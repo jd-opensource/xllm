@@ -147,7 +147,8 @@ void SetFusionAttentionParamPart(
     fusionAttentionParam.layerLinearTransposeType = param.linearTransposeType;
     fusionAttentionParam.packQuantType = param.packQuantType.at(0);
     fusionAttentionParam.quantGroupSize = param.quantGroupSize;
-    fusionAttentionParam.supportLcoc = param.supportLcoc;
+    // TODO:lcoc fail to run when enble tp
+    fusionAttentionParam.supportLcoc = false;//param.supportLcoc;
     fusionAttentionParam.supportLora = param.supportLora;
     fusionAttentionParam.loraEnableGMM = param.loraEnableGMM;
     atb::infer::RmsNormParam attenRmsNormParam;
