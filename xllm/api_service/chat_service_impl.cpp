@@ -18,6 +18,13 @@
 #include "core/runtime/vlm_master.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
+#include "chat_template/chat_template.h"
+#include "chat_template/tools_converter.h"
+#include "common/instance_name.h"
+#include "common/uuid.h"
+#include "request/request_params.h"
+#include "util/utils.h"
+#include <google/protobuf/util/json_util.h>
 
 namespace xllm {
 namespace {
@@ -45,6 +52,108 @@ void set_logprobs(proto::ChatChoice* choice,
       }
     }
   }
+}
+struct ToolsInfo {
+  std::vector<Tool> tools;
+  std::string tool_choice;
+  bool has_tools = false;
+};
+
+ToolsInfo extract_tools_info(const proto::ChatRequest& request) {
+  ToolsInfo info;
+  
+  if (request.tools_size() > 0) {
+    info.has_tools = true;
+    info.tools.reserve(request.tools_size());
+    
+    for (const auto& proto_tool : request.tools()) {
+      Tool tool;
+      tool.type = proto_tool.type();
+      tool.function.name = proto_tool.function().name();
+      tool.function.description = proto_tool.function().description();
+      // tool.function.parameters = proto_tool.function().parameters();
+      // std::cerr << "proto_tool.function().parameters():" << proto_tool.function().parameters() << std::endl;
+
+      std::string parameters_json_str;
+      if (proto_tool.function().has_parameters()) {
+        google::protobuf::util::JsonPrintOptions options;
+        options.add_whitespace = false;
+        options.preserve_proto_field_names = true;
+        auto status = google::protobuf::util::MessageToJsonString(
+            proto_tool.function().parameters(), &parameters_json_str, options);
+        if (!status.ok()) {
+          LOG(WARNING) << "Failed to convert parameters Struct to JSON: " 
+                       << status.message() << ", tool: " << tool.function.name;
+          parameters_json_str = "{}";
+        }
+      } else {
+        parameters_json_str = "{}";
+      }
+      tool.function.parameters = parameters_json_str;
+      std::cerr << "parameters_json_str:" << parameters_json_str << std::endl;
+
+      info.tools.push_back(std::move(tool));
+    }
+    
+    if (request.has_tool_choice()) {
+      info.tool_choice = request.tool_choice();
+    } else {
+      info.tool_choice = "auto";
+    }
+  }
+  
+  return info;
+}
+struct ToolsInfo {
+  std::vector<Tool> tools;
+  std::string tool_choice;
+  bool has_tools = false;
+};
+
+ToolsInfo extract_tools_info(const proto::ChatRequest& request) {
+  ToolsInfo info;
+  
+  if (request.tools_size() > 0) {
+    info.has_tools = true;
+    info.tools.reserve(request.tools_size());
+    
+    for (const auto& proto_tool : request.tools()) {
+      Tool tool;
+      tool.type = proto_tool.type();
+      tool.function.name = proto_tool.function().name();
+      tool.function.description = proto_tool.function().description();
+      // tool.function.parameters = proto_tool.function().parameters();
+      // std::cerr << "proto_tool.function().parameters():" << proto_tool.function().parameters() << std::endl;
+
+      std::string parameters_json_str;
+      if (proto_tool.function().has_parameters()) {
+        google::protobuf::util::JsonPrintOptions options;
+        options.add_whitespace = false;
+        options.preserve_proto_field_names = true;
+        auto status = google::protobuf::util::MessageToJsonString(
+            proto_tool.function().parameters(), &parameters_json_str, options);
+        if (!status.ok()) {
+          LOG(WARNING) << "Failed to convert parameters Struct to JSON: " 
+                       << status.message() << ", tool: " << tool.function.name;
+          parameters_json_str = "{}";
+        }
+      } else {
+        parameters_json_str = "{}";
+      }
+      tool.function.parameters = parameters_json_str;
+      std::cerr << "parameters_json_str:" << parameters_json_str << std::endl;
+
+      info.tools.push_back(std::move(tool));
+    }
+    
+    if (request.has_tool_choice()) {
+      info.tool_choice = request.tool_choice();
+    } else {
+      info.tool_choice = "auto";
+    }
+  }
+  
+  return info;
 }
 
 template <typename ChatCall>
@@ -287,6 +396,27 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
     return;
   }
 
+  ToolsInfo tools_info = extract_tools_info(rpc_request);
+  // 打印所有工具信息
+  std::cerr << "Tools Information:" << std::endl;
+  std::cerr << "Has tools: " << (tools_info.has_tools ? "true" : "false") << std::endl;
+  std::cerr << "Tool choice: " << tools_info.tool_choice << std::endl;
+
+  if (tools_info.has_tools) {
+      std::cerr << "Number of tools: " << tools_info.tools.size() << std::endl;
+      for (size_t i = 0; i < tools_info.tools.size(); ++i) {
+          const auto& tool = tools_info.tools[i];
+          std::cerr << "Tool #" << i + 1 << ":" << std::endl;
+          std::cerr << "  Type: " << tool.type << std::endl;
+          std::cerr << "  Function name: " << tool.function.name << std::endl;
+          std::cerr << "  Function description: " << tool.function.description << std::endl;
+          std::cerr << "  Function parameters: " << tool.function.parameters << std::endl;
+      }
+  } else {
+      std::cerr << "No tools in this request" << std::endl;
+  }
+
+
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
 
@@ -303,6 +433,11 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
   bool include_usage = false;
   if (rpc_request.has_stream_options()) {
     include_usage = rpc_request.stream_options().include_usage();
+  }
+
+  if ((tools_info.has_tools)) {
+    request_params.tools = std::move(tools_info.tools);
+    request_params.tool_choice = std::move(tools_info.tool_choice);
   }
 
   // schedule the request

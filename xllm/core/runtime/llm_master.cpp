@@ -422,7 +422,14 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     const RequestParams& sp,
     OutputCallback callback) {
   Timer timer;
-  auto prompt = chat_template_->apply(messages);
+  std::optional<std::string>  prompt;
+  if (sp.has_tools()) {
+    auto tools = sp.tools;
+    prompt = chat_template_->apply(messages, tools);
+  } else {
+    prompt = chat_template_->apply(messages);
+  }
+
   if (!prompt.has_value()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Failed to construct prompt from messages");

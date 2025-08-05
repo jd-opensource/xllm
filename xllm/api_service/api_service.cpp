@@ -15,7 +15,7 @@
 #include "models.pb.h"
 #include "service_impl_factory.h"
 #include "xllm_metrics.h"
-
+#include <google/protobuf/util/json_util.h>
 namespace xllm {
 
 APIService::APIService(Master* master,
@@ -71,7 +71,7 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string attachment = std::move(ctrl->request_attachment().to_string());
-
+  LOG(INFO) << "attachment:" << attachment;
   std::string error;
   auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
   if (!st) {
@@ -106,10 +106,10 @@ void ChatCompletionsImpl(std::unique_ptr<Service>& service,
   std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
 
-  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
-    LOG(ERROR) << "parse json to proto failed: " << error;
+  auto json_status = google::protobuf::util::JsonStringToMessage(attachment, req_pb);
+  if (!json_status.ok()) {
+    ctrl->SetFailed(json_status.ToString());
+    LOG(ERROR) << "parse json to proto failed: " << json_status.ToString();
     return;
   }
 
@@ -175,7 +175,7 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string attachment = std::move(ctrl->request_attachment().to_string());
-
+  LOG(INFO) << "attachment:" << attachment;
   std::string error;
   auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
   if (!st) {
@@ -289,7 +289,7 @@ void APIService::LinkCluster(::google::protobuf::RpcController* controller,
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string attachment = std::move(ctrl->request_attachment().to_string());
-
+  LOG(INFO) << "attachment:" << attachment;
   std::string error;
   auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
   if (!st) {
@@ -344,7 +344,7 @@ void APIService::UnlinkCluster(::google::protobuf::RpcController* controller,
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string attachment = std::move(ctrl->request_attachment().to_string());
-
+  LOG(INFO) << "attachment:" << attachment;
   std::string error;
   auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
   if (!st) {

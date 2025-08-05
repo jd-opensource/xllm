@@ -100,6 +100,10 @@ struct RequestParams {
 
   // decode address.
   std::string decode_address;
+
+  std::vector<Tool> tools;
+  std::string tool_choice = "auto";
+  bool has_tools() const { return !tools.empty(); }
 };
 
 }  // namespace xllm

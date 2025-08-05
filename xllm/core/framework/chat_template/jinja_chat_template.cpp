@@ -23,6 +23,12 @@ JinjaChatTemplate::JinjaChatTemplate(const TokenizerArgs& args) : args_(args) {
 
 std::optional<std::string> JinjaChatTemplate::apply(
     const ChatMessages& messages) const {
+    const std::vector<Tool> empty_tools;
+    return apply(messages, empty_tools);
+}
+
+std::optional<std::string> JinjaChatTemplate::apply(
+    const ChatMessages& messages, const std::vector<Tool>& tools) const {
   // convert the messages to json object
   nlohmann::ordered_json messages_json = nlohmann::json::array();
   for (const auto& message : messages) {
@@ -38,14 +44,37 @@ std::optional<std::string> JinjaChatTemplate::apply(
 
     messages_json.push_back(message_json);
   }
-  // apply the template
-  return apply(messages_json);
+  
+  // convert tools to json object
+  nlohmann::ordered_json tools_json = nlohmann::json::array();
+  if (!tools.empty()) {
+    try {
+      // Use ToolsConverter to convert tools to JSON string, then parse it
+      std::string tools_json_str = ToolsConverter::convert_tools_to_json(tools);
+      tools_json = nlohmann::json::parse(tools_json_str);
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Failed to convert tools to JSON: " << e.what();
+      // Continue with empty tools array
+    }
+  }
+  
+  // apply the template with tools
+  return apply(messages_json, tools_json);
 }
 
 std::optional<std::string> JinjaChatTemplate::apply(
     nlohmann::ordered_json& messages) const {
+  // Call the overloaded method with empty tools
+  nlohmann::ordered_json empty_tools = nlohmann::json::array();
+  return apply(messages, empty_tools);
+}
+
+std::optional<std::string> JinjaChatTemplate::apply(
+    nlohmann::ordered_json& messages,
+    const nlohmann::ordered_json& tools) const {
   minja::chat_template_inputs input;
   input.messages = messages;
+  input.tools = tools;
   input.add_generation_prompt = true;
   minja::chat_template_options options;
 

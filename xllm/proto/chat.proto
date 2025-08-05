@@ -4,6 +4,19 @@ option go_package = "jd.com/jd-infer/xllm;xllm";
 package xllm.proto;
 
 import "common.proto";
+import "google/protobuf/struct.proto";
+
+message Function {
+  string name = 1;
+  string description = 2;
+  google.protobuf.Struct parameters = 3;
+  // string parameters = 3;
+}
+
+message Tool {
+  string type = 1;  // "function"
+  Function function = 2;
+}
 
 message ChatMessage {
   // the role of the messages author. One of "system", "user", "assistant".
@@ -107,6 +120,9 @@ message ChatRequest {
   optional string service_request_id = 25;
 
   Routing routing = 26;
+
+  repeated Tool tools = 27;
+  optional string tool_choice = 28;
 }
 
 message ChatLogProbData {
