@@ -8,6 +8,7 @@ cc_library(
   HDRS
     llama_decoder_layer.h
     qwen2_decoder_layer.h
+    qwen2_5_vision_encoder_layer.h
     qwen3_decoder_layer.h
     qwen3_moe_decoder_layer.h
     attn_mask.h
@@ -28,6 +29,7 @@ cc_library(
   SRCS
     llama_decoder_layer.cpp
     qwen2_decoder_layer.cpp
+    qwen2_5_vision_encoder_layer.cpp
     qwen3_decoder_layer.cpp
     $<$<BOOL:${USE_A2}>:qwen3_moe_decoder_layer.cpp>
     attn_mask.cpp

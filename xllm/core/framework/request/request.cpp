@@ -70,7 +70,7 @@ void Request::log_statistic(double total_latency) {
                       ? seq->num_generated_tokens() - 1
                       : seq->num_generated_tokens())
               << ", " << std::fixed << std::setprecision(1)
-              << "ttft: " << seq->time_to_first_token_latency_seconds() * 1000
+              << "ttft: " << seq->time_to_first_token_latency_seconds()
               << "ms, "
               << "total_latency: " << total_latency * 1000 << "ms";
   }

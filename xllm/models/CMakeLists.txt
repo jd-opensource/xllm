@@ -31,7 +31,7 @@ cc_library(
     llama.h
     minicpmv.h
     qwen2.h
-    #qwen2_5_vl.h
+    qwen2_5_vl.h
     qwen3.h
     qwen3_moe.h
     qwen_base.h
