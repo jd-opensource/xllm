@@ -18,6 +18,17 @@ message Tool {
   Function function = 2;
 }
 
+message ToolCall {
+  string id = 1;
+  string type = 2;  // "function"
+  FunctionCall function = 3;
+}
+
+message FunctionCall {
+  string name = 1;
+  string arguments = 2;  // JSON string
+}
+
 message ChatMessage {
   // the role of the messages author. One of "system", "user", "assistant".
   optional string role = 1;
@@ -30,6 +41,8 @@ message ChatMessage {
 
   // TODO: add function call support
   // FunctionCall function_call = 4;
+  repeated ToolCall tool_calls = 3;
+  optional string tool_call_id = 4;
 }
 
 

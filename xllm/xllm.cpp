@@ -110,7 +110,8 @@ int run() {
       .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .etcd_addr(FLAGS_etcd_addr)
-      .enable_service_routing(FLAGS_enable_service_routing);
+      .enable_service_routing(FLAGS_enable_service_routing)
+      .tool_call_parser(FLAGS_tool_call_parser);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 

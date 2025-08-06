@@ -174,6 +174,13 @@ DEFINE_bool(enable_atb_comm_multiprocess,
             false,
             "whether to use multiprocess mode.");
 
+// --- function call config ---
+
+DEFINE_string(tool_call_parser,
+              "",
+              "Specify the parser for handling tool-call interactions. "
+              "Options include: 'qwen25'");
+
 DEFINE_bool(enable_atb_spec_kernel,
             false,
             "whether to use ATB speculative kernel.");

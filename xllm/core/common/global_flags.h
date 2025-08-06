@@ -98,6 +98,8 @@ DECLARE_bool(disable_custom_kernels);
 
 DECLARE_bool(enable_atb_comm_multiprocess);
 
+DECLARE_string(tool_call_parser);
+
 DECLARE_bool(enable_atb_spec_kernel);
 
 DECLARE_string(etcd_addr);

@@ -1,4 +1,5 @@
 add_subdirectory(common)
+add_subdirectory(function_call)
 add_subdirectory(distributed_runtime)
 add_subdirectory(framework)
 add_subdirectory(kernels)
