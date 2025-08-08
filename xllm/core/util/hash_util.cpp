@@ -16,69 +16,22 @@ limitations under the License.
 #include "hash_util.h"
 
 #include <MurmurHash3.h>
+#include <assert.h>
 #include <gflags/gflags.h>
 
-#include <boost/archive/binary_oarchive.hpp>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <sstream>
 #include <thread>
 
-DEFINE_string(sha256_hash_seed,
-              "xLLM hash seed",
-              "default Hash seed string for sha256 algo.");
-
 DEFINE_uint32(murmur_hash3_seed, 1024, "default Murmur Hash seed");
 
 namespace xllm {
 
-const uint8_t* sha256_hash_seed() {
-  static uint8_t default_hash_value[HASH_VALUE_MAX_LEN];
-  static std::once_flag flag;
-
-  std::call_once(flag, []() {
-    std::stringstream ss;
-    boost::archive::binary_oarchive boa(ss);
-    boa << FLAGS_sha256_hash_seed;
-
-    std::string serialized_str = ss.str();
-
-    SHA256(reinterpret_cast<unsigned char*>(serialized_str.data()),
-           serialized_str.length(),
-           default_hash_value);
-  });
-
-  return default_hash_value;
-}
-
-void sha256(const uint8_t* pre_hash_value,
-            const Slice<int32_t>& token_ids,
-            uint8_t* hash_value) {
-  std::stringstream ss;
-  ss.rdbuf()->pubsetbuf(nullptr, 0);
-  ss.str("");
-  ss.str().reserve(8 * 1024);
-
-  std::string sv(reinterpret_cast<const char*>(pre_hash_value),
-                 SHA256_DIGEST_LENGTH);
-
-  boost::archive::binary_oarchive boa(ss);
-  boa << sv;
-
-  for (std::size_t i = 0; i < token_ids.size(); ++i) {
-    boa << token_ids[i];
-  }
-
-  std::string serialized_str = ss.str();
-  SHA256(reinterpret_cast<unsigned char*>(serialized_str.data()),
-         serialized_str.length(),
-         hash_value);
-}
-
-void murmur_hash3(const uint8_t* pre_hash_value,
-                  const Slice<int32_t>& token_ids,
-                  uint8_t* hash_value) {
+void MurMurHash3::hash(const uint8_t* pre_hash_value,
+                       const Slice<int32_t>& token_ids,
+                       uint8_t* hash_value) {
   if (pre_hash_value == nullptr) {
     MurmurHash3_x64_128(reinterpret_cast<const void*>(token_ids.data()),
                         sizeof(int32_t) * token_ids.size(),

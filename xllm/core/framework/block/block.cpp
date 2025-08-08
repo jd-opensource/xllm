@@ -41,7 +41,7 @@ Block::Block(const Block& other)
       size_(other.size_),
       ref_count_(other.ref_count_),
       manager_(other.manager_) {
-  memcpy(hash_value_, other.hash_value_, HASH_VALUE_MAX_LEN);
+  memcpy(hash_value_, other.hash_value_, MURMUR_HASH3_VALUE_LEN);
 
   token_ids_.reserve(other.token_ids_.size());
   token_ids_.assign(other.token_ids_.begin(), other.token_ids_.end());
@@ -60,7 +60,7 @@ Block& Block::operator=(const Block& other) {
     manager_ = other.manager_;
     ref_count_ = other.ref_count_;
 
-    memcpy(hash_value_, other.hash_value_, HASH_VALUE_MAX_LEN);
+    memcpy(hash_value_, other.hash_value_, MURMUR_HASH3_VALUE_LEN);
 
     token_ids_.reserve(other.token_ids_.size());
     token_ids_.assign(other.token_ids_.begin(), other.token_ids_.end());
@@ -75,7 +75,7 @@ Block::Block(Block&& other) noexcept
       size_(other.size_),
       ref_count_(other.ref_count_),
       manager_(other.manager_) {
-  memcpy(hash_value_, other.hash_value_, HASH_VALUE_MAX_LEN);
+  memcpy(hash_value_, other.hash_value_, MURMUR_HASH3_VALUE_LEN);
   token_ids_.swap(other.token_ids_);
 
   // reset other without adjusting the reference count
@@ -94,7 +94,7 @@ Block& Block::operator=(Block&& other) noexcept {
     manager_ = other.manager_;
     ref_count_ = other.ref_count_;
 
-    memcpy(hash_value_, other.hash_value_, HASH_VALUE_MAX_LEN);
+    memcpy(hash_value_, other.hash_value_, MURMUR_HASH3_VALUE_LEN);
     token_ids_.swap(other.token_ids_);
 
     other.id_ = -1;

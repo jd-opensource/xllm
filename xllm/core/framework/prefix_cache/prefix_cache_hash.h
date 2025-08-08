@@ -22,23 +22,38 @@ limitations under the License.
 #include <string_view>
 #include <unordered_map>
 
-#include "prefix_cache/prefix_cache.h"
-#include "util/double_buffer.h"
+#include "prefix_cache.h"
+#include "util/hash_util.h"
 #include "util/threadpool.h"
 
 namespace xllm {
 
-using DoubleBufferKvCacheEvent = DoubleBuffer<KvCacheEvent>;
-
 class PrefixCacheHash : public PrefixCache {
  public:
-  explicit PrefixCacheHash(uint32_t block_size)
-      : block_size_(block_size), num_blocks_(0) {};
+  explicit PrefixCacheHash(uint32_t block_size);
 
-  ~PrefixCacheHash() {
+  virtual ~PrefixCacheHash() {
     exited_.store(true);
     sleep(2);
   };
+
+  virtual std::vector<Block> match(const Slice<int32_t>& token_ids) override;
+
+  // insert the token ids and blocks into the prefix tree
+  // return the length of new inserted tokens
+  virtual size_t insert(const Slice<int32_t>& token_ids,
+                        const Slice<Block>& blocks) override;
+
+  // evict blocks hold by the prefix cache
+  // return the actual number of evicted blocks
+  virtual size_t evict(size_t n_blocks) override;
+
+  // get the number of blocks in the prefix cache
+  virtual size_t num_blocks() const override {
+    CHECK(num_blocks_ == cached_blocks_.size()) << "check block num failed";
+
+    return num_blocks_;
+  }
 
   virtual KvCacheEvent* get_upload_kvcache_events() override {
     LOG(ERROR) << "Not implemented!";
@@ -138,6 +153,13 @@ class PrefixCacheHash : public PrefixCache {
   size_t num_blocks_ = 0;
 
   std::atomic_bool exited_{false};
+
+  std::unique_ptr<MurMurHash3> hash_util_;
+
+  std::unordered_map<Murmur3Key, Node*, FixedStringKeyHash, FixedStringKeyEqual>
+      cached_blocks_;
+
+  uint32_t hash_value_len_;
 };
 
 }  // namespace xllm

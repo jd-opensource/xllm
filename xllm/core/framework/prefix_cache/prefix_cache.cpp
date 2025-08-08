@@ -18,8 +18,7 @@ limitations under the License.
 #include <absl/strings/numbers.h>
 #include <absl/strings/str_split.h>
 
-#include "prefix_cache_hash_murmur3.h"
-#include "prefix_cache_hash_sha256.h"
+#include "prefix_cache_hash.h"
 
 namespace xllm {
 
@@ -31,14 +30,7 @@ std::unique_ptr<PrefixCache> CreatePrefixCachePolicy(
   CHECK(subs.size() > 0) << " Prefix cache, input param invalid."
                          << " policy:" << policy;
 
-  if ("sha256_hash" == subs[0]) {
-    return std::make_unique<PrefixCacheHashSha256>(block_size);
-  } else if ("murmur_hash3" == subs[0]) {
-    return std::make_unique<PrefixCacheHashMurmur3>(block_size,
-                                                    enbale_service_routing);
-  } else {
-    return nullptr;
-  }
+  return std::make_unique<PrefixCacheHash>(block_size);
 }
 
 }  // namespace xllm

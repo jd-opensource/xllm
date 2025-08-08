@@ -6,14 +6,11 @@ cc_library(
   NAME 
     prefix_cache
   HDRS
-    prefix_cache.h
     prefix_cache_hash.h
-    prefix_cache_hash_murmur3.h
-    prefix_cache_hash_sha256.h
+    prefix_cache_hash_with_upload.h
   SRCS 
-    prefix_cache.cpp
-    prefix_cache_hash_murmur3.cpp
-    prefix_cache_hash_sha256.cpp
+    prefix_cache_hash.h
+    prefix_cache_hash_with_upload.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:llm_engine>
