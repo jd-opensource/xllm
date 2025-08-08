@@ -13,12 +13,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include "prefix_cache_hash.h"
 
 #include <gtest/gtest.h>
 
 #include "framework/block/block_manager_impl.h"
-#include "prefix_cache_hash_murmur3.h"
-#include "prefix_cache_hash_sha256.h"
 
 namespace xllm {
 
@@ -74,26 +73,14 @@ void test_basic_operation(BlockManagerImpl* block_manager,
   }
 }
 
-TEST(PrefixCacheHashTest, Sha256BasicOperation) {
+TEST(PrefixCacheHashTest, BasicOperation) {
   const uint32_t block_size = 4;
   const uint32_t total_blocks = 5;
   BlockManager::Options options;
   options.num_blocks(total_blocks).block_size(block_size);
   BlockManagerImpl block_manager(options);
 
-  PrefixCacheHashSha256 prefix_cache_hash(block_size);
-
-  test_basic_operation(&block_manager, &prefix_cache_hash, block_size);
-}
-
-TEST(PrefixCacheHashTest, Murmur3BasicOperation) {
-  const uint32_t block_size = 4;
-  const uint32_t total_blocks = 5;
-  BlockManager::Options options;
-  options.num_blocks(total_blocks).block_size(block_size);
-  BlockManagerImpl block_manager(options);
-
-  PrefixCacheHashMurmur3 prefix_cache_hash(block_size);
+  PrefixCacheHash prefix_cache_hash(block_size);
 
   test_basic_operation(&block_manager, &prefix_cache_hash, block_size);
 }
@@ -211,26 +198,14 @@ void test_insert_operation(BlockManagerImpl* block_manager,
   }
 }
 
-TEST(PrefixCacheHashTest, Sha256InsertOperation) {
+TEST(PrefixCacheHashTest, InsertOperation) {
   const uint32_t block_size = 4;
   const uint32_t total_blocks = 5;
   BlockManager::Options options;
   options.num_blocks(total_blocks).block_size(block_size);
   BlockManagerImpl block_manager(options);
 
-  PrefixCacheHashSha256 prefix_cache_hash(block_size);
-
-  test_insert_operation(&block_manager, &prefix_cache_hash, block_size);
-}
-
-TEST(PrefixCacheHashTest, MurmurInsertOperation) {
-  const uint32_t block_size = 4;
-  const uint32_t total_blocks = 5;
-  BlockManager::Options options;
-  options.num_blocks(total_blocks).block_size(block_size);
-  BlockManagerImpl block_manager(options);
-
-  PrefixCacheHashMurmur3 prefix_cache_hash(block_size);
+  PrefixCacheHash prefix_cache_hash(block_size);
 
   test_insert_operation(&block_manager, &prefix_cache_hash, block_size);
 }
@@ -297,26 +272,14 @@ void test_evict_operation(BlockManagerImpl* block_manager,
   }
 }
 
-TEST(PrefixCacheHashTest, Sha256EvictOperation) {
+TEST(PrefixCacheHashTest, EvictOperation) {
   const uint32_t block_size = 4;
   const uint32_t total_blocks = 5;
   BlockManager::Options options;
   options.num_blocks(total_blocks).block_size(block_size);
   BlockManagerImpl block_manager(options);
 
-  PrefixCacheHashSha256 prefix_cache_hash(block_size);
-
-  test_evict_operation(&block_manager, &prefix_cache_hash, block_size);
-}
-
-TEST(PrefixCacheHashTest, Murmur3EvictOperation) {
-  const uint32_t block_size = 4;
-  const uint32_t total_blocks = 5;
-  BlockManager::Options options;
-  options.num_blocks(total_blocks).block_size(block_size);
-  BlockManagerImpl block_manager(options);
-
-  PrefixCacheHashMurmur3 prefix_cache_hash(block_size);
+  PrefixCacheHash prefix_cache_hash(block_size);
 
   test_evict_operation(&block_manager, &prefix_cache_hash, block_size);
 }

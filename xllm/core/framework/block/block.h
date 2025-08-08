@@ -57,12 +57,14 @@ class Block final {
   // check if the block is valid
   bool is_valid() const { return id_ >= 0 && ref_count_ != nullptr; }
 
-  const uint8_t* const get_immutable_hash_value() const { return hash_value_; }
+  const uint8_t* get_immutable_hash_value() const { return hash_value_; }
   uint8_t* get_mutable_hash_value() { return hash_value_; }
 
   void set_hash_value(const uint8_t* hash_value, uint32_t len) {
     memcpy(hash_value_, hash_value, len);
   }
+
+  uint32_t get_hash_value_len() { return MURMUR_HASH3_VALUE_LEN; }
 
   void set_token_ids(const Slice<int32_t>& token_ids) {
     token_ids_.reserve(token_ids.size());
@@ -90,8 +92,8 @@ class Block final {
   // manager that manages this block
   BlockManager* manager_ = nullptr;
 
-  // used for prefix cache
-  uint8_t hash_value_[HASH_VALUE_MAX_LEN];
+  uint8_t hash_value_[MURMUR_HASH3_VALUE_LEN];
+
   std::vector<int32_t> token_ids_;
 };
 

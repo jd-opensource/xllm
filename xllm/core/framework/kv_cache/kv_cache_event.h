@@ -21,17 +21,11 @@ limitations under the License.
 namespace xllm {
 
 struct KvCacheEvent {
-  std::unordered_set<Murmur3Key,
-                     FixedStringKeyHash<Murmur3Key>,
-                     FixedStringKeyEqual<Murmur3Key>>
+  std::unordered_set<Murmur3Key, FixedStringKeyHash, FixedStringKeyEqual>
       stored_cache;
-  std::unordered_set<Murmur3Key,
-                     FixedStringKeyHash<Murmur3Key>,
-                     FixedStringKeyEqual<Murmur3Key>>
+  std::unordered_set<Murmur3Key, FixedStringKeyHash, FixedStringKeyEqual>
       removed_cache;
-  std::unordered_set<Murmur3Key,
-                     FixedStringKeyHash<Murmur3Key>,
-                     FixedStringKeyEqual<Murmur3Key>>
+  std::unordered_set<Murmur3Key, FixedStringKeyHash, FixedStringKeyEqual>
       offload_cache;
 
   void clear() {

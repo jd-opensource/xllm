@@ -13,11 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "prefix_cache_hash_murmur3.h"
+#include "prefix_cache_hash.h"
 
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
-#include <glog/logging.h>
 #include <string.h>
 
 #include <iostream>
@@ -28,31 +27,13 @@ limitations under the License.
 
 namespace xllm {
 
-PrefixCacheHashMurmur3::PrefixCacheHashMurmur3(uint32_t block_size,
-                                               bool enable_service_routing)
-    : PrefixCacheHash(block_size),
-      enable_service_routing_(enable_service_routing),
-      hash_value_len_(MURMUR_HASH3_VALUE_LEN) {
-  if (enable_service_routing_) {
-    db_kvcache_events_.set_front_value(new KvCacheEvent());
-    db_kvcache_events_.set_back_value(new KvCacheEvent());
-  }
+PrefixCacheHash::PrefixCacheHash(uint32_t block_size)
+    : block_size_(block_size), num_blocks_(0) {
+  hash_util_ = std::make_unique<MurMurHash3>();
+  hash_value_len_ = hash_util_->get_hash_value_len();
 }
 
-PrefixCacheHashMurmur3::~PrefixCacheHashMurmur3() {
-  LOG(INFO) << "block matched rate: " << block_match_rate();
-  auto back = db_kvcache_events_.get_back_value();
-  if (back) {
-    delete back;
-  }
-
-  auto front = db_kvcache_events_.get_back_value();
-  if (front) {
-    delete front;
-  }
-}
-
-std::vector<Block> PrefixCacheHashMurmur3::match(
+std::vector<Block> PrefixCacheHash::match(
     const Slice<int32_t>& token_ids,
     const Slice<Block>& existed_shared_blocks) {
   // allign tokens to block boundary
@@ -75,22 +56,22 @@ std::vector<Block> PrefixCacheHashMurmur3::match(
   DNodeList node_list;
 
   size_t start_index = existed_shared_blocks.size() * block_size_;
-  Murmur3Key murmur3_key =
+  Murmur3Key token_hash_key =
       existed_shared_blocks.empty()
           ? Murmur3Key{}
           : Murmur3Key{existed_shared_blocks.back().get_immutable_hash_value()};
   for (size_t i = start_index; i < n_tokens; i += block_size_) {
     if (i == 0) {
-      murmur_hash3(
-          nullptr, token_ids.slice(i, i + block_size_), murmur3_key.data);
+      hash_util_->hash(
+          nullptr, token_ids.slice(i, i + block_size_), token_hash_key.data);
     } else {
-      murmur_hash3(murmur3_key.data,
-                   token_ids.slice(i, i + block_size_),
-                   murmur3_key.data);
+      hash_util_->hash(token_hash_key.data,
+                       token_ids.slice(i, i + block_size_),
+                       token_hash_key.data);
     }
 
-    auto iter = murmur3_cached_blocks_.find(murmur3_key);
-    if (iter != murmur3_cached_blocks_.end()) {
+    auto iter = cached_blocks_.find(token_hash_key);
+    if (iter != cached_blocks_.end()) {
       blocks.push_back(iter->second->block);
       lru_lst_.remove_node(iter->second);
       node_list.push_front(iter->second);
@@ -115,8 +96,8 @@ std::vector<Block> PrefixCacheHashMurmur3::match(
   return blocks;
 }
 
-size_t PrefixCacheHashMurmur3::insert(const Slice<int32_t>& token_ids,
-                                      const Slice<Block>& blocks) {
+size_t PrefixCacheHash::insert(const Slice<int32_t>& token_ids,
+                               const Slice<Block>& blocks) {
   const int64_t now = absl::ToUnixMicros(absl::Now());
   // allign tokens to block boundary
   const size_t n_blocks =
@@ -132,23 +113,20 @@ size_t PrefixCacheHashMurmur3::insert(const Slice<int32_t>& token_ids,
   auto blocks_slice = blocks.slice(0, n_blocks);
 
   DNodeList node_list;
-  Murmur3Key murmur3_key;
-
-  uint32_t block_idx = 0;
-  std::vector<Murmur3Key> insert_list;
-  insert_list.reserve(n_blocks);
+  Murmur3Key token_hash_key;
+  size_t block_idx = 0;
   for (size_t i = 0; i < n_tokens; i += block_size_) {
     if (i == 0) {
-      murmur_hash3(
-          nullptr, tokens_slice.slice(i, i + block_size_), murmur3_key.data);
+      hash_util_->hash(
+          nullptr, token_ids.slice(i, i + block_size_), token_hash_key.data);
     } else {
-      murmur_hash3(murmur3_key.data,
-                   tokens_slice.slice(i, i + block_size_),
-                   murmur3_key.data);
+      hash_util_->hash(token_hash_key.data,
+                       token_ids.slice(i, i + block_size_),
+                       token_hash_key.data);
     }
 
-    auto iter = murmur3_cached_blocks_.find(murmur3_key);
-    if (iter != murmur3_cached_blocks_.end()) {
+    auto iter = cached_blocks_.find(token_hash_key);
+    if (iter != cached_blocks_.end()) {
       iter->second->last_access_time = now;
 
       lru_lst_.remove_node(iter->second);
@@ -157,57 +135,37 @@ size_t PrefixCacheHashMurmur3::insert(const Slice<int32_t>& token_ids,
       Node* new_node = new Node();
 
       new_node->block = blocks[block_idx];
-      new_node->block.set_hash_value(murmur3_key.data, hash_value_len_);
+      new_node->block.set_hash_value(token_hash_key.data, SHA256_DIGEST_LENGTH);
       new_node->block.set_token_ids(token_ids.slice(i, i + block_size_));
       new_node->last_access_time = now;
 
       node_list.push_front(new_node);
 
-      murmur3_cached_blocks_.emplace(std::make_pair(murmur3_key, new_node));
-
-      if (enable_service_routing_) {
-        insert_list.emplace_back(murmur3_key);
-      }
+      cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
 
       num_blocks_++;
     }
 
-    ++block_idx;
+    block_idx++;
   }
 
+  // update LRU list
   while (!node_list.is_empty()) {
     Node* node = node_list.pop_front();
     lru_lst_.push_back(node);
-  }
-  if (enable_service_routing_) {
-    threadpool_.schedule([insert_list = std::move(insert_list), this]() {
-      auto front_ptr = this->db_kvcache_events_.get_front_value();
-      if (!front_ptr) {
-        LOG(INFO) << "Front DoubleBufferKvCacheEvent is nullptr!";
-        return;
-      }
-      if (!this->exited_.load()) {
-        for (const auto& hash_id : insert_list) {
-          front_ptr->removed_cache.erase(hash_id);
-          front_ptr->stored_cache.insert(hash_id);
-        }
-      }
-    });
   }
 
   return n_tokens;
 }
 
-size_t PrefixCacheHashMurmur3::evict(size_t n_blocks) {
+size_t PrefixCacheHash::evict(size_t n_blocks) {
   if (num_blocks_ == 0 || lru_lst_.is_empty()) {
     return 0;
   }
 
   size_t evict_count = 0;
   Node* iter_node = lru_lst_.get_first();
-  std::vector<Murmur3Key> del_list;
-  del_list.reserve(n_blocks);
-  for (size_t i = 0; i < n_blocks;) {
+  for (; evict_count < n_blocks;) {
     if (lru_lst_.is_last(iter_node)) {
       break;
     }
@@ -224,46 +182,15 @@ size_t PrefixCacheHashMurmur3::evict(size_t n_blocks) {
 
     Murmur3Key token_hash_key(del_node->block.get_immutable_hash_value());
 
-    if (enable_service_routing_) {
-      del_list.emplace_back(token_hash_key.data);
-    }
-
-    murmur3_cached_blocks_.erase(token_hash_key);
+    cached_blocks_.erase(token_hash_key);
 
     delete del_node;
-    ++evict_count;
+
     --num_blocks_;
-    ++i;
-  }
-  if (enable_service_routing_) {
-    threadpool_.schedule([del_list = std::move(del_list), this]() {
-      auto front_ptr = this->db_kvcache_events_.get_front_value();
-      if (!front_ptr) {
-        LOG(INFO) << "Front DoubleBufferKvCacheEvent is nullptr!";
-        return;
-      }
-      if (!this->exited_.load()) {
-        for (const auto& hash_id : del_list) {
-          front_ptr->removed_cache.insert(hash_id);
-          front_ptr->stored_cache.erase(hash_id);
-        }
-      }
-    });
+    ++evict_count;
   }
 
   return evict_count;
 }
 
-KvCacheEvent* PrefixCacheHashMurmur3::get_upload_kvcache_events() {
-  if (!enable_service_routing_) {
-    return nullptr;
-  }
-
-  db_kvcache_events_.swap();
-  if (!exited_.load()) {
-    return db_kvcache_events_.get_back_value();
-  } else {
-    return nullptr;
-  }
-}
 }  // namespace xllm
