@@ -1,5 +1,5 @@
 
-#include "prefix_cache_hash_sha256.h"
+#include "prefix_cache_hash.h"
 
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
@@ -13,14 +13,13 @@
 
 namespace xllm {
 
-PrefixCacheHashSha256::PrefixCacheHashSha256(uint32_t block_size)
-    : PrefixCacheHash(block_size), hash_value_len_(SHA256_HASH_VALUE_LEN) {}
-
-PrefixCacheHashSha256::~PrefixCacheHashSha256() {
-  LOG(INFO) << "block matched rate: " << block_match_rate();
+PrefixCacheHash::PrefixCacheHash(uint32_t block_size)
+    : block_size_(block_size), num_blocks_(0) {
+  hash_util_ = std::make_unique<MurMurHash3>();
+  hash_value_len_ = hash_util_->get_hash_value_len();
 }
 
-std::vector<Block> PrefixCacheHashSha256::match(
+std::vector<Block> PrefixCacheHash::match(
     const Slice<int32_t>& token_ids,
     const Slice<Block>& existed_shared_blocks) {
   // allign tokens to block boundary
@@ -37,26 +36,30 @@ std::vector<Block> PrefixCacheHashSha256::match(
 
   std::vector<Block> blocks;
   blocks.reserve(n_blocks);
+  blocks.insert(
+      blocks.end(), existed_shared_blocks.begin(), existed_shared_blocks.end());
 
   DNodeList node_list;
 
-  Sha256Key token_hash_key;
-  for (size_t i = 0; i < n_tokens; i += block_size_) {
+  size_t start_index = existed_shared_blocks.size() * block_size_;
+  Murmur3Key token_hash_key =
+      existed_shared_blocks.empty()
+          ? Murmur3Key{}
+          : Murmur3Key{existed_shared_blocks.back().get_immutable_hash_value()};
+  for (size_t i = start_index; i < n_tokens; i += block_size_) {
     if (i == 0) {
-      sha256(sha256_hash_seed(),
-             token_ids.slice(i, i + block_size_),
-             token_hash_key.data);
+      hash_util_->hash(
+          nullptr, token_ids.slice(i, i + block_size_), token_hash_key.data);
     } else {
-      sha256(token_hash_key.data,
-             token_ids.slice(i, i + block_size_),
-             token_hash_key.data);
+      hash_util_->hash(token_hash_key.data,
+                       token_ids.slice(i, i + block_size_),
+                       token_hash_key.data);
     }
 
-    auto iter = sha256_cached_blocks_.find(token_hash_key);
-    if (iter != sha256_cached_blocks_.end()) {
+    auto iter = cached_blocks_.find(token_hash_key);
+    if (iter != cached_blocks_.end()) {
       blocks.push_back(iter->second->block);
       lru_lst_.remove_node(iter->second);
-      // block_nodes.push_back(iter->second);
       node_list.push_front(iter->second);
     } else {
       break;
@@ -79,8 +82,8 @@ std::vector<Block> PrefixCacheHashSha256::match(
   return blocks;
 }
 
-size_t PrefixCacheHashSha256::insert(const Slice<int32_t>& token_ids,
-                                     const Slice<Block>& blocks) {
+size_t PrefixCacheHash::insert(const Slice<int32_t>& token_ids,
+                               const Slice<Block>& blocks) {
   const int64_t now = absl::ToUnixMicros(absl::Now());
   // allign tokens to block boundary
   const size_t n_blocks =
@@ -96,21 +99,20 @@ size_t PrefixCacheHashSha256::insert(const Slice<int32_t>& token_ids,
   auto blocks_slice = blocks.slice(0, n_blocks);
 
   DNodeList node_list;
-  Sha256Key token_hash_key;
+  Murmur3Key token_hash_key;
   size_t block_idx = 0;
   for (size_t i = 0; i < n_tokens; i += block_size_) {
     if (i == 0) {
-      sha256(sha256_hash_seed(),
-             token_ids.slice(i, i + block_size_),
-             token_hash_key.data);
+      hash_util_->hash(
+          nullptr, token_ids.slice(i, i + block_size_), token_hash_key.data);
     } else {
-      sha256(token_hash_key.data,
-             token_ids.slice(i, i + block_size_),
-             token_hash_key.data);
+      hash_util_->hash(token_hash_key.data,
+                       token_ids.slice(i, i + block_size_),
+                       token_hash_key.data);
     }
 
-    auto iter = sha256_cached_blocks_.find(token_hash_key);
-    if (iter != sha256_cached_blocks_.end()) {
+    auto iter = cached_blocks_.find(token_hash_key);
+    if (iter != cached_blocks_.end()) {
       iter->second->last_access_time = now;
 
       lru_lst_.remove_node(iter->second);
@@ -125,7 +127,7 @@ size_t PrefixCacheHashSha256::insert(const Slice<int32_t>& token_ids,
 
       node_list.push_front(new_node);
 
-      sha256_cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
+      cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
 
       num_blocks_++;
     }
@@ -142,7 +144,7 @@ size_t PrefixCacheHashSha256::insert(const Slice<int32_t>& token_ids,
   return n_tokens;
 }
 
-size_t PrefixCacheHashSha256::evict(size_t n_blocks) {
+size_t PrefixCacheHash::evict(size_t n_blocks) {
   if (num_blocks_ == 0 || lru_lst_.is_empty()) {
     return 0;
   }
@@ -164,9 +166,9 @@ size_t PrefixCacheHashSha256::evict(size_t n_blocks) {
 
     iter_node = lru_lst_.remove_node(del_node);
 
-    Sha256Key token_hash_key(del_node->block.get_immutable_hash_value());
+    Murmur3Key token_hash_key(del_node->block.get_immutable_hash_value());
 
-    sha256_cached_blocks_.erase(token_hash_key);
+    cached_blocks_.erase(token_hash_key);
 
     delete del_node;
 
