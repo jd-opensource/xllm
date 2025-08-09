@@ -122,7 +122,28 @@ bool WorkerImpl::allocate_kv_cache(
     kv_caches_.emplace_back(key_cache, value_cache);
   }
 
+  allocate_host_kv_cache(kv_cache_shape);
   status_ = Status::READY;
+  return true;
+}
+
+bool WorkerImpl::allocate_host_kv_cache(
+    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+  CHECK(model_ != nullptr) << "Model is not initialized.";
+  CHECK(host_kv_caches_.empty()) << "KV caches are already initialized.";
+
+  // create a KVCache for each layer
+  const int64_t num_layers = args_.n_layers();
+  host_kv_caches_.reserve(num_layers);
+  for (int64_t i = 0; i < num_layers; ++i) {
+    torch::Tensor key_cache, value_cache;
+    key_cache = torch::empty(kv_cache_shape[0],
+                             torch::dtype(dtype_).device(torch::kCPU));
+    value_cache = torch::empty(kv_cache_shape[1],
+                               torch::dtype(dtype_).device(torch::kCPU));
+    host_kv_caches_.emplace_back(key_cache, value_cache);
+  }
+
   return true;
 }
 
@@ -157,6 +178,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   }
 #endif
 
+  allocate_host_kv_cache(kv_cache_shape);
   status_ = Status::READY;
   return true;
 }
@@ -181,6 +203,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
   }
 
+  allocate_host_kv_cache(kv_cache_shape);
   status_ = Status::READY;
   return true;
 }

@@ -232,8 +232,9 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   LOG(INFO) << "Initializing v cache with shape: [" << kv_cache_shape[1] << "]";
 
   // initialize block manager
-  BlockManager::Options options;
+  BlockManagerPool::Options options;
   options.num_blocks(kv_cache_cap.n_blocks)
+      .host_num_blocks(kv_cache_cap.n_blocks)
       .block_size(block_size)
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
