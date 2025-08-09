@@ -25,12 +25,32 @@ BlockManagerPool::BlockManagerPool(const BlockManager::Options& options,
     : options_(options) {
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
   block_managers_.reserve(dp_size);
+  host_block_managers_.reserve(dp_size);
+
+  BlockManager::Options npu_options;
+  npu_options.num_blocks(options_.num_blocks())
+      .block_size(options_.block_size())
+      .enable_prefix_cache(options_.enable_prefix_cache())
+      .enable_disagg_pd(options_.enable_disagg_pd())
+      .prefix_cache_policy(options_.prefix_cache_policy())
+      .enable_service_routing(options_.enable_service_routing());
+
+  BlockManager::Options host_options = npu_options;
+  host_options.num_blocks(options_.host_num_blocks())
+      .enable_prefix_cache(false)
+      .enable_service_routing(false);
+
   for (int32_t i = 0; i < dp_size; ++i) {
     if (options.enable_disagg_pd()) {
       block_managers_.emplace_back(
-          std::make_unique<ConcurrentBlockManagerImpl>(options));
+          std::make_unique<ConcurrentBlockManagerImpl>(npu_options));
+      host_block_managers_.emplace_back(
+          std::make_unique<ConcurrentBlockManagerImpl>(host_options));
     } else {
-      block_managers_.emplace_back(std::make_unique<BlockManagerImpl>(options));
+      block_managers_.emplace_back(
+          std::make_unique<BlockManagerImpl>(npu_options));
+      host_block_managers_.emplace_back(
+          std::make_unique<BlockManagerImpl>(host_options));
     }
   }
 }
@@ -62,6 +82,16 @@ int32_t BlockManagerPool::get_dp_rank(Sequence* sequence) const {
     sequence->set_dp_rank(dp_rank);
   }
   return dp_rank;
+}
+
+BlockManager* BlockManagerPool::get_block_manager(Sequence* sequence,
+                                                  bool is_host) {
+  int32_t dp_rank = get_dp_rank(sequence);
+  if (is_host) {
+    return host_block_managers_[dp_rank].get();
+  } else {
+    return block_managers_[dp_rank].get();
+  }
 }
 
 void BlockManagerPool::deallocate(Request* request) {

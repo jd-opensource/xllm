@@ -46,7 +46,7 @@ class FakeTokenizer : public Tokenizer {
 class FakeEngine : public Engine {
  public:
   FakeEngine(int32_t num_blocks, int32_t block_size) {
-    BlockManager::Options opt;
+    BlockManagerPool::Options opt;
     opt.num_blocks_ = num_blocks;
     opt.block_size_ = block_size;
     opt.enable_prefix_cache_ = false;  // we dont consider prefix cache here

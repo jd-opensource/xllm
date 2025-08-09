@@ -30,6 +30,8 @@ class BlockManagerPool {
 
   ~BlockManagerPool() = default;
 
+  BlockManager* get_block_manager(Sequence* sequence, bool is_host);
+
   bool allocate(Sequence* sequence);
   bool allocate(std::vector<Sequence*>& sequences);
   bool allocate(Sequence* sequence, size_t num_tokens);
@@ -60,10 +62,12 @@ class BlockManagerPool {
   int32_t get_manager_with_max_free_blocks() const;
   int32_t get_dp_rank(Sequence* sequence) const;
 
+ private:
   std::vector<std::unique_ptr<BlockManager>> block_managers_;
+  std::vector<std::unique_ptr<BlockManager>> host_block_managers_;
 
   // the options for the block manager
-  BlockManager::Options options_;
+  Options options_;
 };
 
 }  // namespace xllm
