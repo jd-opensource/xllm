@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "chat.pb.h"
+#include "common/macros.h"
 #include "completion.pb.h"
 #include "core/common/macros.h"
 #include "embedding.pb.h"
@@ -101,9 +102,12 @@ struct RequestParams {
   // decode address.
   std::string decode_address;
 
-  std::vector<Tool> tools;
+  // decode address.
+  std::string decode_address;
+
+  std::vector<proto::Tool> proto_tools;
   std::string tool_choice = "auto";
-  bool has_tools() const { return !tools.empty(); }
+  bool has_tools() const { return !proto_tools.empty(); }
 };
 
 }  // namespace xllm

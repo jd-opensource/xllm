@@ -4,6 +4,7 @@
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
 #include <glog/logging.h>
+#include <google/protobuf/util/json_util.h>
 #include <torch/torch.h>
 
 #include <boost/algorithm/string.hpp>
@@ -19,16 +20,37 @@
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
 #include "chat_template/chat_template.h"
-#include "chat_template/tools_converter.h"
 #include "common/instance_name.h"
 #include "common/uuid.h"
+#include "function_call/function_call.h"
 #include "request/request_params.h"
 #include "util/utils.h"
-#include <google/protobuf/util/json_util.h>
-#include "function_call/function_call.h"
 
 namespace xllm {
 namespace {
+
+
+std::string generate_tool_call_id() { return "call_" + llm::generate_uuid(); }
+
+void convert_tool_calls_to_proto(
+    const std::vector<llm::function_call::ToolCallItem>& tool_calls,
+    proto::ChatMessage* message) {
+  for (const auto& call : tool_calls) {
+    if (!call.is_valid()) {
+      LOG(WARNING) << "Invalid tool call: " << call.to_string();
+      continue;
+    }
+
+    auto* proto_tool_call = message->add_tool_calls();
+    proto_tool_call->set_id(call.id.empty() ? generate_tool_call_id()
+                                            : call.id);
+    proto_tool_call->set_type(call.type.empty() ? "function" : call.type);
+
+    auto* function = proto_tool_call->mutable_function();
+    function->set_name(call.function_name);
+    function->set_arguments(call.function_arguments);
+  }
+}
 
 void set_logprobs(proto::ChatChoice* choice,
                   const std::optional<std::vector<LogProb>>& logprobs) {
@@ -53,108 +75,6 @@ void set_logprobs(proto::ChatChoice* choice,
       }
     }
   }
-}
-struct ToolsInfo {
-  std::vector<Tool> tools;
-  std::string tool_choice;
-  bool has_tools = false;
-};
-
-ToolsInfo extract_tools_info(const proto::ChatRequest& request) {
-  ToolsInfo info;
-  
-  if (request.tools_size() > 0) {
-    info.has_tools = true;
-    info.tools.reserve(request.tools_size());
-    
-    for (const auto& proto_tool : request.tools()) {
-      Tool tool;
-      tool.type = proto_tool.type();
-      tool.function.name = proto_tool.function().name();
-      tool.function.description = proto_tool.function().description();
-      // tool.function.parameters = proto_tool.function().parameters();
-      // std::cerr << "proto_tool.function().parameters():" << proto_tool.function().parameters() << std::endl;
-
-      std::string parameters_json_str;
-      if (proto_tool.function().has_parameters()) {
-        google::protobuf::util::JsonPrintOptions options;
-        options.add_whitespace = false;
-        options.preserve_proto_field_names = true;
-        auto status = google::protobuf::util::MessageToJsonString(
-            proto_tool.function().parameters(), &parameters_json_str, options);
-        if (!status.ok()) {
-          LOG(WARNING) << "Failed to convert parameters Struct to JSON: " 
-                       << status.message() << ", tool: " << tool.function.name;
-          parameters_json_str = "{}";
-        }
-      } else {
-        parameters_json_str = "{}";
-      }
-      tool.function.parameters = parameters_json_str;
-      std::cerr << "parameters_json_str:" << parameters_json_str << std::endl;
-
-      info.tools.push_back(std::move(tool));
-    }
-    
-    if (request.has_tool_choice()) {
-      info.tool_choice = request.tool_choice();
-    } else {
-      info.tool_choice = "auto";
-    }
-  }
-  
-  return info;
-}
-struct ToolsInfo {
-  std::vector<Tool> tools;
-  std::string tool_choice;
-  bool has_tools = false;
-};
-
-ToolsInfo extract_tools_info(const proto::ChatRequest& request) {
-  ToolsInfo info;
-  
-  if (request.tools_size() > 0) {
-    info.has_tools = true;
-    info.tools.reserve(request.tools_size());
-    
-    for (const auto& proto_tool : request.tools()) {
-      Tool tool;
-      tool.type = proto_tool.type();
-      tool.function.name = proto_tool.function().name();
-      tool.function.description = proto_tool.function().description();
-      // tool.function.parameters = proto_tool.function().parameters();
-      // std::cerr << "proto_tool.function().parameters():" << proto_tool.function().parameters() << std::endl;
-
-      std::string parameters_json_str;
-      if (proto_tool.function().has_parameters()) {
-        google::protobuf::util::JsonPrintOptions options;
-        options.add_whitespace = false;
-        options.preserve_proto_field_names = true;
-        auto status = google::protobuf::util::MessageToJsonString(
-            proto_tool.function().parameters(), &parameters_json_str, options);
-        if (!status.ok()) {
-          LOG(WARNING) << "Failed to convert parameters Struct to JSON: " 
-                       << status.message() << ", tool: " << tool.function.name;
-          parameters_json_str = "{}";
-        }
-      } else {
-        parameters_json_str = "{}";
-      }
-      tool.function.parameters = parameters_json_str;
-      std::cerr << "parameters_json_str:" << parameters_json_str << std::endl;
-
-      info.tools.push_back(std::move(tool));
-    }
-    
-    if (request.has_tool_choice()) {
-      info.tool_choice = request.tool_choice();
-    } else {
-      info.tool_choice = "auto";
-    }
-  }
-  
-  return info;
 }
 
 template <typename ChatCall>
@@ -250,7 +170,9 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
                                 const std::string& request_id,
                                 int64_t created_time,
                                 const std::string& model,
-                                const RequestOutput& req_output) {
+                                const RequestOutput& req_output,
+                                bool has_tools = false,
+                                const std::string& parser_format = "") {
   auto& response = call->response();
   response.set_object("chat.completion");
   response.set_id(request_id);
@@ -264,9 +186,35 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
     set_logprobs(choice, output.logprobs);
     auto* message = choice->mutable_message();
     message->set_role("assistant");
-    message->set_content(output.text);
-    if (output.finish_reason.has_value()) {
-      choice->set_finish_reason(output.finish_reason.value());
+
+    auto setOutputAndFinishReason = [&]() {
+      message->set_content(output.text);
+      if (output.finish_reason.has_value()) {
+        choice->set_finish_reason(output.finish_reason.value());
+      }
+    };
+
+    if (has_tools && !parser_format.empty()) {
+      auto& fc_interface =
+          llm::function_call::FunctionCallInterface::getInstance();
+      fc_interface.setPreferredFormat(parser_format);
+      auto parse_result = fc_interface.parse(output.text);
+      if (parse_result.has_tool_calls()) {
+        choice->set_finish_reason("tool_calls");
+        if (!parse_result.normal_text.empty()) {
+          std::string cleaned_text = parse_result.normal_text;
+          boost::algorithm::trim(cleaned_text);
+          if (!cleaned_text.empty()) {
+            message->set_content(cleaned_text);
+          }
+        }
+        convert_tool_calls_to_proto(parse_result.tool_calls, message);
+      } else {
+        LOG(WARNING) << "Function call parsing error.";
+        setOutputAndFinishReason();
+      }
+    } else {
+      setOutputAndFinishReason();
     }
   }
 
@@ -283,190 +231,96 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
   return call->write_and_finish(response);
 }
 
-std::string generate_tool_call_id() {
-  return "call_" + llm::generate_uuid();
-}
+}  // namespace
 
-void convert_tool_calls_to_proto(
-    const std::vector<llm::function_call::ToolCallItem>& tool_calls,
-    proto::ChatMessage* message) {
-  
-  for (const auto& call : tool_calls) {
-    if (!call.is_valid()) {
-      LOG(WARNING) << "Invalid tool call: " << call.to_string();
-      continue;
-    }
-    
-    auto* proto_tool_call = message->add_tool_calls();
-    proto_tool_call->set_id(call.id.empty() ? generate_tool_call_id() : call.id);
-    proto_tool_call->set_type(call.type.empty() ? "function" : call.type);
-    
-    auto* function = proto_tool_call->mutable_function();
-    function->set_name(call.function_name);
-    function->set_arguments(call.function_arguments);
-    
-    LOG(INFO) << "Converted tool call: " << call.function_name 
-              << " with args: " << call.function_arguments;
-  }
-}
+ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
+                                 const std::vector<std::string>& models)
+    : APIServiceImpl(master, models) {}
 
+// chat_async for brpc
+void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
+  const auto& rpc_request = call->request();
+  // check if model is supported
+  const auto& model = rpc_request.model();
+  if (!models_.contains(model)) {
+    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+    return;
+  }
 
-bool handle_function_call_response(
-    const RequestOutput& req_output,
-    std::shared_ptr<ChatCallDataBrpc> call_data,
-    const std::string& request_id,
-    int64_t created_time,
-    const std::string& model,
-    const std::string& parser_format) {
-  
-  auto& fc_interface = llm::function_call::FunctionCallInterface::getInstance();
-  
-  fc_interface.setPreferredFormat(parser_format);
-  
-  auto parse_result = fc_interface.parse(req_output.outputs[0].text);
-  
-  if (parse_result.has_tool_calls()) {
-    auto& response = call_data->response();
-    response.set_object("chat.completion");
-    response.set_id(request_id);
-    response.set_created(created_time);
-    response.set_model(model);
-    
-    auto* choice = response.add_choices();
-    choice->set_index(0);
-    choice->set_finish_reason("tool_calls");
-    
-    auto* message = choice->mutable_message();
-    message->set_role("assistant");
-    
-    if (!parse_result.normal_text.empty()) {
-      std::string cleaned_text = parse_result.normal_text;
-      boost::algorithm::trim(cleaned_text);
-      if (!cleaned_text.empty()) {
-        message->set_content(cleaned_text);
-      }
-    }
-    
-    convert_tool_calls_to_proto(parse_result.tool_calls, message);
-    
-    if (req_output.usage.has_value()) {
-      const auto& usage = req_output.usage.value();
-      auto* proto_usage = response.mutable_usage();
-      proto_usage->set_prompt_tokens(static_cast<int32_t>(usage.num_prompt_tokens));
-      proto_usage->set_completion_tokens(static_cast<int32_t>(usage.num_generated_tokens));
-      proto_usage->set_total_tokens(static_cast<int32_t>(usage.num_total_tokens));
-    }
-    
-    LOG(INFO) << "Function call detected: " << parse_result.tool_calls.size() << " calls";
-    return call_data->write_and_finish(response);
-    
-  } else if (parse_result.has_error) {
-    LOG(WARNING) << "Function call parsing error: " << parse_result.error_message;
-    return send_result_to_client_brpc(call_data, request_id, created_time, model, req_output);
-  } else {
-    return send_result_to_client_brpc(call_data, request_id, created_time, model, req_output);
+  // Check if the request is being rate-limited.
+  if (master_->get_rate_limiter()->is_limited()) {
+    call->finish_with_error(
+        StatusCode::RESOURCE_EXHAUSTED,
+        "The number of concurrent requests has reached the limit.");
+    return;
   }
-}
 
+  RequestParams request_params(
+      rpc_request, call->get_x_request_id(), call->get_x_request_time());
+  std::vector<Message> messages;
+  messages.reserve(rpc_request.messages_size());
+  for (const auto& message : rpc_request.messages()) {
+    messages.emplace_back(message.role(), message.content());
+  }
 
-bool handle_streaming_function_calls(
-    const RequestOutput& req_output,
-    std::shared_ptr<ChatCallDataBrpc> call_data,
-    std::unordered_set<size_t>* first_message_sent,
-    const std::string& request_id,
-    int64_t created_time,
-    const std::string& model,
-    const std::string& parser_format,
-    bool include_usage) {
-  
-  auto& fc_interface = llm::function_call::FunctionCallInterface::getInstance();
-  
-  fc_interface.setPreferredFormat(parser_format);
-  
-  auto stream_result = fc_interface.parseStreaming(req_output.outputs[0].text);
-  
-  auto& response = call_data->response();
-  
-  for (const auto& completed_call : stream_result.completed_calls) {
-    const auto& index = req_output.outputs[0].index;
-    if (first_message_sent->find(index) == first_message_sent->end()) {
-      response.Clear();
-      response.set_object("chat.completion.chunk");
-      response.set_id(request_id);
-      response.set_created(created_time);
-      response.set_model(model);
-      auto* choice = response.add_choices();
-      choice->set_index(index);
-      auto* message = choice->mutable_delta();
-      message->set_role("assistant");
-      first_message_sent->insert(index);
-      if (!call_data->write(response)) {
-        return false;
-      }
-    }
-    
-    response.Clear();
-    response.set_object("chat.completion.chunk");
-    response.set_id(request_id);
-    response.set_created(created_time);
-    response.set_model(model);
-    
-    auto* choice = response.add_choices();
-    choice->set_index(index);
-    
-    auto* delta = choice->mutable_delta();
-    auto* tool_call = delta->add_tool_calls();
-    tool_call->set_id(completed_call.id.empty() ? generate_tool_call_id() : completed_call.id);
-    tool_call->set_type(completed_call.type.empty() ? "function" : completed_call.type);
-    
-    auto* function = tool_call->mutable_function();
-    function->set_name(completed_call.function_name);
-    function->set_arguments(completed_call.function_arguments);
-    
-    if (!call_data->write(response)) {
-      return false;
-    }
+  bool include_usage = false;
+  if (rpc_request.has_stream_options()) {
+    include_usage = rpc_request.stream_options().include_usage();
   }
-  
-  if (!stream_result.completed_calls.empty()) {
-    response.Clear();
-    response.set_object("chat.completion.chunk");
-    response.set_id(request_id);
-    response.set_created(created_time);
-    response.set_model(model);
-    
-    auto* choice = response.add_choices();
-    choice->set_index(req_output.outputs[0].index);
-    choice->set_finish_reason("tool_calls");
-    choice->mutable_delta();
-    
-    if (!call_data->write(response)) {
-      return false;
+  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
+  if (rpc_request.has_routing()) {
+    prompt_tokens = std::vector<int>{};
+    prompt_tokens->reserve(rpc_request.routing().token_ids_size());
+    for (int i = 0; i < rpc_request.routing().token_ids_size(); i++) {
+      prompt_tokens->emplace_back(rpc_request.routing().token_ids(i));
     }
+
+    request_params.decode_address = rpc_request.routing().decode_name();
   }
-  
-  if (include_usage && req_output.usage.has_value()) {
-    response.Clear();
-    const auto& usage = req_output.usage.value();
-    response.set_object("chat.completion.chunk");
-    response.set_id(request_id);
-    response.set_created(created_time);
-    response.set_model(model);
-    auto* proto_usage = response.mutable_usage();
-    proto_usage->set_prompt_tokens(static_cast<int32_t>(usage.num_prompt_tokens));
-    proto_usage->set_completion_tokens(static_cast<int32_t>(usage.num_generated_tokens));
-    proto_usage->set_total_tokens(static_cast<int32_t>(usage.num_total_tokens));
-    if (!call_data->write(response)) {
-      return false;
-    }
-  }
-  
-  if (req_output.finished || req_output.cancelled) {
-    response.Clear();
-    return call_data->finish();
-  }
-  
-  return true;
+
+  master_->handle_request(
+      std::move(messages),
+      std::move(prompt_tokens),
+      std::move(request_params),
+      [call,
+       model,
+       master = master_,
+       stream = request_params.streaming,
+       include_usage = include_usage,
+       first_message_sent = std::unordered_set<size_t>(),
+       request_id = request_params.request_id,
+       created_time = absl::ToUnixSeconds(absl::Now())](
+          const RequestOutput& req_output) mutable -> bool {
+        if (req_output.status.has_value()) {
+          const auto& status = req_output.status.value();
+          if (!status.ok()) {
+            // Reduce the number of concurrent requests when a
+            // request is finished with error.
+            master->get_rate_limiter()->decrease_one_request();
+
+            return call->finish_with_error(status.code(), status.message());
+          }
+        }
+
+        // Reduce the number of concurrent requests when a request
+        // is finished or canceled.
+        if (req_output.finished || req_output.cancelled) {
+          master->get_rate_limiter()->decrease_one_request();
+        }
+
+        if (stream) {
+          // send delta to client
+          return send_delta_to_client_brpc(call,
+                                           include_usage,
+                                           &first_message_sent,
+                                           request_id,
+                                           created_time,
+                                           model,
+                                           req_output);
+        }
+        return send_result_to_client_brpc(
+            call, request_id, created_time, model, req_output);
+      });
 }
 
 
@@ -584,27 +438,6 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
     return;
   }
 
-  ToolsInfo tools_info = extract_tools_info(rpc_request);
-  // 打印所有工具信息
-  std::cerr << "Tools Information:" << std::endl;
-  std::cerr << "Has tools: " << (tools_info.has_tools ? "true" : "false") << std::endl;
-  std::cerr << "Tool choice: " << tools_info.tool_choice << std::endl;
-
-  if (tools_info.has_tools) {
-      std::cerr << "Number of tools: " << tools_info.tools.size() << std::endl;
-      for (size_t i = 0; i < tools_info.tools.size(); ++i) {
-          const auto& tool = tools_info.tools[i];
-          std::cerr << "Tool #" << i + 1 << ":" << std::endl;
-          std::cerr << "  Type: " << tool.type << std::endl;
-          std::cerr << "  Function name: " << tool.function.name << std::endl;
-          std::cerr << "  Function description: " << tool.function.description << std::endl;
-          std::cerr << "  Function parameters: " << tool.function.parameters << std::endl;
-      }
-  } else {
-      std::cerr << "No tools in this request" << std::endl;
-  }
-
-
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
 
@@ -623,9 +456,16 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
     include_usage = rpc_request.stream_options().include_usage();
   }
 
-  if ((tools_info.has_tools)) {
-    request_params.tools = std::move(tools_info.tools);
-    request_params.tool_choice = std::move(tools_info.tool_choice);
+  if (rpc_request.tools_size() > 0) {
+    request_params.proto_tools.assign(rpc_request.tools().begin(),
+                                      rpc_request.tools().end());
+
+    // TODO: Implement support for 'required' option in tool_choice.
+    if (rpc_request.has_tool_choice()) {
+      request_params.tool_choice = rpc_request.tool_choice();
+    } else {
+      request_params.tool_choice = "auto";
+    }
   }
 
   // schedule the request
@@ -660,52 +500,30 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
           master->get_rate_limiter()->decrease_one_request();
         }
 
-        std::string parser_format = master->options().tool_call_parser().value_or("");
+        std::string parser_format =
+            master->options().tool_call_parser().value_or("");
         if (stream) {
           if (has_tools && !parser_format.empty()) {
             LOG(ERROR) << "Tool call does not support streaming output";
-            return send_delta_to_client_brpc(call_data,
-                                             include_usage,
-                                             &first_message_sent,
-                                             request_id,
-                                             created_time,
-                                             model,
-                                             req_output);
-            // return handle_streaming_function_calls(
-            //     req_output, call_data, &first_message_sent,
-            //     request_id, created_time, model, parser_format, include_usage);
-          } else {
-            // send delta to client
-            return send_delta_to_client_brpc(call_data,
-                                             include_usage,
-                                             &first_message_sent,
-                                             request_id,
-                                             created_time,
-                                             model,
-                                             req_output);
           }
+          // send delta to client
+          return send_delta_to_client_brpc(call_data,
+                                           include_usage,
+                                           &first_message_sent,
+                                           request_id,
+                                           created_time,
+                                           model,
+                                           req_output);
         }
 
         if (has_tools && !parser_format.empty()) {
-            //debug2
-            auto& interface = llm::function_call::FunctionCallInterface::getInstance();
-            
-            if (parser_format != "auto") {
-                interface.setPreferredFormat(parser_format);
-            }
-            auto result = interface.parse(req_output.outputs[0].text);
-
-            std::cerr << "正常文本: " << result.normal_text << std::endl;
-
-            for (const auto& call : result.tool_calls) {
-                std::cerr << "函数: " << call.function_name << std::endl;
-                std::cerr << "参数: " << call.function_arguments << std::endl;
-            }
-        }
-        if (has_tools && !parser_format.empty()) {
-            return handle_function_call_response(
-                req_output, call_data, 
-                request_id, created_time, model, parser_format);
+          return send_result_to_client_brpc(call_data,
+                                            request_id,
+                                            created_time,
+                                            model,
+                                            req_output,
+                                            has_tools,
+                                            parser_format);
         }
 
         return send_result_to_client_brpc(

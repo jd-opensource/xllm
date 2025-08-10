@@ -1,6 +1,7 @@
 #include "api_service.h"
 
 #include <glog/logging.h>
+#include <google/protobuf/util/json_util.h>
 #include <json2pb/json_to_pb.h>
 #include <json2pb/pb_to_json.h>
 
@@ -71,7 +72,6 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string attachment = std::move(ctrl->request_attachment().to_string());
-  LOG(INFO) << "attachment:" << attachment;
   std::string error;
   auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
   if (!st) {
@@ -175,7 +175,6 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string attachment = std::move(ctrl->request_attachment().to_string());
-  LOG(INFO) << "attachment:" << attachment;
   std::string error;
   auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
   if (!st) {
@@ -289,7 +288,6 @@ void APIService::LinkCluster(::google::protobuf::RpcController* controller,
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string attachment = std::move(ctrl->request_attachment().to_string());
-  LOG(INFO) << "attachment:" << attachment;
   std::string error;
   auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
   if (!st) {
@@ -344,7 +342,6 @@ void APIService::UnlinkCluster(::google::protobuf::RpcController* controller,
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string attachment = std::move(ctrl->request_attachment().to_string());
-  LOG(INFO) << "attachment:" << attachment;
   std::string error;
   auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
   if (!st) {

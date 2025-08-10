@@ -19,9 +19,10 @@ message Tool {
 }
 
 message ToolCall {
-  string id = 1;
-  string type = 2;  // "function"
-  FunctionCall function = 3;
+  optional uint32 index = 1;
+  optional string id = 2;
+  string type = 3;  // "function"
+  FunctionCall function = 4;
 }
 
 message FunctionCall {
