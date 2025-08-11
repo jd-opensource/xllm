@@ -1,264 +1,97 @@
 #include "function_call_parser.h"
-#include "base_detector.h"
-#include <algorithm>
-#include <glog/logging.h>
+#include <stdexcept>
+#include <iostream>
 
 namespace llm {
 namespace function_call {
 
-FunctionCallParser::FunctionCallParser() : preferred_format_(ModelFormat::UNKNOWN) {
-    initialize_detectors();
-}
+const std::unordered_map<std::string, std::string> FunctionCallParser::ToolCallParserEnum = {
+    {"qwen25", "qwen25"},
+    {"qwen3", "qwen25"},
+    // TODO
+    // {"llama3", "llama3"},
+    // {"mistral", "mistral"},
+    // {"deepseekv3", "deepseekv3"},
+    // {"pythonic", "pythonic"},
+    // {"kimi_k2", "kimi_k2"},
+    // {"qwen3_coder", "qwen3_coder"},
+    // {"glm45", "glm45"},
+    // {"step3", "step3"},
+};
 
-void FunctionCallParser::initialize_detectors() {
-    detectors_ = DetectorFactory::create_all_detectors();
+FunctionCallParser::FunctionCallParser(const std::vector<proto::Tool>& tools, const std::string& tool_call_parser)
+    : tools_(tools) {
     
-    for (auto& detector : detectors_) {
-        if (detector) {
-            format_detectors_[detector->get_format()] = std::move(detector);
-        }
+    detector_ = create_detector(tool_call_parser);
+    if (!detector_) {
+        throw std::invalid_argument("Unsupported tool_call_parser: " + tool_call_parser);
     }
-    detectors_.clear();
 }
 
-void FunctionCallParser::set_preferred_format(ModelFormat format) {
-    preferred_format_ = format;
+bool FunctionCallParser::has_tool_call(const std::string& text) const {
+    return detector_->has_tool_call(text);
 }
 
-void FunctionCallParser::set_preferred_format(const std::string& model_name) {
-    preferred_format_ = infer_format_from_model_name(model_name);
-}
-
-ParseResult FunctionCallParser::parse_auto(const std::string& text) {
-    if (preferred_format_ != ModelFormat::UNKNOWN) {
-        auto detector = get_detector(preferred_format_);
-        if (detector && detector->detect(text)) {
-            return detector->parse_calls(text);
-        }
-    }
+std::tuple<std::string, std::vector<ToolCallItem>> FunctionCallParser::parse_non_stream(const std::string& full_text) {
+    StreamingParseResult parsed_result = detector_->detect_and_parse(full_text, tools_);
     
-    for (auto& [format, detector] : format_detectors_) {
-        if (detector && detector->detect(text)) {
-            return detector->parse_calls(text);
-        }
+    if (!parsed_result.calls.empty()) {
+        return std::make_tuple(parsed_result.normal_text, parsed_result.calls);
+    } else {
+        return std::make_tuple(full_text, std::vector<ToolCallItem>());
     }
-    
-    return {};
 }
 
-ParseResult FunctionCallParser::parse_with_format(const std::string& text, ModelFormat format) {
-    auto detector = get_detector(format);
-    if (!detector) {
-        LOG(WARNING) << "Unsupported format: " << static_cast<int>(format);
-        return {};
+
+std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(const std::string& tool_call_parser) {
+    auto it = ToolCallParserEnum.find(tool_call_parser);
+    if (it == ToolCallParserEnum.end()) {
+        return nullptr;
     }
     
-    return detector->parse_calls(text);
-}
-
-StreamingParseResult FunctionCallParser::parse_streaming_auto(const std::string& chunk) {
-    if (preferred_format_ != ModelFormat::UNKNOWN) {
-        auto detector = get_detector(preferred_format_);
-        if (detector) {
-            return detector->parse_streaming(chunk);
-        }
+    if (it->second == "qwen25") {
+        return std::make_unique<Qwen25Detector>();
     }
     
-    for (auto& [format, detector] : format_detectors_) {
-        if (detector) {
-            auto result = detector->parse_streaming(chunk);
-            if (result.has_completed_calls() || result.has_partial_call()) {
-                return result;
-            }
-        }
-    }
+    // if (tool_call_parser == "llama3") {
+    //     return std::make_unique<Llama32Detector>();
+    // }
+    // if (tool_call_parser == "mistral") {
+    //     return std::make_unique<MistralDetector>();
+    // }
     
-    StreamingParseResult empty_result;
-    return empty_result;
-}
-
-StreamingParseResult FunctionCallParser::parse_streaming_with_format(const std::string& chunk, ModelFormat format) {
-    auto detector = get_detector(format);
-    if (!detector) {
-        StreamingParseResult result;
-        result.has_error = true;
-        result.error_message = "Unsupported format";
-        return result;
-    }
-    
-    return detector->parse_streaming(chunk);
-}
-
-std::vector<FormatDetectionResult> FunctionCallParser::detect_formats(const std::string& text) {
-    std::vector<FormatDetectionResult> results;
-    
-    for (auto& [format, detector] : format_detectors_) {
-        if (detector) {
-            auto result = detector->detect_format(text);
-            results.push_back(result);
-        }
-    }
-    
-    std::sort(results.begin(), results.end(), 
-              [](const FormatDetectionResult& a, const FormatDetectionResult& b) {
-                  return a.confidence > b.confidence;
-              });
-    
-    return results;
-}
-
-FormatDetectionResult FunctionCallParser::get_best_format(const std::string& text) {
-    auto results = detect_formats(text);
-    if (!results.empty()) {
-        return results[0];
-    }
-    
-    FormatDetectionResult empty_result;
-    return empty_result;
-}
-
-bool FunctionCallParser::validate_calls(const std::vector<ToolCallItem>& calls, ModelFormat format) {
-    auto detector = get_detector(format);
-    if (!detector) {
-        return false;
-    }
-    
-    for (const auto& call : calls) {
-        if (!detector->validate_call_format(call)) {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-std::string FunctionCallParser::generate_constraints(const std::vector<std::string>& function_names, 
-                                                    ModelFormat format,
-                                                    const ConstraintOptions& options) {
-    ModelFormat target_format = format;
-    if (target_format == ModelFormat::UNKNOWN) {
-        target_format = preferred_format_;
-    }
-    if (target_format == ModelFormat::UNKNOWN) {
-        target_format = ModelFormat::QWEN25; // 默认格式
-    }
-    
-    auto detector = get_detector(target_format);
-    if (!detector) {
-        return "";
-    }
-    
-    ConstraintOptions modified_options = options;
-    modified_options.allowed_functions = function_names;
-    
-    auto grammar = detector->generate_ebnf_grammar(modified_options);
-    return grammar.to_string();
-}
-
-void FunctionCallParser::reset_all_streaming_states() {
-    for (auto& [format, detector] : format_detectors_) {
-        if (detector) {
-            detector->reset_streaming_state();
-        }
-    }
-}
-
-void FunctionCallParser::reset_streaming_state(ModelFormat format) {
-    auto detector = get_detector(format);
-    if (detector) {
-        detector->reset_streaming_state();
-    }
-}
-
-std::vector<ModelFormat> FunctionCallParser::get_supported_formats() const {
-    std::vector<ModelFormat> formats;
-    for (const auto& [format, detector] : format_detectors_) {
-        if (detector) {
-            formats.push_back(format);
-        }
-    }
-    return formats;
-}
-
-std::string FunctionCallParser::get_format_name(ModelFormat format) const {
-    return DetectorFactory::get_format_name(format);
-}
-
-bool FunctionCallParser::is_format_supported(ModelFormat format) const {
-    return format_detectors_.find(format) != format_detectors_.end();
-}
-
-BaseFormatDetector* FunctionCallParser::get_detector(ModelFormat format) {
-    auto it = format_detectors_.find(format);
-    if (it != format_detectors_.end()) {
-        return it->second.get();
-    }
     return nullptr;
-}
-
-ModelFormat FunctionCallParser::infer_format_from_model_name(const std::string& model_name) {
-    return DetectorFactory::infer_format_from_model_name(model_name);
 }
 
 namespace utils {
 
-std::vector<ToolCallItem> parse_function_calls(const std::string& text) {
-    static FunctionCallParser parser;
-    return parser.parse_auto(text).tool_calls;
-}
-
-std::vector<ToolCallItem> parse_function_calls(const std::string& text, const std::string& format) {
-    static FunctionCallParser parser;
+std::vector<ToolCallItem> parse_function_calls(
+    const std::string& text, 
+    const std::vector<proto::Tool>& tools,
+    const std::string& parser_type) {
     
-    ModelFormat model_format = ModelFormat::UNKNOWN;
-    if (format == "qwen25" || format == "qwen") {
-        model_format = ModelFormat::QWEN25;
+    try {
+        FunctionCallParser parser(tools, parser_type);
+        auto [normal_text, calls] = parser.parse_non_stream(text);
+        return calls;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Error parsing function calls: " << e.what();
+        return {};
     }
-
-    if (model_format == ModelFormat::UNKNOWN) {
-        return parser.parse_auto(text).tool_calls;
-    }
-    
-    return parser.parse_with_format(text, model_format).tool_calls;
 }
 
-bool has_function_calls(const std::string& text) {
-    static FunctionCallParser parser;
-    auto calls = parser.parse_auto(text);
-    return calls.has_tool_calls();
-}
 
-std::string detect_best_format(const std::string& text) {
-    static FunctionCallParser parser;
-    auto result = parser.get_best_format(text);
-    return parser.get_format_name(result.format);
-}
-
-std::string generate_ebnf_constraints(const std::vector<std::string>& function_names, 
-                                     const std::string& format) {
-    static FunctionCallParser parser;
+bool has_function_calls(
+    const std::string& text,
+    const std::string& parser_type) {
     
-    ModelFormat model_format = ModelFormat::UNKNOWN;
-    if (format == "qwen25" || format == "qwen") {
-        model_format = ModelFormat::QWEN25;
-    }
-    
-    return parser.generate_constraints(function_names, model_format);
-}
-
-bool validate_function_call_format(const ToolCallItem& call, const std::string& format) {
-    static FunctionCallParser parser;
-    
-    ModelFormat model_format = ModelFormat::UNKNOWN;
-    if (format == "qwen25" || format == "qwen") {
-        model_format = ModelFormat::QWEN25;
-    }
-    
-    if (model_format == ModelFormat::UNKNOWN) {
+    try {
+        FunctionCallParser parser({}, parser_type);
+        return parser.has_tool_call(text);
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Error checking function calls: " << e.what();
         return false;
     }
-    
-    return parser.validate_calls({call}, model_format);
 }
 
 }  // namespace utils

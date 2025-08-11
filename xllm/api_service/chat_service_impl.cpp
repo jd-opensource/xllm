@@ -23,6 +23,7 @@
 #include "common/instance_name.h"
 #include "common/uuid.h"
 #include "function_call/function_call.h"
+#include "function_call/core_types.h"
 #include "request/request_params.h"
 #include "util/utils.h"
 
@@ -32,25 +33,61 @@ namespace {
 
 std::string generate_tool_call_id() { return "call_" + llm::generate_uuid(); }
 
-void convert_tool_calls_to_proto(
-    const std::vector<llm::function_call::ToolCallItem>& tool_calls,
-    proto::ChatMessage* message) {
-  for (const auto& call : tool_calls) {
-    if (!call.is_valid()) {
-      LOG(WARNING) << "Invalid tool call: " << call.to_string();
-      continue;
+struct ToolCallResult {
+  std::optional<std::vector<proto::ToolCall>> tool_calls;
+  std::string text;
+  std::string finish_reason;
+};
+
+ToolCallResult process_tool_calls(
+    const std::string& text,
+    const std::vector<proto::Tool>& tools,
+    const std::string& parser_format,
+    const std::string& finish_reason) {
+
+  ToolCallResult result;
+  result.text = text;
+  result.finish_reason = finish_reason;
+
+  function_call::FunctionCallParser parser(tools, parser_format);
+
+  if (!parser.has_tool_call(text)) {
+    return result;
+  }
+
+  if (result.finish_reason == "stop") {
+    result.finish_reason = "tool_calls";
+  }
+
+  try {
+    auto [parsed_text, call_info_list] = parser.parse_non_stream(text);
+    result.text = parsed_text;
+
+    std::vector<proto::ToolCall> tool_calls;
+    tool_calls.reserve(call_info_list.size());
+
+    for (const auto& call_info : call_info_list) {
+      proto::ToolCall tool_call;
+      tool_call.set_id("call_" + generate_uuid());
+      tool_call.set_type("function");
+
+      auto* function = tool_call.mutable_function();
+      if (call_info.name) {
+        function->set_name(*call_info.name);
+      }
+      function->set_arguments(call_info.parameters);
+
+      tool_calls.push_back(tool_call);
     }
 
-    auto* proto_tool_call = message->add_tool_calls();
-    proto_tool_call->set_id(call.id.empty() ? generate_tool_call_id()
-                                            : call.id);
-    proto_tool_call->set_type(call.type.empty() ? "function" : call.type);
-
-    auto* function = proto_tool_call->mutable_function();
-    function->set_name(call.function_name);
-    function->set_arguments(call.function_arguments);
+    result.tool_calls = std::move(tool_calls);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Tool call parsing error: " << e.what();
   }
+
+  return result;
 }
+
 
 void set_logprobs(proto::ChatChoice* choice,
                   const std::optional<std::vector<LogProb>>& logprobs) {
@@ -172,7 +209,8 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
                                 const std::string& model,
                                 const RequestOutput& req_output,
                                 bool has_tools = false,
-                                const std::string& parser_format = "") {
+                                const std::string& parser_format = "",
+                                const std::vector<proto::Tool>& tools = {}) {
   auto& response = call->response();
   response.set_object("chat.completion");
   response.set_id(request_id);
@@ -195,23 +233,23 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
     };
 
     if (has_tools && !parser_format.empty()) {
-      auto& fc_interface =
-          llm::function_call::FunctionCallInterface::getInstance();
-      fc_interface.setPreferredFormat(parser_format);
-      auto parse_result = fc_interface.parse(output.text);
-      if (parse_result.has_tool_calls()) {
-        choice->set_finish_reason("tool_calls");
-        if (!parse_result.normal_text.empty()) {
-          std::string cleaned_text = parse_result.normal_text;
-          boost::algorithm::trim(cleaned_text);
-          if (!cleaned_text.empty()) {
-            message->set_content(cleaned_text);
-          }
+      std::string finish_reason;
+      if (output.finish_reason.has_value()) {
+        finish_reason = output.finish_reason.value();
+      }
+
+      auto result = process_tool_calls(output.text, tools, parser_format, finish_reason);
+      
+      message->set_content(result.text);
+      
+      if (result.tool_calls) {
+        for (const auto& tool_call : *result.tool_calls) {
+          *message->add_tool_calls() = tool_call;
         }
-        convert_tool_calls_to_proto(parse_result.tool_calls, message);
-      } else {
-        LOG(WARNING) << "Function call parsing error.";
-        setOutputAndFinishReason();
+      }
+      
+      if (!result.finish_reason.empty()) {
+        choice->set_finish_reason(result.finish_reason);
       }
     } else {
       setOutputAndFinishReason();
@@ -481,7 +519,8 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
        first_message_sent = std::unordered_set<size_t>(),
        request_id = request_params.request_id,
        created_time = absl::ToUnixSeconds(absl::Now()),
-       has_tools = request_params.has_tools()](
+       has_tools = request_params.has_tools(),
+       proto_tools = request_params.proto_tools](
           const RequestOutput& req_output) mutable -> bool {
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
@@ -523,7 +562,8 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
                                             model,
                                             req_output,
                                             has_tools,
-                                            parser_format);
+                                            parser_format,
+                                            proto_tools);
         }
 
         return send_result_to_client_brpc(
