@@ -147,6 +147,33 @@ class Sequence final {
     return if_cache;
   }
 
+  // add new cache blocks
+  void append_block(const Block& new_block) {
+    return append_blocks({new_block});
+  }
+  void append_blocks(const std::vector<Block>& new_blocks);
+  void append_host_blocks(const std::vector<Block>& new_blocks);
+
+  // set shared cache blocks from prefix cache
+  void set_shared_blocks(std::vector<Block>&& shared_blocks);
+
+  // release all cache blocks
+  void release_blocks();
+
+  // returns allocated cache blocks
+  Slice<Block> blocks() const { return blocks_; }
+  Slice<Block> host_blocks() const { return host_blocks_; }
+  std::vector<std::pair<int32_t, int32_t>> block_pairs() const {
+    return block_pairs_;
+  }
+
+  // get the number of blocks
+  size_t num_blocks() const { return blocks_.size(); }
+
+  // get the number of shared blocks.
+  size_t num_shared_blocks() const { return num_owned_shared_blocks_; }
+
+  // get the reason why the sequence is finished
   FinishReason finish_reason() const { return finish_reason_; }
   // check finish status, use cached value if not invalidated
   bool finished() const;
@@ -261,6 +288,14 @@ class Sequence final {
   // but the generated tokens are retained for the next execution.
   // In the next execution, we should treat these generated tokens as prompts.
   size_t volatile_num_prompt_tokens_ = 0;
+
+  // number of tokens in kv cache
+  size_t num_kv_cache_tokens_;
+
+  // physical blocks that hold the kv cache.
+  std::vector<Block> blocks_;
+  std::vector<Block> host_blocks_;
+  std::vector<std::pair<int32_t, int32_t>> block_pairs_;
 
   // embedding id that hold the embedding.
   int32_t embedding_id_ = -1;

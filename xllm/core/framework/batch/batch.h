@@ -41,6 +41,11 @@ class Batch {
 
   void add(const std::vector<Sequence*>& sequences);
 
+  void add_copy_out(Sequence* sequence) {
+    copy_out_sequences_.push_back(sequence);
+  };
+
+  // get the number of sequences in the batch
   size_t size() const { return sequences_.size(); }
   bool empty() const { return sequences_.empty(); }
 
@@ -81,6 +86,11 @@ class Batch {
 
   std::vector<Sequence*> sequences_;
 
+  // copied out sequences in the batch
+  std::vector<Sequence*> copy_out_sequences_;
+
+  // max number of tokens to process for each sequence
+  // default to max value
   std::vector<uint32_t> allowed_max_tokens_;
 
   std::vector<torch::Tensor> input_embeddings_vec_;

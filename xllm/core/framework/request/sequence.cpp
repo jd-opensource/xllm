@@ -315,6 +315,66 @@ void Sequence::add_kv_blocks(const std::vector<Block>& blocks) {
   }
 }
 
+void try_replace_unique_blocks(std::vector<Block>&& matched_shared_blocks,
+                               uint32_t* num_owned_shared_blocks,
+                               std::vector<Block>* owned_blocks) {
+  uint32_t num_matched_shared_blocks = matched_shared_blocks.size();
+  if (*num_owned_shared_blocks < num_matched_shared_blocks) {
+    CHECK_GE(owned_blocks->size(), num_matched_shared_blocks);
+    std::move(matched_shared_blocks.begin(),
+              matched_shared_blocks.begin() + num_matched_shared_blocks,
+              owned_blocks->begin());
+    *num_owned_shared_blocks = num_matched_shared_blocks;
+  }
+}
+
+void Sequence::append_host_blocks(const std::vector<Block>& new_blocks) {
+  host_blocks_.insert(blocks_.end(), new_blocks.begin(), new_blocks.end());
+  if (blocks_.size() == host_blocks_.size()) {
+    block_pairs_.clear();
+    block_pairs_.reserve(blocks_.size());
+    for (int i = 0; i < blocks_.size(); i++) {
+      block_pairs_.emplace_back(blocks_[i].id(), host_blocks_[i].id());
+    }
+  }
+}
+
+// append shared cache blocks from prefix cache
+void Sequence::set_shared_blocks(std::vector<Block>&& shared_blocks) {
+  if (shared_blocks.empty()) {
+    return;
+  }
+
+  // The number of matched blocks may be fewer than the number of blocks held by
+  // the sequence itself. In this case, try to replace the blocks computed by
+  // the sequence with blocks from the prefix_cache and release the computed
+  // blocks to save kv_cache as much as possible.
+  if (shared_blocks.size() <= blocks_.size()) {
+    try_replace_unique_blocks(
+        std::move(shared_blocks), &num_owned_shared_blocks_, &blocks_);
+    return;
+  }
+
+  blocks_.clear();
+  num_owned_shared_blocks_ = shared_blocks.size();
+  blocks_ = std::move(shared_blocks);
+
+  // update the kv cache position
+  size_t num_shared_tokens = blocks_.size() * blocks_[0].size();
+
+  // It is possible that num_shared_tokens == num_tokens_, indicating
+  // that the exact same prompt has been received again. In this case, it
+  // becomes necessary to adjust the kv cache position to the previous token,
+  // allowing the model proceed. While the shared blocks should be immutable
+  // ideally, but it remains safe to regenerate the kv cache in this context,
+  // given the utiliztion of the exact same token.
+  if (num_shared_tokens == num_tokens_) {
+    size_t block_size = blocks_[0].size();
+    CHECK_GT(block_size, 0);
+    num_shared_tokens = ((num_tokens_ - 1) / block_size) * block_size;
+  }
+}
+
 // release all cache blocks
 void Sequence::reset() {
   kv_state_.reset();
