@@ -123,6 +123,11 @@ message BlockTables {
   repeated int32 block_tables = 1;
 }
 
+message BlockPair {
+  int32 device_block_id = 1;
+  int32 host_block_id = 2;
+}
+
 message ForwardInput {
   // flatten the token ids and positions
   repeated int32 flatten_tokens_vec = 1;
@@ -155,6 +160,8 @@ message ForwardInput {
   repeated Embeddings embeds = 23;
   uint32 prefill_seq_len = 24;
   repeated int32 embedding_ids = 25;
+  repeated BlockPair copy_out_blocks = 26;
+  repeated BlockPair copy_in_blocks = 27;
 }
 
 message Embeddings {
