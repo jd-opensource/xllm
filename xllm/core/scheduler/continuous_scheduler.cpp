@@ -385,6 +385,9 @@ void ContinuousScheduler::handle_decode_requests(
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
         waiting_priority_queue_.push(request_to_preempt);
+        for (auto& seq : request_to_preempt->sequences) {
+          copy_out_sequences_.push_back(&seq);
+        }
       } else {
         LOG(FATAL) << "Unexpected error: preempting the candidate itself.";
       }
@@ -612,6 +615,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   running_requests_.clear();
   running_sequences_.clear();
   running_sequences_budgets_.clear();
+  copy_out_sequences_.clear();
 
   // remaining budget for the current batch
   size_t remaining_token_budget = options_.max_tokens_per_batch();
@@ -659,9 +663,10 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(running_sequences_, running_sequences_budgets_);
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(running_sequences_,
+                                      running_sequences_budgets_,
+                                      copy_out_sequences_);
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process

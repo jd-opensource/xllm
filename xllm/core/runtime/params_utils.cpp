@@ -110,6 +110,19 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->embedding_ids().begin(),
                            pb_forward_input->embedding_ids().end());
 
+  std::vector<std::pair<int32_t, int32_t>> copy_out_blocks;
+  for (size_t i = 0; i < pb_model_input->copy_out_blocks().size(); ++i) {
+    copy_out_blocks.emplace_back(
+        pb_model_input->copy_out_blocks()[i].device_block_id(),
+        pb_model_input->copy_out_blocks()[i].host_block_id());
+  }
+  std::vector<std::pair<int32_t, int32_t>> copy_in_blocks;
+  for (size_t i = 0; i < pb_model_input->copy_in_blocks().size(); ++i) {
+    copy_in_blocks.emplace_back(
+        pb_model_input->copy_in_blocks()[i].device_block_id(),
+        pb_model_input->copy_in_blocks()[i].host_block_id());
+  }
+
   std::vector<const RequestSamplingParam*> sampling_params;
   std::vector<RequestSamplingParam> tmp_sampling_params;
   for (auto sp : pb_forward_input->sampling_params()) {
@@ -390,6 +403,24 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   pb_forward_input->set_prefill_seq_len(inputs.prefill_seq_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
+  pb_model_input->mutable_copy_out_blocks()->Reserve(
+      inputs.copy_out_blocks.size());
+  for (auto t : inputs.copy_out_blocks) {
+    proto::BlockPair pb_pair;
+    pb_pair.set_device_block_id(t.first);
+    pb_pair.set_host_block_id(t.second);
+    *pb_model_input->mutable_copy_out_blocks()->Add() = pb_pair;
+  }
+  pb_model_input->mutable_copy_in_blocks()->Reserve(
+      inputs.copy_out_blocks.size());
+  for (auto t : inputs.copy_in_blocks) {
+    proto::BlockPair pb_pair;
+    pb_pair.set_device_block_id(t.first);
+    pb_pair.set_host_block_id(t.second);
+    *pb_model_input->mutable_copy_in_blocks()->Add() = pb_pair;
+  }
+
+  COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());
 }
 
 void proto_to_forward_output(const proto::ForwardOutput& pb_output,

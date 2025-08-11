@@ -29,7 +29,8 @@ class BatchFactory {
 
   std::vector<Batch> create_batches(
       const std::vector<Sequence*>& running_sequences,
-      const std::vector<size_t>& running_sequences_budgets);
+      const std::vector<size_t>& running_sequences_budgets,
+      const std::vector<Sequence*>& copy_out_sequences = {});
 
  private:
   BatchFactory(int32_t dp_size) : dp_size_(dp_size) {}

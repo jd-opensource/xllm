@@ -115,6 +115,10 @@ struct ModelInputParams {
   std::vector<int32_t> embedding_ids;
 
 #if defined(USE_NPU)
+  // copy in / copy out
+  std::vector<std::pair<int32_t, int32_t>> copy_out_blocks;
+  std::vector<std::pair<int32_t, int32_t>> copy_in_blocks;
+
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #endif
 

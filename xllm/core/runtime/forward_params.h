@@ -150,6 +150,9 @@ struct RawForwardInput {
   uint32_t prefill_seq_len;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
+  // copy in / copy out
+  std::vector<std::pair<int32_t, int32_t>> copy_out_blocks;
+  std::vector<std::pair<int32_t, int32_t>> copy_in_blocks;
 };
 
 struct RawSampleOutput {

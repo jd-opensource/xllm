@@ -341,6 +341,25 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
   c10::StreamGuard streamGuard(npu_stream_helper_->H2D_memcpy_stream.unwrap());
   processed_inputs = inputs.to(device_, dtype_);
 
+  if (inputs.input_params.copy_out_blocks.size() > 0 ||
+      inputs.input_params.copy_in_blocks.size() > 0) {
+    for (int layer_id = 0; layer_id < args_.n_layers(); layer_id++) {
+      auto key_cache = kv_caches_[layer_id].get_k_cache();
+      auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
+      auto value_cache = kv_caches_[layer_id].get_v_cache();
+      auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
+
+      for (auto block_pair : inputs.input_params.copy_out_blocks) {
+        host_k_cache[block_pair.second].copy_(key_cache[block_pair.first]);
+        host_v_cache[block_pair.second].copy_(value_cache[block_pair.first]);
+      }
+      for (auto block_pair : inputs.input_params.copy_in_blocks) {
+        key_cache[block_pair.first].copy_(host_k_cache[block_pair.second]);
+        value_cache[block_pair.first].copy_(host_v_cache[block_pair.second]);
+      }
+    }
+  }
+
   if (!context_.get_parallel_args().mapping_data().empty()) {
     torch::Tensor token_size_per_dp_group =
         torch::tensor(processed_inputs.input_params.dp_global_token_nums,

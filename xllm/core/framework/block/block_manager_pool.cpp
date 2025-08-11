@@ -117,6 +117,17 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   sequence->reset();
 }
 
+void BlockManagerPool::copy_out_blocks_for(Request* request) {
+  DCHECK(request != nullptr);
+  for (auto& sequence : request->sequences) {
+    int32_t dp_rank = sequence.dp_rank();
+    size_t token_num = sequence.blocks().size() * options_.block_size();
+    auto host_block_ids = host_block_managers_[dp_rank]->allocate(token_num);
+    sequence.append_host_blocks(host_block_ids);
+    deallocate(&sequence);
+  }
+}
+
 bool BlockManagerPool::allocate(Sequence* sequence) {
   DCHECK(sequence != nullptr);
   return allocate(sequence, sequence->num_tokens());

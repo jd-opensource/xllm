@@ -19,7 +19,8 @@ namespace xllm {
 
 std::vector<Batch> BatchFactory::create_batches(
     const std::vector<Sequence*>& running_sequences,
-    const std::vector<size_t>& running_sequences_budgets) {
+    const std::vector<size_t>& running_sequences_budgets,
+    const std::vector<Sequence*>& copy_out_sequences) {
   size_t num_prompt_tokens = 0;
   size_t num_generated_tokens = 0;
   std::vector<Batch> batches(dp_size_);
@@ -47,6 +48,10 @@ std::vector<Batch> BatchFactory::create_batches(
       batches[i % dp_size_].add(sequence, token_budget);
       sequence->set_dp_rank(i % dp_size_);
     }
+  }
+
+  for (auto seq : copy_out_sequences) {
+    batches[seq->dp_rank()].add_copy_out(seq);
   }
 
   COUNTER_ADD(num_processing_tokens_total_prompt, num_prompt_tokens);
