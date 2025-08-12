@@ -199,3 +199,15 @@ DEFINE_string(etcd_addr, "", "etcd adderss for save instance meta info");
 DEFINE_bool(enable_service_routing, false, "whether to use etcd.");
 
 DEFINE_int32(heart_beat_interval, 3, "heart beat interval");
+
+DEFINE_bool(enable_kvcache_store, false, "whether to use kvcache store.");
+
+DEFINE_string(store_protocol, "tcp", "kvcache store protocol.");
+
+DEFINE_string(store_master_server_entry,
+              "tcp",
+              "address information of the stopre master service.");
+
+DEFINE_string(store_metadata_connstring,
+              "",
+              "the address of the kvcache store metadata service .");

@@ -9,7 +9,8 @@ cc_library(
     prefix_cache_hash.h
     prefix_cache_hash_with_upload.h
   SRCS 
-    prefix_cache_hash.h
+    prefix_cache.cpp
+    prefix_cache_hash.cpp
     prefix_cache_hash_with_upload.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>
@@ -42,7 +43,7 @@ cc_test(
     GTest::gtest_main
 )
 
-target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto ascendcl Folly::folly)
 add_dependencies(prefix_test brpc-static)
 
 cc_binary(

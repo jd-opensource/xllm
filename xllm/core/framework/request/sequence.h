@@ -234,6 +234,12 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
+  uint64_t get_shared_host_block_num() const { return shared_host_block_num_; }
+
+  void add_shared_host_block_num(const uint64_t shared_num) {
+    shared_host_block_num_ += shared_num;
+  }
+
   void reset();
 
  private:
@@ -296,6 +302,9 @@ class Sequence final {
   std::vector<Block> blocks_;
   std::vector<Block> host_blocks_;
   std::vector<std::pair<int32_t, int32_t>> block_pairs_;
+
+  // shared host block num
+  uint64_t shared_host_block_num_ = 0;
 
   // embedding id that hold the embedding.
   int32_t embedding_id_ = -1;

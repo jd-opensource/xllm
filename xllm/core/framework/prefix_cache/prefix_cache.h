@@ -84,6 +84,11 @@ class PrefixCache {
     return nullptr;
   }
 
+  virtual bool compute_blocks_hash_value(const Slice<int32_t>& token_ids,
+                                         std::vector<Block>& blocks) {
+    return false;
+  }
+
  protected:
   std::atomic<uint64_t> total_blocks_{0}, matched_blocks_{0};
 };

@@ -81,6 +81,9 @@ class BlockManagerImpl : public BlockManager {
   // total blocks num
   size_t num_total_blocks() const override { return free_blocks_.size() - 1; }
 
+  bool compute_blocks_hash_value(const Slice<int32_t>& token_ids,
+                                 std::vector<Block>& blocks) override;
+
  private:
   // check if has enough slots, if not, try to evict some blocks
   // from the prefix cache

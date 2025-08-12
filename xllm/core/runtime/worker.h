@@ -100,6 +100,17 @@ class Worker {
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks);
 
+  virtual folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
+      const std::vector<const uint8_t*>& hash_keys,
+      const std::vector<uint64_t>& dst_blocks);
+
+  virtual folly::SemiFuture<uint32_t> offload_kv_blocks_to_store_async(
+      const std::vector<const uint8_t*>& hash_keys,
+      const std::vector<uint64_t>& src_blocks);
+
+  virtual folly::SemiFuture<uint32_t> remove_kv_blocks_in_store_async(
+      const std::vector<const uint8_t*>& hash_keys);
+
   // Run the model on the given input. async call
   // the future returns a successfull status with no meaningful value
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
