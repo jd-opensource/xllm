@@ -158,6 +158,8 @@ class ContinuousScheduler : public Scheduler {
   // so they can be preemeted in scheduler.
   std::deque<std::shared_ptr<Request>> running_queue_;
 
+  virtual void prepare_host_cache(std::shared_ptr<Request>& request);
+
   void handle_abnormal_request(
       const std::vector<Sequence*>& candidate_sequences,
       const std::vector<size_t>& candidate_token_budgets,

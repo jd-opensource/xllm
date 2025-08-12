@@ -111,3 +111,11 @@ DECLARE_int32(heart_beat_interval);
 DECLARE_int32(chunked_match_frequency);
 
 DECLARE_bool(use_zero_evict);
+
+DECLARE_bool(enable_kvcache_store);
+
+DECLARE_string(store_protocol);
+
+DECLARE_string(store_master_server_entry);
+
+DECLARE_string(store_metadata_connstring);

@@ -9,5 +9,13 @@ set(CPPREST_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cpprestsdk/Release/include)
 set(CPPREST_LIB ${CMAKE_BINARY_DIR}/third_party/cpprestsdk/Release/Binaries/libcpprest.a)
 add_subdirectory(etcd_cpp_apiv3)
 
+add_subdirectory(MoonCake)
+
+target_include_directories(mooncake_store PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/MoonCake/mooncake-transfer-engine/include
+)
+
+target_link_libraries(mooncake_store PUBLIC transfer_engine cachelib_memory_allocator)
+
 add_subdirectory(spdlog)
 add_subdirectory(hccl_transfer/hccl_transfer)

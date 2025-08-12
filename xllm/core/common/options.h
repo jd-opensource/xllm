@@ -97,6 +97,14 @@ class Options {
   PROPERTY(bool, enable_service_routing) = false;
 
   PROPERTY(std::optional<std::string>, tool_call_parser);
+
+  PROPERTY(bool, enable_kvcache_store) = false;
+
+  PROPERTY(std::string, store_protocol) = "tcp";
+
+  PROPERTY(std::string, store_master_server_entry) = "";
+
+  PROPERTY(std::string, store_metadata_connstring) = "";
 };
 
 }  // namespace xllm

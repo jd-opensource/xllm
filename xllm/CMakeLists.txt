@@ -29,7 +29,7 @@ cc_binary(
 )
 
 # link brpc
-target_link_libraries(xllm PRIVATE brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf ${OpenCV_LIBS})
+target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf ${OpenCV_LIBS})
 add_dependencies(xllm brpc-static)
 
 set(COMMON_LIBS Python::Python ascendcl hccl c_sec nnopbase ms_tools_ext)
