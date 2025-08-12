@@ -66,6 +66,29 @@ class Engine {
     LOG(FATAL) << " pull_kv_blocks is notimplemented!";
   };
 
+  virtual uint32_t load_kv_blocks_from_store(
+      const uint32_t dp_rank,
+      const std::vector<const uint8_t*>& hash_keys,
+      const std::vector<uint64_t>& dst_blocks) {
+    LOG(FATAL) << " pull_kv_blocks is not implemented!";
+    return 0;
+  };
+
+  virtual uint32_t offload_kv_blocks_to_store(
+      const uint32_t dp_rank,
+      const std::vector<const uint8_t*>& hash_keys,
+      const std::vector<uint64_t>& src_blocks) {
+    LOG(FATAL) << " push_kv_blocks is not implemented!";
+    return 0;
+  };
+
+  virtual uint32_t remove_kv_blocks_in_store(
+      const uint32_t dp_rank,
+      const std::vector<const uint8_t*>& hash_keys) {
+    LOG(FATAL) << " push_kv_blocks is not implemented!";
+    return 0;
+  };
+
   virtual void get_device_info(std::vector<std::string>& device_ips,
                                std::vector<uint16_t>& ports) {
     LOG(FATAL) << " get_device_info is notimplemented!";

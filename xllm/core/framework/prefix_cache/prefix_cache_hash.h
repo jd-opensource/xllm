@@ -60,6 +60,9 @@ class PrefixCacheHash : public PrefixCache {
     return nullptr;
   }
 
+  virtual bool compute_blocks_hash_value(const Slice<int32_t>& token_ids,
+                                         std::vector<Block>& blocks) override;
+
  protected:
   struct Node {
     Block block;

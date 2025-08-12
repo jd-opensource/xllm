@@ -177,7 +177,12 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .transfer_listen_port(options_.transfer_listen_port())
         .enable_disagg_pd(options_.enable_disagg_pd())
         .enable_service_routing(options_.enable_service_routing())
-        .enable_schedule_overlap(options_.enable_schedule_overlap());
+        .enable_schedule_overlap(options_.enable_schedule_overlap())
+        .enable_kvcache_store(options_.enable_kvcache_store())
+        .store_protocol(options_.store_protocol())
+        .store_master_server_entry(options_.store_master_server_entry())
+        .store_metadata_connstring(options_.store_metadata_connstring());
+
     if (options_.device_ip().has_value()) {
       eng_options.device_ip(options_.device_ip().value());
     }

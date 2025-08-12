@@ -74,9 +74,9 @@ option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON)
 # option(USE_CXX11_ABI "Use the new C++-11 ABI, which is not backwards compatible." OFF)
 option(USE_MANYLINUX "Build for manylinux" OFF)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_EXTENSIONS ON)
 
 if(USE_NPU)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=0")
@@ -226,6 +226,7 @@ find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenCV CONFIG REQUIRED)
+find_package(Python COMPONENTS Development REQUIRED)
 
 if (USE_MANYLINUX)
   # manylinux doesn't ship Development.Embed

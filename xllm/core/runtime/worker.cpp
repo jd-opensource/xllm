@@ -154,6 +154,27 @@ folly::SemiFuture<bool> Worker::pull_kv_blocks_async(
                                      dst_blocks);
 }
 
+folly::SemiFuture<uint32_t> Worker::load_kv_blocks_from_store_async(
+    const std::vector<const uint8_t*>& hash_keys,
+    const std::vector<uint64_t>& dst_blocks) {
+  return impl_->load_kv_blocks_from_store_async(hash_keys, dst_blocks);
+}
+
+folly::SemiFuture<uint32_t> Worker::offload_kv_blocks_to_store_async(
+    const std::vector<const uint8_t*>& hash_keys,
+    const std::vector<uint64_t>& src_blocks) {
+  return impl_->offload_kv_blocks_to_store_async(hash_keys, src_blocks);
+}
+
+folly::SemiFuture<uint32_t> Worker::remove_kv_blocks_in_store_async(
+    const std::vector<const uint8_t*>& hash_keys) {
+  return impl_->remove_kv_blocks_in_store_async(hash_keys);
+}
+
+folly::SemiFuture<bool> Worker::init_executor_async() {
+  return impl_->init_executor_async();
+}
+
 const torch::Device& Worker::device() const { return impl_->device(); }
 
 folly::SemiFuture<std::optional<ForwardOutput>>

@@ -60,6 +60,15 @@ message PullKVCacheRequest {
   repeated uint64 dst_blocks = 5;
 }
 
+message CacheContents {
+  repeated bytes hash_keys = 1;
+  repeated uint64 blocks = 2;
+}
+
+message StoreResponse {
+ uint32 success_cnt = 1;
+}
+
 message DeviceInfo {
   string device_ip = 1;
   uint32 listen_port = 2;
@@ -218,4 +227,7 @@ service DistributeWorker {
   rpc ExecuteModel (ForwardInput) returns (ForwardOutput);
   rpc GetLastStepResult (Empty) returns (ForwardOutput);
   rpc GetActiveActivationMemory (Empty) returns (ActivationMemory);
+  rpc LoadKVCacheFromStore(CacheContents) returns (StoreResponse) {}
+  rpc OffloadKVCacheToStore(CacheContents) returns (StoreResponse) {}
+  rpc RemoveKVCacheInStore(CacheContents) returns (StoreResponse) {}
 }

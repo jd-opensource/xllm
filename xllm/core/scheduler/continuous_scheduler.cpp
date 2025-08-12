@@ -69,6 +69,8 @@ bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
+  prepare_host_cache(request);
+
   if (request_queue_.write(request)) {
     return true;
   }
@@ -732,6 +734,38 @@ std::vector<Batch> ContinuousScheduler::schedule_request(
   }
   // return an empty batch
   return batch;
+}
+
+void ContinuousScheduler::prepare_host_cache(
+    std::shared_ptr<Request>& request) {
+  for (Sequence& sequence : request->sequences) {
+    auto host_block_manager =
+        block_manager_->get_block_manager(&sequence, true);
+    auto token_ids = sequence.token_ids();
+    auto host_block_ids =
+        host_block_manager->allocate_blocks_for(token_ids.size());
+
+    auto block_manager = block_manager_->get_block_manager(&sequence, false);
+
+    if (block_manager->compute_blocks_hash_value(token_ids, host_block_ids)) {
+      std::vector<const uint8_t*> hash_keys;
+      std::vector<uint64_t> block_ids;
+
+      auto host_blocks = sequence.host_blocks();
+      hash_keys.reserve(host_blocks.size());
+      block_ids.reserve(host_blocks.size());
+
+      for (auto& block : host_blocks) {
+        hash_keys.emplace_back(block.get_immutable_hash_value());
+        block_ids.emplace_back(block.id());
+      }
+
+      auto success_cnt = engine_->load_kv_blocks_from_store(
+          sequence.dp_rank(), hash_keys, block_ids);
+
+      sequence.add_shared_host_block_num(success_cnt);
+    }
+  }
 }
 
 // step the scheduler forward by one step

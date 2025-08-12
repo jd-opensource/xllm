@@ -125,6 +125,14 @@ class Options {
   PROPERTY(std::string, priority_strategy) = "FCFS";
 
   PROPERTY(bool, enable_online_preempt_offline) = true;
+  
+  PROPERTY(bool, enable_kvcache_store) = false;
+
+  PROPERTY(std::string, store_protocol) = "tcp";
+
+  PROPERTY(std::string, store_master_server_entry) = "";
+
+  PROPERTY(std::string, store_metadata_connstring) = "";
 };
 
 }  // namespace xllm

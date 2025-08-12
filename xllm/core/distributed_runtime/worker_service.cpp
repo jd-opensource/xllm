@@ -66,6 +66,32 @@ struct WorkerService::NPUStreamHelper {
 // TODO(mlu): implement mlu stream helper
 #endif
 
+void convert_from_cache_contents(
+    const ::llm::proto::CacheContents& cache_contents,
+    std::vector<const uint8_t*>& hash_keys,
+    std::vector<uint64_t>& blocks) {
+  hash_keys.resize(cache_contents.hash_keys_size());
+  blocks.resize(cache_contents.blocks_size());
+
+  for (int i = 0; i < cache_contents.hash_keys_size(); ++i) {
+    hash_keys.emplace_back(
+        reinterpret_cast<const uint8_t*>(cache_contents.hash_keys(i).data()));
+
+    blocks.emplace_back(cache_contents.blocks(i));
+  }
+}
+
+void convert_from_cache_contents(
+    const ::llm::proto::CacheContents& cache_contents,
+    std::vector<const uint8_t*>& hash_keys) {
+  hash_keys.resize(cache_contents.hash_keys_size());
+
+  for (int i = 0; i < cache_contents.hash_keys_size(); ++i) {
+    hash_keys.emplace_back(
+        reinterpret_cast<const uint8_t*>(cache_contents.hash_keys(i).data()));
+  }
+}
+
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
     : options_(options), device_(device), initialized_(false) {
@@ -246,6 +272,61 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
                                                 dst_blocks);
     bool status = std::move(future).get();
     resp->set_ok(status);
+  });
+  return;
+}
+
+void WorkerService::LoadKVCacheFromStore(
+    ::google::protobuf::RpcController* controller,
+    const ::llm::proto::CacheContents* req,
+    ::llm::proto::StoreResponse* resp,
+    ::google::protobuf::Closure* done) {
+  threadpool_.schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    std::vector<const uint8_t*> hash_keys;
+    std::vector<uint64_t> dst_blocks;
+    convert_from_cache_contents(*req, hash_keys, dst_blocks);
+
+    auto future =
+        worker_->load_kv_blocks_from_store_async(hash_keys, dst_blocks);
+
+    resp->set_success_cnt(std::move(future).get());
+  });
+  return;
+}
+
+void WorkerService::OffloadKVCacheToStore(
+    ::google::protobuf::RpcController* controller,
+    const ::llm::proto::CacheContents* req,
+    ::llm::proto::StoreResponse* resp,
+    ::google::protobuf::Closure* done) {
+  threadpool_.schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    std::vector<const uint8_t*> hash_keys;
+    std::vector<uint64_t> src_blocks;
+    convert_from_cache_contents(*req, hash_keys, src_blocks);
+
+    auto future =
+        worker_->offload_kv_blocks_to_store_async(hash_keys, src_blocks);
+
+    resp->set_success_cnt(std::move(future).get());
+  });
+  return;
+}
+
+void WorkerService::RemoveKVCacheInStore(
+    ::google::protobuf::RpcController* controller,
+    const ::llm::proto::CacheContents* req,
+    ::llm::proto::StoreResponse* resp,
+    ::google::protobuf::Closure* done) {
+  threadpool_.schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    std::vector<const uint8_t*> hash_keys;
+    convert_from_cache_contents(*req, hash_keys);
+
+    auto future = worker_->remove_kv_blocks_in_store_async(hash_keys);
+
+    resp->set_success_cnt(std::move(future).get());
   });
   return;
 }

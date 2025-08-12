@@ -138,7 +138,11 @@ int run() {
       .enable_service_routing(FLAGS_enable_service_routing)
       .tool_call_parser(FLAGS_tool_call_parser)
       .priority_strategy(FLAGS_priority_strategy)
-      .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline);
+      .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline)
+      .enable_kvcache_store(FLAGS_enable_kvcache_store)
+      .store_protocol(FLAGS_store_protocol)
+      .store_master_server_entry(FLAGS_store_master_server_entry)
+      .store_metadata_connstring(FLAGS_store_metadata_connstring);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 

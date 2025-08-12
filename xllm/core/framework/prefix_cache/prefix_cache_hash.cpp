@@ -193,4 +193,29 @@ size_t PrefixCacheHash::evict(size_t n_blocks) {
   return evict_count;
 }
 
+bool PrefixCacheHash::compute_blocks_hash_value(const Slice<int32_t>& token_ids,
+                                                std::vector<Block>& blocks) {
+  const size_t n_blocks = token_ids.size() / block_size_;
+  if (blocks.size() > n_blocks) {
+    LOG(ERROR) << "token ids do not cover the allocate block.";
+    return false;
+  }
+
+  const size_t n_tokens = blocks.size() * block_size_;
+
+  for (size_t i = 0; i < n_tokens; i += block_size_) {
+    if (i == 0) {
+      hash_util_->hash(nullptr,
+                       token_ids.slice(i, i + block_size_),
+                       blocks[i].get_mutable_hash_value());
+    } else {
+      hash_util_->hash(blocks[i - 1].get_mutable_hash_value(),
+                       token_ids.slice(i, i + block_size_),
+                       blocks[i].get_mutable_hash_value());
+    }
+  }
+
+  return true;
+}
+
 }  // namespace xllm

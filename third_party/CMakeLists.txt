@@ -13,3 +13,10 @@ if(USE_NPU)
   add_subdirectory(spdlog)
   add_subdirectory(hccl_transfer/hccl_transfer)
 endif()
+add_subdirectory(MoonCake)
+
+target_include_directories(mooncake_store PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/MoonCake/mooncake-transfer-engine/include
+)
+
+target_link_libraries(mooncake_store PUBLIC transfer_engine cachelib_memory_allocator)

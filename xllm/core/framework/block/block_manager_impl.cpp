@@ -177,4 +177,13 @@ void BlockManagerImpl::free(int32_t block_id) {
   }
 }
 
+bool BlockManagerImpl::compute_blocks_hash_value(
+    const Slice<int32_t>& token_ids,
+    std::vector<Block>& blocks) {
+  if (!options_.enable_prefix_cache()) {
+    return false;
+  }
+
+  return prefix_cache_->compute_blocks_hash_value(token_ids, blocks);
+}
 }  // namespace xllm

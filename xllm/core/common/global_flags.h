@@ -138,3 +138,11 @@ DECLARE_bool(use_zero_evict);
 DECLARE_string(priority_strategy);
 
 DECLARE_bool(enable_online_preempt_offline);
+
+DECLARE_bool(enable_kvcache_store);
+
+DECLARE_string(store_protocol);
+
+DECLARE_string(store_master_server_entry);
+
+DECLARE_string(store_metadata_connstring);

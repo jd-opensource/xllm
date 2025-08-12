@@ -33,6 +33,7 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/params_utils.h"
+#include "util/hash_util.h"
 
 namespace xllm {
 RemoteWorker::RemoteWorker(int32_t global_rank,
@@ -231,6 +232,50 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
   stub_->PullKVCache(&cntl, &request, &s, nullptr);
 
   return s.ok();
+}
+
+uint32_t RemoteWorker::load_kv_blocks_from_store(
+    const std::vector<const uint8_t*>& hash_keys,
+    const std::vector<uint64_t>& dst_blocks) {
+  proto::CacheContents cache_contents;
+  if (!convert_to_cache_contents(hash_keys, dst_blocks, cache_contents)) {
+    return 0;
+  }
+
+  proto::StoreResponse resp;
+  brpc::Controller cntl;
+  stub_->LoadKVCacheFromStore(&cntl, &cache_contents, &resp, nullptr);
+
+  return resp.success_cnt();
+}
+
+uint32_t RemoteWorker::offload_kv_blocks_to_store(
+    const std::vector<const uint8_t*>& hash_keys,
+    const std::vector<uint64_t>& src_blocks) {
+  proto::CacheContents cache_contents;
+  if (!convert_to_cache_contents(hash_keys, src_blocks, cache_contents)) {
+    return 0;
+  }
+
+  proto::StoreResponse resp;
+  brpc::Controller cntl;
+  stub_->OffloadKVCacheToStore(&cntl, &cache_contents, &resp, nullptr);
+
+  return resp.success_cnt();
+}
+
+uint32_t RemoteWorker::remove_kv_blocks_in_store(
+    const std::vector<const uint8_t*>& hash_keys) {
+  proto::CacheContents cache_contents;
+  if (!convert_to_cache_contents(hash_keys, cache_contents)) {
+    return 0;
+  }
+
+  proto::StoreResponse resp;
+  brpc::Controller cntl;
+  stub_->RemoveKVCacheInStore(&cntl, &cache_contents, &resp, nullptr);
+
+  return resp.success_cnt();
 }
 
 ForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
@@ -440,6 +485,23 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
     } else {
       promise.setValue(s.ok());
     }
+  });
+  return future;
+}
+
+folly::SemiFuture<bool> RemoteWorker::init_executor_async() {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+    proto::Empty req;
+    proto::Status s;
+    brpc::Controller cntl;
+    stub_->InitModelExecutor(&cntl, &req, &s, nullptr);
+    if (cntl.Failed() || !s.ok()) {
+      LOG(ERROR) << "init_executor_async failed, " << cntl.ErrorText();
+      promise.setValue(false);
+    }
+    promise.setValue(true);
   });
   return future;
 }

@@ -356,6 +356,55 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
   return true;
 }
 
+uint32_t LLMEngine::load_kv_blocks_from_store(
+    const uint32_t dp_rank,
+    const std::vector<const uint8_t*>& hash_keys,
+    const std::vector<uint64_t>& dst_blocks) {
+  auto tp_size = worker_clients_.size() / options_.dp_size();
+  uint32_t result;
+
+  for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
+    auto curr_res =
+        worker_clients_[tp_rank + tp_size * dp_rank]->load_kv_blocks_from_store(
+            hash_keys, dst_blocks);
+    result = std::min(curr_res, result);
+  }
+
+  return result;
+}
+
+uint32_t LLMEngine::offload_kv_blocks_to_store(
+    const uint32_t dp_rank,
+    const std::vector<const uint8_t*>& hash_keys,
+    const std::vector<uint64_t>& src_blocks) {
+  auto tp_size = worker_clients_.size() / options_.dp_size();
+  uint32_t result;
+
+  for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
+    auto curr_res = worker_clients_[tp_rank + tp_size * dp_rank]
+                        ->offload_kv_blocks_to_store(hash_keys, src_blocks);
+    result = std::min(curr_res, result);
+  }
+
+  return result;
+}
+
+uint32_t LLMEngine::remove_kv_blocks_in_store(
+    const uint32_t dp_rank,
+    const std::vector<const uint8_t*>& hash_keys) {
+  auto tp_size = worker_clients_.size() / options_.dp_size();
+  uint32_t result;
+
+  for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
+    auto curr_res =
+        worker_clients_[tp_rank + tp_size * dp_rank]->remove_kv_blocks_in_store(
+            hash_keys);
+    result = std::min(curr_res, result);
+  }
+
+  return result;
+}
+
 void LLMEngine::get_device_info(std::vector<std::string>& device_ips,
                                 std::vector<uint16_t>& ports) {
   device_ips.reserve(worker_clients_.size());

@@ -125,6 +125,20 @@ struct Options {
   PROPERTY(std::string, priority_strategy) = "FCFS";
 
   PROPERTY(bool, enable_online_preempt_offline) = true;
+  
+  // enable kvcache store.
+  PROPERTY(bool, enable_kvcache_store) = false;
+
+  // store transfer protocol.
+  PROPERTY(std::string, store_protocol) = "tcp";
+
+  // The address information of the Master (IP:Port for default mode and
+  // etcd://IP:Port;IP:Port;...;IP:Port for high availability mode)
+  PROPERTY(std::string, store_master_server_entry) = "";
+
+  // the address of the metadata service (e.g., etcd/Redis) required for
+  // Transfer Engine initialization
+  PROPERTY(std::string, store_metadata_connstring) = "";
 };
 
 }  // namespace runtime

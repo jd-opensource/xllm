@@ -215,3 +215,15 @@ DEFINE_string(priority_strategy, "FCFS", "priority strategy for requests");
 DEFINE_bool(enable_online_preempt_offline,
             true,
             "whether enable online preempt offline");
+
+DEFINE_bool(enable_kvcache_store, false, "whether to use kvcache store.");
+
+DEFINE_string(store_protocol, "tcp", "kvcache store protocol.");
+
+DEFINE_string(store_master_server_entry,
+              "tcp",
+              "address information of the stopre master service.");
+
+DEFINE_string(store_metadata_connstring,
+              "",
+              "the address of the kvcache store metadata service .");
