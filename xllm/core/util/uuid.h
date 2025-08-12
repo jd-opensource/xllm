@@ -18,8 +18,4 @@ class ShortUUID {
   absl::BitGen gen_;
 };
 
-std::string generate_uuid(size_t len = 22);
-
-std::string generate_uuid(size_t len = 22);
-
 }  // namespace xllm

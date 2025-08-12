@@ -1,62 +1,62 @@
 #pragma once
 
-#include "core_types.h"
-#include "base_format_detector.h"
-#include "qwen25_detector.h"
-#include <string>
-#include <vector>
 #include <memory>
-#include <unordered_map>
+#include <string>
 #include <tuple>
+#include <unordered_map>
+#include <vector>
+
+#include "base_format_detector.h"
+#include "core_types.h"
 
 namespace llm {
 namespace function_call {
 
 class FunctionCallParser {
-public:
-    static const std::unordered_map<std::string, std::string> ToolCallParserEnum;
+ public:
+  static const std::unordered_map<std::string, std::string> ToolCallParserEnum;
 
-private:
-    std::unique_ptr<BaseFormatDetector> detector_;
-    std::vector<proto::Tool> tools_;
+ private:
+  std::unique_ptr<BaseFormatDetector> detector_;
+  std::vector<proto::Tool> tools_;
 
-public:
+ public:
+  FunctionCallParser(const std::vector<proto::Tool>& tools,
+                     const std::string& tool_call_parser);
 
-    FunctionCallParser(const std::vector<proto::Tool>& tools, const std::string& tool_call_parser);
-    
-    ~FunctionCallParser() = default;
-    
-    FunctionCallParser(const FunctionCallParser&) = delete;
-    FunctionCallParser& operator=(const FunctionCallParser&) = delete;
+  ~FunctionCallParser() = default;
 
-    bool has_tool_call(const std::string& text) const;
+  FunctionCallParser(const FunctionCallParser&) = delete;
+  FunctionCallParser& operator=(const FunctionCallParser&) = delete;
 
-    std::tuple<std::string, std::vector<ToolCallItem>> parse_non_stream(const std::string& full_text);
+  bool has_tool_call(const std::string& text) const;
 
-    // StructuralTagResponseFormat get_structure_tag();
+  std::tuple<std::string, std::vector<ToolCallItem>> parse_non_stream(
+      const std::string& full_text);
 
-    // std::tuple<std::string, std::any> get_structure_constraint(const std::string& tool_choice);
+  // StructuralTagResponseFormat get_structure_tag();
 
-    BaseFormatDetector* get_detector() const { return detector_.get(); }
+  // std::tuple<std::string, std::any> get_structure_constraint(const
+  // std::string& tool_choice);
 
-private:
-    std::unique_ptr<BaseFormatDetector> create_detector(const std::string& tool_call_parser);
+  BaseFormatDetector* get_detector() const { return detector_.get(); }
+
+ private:
+  std::unique_ptr<BaseFormatDetector> create_detector(
+      const std::string& tool_call_parser);
 };
 
 namespace utils {
 
 std::vector<ToolCallItem> parse_function_calls(
-    const std::string& text, 
-    const std::vector<proto::Tool>& tools,
-    const std::string& parser_type = "qwen25"
-);
-
-bool has_function_calls(
     const std::string& text,
-    const std::string& parser_type = "qwen25"
-);
+    const std::vector<proto::Tool>& tools,
+    const std::string& parser_type = "qwen25");
 
+bool has_function_calls(const std::string& text,
+                        const std::string& parser_type = "qwen25");
 
+std::string generate_tool_call_id();
 }  // namespace utils
 
 }  // namespace function_call

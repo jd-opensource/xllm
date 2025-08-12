@@ -18,14 +18,4 @@ std::string ShortUUID::random(size_t len) {
   return uuid;
 }
 
-std::string generate_uuid(size_t len) {
-  static thread_local ShortUUID uuid_generator;
-  return uuid_generator.random(len);
-}
-
-std::string generate_uuid(size_t len) {
-  static thread_local ShortUUID uuid_generator;
-  return uuid_generator.random(len);
-}
-
 }  // namespace xllm

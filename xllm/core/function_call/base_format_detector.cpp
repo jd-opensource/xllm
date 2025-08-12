@@ -1,66 +1,99 @@
 #include "base_format_detector.h"
-#include <sstream>
-#include <regex>
+
 #include <iostream>
+#include <regex>
+#include <sstream>
 
 namespace llm {
 namespace function_call {
 
-BaseFormatDetector::BaseFormatDetector() 
-    : current_tool_id_(-1)
-    , current_tool_name_sent_(false)
-    , bot_token_("")
-    , eot_token_("")
-    , tool_call_separator_(", ") {
+BaseFormatDetector::BaseFormatDetector()
+    : current_tool_id_(-1),
+      current_tool_name_sent_(false),
+      bot_token_(""),
+      eot_token_(""),
+      tool_call_separator_(", ") {}
+
+std::unordered_map<std::string, int> BaseFormatDetector::get_tool_indices(
+    const std::vector<proto::Tool>& tools) {
+  std::unordered_map<std::string, int> indices;
+  for (size_t i = 0; i < tools.size(); ++i) {
+    if (!tools[i].function().name().empty()) {
+      indices[tools[i].function().name()] = static_cast<int>(i);
+    } else {
+      LOG(ERROR) << "Tool at index " << i
+                 << " has empty function name, skipping";
+    }
+  }
+  return indices;
 }
 
-std::unordered_map<std::string, int> BaseFormatDetector::get_tool_indices(const std::vector<proto::Tool>& tools) {
-    std::unordered_map<std::string, int> indices;
-    for (size_t i = 0; i < tools.size(); ++i) {
-        if (!tools[i].function().name().empty()) {
-            indices[tools[i].function().name()] = static_cast<int>(i);
-        }
+std::vector<ToolCallItem> BaseFormatDetector::parse_base_json(
+    const nlohmann::json& json_obj,
+    const std::vector<proto::Tool>& tools) {
+  auto tool_indices = get_tool_indices(tools);
+  std::vector<ToolCallItem> results;
+
+  std::vector<nlohmann::json> actions;
+  if (json_obj.is_array()) {
+    for (const auto& item : json_obj) {
+      actions.emplace_back(item);
     }
-    return indices;
+  } else {
+    actions.emplace_back(json_obj);
+  }
+
+  for (const auto& act : actions) {
+    if (!act.is_object()) {
+      LOG(ERROR) << "Invalid tool call item, expected object, got: "
+                 << act.type_name();
+      continue;
+    }
+
+    std::string name;
+    if (act.contains("name") && act["name"].is_string()) {
+      name = act["name"].get<std::string>();
+    } else {
+      LOG(ERROR) << "Invalid tool call: missing 'name' field or invalid type";
+      continue;
+    }
+
+    if (tool_indices.find(name) == tool_indices.end()) {
+      LOG(ERROR) << "Model attempted to call undefined function: " << name;
+      continue;
+    }
+
+    nlohmann::json parameters = nlohmann::json::object();
+
+    if (act.contains("parameters")) {
+      parameters = act["parameters"];
+    } else if (act.contains("arguments")) {
+      parameters = act["arguments"];
+    } else {
+      LOG(ERROR) << "No parameters or arguments field found for tool: " << name;
+    }
+
+    if (!parameters.is_object()) {
+      LOG(ERROR) << "Invalid arguments type for tool: " << name
+                 << ", expected object, got: " << parameters.type_name();
+      parameters = nlohmann::json::object();
+    }
+
+    std::string parameters_str;
+    try {
+      parameters_str = parameters.dump(
+          -1, ' ', false, nlohmann::json::error_handler_t::ignore);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to serialize arguments for tool: " << name
+                 << ", error: " << e.what();
+      parameters_str = "{}";
+    }
+
+    results.emplace_back(-1, name, parameters_str);
+  }
+
+  return results;
 }
-
-std::vector<ToolCallItem> BaseFormatDetector::parse_base_json(const std::string& action_json, const std::vector<proto::Tool>& tools) {
-    auto tool_indices = get_tool_indices(tools);
-    std::vector<ToolCallItem> results;
-
-    // TODO: Replace with a more robust JSON library for better functionality and reliability
-    std::string trimmed = action_json;
-    trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
-    trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
-    
-    if (trimmed.empty()) {
-        return results;
-    }
-    
-    std::regex name_regex("\"name\"\\s*:\\s*\"([^\"]+)\"");
-    std::regex args_regex("\"(?:parameters|arguments)\"\\s*:\\s*(\\{[^}]*\\})");
-    
-    std::smatch name_match, args_match;
-    
-    if (std::regex_search(trimmed, name_match, name_regex)) {
-        std::string name = name_match[1].str();
-        
-        if (tool_indices.find(name) != tool_indices.end()) {
-            std::string parameters = "{}";
-            
-            if (std::regex_search(trimmed, args_match, args_regex)) {
-                parameters = args_match[1].str();
-            }
-            
-            results.emplace_back(-1, name, parameters);
-        } else {
-            LOG(ERROR) << "Model attempted to call undefined function: " << name;
-        }
-    }
-    
-    return results;
-}
-
 
 }  // namespace function_call
 }  // namespace llm

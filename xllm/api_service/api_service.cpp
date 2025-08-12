@@ -106,7 +106,10 @@ void ChatCompletionsImpl(std::unique_ptr<Service>& service,
   std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
 
-  auto json_status = google::protobuf::util::JsonStringToMessage(attachment, req_pb);
+  google::protobuf::util::JsonParseOptions options;
+  options.ignore_unknown_fields = true;
+  auto json_status =
+      google::protobuf::util::JsonStringToMessage(attachment, req_pb, options);
   if (!json_status.ok()) {
     ctrl->SetFailed(json_status.ToString());
     LOG(ERROR) << "parse json to proto failed: " << json_status.ToString();

@@ -22,8 +22,8 @@
 #include "chat_template/chat_template.h"
 #include "common/instance_name.h"
 #include "common/uuid.h"
-#include "function_call/function_call.h"
 #include "function_call/core_types.h"
+#include "function_call/function_call.h"
 #include "request/request_params.h"
 #include "util/utils.h"
 
@@ -31,44 +31,42 @@ namespace xllm {
 namespace {
 
 
-std::string generate_tool_call_id() { return "call_" + llm::generate_uuid(); }
-
 struct ToolCallResult {
   std::optional<std::vector<proto::ToolCall>> tool_calls;
   std::string text;
   std::string finish_reason;
 };
 
-ToolCallResult process_tool_calls(
-    const std::string& text,
-    const std::vector<proto::Tool>& tools,
-    const std::string& parser_format,
-    const std::string& finish_reason) {
-
+ToolCallResult process_tool_calls(std::string text,
+                                  const std::vector<proto::Tool>& tools,
+                                  const std::string& parser_format,
+                                  std::string finish_reason) {
   ToolCallResult result;
-  result.text = text;
-  result.finish_reason = finish_reason;
 
   function_call::FunctionCallParser parser(tools, parser_format);
 
   if (!parser.has_tool_call(text)) {
+    result.text = std::move(text);
+    result.finish_reason = std::move(finish_reason);
     return result;
   }
 
-  if (result.finish_reason == "stop") {
+  if (finish_reason == "stop") {
     result.finish_reason = "tool_calls";
+  } else {
+    result.finish_reason = std::move(finish_reason);
   }
 
   try {
     auto [parsed_text, call_info_list] = parser.parse_non_stream(text);
-    result.text = parsed_text;
+    result.text = std::move(parsed_text);
 
     std::vector<proto::ToolCall> tool_calls;
     tool_calls.reserve(call_info_list.size());
 
     for (const auto& call_info : call_info_list) {
       proto::ToolCall tool_call;
-      tool_call.set_id("call_" + generate_uuid());
+      tool_call.set_id(function_call::utils::generate_tool_call_id());
       tool_call.set_type("function");
 
       auto* function = tool_call.mutable_function();
@@ -77,7 +75,7 @@ ToolCallResult process_tool_calls(
       }
       function->set_arguments(call_info.parameters);
 
-      tool_calls.push_back(tool_call);
+      tool_calls.emplace_back(tool_call);
     }
 
     result.tool_calls = std::move(tool_calls);
@@ -87,7 +85,6 @@ ToolCallResult process_tool_calls(
 
   return result;
 }
-
 
 void set_logprobs(proto::ChatChoice* choice,
                   const std::optional<std::vector<LogProb>>& logprobs) {
@@ -208,7 +205,6 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
                                 int64_t created_time,
                                 const std::string& model,
                                 const RequestOutput& req_output,
-                                bool has_tools = false,
                                 const std::string& parser_format = "",
                                 const std::vector<proto::Tool>& tools = {}) {
   auto& response = call->response();
@@ -225,34 +221,30 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
     auto* message = choice->mutable_message();
     message->set_role("assistant");
 
-    auto setOutputAndFinishReason = [&]() {
+    auto set_output_and_finish_reason = [&]() {
       message->set_content(output.text);
       if (output.finish_reason.has_value()) {
         choice->set_finish_reason(output.finish_reason.value());
       }
     };
 
-    if (has_tools && !parser_format.empty()) {
-      std::string finish_reason;
-      if (output.finish_reason.has_value()) {
-        finish_reason = output.finish_reason.value();
-      }
+    if (!tools.empty() && !parser_format.empty()) {
+      auto result = process_tool_calls(
+          output.text, tools, parser_format, output.finish_reason.value_or(""));
 
-      auto result = process_tool_calls(output.text, tools, parser_format, finish_reason);
-      
       message->set_content(result.text);
-      
+
       if (result.tool_calls) {
-        for (const auto& tool_call : *result.tool_calls) {
-          *message->add_tool_calls() = tool_call;
+        for (auto& tool_call : *result.tool_calls) {
+          *message->add_tool_calls() = std::move(tool_call);
         }
       }
-      
+
       if (!result.finish_reason.empty()) {
         choice->set_finish_reason(result.finish_reason);
       }
     } else {
-      setOutputAndFinishReason();
+      set_output_and_finish_reason();
     }
   }
 
@@ -519,7 +511,6 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
        first_message_sent = std::unordered_set<size_t>(),
        request_id = request_params.request_id,
        created_time = absl::ToUnixSeconds(absl::Now()),
-       has_tools = request_params.has_tools(),
        proto_tools = request_params.proto_tools](
           const RequestOutput& req_output) mutable -> bool {
         if (req_output.status.has_value()) {
@@ -539,35 +530,48 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
           master->get_rate_limiter()->decrease_one_request();
         }
 
-        std::string parser_format =
+        const std::string parser_format =
             master->options().tool_call_parser().value_or("");
+        const bool has_tool_support =
+            !proto_tools.empty() && !parser_format.empty();
+
         if (stream) {
-          if (has_tools && !parser_format.empty()) {
+          if (has_tool_support) {
+            // TODO: Support tool call streaming output
             LOG(ERROR) << "Tool call does not support streaming output";
+            return send_delta_to_client_brpc(call,
+                                             include_usage,
+                                             &first_message_sent,
+                                             request_id,
+                                             created_time,
+                                             model,
+                                             req_output);
+          } else {
+            // Stream response without tool support
+            return send_delta_to_client_brpc(call,
+                                             include_usage,
+                                             &first_message_sent,
+                                             request_id,
+                                             created_time,
+                                             model,
+                                             req_output);
           }
-          // send delta to client
-          return send_delta_to_client_brpc(call_data,
-                                           include_usage,
-                                           &first_message_sent,
-                                           request_id,
-                                           created_time,
-                                           model,
-                                           req_output);
+        } else {
+          if (has_tool_support) {
+            // Non-stream response with tool support
+            return send_result_to_client_brpc(call,
+                                              request_id,
+                                              created_time,
+                                              model,
+                                              req_output,
+                                              parser_format,
+                                              proto_tools);
+          } else {
+            // Non-stream response without tool support
+            return send_result_to_client_brpc(
+                call, request_id, created_time, model, req_output);
+          }
         }
-
-        if (has_tools && !parser_format.empty()) {
-          return send_result_to_client_brpc(call_data,
-                                            request_id,
-                                            created_time,
-                                            model,
-                                            req_output,
-                                            has_tools,
-                                            parser_format,
-                                            proto_tools);
-        }
-
-        return send_result_to_client_brpc(
-            call, request_id, created_time, model, req_output);
       });
 }
 
