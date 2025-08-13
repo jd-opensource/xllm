@@ -87,23 +87,8 @@ bool WorkerClient::pull_kv_blocks(const uint64_t src_cluster_id,
 }
 
 uint32_t WorkerClient::load_kv_blocks_from_store(
-    const std::vector<const uint8_t*>& hash_keys,
-    const std::vector<uint64_t>& dst_blocks) {
-  auto future = worker_->load_kv_blocks_from_store_async(hash_keys, dst_blocks);
-  return std::move(future).get();
-}
-
-uint32_t WorkerClient::offload_kv_blocks_to_store(
-    const std::vector<const uint8_t*>& hash_keys,
-    const std::vector<uint64_t>& src_blocks) {
-  auto future =
-      worker_->offload_kv_blocks_to_store_async(hash_keys, src_blocks);
-  return std::move(future).get();
-}
-
-uint32_t WorkerClient::remove_kv_blocks_in_store(
-    const std::vector<const uint8_t*>& hash_keys) {
-  auto future = worker_->remove_kv_blocks_in_store_async(hash_keys);
+    const std::vector<CacheContent>& dst_blocks) {
+  auto future = worker_->load_kv_blocks_from_store_async(dst_blocks);
   return std::move(future).get();
 }
 
@@ -169,20 +154,8 @@ folly::SemiFuture<bool> WorkerClient::pull_kv_blocks_async(
 }
 
 folly::SemiFuture<uint32_t> WorkerClient::load_kv_blocks_from_store_async(
-    const std::vector<const uint8_t*>& hash_keys,
-    const std::vector<uint64_t>& dst_blocks) {
-  return worker_->load_kv_blocks_from_store_async(hash_keys, dst_blocks);
-}
-
-folly::SemiFuture<uint32_t> WorkerClient::offload_kv_blocks_to_store_async(
-    const std::vector<const uint8_t*>& hash_keys,
-    const std::vector<uint64_t>& src_blocks) {
-  return worker_->offload_kv_blocks_to_store_async(hash_keys, src_blocks);
-}
-
-folly::SemiFuture<uint32_t> WorkerClient::remove_kv_blocks_in_store_async(
-    const std::vector<const uint8_t*>& hash_keys) {
-  return worker_->remove_kv_blocks_in_store_async(hash_keys);
+    const std::vector<CacheContent>& dst_blocks) {
+  return worker_->load_kv_blocks_from_store_async(dst_blocks);
 }
 
 folly::SemiFuture<bool> WorkerClient::init_executor_async() {

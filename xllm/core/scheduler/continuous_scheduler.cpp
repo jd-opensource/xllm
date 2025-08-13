@@ -748,20 +748,17 @@ void ContinuousScheduler::prepare_host_cache(
     auto block_manager = block_manager_->get_block_manager(&sequence, false);
 
     if (block_manager->compute_blocks_hash_value(token_ids, host_block_ids)) {
-      std::vector<const uint8_t*> hash_keys;
-      std::vector<uint64_t> block_ids;
+      std::vector<CacheContent> contents;
 
       auto host_blocks = sequence.host_blocks();
-      hash_keys.reserve(host_blocks.size());
-      block_ids.reserve(host_blocks.size());
+      contents.reserve(host_blocks.size());
 
       for (auto& block : host_blocks) {
-        hash_keys.emplace_back(block.get_immutable_hash_value());
-        block_ids.emplace_back(block.id());
+        contents.emplace_back(-1, block.id(), block.get_immutable_hash_value());
       }
 
-      auto success_cnt = engine_->load_kv_blocks_from_store(
-          sequence.dp_rank(), hash_keys, block_ids);
+      auto success_cnt =
+          engine_->load_kv_blocks_from_store(sequence.dp_rank(), contents);
 
       sequence.add_shared_host_block_num(success_cnt);
     }

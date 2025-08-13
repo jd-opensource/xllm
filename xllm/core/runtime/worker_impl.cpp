@@ -357,13 +357,17 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
       auto value_cache = kv_caches_[layer_id].get_v_cache();
       auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
 
-      for (auto block_pair : inputs.input_params.copy_out_blocks) {
-        host_k_cache[block_pair.second].copy_(key_cache[block_pair.first]);
-        host_v_cache[block_pair.second].copy_(value_cache[block_pair.first]);
+      for (auto cache_content : inputs.input_params.copy_out_blocks) {
+        host_k_cache[cache_content.host_block_id].copy_(
+            key_cache[cache_content.device_block_id]);
+        host_v_cache[cache_content.host_block_id].copy_(
+            value_cache[cache_content.device_block_id]);
       }
-      for (auto block_pair : inputs.input_params.copy_in_blocks) {
-        key_cache[block_pair.first].copy_(host_k_cache[block_pair.second]);
-        value_cache[block_pair.first].copy_(host_v_cache[block_pair.second]);
+      for (auto cache_content : inputs.input_params.copy_in_blocks) {
+        key_cache[cache_content.device_block_id].copy_(
+            host_k_cache[cache_content.host_block_id]);
+        value_cache[cache_content.device_block_id].copy_(
+            host_v_cache[cache_content.host_block_id]);
       }
     }
   }
@@ -561,50 +565,16 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 }
 
 folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
-    const std::vector<const uint8_t*>& hash_keys,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<CacheContent>& dst_blocks) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
-      [this, &hash_keys, &dst_blocks, promise = std::move(promise)]() mutable {
+      [this, &dst_blocks, promise = std::move(promise)]() mutable {
         if (this->kv_cache_store_ == nullptr) {
           promise.setValue(0);
           return;
         }
-        promise.setValue(
-            this->kv_cache_store_->batch_get(hash_keys, dst_blocks));
-      });
-  return future;
-}
-
-folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_to_store_async(
-    const std::vector<const uint8_t*>& hash_keys,
-    const std::vector<uint64_t>& src_blocks) {
-  folly::Promise<uint32_t> promise;
-  auto future = promise.getSemiFuture();
-  threadpool_.schedule(
-      [this, &hash_keys, &src_blocks, promise = std::move(promise)]() mutable {
-        if (this->kv_cache_store_ == nullptr) {
-          promise.setValue(0);
-          return;
-        }
-        promise.setValue(
-            this->kv_cache_store_->batch_put(hash_keys, src_blocks));
-      });
-  return future;
-}
-
-folly::SemiFuture<uint32_t> WorkerImpl::remove_kv_blocks_in_store_async(
-    const std::vector<const uint8_t*>& hash_keys) {
-  folly::Promise<uint32_t> promise;
-  auto future = promise.getSemiFuture();
-  threadpool_.schedule(
-      [this, &hash_keys, promise = std::move(promise)]() mutable {
-        if (this->kv_cache_store_ == nullptr) {
-          promise.setValue(0);
-          return;
-        }
-        promise.setValue(this->kv_cache_store_->batch_remove(hash_keys));
+        promise.setValue(this->kv_cache_store_->batch_get(dst_blocks));
       });
   return future;
 }

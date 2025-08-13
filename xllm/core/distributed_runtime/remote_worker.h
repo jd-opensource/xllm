@@ -76,15 +76,7 @@ class RemoteWorker : public WorkerClient {
                               const std::vector<uint64_t>& dst_blocks);
 
   virtual uint32_t load_kv_blocks_from_store(
-      const std::vector<const uint8_t*>& hash_keys,
-      const std::vector<uint64_t>& dst_blocks);
-
-  virtual uint32_t offload_kv_blocks_to_store(
-      const std::vector<const uint8_t*>& hash_keys,
-      const std::vector<uint64_t>& src_blocks);
-
-  virtual uint32_t remove_kv_blocks_in_store(
-      const std::vector<const uint8_t*>& hash_keys);
+      const std::vector<CacheContent>& dst_blocks);
 
   // prepare input request
   virtual ForwardInput prepare_inputs(Batch& batch) override;
@@ -114,15 +106,7 @@ class RemoteWorker : public WorkerClient {
       const std::vector<uint64_t>& dst_blocks);
 
   virtual folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
-      const std::vector<const uint8_t*>& hash_keys,
-      const std::vector<uint64_t>& dst_blocks);
-
-  virtual folly::SemiFuture<uint32_t> offload_kv_blocks_to_store_async(
-      const std::vector<const uint8_t*>& hash_keys,
-      const std::vector<uint64_t>& src_blocks);
-
-  virtual folly::SemiFuture<uint32_t> remove_kv_blocks_in_store_async(
-      const std::vector<const uint8_t*>& hash_keys);
+      const std::vector<CacheContent>& dst_blocks);
 
   // Run the model and return the output.
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(

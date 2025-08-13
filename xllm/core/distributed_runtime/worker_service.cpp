@@ -283,48 +283,10 @@ void WorkerService::LoadKVCacheFromStore(
     ::google::protobuf::Closure* done) {
   threadpool_.schedule([this, controller, req, resp, done]() mutable {
     brpc::ClosureGuard done_guard(done);
-    std::vector<const uint8_t*> hash_keys;
-    std::vector<uint64_t> dst_blocks;
-    convert_from_cache_contents(*req, hash_keys, dst_blocks);
+    std::vector<CacheContent> dst_blocks;
+    proto_to_cache_contents(*req, dst_blocks);
 
-    auto future =
-        worker_->load_kv_blocks_from_store_async(hash_keys, dst_blocks);
-
-    resp->set_success_cnt(std::move(future).get());
-  });
-  return;
-}
-
-void WorkerService::OffloadKVCacheToStore(
-    ::google::protobuf::RpcController* controller,
-    const ::llm::proto::CacheContents* req,
-    ::llm::proto::StoreResponse* resp,
-    ::google::protobuf::Closure* done) {
-  threadpool_.schedule([this, controller, req, resp, done]() mutable {
-    brpc::ClosureGuard done_guard(done);
-    std::vector<const uint8_t*> hash_keys;
-    std::vector<uint64_t> src_blocks;
-    convert_from_cache_contents(*req, hash_keys, src_blocks);
-
-    auto future =
-        worker_->offload_kv_blocks_to_store_async(hash_keys, src_blocks);
-
-    resp->set_success_cnt(std::move(future).get());
-  });
-  return;
-}
-
-void WorkerService::RemoveKVCacheInStore(
-    ::google::protobuf::RpcController* controller,
-    const ::llm::proto::CacheContents* req,
-    ::llm::proto::StoreResponse* resp,
-    ::google::protobuf::Closure* done) {
-  threadpool_.schedule([this, controller, req, resp, done]() mutable {
-    brpc::ClosureGuard done_guard(done);
-    std::vector<const uint8_t*> hash_keys;
-    convert_from_cache_contents(*req, hash_keys);
-
-    auto future = worker_->remove_kv_blocks_in_store_async(hash_keys);
+    auto future = worker_->load_kv_blocks_from_store_async(dst_blocks);
 
     resp->set_success_cnt(std::move(future).get());
   });

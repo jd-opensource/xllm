@@ -68,17 +68,7 @@ class LLMEngine : public Engine {
 
   uint32_t load_kv_blocks_from_store(
       const uint32_t dp_rank,
-      const std::vector<const uint8_t*>& hash_keys,
-      const std::vector<uint64_t>& dst_blocks) override;
-
-  uint32_t offload_kv_blocks_to_store(
-      const uint32_t dp_rank,
-      const std::vector<const uint8_t*>& hash_keys,
-      const std::vector<uint64_t>& src_blocks) override;
-
-  uint32_t remove_kv_blocks_in_store(
-      const uint32_t dp_rank,
-      const std::vector<const uint8_t*>& hash_keys) override;
+      const std::vector<CacheContent>& dst_blocks) override;
 
   void get_device_info(std::vector<std::string>& device_ips,
                        std::vector<uint16_t>& ports) override;

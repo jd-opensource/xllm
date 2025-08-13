@@ -329,12 +329,14 @@ void try_replace_unique_blocks(std::vector<Block>&& matched_shared_blocks,
 }
 
 void Sequence::append_host_blocks(const std::vector<Block>& new_blocks) {
-  host_blocks_.insert(blocks_.end(), new_blocks.begin(), new_blocks.end());
+  host_blocks_.insert(host_blocks_.end(), new_blocks.begin(), new_blocks.end());
   if (blocks_.size() == host_blocks_.size()) {
-    block_pairs_.clear();
-    block_pairs_.reserve(blocks_.size());
+    cache_contents_.clear();
+    cache_contents_.reserve(blocks_.size());
     for (int i = 0; i < blocks_.size(); i++) {
-      block_pairs_.emplace_back(blocks_[i].id(), host_blocks_[i].id());
+      cache_contents_.emplace_back(blocks_[i].id(),
+                                   host_blocks_[i].id(),
+                                   blocks_[i].get_immutable_hash_value());
     }
   }
 }
