@@ -11,6 +11,10 @@
 #include "core/util/slice.h"
 #include "finish_reason.h"
 #include "framework/block/block.h"
+#include "framework/model/parameters.h"
+#include "framework/request/finish_reason.h"
+#include "framework/sampling/parameters.h"
+#include "framework/tokenizer/tokenizer.h"
 #include "incremental_decoder.h"
 #include "mm_data.h"
 #include "request_output.h"
@@ -147,9 +151,7 @@ class Sequence final {
   // returns allocated cache blocks
   Slice<Block> blocks() const { return blocks_; }
   Slice<Block> host_blocks() const { return host_blocks_; }
-  std::vector<std::pair<int32_t, int32_t>> block_pairs() const {
-    return block_pairs_;
-  }
+  std::vector<CacheContent> cache_contents() const { return cache_contents_; }
 
   // get the number of blocks
   size_t num_blocks() const { return blocks_.size(); }
@@ -285,7 +287,7 @@ class Sequence final {
   // physical blocks that hold the kv cache.
   std::vector<Block> blocks_;
   std::vector<Block> host_blocks_;
-  std::vector<std::pair<int32_t, int32_t>> block_pairs_;
+  std::vector<CacheContent> cache_contents_;
 
   // shared host block num
   uint64_t shared_host_block_num_ = 0;
