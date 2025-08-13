@@ -235,45 +235,15 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
 }
 
 uint32_t RemoteWorker::load_kv_blocks_from_store(
-    const std::vector<const uint8_t*>& hash_keys,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<CacheContent>& dst_blocks) {
   proto::CacheContents cache_contents;
-  if (!convert_to_cache_contents(hash_keys, dst_blocks, cache_contents)) {
+  if (!cache_contents_to_proto(dst_blocks, &cache_contents)) {
     return 0;
   }
 
   proto::StoreResponse resp;
   brpc::Controller cntl;
   stub_->LoadKVCacheFromStore(&cntl, &cache_contents, &resp, nullptr);
-
-  return resp.success_cnt();
-}
-
-uint32_t RemoteWorker::offload_kv_blocks_to_store(
-    const std::vector<const uint8_t*>& hash_keys,
-    const std::vector<uint64_t>& src_blocks) {
-  proto::CacheContents cache_contents;
-  if (!convert_to_cache_contents(hash_keys, src_blocks, cache_contents)) {
-    return 0;
-  }
-
-  proto::StoreResponse resp;
-  brpc::Controller cntl;
-  stub_->OffloadKVCacheToStore(&cntl, &cache_contents, &resp, nullptr);
-
-  return resp.success_cnt();
-}
-
-uint32_t RemoteWorker::remove_kv_blocks_in_store(
-    const std::vector<const uint8_t*>& hash_keys) {
-  proto::CacheContents cache_contents;
-  if (!convert_to_cache_contents(hash_keys, cache_contents)) {
-    return 0;
-  }
-
-  proto::StoreResponse resp;
-  brpc::Controller cntl;
-  stub_->RemoveKVCacheInStore(&cntl, &cache_contents, &resp, nullptr);
 
   return resp.success_cnt();
 }
@@ -486,6 +456,27 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
       promise.setValue(s.ok());
     }
   });
+  return future;
+}
+
+folly::SemiFuture<uint32_t> RemoteWorker::load_kv_blocks_from_store_async(
+    const std::vector<CacheContent>& dst_blocks) {
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule(
+      [this, &dst_blocks, promise = std::move(promise)]() mutable {
+        proto::CacheContents cache_contents;
+        if (!cache_contents_to_proto(dst_blocks, &cache_contents)) {
+          promise.setValue(0);
+          return;
+        }
+
+        proto::StoreResponse resp;
+        brpc::Controller cntl;
+        stub_->LoadKVCacheFromStore(&cntl, &cache_contents, &resp, nullptr);
+
+        promise.setValue(resp.success_cnt());
+      });
   return future;
 }
 

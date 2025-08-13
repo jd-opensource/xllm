@@ -87,41 +87,41 @@ KVCacheStore::~KVCacheStore() {
   }
 }
 
-uint64_t KVCacheStore::batch_put(const std::vector<const uint8_t*>& keys,
-                                 const std::vector<uint64_t>& block_ids) {
+uint64_t KVCacheStore::batch_put(const std::vector<CacheContent>& blocks) {
   std::vector<std::string> str_keys;
   std::vector<std::vector<mooncake::Slice>> slices;
 
-  str_keys.reserve(keys.size());
-  slices.resize(keys.size());
-  for (int i = 0; i < keys.size(); i++) {
-    std::string str_key(reinterpret_cast<const char*>(keys[i]),
+  str_keys.reserve(blocks.size());
+  slices.resize(blocks.size());
+  for (auto block : blocks) {
+    std::string str_key(reinterpret_cast<const char*>(block.hash_key),
                         MURMUR_HASH3_VALUE_LEN);
     str_key.append(std::to_string(config_.tp_rank));
 
     str_keys.emplace_back(str_key);
 
-    slices[i].reserve(host_kv_caches_->size() * 2);
+    std::vector<mooncake::Slice> slice;
+    slice.reserve(host_kv_caches_->size() * 2);
     for (int layer = 0; layer < host_kv_caches_->size(); layer++) {
       void* key_cache =
           static_cast<char*>(
               host_kv_caches_->at(layer).get_k_cache().data_ptr()) +
-          block_ids[i] * key_cache_size_per_layer_;
-      slices[i].emplace_back(
-          mooncake::Slice{key_cache, key_cache_size_per_layer_});
+          block.host_block_id * key_cache_size_per_layer_;
+      slice.emplace_back(mooncake::Slice{key_cache, key_cache_size_per_layer_});
 
       void* value_cache =
           static_cast<char*>(
               host_kv_caches_->at(layer).get_v_cache().data_ptr()) +
-          block_ids[i] * value_cache_size_per_layer_;
-      slices[i].emplace_back(
+          block.host_block_id * value_cache_size_per_layer_;
+      slice.emplace_back(
           mooncake::Slice{value_cache, value_cache_size_per_layer_});
+      slices.emplace_back(std::move(slice));
     }
   }
 
   auto results = client_ptr_->BatchPut(str_keys, slices, rep_config_);
   uint64_t success_cnt = 0;
-  for (int i = 0; i < keys.size(); i++) {
+  for (int i = 0; i < blocks.size(); i++) {
     if (!results[i].has_value()) {
       success_cnt = i;
       break;
@@ -130,14 +130,13 @@ uint64_t KVCacheStore::batch_put(const std::vector<const uint8_t*>& keys,
   return success_cnt;
 }
 
-uint64_t KVCacheStore::batch_get(const std::vector<const uint8_t*>& keys,
-                                 const std::vector<uint64_t>& block_ids) {
+uint64_t KVCacheStore::batch_get(const std::vector<CacheContent>& blocks) {
   std::unordered_map<std::string, std::vector<mooncake::Slice>> slices;
   std::vector<std::string> str_keys;
 
-  str_keys.reserve(keys.size());
-  for (int i = 0; i < keys.size(); i++) {
-    std::string str_key(reinterpret_cast<const char*>(keys[i]),
+  str_keys.reserve(blocks.size());
+  for (auto block : blocks) {
+    std::string str_key(reinterpret_cast<const char*>(block.hash_key),
                         MURMUR_HASH3_VALUE_LEN);
     str_key.append(std::to_string(config_.tp_rank));
 
@@ -150,14 +149,14 @@ uint64_t KVCacheStore::batch_get(const std::vector<const uint8_t*>& keys,
       void* key_cache =
           static_cast<char*>(
               host_kv_caches_->at(layer).get_k_cache().data_ptr()) +
-          block_ids[i] * key_cache_size_per_layer_;
+          block.host_block_id * key_cache_size_per_layer_;
       slices[str_key].emplace_back(
           mooncake::Slice{key_cache, key_cache_size_per_layer_});
 
       void* value_cache =
           static_cast<char*>(
               host_kv_caches_->at(layer).get_v_cache().data_ptr()) +
-          block_ids[i] * value_cache_size_per_layer_;
+          block.host_block_id * value_cache_size_per_layer_;
       slices[str_key].emplace_back(
           mooncake::Slice{value_cache, value_cache_size_per_layer_});
     }
@@ -165,7 +164,7 @@ uint64_t KVCacheStore::batch_get(const std::vector<const uint8_t*>& keys,
 
   auto results = client_ptr_->BatchGet(str_keys, slices);
   uint64_t success_cnt = 0;
-  for (int i = 0; i < keys.size(); i++) {
+  for (int i = 0; i < blocks.size(); i++) {
     if (!results[i].has_value()) {
       success_cnt = i;
       break;
@@ -174,10 +173,10 @@ uint64_t KVCacheStore::batch_get(const std::vector<const uint8_t*>& keys,
   return success_cnt;
 }
 
-uint64_t KVCacheStore::batch_remove(const std::vector<const uint8_t*>& keys) {
+uint64_t KVCacheStore::batch_remove(const std::vector<CacheContent>& blocks) {
   uint64_t success_cnt = 0;
-  for (int i = 0; i < keys.size(); i++) {
-    std::string str_key(reinterpret_cast<const char*>(keys[i]),
+  for (auto block : blocks) {
+    std::string str_key(reinterpret_cast<const char*>(block.hash_key),
                         MURMUR_HASH3_VALUE_LEN);
     str_key.append(std::to_string(config_.tp_rank));
 

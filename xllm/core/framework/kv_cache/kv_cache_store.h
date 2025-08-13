@@ -6,6 +6,7 @@
 #include <string>
 
 #include "common/macros.h"
+#include "framework/model/parameters.h"
 #include "kv_cache.h"
 
 namespace llm {
@@ -25,13 +26,11 @@ class KVCacheStore {
                std::vector<llm::KVCache>* host_kv_caches);
   ~KVCacheStore();
 
-  uint64_t batch_put(const std::vector<const uint8_t*>& keys,
-                     const std::vector<uint64_t>& block_ids);
+  uint64_t batch_put(const std::vector<CacheContent>& blocks);
 
-  uint64_t batch_get(const std::vector<const uint8_t*>& keys,
-                     const std::vector<uint64_t>& block_ids);
+  uint64_t batch_get(const std::vector<CacheContent>& blocks);
 
-  uint64_t batch_remove(const std::vector<const uint8_t*>& keys);
+  uint64_t batch_remove(const std::vector<CacheContent>& blocks);
 
  private:
   StoreConfig config_;
