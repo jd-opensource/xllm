@@ -59,15 +59,14 @@ class BaseFormatDetector {
 
  public:
   std::unordered_map<std::string, int> get_tool_indices(
-      const std::vector<proto::Tool>& tools);
+      const std::vector<JsonTool>& tools);
 
-  std::vector<ToolCallItem> parse_base_json(
-      const nlohmann::json& json_obj,
-      const std::vector<proto::Tool>& tools);
+  std::vector<ToolCallItem> parse_base_json(const nlohmann::json& json_obj,
+                                            const std::vector<JsonTool>& tools);
 
   virtual StreamingParseResult detect_and_parse(
       const std::string& text,
-      const std::vector<proto::Tool>& tools) = 0;
+      const std::vector<JsonTool>& tools) = 0;
 
   virtual bool has_tool_call(const std::string& text) = 0;
 };

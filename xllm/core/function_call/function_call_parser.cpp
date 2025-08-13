@@ -22,7 +22,7 @@ const std::unordered_map<std::string, std::string>
         // {"step3", "step3"},
 };
 
-FunctionCallParser::FunctionCallParser(const std::vector<proto::Tool>& tools,
+FunctionCallParser::FunctionCallParser(const std::vector<JsonTool>& tools,
                                        const std::string& tool_call_parser)
     : tools_(tools) {
   detector_ = create_detector(tool_call_parser);
@@ -73,7 +73,7 @@ namespace utils {
 
 std::vector<ToolCallItem> parse_function_calls(
     const std::string& text,
-    const std::vector<proto::Tool>& tools,
+    const std::vector<JsonTool>& tools,
     const std::string& parser_type) {
   try {
     FunctionCallParser parser(tools, parser_type);

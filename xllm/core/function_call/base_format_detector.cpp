@@ -15,11 +15,11 @@ BaseFormatDetector::BaseFormatDetector()
       tool_call_separator_(", ") {}
 
 std::unordered_map<std::string, int> BaseFormatDetector::get_tool_indices(
-    const std::vector<proto::Tool>& tools) {
+    const std::vector<JsonTool>& tools) {
   std::unordered_map<std::string, int> indices;
   for (size_t i = 0; i < tools.size(); ++i) {
-    if (!tools[i].function().name().empty()) {
-      indices[tools[i].function().name()] = static_cast<int>(i);
+    if (!tools[i].function.name.empty()) {
+      indices[tools[i].function.name] = static_cast<int>(i);
     } else {
       LOG(ERROR) << "Tool at index " << i
                  << " has empty function name, skipping";
@@ -30,7 +30,7 @@ std::unordered_map<std::string, int> BaseFormatDetector::get_tool_indices(
 
 std::vector<ToolCallItem> BaseFormatDetector::parse_base_json(
     const nlohmann::json& json_obj,
-    const std::vector<proto::Tool>& tools) {
+    const std::vector<JsonTool>& tools) {
   auto tool_indices = get_tool_indices(tools);
   std::vector<ToolCallItem> results;
 

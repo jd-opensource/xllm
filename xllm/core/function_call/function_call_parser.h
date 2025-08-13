@@ -18,10 +18,10 @@ class FunctionCallParser {
 
  private:
   std::unique_ptr<BaseFormatDetector> detector_;
-  std::vector<proto::Tool> tools_;
+  std::vector<JsonTool> tools_;
 
  public:
-  FunctionCallParser(const std::vector<proto::Tool>& tools,
+  FunctionCallParser(const std::vector<JsonTool>& tools,
                      const std::string& tool_call_parser);
 
   ~FunctionCallParser() = default;
@@ -50,7 +50,7 @@ namespace utils {
 
 std::vector<ToolCallItem> parse_function_calls(
     const std::string& text,
-    const std::vector<proto::Tool>& tools,
+    const std::vector<JsonTool>& tools,
     const std::string& parser_type = "qwen25");
 
 bool has_function_calls(const std::string& text,

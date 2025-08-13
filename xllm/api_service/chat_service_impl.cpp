@@ -37,10 +37,11 @@ struct ToolCallResult {
   std::string finish_reason;
 };
 
-ToolCallResult process_tool_calls(std::string text,
-                                  const std::vector<proto::Tool>& tools,
-                                  const std::string& parser_format,
-                                  std::string finish_reason) {
+ToolCallResult process_tool_calls(
+    std::string text,
+    const std::vector<function_call::JsonTool>& tools,
+    const std::string& parser_format,
+    std::string finish_reason) {
   ToolCallResult result;
 
   function_call::FunctionCallParser parser(tools, parser_format);
@@ -200,13 +201,14 @@ bool send_delta_to_client_brpc(std::shared_ptr<ChatCall> call,
 }
 
 template <typename ChatCall>
-bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
-                                const std::string& request_id,
-                                int64_t created_time,
-                                const std::string& model,
-                                const RequestOutput& req_output,
-                                const std::string& parser_format = "",
-                                const std::vector<proto::Tool>& tools = {}) {
+bool send_result_to_client_brpc(
+    std::shared_ptr<ChatCall> call,
+    const std::string& request_id,
+    int64_t created_time,
+    const std::string& model,
+    const RequestOutput& req_output,
+    const std::string& parser_format = "",
+    const std::vector<function_call::JsonTool>& tools = {}) {
   auto& response = call->response();
   response.set_object("chat.completion");
   response.set_id(request_id);
@@ -486,18 +488,6 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
     include_usage = rpc_request.stream_options().include_usage();
   }
 
-  if (rpc_request.tools_size() > 0) {
-    request_params.proto_tools.assign(rpc_request.tools().begin(),
-                                      rpc_request.tools().end());
-
-    // TODO: Implement support for 'required' option in tool_choice.
-    if (rpc_request.has_tool_choice()) {
-      request_params.tool_choice = rpc_request.tool_choice();
-    } else {
-      request_params.tool_choice = "auto";
-    }
-  }
-
   // schedule the request
   master_->handle_request(
       std::move(messages),
@@ -511,7 +501,7 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
        first_message_sent = std::unordered_set<size_t>(),
        request_id = request_params.request_id,
        created_time = absl::ToUnixSeconds(absl::Now()),
-       proto_tools = request_params.proto_tools](
+       json_tools = request_params.tools](
           const RequestOutput& req_output) mutable -> bool {
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
@@ -533,7 +523,7 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
         const std::string parser_format =
             master->options().tool_call_parser().value_or("");
         const bool has_tool_support =
-            !proto_tools.empty() && !parser_format.empty();
+            !json_tools.empty() && !parser_format.empty();
 
         if (stream) {
           if (has_tool_support) {
@@ -565,7 +555,7 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
                                               model,
                                               req_output,
                                               parser_format,
-                                              proto_tools);
+                                              json_tools);
           } else {
             // Non-stream response without tool support
             return send_result_to_client_brpc(

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "completion.pb.h"
 #include "core/common/macros.h"
 #include "embedding.pb.h"
+#include "function_call/core_types.h"
 #include "multimodal.pb.h"
 #include "request_output.h"
 
@@ -102,12 +104,18 @@ struct RequestParams {
   // decode address.
   std::string decode_address;
 
-  // decode address.
-  std::string decode_address;
-
-  std::vector<proto::Tool> proto_tools;
+  // JSON-based tools (replacing proto_tools)
+  std::vector<function_call::JsonTool> tools;
   std::string tool_choice = "auto";
-  bool has_tools() const { return !proto_tools.empty(); }
+  bool has_tools() const { return !tools.empty(); }
+
+ private:
+  void parse_tools_from_proto(
+      const google::protobuf::RepeatedPtrField<proto::Tool>& proto_tools);
+
+  nlohmann::json proto_struct_to_json(
+      const google::protobuf::Struct& pb_struct);
+  nlohmann::json proto_value_to_json(const google::protobuf::Value& pb_value);
 };
 
 }  // namespace xllm

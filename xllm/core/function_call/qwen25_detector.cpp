@@ -65,7 +65,7 @@ std::vector<std::pair<size_t, size_t>> Qwen25Detector::find_tool_call_ranges(
 
 StreamingParseResult Qwen25Detector::detect_and_parse(
     const std::string& text,
-    const std::vector<proto::Tool>& tools) {
+    const std::vector<JsonTool>& tools) {
   size_t bot_token_pos = text.find(bot_token_);
 
   std::string normal_text;
