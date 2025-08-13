@@ -32,7 +32,7 @@ namespace {
 
 
 struct ToolCallResult {
-  std::optional<std::vector<proto::ToolCall>> tool_calls;
+  std::optional<google::protobuf::RepeatedPtrField<proto::ToolCall>> tool_calls;
   std::string text;
   std::string finish_reason;
 };
@@ -41,7 +41,8 @@ ToolCallResult process_tool_calls(
     std::string text,
     const std::vector<function_call::JsonTool>& tools,
     const std::string& parser_format,
-    std::string finish_reason) {
+    std::string finish_reason,
+    google::protobuf::Arena* arena = nullptr) {
   ToolCallResult result;
 
   function_call::FunctionCallParser parser(tools, parser_format);
@@ -62,21 +63,23 @@ ToolCallResult process_tool_calls(
     auto [parsed_text, call_info_list] = parser.parse_non_stream(text);
     result.text = std::move(parsed_text);
 
-    std::vector<proto::ToolCall> tool_calls;
-    tool_calls.reserve(call_info_list.size());
+    google::protobuf::RepeatedPtrField<proto::ToolCall> tool_calls;
 
     for (const auto& call_info : call_info_list) {
-      proto::ToolCall tool_call;
-      tool_call.set_id(function_call::utils::generate_tool_call_id());
-      tool_call.set_type("function");
+      proto::ToolCall* tool_call =
+          arena ? google::protobuf::Arena::CreateMessage<proto::ToolCall>(arena)
+                : new proto::ToolCall();
 
-      auto* function = tool_call.mutable_function();
+      tool_call->set_id(function_call::utils::generate_tool_call_id());
+      tool_call->set_type("function");
+
+      auto* function = tool_call->mutable_function();
       if (call_info.name) {
         function->set_name(*call_info.name);
       }
       function->set_arguments(call_info.parameters);
 
-      tool_calls.emplace_back(tool_call);
+      tool_calls.AddAllocated(tool_call);
     }
 
     result.tool_calls = std::move(tool_calls);
@@ -231,19 +234,22 @@ bool send_result_to_client_brpc(
     };
 
     if (!tools.empty() && !parser_format.empty()) {
-      auto result = process_tool_calls(
-          output.text, tools, parser_format, output.finish_reason.value_or(""));
+      auto* arena = response.GetArena();
+      auto result = process_tool_calls(output.text,
+                                       tools,
+                                       parser_format,
+                                       output.finish_reason.value_or(""),
+                                       arena);
 
-      message->set_content(result.text);
+      message->mutable_content()->swap(result.text);
 
       if (result.tool_calls) {
-        for (auto& tool_call : *result.tool_calls) {
-          *message->add_tool_calls() = std::move(tool_call);
-        }
+        auto& source_tool_calls = *result.tool_calls;
+        message->mutable_tool_calls()->Swap(&source_tool_calls);
       }
 
       if (!result.finish_reason.empty()) {
-        choice->set_finish_reason(result.finish_reason);
+        choice->mutable_finish_reason()->swap(result.finish_reason);
       }
     } else {
       set_output_and_finish_reason();
