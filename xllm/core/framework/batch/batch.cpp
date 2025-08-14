@@ -36,6 +36,24 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+void split_copy_out_blocks(RawModelInput& raw_model_input,
+                           std::unordered_set<int32_t>& write_block_ids) {
+  std::vector<CacheContent> async_copy_out_blocks;
+  std::vector<CacheContent> sync_copy_out_blocks;
+  for (CacheContent content : raw_model_input.copy_out_blocks) {
+    if (write_block_ids.find(content.device_block_id) !=
+        write_block_ids.end()) {
+      sync_copy_out_blocks.push_back(content);
+    } else {
+      async_copy_out_blocks.push_back(content);
+    }
+  }
+  raw_model_input.copy_out_blocks = std::move(sync_copy_out_blocks);
+  raw_model_input.async_copy_out_blocks = std::move(async_copy_out_blocks);
+}
+}  // namespace
+
 Batch::Batch(Sequence* sequence) { add(sequence); }
 Batch::Batch(const std::vector<Sequence*>& sequences) { add(sequences); }
 
