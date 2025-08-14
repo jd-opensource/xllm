@@ -88,6 +88,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   std::string device_name = "npu:" + std::to_string(currentDevId);
   torch_npu::init_npu(device_name);
   npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
+  extra_stream_helper_ = std::make_unique<NPUStreamHelper>();
 #elif defined(USE_MLU)
   // TODO(mlu): implement mlu init context
 #endif
@@ -349,21 +350,22 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
   c10::StreamGuard streamGuard(npu_stream_helper_->H2D_memcpy_stream.unwrap());
   processed_inputs = inputs.to(device_, dtype_);
 
-  if (inputs.input_params.copy_out_blocks.size() > 0 ||
-      inputs.input_params.copy_in_blocks.size() > 0) {
+  auto& input_params = processed_inputs.input_params;
+  if (input_params.copy_out_blocks.size() > 0 ||
+      input_params.copy_in_blocks.size() > 0) {
     for (int layer_id = 0; layer_id < args_.n_layers(); layer_id++) {
       auto key_cache = kv_caches_[layer_id].get_k_cache();
       auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
       auto value_cache = kv_caches_[layer_id].get_v_cache();
       auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
 
-      for (auto cache_content : inputs.input_params.copy_out_blocks) {
+      for (auto cache_content : input_params.copy_out_blocks) {
         host_k_cache[cache_content.host_block_id].copy_(
             key_cache[cache_content.device_block_id]);
         host_v_cache[cache_content.host_block_id].copy_(
             value_cache[cache_content.device_block_id]);
       }
-      for (auto cache_content : inputs.input_params.copy_in_blocks) {
+      for (auto cache_content : input_params.copy_in_blocks) {
         key_cache[cache_content.device_block_id].copy_(
             host_k_cache[cache_content.host_block_id]);
         value_cache[cache_content.device_block_id].copy_(
@@ -397,6 +399,40 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
 #endif
 }
 
+folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
+    InputParameters& input_params) {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+#if !defined(USE_NPU)
+  promise.setValue(false);
+  return future;
+#endif
+  threadpool_.schedule([this,
+                        input_params = input_params,
+                        promise = std::move(promise)]() mutable {
+    c10::StreamGuard streamGuard(
+        extra_stream_helper_->H2D_memcpy_stream.unwrap());
+    if (input_params.async_copy_out_blocks.size() > 0) {
+      for (int layer_id = 0; layer_id < args_.n_layers(); layer_id++) {
+        auto key_cache = kv_caches_[layer_id].get_k_cache();
+        auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
+        auto value_cache = kv_caches_[layer_id].get_v_cache();
+        auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
+
+        for (auto cache_content : input_params.async_copy_out_blocks) {
+          host_k_cache[cache_content.host_block_id].copy_(
+              key_cache[cache_content.device_block_id]);
+          host_v_cache[cache_content.host_block_id].copy_(
+              value_cache[cache_content.device_block_id]);
+        }
+      }
+    }
+    aclrtSynchronizeStream(extra_stream_helper_->H2D_memcpy_stream.stream());
+  });
+
+  return future;
+}
+
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
     const ForwardInput& inputs) {
   ForwardInput forward_inputs_on_device;
@@ -408,8 +444,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
                         inputs = forward_inputs_on_device,
                         promise = std::move(promise)]() mutable {
     // run the model on the given input in working thread
+    auto copy_future = copy_out_blocks_async(inputs.input_params);
     if (!enable_schedule_overlap()) {
       const auto output = this->step(inputs);
+      std::move(copy_future).get();
       promise.setValue(output);
     } else {
       if (last_step_output_valid_ && !inputs.input_params.empty_kv_cache) {
@@ -438,6 +476,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
           last_step_output_valid_ = false;
         }
       }
+      std::move(copy_future).get();
       promise.setValue(output);
     }
   });
