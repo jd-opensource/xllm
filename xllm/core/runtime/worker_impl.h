@@ -146,6 +146,8 @@ class WorkerImpl {
 
   Status get_status() const { return status_; }
 
+  folly::SemiFuture<bool> copy_out_blocks_async(InputParameters& input_params);
+
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
 
@@ -162,6 +164,10 @@ class WorkerImpl {
   // if enable_schedule_overlap, two step tasks might be dispatched to
   // the task queue, step need to be executed one-by-one
   ThreadPool threadpool_;
+
+  // extra working thread
+  // do some overlap work with model execute
+  ThreadPool extra_threadpool_;
 
   // dtype of the model
   torch::ScalarType dtype_;
@@ -201,6 +207,7 @@ class WorkerImpl {
   // c10_npu::NPUStream related files.
   struct NPUStreamHelper;
   std::unique_ptr<NPUStreamHelper> npu_stream_helper_;
+  std::unique_ptr<NPUStreamHelper> extra_stream_helper_;
 
   bool is_spec_draft_ = false;
 
