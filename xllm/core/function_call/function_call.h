@@ -4,13 +4,11 @@
 #include "core_types.h"
 #include "function_call_parser.h"
 #include "qwen25_detector.h"
+#include "kimik2_detector.h"
+#include "deepseekv3_detector.h"
 
 namespace llm {
 namespace function_call {
-
-using Parser = FunctionCallParser;
-using Detector = BaseFormatDetector;
-using QwenDetector = Qwen25Detector;
 
 inline std::vector<ToolCallItem> parse(const std::string& text,
                                        const std::vector<JsonTool>& tools,

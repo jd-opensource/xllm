@@ -5,6 +5,8 @@
 
 #include "common/uuid.h"
 #include "qwen25_detector.h"
+#include "kimik2_detector.h"
+#include "deepseekv3_detector.h"
 namespace llm {
 namespace function_call {
 
@@ -12,10 +14,11 @@ const std::unordered_map<std::string, std::string>
     FunctionCallParser::ToolCallParserEnum = {
         {"qwen25", "qwen25"},
         {"qwen3", "qwen25"},
+        {"kimi_k2", "kimi_k2"},
+        {"deepseekv3", "deepseekv3"},
         // TODO
         // {"llama3", "llama3"},
         // {"mistral", "mistral"},
-        // {"deepseekv3", "deepseekv3"},
         // {"pythonic", "pythonic"},
         // {"qwen3_coder", "qwen3_coder"},
         // {"glm45", "glm45"},
@@ -26,10 +29,16 @@ FunctionCallParser::FunctionCallParser(const std::vector<JsonTool>& tools,
                                        const std::string& tool_call_parser)
     : tools_(tools) {
   detector_ = create_detector(tool_call_parser);
-  if (!detector_) {
-    throw std::invalid_argument("Unsupported tool_call_parser: " +
-                                tool_call_parser);
-  }
+  CHECK(detector_ != nullptr)
+      << "Unsupported tool_call_parser: " << tool_call_parser
+      << ". Supported parsers are: " << [this]() {
+           std::string supported;
+           for (const auto& [key, value] : ToolCallParserEnum) {
+             if (!supported.empty()) supported += ", ";
+             supported += key;
+           }
+           return supported;
+         }();
 }
 
 bool FunctionCallParser::has_tool_call(const std::string& text) const {
@@ -57,6 +66,14 @@ std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
 
   if (it->second == "qwen25") {
     return std::make_unique<Qwen25Detector>();
+  }
+  
+  if (it->second == "kimi_k2") {
+    return std::make_unique<KimiK2Detector>();
+  }
+  
+  if (it->second == "deepseekv3") {
+    return std::make_unique<DeepSeekV3Detector>();
   }
 
   // if (tool_call_parser == "llama3") {
