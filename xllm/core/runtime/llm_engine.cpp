@@ -358,14 +358,14 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
 
 uint32_t LLMEngine::load_kv_blocks_from_store(
     const uint32_t dp_rank,
-    const std::vector<CacheContent>& dst_blocks) {
+    const std::vector<CacheContent>& cache_content_vec) {
   auto tp_size = worker_clients_.size() / options_.dp_size();
   uint32_t result;
 
   for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
     auto curr_res =
         worker_clients_[tp_rank + tp_size * dp_rank]->load_kv_blocks_from_store(
-            dst_blocks);
+            cache_content_vec);
     result = std::min(curr_res, result);
   }
 

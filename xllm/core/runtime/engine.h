@@ -68,8 +68,8 @@ class Engine {
 
   virtual uint32_t load_kv_blocks_from_store(
       const uint32_t dp_rank,
-      const std::vector<CacheContent>& dst_blocks) {
-    LOG(FATAL) << " pull_kv_blocks is not implemented!";
+      const std::vector<CacheContent>& cache_content_vec) {
+    LOG(FATAL) << " load_kv_blocks_from_store is not implemented!";
     return 0;
   };
 

@@ -372,6 +372,8 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
             host_v_cache[cache_content.host_block_id]);
       }
     }
+
+    offload_kv_blocks_from_store_async(inputs.input_params.copy_out_blocks);
   }
 
   if (!context_.get_parallel_args().mapping_data().empty()) {
@@ -403,13 +405,12 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
     InputParameters& input_params) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-#if !defined(USE_NPU)
-  promise.setValue(false);
+#if !defined(USE_NPU) promise.setValue(false);
   return future;
 #endif
-  threadpool_.schedule([this,
-                        input_params = input_params,
-                        promise = std::move(promise)]() mutable {
+  extra_threadpool_.schedule([this,
+                              input_params = input_params,
+                              promise = std::move(promise)]() mutable {
     c10::StreamGuard streamGuard(
         extra_stream_helper_->H2D_memcpy_stream.unwrap());
     if (input_params.async_copy_out_blocks.size() > 0) {
@@ -426,8 +427,11 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
               value_cache[cache_content.device_block_id]);
         }
       }
+      offload_kv_blocks_from_store_async(input_params.async_copy_out_blocks);
     }
-    aclrtSynchronizeStream(extra_stream_helper_->H2D_memcpy_stream.stream());
+    auto ret = aclrtSynchronizeStream(
+        extra_stream_helper_->H2D_memcpy_stream.stream());
+    promise.setValue(ret == 0);
   });
 
   return future;
@@ -604,16 +608,31 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 }
 
 folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
-    const std::vector<CacheContent>& dst_blocks) {
+    const std::vector<CacheContent>& cache_content_vec) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
-      [this, &dst_blocks, promise = std::move(promise)]() mutable {
+      [this, &cache_content_vec, promise = std::move(promise)]() mutable {
         if (this->kv_cache_store_ == nullptr) {
           promise.setValue(0);
           return;
         }
-        promise.setValue(this->kv_cache_store_->batch_get(dst_blocks));
+        promise.setValue(this->kv_cache_store_->batch_get(cache_content_vec));
+      });
+  return future;
+}
+
+folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_from_store_async(
+    const std::vector<CacheContent>& cache_content_vec) {
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule(
+      [this, &cache_content_vec, promise = std::move(promise)]() mutable {
+        if (this->kv_cache_store_ == nullptr) {
+          promise.setValue(0);
+          return;
+        }
+        promise.setValue(this->kv_cache_store_->batch_put(cache_content_vec));
       });
   return future;
 }

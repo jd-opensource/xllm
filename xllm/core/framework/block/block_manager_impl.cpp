@@ -74,6 +74,25 @@ void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
   }
 }
 
+void BlockManagerImpl::release_blocks_without_cache_for(Sequence* sequence) {
+  DCHECK(sequence != nullptr);
+
+  if (options_.enable_prefix_cache()) {
+    // update effective block usage
+    for (const auto& block : sequence->blocks()) {
+      // the block is not shared by other sequence
+      if (block.ref_count() <= 2) {
+        num_blocks_in_use_.fetch_sub(1, std::memory_order_relaxed);
+      }
+    }
+  } else {
+    num_blocks_in_use_.fetch_sub(sequence->num_blocks(),
+                                 std::memory_order_relaxed);
+  }
+  // release the blocks after prefix cache insertion
+  sequence->release_blocks();
+}
+
 bool BlockManagerImpl::has_enough_blocks(uint32_t num_blocks) {
   if (num_blocks <= num_free_blocks_) {
     return true;
@@ -136,6 +155,12 @@ void BlockManagerImpl::cache(const Slice<int32_t>& token_ids,
     AUTO_COUNTER(prefix_cache_latency_seconds_insert);
     // Add the kv cache to the prefix cache
     prefix_cache_->insert(token_ids, blocks);
+
+    // // only insert tokens in kv cache to the prefix cache
+    // const auto tokens_ids = sequence->tokens_in_kv_cache();
+    // auto* blocks = sequence->mutable_blocks();
+    // // Add the kv cache to the prefix cache
+    // prefix_cache_->insert(tokens_ids, *blocks);
   }
 }
 
@@ -177,11 +202,11 @@ void BlockManagerImpl::free(int32_t block_id) {
   }
 }
 
-bool BlockManagerImpl::compute_blocks_hash_value(
+uint32_t BlockManagerImpl::compute_blocks_hash_value(
     const Slice<int32_t>& token_ids,
     std::vector<Block>& blocks) {
   if (!options_.enable_prefix_cache()) {
-    return false;
+    return 0;
   }
 
   return prefix_cache_->compute_blocks_hash_value(token_ids, blocks);

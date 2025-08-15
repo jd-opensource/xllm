@@ -387,9 +387,6 @@ void ContinuousScheduler::handle_decode_requests(
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
         waiting_priority_queue_.push(request_to_preempt);
-        for (auto& seq : request_to_preempt->sequences) {
-          copy_out_sequences_.push_back(&seq);
-        }
       } else {
         LOG(FATAL) << "Unexpected error: preempting the candidate itself.";
       }
@@ -617,7 +614,6 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   running_requests_.clear();
   running_sequences_.clear();
   running_sequences_budgets_.clear();
-  copy_out_sequences_.clear();
 
   // remaining budget for the current batch
   size_t remaining_token_budget = options_.max_tokens_per_batch();
@@ -668,7 +664,8 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   auto batches = BatchFactory::get_instance(options_.dp_size())
                      ->create_batches(running_sequences_,
                                       running_sequences_budgets_,
-                                      copy_out_sequences_);
+                                      block_manager_->get_copy_in_content(),
+                                      block_manager_->get_copy_out_content());
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process
@@ -741,18 +738,21 @@ void ContinuousScheduler::prepare_host_cache(
   for (Sequence& sequence : request->sequences) {
     auto host_block_manager =
         block_manager_->get_block_manager(&sequence, true);
+
     auto token_ids = sequence.token_ids();
-    auto host_block_ids =
+
+    auto host_blocks =
         host_block_manager->allocate_blocks_for(token_ids.size());
 
     auto block_manager = block_manager_->get_block_manager(&sequence, false);
 
-    if (block_manager->compute_blocks_hash_value(token_ids, host_block_ids)) {
+    auto full_block_cnt =
+        block_manager->compute_blocks_hash_value(token_ids, host_blocks);
+
+    if (full_block_cnt > 0) {
       std::vector<CacheContent> contents;
 
-      auto host_blocks = sequence.host_blocks();
-      contents.reserve(host_blocks.size());
-
+      contents.reserve(full_block_cnt);
       for (auto& block : host_blocks) {
         contents.emplace_back(-1, block.id(), block.get_immutable_hash_value());
       }
@@ -760,8 +760,10 @@ void ContinuousScheduler::prepare_host_cache(
       auto success_cnt =
           engine_->load_kv_blocks_from_store(sequence.dp_rank(), contents);
 
-      sequence.add_shared_host_block_num(success_cnt);
+      sequence.set_shared_host_block_num(success_cnt);
     }
+
+    sequence.append_host_blocks(host_blocks);
   }
 }
 
@@ -779,6 +781,7 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
       return;
     }
     engine_->step(batch);
+    block_manager_->reset_copy_content();
     // process request output in batch
     process_batch_output(false);
   } else {
@@ -804,6 +807,7 @@ void ContinuousScheduler::step_with_schedule_overlap(
 
   if (!cur_batch_all_empty) {
     engine_->step(batch);
+    block_manager_->reset_copy_content();
   }
 
   // producer-consumer mode, make sure only one step is scheduled in advance
@@ -832,6 +836,7 @@ void ContinuousScheduler::generate() {
 
     // run inference for the batch
     engine_->step(batch);
+    block_manager_->reset_copy_content();
 
     // process request output in batch
     process_batch_output(false);

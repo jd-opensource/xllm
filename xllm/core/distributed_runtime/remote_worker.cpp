@@ -235,9 +235,9 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
 }
 
 uint32_t RemoteWorker::load_kv_blocks_from_store(
-    const std::vector<CacheContent>& dst_blocks) {
+    const std::vector<CacheContent>& cache_content_vec) {
   proto::CacheContents cache_contents;
-  if (!cache_contents_to_proto(dst_blocks, &cache_contents)) {
+  if (!cache_contents_to_proto(cache_content_vec, &cache_contents)) {
     return 0;
   }
 
@@ -460,13 +460,13 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
 }
 
 folly::SemiFuture<uint32_t> RemoteWorker::load_kv_blocks_from_store_async(
-    const std::vector<CacheContent>& dst_blocks) {
+    const std::vector<CacheContent>& cache_content_vec) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
-      [this, &dst_blocks, promise = std::move(promise)]() mutable {
+      [this, &cache_content_vec, promise = std::move(promise)]() mutable {
         proto::CacheContents cache_contents;
-        if (!cache_contents_to_proto(dst_blocks, &cache_contents)) {
+        if (!cache_contents_to_proto(cache_content_vec, &cache_contents)) {
           promise.setValue(0);
           return;
         }

@@ -68,7 +68,7 @@ class LLMEngine : public Engine {
 
   uint32_t load_kv_blocks_from_store(
       const uint32_t dp_rank,
-      const std::vector<CacheContent>& dst_blocks) override;
+      const std::vector<CacheContent>& cache_content_vec) override;
 
   void get_device_info(std::vector<std::string>& device_ips,
                        std::vector<uint16_t>& ports) override;

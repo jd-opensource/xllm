@@ -35,6 +35,8 @@ class BatchInputBuilder {
       const std::vector<Sequence*>& sequences,
       const std::vector<uint32_t>& allowed_max_tokens,
       const std::vector<torch::Tensor>& input_embeddings_vec,
+      const std::vector<CacheContent>* copy_in_cache_contents,
+      const std::vector<CacheContent>* copy_out_cache_contents,
       const std::vector<MMData>& mm_data_vec,
       const ModelArgs* args);
 
@@ -118,6 +120,10 @@ class BatchInputBuilder {
   // Configuration
   bool use_mrope_ = false;
   int32_t num_sequences_ = 0;
+
+  // copy in and out cache contents
+  const std::vector<CacheContent>* copy_in_cache_contents_ = nullptr;
+  const std::vector<CacheContent>* copy_out_cache_contents_ = nullptr;
 };
 
 }  // namespace xllm

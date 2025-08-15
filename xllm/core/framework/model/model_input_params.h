@@ -76,6 +76,10 @@ struct ModelInputParams {
     params.layer_synchronizer = layer_synchronizer;
 #endif
     params.expert_load_data = expert_load_data;
+
+    params.async_copy_out_blocks = std::move(async_copy_out_blocks);
+    params.copy_out_blocks = std::move(copy_out_blocks);
+    params.copy_in_blocks = std::move(copy_in_blocks);
     return params;
   }
 

@@ -135,7 +135,64 @@ size_t PrefixCacheHash::insert(const Slice<int32_t>& token_ids,
       Node* new_node = new Node();
 
       new_node->block = blocks[block_idx];
-      new_node->block.set_hash_value(token_hash_key.data, SHA256_DIGEST_LENGTH);
+      new_node->block.set_hash_value(token_hash_key.data);
+      new_node->block.set_token_ids(token_ids.slice(i, i + block_size_));
+      new_node->last_access_time = now;
+
+      node_list.push_front(new_node);
+
+      cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
+
+      num_blocks_++;
+    }
+
+    block_idx++;
+  }
+
+  // update LRU list
+  while (!node_list.is_empty()) {
+    Node* node = node_list.pop_front();
+    lru_lst_.push_back(node);
+  }
+
+  return n_tokens;
+}
+
+size_t PrefixCacheHash::insert(const Slice<int32_t>& token_ids,
+                               std::vector<Block>& blocks) {
+  const int64_t now = absl::ToUnixMicros(absl::Now());
+  // allign tokens to block boundary
+  const size_t n_blocks =
+      std::min(token_ids.size() / block_size_, blocks.size());
+  const size_t n_tokens = n_blocks * block_size_;
+
+  if (n_blocks == 0) {
+    return 0;
+  }
+
+  DNodeList node_list;
+  Murmur3Key token_hash_key;
+  size_t block_idx = 0;
+  for (size_t i = 0; i < n_tokens; i += block_size_) {
+    if (i == 0) {
+      hash_util_->hash(
+          nullptr, token_ids.slice(i, i + block_size_), token_hash_key.data);
+    } else {
+      hash_util_->hash(token_hash_key.data,
+                       token_ids.slice(i, i + block_size_),
+                       token_hash_key.data);
+    }
+    blocks[block_idx].set_hash_value(token_hash_key.data);
+
+    auto iter = cached_blocks_.find(token_hash_key);
+    if (iter != cached_blocks_.end()) {
+      iter->second->last_access_time = now;
+
+      lru_lst_.remove_node(iter->second);
+      node_list.push_front(iter->second);
+    } else {
+      Node* new_node = new Node();
+      new_node->block = blocks[block_idx];
       new_node->block.set_token_ids(token_ids.slice(i, i + block_size_));
       new_node->last_access_time = now;
 
@@ -193,29 +250,28 @@ size_t PrefixCacheHash::evict(size_t n_blocks) {
   return evict_count;
 }
 
-bool PrefixCacheHash::compute_blocks_hash_value(const Slice<int32_t>& token_ids,
-                                                std::vector<Block>& blocks) {
-  const size_t n_blocks = token_ids.size() / block_size_;
+uint32_t PrefixCacheHash::compute_blocks_hash_value(
+    const Slice<int32_t>& token_ids,
+    std::vector<Block>& blocks) {
+  const size_t n_blocks = (token_ids.size() + block_size_ - 1) / block_size_;
   if (blocks.size() > n_blocks) {
     LOG(ERROR) << "token ids do not cover the allocate block.";
-    return false;
+    return 0;
   }
 
-  const size_t n_tokens = blocks.size() * block_size_;
-
-  for (size_t i = 0; i < n_tokens; i += block_size_) {
+  for (size_t i = 0; i < token_ids.size() / block_size_; i++) {
     if (i == 0) {
       hash_util_->hash(nullptr,
-                       token_ids.slice(i, i + block_size_),
+                       token_ids.slice(i * block_size_, (i + 1) * block_size_),
                        blocks[i].get_mutable_hash_value());
     } else {
       hash_util_->hash(blocks[i - 1].get_mutable_hash_value(),
-                       token_ids.slice(i, i + block_size_),
+                       token_ids.slice(i * block_size_, (i + 1) * block_size_),
                        blocks[i].get_mutable_hash_value());
     }
   }
 
-  return true;
+  return token_ids.size() / block_size_;
 }
 
 }  // namespace xllm

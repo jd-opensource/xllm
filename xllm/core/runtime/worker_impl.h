@@ -137,7 +137,10 @@ class WorkerImpl {
       const std::vector<uint64_t>& dst_blocks);
 
   virtual folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
-      const std::vector<CacheContent>& dst_blocks);
+      const std::vector<CacheContent>& cache_content_vec);
+
+  virtual folly::SemiFuture<uint32_t> offload_kv_blocks_from_store_async(
+      const std::vector<CacheContent>& cache_content_vec);
 
   // Run the model on the given input. async call
   // the future returns a successfull status with no meaningful value

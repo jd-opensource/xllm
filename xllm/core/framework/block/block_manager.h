@@ -67,8 +67,8 @@ class BlockManager {
   virtual void get_merged_kvcache_event(KvCacheEvent* event) const = 0;
   virtual float get_gpu_cache_usage_perc() const = 0;
 
-  virtual bool compute_blocks_hash_value(const Slice<int32_t>& token_ids,
-                                         std::vector<Block>& blocks) = 0;
+  virtual uint32_t compute_blocks_hash_value(const Slice<int32_t>& token_ids,
+                                             std::vector<Block>& blocks) = 0;
 
   virtual size_t num_blocks_in_prefix_cache() const = 0;
   virtual size_t num_free_blocks() const = 0;

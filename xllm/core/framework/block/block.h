@@ -60,8 +60,8 @@ class Block final {
   const uint8_t* get_immutable_hash_value() const { return hash_value_; }
   uint8_t* get_mutable_hash_value() { return hash_value_; }
 
-  void set_hash_value(const uint8_t* hash_value, uint32_t len) {
-    memcpy(hash_value_, hash_value, len);
+  void set_hash_value(const uint8_t* hash_value) {
+    memcpy(hash_value_, hash_value, MURMUR_HASH3_VALUE_LEN);
   }
 
   uint32_t get_hash_value_len() { return MURMUR_HASH3_VALUE_LEN; }
