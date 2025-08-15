@@ -151,7 +151,8 @@ class Sequence final {
   // returns allocated cache blocks
   Slice<Block> blocks() const { return blocks_; }
   Slice<Block> host_blocks() const { return host_blocks_; }
-  std::vector<CacheContent> cache_contents() const { return cache_contents_; }
+  std::vector<Block>* mutable_blocks() { return &blocks_; }
+  std::vector<Block>* mutable_host_blocks() { return &host_blocks_; }
 
   // get the number of blocks
   size_t num_blocks() const { return blocks_.size(); }
@@ -222,8 +223,8 @@ class Sequence final {
 
   uint64_t get_shared_host_block_num() const { return shared_host_block_num_; }
 
-  void add_shared_host_block_num(const uint64_t shared_num) {
-    shared_host_block_num_ += shared_num;
+  void set_shared_host_block_num(const uint64_t shared_num) {
+    shared_host_block_num_ = shared_num;
   }
 
   void reset();
@@ -287,7 +288,6 @@ class Sequence final {
   // physical blocks that hold the kv cache.
   std::vector<Block> blocks_;
   std::vector<Block> host_blocks_;
-  std::vector<CacheContent> cache_contents_;
 
   // shared host block num
   uint64_t shared_host_block_num_ = 0;

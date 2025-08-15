@@ -56,6 +56,9 @@ struct ModelInputParams {
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.layer_synchronizer = layer_synchronizer;
 
+    params.async_copy_out_blocks = std::move(async_copy_out_blocks);
+    params.copy_out_blocks = std::move(copy_out_blocks);
+    params.copy_in_blocks = std::move(copy_in_blocks);
     return params;
   }
 

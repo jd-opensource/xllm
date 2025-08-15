@@ -26,11 +26,11 @@ class KVCacheStore {
                std::vector<llm::KVCache>* host_kv_caches);
   ~KVCacheStore();
 
-  uint64_t batch_put(const std::vector<CacheContent>& blocks);
+  uint64_t batch_put(const std::vector<CacheContent>& cache_content_vec);
 
-  uint64_t batch_get(const std::vector<CacheContent>& blocks);
+  uint64_t batch_get(const std::vector<CacheContent>& cache_content_vec);
 
-  uint64_t batch_remove(const std::vector<CacheContent>& blocks);
+  uint64_t batch_remove(const std::vector<CacheContent>& cache_content_vec);
 
  private:
   StoreConfig config_;

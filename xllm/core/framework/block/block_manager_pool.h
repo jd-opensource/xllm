@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "block_manager.h"
+#include "core/framework/model/parameters.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 
@@ -31,6 +32,18 @@ class BlockManagerPool {
 
   void allocate_shared(Sequence* sequence);
   void cache(Sequence* sequence);
+  void copy_in_blocks_for(Request* request);
+  void copy_in_blocks_for(std::vector<Sequence*>& sequences);
+  void copy_in_blocks_for(Sequence* sequence);
+
+  void copy_out_blocks_for(Request* request, bool is_preempted = false);
+  void copy_out_blocks_for(std::vector<Sequence*>& sequences,
+                           bool is_preempted = false);
+  void copy_out_blocks_for(Sequence* sequence, bool is_preempted = false);
+
+  std::vector<std::vector<CacheContent>>* get_copy_in_content();
+  std::vector<std::vector<CacheContent>>* get_copy_out_content();
+  void reset_copy_content();
 
   void get_merged_kvcache_event(KvCacheEvent* event) const;
   float get_gpu_cache_usage_perc() const;
@@ -53,6 +66,11 @@ class BlockManagerPool {
 
   // the options for the block manager
   Options options_;
+
+  // cachecontent per step
+  std::vector<std::vector<CacheContent>> copy_in_cache_contents_;
+  std::vector<std::vector<CacheContent>> copy_out_cache_contents_;
+  std::vector<std::vector<Block>> evict_host_blocks_;
 };
 
 }  // namespace xllm
