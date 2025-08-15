@@ -155,8 +155,8 @@ folly::SemiFuture<bool> Worker::pull_kv_blocks_async(
 }
 
 folly::SemiFuture<uint32_t> Worker::load_kv_blocks_from_store_async(
-    const std::vector<CacheContent>& dst_blocks) {
-  return impl_->load_kv_blocks_from_store_async(dst_blocks);
+    const std::vector<CacheContent>& cache_content_vec) {
+  return impl_->load_kv_blocks_from_store_async(cache_content_vec);
 }
 
 folly::SemiFuture<bool> Worker::init_executor_async() {

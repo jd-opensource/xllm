@@ -67,6 +67,11 @@ class PrefixCache {
   virtual size_t insert(const Slice<int32_t>& token_ids,
                         const Slice<Block>& blocks) = 0;
 
+  virtual size_t insert(const Slice<int32_t>& token_ids,
+                        std::vector<Block>& blocks) {
+    return insert(Slice<int32_t>(token_ids), Slice<Block>(blocks));
+  }
+
   virtual size_t evict(size_t n_blocks) = 0;
 
   virtual size_t num_blocks() const = 0;
@@ -84,9 +89,9 @@ class PrefixCache {
     return nullptr;
   }
 
-  virtual bool compute_blocks_hash_value(const Slice<int32_t>& token_ids,
-                                         std::vector<Block>& blocks) {
-    return false;
+  virtual uint32_t compute_blocks_hash_value(const Slice<int32_t>& token_ids,
+                                             std::vector<Block>& blocks) {
+    return 0;
   }
 
  protected:

@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
 #include "core/util/tensor_helper.h"
+#include "util/hash_util.h"
 
 namespace xllm {
 
@@ -330,15 +331,6 @@ void try_replace_unique_blocks(std::vector<Block>&& matched_shared_blocks,
 
 void Sequence::append_host_blocks(const std::vector<Block>& new_blocks) {
   host_blocks_.insert(host_blocks_.end(), new_blocks.begin(), new_blocks.end());
-  if (blocks_.size() == host_blocks_.size()) {
-    cache_contents_.clear();
-    cache_contents_.reserve(blocks_.size());
-    for (int i = 0; i < blocks_.size(); i++) {
-      cache_contents_.emplace_back(blocks_[i].id(),
-                                   host_blocks_[i].id(),
-                                   blocks_[i].get_immutable_hash_value());
-    }
-  }
 }
 
 // append shared cache blocks from prefix cache

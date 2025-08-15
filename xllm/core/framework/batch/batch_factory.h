@@ -30,7 +30,9 @@ class BatchFactory {
   std::vector<Batch> create_batches(
       const std::vector<Sequence*>& running_sequences,
       const std::vector<size_t>& running_sequences_budgets,
-      const std::vector<Sequence*>& copy_out_sequences = {});
+      std::vector<std::vector<CacheContent>>* copy_in_cache_contents = nullptr,
+      std::vector<std::vector<CacheContent>>* copy_out_cache_contents =
+          nullptr);
 
  private:
   BatchFactory(int32_t dp_size) : dp_size_(dp_size) {}

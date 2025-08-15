@@ -44,6 +44,8 @@ class PrefixCacheHash : public PrefixCache {
   virtual size_t insert(const Slice<int32_t>& token_ids,
                         const Slice<Block>& blocks) override;
 
+  virtual size_t insert(const Slice<int32_t>& token_ids,
+                        std::vector<Block>& blocks) override;
   // evict blocks hold by the prefix cache
   // return the actual number of evicted blocks
   virtual size_t evict(size_t n_blocks) override;
@@ -60,8 +62,9 @@ class PrefixCacheHash : public PrefixCache {
     return nullptr;
   }
 
-  virtual bool compute_blocks_hash_value(const Slice<int32_t>& token_ids,
-                                         std::vector<Block>& blocks) override;
+  virtual uint32_t compute_blocks_hash_value(
+      const Slice<int32_t>& token_ids,
+      std::vector<Block>& blocks) override;
 
  protected:
   struct Node {

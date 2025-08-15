@@ -53,6 +53,7 @@ BlockManagerPool::BlockManagerPool(const BlockManager::Options& options,
           std::make_unique<BlockManagerImpl>(host_options));
     }
   }
+  reset_copy_content();
 }
 
 int32_t BlockManagerPool::get_manager_with_max_free_blocks() const {
@@ -117,16 +118,104 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   sequence->reset();
 }
 
-void BlockManagerPool::copy_out_blocks_for(Request* request) {
+void BlockManagerPool::copy_in_blocks_for(Request* request) {
   DCHECK(request != nullptr);
-  for (auto& sequence : request->sequences) {
-    cache_blocks_for(&sequence);
-    int32_t dp_rank = sequence.dp_rank();
-    size_t token_num = sequence.blocks().size() * options_.block_size();
-    auto host_block_ids = host_block_managers_[dp_rank]->allocate(token_num);
-    sequence.append_host_blocks(host_block_ids);
-    deallocate(&sequence);
+  for (auto& sequence : request->sequences()) {
+    copy_in_blocks_for(&sequence);
   }
+}
+
+void BlockManagerPool::copy_in_blocks_for(std::vector<Sequence*>& sequences) {
+  for (auto* sequence : sequences) {
+    DCHECK(sequence != nullptr);
+    copy_in_blocks_for(sequence);
+  }
+}
+
+void BlockManagerPool::copy_in_blocks_for(Sequence* sequence) {
+  DCHECK(sequence != nullptr);
+  auto blocks = sequence->blocks();
+  auto host_blocks = sequence->host_blocks();
+  auto hbm_shared_blocks =
+      sequence->num_kv_cache_tokens() / options_.block_size();
+
+  for (int i = hbm_shared_blocks; i < sequence->get_shared_host_block_num();
+       i++) {
+    copy_in_cache_contents_[sequence->dp_rank()].emplace_back(
+        blocks[i].id(),
+        host_blocks[i].id(),
+        host_blocks[i].get_immutable_hash_value());
+  }
+}
+
+void BlockManagerPool::copy_out_blocks_for(Request* request,
+                                           bool is_preempted) {
+  DCHECK(request != nullptr);
+  for (auto& sequence : request->sequences()) {
+    copy_out_blocks_for(&sequence, is_preempted);
+  }
+}
+
+void BlockManagerPool::copy_out_blocks_for(std::vector<Sequence*>& sequences,
+                                           bool is_preempted) {
+  for (auto* sequence : sequences) {
+    DCHECK(sequence != nullptr);
+    copy_out_blocks_for(sequence, is_preempted);
+  }
+}
+
+void BlockManagerPool::copy_out_blocks_for(Sequence* sequence,
+                                           bool is_preempted) {
+  DCHECK(sequence != nullptr);
+  cache(sequence);
+  int32_t dp_rank = sequence->dp_rank();
+  size_t token_num =
+      (sequence->blocks().size() - sequence->host_blocks().size() -
+       (sequence->num_tokens() % options_.block_size() != 0)) *
+      options_.block_size();
+  std::vector<Block>* host_blocks_ptr = sequence->mutable_host_blocks();
+
+  if (token_num > 0) {
+    sequence->append_host_blocks(
+        host_block_managers_[dp_rank]->allocate(token_num));
+  }
+  if (!is_preempted) {
+    evict_host_blocks_.emplace_back(std::move(*host_blocks_ptr));
+    host_blocks_ptr = &evict_host_blocks_.back();
+  }
+
+  auto blocks = sequence->blocks();
+
+  for (int i = sequence->get_shared_host_block_num();
+       i < host_blocks_ptr->size();
+       i++) {
+    host_blocks_ptr->at(i).set_hash_value(blocks[i].get_immutable_hash_value());
+    copy_out_cache_contents_[dp_rank].emplace_back(
+        blocks[i].id(),
+        host_blocks_ptr->at(i).id(),
+        host_blocks_ptr->at(i).get_immutable_hash_value());
+  }
+  sequence->set_shared_host_block_num(host_blocks_ptr->size());
+
+  block_managers_[dp_rank]->deallocate(sequence);
+}
+
+std::vector<std::vector<CacheContent>>*
+BlockManagerPool::get_copy_in_content() {
+  return &copy_in_cache_contents_;
+}
+
+std::vector<std::vector<CacheContent>>*
+BlockManagerPool::get_copy_out_content() {
+  return &copy_out_cache_contents_;
+}
+
+void BlockManagerPool::reset_copy_content() {
+  copy_in_cache_contents_.clear();
+  copy_in_cache_contents_.resize(host_block_managers_.size());
+  copy_out_cache_contents_.clear();
+  copy_out_cache_contents_.resize(host_block_managers_.size());
+  evict_host_blocks_.clear();
 }
 
 bool BlockManagerPool::allocate(Sequence* sequence) {
