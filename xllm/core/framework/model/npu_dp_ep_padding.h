@@ -41,6 +41,7 @@ class DpEpPadding {
               int32_t num_experts_per_tok,
               const nlohmann::json& mapping_npu,
               at::Device device,
+              torch::ScalarType dtype,
               bool is_prefill);
 
   DpEpPaddingData build();
@@ -89,5 +90,6 @@ class DpEpPadding {
   torch::Tensor expert_array_;
   std::vector<int64_t> new_dp_size_;
   at::Device device_;
+  torch::ScalarType dtype_;
 };
 }  // namespace xllm

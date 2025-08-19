@@ -12,11 +12,13 @@ DpEpPadding::DpEpPadding(torch::Tensor token_size_per_dp_group,
                          int32_t num_experts_per_tok,
                          const nlohmann::json& mapping_npu,
                          at::Device device,
+                         torch::ScalarType dtype,
                          bool is_prefill)
     : token_size_per_dp_group_(token_size_per_dp_group.contiguous()),
       num_experts_per_tok_(num_experts_per_tok),
       mapping_npu_(mapping_npu),
       device_(device),
+      dtype_(dtype),
       is_prefill_(is_prefill),
       expert_parallel_degree_(0) {
   // Validate input tensor
@@ -330,11 +332,10 @@ void DpEpPadding::handle_expert_parallel() {
       moe_idx_data.push_back(i);
     }
     moe_idx_ = torch::tensor(moe_idx_data, torch::dtype(torch::kInt32));
-    expert_array_ = safe_to(
-        torch::ones({moe_idx_.sizes()[0]}, torch::dtype(torch::kFloat16))
-            .view({-1, 1}),
-        device_,
-        true);
+    expert_array_ =
+        safe_to(torch::ones({moe_idx_.sizes()[0]}, dtype_).view({-1, 1}),
+                device_,
+                true);
   } else {
     dynamic_ep_idx_ = torch::zeros({1}, torch::kInt32);
     moe_idx_ = torch::zeros({1}, torch::kInt32);

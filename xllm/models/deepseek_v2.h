@@ -72,6 +72,12 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
 
   void merge_loaded_weights() { decoder_layer_->merge_loaded_weights(); }
 
+  void prepare_expert_weight(const std::vector<int32_t>& expert_list) {
+    decoder_layer_->prepare_expert_weight(expert_list);
+  }
+
+  void update_expert_weight() { decoder_layer_->update_expert_weight(); }
+
  private:
   DeepseekV2Decoder decoder_layer_{nullptr};
 };
@@ -215,6 +221,15 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     norm_->merge_loaded_weights();
   }
 
+  void prepare_expert_weight(int32_t layer_id,
+                             const std::vector<int32_t>& expert_ids) {
+    layers_[layer_id]->prepare_expert_weight(expert_ids);
+  }
+
+  void update_expert_weight(int32_t layer_id) {
+    layers_[layer_id]->update_expert_weight();
+  }
+
   AtbWordEmbedding get_word_embedding() { return embed_tokens_; }
 
   void set_word_embedding(AtbWordEmbedding& word_embedding) {
@@ -255,6 +270,7 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
     context_->SetExecuteStream(stream);
     context_->SetAsyncTilingCopyStatus(true);
     lm_head_ = register_module("lm_head", LlmHead(context));
+    first_k_dense_replace_ = context.get_model_args().first_k_dense_replace();
   }
 
   // tokens: [num_tokens]
@@ -290,6 +306,16 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
     lm_head_->merge_loaded_weights();
   }
 
+  void prepare_expert_weight(int32_t layer_id,
+                             const std::vector<int32_t>& expert_ids) {
+    model_->prepare_expert_weight(layer_id + first_k_dense_replace_,
+                                  expert_ids);
+  }
+
+  void update_expert_weight(int32_t layer_id) {
+    model_->update_expert_weight(layer_id + first_k_dense_replace_);
+  }
+
   LlmHead get_lm_head() { return lm_head_; }
 
   void set_lm_head(LlmHead& head) { lm_head_ = head; }
@@ -305,6 +331,7 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
   LlmHead lm_head_{nullptr};
   AtbWorkspace work_space_;
   atb::Context* context_;
+  int32_t first_k_dense_replace_;
 };
 TORCH_MODULE(DeepseekV2ForCausalLM);
 

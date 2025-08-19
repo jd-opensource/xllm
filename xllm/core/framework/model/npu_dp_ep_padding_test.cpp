@@ -25,8 +25,12 @@ TEST(DpEpPaddingTest, Build) {
   MappingNPU mapping(rank_table_file, 16, 0, options);
   nlohmann::json data = mapping.to_json();
   torch::Tensor token_size_per_dp_group = torch::tensor({10, 10});
-  DpEpPadding dp_ep_padding(
-      token_size_per_dp_group, 8, data, torch::Device(torch::kCPU), true);
+  DpEpPadding dp_ep_padding(token_size_per_dp_group,
+                            8,
+                            data,
+                            torch::Device(torch::kCPU),
+                            torch::Dtype(torch::kInt32),
+                            true);
   DpEpPaddingData dp_ep_padding_data = dp_ep_padding.build();
   LOG(INFO) << "attn_padding_idx:" << dp_ep_padding_data.attn_padding_idx();
   LOG(INFO) << "attn_unpadding_idx:" << dp_ep_padding_data.attn_unpadding_idx();

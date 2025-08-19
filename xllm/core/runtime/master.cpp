@@ -39,8 +39,17 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
   if (options.communication_backend().has_value()) {
     FLAGS_communication_backend = options.communication_backend().value();
   }
-  if (options.communication_backend().has_value()) {
+  if (options.expert_parallel_degree().has_value()) {
     FLAGS_expert_parallel_degree = options.expert_parallel_degree().value();
+  }
+  if (options.enable_eplb().has_value()) {
+    FLAGS_enable_eplb = options.enable_eplb().value();
+  }
+  if (options.eplb_update_rate().has_value()) {
+    FLAGS_eplb_update_rate = options.eplb_update_rate().value();
+  }
+  if (options.eplb_update_threshold().has_value()) {
+    FLAGS_eplb_update_threshold = options.eplb_update_threshold().value();
   }
 
   // construct engine

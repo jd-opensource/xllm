@@ -5,6 +5,7 @@
 
 #include <optional>
 
+#include "common/global_flags.h"
 #include "common/macros.h"
 #include "common/metrics.h"
 #include "framework/model/model_input_params.h"
@@ -246,6 +247,13 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     transfer_kv_info.remote_instance_info = std::move(instance_info);
     forward_inputs.transfer_kv_infos.emplace_back(std::move(transfer_kv_info));
   }
+  auto& eplb_info = forward_inputs.eplb_info;
+  eplb_info.prepare_layer_id = pb_forward_input->eplb_info().prepare_layer_id();
+  eplb_info.expert_ids =
+      std::vector<int32_t>(pb_forward_input->eplb_info().expert_ids().begin(),
+                           pb_forward_input->eplb_info().expert_ids().end());
+  eplb_info.update_layer_id = pb_forward_input->eplb_info().update_layer_id();
+  forward_inputs.eplb_info = eplb_info;
   COUNTER_ADD(proto_latency_seconds_proto2i, timer.elapsed_seconds());
 }
 
@@ -349,6 +357,13 @@ void forward_input_to_proto(const RawForwardInput& inputs,
           transfer_kv_info.remote_instance_info.dp_size);
     }
   }
+  pb_forward_input->mutable_eplb_info()->set_prepare_layer_id(
+      inputs.eplb_info.prepare_layer_id);
+  pb_forward_input->mutable_eplb_info()->set_update_layer_id(
+      inputs.eplb_info.update_layer_id);
+  ADD_VECTOR_TO_PROTO(
+      pb_forward_input->mutable_eplb_info()->mutable_expert_ids(),
+      inputs.eplb_info.expert_ids);
   pb_forward_input->mutable_embeds()->Reserve(inputs.embeddings.size());
   for (auto t : inputs.embeddings) {
     proto::Embeddings embeds;
@@ -366,6 +381,11 @@ void proto_to_forward_output(const proto::ForwardOutput& pb_output,
   Timer timer;
   size_t seq_nums = pb_output.outputs().size();
   raw_forward_output.outputs.reserve(seq_nums);
+  size_t expert_load_data_size = pb_output.expert_load_data().size();
+  raw_forward_output.expert_load_data.reserve(expert_load_data_size);
+  raw_forward_output.expert_load_data.assign(
+      pb_output.expert_load_data().begin(), pb_output.expert_load_data().end());
+  raw_forward_output.prepared_layer_id = pb_output.prepared_layer_id();
   for (size_t i = 0; i < seq_nums; ++i) {
     proto::SquenceOutput pb_seq_out = pb_output.outputs()[i];
     RawSampleOutput s;
@@ -401,6 +421,8 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
                              const torch::Tensor& top_tokens,
                              const torch::Tensor& top_logprobs,
                              const torch::Tensor& embeddings,
+                             const torch::Tensor& expert_load_data,
+                             int32_t prepared_layer_id,
                              proto::ForwardOutput* pb_forward_output) {
   Timer timer;
   const int32_t num_seqs = next_tokens.size(0);
@@ -499,6 +521,20 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
       }
       *pb_seq_out.mutable_tokens()->Add() = pb_token;
       *pb_forward_output->mutable_outputs()->Add() = pb_seq_out;
+    }
+  }
+
+  if (FLAGS_enable_eplb) {
+    pb_forward_output->set_prepared_layer_id(prepared_layer_id);
+
+    torch::Tensor expert_load_data_flattened =
+        expert_load_data.view({-1}).contiguous();
+    if (expert_load_data_flattened.defined()) {
+      Slice<int64_t> expert_load_data_flattened_slice = {
+          expert_load_data_flattened.data_ptr<int64_t>(),
+          expert_load_data_flattened.size(0)};
+      ADD_VECTOR_TO_PROTO(pb_forward_output->mutable_expert_load_data(),
+                          expert_load_data_flattened_slice);
     }
   }
   COUNTER_ADD(proto_latency_seconds_o2proto, timer.elapsed_seconds());

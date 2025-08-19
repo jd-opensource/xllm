@@ -90,6 +90,7 @@ public:
     void InitCommDomain(std::string defaultBackend);
     /// A summary of current parallelism strategy
     std::string ToString() const;
+    uint32_t localWorldSize() const;
 
 private:
     /// A map holds a `ParallelInfo` object and corresponding module

@@ -52,6 +52,12 @@ DECLARE_int32(num_response_handling_threads);
 
 DECLARE_string(communication_backend);
 
+DECLARE_bool(enable_eplb);
+
+DECLARE_int64(eplb_update_rate);
+
+DECLARE_double(eplb_update_threshold);
+
 DECLARE_string(rank_tablefile);
 
 DECLARE_bool(enable_mla);

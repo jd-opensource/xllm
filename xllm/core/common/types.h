@@ -236,4 +236,10 @@ struct JsonTool {
       : type(tool_type), function(func) {}
 };
 
+struct EplbInfo {
+  int32_t prepare_layer_id = -1;
+  std::vector<int32_t> expert_ids;
+  int32_t update_layer_id = -1;
+};
+
 }  // namespace xllm

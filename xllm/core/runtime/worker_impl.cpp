@@ -235,7 +235,7 @@ WorkerImpl::estimate_kv_cache_capacity_async() {
 
 void WorkerImpl::update_last_step_output(
     const std::optional<ForwardOutput>& output) {
-  if (output.value().sample_output.next_tokens.defined()) {
+  if (output.value().sample_output.next_tokens.defined() || FLAGS_enable_eplb) {
     last_step_output_ = std::move(output.value());
     last_step_output_valid_ = true;
   } else {
@@ -277,8 +277,13 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
                               context_.get_model_args().num_experts_per_tok(),
                               context_.get_parallel_args().mapping_data(),
                               device_,
+                              dtype_,
                               is_prefill);
     processed_inputs.input_params.dp_ep_padding_data = dp_ep_padding.build();
+    if (FLAGS_enable_eplb) {
+      expert_load_data_.fill_(0);
+      processed_inputs.input_params.expert_load_data = expert_load_data_;
+    }
   }
   aclrtSynchronizeStream(npu_stream_helper_->H2D_memcpy_stream.stream());
 }
@@ -304,7 +309,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       }
       const auto output = this->step(inputs);
       if (output.has_value()) {
-        if (is_driver()) {
+        if (is_driver() || FLAGS_enable_eplb) {
           std::unique_lock<std::mutex> lock(mtx_);
           cv_.wait(lock, [this] { return !is_recorded_; });
           update_last_step_output(output);
@@ -314,7 +319,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
           update_last_step_output(output);
         }
       } else {
-        if (is_driver()) {
+        if (is_driver() || FLAGS_enable_eplb) {
           std::unique_lock<std::mutex> lock(mtx_);
           cv_.wait(lock, [this] { return !is_recorded_; });
           last_step_output_valid_ = false;
@@ -402,6 +407,15 @@ bool WorkerImpl::init_model(const std::string& model_weights_path) {
   this->load_model(std::move(model_loader));
 
   status_ = Status::LOADED;
+  if (FLAGS_enable_eplb) {
+    int32_t num_layers = args.n_layers() - args.first_k_dense_replace();
+    int32_t num_device_experts =
+        args.n_routed_experts() / context_.get_parallel_args().world_size() + 1;
+    expert_load_data_ = torch::zeros({num_layers, num_device_experts})
+                            .to(torch::kInt64)
+                            .to(device_)
+                            .contiguous();
+  }
   return true;
 }
 

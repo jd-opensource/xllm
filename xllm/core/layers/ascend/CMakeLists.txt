@@ -58,6 +58,7 @@ cc_library(
     :kv_cache
     :prefix_cache
     :block
+    :eplb
     :parallel_state
     :state_dict
     glog::glog

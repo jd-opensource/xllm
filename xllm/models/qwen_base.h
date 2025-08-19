@@ -380,6 +380,12 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     lm_head_->merge_loaded_weights();
   }
 
+  virtual void prepare_expert_weight(int32_t layer_id,
+                                     const std::vector<int32_t>& expert_ids) {
+    return;
+  }
+  virtual void update_expert_weight(int32_t layer_id) { return; }
+
   virtual LlmHead get_lm_head() { return lm_head_; }
 
   virtual void set_lm_head(LlmHead& head) { lm_head_ = head; }

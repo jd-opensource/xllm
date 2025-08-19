@@ -91,6 +91,10 @@ void Mapping::InitCommDomain(std::string defaultBackend)
     this->isInitialized_ = true;
 }
 
+uint32_t Mapping::localWorldSize() const{
+   return localWorldSize_;
+}
+
 void Mapping::Register(ParallelType parallelType, atb_speed::common::ParallelInfo parallelInfo)
 {
     this->parallelStrategies_[parallelType] = parallelInfo;

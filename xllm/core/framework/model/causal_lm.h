@@ -39,6 +39,11 @@ class CausalLM : public torch::nn::Module {
 
   virtual torch::Device device() const = 0;
 
+  virtual void prepare_expert_weight(
+      int32_t layer_id,
+      const std::vector<int32_t>& expert_ids) = 0;
+  virtual void update_expert_weight(int32_t layer_id) = 0;
+
   virtual const torch::TensorOptions& options() const = 0;
 
   virtual hf::LlmHead get_lm_head() = 0;
@@ -67,6 +72,15 @@ class CausalLMImpl : public CausalLM {
 
   void load_model(std::unique_ptr<ModelLoader> loader) override {
     model_->load_model(std::move(loader));
+  }
+  virtual void prepare_expert_weight(
+      int32_t layer_id,
+      const std::vector<int32_t>& expert_ids) override {
+    return model_->prepare_expert_weight(layer_id, expert_ids);
+  }
+
+  virtual void update_expert_weight(int32_t layer_id) {
+    return model_->update_expert_weight(layer_id);
   }
 
   hf::LlmHead get_lm_head() override { return model_->get_lm_head(); };

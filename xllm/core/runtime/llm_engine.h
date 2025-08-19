@@ -8,6 +8,8 @@
 #include "distributed_runtime/dist_manager.h"
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
+#include "framework/eplb/eplb_manager.h"
+#include "framework/eplb/eplb_policy.h"
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
@@ -99,6 +101,7 @@ class LLMEngine : public Engine {
   int64_t n_local_q_heads_ = 0;
   int64_t head_dim_ = 0;
 
+  torch::Tensor expert_load_data_;
   // For multi-node serving
   // engine brpc server, all workers connect to engine_server_,
   // engine_server_ will send a UniqueId for workers to
@@ -106,6 +109,12 @@ class LLMEngine : public Engine {
   // address to engine, engine will create WorkerClient for each worker.
   // Engine call workers to step via these WorkerClients.
   std::shared_ptr<DistManager> dist_manager_ = nullptr;
+
+  std::unique_ptr<EplbManager> eplb_manager_ = nullptr;
+  std::unique_ptr<EplbPolicy> eplb_policy_ = nullptr;
+  void process_eplb_data(
+      const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
+      int32_t worker_clients_num);
 };
 
 }  // namespace xllm
