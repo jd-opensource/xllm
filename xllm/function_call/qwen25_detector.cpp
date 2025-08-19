@@ -4,7 +4,7 @@
 #include <iostream>
 #include <string_view>
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 Qwen25Detector::Qwen25Detector() : BaseFormatDetector() {
@@ -113,4 +113,4 @@ StreamingParseResult Qwen25Detector::detect_and_parse(
 }
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

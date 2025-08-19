@@ -25,74 +25,6 @@ std::string generate_chat_request_id() {
 
 }  // namespace
 
-nlohmann::json RequestParams::proto_value_to_json(
-    const google::protobuf::Value& pb_value) {
-  switch (pb_value.kind_case()) {
-    case google::protobuf::Value::kNullValue:
-      return nlohmann::json(nullptr);
-
-    case google::protobuf::Value::kNumberValue:
-      return nlohmann::json(pb_value.number_value());
-
-    case google::protobuf::Value::kStringValue:
-      return nlohmann::json(pb_value.string_value());
-
-    case google::protobuf::Value::kBoolValue:
-      return nlohmann::json(pb_value.bool_value());
-
-    case google::protobuf::Value::kStructValue:
-      return proto_struct_to_json(pb_value.struct_value());
-
-    case google::protobuf::Value::kListValue: {
-      nlohmann::json array = nlohmann::json::array();
-      const auto& list = pb_value.list_value();
-      for (const auto& item : list.values()) {
-        array.push_back(proto_value_to_json(item));
-      }
-      return array;
-    }
-
-    case google::protobuf::Value::KIND_NOT_SET:
-    default:
-      return nlohmann::json(nullptr);
-  }
-}
-
-nlohmann::json RequestParams::proto_struct_to_json(
-    const google::protobuf::Struct& pb_struct) {
-  nlohmann::json result = nlohmann::json::object();
-
-  for (const auto& field : pb_struct.fields()) {
-    result[field.first] = proto_value_to_json(field.second);
-  }
-
-  return result;
-}
-
-void RequestParams::parse_tools_from_proto(
-    const google::protobuf::RepeatedPtrField<proto::Tool>& proto_tools) {
-  tools.clear();
-  tools.reserve(proto_tools.size());
-
-  for (const auto& proto_tool : proto_tools) {
-    function_call::JsonTool json_tool;
-    json_tool.type = proto_tool.type();
-
-    const auto& proto_function = proto_tool.function();
-    json_tool.function.name = proto_function.name();
-    json_tool.function.description = proto_function.description();
-
-    if (proto_function.has_parameters()) {
-      json_tool.function.parameters =
-          proto_struct_to_json(proto_function.parameters());
-    } else {
-      json_tool.function.parameters = nlohmann::json::object();
-    }
-
-    tools.emplace_back(std::move(json_tool));
-  }
-}
-
 RequestParams::RequestParams(const proto::CompletionRequest& request,
                              const std::string& x_rid,
                              const std::string& x_rtime) {
@@ -162,6 +94,77 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
 }
 
 namespace {
+
+nlohmann::json proto_value_to_json(const google::protobuf::Value& pb_value);
+
+nlohmann::json proto_struct_to_json(const google::protobuf::Struct& pb_struct) {
+  nlohmann::json result = nlohmann::json::object();
+
+  for (const auto& field : pb_struct.fields()) {
+    result[field.first] = proto_value_to_json(field.second);
+  }
+
+  return result;
+}
+
+nlohmann::json proto_value_to_json(const google::protobuf::Value& pb_value) {
+  switch (pb_value.kind_case()) {
+    case google::protobuf::Value::kNullValue:
+      return nlohmann::json(nullptr);
+
+    case google::protobuf::Value::kNumberValue:
+      return nlohmann::json(pb_value.number_value());
+
+    case google::protobuf::Value::kStringValue:
+      return nlohmann::json(pb_value.string_value());
+
+    case google::protobuf::Value::kBoolValue:
+      return nlohmann::json(pb_value.bool_value());
+
+    case google::protobuf::Value::kStructValue:
+      return proto_struct_to_json(pb_value.struct_value());
+
+    case google::protobuf::Value::kListValue: {
+      nlohmann::json array = nlohmann::json::array();
+      const auto& list = pb_value.list_value();
+      for (const auto& item : list.values()) {
+        array.push_back(proto_value_to_json(item));
+      }
+      return array;
+    }
+
+    case google::protobuf::Value::KIND_NOT_SET:
+    default:
+      return nlohmann::json(nullptr);
+  }
+}
+
+std::vector<xllm::JsonTool> parse_tools_from_proto(
+    const google::protobuf::RepeatedPtrField<proto::Tool>& proto_tools) {
+  std::vector<xllm::JsonTool> tools;
+  tools.clear();
+  tools.reserve(proto_tools.size());
+
+  for (const auto& proto_tool : proto_tools) {
+    xllm::JsonTool json_tool;
+    json_tool.type = proto_tool.type();
+
+    const auto& proto_function = proto_tool.function();
+    json_tool.function.name = proto_function.name();
+    json_tool.function.description = proto_function.description();
+
+    if (proto_function.has_parameters()) {
+      json_tool.function.parameters =
+          proto_struct_to_json(proto_function.parameters());
+    } else {
+      json_tool.function.parameters = nlohmann::json::object();
+    }
+
+    tools.emplace_back(std::move(json_tool));
+  }
+  return tools;
+}
+
 template <typename ChatRequest>
 void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
   if (request.has_request_id()) {
@@ -228,12 +231,12 @@ void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
 
   // Parse tools from proto request
   if (request.tools_size() > 0) {
-    parse_tools_from_proto(request.tools());
+    params.tools = parse_tools_from_proto(request.tools());
 
     if (request.has_tool_choice()) {
-      tool_choice = request.tool_choice();
+      params.tool_choice = request.tool_choice();
     } else {
-      tool_choice = "auto";
+      params.tool_choice = "auto";
     }
   }
 }

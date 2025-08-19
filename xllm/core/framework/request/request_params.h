@@ -9,8 +9,8 @@
 #include "common/macros.h"
 #include "completion.pb.h"
 #include "core/common/macros.h"
+#include "core/common/types.h"
 #include "embedding.pb.h"
-#include "function_call/core_types.h"
 #include "multimodal.pb.h"
 #include "request_output.h"
 
@@ -105,17 +105,9 @@ struct RequestParams {
   std::string decode_address;
 
   // JSON-based tools (replacing proto_tools)
-  std::vector<function_call::JsonTool> tools;
+  std::vector<xllm::JsonTool> tools;
   std::string tool_choice = "auto";
   bool has_tools() const { return !tools.empty(); }
-
- private:
-  void parse_tools_from_proto(
-      const google::protobuf::RepeatedPtrField<proto::Tool>& proto_tools);
-
-  nlohmann::json proto_struct_to_json(
-      const google::protobuf::Struct& pb_struct);
-  nlohmann::json proto_value_to_json(const google::protobuf::Value& pb_value);
 };
 
 }  // namespace xllm

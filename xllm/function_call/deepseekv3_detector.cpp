@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <string_view>
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 DeepSeekV3Detector::DeepSeekV3Detector() : BaseFormatDetector() {
@@ -172,4 +172,4 @@ StreamingParseResult DeepSeekV3Detector::detect_and_parse(
 }
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

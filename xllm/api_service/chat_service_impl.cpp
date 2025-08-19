@@ -13,23 +13,17 @@
 #include <unordered_set>
 
 #include "core/common/instance_name.h"
+#include "core/common/types.h"
 #include "core/framework/request/mm_input_helper.h"
 #include "core/framework/request/request_params.h"
 #include "core/runtime/llm_master.h"
 #include "core/runtime/vlm_master.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
-#include "chat_template/chat_template.h"
-#include "common/instance_name.h"
-#include "common/uuid.h"
-#include "function_call/core_types.h"
 #include "function_call/function_call.h"
-#include "request/request_params.h"
-#include "util/utils.h"
 
 namespace xllm {
 namespace {
-
 
 struct ToolCallResult {
   std::optional<google::protobuf::RepeatedPtrField<proto::ToolCall>> tool_calls;
@@ -37,12 +31,11 @@ struct ToolCallResult {
   std::string finish_reason;
 };
 
-ToolCallResult process_tool_calls(
-    std::string text,
-    const std::vector<function_call::JsonTool>& tools,
-    const std::string& parser_format,
-    std::string finish_reason,
-    google::protobuf::Arena* arena = nullptr) {
+ToolCallResult process_tool_calls(std::string text,
+                                  const std::vector<xllm::JsonTool>& tools,
+                                  const std::string& parser_format,
+                                  std::string finish_reason,
+                                  google::protobuf::Arena* arena = nullptr) {
   ToolCallResult result;
 
   function_call::FunctionCallParser parser(tools, parser_format);
@@ -204,14 +197,13 @@ bool send_delta_to_client_brpc(std::shared_ptr<ChatCall> call,
 }
 
 template <typename ChatCall>
-bool send_result_to_client_brpc(
-    std::shared_ptr<ChatCall> call,
-    const std::string& request_id,
-    int64_t created_time,
-    const std::string& model,
-    const RequestOutput& req_output,
-    const std::string& parser_format = "",
-    const std::vector<function_call::JsonTool>& tools = {}) {
+bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
+                                const std::string& request_id,
+                                int64_t created_time,
+                                const std::string& model,
+                                const RequestOutput& req_output,
+                                const std::string& parser_format = "",
+                                const std::vector<xllm::JsonTool>& tools = {}) {
   auto& response = call->response();
   response.set_object("chat.completion");
   response.set_id(request_id);
@@ -327,7 +319,8 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
        include_usage = include_usage,
        first_message_sent = std::unordered_set<size_t>(),
        request_id = request_params.request_id,
-       created_time = absl::ToUnixSeconds(absl::Now())](
+       created_time = absl::ToUnixSeconds(absl::Now()),
+       json_tools = request_params.tools](
           const RequestOutput& req_output) mutable -> bool {
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
@@ -346,110 +339,48 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
           master->get_rate_limiter()->decrease_one_request();
         }
 
+        const std::string parser_format =
+            master->options().tool_call_parser().value_or("");
+        const bool has_tool_support =
+            !json_tools.empty() && !parser_format.empty();
+
         if (stream) {
-          // send delta to client
-          return send_delta_to_client_brpc(call,
-                                           include_usage,
-                                           &first_message_sent,
-                                           request_id,
-                                           created_time,
-                                           model,
-                                           req_output);
-        }
-        return send_result_to_client_brpc(
-            call, request_id, created_time, model, req_output);
-      });
-}
-
-
-}  // namespace
-
-ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
-                                 const std::vector<std::string>& models)
-    : APIServiceImpl(master, models) {}
-
-// chat_async for brpc
-void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
-  const auto& rpc_request = call->request();
-  // check if model is supported
-  const auto& model = rpc_request.model();
-  if (!models_.contains(model)) {
-    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
-    return;
-  }
-
-  // Check if the request is being rate-limited.
-  if (master_->get_rate_limiter()->is_limited()) {
-    call->finish_with_error(
-        StatusCode::RESOURCE_EXHAUSTED,
-        "The number of concurrent requests has reached the limit.");
-    return;
-  }
-
-  RequestParams request_params(
-      rpc_request, call->get_x_request_id(), call->get_x_request_time());
-  std::vector<Message> messages;
-  messages.reserve(rpc_request.messages_size());
-  for (const auto& message : rpc_request.messages()) {
-    messages.emplace_back(message.role(), message.content());
-  }
-
-  bool include_usage = false;
-  if (rpc_request.has_stream_options()) {
-    include_usage = rpc_request.stream_options().include_usage();
-  }
-  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
-  if (rpc_request.has_routing()) {
-    prompt_tokens = std::vector<int>{};
-    prompt_tokens->reserve(rpc_request.routing().token_ids_size());
-    for (int i = 0; i < rpc_request.routing().token_ids_size(); i++) {
-      prompt_tokens->emplace_back(rpc_request.routing().token_ids(i));
-    }
-
-    request_params.decode_address = rpc_request.routing().decode_name();
-  }
-
-  master_->handle_request(
-      std::move(messages),
-      std::move(prompt_tokens),
-      std::move(request_params),
-      [call,
-       model,
-       master = master_,
-       stream = request_params.streaming,
-       include_usage = include_usage,
-       first_message_sent = std::unordered_set<size_t>(),
-       request_id = request_params.request_id,
-       created_time = absl::ToUnixSeconds(absl::Now())](
-          const RequestOutput& req_output) mutable -> bool {
-        if (req_output.status.has_value()) {
-          const auto& status = req_output.status.value();
-          if (!status.ok()) {
-            // Reduce the number of concurrent requests when a
-            // request is finished with error.
-            master->get_rate_limiter()->decrease_one_request();
-
-            return call->finish_with_error(status.code(), status.message());
+          if (has_tool_support) {
+            // TODO: Support tool call streaming output
+            LOG(ERROR) << "Tool call does not support streaming output";
+            return send_delta_to_client_brpc(call,
+                                             include_usage,
+                                             &first_message_sent,
+                                             request_id,
+                                             created_time,
+                                             model,
+                                             req_output);
+          } else {
+            // Stream response without tool support
+            return send_delta_to_client_brpc(call,
+                                             include_usage,
+                                             &first_message_sent,
+                                             request_id,
+                                             created_time,
+                                             model,
+                                             req_output);
+          }
+        } else {
+          if (has_tool_support) {
+            // Non-stream response with tool support
+            return send_result_to_client_brpc(call,
+                                              request_id,
+                                              created_time,
+                                              model,
+                                              req_output,
+                                              parser_format,
+                                              json_tools);
+          } else {
+            // Non-stream response without tool support
+            return send_result_to_client_brpc(
+                call, request_id, created_time, model, req_output);
           }
         }
-
-        // Reduce the number of concurrent requests when a request
-        // is finished or canceled.
-        if (req_output.finished || req_output.cancelled) {
-          master->get_rate_limiter()->decrease_one_request();
-        }
-
-        if (stream) {
-          return send_delta_to_client_brpc(call,
-                                           include_usage,
-                                           &first_message_sent,
-                                           request_id,
-                                           created_time,
-                                           model,
-                                           req_output);
-        }
-        return send_result_to_client_brpc(
-            call, request_id, created_time, model, req_output);
       });
 }
 
@@ -506,8 +437,7 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
        include_usage = include_usage,
        first_message_sent = std::unordered_set<size_t>(),
        request_id = request_params.request_id,
-       created_time = absl::ToUnixSeconds(absl::Now()),
-       json_tools = request_params.tools](
+       created_time = absl::ToUnixSeconds(absl::Now())](
           const RequestOutput& req_output) mutable -> bool {
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
@@ -526,48 +456,18 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
           master->get_rate_limiter()->decrease_one_request();
         }
 
-        const std::string parser_format =
-            master->options().tool_call_parser().value_or("");
-        const bool has_tool_support =
-            !json_tools.empty() && !parser_format.empty();
-
         if (stream) {
-          if (has_tool_support) {
-            // TODO: Support tool call streaming output
-            LOG(ERROR) << "Tool call does not support streaming output";
-            return send_delta_to_client_brpc(call,
-                                             include_usage,
-                                             &first_message_sent,
-                                             request_id,
-                                             created_time,
-                                             model,
-                                             req_output);
-          } else {
-            // Stream response without tool support
-            return send_delta_to_client_brpc(call,
-                                             include_usage,
-                                             &first_message_sent,
-                                             request_id,
-                                             created_time,
-                                             model,
-                                             req_output);
-          }
-        } else {
-          if (has_tool_support) {
-            // Non-stream response with tool support
-            return send_result_to_client_brpc(call,
-                                              request_id,
-                                              created_time,
-                                              model,
-                                              req_output,
-                                              parser_format,
-                                              json_tools);
-          } else {
-            // Non-stream response without tool support
-            return send_result_to_client_brpc(
-                call, request_id, created_time, model, req_output);
-          }
+          // send delta to client
+          return send_delta_to_client_brpc(call,
+                                           include_usage,
+                                           &first_message_sent,
+                                           request_id,
+                                           created_time,
+                                           model,
+                                           req_output);
         }
+        return send_result_to_client_brpc(
+            call, request_id, created_time, model, req_output);
       });
 }
 

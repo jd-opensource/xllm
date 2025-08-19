@@ -16,7 +16,6 @@
 #include "models.pb.h"
 #include "service_impl_factory.h"
 #include "xllm_metrics.h"
-#include <google/protobuf/util/json_util.h>
 namespace xllm {
 
 APIService::APIService(Master* master,

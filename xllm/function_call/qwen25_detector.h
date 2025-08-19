@@ -6,7 +6,7 @@
 
 #include "base_format_detector.h"
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 class Qwen25Detector : public BaseFormatDetector {
@@ -34,4 +34,4 @@ class Qwen25Detector : public BaseFormatDetector {
 };
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

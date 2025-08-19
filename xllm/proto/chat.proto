@@ -4,31 +4,6 @@ option go_package = "jd.com/jd-infer/xllm;xllm";
 package xllm.proto;
 
 import "common.proto";
-import "google/protobuf/struct.proto";
-
-message Function {
-  string name = 1;
-  string description = 2;
-  google.protobuf.Struct parameters = 3;
-  // string parameters = 3;
-}
-
-message Tool {
-  string type = 1;  // "function"
-  Function function = 2;
-}
-
-message ToolCall {
-  optional uint32 index = 1;
-  optional string id = 2;
-  string type = 3;  // "function"
-  FunctionCall function = 4;
-}
-
-message FunctionCall {
-  string name = 1;
-  string arguments = 2;  // JSON string
-}
 
 message ChatMessage {
   // the role of the messages author. One of "system", "user", "assistant".

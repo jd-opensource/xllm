@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 class DeepSeekV3DetectorTest : public ::testing::Test {
@@ -415,4 +415,4 @@ TEST_F(DeepSeekV3DetectorTest, MalformedTokensHandling) {
 }
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

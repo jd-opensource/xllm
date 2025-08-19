@@ -29,5 +29,6 @@ cc_library(
     proto::xllm_proto
     absl::flat_hash_set
     absl::random_random
+    :function_call
 )
 

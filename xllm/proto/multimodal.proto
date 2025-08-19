@@ -31,6 +31,9 @@ message MMChatMessage {
 
   // the content of the message. null for assistant messages with function calls.
   repeated MMInputData content = 2;
+
+  repeated ToolCall tool_calls = 3;
+  optional string tool_call_id = 4;
 }
 
 // Next Id: 27
@@ -120,5 +123,9 @@ message MMChatRequest {
 
   optional string service_request_id = 25;
 
+
   Routing routing = 26;
+
+  repeated Tool tools = 27;
+  optional string tool_choice = 28;
 }

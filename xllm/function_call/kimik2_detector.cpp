@@ -4,7 +4,7 @@
 #include <regex>
 #include <stdexcept>
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 KimiK2Detector::KimiK2Detector() : BaseFormatDetector() {
@@ -149,4 +149,4 @@ int KimiK2Detector::extract_function_index(
 }
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

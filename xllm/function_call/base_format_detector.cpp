@@ -4,7 +4,7 @@
 #include <regex>
 #include <sstream>
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 BaseFormatDetector::BaseFormatDetector()
@@ -96,4 +96,4 @@ std::vector<ToolCallItem> BaseFormatDetector::parse_base_json(
 }
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

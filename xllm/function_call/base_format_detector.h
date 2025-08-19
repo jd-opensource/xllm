@@ -11,7 +11,7 @@
 #include "chat.pb.h"
 #include "core_types.h"
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 class BaseFormatDetector {
@@ -72,4 +72,4 @@ class BaseFormatDetector {
 };
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

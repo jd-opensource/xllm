@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 class KimiK2DetectorTest : public ::testing::Test {
@@ -452,4 +452,4 @@ TEST_F(KimiK2DetectorTest, NestedBracesInJson) {
 }
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

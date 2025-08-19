@@ -2,12 +2,12 @@
 
 #include "base_format_detector.h"
 #include "core_types.h"
-#include "function_call_parser.h"
-#include "qwen25_detector.h"
-#include "kimik2_detector.h"
 #include "deepseekv3_detector.h"
+#include "function_call_parser.h"
+#include "kimik2_detector.h"
+#include "qwen25_detector.h"
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 inline std::vector<ToolCallItem> parse(const std::string& text,
@@ -22,4 +22,4 @@ inline bool has_calls(const std::string& text,
 }
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

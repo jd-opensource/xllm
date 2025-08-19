@@ -9,7 +9,7 @@
 #include "base_format_detector.h"
 #include "core_types.h"
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 class FunctionCallParser {
@@ -60,4 +60,4 @@ std::string generate_tool_call_id();
 }  // namespace utils
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

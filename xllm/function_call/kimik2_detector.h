@@ -5,7 +5,7 @@
 
 #include "base_format_detector.h"
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 /**
@@ -51,4 +51,4 @@ class KimiK2Detector : public BaseFormatDetector {
 };
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

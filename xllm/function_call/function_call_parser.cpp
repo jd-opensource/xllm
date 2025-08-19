@@ -3,11 +3,11 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "common/uuid.h"
-#include "qwen25_detector.h"
-#include "kimik2_detector.h"
+#include "core/util/uuid.h"
 #include "deepseekv3_detector.h"
-namespace llm {
+#include "kimik2_detector.h"
+#include "qwen25_detector.h"
+namespace xllm {
 namespace function_call {
 
 const std::unordered_map<std::string, std::string>
@@ -67,11 +67,11 @@ std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
   if (it->second == "qwen25") {
     return std::make_unique<Qwen25Detector>();
   }
-  
+
   if (it->second == "kimi_k2") {
     return std::make_unique<KimiK2Detector>();
   }
-  
+
   if (it->second == "deepseekv3") {
     return std::make_unique<DeepSeekV3Detector>();
   }
@@ -120,4 +120,4 @@ std::string generate_tool_call_id() { return "call_" + short_uuid.random(); }
 }  // namespace utils
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm

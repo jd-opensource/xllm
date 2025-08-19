@@ -7,6 +7,7 @@
 #include <variant>
 #include <vector>
 
+#include "core/common/types.h"
 #include "framework/tokenizer/tokenizer_args.h"
 
 namespace xllm {
@@ -52,9 +53,16 @@ class JinjaChatTemplate {
 
   std::optional<std::string> apply(const ChatMessages& messages) const;
 
+  std::optional<std::string> apply(
+      const ChatMessages& messages,
+      const std::vector<xllm::JsonTool>& json_tools) const;
+
   // expose this function for testing
   // apply the template to the values in the json object
   std::optional<std::string> apply(nlohmann::ordered_json& messages) const;
+
+  std::optional<std::string> apply(nlohmann::ordered_json& messages,
+                                   const nlohmann::ordered_json& tools) const;
 
  private:
   nlohmann::ordered_json get_mm_content(const Message::MMContentVec& vec) const;

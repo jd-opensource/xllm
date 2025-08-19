@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace llm {
+namespace xllm {
 namespace function_call {
 
 class Qwen25DetectorTest : public ::testing::Test {
@@ -325,4 +325,4 @@ TEST_F(Qwen25DetectorTest, PerformanceWithManyToolCalls) {
 }
 
 }  // namespace function_call
-}  // namespace llm
+}  // namespace xllm
