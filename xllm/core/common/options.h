@@ -54,6 +54,12 @@ class Options {
   // thread num to handle requests
   PROPERTY(size_t, num_handling_threads) = 4;
 
+  PROPERTY(std::optional<bool>, enable_eplb);
+
+  PROPERTY(std::optional<int64_t>, eplb_update_rate);
+
+  PROPERTY(std::optional<double>, eplb_update_threshold);
+
   PROPERTY(std::optional<std::string>, communication_backend);
 
   PROPERTY(std::optional<std::string>, rank_tablefile);

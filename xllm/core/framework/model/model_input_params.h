@@ -35,6 +35,7 @@ struct ModelInputParams {
     params.embedding_ids = embedding_ids;
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.layer_synchronizer = layer_synchronizer;
+    params.expert_load_data = expert_load_data;
 
     return params;
   }
@@ -97,6 +98,7 @@ struct ModelInputParams {
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
 
   DpEpPaddingData dp_ep_padding_data;
+  torch::Tensor expert_load_data;
 };
 
 }  // namespace xllm

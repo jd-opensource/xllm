@@ -57,6 +57,7 @@ cc_library(
     :worker_service
     :xllm_server
     :xllm_ops
+    :eplb
     glog::glog
     Folly::folly
     absl::strings

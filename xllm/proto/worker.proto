@@ -98,6 +98,12 @@ message TransferKVInfo {
   InstanceInfo remote_instance_info = 5;
 }
 
+message EplbInfo {
+  int32 prepare_layer_id = 1;
+  repeated int32 expert_ids = 2;
+  int32 update_layer_id = 3;
+};
+
 message RequestSamplingParam {
   float frequency_penalty = 1;
   float presence_penalty = 2;
@@ -155,6 +161,7 @@ message ForwardInput {
   repeated Embeddings embeds = 23;
   uint32 prefill_seq_len = 24;
   repeated int32 embedding_ids = 25;
+  EplbInfo eplb_info =26;
 }
 
 message Embeddings {
@@ -178,6 +185,8 @@ message SquenceOutput {
 
 message ForwardOutput {
   repeated SquenceOutput outputs = 2;
+  repeated int64 expert_load_data = 3;
+  int32 prepared_layer_id = 4;
 }
 
 // master create Collective service
