@@ -122,6 +122,19 @@ bool LLMEngine::init_model() {
   n_local_q_heads_ = std::max<int64_t>(1, n_heads / world_size);
   head_dim_ = args_.head_dim();
   dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
+  if (FLAGS_enable_eplb) {
+    int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
+    int32_t num_experts = args_.n_routed_experts();
+    expert_load_data_ =
+        torch::zeros({num_layers, num_experts + worker_clients_.size()})
+            .to(torch::kInt64);
+    eplb_policy_ =
+        std::make_unique<EplbPolicy>(num_experts / worker_clients_.size() + 1,
+                                     worker_clients_.size(),
+                                     num_layers);
+    eplb_manager_ = std::make_unique<EplbManager>(
+        eplb_policy_.get(), num_layers, worker_clients_.size(), num_experts);
+  }
 
   // key + value for all layers
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
@@ -486,6 +499,7 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   raw_forward_inputs.reserve(dp_size);
   std::vector<int32_t> dp_global_token_nums(dp_size);
   bool global_empty_kv_cache = true;
+  EplbInfo eplb_info;
   for (auto dp_rank = 0; dp_rank < dp_size; ++dp_rank) {
     // assume the order in workers_ is its rank
     RawForwardInput raw_forward_input = batch[dp_rank].prepare_forward_input();
@@ -497,11 +511,17 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num);
+  if (FLAGS_enable_eplb) {
+    eplb_info = eplb_manager_->get_eplb_info();
+  }
   // update dp related global paramters and then execute model
   for (auto worker_rank = 0; worker_rank < worker_clients_num; ++worker_rank) {
     auto dp_rank = worker_rank / dp_local_tp_size;
     raw_forward_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
     raw_forward_inputs[dp_rank].global_empty_kv_cache = global_empty_kv_cache;
+    if (FLAGS_enable_eplb) {
+      raw_forward_inputs[dp_rank].eplb_info = eplb_info;
+    }
     futures.emplace_back(
         worker_clients_[worker_rank]->step_async(raw_forward_inputs[dp_rank]));
   }
@@ -509,6 +529,9 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
 
+  if (FLAGS_enable_eplb && !options_.enable_schedule_overlap()) {
+    process_eplb_data(results, worker_clients_num);
+  }
   // concat results from dp ranks
   std::vector<std::optional<RawForwardOutput>> raw_forward_outputs;
   raw_forward_outputs.reserve(dp_size);
@@ -541,23 +564,46 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(dp_size);
-  for (auto worker_rank = 0; worker_rank < worker_clients_num;
-       worker_rank += dp_local_tp_size) {
-    futures.emplace_back(
-        worker_clients_[worker_rank]->get_last_step_result_async());
-  }
-  // wait for the all future to complete
-  auto last_step_results = folly::collectAll(futures).get();
-  // concat last step results from dp ranks
   std::vector<RawForwardOutput> raw_forward_outputs;
   raw_forward_outputs.reserve(dp_size);
-  for (auto worker_rank = 0; worker_rank < worker_clients_num;
-       worker_rank += dp_local_tp_size) {
-    auto result = last_step_results[worker_rank / dp_local_tp_size].value();
-    if (result.has_value()) {
-      raw_forward_outputs.emplace_back(std::move(result.value()));
-    } else {
-      throw std::runtime_error("Failed to get last step results.");
+  if (FLAGS_enable_eplb) {
+    for (auto worker_rank = 0; worker_rank < worker_clients_num;
+         worker_rank++) {
+      futures.emplace_back(
+          worker_clients_[worker_rank]->get_last_step_result_async());
+    }
+    // wait for the all future to complete
+    auto last_step_results = folly::collectAll(futures).get();
+    // concat last step results from dp ranks
+    process_eplb_data(last_step_results, worker_clients_num);
+    for (auto worker_rank = 0; worker_rank < worker_clients_num;
+         worker_rank += dp_local_tp_size) {
+      auto result = last_step_results[worker_rank].value();
+      if (result.has_value()) {
+        raw_forward_outputs.emplace_back(std::move(result.value()));
+      } else {
+        throw std::runtime_error("Failed to get last step results.");
+      }
+    }
+  } else {
+    for (auto worker_rank = 0; worker_rank < worker_clients_num;
+         worker_rank += dp_local_tp_size) {
+      futures.emplace_back(
+          worker_clients_[worker_rank]->get_last_step_result_async());
+    }
+
+    // wait for the all future to complete
+    auto last_step_results = folly::collectAll(futures).get();
+    // concat last step results from dp ranks
+
+    for (auto worker_rank = 0; worker_rank < worker_clients_num;
+         worker_rank += dp_local_tp_size) {
+      auto result = last_step_results[worker_rank / dp_local_tp_size].value();
+      if (result.has_value()) {
+        raw_forward_outputs.emplace_back(std::move(result.value()));
+      } else {
+        throw std::runtime_error("Failed to get last step results.");
+      }
     }
   }
 
@@ -590,6 +636,32 @@ void LLMEngine::setup_workers(const runtime::Options& options) {
     dist_manager_ = std::make_shared<DistManager>(options);
   }
   worker_clients_ = dist_manager_->get_worker_clients();
+}
+
+void LLMEngine::process_eplb_data(
+    const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
+    int32_t worker_clients_num) {
+  int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
+  int32_t num_device_experts =
+      args_.n_routed_experts() / worker_clients_.size() + 1;
+  std::vector<torch::Tensor> tensors;
+  std::vector<int32_t> layer_ids(num_device_experts - 1, -1);
+  tensors.reserve(worker_clients_.size());
+  for (size_t worker_rank = 0; worker_rank < results.size(); ++worker_rank) {
+    auto result = results[worker_rank].value();
+    if (result.has_value()) {
+      tensors.emplace_back(
+          torch::from_blob(result.value().expert_load_data.data(),
+                           {num_layers, num_device_experts},
+                           torch::TensorOptions().dtype(torch::kInt64))
+              .clone());
+      layer_ids[worker_rank] = result.value().prepared_layer_id;
+    } else {
+      LOG(ERROR) << "Failed to process EPLB data";
+    }
+  }
+  eplb_manager_->set_prepared_layer_ids(layer_ids);
+  eplb_manager_->update_expert_load(tensors);
 }
 
 }  // namespace xllm

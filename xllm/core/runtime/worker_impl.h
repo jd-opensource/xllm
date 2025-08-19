@@ -28,6 +28,7 @@ limitations under the License.
 #include "framework/kv_cache/hccl_kv_cache_transfer.h"
 #include "framework/kv_cache/llm_data_dist_transfer.h"
 #endif
+#include "framework/eplb/eplb_executor.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
 #include "framework/model/model_input_params.h"
@@ -194,6 +195,8 @@ class WorkerImpl {
 
   std::unique_ptr<Sampler> sampler_;
 
+  std::unique_ptr<EplbExecutor> eplb_executor_;
+
   // params for enable_schedule_overlap case
   // an output to store the result of last step
   ForwardOutput last_step_output_;
@@ -218,6 +221,8 @@ class WorkerImpl {
   bool is_spec_draft_ = false;
 
   Status status_ = Status::UNINITIALIZED;
+
+  torch::Tensor expert_load_data_;
 };
 
 }  // namespace xllm

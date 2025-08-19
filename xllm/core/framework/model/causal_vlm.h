@@ -56,6 +56,13 @@ class CausalVLMImpl : public CausalVLM {
   void load_model(std::unique_ptr<ModelLoader> loader) override {
     model_->load_model(std::move(loader));
   }
+  
+  virtual void prepare_expert_weight(int32_t layer_id,
+                                     const std::vector<int32_t>& expert_ids) {
+    return;
+  }
+
+  virtual void update_expert_weight(int32_t layer_id) { return; }
 
 #if defined(USE_NPU)
   hf::LlmHead get_lm_head() override { return model_->get_lm_head(); };

@@ -55,7 +55,7 @@ struct ModelInputParams {
 #if defined(USE_NPU)
     params.layer_synchronizer = layer_synchronizer;
 #endif
-
+    params.expert_load_data = expert_load_data;
     return params;
   }
 
@@ -119,6 +119,7 @@ struct ModelInputParams {
 #endif
 
   DpEpPaddingData dp_ep_padding_data;
+  torch::Tensor expert_load_data;
 };
 
 }  // namespace xllm

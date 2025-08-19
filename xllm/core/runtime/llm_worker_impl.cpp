@@ -37,6 +37,7 @@ limitations under the License.
 #include "common/device_monitor.h"
 #include "common/metrics.h"
 #include "common/types.h"
+#include "core/common/global_flags.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state.h"
@@ -80,6 +81,7 @@ bool LLMWorkerImpl::init_model(torch::ScalarType dtype,
   model_executor_ =
       std::make_unique<Executor>(model_.get(), model_args, device_, options_);
 
+  eplb_executor_ = std::make_unique<EplbExecutor>(model_.get());
   return true;
 }
 
@@ -95,6 +97,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
   auto& params = inputs.input_params;
   auto& sampling_params = inputs.sampling_params;
 
+  if (FLAGS_enable_eplb) {
+    eplb_executor_->eplb_execute(inputs.eplb_info);
+  }
   std::vector<folly::SemiFuture<bool>> futures;
   if (options_.instance_role() == InstanceRole::PREFILL &&
       options_.kv_cache_transfer_mode() == "PUSH" &&
@@ -124,6 +129,14 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
         model_->logits(hidden_states, sampling_params.selected_token_idxes);
   }
 
+  ForwardOutput output;
+  if (FLAGS_enable_eplb) {
+    output.expert_load_data = expert_load_data_;
+    output.prepared_layer_id = eplb_executor_->get_ready_layer_id();
+    if (output.prepared_layer_id != -1) {
+      eplb_executor_->reset_ready_layer_id();
+    }
+  }
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
       !options_.enable_speculative_decode()) {
 #if defined(USE_NPU)
@@ -145,11 +158,13 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
         }
       }
     }
+    if (FLAGS_enable_eplb) {
+      return output;
+    }
     return std::nullopt;
   }
 
   // driver prepare model output
-  ForwardOutput output;
   SampleOutput sample_output;
   if (sampling_params.selected_token_idxes.defined()) {
     sample_output = sampler_->forward(logits, sampling_params);

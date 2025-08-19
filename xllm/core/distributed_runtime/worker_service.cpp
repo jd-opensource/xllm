@@ -31,6 +31,7 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 #endif
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
@@ -331,6 +332,8 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
         torch::Tensor top_tokens;
         torch::Tensor top_logprobs;
         torch::Tensor embeddings;
+        torch::Tensor expert_load_data;
+        int32_t prepared_layer_id = -1;
 
         // execute model
         auto future = worker_->step_async(forward_inputs);
@@ -341,6 +344,10 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
           if (forward_outputs) {
             DCHECK(forward_outputs.has_value()) << "Failed to execute model";
             const auto& sample_output = forward_outputs.value().sample_output;
+            expert_load_data = safe_to(
+                forward_outputs.value().expert_load_data, torch::kCPU, true);
+            prepared_layer_id = forward_outputs.value().prepared_layer_id;
+
             {
 #if defined(USE_NPU)
               c10::StreamGuard streamGuard(
@@ -376,15 +383,19 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
 #endif
             }
           }
-        } else if (worker_->is_driver()) {
-          // construct fake output tensor
-          auto options =
-              torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-          int32_t prefill_seq_len =
-              static_cast<int32_t>(pb_forward_input->prefill_seq_len());
-          next_tokens = torch::arange(
-              -1, -1 * (num_sequences - prefill_seq_len + 1), -1, options);
-          std::move(future).deferValue([](auto&&) {});
+        } else {
+          if (worker_->is_driver()) {
+            // construct fake output tensor
+            auto options =
+                torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
+            int32_t prefill_seq_len =
+                static_cast<int32_t>(pb_forward_input->prefill_seq_len());
+            next_tokens = torch::arange(
+                -1, -1 * (num_sequences - prefill_seq_len + 1), -1, options);
+            std::move(future).deferValue([](auto&&) {});
+          }
+          expert_load_data =
+              torch::zeros({1, 1}).to(torch::kInt64).contiguous();
         }
 
         forward_output_to_proto(next_tokens,
@@ -392,6 +403,8 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
                                 top_tokens,
                                 top_logprobs,
                                 embeddings,
+                                expert_load_data,
+                                prepared_layer_id,
                                 pb_forward_output);
         COUNTER_ADD(worker_service_latency_seconds, timer.elapsed_seconds());
       });
@@ -415,6 +428,9 @@ void WorkerService::GetLastStepResult(
         auto forward_outputs = std::move(future).get();
         if (forward_outputs) {
           const auto& sample_output = forward_outputs.value().sample_output;
+          const auto& expert_load_data = safe_to(
+              forward_outputs.value().expert_load_data, torch::kCPU, true);
+          int32_t prepared_layer_id = forward_outputs.value().prepared_layer_id;
 #if defined(USE_NPU)
           c10::StreamGuard streamGuard(
               npu_stream_helper_->D2H_memcpy_stream.unwrap());
@@ -429,8 +445,8 @@ void WorkerService::GetLastStepResult(
           // [num_seq]
           const auto& next_tokens =
               safe_to(sample_output.next_tokens, torch::kCPU, true);
-          if (next_tokens.defined()) {
-            // [num_seq]
+          if (next_tokens.defined() || FLAGS_enable_eplb) {
+            // [num_seq] FloatTensor
             const auto& logprobs =
                 safe_to(sample_output.logprobs, torch::kCPU, true);
             // [num_seq, topk]
@@ -451,6 +467,8 @@ void WorkerService::GetLastStepResult(
                                     top_tokens,
                                     top_logprobs,
                                     embeddings,
+                                    expert_load_data,
+                                    prepared_layer_id,
                                     pb_forward_output);
           }
         }

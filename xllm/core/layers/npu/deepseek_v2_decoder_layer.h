@@ -22,6 +22,9 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 
 #include "atb_base.h"
+#include "atb_layers/models/deepseekv2/layer/decoder_layer.h"
+#include "framework/eplb/expert_buffer_manager.h"
+#include "framework/eplb/expert_weight_buffer_shm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/parallel_state.h"
@@ -30,6 +33,78 @@ limitations under the License.
 #include "xllm_kernels/models/deepseekv2/layer/decoder_layer.h"
 
 namespace xllm::hf {
+class ExpertBuffer {
+ public:
+  torch::Tensor gateup_weight;
+  torch::Tensor gateup_offset;
+  torch::Tensor gateup_scale;
+  torch::Tensor down_weight;
+  torch::Tensor down_offset;
+  torch::Tensor down_scale;
+
+  static ExpertBuffer& Instance() {
+    static ExpertBuffer instance;
+    return instance;
+  }
+
+  void initialize_or_reuse(const std::vector<int64_t>& gateup_weight_shape,
+                           const std::vector<int64_t>& gateup_offset_shape,
+                           const std::vector<int64_t>& gateup_scale_shape,
+                           const std::vector<int64_t>& down_weight_shape,
+                           const std::vector<int64_t>& down_offset_shape,
+                           const std::vector<int64_t>& down_scale_shape,
+                           const torch::TensorOptions& weight_options,
+                           const torch::TensorOptions& offset_options,
+                           const torch::TensorOptions& scale_options,
+
+                           bool force_reinit = false) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (force_reinit) {
+      initialized_ = false;
+    }
+
+    if (!initialized_) {
+      gateup_weight =
+          torch::empty(gateup_weight_shape, weight_options).contiguous();
+      gateup_offset =
+          torch::empty(gateup_offset_shape, offset_options).contiguous();
+      gateup_scale =
+          torch::empty(gateup_scale_shape, scale_options).contiguous();
+      down_weight =
+          torch::empty(down_weight_shape, weight_options).contiguous();
+      down_offset =
+          torch::empty(down_offset_shape, offset_options).contiguous();
+      down_scale = torch::empty(down_scale_shape, scale_options).contiguous();
+      initialized_ = true;
+    } else {
+      auto validate_shape = [](const torch::Tensor& t,
+                               const std::vector<int64_t>& expected) {
+        TORCH_CHECK(t.sizes() == expected,
+                    "Shape mismatch. Expected ",
+                    expected,
+                    " got ",
+                    t.sizes());
+      };
+
+      validate_shape(gateup_weight, gateup_weight_shape);
+      validate_shape(gateup_offset, gateup_offset_shape);
+      validate_shape(down_weight, down_weight_shape);
+      validate_shape(down_offset, down_offset_shape);
+      // gateup_weight = at_npu::native::npu_format_cast(
+      //   gateup_weight.contiguous(), 2);
+      gateup_offset = gateup_offset.contiguous();
+      gateup_scale = gateup_scale.contiguous();
+      down_weight = down_weight.contiguous();
+      down_offset = down_offset.contiguous();
+      down_scale = down_scale.contiguous();
+    }
+  }
+
+ private:
+  std::mutex mutex_;
+  bool initialized_ = false;
+};
 
 class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
  public:
@@ -44,6 +119,10 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
   void verify_loaded_weights(const std::string& prefix) const;
 
   void merge_loaded_weights();
+
+  void prepare_expert_weight(const std::vector<int32_t>& expert_list);
+
+  void update_expert_weight();
 
   torch::Tensor block_tables_placeholder_;
 
@@ -75,8 +154,8 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
                        const ParallelArgs& parallel_args,
                        bool is_prefill);
 
-  void resize_experts_weights(int num_of_device_experts);
-
+  void reserve_experts_weights(int num_of_device_experts);
+  void initialize_device_expert_list(int numdevice, int num_layers);
   void initialize_basic_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param,
       const ModelArgs& args,
@@ -117,6 +196,10 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
 
   std::string extract_endswith(const std::string& input);
 
+  std::string get_expert_shm_key(int32_t layer_id,
+                                 int32_t expert_ids,
+                                 std::string suffix);
+  torch::Tensor build_expert_routing_map(std::vector<int32_t> expert_lists);
   void set_kv_weight(const StateDict& state_dict,
                      const std::string& tensor_name,
                      int weight_position,
@@ -166,11 +249,22 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
   torch::Tensor trans_rope_weight(torch::Tensor weight);
 
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts,
+                                      at::Device device,
                                       bool transpose = false);
 
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_up,
                                       std::vector<torch::Tensor>& experts_gate,
+                                      at::Device device,
                                       bool transpose = false);
+
+  void merge_and_copy_gate_up_weights(
+      torch::Tensor& target_buffer,
+      const std::vector<torch::Tensor>& experts_gate,
+      const std::vector<torch::Tensor>& experts_up,
+      bool do_transpose = false);
+  void merge_and_copy_down_weights(
+      torch::Tensor& target_buffer,
+      const std::vector<torch::Tensor>& experts_down);
 
   int64_t init_layer();
 
@@ -196,6 +290,10 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
   int32_t kv_lora_rank_;
   int32_t qk_rope_head_dim_;
 
+  int32_t rank_;
+  int32_t first_k_dense_replace_;
+  int32_t n_layers_;
+  int32_t localWorldSize_;
   int32_t ep_size_;
   int32_t num_experts_;
   int32_t num_experts_per_partition_;
@@ -220,6 +318,7 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
 
   atb::Tensor internal_tensor_;
 
+  torch::Tensor at_cumsum_;
   torch::Tensor tensor_placeholder_;
   torch::Tensor slot_tensor_placeholder_;
   torch::Tensor int_tensor_placeholder_;
@@ -232,12 +331,19 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
   torch::Tensor at_in_device_expert_count_;
 
   std::vector<int32_t> int_placeholder_;
+  std::vector<int32_t> device_expert_list_;
 
   std::unordered_map<std::string, torch::Tensor> shared_experts_weights_;
   std::unordered_map<std::string, std::vector<torch::Tensor>> experts_weights_;
+  std::unordered_map<std::string, std::vector<torch::Tensor>>
+      all_experts_weights_buffer_;
 
   std::mutex shared_experts_mutex_;
   std::mutex experts_mutex_;
+
+  std::unique_ptr<ExpertBufferManager> shared_buffer_ = nullptr;
+  torch::Tensor expert_routing_map_;
+  torch::Tensor expert_routing_map_buffer_;
 };
 
 class DeepseekV2Decoder
