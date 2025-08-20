@@ -4,9 +4,9 @@ hide:
 ---
 
 
-<h1 align="center">
-    xLLM
-</h1>
+<div style="text-align:center">
+    <img src="../assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
+</div>
 
 ## 1. 简介
 

@@ -14,6 +14,11 @@ limitations under the License. -->
 
 [English](./README.md) | [中文](./README_zh.md)
 
+
+<div style="text-align:center">
+    <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
+</div>
+
 ## 1. 简介
 
 **xLLM** 是一个高效且易用的开源智能推理框架，为模型在国产芯片上的推理提供企业级服务保障与高性能引擎计算能力。

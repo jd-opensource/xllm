@@ -215,5 +215,6 @@ nav:
         - 投机推理: zh/features/mtp.md
         - MOE负载均衡: zh/features/eplb.md
         - ACLGraph: zh/features/acl_graph.md
+      - xLLM Service概览: zh/features/xllm_service_overview.md
   - CLI参考:
     - zh/cli_reference.md
