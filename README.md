@@ -14,6 +14,10 @@ limitations under the License. -->
 
 [English](./README.md) | [中文](./README_zh.md)
 
+<div style="text-align:center">
+    <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
+</div>
+
 ## 1. Project Overview
 
 **xLLM** is an efficient and user-friendly LLM intelligent inference framework that provides enterprise-level service guarantees and high-performance engine computing capabilities for model inference on domestic AI accelerators.

@@ -4,7 +4,7 @@ hide:
 ---
 
 
-# :woman_raising_hand:服务启动参数
+# 服务启动参数
 
 xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 
