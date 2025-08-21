@@ -199,20 +199,19 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
 
   // compute kv cache slot size
   const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
-  const int64_t base_size = args_.n_layers() * dtype_size;
   int64_t slot_size = 0;
   if (FLAGS_enable_mla) {
-    slot_size = base_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+    slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
   } else {
-    slot_size = 2 * head_dim_ * base_size * n_local_kv_heads_;
+    slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   }
   kv_cache_cap.slot_size = slot_size;
 
   // compute kv cache n_blocks
   const int32_t block_size = options_.block_size();
   const int64_t block_size_in_bytes = block_size * slot_size;
-  kv_cache_cap.n_blocks =
-      kv_cache_cap.cache_size_in_bytes / block_size_in_bytes;
+  kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
+                          (args_.n_layers() * block_size_in_bytes);
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
 
   return kv_cache_cap;
