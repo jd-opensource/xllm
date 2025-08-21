@@ -250,3 +250,8 @@ DEFINE_string(store_master_server_entry,
 DEFINE_string(store_metadata_connstring,
               "",
               "the address of the kvcache store metadata service .");
+
+// --- continuous kvcache config ---
+DEFINE_bool(enable_continuous_kvcache,
+            false,
+            "whether to enable continuous kvcache.");

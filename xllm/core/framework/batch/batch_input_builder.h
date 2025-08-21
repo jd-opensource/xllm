@@ -67,6 +67,10 @@ class BatchInputBuilder {
                            uint32_t n_kv_cache_tokens,
                            uint32_t seq_len,
                            uint32_t q_seq_len);
+  void setup_continuous_kv_cache_info(Sequence* sequence,
+                                      uint32_t n_kv_cache_tokens,
+                                      uint32_t seq_len,
+                                      uint32_t q_seq_len);
 
   // State management
   struct BuilderState {
@@ -105,6 +109,10 @@ class BatchInputBuilder {
     std::vector<int32_t> embedding_ids;
     uint32_t prefill_seq_len = 0;
     std::vector<TransferKVInfo> transfer_kv_infos;
+
+    // for continuous kvcache
+    std::vector<int64_t> new_cache_slot_offsets;  //[n_tokens]
+    std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
   };
 
   // Input data

@@ -64,3 +64,19 @@ message Routing {
 
   string decode_name = 2;
 }
+
+message Empty {}
+
+message AddressInfo {
+  // the ip adderss of worker process.
+  string address = 1;
+  int32 global_rank = 2;
+}
+
+message CommUniqueId {
+  bytes comm_unique_id = 1;
+}
+
+message CommUniqueIdList {
+  repeated CommUniqueId comm_unique_ids = 1;
+}

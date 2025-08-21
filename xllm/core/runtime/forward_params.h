@@ -154,6 +154,9 @@ struct RawForwardInput {
   std::vector<CacheBlockInfo> async_copy_out_blocks;
   std::vector<CacheBlockInfo> copy_out_blocks;
   std::vector<CacheBlockInfo> copy_in_blocks;
+  // for continuous kvcache
+  std::vector<int64_t> new_cache_slot_offsets;  //[n_tokens]
+  std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
 };
 
 struct RawSampleOutput {

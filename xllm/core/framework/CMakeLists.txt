@@ -5,6 +5,7 @@ include_directories(.)
 
 add_subdirectory(batch)
 add_subdirectory(block)
+add_subdirectory(page)
 add_subdirectory(chat_template)
 add_subdirectory(kv_cache)
 add_subdirectory(model)

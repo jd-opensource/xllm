@@ -140,6 +140,8 @@ class Options {
   PROPERTY(std::string, store_master_server_entry) = "";
 
   PROPERTY(std::string, store_metadata_connstring) = "";
+
+  PROPERTY(bool, enable_continuous_kvcache) = false;
 };
 
 }  // namespace xllm

@@ -265,6 +265,29 @@ void BatchInputBuilder::setup_kv_cache_info(Sequence* sequence,
   state_.block_tables_vec.emplace_back(std::move(block_ids));
 }
 
+void BatchInputBuilder::setup_continuous_kv_cache_info(
+    Sequence* sequence,
+    uint32_t n_kv_cache_tokens,
+    uint32_t seq_len,
+    uint32_t q_seq_len) {
+  // update kv cache tokens num
+  sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
+
+  int32_t seq_id = sequence->seq_id();
+
+  int64_t kv_cache_start_offset = seq_id * FLAGS_buffer_size_per_seq;
+  std::vector<int64_t> cache_slot_offsets;
+  cache_slot_offsets.reserve(seq_len - n_kv_cache_tokens);
+  for (int32_t i = n_kv_cache_tokens; i < seq_len; ++i) {
+    cache_slot_offsets.push_back(kv_cache_start_offset +
+                                 i * FLAGS_cache_size_per_token);
+  }
+  state_.new_cache_slot_offsets.insert(state_.new_cache_slot_offsets.end(),
+                                       cache_slot_offsets.begin(),
+                                       cache_slot_offsets.end());
+  state_.kv_cache_start_offsets.push_back(kv_cache_start_offset);
+}
+
 void BatchInputBuilder::padding_decode_batch_size(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
@@ -346,6 +369,13 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
   }
 
+  if (FLAGS_enable_continuous_kvcache) {
+    input_params.new_cache_slots =
+        torch::tensor(state_.new_cache_slot_offsets, torch::kInt64);
+    input_params.kv_cache_start_offsets =
+        torch::tensor(state_.kv_cache_start_offsets, torch::kInt64);
+  }
+
   CHECK_EQ(state_.sampling_params.size(), state_.selected_token_idxes.size());
   // Setup sampling parameters
   if (!state_.selected_token_idxes.empty()) {
@@ -395,6 +425,13 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.prefill_seq_len = state_.prefill_seq_len;
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
+
+  if (FLAGS_enable_continuous_kvcache) {
+    raw_forward_input.new_cache_slot_offsets =
+        std::move(state_.new_cache_slot_offsets);
+    raw_forward_input.kv_cache_start_offsets =
+        std::move(state_.kv_cache_start_offsets);
+  }
 
   if (mm_data_vec_.size() != 0) {
     MMData mm_data = MMData::batch(mm_data_vec_);

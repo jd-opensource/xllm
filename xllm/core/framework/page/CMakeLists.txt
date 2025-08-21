@@ -1,0 +1,39 @@
+include(cc_binary)
+include(cc_library)
+
+cc_library(
+  NAME
+    page
+  HDRS
+    options.h
+    phy_page.h
+    page_allocator.h
+    page_manager.h
+    page_manager_client.h
+    remote_page_manager.h
+    page_manager_service.h
+    page_manager_server.h
+    page_manager_pool.h
+    xtensor.h
+    multi_layer_xtensor.h
+    multi_layer_xtensor_transfer.h
+  SRCS
+    phy_page.cpp
+    page_allocator.cpp
+    page_manager.cpp
+    page_manager_client.cpp
+    remote_page_manager.cpp
+    page_manager_service.cpp
+    page_manager_server.cpp
+    page_manager_pool.cpp
+    xtensor.cpp
+    multi_layer_xtensor.cpp
+    multi_layer_xtensor_transfer.cpp
+  DEPS
+    torch
+    :request
+    :common
+    glog::glog
+    proto::xllm_proto
+    :collective_service
+)
