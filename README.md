@@ -14,9 +14,9 @@ limitations under the License. -->
 
 [English](./README.md) | [中文](./README_zh.md)
 
-<div style="text-align:center">
+<p align="center">
     <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
-</div>
+</p>
 
 ## 1. Project Overview
 
