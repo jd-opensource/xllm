@@ -80,6 +80,11 @@ struct ModelInputParams {
     params.async_copy_out_blocks = std::move(async_copy_out_blocks);
     params.copy_out_blocks = std::move(copy_out_blocks);
     params.copy_in_blocks = std::move(copy_in_blocks);
+
+    // params for continuous kvcache
+    params.new_cache_slot_offsets = safe_to(new_cache_slot_offsets, device);
+    params.kv_cache_start_offsets = safe_to(kv_cache_start_offsets, device);
+
     return params;
   }
 
@@ -149,6 +154,15 @@ struct ModelInputParams {
 
   DpEpPaddingData dp_ep_padding_data;
   torch::Tensor expert_load_data;
+
+  // new slot offsets for continuous kvcache
+  // used to store kv-cache to right position
+  // IntTensor: [n_tokens]
+  torch::Tensor new_cache_slot_offsets;
+
+  // kvcache offset of sequence in the xtensor for all layers
+  // IntTensor: [n_seq]
+  torch::Tensor kv_cache_start_offsets;
 };
 
 }  // namespace xllm

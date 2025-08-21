@@ -14,4 +14,5 @@ proto_library(
     disagg_pd.proto
     xllm_service.proto
     xservice.proto
+    page_manager.proto
 )

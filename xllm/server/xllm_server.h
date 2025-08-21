@@ -19,6 +19,7 @@ limitations under the License.
 #include "core/distributed_runtime/collective_service.h"
 #include "core/distributed_runtime/disagg_pd_service.h"
 #include "core/distributed_runtime/worker_service.h"
+#include "core/framework/page/page_manager_service.h"
 
 namespace xllm {
 
@@ -32,6 +33,8 @@ class XllmServer final {
   bool start(std::shared_ptr<CollectiveService> service,
              const std::string& addr);
   bool start(std::shared_ptr<WorkerService> service, const std::string& addr);
+  bool start(std::shared_ptr<PageManagerService> service,
+             const std::string& addr);
 
   void run();
   void stop();

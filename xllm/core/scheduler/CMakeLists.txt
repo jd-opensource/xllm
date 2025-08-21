@@ -13,6 +13,7 @@ cc_library(
     scheduler.h
     scheduler_factory.h
     decode_priority_queue.h
+    kv_cache_manager_client.h
   SRCS
     chunked_prefill_scheduler.cpp
     zero_eviction_scheduler.cpp
@@ -20,6 +21,7 @@ cc_library(
     disagg_pd_scheduler.cpp
     async_response_processor.cpp
     scheduler_factory.cpp
+    kv_cache_manager_client.cpp
   DEPS
     :batch
     :request

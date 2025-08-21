@@ -134,6 +134,34 @@ bool XllmServer::start(std::shared_ptr<WorkerService> service,
   return true;
 }
 
+bool XllmServer::start(std::shared_ptr<PageManagerService> service,
+                       const std::string& addr) {
+  server_ = std::make_unique<brpc::Server>();
+  if (server_->AddService(service.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
+      0) {
+    LOG(ERROR) << "Fail to add DistributePageManager service";
+    return false;
+  }
+
+  brpc::ServerOptions options;
+  options.idle_timeout_sec = FLAGS_idle_timeout_s;
+  options.num_threads = FLAGS_num_threads;
+  options.max_concurrency = FLAGS_max_concurrency;
+  listen_address_ = addr;
+  if (server_->Start(addr.c_str(), &options) != 0) {
+    LOG(ERROR) << "Failed to start distribute server on address: " << addr;
+    return false;
+  }
+  listen_port_ = server_->listen_address().port;
+  LOG(INFO) << "DistributePageManager started on address "
+            << server_->listen_address()
+            << ", idle_timeout_sec: " << FLAGS_idle_timeout_s
+            << ", num_threads: " << FLAGS_num_threads
+            << ", max_concurrency: " << FLAGS_max_concurrency;
+
+  return true;
+}
+
 bool XllmServer::create_server(google::protobuf::Service* service,
                                const std::string& addr,
                                int port,

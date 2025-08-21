@@ -145,6 +145,12 @@ struct Options {
   // the address of the metadata service (e.g., etcd/Redis) required for
   // Transfer Engine initialization
   PROPERTY(std::string, store_metadata_connstring) = "";
+
+  // enable continuous kvcache
+  PROPERTY(bool, enable_continuous_kvcache) = false;
+
+  // granularity size for one page in bytes, default 2MB, when enable vattn
+  PROPERTY(int64_t, granularity_size) = 2 * 1024 * 1024;
 };
 
 }  // namespace runtime
