@@ -31,8 +31,8 @@ jobs:
     steps:
       - name: Install clang-format
         run: |
-          # use apt-install
-          sudo apt-get update && sudo apt-get install -y clang-format  colordiff
+          pip install clang-format==20.1.6
+          clang-format --version
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,10 +50,22 @@ jobs:
             echo "base_commit=${{ github.sha }}~1" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify clang-format configuration
+        run: |
+          if [ ! -f ".clang-format" ]; then
+            echo "❌ .clang-format file not found in repository root"
+            exit 1
+          fi
+          clang-format --style=file --dump-config > /dev/null || {
+            echo "❌ .clang-format file has invalid format"
+            exit 1
+          }
+
       - name: Check code format
         shell: /usr/bin/bash {0}
         run: |
           BASE_COMMIT="${{ steps.get_base_commit.outputs.base_commit }}"
+          CLANG_FORMAT_FILE="$(pwd)/.clang-format"
 
           # ignore path
           IGNORED_PATHS=(
@@ -78,6 +90,7 @@ jobs:
 
           # run clang-format
           diff=$(git-clang-format \
+            --style=file:"$CLANG_FORMAT_FILE" \
             --extensions="c,h,cc,cp,cpp,c++,cxx,hh,hpp,hxx,inc,cu,cuh" \
             --commit "$BASE_COMMIT" \
             --diff \
