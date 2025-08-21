@@ -105,6 +105,7 @@ private:
     int CreateA16(AclNNVariantPack &aclnnVariantPack);
     int CreateW8A8Token(AclNNVariantPack &aclnnVariantPack);
     int CreateW4A8(AclNNVariantPack &aclnnVariantPack);
+    int IndexGmmQuant(AclNNVariantPack &aclnnVariantPack);
 
     std::vector<aclTensor *> yTensorVector;
     std::vector<std::vector<aclTensor *>> inputVectorOfTensor;
