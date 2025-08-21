@@ -43,19 +43,15 @@ DEFINE_string(task,
               "generate",
               "The task to use the model for. generate/embed.");
 
-DEFINE_string(
-    devices,
-    "auto",
-    "Devices to run the model on, e.g. cpu, cuda:0, cuda:0,cuda:1, or "
-    "auto to use all available gpus.");
+DEFINE_string(devices,
+              "npu:0",
+              "Devices to run the model on, e.g. npu:0, npu:0,npu:1.");
 
 DEFINE_string(draft_model, "", "draft hf model path to the model file.");
 
-DEFINE_string(
-    draft_devices,
-    "auto",
-    "Devices to run the draft model on, e.g. cpu, cuda:0, cuda:0,cuda:1, or "
-    "auto to use all available gpus.");
+DEFINE_string(draft_devices,
+              "npu:0",
+              "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1.");
 
 DEFINE_int32(block_size,
              128,
@@ -122,7 +118,7 @@ DEFINE_bool(enable_prefix_cache,
 // --- serving on multi-nodes config ---
 
 DEFINE_string(master_node_addr,
-              "",
+              "127.0.0.1:19888",
               "The master address for multi-node distributed serving(e.g. "
               "10.18.1.1:9999).");
 
