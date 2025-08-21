@@ -2,7 +2,7 @@
 # pre-commit run --all-files
 
 repos:
--   repo: git@coding.jd.com:9n_thirdparty/mirrors-clang-format.git
+-   repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v20.1.6
     hooks:
       - id: clang-format
