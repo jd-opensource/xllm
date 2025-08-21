@@ -57,6 +57,11 @@ FunctionCallParser::parse_non_stream(const std::string& full_text) {
   }
 }
 
+StreamingParseResult FunctionCallParser::parse_streaming_increment(
+    const std::string& new_text) {
+  return detector_->parse_streaming_increment(new_text, tools_);
+}
+
 std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
     const std::string& tool_call_parser) {
   auto it = ToolCallParserEnum.find(tool_call_parser);
@@ -110,6 +115,19 @@ bool has_function_calls(const std::string& text,
   } catch (const std::exception& e) {
     LOG(ERROR) << "Error checking function calls: " << e.what();
     return false;
+  }
+}
+
+StreamingParseResult parse_streaming_increment(
+    const std::string& new_text,
+    const std::vector<JsonTool>& tools,
+    const std::string& parser_type) {
+  try {
+    FunctionCallParser parser(tools, parser_type);
+    return parser.parse_streaming_increment(new_text);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Error in streaming parsing: " << e.what();
+    return StreamingParseResult();
   }
 }
 

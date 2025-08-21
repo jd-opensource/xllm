@@ -10,6 +10,7 @@
 
 #include "chat.pb.h"
 #include "core_types.h"
+#include "utils.h"
 
 namespace xllm {
 namespace function_call {
@@ -22,42 +23,6 @@ class BaseFormatDetector {
   BaseFormatDetector(const BaseFormatDetector&) = delete;
   BaseFormatDetector& operator=(const BaseFormatDetector&) = delete;
 
- protected:
-  // Streaming state management
-  // Buffer for accumulating incomplete patterns that arrive across multiple
-  // streaming chunks
-  std::string buffer_;
-
-  // Stores complete tool call info (name and arguments) for each tool being
-  // parsed. Used by serving layer for completion handling when streaming ends.
-  // Format: [{"name": str, "arguments": dict}, ...]
-  std::vector<std::unordered_map<std::string, std::string>> prev_tool_call_arr_;
-
-  // Index of currently streaming tool call. Starts at -1 (no active tool),
-  // increments as each tool completes. Tracks which tool's arguments are
-  // streaming.
-  int current_tool_id_;
-
-  // Flag for whether current tool's name has been sent to client.
-  // Tool names sent first with empty parameters, then arguments stream
-  // incrementally.
-  bool current_tool_name_sent_;
-
-  // Tracks raw JSON string content streamed to client for each tool's
-  // arguments. Critical for serving layer to calculate remaining content when
-  // streaming ends. Each index corresponds to a tool_id. Example:
-  // ['{"location": "San Francisco"', '{"temp": 72']
-  std::vector<std::string> streamed_args_for_tool_;
-
-  // Token configuration (override in subclasses)
-  std::string bot_token_;
-  std::string eot_token_;
-  std::string tool_call_separator_;
-
-  // Tool indices cache
-  std::unordered_map<std::string, int> tool_indices_;
-
- public:
   std::unordered_map<std::string, int> get_tool_indices(
       const std::vector<JsonTool>& tools);
 
@@ -69,6 +34,30 @@ class BaseFormatDetector {
       const std::vector<JsonTool>& tools) = 0;
 
   virtual bool has_tool_call(const std::string& text) = 0;
+
+  virtual StreamingParseResult parse_streaming_increment(
+      const std::string& new_text,
+      const std::vector<JsonTool>& tools);
+
+  std::vector<std::unordered_map<std::string, std::string>> prev_tool_call_arr_;
+
+  std::vector<std::string> streamed_args_for_tool_;
+
+ protected:
+  std::string buffer_;
+
+  int current_tool_id_;
+
+  bool current_tool_name_sent_;
+
+  std::string bot_token_;
+  std::string eot_token_;
+  std::string tool_call_separator_;
+
+  int _ends_with_partial_token(const std::string& buffer,
+                               const std::string& bot_token) const;
+
+  std::unordered_map<std::string, int> tool_indices_;
 };
 
 }  // namespace function_call

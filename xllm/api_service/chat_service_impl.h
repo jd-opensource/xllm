@@ -19,6 +19,8 @@ class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChatServiceImpl);
+
+  const std::string parser_format_;
 };
 
 class VLMMaster;

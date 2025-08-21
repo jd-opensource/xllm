@@ -112,5 +112,50 @@ StreamingParseResult Qwen25Detector::detect_and_parse(
   return StreamingParseResult(std::move(normal_text), std::move(calls));
 }
 
+StreamingParseResult Qwen25Detector::parse_streaming_increment(
+    const std::string& new_text,
+    const std::vector<JsonTool>& tools) {
+  // Streaming incremental parsing for Qwen 2.5/3 tool calls.
+  // Uses base class implementation with buffering to handle partial end tokens.
+  StreamingParseResult result =
+      BaseFormatDetector::parse_streaming_increment(new_text, tools);
+
+  // Handle partial end tokens that are streamed character by character
+  if (!result.normal_text.empty()) {
+    normal_text_buffer_ += result.normal_text;
+
+    // Check if buffer contains complete end token (without leading newline)
+    std::string end_token_without_newline =
+        eot_token_.substr(1);  // "</tool_call>"
+    size_t end_token_pos = normal_text_buffer_.find(end_token_without_newline);
+
+    if (end_token_pos != std::string::npos) {
+      std::string cleaned_text = normal_text_buffer_;
+      // Remove the end token
+      cleaned_text.erase(end_token_pos, end_token_without_newline.length());
+      normal_text_buffer_.clear();
+      result.normal_text = cleaned_text;
+    } else {
+      // Check if buffer might contain partial end token at the end
+      int partial_match_len = _ends_with_partial_token(
+          normal_text_buffer_, end_token_without_newline);
+
+      if (partial_match_len > 0) {
+        // Keep potential partial match in buffer, return the rest
+        result.normal_text = normal_text_buffer_.substr(
+            0, normal_text_buffer_.length() - partial_match_len);
+        normal_text_buffer_ = normal_text_buffer_.substr(
+            normal_text_buffer_.length() - partial_match_len);
+      } else {
+        // No partial match, return all buffered text
+        result.normal_text = normal_text_buffer_;
+        normal_text_buffer_.clear();
+      }
+    }
+  }
+
+  return result;
+}
+
 }  // namespace function_call
 }  // namespace xllm

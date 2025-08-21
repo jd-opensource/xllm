@@ -6,15 +6,15 @@
 #include <string>
 #include <vector>
 
+#include "core_types.h"
+#include "function_call_parser.h"
+
 namespace xllm {
 namespace function_call {
 
-class Qwen25DetectorTest : public ::testing::Test {
+class Qwen25TestBase : public ::testing::Test {
  protected:
   void SetUp() override {
-    detector_ = std::make_unique<Qwen25Detector>();
-
-    // Setup test tools
     nlohmann::json weather_params = {
         {"type", "object"},
         {"properties",
@@ -44,10 +44,24 @@ class Qwen25DetectorTest : public ::testing::Test {
     tools_ = {weather_tool_, calculator_tool_};
   }
 
-  std::unique_ptr<Qwen25Detector> detector_;
   JsonTool weather_tool_;
   JsonTool calculator_tool_;
   std::vector<JsonTool> tools_;
+};
+
+class Qwen25DetectorTest : public Qwen25TestBase {
+ protected:
+  void SetUp() override {
+    Qwen25TestBase::SetUp();
+    detector_ = std::make_unique<Qwen25Detector>();
+  }
+
+  std::unique_ptr<Qwen25Detector> detector_;
+};
+
+class Qwen25StreamingTest : public Qwen25TestBase {
+ protected:
+  void SetUp() override { Qwen25TestBase::SetUp(); }
 };
 
 // Test constructor and basic properties
@@ -322,6 +336,194 @@ TEST_F(Qwen25DetectorTest, PerformanceWithManyToolCalls) {
         std::to_string(i) + " + " + std::to_string(i + 1);
     EXPECT_EQ(params["expression"], expected_expr);
   }
+}
+
+// Test basic streaming functionality
+TEST_F(Qwen25StreamingTest, BasicStreamingParsing) {
+  FunctionCallParser parser(tools_, "qwen3");
+
+  // Simulate streaming chunks
+  std::vector<std::string> chunks = {
+      "I need to check the weather ",
+      "<tool_call>\n",
+      "{\"name\": \"get_current_weather\", ",
+      "\"arguments\": {\"location\": \"Beijing\", ",
+      "\"unit\": \"celsius\"}}\n",
+      "</tool_call>"};
+
+  std::string accumulated_normal_text;
+  std::vector<ToolCallItem> accumulated_calls;
+
+  for (const auto& chunk : chunks) {
+    auto result = parser.parse_streaming_increment(chunk);
+
+    if (!result.normal_text.empty()) {
+      accumulated_normal_text += result.normal_text;
+    }
+
+    for (const auto& call : result.calls) {
+      accumulated_calls.push_back(call);
+    }
+  }
+
+  // Verify results
+  EXPECT_EQ(accumulated_normal_text, "I need to check the weather ");
+  EXPECT_GT(accumulated_calls.size(), 0);
+
+  // Find the complete tool call
+  bool found_complete_call = false;
+  for (const auto& call : accumulated_calls) {
+    if (call.name.has_value() && call.name.value() == "get_current_weather") {
+      found_complete_call = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_complete_call);
+}
+
+// Test multiple tool calls streaming
+TEST_F(Qwen25StreamingTest, MultipleToolCallsStreaming) {
+  FunctionCallParser parser(tools_, "qwen3");
+
+  // Simulate realistic token-level streaming chunks with multiple tool calls
+  std::vector<std::string> chunks = {"Let",
+                                     " me",
+                                     " help",
+                                     " you",
+                                     " with",
+                                     " weather",
+                                     " and",
+                                     " calculation",
+                                     " ",
+                                     "<tool_call>",
+                                     "\n",
+                                     "{",
+                                     "\"name\"",
+                                     ":",
+                                     " \"",
+                                     "get_current_weather",
+                                     "\",",
+                                     " ",
+                                     "\"arguments\"",
+                                     ":",
+                                     " {",
+                                     "\"location\"",
+                                     ":",
+                                     " \"",
+                                     "Shanghai",
+                                     "\"}}\n",
+                                     "</tool_call>",
+                                     "\n",
+                                     "<tool_call>",
+                                     "\n",
+                                     "{",
+                                     "\"name\"",
+                                     ":",
+                                     " \"",
+                                     "calculate",
+                                     "\",",
+                                     " ",
+                                     "\"arguments\"",
+                                     ":",
+                                     " {",
+                                     "\"expression\"",
+                                     ":",
+                                     " \"",
+                                     "2",
+                                     " +",
+                                     " ",
+                                     "3",
+                                     "\"}}\n",
+                                     "</tool_call>"};
+
+  std::string accumulated_normal_text;
+  std::vector<ToolCallItem> accumulated_calls;
+
+  for (const auto& chunk : chunks) {
+    auto result = parser.parse_streaming_increment(chunk);
+    // std::cerr << "buffer_: " << (*parser.detector_).buffer_ << std::endl;
+    // std::cerr << "  -> Normal text: " << result.normal_text << std::endl;
+    // std::cerr << "  -> Calls count: " << result.calls.size() << std::endl;
+    if (!result.normal_text.empty()) {
+      accumulated_normal_text += result.normal_text;
+    }
+
+    for (const auto& call : result.calls) {
+      accumulated_calls.push_back(call);
+    }
+  }
+
+  // Verify results
+  EXPECT_EQ(accumulated_normal_text,
+            "Let me help you with weather and calculation ");
+  EXPECT_GT(accumulated_calls.size(), 0);
+
+  // Check for both tool calls
+  bool found_weather = false;
+  bool found_calculator = false;
+
+  for (const auto& call : accumulated_calls) {
+    if (call.name.has_value()) {
+      if (call.name.value() == "get_current_weather") {
+        found_weather = true;
+      } else if (call.name.value() == "calculate") {
+        found_calculator = true;
+      }
+    }
+  }
+
+  EXPECT_TRUE(found_weather);
+  EXPECT_TRUE(found_calculator);
+}
+
+// Test partial token handling
+TEST_F(Qwen25StreamingTest, PartialTokenHandling) {
+  FunctionCallParser parser(tools_, "qwen3");
+
+  // Simulate realistic partial tokens being streamed - testing edge cases where
+  // tokens are split
+  std::vector<std::string> chunks = {"Testing",
+                                     " partial",
+                                     " tokens",
+                                     " ",
+                                     "<tool_call>",
+                                     "\n",
+                                     "{",
+                                     "\"name\"",
+                                     ":",
+                                     " \"",
+                                     "get_current_weather",
+                                     "\",",
+                                     " ",
+                                     "\"arguments\"",
+                                     ":",
+                                     " {",
+                                     "\"location\"",
+                                     ":",
+                                     " \"",
+                                     "Tokyo",
+                                     "\"}}",
+                                     "\n",
+                                     "</tool_call>"};
+
+  std::string accumulated_normal_text;
+  std::vector<ToolCallItem> accumulated_calls;
+
+  for (const auto& chunk : chunks) {
+    auto result = parser.parse_streaming_increment(chunk);
+
+    if (!result.normal_text.empty()) {
+      accumulated_normal_text += result.normal_text;
+    }
+
+    for (const auto& call : result.calls) {
+      accumulated_calls.push_back(call);
+    }
+  }
+
+  // Verify results
+  EXPECT_EQ(accumulated_normal_text, "Testing partial tokens ");
+  EXPECT_GT(accumulated_calls.size(), 0);
 }
 
 }  // namespace function_call
