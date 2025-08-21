@@ -5,6 +5,7 @@
 
 #include <memory>
 
+#include "common/device_monitor_async_wrapper.h"
 #include "common/types.h"
 #include "executor.h"
 #include "forward_params.h"
@@ -135,9 +136,9 @@ class WorkerImpl {
 
   bool is_driver() const { return driver_ || dp_driver_; }
 
-  virtual int64_t get_active_activation_memory();
+  int64_t get_active_activation_memory();
 
-  virtual folly::SemiFuture<int64_t> get_active_activation_memory_async();
+  folly::SemiFuture<int64_t> get_active_activation_memory_async();
 
   Status get_status() const { return status_; }
 
@@ -197,6 +198,8 @@ class WorkerImpl {
   bool is_spec_draft_ = false;
 
   Status status_ = Status::UNINITIALIZED;
+
+  DeviceMonitorAsyncWrapper device_monitor_;
 };
 
 }  // namespace xllm

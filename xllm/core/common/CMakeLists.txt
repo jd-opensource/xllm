@@ -6,6 +6,7 @@ cc_library(
     common
   HDRS
     device_memory.h
+    device_monitor_async_wrapper.h
     etcd_client.h
     global_flags.h
     instance_name.h
@@ -19,6 +20,7 @@ cc_library(
     device_monitor.h
   SRCS
     device_memory.cpp
+    device_monitor_async_wrapper.cpp
     etcd_client.cpp
     global_flags.cpp
     layer_synchronizer.cpp
