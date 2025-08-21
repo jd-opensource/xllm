@@ -25,6 +25,7 @@
 #include "atb_speed/log.h"
 #include "atb_speed/utils/timer.h"
 #include "aclnnop/aclnn_grouped_matmul_v4.h"
+#include "aclnn_index_group_matmul.h"
 #include "operations/aclnn/utils/utils.h"
 #include "atb_speed/utils/check_util.h"
 
@@ -50,7 +51,7 @@ atb::Status GroupedMatmulOperation::InferShape(
         ACL_BF16 : ACL_FLOAT16;
     outTensorDescs.at(DIM0).shape.dimNum = inTensorDescs.at(DIM0).shape.dimNum;
 
-    int nDim = param_.transposeB ? DIM1 : DIM2;
+    int nDim = DIM2;
     ATB_SPEED_LOG_DEBUG(opName_ << "GroupedMatmulOperation infer shape origin inTensorDescs.at(DIM0).shape.dims[DIM0]"
                   << inTensorDescs.at(DIM0).shape.dims[DIM0]);
     ATB_SPEED_LOG_DEBUG(opName_ << "GroupedMatmulOperation infer shape origin inTensorDescs.at(DIM1).shape.dims[nDim]"
@@ -95,9 +96,9 @@ atb::Dims GetWeightStorageShape(const atb::TensorDesc atbTensorDesc)
         // (group_size, n, k) => (group_size, n / 16, k / 16, 16, 16)
         storageTensorDims.dims[0] = atbTensorDesc.shape.dims[0];
         storageTensorDims.dims[1] = 1 + ((atbTensorDesc.shape.dims[1] - 1) / 16);  // 1, 16：1: 维度, 16: padding大小
-        storageTensorDims.dims[2] = 1 + ((atbTensorDesc.shape.dims[2] - 1) / 16);  // 2, 16：1: 维度, 16: padding大小
+        storageTensorDims.dims[2] = 1 + ((atbTensorDesc.shape.dims[2] - 1) / 32);  // 2, 16：1: 维度, 16: padding大小
         storageTensorDims.dims[3] = 16;  // 3, 16：NZ格式要求
-        storageTensorDims.dims[4] = 16;  // 4, 16：NZ格式要求
+        storageTensorDims.dims[4] = 32;  // 4, 16：NZ格式要求
     }
     return storageTensorDims;
 }
@@ -124,10 +125,18 @@ atb::Status GroupedMatmulOperation::CreateAclNNInTensorVariantPack(const atb::Va
     AclNNVariantPack &aclnnVariantPack = this->aclnnOpCache_->aclnnVariantPack;
     aclnnVariantPack.aclInTensors.resize(GetInputNum());
     uint32_t inTensorCount = aclnnVariantPack.aclInTensors.size();
+    atb::Tensor x = variantPack.inTensors.at(DIM0);
+    atb::Tensor y = variantPack.inTensors.at(DIM1);
+    int index = 7;
+    if(!(x.desc.shape.dims[0] < 2048 && x.desc.shape.dims[0] > 8 && y.desc.shape.dims[2]==7168)){
+        index = 7;
+    }else{
+        index = 4;
+    }
     for (size_t i = 0; i < inTensorCount; i++) {
         std::shared_ptr<AclNNTensor> aclnnTensor = std::make_shared<AclNNTensor>();
         if (i == inTensorCount - 1) {
-            aclnnTensor->tensorIdx = 7; // 7 : for the last tensor
+            aclnnTensor->tensorIdx = index; // 7 : for the last tensor
         } else {
             aclnnTensor->tensorListidx = i;
             aclnnTensor->tensorIdx = 0;
@@ -154,16 +163,16 @@ atb::Status GroupedMatmulOperation::CreateAclNNInTensorVariantPack(const atb::Va
             storageTensorDims = GetWeightStorageShape(squeezedAtbTensor.desc);
         }
 
-        // ViewShape and Stride
+
         atb::Dims viewDims = squeezedAtbTensor.desc.shape;
-        if (squeezedAtbTensor.desc.shape.dimNum >= 3 && this->param_.transposeB) {  // 3: 维度
-            aclnnTensor->strides = GetTransposeTensorStride(viewDims);
-            viewDims.dims[0] = squeezedAtbTensor.desc.shape.dims[0];
-            viewDims.dims[1] = squeezedAtbTensor.desc.shape.dims[2];  // 1, 2: 后两维转置
-            viewDims.dims[2] = squeezedAtbTensor.desc.shape.dims[1];  // 1, 2: 后两维转置
-        } else {
+        // if (squeezedAtbTensor.desc.shape.dimNum >= 3 && this->param_.transposeB) {  // 3: 维度
+        //     aclnnTensor->strides = GetTransposeTensorStride(viewDims);
+        //     viewDims.dims[0] = squeezedAtbTensor.desc.shape.dims[0];
+        //     viewDims.dims[1] = squeezedAtbTensor.desc.shape.dims[2];  // 1, 2: 后两维转置
+        //     viewDims.dims[2] = squeezedAtbTensor.desc.shape.dims[1];  // 1, 2: 后两维转置
+        // } else {
             aclnnTensor->strides = GetCopyTensorStride(viewDims);
-        }
+        // }
 
         CHECK_OPERATION_STATUS_RETURN(CallAclCreateTensor(viewDims, storageTensorDims, squeezedAtbTensor, aclnnTensor));
         aclnnVariantPack.aclInTensors[i] = aclnnTensor;
@@ -266,9 +275,26 @@ int GroupedMatmulOperation::CreateA16(AclNNVariantPack &aclnnVariantPack)
         &this->aclnnOpCache_->aclExecutor);
     return ret;
 }
+int GroupedMatmulOperation::IndexGmmQuant(AclNNVariantPack &aclnnVariantPack)
+{
+    int ret = aclnnIndexGroupMatmulGetWorkspaceSize(aclnnVariantPack.aclInTensorList.at(DIM0),
+        aclnnVariantPack.aclInTensorList.at(DIM1),
+        param_.hasBias ? aclnnVariantPack.aclInTensorList.at(DIM3) :
+                            aclnnVariantPack.aclInTensorList.at(DIM2),
+        param_.hasBias ? aclnnVariantPack.aclInTensorList.at(4) :  // 5 : index of input tensor
+                            aclnnVariantPack.aclInTensorList.at(3),  // 4 : index of input tensor
+        param_.hasBias ? aclnnVariantPack.aclInTensors.at(5)->tensor :  // 6 : index of input tensor
+                                aclnnVariantPack.aclInTensors.at(4)->tensor,  // 5 : index of input tensor
+        aclnnVariantPack.aclOutTensorList.at(DIM0),
+        &this->aclnnOpCache_->workspaceSize,
+        &this->aclnnOpCache_->aclExecutor);
+    return ret;
+    // splitItem, groupType, groupListType, actType,
+}
+
 
 int GroupedMatmulOperation::CreateW8A8Token(AclNNVariantPack &aclnnVariantPack)
-{
+{   
     int ret = aclnnGroupedMatmulV4GetWorkspaceSize(aclnnVariantPack.aclInTensorList.at(DIM0),
         aclnnVariantPack.aclInTensorList.at(DIM1),
         param_.hasBias ? aclnnVariantPack.aclInTensorList.at(DIM2) : nullptr,
@@ -313,7 +339,13 @@ int GroupedMatmulOperation::SetAclNNWorkspaceExecutor()
     } else if (param_.quantType == GmmQuantType::W4A8_GROUP) {
         ret = CreateW4A8(aclnnVariantPack);
     } else {
-        ret = CreateW8A8Token(aclnnVariantPack);
+        atb::Tensor x = aclnnVariantPack.aclInTensors.at(DIM0)->atbTensor;
+        atb::Tensor y = aclnnVariantPack.aclInTensors.at(DIM1)->atbTensor;
+        if(!(x.desc.shape.dims[0] < 2048 && x.desc.shape.dims[0] > 8 && y.desc.shape.dims[2]==7168)){
+             ret = CreateW8A8Token(aclnnVariantPack);
+        }else{
+            ret = IndexGmmQuant(aclnnVariantPack);
+        }    
     }
 
     ATB_SPEED_LOG_DEBUG(opName_ << " SetAclNNWorkspaceExecutor end, ret:" << ret
@@ -325,8 +357,20 @@ int GroupedMatmulOperation::SetAclNNWorkspaceExecutor()
 int GroupedMatmulOperation::ExecuteAclNNOp(uint8_t *workspace, aclrtStream &stream)
 {
     ATB_SPEED_LOG_DEBUG(opName_ << " aclnnGroupedMatmul start");
-    int ret = aclnnGroupedMatmulV4(
-        workspace, this->aclnnOpCache_->workspaceSize, this->aclnnOpCache_->aclExecutor, stream);
+
+    AclNNVariantPack &aclnnVariantPack = this->aclnnOpCache_->aclnnVariantPack;
+    atb::Tensor x = aclnnVariantPack.aclInTensors.at(DIM0)->atbTensor;
+    atb::Tensor y = aclnnVariantPack.aclInTensors.at(DIM1)->atbTensor;
+    int ret = 0;
+    if(!(x.desc.shape.dims[0] < 2048 && x.desc.shape.dims[0] > 8 && y.desc.shape.dims[2]==7168)){
+        ret = aclnnGroupedMatmulV4(
+            workspace, this->aclnnOpCache_->workspaceSize, this->aclnnOpCache_->aclExecutor, stream);
+    }
+    else{
+        ret = aclnnIndexGroupMatmul(
+            workspace, this->aclnnOpCache_->workspaceSize, this->aclnnOpCache_->aclExecutor, stream);
+    }
+
     ATB_SPEED_LOG_DEBUG(opName_ << " aclnnGroupedMatmul end, ret:" << ret);
     return ret;
 }
