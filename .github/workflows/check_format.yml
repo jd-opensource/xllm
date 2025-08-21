@@ -1,0 +1,97 @@
+name: CheckFormat
+on: 
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+      - 'cibuild/**'
+      - 'cmake/**'
+      - 'docs/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - 'xllm/core/kernels/ascend/a2/**'
+      - 'xllm/core/kernels/ascend/a3/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+      - 'cibuild/**'
+      - 'cmake/**'
+      - 'docs/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - 'xllm/core/kernels/ascend/a2/**'
+      - 'xllm/core/kernels/ascend/a3/**'
+
+jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install clang-format
+        run: |
+          # use apt-install
+          sudo apt-get update && sudo apt-get install -y clang-format  colordiff
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine base commit for comparison
+        id: get_base_commit
+        run: |
+          # pull_request action
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base_commit=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+          else
+            # push action
+            echo "base_commit=${{ github.sha }}~1" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check code format
+        shell: /usr/bin/bash {0}
+        run: |
+          BASE_COMMIT="${{ steps.get_base_commit.outputs.base_commit }}"
+
+          # ignore path
+          IGNORED_PATHS=(
+            "^.github/.*"
+            "^cibuild/.*"
+            "^cmake/.*"
+            "^docs/.*"
+            "^third_party/.*"
+            "^tools/.*"
+            "^xllm/core/kernels/ascend/a2/.*"
+            "^xllm/core/kernels/ascend/a3/.*"
+          )
+
+          # igonore files
+          FILES=$(git diff --name-only "$BASE_COMMIT" -- '*.c' '*.h' '*.cc' '*.cp' '*.cpp' '*.c++' '*.cxx' '*.hh' '*.hpp' '*.hxx' '*.inc' '*.cu' '*.cuh' | \
+            grep -v -E "$(IFS=\|; echo "${IGNORED_PATHS[*]}")")
+          
+          if [ -z "$FILES" ]; then
+            echo "✅ No files to check (all excluded)"
+            exit 0
+          fi
+
+          # run clang-format
+          diff=$(git-clang-format \
+            --extensions="c,h,cc,cp,cpp,c++,cxx,hh,hpp,hxx,inc,cu,cuh" \
+            --commit "$BASE_COMMIT" \
+            --diff \
+            -- $FILES)
+
+          # check diff
+          if [ "$diff" = "no modified files to format" ] || [ "$diff" = "clang-format did not modify any files" ]; then
+            echo "✅ Code format is correct"
+            exit 0
+          fi
+
+          printf "\n❌ You have introduced coding style breakages.\n"
+
+          printf "\n\033[1mSuggested changes:\n\n"
+          echo "$diff"
+          exit 1
+
