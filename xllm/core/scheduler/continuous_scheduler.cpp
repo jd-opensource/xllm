@@ -625,7 +625,8 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
     if (sequence->is_first_token()) {
       HISTOGRAM_OBSERVE(time_to_first_token_latency_milliseconds,
                         tbt_milliseconds);
-      sequence->set_time_to_first_token_latency_seconds(tbt_milliseconds);
+      sequence->set_time_to_first_token_latency_seconds(
+          static_cast<double>(tbt_milliseconds) / 1000);
     } else {
       HISTOGRAM_OBSERVE(inter_token_latency_milliseconds, tbt_milliseconds);
     }
