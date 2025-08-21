@@ -174,12 +174,12 @@ Welcome to contact us:
 ## 7. Acknowledgment
 
 This project was made possible thanks to the following open-source projects:  
-- [ScaleLLM](https://github.com/vectorch-ai/ScaleLLM) - Adopt the graph construction and runtime execution from ScaleLLM.
-- [MindIE](https://www.hiascend.com/en/software/mindie) - Adopt the kernel optimization and ATB from MindIE.
-- [Mooncake](https://github.com/kvcache-ai/Mooncake) - Adopt the hybrid KV cache management from Mooncake.
-- [brpc](https://github.com/apache/brpc) - Build the high-performance http service with brpc.
-- [tokenizers-cpp](https://github.com/mlc-ai/tokenizers-cpp) - Adopt the tokenizers-cpp for c++ tokenizer.
-- [safetensors](https://github.com/huggingface/safetensors) - Adopt the safetensors for model weights loading.
+- [ScaleLLM](https://github.com/vectorch-ai/ScaleLLM) - xLLM draws inspiration from ScaleLLM's graph construction method and references its runtime execution. 
+- [MindIE](https://www.hiascend.com/en/software/mindie) - Develop xLLM kernels based on kernel optimization and ATB of MindIE.
+- [Mooncake](https://github.com/kvcache-ai/Mooncake) - Build xLLM hybrid KV cache management based on Mooncake.
+- [brpc](https://github.com/apache/brpc) - Build high-performance http service based on brpc.
+- [tokenizers-cpp](https://github.com/mlc-ai/tokenizers-cpp) - Build C++ tokenizer based on tokenizers-cpp.
+- [safetensors](https://github.com/huggingface/safetensors) - xLLM relies on the C binding safetensors capability.
 
 
 Thanks to all the following [developers](https://github.com/jd-opensource/xllm/graphs/contributors) who have contributed to xLLM.
