@@ -460,14 +460,10 @@ int64_t WorkerImpl::get_active_activation_memory() {
 }
 
 folly::SemiFuture<int64_t> WorkerImpl::get_active_activation_memory_async() {
-  folly::Promise<int64_t> promise;
-  auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
-    const int64_t active_activation_memory =
-        this->get_active_activation_memory();
-    promise.setValue(active_activation_memory);
-  });
-  return future;
+  return device_monitor_.get_device_stats_async(device_.index())
+      .deferValue([](const DeviceStats* stats) -> int64_t {
+        return stats->active_activation_memory;
+      });
 }
 
 }  // namespace xllm
