@@ -16,4 +16,5 @@ proto_library(
     xllm_service.proto
     xservice.proto
     image_generation.proto
+    page_manager.proto
 )

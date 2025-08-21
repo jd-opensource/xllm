@@ -20,6 +20,7 @@ limitations under the License.
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/model/model_args.h"
+#include "framework/page/page_manager_pool.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "options.h"
@@ -42,6 +43,10 @@ class Engine {
   // return the block manager
   virtual BlockManagerPool* block_manager_pool() const {
     return block_manager_pool_.get();
+  }
+
+  virtual PageManagerPool* page_manager_pool() const {
+    return page_manager_pool_.get();
   }
 
   // return the model args
@@ -105,6 +110,7 @@ class Engine {
 
   struct KVCacheCapacity {
     int64_t n_blocks = 0;
+    int64_t n_pages = 0;  // for continuous kvcache
     int64_t cache_size_in_bytes = 0;
     int64_t slot_size = 0;
   };
@@ -118,6 +124,9 @@ class Engine {
 
   // block manager
   std::unique_ptr<BlockManagerPool> block_manager_pool_;
+
+  // page manager
+  std::unique_ptr<PageManagerPool> page_manager_pool_;
 
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;

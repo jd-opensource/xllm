@@ -162,6 +162,8 @@ class Options {
   // dit
   // max requests per batch
   PROPERTY(int, max_requests_per_batch) = 0;
+
+  PROPERTY(bool, enable_continuous_kvcache) = false;
 };
 
 }  // namespace xllm

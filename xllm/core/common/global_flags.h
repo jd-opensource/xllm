@@ -179,3 +179,11 @@ DECLARE_int32(max_global_tpot_ms);
 
 // dit
 DECLARE_int32(max_requests_per_batch);
+
+DECLARE_bool(enable_continuous_kvcache);
+
+DECLARE_int64(granularity_size);
+
+DECLARE_int64(cache_size_per_token);
+
+DECLARE_int64(buffer_size_per_seq);

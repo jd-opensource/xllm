@@ -103,8 +103,9 @@ auto resource_guard(Func&& func) {
 
 }  // namespace
 
-BlockCapacityGuard::BlockCapacityGuard(BlockManagerPool* block_manager) {
-  block_manager_pool_ = block_manager;
+BlockCapacityGuard::BlockCapacityGuard(
+    KVCacheManagerClient* kv_cache_manager_client) {
+  kv_cache_manager_client_ = kv_cache_manager_client;
 }
 
 void BlockCapacityGuard::compute_reserved_block_num() {
@@ -121,7 +122,7 @@ void BlockCapacityGuard::compute_reserved_block_num() {
 void BlockCapacityGuard::prefix_cache_for_candidate_sequences() {
   if (is_prefix_cache()) {
     for (auto* sequence : candidate_sequences_) {
-      block_manager_pool_->allocate_shared(sequence);
+      kv_cache_manager_client_->allocate_shared(sequence);
     }
   }
 }
@@ -247,8 +248,13 @@ bool BlockCapacityGuard::if_accept_candidate_sequences(
 ZeroEvictionScheduler::ZeroEvictionScheduler(Engine* engine,
                                              const Options& options)
     : ContinuousScheduler(engine, options) {
+  if (FLAGS_enable_continuous_kvcache) {
+    LOG(FATAL)
+        << "ZeroEvictionScheduler is not supported for continuous kvcache";
+  }
+
   block_capacity_guard_ =
-      std::make_unique<BlockCapacityGuard>(block_manager_pool_);
+      std::make_unique<BlockCapacityGuard>(kv_cache_manager_client_.get());
 }
 
 ZeroEvictionScheduler::~ZeroEvictionScheduler() {
@@ -287,7 +293,7 @@ bool ZeroEvictionScheduler::try_allocate_block_for(
     if (this->enable_prefix_cache_) {
       for (auto* seq : *prefill_sequences) {
         // release shared blocks
-        this->block_manager_pool_->deallocate(seq);
+        this->kv_cache_manager_client_->deallocate(seq);
       }
     }
 
@@ -323,7 +329,7 @@ bool ZeroEvictionScheduler::try_allocate_block_for(
   for (auto* prefill_sequence : *prefill_sequences) {
     // if scheduling is unsuccessful, everything will be deallocated together,
     // so no additional deallocation is needed here.
-    if (!block_manager_pool_->allocate(prefill_sequence)) {
+    if (!kv_cache_manager_client_->allocate(prefill_sequence)) {
       return false;
     }
     size_t num_tokens = prefill_sequence->num_tokens();
@@ -354,11 +360,11 @@ void ZeroEvictionScheduler::handle_prefill_requests(
 
   while (!waiting_priority_queue_.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 &&
-         block_manager_pool_->kv_cache_utilization() <
+         kv_cache_manager_client_->kv_cache_utilization() <
              FLAGS_prefill_scheduling_memory_usage_threshold) {
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     if (request->finished() || request->cancelled()) {
-      block_manager_pool_->deallocate(request.get());
+      kv_cache_manager_client_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
@@ -410,13 +416,13 @@ void ZeroEvictionScheduler::handle_prefill_requests(
 
   if (running_sequences_.empty() && !waiting_priority_queue_.empty() &&
       running_queue_->empty() &&
-      block_manager_pool_->kv_cache_utilization() == 0) {
+      kv_cache_manager_client_->kv_cache_utilization() == 0) {
     LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                   "a single sequence.";
     // no enough memory to schedule single sequence, just finish the request
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     waiting_priority_queue_.pop();
-    block_manager_pool_->deallocate(request.get());
+    kv_cache_manager_client_->deallocate(request.get());
     response_processor_->process_failed_request(
         request,
         {StatusCode::RESOURCE_EXHAUSTED,

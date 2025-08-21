@@ -38,6 +38,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
+#include "framework/page/xtensor.h"
 #include "framework/state_dict/state_dict.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "pytorch/adapter/workspace/workspace.h"
@@ -70,6 +71,9 @@ class NpuBaseLayer : public BaseLayer {
 
   virtual void run_task(std::string taskName,
                         std::function<int()> task) const override;
+
+ protected:
+  atb::Tensor XTensor2Tensor(const std::shared_ptr<xllm::XTensor>& xtensor);
 
  protected:
   atb::Context* context_;

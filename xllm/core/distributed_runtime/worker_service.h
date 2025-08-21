@@ -59,6 +59,11 @@ class WorkerService : public proto::DistributeWorker {
                        proto::Status* response,
                        ::google::protobuf::Closure* done) override;
 
+  void AllocateContinuousKVCache(::google::protobuf::RpcController* controller,
+                                 const proto::XTensorOptionsVec* request,
+                                 proto::Status* response,
+                                 ::google::protobuf::Closure* done) override;
+
   void AllocateKVCacheWithTransfer(
       ::google::protobuf::RpcController* controller,
       const proto::AllocateKVCacheWithTransferRequest* req,
