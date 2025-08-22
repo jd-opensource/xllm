@@ -19,6 +19,11 @@ limitations under the License. -->
     <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
 </p>
 
+<p align="center">
+| <a href="https://xllm.readthedocs.io/zh-cn/latest/"><b>Documentation</b></a> | 
+</p>
+
+
 ## 1. 简介
 
 **xLLM** 是一个高效且易用的开源智能推理框架，为模型在国产芯片上的推理提供企业级服务保障与高性能引擎计算能力。
@@ -102,6 +107,15 @@ xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与
 
 ## 4. 快速开始
 #### 安装
+首先下载我们提供的镜像：
+```bash
+docker pull xllm/xllm-ai:xllm-0.6.0-dev-800I-A2-py3.11-openeuler24.03-lts
+```
+然后创建对应的容器
+```bash
+sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /mnt/cfs/9n-das-admin/llm_models:/mnt/cfs/9n-das-admin/llm_models -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/  xllm/xllm-ai:xllm-0.6.0-dev-800I-A2-py3.11-openeuler24.03-lts
+```
+
 下载官方仓库与模块依赖：
 ```
 git clone https://github.com/jd-opensource/xllm

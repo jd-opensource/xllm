@@ -18,6 +18,10 @@ limitations under the License. -->
     <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
 </p>
 
+<p align="center">
+| <a href="https://xllm.readthedocs.io/zh-cn/latest/"><b>Documentation</b></a> | 
+</p>
+
 ## 1. Project Overview
 
 **xLLM** is an efficient and user-friendly LLM intelligent inference framework that provides enterprise-level service guarantees and high-performance engine computing capabilities for model inference on domestic AI accelerators.
@@ -103,6 +107,15 @@ Supported models list:
 
 ## 4. Quick Start
 #### Installation
+First, download the image we provide:
+```bash
+docker pull xllm/xllm-ai:xllm-0.6.0-dev-800I-A2-py3.11-openeuler24.03-lts
+```
+Then create the corresponding container:
+```bash
+sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /mnt/cfs/9n-das-admin/llm_models:/mnt/cfs/9n-das-admin/llm_models -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/  xllm/xllm-ai:xllm-0.6.0-dev-800I-A2-py3.11-openeuler24.03-lts
+```
+
 Install official repo and submodules：
 ```
 git clone https://github.com/jd-opensource/xllm
