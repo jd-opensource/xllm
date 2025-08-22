@@ -183,6 +183,7 @@ python setup.py bdist_wheel
 - [brpc](https://github.com/apache/brpc) - 依赖brpc构建了高性能http service。
 - [tokenizers-cpp](https://github.com/mlc-ai/tokenizers-cpp) - 依赖tokenizers-cpp构建了c++ tokenizer。
 - [safetensors](https://github.com/huggingface/safetensors) - 依赖其c binding safetensors能力。
+- [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - xLLM的C++版本JSON解析器，参考Python与Go实现的设计思路。
 
 感谢以下为xLLM作出贡献的[开发者](https://github.com/jd-opensource/xllm/graphs/contributors)
 <a href="https://github.com/jd-opensource/xLLM/graphs/contributors">

@@ -184,6 +184,7 @@ This project was made possible thanks to the following open-source projects:
 - [brpc](https://github.com/apache/brpc) - Build high-performance http service based on brpc.
 - [tokenizers-cpp](https://github.com/mlc-ai/tokenizers-cpp) - Build C++ tokenizer based on tokenizers-cpp.
 - [safetensors](https://github.com/huggingface/safetensors) - xLLM relies on the C binding safetensors capability.
+- [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - Implement xLLM's C++ JSON parser with insights from Python and Go implementations.
 
 
 Thanks to all the following [developers](https://github.com/jd-opensource/xllm/graphs/contributors) who have contributed to xLLM.
