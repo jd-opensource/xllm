@@ -21,7 +21,6 @@
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
 #include "function_call/function_call.h"
-#include "streaming_function_call_handler.h"
 
 namespace xllm {
 namespace {
@@ -109,14 +108,193 @@ void set_logprobs(proto::ChatChoice* choice,
   }
 }
 
+struct StreamingState {
+  std::unique_ptr<function_call::FunctionCallParser> parser;
+  std::unordered_map<size_t, bool> has_tool_calls;
+
+  StreamingState(const std::vector<function_call::JsonTool>& tools,
+                 const std::string& parser_format) {
+    if (!tools.empty() && !parser_format.empty()) {
+      parser = std::make_unique<function_call::FunctionCallParser>(
+          tools, parser_format);
+    }
+  }
+};
+
 template <typename ChatCall>
-bool send_delta_to_client_brpc(std::shared_ptr<ChatCall> call,
-                               bool include_usage,
-                               std::unordered_set<size_t>* first_message_sent,
-                               const std::string& request_id,
-                               int64_t created_time,
-                               const std::string& model,
-                               const RequestOutput& output) {
+bool send_tool_call_chunk(std::shared_ptr<ChatCall> call,
+                          size_t index,
+                          const std::string& tool_call_id,
+                          const std::string& function_name,
+                          const std::string& arguments,
+                          int tool_index,
+                          const std::string& request_id,
+                          int64_t created_time,
+                          const std::string& model) {
+  auto& response = call->response();
+  response.Clear();
+  response.set_object("chat.completion.chunk");
+  response.set_id(request_id);
+  response.set_created(created_time);
+  response.set_model(model);
+
+  auto* choice = response.add_choices();
+  choice->set_index(index);
+  auto* delta = choice->mutable_delta();
+
+  auto* tool_call = delta->add_tool_calls();
+  if (!tool_call_id.empty()) {
+    tool_call->set_id(tool_call_id);
+  }
+  tool_call->set_index(tool_index);
+  tool_call->set_type("function");
+
+  auto* function = tool_call->mutable_function();
+  if (!function_name.empty()) {
+    function->set_name(function_name);
+  }
+  if (!arguments.empty()) {
+    function->set_arguments(arguments);
+  }
+
+  return call->write(response);
+}
+
+template <typename ChatCall>
+bool send_normal_text_chunk(std::shared_ptr<ChatCall> call,
+                            size_t index,
+                            const std::string& content,
+                            const std::string& request_id,
+                            int64_t created_time,
+                            const std::string& model) {
+  auto& response = call->response();
+  response.Clear();
+  response.set_object("chat.completion.chunk");
+  response.set_id(request_id);
+  response.set_created(created_time);
+  response.set_model(model);
+
+  auto* choice = response.add_choices();
+  choice->set_index(index);
+  auto* delta = choice->mutable_delta();
+  delta->set_content(content);
+
+  return call->write(response);
+}
+
+template <typename ChatCall>
+bool process_tool_call_stream(std::shared_ptr<ChatCall> call,
+                              std::shared_ptr<StreamingState> streaming_state,
+                              size_t index,
+                              const std::string& delta,
+                              const std::string& request_id,
+                              int64_t created_time,
+                              const std::string& model) {
+  if (!streaming_state->parser) {
+    return true;
+  }
+
+  auto parse_result = streaming_state->parser->parse_streaming_increment(delta);
+
+  if (!parse_result.normal_text.empty()) {
+    if (!send_normal_text_chunk(call,
+                                index,
+                                parse_result.normal_text,
+                                request_id,
+                                created_time,
+                                model)) {
+      return false;
+    }
+  }
+
+  for (const auto& call_item : parse_result.calls) {
+    streaming_state->has_tool_calls[index] = true;
+
+    std::string tool_call_id;
+    std::string function_name;
+
+    if (call_item.name.has_value()) {
+      tool_call_id = function_call::utils::generate_tool_call_id();
+      function_name = call_item.name.value();
+    }
+
+    if (!send_tool_call_chunk(call,
+                              index,
+                              tool_call_id,
+                              function_name,
+                              call_item.parameters,
+                              call_item.tool_index,
+                              request_id,
+                              created_time,
+                              model)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+template <typename ChatCall>
+bool check_for_unstreamed_tool_args(
+    std::shared_ptr<ChatCall> call,
+    std::shared_ptr<StreamingState> streaming_state,
+    size_t index,
+    const std::string& request_id,
+    int64_t created_time,
+    const std::string& model) {
+  if (!streaming_state->parser) {
+    return true;
+  }
+
+  auto* detector = streaming_state->parser->get_detector();
+  if (!detector) {
+    return true;
+  }
+
+  if (!detector->prev_tool_call_arr_.empty() &&
+      !detector->streamed_args_for_tool_.empty()) {
+    size_t tool_index = detector->prev_tool_call_arr_.size() - 1;
+    if (tool_index < detector->streamed_args_for_tool_.size()) {
+      const auto& expected_args = detector->prev_tool_call_arr_[tool_index];
+      const std::string& actual_args =
+          detector->streamed_args_for_tool_[tool_index];
+
+      if (expected_args.find("arguments") != expected_args.end()) {
+        const std::string& expected_call = expected_args.at("arguments");
+
+        if (expected_call.length() > actual_args.length()) {
+          std::string remaining_call =
+              expected_call.substr(actual_args.length());
+
+          if (!remaining_call.empty()) {
+            return send_tool_call_chunk(call,
+                                        index,
+                                        "",
+                                        "",
+                                        remaining_call,
+                                        static_cast<int>(tool_index),
+                                        request_id,
+                                        created_time,
+                                        model);
+          }
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+template <typename ChatCall>
+bool send_delta_to_client_brpc(
+    std::shared_ptr<ChatCall> call,
+    bool include_usage,
+    std::unordered_set<size_t>* first_message_sent,
+    const std::string& request_id,
+    int64_t created_time,
+    const std::string& model,
+    const RequestOutput& output,
+    std::shared_ptr<StreamingState> streaming_state = nullptr) {
   auto& response = call->response();
 
   // send delta to client
@@ -141,22 +319,47 @@ bool send_delta_to_client_brpc(std::shared_ptr<ChatCall> call,
     }
 
     if (!seq_output.text.empty()) {
-      response.Clear();
-      response.set_object("chat.completion.chunk");
-      response.set_id(request_id);
-      response.set_created(created_time);
-      response.set_model(model);
-      auto* choice = response.add_choices();
-      choice->set_index(index);
-      set_logprobs(choice, seq_output.logprobs);
-      auto* message = choice->mutable_delta();
-      message->set_content(seq_output.text);
-      if (!call->write(response)) {
-        return false;
+      if (streaming_state && streaming_state->parser) {
+        if (!process_tool_call_stream(call,
+                                      streaming_state,
+                                      index,
+                                      seq_output.text,
+                                      request_id,
+                                      created_time,
+                                      model)) {
+          return false;
+        }
+      } else {
+        response.Clear();
+        response.set_object("chat.completion.chunk");
+        response.set_id(request_id);
+        response.set_created(created_time);
+        response.set_model(model);
+        auto* choice = response.add_choices();
+        choice->set_index(index);
+        set_logprobs(choice, seq_output.logprobs);
+        auto* message = choice->mutable_delta();
+        message->set_content(seq_output.text);
+        if (!call->write(response)) {
+          return false;
+        }
       }
     }
 
+    // Handle finish reason
     if (seq_output.finish_reason.has_value()) {
+      // Check for unstreamed tool args before sending finish reason
+      if (streaming_state && streaming_state->has_tool_calls[index]) {
+        if (!check_for_unstreamed_tool_args(call,
+                                            streaming_state,
+                                            index,
+                                            request_id,
+                                            created_time,
+                                            model)) {
+          return false;
+        }
+      }
+
       response.Clear();
       response.set_object("chat.completion.chunk");
       response.set_id(request_id);
@@ -165,7 +368,14 @@ bool send_delta_to_client_brpc(std::shared_ptr<ChatCall> call,
       auto* choice = response.add_choices();
       choice->set_index(index);
       choice->mutable_delta();
-      choice->set_finish_reason(seq_output.finish_reason.value());
+
+      if (streaming_state && streaming_state->has_tool_calls[index] &&
+          seq_output.finish_reason.value() == "stop") {
+        choice->set_finish_reason("tool_calls");
+      } else {
+        choice->set_finish_reason(std::move(seq_output.finish_reason.value()));
+      }
+
       if (!call->write(response)) {
         return false;
       }
@@ -313,10 +523,10 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   const bool has_tool_support =
       !request_params.tools.empty() && !parser_format_.empty();
 
-  std::shared_ptr<StreamingFunctionCallHandler> streaming_handler;
+  std::shared_ptr<StreamingState> streaming_state;
   if (request_params.streaming && has_tool_support) {
-    streaming_handler = std::make_shared<StreamingFunctionCallHandler>(
-        request_params.tools, parser_format_);
+    streaming_state =
+        std::make_shared<StreamingState>(request_params.tools, parser_format_);
   }
 
   master_->handle_request(
@@ -333,7 +543,7 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
        created_time = absl::ToUnixSeconds(absl::Now()),
        json_tools = request_params.tools,
        parser_format = parser_format_,
-       streaming_handler = std::move(streaming_handler),
+       streaming_state = streaming_state,
        has_tool_support =
            has_tool_support](const RequestOutput& req_output) mutable -> bool {
         if (req_output.status.has_value()) {
@@ -354,27 +564,14 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
         }
 
         if (stream) {
-          if (streaming_handler) {
-            // Use persistent streaming function call handler - maintains state
-            // across calls
-            return streaming_handler->process_streaming_output(
-                call,
-                include_usage,
-                &first_message_sent,
-                request_id,
-                created_time,
-                model,
-                req_output);
-          } else {
-            // Stream response without tool support
-            return send_delta_to_client_brpc(call,
-                                             include_usage,
-                                             &first_message_sent,
-                                             request_id,
-                                             created_time,
-                                             model,
-                                             req_output);
-          }
+          return send_delta_to_client_brpc(call,
+                                           include_usage,
+                                           &first_message_sent,
+                                           request_id,
+                                           created_time,
+                                           model,
+                                           req_output,
+                                           streaming_state);
         } else {
           return send_result_to_client_brpc(call,
                                             request_id,

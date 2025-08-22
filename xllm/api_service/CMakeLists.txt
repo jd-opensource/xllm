@@ -14,7 +14,6 @@ cc_library(
     service_impl_factory.h
     stream_call.h
     models_service_impl.h
-    streaming_function_call_handler.h
   SRCS
     api_service.cpp
     call.cpp
@@ -22,7 +21,6 @@ cc_library(
     chat_service_impl.cpp
     embedding_service_impl.cpp
     models_service_impl.cpp
-    streaming_function_call_handler.cpp
   DEPS
     :master
     :chat_template
