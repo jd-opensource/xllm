@@ -72,8 +72,8 @@ class WorkerService : public proto::DistributeWorker {
 
   virtual void LoadKVCacheFromStore(
       ::google::protobuf::RpcController* controller,
-      const ::llm::proto::CacheContents* req,
-      ::llm::proto::StoreResponse* resp,
+      const ::xllm::proto::CacheBlockInfos* req,
+      ::xllm::proto::StoreResponse* resp,
       ::google::protobuf::Closure* done) override;
 
   void GetDeviceInfo(::google::protobuf::RpcController* controller,

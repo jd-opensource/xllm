@@ -74,7 +74,7 @@ class WorkerClient {
                               const std::vector<uint64_t>& dst_blocks);
 
   virtual uint32_t load_kv_blocks_from_store(
-      const std::vector<CacheContent>& cache_content_vec);
+      const std::vector<CacheBlockInfo>& cache_block_info);
 
   // prepare input for execution
   virtual ForwardInput prepare_inputs(Batch& batch);
@@ -106,7 +106,7 @@ class WorkerClient {
       const std::vector<uint64_t>& dst_blocks);
 
   virtual folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
-      const std::vector<CacheContent>& cache_content_vec);
+      const std::vector<CacheBlockInfo>& cache_block_info);
 
   // Run the model on the given input. async call
   // the future returns a successfull status with no meaningful value

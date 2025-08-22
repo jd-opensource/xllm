@@ -46,8 +46,6 @@ struct Murmur3Key {
     }
     return rt;
   }
-
-  static uint32_t get_key_len() { return MURMUR_HASH3_VALUE_LEN; }
 };
 
 struct FixedStringKeyHash {
@@ -65,15 +63,10 @@ struct FixedStringKeyEqual {
   }
 };
 
-void print_hex_array(uint8_t* array, uint32_t len);
+void print_hex_array(uint8_t* array);
 
-class MurMurHash3 {
- public:
-  uint32_t get_hash_value_len() { return MURMUR_HASH3_VALUE_LEN; }
-
-  void hash(const uint8_t* pre_hash_value,
-            const Slice<int32_t>& token_ids,
-            uint8_t* hash_value);
-};
+void murmur_hash3(const uint8_t* pre_hash_value,
+                  const Slice<int32_t>& token_ids,
+                  uint8_t* hash_value);
 
 }  // namespace xllm

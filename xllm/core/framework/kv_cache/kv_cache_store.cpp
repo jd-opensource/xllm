@@ -1,7 +1,7 @@
 
 #include "kv_cache_store.h"
 
-#include <MoonCake/mooncake-store/include/utils.h>
+#include <Mooncake/mooncake-store/include/utils.h>
 #include <glog/logging.h>
 
 #include <string>
@@ -9,10 +9,10 @@
 
 #include "util/hash_util.h"
 
-namespace llm {
+namespace xllm {
 
 KVCacheStore::KVCacheStore(const StoreConfig& config,
-                           std::vector<llm::KVCache>* host_kv_caches)
+                           std::vector<xllm::KVCache>* host_kv_caches)
     : config_(config), host_kv_caches_(host_kv_caches) {
   if (config_.protocol == "rdma") {
     if (getenv("DEVICE_NAME")) {
@@ -33,10 +33,10 @@ KVCacheStore::KVCacheStore(const StoreConfig& config,
                                              config_.master_server_entry);
 
   rep_config_.replica_num = config_.replica_num;
-  rep_config_.preferred_segment = config_.localhost_name;
+  // rep_config_.preferred_segment = config_.localhost_name;
 
   if (!client_opt.has_value()) {
-    LOG(ERROR) << "mooncake::Client::Create fail!";
+    LOG(FATAL) << "mooncake::Client::Create fail!";
     return;
   }
   client_ptr_ = client_opt.value();
@@ -91,16 +91,22 @@ KVCacheStore::~KVCacheStore() {
 }
 
 uint64_t KVCacheStore::batch_put(
-    const std::vector<CacheContent>& cache_content_vec) {
+    const std::vector<CacheBlockInfo>& cache_block_info) {
   std::vector<std::string> str_keys;
   std::vector<std::vector<mooncake::Slice>> slices;
 
-  str_keys.reserve(cache_content_vec.size());
-  slices.reserve(cache_content_vec.size());
-  for (auto cache_content : cache_content_vec) {
+  str_keys.reserve(cache_block_info.size());
+  slices.reserve(cache_block_info.size());
+  for (auto cache_content : cache_block_info) {
     std::string str_key(reinterpret_cast<const char*>(cache_content.hash_key),
                         MURMUR_HASH3_VALUE_LEN);
+
     str_key.append(std::to_string(config_.tp_rank));
+
+    auto exist = client_ptr_->IsExist(str_key);
+    if (exist.has_value() && exist.value()) {
+      continue;
+    }
 
     str_keys.emplace_back(str_key);
 
@@ -123,11 +129,18 @@ uint64_t KVCacheStore::batch_put(
     slices.emplace_back(std::move(slice));
   }
 
+  if (str_keys.size() == 0) {
+    return cache_block_info.size();
+  }
+
+  uint64_t success_cnt = str_keys.size();
   auto results = client_ptr_->BatchPut(str_keys, slices, rep_config_);
-  uint64_t success_cnt = 0;
-  for (int i = 0; i < cache_content_vec.size(); i++) {
+
+  for (int i = 0; i < str_keys.size(); i++) {
     if (!results[i].has_value()) {
       success_cnt = i;
+      // LOG(ERROR) << "success_cnt: " << success_cnt
+      //            << ", failed to BatchPut: " << toString(results[i].error());
       break;
     }
   }
@@ -135,15 +148,20 @@ uint64_t KVCacheStore::batch_put(
 }
 
 uint64_t KVCacheStore::batch_get(
-    const std::vector<CacheContent>& cache_content_vec) {
+    const std::vector<CacheBlockInfo>& cache_block_info) {
   std::unordered_map<std::string, std::vector<mooncake::Slice>> slices;
   std::vector<std::string> str_keys;
 
-  str_keys.reserve(cache_content_vec.size());
-  for (auto cache_content : cache_content_vec) {
+  str_keys.reserve(cache_block_info.size());
+  for (auto cache_content : cache_block_info) {
     std::string str_key(reinterpret_cast<const char*>(cache_content.hash_key),
                         MURMUR_HASH3_VALUE_LEN);
+
     str_key.append(std::to_string(config_.tp_rank));
+    auto exist = client_ptr_->IsExist(str_key);
+    if (!exist.has_value() || !exist.value()) {
+      break;
+    }
 
     str_keys.emplace_back(str_key);
 
@@ -167,11 +185,17 @@ uint64_t KVCacheStore::batch_get(
     }
   }
 
+  if (str_keys.size() == 0) {
+    return 0;
+  }
+
+  uint64_t success_cnt = str_keys.size();
   auto results = client_ptr_->BatchGet(str_keys, slices);
-  uint64_t success_cnt = 0;
-  for (int i = 0; i < cache_content_vec.size(); i++) {
+  for (int i = 0; i < str_keys.size(); i++) {
     if (!results[i].has_value()) {
       success_cnt = i;
+      // LOG(ERROR) << "success_cnt: " << success_cnt
+      //            << ", failed to BatchGet: " << toString(results[i].error());
       break;
     }
   }
@@ -179,9 +203,9 @@ uint64_t KVCacheStore::batch_get(
 }
 
 uint64_t KVCacheStore::batch_remove(
-    const std::vector<CacheContent>& cache_content_vec) {
+    const std::vector<CacheBlockInfo>& cache_block_info) {
   uint64_t success_cnt = 0;
-  for (auto cache_content : cache_content_vec) {
+  for (auto cache_content : cache_block_info) {
     std::string str_key(reinterpret_cast<const char*>(cache_content.hash_key),
                         MURMUR_HASH3_VALUE_LEN);
     str_key.append(std::to_string(config_.tp_rank));
@@ -195,4 +219,4 @@ uint64_t KVCacheStore::batch_remove(
   return success_cnt;
 }
 
-}  // namespace llm
+}  // namespace xllm

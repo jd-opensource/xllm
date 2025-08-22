@@ -23,8 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "framework/block/block_manager_impl.h"
-#include "prefix_cache_hash.h"
-
+#include "prefix_cache.h"
 using namespace xllm;
 
 static void BM_HashSearch(benchmark::State& state) {
@@ -42,7 +41,7 @@ static void BM_HashSearch(benchmark::State& state) {
   options.num_blocks(n_blocks + 1).block_size(block_size);
   BlockManagerImpl block_manager(options);
 
-  PrefixCacheHash prefix_cache(block_size);
+  PrefixCache prefix_cache(block_size);
 
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -79,3 +78,5 @@ BENCHMARK(BM_HashSearch)
     ->Iterations(100)
     ->Repetitions(20)
     ->ReportAggregatesOnly(true);
+
+BENCHMARK_MAIN();

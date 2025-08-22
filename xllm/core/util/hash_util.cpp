@@ -29,9 +29,9 @@ DEFINE_uint32(murmur_hash3_seed, 1024, "default Murmur Hash seed");
 
 namespace xllm {
 
-void MurMurHash3::hash(const uint8_t* pre_hash_value,
-                       const Slice<int32_t>& token_ids,
-                       uint8_t* hash_value) {
+void murmur_hash3(const uint8_t* pre_hash_value,
+                  const Slice<int32_t>& token_ids,
+                  uint8_t* hash_value) {
   if (pre_hash_value == nullptr) {
     MurmurHash3_x64_128(reinterpret_cast<const void*>(token_ids.data()),
                         sizeof(int32_t) * token_ids.size(),
@@ -57,13 +57,13 @@ void MurMurHash3::hash(const uint8_t* pre_hash_value,
   }
 }
 
-void print_hex_array(uint8_t* array, uint32_t len) {
-  for (size_t i = 0; i < len; ++i) {
+void print_hex_array(uint8_t* array) {
+  for (size_t i = 0; i < MURMUR_HASH3_VALUE_LEN; ++i) {
     unsigned char uc = static_cast<unsigned char>(array[i]);
     std::cout << std::hex << std::setw(2) << std::setfill('0')
               << static_cast<int>(uc);
 
-    if (i % 16 == 15) {
+    if (i % MURMUR_HASH3_VALUE_LEN == MURMUR_HASH3_VALUE_LEN - 1) {
       std::cout << std::endl;
     }
 

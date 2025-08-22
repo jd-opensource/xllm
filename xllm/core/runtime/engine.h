@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <folly/futures/Future.h>
+
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/model/model_args.h"
@@ -66,11 +68,11 @@ class Engine {
     LOG(FATAL) << " pull_kv_blocks is notimplemented!";
   };
 
-  virtual uint32_t load_kv_blocks_from_store(
+  virtual folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
       const uint32_t dp_rank,
-      const std::vector<CacheContent>& cache_content_vec) {
+      const std::vector<CacheBlockInfo>& cache_block_info) {
     LOG(FATAL) << " load_kv_blocks_from_store is not implemented!";
-    return 0;
+    return folly::makeSemiFuture(static_cast<uint32_t>(0));
   };
 
   virtual void get_device_info(std::vector<std::string>& device_ips,

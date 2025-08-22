@@ -45,7 +45,14 @@ std::string Options::to_string() const {
      << ", nnodes: " << nnodes() << ", node_rank: " << node_rank()
      << ", enable_schedule_overlap: " << enable_schedule_overlap()
      << ", enable_disagg_pd: " << enable_disagg_pd()
-     << ", kv_cache_transfer_mode: " << kv_cache_transfer_mode();
+     << ", kv_cache_transfer_mode: " << kv_cache_transfer_mode()
+     << ", etcd_addr: " << etcd_addr().value_or("null")
+     << ", enable_service_routing: " << enable_service_routing()
+     << ", enable_cache_upload: " << enable_cache_upload()
+     << ", enable_kvcache_store: " << enable_kvcache_store()
+     << ", store_protocol: " << store_protocol()
+     << ", store_master_server_entry: " << store_master_server_entry()
+     << ", store_metadata_connstring: " << store_metadata_connstring();
   ss << "]";
   return ss.str();
 }
