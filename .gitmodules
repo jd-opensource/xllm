@@ -25,6 +25,6 @@
 [submodule "third_party/spdlog"]
 	path = third_party/spdlog
 	url = https://gitcode.com/xLLM-AI/spdlog.git
-[submodule "third_party/MoonCake"]
-	path = third_party/MoonCake
-	url = git@coding.jd.com:9n_aigc/MoonCake.git
+[submodule "third_party/Mooncake"]
+	path = third_party/Mooncake
+	url = https://github.com/kvcache-ai/Mooncake.git

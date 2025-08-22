@@ -115,6 +115,11 @@ DEFINE_bool(enable_prefix_cache,
             true,
             "enable the prefix cache for the block manager");
 
+DEFINE_bool(enable_cache_upload,
+            false,
+            "Whether to upload cache info to service. This feature is only "
+            "available when service routing is enabled.");
+
 // --- serving on multi-nodes config ---
 
 DEFINE_string(master_node_addr,
@@ -181,9 +186,16 @@ DEFINE_bool(enable_atb_spec_kernel,
 
 DEFINE_string(etcd_addr, "", "etcd adderss for save instance meta info");
 
-DEFINE_bool(enable_service_routing, false, "whether to use etcd.");
+DEFINE_bool(enable_service_routing,
+            false,
+            "whether to use xllm service routing.");
 
 DEFINE_int32(heart_beat_interval, 3, "heart beat interval");
+
+DEFINE_double(host_blocks_factor,
+              0.0,
+              "host block factor, e.g. host block num = host_blocks_factor * "
+              "hbm block num");
 
 DEFINE_bool(enable_kvcache_store, false, "whether to use kvcache store.");
 
@@ -191,7 +203,7 @@ DEFINE_string(store_protocol, "tcp", "kvcache store protocol.");
 
 DEFINE_string(store_master_server_entry,
               "tcp",
-              "address information of the stopre master service.");
+              "address information of the store master service.");
 
 DEFINE_string(store_metadata_connstring,
               "",

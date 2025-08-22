@@ -98,7 +98,11 @@ class Options {
 
   PROPERTY(std::optional<std::string>, tool_call_parser);
 
+  PROPERTY(double, host_blocks_factor) = 0.0;
+
   PROPERTY(bool, enable_kvcache_store) = false;
+
+  PROPERTY(bool, enable_cache_upload) = false;
 
   PROPERTY(std::string, store_protocol) = "tcp";
 

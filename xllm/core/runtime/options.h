@@ -107,6 +107,12 @@ struct Options {
   // enable service routing mode.
   PROPERTY(bool, enable_service_routing) = false;
 
+  // enable kvcache upload to service.
+  PROPERTY(bool, enable_cache_upload) = false;
+
+  // host block factor, e.g. host block num = host_blocks_factor * hbm block num
+  PROPERTY(double, host_blocks_factor) = 0.0;
+
   // enable kvcache store.
   PROPERTY(bool, enable_kvcache_store) = false;
 

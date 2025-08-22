@@ -3,7 +3,7 @@
 #include <vector>
 
 #include "block_manager.h"
-#include "core/framework/model/parameters.h"
+#include "framework/model/model_input_params.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 
@@ -11,8 +11,17 @@ namespace xllm {
 
 class BlockManagerPool {
  public:
-  explicit BlockManagerPool(const BlockManager::Options& options,
-                            int32_t dp_size = 1);
+  struct Options {
+    PROPERTY(uint32_t, num_blocks) = 0;
+    PROPERTY(uint32_t, host_num_blocks) = 0;
+    PROPERTY(int32_t, block_size) = 0;
+    PROPERTY(bool, enable_prefix_cache) = true;
+    PROPERTY(bool, enable_disagg_pd) = false;
+    PROPERTY(bool, enable_cache_upload) = false;
+    PROPERTY(bool, enable_kvcache_store) = false;
+  };
+
+  explicit BlockManagerPool(const Options& options, int32_t dp_size = 1);
 
   ~BlockManagerPool() = default;
 
@@ -21,6 +30,8 @@ class BlockManagerPool {
   bool allocate(Sequence* sequence);
   bool allocate(std::vector<Sequence*>& sequences);
   bool allocate(Sequence* sequence, size_t num_tokens);
+
+  uint32_t pre_allocate(Sequence* sequence);
 
   // Try to allocate blocks with num_tokens,
   // return {} if not enough blocks
@@ -32,17 +43,9 @@ class BlockManagerPool {
 
   void allocate_shared(Sequence* sequence);
   void cache(Sequence* sequence);
-  void copy_in_blocks_for(Request* request);
-  void copy_in_blocks_for(std::vector<Sequence*>& sequences);
-  void copy_in_blocks_for(Sequence* sequence);
 
-  void copy_out_blocks_for(Request* request, bool is_preempted = false);
-  void copy_out_blocks_for(std::vector<Sequence*>& sequences,
-                           bool is_preempted = false);
-  void copy_out_blocks_for(Sequence* sequence, bool is_preempted = false);
-
-  std::vector<std::vector<CacheContent>>* get_copy_in_content();
-  std::vector<std::vector<CacheContent>>* get_copy_out_content();
+  std::vector<std::vector<CacheBlockInfo>>* get_copy_in_content();
+  std::vector<std::vector<CacheBlockInfo>>* get_copy_out_content();
   void reset_copy_content();
 
   void get_merged_kvcache_event(KvCacheEvent* event) const;
@@ -54,11 +57,14 @@ class BlockManagerPool {
   double kv_cache_utilization() const;
 
   // get the options for the block manager
-  const BlockManager::Options& options() const { return options_; }
+  const Options& options() const { return options_; }
 
  private:
   int32_t get_manager_with_max_free_blocks() const;
   int32_t get_dp_rank(Sequence* sequence) const;
+
+  void allocate_host_shared(Sequence* sequence);
+  void cache_host(Sequence* sequence);
 
  private:
   std::vector<std::unique_ptr<BlockManager>> block_managers_;
@@ -67,9 +73,9 @@ class BlockManagerPool {
   // the options for the block manager
   Options options_;
 
-  // cachecontent per step
-  std::vector<std::vector<CacheContent>> copy_in_cache_contents_;
-  std::vector<std::vector<CacheContent>> copy_out_cache_contents_;
+  // CacheBlockInfo per step
+  std::vector<std::vector<CacheBlockInfo>> copy_in_cache_contents_;
+  std::vector<std::vector<CacheBlockInfo>> copy_out_cache_contents_;
   std::vector<std::vector<Block>> evict_host_blocks_;
 };
 
