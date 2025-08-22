@@ -5,7 +5,7 @@ package xllm.proto;
 
 import "common.proto";
 
-// Next ID: 25
+// Next ID: 26
 message CompletionRequest {
   // ID of the model to use. (required)
   // You can use the ListModels endpoint to list available models.
@@ -83,7 +83,9 @@ message CompletionRequest {
 
   optional string service_request_id = 23;
 
-  Routing routing = 24;
+  repeated int32 token_ids = 24;
+
+  Routing routing = 25;
 }
 
 message LogProbs {

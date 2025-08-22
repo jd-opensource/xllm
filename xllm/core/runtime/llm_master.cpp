@@ -404,7 +404,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                          sp.skip_special_tokens,
                          options_.enable_schedule_overlap(),
                          callback,
-                         nullptr);
+                         nullptr,
+                         sp.decode_address);
 
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,

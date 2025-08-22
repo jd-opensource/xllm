@@ -22,7 +22,7 @@ message ChatMessage {
 }
 
 
-// Next Id: 27
+// Next Id: 30
 message ChatRequest {
   // ID of the model to use. You can use the ListModels endpoint to list available models.
   string model = 1;
@@ -108,10 +108,12 @@ message ChatRequest {
 
   optional string service_request_id = 25;
 
-  Routing routing = 26;
+  repeated int32 token_ids = 26;
+  
+  Routing routing = 27;
 
-  repeated Tool tools = 27;
-  optional string tool_choice = 28;
+  repeated Tool tools = 28;
+  optional string tool_choice = 29;
 }
 
 message ChatLogProbData {

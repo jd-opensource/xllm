@@ -512,9 +512,9 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   std::optional<std::vector<int>> prompt_tokens = std::nullopt;
   if (rpc_request.has_routing()) {
     prompt_tokens = std::vector<int>{};
-    prompt_tokens->reserve(rpc_request.routing().token_ids_size());
-    for (int i = 0; i < rpc_request.routing().token_ids_size(); i++) {
-      prompt_tokens->emplace_back(rpc_request.routing().token_ids(i));
+    prompt_tokens->reserve(rpc_request.token_ids_size());
+    for (int i = 0; i < rpc_request.token_ids_size(); i++) {
+      prompt_tokens->emplace_back(rpc_request.token_ids(i));
     }
 
     request_params.decode_address = rpc_request.routing().decode_name();

@@ -36,7 +36,8 @@ struct RequestState final {
                bool skip_special_tokens,
                bool enable_schedule_overlap,
                const OutputFunc& output_func,
-               const OutputsFunc& outputs_func);
+               const OutputsFunc& outputs_func,
+               const std::string& decode_address = "");
 
   RequestState(const std::string& prompt,
                const std::vector<int32_t>& prompt_tokens,
@@ -52,7 +53,8 @@ struct RequestState final {
                bool skip_special_tokens,
                bool enable_schedule_overlap,
                const OutputFunc& output_func,
-               const OutputsFunc& outputs_func);
+               const OutputsFunc& outputs_func,
+               const std::string& decode_address = "");
 
   RequestState(const std::string& prompt,
                const std::vector<int32_t>& prompt_tokens,
@@ -68,7 +70,8 @@ struct RequestState final {
                bool skip_special_tokens,
                bool enable_schedule_overlap,
                const OutputFunc& output_func,
-               const OutputsFunc& outputs_func);
+               const OutputsFunc& outputs_func,
+               const std::string& decode_address = "");
 
  public:
   // sampling parameters

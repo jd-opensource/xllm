@@ -21,7 +21,8 @@ RequestState::RequestState(const std::string& prompt,
                            bool skip_special_tokens,
                            bool enable_schedule_overlap,
                            const OutputFunc& output_func,
-                           const OutputsFunc& outputs_func)
+                           const OutputsFunc& outputs_func,
+                           const std::string& decode_address)
     : prompt(std::move(prompt)),
       prompt_tokens(std::move(prompt_tokens)),
       sampling_param(std::move(sampling_param)),
@@ -35,7 +36,8 @@ RequestState::RequestState(const std::string& prompt,
       skip_special_tokens(skip_special_tokens),
       enable_schedule_overlap(enable_schedule_overlap),
       output_func(output_func),
-      outputs_func(outputs_func) {
+      outputs_func(outputs_func),
+      decode_address(decode_address) {
   if (best_of < n) {
     LOG(FATAL) << "best_of must greater than n.";
   }
@@ -55,7 +57,8 @@ RequestState::RequestState(const std::string& prompt,
                            bool skip_special_tokens,
                            bool enable_schedule_overlap,
                            const OutputFunc& output_func,
-                           const OutputsFunc& outputs_func)
+                           const OutputsFunc& outputs_func,
+                           const std::string& decode_address)
     : prompt(std::move(prompt)),
       prompt_tokens(std::move(prompt_tokens)),
       input_embedding(input_embedding),
@@ -70,7 +73,8 @@ RequestState::RequestState(const std::string& prompt,
       skip_special_tokens(skip_special_tokens),
       enable_schedule_overlap(enable_schedule_overlap),
       output_func(output_func),
-      outputs_func(outputs_func) {
+      outputs_func(outputs_func),
+      decode_address(decode_address) {
   if (best_of < n) {
     LOG(FATAL) << "best_of must greater than n.";
   }
@@ -90,7 +94,8 @@ RequestState::RequestState(const std::string& prompt,
                            bool skip_special_tokens,
                            bool enable_schedule_overlap,
                            const OutputFunc& output_func,
-                           const OutputsFunc& outputs_func)
+                           const OutputsFunc& outputs_func,
+                           const std::string& decode_address)
     : prompt(std::move(prompt)),
       prompt_tokens(std::move(prompt_tokens)),
       mm_data(std::move(mm_data)),
@@ -105,7 +110,8 @@ RequestState::RequestState(const std::string& prompt,
       skip_special_tokens(skip_special_tokens),
       enable_schedule_overlap(enable_schedule_overlap),
       output_func(output_func),
-      outputs_func(outputs_func) {
+      outputs_func(outputs_func),
+      decode_address(decode_address) {
   if (best_of < n) {
     LOG(FATAL) << "best_of must greater than n.";
   }
