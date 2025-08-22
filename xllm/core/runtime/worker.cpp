@@ -156,7 +156,12 @@ int64_t Worker::get_active_activation_memory() {
 }
 
 folly::SemiFuture<int64_t> Worker::get_active_activation_memory_async() {
-  return impl_->get_active_activation_memory_async();
+  folly::Promise<int64_t> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+    promise.setValue(impl_->get_active_activation_memory());
+  });
+  return future;
 }
 
 }  // namespace xllm

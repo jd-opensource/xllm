@@ -459,11 +459,4 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
-folly::SemiFuture<int64_t> WorkerImpl::get_active_activation_memory_async() {
-  return device_monitor_.get_device_stats_async(device_.index())
-      .deferValue([](const DeviceStats* stats) -> int64_t {
-        return stats->active_activation_memory;
-      });
-}
-
 }  // namespace xllm
