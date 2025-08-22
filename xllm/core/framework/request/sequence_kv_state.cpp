@@ -104,6 +104,8 @@ size_t KVCacheState::current_max_tokens_capacity() const {
 // returns allocated cache blocks
 Slice<Block> KVCacheState::kv_blocks() const { return blocks_; }
 
+std::vector<Block>* KVCacheState::mutable_kv_blocks() { return &blocks_; }
+
 // get the number of blocks
 size_t KVCacheState::num_kv_blocks() const { return blocks_.size(); }
 

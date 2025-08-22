@@ -33,6 +33,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/runtime/params_utils.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
 #include "runtime/forward_params.h"
@@ -278,13 +279,13 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
 
 void WorkerService::LoadKVCacheFromStore(
     ::google::protobuf::RpcController* controller,
-    const ::llm::proto::CacheContents* req,
-    ::llm::proto::StoreResponse* resp,
+    const ::xllm::proto::CacheBlockInfos* req,
+    ::xllm::proto::StoreResponse* resp,
     ::google::protobuf::Closure* done) {
   threadpool_.schedule([this, controller, req, resp, done]() mutable {
     brpc::ClosureGuard done_guard(done);
-    std::vector<CacheContent> dst_blocks;
-    proto_to_cache_contents(*req, dst_blocks);
+    std::vector<CacheBlockInfo> dst_blocks;
+    proto_to_cache_block_info(*req, dst_blocks);
 
     auto future = worker_->load_kv_blocks_from_store_async(dst_blocks);
 

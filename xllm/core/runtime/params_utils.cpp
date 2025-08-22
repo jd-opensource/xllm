@@ -110,29 +110,30 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->embedding_ids().begin(),
                            pb_forward_input->embedding_ids().end());
 
-  std::vector<CacheContent> async_copy_out_blocks;
-  for (size_t i = 0; i < pb_model_input->async_copy_out_blocks().size(); ++i) {
+  std::vector<CacheBlockInfo> async_copy_out_blocks;
+  for (size_t i = 0; i < pb_forward_input->async_copy_out_blocks().size();
+       ++i) {
     async_copy_out_blocks.emplace_back(
-        pb_model_input->async_copy_out_blocks()[i].device_block_id(),
-        pb_model_input->async_copy_out_blocks()[i].host_block_id(),
+        pb_forward_input->async_copy_out_blocks()[i].device_block_id(),
+        pb_forward_input->async_copy_out_blocks()[i].host_block_id(),
         reinterpret_cast<const uint8_t*>(
-            pb_model_input->async_copy_out_blocks()[i].hash_key().data()));
+            pb_forward_input->async_copy_out_blocks()[i].hash_key().data()));
   }
-  std::vector<CacheContent> copy_out_blocks;
-  for (size_t i = 0; i < pb_model_input->copy_out_blocks().size(); ++i) {
+  std::vector<CacheBlockInfo> copy_out_blocks;
+  for (size_t i = 0; i < pb_forward_input->copy_out_blocks().size(); ++i) {
     copy_out_blocks.emplace_back(
-        pb_model_input->copy_out_blocks()[i].device_block_id(),
-        pb_model_input->copy_out_blocks()[i].host_block_id(),
+        pb_forward_input->copy_out_blocks()[i].device_block_id(),
+        pb_forward_input->copy_out_blocks()[i].host_block_id(),
         reinterpret_cast<const uint8_t*>(
-            pb_model_input->copy_out_blocks()[i].hash_key().data()));
+            pb_forward_input->copy_out_blocks()[i].hash_key().data()));
   }
-  std::vector<CacheContent> copy_in_blocks;
-  for (size_t i = 0; i < pb_model_input->copy_in_blocks().size(); ++i) {
+  std::vector<CacheBlockInfo> copy_in_blocks;
+  for (size_t i = 0; i < pb_forward_input->copy_in_blocks().size(); ++i) {
     copy_in_blocks.emplace_back(
-        pb_model_input->copy_in_blocks()[i].device_block_id(),
-        pb_model_input->copy_in_blocks()[i].host_block_id(),
+        pb_forward_input->copy_in_blocks()[i].device_block_id(),
+        pb_forward_input->copy_in_blocks()[i].host_block_id(),
         reinterpret_cast<const uint8_t*>(
-            pb_model_input->copy_in_blocks()[i].hash_key().data()));
+            pb_forward_input->copy_in_blocks()[i].hash_key().data()));
   }
 
   std::vector<const RequestSamplingParam*> sampling_params;
@@ -419,32 +420,33 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   pb_forward_input->set_prefill_seq_len(inputs.prefill_seq_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
-  pb_model_input->mutable_async_copy_out_blocks()->Reserve(
+  pb_forward_input->mutable_async_copy_out_blocks()->Reserve(
       inputs.async_copy_out_blocks.size());
   for (auto t : inputs.async_copy_out_blocks) {
-    proto::CacheContent pb_pair;
-    pb_pair.set_device_block_id(t.device_block_id);
-    pb_pair.set_host_block_id(t.host_block_id);
-    pb_pair.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
-    *pb_model_input->mutable_async_copy_out_blocks()->Add() = pb_pair;
+    proto::CacheBlockInfo cache_block_info;
+    cache_block_info.set_device_block_id(t.device_block_id);
+    cache_block_info.set_host_block_id(t.host_block_id);
+    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
+    *pb_forward_input->mutable_async_copy_out_blocks()->Add() =
+        cache_block_info;
   }
-  pb_model_input->mutable_copy_out_blocks()->Reserve(
+  pb_forward_input->mutable_copy_out_blocks()->Reserve(
       inputs.copy_out_blocks.size());
   for (auto t : inputs.copy_out_blocks) {
-    proto::CacheContent pb_pair;
-    pb_pair.set_device_block_id(t.device_block_id);
-    pb_pair.set_host_block_id(t.host_block_id);
-    pb_pair.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
-    *pb_model_input->mutable_copy_out_blocks()->Add() = pb_pair;
+    proto::CacheBlockInfo cache_block_info;
+    cache_block_info.set_device_block_id(t.device_block_id);
+    cache_block_info.set_host_block_id(t.host_block_id);
+    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
+    *pb_forward_input->mutable_copy_out_blocks()->Add() = cache_block_info;
   }
-  pb_model_input->mutable_copy_in_blocks()->Reserve(
+  pb_forward_input->mutable_copy_in_blocks()->Reserve(
       inputs.copy_in_blocks.size());
   for (auto t : inputs.copy_in_blocks) {
-    proto::CacheContent pb_pair;
-    pb_pair.set_device_block_id(t.device_block_id);
-    pb_pair.set_host_block_id(t.host_block_id);
-    pb_pair.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
-    *pb_model_input->mutable_copy_in_blocks()->Add() = pb_pair;
+    proto::CacheBlockInfo cache_block_info;
+    cache_block_info.set_device_block_id(t.device_block_id);
+    cache_block_info.set_host_block_id(t.host_block_id);
+    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
+    *pb_forward_input->mutable_copy_in_blocks()->Add() = cache_block_info;
   }
 
   COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());
@@ -649,33 +651,35 @@ Token build_token(int64_t index,
   return token;
 }
 
-void proto_to_cache_contents(const proto::CacheContents& cache_contents,
-                             std::vector<CacheContent>& cache_content_vec) {
-  cache_content_vec.reserve(cache_contents.contents_size());
+void proto_to_cache_block_info(
+    const proto::CacheBlockInfos& cache_block_info_pb,
+    std::vector<CacheBlockInfo>& cache_block_info) {
+  cache_block_info.reserve(cache_block_info_pb.contents_size());
 
-  for (int i = 0; i < cache_contents.contents_size(); ++i) {
-    cache_content_vec.emplace_back(
-        cache_contents.contents(i).device_block_id(),
-        cache_contents.contents(i).host_block_id(),
+  for (int i = 0; i < cache_block_info_pb.contents_size(); ++i) {
+    cache_block_info.emplace_back(
+        cache_block_info_pb.contents(i).device_block_id(),
+        cache_block_info_pb.contents(i).host_block_id(),
         reinterpret_cast<const uint8_t*>(
-            cache_contents.contents(i).hash_key().data()));
+            cache_block_info_pb.contents(i).hash_key().data()));
   }
 }
 
-bool cache_contents_to_proto(const std::vector<CacheContent>& cache_content_vec,
-                             proto::CacheContents* cache_contents) {
-  cache_contents->mutable_contents()->Reserve(cache_content_vec.size());
-  for (const CacheContent cache_content : cache_content_vec) {
-    proto::CacheContent pb_cache;
+bool cache_block_info_to_proto(
+    const std::vector<CacheBlockInfo>& cache_block_info,
+    proto::CacheBlockInfos* cache_block_info_pb) {
+  cache_block_info_pb->mutable_contents()->Reserve(cache_block_info.size());
+  for (const CacheBlockInfo cache_content : cache_block_info) {
+    proto::CacheBlockInfo pb_cache;
     pb_cache.set_device_block_id(cache_content.device_block_id);
     pb_cache.set_host_block_id(cache_content.host_block_id);
     if (cache_content.hash_key != nullptr) {
       pb_cache.set_hash_key(cache_content.hash_key, MURMUR_HASH3_VALUE_LEN);
     } else {
-      LOG(ERROR) << "convert to CacheContents fail, hash key is nullptr!";
+      LOG(ERROR) << "convert to CacheBlockInfos fail, hash key is nullptr!";
       return false;
     }
-    *cache_contents->mutable_contents()->Add() = pb_cache;
+    *cache_block_info_pb->mutable_contents()->Add() = pb_cache;
   }
 
   return true;

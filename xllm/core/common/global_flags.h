@@ -53,6 +53,8 @@ DECLARE_double(max_memory_utilization);
 
 DECLARE_bool(enable_prefix_cache);
 
+DECLARE_bool(enable_cache_upload);
+
 DECLARE_int32(max_tokens_per_batch);
 
 DECLARE_int32(max_seqs_per_batch);
@@ -138,6 +140,8 @@ DECLARE_bool(use_zero_evict);
 DECLARE_string(priority_strategy);
 
 DECLARE_bool(enable_online_preempt_offline);
+
+DECLARE_double(host_blocks_factor);
 
 DECLARE_bool(enable_kvcache_store);
 

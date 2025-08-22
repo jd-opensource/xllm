@@ -47,7 +47,7 @@ namespace xllm {
 
 LLMEngine::LLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
-    : options_(options), dist_manager_(dist_manager) {
+    : options_(options), dist_manager_(dist_manager), threadpool_(5) {
   auto master_node_addr = options.master_node_addr().value_or("");
   CHECK(!master_node_addr.empty())
       << " LLM need to set master node addr, Please set --master_node_addr.";
@@ -281,10 +281,11 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   BlockManagerPool::Options options;
   options.num_blocks(kv_cache_cap.n_blocks)
       .block_size(block_size)
-      .host_num_blocks(kv_cache_cap.n_blocks)
+      .host_num_blocks(kv_cache_cap.n_blocks * options_.host_blocks_factor())
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_service_routing(options_.enable_service_routing());
+      .enable_cache_upload(options_.enable_cache_upload())
+      .enable_kvcache_store(options_.enable_kvcache_store());
   block_manager_pool_ =
       std::make_unique<BlockManagerPool>(options, options_.dp_size());
 
@@ -356,20 +357,26 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
   return true;
 }
 
-uint32_t LLMEngine::load_kv_blocks_from_store(
+folly::SemiFuture<uint32_t> LLMEngine::load_kv_blocks_from_store_async(
     const uint32_t dp_rank,
-    const std::vector<CacheContent>& cache_content_vec) {
-  auto tp_size = worker_clients_.size() / options_.dp_size();
-  uint32_t result;
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this,
+                        dp_rank = dp_rank,
+                        cache_block_info = std::move(cache_block_info),
+                        promise = std::move(promise)]() mutable {
+    auto tp_size = this->worker_clients_.size() / this->options_.dp_size();
+    uint32_t result;
 
-  for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
-    auto curr_res =
-        worker_clients_[tp_rank + tp_size * dp_rank]->load_kv_blocks_from_store(
-            cache_content_vec);
-    result = std::min(curr_res, result);
-  }
-
-  return result;
+    for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
+      auto sub_future = this->worker_clients_[tp_rank + tp_size * dp_rank]
+                            ->load_kv_blocks_from_store_async(cache_block_info);
+      result = std::min(std::move(sub_future).get(), result);
+    }
+    promise.setValue(result);
+  });
+  return future;
 }
 
 void LLMEngine::get_device_info(std::vector<std::string>& device_ips,

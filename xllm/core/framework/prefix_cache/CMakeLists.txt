@@ -6,12 +6,13 @@ cc_library(
   NAME 
     prefix_cache
   HDRS
-    prefix_cache_hash.h
-    prefix_cache_hash_with_upload.h
+    prefix_cache.h
+    prefix_cache_with_upload.h
+    prefix_cache_factory.h
   SRCS 
     prefix_cache.cpp
-    prefix_cache_hash.cpp
-    prefix_cache_hash_with_upload.cpp
+    prefix_cache_with_upload.cpp
+    prefix_cache_factory.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:llm_engine>
@@ -25,7 +26,7 @@ cc_library(
 )
 
 set(TEST_SRCS
-  prefix_cache_hash_test.cpp
+  prefix_cache_test.cpp
 )
 
 cc_test(

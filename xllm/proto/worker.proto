@@ -60,14 +60,14 @@ message PullKVCacheRequest {
   repeated uint64 dst_blocks = 5;
 }
 
-message CacheContent {
+message CacheBlockInfo {
   int32 device_block_id = 1;
   int32 host_block_id = 2;
   bytes hash_key = 3;
 }
 
-message CacheContents {
-  repeated CacheContent contents = 1;
+message CacheBlockInfos {
+  repeated CacheBlockInfo contents = 1;
 }
 
 message StoreResponse {
@@ -181,9 +181,9 @@ message ForwardInput {
   uint32 prefill_seq_len = 24;
   repeated int32 embedding_ids = 25;
   EplbInfo eplb_info =26;
-  repeated CacheContent async_copy_out_blocks = 26;
-  repeated CacheContent copy_out_blocks = 27;
-  repeated CacheContent copy_in_blocks = 28;
+  repeated CacheBlockInfo async_copy_out_blocks = 27;
+  repeated CacheBlockInfo copy_out_blocks = 28;
+  repeated CacheBlockInfo copy_in_blocks = 29;
 }
 
 message Embeddings {
@@ -233,5 +233,5 @@ service DistributeWorker {
   rpc ExecuteModel (ForwardInput) returns (ForwardOutput);
   rpc GetLastStepResult (Empty) returns (ForwardOutput);
   rpc GetActiveActivationMemory (Empty) returns (ActivationMemory);
-  rpc LoadKVCacheFromStore(CacheContents) returns (StoreResponse) {}
+  rpc LoadKVCacheFromStore(CacheBlockInfos) returns (StoreResponse) {}
 }

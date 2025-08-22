@@ -238,7 +238,7 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       .block_size(block_size)
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_service_routing(options_.enable_service_routing());
+      .enable_cache_upload(options_.enable_cache_upload());
   block_manager_pool_ = std::make_unique<BlockManagerPool>(options);
 
   // init kv cache for each worker in parallel

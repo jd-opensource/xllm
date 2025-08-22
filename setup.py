@@ -423,7 +423,13 @@ def check_and_install_pre_commit():
             print("Run 'pre-commit install' failed. Please install pre-commit: pip install pre-commit")
             exit(0)
 
+def apply_patch():
+    if os.path.exists("third_party/custom_patch"):
+        os.system("cd third_party/Mooncake && git apply ../custom_patch/Mooncake.patch")
+        os.system("cd third_party/cpprestsdk && git apply ../custom_patch/cpprestsdk.patch")
+
 if __name__ == "__main__":
+    apply_patch()
     device = 'a2'  # default
     arch = "x86" # default
     if '--device' in sys.argv:

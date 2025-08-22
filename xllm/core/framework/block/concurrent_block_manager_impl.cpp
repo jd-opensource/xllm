@@ -38,7 +38,7 @@ std::vector<Block> ConcurrentBlockManagerImpl::allocate_shared(
 }
 
 void ConcurrentBlockManagerImpl::cache(const Slice<int32_t>& token_ids,
-                                       const Slice<Block>& blocks) {
+                                       std::vector<Block>& blocks) {
   std::lock_guard<std::mutex> lock(mutex_);
   BlockManagerImpl::cache(token_ids, blocks);
 }

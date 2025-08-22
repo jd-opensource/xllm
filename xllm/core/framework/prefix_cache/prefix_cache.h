@@ -16,28 +16,24 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
+
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "common/types.h"
 #include "framework/block/block.h"
 #include "framework/kv_cache/kv_cache_event.h"
+#include "util/hash_util.h"
 #include "util/slice.h"
+#include "util/threadpool.h"
 
 namespace xllm {
-
-template <typename VectorA, typename VectorB>
-size_t common_prefix_length(const VectorA& token_ids1,
-                            const VectorB& token_ids2) {
-  size_t i = 0;
-  while (i < token_ids1.size() && i < token_ids2.size() &&
-         token_ids1[i] == token_ids2[i]) {
-    ++i;
-  }
-  return i;
-}
 
 inline size_t round_down(size_t n, size_t multiple) {
   return (n / multiple) * multiple;
@@ -50,31 +46,35 @@ class PrefixCache {
   PrefixCache& operator=(const PrefixCache&) = delete;
   PrefixCache& operator=(PrefixCache&&) = delete;
 
-  PrefixCache() = default;
-  virtual ~PrefixCache() = default;
+  explicit PrefixCache(uint32_t block_size)
+      : block_size_(block_size), num_blocks_(0) {}
+
+  virtual ~PrefixCache() {
+    exited_.store(true);
+    sleep(2);
+  };
 
   std::vector<Block> match(const std::vector<int32_t>& token_ids) {
     return match(Slice<int32_t>(token_ids), {});
   }
+
   virtual std::vector<Block> match(
       const Slice<int32_t>& token_ids,
-      const Slice<Block>& existed_shared_blocks = {}) = 0;
-
-  size_t insert(const std::vector<int32_t>& token_ids,
-                const std::vector<Block>& blocks) {
-    return insert(Slice<int32_t>(token_ids), Slice<Block>(blocks));
-  }
-  virtual size_t insert(const Slice<int32_t>& token_ids,
-                        const Slice<Block>& blocks) = 0;
+      const Slice<Block>& existed_shared_blocks = {});
 
   virtual size_t insert(const Slice<int32_t>& token_ids,
-                        std::vector<Block>& blocks) {
-    return insert(Slice<int32_t>(token_ids), Slice<Block>(blocks));
+                        std::vector<Block>& blocks);
+
+  // evict blocks hold by the prefix cache
+  // return the actual number of evicted blocks
+  virtual size_t evict(size_t n_blocks);
+
+  // get the number of blocks in the prefix cache
+  virtual size_t num_blocks() const {
+    CHECK(num_blocks_ == cached_blocks_.size()) << "check block num failed";
+
+    return num_blocks_;
   }
-
-  virtual size_t evict(size_t n_blocks) = 0;
-
-  virtual size_t num_blocks() const = 0;
 
   float block_match_rate() {
     if (total_blocks_.load() == 0) {
@@ -89,18 +89,112 @@ class PrefixCache {
     return nullptr;
   }
 
-  virtual uint32_t compute_blocks_hash_value(const Slice<int32_t>& token_ids,
-                                             std::vector<Block>& blocks) {
-    return 0;
-  }
+  static uint32_t compute_hash_keys(const Slice<int32_t>& token_ids,
+                                    std::vector<Block>& blocks);
 
  protected:
+  size_t insert(const Slice<int32_t>& token_ids,
+                std::vector<Block>& blocks,
+                std::vector<Murmur3Key>* insert_keys);
+  size_t evict(size_t n_blocks, std::vector<Murmur3Key>* evict_keys);
+
+  struct Node {
+    Block block;
+    // the last access time of the node, used to evict blocks
+    int64_t last_access_time = 0;
+
+    // the previous and next nodes, used to maintain the LRU list
+    Node* prev = nullptr;
+    Node* next = nullptr;
+  };
+
+  struct DNodeList {
+    DNodeList() {
+      lst_front.next = &lst_back;
+      lst_back.prev = &lst_front;
+    }
+
+    ~DNodeList() {
+      Node* node = lst_front.next;
+      while (node != &lst_back) {
+        Node* next = node->next;
+        delete node;
+        node = next;
+      }
+    }
+
+    bool is_empty() { return lst_front.next == &lst_back; }
+
+    // remove the node from the LRU list, and return next node
+    Node* remove_node(Node* node) {
+      Node* next_node = node->next;
+
+      node->prev->next = next_node;
+      next_node->prev = node->prev;
+
+      return next_node;
+    }
+
+    bool is_last(Node* node) { return node == &lst_back; }
+
+    // add a new node to the front of the LRU list
+    void push_front(Node* node) {
+      node->next = lst_front.next;
+      lst_front.next->prev = node;
+
+      node->prev = &lst_front;
+      lst_front.next = node;
+    }
+
+    Node* get_first() { return lst_front.next; }
+
+    // pop out node to the back of the LRU list
+    Node* pop_front() {
+      if (lst_front.next == &lst_back) {
+        return nullptr;
+      }
+
+      Node* node = lst_front.next;
+
+      lst_front.next = node->next;
+      node->next->prev = &lst_front;
+
+      return node;
+    }
+
+    // add a new node to the back of the LRU list
+    void push_back(Node* node) {
+      node->prev = lst_back.prev;
+      node->next = &lst_back;
+      lst_back.prev->next = node;
+      lst_back.prev = node;
+    }
+
+    // move the node to the back of the LRU list
+    void move_back(Node* node) {
+      remove_node(node);
+      push_back(node);
+    }
+
+    // Node lst_front;
+    Node lst_front;
+    Node lst_back;
+  };
+
+  DNodeList lru_lst_;
+
+  // the block size of the memory blocks
+  uint32_t block_size_;
+
+  // the total number of blocks in the prefix cache
+  size_t num_blocks_ = 0;
+
+  std::atomic_bool exited_{false};
+
+  std::unordered_map<Murmur3Key, Node*, FixedStringKeyHash, FixedStringKeyEqual>
+      cached_blocks_;
+
   std::atomic<uint64_t> total_blocks_{0}, matched_blocks_{0};
 };
-
-std::unique_ptr<PrefixCache> CreatePrefixCachePolicy(
-    const int32_t block_size,
-    const std::string& policy,
-    const bool& enbale_service_routing = false);
 
 }  // namespace xllm

@@ -20,8 +20,7 @@ limitations under the License.
 
 namespace xllm {
 
-BlockManagerPool::BlockManagerPool(const BlockManager::Options& options,
-                                   int32_t dp_size)
+BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     : options_(options) {
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
   block_managers_.reserve(dp_size);
@@ -32,25 +31,27 @@ BlockManagerPool::BlockManagerPool(const BlockManager::Options& options,
       .block_size(options_.block_size())
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .prefix_cache_policy(options_.prefix_cache_policy())
-      .enable_service_routing(options_.enable_service_routing());
+      .enable_cache_upload(options_.enable_cache_upload());
 
   BlockManager::Options host_options = npu_options;
   host_options.num_blocks(options_.host_num_blocks())
-      .enable_prefix_cache(false)
-      .enable_service_routing(false);
+      .enable_cache_upload(false);
 
   for (int32_t i = 0; i < dp_size; ++i) {
-    if (options.enable_disagg_pd()) {
+    if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
       block_managers_.emplace_back(
           std::make_unique<ConcurrentBlockManagerImpl>(npu_options));
-      host_block_managers_.emplace_back(
-          std::make_unique<ConcurrentBlockManagerImpl>(host_options));
+      if (options_.host_num_blocks() > 0) {
+        host_block_managers_.emplace_back(
+            std::make_unique<ConcurrentBlockManagerImpl>(host_options));
+      }
     } else {
       block_managers_.emplace_back(
           std::make_unique<BlockManagerImpl>(npu_options));
-      host_block_managers_.emplace_back(
-          std::make_unique<BlockManagerImpl>(host_options));
+      if (options_.host_num_blocks() > 0) {
+        host_block_managers_.emplace_back(
+            std::make_unique<BlockManagerImpl>(host_options));
+      }
     }
   }
   reset_copy_content();
@@ -111,101 +112,24 @@ void BlockManagerPool::deallocate(std::vector<Sequence*>& sequences) {
 void BlockManagerPool::deallocate(Sequence* sequence) {
   DCHECK(sequence != nullptr);
   // add blocks to the prefix cache
-  cache(sequence);
   int32_t dp_rank = sequence->dp_rank();
+  cache(sequence);
+  if (!host_block_managers_.empty()) {
+    cache_host(sequence);
+    host_block_managers_[dp_rank]->deallocate(
+        sequence->host_kv_state().kv_blocks());
+  }
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
   // release the blocks after prefix cache insertion
   sequence->reset();
 }
 
-void BlockManagerPool::copy_in_blocks_for(Request* request) {
-  DCHECK(request != nullptr);
-  for (auto& sequence : request->sequences()) {
-    copy_in_blocks_for(&sequence);
-  }
-}
-
-void BlockManagerPool::copy_in_blocks_for(std::vector<Sequence*>& sequences) {
-  for (auto* sequence : sequences) {
-    DCHECK(sequence != nullptr);
-    copy_in_blocks_for(sequence);
-  }
-}
-
-void BlockManagerPool::copy_in_blocks_for(Sequence* sequence) {
-  DCHECK(sequence != nullptr);
-  auto blocks = sequence->blocks();
-  auto host_blocks = sequence->host_blocks();
-  auto hbm_shared_blocks =
-      sequence->num_kv_cache_tokens() / options_.block_size();
-
-  for (int i = hbm_shared_blocks; i < sequence->get_shared_host_block_num();
-       i++) {
-    copy_in_cache_contents_[sequence->dp_rank()].emplace_back(
-        blocks[i].id(),
-        host_blocks[i].id(),
-        host_blocks[i].get_immutable_hash_value());
-  }
-}
-
-void BlockManagerPool::copy_out_blocks_for(Request* request,
-                                           bool is_preempted) {
-  DCHECK(request != nullptr);
-  for (auto& sequence : request->sequences()) {
-    copy_out_blocks_for(&sequence, is_preempted);
-  }
-}
-
-void BlockManagerPool::copy_out_blocks_for(std::vector<Sequence*>& sequences,
-                                           bool is_preempted) {
-  for (auto* sequence : sequences) {
-    DCHECK(sequence != nullptr);
-    copy_out_blocks_for(sequence, is_preempted);
-  }
-}
-
-void BlockManagerPool::copy_out_blocks_for(Sequence* sequence,
-                                           bool is_preempted) {
-  DCHECK(sequence != nullptr);
-  cache(sequence);
-  int32_t dp_rank = sequence->dp_rank();
-  size_t token_num =
-      (sequence->blocks().size() - sequence->host_blocks().size() -
-       (sequence->num_tokens() % options_.block_size() != 0)) *
-      options_.block_size();
-  std::vector<Block>* host_blocks_ptr = sequence->mutable_host_blocks();
-
-  if (token_num > 0) {
-    sequence->append_host_blocks(
-        host_block_managers_[dp_rank]->allocate(token_num));
-  }
-  if (!is_preempted) {
-    evict_host_blocks_.emplace_back(std::move(*host_blocks_ptr));
-    host_blocks_ptr = &evict_host_blocks_.back();
-  }
-
-  auto blocks = sequence->blocks();
-
-  for (int i = sequence->get_shared_host_block_num();
-       i < host_blocks_ptr->size();
-       i++) {
-    host_blocks_ptr->at(i).set_hash_value(blocks[i].get_immutable_hash_value());
-    copy_out_cache_contents_[dp_rank].emplace_back(
-        blocks[i].id(),
-        host_blocks_ptr->at(i).id(),
-        host_blocks_ptr->at(i).get_immutable_hash_value());
-  }
-  sequence->set_shared_host_block_num(host_blocks_ptr->size());
-
-  block_managers_[dp_rank]->deallocate(sequence);
-}
-
-std::vector<std::vector<CacheContent>>*
+std::vector<std::vector<CacheBlockInfo>>*
 BlockManagerPool::get_copy_in_content() {
   return &copy_in_cache_contents_;
 }
 
-std::vector<std::vector<CacheContent>>*
+std::vector<std::vector<CacheBlockInfo>>*
 BlockManagerPool::get_copy_out_content() {
   return &copy_out_cache_contents_;
 }
@@ -242,6 +166,9 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   if (sequence->kv_state().num_kv_blocks() == 0) {
     allocate_shared(sequence);
   }
+  if (sequence->host_kv_state().num_kv_blocks() == 0) {
+    allocate_host_shared(sequence);
+  }
 
   const size_t num_blocks = sequence->kv_state().num_kv_blocks();
   // round up to the nearest block number
@@ -261,6 +188,25 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   }
 
   sequence->add_kv_blocks(blocks);
+
+  size_t hbm_cache_token_num = sequence->kv_state().kv_cache_tokens_num();
+  size_t host_cache_token_num = sequence->host_kv_state().kv_cache_tokens_num();
+  if (hbm_cache_token_num < host_cache_token_num) {
+    auto hbm_blocks = sequence->kv_state().kv_blocks();
+    auto host_blocks = sequence->host_kv_state().kv_blocks();
+
+    for (int i = hbm_cache_token_num / options_.block_size();
+         i < host_cache_token_num / options_.block_size();
+         i++) {
+      copy_in_cache_contents_[sequence->dp_rank()].emplace_back(
+          hbm_blocks[i].id(),
+          host_blocks[i].id(),
+          host_blocks[i].get_immutable_hash_value());
+    }
+    sequence->kv_state().incr_kv_cache_tokens_num(host_cache_token_num -
+                                                  hbm_cache_token_num);
+  }
+
   return true;
 }
 
@@ -270,6 +216,39 @@ std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
   const size_t block_size = options_.block_size();
   const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
   return block_managers_[dp_rank]->allocate(num_blocks_needed);
+}
+
+uint32_t BlockManagerPool::pre_allocate(Sequence* sequence) {
+  DCHECK(sequence != nullptr);
+
+  if (!options_.enable_kvcache_store() ||
+      sequence->kv_state().num_kv_blocks() != 0 ||
+      sequence->host_kv_state().num_kv_blocks() != 0) {
+    return 0;
+  }
+
+  int32_t dp_rank = get_dp_rank(sequence);
+  allocate_host_shared(sequence);
+
+  const size_t num_blocks = sequence->host_kv_state().num_kv_blocks();
+  // round down to the nearest block number
+  const size_t block_size = options_.block_size();
+  const size_t num_additional_blocks =
+      sequence->num_tokens() / block_size - num_blocks;
+  if (num_additional_blocks <= 0) {
+    return 0;
+  }
+
+  auto host_blocks =
+      host_block_managers_[dp_rank]->allocate(num_additional_blocks);
+  if (host_blocks.size() != num_additional_blocks) {
+    return 0;
+  }
+
+  PrefixCache::compute_hash_keys(sequence->tokens(), host_blocks);
+
+  sequence->host_kv_state().add_kv_blocks(host_blocks);
+  return num_additional_blocks;
 }
 
 void BlockManagerPool::allocate_shared(Sequence* sequence) {
@@ -290,8 +269,56 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
 void BlockManagerPool::cache(Sequence* sequence) {
   int32_t dp_rank = sequence->dp_rank();
   const auto token_ids = sequence->cached_tokens();
-  const auto blocks = sequence->kv_state().kv_blocks();
-  return block_managers_[dp_rank]->cache(token_ids, blocks);
+  auto* blocks = sequence->kv_state().mutable_kv_blocks();
+  return block_managers_[dp_rank]->cache(token_ids, *blocks);
+}
+
+void BlockManagerPool::allocate_host_shared(Sequence* sequence) {
+  // only allocate shared blocks for prefill sequences
+  if (sequence->host_kv_state().num_kv_blocks() != 0 ||
+      host_block_managers_.size() != block_managers_.size()) {
+    return;
+  }
+
+  if (options_.enable_prefix_cache()) {
+    int32_t dp_rank = get_dp_rank(sequence);
+    std::vector<Block> shared_blocks =
+        host_block_managers_[dp_rank]->allocate_shared(sequence->tokens());
+    sequence->add_shared_host_kv_blocks(std::move(shared_blocks));
+  }
+}
+
+void BlockManagerPool::cache_host(Sequence* sequence) {
+  DCHECK(sequence != nullptr);
+
+  int32_t dp_rank = sequence->dp_rank();
+  size_t needed_block_num = (sequence->num_tokens() / options_.block_size() -
+                             sequence->host_kv_state().num_kv_blocks());
+
+  if (needed_block_num > 0) {
+    sequence->host_kv_state().add_kv_blocks(
+        host_block_managers_[dp_rank]->allocate(needed_block_num));
+  }
+
+  evict_host_blocks_.emplace_back(
+      std::move(*sequence->host_kv_state().mutable_kv_blocks()));
+  std::vector<Block>* host_blocks_ptr = &evict_host_blocks_.back();
+
+  auto blocks = sequence->kv_state().kv_blocks();
+
+  for (int i = sequence->host_kv_state().kv_cache_tokens_num() /
+               options_.block_size();
+       i < host_blocks_ptr->size();
+       i++) {
+    host_blocks_ptr->at(i).set_hash_value(blocks[i].get_immutable_hash_value());
+    copy_out_cache_contents_[dp_rank].emplace_back(
+        blocks[i].id(),
+        host_blocks_ptr->at(i).id(),
+        host_blocks_ptr->at(i).get_immutable_hash_value());
+  }
+
+  host_block_managers_[dp_rank]->cache(
+      sequence->tokens(), *sequence->host_kv_state().mutable_kv_blocks());
 }
 
 void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {

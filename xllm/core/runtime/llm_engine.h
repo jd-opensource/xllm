@@ -30,6 +30,7 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/engine.h"
+#include "util/threadpool.h"
 #include "worker.h"
 #include "worker_client.h"
 #include "xservice_client.h"
@@ -66,9 +67,9 @@ class LLMEngine : public Engine {
                       const int32_t dst_dp_rank,
                       const std::vector<uint64_t>& dst_blocks) override;
 
-  uint32_t load_kv_blocks_from_store(
+  folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
       const uint32_t dp_rank,
-      const std::vector<CacheContent>& cache_content_vec) override;
+      const std::vector<CacheBlockInfo>& cache_block_info) override;
 
   void get_device_info(std::vector<std::string>& device_ips,
                        std::vector<uint16_t>& ports) override;
@@ -134,6 +135,8 @@ class LLMEngine : public Engine {
   void process_eplb_data(
       const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
       int32_t worker_clients_num);
+  
+  ThreadPool threadpool_;
 };
 
 }  // namespace xllm

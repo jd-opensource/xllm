@@ -125,7 +125,13 @@ struct Options {
   PROPERTY(std::string, priority_strategy) = "FCFS";
 
   PROPERTY(bool, enable_online_preempt_offline) = true;
-  
+
+  // enable kvcache upload to service.
+  PROPERTY(bool, enable_cache_upload) = false;
+
+  // host block factor, e.g. host block num = host_blocks_factor * hbm block num
+  PROPERTY(double, host_blocks_factor) = 0.0;
+
   // enable kvcache store.
   PROPERTY(bool, enable_kvcache_store) = false;
 

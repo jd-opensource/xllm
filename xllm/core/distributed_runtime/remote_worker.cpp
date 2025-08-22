@@ -235,15 +235,15 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
 }
 
 uint32_t RemoteWorker::load_kv_blocks_from_store(
-    const std::vector<CacheContent>& cache_content_vec) {
-  proto::CacheContents cache_contents;
-  if (!cache_contents_to_proto(cache_content_vec, &cache_contents)) {
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  proto::CacheBlockInfos pb_cache_block_infos;
+  if (!cache_block_info_to_proto(cache_block_info, &pb_cache_block_infos)) {
     return 0;
   }
 
   proto::StoreResponse resp;
   brpc::Controller cntl;
-  stub_->LoadKVCacheFromStore(&cntl, &cache_contents, &resp, nullptr);
+  stub_->LoadKVCacheFromStore(&cntl, &pb_cache_block_infos, &resp, nullptr);
 
   return resp.success_cnt();
 }
@@ -460,13 +460,13 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
 }
 
 folly::SemiFuture<uint32_t> RemoteWorker::load_kv_blocks_from_store_async(
-    const std::vector<CacheContent>& cache_content_vec) {
+    const std::vector<CacheBlockInfo>& cache_block_info) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
-      [this, &cache_content_vec, promise = std::move(promise)]() mutable {
-        proto::CacheContents cache_contents;
-        if (!cache_contents_to_proto(cache_content_vec, &cache_contents)) {
+      [this, &cache_block_info, promise = std::move(promise)]() mutable {
+        proto::CacheBlockInfos cache_contents;
+        if (!cache_block_info_to_proto(cache_block_info, &cache_contents)) {
           promise.setValue(0);
           return;
         }
@@ -475,25 +475,12 @@ folly::SemiFuture<uint32_t> RemoteWorker::load_kv_blocks_from_store_async(
         brpc::Controller cntl;
         stub_->LoadKVCacheFromStore(&cntl, &cache_contents, &resp, nullptr);
 
+        if (cntl.Failed()) {
+          promise.setValue(0);
+          return;
+        }
         promise.setValue(resp.success_cnt());
       });
-  return future;
-}
-
-folly::SemiFuture<bool> RemoteWorker::init_executor_async() {
-  folly::Promise<bool> promise;
-  auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
-    proto::Empty req;
-    proto::Status s;
-    brpc::Controller cntl;
-    stub_->InitModelExecutor(&cntl, &req, &s, nullptr);
-    if (cntl.Failed() || !s.ok()) {
-      LOG(ERROR) << "init_executor_async failed, " << cntl.ErrorText();
-      promise.setValue(false);
-    }
-    promise.setValue(true);
-  });
   return future;
 }
 

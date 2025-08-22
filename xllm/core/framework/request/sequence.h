@@ -17,6 +17,7 @@ limitations under the License.
 #pragma once
 
 #include <absl/time/time.h>
+#include <folly/futures/Future.h>
 
 #include <cstdint>
 #include <vector>
@@ -27,10 +28,6 @@ limitations under the License.
 #include "core/util/slice.h"
 #include "finish_reason.h"
 #include "framework/block/block.h"
-#include "framework/model/parameters.h"
-#include "framework/request/finish_reason.h"
-#include "framework/sampling/parameters.h"
-#include "framework/tokenizer/tokenizer.h"
 #include "incremental_decoder.h"
 #include "mm_data.h"
 #include "request_output.h"
@@ -125,6 +122,18 @@ class Sequence final {
   Slice<int32_t> cached_tokens() const {
     return {tokens_, kv_state_.kv_cache_tokens_num()};
   }
+
+  // get token ids in host kv cache
+  Slice<int32_t> cached_host_tokens() const {
+    return {tokens_, host_kv_state_.kv_cache_tokens_num()};
+  }
+
+  // get the number of tokens need compute
+  size_t num_need_compute_tokens() const {
+    return num_tokens_ - std::max(kv_state_.kv_cache_tokens_num(),
+                                  host_kv_state_.kv_cache_tokens_num());
+  }
+
   // add a new token id to the sequence and update the count
   // the token would be discarded if the sequence is still in prefill stage
   void append_token(const Token& token);
@@ -141,7 +150,9 @@ class Sequence final {
   torch::Tensor get_input_embedding() const { return input_embedding_; }
 
   void add_kv_blocks(const std::vector<Block>& blocks);
+  void add_host_kv_blocks(const std::vector<Block>& blocks);
   void add_shared_kv_blocks(std::vector<Block>&& blocks);
+  void add_shared_host_kv_blocks(std::vector<Block>&& blocks);
 
   // whether the prefill stage has been cached.
   bool if_cache_block_for_prefill() {
@@ -151,32 +162,6 @@ class Sequence final {
     return if_cache;
   }
 
-  // add new cache blocks
-  void append_block(const Block& new_block) {
-    return append_blocks({new_block});
-  }
-  void append_blocks(const std::vector<Block>& new_blocks);
-  void append_host_blocks(const std::vector<Block>& new_blocks);
-
-  // set shared cache blocks from prefix cache
-  void set_shared_blocks(std::vector<Block>&& shared_blocks);
-
-  // release all cache blocks
-  void release_blocks();
-
-  // returns allocated cache blocks
-  Slice<Block> blocks() const { return blocks_; }
-  Slice<Block> host_blocks() const { return host_blocks_; }
-  std::vector<Block>* mutable_blocks() { return &blocks_; }
-  std::vector<Block>* mutable_host_blocks() { return &host_blocks_; }
-
-  // get the number of blocks
-  size_t num_blocks() const { return blocks_.size(); }
-
-  // get the number of shared blocks.
-  size_t num_shared_blocks() const { return num_owned_shared_blocks_; }
-
-  // get the reason why the sequence is finished
   FinishReason finish_reason() const { return finish_reason_; }
   // check finish status, use cached value if not invalidated
   bool finished() const;
@@ -229,6 +214,8 @@ class Sequence final {
 
   KVCacheState& kv_state() { return kv_state_; }
 
+  KVCacheState& host_kv_state() { return host_kv_state_; }
+
   // for generated tokens
   float get_average_logprob();
   void generate_output_tokens_logprobs(
@@ -237,10 +224,18 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
-  uint64_t get_shared_host_block_num() const { return shared_host_block_num_; }
+  void set_async_result(folly::SemiFuture<uint32_t>&& future) {
+    future_ = std::move(future);
+  }
 
-  void set_shared_host_block_num(const uint64_t shared_num) {
-    shared_host_block_num_ = shared_num;
+  void sync_result() {
+    if (future_.has_value() && future_.value().isReady()) {
+      auto success_cnt = future_.value().value();
+      if (success_cnt > 0) {
+        kv_state_.incr_kv_cache_tokens_num(success_cnt *
+                                           kv_state_.kv_blocks()[0].size());
+      }
+    }
   }
 
   void reset();
@@ -250,6 +245,8 @@ class Sequence final {
   size_t index_ = 0;
 
   KVCacheState kv_state_;
+
+  KVCacheState host_kv_state_;
 
   std::unique_ptr<LogprobState> logprob_state_;
 
@@ -298,16 +295,6 @@ class Sequence final {
   // In the next execution, we should treat these generated tokens as prompts.
   size_t volatile_num_prompt_tokens_ = 0;
 
-  // number of tokens in kv cache
-  size_t num_kv_cache_tokens_;
-
-  // physical blocks that hold the kv cache.
-  std::vector<Block> blocks_;
-  std::vector<Block> host_blocks_;
-
-  // shared host block num
-  uint64_t shared_host_block_num_ = 0;
-
   // embedding id that hold the embedding.
   int32_t embedding_id_ = -1;
 
@@ -338,6 +325,9 @@ class Sequence final {
   // update stage, we pop the state from the queue.
   // 2 valid elements at most, maximum 2 steps pre scheduled.
   std::queue<bool> is_pre_scheduled_step_prefill_;
+
+  // kvcache store copy async result
+  std::optional<folly::SemiFuture<uint32_t>> future_;
 };
 
 }  // namespace xllm

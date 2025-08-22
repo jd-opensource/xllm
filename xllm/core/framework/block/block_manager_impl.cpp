@@ -16,8 +16,8 @@ limitations under the License.
 
 #include "block_manager_impl.h"
 
-#include "framework/prefix_cache/prefix_cache_hash_murmur3.h"
-
+#include "framework/prefix_cache/prefix_cache.h"
+#include "framework/prefix_cache/prefix_cache_with_upload.h"
 namespace xllm {
 
 BlockManagerImpl::BlockManagerImpl(const Options& options)
@@ -25,8 +25,9 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
   CHECK_GT(options.num_blocks(), 0) << "No blocks to allocate";
   CHECK_GT(options.block_size(), 0) << "Block size must be positive";
   if (options_.enable_prefix_cache()) {
-    prefix_cache_ = std::make_unique<PrefixCacheHashMurmur3>(
-        options.block_size(), options.enable_service_routing());
+    prefix_cache_ = create_prefix_cache(options.block_size(),
+                                        options.enable_cache_upload());
+    CHECK(prefix_cache_) << "Failed to create prefix cache!";
   }
 
   size_t total_blocks = options_.num_blocks();
@@ -72,25 +73,6 @@ void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
   } else {
     num_used_blocks_.fetch_sub(blocks.size(), std::memory_order_relaxed);
   }
-}
-
-void BlockManagerImpl::release_blocks_without_cache_for(Sequence* sequence) {
-  DCHECK(sequence != nullptr);
-
-  if (options_.enable_prefix_cache()) {
-    // update effective block usage
-    for (const auto& block : sequence->blocks()) {
-      // the block is not shared by other sequence
-      if (block.ref_count() <= 2) {
-        num_blocks_in_use_.fetch_sub(1, std::memory_order_relaxed);
-      }
-    }
-  } else {
-    num_blocks_in_use_.fetch_sub(sequence->num_blocks(),
-                                 std::memory_order_relaxed);
-  }
-  // release the blocks after prefix cache insertion
-  sequence->release_blocks();
 }
 
 bool BlockManagerImpl::has_enough_blocks(uint32_t num_blocks) {
@@ -150,17 +132,11 @@ std::vector<Block> BlockManagerImpl::allocate_shared(
 }
 
 void BlockManagerImpl::cache(const Slice<int32_t>& token_ids,
-                             const Slice<Block>& blocks) {
+                             std::vector<Block>& blocks) {
   if (options_.enable_prefix_cache()) {
     AUTO_COUNTER(prefix_cache_latency_seconds_insert);
     // Add the kv cache to the prefix cache
     prefix_cache_->insert(token_ids, blocks);
-
-    // // only insert tokens in kv cache to the prefix cache
-    // const auto tokens_ids = sequence->tokens_in_kv_cache();
-    // auto* blocks = sequence->mutable_blocks();
-    // // Add the kv cache to the prefix cache
-    // prefix_cache_->insert(tokens_ids, *blocks);
   }
 }
 
@@ -202,13 +178,4 @@ void BlockManagerImpl::free(int32_t block_id) {
   }
 }
 
-uint32_t BlockManagerImpl::compute_blocks_hash_value(
-    const Slice<int32_t>& token_ids,
-    std::vector<Block>& blocks) {
-  if (!options_.enable_prefix_cache()) {
-    return 0;
-  }
-
-  return prefix_cache_->compute_blocks_hash_value(token_ids, blocks);
-}
 }  // namespace xllm

@@ -26,21 +26,21 @@ limitations under the License.
 #include "util/tensor_helper.h"
 
 namespace xllm {
-struct CacheContent {
+struct CacheBlockInfo {
   int32_t device_block_id = 0;
   int32_t host_block_id = 0;
   uint8_t* hash_key = nullptr;
 
-  CacheContent() {}
+  CacheBlockInfo() {}
 
-  CacheContent(int32_t device_block_id, int32_t host_block_id) {
+  CacheBlockInfo(int32_t device_block_id, int32_t host_block_id) {
     this->device_block_id = device_block_id;
     this->host_block_id = host_block_id;
   }
 
-  CacheContent(int32_t device_block_id,
-               int32_t host_block_id,
-               const uint8_t* hash_key) {
+  CacheBlockInfo(int32_t device_block_id,
+                 int32_t host_block_id,
+                 const uint8_t* hash_key) {
     this->device_block_id = device_block_id;
     this->host_block_id = host_block_id;
     this->hash_key = const_cast<uint8_t*>(hash_key);
@@ -140,9 +140,9 @@ struct ModelInputParams {
 
 #if defined(USE_NPU)
   // copy in / copy out
-  std::vector<CacheContent> async_copy_out_blocks;
-  std::vector<CacheContent> copy_out_blocks;
-  std::vector<CacheContent> copy_in_blocks;
+  std::vector<CacheBlockInfo> async_copy_out_blocks;
+  std::vector<CacheBlockInfo> copy_out_blocks;
+  std::vector<CacheBlockInfo> copy_in_blocks;
 
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #endif

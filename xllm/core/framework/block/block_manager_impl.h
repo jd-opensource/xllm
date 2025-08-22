@@ -34,7 +34,6 @@ class BlockManagerImpl : public BlockManager {
   std::vector<Block> allocate(size_t num_blocks) override;
 
   void deallocate(const Slice<Block>& blocks) override;
-  void release_blocks_without_cache_for(Sequence* sequence) override;
 
   // allocate shared blocks when enable prefix cache
   std::vector<Block> allocate_shared(
@@ -43,7 +42,7 @@ class BlockManagerImpl : public BlockManager {
 
   // cache blocks when enable prefix cache
   void cache(const Slice<int32_t>& token_ids,
-             const Slice<Block>& blocks) override;
+             std::vector<Block>& blocks) override;
 
   void get_merged_kvcache_event(KvCacheEvent* event) const override;
 
@@ -81,9 +80,6 @@ class BlockManagerImpl : public BlockManager {
 
   // total blocks num
   size_t num_total_blocks() const override { return free_blocks_.size() - 1; }
-
-  uint32_t compute_blocks_hash_value(const Slice<int32_t>& token_ids,
-                                     std::vector<Block>& blocks) override;
 
  private:
   // check if has enough slots, if not, try to evict some blocks

@@ -155,12 +155,8 @@ folly::SemiFuture<bool> Worker::pull_kv_blocks_async(
 }
 
 folly::SemiFuture<uint32_t> Worker::load_kv_blocks_from_store_async(
-    const std::vector<CacheContent>& cache_content_vec) {
-  return impl_->load_kv_blocks_from_store_async(cache_content_vec);
-}
-
-folly::SemiFuture<bool> Worker::init_executor_async() {
-  return impl_->init_executor_async();
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  return impl_->load_kv_blocks_from_store_async(cache_block_info);
 }
 
 const torch::Device& Worker::device() const { return impl_->device(); }
