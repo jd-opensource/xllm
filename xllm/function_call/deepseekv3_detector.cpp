@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <regex>
 #include <string_view>
 
 namespace xllm {
@@ -11,7 +12,12 @@ namespace function_call {
 DeepSeekV3Detector::DeepSeekV3Detector() : BaseFormatDetector() {
   bot_token_ = "<｜tool▁calls▁begin｜>";
   eot_token_ = "<｜tool▁calls▁end｜>";
-  tool_call_separator_ = "";
+  func_call_regex_ = "<｜tool▁call▁begin｜>.*?<｜tool▁call▁end｜>";
+  func_detail_regex_ =
+      "<｜tool▁call▁begin｜>(.*)<｜tool▁sep｜>(.*)\n```json\n(.*)\n```<"
+      "｜tool▁call▁end｜>";
+  _last_arguments_ = "";
+  current_tool_id_ = -1;
 }
 
 bool DeepSeekV3Detector::has_tool_call(const std::string& text) {
@@ -169,6 +175,127 @@ StreamingParseResult DeepSeekV3Detector::detect_and_parse(
   }
 
   return StreamingParseResult(std::move(normal_text), std::move(calls));
+}
+
+StreamingParseResult DeepSeekV3Detector::parse_streaming_increment(
+    const std::string& new_text,
+    const std::vector<JsonTool>& tools) {
+  buffer_ += new_text;
+  std::string current_text = buffer_;
+
+  bool has_tool_call =
+      (current_text.find(bot_token_) != std::string::npos ||
+       current_text.find("<｜tool▁call▁begin｜>") != std::string::npos);
+
+  if (!has_tool_call) {
+    buffer_.clear();
+    std::string result_text = new_text;
+
+    std::vector<std::string> end_tokens = {
+        eot_token_, "```", "<｜tool▁call▁end｜>"};
+    for (const auto& e_token : end_tokens) {
+      size_t pos = result_text.find(e_token);
+      if (pos != std::string::npos) {
+        result_text = result_text.substr(0, pos) +
+                      result_text.substr(pos + e_token.length());
+      }
+    }
+    return StreamingParseResult(result_text);
+  }
+
+  if (tool_indices_.empty()) {
+    tool_indices_ = get_tool_indices(tools);
+  }
+
+  std::vector<ToolCallItem> calls;
+  try {
+    std::regex partial_match_regex(
+        R"(<｜tool▁call▁begin｜>(.*)<｜tool▁sep｜>(.*)\n```json\n(.*)\n```.*)");
+    std::smatch match;
+
+    if (std::regex_search(current_text, match, partial_match_regex)) {
+      std::string func_name = match[2].str();
+      // Trim whitespace
+      func_name.erase(0, func_name.find_first_not_of(" \t\n\r"));
+      func_name.erase(func_name.find_last_not_of(" \t\n\r") + 1);
+
+      std::string func_args_raw = match[3].str();
+      // Trim whitespace
+      func_args_raw.erase(0, func_args_raw.find_first_not_of(" \t\n\r"));
+      func_args_raw.erase(func_args_raw.find_last_not_of(" \t\n\r") + 1);
+
+      if (current_tool_id_ == -1) {
+        current_tool_id_ = 0;
+        prev_tool_call_arr_.clear();
+        streamed_args_for_tool_ = {""};
+      }
+
+      while (static_cast<int>(prev_tool_call_arr_.size()) <= current_tool_id_) {
+        prev_tool_call_arr_.push_back({});
+      }
+      while (static_cast<int>(streamed_args_for_tool_.size()) <=
+             current_tool_id_) {
+        streamed_args_for_tool_.push_back("");
+      }
+
+      if (!current_tool_name_sent_) {
+        calls.push_back(ToolCallItem(current_tool_id_, func_name, ""));
+        current_tool_name_sent_ = true;
+        prev_tool_call_arr_[current_tool_id_]["name"] = func_name;
+        prev_tool_call_arr_[current_tool_id_]["arguments"] = "{}";
+      } else {
+        std::string argument_diff;
+        if (func_args_raw.length() > _last_arguments_.length() &&
+            func_args_raw.substr(0, _last_arguments_.length()) ==
+                _last_arguments_) {
+          argument_diff = func_args_raw.substr(_last_arguments_.length());
+        } else {
+          argument_diff = func_args_raw;
+        }
+
+        if (!argument_diff.empty()) {
+          calls.push_back(
+              ToolCallItem(current_tool_id_, std::nullopt, argument_diff));
+          _last_arguments_ += argument_diff;
+          streamed_args_for_tool_[current_tool_id_] += argument_diff;
+        }
+
+        if (_is_complete_json(func_args_raw)) {
+          try {
+            nlohmann::json parsed_args = nlohmann::json::parse(func_args_raw);
+            prev_tool_call_arr_[current_tool_id_]["arguments"] =
+                parsed_args.dump();
+          } catch (const nlohmann::json::parse_error&) {
+            // Ignore parse errors for partial JSON
+          }
+
+          std::regex tool_call_end_pattern(
+              R"(<｜tool▁call▁begin｜>.*?<｜tool▁call▁end｜>)");
+          std::smatch end_match;
+
+          if (std::regex_search(
+                  current_text, end_match, tool_call_end_pattern)) {
+            buffer_ =
+                current_text.substr(end_match.position() + end_match.length());
+          } else {
+            buffer_.clear();
+          }
+
+          StreamingParseResult result("", calls);
+          current_tool_id_++;
+          _last_arguments_.clear();
+          current_tool_name_sent_ = false;
+          return result;
+        }
+      }
+    }
+
+    return StreamingParseResult("", calls);
+
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Error in parse_streaming_increment: " << e.what();
+    return StreamingParseResult(current_text);
+  }
 }
 
 }  // namespace function_call

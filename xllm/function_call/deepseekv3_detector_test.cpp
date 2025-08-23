@@ -414,5 +414,235 @@ TEST_F(DeepSeekV3DetectorTest, MalformedTokensHandling) {
   EXPECT_EQ(result2.calls.size(), 0);  // Should not match incomplete pattern
 }
 
+// ========== Streaming Tests ==========
+
+// Test basic streaming parsing
+TEST_F(DeepSeekV3DetectorTest, BasicStreamingParsing) {
+  std::vector<std::string> chunks = {
+      "<｜tool▁calls▁begin｜>",
+      "<｜tool▁call▁begin｜>function<｜tool▁sep｜>get_current_weather\n```"
+      "json\n",
+      "{\"location\": \"Tokyo\"}",
+      "\n```<｜tool▁call▁end｜>",
+      "<｜tool▁calls▁end｜>"};
+
+  std::vector<StreamingParseResult> results;
+
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+    results.push_back(result);
+  }
+
+  bool found_tool_name = false;
+  bool found_arguments = false;
+
+  for (const auto& result : results) {
+    if (!result.calls.empty()) {
+      for (const auto& call : result.calls) {
+        if (call.name.has_value() &&
+            call.name.value() == "get_current_weather") {
+          found_tool_name = true;
+        }
+        if (!call.parameters.empty() &&
+            call.parameters.find("Tokyo") != std::string::npos) {
+          found_arguments = true;
+        }
+      }
+    }
+  }
+
+  EXPECT_TRUE(found_tool_name) << "Should find tool name in streaming results";
+  EXPECT_TRUE(found_arguments) << "Should find arguments in streaming results";
+}
+
+// Test incremental argument streaming
+TEST_F(DeepSeekV3DetectorTest, IncrementalArgumentStreaming) {
+  std::vector<std::string> chunks = {
+      "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>get_"
+      "current_weather\n```json\n",
+      "{\"location\":",
+      " \"San Francisco\"",
+      ", \"unit\": \"celsius\"",
+      "}\n```<｜tool▁call▁end｜><｜tool▁calls▁end｜>"};
+
+  std::string accumulated_args;
+  bool tool_name_sent = false;
+
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+
+    for (const auto& call : result.calls) {
+      if (call.name.has_value()) {
+        tool_name_sent = true;
+        EXPECT_EQ(call.name.value(), "get_current_weather");
+      } else {
+        accumulated_args += call.parameters;
+      }
+    }
+  }
+
+  EXPECT_TRUE(tool_name_sent)
+      << "Tool name should be sent when tool call is complete";
+  if (!accumulated_args.empty()) {
+    EXPECT_TRUE(accumulated_args.find("San Francisco") != std::string::npos)
+        << "Should contain location argument";
+    EXPECT_TRUE(accumulated_args.find("celsius") != std::string::npos)
+        << "Should contain unit argument";
+  }
+}
+
+// Test streaming with multiple tool calls
+TEST_F(DeepSeekV3DetectorTest, StreamingMultipleToolCalls) {
+  std::vector<std::string> chunks = {"<｜tool▁calls▁begin｜>",
+                                     "\n",
+                                     "<｜tool▁call▁begin｜>",
+                                     "function",
+                                     "<｜tool▁sep｜>",
+                                     "get_current_weather",
+                                     "\n",
+                                     "```",
+                                     "json",
+                                     "\n",
+                                     "{",
+                                     "\"location\"",
+                                     ":",
+                                     " \"",
+                                     "Tokyo",
+                                     "\"}",
+                                     "\n",
+                                     "```",
+                                     "<｜tool▁call▁end｜>",
+                                     "\n",
+                                     "<｜tool▁call▁begin｜>",
+                                     "function",
+                                     "<｜tool▁sep｜>",
+                                     "get_current_weather",
+                                     "\n",
+                                     "```",
+                                     "json",
+                                     "\n",
+                                     "{",
+                                     "\"location\"",
+                                     ":",
+                                     " \"",
+                                     "Paris",
+                                     "\",",
+                                     " \"",
+                                     "unit\"",
+                                     ":",
+                                     " \"",
+                                     "celsius",
+                                     "\"}",
+                                     "\n",
+                                     "```",
+                                     "<｜tool▁call▁end｜>",
+                                     "\n",
+                                     "<｜tool▁calls▁end｜>"};
+
+  int tool_calls_found = 0;
+  for (const auto& chunk : chunks) {
+    auto stream_result = detector_->parse_streaming_increment(chunk, tools_);
+    for (const auto& call : stream_result.calls) {
+      if (call.name.has_value()) {
+        tool_calls_found++;
+      }
+    }
+  }
+
+  EXPECT_EQ(tool_calls_found, 2)
+      << "Should find 2 tool calls in streaming mode";
+}
+
+// Test normal text handling during streaming
+TEST_F(DeepSeekV3DetectorTest, StreamingNormalTextHandling) {
+  std::vector<std::string> chunks = {
+      "This is normal text before tool call. ",
+      "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>get_"
+      "current_weather\n```json\n",
+      "{\"location\": \"Tokyo\"}\n```<｜tool▁call▁end｜><｜tool▁calls▁end｜>",
+      " And this is text after."};
+
+  std::string accumulated_normal_text;
+  bool found_tool_call = false;
+
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+
+    if (!result.normal_text.empty()) {
+      accumulated_normal_text += result.normal_text;
+    }
+
+    if (!result.calls.empty()) {
+      found_tool_call = true;
+    }
+  }
+
+  EXPECT_TRUE(found_tool_call) << "Should find tool call";
+  EXPECT_TRUE(accumulated_normal_text.find("This is normal text") !=
+              std::string::npos)
+      << "Should preserve normal text before tool call";
+  // Note: We don't expect "And this is text after" to be in
+  // accumulated_normal_text
+}
+
+// Test partial token handling
+TEST_F(DeepSeekV3DetectorTest, StreamingPartialTokenHandling) {
+  std::vector<std::string> chunks = {
+      "<｜tool▁calls▁beg",  // Partial start token
+      "in｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>get_current_weather\n```"
+      "json\n",
+      "{\"location\": \"Tokyo\"}\n```<｜tool▁call▁e",  // Partial end token
+      "nd｜><｜tool▁calls▁end｜>"};
+
+  bool found_tool_call = false;
+
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+
+    if (!result.calls.empty()) {
+      for (const auto& call : result.calls) {
+        if (call.name.has_value() &&
+            call.name.value() == "get_current_weather") {
+          found_tool_call = true;
+        }
+      }
+    }
+  }
+
+  EXPECT_TRUE(found_tool_call) << "Should handle partial tokens correctly";
+}
+
+// Test streaming with empty chunks
+TEST_F(DeepSeekV3DetectorTest, StreamingEmptyChunks) {
+  std::vector<std::string> chunks = {
+      "",
+      "<｜tool▁calls▁begin｜>",
+      "",
+      "<｜tool▁call▁begin｜>function<｜tool▁sep｜>get_current_weather\n```"
+      "json\n",
+      "",
+      "{\"location\": \"Tokyo\"}",
+      "",
+      "\n```<｜tool▁call▁end｜><｜tool▁calls▁end｜>",
+      ""};
+
+  bool found_tool_call = false;
+
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+
+    if (!result.calls.empty()) {
+      for (const auto& call : result.calls) {
+        if (call.name.has_value() &&
+            call.name.value() == "get_current_weather") {
+          found_tool_call = true;
+        }
+      }
+    }
+  }
+
+  EXPECT_TRUE(found_tool_call) << "Should handle empty chunks correctly";
+}
+
 }  // namespace function_call
 }  // namespace xllm
