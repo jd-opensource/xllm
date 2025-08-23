@@ -34,6 +34,7 @@ class KimiK2Detector : public BaseFormatDetector {
   std::string tool_call_argument_begin_token_;
 
   std::regex tool_call_regex_;
+  std::regex stream_tool_call_portion_regex_;
 
   std::string last_arguments_;
 
@@ -42,6 +43,10 @@ class KimiK2Detector : public BaseFormatDetector {
 
   StreamingParseResult detect_and_parse(
       const std::string& text,
+      const std::vector<JsonTool>& tools) override;
+
+  StreamingParseResult parse_streaming_increment(
+      const std::string& new_text,
       const std::vector<JsonTool>& tools) override;
 
  private:

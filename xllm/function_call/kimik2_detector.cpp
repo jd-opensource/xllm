@@ -31,6 +31,19 @@ KimiK2Detector::KimiK2Detector() : BaseFormatDetector() {
     throw;
   }
 
+  // Regex pattern for streaming parsing (partial tool calls)
+  std::string stream_pattern =
+      R"(<\|tool_call_begin\|>\s*([\w\.]+:\d+)\s*<\|tool_call_argument_begin\|>\s*(\{.*))";
+
+  try {
+    stream_tool_call_portion_regex_ =
+        std::regex(stream_pattern, std::regex_constants::ECMAScript);
+  } catch (const std::regex_error& e) {
+    LOG(ERROR) << "Failed to compile KimiK2 streaming regex pattern: "
+               << e.what();
+    throw;
+  }
+
   last_arguments_ = "";
 }
 
@@ -145,6 +158,130 @@ int KimiK2Detector::extract_function_index(
     LOG(ERROR) << "Error extracting function index from tool_call_id: "
                << tool_call_id << ", error: " << e.what();
     return 0;
+  }
+}
+
+StreamingParseResult KimiK2Detector::parse_streaming_increment(
+    const std::string& new_text,
+    const std::vector<JsonTool>& tools) {
+  buffer_ += new_text;
+  std::string current_text = buffer_;
+
+  bool has_tool_call_marker =
+      (current_text.find(bot_token_) != std::string::npos ||
+       current_text.find(tool_call_start_token_) != std::string::npos);
+
+  if (!has_tool_call_marker) {
+    buffer_.clear();
+    std::string cleaned_text = new_text;
+    std::vector<std::string> end_tokens = {eot_token_, tool_call_end_token_};
+    for (const auto& e_token : end_tokens) {
+      size_t pos = cleaned_text.find(e_token);
+      if (pos != std::string::npos) {
+        cleaned_text.erase(pos, e_token.length());
+      }
+    }
+    return StreamingParseResult(cleaned_text, {});
+  }
+
+  if (tool_indices_.empty()) {
+    tool_indices_ = get_tool_indices(tools);
+  }
+
+  std::vector<ToolCallItem> calls;
+
+  try {
+    std::smatch match;
+    if (std::regex_search(
+            current_text, match, stream_tool_call_portion_regex_)) {
+      std::string function_id = match[1].str();
+      std::string function_args = match[2].str();
+
+      std::string function_name = extract_function_name(function_id);
+
+      if (current_tool_id_ == -1) {
+        current_tool_id_ = 0;
+        prev_tool_call_arr_.clear();
+        streamed_args_for_tool_.clear();
+        streamed_args_for_tool_.push_back("");
+      }
+
+      while (static_cast<int>(prev_tool_call_arr_.size()) <= current_tool_id_) {
+        prev_tool_call_arr_.push_back(
+            std::unordered_map<std::string, std::string>());
+      }
+      while (static_cast<int>(streamed_args_for_tool_.size()) <=
+             current_tool_id_) {
+        streamed_args_for_tool_.push_back("");
+      }
+
+      if (!current_tool_name_sent_) {
+        calls.emplace_back(current_tool_id_, function_name, "");
+        current_tool_name_sent_ = true;
+        prev_tool_call_arr_[current_tool_id_]["name"] = function_name;
+        prev_tool_call_arr_[current_tool_id_]["arguments"] = "{}";
+      } else {
+        std::string argument_diff;
+        if (function_args.length() > last_arguments_.length() &&
+            function_args.substr(0, last_arguments_.length()) ==
+                last_arguments_) {
+          argument_diff = function_args.substr(last_arguments_.length());
+        } else {
+          argument_diff = function_args;
+        }
+
+        size_t end_pos = argument_diff.find(tool_call_end_token_);
+        if (end_pos != std::string::npos) {
+          argument_diff = argument_diff.substr(0, end_pos);
+        }
+
+        if (!argument_diff.empty()) {
+          calls.emplace_back(current_tool_id_, std::nullopt, argument_diff);
+          last_arguments_ += argument_diff;
+          streamed_args_for_tool_[current_tool_id_] += argument_diff;
+        }
+
+        std::string parsed_args = function_args;
+        end_pos = parsed_args.find(tool_call_end_token_);
+        if (end_pos != std::string::npos) {
+          parsed_args = parsed_args.substr(0, end_pos);
+        }
+
+        if (_is_complete_json(parsed_args)) {
+          try {
+            auto parsed_json = nlohmann::json::parse(parsed_args);
+            prev_tool_call_arr_[current_tool_id_]["arguments"] =
+                parsed_json.dump();
+          } catch (const std::exception& e) {
+            LOG(ERROR) << "Failed to parse JSON arguments: " << e.what();
+          }
+
+          std::regex tool_call_end_pattern(
+              R"(<\|tool_call_begin\|>.*?<\|tool_call_end\|>)",
+              std::regex_constants::ECMAScript);
+          std::smatch end_match;
+          if (std::regex_search(
+                  current_text, end_match, tool_call_end_pattern)) {
+            buffer_ =
+                current_text.substr(end_match.position() + end_match.length());
+          } else {
+            buffer_.clear();
+          }
+
+          StreamingParseResult result("", calls);
+          current_tool_id_++;
+          last_arguments_.clear();
+          current_tool_name_sent_ = false;
+          return result;
+        }
+      }
+    }
+
+    return StreamingParseResult("", calls);
+
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Error in KimiK2 parse_streaming_increment: " << e.what();
+    return StreamingParseResult(current_text, {});
   }
 }
 

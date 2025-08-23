@@ -2,10 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
-
 namespace xllm {
 namespace function_call {
 
@@ -449,6 +449,177 @@ TEST_F(KimiK2DetectorTest, NestedBracesInJson) {
   nlohmann::json params = nlohmann::json::parse(call.parameters);
   EXPECT_EQ(params["location"], "Beijing");
   EXPECT_EQ(params["config"]["nested"]["deep"], "value");
+}
+
+// Test streaming parsing functionality
+TEST_F(KimiK2DetectorTest, StreamingParseBasicFunctionality) {
+  std::string chunk1 =
+      "<|tool_calls_section_begin|><|tool_call_begin|>functions.get_current_"
+      "weather:0 <|tool_call_argument_begin|>";
+  std::string chunk2 = "{\"location\": ";
+  std::string chunk3 =
+      "\"Beijing\"}<|tool_call_end|><|tool_calls_section_end|>";
+
+  // First chunk - no calls returned yet, waiting for arguments to start
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  EXPECT_EQ(result1.normal_text, "");
+  EXPECT_EQ(result1.calls.size(), 0);
+
+  // Second chunk - function name sent with empty parameters when arguments
+  // start
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  EXPECT_EQ(result2.normal_text, "");
+  EXPECT_EQ(result2.calls.size(), 1);
+  EXPECT_TRUE(result2.calls[0].name.has_value());
+  EXPECT_EQ(result2.calls[0].name.value(), "get_current_weather");
+  EXPECT_EQ(result2.calls[0].parameters, "");
+
+  // Third chunk - incremental arguments sent
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  EXPECT_EQ(result3.normal_text, "");
+  EXPECT_EQ(result3.calls.size(), 1);
+  EXPECT_FALSE(result3.calls[0].name.has_value());
+  EXPECT_EQ(result3.calls[0].parameters, "{\"location\": \"Beijing\"}");
+}
+
+TEST_F(KimiK2DetectorTest, StreamingParseWithNormalText) {
+  // Test streaming parsing with normal text before tool call
+  std::string chunk1 = "Please check the weather ";
+  std::string chunk2 =
+      "<|tool_calls_section_begin|><|tool_call_begin|>functions.get_current_"
+      "weather:0 <|tool_call_argument_begin|>";
+  std::string chunk3 =
+      "{\"location\": \"Tokyo\"}<|tool_call_end|><|tool_calls_section_end|>";
+
+  // First chunk - normal text
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  EXPECT_EQ(result1.normal_text, "Please check the weather ");
+  EXPECT_EQ(result1.calls.size(), 0);
+
+  // Second chunk - tool call start (no calls returned yet, waiting for
+  // arguments)
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  EXPECT_EQ(result2.normal_text, "");
+  EXPECT_EQ(result2.calls.size(), 0);
+
+  // Third chunk - complete arguments (function name sent with empty parameters
+  // first)
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  EXPECT_EQ(result3.normal_text, "");
+  EXPECT_EQ(result3.calls.size(), 1);
+  EXPECT_TRUE(result3.calls[0].name.has_value());
+  EXPECT_EQ(result3.calls[0].name.value(), "get_current_weather");
+  EXPECT_EQ(result3.calls[0].parameters, "");
+}
+
+TEST_F(KimiK2DetectorTest, StreamingParseMultipleToolCalls) {
+  // Test streaming parsing with multiple tool calls
+  std::string chunk1 =
+      "<|tool_calls_section_begin|><|tool_call_begin|>functions.get_current_"
+      "weather:0 <|tool_call_argument_begin|>";
+  std::string chunk2 = "{\"location\": \"Beijing\"}<|tool_call_end|>";
+  std::string chunk3 =
+      "<|tool_call_begin|>functions.calculate:1 <|tool_call_argument_begin|>";
+  std::string chunk4 =
+      "{\"expression\": \"2+3\"}<|tool_call_end|><|tool_calls_section_end|>";
+
+  // First chunk - no calls returned yet, waiting for arguments
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  EXPECT_EQ(result1.calls.size(), 0);
+
+  // Second chunk - first tool call completes, function name sent with empty
+  // parameters then arguments are sent separately
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  EXPECT_EQ(result2.calls.size(), 1);
+  EXPECT_TRUE(result2.calls[0].name.has_value());
+  EXPECT_EQ(result2.calls[0].name.value(), "get_current_weather");
+  EXPECT_EQ(result2.calls[0].parameters, "");
+
+  // Third chunk - second tool call starts, first tool's arguments are sent
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  EXPECT_EQ(result3.calls.size(), 1);
+  EXPECT_FALSE(
+      result3.calls[0].name.has_value());  // Only parameters for first tool
+  EXPECT_EQ(result3.calls[0].parameters, "{\"location\": \"Beijing\"}");
+
+  // Fourth chunk - second tool call completes
+  auto result4 = detector_->parse_streaming_increment(chunk4, tools_);
+  EXPECT_EQ(result4.calls.size(), 1);
+  EXPECT_TRUE(result4.calls[0].name.has_value());
+  EXPECT_EQ(result4.calls[0].name.value(), "calculate");
+  EXPECT_EQ(result4.calls[0].parameters, "");
+}
+
+TEST_F(KimiK2DetectorTest, StreamingParseIncrementalArguments) {
+  // Test streaming parsing with arguments arriving in small chunks
+  std::string chunk1 =
+      "<|tool_calls_section_begin|><|tool_call_begin|>functions.get_current_"
+      "weather:0 <|tool_call_argument_begin|>";
+  std::string chunk2 = "{";
+  std::string chunk3 = "\"location\":";
+  std::string chunk4 = " \"Shanghai\",";
+  std::string chunk5 = " \"unit\": \"celsius\"";
+  std::string chunk6 = "}<|tool_call_end|><|tool_calls_section_end|>";
+
+  // First chunk - no calls returned yet, waiting for arguments
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  EXPECT_EQ(result1.calls.size(), 0);
+
+  // Second chunk - function name sent with empty parameters when arguments
+  // start
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  EXPECT_EQ(result2.calls.size(), 1);
+  EXPECT_TRUE(result2.calls[0].name.has_value());
+  EXPECT_EQ(result2.calls[0].name.value(), "get_current_weather");
+  EXPECT_EQ(result2.calls[0].parameters, "");
+
+  // Incremental argument chunks - each sends the incremental part
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  EXPECT_EQ(result3.calls.size(), 1);
+  EXPECT_FALSE(result3.calls[0].name.has_value());
+  EXPECT_EQ(result3.calls[0].parameters, "{\"location\":");
+
+  auto result4 = detector_->parse_streaming_increment(chunk4, tools_);
+  EXPECT_EQ(result4.calls.size(), 1);
+  EXPECT_FALSE(result4.calls[0].name.has_value());
+  EXPECT_EQ(result4.calls[0].parameters, " \"Shanghai\",");
+
+  auto result5 = detector_->parse_streaming_increment(chunk5, tools_);
+  EXPECT_EQ(result5.calls.size(), 1);
+  EXPECT_FALSE(result5.calls[0].name.has_value());
+  EXPECT_EQ(result5.calls[0].parameters, " \"unit\": \"celsius\"");
+
+  // Complete arguments - final chunk
+  auto result6 = detector_->parse_streaming_increment(chunk6, tools_);
+  EXPECT_EQ(result6.calls.size(), 1);
+  EXPECT_FALSE(result6.calls[0].name.has_value());
+  EXPECT_EQ(result6.calls[0].parameters, "}");
+}
+
+TEST_F(KimiK2DetectorTest, StreamingParseStateReset) {
+  // Test that streaming state is properly reset between different parsing
+  // sessions
+
+  // First complete tool call
+  std::string text1 =
+      "<|tool_calls_section_begin|><|tool_call_begin|>functions.get_current_"
+      "weather:0 <|tool_call_argument_begin|>{\"location\": "
+      "\"Beijing\"}<|tool_call_end|>";
+  auto result1 = detector_->parse_streaming_increment(text1, tools_);
+
+  // Create a new detector to simulate fresh state
+  auto fresh_detector = std::make_unique<KimiK2Detector>();
+
+  // Second complete tool call with fresh detector
+  std::string text2 =
+      "<|tool_calls_section_begin|><|tool_call_begin|>functions.calculate:0 "
+      "<|tool_call_argument_begin|>{\"expression\": \"1+1\"}<|tool_call_end|>";
+  auto result2 = fresh_detector->parse_streaming_increment(text2, tools_);
+
+  EXPECT_EQ(result2.calls.size(), 1);
+  EXPECT_EQ(result2.calls[0].name.value(), "calculate");
+  EXPECT_EQ(result2.calls[0].tool_index,
+            0);  // Should start from 0 with fresh state
 }
 
 }  // namespace function_call
