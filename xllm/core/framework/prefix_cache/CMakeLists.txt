@@ -15,9 +15,9 @@ cc_library(
     prefix_cache_hash_murmur3.cpp
     prefix_cache_hash_sha256.cpp
   DEPS
-    torch_npu
-    llm_engine
-    graph
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+    $<$<BOOL:${USE_NPU}>:llm_engine>
+    $<$<BOOL:${USE_NPU}>:graph>
     :request
     :common
     glog::glog

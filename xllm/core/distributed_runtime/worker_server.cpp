@@ -15,19 +15,23 @@
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/mapping_npu.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
-#include "hccl/hccl.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
 #include "util/net.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
+
+#if defined(USE_NPU)
+#include "framework/mapping_npu.h"
+#include "hccl/hccl.h"
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
 #include "xllm_kernels/models/base/param/mapping.h"
+#endif
+
 namespace xllm {
 
 void WorkerServer::create_server(const runtime::Options& options,

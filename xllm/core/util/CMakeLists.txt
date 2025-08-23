@@ -42,8 +42,8 @@ cc_library(
     nlohmann_json::nlohmann_json
     glog::glog
     torch
-    torch_npu
-    ms_tools_ext
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+    $<$<BOOL:${USE_NPU}>:ms_tools_ext>
     SMHasherSupport
     Boost::serialization
 )

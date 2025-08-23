@@ -127,9 +127,11 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   forward_inputs.positions =
       torch::tensor(flatten_positions_vec, tensor_options);
   std::pair<int, int> prefill_indices{0, 0};
+#if defined(USE_NPU)
   if (q_seq_lens.size() >= 1) {
     prefill_indices = util::find_ones_indices(q_seq_lens);
   }
+#endif
   auto& input_params = forward_inputs.input_params;
   input_params.empty_kv_cache = pb_forward_input->empty_kv_cache();
   input_params.global_empty_kv_cache =

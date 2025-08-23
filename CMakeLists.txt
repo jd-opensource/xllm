@@ -1,44 +1,50 @@
 cmake_minimum_required(VERSION 3.26)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+option(USE_NPU "Enable NPU support" OFF)
+option(USE_MLU "Enable MLU support" OFF)
+
 if(DEVICE_ARCH STREQUAL "ARM")
     set(CMAKE_SYSTEM_PROCESSOR aarch64)
     set(RUST_TARGET aarch64-unknown-linux-gnu)
 endif()
 
-if(DEVICE_TYPE STREQUAL "USE_A3")
-    add_compile_definitions(USE_A3) 
-    add_definitions(-DUSE_A3)
-    set(USE_A3 ON)
-    message(STATUS "Building for device: A3 (macro USE_A3 defined)")
-else()
-    add_compile_definitions(USE_A2)
-    add_definitions(-DUSE_A2)
-    set(USE_A2 ON)
-    message(STATUS "Building for device: A2 (macro USE_A2 defined)")
-endif()
-
-option(PRECOMPILE_XLLM_OPS "Precompile xllm ops before main build" ON)
-if(PRECOMPILE_XLLM_OPS)
-  set(XLLM_OPS_MARKER "${CMAKE_BINARY_DIR}/xllm_ops_compiled.marker")
-  
-  if(NOT EXISTS ${XLLM_OPS_MARKER})
-    message(STATUS "Precompiling xllm ops (first time)...")
-    execute_process(
-      COMMAND bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/xllm_ops
-      RESULT_VARIABLE XLLM_OPS_RESULT
-    )
-    if(NOT XLLM_OPS_RESULT EQUAL 0)
-      message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
-    endif()
-    
-    file(TOUCH ${XLLM_OPS_MARKER})
-    message(STATUS "xllm ops precompiled successfully")
+if(USE_NPU)
+  if(DEVICE_TYPE STREQUAL "USE_A3")
+      add_compile_definitions(USE_A3) 
+      add_definitions(-DUSE_A3)
+      set(USE_A3 ON)
+      message(STATUS "Building for device: A3 (macro USE_A3 defined)")
   else()
-    message(STATUS "xllm ops already compiled, skipping...")
+      add_compile_definitions(USE_A2)
+      add_definitions(-DUSE_A2)
+      set(USE_A2 ON)
+      message(STATUS "Building for device: A2 (macro USE_A2 defined)")
+  endif()
+
+  option(PRECOMPILE_XLLM_OPS "Precompile xllm ops before main build" ON)
+  if(PRECOMPILE_XLLM_OPS)
+    set(XLLM_OPS_MARKER "${CMAKE_BINARY_DIR}/xllm_ops_compiled.marker")
+  
+    if(NOT EXISTS ${XLLM_OPS_MARKER})
+      message(STATUS "Precompiling xllm ops (first time)...")
+      execute_process(
+        COMMAND bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/xllm_ops
+        RESULT_VARIABLE XLLM_OPS_RESULT
+      )
+      if(NOT XLLM_OPS_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
+      endif()
+    
+      file(TOUCH ${XLLM_OPS_MARKER})
+      message(STATUS "xllm ops precompiled successfully")
+    else()
+      message(STATUS "xllm ops already compiled, skipping...")
+    endif()
   endif()
 endif()
+
 enable_testing()
 
 if(NOT TARGET all_tests)
@@ -255,35 +261,44 @@ else()
   message(STATUS "Downloading and using libtorch 2.1.0 for CPU at ${LIBTORCH_SOURCE_DIR}")
 endif()
 
-add_definitions(-DBUILD_LIBTORCH)
-add_definitions(-DTORCH_SETCUSTOMHANDLER=ON)
-# set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
-set(CMAKE_VERBOSE_MAKEFILE ON)
-add_definitions(-DTORCH_HIGHER_THAN_PTA6)
-include_directories(
-    $ENV{PYTHON_INCLUDE_PATH}
-    $ENV{PYTORCH_INSTALL_PATH}/include
-    $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
-    $ENV{PYTORCH_NPU_INSTALL_PATH}/include
-    $ENV{NPU_HOME_PATH}/include
-    $ENV{ATB_HOME_PATH}/include
-    $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
-    $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels/core/include
-    $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels
-    $ENV{XLLM_KERNELS_PATH}/include/
-)
+if(USE_NPU)
+  add_definitions(-DUSE_NPU)
+  add_definitions(-DBUILD_LIBTORCH)
+  add_definitions(-DTORCH_SETCUSTOMHANDLER=ON)
+  # set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
+  set(CMAKE_VERBOSE_MAKEFILE ON)
+  add_definitions(-DTORCH_HIGHER_THAN_PTA6)
+  include_directories(
+      $ENV{PYTHON_INCLUDE_PATH}
+      $ENV{PYTORCH_INSTALL_PATH}/include
+      $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
+      $ENV{PYTORCH_NPU_INSTALL_PATH}/include
+      $ENV{NPU_HOME_PATH}/include
+      $ENV{ATB_HOME_PATH}/include
+      $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
+      $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels/core/include
+      $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels
+      $ENV{XLLM_KERNELS_PATH}/include/
+  )
 
-link_directories(
-    $ENV{PYTHON_LIB_PATH}
-    $ENV{PYTORCH_INSTALL_PATH}/lib
-    $ENV{PYTORCH_NPU_INSTALL_PATH}/lib
-    $ENV{NPU_HOME_PATH}/lib64
-    $ENV{ATB_HOME_PATH}/lib
-    $ENV{NPU_TOOLKIT_HOME}/lib64
-    $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
-    $ENV{XLLM_KERNELS_PATH}/lib/
-)
-link_libraries(cust_opapi)
+  link_directories(
+      $ENV{PYTHON_LIB_PATH}
+      $ENV{PYTORCH_INSTALL_PATH}/lib
+      $ENV{PYTORCH_NPU_INSTALL_PATH}/lib
+      $ENV{NPU_HOME_PATH}/lib64
+      $ENV{ATB_HOME_PATH}/lib
+      $ENV{NPU_TOOLKIT_HOME}/lib64
+      $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
+      $ENV{XLLM_KERNELS_PATH}/lib/
+  )
+  link_libraries(cust_opapi)
+endif()
+
+if(USE_MLU)
+  add_definitions(-DUSE_MLU)
+# TODO(mlu): set mlu environment variables
+endif()
+
 # check if USE_CXX11_ABI is set correctly
 # if (DEFINED USE_CXX11_ABI)
 #   parse_make_options(${TORCH_CXX_FLAGS} "TORCH_CXX_FLAGS")
@@ -321,8 +336,10 @@ set(BRPC_OUTPUT_DIR ${CMAKE_BINARY_DIR}/third_party/brpc/output)
 include_directories(${BRPC_OUTPUT_DIR}/include)
 link_directories(${BRPC_OUTPUT_DIR}/lib)
 
-# hccl_transfer
-include_directories(third_party/hccl_transfer/hccl_transfer/include)
+if(USE_NPU)
+  # hccl_transfer
+  include_directories(third_party/hccl_transfer/hccl_transfer/include)
+endif()
 
 # add subdirectories
 add_subdirectory(xllm)

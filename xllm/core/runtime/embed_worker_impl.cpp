@@ -7,10 +7,11 @@
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
-
+#endif
 #include <memory>
 #include <optional>
 #include <utility>

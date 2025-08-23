@@ -62,8 +62,11 @@ bool VLMWorkerImpl::init_model(torch::ScalarType dtype,
 }
 
 std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& inputs) {
+#if defined(USE_NPU)
   c10_npu::SetDevice(device_.index());
-
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu set device
+#endif
   Timer timer;
   // all tensors should be on the same device as model
   auto flatten_tokens = inputs.token_ids.to(device_);
@@ -81,7 +84,11 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& inputs) {
         model_->logits(hidden_states, sampling_params.selected_token_idxes);
   }
 
+#if defined(USE_NPU)
   torch::npu::synchronize();
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu synchronize stream
+#endif
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

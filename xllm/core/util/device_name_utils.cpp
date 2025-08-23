@@ -2,17 +2,23 @@
 
 #include <absl/strings/numbers.h>
 #include <absl/strings/str_split.h>
-#include <c10/core/StorageImpl.h>
 #include <glog/logging.h>
-#include <torch/csrc/Device.h>
-#include <torch/extension.h>
 #include <torch/torch.h>
 #include <torch/types.h>
+
+#if defined(USE_NPU)
+#include <c10/core/StorageImpl.h>
+#include <torch/csrc/Device.h>
+#include <torch/extension.h>
 #include <torch_npu/csrc/core/npu/NPUFunctions.h>
 #include <torch_npu/torch_npu.h>
+#elif defined(USE_MLU)
+// TODO(mlu): include mlu device name utils
+#endif
 
 namespace xllm {
 
+#if defined(USE_NPU)
 std::vector<torch::Device> DeviceNameUtils::parse_devices(
     const std::string& device_str) {
   std::vector<torch::Device> devices;
@@ -52,5 +58,8 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
       << "All devices must be of the same type. Got: " << device_str;
   return devices;
 }
+#elif defined(USE_MLU)
+// TODO(mlu): implement mlu device name utils
+#endif
 
 }  // namespace xllm

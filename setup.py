@@ -187,6 +187,9 @@ def set_npu_envs():
     os.environ["LCCL_DETERMINISTIC"] = "0"
     os.environ["LCCL_PARALLEL"] = "0"
 
+# TODO(mlu): set mlu environment variables
+def set_mlu_envs():
+    pass
 
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
@@ -198,7 +201,7 @@ class CMakeExtension(Extension):
 class ExtBuild(build_ext):
     user_options = build_ext.user_options + [
         ("base-dir=", None, "base directory of xLLM project"),
-        ("device=", None, "target device type (a3 or a2)"),
+        ("device=", None, "target device type (a3 or a2 or mlu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
     ]
 
@@ -213,8 +216,8 @@ class ExtBuild(build_ext):
         self.device = self.device.lower()
         if self.device is None:
           self.device = "a2"
-        if self.device not in ("a2", "a3"):
-            raise ValueError("--device must be either 'a2' or 'a3' (case-insensitive)")
+        if self.device not in ("a2", "a3", "mlu"):
+            raise ValueError("--device must be either 'a2' or 'a3' or 'mlu' (case-insensitive)")
         if self.arch is None:
           self.arch = "x86"
         self.arch = self.arch.lower()
@@ -270,9 +273,18 @@ class ExtBuild(build_ext):
             f"-DDEVICE_TYPE=USE_{self.device.upper()}",
             f"-DDEVICE_ARCH={self.arch.upper()}",
         ]
+        
+        if self.device == "a2" or self.device == "a3":
+            cmake_args += ["-DUSE_NPU=ON"]
+            # set npu environment variables
+            set_npu_envs()
+        elif self.device == "mlu":
+            cmake_args += ["-DUSE_MLU=ON"]
+            # set mlu environment variables
+            set_mlu_envs()
+        else:
+            raise ValueError("Please set --device to a2 or a3 or mlu.")
 
-        # set npu environment variables
-        set_npu_envs()
 
         # Adding CMake arguments set as environment variable
         # (needed e.g. to build for ARM OSx on conda-forge)
@@ -397,8 +409,8 @@ if __name__ == "__main__":
         idx = sys.argv.index('--device')
         if idx + 1 < len(sys.argv):
             device = sys.argv[idx+1].lower()
-            if device not in ('a2', 'a3'):
-                print("Error: --device must be a2 or a3")
+            if device not in ('a2', 'a3', 'mlu'):
+                print("Error: --device must be a2 or a3 or mlu")
                 sys.exit(1)
             # Remove the arguments so setup() doesn't see them
             del sys.argv[idx]

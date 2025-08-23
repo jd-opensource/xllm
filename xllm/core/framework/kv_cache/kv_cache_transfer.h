@@ -82,21 +82,25 @@ class KVCacheTransfer {
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks);
 
+#if defined(USE_NPU)
   virtual folly::SemiFuture<bool> push_kv_blocks_async(
       const std::vector<TransferKVInfo>& transfer_kv_infos,
       const ParallelArgs& parallel_args,
       std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer,
       bool is_spec_draft);
+#endif
 
   virtual void merge_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       const std::vector<TransferKVInfo>& transfer_kv_infos,
       const ParallelArgs& parallel_args);
 
+#if defined(USE_NPU)
   virtual bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
       bool is_spec_draft) = 0;
+#endif
 
  protected:
   // working thread

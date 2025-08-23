@@ -14,9 +14,11 @@ set(BASE_DEPS
   torch
 )
 
-# Modify dependencies for npu
-list(APPEND BASE_DEPS torch_npu)
-list(APPEND BASE_DEPS :npu_layers)
+if(USE_NPU)
+  # Modify dependencies for npu
+  list(APPEND BASE_DEPS torch_npu)
+  list(APPEND BASE_DEPS :npu_layers)
+endif()
 
 # Define the library
 cc_library(

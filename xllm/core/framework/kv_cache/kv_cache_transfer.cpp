@@ -32,6 +32,7 @@ folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
   return future;
 }
 
+#if defined(USE_NPU)
 folly::SemiFuture<bool> KVCacheTransfer::push_kv_blocks_async(
     const std::vector<TransferKVInfo>& transfer_kv_infos,
     const ParallelArgs& parallel_args,
@@ -56,6 +57,7 @@ folly::SemiFuture<bool> KVCacheTransfer::push_kv_blocks_async(
   });
   return future;
 }
+#endif
 
 void KVCacheTransfer::merge_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,

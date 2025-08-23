@@ -12,7 +12,7 @@ cc_library(
     layer_synchronizer.h
     macros.h
     metrics.h
-    mspti_helper.h
+    $<$<BOOL:${USE_NPU}>:mspti_helper.h>
     options.h
     rate_limiter.h
     types.h
@@ -23,7 +23,7 @@ cc_library(
     global_flags.cpp
     layer_synchronizer.cpp
     metrics.cpp
-    mspti_helper.cpp
+    $<$<BOOL:${USE_NPU}>:mspti_helper.cpp>
     options.cpp
     rate_limiter.cpp
     device_monitor.cpp
@@ -32,9 +32,9 @@ cc_library(
     absl::random_random
     absl::strings
     torch
-    torch_npu
-    mspti
-    ms_tools_ext
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+    $<$<BOOL:${USE_NPU}>:mspti>
+    $<$<BOOL:${USE_NPU}>:ms_tools_ext>
     Boost::serialization
     cpprest
     etcd-cpp-api

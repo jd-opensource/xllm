@@ -5,7 +5,9 @@
 
 namespace xllm {
 
+#if defined(USE_NPU)
 using namespace llm_datadist;
+#endif
 
 class SpecKVCacheTransfer : public LlmDataDistTransfer {
  public:
@@ -57,6 +59,7 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
       std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer,
       bool is_spec_draft) override;
 
+#if defined(USE_NPU)
   bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
@@ -68,6 +71,7 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
 
   bool push_embed_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos);
+#endif
 
   void merge_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
@@ -79,6 +83,7 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
  private:
   int64_t spec_num_layers_;
 
+#if defined(USE_NPU)
   Cache spec_k_cache_;
   Cache spec_v_cache_;
   Cache embed_cache_;
@@ -86,6 +91,7 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
 
   Cache host_cache;
   std::vector<std::vector<uint16_t>> buffers;
+#endif
 };
 
 }  // namespace xllm
