@@ -59,8 +59,8 @@ cc_library(
     gflags::gflags
     spdlog::spdlog
     torch
-    torch_npu
-    xllm_kernels
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+    $<$<BOOL:${USE_NPU}>:xllm_kernels>
 )
 
 

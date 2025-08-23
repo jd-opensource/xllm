@@ -1,3 +1,5 @@
 include(cc_library)
-add_subdirectory(npu)
 
+if(USE_NPU)
+  add_subdirectory(npu)
+endif()

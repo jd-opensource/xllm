@@ -140,7 +140,12 @@ VLMMaster::~VLMMaster() {
     loop_thread_.join();
   }
 
+  // torch::cuda::empty_cache();
+#if defined(USE_NPU)
   c10_npu::NPUCachingAllocator::emptyCache();
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu empty cache
+#endif
 }
 
 void VLMMaster::handle_request(const std::vector<Message>& messages,

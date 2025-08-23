@@ -6,9 +6,11 @@
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
+#endif
 
 #include <memory>
 #include <optional>
@@ -58,7 +60,11 @@ bool EmbedVLMWorkerImpl::init_model(torch::ScalarType dtype,
 std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
     const ForwardInput& inputs) {
   torch::DeviceGuard device_guard(device_);
+#if defined(USE_NPU)
   torch::npu::synchronize();
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu synchronize stream
+#endif
 
   Timer timer;
 
@@ -72,7 +78,11 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   auto hidden_states = model_executor_->forward(
       flatten_tokens, flatten_positions, kv_caches_, params);
 
+#if defined(USE_NPU)
   torch::npu::synchronize();
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu synchronize stream
+#endif
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

@@ -35,10 +35,14 @@
 
 namespace xllm {
 
+#if defined(USE_NPU)
 struct WorkerImpl::NPUStreamHelper {
   c10_npu::NPUStream H2D_memcpy_stream;
   NPUStreamHelper() : H2D_memcpy_stream(c10_npu::getNPUStreamFromPool()) {}
 };
+#elif defined(USE_MLU)
+// TODO(mlu): implement mlu stream helper
+#endif
 
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 
@@ -57,6 +61,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   dp_driver_ =
       parallel_args.dp_size() > 1 && parallel_args.rank() % tp_size == 0;
 
+#if defined(USE_NPU)
   int currentDevId = device.index();
   int ret = aclrtSetDevice(currentDevId);
   if (ret != 0) {
@@ -66,6 +71,9 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   std::string device_name = "npu:" + std::to_string(currentDevId);
   torch_npu::init_npu(device_name);
   npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu init context
+#endif
   sampler_ = std::make_unique<Sampler>();
 }
 
@@ -81,12 +89,19 @@ bool WorkerImpl::allocate_kv_cache(
   kv_caches_.reserve(num_layers);
   for (int64_t i = 0; i < num_layers; ++i) {
     torch::Tensor key_cache, value_cache;
+#if defined(USE_NPU)
     key_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_)),
         2);
     value_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
         2);
+#elif defined(USE_MLU)
+    key_cache =
+        torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
+    value_cache =
+        torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+#endif
     kv_caches_.emplace_back(key_cache, value_cache);
   }
 
@@ -192,12 +207,16 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   size_t torch_cache = 0;
   size_t torch_largest_block = 0;
+#if defined(USE_NPU)
   c10_npu::NPUCachingAllocator::emptyCache();
   c10_npu::NPUCachingAllocator::FreeDeviceCachedMemory(device_.index());
   // aclrtSynchronizeDevice();
   // get torch's cache memory size since torch_npu's emptyCache is useless
   c10_npu::NPUCachingAllocator::cacheInfo(
       device_.index(), &torch_cache, &torch_largest_block);
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu estimate kv cache capacity
+#endif
   const auto available_memory = DeviceMemory::available_memory(device_);
   const auto total_memory = DeviceMemory::total_memory(device_);
   DeviceMonitor::get_instance().set_total_memory(device_.index(), total_memory);
@@ -207,7 +226,11 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
 }
 
 void WorkerImpl::process_group_test() {
+#if defined(USE_NPU)
   c10_npu::SetDevice(device_.index());
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu process group test
+#endif
 
   // create random tensors
   const auto options = torch::dtype(torch::kHalf).device(device_);
@@ -261,6 +284,7 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
 
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
                                              ForwardInput& processed_inputs) {
+#if defined(USE_NPU)
   c10::StreamGuard streamGuard(npu_stream_helper_->H2D_memcpy_stream.unwrap());
   processed_inputs = inputs.to(device_, dtype_);
 
@@ -281,6 +305,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
     processed_inputs.input_params.dp_ep_padding_data = dp_ep_padding.build();
   }
   aclrtSynchronizeStream(npu_stream_helper_->H2D_memcpy_stream.stream());
+#endif
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(

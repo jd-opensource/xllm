@@ -31,7 +31,7 @@ cc_test(
     :batch
     absl::time
     GTest::gtest_main
-    torch_npu
+    $<$<BOOL:${USE_NPU}>:torch_npu>
 )
 target_link_libraries(batch_test PUBLIC Python::Python ascendcl hccl c_sec nnopbase)
 

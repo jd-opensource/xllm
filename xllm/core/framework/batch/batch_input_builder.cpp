@@ -87,9 +87,13 @@ void BatchInputBuilder::process_single_sequence(int32_t seq_index) {
   state_.empty_kv_cache = state_.empty_kv_cache && (n_kv_cache_tokens == 0);
   state_.max_seq_len = std::max(state_.max_seq_len, seq_len);
   state_.q_max_seq_len = std::max(state_.q_max_seq_len, q_seq_len);
+#if defined(USE_NPU)
   state_.seq_lens.push_back(seq_len);
   state_.q_seq_lens.push_back(q_seq_len);
-
+#elif defined(USE_MLU)
+  state_.seq_lens.push_back(seq_lens.back() + seq_len);
+  state_.q_seq_lens.push_back(q_seq_lens.back() + q_seq_len);
+#endif
   // Process tokens and positions
   extract_tokens_and_positions(sequence, n_kv_cache_tokens, seq_len);
 
@@ -241,8 +245,14 @@ void BatchInputBuilder::padding_decode_batch_size(
           }
           state_.new_token_slot_ids.push_back(0);
         }
+#if defined(USE_NPU)
         state_.seq_lens.push_back(num_decoding_tokens);
         state_.q_seq_lens.push_back(num_decoding_tokens);
+#elif defined(USE_MLU)
+        state_.seq_lens.push_back(state_.seq_lens.back() + num_decoding_tokens);
+        state_.q_seq_lens.push_back(state_.q_seq_lens.back() +
+                                    num_decoding_tokens);
+#endif
         state_.block_tables_vec.emplace_back();
       }
     }
