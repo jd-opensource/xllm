@@ -9,7 +9,11 @@
 
 namespace xllm {
 
-std::shared_ptr<Request> DisaggDecodeServiceImpl::generate_request(
+DisaggPDServiceImpl::DisaggPDServiceImpl(DisaggPDScheduler* scheduler,
+                                         Engine* engine)
+    : DisaggPDServiceImplInterface(), scheduler_(scheduler), engine_(engine) {}
+
+std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
     const proto::DisaggRequest& req) {
   // create a new request
   // TODO: Should to support best_of > 1 case, now we only consider
@@ -81,14 +85,7 @@ std::shared_ptr<Request> DisaggDecodeServiceImpl::generate_request(
   return new_request;
 }
 
-DisaggDecodeServiceImpl::DisaggDecodeServiceImpl(
-    DisaggDecodeScheduler* scheduler,
-    Engine* engine)
-    : DisaggPDServiceImplInterface(true),
-      scheduler_(scheduler),
-      engine_(engine) {}
-
-void DisaggDecodeServiceImpl::decode_recv_new_requests(
+void DisaggPDServiceImpl::decode_recv_new_requests(
     const proto::DisaggRequests* request,
     proto::DisaggResponses* response) {
   // link prefill cluster
@@ -150,7 +147,7 @@ void DisaggDecodeServiceImpl::decode_recv_new_requests(
 }
 
 // TODO: support embedding later, now we only support tokens
-void DisaggDecodeServiceImpl::decode_recv_first_generation(
+void DisaggPDServiceImpl::decode_recv_first_generation(
     const proto::DisaggGenerations* request,
     proto::Status* response) {
   // TODO: we only support one request generation currently
@@ -193,11 +190,7 @@ void DisaggDecodeServiceImpl::decode_recv_first_generation(
   response->set_ok(true);
 }
 
-DisaggPrefillServiceImpl::DisaggPrefillServiceImpl(
-    DisaggPrefillScheduler* scheduler)
-    : DisaggPDServiceImplInterface(false), scheduler_(scheduler) {}
-
-bool DisaggPrefillServiceImpl::prefill_recv_generation(
+bool DisaggPDServiceImpl::prefill_recv_generation(
     const proto::DisaggStreamGeneration* request,
     proto::Status* response) {
   // convert proto request to `RequestOutput`
@@ -266,7 +259,7 @@ bool DisaggPrefillServiceImpl::prefill_recv_generation(
   return success;
 }
 
-void DisaggPrefillServiceImpl::prefill_recv_generations(
+void DisaggPDServiceImpl::prefill_recv_generations(
     const proto::DisaggStreamGenerations* requests,
     proto::StatusSet* responses) {
   for (auto& gen : requests->gens()) {

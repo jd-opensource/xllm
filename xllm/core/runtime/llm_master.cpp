@@ -81,7 +81,7 @@ LLMMaster::LLMMaster(const Options& options)
 
       case InstanceRole::PREFILL:
         instance_info.rpc_address = ServerRegistry::get_instance()
-                                        .get_server("DisaggPrefillServer")
+                                        .get_server("DisaggPDServer")
                                         ->listen_address();
         instance_info.type = "prefill";
         engine_->get_cache_info(instance_info.cluster_ids,
@@ -92,7 +92,7 @@ LLMMaster::LLMMaster(const Options& options)
 
       case InstanceRole::DECODE:
         instance_info.rpc_address = ServerRegistry::get_instance()
-                                        .get_server("DisaggDecodeServer")
+                                        .get_server("DisaggPDServer")
                                         ->listen_address();
         instance_info.type = "decode";
         engine_->get_cache_info(instance_info.cluster_ids,

@@ -19,24 +19,53 @@
 
 namespace xllm {
 
-namespace {
-void handle_stream_response(brpc::Controller* cntl, proto::Status* response) {
-  std::unique_ptr<brpc::Controller> cntl_guard(cntl);
-  std::unique_ptr<proto::Status> response_guard(response);
-  if (cntl->Failed()) {
-    LOG(WARNING) << "Fail to send stream generation, " << cntl->ErrorText();
+DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
+    : ContinuousScheduler(engine, options) {
+  if (!options_.instance_role().has_value()) {
+    LOG(FATAL) << "Instance type is not set in disagg pd mode.";
+  }
+  // start dispatch thread for prefill instance
+  dispatch_thread_ = std::make_unique<std::thread>(
+      &DisaggPDScheduler::dispatch_requests, this);
+
+  rpc_server_thread_ =
+      std::make_unique<std::thread>(&DisaggPDScheduler::start_rpc_server, this);
+  // wait rpc server initialized
+  auto rpc_server = ServerRegistry::get_instance().get_server("DisaggPDServer");
+  while (!rpc_server || !rpc_server->has_initialized()) {
+    absl::SleepFor(absl::Milliseconds(100));
+    rpc_server = ServerRegistry::get_instance().get_server("DisaggPDServer");
+  }
+  // connect to master service
+  xservice_client_ = XServiceClient::get_instance();
+  if (!xservice_client_->initialize_done()) {
+    LOG(FATAL) << "XServiceClient not init.";
     return;
   }
-  // do something
-}
-}  // namespace
+  xservice_client_->set_scheduler(this);
 
-DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
-    : ContinuousScheduler(engine, options) {}
+  // register instance info
+  instance_info_.name = xservice_client_->get_instance_name();
+  instance_info_.rpc_address = rpc_server->listen_address();
+  instance_info_.type = options_.instance_role().value().to_string();
+  LOG(INFO) << "Instance info: instance name = " << instance_info_.name
+            << ", instance rpc_address = " << instance_info_.rpc_address
+            << ", instance type = " << instance_info_.type;
+
+  engine->get_cache_info(instance_info_.cluster_ids,
+                         instance_info_.addrs,
+                         instance_info_.k_cache_ids,
+                         instance_info_.v_cache_ids);
+  instance_info_.dp_size = options.dp_size();
+}
 
 DisaggPDScheduler::~DisaggPDScheduler() {
   if (rpc_server_thread_ && rpc_server_thread_->joinable()) {
     rpc_server_thread_->join();
+  }
+
+  if (dispatch_thread_ && dispatch_thread_->joinable()) {
+    dispatch_thread_->join();
   }
 }
 
@@ -100,62 +129,11 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
   return it->second;
 }
 
-DisaggPrefillScheduler::DisaggPrefillScheduler(Engine* engine,
-                                               const Options& options)
-    : DisaggPDScheduler(engine, options) {
-  if (!options_.instance_role().has_value()) {
-    LOG(FATAL) << "Instance type is not set in disagg pd mode.";
-  }
-
-  // start dispatch thread for prefill instance
-  dispatch_thread_ = std::make_unique<std::thread>(
-      &DisaggPrefillScheduler::dispatch_requests, this);
-
-  rpc_server_thread_ = std::make_unique<std::thread>(
-      &DisaggPrefillScheduler::start_rpc_server, this);
-  // wait rpc server initialized
+void DisaggPDScheduler::start_rpc_server() {
+  std::unique_ptr<DisaggPDService> service =
+      std::make_unique<DisaggPDService>(this, engine_);
   auto rpc_server =
-      ServerRegistry::get_instance().get_server("DisaggPrefillServer");
-  while (!rpc_server || !rpc_server->has_initialized()) {
-    absl::SleepFor(absl::Milliseconds(100));
-    rpc_server =
-        ServerRegistry::get_instance().get_server("DisaggPrefillServer");
-  }
-  // connect to master service
-  xservice_client_ = XServiceClient::get_instance();
-  if (!xservice_client_->initialize_done()) {
-    LOG(FATAL) << "XServiceClient not init.";
-    return;
-  }
-  xservice_client_->set_scheduler(this);
-
-  // register instance info
-  instance_info_.name = xservice_client_->get_instance_name();
-  instance_info_.rpc_address = rpc_server->listen_address();
-  instance_info_.type = "prefill";
-  LOG(INFO) << "Register instance info to master: "
-            << ", instance name = " << instance_info_.name
-            << ", instance rpc_address = " << instance_info_.rpc_address
-            << ", instance type = " << instance_info_.type;
-
-  engine->get_cache_info(instance_info_.cluster_ids,
-                         instance_info_.addrs,
-                         instance_info_.k_cache_ids,
-                         instance_info_.v_cache_ids);
-  instance_info_.dp_size = options.dp_size();
-}
-
-DisaggPrefillScheduler::~DisaggPrefillScheduler() {
-  if (dispatch_thread_ && dispatch_thread_->joinable()) {
-    dispatch_thread_->join();
-  }
-}
-
-void DisaggPrefillScheduler::start_rpc_server() {
-  std::unique_ptr<DisaggPrefillService> service =
-      std::make_unique<DisaggPrefillService>(this);
-  auto rpc_server =
-      ServerRegistry::get_instance().register_server("DisaggPrefillServer");
+      ServerRegistry::get_instance().register_server("DisaggPDServer");
   if (!rpc_server->start(std::move(service))) {
     LOG(ERROR) << "Failed to start brpc disagg pd server on port "
                << FLAGS_disagg_pd_port;
@@ -163,14 +141,16 @@ void DisaggPrefillScheduler::start_rpc_server() {
   }
 }
 
-void DisaggPrefillScheduler::step(const absl::Duration& timeout) {
-  DisaggPDScheduler::step(timeout);
+void DisaggPDScheduler::step(const absl::Duration& timeout) {
+  ContinuousScheduler::step(timeout);
   // send first generation token to decode instance
   // and remove the request from running_requests_ to remote_requests_map_
-  prefill_send_first_generation();
+  if (options_.instance_role() == InstanceRole::PREFILL) {
+    prefill_send_first_generation();
+  }
 }
 
-bool DisaggPrefillScheduler::add_request(std::shared_ptr<Request>& request) {
+bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
@@ -180,90 +160,8 @@ bool DisaggPrefillScheduler::add_request(std::shared_ptr<Request>& request) {
   return true;
 }
 
-std::vector<Batch> DisaggPrefillScheduler::prepare_batch() {
-  Timer timer;
-  // propogate new requests to waiting_priority_queue_
-  std::shared_ptr<Request> request = nullptr;
-
-  // read from request queue then push to waiting priority queue
-  while (request_queue_.read(request)) {
-    CHECK(request != nullptr);
-
-    // expand sequences to the target number if prefix cache is disabled.
-    if (!enable_prefix_cache_) {
-      // expand sequences to the target number
-      request->expand_sequences(false);
-    }
-
-    waiting_priority_queue_.push(request);
-  }
-
-  running_requests_.clear();
-  // clear previous batch
-  running_sequences_.clear();
-  running_sequences_budgets_.clear();
-
-  // remaining budget for the current batch
-  size_t remaining_token_budget = options_.max_tokens_per_batch();
-  size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
-
-  // schedule the prefill requests in the waiting priority queue until budgets
-  // are exhausted.
-  // When the KV Cache usage reaches the threshold, prefill requests will no
-  // longer be scheduled to avoid frequent preemption.
-  while (!waiting_priority_queue_.empty() && remaining_seq_budget > 0 &&
-         block_manager_->kv_cache_utilization() <
-             FLAGS_prefill_scheduling_memory_usage_threshold) {
-    std::shared_ptr<Request> request(waiting_priority_queue_.top());
-
-    const size_t num_sequences = request->sequences().size();
-    CHECK(num_sequences == 1)
-        << "Waiting request should have only one sequence.";
-
-    auto& prefill_sequence = request->sequences()[0];
-    size_t num_tokens = prefill_sequence->num_tokens();
-    if (num_tokens > remaining_token_budget) {
-      break;
-    }
-
-    if (!block_manager_->allocate(prefill_sequence.get())) {
-      block_manager_->deallocate(prefill_sequence.get());
-      break;
-    }
-
-    // remove the request from the waiting priority queue
-    waiting_priority_queue_.pop();
-    // add the request to the batch
-    running_requests_.push_back(request);
-    running_sequences_.push_back(prefill_sequence.get());
-    running_sequences_budgets_.push_back(num_tokens);
-    remaining_token_budget -= num_tokens;
-    remaining_seq_budget -= 1;
-  }
-
-  if (running_sequences_.empty() && !waiting_priority_queue_.empty()) {
-    LOG(ERROR) << "No enough memory to schedule single sequence";
-    // no enough memory to schedule single sequence, just finish the request
-    std::shared_ptr<Request> request(waiting_priority_queue_.top());
-    waiting_priority_queue_.pop();
-    block_manager_->deallocate(request.get());
-    // release the ownership of the request
-    response_processor_->process_completed_request(request);
-  }
-
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(running_sequences_, running_sequences_budgets_);
-
-  if (!batches[0].empty()) {
-    // only update the scheduling latency when there are requests to process
-    COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
-  }
-  return batches;
-}
-
 // prefill send new request to remote instance
-void DisaggPrefillScheduler::dispatch_requests() {
+void DisaggPDScheduler::dispatch_requests() {
   while (true) {
     std::vector<std::shared_ptr<Request>> requests;
     std::shared_ptr<Request> request = prefill_request_queue_.pop();
@@ -427,7 +325,7 @@ void DisaggPrefillScheduler::dispatch_requests() {
   }
 }
 
-void DisaggPrefillScheduler::prefill_send_first_generation() {
+void DisaggPDScheduler::prefill_send_first_generation() {
   if (running_sequences_.size() == 0) {
     return;
   }
@@ -436,18 +334,29 @@ void DisaggPrefillScheduler::prefill_send_first_generation() {
   requests.reserve(running_requests_.size());
   {
     std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
-    for (auto& request : running_requests_) {
-      if (remote_requests_map_.find(request->request_id()) !=
-          remote_requests_map_.end()) {
-        LOG(FATAL)
-            << "Two request has the same request_id, check the requests map.";
+    for (size_t i = 0; i < running_requests_.size(); ++i) {
+      auto request = running_requests_[i];
+      // Check if the request is a recently completed prefill request
+      if (request->sequences()[0]->num_generated_tokens() == 1) {
+        if (remote_requests_map_.find(request->request_id()) !=
+            remote_requests_map_.end()) {
+          LOG(FATAL)
+              << "Two request has the same request_id, check the requests map.";
+        }
+        remote_requests_map_[request->request_id()] = request;
+        remote_requests_output_thread_map_[request->request_id()] =
+            next_thread_idx;
+        next_thread_idx = (++next_thread_idx) % kOutputTheadNum_;
+        requests.emplace_back(request);
+
+        running_requests_[i] = nullptr;
       }
-      remote_requests_map_[request->request_id()] = request;
-      remote_requests_output_thread_map_[request->request_id()] =
-          next_thread_idx;
-      next_thread_idx = (++next_thread_idx) % kOutputTheadNum_;
-      requests.emplace_back(request);
     }
+  }
+
+  // No prefill request needs to be transferred to decode.
+  if (requests.size() == 0) {
+    return;
   }
 
   prefill_threadpool_.schedule([this,
@@ -543,8 +452,7 @@ void DisaggPrefillScheduler::prefill_send_first_generation() {
   });
 }
 
-bool DisaggPrefillScheduler::prefill_recv_generation(
-    const RequestOutput& output) {
+bool DisaggPDScheduler::prefill_recv_generation(const RequestOutput& output) {
   std::shared_ptr<Request> request = nullptr;
   int request_thread_idx = -1;
   {
@@ -587,66 +495,8 @@ bool DisaggPrefillScheduler::prefill_recv_generation(
   return true;
 }
 
-DisaggDecodeScheduler::DisaggDecodeScheduler(Engine* engine,
-                                             const Options& options)
-    : DisaggPDScheduler(engine, options), tokenizer_(engine->tokenizer()) {
-  if (!options_.instance_role().has_value()) {
-    LOG(FATAL) << "Instance type is not set in disagg pd mode.";
-  }
-
-  // decode use ChunkedPrefillScheduler or ContinuousScheduler scheduler,
-  // prefill will override some methods.
-  if (options_.enable_chunked_prefill()) {
-    scheduler_ = std::make_unique<ChunkedPrefillScheduler>(engine, options_);
-  } else {
-    scheduler_ = std::make_unique<ContinuousScheduler>(engine, options_);
-  }
-
-  rpc_server_thread_ = std::make_unique<std::thread>(
-      &DisaggDecodeScheduler::start_rpc_server, this);
-  // wait rpc server initialized
-  auto rpc_server =
-      ServerRegistry::get_instance().get_server("DisaggDecodeServer");
-  while (!rpc_server || !rpc_server->has_initialized()) {
-    absl::SleepFor(absl::Milliseconds(100));
-    rpc_server =
-        ServerRegistry::get_instance().get_server("DisaggDecodeServer");
-  }
-
-  // connect to master service
-  xservice_client_ = XServiceClient::get_instance();
-  if (!xservice_client_->initialize_done()) {
-    LOG(FATAL) << "XServiceClient not init.";
-    return;
-  }
-  xservice_client_->set_scheduler(this);
-}
-
-DisaggDecodeScheduler::~DisaggDecodeScheduler() {}
-
-std::vector<Batch> DisaggDecodeScheduler::prepare_batch() {
-  LOG(FATAL) << "DisaggDecodeScheduler not support "
-                "prepare_batch method";
-}
-
-void DisaggDecodeScheduler::start_rpc_server() {
-  std::unique_ptr<DisaggDecodeService> service =
-      std::make_unique<DisaggDecodeService>(this, engine_);
-  auto rpc_server =
-      ServerRegistry::get_instance().register_server("DisaggDecodeServer");
-  if (!rpc_server->start(std::move(service))) {
-    LOG(ERROR) << "Failed to start brpc disagg pd server on port "
-               << FLAGS_disagg_pd_port;
-    return;
-  }
-}
-
-void DisaggDecodeScheduler::step(const absl::Duration& timeout) {
-  scheduler_->step(timeout);
-}
-
 // request is received from prefill
-bool DisaggDecodeScheduler::decode_schedule(
+bool DisaggPDScheduler::decode_schedule(
     std::shared_ptr<Request>& request,
     const std::string& prefill_instance_name) {
   CHECK(request != nullptr);
@@ -687,7 +537,7 @@ bool DisaggDecodeScheduler::decode_schedule(
   return true;
 }
 
-bool DisaggDecodeScheduler::decode_recv_first_generation(
+bool DisaggPDScheduler::decode_recv_first_generation(
     const std::string& req_id,
     int64_t token_id,
     bool has_logprob,
@@ -760,10 +610,11 @@ bool DisaggDecodeScheduler::decode_recv_first_generation(
                             dst_block_ids);
   }
 
-  return scheduler_->add_request(request);
+  request_queue_.write(request);
+  return true;
 }
 
-bool DisaggDecodeScheduler::decode_send_stream_generation(
+bool DisaggPDScheduler::decode_send_stream_generation(
     const RequestOutput& output) {
   int request_thread_idx = -1;
   {
@@ -861,13 +712,6 @@ bool DisaggDecodeScheduler::decode_send_stream_generation(
       //*req.mutable_outputs()->Add() = proto_seq_out;
     }
 
-    // Async
-    // proto::Status* resp = new proto::Status();
-    // brpc::Controller* cntl = new brpc::Controller();
-    // google::protobuf::Closure* done = brpc::NewCallback(
-    //     &handle_stream_response, cntl, resp);
-    // stub->Generation(cntl, &req, resp, done);
-
     // Sync
     proto::Status resp;
     brpc::Controller cntl;
@@ -885,7 +729,7 @@ bool DisaggDecodeScheduler::decode_send_stream_generation(
   return true;
 }
 
-std::vector<bool> DisaggDecodeScheduler::decode_send_stream_generations(
+std::vector<bool> DisaggPDScheduler::decode_send_stream_generations(
     const std::vector<RequestOutput>& outputs) {
   std::vector<bool> send_status;
   send_status.resize(outputs.size(), true);
@@ -1038,13 +882,6 @@ std::vector<bool> DisaggDecodeScheduler::decode_send_stream_generations(
         }
       }
 
-      // Async
-      // proto::Status* resp = new proto::Status();
-      // brpc::Controller* cntl = new brpc::Controller();
-      // google::protobuf::Closure* done = brpc::NewCallback(
-      //     &handle_stream_response, cntl, resp);
-      // stub->Generations(cntl, &gens, resp, done);
-
       // Sync
       proto::StatusSet resp;
       brpc::Controller cntl;
@@ -1067,9 +904,8 @@ std::vector<bool> DisaggDecodeScheduler::decode_send_stream_generations(
   return send_status;
 }
 
-std::vector<Block> DisaggDecodeScheduler::allocate_raw_blocks(
-    int token_num,
-    int32_t& dp_rank) {
+std::vector<Block> DisaggPDScheduler::allocate_raw_blocks(int token_num,
+                                                          int32_t& dp_rank) {
   // When the KV Cache usage reaches the threshold, prefill requests will no
   // longer be scheduled to avoid frequent preemption.
   if (block_manager_->kv_cache_utilization() <

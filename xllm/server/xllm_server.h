@@ -13,8 +13,7 @@ class XllmServer final {
   ~XllmServer();
 
   bool start(std::unique_ptr<APIService> api_service);
-  bool start(std::unique_ptr<DisaggPrefillService> disagg_prefill_service);
-  bool start(std::unique_ptr<DisaggDecodeService> disagg_decode_service);
+  bool start(std::unique_ptr<DisaggPDService> disagg_pd_service);
   bool start(std::shared_ptr<CollectiveService> service,
              const std::string& addr);
   bool start(std::shared_ptr<WorkerService> service, const std::string& addr);

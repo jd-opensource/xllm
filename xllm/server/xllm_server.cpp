@@ -55,7 +55,7 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
   return true;
 }
 
-bool XllmServer::start(std::unique_ptr<DisaggPrefillService> service) {
+bool XllmServer::start(std::unique_ptr<DisaggPDService> service) {
   std::string addr("");
   if (!FLAGS_host.empty()) {
     addr = FLAGS_host + ":" + std::to_string(FLAGS_disagg_pd_port);
@@ -63,25 +63,7 @@ bool XllmServer::start(std::unique_ptr<DisaggPrefillService> service) {
   if (!create_server((google::protobuf::Service*)(service.get()),
                      addr,
                      FLAGS_disagg_pd_port,
-                     "Disagg Prefill")) {
-    return false;
-  }
-
-  has_initialized_ = true;
-  // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
-  server_->RunUntilAskedToQuit();
-  return true;
-}
-
-bool XllmServer::start(std::unique_ptr<DisaggDecodeService> service) {
-  std::string addr("");
-  if (!FLAGS_host.empty()) {
-    addr = FLAGS_host + ":" + std::to_string(FLAGS_disagg_pd_port);
-  }
-  if (!create_server((google::protobuf::Service*)(service.get()),
-                     addr,
-                     FLAGS_disagg_pd_port,
-                     "Disagg Decode")) {
+                     "Disagg PD")) {
     return false;
   }
 

@@ -14,11 +14,7 @@ std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
     Engine* engine,
     ContinuousScheduler::Options options) {
   if (options.enable_disagg_pd()) {
-    if (options.instance_role().value() == InstanceRole::DECODE) {
-      return std::make_unique<DisaggDecodeScheduler>(engine, options);
-    }
-
-    return std::make_unique<DisaggPrefillScheduler>(engine, options);
+    return std::make_unique<DisaggPDScheduler>(engine, options);
   }
 
   if (options.enable_chunked_prefill()) {

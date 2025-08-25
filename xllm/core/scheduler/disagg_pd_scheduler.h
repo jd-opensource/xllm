@@ -26,47 +26,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
   virtual ~DisaggPDScheduler();
 
   virtual uint32_t get_waiting_requests_num() const override {
-    LOG(ERROR) << "Not implemented!";
-    return 0;
+    return waiting_priority_queue_.size();
   };
-
- protected:
-  // check remote instance info, if not exist, get from master service
-  bool check_remote_instance_info(const std::string& instance_name);
-
-  // create rpc channel to remote instance,
-  // we can get remote instance info from master service.
-  proto::DisaggPDService_Stub* create_rpc_channel(
-      const std::string& instance_name);
-
- private:
-  virtual void start_rpc_server() = 0;
-
- protected:
-  // remote instance name(ID) -> instance info
-  std::unordered_map<std::string, InstanceInfo> remote_instances_info_;
-
-  // rpc server for prefill/decode instance
-  std::unique_ptr<std::thread> rpc_server_thread_;
-
-  // request_id -> brpc channel
-  // brpc channel is connected to remote instance rpc server
-  std::unordered_map<std::string, proto::DisaggPDService_Stub*>
-      req_to_channel_map_;
-  std::unordered_map<std::string, proto::DisaggPDService_Stub*>
-      instance_channel_map_;
-  std::mutex req_to_channel_map_mutex_;
-  std::mutex instance_channel_map_mutex_;
-
-  XServiceClient* xservice_client_;
-};
-
-// ContinuousScheduler for disagg Prefill instance
-class DisaggPrefillScheduler final : public DisaggPDScheduler {
- public:
-  DisaggPrefillScheduler(Engine* engine, const Options& options);
-
-  ~DisaggPrefillScheduler();
 
   void step(const absl::Duration& timeout) override;
 
@@ -78,63 +39,6 @@ class DisaggPrefillScheduler final : public DisaggPDScheduler {
   void prefill_send_first_generation();
   // prefill-3: for prefill receive stream generation from decode
   bool prefill_recv_generation(const RequestOutput& output);
-
-  uint32_t get_waiting_requests_num() const override {
-    return waiting_priority_queue_.size();
-  };
-
- private:
-  // for prefill
-  // build a batch of requests from the priority queue
-  // for prefill instance, we only handle prefill requests
-  virtual std::vector<Batch> prepare_batch() override;
-
-  void start_rpc_server() override;
-
- private:
-  // for prefill, dispatch request to Decode instance
-  std::unique_ptr<std::thread> dispatch_thread_;
-  ConcurrentQueue<std::shared_ptr<Request>> prefill_request_queue_;
-  // for prefill save all remote requests
-  std::unordered_map<std::string, std::shared_ptr<Request>>
-      remote_requests_map_;
-  std::mutex remote_requests_map_mutex_;
-  using RequestPriorityQueue =
-      std::priority_queue<std::shared_ptr<Request>,
-                          std::vector<std::shared_ptr<Request>>,
-                          RequestComparator>;
-  RequestPriorityQueue waiting_priority_queue_;
-
-  // use threadpool to handle prefill-completed request
-  ThreadPool prefill_threadpool_;
-
-  // use threadpool to handle all RequestOuputs queue
-  static constexpr size_t kOutputTheadNum_ = 128;  // magic num
-  ThreadPool output_threadpools_[kOutputTheadNum_];
-  // keep the thread to handle request output
-  // A request will be handled in the same thread to guarantee the token's
-  // order.
-  std::unordered_map<std::string, size_t> remote_requests_output_thread_map_;
-  size_t next_thread_idx = 0;
-
-  // related decode instance name(ID) list
-  std::vector<std::string> decode_inst_names_;
-  // TODO later
-  // std::vector<std::string> updated_decode_inst_names;
-  int current_decode_idx_ = 0;
-
-  InstanceInfo instance_info_;
-};
-
-class DisaggDecodeScheduler final : public DisaggPDScheduler {
- public:
-  DisaggDecodeScheduler(Engine* engine, const Options& options);
-
-  ~DisaggDecodeScheduler();
-
-  void step(const absl::Duration& timeout) override;
-
-  const Tokenizer* tokenizer() const { return tokenizer_; }
 
   // decode-1: for decode recveive new request from prefill
   bool decode_schedule(std::shared_ptr<Request>& request,
@@ -154,6 +58,7 @@ class DisaggDecodeScheduler final : public DisaggPDScheduler {
                                     std::vector<uint64_t> src_block_ids,
                                     int32_t src_dp_size,
                                     int32_t src_dp_rank);
+
   // decode allocate blocks for request prompt when receive from prefill.
   std::vector<Block> allocate_raw_blocks(int token_num, int32_t& dp_rank);
   // decode-3: decode send response to prefill
@@ -163,30 +68,75 @@ class DisaggDecodeScheduler final : public DisaggPDScheduler {
 
   bool enable_schedule_overlap() { return options_.enable_schedule_overlap(); };
 
-  uint32_t get_waiting_requests_num() const override {
-    return scheduler_->get_waiting_requests_num();
-  };
-
  private:
-  virtual std::vector<Batch> prepare_batch() override;
-  void start_rpc_server() override;
+  // check remote instance info, if not exist, get from master service
+  bool check_remote_instance_info(const std::string& instance_name);
 
- private:
-  const Tokenizer* tokenizer_;  // not owned
+  // create rpc channel to remote instance,
+  // we can get remote instance info from master service.
+  proto::DisaggPDService_Stub* create_rpc_channel(
+      const std::string& instance_name);
+
+  void start_rpc_server();
+
+  // remote instance name(ID) -> instance info
+  std::unordered_map<std::string, InstanceInfo> remote_instances_info_;
+
+  // rpc server for prefill/decode instance
+  std::unique_ptr<std::thread> rpc_server_thread_;
+
+  // request_id -> brpc channel
+  // brpc channel is connected to remote instance rpc server
+  std::unordered_map<std::string, proto::DisaggPDService_Stub*>
+      req_to_channel_map_;
+  std::unordered_map<std::string, proto::DisaggPDService_Stub*>
+      instance_channel_map_;
+  std::mutex req_to_channel_map_mutex_;
+  std::mutex instance_channel_map_mutex_;
+
+  XServiceClient* xservice_client_;
+
+  // for prefill, dispatch request to Decode instance
+  std::unique_ptr<std::thread> dispatch_thread_;
+  ConcurrentQueue<std::shared_ptr<Request>> prefill_request_queue_;
+  // for prefill save all remote requests
+  std::unordered_map<std::string, std::shared_ptr<Request>>
+      remote_requests_map_;
+  std::mutex remote_requests_map_mutex_;
+  using RequestPriorityQueue =
+      std::priority_queue<std::shared_ptr<Request>,
+                          std::vector<std::shared_ptr<Request>>,
+                          RequestComparator>;
+  RequestPriorityQueue waiting_priority_queue_;
+
+  // use threadpool to handle prefill-completed request
+  ThreadPool prefill_threadpool_;
+
+  // use threadpool to handle all RequestOuputs queue
+  static constexpr size_t kOutputTheadNum_ = 128;  // magic num
+  size_t next_thread_idx = 0;
+  ThreadPool output_threadpools_[kOutputTheadNum_];
+  // keep the thread to handle request output
+  // A request will be handled in the same thread to guarantee the token's
+  // order.
+  std::unordered_map<std::string, size_t> remote_requests_output_thread_map_;
+
+  // related decode instance name(ID) list
+  std::vector<std::string> decode_inst_names_;
+  // TODO later
+  // std::vector<std::string> updated_decode_inst_names;
+  int current_decode_idx_ = 0;
+
+  InstanceInfo instance_info_;
+
   // for decode
-  std::unique_ptr<ContinuousScheduler> scheduler_;
   std::unordered_map<std::string, std::shared_ptr<Request>>
       received_request_map_;
   std::mutex received_request_map_mutex_;
 
-  // use threadpool to handle all RequestOuputs queue
-  static constexpr size_t kOutputTheadNum_ = 128;  // magic num
-  ThreadPool output_threadpools_[kOutputTheadNum_];
-
   // for decode non-batch response, each request will allocate a thread to
   // handle response. keep the thread to handle request output
   std::unordered_map<std::string, size_t> received_request_output_thread_map_;
-  size_t next_thread_idx = 0;
 
   // for decode batch response, each prefill instance will allocate a thread to
   // handle response. the requests from the same prefill will be handled in one

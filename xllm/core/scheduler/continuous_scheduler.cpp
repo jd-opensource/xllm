@@ -407,6 +407,9 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   std::vector<std::shared_ptr<Request>> finished_requests;
   for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
        ++it) {
+    if (*it == nullptr) {
+      continue;
+    }
     std::shared_ptr<Request> request = *it;
     if (request->finished() || request->cancelled()) {
       block_manager_->deallocate(request.get());
