@@ -73,6 +73,7 @@ struct ForwardInput {
     inputs.input_params = input_params.to(device);
     inputs.sampling_params = sampling_params.to(device, dtype);
     inputs.transfer_kv_infos = transfer_kv_infos;
+    inputs.eplb_info = eplb_info;
     return inputs;
   }
   // flatten token ids
@@ -83,6 +84,7 @@ struct ForwardInput {
   SamplingParameters sampling_params;
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
+  EplbInfo eplb_info;
 };
 
 // output after forward execution
@@ -96,6 +98,10 @@ struct ForwardOutput {
   SampleOutput sample_output;
   torch::Tensor logits;
   torch::Tensor embedding;
+
+  torch::Tensor expert_load_data;
+
+  int32_t prepared_layer_id;
 };
 
 // Model input with raw data, which will be
@@ -122,6 +128,7 @@ struct RawForwardInput {
   std::vector<int32_t> dp_global_token_nums;
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
+  EplbInfo eplb_info;
   std::vector<std::vector<float>> embeddings;
   // num of prefill sequence in chunked prefill case
   uint32_t prefill_seq_len;
@@ -135,6 +142,8 @@ struct RawSampleOutput {
 
 struct RawForwardOutput {
   std::vector<RawSampleOutput> outputs;  // num seqs
+  std::vector<int64_t> expert_load_data;
+  int32_t prepared_layer_id;
 };
 
 }  // namespace xllm
