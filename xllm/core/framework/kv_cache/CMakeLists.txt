@@ -14,6 +14,7 @@ cc_library(
     kv_cache_transfer.h
     llm_data_dist_transfer.h
     spec_kv_cache_transfer.h
+    kv_cache_store.h
   SRCS
     embedding_allocator.cpp
     hccl_kv_cache_transfer.cpp
@@ -21,6 +22,7 @@ cc_library(
     kv_cache_transfer.cpp
     llm_data_dist_transfer.cpp
     spec_kv_cache_transfer.cpp
+    kv_cache_store.cpp
   DEPS
     :common
     graph
@@ -28,4 +30,5 @@ cc_library(
     hccl_transfer
     torch
     torch_npu
+    mooncake_store
 )

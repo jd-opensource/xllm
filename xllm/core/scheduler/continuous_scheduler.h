@@ -2,10 +2,12 @@
 
 #include <absl/time/time.h>
 #include <folly/MPMCQueue.h>
+#include <folly/futures/Future.h>
 
 #include <limits>
 #include <memory>
 #include <queue>
+#include <unordered_map>
 
 #include "async_response_processor.h"
 #include "common/macros.h"
@@ -157,6 +159,8 @@ class ContinuousScheduler : public Scheduler {
   // these requests have already allocated some kv caches,
   // so they can be preemeted in scheduler.
   std::deque<std::shared_ptr<Request>> running_queue_;
+
+  virtual void prepare_cache_async(std::shared_ptr<Request>& request);
 
   void handle_abnormal_request(
       const std::vector<Sequence*>& candidate_sequences,

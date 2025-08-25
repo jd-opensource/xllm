@@ -47,6 +47,8 @@ bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
+  prepare_cache_async(request);
+
   if (request_queue_.write(request)) {
     return true;
   }
@@ -102,7 +104,9 @@ void ContinuousScheduler::handle_prefill_requests(
         continue;
       }
 
-      size_t num_tokens = prefill_sequence->num_tokens();
+      prefill_sequence->sync_result();
+
+      size_t num_tokens = prefill_sequence->num_need_compute_tokens();
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
         can_schedule = false;
@@ -261,7 +265,6 @@ void ContinuousScheduler::handle_decode_requests(
     // memory exhausted, try to preempt lowest priority request
     if (running_queue_.size() > 1) {
       std::shared_ptr<Request> request_to_preempt = running_queue_.back();
-
       if (request_to_preempt.get() != request.get()) {
         ++num_preempted_requests;
         block_manager_->deallocate(request_to_preempt.get());
@@ -479,9 +482,11 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(running_sequences_, running_sequences_budgets_);
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(running_sequences_,
+                                      running_sequences_budgets_,
+                                      block_manager_->get_copy_in_content(),
+                                      block_manager_->get_copy_out_content());
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process
@@ -537,6 +542,33 @@ std::vector<Batch> ContinuousScheduler::schedule_request(
   return batch;
 }
 
+void ContinuousScheduler::prepare_cache_async(
+    std::shared_ptr<Request>& request) {
+  if (request->sequences()[0]->kv_state().num_kv_blocks() != 0 ||
+      request->sequences()[0]->host_kv_state().num_kv_blocks() != 0) {
+    return;
+  }
+  for (auto& prefill_sequence : request->sequences()) {
+    const size_t num_additional_blocks =
+        block_manager_->pre_allocate(prefill_sequence.get());
+    if (num_additional_blocks > 0) {
+      const auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
+      std::vector<CacheBlockInfo> contents;
+      contents.reserve(num_additional_blocks);
+      for (int i = host_blocks.size() - num_additional_blocks;
+           i < host_blocks.size();
+           i++) {
+        contents.emplace_back(
+            -1, host_blocks[i].id(), host_blocks[i].get_immutable_hash_value());
+      }
+
+      auto future = engine_->load_kv_blocks_from_store_async(
+          prefill_sequence->dp_rank(), std::move(contents));
+      prefill_sequence->set_async_result(std::move(future));
+    }
+  }
+}
+
 // step the scheduler forward by one step
 // may get blocked if there are no requests to process
 void ContinuousScheduler::step(const absl::Duration& timeout) {
@@ -551,6 +583,7 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
       return;
     }
     engine_->step(batch);
+    block_manager_->reset_copy_content();
     // process request output in batch
     process_batch_output(false);
   } else {
@@ -576,6 +609,7 @@ void ContinuousScheduler::step_with_schedule_overlap(
 
   if (!cur_batch_all_empty) {
     engine_->step(batch);
+    block_manager_->reset_copy_content();
   }
 
   // producer-consumer mode, make sure only one step is scheduled in advance
@@ -604,6 +638,7 @@ void ContinuousScheduler::generate() {
 
     // run inference for the batch
     engine_->step(batch);
+    block_manager_->reset_copy_content();
 
     // process request output in batch
     process_batch_output(false);

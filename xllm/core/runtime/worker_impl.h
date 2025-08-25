@@ -10,6 +10,7 @@
 #include "forward_params.h"
 #include "framework/context.h"
 #include "framework/kv_cache/hccl_kv_cache_transfer.h"
+#include "framework/kv_cache/kv_cache_store.h"
 #include "framework/kv_cache/llm_data_dist_transfer.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
@@ -49,6 +50,9 @@ class WorkerImpl {
 
   // allocate kv cache. blocking call
   virtual bool allocate_kv_cache(
+      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+
+  virtual bool allocate_host_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
   virtual bool allocate_kv_cache_with_transfer(
@@ -112,6 +116,15 @@ class WorkerImpl {
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks);
 
+  virtual folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
+      const std::vector<CacheBlockInfo>& cache_block_info);
+
+  virtual uint32_t offload_kv_blocks_to_store(
+      const std::vector<CacheBlockInfo>& cache_block_info);
+
+  virtual folly::SemiFuture<uint32_t> offload_kv_blocks_to_store_async(
+      const std::vector<CacheBlockInfo>& cache_block_info);
+
   // Run the model on the given input. async call
   // the future returns a successfull status with no meaningful value
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
@@ -139,6 +152,8 @@ class WorkerImpl {
 
   Status get_status() const { return status_; }
 
+  folly::SemiFuture<bool> copy_out_blocks_async(ModelInputParams& input_params);
+
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
 
@@ -156,6 +171,10 @@ class WorkerImpl {
   // the task queue, step need to be executed one-by-one
   ThreadPool threadpool_;
 
+  // extra working thread
+  // do some overlap work with model execute
+  ThreadPool extra_threadpool_;
+
   // dtype of the model
   torch::ScalarType dtype_;
 
@@ -167,6 +186,7 @@ class WorkerImpl {
 
   // kv caches
   std::vector<xllm::KVCache> kv_caches_;
+  std::vector<xllm::KVCache> host_kv_caches_;
 
   // causal LM model
   std::unique_ptr<CausalLM> model_;
@@ -187,10 +207,13 @@ class WorkerImpl {
 
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
 
+  std::shared_ptr<KVCacheStore> kv_cache_store_;
+
   // a walkaround to avoid compilation conflict involved by
   // c10_npu::NPUStream related files.
   struct NPUStreamHelper;
   std::unique_ptr<NPUStreamHelper> npu_stream_helper_;
+  std::unique_ptr<NPUStreamHelper> extra_stream_helper_;
 
   bool is_spec_draft_ = false;
 

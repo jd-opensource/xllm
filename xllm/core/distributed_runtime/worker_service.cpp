@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "common/metrics.h"
+#include "core/runtime/params_utils.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
 #include "runtime/forward_params.h"
@@ -211,6 +212,23 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
                                                 dst_blocks);
     bool status = std::move(future).get();
     resp->set_ok(status);
+  });
+  return;
+}
+
+void WorkerService::LoadKVCacheFromStore(
+    ::google::protobuf::RpcController* controller,
+    const ::xllm::proto::CacheBlockInfos* req,
+    ::xllm::proto::StoreResponse* resp,
+    ::google::protobuf::Closure* done) {
+  threadpool_.schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    std::vector<CacheBlockInfo> dst_blocks;
+    proto_to_cache_block_info(*req, dst_blocks);
+
+    auto future = worker_->load_kv_blocks_from_store_async(dst_blocks);
+
+    resp->set_success_cnt(std::move(future).get());
   });
   return;
 }

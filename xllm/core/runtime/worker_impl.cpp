@@ -66,6 +66,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   std::string device_name = "npu:" + std::to_string(currentDevId);
   torch_npu::init_npu(device_name);
   npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
+  extra_stream_helper_ = std::make_unique<NPUStreamHelper>();
   sampler_ = std::make_unique<Sampler>();
 }
 
@@ -88,6 +89,48 @@ bool WorkerImpl::allocate_kv_cache(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
         2);
     kv_caches_.emplace_back(key_cache, value_cache);
+  }
+
+  allocate_host_kv_cache(kv_cache_shape);
+  status_ = Status::READY;
+  return true;
+}
+
+bool WorkerImpl::allocate_host_kv_cache(
+    const std::vector<std::vector<int64_t>>& device_kv_cache_shape) {
+  if (options_.host_blocks_factor() <= 0.0) {
+    return true;
+  }
+
+  CHECK(model_ != nullptr) << "Model is not initialized.";
+  CHECK(host_kv_caches_.empty()) << "KV caches are already initialized.";
+
+  std::vector<std::vector<int64_t>> host_kv_cache_shape = device_kv_cache_shape;
+  host_kv_cache_shape[0][0] =
+      device_kv_cache_shape[0][0] * options_.host_blocks_factor();
+  host_kv_cache_shape[1][0] =
+      device_kv_cache_shape[1][0] * options_.host_blocks_factor();
+
+  // create a KVCache for each layer
+  const int64_t num_layers = context_.get_model_args().n_layers();
+  kv_caches_.reserve(num_layers);
+  for (int64_t i = 0; i < num_layers; ++i) {
+    torch::Tensor key_cache, value_cache;
+    key_cache = torch::empty(host_kv_cache_shape[0],
+                             torch::dtype(dtype_).device(torch::kCPU));
+    value_cache = torch::empty(host_kv_cache_shape[1],
+                               torch::dtype(dtype_).device(torch::kCPU));
+    host_kv_caches_.emplace_back(key_cache, value_cache);
+  }
+
+  if (options_.enable_kvcache_store()) {
+    StoreConfig config;
+    config.protocol = options_.store_protocol();
+    config.metadata_connstring = options_.store_metadata_connstring();
+    config.master_server_entry = options_.store_master_server_entry();
+    config.tp_rank = options_.node_rank() % options_.dp_size();
+
+    kv_cache_store_ = std::make_shared<KVCacheStore>(config, &host_kv_caches_);
   }
 
   status_ = Status::READY;
@@ -123,6 +166,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
     kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
   }
 
+  allocate_host_kv_cache(kv_cache_shape);
   status_ = Status::READY;
   return true;
 }
@@ -146,6 +190,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
   }
 
+  allocate_host_kv_cache(kv_cache_shape);
   status_ = Status::READY;
   return true;
 }
@@ -264,6 +309,33 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
   c10::StreamGuard streamGuard(npu_stream_helper_->H2D_memcpy_stream.unwrap());
   processed_inputs = inputs.to(device_, dtype_);
 
+  auto& input_params = processed_inputs.input_params;
+  if (input_params.copy_out_blocks.size() > 0 ||
+      input_params.copy_in_blocks.size() > 0) {
+    const int64_t num_layers = context_.get_model_args().n_layers();
+    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+      auto key_cache = kv_caches_[layer_id].get_k_cache();
+      auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
+      auto value_cache = kv_caches_[layer_id].get_v_cache();
+      auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
+
+      for (auto cache_content : input_params.copy_out_blocks) {
+        host_k_cache[cache_content.host_block_id].copy_(
+            key_cache[cache_content.device_block_id]);
+        host_v_cache[cache_content.host_block_id].copy_(
+            value_cache[cache_content.device_block_id]);
+      }
+      for (auto cache_content : input_params.copy_in_blocks) {
+        key_cache[cache_content.device_block_id].copy_(
+            host_k_cache[cache_content.host_block_id]);
+        value_cache[cache_content.device_block_id].copy_(
+            host_v_cache[cache_content.host_block_id]);
+      }
+    }
+
+    offload_kv_blocks_to_store_async(inputs.input_params.copy_out_blocks);
+  }
+
   if (!context_.get_parallel_args().mapping_data().empty()) {
     torch::Tensor token_size_per_dp_group =
         torch::tensor(processed_inputs.input_params.dp_global_token_nums,
@@ -283,6 +355,40 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
   aclrtSynchronizeStream(npu_stream_helper_->H2D_memcpy_stream.stream());
 }
 
+folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
+    ModelInputParams& input_params) {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  extra_threadpool_.schedule([this,
+                              input_params = input_params,
+                              promise = std::move(promise)]() mutable {
+    c10::StreamGuard streamGuard(
+        extra_stream_helper_->H2D_memcpy_stream.unwrap());
+    if (input_params.async_copy_out_blocks.size() > 0) {
+      const int64_t num_layers = context_.get_model_args().n_layers();
+      for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+        auto key_cache = kv_caches_[layer_id].get_k_cache();
+        auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
+        auto value_cache = kv_caches_[layer_id].get_v_cache();
+        auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
+
+        for (auto cache_content : input_params.async_copy_out_blocks) {
+          host_k_cache[cache_content.host_block_id].copy_(
+              key_cache[cache_content.device_block_id]);
+          host_v_cache[cache_content.host_block_id].copy_(
+              value_cache[cache_content.device_block_id]);
+        }
+      }
+
+      offload_kv_blocks_to_store(input_params.async_copy_out_blocks);
+    }
+    auto ret = aclrtSynchronizeStream(
+        extra_stream_helper_->H2D_memcpy_stream.stream());
+    promise.setValue(ret == 0);
+  });
+  return future;
+}
+
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
     const ForwardInput& inputs) {
   ForwardInput forward_inputs_on_device;
@@ -294,8 +400,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
                         inputs = forward_inputs_on_device,
                         promise = std::move(promise)]() mutable {
     // run the model on the given input in working thread
+    auto copy_future = copy_out_blocks_async(inputs.input_params);
     if (!enable_schedule_overlap()) {
       const auto output = this->step(inputs);
+      std::move(copy_future).get();
       promise.setValue(output);
     } else {
       if (last_step_output_valid_ && !inputs.input_params.empty_kv_cache) {
@@ -324,6 +432,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
           last_step_output_valid_ = false;
         }
       }
+      std::move(copy_future).get();
       promise.setValue(output);
     }
   });
@@ -435,6 +544,44 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
                                                   src_v_cache_id,
                                                   src_blocks,
                                                   dst_blocks);
+}
+
+folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule(
+      [this, &cache_block_info, promise = std::move(promise)]() mutable {
+        if (this->kv_cache_store_ == nullptr) {
+          promise.setValue(0);
+          return;
+        }
+        promise.setValue(this->kv_cache_store_->batch_get(cache_block_info));
+      });
+  return future;
+}
+
+uint32_t WorkerImpl::offload_kv_blocks_to_store(
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  if (kv_cache_store_ == nullptr) {
+    return 0;
+  }
+  return kv_cache_store_->batch_put(cache_block_info);
+}
+
+folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_to_store_async(
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule(
+      [this, &cache_block_info, promise = std::move(promise)]() mutable {
+        if (this->kv_cache_store_ == nullptr) {
+          promise.setValue(0);
+          return;
+        }
+        promise.setValue(this->kv_cache_store_->batch_put(cache_block_info));
+      });
+  return future;
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(

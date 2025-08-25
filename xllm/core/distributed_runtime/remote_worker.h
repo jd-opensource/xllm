@@ -60,6 +60,9 @@ class RemoteWorker : public WorkerClient {
                               const std::vector<uint64_t>& src_blocks,
                               const std::vector<uint64_t>& dst_blocks);
 
+  virtual uint32_t load_kv_blocks_from_store(
+      const std::vector<CacheBlockInfo>& cache_block_info);
+
   // prepare input request
   virtual ForwardInput prepare_inputs(Batch& batch) override;
 
@@ -86,6 +89,9 @@ class RemoteWorker : public WorkerClient {
       const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks);
+
+  virtual folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
+      const std::vector<CacheBlockInfo>& cache_block_info);
 
   // Run the model and return the output.
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(

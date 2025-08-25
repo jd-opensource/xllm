@@ -18,6 +18,7 @@
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/params_utils.h"
+#include "util/hash_util.h"
 
 namespace xllm {
 RemoteWorker::RemoteWorker(int32_t global_rank,
@@ -216,6 +217,20 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
   stub_->PullKVCache(&cntl, &request, &s, nullptr);
 
   return s.ok();
+}
+
+uint32_t RemoteWorker::load_kv_blocks_from_store(
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  proto::CacheBlockInfos pb_cache_block_infos;
+  if (!cache_block_info_to_proto(cache_block_info, &pb_cache_block_infos)) {
+    return 0;
+  }
+
+  proto::StoreResponse resp;
+  brpc::Controller cntl;
+  stub_->LoadKVCacheFromStore(&cntl, &pb_cache_block_infos, &resp, nullptr);
+
+  return resp.success_cnt();
 }
 
 ForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
@@ -426,6 +441,31 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
       promise.setValue(s.ok());
     }
   });
+  return future;
+}
+
+folly::SemiFuture<uint32_t> RemoteWorker::load_kv_blocks_from_store_async(
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule(
+      [this, &cache_block_info, promise = std::move(promise)]() mutable {
+        proto::CacheBlockInfos cache_contents;
+        if (!cache_block_info_to_proto(cache_block_info, &cache_contents)) {
+          promise.setValue(0);
+          return;
+        }
+
+        proto::StoreResponse resp;
+        brpc::Controller cntl;
+        stub_->LoadKVCacheFromStore(&cntl, &cache_contents, &resp, nullptr);
+
+        if (cntl.Failed()) {
+          promise.setValue(0);
+          return;
+        }
+        promise.setValue(resp.success_cnt());
+      });
   return future;
 }
 

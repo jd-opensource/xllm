@@ -72,6 +72,12 @@ bool WorkerClient::pull_kv_blocks(const uint64_t src_cluster_id,
   return std::move(future).get();
 }
 
+uint32_t WorkerClient::load_kv_blocks_from_store(
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  auto future = worker_->load_kv_blocks_from_store_async(cache_block_info);
+  return std::move(future).get();
+}
+
 ForwardInput WorkerClient::prepare_inputs(Batch& batch) {
   return worker_->prepare_inputs(batch);
 }
@@ -131,6 +137,11 @@ folly::SemiFuture<bool> WorkerClient::pull_kv_blocks_async(
                                        src_v_cache_id,
                                        src_blocks,
                                        dst_blocks);
+}
+
+folly::SemiFuture<uint32_t> WorkerClient::load_kv_blocks_from_store_async(
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  return worker_->load_kv_blocks_from_store_async(cache_block_info);
 }
 
 const torch::Device& WorkerClient::device() const { return worker_->device(); }
