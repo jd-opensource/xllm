@@ -2,16 +2,19 @@
 
 #include <brpc/closure_guard.h>
 #include <brpc/controller.h>
-#include <c10/core/Device.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+
+#include <boost/algorithm/string.hpp>
+#include <vector>
+
+#if defined(USE_NPU)
+#include <c10/core/Device.h>
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/core/npu/NPUFunctions.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
-
-#include <boost/algorithm/string.hpp>
-#include <vector>
+#endif
 
 #include "common/metrics.h"
 #include "framework/request/sequence.h"
@@ -23,6 +26,7 @@
 namespace xllm {
 
 namespace {
+#if defined(USE_NPU)
 void init_npu_context(const torch::Device& device) {
   int device_id = device.index();
   int ret = aclrtSetDevice(device_id);
@@ -32,18 +36,29 @@ void init_npu_context(const torch::Device& device) {
   std::string device_name = "npu:" + std::to_string(device_id);
   torch_npu::init_npu(device_name);
 }
+#elif defined(USE_MLU)
+// TODO(mlu): implement mlu init context
+#endif
 }  // namespace
 
+#if defined(USE_NPU)
 struct WorkerService::NPUStreamHelper {
   c10_npu::NPUStream D2H_memcpy_stream;
   NPUStreamHelper() : D2H_memcpy_stream(c10_npu::getNPUStreamFromPool()) {}
 };
+#elif defined(USE_MLU)
+// TODO(mlu): implement mlu stream helper
+#endif
 
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
     : options_(options), device_(device), initialized_(false) {
+#if defined(USE_NPU)
   init_npu_context(device);
   npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu init context
+#endif
 }
 
 WorkerService::WorkerService(runtime::Options options,
@@ -53,8 +68,12 @@ WorkerService::WorkerService(runtime::Options options,
       device_(device),
       worker_(std::move(worker)),
       initialized_(true) {
+#if defined(USE_NPU)
   init_npu_context(device);
   npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu init context
+#endif
 }
 
 WorkerService::~WorkerService() = default;
@@ -276,8 +295,12 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
   threadpool_.schedule(
       [this, controller, pb_forward_input, pb_forward_output, done]() mutable {
         brpc::ClosureGuard done_guard(done);
-        // convert proto::ForwardInput to ForwardInput
+    // convert proto::ForwardInput to ForwardInput
+#if defined(USE_NPU)
         c10_npu::SetDevice(device_.index());
+#elif defined(USE_MLU)
+    // TODO(mlu): implement mlu execute model
+#endif
         Timer timer;
         int32_t num_sequences = pb_forward_input->num_sequences();
 
@@ -305,8 +328,12 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
             const auto& sample_output = forward_outputs.value().sample_output;
 
             {
+#if defined(USE_NPU)
               c10::StreamGuard streamGuard(
                   npu_stream_helper_->D2H_memcpy_stream.unwrap());
+#elif defined(USE_MLU)
+          // TODO(mlu): implement mlu synchronize stream
+#endif
               // only driver worker (rank=0) need to fill this
               // [num_seq, ..., embed_dim] FloatTensor
               embeddings = safe_to(sample_output.embeddings, torch::kCPU, true);
@@ -325,8 +352,12 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
                 top_logprobs =
                     safe_to(sample_output.top_logprobs, torch::kCPU, true);
               }
+#if defined(USE_NPU)
               aclrtSynchronizeStream(
                   npu_stream_helper_->D2H_memcpy_stream.stream());
+#elif defined(USE_MLU)
+          // TODO(mlu): implement mlu synchronize stream
+#endif
             }
           }
         } else if (worker_->is_driver()) {
@@ -357,15 +388,23 @@ void WorkerService::GetLastStepResult(
     ::google::protobuf::Closure* done) {
   threadpool_.schedule(
       [this, controller, req, pb_forward_output, done]() mutable {
+#if defined(USE_NPU)
         c10_npu::SetDevice(device_.index());
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu set device
+#endif
         brpc::ClosureGuard done_guard(done);
 
         auto future = worker_->get_last_step_result_async();
         auto forward_outputs = std::move(future).get();
         if (forward_outputs) {
           const auto& sample_output = forward_outputs.value().sample_output;
+#if defined(USE_NPU)
           c10::StreamGuard streamGuard(
               npu_stream_helper_->D2H_memcpy_stream.unwrap());
+#elif defined(USE_MLU)
+      // TODO(mlu): implement mlu synchronize stream
+#endif
           // [num_seq, ..., embed_dim]
           auto embeddings =
               safe_to(sample_output.embeddings, torch::kCPU, true);
@@ -384,8 +423,12 @@ void WorkerService::GetLastStepResult(
             // [num_seq, topk]
             const auto& top_logprobs =
                 safe_to(sample_output.top_logprobs, torch::kCPU, true);
+#if defined(USE_NPU)
             aclrtSynchronizeStream(
                 npu_stream_helper_->D2H_memcpy_stream.stream());
+#elif defined(USE_MLU)
+        // TODO(mlu): implement mlu synchronize stream
+#endif
 
             forward_output_to_proto(next_tokens,
                                     logprobs,

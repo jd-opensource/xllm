@@ -43,11 +43,11 @@ cc_library(
     speculative_worker_impl.cpp
   DEPS
     torch
-    torch_npu
+    $<$<BOOL:${USE_NPU}>:torch_npu>
     :common
     :request
     :state_dict
-    :npu_layers
+    $<$<BOOL:${USE_NPU}>:npu_layers>
     :model
     :models
     :sampler
@@ -84,7 +84,7 @@ cc_library(
     :runtime
     :model
     :models
-    :npu_layers
+    $<$<BOOL:${USE_NPU}>:npu_layers>
     :chat_template
     glog::glog
 )

@@ -127,7 +127,12 @@ LLMMaster::~LLMMaster() {
     loop_thread_.join();
   }
 
+  // torch::cuda::empty_cache();
+#if defined(USE_NPU)
   c10_npu::NPUCachingAllocator::emptyCache();
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu empty cache
+#endif
 }
 
 void LLMMaster::handle_batch_request(std::vector<std::string> prompts,

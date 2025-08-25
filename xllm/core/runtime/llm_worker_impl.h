@@ -32,6 +32,7 @@ class LLMWorkerImpl : public WorkerImpl {
 
   std::optional<ForwardOutput> step(const ForwardInput& inputs) override;
 
+#if defined(USE_NPU)
   hf::LlmHead get_lm_head() { return model_->get_lm_head(); };
 
   void set_lm_head(hf::LlmHead& head) { model_->set_lm_head(head); };
@@ -43,6 +44,9 @@ class LLMWorkerImpl : public WorkerImpl {
   void set_word_embedding(hf::AtbWordEmbedding& embedding) {
     model_->set_word_embedding(embedding);
   };
+#elif defined(USE_MLU)
+// TODO(mlu): implement mlu get/set lm head and word embedding
+#endif
 };
 
 }  // namespace xllm

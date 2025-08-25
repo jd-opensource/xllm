@@ -2,7 +2,6 @@
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include <pybind11/pybind11.h>
 
 #include <atomic>
 #include <boost/algorithm/string.hpp>
@@ -22,17 +21,26 @@
 #include "runtime/speculative_engine.h"
 #include "runtime/vlm_engine.h"
 #include "runtime/vlm_master.h"
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
-#include "torch_npu/csrc/core/npu/THNPUCachingHostAllocator.h"
 #include "util/device_name_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
+
+#if defined(USE_NPU)
+#include <pybind11/pybind11.h>
+
+#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
+#include "torch_npu/csrc/core/npu/THNPUCachingHostAllocator.h"
+#else
+// TODO(mlu): include mlu caching allocator
+// #include "c10/cuda/CUDACachingAllocator.h"
+#endif
 
 namespace xllm {
 
 Master::Master(const Options& options, EngineType type) : options_(options) {
   LOG(INFO) << "Master init options: " << options.to_string();
 
+#if defined(USE_NPU)
   if (options.rank_tablefile().has_value()) {
     FLAGS_rank_tablefile = options.rank_tablefile().value();
   }
@@ -42,6 +50,7 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
   if (options.communication_backend().has_value()) {
     FLAGS_expert_parallel_degree = options.expert_parallel_degree().value();
   }
+#endif
 
   // construct engine
   const auto devices =

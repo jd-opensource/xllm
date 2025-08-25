@@ -7,7 +7,10 @@
 #include "runtime/options.h"
 
 namespace xllm {
+
+#if defined(USE_NPU)
 using namespace llm_datadist;
+#endif
 
 class SpeculativeWorkerImpl : public WorkerImpl {
  public:

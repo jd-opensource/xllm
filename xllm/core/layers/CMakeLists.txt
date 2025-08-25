@@ -22,7 +22,11 @@ cc_library(
 cc_library(
   NAME 
     layers
+  HDRS
+    embedding.h
+    normalization.h
   DEPS
+    :parallel_state
     :state_dict
     :kv_cache
     :prefix_cache
@@ -33,5 +37,6 @@ cc_library(
     torch
 )
 
-add_subdirectory(npu)
-
+if(USE_NPU)
+  add_subdirectory(npu)
+endif()

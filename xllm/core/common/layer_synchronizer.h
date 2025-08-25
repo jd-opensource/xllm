@@ -1,12 +1,15 @@
 #pragma once
 
+#if defined(USE_NPU)
 #include <acl/acl.h>
+#endif
 
 #include <atomic>
 #include <vector>
 
 namespace xllm {
 
+#if defined(USE_NPU)
 class NPULayerSynchronizerImpl {
  public:
   NPULayerSynchronizerImpl(const int64_t num_layers);
@@ -20,5 +23,5 @@ class NPULayerSynchronizerImpl {
   std::vector<aclrtEvent> events_;
   std::vector<std::atomic<bool>> event_record_flags_;
 };
-
+#endif
 }  // namespace xllm

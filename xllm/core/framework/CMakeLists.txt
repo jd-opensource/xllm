@@ -18,11 +18,11 @@ cc_library(
   NAME 
     parallel_state
   HDRS
-    mapping_npu.h
-    parallel_state.h
+    $<$<BOOL:${USE_NPU}>:mapping_npu.h>
+    $<$<BOOL:${USE_NPU}>:parallel_state.h>
   SRCS
-    mapping_npu.cpp
-    parallel_state.cpp
+    $<$<BOOL:${USE_NPU}>:mapping_npu.cpp>
+    $<$<BOOL:${USE_NPU}>:parallel_state.cpp>
   DEPS
     :common
     torch
@@ -33,7 +33,7 @@ cc_test(
   NAME 
     mapping_npu_test
   SRCS
-    mapping_npu_test.cpp
+    $<$<BOOL:${USE_NPU}>:mapping_npu_test.cpp>
   DEPS
     parallel_state
     absl::synchronization
@@ -54,7 +54,7 @@ cc_library(
     :common
     :model
     :models
-    :npu_layers
+    $<$<BOOL:${USE_NPU}>:npu_layers>
     :tokenizer
     torch
 )

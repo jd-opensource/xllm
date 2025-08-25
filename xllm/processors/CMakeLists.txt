@@ -13,13 +13,15 @@ set(BASE_DEPS
   torch
 )
 
-# Check if NPU is being used
-include_directories($ENV{XLLM_KERNELS_PATH}/include/xllm_kernels/core/include) 
-include_directories($ENV{XLLM_KERNELS_PATH}/include/xllm_kernels)
+if(USE_NPU)
+  # Check if NPU is being used
+  include_directories($ENV{XLLM_KERNELS_PATH}/include/xllm_kernels/core/include) 
+  include_directories($ENV{XLLM_KERNELS_PATH}/include/xllm_kernels)
 
-# Modify dependencies for NPU
-list(APPEND BASE_DEPS torch_npu)
-list(APPEND BASE_DEPS :npu_layers)
+  # Modify dependencies for NPU
+  list(APPEND BASE_DEPS torch_npu)
+  list(APPEND BASE_DEPS :npu_layers)
+endif()
 
 # Define the library
 cc_library(

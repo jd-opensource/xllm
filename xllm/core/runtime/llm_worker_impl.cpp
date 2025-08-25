@@ -39,12 +39,16 @@ bool LLMWorkerImpl::init_model(torch::ScalarType dtype,
                                const ModelArgs& model_args,
                                const QuantArgs& quant_args) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
+#if defined(USE_NPU)
   int currentDevId = device_.index();
   int ret = aclrtSetDevice(currentDevId);
   if (ret != 0) {
     LOG(ERROR) << "ACL set device id:" << currentDevId
                << " failed, ret:" << ret;
   }
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu init device
+#endif
 
   // initialize model
   context_.set_model_args(model_args);
@@ -63,7 +67,11 @@ bool LLMWorkerImpl::init_model(torch::ScalarType dtype,
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
+#if defined(USE_NPU)
   c10_npu::SetDevice(device_.index());
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu set device
+#endif
   Timer timer;
   auto& flatten_tokens = inputs.token_ids;
   auto& flatten_positions = inputs.positions;
@@ -74,6 +82,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
   if (options_.instance_role() == InstanceRole::PREFILL &&
       options_.kv_cache_transfer_mode() == "PUSH" &&
       !inputs.transfer_kv_infos.empty()) {
+#if defined(USE_NPU)
     std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer =
         std::make_shared<NPULayerSynchronizerImpl>(
             context_.get_model_args().n_layers());
@@ -85,6 +94,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
                                                  context_.get_parallel_args(),
                                                  layer_synchronizer,
                                                  is_spec_draft_));
+#endif
   }
 
   // call model executor forward to get hidden states
@@ -99,9 +109,13 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
       !options_.enable_speculative_decode()) {
+#if defined(USE_NPU)
     // torch::npu::synchronize();
     aclrtSynchronizeStream(
         c10_npu::getCurrentNPUStream(device_.index()).stream());
+#elif defined(USE_MLU)
+    // TODO(mlu): implement mlu synchronize stream
+#endif
     if (options_.instance_role() == InstanceRole::PREFILL &&
         options_.kv_cache_transfer_mode() == "PUSH" &&
         !inputs.transfer_kv_infos.empty()) {
@@ -143,8 +157,12 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
     output.max_top_logprobs = sampling_params.max_top_logprobs;
   }
 
+#if defined(USE_NPU)
   aclrtSynchronizeStream(
       c10_npu::getCurrentNPUStream(device_.index()).stream());
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu synchronize stream
+#endif
 
   if (options_.instance_role() == InstanceRole::PREFILL &&
       options_.kv_cache_transfer_mode() == "PUSH" &&
