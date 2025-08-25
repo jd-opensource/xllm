@@ -4,7 +4,7 @@
 
 #include "core/framework/context.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
-#include "core/layers/npu/qwen3_moe_decoder_layer.h"
+#include "core/layers/qwen3_moe_decoder_layer.h"
 #include "qwen_base.h"
 
 namespace xllm::hf {
@@ -16,8 +16,8 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
  public:
   Qwen3MoeDecoderLayerImpl(const Context& context, const int32_t i) {
     // register submodules
-    decoder_layer_ =
-        register_module("decoder_layer", Qwen3MoeDecoder(context, i));
+    decoder_layer_ = register_module("decoder_layer",
+                                     layer::Qwen3MoeDecoderLayer(context, i));
   }
 
   torch::Tensor forward(torch::Tensor x,
@@ -55,7 +55,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
   void merge_loaded_weights() { decoder_layer_->merge_loaded_weights(); }
 
  private:
-  Qwen3MoeDecoder decoder_layer_{nullptr};
+  layer::Qwen3MoeDecoderLayer decoder_layer_{nullptr};
 };
 TORCH_MODULE(Qwen3MoeDecoderLayer);
 
@@ -92,9 +92,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
     max_seq_len_ = model_args.max_position_embeddings();
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
-    attn_mask_ = AttentionMaskImpl(options.device(),
-                                   options.dtype().toScalarType(),
-                                   /*mask_value=*/mask_value);
+    attn_mask_ = layer::AttentionMask(options.device(),
+                                      options.dtype().toScalarType(),
+                                      /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
       auto block = Qwen3MoeDecoderLayer(context, i);
@@ -102,7 +102,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    norm_ = register_module("norm", RmsNorm(context));
+    norm_ = register_module("norm", layer::RmsNorm(context));
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
@@ -222,8 +222,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   at::Device device_;
   torch::Dtype dtype_;
   AtbWordEmbedding embed_tokens_{nullptr};
-  AttentionMaskImpl attn_mask_;
-  RmsNorm norm_{nullptr};
+  layer::AttentionMask attn_mask_;
+  layer::RmsNorm norm_{nullptr};
   torch::Tensor cos_sin_;
   AtbRotaryEmbedding atb_pos_emb_{nullptr};
 };

@@ -1,14 +1,15 @@
-#include "layers/npu/atb_parallel_linear.h"
+#include "layers/npu/npu_column_parallel_linear_impl.h"
 
 #include "framework/parallel_state.h"
 
-namespace xllm::hf {
-std::shared_ptr<AtbColumnParallelLinearImpl>
-create_atb_column_parallel_linear_layer(const Context& context) {
-  return std::make_shared<AtbColumnParallelLinearImpl>(context);
-}
+namespace xllm::layer {
 
-void AtbColumnParallelLinearImpl::param_from_args(
+// std::shared_ptr<NpuColumnParallelLinearImpl>
+// create_atb_column_parallel_linear_layer(const Context& context) {
+//   return std::make_shared<NpuColumnParallelLinearImpl>(context);
+// }
+
+void NpuColumnParallelLinearImpl::param_from_args(
     atb_speed::common::LinearParallelParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -31,8 +32,8 @@ void AtbColumnParallelLinearImpl::param_from_args(
   }
 }
 
-AtbColumnParallelLinearImpl::AtbColumnParallelLinearImpl(const Context& context)
-    : ATBBase(context) {
+NpuColumnParallelLinearImpl::NpuColumnParallelLinearImpl(const Context& context)
+    : NpuBaseLayer(context) {
   param_from_args(
       linear_param_, context.get_model_args(), context.get_parallel_args());
   at_weight_tensors_.resize(1);
@@ -46,19 +47,19 @@ AtbColumnParallelLinearImpl::AtbColumnParallelLinearImpl(const Context& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 }
 
-void AtbColumnParallelLinearImpl::verify_loaded_weights(
+void NpuColumnParallelLinearImpl::verify_loaded_weights(
     const std::string weight_str) const {
   CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
       << "weight is not loaded for " << weight_str;
 }
 
-void AtbColumnParallelLinearImpl::merge_loaded_weights() {
+void NpuColumnParallelLinearImpl::merge_loaded_weights() {
   atb_weight_tensors_[0] =
       atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[0]);
   init_layer();
 }
 
-void AtbColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
+void NpuColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   if (dp_size_ > 1) {
     set_weight(
         state_dict, "weight", 0, 0, dp_local_tp_rank_, dp_local_tp_size_);
@@ -68,19 +69,19 @@ void AtbColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   at_weight_tensors_[0] = at_weight_tensors_[0].to(dtype_);
 }
 
-int64_t AtbColumnParallelLinearImpl::init_layer() {
-  ATBBase::name_ = "atb_parallel_linear_layer";
+int64_t NpuColumnParallelLinearImpl::init_layer() {
+  name_ = "atb_parallel_linear_layer";
   model_name_ = "Atb Parallel Linear";
-  runTaskFunc_ = std::bind(&AtbColumnParallelLinearImpl::run_task,
-                           this,
-                           std::placeholders::_1,
-                           std::placeholders::_2);
+  run_task_func_ = std::bind(&NpuColumnParallelLinearImpl::run_task,
+                             this,
+                             std::placeholders::_1,
+                             std::placeholders::_2);
   CHECK_OPERATION_STATUS_RETURN(init_node(linear_node_, linear_param_));
 
   return atb::NO_ERROR;
 }
 
-int64_t AtbColumnParallelLinearImpl::init_node(
+int64_t NpuColumnParallelLinearImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::common::LinearParallelParam& linearParam) {
   atb::Operation* operation = nullptr;
@@ -118,7 +119,7 @@ int64_t AtbColumnParallelLinearImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor AtbColumnParallelLinearImpl::forward(const torch::Tensor& input,
+torch::Tensor NpuColumnParallelLinearImpl::forward(const torch::Tensor& input,
                                                    atb::Context* context,
                                                    AtbWorkspace& workspace,
                                                    int nodeId) {
@@ -131,7 +132,7 @@ torch::Tensor AtbColumnParallelLinearImpl::forward(const torch::Tensor& input,
   return at_out_tensors_.at(0);
 }
 
-void AtbColumnParallelLinearImpl::build_node_variant_pack(
+void NpuColumnParallelLinearImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     const torch::Tensor& input) {
   internal_input = atb_speed::Utils::AtTensor2Tensor(input);
@@ -163,7 +164,7 @@ void AtbColumnParallelLinearImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(at_out_tensors_.at(0));
 }
 
-AtbColumnParallelLinear::AtbColumnParallelLinear(const Context& context)
-    : ModuleHolder(create_atb_column_parallel_linear_layer(context)) {}
+// AtbColumnParallelLinear::AtbColumnParallelLinear(const Context& context)
+//     : ModuleHolder(create_atb_column_parallel_linear_layer(context)) {}
 
-}  // namespace xllm::hf
+}  // namespace xllm::layer

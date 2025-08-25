@@ -8,27 +8,35 @@
 
 #include "atb_base.h"
 #include "framework/model/model_args.h"
+#include "framework/model/model_input_params.h"
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/parallel_state.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
+#include "npu_base_layer.h"
+#include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
+#include "xllm_kernels/core/include/atb_speed/base/model.h"
+#include "xllm_kernels/core/include/atb_speed/log.h"
+#include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
 #include "xllm_kernels/models/qwen3/layer/moe_decoder_layer.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
-class Qwen3MoeDecoderImpl : public torch::nn::Module, public ATBBase {
+class NpuQwen3MoeDecoderLayerImpl : public NpuBaseLayer {
  public:
-  explicit Qwen3MoeDecoderImpl(const Context& context, const int32_t layer_id);
+  explicit NpuQwen3MoeDecoderLayerImpl(const Context& context,
+                                       const int32_t layer_id);
 
-  ~Qwen3MoeDecoderImpl() {};
+  ~NpuQwen3MoeDecoderLayerImpl() {};
 
-  void load_state_dict(const StateDict& state_dict);
+  virtual void load_state_dict(const StateDict& state_dict);
 
-  void verify_loaded_weights(const std::string& prefix) const;
+  virtual void verify_loaded_weights(const std::string& prefix) const;
 
-  void merge_loaded_weights();
+  virtual void merge_loaded_weights();
 
-  torch::Tensor block_tables_placeholder_;
+  virtual int64_t init_layer() override;
 
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& cos_pos,
@@ -144,8 +152,6 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module, public ATBBase {
                                       std::vector<torch::Tensor>& experts_gate,
                                       bool transpose = false);
 
-  int64_t init_layer();
-
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::qwen::MoeDecoderLayerParam& param);
 
@@ -159,6 +165,7 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module, public ATBBase {
                                torch::Tensor& expert_array,
                                bool is_prefill);
 
+  torch::Tensor block_tables_placeholder_;
   std::string model_name_;
 
   int32_t device_id_;
@@ -207,22 +214,11 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module, public ATBBase {
   std::mutex experts_mutex_;
 };
 
-class Qwen3MoeDecoder : public torch::nn::ModuleHolder<Qwen3MoeDecoderImpl> {
- public:
-  using torch::nn::ModuleHolder<Qwen3MoeDecoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen3MoeDecoderImpl;
-
-  Qwen3MoeDecoder(const Context& context, int32_t layer_id);
-};
-
-std::shared_ptr<Qwen3MoeDecoderImpl> create_qwen3_moe_decoder_layer(
-    const Context& context,
-    int32_t layer_id);
-
 std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,
                                           int32_t dp_local_tp_size,
                                           int32_t dp_rank,
                                           int32_t dp_size,
                                           int32_t rank,
                                           at::Device device);
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm

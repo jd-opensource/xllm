@@ -11,11 +11,11 @@
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/parallel_state.h"
-#include "core/layers/npu/attn_mask.h"
-#include "core/layers/npu/llama_decoder_layer.h"
+#include "core/layers/attention_mask.h"
+#include "core/layers/llama_decoder_layer.h"
 #include "core/layers/npu/llm_head.h"
-#include "core/layers/npu/rms_norm.h"
 #include "core/layers/npu/word_embedding.h"
+#include "core/layers/rms_norm.h"
 #include "core/util/tensor_helper.h"
 #include "model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
@@ -27,7 +27,8 @@ class LlamaDecoderLayerImpl : public torch::nn::Module {
  public:
   LlamaDecoderLayerImpl(const Context& context) {
     // register submodules
-    decoder_layer_ = register_module("decoder_layer", LlamaDecoder(context));
+    decoder_layer_ =
+        register_module("decoder_layer", layer::LlamaDecoderLayer(context));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -61,7 +62,7 @@ class LlamaDecoderLayerImpl : public torch::nn::Module {
   void merge_loaded_weights() { decoder_layer_->merge_loaded_weights(); }
 
  private:
-  LlamaDecoder decoder_layer_{nullptr};
+  layer::LlamaDecoderLayer decoder_layer_{nullptr};
 };
 TORCH_MODULE(LlamaDecoderLayer);
 
@@ -108,7 +109,7 @@ class LlamaModelImpl : public torch::nn::Module {
     layers_.reserve(context.get_model_args().n_layers());
     work_space_ = AtbWorkspace(options.device());
     embed_tokens_ = register_module("embed_tokens", AtbWordEmbedding(context));
-    norm_ = register_module("norm", RmsNorm(context));
+    norm_ = register_module("norm", layer::RmsNorm(context));
 
     std::tie(cos_pos_, sin_pos_) =
         get_llama_rotary_embedding(128,
@@ -116,13 +117,13 @@ class LlamaModelImpl : public torch::nn::Module {
                                    model_args.rope_theta(),
                                    options);
     // encode_attn_mask_ =
-    //   AttentionMaskImpl(options.device(),
+    //   layer::AttentionMask(options.device(),
     //   options.dtype()).get_attn_mask(2048, options.device(),
     //   options.dtype());
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
-    attn_mask_ = AttentionMaskImpl(options.device(),
-                                   options.dtype().toScalarType(),
-                                   /*mask_value=*/mask_value);
+    attn_mask_ = layer::AttentionMask(options.device(),
+                                      options.dtype().toScalarType(),
+                                      /*mask_value=*/mask_value);
     max_seq_len_ = 0;
     atb::Status st = atb::CreateContext(&context_);
     LOG_IF(ERROR, st != 0) << "ContextFactory create atb::Context fail";
@@ -237,9 +238,9 @@ class LlamaModelImpl : public torch::nn::Module {
   int max_seq_len_ = 0;
   int device_id_ = 0;
   AtbWorkspace work_space_;
-  AttentionMaskImpl attn_mask_;
+  layer::AttentionMask attn_mask_;
   AtbWordEmbedding embed_tokens_{nullptr};
-  RmsNorm norm_{nullptr};
+  layer::RmsNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast

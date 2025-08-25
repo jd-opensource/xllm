@@ -1,18 +1,16 @@
 #pragma once
 #include <torch/torch.h>
 
-#include "atb/atb_infer.h"
-
 namespace xllm {
-namespace hf {
+namespace layer {
 
-class AttentionMaskImpl : public torch::nn::Module {
+class AttentionMask : public torch::nn::Module {
  public:
-  AttentionMaskImpl() = default;
+  AttentionMask() = default;
 
-  explicit AttentionMaskImpl(at::Device device,
-                             torch::Dtype dtype,
-                             float mask_value = -9984);
+  explicit AttentionMask(at::Device device,
+                         torch::Dtype dtype,
+                         float mask_value = -9984);
 
   torch::Tensor get_decode_attn_mask(torch::Tensor input_lengths,
                                      int64_t max_s,
@@ -37,5 +35,5 @@ class AttentionMaskImpl : public torch::nn::Module {
   at::Tensor atten_mask_cache_;
 };
 
-}  // namespace hf
+}  // namespace layer
 }  // namespace xllm

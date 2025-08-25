@@ -8,8 +8,8 @@
 #include <typeinfo>
 #include <vector>
 
-#include "core/layers/npu/attn_mask.h"
-#include "core/layers/npu/rms_norm.h"
+#include "core/layers/attention_mask.h"
+#include "core/layers/rms_norm.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 // test
 #include <mstx/ms_tools_ext.h>
@@ -296,14 +296,14 @@ class QWenModelImplBase : public torch::nn::Module {
   int max_seq_len_ = 0;
   int device_id = 0;
   AtbWorkspace work_space_;
-  AttentionMaskImpl attn_mask_;
+  layer::AttentionMask attn_mask_;
   AtbRotaryEmbedding atb_pos_emb_{nullptr};
 
   std::vector<int64_t> mrope_section_;
   // test
   //  ParallelEmbedding embed_tokens_{nullptr};
   AtbWordEmbedding embed_tokens_{nullptr};
-  RmsNorm norm_{nullptr};
+  layer::RmsNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast

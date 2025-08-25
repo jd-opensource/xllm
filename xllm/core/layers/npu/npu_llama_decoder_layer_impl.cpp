@@ -1,16 +1,17 @@
-#include "llama_decoder_layer.h"
+#include "npu_llama_decoder_layer_impl.h"
 
 #include <glog/logging.h>
 #include <mstx/ms_tools_ext.h>
 
 #include <map>
 
-#include "attn_mask.h"
 #include "common/global_flags.h"
+#include "core/layers/attention_mask.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
 const uint64_t WEIGHT_COUNT_PER_LAYER = 50;
 
@@ -96,7 +97,8 @@ static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
                                           {IN_MLP_W1_WEIGHT, 0},
                                           {IN_MLP_CPROJ_WEIGHT, 1}};
 
-LlamaDecoderImpl::LlamaDecoderImpl(const Context& context) : ATBBase(context) {
+NpuLlamaDecoderLayerImpl::NpuLlamaDecoderLayerImpl(const Context& context)
+    : NpuBaseLayer(context) {
   param_from_args(prefill_param_,
                   context.get_model_args(),
                   context.get_parallel_args(),
@@ -122,10 +124,11 @@ LlamaDecoderImpl::LlamaDecoderImpl(const Context& context) : ATBBase(context) {
 }
 
 // fix param
-void LlamaDecoderImpl::param_from_args(atb_speed::llama::LlamaLayerParam& param,
-                                       const ModelArgs& args,
-                                       const ParallelArgs& parallel_args,
-                                       bool isPrefill) {
+void NpuLlamaDecoderLayerImpl::param_from_args(
+    atb_speed::llama::LlamaLayerParam& param,
+    const ModelArgs& args,
+    const ParallelArgs& parallel_args,
+    bool isPrefill) {
   param.isFA = false;
   param.isPrefill = isPrefill;
   param.isBF16 = args.dtype() == "bfloat16";
@@ -157,14 +160,14 @@ void LlamaDecoderImpl::param_from_args(atb_speed::llama::LlamaLayerParam& param,
   // param.enableLogN = false;
 }
 
-void LlamaDecoderImpl::verify_loaded_weights() const {
+void NpuLlamaDecoderLayerImpl::verify_loaded_weights() const {
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
 }
 
-void LlamaDecoderImpl::merge_loaded_weights() {
+void NpuLlamaDecoderLayerImpl::merge_loaded_weights() {
   auto new_q_weight = torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
                                   at_weight_tensors_[IN_K_WEIGHT],
                                   at_weight_tensors_[IN_V_WEIGHT]},
@@ -190,7 +193,7 @@ void LlamaDecoderImpl::merge_loaded_weights() {
   init_layer();
 }
 
-void LlamaDecoderImpl::load_state_dict(const StateDict& state_dict) {
+void NpuLlamaDecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
       set_weight(state_dict, name, index, WEIGHT_SHARD[index]);
@@ -200,9 +203,9 @@ void LlamaDecoderImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-int64_t LlamaDecoderImpl::init_layer() {
+int64_t NpuLlamaDecoderLayerImpl::init_layer() {
   init_attn_mask();
-  ATBBase::name_ = "llama_decoder_layer";
+  name_ = "llama_decoder_layer";
   model_name_ = "llama";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
@@ -210,18 +213,17 @@ int64_t LlamaDecoderImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t LlamaDecoderImpl::init_attn_mask() {
+int64_t NpuLlamaDecoderLayerImpl::init_attn_mask() {
   torch::Dtype dtype =
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
-  // encode_attn_mask_ =
-  //     AttentionMaskImpl(device_, dtype).get_attn_mask(2048, dtype, device_);
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
 
   return atb::NO_ERROR;
 }
 
-int64_t LlamaDecoderImpl::init_node(atb_speed::Model::Node& node,
-                                    atb_speed::llama::LlamaLayerParam& param) {
+int64_t NpuLlamaDecoderLayerImpl::init_node(
+    atb_speed::Model::Node& node,
+    atb_speed::llama::LlamaLayerParam& param) {
   atb::Operation* operation = nullptr;
   atb_speed::llama::LlamaDecoderLayer decoder_layer(param);
   decoder_layer.BuildGraph(&operation);
@@ -251,15 +253,15 @@ int64_t LlamaDecoderImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor LlamaDecoderImpl::forward(torch::Tensor& x,
-                                        torch::Tensor& cos_pos,
-                                        torch::Tensor& sin_pos,
-                                        torch::Tensor& attn_mask,
-                                        KVCache& kv_cache,
-                                        ModelInputParams& input_params,
-                                        atb::Context* context,
-                                        AtbWorkspace& workspace,
-                                        int node_id) {
+torch::Tensor NpuLlamaDecoderLayerImpl::forward(torch::Tensor& x,
+                                                torch::Tensor& cos_pos,
+                                                torch::Tensor& sin_pos,
+                                                torch::Tensor& attn_mask,
+                                                KVCache& kv_cache,
+                                                ModelInputParams& input_params,
+                                                atb::Context* context,
+                                                AtbWorkspace& workspace,
+                                                int node_id) {
   atb::Status st;
 
   if (input_params.prefill_indices.second !=
@@ -293,14 +295,15 @@ torch::Tensor LlamaDecoderImpl::forward(torch::Tensor& x,
   return at_placeholder_;
 }
 
-void LlamaDecoderImpl::build_node_variant_pack(atb_speed::Model::Node& node,
-                                               torch::Tensor& x,
-                                               torch::Tensor& cos_pos,
-                                               torch::Tensor& sin_pos,
-                                               at::Tensor& attn_mask,
-                                               KVCache& kv_cache,
-                                               ModelInputParams& input_params,
-                                               bool is_prefill) {
+void NpuLlamaDecoderLayerImpl::build_node_variant_pack(
+    atb_speed::Model::Node& node,
+    torch::Tensor& x,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    at::Tensor& attn_mask,
+    KVCache& kv_cache,
+    ModelInputParams& input_params,
+    bool is_prefill) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
@@ -340,12 +343,5 @@ void LlamaDecoderImpl::build_node_variant_pack(atb_speed::Model::Node& node,
   node.variantPack.outTensors.at(0) = internal_tensors_;
 }
 
-LlamaDecoder::LlamaDecoder(const Context& context)
-    : ModuleHolder(create_llama_decode_layer(context)) {}
-
-std::shared_ptr<LlamaDecoderImpl> create_llama_decode_layer(
-    const Context& context) {
-  return std::make_shared<LlamaDecoderImpl>(context);
-}
-
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm

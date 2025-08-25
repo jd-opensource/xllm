@@ -1,14 +1,15 @@
 #pragma once
 
-#include "core/layers/npu/qwen3_decoder_layer.h"
+#include "core/layers/qwen3_decoder_layer.h"
 #include "qwen_base.h"
 
 namespace xllm::hf {
 
-class QWen3DecoderLayerImpl : public QWenDecoderLayerImplBase<Qwen3Decoder> {
+class QWen3DecoderLayerImpl
+    : public QWenDecoderLayerImplBase<layer::Qwen3DecoderLayer> {
  public:
   QWen3DecoderLayerImpl(const Context& context)
-      : QWenDecoderLayerImplBase<Qwen3Decoder>(context) {}
+      : QWenDecoderLayerImplBase<layer::Qwen3DecoderLayer>(context) {}
 };
 TORCH_MODULE(QWen3DecoderLayer);
 
@@ -32,7 +33,7 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
     layers_.reserve(model_args.n_layers());
     work_space_ = AtbWorkspace(options.device());
     embed_tokens_ = register_module("embed_tokens", AtbWordEmbedding(context));
-    norm_ = register_module("norm", RmsNorm(context));
+    norm_ = register_module("norm", layer::RmsNorm(context));
 
     atb_pos_emb_ = AtbRotaryEmbedding(context);
     cos_sin_ = get_qwen3_rotary_embedding(128,
@@ -41,12 +42,12 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
                                           options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     // encode_attn_mask_ =
-    //   AttentionMaskImpl(options.device(),
+    //   layer::AttentionMask(options.device(),
     //   options.dtype()).get_attn_mask(2048, options.device(),
     //   options.dtype());
-    attn_mask_ = AttentionMaskImpl(options.device(),
-                                   options.dtype().toScalarType(),
-                                   /*mask_value=*/mask_value);
+    attn_mask_ = layer::AttentionMask(options.device(),
+                                      options.dtype().toScalarType(),
+                                      /*mask_value=*/mask_value);
     atb::Status st = atb::CreateContext(&context_);
     LOG_IF(ERROR, st != 0) << "ContextFactory create atb::Context fail";
     device_id = options.device().index();

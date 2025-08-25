@@ -12,49 +12,47 @@
 #include <functional>
 
 #include "atb/atb_infer.h"
-#include "atb_base.h"
+#include "framework/context.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
+#include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
 #include "xllm_kernels/core/include/atb_speed/base/model.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
-class RmsNormImpl : public torch::nn::Module, public ATBBase {
+class NpuRmsNormImpl : public NpuBaseLayer {
  public:
-  using Task = std::function<int()>;
-  using RunTaskFunc =
-      std::function<void(const std::string& taskName, Task task)>;
+  explicit NpuRmsNormImpl(const Context& context);
 
-  explicit RmsNormImpl(const Context& context);
+  ~NpuRmsNormImpl() {};
 
-  ~RmsNormImpl() {};
-
-  void load_state_dict(const StateDict& state_dict);
+  virtual void load_state_dict(const StateDict& state_dict) override;
 
   void verify_loaded_weights(const std::string weight_str) const;
 
-  void merge_loaded_weights();
+  virtual void merge_loaded_weights() override;
 
-  void param_from_args(atb::infer::RmsNormParam& param, const ModelArgs& args);
-
-  int64_t init_layer();
+  virtual int64_t init_layer() override;
 
   torch::Tensor forward(torch::Tensor& x,
                         atb::Context* context,
                         AtbWorkspace& workspace,
                         int nodeId);
 
+ private:
   void build_node_variant_pack(atb_speed::Model::Node& node, torch::Tensor& x);
 
- private:
   int64_t init_node(atb_speed::Model::Node& node,
                     atb::infer::RmsNormParam& param);
+
+  void param_from_args(atb::infer::RmsNormParam& param, const ModelArgs& args);
 
   atb_speed::Model::Node norm_node_;
   std::string model_name_;
@@ -62,14 +60,5 @@ class RmsNormImpl : public torch::nn::Module, public ATBBase {
   atb::Tensor internal_tensors_;
 };
 
-class RmsNorm : public torch::nn::ModuleHolder<RmsNormImpl> {
- public:
-  using torch::nn::ModuleHolder<RmsNormImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = RmsNormImpl;
-
-  RmsNorm(const Context& context);
-};
-
-std::shared_ptr<RmsNormImpl> create_rms_norm_layer(const Context& context);
-
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm

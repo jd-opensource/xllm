@@ -1,20 +1,22 @@
-#include "siglip_encoder_layer.h"
+#include "npu_siglip_encoder_layer_impl.h"
 
 #include "nlohmann/json.hpp"
-#include "xllm_kernels/pytorch/atb_torch/core/include/base_operation.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
-SiglipEncoderLayerUpImpl::SiglipEncoderLayerUpImpl(const Context& context,
-                                                   const std::string& prefix)
-    : graph_("siglip_encoder_layer_up"),
+NpuSiglipEncoderLayerUpImpl::NpuSiglipEncoderLayerUpImpl(
+    const Context& context,
+    const std::string& prefix)
+    : NpuBaseLayer(context),
+      graph_("siglip_encoder_layer_up"),
       model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
       prefix_(prefix) {
   build_graph(prefix);
 }
 
-void SiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
+void NpuSiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
   // set graph input names and output names
   std::vector<std::string> input_names = {
       "hidden_states",
@@ -125,7 +127,7 @@ void SiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
   graph_.Build();
 }
 
-void SiglipEncoderLayerUpImpl::load_state_dict(const StateDict& state_dict) {
+void NpuSiglipEncoderLayerUpImpl::load_state_dict(const StateDict& state_dict) {
   const std::set<std::string> key_names = {"layer_norm1.weight",
                                            "layer_norm1.bias",
                                            "self_attn.q_proj.weight",
@@ -147,7 +149,7 @@ void SiglipEncoderLayerUpImpl::load_state_dict(const StateDict& state_dict) {
   graph_.SetWeights(weights_map);
 }
 
-torch::Tensor SiglipEncoderLayerUpImpl::forward(torch::Tensor& x) {
+torch::Tensor NpuSiglipEncoderLayerUpImpl::forward(torch::Tensor& x) {
   // set graph forward inputs
   atb_torch::TorchTensorMap inputs;
   atb_torch::TorchTensorMap outputs;
@@ -165,27 +167,18 @@ torch::Tensor SiglipEncoderLayerUpImpl::forward(torch::Tensor& x) {
   return output["layer_up_out"];
 }
 
-std::shared_ptr<SiglipEncoderLayerUpImpl> create_siglip_encoder_layer_up(
-    const Context& context,
-    const std::string& prefix) {
-  return std::make_shared<SiglipEncoderLayerUpImpl>(context, prefix);
-}
-
-SiglipEncoderLayerUp::SiglipEncoderLayerUp(const Context& context,
-                                           const std::string& prefix)
-    : ModuleHolder(create_siglip_encoder_layer_up(context, prefix)) {}
-
-SiglipEncoderLayerDownImpl::SiglipEncoderLayerDownImpl(
+NpuSiglipEncoderLayerDownImpl::NpuSiglipEncoderLayerDownImpl(
     const Context& context,
     const std::string& prefix)
-    : graph_("siglip_encoder_layer_down"),
+    : NpuBaseLayer(context),
+      graph_("siglip_encoder_layer_down"),
       model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
       prefix_(prefix) {
   build_graph(prefix);
 }
 
-void SiglipEncoderLayerDownImpl::build_graph(const std::string& prefix) {
+void NpuSiglipEncoderLayerDownImpl::build_graph(const std::string& prefix) {
   // set graph input names and output names
   std::vector<std::string> input_names = {"residual",
                                           "hidden_states",
@@ -288,7 +281,8 @@ void SiglipEncoderLayerDownImpl::build_graph(const std::string& prefix) {
   graph_.Build();
 }
 
-void SiglipEncoderLayerDownImpl::load_state_dict(const StateDict& state_dict) {
+void NpuSiglipEncoderLayerDownImpl::load_state_dict(
+    const StateDict& state_dict) {
   const std::set<std::string> key_names = {"self_attn.out_proj.weight",
                                            "self_attn.out_proj.bias",
                                            "layer_norm2.weight",
@@ -310,8 +304,8 @@ void SiglipEncoderLayerDownImpl::load_state_dict(const StateDict& state_dict) {
   graph_.SetWeights(weights_map);
 }
 
-torch::Tensor SiglipEncoderLayerDownImpl::forward(torch::Tensor& x,
-                                                  torch::Tensor& y) {
+torch::Tensor NpuSiglipEncoderLayerDownImpl::forward(torch::Tensor& x,
+                                                     torch::Tensor& y) {
   // set graph forward inputs
   atb_torch::TorchTensorMap inputs;
   atb_torch::TorchTensorMap outputs;
@@ -324,31 +318,22 @@ torch::Tensor SiglipEncoderLayerDownImpl::forward(torch::Tensor& x,
   return output["layer_down_out"];
 }
 
-std::shared_ptr<SiglipEncoderLayerDownImpl> create_siglip_encoder_layer_down(
-    const Context& context,
-    const std::string& prefix) {
-  return std::make_shared<SiglipEncoderLayerDownImpl>(context, prefix);
-}
-
-SiglipEncoderLayerDown::SiglipEncoderLayerDown(const Context& context,
-                                               const std::string& prefix)
-    : ModuleHolder(create_siglip_encoder_layer_down(context, prefix)) {}
-
-SiglipEncoderLayerImpl::SiglipEncoderLayerImpl(const Context& context,
-                                               const std::string& prefix)
-    : model_args_(context.get_model_args()),
+NpuSiglipEncoderLayerImpl::NpuSiglipEncoderLayerImpl(const Context& context,
+                                                     const std::string& prefix)
+    : NpuBaseLayer(context),
+      model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
       prefix_(prefix) {
-  up_ = SiglipEncoderLayerUp(context, prefix);
-  down_ = SiglipEncoderLayerDown(context, prefix);
+  up_ = NpuSiglipEncoderLayerUp(context, prefix);
+  down_ = NpuSiglipEncoderLayerDown(context, prefix);
 }
 
-void SiglipEncoderLayerImpl::load_state_dict(const StateDict& state_dict) {
+void NpuSiglipEncoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   up_->load_state_dict(state_dict);
   down_->load_state_dict(state_dict);
 }
 
-torch::Tensor SiglipEncoderLayerImpl::forward(torch::Tensor& x) {
+torch::Tensor NpuSiglipEncoderLayerImpl::forward(torch::Tensor& x) {
   auto residual = x.clone();
   auto batch = x.size(0);
   auto seq_len = x.size(1);
@@ -362,14 +347,5 @@ torch::Tensor SiglipEncoderLayerImpl::forward(torch::Tensor& x) {
   return down_->forward(residual, out);
 }
 
-std::shared_ptr<SiglipEncoderLayerImpl> create_siglip_encoder_layer(
-    const Context& context,
-    const std::string& prefix) {
-  return std::make_shared<SiglipEncoderLayerImpl>(context, prefix);
-}
-
-SiglipEncoderLayer::SiglipEncoderLayer(const Context& context,
-                                       const std::string& prefix)
-    : ModuleHolder(create_siglip_encoder_layer(context, prefix)) {}
-
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm

@@ -12,12 +12,12 @@
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
-#include "core/layers/npu/attn_mask.h"
-#include "core/layers/npu/deepseek_v2_decoder_layer.h"
+#include "core/layers/attention_mask.h"
+#include "core/layers/deepseek_v2_decoder_layer.h"
 #include "core/layers/npu/llm_head.h"
 #include "core/layers/npu/pos_embedding.h"
-#include "core/layers/npu/rms_norm.h"
 #include "core/layers/npu/word_embedding.h"
+#include "core/layers/rms_norm.h"
 #include "core/layers/rotary_embedding.h"
 #include "framework/context.h"
 #include "model_registry.h"
@@ -36,8 +36,8 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                              const int32_t i,
                              const float sm_scale) {
     // register submodules
-    decoder_layer_ = register_module("decoder_layer",
-                                     DeepseekV2Decoder(context, i, sm_scale));
+    decoder_layer_ = register_module(
+        "decoder_layer", layer::DeepseekV2DecoderLayer(context, i, sm_scale));
   }
 
   torch::Tensor forward(torch::Tensor x,
@@ -73,7 +73,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   void merge_loaded_weights() { decoder_layer_->merge_loaded_weights(); }
 
  private:
-  DeepseekV2Decoder decoder_layer_{nullptr};
+  layer::DeepseekV2DecoderLayer decoder_layer_{nullptr};
 };
 TORCH_MODULE(DeepseekV2DecoderLayer);
 
@@ -112,9 +112,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     atb_pos_emb_ = AtbRotaryEmbedding(context);
     max_seq_len_ = model_args.max_position_embeddings();
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
-    attn_mask_ = AttentionMaskImpl(options.device(),
-                                   options.dtype().toScalarType(),
-                                   /*mask_value=*/mask_value);
+    attn_mask_ = layer::AttentionMask(options.device(),
+                                      options.dtype().toScalarType(),
+                                      /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
       auto block = DeepseekV2DecoderLayer(context, i, sm_scale);
@@ -122,7 +122,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    norm_ = register_module("norm", RmsNorm(context));
+    norm_ = register_module("norm", layer::RmsNorm(context));
     // dp_size_=4;
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
@@ -237,8 +237,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   AtbWordEmbedding embed_tokens_{nullptr};
   std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
   AtbRotaryEmbedding atb_pos_emb_{nullptr};
-  AttentionMaskImpl attn_mask_;
-  RmsNorm norm_{nullptr};
+  layer::AttentionMask attn_mask_;
+  layer::RmsNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Model);
 

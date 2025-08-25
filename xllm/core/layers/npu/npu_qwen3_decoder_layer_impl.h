@@ -12,14 +12,12 @@
 #include <functional>
 
 #include "atb/atb_infer.h"
-#include "atb_base.h"
+#include "framework/context.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
-#include "framework/parallel_state.h"
-#include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
+#include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
 #include "xllm_kernels/core/include/atb_speed/base/model.h"
@@ -27,33 +25,22 @@
 #include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
 #include "xllm_kernels/models/qwen3/layer/decoder_layer.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
-class Qwen3DecoderImpl : public torch::nn::Module, public ATBBase {
+class NpuQwen3DecoderLayerImpl : public NpuBaseLayer {
  public:
-  using Task = std::function<int()>;
-  using RunTaskFunc =
-      std::function<void(const std::string& taskName, Task task)>;
+  explicit NpuQwen3DecoderLayerImpl(const Context& context);
 
-  explicit Qwen3DecoderImpl(const Context& context);
+  ~NpuQwen3DecoderLayerImpl() {};
 
-  ~Qwen3DecoderImpl() {};
+  virtual void load_state_dict(const StateDict& state_dict) override;
 
-  void load_state_dict(const StateDict& state_dict);
+  virtual void verify_loaded_weights() const override;
 
-  void verify_loaded_weights() const;
+  virtual void merge_loaded_weights() override;
 
-  void merge_loaded_weights();
-
-  void param_from_args(atb_speed::qwen::QwenLayerParam& param,
-                       const ModelArgs& args,
-                       const ParallelArgs& parallel_args,
-                       bool isPrefill);
-
-  void initialize_quantization_parameters(
-      atb_speed::qwen::QwenLayerParam& param);
-
-  int64_t init_layer();
+  virtual int64_t init_layer() override;
 
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& cos_pos,
@@ -67,6 +54,12 @@ class Qwen3DecoderImpl : public torch::nn::Module, public ATBBase {
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
 
+ private:
+  void param_from_args(atb_speed::qwen::QwenLayerParam& param,
+                       const ModelArgs& args,
+                       const ParallelArgs& parallel_args,
+                       bool isPrefill);
+
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                torch::Tensor& x,
                                torch::Tensor& cos_pos,
@@ -76,7 +69,9 @@ class Qwen3DecoderImpl : public torch::nn::Module, public ATBBase {
                                ModelInputParams& input_params,
                                bool is_prefill);
 
- private:
+  void initialize_quantization_parameters(
+      atb_speed::qwen::QwenLayerParam& param);
+
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::qwen::QwenLayerParam& param);
 
@@ -102,15 +97,5 @@ class Qwen3DecoderImpl : public torch::nn::Module, public ATBBase {
   std::vector<std::shared_ptr<std::vector<int>>> decode_vector_storage_;
 };
 
-class Qwen3Decoder : public torch::nn::ModuleHolder<Qwen3DecoderImpl> {
- public:
-  using torch::nn::ModuleHolder<Qwen3DecoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen3DecoderImpl;
-
-  Qwen3Decoder(const Context& context);
-};
-
-std::shared_ptr<Qwen3DecoderImpl> create_qwen3_decode_layer(
-    const Context& context);
-
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm
