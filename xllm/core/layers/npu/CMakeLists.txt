@@ -6,50 +6,43 @@ cc_library(
   NAME
     npu_layers 
   HDRS
-    llama_decoder_layer.h
-    qwen2_decoder_layer.h
-    qwen3_decoder_layer.h
-    qwen3_moe_decoder_layer.h
-    attn_mask.h
-    atb_base.h
-    word_embedding.h
-    atb_word_embedding_impl.h
-    pos_embedding.h
-    rms_norm.h
-    llm_head.h
-    atb_head_impl.h
-    siglip_encoder_layer.h
-    multi_head_attention.h
-    qwen2_5_vision_encoder_layer.h
-    qwen3_moe_decoder_layer.h
-    atb_linear.h
-    atb_parallel_linear.h
+    npu_word_embedding_impl.h
+    npu_pos_embedding_impl.h
+    npu_lm_head_impl.h
+    npu_qwen2dot5_vision_encoder_layer_impl.h
+    npu_qwen3_moe_decoder_layer_impl.h
+    # atb_parallel_linear.h
     buffer/atb_buffer.h
     buffer/atb_workspace.h
+    npu_base_layer.h
+    npu_column_parallel_linear_impl.h
+    npu_deepseek_v2_decoder_layer_impl.h
+    npu_llama_decoder_layer_impl.h
+    npu_qwen2_decoder_layer_impl.h
+    npu_qwen3_decoder_layer_impl.h
+    npu_rms_norm_impl.h
+    npu_siglip_encoder_layer_impl.h
   SRCS
-    llama_decoder_layer.cpp
-    qwen2_decoder_layer.cpp
-    qwen3_decoder_layer.cpp
-    qwen2_5_vision_encoder_layer.cpp
-    qwen3_moe_decoder_layer.cpp
-    attn_mask.cpp
-    atb_base.cpp
-    word_embedding.cpp
-    atb_word_embedding_impl.cpp
-    pos_embedding.cpp
-    rms_norm.cpp
-    llm_head.cpp
-    atb_head_impl.cpp
-    siglip_encoder_layer.cpp
-    multi_head_attention.cpp
-    deepseek_v2_decoder_layer.cpp
-    atb_linear.cpp
-    atb_parallel_linear.cpp
+    npu_word_embedding_impl.cpp
+    npu_pos_embedding_impl.cpp
+    npu_lm_head_impl.cpp
+    npu_qwen2dot5_vision_encoder_layer_impl.cpp
+    npu_qwen3_moe_decoder_layer_impl.cpp
+    # atb_parallel_linear.cpp
     buffer/atb_buffer.cpp
     buffer/atb_workspace.cpp
+    npu_base_layer.cpp
+    npu_column_parallel_linear_impl.cpp
+    npu_deepseek_v2_decoder_layer_impl.cpp
+    npu_llama_decoder_layer_impl.cpp
+    npu_qwen2_decoder_layer_impl.cpp
+    npu_qwen3_decoder_layer_impl.cpp
+    npu_rms_norm_impl.cpp
+    npu_siglip_encoder_layer_impl.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"
+    :base_layer
     :kv_cache
     :prefix_cache
     :block

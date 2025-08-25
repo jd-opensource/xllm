@@ -21,8 +21,7 @@
 // DiT model compatible with huggingface weights
 //   ref to:
 //   https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/transformers/transformer_flux.py
-namespace xllm::hf {
-
+namespace xllm {
 inline torch::Tensor apply_rotary_emb(const torch::Tensor& x,
                                       const torch::Tensor& freqs_cis) {
   // assume freqs_cis is [2, S, D]，[0] is cos，[1] is sin
@@ -2056,4 +2055,4 @@ REGISTER_MODEL_ARGS(FluxTransformer2DModel, [&] {
   LOAD_ARG_OR(
       dit_axes_dims_rope, "axes_dims_rope", (std::vector<int64_t>{16, 56, 56}));
 });
-}  // namespace xllm::hf
+}  // namespace xllm

@@ -34,7 +34,7 @@ AtbWorkspace::AtbWorkspace(at::Device device) {
 
 AtbWorkspace::~AtbWorkspace() {}
 
-void* AtbWorkspace::GetWorkspaceBuffer(uint64_t bufferSize) {
+void* AtbWorkspace::get_workspace_buffer(uint64_t bufferSize) {
   int32_t device_id = 0;
   aclrtGetDevice(&device_id);
 

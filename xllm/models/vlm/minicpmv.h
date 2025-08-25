@@ -25,15 +25,15 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/npu/multi_head_attention.h"
-#include "core/layers/npu/siglip_encoder_layer.h"
+#include "core/layers/multi_head_attention.h"
+#include "core/layers/siglip_encoder_layer.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/minicpmv_image_processor.h"
 #include "processors/pywarpper_image_processor.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
-namespace xllm::hf {
+namespace xllm {
 
 class MiniCPMInputProcessor : public InputProcessor {
  public:
@@ -215,7 +215,7 @@ class BaseResamplerImpl : public torch::nn::Module {
     ln_kv_->weight.set_data(ln_kv_->weight.to(options));
     ln_kv_->bias.set_data(ln_kv_->bias.to(options));
     // Initialize attention module
-    attn_ = MultiheadAttention(context);
+    attn_ = layer::MultiheadAttention(context);
     options_ = options;
     // Optionally add post projection
     ln_post_ = register_module(
@@ -234,7 +234,7 @@ class BaseResamplerImpl : public torch::nn::Module {
  protected:
   int num_queries_, num_heads_, embed_dim_, kv_dim_;
   torch::Tensor query_;
-  MultiheadAttention attn_{nullptr};
+  layer::MultiheadAttention attn_{nullptr};
   torch::TensorOptions options_;
   torch::nn::LayerNorm ln_q_{nullptr};
   torch::nn::LayerNorm ln_kv_{nullptr};
@@ -717,7 +717,7 @@ class Idefics2EncoderImpl : public torch::nn::Module {
           i >= model_args.max_window_layers()) {
         sliding_window = model_args.sliding_window();
       }
-      auto block = SiglipEncoderLayer(context);
+      auto block = layer::SiglipEncoderLayer(context);
       layers_.push_back(block);
       blocks_->push_back(block);
     }
@@ -748,7 +748,7 @@ class Idefics2EncoderImpl : public torch::nn::Module {
   }
 
  private:
-  std::vector<SiglipEncoderLayer> layers_;
+  std::vector<layer::SiglipEncoderLayer> layers_;
   torch::nn::ModuleList blocks_{nullptr};
 };
 TORCH_MODULE(Idefics2Encoder);
@@ -1249,15 +1249,15 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     vpm_->verify_loaded_weights("vpm.");
   }
 
-  LlmHead get_lm_head() { return language_model_->get_lm_head(); }
+  layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
 
-  void set_lm_head(LlmHead& head) { language_model_->set_lm_head(head); }
+  void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
 
-  AtbWordEmbedding get_word_embedding() {
+  layer::WordEmbedding get_word_embedding() {
     return language_model_->get_word_embedding();
   }
 
-  void set_word_embedding(AtbWordEmbedding& word_embedding) {
+  void set_word_embedding(layer::WordEmbedding& word_embedding) {
     language_model_->set_word_embedding(word_embedding);
   }
 
@@ -1323,4 +1323,4 @@ REGISTER_MODEL_ARGS(minicpmv, [&] {
     return args->mm_hidden_size() / args->mm_num_attention_heads();
   });
 });
-}  // namespace xllm::hf
+}  // namespace xllm

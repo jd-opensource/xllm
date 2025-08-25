@@ -15,15 +15,16 @@ limitations under the License.
 
 #pragma once
 
-#include "core/layers/npu/qwen3_decoder_layer.h"
+#include "core/layers/qwen3_decoder_layer.h"
 #include "qwen_base.h"
 
-namespace xllm::hf {
+namespace xllm {
 
-class QWen3DecoderLayerImpl : public QWenDecoderLayerImplBase<Qwen3Decoder> {
+class QWen3DecoderLayerImpl
+    : public QWenDecoderLayerImplBase<layer::Qwen3DecoderLayer> {
  public:
   QWen3DecoderLayerImpl(const ModelContext& context)
-      : QWenDecoderLayerImplBase<Qwen3Decoder>(context) {}
+      : QWenDecoderLayerImplBase<layer::Qwen3DecoderLayer>(context) {}
 };
 TORCH_MODULE(QWen3DecoderLayer);
 
@@ -45,23 +46,23 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
+    embed_tokens_ =
+        register_module("embed_tokens", layer::WordEmbedding(context));
+    norm_ = register_module("norm", layer::RmsNorm(context));
 
-    embed_tokens_ = register_module("embed_tokens", AtbWordEmbedding(context));
-    norm_ = register_module("norm", RmsNorm(context));
-
-    atb_pos_emb_ = AtbRotaryEmbedding(context);
+    atb_pos_emb_ = layer::PosEmbedding(context);
     cos_sin_ = get_qwen3_rotary_embedding(128,
                                           model_args.max_position_embeddings(),
                                           model_args.rope_theta(),
                                           options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     // encode_attn_mask_ =
-    //   AttentionMaskImpl(options.device(),
+    //   layer::AttentionMask(options.device(),
     //   options.dtype()).get_attn_mask(2048, options.device(),
     //   options.dtype());
-    attn_mask_ = AttentionMaskImpl(options.device(),
-                                   options.dtype().toScalarType(),
-                                   /*mask_value=*/mask_value);
+    attn_mask_ = layer::AttentionMask(options.device(),
+                                      options.dtype().toScalarType(),
+                                      /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
       auto block = QWen3DecoderLayer(context);
@@ -112,4 +113,4 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
-}  // namespace xllm::hf
+}  // namespace xllm

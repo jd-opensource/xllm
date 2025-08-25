@@ -16,7 +16,7 @@
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
-namespace xllm::hf {
+namespace xllm {
 struct FlowMatchEulerDiscreteSchedulerOutput {
   torch::Tensor prev_sample;
   explicit FlowMatchEulerDiscreteSchedulerOutput(torch::Tensor sample)
@@ -436,4 +436,4 @@ REGISTER_MODEL_ARGS(FlowMatchEulerDiscreteScheduler, [&] {
   LOAD_ARG_OR(scheduler_base_image_seq_len, "base_image_seq_len", 256);
   LOAD_ARG_OR(scheduler_max_image_seq_len, "max_image_seq_len", 4096);
 });
-}  // namespace xllm::hf
+}  // namespace xllm

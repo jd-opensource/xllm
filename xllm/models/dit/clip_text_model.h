@@ -12,17 +12,16 @@
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/npu/siglip_encoder_layer.h"
+#include "core/layers/siglip_encoder_layer.h"
 #include "dit_linear.h"
 #include "models/model_registry.h"
-#include "models/vlm/qwen2_5_vl.h"
 #include "processors/clip_image_processor.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
-namespace xllm::hf {
+namespace xllm {
 // Clip model ref to:
 // https://github.com/huggingface/transformers/blob/main/src/transformers/models/clip/modeling_clip.py#L152
 // https://github.com/huggingface/transformers/.../configuration_clip.py
@@ -832,4 +831,4 @@ REGISTER_MODEL_ARGS(CLIPTextModel, [&] {
   LOAD_ARG_OR(clip_eos_token_id, "eos_token_id", 2);
   LOAD_ARG_OR(clip_head_dim, "head_dim", 64);
 });
-}  // namespace xllm::hf
+}  // namespace xllm

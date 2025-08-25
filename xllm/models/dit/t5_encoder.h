@@ -19,7 +19,7 @@
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
-namespace xllm::hf {
+namespace xllm {
 // T5 model compatible with huggingface weights
 //    ref to:
 //   https://github.com/huggingface/transformers/tree/main/src/transformers/models/t5
@@ -938,4 +938,4 @@ REGISTER_MODEL_ARGS(T5EncoderModel, [&] {
               128);
   LOAD_ARG_OR(t5_layer_norm_epsilon, "layer_norm_epsilon", 1e-6f);
 });
-}  // namespace xllm::hf
+}  // namespace xllm

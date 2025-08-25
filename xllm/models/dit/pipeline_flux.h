@@ -22,16 +22,15 @@
 #include "core/framework/model_context.h"
 #include "core/framework/request/dit_request_state.h"
 #include "core/framework/state_dict/state_dict.h"
-#include "core/layers/npu/pos_embedding.h"
-#include "core/layers/npu/rms_norm.h"
-#include "core/layers/npu/word_embedding.h"
+#include "core/layers/pos_embedding.h"
+#include "core/layers/rms_norm.h"
 #include "core/layers/rotary_embedding.h"
 #include "dit.h"
 #include "flowmatch_euler_discrete_scheduler.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
 #include "t5_encoder.h"
-namespace xllm::hf {
+namespace xllm {
 float calculate_shift(int64_t image_seq_len,
                       int64_t base_seq_len = 256,
                       int64_t max_seq_len = 4096,
@@ -774,4 +773,4 @@ class FluxPipelineImpl : public torch::nn::Module {
 };
 TORCH_MODULE(FluxPipeline);
 REGISTER_DIT_MODEL(flux, FluxPipeline);
-}  // namespace xllm::hf
+}  // namespace xllm

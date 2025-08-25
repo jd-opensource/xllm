@@ -24,18 +24,24 @@ limitations under the License.
 #include <typeinfo>
 #include <vector>
 
+#include "core/layers/attention_mask.h"
+#include "core/layers/rms_norm.h"
+#include "xllm_kernels/core/include/atb_speed/log.h"
+// test
+#include <mstx/ms_tools_ext.h>
+
 #include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/npu/attn_mask.h"
-#include "core/layers/npu/llm_head.h"
-#include "core/layers/npu/pos_embedding.h"
-#include "core/layers/npu/rms_norm.h"
+#include "core/layers/attention_mask.h"
+#include "core/layers/lm_head.h"
+#include "core/layers/pos_embedding.h"
+#include "core/layers/rms_norm.h"
 #include "models/model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
-namespace xllm::hf {
+namespace xllm {
 
 std::tuple<torch::Tensor, torch::Tensor> get_qwen_rotary_embedding(
     int64_t dim,
@@ -288,9 +294,9 @@ class QWenModelImplBase : public torch::nn::Module {
     norm_->merge_loaded_weights();
   }
 
-  virtual AtbWordEmbedding get_word_embedding() { return embed_tokens_; }
+  virtual layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
 
-  virtual void set_word_embedding(AtbWordEmbedding& word_embedding) {
+  virtual void set_word_embedding(layer::WordEmbedding& word_embedding) {
     embed_tokens_ = word_embedding;
   }
 
@@ -300,14 +306,14 @@ class QWenModelImplBase : public torch::nn::Module {
   torch::Tensor cos_sin_;
   int max_seq_len_ = 0;
   int device_id = 0;
-  AttentionMaskImpl attn_mask_;
-  AtbRotaryEmbedding atb_pos_emb_{nullptr};
+  layer::AttentionMask attn_mask_;
+  layer::PosEmbedding atb_pos_emb_{nullptr};
 
   std::vector<int64_t> mrope_section_;
   // test
   //  ParallelEmbedding embed_tokens_{nullptr};
-  AtbWordEmbedding embed_tokens_{nullptr};
-  RmsNorm norm_{nullptr};
+  layer::WordEmbedding embed_tokens_{nullptr};
+  layer::RmsNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
@@ -324,7 +330,7 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     tie_word_embeddings = context.get_model_args().tie_word_embeddings();
     // register submodules
     model_ = register_module("model", QWenModelType(context));
-    lm_head_ = register_module("lm_head", LlmHead(context));
+    lm_head_ = register_module("lm_head", layer::LmHead(context));
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -381,15 +387,15 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-  virtual LlmHead get_lm_head() { return lm_head_; }
+  virtual layer::LmHead get_lm_head() { return lm_head_; }
 
-  virtual void set_lm_head(LlmHead& head) { lm_head_ = head; }
+  virtual void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
 
-  virtual AtbWordEmbedding get_word_embedding() {
+  virtual layer::WordEmbedding get_word_embedding() {
     return model_->get_word_embedding();
   }
 
-  virtual void set_word_embedding(AtbWordEmbedding& word_embedding) {
+  virtual void set_word_embedding(layer::WordEmbedding& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
 
@@ -399,7 +405,7 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
   int device_id = 0;
   bool tie_word_embeddings{false};
   // test
-  LlmHead lm_head_{nullptr};
+  layer::LmHead lm_head_{nullptr};
 };
 
-}  // namespace xllm::hf
+}  // namespace xllm

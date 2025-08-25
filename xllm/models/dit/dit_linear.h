@@ -2,7 +2,7 @@
 
 #include <torch/torch.h>
 
-namespace xllm::hf {
+namespace xllm {
 namespace F = torch::nn::functional;
 class DiTLinearImpl : public torch::nn::Module {
  public:
@@ -22,4 +22,4 @@ class DiTLinearImpl : public torch::nn::Module {
   }
 };
 TORCH_MODULE(DiTLinear);
-}  // namespace xllm::hf
+}  // namespace xllm

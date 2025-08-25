@@ -24,7 +24,7 @@
 //  ref to:
 //  https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/autoencoders/autoencoder_kl.py
 
-namespace xllm::hf {
+namespace xllm {
 class VAEImageProcessorImpl : public torch::nn::Module {
  private:
   int vae_scale_factor_ = 8;
@@ -2185,7 +2185,7 @@ class VAEImpl : public torch::nn::Module {
   torch::nn::Conv2d post_quant_conv_{nullptr};
   bool use_post_quant_conv_{false};
   bool use_slicing_{false};
-  torch::nn::ModuleHolder<AtbEmbeddingImpl> embedding_{nullptr};
+  // WordEmbedding embedding_{nullptr};
   ModelArgs args_;
   torch::Device device_;
   torch::ScalarType dtype_;
@@ -2222,4 +2222,4 @@ REGISTER_MODEL_ARGS(AutoencoderKL, [&] {
   LOAD_ARG_OR(vae_use_quant_conv, "use_quant_conv", false);
   LOAD_ARG_OR(vae_use_post_quant_conv, "use_post_quant_conv", false);
 });
-}  // namespace xllm::hf
+}  // namespace xllm

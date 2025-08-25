@@ -65,15 +65,15 @@ class CausalVLMImpl : public CausalVLM {
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
 #if defined(USE_NPU)
-  hf::LlmHead get_lm_head() override { return model_->get_lm_head(); };
+  layer::LmHead get_lm_head() override { return model_->get_lm_head(); };
 
-  void set_lm_head(hf::LlmHead& head) override { model_->set_lm_head(head); };
+  void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); };
 
-  hf::AtbWordEmbedding get_word_embedding() override {
+  layer::WordEmbedding get_word_embedding() override {
     return model_->get_word_embedding();
   };
 
-  void set_word_embedding(hf::AtbWordEmbedding& embedding) override {
+  void set_word_embedding(layer::WordEmbedding& embedding) override {
     model_->set_word_embedding(embedding);
   };
 #endif
