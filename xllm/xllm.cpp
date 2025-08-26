@@ -165,8 +165,5 @@ int main(int argc, char** argv) {
 
   google::InitGoogleLogging("xllm");
 
-  LOG(INFO) << "Dump all gflags: " << std::endl
-            << google::CommandlineFlagsIntoString();
-
   return run();
 }
