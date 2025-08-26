@@ -55,8 +55,8 @@ BatchInputBuilder::BatchInputBuilder(
     const std::vector<uint32_t>& allowed_max_tokens,
     const std::vector<torch::Tensor>& input_embeddings_vec,
     const std::vector<MMData>& mm_data_vec,
-    const std::vector<CacheBlockInfo>* copy_in_cache_contents,
-    const std::vector<CacheBlockInfo>* copy_out_cache_contents,
+    const std::vector<CacheBlockInfo>* copy_in_cache_block_infos,
+    const std::vector<CacheBlockInfo>* copy_out_cache_block_infos,
     const ModelArgs* args)
     : sequences_(sequences),
       allowed_max_tokens_(allowed_max_tokens),
@@ -64,8 +64,8 @@ BatchInputBuilder::BatchInputBuilder(
       mm_data_vec_(mm_data_vec),
       args_(args),
       num_sequences_(static_cast<int32_t>(sequences.size())),
-      copy_in_cache_contents_(copy_in_cache_contents),
-      copy_out_cache_contents_(copy_out_cache_contents) {
+      copy_in_cache_block_infos_(copy_in_cache_block_infos),
+      copy_out_cache_block_infos_(copy_out_cache_block_infos) {
   // Reserve space for better performance
   state_.flatten_tokens_vec.reserve(1000);
   state_.flatten_positions_vec.reserve(1000);
@@ -411,19 +411,19 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
     }
   }
 
-  if (copy_out_cache_contents_ != nullptr &&
-      copy_out_cache_contents_->size() > 0) {
+  if (copy_out_cache_block_infos_ != nullptr &&
+      copy_out_cache_block_infos_->size() > 0) {
     raw_forward_input.copy_out_blocks.insert(
         raw_forward_input.copy_out_blocks.end(),
-        copy_out_cache_contents_->begin(),
-        copy_out_cache_contents_->end());
+        copy_out_cache_block_infos_->begin(),
+        copy_out_cache_block_infos_->end());
   }
-  if (copy_in_cache_contents_ != nullptr &&
-      copy_in_cache_contents_->size() > 0) {
+  if (copy_in_cache_block_infos_ != nullptr &&
+      copy_in_cache_block_infos_->size() > 0) {
     raw_forward_input.copy_in_blocks.insert(
         raw_forward_input.copy_in_blocks.end(),
-        copy_in_cache_contents_->begin(),
-        copy_in_cache_contents_->end());
+        copy_in_cache_block_infos_->begin(),
+        copy_in_cache_block_infos_->end());
   }
 
   split_copy_out_blocks(raw_forward_input, write_block_ids_);

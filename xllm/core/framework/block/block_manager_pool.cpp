@@ -125,20 +125,20 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
 }
 
 std::vector<std::vector<CacheBlockInfo>>*
-BlockManagerPool::get_copy_in_content() {
-  return &copy_in_cache_contents_;
+BlockManagerPool::get_copy_in_cache_block_infos() {
+  return &copy_in_cache_block_infos_;
 }
 
 std::vector<std::vector<CacheBlockInfo>>*
-BlockManagerPool::get_copy_out_content() {
-  return &copy_out_cache_contents_;
+BlockManagerPool::get_copy_out_cache_block_infos() {
+  return &copy_out_cache_block_infos_;
 }
 
 void BlockManagerPool::reset_copy_content() {
-  copy_in_cache_contents_.clear();
-  copy_in_cache_contents_.resize(host_block_managers_.size());
-  copy_out_cache_contents_.clear();
-  copy_out_cache_contents_.resize(host_block_managers_.size());
+  copy_in_cache_block_infos_.clear();
+  copy_in_cache_block_infos_.resize(host_block_managers_.size());
+  copy_out_cache_block_infos_.clear();
+  copy_out_cache_block_infos_.resize(host_block_managers_.size());
   evict_host_blocks_.clear();
 }
 
@@ -198,7 +198,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
     for (int i = hbm_cache_token_num / options_.block_size();
          i < host_cache_token_num / options_.block_size();
          i++) {
-      copy_in_cache_contents_[sequence->dp_rank()].emplace_back(
+      copy_in_cache_block_infos_[sequence->dp_rank()].emplace_back(
           hbm_blocks[i].id(),
           host_blocks[i].id(),
           host_blocks[i].get_immutable_hash_value());
@@ -311,7 +311,7 @@ void BlockManagerPool::cache_host(Sequence* sequence) {
        i < host_blocks_ptr->size();
        i++) {
     host_blocks_ptr->at(i).set_hash_value(blocks[i].get_immutable_hash_value());
-    copy_out_cache_contents_[dp_rank].emplace_back(
+    copy_out_cache_block_infos_[dp_rank].emplace_back(
         blocks[i].id(),
         host_blocks_ptr->at(i).id(),
         host_blocks_ptr->at(i).get_immutable_hash_value());

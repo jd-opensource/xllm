@@ -65,7 +65,7 @@ class LLMEngine : public Engine {
                       const int32_t dst_dp_rank,
                       const std::vector<uint64_t>& dst_blocks) override;
 
-  folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
+  std::vector<folly::SemiFuture<uint32_t>> load_kv_blocks_from_store_async(
       const uint32_t dp_rank,
       const std::vector<CacheBlockInfo>& cache_block_info) override;
 
@@ -127,8 +127,6 @@ class LLMEngine : public Engine {
   // address to engine, engine will create WorkerClient for each worker.
   // Engine call workers to step via these WorkerClients.
   std::shared_ptr<DistManager> dist_manager_ = nullptr;
-
-  ThreadPool threadpool_;
 };
 
 }  // namespace xllm

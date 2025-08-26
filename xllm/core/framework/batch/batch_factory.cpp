@@ -20,8 +20,8 @@ namespace xllm {
 std::vector<Batch> BatchFactory::create_batches(
     const std::vector<Sequence*>& running_sequences,
     const std::vector<size_t>& running_sequences_budgets,
-    std::vector<std::vector<CacheBlockInfo>>* copy_in_cache_contents,
-    std::vector<std::vector<CacheBlockInfo>>* copy_out_cache_contents) {
+    std::vector<std::vector<CacheBlockInfo>>* copy_in_cache_block_infos,
+    std::vector<std::vector<CacheBlockInfo>>* copy_out_cache_block_infos) {
   size_t num_prompt_tokens = 0;
   size_t num_generated_tokens = 0;
   std::vector<Batch> batches(dp_size_);
@@ -53,14 +53,15 @@ std::vector<Batch> BatchFactory::create_batches(
 
   for (int i = 0; i < dp_size_; i++) {
     if (!batches[i].empty()) {
-      if (copy_in_cache_contents != nullptr &&
-          copy_out_cache_contents->size() == dp_size_) {
-        batches[i].set_copy_in_cache_contents(&(copy_in_cache_contents->at(i)));
+      if (copy_in_cache_block_infos != nullptr &&
+          copy_in_cache_block_infos->size() == dp_size_) {
+        batches[i].set_copy_in_cache_block_infos(
+            &(copy_in_cache_block_infos->at(i)));
       }
-      if (copy_out_cache_contents != nullptr &&
-          copy_out_cache_contents->size() == dp_size_) {
-        batches[i].set_copy_out_cache_contents(
-            &(copy_out_cache_contents->at(i)));
+      if (copy_out_cache_block_infos != nullptr &&
+          copy_out_cache_block_infos->size() == dp_size_) {
+        batches[i].set_copy_out_cache_block_infos(
+            &(copy_out_cache_block_infos->at(i)));
       }
     }
   }
