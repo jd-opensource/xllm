@@ -22,7 +22,6 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 
 #include "atb_base.h"
-#include "atb_layers/models/deepseekv2/layer/decoder_layer.h"
 #include "framework/eplb/expert_buffer_manager.h"
 #include "framework/eplb/expert_weight_buffer_shm.h"
 #include "framework/model/model_args.h"

@@ -1183,12 +1183,14 @@ void DeepseekV2DecoderImpl::merge_experts_weights() {
   if (decode_param_.isBF16) {
     torch::Tensor mlp_down_weight =
         merge_experts_weights(experts_weights_["down_proj.weight"],
+                              device_,
                               /*transpose=*/true);
     at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
         at_npu::native::npu_format_cast(mlp_down_weight, 29);
   } else {
     torch::Tensor mlp_down_weight =
         merge_experts_weights(experts_weights_["down_proj.weight"],
+                              device_,
                               /*transpose=*/false);
     at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
         at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
