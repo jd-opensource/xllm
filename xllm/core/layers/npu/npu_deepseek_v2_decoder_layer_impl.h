@@ -6,31 +6,32 @@
 
 #include <nlohmann/json.hpp>
 
-#include "atb_base.h"
-#include "framework/model/model_args.h"
+#include "framework/context.h"
+#include "framework/model/model_input_params.h"
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/parallel_state.h"
-#include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
+#include "npu_base_layer.h"
 #include "xllm_kernels/models/deepseekv2/layer/decoder_layer.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
-class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
+class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
  public:
-  explicit DeepseekV2DecoderImpl(const Context& context,
-                                 const int32_t layer_id,
-                                 const float sm_scale);
+  explicit NpuDeepseekV2DecoderLayerImpl(const Context& context,
+                                         const int32_t layer_id,
+                                         const float sm_scale);
 
-  ~DeepseekV2DecoderImpl() {};
+  ~NpuDeepseekV2DecoderLayerImpl() {};
 
-  void load_state_dict(const StateDict& state_dict);
+  virtual void load_state_dict(const StateDict& state_dict) override;
 
   void verify_loaded_weights(const std::string& prefix) const;
 
-  void merge_loaded_weights();
+  virtual void merge_loaded_weights() override;
 
-  torch::Tensor block_tables_placeholder_;
+  virtual int64_t init_layer() override;
 
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& cos_pos,
@@ -157,8 +158,6 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
                                       std::vector<torch::Tensor>& experts_gate,
                                       bool transpose = false);
 
-  int64_t init_layer();
-
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::deepseekV2::DecoderLayerParam& param);
 
@@ -171,6 +170,7 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
                                const ModelInputParams& input_params,
                                bool is_prefill);
 
+  torch::Tensor block_tables_placeholder_;
   std::string model_name_;
 
   int32_t device_id_;
@@ -225,27 +225,11 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
   std::mutex experts_mutex_;
 };
 
-class DeepseekV2Decoder
-    : public torch::nn::ModuleHolder<DeepseekV2DecoderImpl> {
- public:
-  using torch::nn::ModuleHolder<DeepseekV2DecoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = DeepseekV2DecoderImpl;
-
-  DeepseekV2Decoder(const Context& context,
-                    const int32_t layer_id,
-                    const float sm_scale);
-};
-
-std::shared_ptr<DeepseekV2DecoderImpl> create_deepseek_v2_decoder_layer(
-    const Context& context,
-    const int32_t layer_id,
-    const float sm_scale);
-
 std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,
                                           int32_t dp_local_tp_size,
                                           int32_t dp_rank,
                                           int32_t dp_size,
                                           int32_t rank,
                                           at::Device device);
-
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm

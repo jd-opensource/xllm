@@ -191,7 +191,7 @@ atb::Status ATBBase::execute_node(atb_speed::Model::Node& node,
   }
 
   if (node.workspaceSize > 0) {
-    node.workspace = workspace.GetWorkspaceBuffer(node.workspaceSize);
+    node.workspace = workspace.get_workspace_buffer(node.workspaceSize);
   }
 
   runTaskFunc_(name_ + std::to_string(nodeId), [=]() {

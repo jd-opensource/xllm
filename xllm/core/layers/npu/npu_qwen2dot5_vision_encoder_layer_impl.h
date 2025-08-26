@@ -12,7 +12,6 @@
 #include <functional>
 
 #include "atb/atb_infer.h"
-#include "atb_base.h"
 #include "atb_speed/base/hosttensor_binder.h"
 #include "atb_speed/base/model.h"
 #include "atb_speed/log.h"
@@ -22,10 +21,13 @@
 #include "core/framework/parallel_state.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
+#include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "xllm_kernels/models/qwen2_5/vision_encoder/encoder_layer.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
+
 enum VisionEncoderLayerTensorId : int {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_POST_NORM_WEIGHT,
@@ -47,23 +49,20 @@ enum VisionEncoderLayerTensorId : int {
   IN_VISION_V_BIAS
 };
 
-class Qwen2_5VisionEncoderImpl : public torch::nn::Module, public ATBBase {
+class NpuQwen2dot5VisionEncoderLayerImpl : public NpuBaseLayer {
  public:
-  using Task = std::function<int()>;
-  using RunTaskFunc =
-      std::function<void(const std::string& taskName, Task task)>;
-  explicit Qwen2_5VisionEncoderImpl(const Context& context);
+  explicit NpuQwen2dot5VisionEncoderLayerImpl(const Context& context);
 
-  ~Qwen2_5VisionEncoderImpl() {};
-  void load_state_dict(const StateDict& state_dict);
-  void verify_loaded_weights() const;
-  void merge_loaded_weights();
-  void get_weights_col_packed_qkv();
-  void param_from_args(atb_speed::qwen::VisionEncoderLayerParam& param,
-                       const ModelArgs& args,
-                       const ParallelArgs& parallel_args);
+  ~NpuQwen2dot5VisionEncoderLayerImpl() {};
 
-  int64_t init_layer();
+  virtual void load_state_dict(const StateDict& state_dict) override;
+
+  virtual void verify_loaded_weights() const override;
+
+  virtual void merge_loaded_weights() override;
+
+  virtual int64_t init_layer() override;
+
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& cos_pos,
                         torch::Tensor& sin_pos,
@@ -76,6 +75,7 @@ class Qwen2_5VisionEncoderImpl : public torch::nn::Module, public ATBBase {
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr);
 
+ private:
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                torch::Tensor& x,
                                torch::Tensor& cos_pos,
@@ -85,11 +85,19 @@ class Qwen2_5VisionEncoderImpl : public torch::nn::Module, public ATBBase {
                                ModelInputParams& input_params,
                                bool is_prefill);
 
- private:
+  void get_weights_col_packed_qkv();
+
+  void param_from_args(atb_speed::qwen::VisionEncoderLayerParam& param,
+                       const ModelArgs& args,
+                       const ParallelArgs& parallel_args);
+
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::qwen::VisionEncoderLayerParam& param);
+
   void pad_qkv_weights();
+
   void pad_mlp_weights();
+
   torch::Tensor pad_tensor(const torch::Tensor& tensor,
                            int64_t target_shape,
                            int64_t dim = 0) {
@@ -107,6 +115,7 @@ class Qwen2_5VisionEncoderImpl : public torch::nn::Module, public ATBBase {
     }
     return tensor;
   }
+
   atb_speed::Model::Node encode_node_;
   std::string model_name_;
 
@@ -120,15 +129,20 @@ class Qwen2_5VisionEncoderImpl : public torch::nn::Module, public ATBBase {
   int device_id_;
 };
 
-class Qwen2_5VisionEncoder
-    : public torch::nn::ModuleHolder<Qwen2_5VisionEncoderImpl> {
- public:
-  using torch::nn::ModuleHolder<Qwen2_5VisionEncoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen2_5VisionEncoderImpl;
+// class Qwen2_5VisionEncoder
+//     : public torch::nn::ModuleHolder<NpuQwen2dot5VisionEncoderLayerImpl> {
+//  public:
+//   using
+//   torch::nn::ModuleHolder<NpuQwen2dot5VisionEncoderLayerImpl>::ModuleHolder;
+//   using Impl __attribute__((__unused__)) =
+//   NpuQwen2dot5VisionEncoderLayerImpl;
 
-  Qwen2_5VisionEncoder(const Context& context);
-};
+//   Qwen2_5VisionEncoder(const Context& context);
+// };
 
-std::shared_ptr<Qwen2_5VisionEncoderImpl> create_qwen2_5_vision_encoder_layer(
-    const Context& context);
-}  // namespace xllm::hf
+// std::shared_ptr<NpuQwen2dot5VisionEncoderLayerImpl>
+// create_qwen2_5_vision_encoder_layer(
+//     const Context& context);
+
+}  // namespace layer
+}  // namespace xllm

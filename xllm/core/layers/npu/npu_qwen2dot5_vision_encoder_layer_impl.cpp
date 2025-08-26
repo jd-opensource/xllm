@@ -1,4 +1,4 @@
-#include "qwen2_5_vision_encoder_layer.h"
+#include "npu_qwen2dot5_vision_encoder_layer_impl.h"
 
 #include <glog/logging.h>
 #include <mstx/ms_tools_ext.h>
@@ -9,7 +9,9 @@
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
+
 const uint64_t WEIGHT_COUNT_PER_LAYER = 18;
 
 static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
@@ -37,12 +39,7 @@ static std::map<int, int> WEIGHT_SHARD = {
     {IN_MLP_DOWN_WEIGHT, 1},
 };
 
-std::shared_ptr<Qwen2_5VisionEncoderImpl> create_qwen2_5_vision_encoder_layer(
-    const Context& context) {
-  return std::make_shared<Qwen2_5VisionEncoderImpl>(context);
-}
-
-void Qwen2_5VisionEncoderImpl::param_from_args(
+void NpuQwen2dot5VisionEncoderLayerImpl::param_from_args(
     atb_speed::qwen::VisionEncoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -61,8 +58,9 @@ void Qwen2_5VisionEncoderImpl::param_from_args(
   param.enableLogN = false;
 }
 
-Qwen2_5VisionEncoderImpl::Qwen2_5VisionEncoderImpl(const Context& context)
-    : ATBBase(context) {
+NpuQwen2dot5VisionEncoderLayerImpl::NpuQwen2dot5VisionEncoderLayerImpl(
+    const Context& context)
+    : NpuBaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -79,13 +77,13 @@ Qwen2_5VisionEncoderImpl::Qwen2_5VisionEncoderImpl(const Context& context)
   }
 }
 
-void Qwen2_5VisionEncoderImpl::verify_loaded_weights() const {
+void NpuQwen2dot5VisionEncoderLayerImpl::verify_loaded_weights() const {
   for (const auto& [index, name] : WEIGHT_MAPPING) {
     CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
 }
-void Qwen2_5VisionEncoderImpl::pad_mlp_weights() {
+void NpuQwen2dot5VisionEncoderLayerImpl::pad_mlp_weights() {
   torch::Tensor weight = at_weight_tensors_[IN_MLP_GATE_WEIGHT];
   torch::Tensor bias = at_weight_tensors_[IN_MLP_GATE_BIAS];
 
@@ -134,7 +132,7 @@ void Qwen2_5VisionEncoderImpl::pad_mlp_weights() {
       pad_tensor(down_weight, tp_intermediate_size_pad, 1);
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT] = down_weight_padded;
 }
-void Qwen2_5VisionEncoderImpl::pad_qkv_weights() {
+void NpuQwen2dot5VisionEncoderLayerImpl::pad_qkv_weights() {
   auto qkv_proj_weight = at_weight_tensors_[IN_QKV_WEIGHT];
   auto qkv_proj_bias = at_weight_tensors_[IN_QKV_BIAS];
   int num_heads_pre_rank = encode_param_.numAttentionHeadsPerRank;
@@ -214,7 +212,7 @@ void Qwen2_5VisionEncoderImpl::pad_qkv_weights() {
   }
   at_weight_tensors_[IN_WATTENTION_OUT_WEIGHT] = out_proj_weight;
 }
-void Qwen2_5VisionEncoderImpl::merge_loaded_weights() {
+void NpuQwen2dot5VisionEncoderLayerImpl::merge_loaded_weights() {
   pad_qkv_weights();
   if (encode_param_.worldSize > 1) {
     // merge qkv weight
@@ -257,7 +255,7 @@ void Qwen2_5VisionEncoderImpl::merge_loaded_weights() {
   init_layer();
 }
 // tp spilt weight
-void Qwen2_5VisionEncoderImpl::get_weights_col_packed_qkv() {
+void NpuQwen2dot5VisionEncoderLayerImpl::get_weights_col_packed_qkv() {
   int rank = encode_param_.rank;
   int worldSize = encode_param_.worldSize;
   // split qkv weight
@@ -279,7 +277,8 @@ void Qwen2_5VisionEncoderImpl::get_weights_col_packed_qkv() {
       (qkv_bias[2].chunk(worldSize, 0))[rank];
 }
 
-void Qwen2_5VisionEncoderImpl::load_state_dict(const StateDict& state_dict) {
+void NpuQwen2dot5VisionEncoderLayerImpl::load_state_dict(
+    const StateDict& state_dict) {
   for (const auto& [index, name] : WEIGHT_MAPPING) {
     if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
       set_weight(state_dict, name, index, WEIGHT_SHARD[index]);
@@ -290,14 +289,14 @@ void Qwen2_5VisionEncoderImpl::load_state_dict(const StateDict& state_dict) {
   get_weights_col_packed_qkv();
 }
 
-int64_t Qwen2_5VisionEncoderImpl::init_layer() {
-  ATBBase::name_ = "qwen2_5_encoder_layer";
+int64_t NpuQwen2dot5VisionEncoderLayerImpl::init_layer() {
+  name_ = "qwen2_5_encoder_layer";
   model_name_ = "qwen2_5_vl";
   CHECK_OPERATION_STATUS_RETURN(init_node(encode_node_, encode_param_));
   return atb::NO_ERROR;
 }
 
-int64_t Qwen2_5VisionEncoderImpl::init_node(
+int64_t NpuQwen2dot5VisionEncoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::qwen::VisionEncoderLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -327,17 +326,18 @@ int64_t Qwen2_5VisionEncoderImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor Qwen2_5VisionEncoderImpl::forward(torch::Tensor& x,
-                                                torch::Tensor& cos_pos,
-                                                torch::Tensor& sin_pos,
-                                                torch::Tensor& cu_seqlen,
-                                                std::vector<int>& cu_seqlen_vec,
-                                                ModelInputParams& input_params,
-                                                atb::Context* context,
-                                                AtbWorkspace& workspace,
-                                                int node_id,
-                                                aclrtEvent* event,
-                                                std::atomic<bool>* event_flag) {
+torch::Tensor NpuQwen2dot5VisionEncoderLayerImpl::forward(
+    torch::Tensor& x,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    torch::Tensor& cu_seqlen,
+    std::vector<int>& cu_seqlen_vec,
+    ModelInputParams& input_params,
+    atb::Context* context,
+    AtbWorkspace& workspace,
+    int node_id,
+    aclrtEvent* event,
+    std::atomic<bool>* event_flag) {
   atb::Status st;
 
   build_node_variant_pack(encode_node_,
@@ -355,7 +355,7 @@ torch::Tensor Qwen2_5VisionEncoderImpl::forward(torch::Tensor& x,
   return x;
 }
 
-void Qwen2_5VisionEncoderImpl::build_node_variant_pack(
+void NpuQwen2dot5VisionEncoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,
@@ -388,6 +388,8 @@ void Qwen2_5VisionEncoderImpl::build_node_variant_pack(
   node.variantPack.outTensors.at(0) = internal_tensors_;
 }
 
-Qwen2_5VisionEncoder::Qwen2_5VisionEncoder(const Context& context)
-    : ModuleHolder(create_qwen2_5_vision_encoder_layer(context)) {}
-}  // namespace xllm::hf
+// Qwen2_5VisionEncoder::Qwen2_5VisionEncoder(const Context& context)
+//     : ModuleHolder(create_qwen2_5_vision_encoder_layer(context)) {}
+
+}  // namespace layer
+}  // namespace xllm

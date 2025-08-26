@@ -9,9 +9,9 @@
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/layers/npu/llm_head.h"
-#include "core/layers/npu/qwen2_5_vision_encoder_layer.h"
-#include "core/layers/npu/qwen2_decoder_layer.h"
-#include "core/layers/npu/rms_norm.h"
+#include "core/layers/qwen2_decoder_layer.h"
+#include "core/layers/qwen2dot5_vision_decode_layer.h"
+#include "core/layers/rms_norm.h"
 #include "model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
@@ -133,8 +133,8 @@ class Qwen2_5_VisionBlockImpl : public torch::nn::Module {
  public:
   Qwen2_5_VisionBlockImpl(const Context& context) {
     // register submodules
-    encoder_layer_ =
-        register_module("encoder_layer", Qwen2_5VisionEncoder(context));
+    encoder_layer_ = register_module(
+        "encoder_layer", layer::Qwen2dot5VisionEncoderLayer(context));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -169,7 +169,7 @@ class Qwen2_5_VisionBlockImpl : public torch::nn::Module {
   void merge_loaded_weights() { encoder_layer_->merge_loaded_weights(); }
 
  private:
-  Qwen2_5VisionEncoder encoder_layer_{nullptr};
+  layer::Qwen2dot5VisionEncoderLayer encoder_layer_{nullptr};
 };
 TORCH_MODULE(Qwen2_5_VisionBlock);
 
@@ -276,7 +276,7 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
 
     hidden_size_ =
         context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
-    ln_q_ = register_module("ln_q", RmsNorm(context));
+    ln_q_ = register_module("ln_q", layer::RmsNorm(context));
 
     auto cpl = torch::nn::Linear(
         torch::nn::LinearOptions(hidden_size_, hidden_size_).bias(true));
@@ -352,7 +352,7 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
  private:
   int64_t hidden_size_;
 
-  RmsNorm ln_q_{nullptr};
+  layer::RmsNorm ln_q_{nullptr};
   torch::nn::Sequential mlp_{nullptr};
   std::tuple<torch::nn::Linear, torch::nn::GELU, torch::nn::Linear> layers_ = {
       nullptr,

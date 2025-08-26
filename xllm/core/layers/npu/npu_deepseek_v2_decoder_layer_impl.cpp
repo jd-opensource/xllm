@@ -1,4 +1,4 @@
-#include "deepseek_v2_decoder_layer.h"
+#include "npu_deepseek_v2_decoder_layer_impl.h"
 
 #include <gflags/gflags.h>
 
@@ -6,7 +6,8 @@ DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
 DECLARE_int32(expert_parallel_degree);
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
 enum DecoderLayerTensorId : int {
   IN_INPUT_NORM_WEIGHT = 0,  //[7168]
@@ -232,10 +233,11 @@ static std::vector<std::string> LINEAR_FOR_ROPE = {
     "self_attn.kv_a_proj_with_mqa.deq_scale",
 };
 
-DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const Context& context,
-                                             const int32_t layer_id,
-                                             const float sm_scale)
-    : ATBBase(context),
+NpuDeepseekV2DecoderLayerImpl::NpuDeepseekV2DecoderLayerImpl(
+    const Context& context,
+    const int32_t layer_id,
+    const float sm_scale)
+    : NpuBaseLayer(context),
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       sm_scale_(sm_scale),
@@ -265,7 +267,7 @@ DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const Context& context,
   initialize_tensors(options);
 }
 
-void DeepseekV2DecoderImpl::initialize_tensors(
+void NpuDeepseekV2DecoderLayerImpl::initialize_tensors(
     const torch::TensorOptions& options) {
   // initializ placeholder
   at_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
@@ -288,7 +290,7 @@ void DeepseekV2DecoderImpl::initialize_tensors(
   initialize_weight_tensors(options);
 }
 
-void DeepseekV2DecoderImpl::param_from_args(
+void NpuDeepseekV2DecoderLayerImpl::param_from_args(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -301,7 +303,8 @@ void DeepseekV2DecoderImpl::param_from_args(
   initialize_kimi_k2_parameters(param, args, is_prefill);
 }
 
-void DeepseekV2DecoderImpl::resize_experts_weights(int num_of_device_experts) {
+void NpuDeepseekV2DecoderLayerImpl::resize_experts_weights(
+    int num_of_device_experts) {
   experts_weights_["gate_proj.weight"] =
       std::vector<torch::Tensor>(num_of_device_experts);
   experts_weights_["up_proj.weight"] =
@@ -324,14 +327,14 @@ void DeepseekV2DecoderImpl::resize_experts_weights(int num_of_device_experts) {
   }
 }
 
-void DeepseekV2DecoderImpl::initialize_weight_tensors(
+void NpuDeepseekV2DecoderLayerImpl::initialize_weight_tensors(
     const torch::TensorOptions& options) {
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     at_weight_tensors_[i] = torch::zeros({1}).to(options);
   }
 }
 
-void DeepseekV2DecoderImpl::initialize_basic_parameters(
+void NpuDeepseekV2DecoderLayerImpl::initialize_basic_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -386,7 +389,7 @@ void DeepseekV2DecoderImpl::initialize_basic_parameters(
   qk_rope_head_dim_ = args.qk_rope_head_dim();
 }
 
-void DeepseekV2DecoderImpl::initialize_attention_parameters(
+void NpuDeepseekV2DecoderLayerImpl::initialize_attention_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -416,7 +419,7 @@ void DeepseekV2DecoderImpl::initialize_attention_parameters(
   param.enableKvQuantLayer = false;  // TODO
 }
 
-void DeepseekV2DecoderImpl::initialize_mlp_parameters(
+void NpuDeepseekV2DecoderLayerImpl::initialize_mlp_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -480,7 +483,7 @@ void DeepseekV2DecoderImpl::initialize_mlp_parameters(
   }
 }
 
-void DeepseekV2DecoderImpl::initialize_kimi_k2_parameters(
+void NpuDeepseekV2DecoderLayerImpl::initialize_kimi_k2_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ModelArgs& args,
     bool is_prefill) {
@@ -503,7 +506,7 @@ void DeepseekV2DecoderImpl::initialize_kimi_k2_parameters(
   param.enableGMMSwigluQuant = enable_gmmswigluquant;
 }
 
-void DeepseekV2DecoderImpl::initialize_parallel_parameters(
+void NpuDeepseekV2DecoderLayerImpl::initialize_parallel_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = dp_local_tp_size_;
@@ -517,7 +520,7 @@ void DeepseekV2DecoderImpl::initialize_parallel_parameters(
   param.maxDecodeDpTokenSize = 0;  // TODO
 }
 
-void DeepseekV2DecoderImpl::initialize_quantization_parameters(
+void NpuDeepseekV2DecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param) {
   if (quantize_type_ == "") {
     param.moePackQuantType = static_cast<int>(PackType::ALL_FP);
@@ -572,7 +575,8 @@ void DeepseekV2DecoderImpl::initialize_quantization_parameters(
   }
 }
 
-void DeepseekV2DecoderImpl::load_state_dict(const StateDict& state_dict) {
+void NpuDeepseekV2DecoderLayerImpl::load_state_dict(
+    const StateDict& state_dict) {
   for (const auto& [name, tensor] : state_dict) {
     bool is_sharded = false;
     int index = 0;
@@ -602,7 +606,7 @@ void DeepseekV2DecoderImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-int DeepseekV2DecoderImpl::get_mapped_index(
+int NpuDeepseekV2DecoderLayerImpl::get_mapped_index(
     const std::string& name,
     const std::unordered_map<std::string, int>& mapping) {
   const auto it = mapping.find(name);
@@ -614,7 +618,7 @@ int DeepseekV2DecoderImpl::get_mapped_index(
   return it->second;
 }
 
-void DeepseekV2DecoderImpl::process_expert_weights(
+void NpuDeepseekV2DecoderLayerImpl::process_expert_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -643,7 +647,7 @@ void DeepseekV2DecoderImpl::process_expert_weights(
   experts_weights_[suffix][local_index] = tmp_tensor.clone();
 }
 
-void DeepseekV2DecoderImpl::process_shared_expert_weights(
+void NpuDeepseekV2DecoderLayerImpl::process_shared_expert_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -669,7 +673,7 @@ void DeepseekV2DecoderImpl::process_shared_expert_weights(
   }
 }
 
-void DeepseekV2DecoderImpl::process_mlp_common_weights(
+void NpuDeepseekV2DecoderLayerImpl::process_mlp_common_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -695,7 +699,7 @@ void DeepseekV2DecoderImpl::process_mlp_common_weights(
   }
 }
 
-void DeepseekV2DecoderImpl::process_general_weights(
+void NpuDeepseekV2DecoderLayerImpl::process_general_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -718,10 +722,11 @@ void DeepseekV2DecoderImpl::process_general_weights(
   at_weight_tensors_[index] = tmp_tensor;
 }
 
-void DeepseekV2DecoderImpl::set_kv_weight(const StateDict& state_dict,
-                                          const std::string& tensor_name,
-                                          int weight_position,
-                                          int dim) {
+void NpuDeepseekV2DecoderLayerImpl::set_kv_weight(
+    const StateDict& state_dict,
+    const std::string& tensor_name,
+    int weight_position,
+    int dim) {
   torch::Tensor mutable_tensor;
   if (parallel_args_.world_size() <= 1) {
     mutable_tensor = state_dict.get_tensor(tensor_name).to(device_);
@@ -750,7 +755,7 @@ void DeepseekV2DecoderImpl::set_kv_weight(const StateDict& state_dict,
   at_weight_tensors_[weight_position + 6] = v_b_proj_preprocessed.to(device_);
 }
 
-void DeepseekV2DecoderImpl::preprocess_linear_for_rope() {
+void NpuDeepseekV2DecoderLayerImpl::preprocess_linear_for_rope() {
   for (const auto& name : LINEAR_FOR_ROPE) {
     if (quantize_type_ == "") {
       if (!absl::EndsWith(name, "weight")) {
@@ -768,9 +773,10 @@ void DeepseekV2DecoderImpl::preprocess_linear_for_rope() {
   }
 }
 
-torch::Tensor DeepseekV2DecoderImpl::view_tensor(torch::Tensor weight,
-                                                 const std::string& name,
-                                                 bool pre_view) {
+torch::Tensor NpuDeepseekV2DecoderLayerImpl::view_tensor(
+    torch::Tensor weight,
+    const std::string& name,
+    bool pre_view) {
   if (absl::StrContains(name, "q_b_proj")) {
     if (pre_view) {
       return weight
@@ -792,7 +798,8 @@ torch::Tensor DeepseekV2DecoderImpl::view_tensor(torch::Tensor weight,
   return weight;
 }
 
-torch::Tensor DeepseekV2DecoderImpl::trans_rope_weight(torch::Tensor weight) {
+torch::Tensor NpuDeepseekV2DecoderLayerImpl::trans_rope_weight(
+    torch::Tensor weight) {
   int64_t d = weight.size(-2);
   int64_t rope_dim = prefill_param_.qkRopeHeadDim;
   torch::Tensor weight_1 =
@@ -808,7 +815,7 @@ torch::Tensor DeepseekV2DecoderImpl::trans_rope_weight(torch::Tensor weight) {
   return weight.contiguous();
 }
 
-torch::Tensor DeepseekV2DecoderImpl::get_sharded_tensor(
+torch::Tensor NpuDeepseekV2DecoderLayerImpl::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim) {
@@ -820,7 +827,7 @@ torch::Tensor DeepseekV2DecoderImpl::get_sharded_tensor(
   }
 }
 
-torch::Tensor DeepseekV2DecoderImpl::get_sharded_tensor(
+torch::Tensor NpuDeepseekV2DecoderLayerImpl::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim,
@@ -834,7 +841,8 @@ torch::Tensor DeepseekV2DecoderImpl::get_sharded_tensor(
   }
 }
 
-std::string DeepseekV2DecoderImpl::extract_endswith(const std::string& input) {
+std::string NpuDeepseekV2DecoderLayerImpl::extract_endswith(
+    const std::string& input) {
   std::vector<std::string> parts;
   std::stringstream ss(input);
   std::string part;
@@ -848,7 +856,8 @@ std::string DeepseekV2DecoderImpl::extract_endswith(const std::string& input) {
   return result;
 }
 
-int DeepseekV2DecoderImpl::extract_expert_index(const std::string& name) {
+int NpuDeepseekV2DecoderLayerImpl::extract_expert_index(
+    const std::string& name) {
   std::string prefix = "experts.";
   size_t pos = name.find(prefix);
   if (pos != std::string::npos) {
@@ -864,7 +873,7 @@ int DeepseekV2DecoderImpl::extract_expert_index(const std::string& name) {
   return -1;
 }
 
-void DeepseekV2DecoderImpl::verify_loaded_weights(
+void NpuDeepseekV2DecoderLayerImpl::verify_loaded_weights(
     const std::string& prefix) const {
   for (const auto& [index, name] : WEIGHT_MAPPING) {
     CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
@@ -872,7 +881,7 @@ void DeepseekV2DecoderImpl::verify_loaded_weights(
   }
 }
 
-void DeepseekV2DecoderImpl::merge_loaded_weights() {
+void NpuDeepseekV2DecoderLayerImpl::merge_loaded_weights() {
   if (quantize_type_ == "w8a8_dynamic") {
     if (prefill_param_.isBF16) {
       convert_descaled_weights_to_float();
@@ -965,7 +974,7 @@ void DeepseekV2DecoderImpl::merge_loaded_weights() {
   init_layer();
 }
 
-torch::Tensor DeepseekV2DecoderImpl::convert_fp16_to_int64(
+torch::Tensor NpuDeepseekV2DecoderLayerImpl::convert_fp16_to_int64(
     const torch::Tensor& fp16_tensor) {
   auto float_tensor = fp16_tensor.to(torch::kFloat32);
   auto int32_tensor = float_tensor.view(torch::kInt32);
@@ -973,7 +982,7 @@ torch::Tensor DeepseekV2DecoderImpl::convert_fp16_to_int64(
   return int64_tensor;
 }
 
-void DeepseekV2DecoderImpl::convert_descaled_weights_to_float() {
+void NpuDeepseekV2DecoderLayerImpl::convert_descaled_weights_to_float() {
   auto convert_to_float = [this](int index) {
     at_weight_tensors_[index] = at_weight_tensors_[index].to(torch::kFloat32);
   };
@@ -983,7 +992,7 @@ void DeepseekV2DecoderImpl::convert_descaled_weights_to_float() {
   convert_to_float(IN_ATTENTION_OUT_DESCALE);
 }
 
-void DeepseekV2DecoderImpl::convert_offsets_to_int8() {
+void NpuDeepseekV2DecoderLayerImpl::convert_offsets_to_int8() {
   auto convert_to_int8 = [this](int index) {
     at_weight_tensors_[index] =
         at_weight_tensors_[index].to(torch::kInt8).to(device_);
@@ -994,7 +1003,7 @@ void DeepseekV2DecoderImpl::convert_offsets_to_int8() {
   convert_to_int8(IN_ATTENTION_OUT_OFFSET);
 }
 
-void DeepseekV2DecoderImpl::handle_device_specific_bias() {
+void NpuDeepseekV2DecoderLayerImpl::handle_device_specific_bias() {
   if (dp_local_tp_rank_ != 0) {
     torch::Tensor original_tensor = at_weight_tensors_[IN_ATTENTION_OUT_BIAS];
     at_weight_tensors_[IN_ATTENTION_OUT_BIAS] =
@@ -1005,7 +1014,7 @@ void DeepseekV2DecoderImpl::handle_device_specific_bias() {
   }
 }
 
-void DeepseekV2DecoderImpl::merge_shared_experts_weights() {
+void NpuDeepseekV2DecoderLayerImpl::merge_shared_experts_weights() {
   auto merge_and_clear = [this](int index,
                                 torch::Tensor& shared_experts_gate,
                                 torch::Tensor& shared_experts_up) {
@@ -1047,7 +1056,7 @@ void DeepseekV2DecoderImpl::merge_shared_experts_weights() {
   }
 }
 
-void DeepseekV2DecoderImpl::merge_experts_weights() {
+void NpuDeepseekV2DecoderLayerImpl::merge_experts_weights() {
   torch::Tensor mlp_gateup_weight =
       merge_experts_weights(experts_weights_["gate_proj.weight"],
                             experts_weights_["up_proj.weight"],
@@ -1065,27 +1074,13 @@ void DeepseekV2DecoderImpl::merge_experts_weights() {
                               experts_weights_["up_proj.weight_scale"]);
   }
 
-#if defined(USE_A3)
   torch::Tensor mlp_down_weight =
       merge_experts_weights(experts_weights_["down_proj.weight"],
                             /*transpose=*/false);
+  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
+  //     at_npu::native::npu_format_cast(mlp_down_weight, 29);
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
       at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-#else
-  if (decode_param_.isBF16) {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              /*transpose=*/true);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 29);
-  } else {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              /*transpose=*/false);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-  }
-#endif
   if (quantize_type_ == "w8a8_dynamic") {
     at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] =
         merge_experts_weights(experts_weights_["down_proj.weight_offset"]);
@@ -1094,7 +1089,7 @@ void DeepseekV2DecoderImpl::merge_experts_weights() {
   }
 }
 
-torch::Tensor DeepseekV2DecoderImpl::merge_experts_weights(
+torch::Tensor NpuDeepseekV2DecoderLayerImpl::merge_experts_weights(
     std::vector<torch::Tensor>& experts,
     bool transpose) {
   torch::Tensor merged_tensor = torch::stack(experts, 0).to(device_);
@@ -1106,7 +1101,7 @@ torch::Tensor DeepseekV2DecoderImpl::merge_experts_weights(
   return merged_tensor;
 }
 
-torch::Tensor DeepseekV2DecoderImpl::merge_experts_weights(
+torch::Tensor NpuDeepseekV2DecoderLayerImpl::merge_experts_weights(
     std::vector<torch::Tensor>& experts_gate,
     std::vector<torch::Tensor>& experts_up,
     bool transpose) {
@@ -1123,7 +1118,7 @@ torch::Tensor DeepseekV2DecoderImpl::merge_experts_weights(
   return merged_tensor;
 }
 
-void DeepseekV2DecoderImpl::squeeze_experts_weights() {
+void NpuDeepseekV2DecoderLayerImpl::squeeze_experts_weights() {
   for (const auto& index : SQUEEZE_WEIGHT_VEC) {
     if (at_weight_tensors_[index].dim() > 1) {
       at_weight_tensors_[index] = at_weight_tensors_[index].squeeze();
@@ -1131,15 +1126,15 @@ void DeepseekV2DecoderImpl::squeeze_experts_weights() {
   }
 }
 
-int64_t DeepseekV2DecoderImpl::init_layer() {
-  ATBBase::name_ = "deepseek_v2_decoder_layer " + std::to_string(layer_id_);
+int64_t NpuDeepseekV2DecoderLayerImpl::init_layer() {
+  name_ = "deepseek_v2_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "DeepSeek_V2";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
   return atb::NO_ERROR;
 }
 
-int64_t DeepseekV2DecoderImpl::init_node(
+int64_t NpuDeepseekV2DecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::deepseekV2::DecoderLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -1169,7 +1164,7 @@ int64_t DeepseekV2DecoderImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor DeepseekV2DecoderImpl::forward(
+torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
     torch::Tensor& x,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
@@ -1212,7 +1207,7 @@ torch::Tensor DeepseekV2DecoderImpl::forward(
   return tensor_placeholder_;
 }
 
-void DeepseekV2DecoderImpl::build_node_variant_pack(
+void NpuDeepseekV2DecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,
@@ -1339,17 +1334,5 @@ void DeepseekV2DecoderImpl::build_node_variant_pack(
   node.variantPack.outTensors.at(0) = internal_tensor_;
 }
 
-DeepseekV2Decoder::DeepseekV2Decoder(const Context& context,
-                                     const int32_t layer_id,
-                                     const float sm_scale)
-    : ModuleHolder(
-          create_deepseek_v2_decoder_layer(context, layer_id, sm_scale)) {}
-
-std::shared_ptr<DeepseekV2DecoderImpl> create_deepseek_v2_decoder_layer(
-    const Context& context,
-    const int32_t layer_id,
-    const float sm_scale) {
-  return std::make_shared<DeepseekV2DecoderImpl>(context, layer_id, sm_scale);
-}
-
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm

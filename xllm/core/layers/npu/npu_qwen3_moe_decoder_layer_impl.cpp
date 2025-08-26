@@ -1,4 +1,4 @@
-#include "qwen3_moe_decoder_layer.h"
+#include "npu_qwen3_moe_decoder_layer_impl.h"
 
 #include <gflags/gflags.h>
 
@@ -6,7 +6,8 @@ DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
 DECLARE_int32(expert_parallel_degree);
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
 enum DecoderLayerTensorId : int {
   IN_INPUT_NORM_WEIGHT = 0,  // [2048]
@@ -191,9 +192,9 @@ static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
     {IN_MLP_DOWN_WEIGHT_EXPERT, 1},
 };
 
-Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const Context& context,
-                                         const int32_t layer_id)
-    : ATBBase(context),
+NpuQwen3MoeDecoderLayerImpl::NpuQwen3MoeDecoderLayerImpl(const Context& context,
+                                                         const int32_t layer_id)
+    : NpuBaseLayer(context),
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       num_speculative_tokens_(
@@ -223,7 +224,7 @@ Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const Context& context,
   initialize_tensors(options);
 }
 
-void Qwen3MoeDecoderImpl::initialize_tensors(
+void NpuQwen3MoeDecoderLayerImpl::initialize_tensors(
     const torch::TensorOptions& options) {
   // initializ placeholder
   at_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
@@ -246,7 +247,7 @@ void Qwen3MoeDecoderImpl::initialize_tensors(
   initialize_weight_tensors(options);
 }
 
-void Qwen3MoeDecoderImpl::param_from_args(
+void NpuQwen3MoeDecoderLayerImpl::param_from_args(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -258,7 +259,8 @@ void Qwen3MoeDecoderImpl::param_from_args(
   initialize_quantization_parameters(param);
 }
 
-void Qwen3MoeDecoderImpl::resize_experts_weights(int num_of_device_experts) {
+void NpuQwen3MoeDecoderLayerImpl::resize_experts_weights(
+    int num_of_device_experts) {
   experts_weights_["gate_proj.weight"] =
       std::vector<torch::Tensor>(num_of_device_experts);
   experts_weights_["up_proj.weight"] =
@@ -281,14 +283,14 @@ void Qwen3MoeDecoderImpl::resize_experts_weights(int num_of_device_experts) {
   }
 }
 
-void Qwen3MoeDecoderImpl::initialize_weight_tensors(
+void NpuQwen3MoeDecoderLayerImpl::initialize_weight_tensors(
     const torch::TensorOptions& options) {
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     at_weight_tensors_[i] = torch::zeros({1}).to(options);
   }
 }
 
-void Qwen3MoeDecoderImpl::initialize_basic_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -341,7 +343,7 @@ void Qwen3MoeDecoderImpl::initialize_basic_parameters(
   }
 }
 
-void Qwen3MoeDecoderImpl::initialize_attention_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_attention_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -349,7 +351,7 @@ void Qwen3MoeDecoderImpl::initialize_attention_parameters(
   param.enableKvQuantLayer = false;  // TODO
 }
 
-void Qwen3MoeDecoderImpl::initialize_mlp_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -371,7 +373,7 @@ void Qwen3MoeDecoderImpl::initialize_mlp_parameters(
   param.enableCVOverlap = false;  // TODO
 }
 
-void Qwen3MoeDecoderImpl::initialize_parallel_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_parallel_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = 0;
@@ -379,7 +381,7 @@ void Qwen3MoeDecoderImpl::initialize_parallel_parameters(
   param.maxDecodeDpTokenSize = 0;  // TODO
 }
 
-void Qwen3MoeDecoderImpl::initialize_quantization_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param) {
   if (quantize_type_.empty()) {
     param.packQuantType = {static_cast<int>(PackType::ALL_FP),
@@ -419,7 +421,7 @@ void Qwen3MoeDecoderImpl::initialize_quantization_parameters(
   }
 }
 
-void Qwen3MoeDecoderImpl::load_state_dict(const StateDict& state_dict) {
+void NpuQwen3MoeDecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   for (const auto& [name, tensor] : state_dict) {
     bool is_sharded = false;
     int index = 0;
@@ -438,7 +440,7 @@ void Qwen3MoeDecoderImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-int Qwen3MoeDecoderImpl::get_mapped_index(
+int NpuQwen3MoeDecoderLayerImpl::get_mapped_index(
     const std::string& name,
     const std::unordered_map<std::string, int>& mapping) {
   const auto it = mapping.find(name);
@@ -450,9 +452,10 @@ int Qwen3MoeDecoderImpl::get_mapped_index(
   return it->second;
 }
 
-void Qwen3MoeDecoderImpl::process_expert_weights(const StateDict& state_dict,
-                                                 const std::string& name,
-                                                 const torch::Tensor& tensor) {
+void NpuQwen3MoeDecoderLayerImpl::process_expert_weights(
+    const StateDict& state_dict,
+    const std::string& name,
+    const torch::Tensor& tensor) {
   int expert_index = extract_expert_index(name);
   if (expert_index < start_expert_id_ || expert_index > end_expert_id_) {
     return;
@@ -481,7 +484,7 @@ void Qwen3MoeDecoderImpl::process_expert_weights(const StateDict& state_dict,
   experts_weights_[suffix][local_index] = tmp_tensor.clone();
 }
 
-void Qwen3MoeDecoderImpl::process_mlp_common_weights(
+void NpuQwen3MoeDecoderLayerImpl::process_mlp_common_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
@@ -511,9 +514,10 @@ void Qwen3MoeDecoderImpl::process_mlp_common_weights(
   }
 }
 
-void Qwen3MoeDecoderImpl::process_general_weights(const StateDict& state_dict,
-                                                  const std::string& name,
-                                                  const torch::Tensor& tensor) {
+void NpuQwen3MoeDecoderLayerImpl::process_general_weights(
+    const StateDict& state_dict,
+    const std::string& name,
+    const torch::Tensor& tensor) {
   const auto& weight_mapping = (quantize_type_.compare("w8a8_dynamic") == 0)
                                    ? WEIGHT_MAPPING_W8A8
                                    : WEIGHT_MAPPING;
@@ -553,7 +557,7 @@ void Qwen3MoeDecoderImpl::process_general_weights(const StateDict& state_dict,
   at_weight_tensors_[index] = tmp_tensor;
 }
 
-torch::Tensor Qwen3MoeDecoderImpl::get_sharded_tensor(
+torch::Tensor NpuQwen3MoeDecoderLayerImpl::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim) {
@@ -565,7 +569,7 @@ torch::Tensor Qwen3MoeDecoderImpl::get_sharded_tensor(
   }
 }
 
-torch::Tensor Qwen3MoeDecoderImpl::get_sharded_tensor(
+torch::Tensor NpuQwen3MoeDecoderLayerImpl::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim,
@@ -579,7 +583,8 @@ torch::Tensor Qwen3MoeDecoderImpl::get_sharded_tensor(
   }
 }
 
-std::string Qwen3MoeDecoderImpl::extract_endswith(const std::string& input) {
+std::string NpuQwen3MoeDecoderLayerImpl::extract_endswith(
+    const std::string& input) {
   std::vector<std::string> parts;
   std::stringstream ss(input);
   std::string part;
@@ -594,7 +599,7 @@ std::string Qwen3MoeDecoderImpl::extract_endswith(const std::string& input) {
   return result;
 }
 
-int Qwen3MoeDecoderImpl::extract_expert_index(const std::string& name) {
+int NpuQwen3MoeDecoderLayerImpl::extract_expert_index(const std::string& name) {
   std::string prefix = "experts.";
   size_t pos = name.find(prefix);
   if (pos != std::string::npos) {
@@ -611,7 +616,7 @@ int Qwen3MoeDecoderImpl::extract_expert_index(const std::string& name) {
   return -1;
 }
 
-void Qwen3MoeDecoderImpl::verify_loaded_weights(
+void NpuQwen3MoeDecoderLayerImpl::verify_loaded_weights(
     const std::string& prefix) const {
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     if (name == "down_proj.weight" || name == "gate_proj.weight" ||
@@ -623,7 +628,7 @@ void Qwen3MoeDecoderImpl::verify_loaded_weights(
   }
 }
 
-void Qwen3MoeDecoderImpl::merge_loaded_weights() {
+void NpuQwen3MoeDecoderLayerImpl::merge_loaded_weights() {
   merge_experts_weights();
 
   at_weight_tensors_[IN_QKV_WEIGHT_0] =
@@ -693,7 +698,7 @@ void Qwen3MoeDecoderImpl::merge_loaded_weights() {
   init_layer();
 }
 
-torch::Tensor Qwen3MoeDecoderImpl::convert_fp16_to_int64(
+torch::Tensor NpuQwen3MoeDecoderLayerImpl::convert_fp16_to_int64(
     const torch::Tensor& fp16_tensor) {
   auto float_tensor = fp16_tensor.to(torch::kFloat32);
   auto int32_tensor = float_tensor.view(torch::kInt32);
@@ -701,14 +706,14 @@ torch::Tensor Qwen3MoeDecoderImpl::convert_fp16_to_int64(
   return int64_tensor;
 }
 
-void Qwen3MoeDecoderImpl::convert_descaled_weights_to_float() {
+void NpuQwen3MoeDecoderLayerImpl::convert_descaled_weights_to_float() {
   auto convert_to_float = [this](int index) {
     at_weight_tensors_[index] = at_weight_tensors_[index].to(torch::kFloat32);
   };
   convert_to_float(IN_ATTENTION_OUT_DESCALE);
 }
 
-void Qwen3MoeDecoderImpl::merge_experts_weights() {
+void NpuQwen3MoeDecoderLayerImpl::merge_experts_weights() {
   if (experts_weights_.count("gate_proj.weight") > 0) {
     auto& gate_weight = experts_weights_["gate_proj.weight"];
   }
@@ -767,7 +772,7 @@ void Qwen3MoeDecoderImpl::merge_experts_weights() {
   }
 }
 
-torch::Tensor Qwen3MoeDecoderImpl::merge_experts_weights(
+torch::Tensor NpuQwen3MoeDecoderLayerImpl::merge_experts_weights(
     std::vector<torch::Tensor>& experts,
     bool transpose) {
   torch::Tensor merged_tensor = torch::stack(experts, 0).to(device_);
@@ -780,7 +785,7 @@ torch::Tensor Qwen3MoeDecoderImpl::merge_experts_weights(
   return merged_tensor;
 }
 
-torch::Tensor Qwen3MoeDecoderImpl::merge_experts_weights(
+torch::Tensor NpuQwen3MoeDecoderLayerImpl::merge_experts_weights(
     std::vector<torch::Tensor>& experts_gate,
     std::vector<torch::Tensor>& experts_up,
     bool transpose) {
@@ -798,8 +803,8 @@ torch::Tensor Qwen3MoeDecoderImpl::merge_experts_weights(
   return merged_tensor;
 }
 
-int64_t Qwen3MoeDecoderImpl::init_layer() {
-  ATBBase::name_ = "qwen3_moe_decoder_layer " + std::to_string(layer_id_);
+int64_t NpuQwen3MoeDecoderLayerImpl::init_layer() {
+  name_ = "qwen3_moe_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "Qwen3_Moe";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
@@ -807,7 +812,7 @@ int64_t Qwen3MoeDecoderImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t Qwen3MoeDecoderImpl::init_node(
+int64_t NpuQwen3MoeDecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::qwen::MoeDecoderLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -838,18 +843,19 @@ int64_t Qwen3MoeDecoderImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor Qwen3MoeDecoderImpl::forward(torch::Tensor& x,
-                                           torch::Tensor& cos_pos,
-                                           torch::Tensor& sin_pos,
-                                           torch::Tensor& attn_mask,
-                                           KVCache& kv_cache,
-                                           const ModelInputParams& input_params,
-                                           atb::Context* context,
-                                           AtbWorkspace& workspace,
-                                           torch::Tensor& expert_array,
-                                           aclrtEvent* event,
-                                           std::atomic<bool>* event_flag,
-                                           int node_id) {
+torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
+    torch::Tensor& x,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    torch::Tensor& attn_mask,
+    KVCache& kv_cache,
+    const ModelInputParams& input_params,
+    atb::Context* context,
+    AtbWorkspace& workspace,
+    torch::Tensor& expert_array,
+    aclrtEvent* event,
+    std::atomic<bool>* event_flag,
+    int node_id) {
   atb::Status st;
   if (input_params.global_empty_kv_cache) {
     build_node_variant_pack(prefill_node_,
@@ -884,7 +890,7 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(torch::Tensor& x,
   return tensor_placeholder_;
 }
 
-void Qwen3MoeDecoderImpl::build_node_variant_pack(
+void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,
@@ -965,13 +971,5 @@ void Qwen3MoeDecoderImpl::build_node_variant_pack(
   node.variantPack.outTensors.at(0) = internal_tensor_;
 }
 
-Qwen3MoeDecoder::Qwen3MoeDecoder(const Context& context, const int32_t layer_id)
-    : ModuleHolder(create_qwen3_moe_decoder_layer(context, layer_id)) {}
-
-std::shared_ptr<Qwen3MoeDecoderImpl> create_qwen3_moe_decoder_layer(
-    const Context& context,
-    int32_t layer_id) {
-  return std::make_shared<Qwen3MoeDecoderImpl>(context, layer_id);
-}
-
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm
