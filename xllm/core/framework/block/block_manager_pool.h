@@ -59,8 +59,8 @@ class BlockManagerPool {
   void allocate_shared(Sequence* sequence);
   void cache(Sequence* sequence);
 
-  std::vector<std::vector<CacheBlockInfo>>* get_copy_in_content();
-  std::vector<std::vector<CacheBlockInfo>>* get_copy_out_content();
+  std::vector<std::vector<CacheBlockInfo>>* get_copy_in_cache_block_infos();
+  std::vector<std::vector<CacheBlockInfo>>* get_copy_out_cache_block_infos();
   void reset_copy_content();
 
   void get_merged_kvcache_event(KvCacheEvent* event) const;
@@ -89,8 +89,8 @@ class BlockManagerPool {
   Options options_;
 
   // CacheBlockInfo per step
-  std::vector<std::vector<CacheBlockInfo>> copy_in_cache_contents_;
-  std::vector<std::vector<CacheBlockInfo>> copy_out_cache_contents_;
+  std::vector<std::vector<CacheBlockInfo>> copy_in_cache_block_infos_;
+  std::vector<std::vector<CacheBlockInfo>> copy_out_cache_block_infos_;
   std::vector<std::vector<Block>> evict_host_blocks_;
 };
 

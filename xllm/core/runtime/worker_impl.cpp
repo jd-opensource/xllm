@@ -130,7 +130,7 @@ bool WorkerImpl::allocate_kv_cache(
 
 bool WorkerImpl::allocate_host_kv_cache(
     const std::vector<std::vector<int64_t>>& device_kv_cache_shape) {
-  if (options_.host_blocks_factor() <= 0.0) {
+  if (options_.host_blocks_factor() <= 0.00001) {
     return true;
   }
 
@@ -373,17 +373,17 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
       auto value_cache = kv_caches_[layer_id].get_v_cache();
       auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
 
-      for (auto cache_content : input_params.copy_out_blocks) {
-        host_k_cache[cache_content.host_block_id].copy_(
-            key_cache[cache_content.device_block_id]);
-        host_v_cache[cache_content.host_block_id].copy_(
-            value_cache[cache_content.device_block_id]);
+      for (auto block_info : input_params.copy_out_blocks) {
+        host_k_cache[block_info.host_block_id].copy_(
+            key_cache[block_info.device_block_id]);
+        host_v_cache[block_info.host_block_id].copy_(
+            value_cache[block_info.device_block_id]);
       }
-      for (auto cache_content : input_params.copy_in_blocks) {
-        key_cache[cache_content.device_block_id].copy_(
-            host_k_cache[cache_content.host_block_id]);
-        value_cache[cache_content.device_block_id].copy_(
-            host_v_cache[cache_content.host_block_id]);
+      for (auto block_info : input_params.copy_in_blocks) {
+        key_cache[block_info.device_block_id].copy_(
+            host_k_cache[block_info.host_block_id]);
+        value_cache[block_info.device_block_id].copy_(
+            host_v_cache[block_info.host_block_id]);
       }
     }
 
@@ -419,12 +419,10 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
     ModelInputParams& input_params) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-#if !defined(USE_NPU) promise.setValue(false);
-  return future;
-#endif
-  extra_threadpool_.schedule([this,
-                              input_params = input_params,
-                              promise = std::move(promise)]() mutable {
+#if defined(USE_NPU)
+  general_threadpool_.schedule([this,
+                                input_params = input_params,
+                                promise = std::move(promise)]() mutable {
     c10::StreamGuard streamGuard(
         extra_stream_helper_->H2D_memcpy_stream.unwrap());
     if (input_params.async_copy_out_blocks.size() > 0) {
@@ -435,11 +433,11 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
         auto value_cache = kv_caches_[layer_id].get_v_cache();
         auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
 
-        for (auto cache_content : input_params.async_copy_out_blocks) {
-          host_k_cache[cache_content.host_block_id].copy_(
-              key_cache[cache_content.device_block_id]);
-          host_v_cache[cache_content.host_block_id].copy_(
-              value_cache[cache_content.device_block_id]);
+        for (auto block_info : input_params.async_copy_out_blocks) {
+          host_k_cache[block_info.host_block_id].copy_(
+              key_cache[block_info.device_block_id]);
+          host_v_cache[block_info.host_block_id].copy_(
+              value_cache[block_info.device_block_id]);
         }
       }
 
@@ -449,6 +447,10 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
         extra_stream_helper_->H2D_memcpy_stream.stream());
     promise.setValue(ret == 0);
   });
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu device set
+  promise.setValue(false);
+#endif
 
   return future;
 }
@@ -627,7 +629,7 @@ folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
     const std::vector<CacheBlockInfo>& cache_block_info) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule(
+  general_threadpool_.schedule(
       [this, &cache_block_info, promise = std::move(promise)]() mutable {
         if (this->kv_cache_store_ == nullptr) {
           promise.setValue(0);
@@ -650,7 +652,7 @@ folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_to_store_async(
     const std::vector<CacheBlockInfo>& cache_block_info) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule(
+  general_threadpool_.schedule(
       [this, &cache_block_info, promise = std::move(promise)]() mutable {
         if (this->kv_cache_store_ == nullptr) {
           promise.setValue(0);

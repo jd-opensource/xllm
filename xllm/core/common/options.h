@@ -125,7 +125,7 @@ class Options {
   PROPERTY(std::string, priority_strategy) = "FCFS";
 
   PROPERTY(bool, enable_online_preempt_offline) = true;
-  
+
   PROPERTY(double, host_blocks_factor) = 0.0;
 
   PROPERTY(bool, enable_kvcache_store) = false;

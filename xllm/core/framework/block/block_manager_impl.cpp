@@ -16,8 +16,7 @@ limitations under the License.
 
 #include "block_manager_impl.h"
 
-#include "framework/prefix_cache/prefix_cache.h"
-#include "framework/prefix_cache/prefix_cache_with_upload.h"
+#include "framework/prefix_cache/prefix_cache_factory.h"
 namespace xllm {
 
 BlockManagerImpl::BlockManagerImpl(const Options& options)

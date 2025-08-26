@@ -234,20 +234,6 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
   return s.ok();
 }
 
-uint32_t RemoteWorker::load_kv_blocks_from_store(
-    const std::vector<CacheBlockInfo>& cache_block_info) {
-  proto::CacheBlockInfos pb_cache_block_infos;
-  if (!cache_block_info_to_proto(cache_block_info, &pb_cache_block_infos)) {
-    return 0;
-  }
-
-  proto::StoreResponse resp;
-  brpc::Controller cntl;
-  stub_->LoadKVCacheFromStore(&cntl, &pb_cache_block_infos, &resp, nullptr);
-
-  return resp.success_cnt();
-}
-
 ForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
   LOG(ERROR) << "RemoteWorker Method prepare_inputs is UnImplemented.";
 }
@@ -460,28 +446,36 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
 }
 
 folly::SemiFuture<uint32_t> RemoteWorker::load_kv_blocks_from_store_async(
-    const std::vector<CacheBlockInfo>& cache_block_info) {
+    const std::vector<CacheBlockInfo> cache_block_info) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule(
-      [this, &cache_block_info, promise = std::move(promise)]() mutable {
-        proto::CacheBlockInfos cache_contents;
-        if (!cache_block_info_to_proto(cache_block_info, &cache_contents)) {
-          promise.setValue(0);
-          return;
-        }
+  general_threadpool_.schedule([this,
+                                cache_block_info = std::move(cache_block_info),
+                                promise = std::move(promise)]() mutable {
+    proto::CacheBlockInfos pb_cache_block_info;
+    if (!cache_block_info_to_proto(cache_block_info, &pb_cache_block_info)) {
+      promise.setValue(0);
+      return;
+    }
 
-        proto::StoreResponse resp;
-        brpc::Controller cntl;
-        stub_->LoadKVCacheFromStore(&cntl, &cache_contents, &resp, nullptr);
-
-        if (cntl.Failed()) {
-          promise.setValue(0);
-          return;
-        }
-        promise.setValue(resp.success_cnt());
-      });
+    auto done = new LoadKVCacheFromStoreClosure();
+    done->promise = std::move(promise);
+    stub_->LoadKVCacheFromStore(
+        &done->cntl, &pb_cache_block_info, &done->response, done);
+  });
   return future;
+}
+
+void LoadKVCacheFromStoreClosure::Run() {
+  std::unique_ptr<LoadKVCacheFromStoreClosure> self_guard(this);
+
+  bool success = !cntl.Failed();
+  if (!success) {
+    promise.setValue(0);
+  } else {
+    promise.setValue(response.success_cnt());
+  }
+  return;
 }
 
 const torch::Device& RemoteWorker::device() const {

@@ -174,7 +174,7 @@ size_t PrefixCache::evict(size_t n_blocks,
   size_t evict_count = 0;
   Node* iter_node = lru_lst_.get_first();
   evict_keys->reserve(n_blocks);
-  for (size_t i = 0; i < n_blocks; ++i) {
+  while (evict_count < n_blocks) {
     if (lru_lst_.is_last(iter_node)) {
       break;
     }

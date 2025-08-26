@@ -669,12 +669,12 @@ bool cache_block_info_to_proto(
     const std::vector<CacheBlockInfo>& cache_block_info,
     proto::CacheBlockInfos* cache_block_info_pb) {
   cache_block_info_pb->mutable_contents()->Reserve(cache_block_info.size());
-  for (const CacheBlockInfo cache_content : cache_block_info) {
+  for (const CacheBlockInfo block_info : cache_block_info) {
     proto::CacheBlockInfo pb_cache;
-    pb_cache.set_device_block_id(cache_content.device_block_id);
-    pb_cache.set_host_block_id(cache_content.host_block_id);
-    if (cache_content.hash_key != nullptr) {
-      pb_cache.set_hash_key(cache_content.hash_key, MURMUR_HASH3_VALUE_LEN);
+    pb_cache.set_device_block_id(block_info.device_block_id);
+    pb_cache.set_host_block_id(block_info.host_block_id);
+    if (block_info.hash_key != nullptr) {
+      pb_cache.set_hash_key(block_info.hash_key, MURMUR_HASH3_VALUE_LEN);
     } else {
       LOG(ERROR) << "convert to CacheBlockInfos fail, hash key is nullptr!";
       return false;

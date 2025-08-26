@@ -1,7 +1,8 @@
+#include "prefix_cache_factory.h"
+
 #include <absl/strings/numbers.h>
 #include <absl/strings/str_split.h>
 
-#include "prefix_cache.h"
 #include "prefix_cache_with_upload.h"
 
 namespace xllm {

@@ -67,32 +67,6 @@ struct WorkerService::NPUStreamHelper {
 // TODO(mlu): implement mlu stream helper
 #endif
 
-void convert_from_cache_contents(
-    const ::llm::proto::CacheContents& cache_contents,
-    std::vector<const uint8_t*>& hash_keys,
-    std::vector<uint64_t>& blocks) {
-  hash_keys.resize(cache_contents.hash_keys_size());
-  blocks.resize(cache_contents.blocks_size());
-
-  for (int i = 0; i < cache_contents.hash_keys_size(); ++i) {
-    hash_keys.emplace_back(
-        reinterpret_cast<const uint8_t*>(cache_contents.hash_keys(i).data()));
-
-    blocks.emplace_back(cache_contents.blocks(i));
-  }
-}
-
-void convert_from_cache_contents(
-    const ::llm::proto::CacheContents& cache_contents,
-    std::vector<const uint8_t*>& hash_keys) {
-  hash_keys.resize(cache_contents.hash_keys_size());
-
-  for (int i = 0; i < cache_contents.hash_keys_size(); ++i) {
-    hash_keys.emplace_back(
-        reinterpret_cast<const uint8_t*>(cache_contents.hash_keys(i).data()));
-  }
-}
-
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
     : options_(options), device_(device), initialized_(false) {
@@ -282,15 +256,13 @@ void WorkerService::LoadKVCacheFromStore(
     const ::xllm::proto::CacheBlockInfos* req,
     ::xllm::proto::StoreResponse* resp,
     ::google::protobuf::Closure* done) {
-  threadpool_.schedule([this, controller, req, resp, done]() mutable {
-    brpc::ClosureGuard done_guard(done);
-    std::vector<CacheBlockInfo> dst_blocks;
-    proto_to_cache_block_info(*req, dst_blocks);
+  brpc::ClosureGuard done_guard(done);
+  std::vector<CacheBlockInfo> dst_blocks;
+  proto_to_cache_block_info(*req, dst_blocks);
 
-    auto future = worker_->load_kv_blocks_from_store_async(dst_blocks);
+  auto future = worker_->load_kv_blocks_from_store_async(dst_blocks);
 
-    resp->set_success_cnt(std::move(future).get());
-  });
+  resp->set_success_cnt(std::move(future).get());
   return;
 }
 

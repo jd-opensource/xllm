@@ -663,12 +663,12 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(running_sequences_,
-                           running_sequences_budgets_,
-                           block_manager_pool_->get_copy_in_content(),
-                           block_manager_pool_->get_copy_out_content());
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(
+                         running_sequences_,
+                         running_sequences_budgets_,
+                         block_manager_pool_->get_copy_in_cache_block_infos(),
+                         block_manager_pool_->get_copy_out_cache_block_infos());
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process
@@ -756,9 +756,9 @@ void ContinuousScheduler::prepare_cache_async(
             -1, host_blocks[i].id(), host_blocks[i].get_immutable_hash_value());
       }
 
-      auto future = engine_->load_kv_blocks_from_store_async(
+      auto futures = engine_->load_kv_blocks_from_store_async(
           prefill_sequence->dp_rank(), std::move(contents));
-      prefill_sequence->set_async_result(std::move(future));
+      prefill_sequence->set_async_result(std::move(futures));
     }
   }
 }

@@ -67,7 +67,7 @@ class LLMEngine : public Engine {
                       const int32_t dst_dp_rank,
                       const std::vector<uint64_t>& dst_blocks) override;
 
-  folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
+  std::vector<folly::SemiFuture<uint32_t>> load_kv_blocks_from_store_async(
       const uint32_t dp_rank,
       const std::vector<CacheBlockInfo>& cache_block_info) override;
 
@@ -135,7 +135,7 @@ class LLMEngine : public Engine {
   void process_eplb_data(
       const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
       int32_t worker_clients_num);
-  
+
   ThreadPool threadpool_;
 };
 

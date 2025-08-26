@@ -224,16 +224,23 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
-  void set_async_result(folly::SemiFuture<uint32_t>&& future) {
-    future_ = std::move(future);
+  void set_async_result(std::vector<folly::SemiFuture<uint32_t>>&& futures) {
+    futures_ = std::move(futures);
   }
 
   void sync_result() {
-    if (future_.has_value() && future_.value().isReady()) {
-      auto success_cnt = future_.value().value();
+    if (futures_.has_value()) {
+      auto success_cnt = host_kv_state_.num_kv_blocks();
+      for (auto& future : futures_.value()) {
+        if (future.isReady()) {
+          success_cnt = std::min(success_cnt, size_t(future.value()));
+        } else {
+          return;
+        }
+      }
       if (success_cnt > 0) {
-        kv_state_.incr_kv_cache_tokens_num(success_cnt *
-                                           kv_state_.kv_blocks()[0].size());
+        host_kv_state_.incr_kv_cache_tokens_num(
+            success_cnt * host_kv_state_.kv_blocks()[0].size());
       }
     }
   }
@@ -327,7 +334,7 @@ class Sequence final {
   std::queue<bool> is_pre_scheduled_step_prefill_;
 
   // kvcache store copy async result
-  std::optional<folly::SemiFuture<uint32_t>> future_;
+  std::optional<std::vector<folly::SemiFuture<uint32_t>>> futures_;
 };
 
 }  // namespace xllm

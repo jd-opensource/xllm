@@ -45,6 +45,7 @@ cc_test(
   DEPS
     torch
     :eplb
+    fmt::fmt
     GTest::gtest_main
 )
 

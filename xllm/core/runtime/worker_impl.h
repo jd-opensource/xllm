@@ -191,9 +191,9 @@ class WorkerImpl {
   // the task queue, step need to be executed one-by-one
   ThreadPool threadpool_;
 
-  // extra working thread
+  // general working thread
   // do some overlap work with model execute
-  ThreadPool extra_threadpool_;
+  ThreadPool general_threadpool_;
 
   // dtype of the model
   torch::ScalarType dtype_;

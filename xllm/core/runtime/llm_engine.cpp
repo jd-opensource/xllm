@@ -47,7 +47,7 @@ namespace xllm {
 
 LLMEngine::LLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
-    : options_(options), dist_manager_(dist_manager), threadpool_(5) {
+    : options_(options), dist_manager_(dist_manager) {
   auto master_node_addr = options.master_node_addr().value_or("");
   CHECK(!master_node_addr.empty())
       << " LLM need to set master node addr, Please set --master_node_addr.";
@@ -357,26 +357,20 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
   return true;
 }
 
-folly::SemiFuture<uint32_t> LLMEngine::load_kv_blocks_from_store_async(
+std::vector<folly::SemiFuture<uint32_t>>
+LLMEngine::load_kv_blocks_from_store_async(
     const uint32_t dp_rank,
     const std::vector<CacheBlockInfo>& cache_block_info) {
-  folly::Promise<uint32_t> promise;
-  auto future = promise.getSemiFuture();
-  threadpool_.schedule([this,
-                        dp_rank = dp_rank,
-                        cache_block_info = std::move(cache_block_info),
-                        promise = std::move(promise)]() mutable {
-    auto tp_size = this->worker_clients_.size() / this->options_.dp_size();
-    uint32_t result;
+  std::vector<folly::SemiFuture<uint32_t>> futures;
+  auto tp_size = this->worker_clients_.size() / this->options_.dp_size();
 
-    for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
-      auto sub_future = this->worker_clients_[tp_rank + tp_size * dp_rank]
-                            ->load_kv_blocks_from_store_async(cache_block_info);
-      result = std::min(std::move(sub_future).get(), result);
-    }
-    promise.setValue(result);
-  });
-  return future;
+  futures.reserve(tp_size);
+  for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
+    futures.emplace_back(
+        this->worker_clients_[tp_rank + tp_size * dp_rank]
+            ->load_kv_blocks_from_store_async(cache_block_info));
+  }
+  return std::move(futures);
 }
 
 void LLMEngine::get_device_info(std::vector<std::string>& device_ips,

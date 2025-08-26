@@ -41,14 +41,14 @@ class Batch {
 
   void add(const std::vector<Sequence*>& sequences);
 
-  void set_copy_in_cache_contents(
-      std::vector<CacheBlockInfo>* copy_in_cache_contents) {
-    copy_in_cache_contents_ = copy_in_cache_contents;
+  void set_copy_in_cache_block_infos(
+      std::vector<CacheBlockInfo>* copy_in_cache_block_infos) {
+    copy_in_cache_block_infos_ = copy_in_cache_block_infos;
   }
 
-  void set_copy_out_cache_contents(
-      std::vector<CacheBlockInfo>* copy_out_cache_contents) {
-    copy_out_cache_contents_ = copy_out_cache_contents;
+  void set_copy_out_cache_block_infos(
+      std::vector<CacheBlockInfo>* copy_out_cache_block_infos) {
+    copy_out_cache_block_infos_ = copy_out_cache_block_infos;
   }
 
   // get the number of sequences in the batch
@@ -91,8 +91,8 @@ class Batch {
                                  bool enable_schedule_overlap);
 
   std::vector<Sequence*> sequences_;
-  std::vector<CacheBlockInfo>* copy_in_cache_contents_ = nullptr;
-  std::vector<CacheBlockInfo>* copy_out_cache_contents_ = nullptr;
+  std::vector<CacheBlockInfo>* copy_in_cache_block_infos_ = nullptr;
+  std::vector<CacheBlockInfo>* copy_out_cache_block_infos_ = nullptr;
 
   // max number of tokens to process for each sequence
   // default to max value
