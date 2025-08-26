@@ -27,21 +27,16 @@ limitations under the License.
 #include "common/types.h"
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
+#include "framework/request/priority_comparator.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "runtime/xservice_client.h"
 #include "scheduler.h"
+#include "scheduler/decode_priority_queue.h"
 
 namespace xllm {
 class Engine;
-
-struct RequestComparator {
-  bool operator()(std::shared_ptr<Request> a,
-                  std::shared_ptr<Request> b) const {
-    return a->created_time() > b->created_time();
-  }
-};
-
+class DecodePriorityQueue;
 class ContinuousScheduler : public Scheduler {
  public:
   struct Options {
@@ -87,6 +82,11 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(bool, enable_chunked_prefill) = true;
 
     PROPERTY(bool, enable_service_routing) = false;
+
+    // TODO: think if distinguish prefill and decode priority strategy
+    PROPERTY(std::string,
+             priority_strategy) = "FCFS";  // priority, deadline, FCFS
+    PROPERTY(bool, enable_on_preempt_off) = true;
   };
 
   ContinuousScheduler(Engine* engine, const Options& options);
@@ -113,7 +113,25 @@ class ContinuousScheduler : public Scheduler {
   }
 
   virtual uint32_t get_waiting_requests_num() const override {
-    return waiting_priority_queue_.size();
+    return waiting_priority_queue_.size() +
+           waiting_priority_queue_offline_.size();
+  }
+  // for test only
+  std::vector<Batch> prepare_batch_test() { return prepare_batch(); }
+  std::vector<std::shared_ptr<Request>> get_running_requests() {
+    return running_requests_;
+  }
+  std::vector<std::shared_ptr<Request>> get_waiting_requests() {
+    std::vector<std::shared_ptr<Request>> result;
+
+    auto temp_queue = waiting_priority_queue_;
+
+    while (!temp_queue.empty()) {
+      result.push_back(temp_queue.top());
+      temp_queue.pop();
+    }
+
+    return result;
   }
 
  protected:
@@ -160,9 +178,11 @@ class ContinuousScheduler : public Scheduler {
   using RequestPriorityQueue =
       std::priority_queue<std::shared_ptr<Request>,
                           std::vector<std::shared_ptr<Request>>,
-                          RequestComparator>;
+                          std::function<bool(const std::shared_ptr<Request>&,
+                                             const std::shared_ptr<Request>&)>>;
   // keep all new requests, generally speaking, they do not have any kv cache.
   RequestPriorityQueue waiting_priority_queue_;
+  RequestPriorityQueue waiting_priority_queue_offline_;
 
   // keep all running request from high priority to low.
   // NOTE: Maybe not all requests are scheduled in one step,
@@ -171,12 +191,30 @@ class ContinuousScheduler : public Scheduler {
   // popped from waiting_priority_queue_ but remain in prefill stage,
   // these requests have already allocated some kv caches,
   // so they can be preemeted in scheduler.
-  std::deque<std::shared_ptr<Request>> running_queue_;
 
   // is last step handle prefill requests
   bool last_step_prefill_ = false;
 
+  // std::deque<std::shared_ptr<Request>> running_queue_;
+  // std::deque<std::shared_ptr<Request>> running_queue_offline_;
+  std::unique_ptr<DecodePriorityQueue> running_queue_;
+  std::unique_ptr<DecodePriorityQueue> running_queue_offline_;
+
+  void handle_prefill_requests(
+      size_t& remaining_token_budget,
+      size_t& remaining_seq_budget,
+      RequestPriorityQueue& waiting_priority_queue,
+      size_t& num_onp_preempt_off_requests,
+      std::vector<std::shared_ptr<Request>>& finished_requests);
+  void handle_decode_requests(
+      size_t& remaining_token_budget,
+      size_t& remaining_seq_budget,
+      size_t& num_offd_preempt_off_requests,
+      size_t& num_ond_preempt_on_requests,
+      size_t& num_ond_preempt_off_requests,
+      std::unique_ptr<DecodePriorityQueue>& running_queue);
   void handle_abnormal_request(
+      std::unique_ptr<DecodePriorityQueue>& running_queue,
       const std::vector<Sequence*>& candidate_sequences,
       const std::vector<size_t>& candidate_token_budgets,
       const size_t& allocated_tokens,
@@ -190,15 +228,6 @@ class ContinuousScheduler : public Scheduler {
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch();
 
-  virtual void handle_prefill_requests(
-      size_t& remaining_token_budget,
-      size_t& remaining_seq_budget,
-      std::vector<std::shared_ptr<Request>>& finished_requests);
-
-  void handle_decode_requests(size_t& remaining_token_budget,
-                              size_t& remaining_seq_budget,
-                              size_t& num_preempted_requests);
-
  private:
   std::vector<Batch> schedule_request(const absl::Duration& timeout);
 
@@ -210,6 +239,8 @@ class ContinuousScheduler : public Scheduler {
   std::vector<int64_t> get_num_occupied_slots(
       std::vector<Sequence*>& sequences) const;
   std::vector<int64_t> get_active_activation_in_bytes();
+
+  void create_running_queue(const Options& options);
 
  private:
   // tokenizer

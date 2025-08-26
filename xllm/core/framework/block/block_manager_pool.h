@@ -48,6 +48,10 @@ class BlockManagerPool {
   void get_merged_kvcache_event(KvCacheEvent* event) const;
   float get_gpu_cache_usage_perc() const;
 
+  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
+                                Sequence* prefill_sequence,
+                                size_t& num_request_to_evict);
+
   std::vector<size_t> num_blocks_in_prefix_cache() const;
   std::vector<size_t> num_free_blocks() const;
   std::vector<size_t> num_used_blocks() const;

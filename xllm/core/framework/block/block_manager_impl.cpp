@@ -30,6 +30,7 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
   }
 
   size_t total_blocks = options_.num_blocks();
+  block_size_ = options_.block_size();
   num_free_blocks_ = total_blocks;
   free_blocks_.reserve(total_blocks);
   for (int32_t i = 0; i < total_blocks; ++i) {
@@ -71,6 +72,33 @@ void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
   } else {
     num_used_blocks_.fetch_sub(blocks.size(), std::memory_order_relaxed);
   }
+}
+
+bool BlockManagerImpl::check_if_enough_to_evict(
+    DecodePriorityQueue* running_queue_to_evict,
+    Sequence* prefill_sequence,
+    size_t& num_request_to_evict) {
+  // check if it's enough when we evict this requests queue
+
+  const size_t num_blocks_needed =
+      (prefill_sequence->num_tokens() + block_size_ - 1) / block_size_;
+  size_t num_blocks_can_evict = 0;
+  // count the number of blocks can be preempted
+  for (auto it = running_queue_to_evict->rbegin();
+       it != running_queue_to_evict->rend();
+       ++it) {
+    std::shared_ptr<Request> request_to_preempt = *it;
+    num_request_to_evict++;
+    // count the number of blocks belong to the request
+    for (const auto& seq : request_to_preempt->sequences()) {
+      num_blocks_can_evict += seq->kv_state().num_kv_blocks();
+    }
+    if ((num_blocks_needed <= num_blocks_can_evict) ||
+        has_enough_blocks(num_blocks_needed - num_blocks_can_evict)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool BlockManagerImpl::has_enough_blocks(uint32_t num_blocks) {

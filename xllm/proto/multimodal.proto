@@ -127,5 +127,13 @@ message MMChatRequest {
   Routing routing = 26;
 
   repeated Tool tools = 27;
+
   optional string tool_choice = 28;
+
+  optional bool offline = 29;
+
+  optional int32 slo_ms = 30;
+
+  // request priority. default = DEFAULT
+  optional Priority priority = 31;
 }

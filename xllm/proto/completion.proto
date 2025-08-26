@@ -86,6 +86,13 @@ message CompletionRequest {
   repeated int32 token_ids = 24;
 
   Routing routing = 25;
+
+  optional bool offline = 26;
+
+  optional int32 slo_ms = 27;
+
+  // request priority. default = DEFAULT
+  optional Priority priority = 28;
 }
 
 message LogProbs {

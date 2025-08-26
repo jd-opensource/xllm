@@ -59,7 +59,7 @@ class BlockCapacityGuard {
 
   bool if_accept_candidate_sequences(
       const std::vector<Sequence*>& candidate_sequences,
-      const std::deque<std::shared_ptr<Request>>& running_queue,
+      const std::unique_ptr<DecodePriorityQueue>& running_queue,
       const std::vector<Sequence*>& running_sequences);
 
  private:
@@ -118,7 +118,7 @@ class ZeroEvictionScheduler final : public ContinuousScheduler {
   void handle_prefill_requests(
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
-      std::vector<std::shared_ptr<Request>>& finished_requests) override;
+      std::vector<std::shared_ptr<Request>>& finished_requests);
 
   bool try_allocate_block_for(std::shared_ptr<Request> request,
                               std::vector<Sequence*>* prefill_sequences,

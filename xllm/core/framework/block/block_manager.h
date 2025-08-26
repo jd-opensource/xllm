@@ -32,10 +32,13 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "framework/prefix_cache/prefix_cache.h"
+#include "framework/request/request.h"
+#include "framework/request/sequence.h"
+#include "scheduler/decode_priority_queue.h"
 #include "util/timer.h"
 
 namespace xllm {
-
+// class DecodePriorityQueue;
 class BlockManager {
  public:
   struct Options {
@@ -59,6 +62,10 @@ class BlockManager {
 
   virtual void cache(const Slice<int32_t>& token_ids,
                      const Slice<Block>& blocks) = 0;
+  virtual bool check_if_enough_to_evict(
+      DecodePriorityQueue* running_queue_to_evict,
+      Sequence* prefill_sequence,
+      size_t& num_request_to_evict) = 0;
 
   // get merged all dp rank KVCacheEvent
   virtual void get_merged_kvcache_event(KvCacheEvent* event) const = 0;

@@ -113,7 +113,16 @@ message ChatRequest {
   Routing routing = 27;
 
   repeated Tool tools = 28;
+
   optional string tool_choice = 29;
+
+  optional bool offline = 30;
+
+  optional int32 slo_ms = 31;
+
+  // request priority. default = DEFAULT
+  optional Priority priority = 32;
+
 }
 
 message ChatLogProbData {

@@ -46,6 +46,10 @@ class BlockManagerImpl : public BlockManager {
 
   void get_merged_kvcache_event(KvCacheEvent* event) const override;
 
+  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
+                                Sequence* prefill_sequence,
+                                size_t& num_request_to_evict) override;
+
   size_t num_blocks_in_prefix_cache() const override {
     if (options_.enable_prefix_cache()) {
       CHECK(prefix_cache_);
@@ -98,6 +102,9 @@ class BlockManagerImpl : public BlockManager {
 
   // free block count
   size_t num_free_blocks_ = 0;
+
+  // block size
+  size_t block_size_ = 0;
 
   // free block list
   std::vector<int32_t> free_blocks_;

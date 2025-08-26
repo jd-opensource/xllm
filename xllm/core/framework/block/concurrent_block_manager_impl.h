@@ -39,6 +39,10 @@ class ConcurrentBlockManagerImpl : public BlockManagerImpl {
   void cache(const Slice<int32_t>& token_ids,
              const Slice<Block>& blocks) override;
 
+  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
+                                Sequence* prefill_sequence,
+                                size_t& num_request_to_evict) override;
+
   // get the number of blocks in the prefix cache
   size_t num_blocks_in_prefix_cache() const override;
 

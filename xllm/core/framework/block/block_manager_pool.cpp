@@ -92,6 +92,16 @@ bool BlockManagerPool::allocate(Sequence* sequence) {
   return allocate(sequence, sequence->num_tokens());
 }
 
+bool BlockManagerPool::check_if_enough_to_evict(
+    DecodePriorityQueue* running_queue_to_evict,
+    Sequence* prefill_sequence,
+    size_t& num_request_to_evict) {
+  DCHECK(prefill_sequence != nullptr);
+  int32_t dp_rank = prefill_sequence->dp_rank();
+  return block_managers_[dp_rank]->check_if_enough_to_evict(
+      running_queue_to_evict, prefill_sequence, num_request_to_evict);
+}
+
 bool BlockManagerPool::allocate(std::vector<Sequence*>& sequences) {
   for (auto* sequence : sequences) {
     DCHECK(sequence != nullptr);

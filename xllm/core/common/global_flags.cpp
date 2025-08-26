@@ -199,3 +199,9 @@ DEFINE_string(etcd_addr, "", "etcd adderss for save instance meta info");
 DEFINE_bool(enable_service_routing, false, "whether to use etcd.");
 
 DEFINE_int32(heart_beat_interval, 3, "heart beat interval");
+
+DEFINE_string(priority_strategy, "FCFS", "priority strategy for requests");
+
+DEFINE_bool(enable_on_preempt_off,
+            true,
+            "whether enable online preempt offline");

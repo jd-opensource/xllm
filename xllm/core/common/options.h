@@ -113,6 +113,10 @@ class Options {
   PROPERTY(bool, enable_service_routing) = false;
 
   PROPERTY(std::optional<std::string>, tool_call_parser);
+
+  PROPERTY(std::string, priority_strategy) = "FCFS";
+
+  PROPERTY(bool, enable_on_preempt_off) = true;
 };
 
 }  // namespace xllm

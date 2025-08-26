@@ -121,6 +121,10 @@ struct Options {
 
   // enable service routing mode.
   PROPERTY(bool, enable_service_routing) = false;
+
+  PROPERTY(std::string, priority_strategy) = "FCFS";
+
+  PROPERTY(bool, enable_on_preempt_off) = true;
 };
 
 }  // namespace runtime

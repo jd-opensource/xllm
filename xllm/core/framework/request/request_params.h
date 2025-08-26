@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "chat.pb.h"
+#include "common.pb.h"
 #include "common/macros.h"
 #include "completion.pb.h"
 #include "core/common/macros.h"
@@ -124,6 +125,12 @@ struct RequestParams {
   std::vector<xllm::JsonTool> tools;
   std::string tool_choice = "auto";
   bool has_tools() const { return !tools.empty(); }
+
+  bool offline = false;
+
+  int32_t slo_ms = 0;
+
+  xllm::proto::Priority priority = xllm::proto::Priority::NORMAL;
 };
 
 }  // namespace xllm

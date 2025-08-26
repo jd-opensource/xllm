@@ -126,3 +126,7 @@ DECLARE_int32(heart_beat_interval);
 DECLARE_int32(chunked_match_frequency);
 
 DECLARE_bool(use_zero_evict);
+
+DECLARE_string(priority_strategy);
+
+DECLARE_bool(enable_on_preempt_off);

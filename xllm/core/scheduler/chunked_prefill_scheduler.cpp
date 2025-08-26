@@ -37,8 +37,8 @@ ChunkedPrefillScheduler::~ChunkedPrefillScheduler() {
   }
 
   // release all requests in the running priority queue
-  while (!running_queue_.empty()) {
-    running_queue_.pop_front();
+  while (!running_queue_->empty()) {
+    running_queue_->pop_top();
   }
 }
 
@@ -52,7 +52,7 @@ void ChunkedPrefillScheduler::handle_abnormal_request(
     size_t& remaining_seq_budget,
     bool budget_exhausted,
     bool blocks_exhausted) {
-  std::shared_ptr<Request> request = running_queue_.front();
+  std::shared_ptr<Request> request = running_queue_->top();
   if (candidate_sequences.empty()) {
     if (!running_sequences_.empty()) {
       return;
@@ -73,10 +73,10 @@ void ChunkedPrefillScheduler::handle_abnormal_request(
       LOG(ERROR) << "Request prompt is too long, please set a larger "
                     "max_tokens value via --max_tokens_per_batch.";
     } else {
-      CHECK(running_queue_.size() == 1)
+      CHECK(running_queue_->size() == 1)
           << "Running queue size is not 1, there maybe a bug of request "
              "preemption logic. running_queue_.size ="
-          << running_queue_.size();
+          << running_queue_->size();
       if (util::sum(block_manager_pool_->num_used_blocks()) !=
           request->total_num_blocks()) {
         // blocks_exhausted is true.
@@ -90,7 +90,7 @@ void ChunkedPrefillScheduler::handle_abnormal_request(
     }
 
     // request is too long, budget or memory no enough.
-    running_queue_.pop_front();
+    running_queue_->pop_top();
     block_manager_pool_->deallocate(request.get());
     response_processor_->process_failed_request(
         request,
@@ -98,7 +98,7 @@ void ChunkedPrefillScheduler::handle_abnormal_request(
          "No enough resource to schedule a single sequence"});
   } else {
     // partially schedule the sequences in request
-    running_queue_.pop_front();
+    running_queue_->pop_top();
     running_requests_.emplace_back(request);
     running_sequences_.insert(running_sequences_.end(),
                               candidate_sequences.begin(),
@@ -119,10 +119,10 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     std::vector<Sequence*>& prefill_stage_sequences,
     bool& budget_exhausted,
     bool& blocks_exhausted) {
-  while (!running_queue_.empty() &&
+  while (!running_queue_->empty() &&
          remaining_token_budget > options_.num_speculative_tokens() &&
          remaining_seq_budget > 0) {
-    std::shared_ptr<Request> request(running_queue_.front());
+    std::shared_ptr<Request> request(running_queue_->top());
     // TODO: check if request is timeout
 
     const size_t num_sequences = request->sequences().size();
@@ -186,7 +186,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
 
     if (has_enough_budget && has_enough_blocks) {
       // remove the request from the priority queue
-      running_queue_.pop_front();
+      running_queue_->pop_top();
       // add the request to the batch
       running_requests_.emplace_back(request);
       running_sequences_.insert(running_sequences_.end(),
@@ -216,13 +216,13 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
 
     // memory exhausted, preempt lowest priority request and retry.
     // preemptable_requests_ only contain decoding requests.
-    if (running_queue_.size() > 1) {
-      std::shared_ptr<Request> request_to_preempt = running_queue_.back();
+    if (running_queue_->size() > 1) {
+      std::shared_ptr<Request> request_to_preempt = running_queue_->back();
 
       if (request_to_preempt.get() != request.get()) {
         ++num_preempted_requests;
         block_manager_pool_->deallocate(request_to_preempt.get());
-        running_queue_.pop_back();
+        running_queue_.->pop_back();
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
         waiting_priority_queue_.push(request_to_preempt);
@@ -343,7 +343,7 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
   }
 
   if (running_sequences_.empty() && !waiting_priority_queue_.empty() &&
-      running_queue_.empty() &&
+      running_queue_->empty() &&
       block_manager_pool_->kv_cache_utilization() == 0) {
     LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                   "a single sequence";
@@ -463,7 +463,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
     }
 
     // push the request front to the priority deque
-    running_queue_.push_front(request);
+    running_queue_->push(request, false /*if_back*/);
   }
 
   // clear previous batch
@@ -551,7 +551,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
             pending_requests_.load(std::memory_order_relaxed));
   GAUGE_SET(num_running_requests, running_requests_.size());
   GAUGE_SET(num_waiting_requests,
-            waiting_priority_queue_.size() + running_queue_.size());
+            waiting_priority_queue_.size() + running_queue_->size());
   GAUGE_SET(num_preempted_requests, num_preempted_requests);
 
   GAUGE_SET(num_running_sequences, running_sequences_.size());

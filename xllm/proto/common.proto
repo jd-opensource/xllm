@@ -27,6 +27,16 @@ message FunctionCall {
   string name = 1;
   string arguments = 2;  // JSON string
 }
+enum Priority {
+  DEFAULT = 0;
+
+  HIGH = 1;
+
+  NORMAL = 2;
+
+  LOW = 3;
+}
+
 
 message Usage {
   // the number of tokens in the prompt.

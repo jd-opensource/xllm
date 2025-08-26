@@ -18,6 +18,7 @@ cc_library(
     sequences_group.h
     request_state.h
     stopping_checker.h
+    priority_comparator.h
   SRCS
     finish_reason.cpp
     incremental_decoder.cpp
@@ -32,6 +33,7 @@ cc_library(
     sequences_group.cpp
     request_state.cpp
     stopping_checker.cpp
+    priority_comparator.cpp
   DEPS
     :kv_cache
     :prefix_cache

@@ -37,7 +37,10 @@ class Request {
           const std::string& x_request_id,
           const std::string& x_request_time,
           const RequestState& state,
-          const std::string& service_request_id = "");
+          const std::string& service_request_id = "",
+          bool offline = false,
+          int32_t slo_ms = 0,
+          xllm::proto::Priority priority = xllm::proto::Priority::NORMAL);
 
   bool finished() const;
 
@@ -81,6 +84,10 @@ class Request {
 
   const std::string& x_request_time() const { return x_request_time_; }
 
+  const bool offline() const { return offline_; }
+  const int32_t slo_ms() const { return slo_ms_; }
+  const xllm::proto::Priority priority() const { return priority_; }
+
   RequestState& state() { return state_; }
 
   void update_connection_status();
@@ -107,6 +114,12 @@ class Request {
   std::unique_ptr<SequencesGroup> sequences_group_;
 
   std::atomic<bool> cancelled_{false};
+
+  bool offline_;
+
+  int32_t slo_ms_;
+
+  xllm::proto::Priority priority_;
 
  private:
   void create_sequences_group();
