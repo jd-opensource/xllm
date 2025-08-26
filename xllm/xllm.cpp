@@ -15,6 +15,7 @@
 #include "core/common/options.h"
 #include "core/common/types.h"
 #include "core/runtime/master.h"
+#include "core/util/net.h"
 #include "core/util/utils.h"
 #include "server/xllm_server_registry.h"
 using namespace xllm;
@@ -68,6 +69,11 @@ int run() {
       FLAGS_model_id =
           std::filesystem::path(FLAGS_model).parent_path().filename();
     }
+  }
+
+  if (FLAGS_host.empty()) {
+    // set the host to the local IP when the host is empty
+    FLAGS_host = net::get_local_ip_addr();
   }
 
   if (FLAGS_backend == "vlm") {
