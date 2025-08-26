@@ -8,7 +8,7 @@
 
 #include "framework/state_dict/state_dict.h"
 
-namespace llm {
+namespace xllm {
 
 class WeightUtils {
  public:
@@ -84,4 +84,4 @@ class WeightUtils {
 #define LOAD_WEIGHT(name) \
   WeightUtils::load_weight(state_dict, #name, name##_, name##_is_loaded_);
 
-}  // namespace llm
+}  // namespace xllm

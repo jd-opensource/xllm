@@ -9,7 +9,7 @@
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 
-namespace llm {
+namespace xllm {
 
 using TensorTransform = std::function<torch::Tensor(const torch::Tensor&)>;
 
@@ -100,4 +100,4 @@ class ReplicatedLinear : public torch::nn::ModuleHolder<ParallelLinearImpl> {
                    const QuantArgs& quant_args,
                    const torch::TensorOptions& options);
 };
-}  // namespace llm
+}  // namespace xllm

@@ -7,7 +7,7 @@
 #include "linear.h"
 #include "weight_utils.h"
 
-namespace llm {
+namespace xllm {
 
 // Linear layer with column parallelism.
 // The linear layer is defined as Y = XA + b. A is parallelized along
@@ -119,4 +119,4 @@ class RowParallelLinearImpl : public ParallelLinearImpl {
   // parallel args
   ParallelArgs parallel_args_;
 };
-}  // namespace llm
+}  // namespace xllm

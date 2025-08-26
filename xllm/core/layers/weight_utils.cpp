@@ -1,6 +1,6 @@
 #include "weight_utils.h"
 
-namespace llm {
+namespace xllm {
 
 void WeightUtils::load_weight(const StateDict& state_dict,
                               const std::string& name,
@@ -111,4 +111,4 @@ void WeightUtils::load_fused_weight(
   }
 }
 
-}  // namespace llm
+}  // namespace xllm

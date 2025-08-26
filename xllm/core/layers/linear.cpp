@@ -10,7 +10,7 @@
 
 #include "linear_impl.h"
 
-namespace llm {
+namespace xllm {
 namespace {
 #define MAKE_COLUMN_PARALLEL_LINEAR(LinearlImplClass) \
   std::make_shared<LinearlImplClass>(                 \
@@ -130,4 +130,4 @@ ReplicatedLinear::ReplicatedLinear(int64_t in_features,
                                                  ParallelArgs(0, 1, nullptr),
                                                  options)) {}
 
-}  // namespace llm
+}  // namespace xllm

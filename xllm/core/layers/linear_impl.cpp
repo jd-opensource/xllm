@@ -6,7 +6,7 @@
 
 #include "framework/model_parallel.h"
 
-namespace llm {
+namespace xllm {
 
 // Linear layer with column parallelism.
 ColumnParallelLinearImpl::ColumnParallelLinearImpl(
@@ -146,4 +146,4 @@ void RowParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-}  // namespace llm
+}  // namespace xllm

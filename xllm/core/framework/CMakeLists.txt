@@ -31,17 +31,19 @@ cc_library(
     glog::glog
 )
 
-cc_test(
-  NAME 
-    mapping_npu_test
-  SRCS
-    $<$<BOOL:${USE_NPU}>:mapping_npu_test.cpp>
-  DEPS
-    parallel_state
-    absl::synchronization
-    absl::time
-    GTest::gtest_main
-)
+if(USE_NPU)
+  cc_test(
+    NAME 
+      mapping_npu_test
+    SRCS
+      mapping_npu_test.cpp
+    DEPS
+      parallel_state
+      absl::synchronization
+      absl::time
+      GTest::gtest_main
+  )
+endif()
 
 cc_library(
   NAME 
