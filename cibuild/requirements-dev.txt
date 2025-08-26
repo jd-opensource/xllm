@@ -3,4 +3,3 @@ setuptools
 wheel
 pytest
 jinja2
-triton >= 3.0.0
