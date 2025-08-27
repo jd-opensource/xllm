@@ -331,12 +331,30 @@ class ExtBuild(build_ext):
             subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
 class BuildDistWheel(bdist_wheel):
+    user_options = build_ext.user_options + [
+        ("device=", None, "target device type (a3 or a2 or mlu)"),
+        ("arch=", None, "target arch type (x86 or arm)"),
+    ]
+
+    def initialize_options(self):
+        super().initialize_options()
+        self.device = None
+        self.arch = None
+
+    def finalize_options(self):
+        super().finalize_options()
+        if not self.device or not self.arch:
+            raise ValueError("Must set device and arch, like: python setup.py bdist_wheel --device='a3' --arch='arm'")
+
     def run(self):
         build_ext_cmd = self.get_finalized_command('build_ext')
-        ext_path = ''
-        for ext in build_ext_cmd.extensions:
-            ext_path = build_ext_cmd.get_ext_fullpath(ext.name)
-            ext_path = os.path.abspath(os.path.dirname(ext_path))
+        build_ext_cmd.device = self.device
+        build_ext_cmd.arch = self.arch
+        self.run_command('build_ext')
+        if self.arch == 'arm':
+            ext_path = get_base_dir() + "/build/lib.linux-aarch64-cpython-311/"
+        else:
+            ext_path = get_base_dir() + "/build/lib.linux-x86_64-cpython-311/"
         if len(ext_path) == 0:
             print("Build wheel failed, not found path.")
             exit(1)
@@ -348,6 +366,8 @@ class BuildDistWheel(bdist_wheel):
                     os.remove(path)
         global BUILD_TEST_FILE
         BUILD_TEST_FILE = False
+
+        self.skip_build = True
         super().run()
 
 class TestUT(Command):
