@@ -161,9 +161,13 @@ std::vector<SequenceStatus> BlockCapacityGuard::get_all_sequence_status() {
 
 uint32_t BlockCapacityGuard::num_block_need_to_use_for(
     const Sequence* sequence) {
-  uint32_t remaining_decode_token_num =
+  constexpr uint32_t MIN_BLOCKS_REQUIRED = 1;
+  int32_t remaining_decode_token_num =
       FLAGS_max_decode_token_per_sequence -
       (sequence->num_tokens() - sequence->num_prompt_tokens());
+  if (remaining_decode_token_num < 0) {
+    return MIN_BLOCKS_REQUIRED;
+  }
   uint32_t remaining_decode_block_num =
       ceiling_div(remaining_decode_token_num, block_size());
   return remaining_decode_block_num;
@@ -387,7 +391,6 @@ void ZeroEvictionScheduler::handle_prefill_requests(
                                 &allocated_seqs,
                                 remaining_token_budget,
                                 remaining_seq_budget)) {
-      is_satisfied_for_prefill = false;
       break;
     }
 
@@ -424,136 +427,6 @@ void ZeroEvictionScheduler::handle_prefill_requests(
   if (!running_sequences_.empty()) {
     last_step_prefill_ = true;
   }
-}
-
-std::vector<Batch> ZeroEvictionScheduler::prepare_batch() {
-  Timer timer;
-  // propogate new requests to waiting_priority_queue_
-  // Include those requests that are preempted by others.
-  std::shared_ptr<Request> request;
-  // read from request queue then push to waiting priority queue
-  while (request_queue_.read(request)) {
-    CHECK(request);
-
-    // expand sequences to the target number if prefix cache is disabled.
-    if (!enable_prefix_cache_) {
-      // expand sequences to the target number
-      request->expand_sequences(false);
-    }
-
-    if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
-      waiting_priority_queue_.push(request);
-    } else {
-      // request from prefill instance in disagge pd mode.
-      running_requests_.emplace_back(request);
-    }
-  }
-
-  // handle finished/cancelled requests
-  std::vector<std::shared_ptr<Request>> finished_requests;
-  for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
-       ++it) {
-    std::shared_ptr<Request> request = *it;
-    if (request->finished() || request->cancelled()) {
-      block_manager_->deallocate(request.get());
-      // release the ownership of the request
-      finished_requests.emplace_back(request);
-      // finished request is set to nullptr
-      *it = nullptr;
-      // if a decode request ends, its kv_cache will be released, and prefill
-      // can try to reschedule requests.
-      is_satisfied_for_prefill = true;
-    }
-  }
-
-  // insert running requests back to the running queue, iterating from
-  // the highest priority to the lowest
-  // insert running requests back to the running queue, iterating from
-  // the highest priority to the lowest
-  if (last_step_prefill_) {
-    // insert all requests to the back of running_queue_
-    // 1. last step is prefill step:
-    // new prefill has high priority, but these requests has lower priority
-    // then existed requests in running_queue_ in decoding stage.
-    // so we need to push them to the back of running_queue_.
-    for (auto it = running_requests_.begin(); it != running_requests_.end();
-         ++it) {
-      // finished request is set to nullptr
-      if (*it == nullptr) {
-        continue;
-      }
-      handle_running_requests(*it);
-      running_queue_.push_back(*it);
-    }
-  } else {
-    // insert all requests to the front of running_queue_
-    // 2. last step is decode step:
-    // We need to traverse running_requests_ array in reverse order.
-    // Because there may be some unexecuted requests with
-    // lower priorities remaining in the running_queue_.
-    // For the requests in running_requests_,
-    // their priorities are all higher than those of the
-    // remaining requests. Therefore, the `push_front`
-    // method needs to be used.
-    //
-    for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
-         ++it) {
-      // finished request is set to nullptr
-      if (*it == nullptr) {
-        continue;
-      }
-      handle_running_requests(*it);
-      running_queue_.push_front(*it);
-    }
-  }
-
-  // clear previous batch
-  last_step_prefill_ = false;
-  running_requests_.clear();
-  running_sequences_.clear();
-  running_sequences_budgets_.clear();
-
-  // remaining budget for the current batch
-  size_t remaining_token_budget = options_.max_tokens_per_batch();
-  size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
-  size_t num_preempted_requests = 0;
-
-  if (is_satisfied_for_prefill) {
-    handle_prefill_requests(
-        remaining_token_budget, remaining_seq_budget, finished_requests);
-  }
-
-  handle_decode_requests(
-      remaining_token_budget, remaining_seq_budget, num_preempted_requests);
-
-  if (!finished_requests.empty()) {
-    response_processor_->process_completed_requests(finished_requests);
-  }
-
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(running_sequences_, running_sequences_budgets_);
-
-  if (!batches[0].empty()) {
-    // only update the scheduling latency when there are requests to process
-    COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
-  }
-
-  GAUGE_SET(num_pending_requests,
-            pending_requests_.load(std::memory_order_relaxed));
-  GAUGE_SET(num_running_requests, running_requests_.size());
-  GAUGE_SET(num_waiting_requests,
-            waiting_priority_queue_.size() + running_queue_.size());
-  GAUGE_SET(num_preempted_requests, num_preempted_requests);
-
-  GAUGE_SET(num_running_sequences, running_sequences_.size());
-
-  GAUGE_SET(kv_cache_utilization_perc, block_manager_->kv_cache_utilization());
-  GAUGE_SET(num_blocks_in_prefix_cache,
-            util::min(block_manager_->num_blocks_in_prefix_cache()));
-  GAUGE_SET(num_free_blocks, util::max(block_manager_->num_free_blocks()));
-  GAUGE_SET(num_used_blocks, util::min(block_manager_->num_used_blocks()));
-  return batches;
 }
 
 }  // namespace xllm

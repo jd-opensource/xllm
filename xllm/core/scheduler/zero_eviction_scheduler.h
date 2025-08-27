@@ -114,20 +114,11 @@ class ZeroEvictionScheduler final : public ContinuousScheduler {
   ZeroEvictionScheduler(Engine* engine, const Options& options);
   virtual ~ZeroEvictionScheduler();
 
-  std::vector<Batch> prepare_batch_test() { return prepare_batch(); }
-
-  uint32_t get_waiting_requests_num() const override {
-    return waiting_priority_queue_.size();
-  };
-
  private:
   void handle_prefill_requests(
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       std::vector<std::shared_ptr<Request>>& finished_requests) override;
-
-  // build a batch of requests from the priority queue
-  std::vector<Batch> prepare_batch() override;
 
   bool try_allocate_block_for(std::shared_ptr<Request> request,
                               std::vector<Sequence*>* prefill_sequences,
@@ -137,12 +128,7 @@ class ZeroEvictionScheduler final : public ContinuousScheduler {
                               size_t remaining_token_budget,
                               size_t remaining_seq_budget);
 
-  // is last step handle prefill requests
-  bool last_step_prefill_ = false;
-
   std::unique_ptr<BlockCapacityGuard> block_capacity_guard_;
-
-  bool is_satisfied_for_prefill = true;
 };
 
 }  // namespace xllm

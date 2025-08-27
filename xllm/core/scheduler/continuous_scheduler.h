@@ -173,6 +173,9 @@ class ContinuousScheduler : public Scheduler {
   // so they can be preemeted in scheduler.
   std::deque<std::shared_ptr<Request>> running_queue_;
 
+  // is last step handle prefill requests
+  bool last_step_prefill_ = false;
+
   void handle_abnormal_request(
       const std::vector<Sequence*>& candidate_sequences,
       const std::vector<size_t>& candidate_token_budgets,
@@ -217,8 +220,6 @@ class ContinuousScheduler : public Scheduler {
   std::vector<std::shared_ptr<Request>> last_running_requests_;
   std::vector<Sequence*> last_running_sequences_;
   bool is_first_step_ = true;
-  // is last step handle prefill requests
-  bool last_step_prefill_ = false;
 };
 
 }  // namespace xllm
