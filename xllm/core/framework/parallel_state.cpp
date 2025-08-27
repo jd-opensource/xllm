@@ -16,10 +16,14 @@ limitations under the License.
 #include "parallel_state.h"
 
 #include <c10/core/Device.h>
+#if defined(USE_NPU)
 #include <hccl/hccl_types.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #include <torch_npu/csrc/core/npu/NPUStream.h>
+
+#include "hccl/hccl.h"
+#endif
 #pragma GCC diagnostic pop
 #include <glog/logging.h>
 #include <torch/torch.h>
@@ -29,11 +33,11 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/model/model_args.h"
-#include "hccl/hccl.h"
 
 namespace xllm {
 
 namespace {
+#if defined(USE_NPU)
 #define HCCLCHECK(cmd)                                               \
   do {                                                               \
     HcclResult r = cmd;                                              \
@@ -41,6 +45,7 @@ namespace {
       LOG(FATAL) << "Failed, HCCL error :" << HcclGetErrorString(r); \
     }                                                                \
   } while (0)
+#endif
 inline bool is_npu(const at::Tensor& tensor) {
   if (!tensor.defined()) {
     return false;
@@ -59,6 +64,7 @@ at::Tensor flatten_for_scatter_gather(std::vector<at::Tensor>& tensors) {
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return at::empty(sizes, t.options());
 }
+#if defined(USE_NPU)
 HcclDataType to_hccl_data_type(const torch::Tensor& input) {
   const auto type = input.scalar_type();
   switch (type) {
@@ -84,6 +90,7 @@ HcclDataType to_hccl_data_type(const torch::Tensor& input) {
       TORCH_CHECK(false, "Unconvertible HCCL type ", type);
   }
 }
+#endif
 void check_input(torch::Tensor input) {
   CHECK(is_npu(input)) << "input should be npu tensor";
   CHECK(input.is_contiguous()) << "input should be contiguous";
@@ -165,6 +172,7 @@ torch::Tensor scatter(torch::Tensor input, const ParallelArgs& parallel_args) {
 
 }  // namespace parallel_state
 
+#if defined(USE_NPU)
 std::vector<std::unique_ptr<ProcessGroup>> ProcessGroup::create_process_groups(
     const std::vector<torch::Device>& devices) {
   CHECK(!devices.empty()) << "devices should not be empty";
@@ -187,7 +195,15 @@ std::vector<std::unique_ptr<ProcessGroup>> ProcessGroup::create_process_groups(
   }
   return process_groups;
 }
+#elif defined(USE_MLU)
+// TODO(mlu): implement create_process_groups for mlu
+std::vector<std::unique_ptr<ProcessGroup>> ProcessGroup::create_process_groups(
+    const std::vector<torch::Device>& devices) {
+  return {};
+}
+#endif
 
+#if defined(USE_NPU)
 ProcessGroupHCCL::ProcessGroupHCCL(int rank,
                                    int world_size,
                                    const torch::Device& device,
@@ -238,5 +254,5 @@ void ProcessGroupHCCL::allgather(torch::Tensor input,
   //   outputs[i].copy_(flattened_output[i], /*non_blocking=*/true);
   // }
 }
-
+#endif
 }  // namespace xllm

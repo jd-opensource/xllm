@@ -16,12 +16,9 @@ limitations under the License.
 #include "spec_kv_cache_transfer.h"
 
 #include <glog/logging.h>
-#if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
-#endif
 
 namespace xllm {
-#if defined(USE_NPU)
 namespace {
 #define CHECK_LDD_RET(ret)  \
   CHECK(ret == LLM_SUCCESS) \
@@ -40,7 +37,6 @@ const std::map<torch::ScalarType, ge::DataType> kScalarTypeToDtype = {
     {torch::kDouble, ge::DT_DOUBLE},
 };
 }  // namespace
-#endif
 
 SpecKVCacheTransfer::SpecKVCacheTransfer(const std::string& device_ip,
                                          const uint16_t listen_port,
@@ -82,7 +78,6 @@ void SpecKVCacheTransfer::_allocate_kv_cache(
     bool is_spec,
     Cache& k_cache,
     Cache& v_cache) {
-#if defined(USE_NPU)
   if (is_spec) {
     spec_num_layers_ = num_layers;
   } else {
@@ -114,7 +109,6 @@ void SpecKVCacheTransfer::_allocate_kv_cache(
     value_cache = v_torch_tensors[i];
     kv_caches.emplace_back(key_cache, value_cache);
   }
-#endif
 }
 
 void SpecKVCacheTransfer::allocate_embedding(
@@ -122,7 +116,6 @@ void SpecKVCacheTransfer::allocate_embedding(
     const std::vector<int64_t>& embedding_shape,
     torch::ScalarType dtype,
     torch::Device device) {
-#if defined(USE_NPU)
   const auto& it = kScalarTypeToDtype.find(dtype);
   CHECK(it != kScalarTypeToDtype.cend()) << "Unsupport data type : " << dtype;
   auto ge_dtype = it->second;
@@ -137,17 +130,14 @@ void SpecKVCacheTransfer::allocate_embedding(
   CHECK_EQ(embed_host_cache_.cache_desc.num_tensors, 1);
   embed_host_cache_.tensor_addrs.emplace_back(reinterpret_cast<uint64_t>(
       embedding_allocator->get_embeddings_cache_ptr()));
-#endif
 }
 
 void SpecKVCacheTransfer::free_kv_cache() {
-#if defined(USE_NPU)
   llm_data_dist_->DeallocateCache(k_cache_.cache_id);
   llm_data_dist_->DeallocateCache(v_cache_.cache_id);
   llm_data_dist_->DeallocateCache(spec_k_cache_.cache_id);
   llm_data_dist_->DeallocateCache(spec_v_cache_.cache_id);
   llm_data_dist_->DeallocateCache(embed_cache_.cache_id);
-#endif
 }
 
 bool SpecKVCacheTransfer::pull_kv_blocks(
@@ -157,7 +147,6 @@ bool SpecKVCacheTransfer::pull_kv_blocks(
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks) {
-#if defined(USE_NPU)
   CacheIndex k_cache_index{src_cluster_id, src_k_cache_id};
   CHECK_LDD_RET(llm_data_dist_->PullKvBlocks(
       k_cache_index, k_cache_, src_blocks, dst_blocks));
@@ -178,10 +167,8 @@ bool SpecKVCacheTransfer::pull_kv_blocks(
                                              {src_blocks.back()},
                                              {dst_blocks.back()}));
   return true;
-#endif
 }
 
-#if defined(USE_NPU)
 bool SpecKVCacheTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
@@ -289,9 +276,7 @@ bool SpecKVCacheTransfer::push_embed_blocks(
   return true;
 #endif
 }
-#endif
 
-#if defined(USE_NPU)
 folly::SemiFuture<bool> SpecKVCacheTransfer::push_kv_blocks_async(
     const std::vector<TransferKVInfo>& transfer_kv_infos,
     const ParallelArgs& parallel_args,
@@ -316,7 +301,6 @@ folly::SemiFuture<bool> SpecKVCacheTransfer::push_kv_blocks_async(
   });
   return future;
 }
-#endif
 
 void SpecKVCacheTransfer::merge_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,

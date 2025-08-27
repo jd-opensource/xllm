@@ -106,8 +106,8 @@ void BatchInputBuilder::process_single_sequence(int32_t seq_index) {
   state_.seq_lens.push_back(seq_len);
   state_.q_seq_lens.push_back(q_seq_len);
 #elif defined(USE_MLU)
-  state_.seq_lens.push_back(seq_lens.back() + seq_len);
-  state_.q_seq_lens.push_back(q_seq_lens.back() + q_seq_len);
+  state_.seq_lens.push_back(state_.seq_lens.back() + seq_len);
+  state_.q_seq_lens.push_back(state_.q_seq_lens.back() + q_seq_len);
 #endif
   // Process tokens and positions
   extract_tokens_and_positions(sequence, n_kv_cache_tokens, seq_len);

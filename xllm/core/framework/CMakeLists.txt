@@ -18,32 +18,29 @@ cc_library(
   NAME 
     parallel_state
   HDRS
-    $<$<BOOL:${USE_NPU}>:mapping_npu.h>
-    $<$<BOOL:${USE_NPU}>:parallel_state.h>
-    model_parallel.h
+    mapping_npu.h
+    parallel_state.h
   SRCS
-    $<$<BOOL:${USE_NPU}>:mapping_npu.cpp>
-    $<$<BOOL:${USE_NPU}>:parallel_state.cpp>
-    model_parallel.cpp
+    mapping_npu.cpp
+    parallel_state.cpp
   DEPS
     :common
     torch
     glog::glog
 )
 
-if(USE_NPU)
-  cc_test(
-    NAME 
-      mapping_npu_test
-    SRCS
-      mapping_npu_test.cpp
-    DEPS
-      parallel_state
-      absl::synchronization
-      absl::time
-      GTest::gtest_main
-  )
-endif()
+
+cc_test(
+  NAME 
+    mapping_npu_test
+  SRCS
+    mapping_npu_test.cpp
+  DEPS
+    parallel_state
+    absl::synchronization
+    absl::time
+    GTest::gtest_main
+)
 
 cc_library(
   NAME 

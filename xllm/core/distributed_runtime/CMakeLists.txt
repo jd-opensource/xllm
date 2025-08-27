@@ -26,6 +26,7 @@ cc_library(
     glog::glog
     proto::xllm_proto
     absl::flat_hash_set
+    :parallel_state
 )
 
 cc_library(

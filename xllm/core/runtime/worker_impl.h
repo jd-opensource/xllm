@@ -24,8 +24,10 @@ limitations under the License.
 #include "executor.h"
 #include "forward_params.h"
 #include "framework/context.h"
+#if defined(USE_NPU)
 #include "framework/kv_cache/hccl_kv_cache_transfer.h"
 #include "framework/kv_cache/llm_data_dist_transfer.h"
+#endif
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
 #include "framework/model/model_input_params.h"
@@ -70,9 +72,11 @@ class WorkerImpl {
       uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
+#if defined(USE_NPU)
   virtual bool allocate_kv_cache_with_transfer(
       std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
+#endif
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -200,12 +204,16 @@ class WorkerImpl {
 
   InstanceRole instance_role_ = InstanceRole::DEFAULT;
 
+#if defined(USE_NPU)
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
+#endif
 
   // a walkaround to avoid compilation conflict involved by
   // c10_npu::NPUStream related files.
+#if defined(USE_NPU)
   struct NPUStreamHelper;
   std::unique_ptr<NPUStreamHelper> npu_stream_helper_;
+#endif
 
   bool is_spec_draft_ = false;
 

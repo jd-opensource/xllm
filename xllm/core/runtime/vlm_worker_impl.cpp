@@ -21,11 +21,14 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/core/npu/NPUFunctions.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
 
+#include "pytorch/adapter/utils/utils.h"
+#endif
 #include <memory>
 #include <optional>
 #include <utility>
@@ -36,7 +39,6 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
-#include "pytorch/adapter/utils/utils.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
 
@@ -53,11 +55,15 @@ bool VLMWorkerImpl::init_model(torch::ScalarType dtype,
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
   int currentDevId = device_.index();
+#if defined(USE_NPU)
   int ret = aclrtSetDevice(currentDevId);
   if (ret != 0) {
     LOG(ERROR) << "ACL set device id:" << currentDevId
                << " failed, ret:" << ret;
   }
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu set device
+#endif
 
   // initialize model
   ModelArgs tmp_model_args = model_args;

@@ -19,7 +19,9 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
+#if defined(USE_NPU)
 #include "kernels/npu/xllm_ops/top_k_top_p.h"
+#endif
 
 namespace xllm {
 

@@ -21,10 +21,14 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/core/npu/NPUFunctions.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
+
+#include "pytorch/adapter/utils/utils.h"
+#endif
 
 #include <memory>
 #include <optional>
@@ -38,7 +42,6 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
-#include "pytorch/adapter/utils/utils.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
 

@@ -62,6 +62,7 @@ void apply_top_k_top_p(torch::Tensor& logits,
                        const torch::Tensor& top_k,
                        const torch::Tensor& top_p) {
   if (top_k.defined() && top_p.defined()) {
+#if defined(USE_NPU)
     auto max_value = std::numeric_limits<int64_t>::max();
 
     auto processed_top_k =
@@ -69,6 +70,7 @@ void apply_top_k_top_p(torch::Tensor& logits,
             top_k <= 0, torch::tensor(max_value).to(top_k.device()), top_k)
             .to(torch::kInt32);
     xllm_ops::top_k_top_p(logits, processed_top_k, top_p);
+#endif
   } else {
     auto [sorted_logits, logits_idx] =
         logits.sort(/*dim=*/-1, /*descending=*/true);

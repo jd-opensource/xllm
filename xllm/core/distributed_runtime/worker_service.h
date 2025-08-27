@@ -126,8 +126,6 @@ class WorkerService : public proto::DistributeWorker {
   std::unique_ptr<NPUStreamHelper> npu_stream_helper_;
 #elif defined(USE_MLU)
   // TODO(mlu): implement mlu stream helper
-  struct MLUStreamHelper;
-  std::unique_ptr<MLUStreamHelper> mlu_stream_helper_;
 #endif
 };
 

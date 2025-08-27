@@ -16,7 +16,9 @@ limitations under the License.
 #pragma once
 
 #include <absl/container/flat_hash_set.h>
+#if defined(USE_NPU)
 #include <hccl/hccl.h>
+#endif
 
 #include <unordered_map>
 
@@ -41,14 +43,18 @@ class CollectiveService : public proto::Collective {
  private:
   DISALLOW_COPY_AND_ASSIGN(CollectiveService);
 
+#if defined(USE_NPU)
   void to_proto_list(const std::vector<HcclRootInfo>& src,
                      proto::CommUniqueIdList* dst);
   void from_proto_list(const proto::CommUniqueIdList& src,
                        std::vector<HcclRootInfo>* dst);
+#endif
 
  private:
   int total_num_ = 0;
+#if defined(USE_NPU)
   std::vector<HcclRootInfo> root_infos_;
+#endif
   std::mutex mutex_;
   std::unordered_map<int32_t, std::string> addrs_map_;
 };

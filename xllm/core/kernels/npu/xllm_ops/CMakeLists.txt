@@ -18,7 +18,7 @@ cc_library(
     ${SOURCE_FILES}
   DEPS
     atb
-    $<$<BOOL:${USE_NPU}>:torch_npu>
+    torch_npu
     gflags::gflags
     nlohmann_json::nlohmann_json
     opapi

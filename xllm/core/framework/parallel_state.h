@@ -16,7 +16,6 @@ limitations under the License.
 #pragma once
 
 #include <c10/core/Device.h>
-#include <hccl/hccl_types.h>
 #include <torch/torch.h>
 
 #include <memory>
@@ -24,9 +23,13 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/macros.h"
-#include "hccl/hccl.h"
 #include "mapping_npu.h"
+#if defined(USE_NPU)
+#include <hccl/hccl_types.h>
+
+#include "hccl/hccl.h"
 #include "xllm_kernels/models/base/param/mapping.h"
+#endif
 
 namespace xllm {
 
@@ -60,6 +63,7 @@ struct ParallelArgs {
         process_group_(process_group),
         ep_size_(ep_size) {}
 
+#if defined(USE_NPU)
   ParallelArgs(int32_t rank,
                int32_t world_size,
                int32_t dp_size,
@@ -78,6 +82,7 @@ struct ParallelArgs {
         mapping_(mapping),
         dispatchAndCombinecommDomain_(dispatchAndCombinecommDomain),
         dispatchAndCombineHcclComm_(dispatchAndCombineHcclComm) {}
+#endif
 
   ParallelArgs(int32_t rank,
                int32_t world_size,
@@ -114,6 +119,7 @@ struct ParallelArgs {
   // ep size
   PROPERTY(int32_t, ep_size) = 1;
 
+#if defined(USE_NPU)
   // atb hccl mapping json data
   PROPERTY(nlohmann::json, mapping_data);
 
@@ -125,6 +131,7 @@ struct ParallelArgs {
 
   // atb hccl dispatchAndCombineHcclComm
   PROPERTY(HcclComm, dispatchAndCombineHcclComm);
+#endif
 };
 
 class ProcessGroup {
@@ -164,6 +171,7 @@ class ProcessGroup {
   torch::Device device_;
 };
 
+#if defined(USE_NPU)
 class ProcessGroupHCCL : public ProcessGroup {
  public:
   // Constructor.
@@ -183,5 +191,6 @@ class ProcessGroupHCCL : public ProcessGroup {
  private:
   HcclComm comm_ = nullptr;
 };
+#endif
 
 }  // namespace xllm

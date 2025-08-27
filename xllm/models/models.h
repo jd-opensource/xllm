@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#if defined(USE_NPU)
 #include "deepseek_v2.h"      // IWYU pragma: keep
 #include "deepseek_v2_mtp.h"  // IWYU pragma: keep
 #include "deepseek_v3.h"      // IWYU pragma: keep
@@ -28,4 +29,5 @@ limitations under the License.
 #if defined(USE_A2)
 #include "qwen2_5_vl.h"  // IWYU pragma: keep
 #include "qwen3_moe.h"   // IWYU pragma: keep
+#endif
 #endif

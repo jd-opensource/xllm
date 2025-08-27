@@ -19,7 +19,9 @@ limitations under the License.
 #include <c10/core/Device.h>
 #include <c10/core/ScalarType.h>
 #include <torch/torch.h>
+#if defined(USE_NPU)
 #include <torch_npu/torch_npu.h>
+#endif
 
 #include <tuple>
 

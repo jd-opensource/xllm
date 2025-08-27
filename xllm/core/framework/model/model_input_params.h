@@ -18,7 +18,9 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#if defined(USE_NPU)
 #include "common/layer_synchronizer.h"
+#endif
 #include "framework/request/mm_data.h"
 #include "npu_dp_ep_padding.h"
 #include "util/tensor_helper.h"
@@ -50,7 +52,9 @@ struct ModelInputParams {
     params.prefill_seq_len = prefill_seq_len;
     params.embedding_ids = embedding_ids;
     params.dp_ep_padding_data = dp_ep_padding_data;
+#if defined(USE_NPU)
     params.layer_synchronizer = layer_synchronizer;
+#endif
 
     return params;
   }
@@ -110,7 +114,9 @@ struct ModelInputParams {
   // embedding ids of each sequence
   std::vector<int32_t> embedding_ids;
 
+#if defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
+#endif
 
   DpEpPaddingData dp_ep_padding_data;
 };

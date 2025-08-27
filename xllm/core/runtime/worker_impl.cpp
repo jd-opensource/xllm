@@ -21,10 +21,15 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/core/npu/NPUFunctions.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
+
+#include "kernels/npu/xllm_ops/replace_token.h"
+#include "pytorch/adapter/utils/utils.h"
+#endif
 
 #include <memory>
 #include <optional>
@@ -40,8 +45,6 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
-#include "kernels/npu/xllm_ops/replace_token.h"
-#include "pytorch/adapter/utils/utils.h"
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
@@ -126,6 +129,7 @@ bool WorkerImpl::allocate_kv_cache(
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+#if defined(USE_NPU)
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
@@ -151,11 +155,13 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
     allocate_kv_cache(kv_cache_shape);
     kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
   }
+#endif
 
   status_ = Status::READY;
   return true;
 }
 
+#if defined(USE_NPU)
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
@@ -178,6 +184,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   status_ = Status::READY;
   return true;
 }
+#endif
 
 void WorkerImpl::get_device_info(std::string& device_ip, uint16_t& port) {
   device_ip = options_.device_ip().value();
@@ -188,19 +195,23 @@ void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 std::string& addr,
                                 int64_t& k_cache_id,
                                 int64_t& v_cache_id) {
+#if defined(USE_NPU)
   kv_cache_transfer_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
+#endif
 }
 
 bool WorkerImpl::link_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports) {
+#if defined(USE_NPU)
   for (int32_t i = 0; i < cluster_ids.size(); ++i) {
     if (!kv_cache_transfer_->link_cluster(
             cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
       return false;
     }
   }
+#endif
   return true;
 }
 
@@ -208,12 +219,14 @@ bool WorkerImpl::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
                                 const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
+#if defined(USE_NPU)
   for (int32_t i = 0; i < cluster_ids.size(); ++i) {
     if (!kv_cache_transfer_->unlink_cluster(
             cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
       return false;
     }
   }
+#endif
   return true;
 }
 
@@ -282,7 +295,7 @@ void WorkerImpl::update_last_step_output(
 
 ForwardInput WorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
-#if defined(USE_A3)
+#if defined(USE_A3) || defined(USE_MLU)
   auto& flatten_tokens = inputs.token_ids;
   auto neg_mask = (flatten_tokens < 0);
   auto clamped_neg_indices = torch::clamp(-flatten_tokens, 0);
@@ -468,12 +481,15 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
     int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks) {
+#if defined(USE_NPU)
   return kv_cache_transfer_->pull_kv_blocks_async(src_cluster_id,
                                                   src_addr,
                                                   src_k_cache_id,
                                                   src_v_cache_id,
                                                   src_blocks,
                                                   dst_blocks);
+#endif
+  return false;
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(

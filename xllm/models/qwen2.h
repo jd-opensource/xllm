@@ -16,7 +16,9 @@ limitations under the License.
 
 #pragma once
 
+#if defined(USE_NPU)
 #include "core/layers/npu/qwen2_decoder_layer.h"
+#endif
 #include "qwen_base.h"
 
 // QWen2 model compatible with huggingface weights

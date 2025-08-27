@@ -17,30 +17,23 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 #include <gflags/gflags.h>
+#include <mstx/ms_tools_ext.h>
 #include <torch/torch.h>
 
 #include <string>
 #include <typeinfo>
 #include <vector>
 
-// test
-#include <mstx/ms_tools_ext.h>
-
 #include "core/common/global_flags.h"
 #include "core/framework/context.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
-#if defined(USE_NPU)
 #include "core/layers/npu/attn_mask.h"
 #include "core/layers/npu/llm_head.h"
 #include "core/layers/npu/pos_embedding.h"
 #include "core/layers/npu/rms_norm.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
-#elif defined(USE_MLU)
-#include "core/layers/embedding.h"
-#include "core/layers/normalization.h"
-#endif
 #include "model_registry.h"
+#include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm::hf {
 
@@ -109,7 +102,6 @@ torch::Tensor get_qwen_concat_rotary_embedding(
   return torch::cat(cos_sin, -1);
 }
 
-#if defined(USE_NPU)
 template <typename DecoderType>
 class QWenDecoderLayerImplBase : public torch::nn::Module {
  public:
@@ -158,9 +150,6 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
  private:
   DecoderType decoder_layer_{nullptr};
 };
-#elif defined(USE_MLU)
-// TODO(mlu): implement the QWenDecoderLayerImplBase for mlu
-#endif
 
 template <typename DecoderLayerType>
 class QWenModelImplBase : public torch::nn::Module {
@@ -181,7 +170,6 @@ class QWenModelImplBase : public torch::nn::Module {
                                 torch::Tensor positions,
                                 std::vector<KVCache>& kv_caches,
                                 const ModelInputParams& input_params) {
-#if defined(USE_NPU)
     auto inputs_embeds = input_params.input_embedding;
     // test
     torch::Tensor h;
@@ -275,20 +263,6 @@ class QWenModelImplBase : public torch::nn::Module {
     }
     h = norm_(h, context_, work_space_, 0);
     return h;
-#elif defined(USE_MLU)
-    torch::Tensor h;
-    if (inputs_embeds.defined()) {
-      h = inputs_embeds;
-    } else {
-      h = embed_tokens_(tokens);
-    }
-    torch::Tensor residual;
-    for (size_t i = 0; i < layers_.size(); i++) {
-      auto& layer = layers_[i];
-      h = layer(h, positions, residual, kv_caches[i], input_params);
-    }
-    return norm_(h, residual);
-#endif
   }
 
   // load the weight from the checkpoint
@@ -312,7 +286,6 @@ class QWenModelImplBase : public torch::nn::Module {
     norm_->verify_loaded_weights(prefix + "norm.");
   }
 
-#if defined(USE_NPU)
   virtual void merge_loaded_weights() {
     // test
     embed_tokens_->merge_loaded_weights();
@@ -327,10 +300,8 @@ class QWenModelImplBase : public torch::nn::Module {
   virtual void set_word_embedding(AtbWordEmbedding& word_embedding) {
     embed_tokens_ = word_embedding;
   }
-#endif
 
  protected:
-#if defined(USE_NPU)
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
   torch::Tensor cos_sin_;
@@ -346,12 +317,6 @@ class QWenModelImplBase : public torch::nn::Module {
   //  ParallelEmbedding embed_tokens_{nullptr};
   AtbWordEmbedding embed_tokens_{nullptr};
   RmsNorm norm_{nullptr};
-#endif
-
-#ifdef USE_MLU
-  RMSNormResidual norm_{nullptr};
-  ParallelEmbedding embed_tokens_{nullptr};
-#endif
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
@@ -369,7 +334,6 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     // register submodules
     model_ = register_module("model", QWenModelType(context));
 
-#if defined(USE_NPU)
     auto options = context.get_tensor_options();
     device_id = options.device().index();
     work_space_ = AtbWorkspace(options.device());
@@ -378,15 +342,6 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     context_->SetExecuteStream(stream);
     context_->SetAsyncTilingCopyStatus(true);
     lm_head_ = register_module("lm_head", LlmHead(context));
-#elif defined(USE_MLU)
-    lm_head_ = register_module("lm_head",
-                               ColumnParallelLinear(args.hidden_size(),
-                                                    args.vocab_size(),
-                                                    /*bias=*/false,
-                                                    /*gather_output=*/true,
-                                                    parallel_args,
-                                                    options));
-#endif
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -412,14 +367,7 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     // select tokens if provided
     auto h = hidden_states;
     // test
-#if defined(USE_NPU)
     return lm_head_(hidden_states, seleted_idxes, context_, work_space_, 0);
-#elif defined(USE_MLU)
-    if (seleted_idxes.defined()) {
-      h = h.index_select(/*dim=*/0, seleted_idxes);
-    }
-    return lm_head_(h);
-#endif
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader,
@@ -435,7 +383,6 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
             state_dict->get_dict_with_prefix(prefix + "lm_head."));
       }
     }
-#if defined(USE_NPU)
     // verify
     model_->verify_loaded_weights(prefix + "model.");
     lm_head_->verify_loaded_weights(prefix + "lm_head.");
@@ -443,10 +390,8 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     model_->merge_loaded_weights();
     // test
     lm_head_->merge_loaded_weights();
-#endif
   }
 
-#if defined(USE_NPU)
   virtual LlmHead get_lm_head() { return lm_head_; }
 
   virtual void set_lm_head(LlmHead& head) { lm_head_ = head; }
@@ -458,7 +403,6 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
   virtual void set_word_embedding(AtbWordEmbedding& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
-#endif
 
  protected:
   // parameter members, must be registered
@@ -466,13 +410,9 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
   int device_id = 0;
   bool tie_word_embeddings{false};
   // test
-#if defined(USE_NPU)
   LlmHead lm_head_{nullptr};
   AtbWorkspace work_space_;
   atb::Context* context_;
-#elif defined(USE_MLU)
-  ColumnParallelLinear lm_head_{nullptr};
-#endif
 };
 
 }  // namespace xllm::hf

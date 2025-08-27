@@ -30,6 +30,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
+#include "framework/mapping_npu.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
@@ -38,9 +39,7 @@ limitations under the License.
 #include "util/net.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
-
 #if defined(USE_NPU)
-#include "framework/mapping_npu.h"
 #include "hccl/hccl.h"
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
@@ -59,10 +58,14 @@ void WorkerServer::create_server(const runtime::Options& options,
                                  int local_rank,
                                  int32_t ep_size) {
   int device_id = device.index();
+#if defined(USE_NPU)
   int ret = aclrtSetDevice(device_id);
   if (ret != 0) {
     LOG(ERROR) << "ACL set device id: " << device_id << " failed, ret:" << ret;
   }
+#elif defined(USE_MLU)
+// TODO(mlu): implement mlu device set
+#endif
 
   auto worker_global_rank = global_rank;
   // TODO: FIXME Later
@@ -125,6 +128,7 @@ void WorkerServer::create_server(const runtime::Options& options,
       FLAGS_rank_tablefile, world_size, worker_global_rank, mapping_options);
 
   auto mapping_data = mapping_npu.to_json();
+#if defined(USE_NPU)
   atb_speed::base::Mapping mapping;
   mapping.ParseParam(mapping_data);
   mapping.InitCommDomain(FLAGS_communication_backend);
@@ -150,6 +154,10 @@ void WorkerServer::create_server(const runtime::Options& options,
                                                  mapping,
                                                  dispatchAndCombinecommDomain,
                                                  dispatchAndCombineHcclComm);
+#elif defined(USE_MLU)
+  parallel_args = std::make_unique<ParallelArgs>(
+      worker_global_rank, world_size, dp_size, nullptr, ep_size);
+#endif
 
   WorkerType worker_type =
       (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;

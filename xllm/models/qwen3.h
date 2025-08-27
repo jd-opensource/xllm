@@ -45,7 +45,6 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-#if defined(USE_NPU)
     work_space_ = AtbWorkspace(options.device());
     embed_tokens_ = register_module("embed_tokens", AtbWordEmbedding(context));
     norm_ = register_module("norm", RmsNorm(context));
@@ -71,10 +70,6 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
     // context_->SetExecuteStream(atb_speed::Utils::GetCurrentStream());
     context_->SetExecuteStream(stream);
     context_->SetAsyncTilingCopyStatus(true);
-#elif defined(USE_MLU)
-    norm_ = register_module("norm", RMSNormResidual(context));
-    embed_tokens_ = register_module("embed_tokens", ParallelEmbedding(context));
-#endif
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
       auto block = QWen3DecoderLayer(context);

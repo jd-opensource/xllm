@@ -17,7 +17,7 @@ cc_library(
   DEPS
     glog::glog
     torch
-    xllm_ops
+    $<$<BOOL:${USE_NPU}>:xllm_ops>
 )
 
 cc_test(
@@ -34,5 +34,11 @@ cc_test(
     glog::glog
 )
 target_link_libraries(rejection_sampler_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
-target_link_libraries(rejection_sampler_test PUBLIC Python::Python ascendcl hccl c_sec nnopbase)
+target_link_libraries(rejection_sampler_test
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>
+                      $<$<BOOL:${USE_NPU}>:nnopbase>)
 add_dependencies(rejection_sampler_test brpc-static)

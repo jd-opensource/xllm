@@ -13,14 +13,14 @@ cc_library(
     kv_cache_event.h
     kv_cache_transfer.h
     $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.h>
-    spec_kv_cache_transfer.h
+    $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.h>
   SRCS
     embedding_allocator.cpp
     $<$<BOOL:${USE_NPU}>:hccl_kv_cache_transfer.cpp>
     kv_cache.cpp
     kv_cache_transfer.cpp
     $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.cpp>
-    spec_kv_cache_transfer.cpp
+    $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.cpp>
   DEPS
     :common
     $<$<BOOL:${USE_NPU}>:graph>

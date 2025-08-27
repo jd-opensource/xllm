@@ -28,15 +28,15 @@ cc_library(
   HDRS
     model_registry.h
     models.h
-    deepseek_v2.h
-    deepseek_v2_mtp.h
-    llama.h
-    minicpmv.h
-    qwen2.h
-    qwen2_5_vl.h
-    qwen3.h
-    qwen3_moe.h
-    qwen_base.h
+    $<$<BOOL:${USE_NPU}>:deepseek_v2.h>
+    $<$<BOOL:${USE_NPU}>:deepseek_v2_mtp.h>
+    $<$<BOOL:${USE_NPU}>:llama.h>
+    $<$<BOOL:${USE_NPU}>:minicpmv.h>
+    $<$<BOOL:${USE_NPU}>:qwen2.h>
+    $<$<BOOL:${USE_NPU}>:qwen2_5_vl.h>
+    $<$<BOOL:${USE_NPU}>:qwen3.h>
+    $<$<BOOL:${USE_NPU}>:qwen3_moe.h>
+    $<$<BOOL:${USE_NPU}>:qwen_base.h>
   SRCS
     model_registry.cpp
   DEPS

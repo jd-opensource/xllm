@@ -111,10 +111,12 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path) {
 
   if (draft_impl_->get_status() == WorkerImpl::Status::LOADED) {
     // Deepseek MTP
+#if defined(USE_NPU)
     auto head = impl_->get_lm_head();
     draft_impl_->set_lm_head(head);
     auto word_embedding = impl_->get_word_embedding();
     draft_impl_->set_word_embedding(word_embedding);
+#endif
   }
   return result;
 }
@@ -135,6 +137,7 @@ bool SpeculativeWorkerImpl::allocate_kv_cache(
   }
 }
 
+#if defined(USE_NPU)
 bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
     const uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
@@ -162,6 +165,7 @@ bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
   }
   return true;
 }
+#endif
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
     const ForwardInput& inputs) {
@@ -230,12 +234,15 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
       /*dim=*/0, inputs.sampling_params.selected_token_idxes);
   CHECK_EQ(embeddings.size(0), output.sample_output.next_tokens.size(0));
   embedding_allocator_->write(inputs.input_params.embedding_ids, embeddings);
+#if defined(USE_NPU)
   if (kv_cache_transfer_) {
     kv_cache_transfer_->copy_blocks(inputs.input_params.embedding_ids,
                                     /*h2d*/ true);
   }
+#endif
   output.sample_output.embeddings = torch::Tensor();
 
+#if defined(USE_NPU)
   if (options_.instance_role() == InstanceRole::PREFILL &&
       options_.kv_cache_transfer_mode() == "PUSH" &&
       !inputs.transfer_kv_infos.empty()) {
@@ -243,6 +250,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
         inputs.transfer_kv_infos, context_.get_parallel_args(), nullptr, true);
     auto out = std::move(future).get();
   }
+#endif
   return output;
 }
 
@@ -280,10 +288,12 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
   // More work need to support n-gram and native speculative decoding.
   ForwardInput draft_inputs = inputs;
   // get embedding cache
+#if defined(USE_NPU)
   if (kv_cache_transfer_) {
     kv_cache_transfer_->copy_blocks(inputs.input_params.embedding_ids,
                                     /*h2d*/ false);
   }
+#endif
   torch::Tensor embeddings =
       embedding_allocator_->read(draft_inputs.input_params.embedding_ids);
   draft_inputs.input_params.mm_data =
@@ -343,10 +353,12 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
   embedding_allocator_->write_validate(inputs.input_params.embedding_ids,
                                        val_output.next_tokens.to(torch::kCPU),
                                        val_output.embeddings);
+#if defined(USE_NPU)
   if (kv_cache_transfer_) {
     kv_cache_transfer_->copy_blocks(inputs.input_params.embedding_ids,
                                     /*h2d*/ true);
   }
+#endif
   val_output.embeddings = torch::Tensor();
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_) {

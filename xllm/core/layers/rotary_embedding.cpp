@@ -19,7 +19,9 @@ limitations under the License.
 #include <c10/core/ScalarType.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#if defined(USE_NPU)
 #include <torch_npu/torch_npu.h>
+#endif
 
 #include <boost/algorithm/string.hpp>
 #include <cmath>

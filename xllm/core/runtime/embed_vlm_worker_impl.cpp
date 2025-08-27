@@ -25,6 +25,8 @@ limitations under the License.
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
+
+#include "pytorch/adapter/utils/utils.h"
 #endif
 
 #include <memory>
@@ -38,7 +40,6 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "options.h"
-#include "pytorch/adapter/utils/utils.h"
 #include "util/timer.h"
 
 namespace xllm {

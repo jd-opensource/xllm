@@ -17,7 +17,9 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "framework/kv_cache/embedding_allocator.h"
+#if defined(USE_NPU)
 #include "framework/kv_cache/spec_kv_cache_transfer.h"
+#endif
 #include "runtime/llm_worker_impl.h"
 #include "runtime/options.h"
 
@@ -71,9 +73,11 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 
+#if defined(USE_NPU)
   bool allocate_kv_cache_with_transfer(
       const uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+#endif
 
   void get_cache_info(uint64_t& cluster_id,
                       std::string& addr,
@@ -148,6 +152,8 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   std::unique_ptr<LLMWorkerImpl> draft_impl_;
 
   std::shared_ptr<EmbeddingAllocator> embedding_allocator_;
+#if defined(USE_NPU)
   std::shared_ptr<SpecKVCacheTransfer> kv_cache_transfer_;
+#endif
 };
 }  // namespace xllm

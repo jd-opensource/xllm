@@ -32,7 +32,12 @@ cc_binary(
 target_link_libraries(xllm PRIVATE brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf ${OpenCV_LIBS})
 add_dependencies(xllm brpc-static)
 
-set(COMMON_LIBS Python::Python ascendcl hccl c_sec nnopbase ms_tools_ext)
+if(USE_NPU)
+  set(COMMON_LIBS Python::Python ascendcl hccl c_sec nnopbase ms_tools_ext)
+elseif(USE_MLU)
+  set(COMMON_LIBS Python::Python)
+endif()
+
 if(USE_MSPTI)
   list(APPEND COMMON_LIBS mspti)
 endif()

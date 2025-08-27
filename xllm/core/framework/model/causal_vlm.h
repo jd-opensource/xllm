@@ -57,6 +57,7 @@ class CausalVLMImpl : public CausalVLM {
     model_->load_model(std::move(loader));
   }
 
+#if defined(USE_NPU)
   hf::LlmHead get_lm_head() override { return model_->get_lm_head(); };
 
   void set_lm_head(hf::LlmHead& head) override { model_->set_lm_head(head); };
@@ -68,6 +69,7 @@ class CausalVLMImpl : public CausalVLM {
   void set_word_embedding(hf::AtbWordEmbedding& embedding) override {
     model_->set_word_embedding(embedding);
   };
+#endif
 
   torch::Device device() const override { return options_.device(); }
 

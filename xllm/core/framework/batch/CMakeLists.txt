@@ -33,5 +33,11 @@ cc_test(
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )
-target_link_libraries(batch_test PUBLIC Python::Python ascendcl hccl c_sec nnopbase)
+target_link_libraries(batch_test
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>
+                      $<$<BOOL:${USE_NPU}>:nnopbase>)
 

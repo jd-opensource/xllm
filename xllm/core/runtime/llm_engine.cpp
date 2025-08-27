@@ -20,7 +20,9 @@ limitations under the License.
 #include <absl/time/clock.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+#if defined(USE_NPU)
 #include <hccl/hccl.h>
+#endif
 #include <sys/sysinfo.h>
 #include <unistd.h>
 
@@ -59,7 +61,9 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   for (const auto device : devices) {
     CHECK_EQ(device.type(), device_type)
         << "All devices should be the same type";
+#if defined(USE_NPU)
     FLAGS_enable_atb_comm_multiprocess = (options.nnodes() > 1);
+#endif
   }
   FLAGS_enable_mla = options.enable_mla();
 
