@@ -25,6 +25,7 @@ limitations under the License.
 #include "minicpmv.h"         // IWYU pragma: keep
 #include "qwen2.h"            // IWYU pragma: keep
 #include "qwen3.h"            // IWYU pragma: keep
+#include "qwen3_embedding.h"  // IWYU pragma: keep
 #include "qwen_base.h"        // IWYU pragma: keep
 #if defined(USE_A2)
 #include "qwen2_5_vl.h"  // IWYU pragma: keep

@@ -132,7 +132,18 @@ void ATBBase::set_weight(const StateDict& state_dict,
                          int dim) {
   for (const auto& [name, tensor] : state_dict) {
     if (absl::EndsWith(name, tensor_name)) {
-      if (parallel_args_.world_size() <= 1) {
+      bool use_non_sharded =
+          (parallel_args_.world_size() <= 1) ||
+          (tensor.size(dim) % parallel_args_.world_size() != 0);
+      if (use_non_sharded) {
+        if (tensor.size(dim) % parallel_args_.world_size() != 0 &&
+            parallel_args_.world_size() > 1) {
+          LOG(WARNING) << "Tensor '" << state_dict.prefix() << tensor_name
+                       << "' dimension " << dim << " (size=" << tensor.size(dim)
+                       << ") is not divisible by world_size="
+                       << parallel_args_.world_size()
+                       << ". Using non-sharded tensor loading.";
+        }
         at::Tensor mutable_tensor = tensor;
         correct_tensor_dtype(mutable_tensor, tensor_name);
         at_weight_tensors_[weight_position] = mutable_tensor.to(device_);

@@ -420,7 +420,10 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
                              const torch::Tensor& embeddings,
                              proto::ForwardOutput* pb_forward_output) {
   Timer timer;
-  const int32_t num_seqs = next_tokens.size(0);
+  int32_t num_seqs = next_tokens.size(0);
+  if (embeddings.defined() && embeddings.numel() > 0) {
+    num_seqs = std::max(num_seqs, static_cast<int32_t>(embeddings.size(0)));
+  }
   int32_t output_idx = 0;
   pb_forward_output->mutable_outputs()->Reserve(num_seqs);
   for (int32_t output_idx = 0; output_idx < num_seqs; ++output_idx) {
@@ -476,8 +479,9 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
         const auto token_embeddings =
             curr_embeddings.defined() ? curr_embeddings[i] : curr_embeddings;
         if (token_embeddings.defined()) {
-          Slice<float> embedding_slice = {token_embeddings.data_ptr<float>(),
-                                          token_embeddings.size(0)};
+          Slice<float> embedding_slice = {
+              token_embeddings.data_ptr<float>(),
+              static_cast<size_t>(token_embeddings.size(0))};
           ADD_VECTOR_TO_PROTO(pb_token.mutable_embeddings()->mutable_vals(),
                               embedding_slice);
         }
@@ -485,32 +489,43 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
       }
       *pb_forward_output->mutable_outputs()->Add() = pb_seq_out;
     } else {
-      const auto token = build_token(
-          output_idx, next_tokens, logprobs, top_tokens, top_logprobs);
       proto::SquenceOutput pb_seq_out;
       pb_seq_out.mutable_tokens()->Reserve(1);
       proto::Token pb_token;
-      pb_token.set_id(token.id);
-      if (token.logprob.has_value()) {
-        pb_token.set_logprob(token.logprob.value());
+
+      // Handle case where next_tokens might be empty but embeddings have data
+      if (next_tokens.defined() && next_tokens.numel() > 0) {
+        const auto token = build_token(
+            output_idx, next_tokens, logprobs, top_tokens, top_logprobs);
+        pb_token.set_id(token.id);
+        if (token.logprob.has_value()) {
+          pb_token.set_logprob(token.logprob.value());
+        } else {
+          pb_token.set_empty(true);
+        }
+        pb_token.mutable_top_tokens()->Reserve(token.top_tokens.size());
+        for (auto it = token.top_tokens.begin(); it != token.top_tokens.end();
+             ++it) {
+          pb_token.add_top_tokens(*it);
+        }
+        pb_token.mutable_top_logprobs()->Reserve(token.top_logprobs.size());
+        for (auto it = token.top_logprobs.begin();
+             it != token.top_logprobs.end();
+             ++it) {
+          pb_token.add_top_logprobs(*it);
+        }
       } else {
+        // For embedding-only requests, set a placeholder token ID
+        pb_token.set_id(-1);
         pb_token.set_empty(true);
       }
-      pb_token.mutable_top_tokens()->Reserve(token.top_tokens.size());
-      for (auto it = token.top_tokens.begin(); it != token.top_tokens.end();
-           ++it) {
-        pb_token.add_top_tokens(*it);
-      }
-      pb_token.mutable_top_logprobs()->Reserve(token.top_logprobs.size());
-      for (auto it = token.top_logprobs.begin(); it != token.top_logprobs.end();
-           ++it) {
-        pb_token.add_top_logprobs(*it);
-      }
+
       const auto token_embeddings =
           embeddings.defined() ? embeddings[output_idx] : embeddings;
       if (token_embeddings.defined()) {
-        Slice<float> embedding_slice = {token_embeddings.data_ptr<float>(),
-                                        token_embeddings.size(0)};
+        Slice<float> embedding_slice = {
+            token_embeddings.data_ptr<float>(),
+            static_cast<size_t>(token_embeddings.size(0))};
         ADD_VECTOR_TO_PROTO(pb_token.mutable_embeddings()->mutable_vals(),
                             embedding_slice);
       }

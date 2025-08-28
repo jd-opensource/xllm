@@ -341,7 +341,6 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
           if (forward_outputs) {
             DCHECK(forward_outputs.has_value()) << "Failed to execute model";
             const auto& sample_output = forward_outputs.value().sample_output;
-
             {
 #if defined(USE_NPU)
               c10::StreamGuard streamGuard(
@@ -351,8 +350,10 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
 #endif
               // only driver worker (rank=0) need to fill this
               // [num_seq, ..., embed_dim] FloatTensor
-              embeddings = safe_to(sample_output.embeddings, torch::kCPU, true);
-              embeddings = safe_to(embeddings, torch::kFloat32, true);
+              embeddings =
+                  safe_to(sample_output.embeddings,
+                          torch::dtype(torch::kFloat32).device(torch::kCPU),
+                          true);
 
               // [num_seq]
               next_tokens =

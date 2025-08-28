@@ -110,6 +110,12 @@ std::optional<ForwardOutput> EmbedWorkerImpl::step(const ForwardInput& inputs) {
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
   }
+#if defined(USE_NPU)
+  aclrtSynchronizeStream(
+      c10_npu::getCurrentNPUStream(device_.index()).stream());
+#elif defined(USE_MLU)
+  // TODO(mlu): implement mlu synchronize stream
+#endif
   return output;
 }
 

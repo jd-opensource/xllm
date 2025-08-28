@@ -161,8 +161,8 @@ void WorkerServer::create_server(const runtime::Options& options,
 
   WorkerType worker_type =
       (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
-  CHECK(worker_type == WorkerType::LLM)
-      << "Multi Node only support LLM Now, but get task type = "
+  CHECK(worker_type == WorkerType::LLM || worker_type == WorkerType::ELM)
+      << "Multi Node only support LLM and ELM Now, but get task type = "
       << options.task_type();
   std::unique_ptr<Worker> worker =
       std::make_unique<Worker>(*parallel_args, device, options, worker_type);
@@ -180,7 +180,7 @@ WorkerServer::WorkerServer(int local_worker_idx,
                            const torch::Device& device,
                            const runtime::Options& options,
                            WorkerType worker_type) {
-  if (worker_type == WorkerType::LLM) {
+  if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM) {
     // TODO: Use Process or thread.
     worker_thread_ = std::make_unique<std::thread>(&WorkerServer::create_server,
                                                    this,
