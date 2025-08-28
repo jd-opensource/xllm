@@ -72,7 +72,7 @@ bash start_pd.sh decode
 ```
 
 The start_pd.sh script is as follows:
-```bash title="start_pd.sh" linenums="1" hl_lines="36 58"
+```bash title="start_pd.sh" linenums="1" hl_lines="34 56 30 53"
 export PYTHON_INCLUDE_PATH="$(python3 -c 'from sysconfig import get_paths; print(get_paths()["include"])')"
 export PYTHON_LIB_PATH="$(python3 -c 'from sysconfig import get_paths; print(get_paths()["include"])')"
 export PYTORCH_NPU_INSTALL_PATH=/usr/local/libtorch_npu/  # NPU version PyTorch path
@@ -139,7 +139,7 @@ fi
 
 Important notes:
 
-- For PD disaggregation when specifying NPU Device, the corresponding `device_ip` is required. This is different for each card. You can see this by executing the following command on the physical machine outside the container environment. The value after `address_{i}=` displayed is the `device_ip` corresponding to `NPU {i}`.
+- For PD disaggregation when specifying NPU Device, the corresponding `device_ip` is required. This is different for each device. You can see this by executing the following command on the physical machine outside the container environment. The value after `address_{i}=` displayed is the `device_ip` corresponding to `NPU {i}`.
 ```bash
 sudo cat /etc/hccn.conf
 ```

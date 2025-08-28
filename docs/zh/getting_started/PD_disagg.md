@@ -58,7 +58,7 @@ bash start_pd.sh
 bash start_pd.sh decode
 ```
 start_pd.sh脚本如下:
-```bash title="start_pd.sh" linenums="1" hl_lines="36 58"
+```bash title="start_pd.sh" linenums="1" hl_lines="34 56 30 53"
 export PYTHON_INCLUDE_PATH="$(python3 -c 'from sysconfig import get_paths; print(get_paths()["include"])')"
 export PYTHON_LIB_PATH="$(python3 -c 'from sysconfig import get_paths; print(get_paths()["include"])')"
 export PYTORCH_NPU_INSTALL_PATH=/usr/local/libtorch_npu/  # NPU 版 PyTorch 路径

@@ -5,9 +5,11 @@ site_url: !ENV READTHEDOCS_CANONICAL_URL
 repo_name: jd-opensource/xllm
 repo_url: https://github.com/jd-opensource/xllm
 
+edit_uri: edit/main/docs/
+
 # Copyright
 copyright: Copyright &copy; 2025 xLLM Team
-# docs_dir: docs/zh
+# docs_dir: docs/en
 # Configuration
 theme:
   name: material
@@ -46,7 +48,7 @@ theme:
     - media: "(prefers-color-scheme)"
       toggle:
         icon: material/link
-        name: 切换亮色模式
+        name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: custom
@@ -54,7 +56,7 @@ theme:
       toggle:
         # icon: material/toggle-switch
         icon: material/eye
-        name: 切换暗色模式
+        name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: black
@@ -62,7 +64,7 @@ theme:
       toggle:
         # icon: material/toggle-switch-off
         icon: material/eye-outline
-        name: 切换到系统偏好
+        name: Switch to system preference
     # primary: custom
     # accent: custom
   font:
@@ -96,8 +98,8 @@ extra_css:
 
 # Additional configuration
 extra:
-  # static:
-  #   - assets/logo.png
+  source:
+    path: https://github.com/jd-opensource/xllm/blob/main/docs/
   status:
     new: Recently added
     deprecated: Deprecated
@@ -110,7 +112,7 @@ extra:
     - icon: gitcodeai
       link: https://gitcode.com/xLLM-AI/xllm
     - icon: fontawesome/brands/docker
-      link: https://hub.docker.com/r/squidfunk/mkdocs-material/
+      link: https://hub.docker.com/r/xllm/xllm-ai
     - icon: email-fill
       link: https://github.com/jd-opensource/xllm
     # - icon: fontawesome/brands/python
@@ -178,42 +180,46 @@ extra_javascript:
   - mkdocs/javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 nav:
-  - 主页: zh/index.md
-  - 开始使用:
-    - zh/getting_started/compile.md
-    - 快速开始:
-      - 在线服务: 
-        - zh/getting_started/single_node.md
-        - zh/getting_started/multi_node.md
-        - zh/getting_started/PD_disagg.md
-      - 多模态支持:
-        - zh/getting_started/start_vlm_service.md
-  - 功能介绍:
-    - 概览:
-      - zh/features/overview.md
-    - 功能列表:
-      - 运行时:
-        - zh/features/async_schedule.md
-        - zh/features/multi_streams.md
-      - 调度算法:
-        - zh/features/continuous_scheduler.md
-        - zh/features/chunked_scheduler.md
-        - zh/features/zero_evict_scheduler.md
-        - zh/features/prefix_cache.md
-      - 分布式:
-        - zh/features/disagg_pd.md
-      - 算子:
-        - zh/features/groupgemm.md
-        - zh/features/ppmatmul.md
-        - zh/features/topk_topP.md
-      - KV存储管理:
-        - zh/features/global_kvcache.md
-        - zh/features/xtensor_memory.md
-      - 多模态:
-        - zh/features/multimodal.md
-      - 进阶指南:
-        - 投机推理: zh/features/mtp.md
-        - MOE负载均衡: zh/features/eplb.md
-        - ACLGraph: zh/features/acl_graph.md
-  - CLI参考:
-    - zh/cli_reference.md
+  - Home: en/index.md
+  - Getting Started:
+    - en/getting_started/compile.md
+    - Quick Start:
+      - Online Service: 
+        - en/getting_started/single_node.md
+        - en/getting_started/multi_node.md
+        - en/getting_started/PD_disagg.md
+      - Multimodal Support:
+        - en/getting_started/start_vlm_service.md
+    - en/getting_started/scripts.md
+  - Features:
+    - Overview:
+      - en/features/overview.md
+    - Feature List:
+      - Runtime:
+        - en/features/async_schedule.md
+        - en/features/multi_streams.md
+      - Scheduler:
+        - en/features/continuous_scheduler.md
+        - en/features/chunked_scheduler.md
+        - en/features/zero_evict_scheduler.md
+        - en/features/prefix_cache.md
+      - Distributed:
+        - en/features/disagg_pd.md
+      - Operators:
+        - en/features/groupgemm.md
+        - en/features/ppmatmul.md
+        - en/features/topk_topP.md
+      - Memory Management:
+        - en/features/global_kvcache.md
+        - en/features/xtensor_memory.md
+      - Multimodal:
+        - en/features/multimodal.md
+      - MoE Optimization:
+        - en/features/moe_params.md
+        - en/features/eplb.md
+      - Advanced Guides:
+        - Speculative Inference: en/features/mtp.md
+        - EPLB: en/features/eplb.md
+        - ACLGraph: en/features/acl_graph.md
+  - CLI Reference:
+    - en/cli_reference.md

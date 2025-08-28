@@ -1,4 +1,4 @@
-# EPLB Load Balancing
+# EPLB
 
 ## Background
 

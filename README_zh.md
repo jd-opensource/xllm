@@ -14,11 +14,14 @@ limitations under the License. -->
 
 [English](./README.md) | [中文](./README_zh.md)
 
+<div align="center">
+<img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
+    
+[![Document](https://img.shields.io/badge/Document-black?logo=html5&labelColor=grey&color=red)](https://xllm.readthedocs.io/zh-cn/latest/) [![Docker](https://img.shields.io/badge/Docker-black?logo=docker&labelColor=grey&color=%231E90FF)](https://hub.docker.com/r/xllm/xllm-ai) [![License](https://img.shields.io/badge/license-Apache%202.0-brightgreen?labelColor=grey)](https://opensource.org/licenses/Apache-2.0) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jd-opensource/xllm) 
+    
+</div>
 
-<p align="center">
-    <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
-</p>
-
+---------------------
 <p align="center">
 | <a href="https://xllm.readthedocs.io/zh-cn/latest/"><b>Documentation</b></a> | 
 </p>
@@ -26,12 +29,14 @@ limitations under the License. -->
 
 ## 1. 简介
 
-**xLLM** 是一个高效且易用的开源智能推理框架，为模型在国产芯片上的推理提供企业级服务保障与高性能引擎计算能力。
+**xLLM** 是一个高效的开源大模型推理框架，专为**国产芯片**优化设计，提供企业级的服务部署，使得性能更高、成本更低。该框架采用**服务-引擎分离的推理架构**，通过服务层的在离线请求弹性调度、动态PD分离、EPD混合机制及高可用容错设计，结合引擎层的多流并行计算、图融合优化、投机推理、动态负载均衡及全局KV缓存管理，实现推理效率突破性提升。xLLM整体架构和功能如下图所示：
 
-#### 背景
-当前，百亿至万亿参数规模的大语言模型正快速部署于智能客服、实时推荐、内容生成等核心业务场景，对国产计算硬件的高效支持已成为低成本推理部署的核心需求。现有推理引擎难以有效适配国产芯片等专用加速器的架构特性，硬件计算单元利用率低、MoE 架构下的负载不均衡与通信开销瓶颈、kv 缓存管理困难等问题，制约了请求的高效推理与系统的可扩展性。xLLM 推理引擎提升了 “通信 - 计算 - 存储” 全链路的资源利用效率，为大语言模型在实际业务中的规模化落地提供了关键技术支撑。
+<div align="center">
+<img src="docs/assets/xllm_arch.png" alt="xllm_arch" style="width:80%; height:auto;">
+</div>
 
---- 
+**xLLM** 已支持主流大模型（如 *DeepSeek-V3.1*，*Qwen2/3*等）在国产芯片上的高效部署，助力企业实现高性能、低成本的 AI 大模型应用落地。xLLM已全面落地京东零售核心业务，涵盖智能客服、风控、供应链优化、广告推荐等多种场景。
+
 
 ## 2. 核心特性
 xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与算法驱动的决策控制，联合加速推理过程，实现高吞吐、低延迟的分布式推理服务。
@@ -45,10 +50,6 @@ xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与
 - 基于参数化与多图缓存方法的动态尺寸适配，提升静态图灵活性；
 - 受管控的显存池，保证地址安全可复用；
 - 集成适配性能关键的自定义算子（如 *PageAttention*, *AllReduce*）。
-
-**算子优化**
-- *GroupMatmul* 优化，提升计算效率；
-- *Chunked Prefill* 优化，支撑长序列输入。
 
 **高效显存优化**
 - 离散物理内存与连续虚拟内存的映射管理；
@@ -179,18 +180,18 @@ python setup.py bdist_wheel
 
 ## 6. 社区支持
 如果你在xLLM的开发或使用过程中遇到任何问题，欢迎在项目的Issue区域提交可复现的步骤或日志片段。
-如果您有企业内部Slack，请直接联系xLLM Core团队。
-
-欢迎沟通和联系我们:
+如果您有企业内部Slack，请直接联系xLLM Core团队。另外，我们建立了一个微信群，可以在[这里](https://qr.link/JZaROS)找到我们的群聊二维码图片或访问以下活码。欢迎沟通和联系我们:
 
 <div align="center">
-  <img src="xxx" alt="contact" width="50%" height="50%">
+  <img src="docs/assets/wechat_qrcode1.png" alt="qrcode1" width="30%" />
+  <img src="docs/assets/wechat_qrcode2.png" alt="qrcode2" width="30%" />
 </div>
 
 ---
 
 ## 7. 致谢
 本项目的实现得益于以下开源项目: 
+
 - [ScaleLLM](https://github.com/vectorch-ai/ScaleLLM) - 采用了ScaleLLM中构图方式和借鉴Runtime执行。
 - [Mooncake](https://github.com/kvcache-ai/Mooncake) - 依赖构建了多级KV Cache管理机制。
 - [brpc](https://github.com/apache/brpc) - 依赖brpc构建了高性能http service。
@@ -198,7 +199,16 @@ python setup.py bdist_wheel
 - [safetensors](https://github.com/huggingface/safetensors) - 依赖其c binding safetensors能力。
 - [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - xLLM的C++版本JSON解析器，参考Python与Go实现的设计思路。
 
+感谢以下合作的高校实验室：
+
+- [THU-MIG](https://ise.thss.tsinghua.edu.cn/mig/projects.html)（清华大学软件学院、北京信息科学与技术国家研究中心）
+- USTC-Cloudlab（中国科学技术大学云计算实验室）
+- [Beihang-HiPO](https://github.com/buaa-hipo)（北京航空航天大学HiPO研究组）
+- PKU-DS-LAB（北京大学数据结构实验室）
+- PKU-NetSys-LAB（北京大学网络系统实验室）
+
 感谢以下为xLLM作出贡献的[开发者](https://github.com/jd-opensource/xllm/graphs/contributors)
+
 <a href="https://github.com/jd-opensource/xLLM/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=jd-opensource/xllm" />
 </a>

@@ -5,6 +5,8 @@ site_url: !ENV READTHEDOCS_CANONICAL_URL
 repo_name: jd-opensource/xllm
 repo_url: https://github.com/jd-opensource/xllm
 
+edit_uri: edit/main/docs/
+
 # Copyright
 copyright: Copyright &copy; 2025 xLLM Team
 # docs_dir: docs/zh
@@ -96,8 +98,9 @@ extra_css:
 
 # Additional configuration
 extra:
-  # static:
-  #   - assets/logo.png
+  source:
+    path: https://github.com/jd-opensource/xllm/blob/main/docs/
+
   status:
     new: Recently added
     deprecated: Deprecated
@@ -110,7 +113,7 @@ extra:
     - icon: gitcodeai
       link: https://gitcode.com/xLLM-AI/xllm
     - icon: fontawesome/brands/docker
-      link: https://hub.docker.com/r/squidfunk/mkdocs-material/
+      link: https://hub.docker.com/r/xllm/xllm-ai
     - icon: email-fill
       link: https://github.com/jd-opensource/xllm
     # - icon: fontawesome/brands/python
@@ -188,6 +191,7 @@ nav:
         - zh/getting_started/PD_disagg.md
       - 多模态支持:
         - zh/getting_started/start_vlm_service.md
+    - zh/getting_started/scripts.md
   - 功能介绍:
     - 概览:
       - zh/features/overview.md
@@ -211,9 +215,11 @@ nav:
         - zh/features/xtensor_memory.md
       - 多模态:
         - zh/features/multimodal.md
+      - MoE优化:
+        - zh/features/moe_params.md
+        - zh/features/eplb.md
       - 进阶指南:
         - 投机推理: zh/features/mtp.md
-        - MOE负载均衡: zh/features/eplb.md
         - ACLGraph: zh/features/acl_graph.md
       - xLLM Service概览: zh/features/xllm_service_overview.md
   - CLI参考:

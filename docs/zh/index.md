@@ -2,13 +2,17 @@
 hide:
   - navigation
 ---
-
+<style>
+.md-content h1:first-of-type {
+    display: none;
+}
+</style>
 
 <div style="text-align:center">
     <img src="../assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
 </div>
 
-## 1. 简介
+## 简介
 
 **xLLM** 是一个高效且易用的开源智能推理框架，为模型在国产芯片上的推理提供企业级服务保障与高性能引擎计算能力。
 
@@ -17,7 +21,7 @@ hide:
 
 --- 
 
-## 2. 核心特性
+## 核心特性
 xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与算法驱动的决策控制，联合加速推理过程，实现高吞吐、低延迟的分布式推理服务。
 
 ### 全图化/多层流水线执行编排

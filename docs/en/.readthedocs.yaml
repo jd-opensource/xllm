@@ -12,7 +12,8 @@ build:
   jobs:
     pre_build:
       - echo "copy index page"
-      - cp docs/zh/index.md docs/index.md
+      - cp docs/en/index.md docs/index.md
+      - sed -i 's#../assets/#assets/#g' docs/index.md
 
 # Build documentation with Mkdocs
 mkdocs:

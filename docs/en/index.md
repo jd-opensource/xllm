@@ -1,8 +1,19 @@
+---
+hide:
+  - navigation
+---
+<style>
+.md-content h1:first-of-type {
+    display: none;
+}
+</style>
+
+
 <div style="text-align:center">
     <img src="../assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
 </div>
 
-## 1. Project Overview
+## Project Overview
 
 **xLLM** is an efficient and user-friendly LLM intelligent inference framework that provides enterprise-level service guarantees and high-performance engine computing capabilities for model inference on domestic AI accelerators.
 
@@ -12,7 +23,7 @@
 LLM with parameter scales ranging from tens of billions to trillions are being rapidly deployed in core business scenarios such as intelligent customer service, real-time recommendation, and content generation. Efficient support for domestic computing hardware has become a core requirement for low-cost inference deployment. Existing inference engines struggle to effectively adapt to the architectural characteristics of dedicated accelerators like domestic chips. Performance issues such as low utilization of computing units, load imbalance and communication overhead bottlenecks under the MoE architecture, and difficulties in kv cache management have restricted the efficient inference of requests and the scalability of the system. The xLLM inference engine improves the resource efficiency of the entire  "communication-computation-storage" performance link and it provides crucial technical support for the large-scale implementation of LLM in real-world business scenarios.
 
 
-## 2. Core Features
+## Core Features
 
 **xLLM** delivers robust intelligent computing capabilities. By leveraging hardware system optimization and algorithm-driven decision control, it jointly accelerates the inference process, enabling high-throughput, low-latency distributed inference services.
 

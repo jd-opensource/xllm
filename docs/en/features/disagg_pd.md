@@ -4,6 +4,7 @@ LLM online inference services typically need to meet two performance metrics: TT
 
 ## Introduction
 The xLLM PD Separation feature is primarily implemented through the following three modules:  
+
 - **etcd**: Stores metadata such as instance information.  
 - **xLLM Service**: Schedules requests and manages all computing instances.  
 - **xLLM**: Handles request computation instances.  
@@ -14,6 +15,7 @@ The overall architecture is shown below:
 ## Usage
 ### Preparation
 #### Install Dependencies
+
 - **etcd**: [etcd Installation](https://etcd.io/docs/v3.6/install/)  
 - **xLLM Service**: Refer to xLLM Service compilation documentation.
 - **xLLM**: Refer to xLLM compilation documentation.
@@ -38,9 +40,10 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
 3. Start xLLM  
 - Taking Qwen2-7B as an example  
     - Start Prefill Instance
-        ``` shell linenums="1" hl_lines="11"
+        ``` shell linenums="1" hl_lines="10"
         ./xllm --model=Qwen2-7B-Instruct \
                --port=8010 \
+               --devices="npu:0" \
                --master_node_addr="127.0.0.1:18888" \
                --enable_prefix_cache=false \
                --enable_chunked_prefill=false \
@@ -55,20 +58,26 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
         ```
     - Start Decode Instance 
         ```shell linenums="1" hl_lines="11"  
-        ./xllm --model=Qwen2-7B-Instruct \  
-               --port=8020 \    
-               --master_node_addr="127.0.0.1:18898" \  
-               --enable_prefix_cache=false \  
-               --enable_chunked_prefill=false \  
-               --enable_disagg_pd=true \  
-               --instance_role=DECODE \  
-               --xservice_addr=127.0.0.1:28889 \  
+        ./xllm --model=Qwen2-7B-Instruct \
+               --port=8020 \
+               --devices="npu:1" \
+               --master_node_addr="127.0.0.1:18898" \
+               --enable_prefix_cache=false \
+               --enable_chunked_prefill=false \
+               --enable_disagg_pd=true \
+               --instance_role=DECODE \
+               --xservice_addr=127.0.0.1:28889 \
                --device_ip=xx.xx.xx.xx \  # Replace with actual Device IP  
-               --transfer_listen_port=26100 \  
-               --disagg_pd_port=7787 \  
-               --node_rank=0 \  
-               --nnodes=1  
+               --transfer_listen_port=26100 \
+               --disagg_pd_port=7787 \
+               --node_rank=0 \
+               --nnodes=1
         ```
+    Important notes:
+    
+    - For PD disaggregation when specifying NPU Device, the corresponding `device_ip` is required. This is different for each device. You can see this by executing the following command on the physical machine outside the container environment. The value after `address_{i}=` displayed is the `device_ip` corresponding to `NPU {i}`.
+
+    - `xservice_addr` must match the `rpc_server_port` of `xllm_service`
 
 ## Notice
 Disaggregated PD **does not support** enabling prefix cache or chunked prefill. These features must be disabled using the following parameters:

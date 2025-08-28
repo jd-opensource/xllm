@@ -14,9 +14,14 @@ limitations under the License. -->
 
 [English](./README.md) | [中文](./README_zh.md)
 
-<p align="center">
-    <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
-</p>
+<div align="center">
+<img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
+    
+[![Document](https://img.shields.io/badge/Document-black?logo=html5&labelColor=grey&color=red)](https://xllm.readthedocs.io/zh-cn/latest/) [![Docker](https://img.shields.io/badge/Docker-black?logo=docker&labelColor=grey&color=%231E90FF)](https://hub.docker.com/r/xllm/xllm-ai) [![License](https://img.shields.io/badge/license-Apache%202.0-brightgreen?labelColor=grey)](https://opensource.org/licenses/Apache-2.0) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jd-opensource/xllm) 
+    
+</div>
+
+---------------------
 
 <p align="center">
 | <a href="https://xllm.readthedocs.io/zh-cn/latest/"><b>Documentation</b></a> | 
@@ -24,14 +29,14 @@ limitations under the License. -->
 
 ## 1. Project Overview
 
-**xLLM** is an efficient and user-friendly LLM intelligent inference framework that provides enterprise-level service guarantees and high-performance engine computing capabilities for model inference on domestic AI accelerators.
+**xLLM** is an **efficient LLM inference framework**, specifically optimized for **Chinese AI accelerators**, enabling enterprise-grade deployment with enhanced efficiency and reduced cost. The framework adopts a **service-engine decoupled** inference architecture, achieving breakthrough efficiency through several  technologies: at the service layer, including elastic scheduling of online/offline requests, dynamic PD disaggregation, a hybrid EPD mechanism for multimodal and high-availability fault tolerance; and at the engine layer, combined with technologies such as multi-stream parallel computing, graph fusion optimization, speculative inference, dynamic load balancing and global KV cache management. The overall architecture is shown below:
 
+<div align="center">
+<img src="docs/assets/xllm_arch.png" alt="xllm_arch" style="width:80%; height:auto;">
+</div>
 
-#### Background
+**xLLM** already supports efficient deployment of mainstream large models (such as *DeepSeek-V3.1*, *Qwen2/3*, etc.) on Chinese AI accelerators, empowering enterprises to implement high-performance, low-cost AI large model applications. xLLM has been fully deployed in JD.com’s real core retail businesses, covering a variety of scenarios including intelligent customer service, risk control, supply chain optimization, ad recommendation, and more.
 
-LLM with parameter scales ranging from tens of billions to trillions are being rapidly deployed in core business scenarios such as intelligent customer service, real-time recommendation, and content generation. Efficient support for domestic computing hardware has become a core requirement for low-cost inference deployment. Existing inference engines struggle to effectively adapt to the architectural characteristics of dedicated accelerators like domestic chips. Performance issues such as low utilization of computing units, load imbalance and communication overhead bottlenecks under the MoE architecture, and difficulties in kv cache management have restricted the efficient inference of requests and the scalability of the system. The xLLM inference engine improves the resource efficiency of the entire  "communication-computation-storage" performance link and it provides crucial technical support for the large-scale implementation of LLM in real-world business scenarios.
-
----
 
 ## 2. Core Features
 
@@ -46,10 +51,6 @@ LLM with parameter scales ranging from tens of billions to trillions are being r
 - Dynamic shape adaptation based on parameterization and multi-graph caching methods to enhance the flexibility of static graph.
 - Controlled tensor memory pool to ensure address security and reusability.
 - Integration and adaptation of performance-critical custom operators (e.g., *PageAttention*, *AllReduce*).
-
-**Kernel Optimization**
-- *GroupMatmul* optimization to improve computational efficiency.
-- *Chunked Prefill* optimization to support long-sequence inputs.
 
 **Efficient Memory Optimization**
 - Mapping management between discrete physical memory and continuous virtual memory.
@@ -178,12 +179,11 @@ If you have problems about development, please check our document: **[Document](
 ---
 
 ## 6. Community & Support
-If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack.
-
-Welcome to contact us:
+If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack. Moreover, we have established a WeChat user group. You can find our group chat QR code image [here](https://qr.link/JZaROS) or visit the following live QR code. Welcome to contact us!
 
 <div align="center">
-  <img src="" alt="contact" width="50%" height="50%">
+  <img src="docs/assets/wechat_qrcode1.png" alt="qrcode1" width="30%" />
+  <img src="docs/assets/wechat_qrcode2.png" alt="qrcode2" width="30%" />
 </div>
 
 ---
@@ -199,7 +199,16 @@ This project was made possible thanks to the following open-source projects:
 - [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - Implement xLLM's C++ JSON parser with insights from Python and Go implementations.
 
 
+Thanks to the following collaborating university laboratories:
+
+- [THU-MIG](https://ise.thss.tsinghua.edu.cn/mig/projects.html) (School of Software, BNRist, Tsinghua University)
+- USTC-Cloudlab (Cloud Computing Lab, University of Science and Technology of China)
+- [Beihang-HiPO](https://github.com/buaa-hipo) (Beihang HiPO research group)
+- PKU-DS-LAB (Data Structure Laboratory, Peking University)
+- PKU-NetSys-LAB (NetSys Lab, Peking University)
+
 Thanks to all the following [developers](https://github.com/jd-opensource/xllm/graphs/contributors) who have contributed to xLLM.
+
 <a href="https://github.com/jd-opensource/xllm/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=jd-opensource/xllm" />
 </a>

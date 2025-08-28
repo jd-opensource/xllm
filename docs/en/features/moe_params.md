@@ -1,4 +1,4 @@
-# MoE Parameters Introduction
+# EP Parallelism
 
 ## Background
 

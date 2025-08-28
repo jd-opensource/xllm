@@ -461,10 +461,10 @@ if __name__ == "__main__":
         description="A high-performance inference system for large language models.",
         long_description=read_readme(),
         long_description_content_type="text/markdown",
-        url="http://xingyun.jd.com/codingRoot/9n_aigc/xllm",
+        url="https://github.com/jd-opensource/xllm",
         project_url={
-            "Homepage": "http://xingyun.jd.com/codingRoot/9n_aigc/xllm",
-            "Documentation": "https://joyspace.jd.com/teams/5xtCjbPCeztllfb9kw1Y/JkZHLd6OAy6BuQcVAIuN",
+            "Homepage": "https://xllm.readthedocs.io/zh-cn/latest/",
+            "Documentation": "https://xllm.readthedocs.io/zh-cn/latest/",
         },
         classifiers=[
             "Intended Audience :: Developers",
