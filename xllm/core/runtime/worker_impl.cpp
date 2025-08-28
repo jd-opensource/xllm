@@ -285,10 +285,13 @@ WorkerImpl::estimate_kv_cache_capacity_async() {
 
 void WorkerImpl::update_last_step_output(
     const std::optional<ForwardOutput>& output) {
-  if (output.value().sample_output.next_tokens.defined() || FLAGS_enable_eplb) {
+  if (output.value().sample_output.next_tokens.defined()) {
     last_step_output_ = std::move(output.value());
     last_step_output_valid_ = true;
   } else {
+    if(FLAGS_enable_eplb) {
+      last_step_output_ = std::move(output.value());
+    }
     last_step_output_valid_ = false;
   }
 }
@@ -332,7 +335,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
                               is_prefill);
     processed_inputs.input_params.dp_ep_padding_data = dp_ep_padding.build();
     if (FLAGS_enable_eplb) {
-      expert_load_data_.fill_(0);
+      // expert_load_data_.fill_(0);
       processed_inputs.input_params.expert_load_data = expert_load_data_;
     }
   }
@@ -391,7 +394,7 @@ ForwardOutput WorkerImpl::get_last_step_result() {
   ForwardOutput output;
   std::unique_lock<std::mutex> lock(mtx_);
   cv_.wait(lock, [this] { return is_recorded_; });
-  if (last_step_output_valid_) {
+  if (last_step_output_valid_ || FLAGS_enable_eplb) {
     output = last_step_output_;
   }
   is_recorded_ = false;
