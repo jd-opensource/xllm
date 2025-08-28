@@ -24,6 +24,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "api_service/call.h"
 #include "sequence.h"
 
 namespace xllm {
@@ -142,4 +143,15 @@ RequestOutput Request::generate_output(const Tokenizer& tokenizer) {
   return output;
 }
 
+void Request::update_connection_status() {
+  if (!state_.call_.has_value()) {
+    return;
+  }
+  Call* call = state_.call_.value();
+  bool is_disconnected = call->is_disconnected();
+  if (!is_disconnected) {
+    return;
+  }
+  cancelled_.store(true, std::memory_order_relaxed);
+}
 }  // namespace xllm

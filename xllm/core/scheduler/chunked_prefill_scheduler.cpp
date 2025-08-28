@@ -423,6 +423,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
   for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
        ++it) {
     std::shared_ptr<Request> request = *it;
+    request->update_connection_status();
     if (request->finished() || request->cancelled()) {
       block_manager_->deallocate(request.get());
       // release the ownership of the request

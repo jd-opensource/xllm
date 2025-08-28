@@ -549,6 +549,7 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
       std::move(messages),
       std::move(prompt_tokens),
       std::move(request_params),
+      call.get(),
       [call,
        model,
        master = master_,

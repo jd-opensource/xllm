@@ -198,6 +198,7 @@ void CompletionServiceImpl::process_async_impl(
       std::move(rpc_request.prompt()),
       std::move(prompt_tokens),
       std::move(request_params),
+      call.get(),
       [call,
        model,
        master = master_,

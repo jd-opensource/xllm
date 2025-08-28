@@ -426,6 +426,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
       continue;
     }
     std::shared_ptr<Request> request = *it;
+    request->update_connection_status();
     if (request->finished() || request->cancelled()) {
       block_manager_->deallocate(request.get());
       // release the ownership of the request

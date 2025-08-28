@@ -18,6 +18,7 @@ limitations under the License.
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 
+#include "api_service/call.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
 #include "core/framework/request/request_output.h"
@@ -81,12 +82,14 @@ PYBIND11_MODULE(xllm_export, m) {
            py::overload_cast<std::string,
                              std::optional<std::vector<int>>,
                              RequestParams,
+                             std::optional<Call*>,
                              OutputCallback>(&LLMMaster::handle_request),
            py::call_guard<py::gil_scoped_release>())
       .def("handle_request",
            py::overload_cast<std::vector<Message>,
                              std::optional<std::vector<int>>,
                              RequestParams,
+                             std::optional<Call*>,
                              OutputCallback>(&LLMMaster::handle_request),
            py::call_guard<py::gil_scoped_release>())
       .def("handle_batch_request",

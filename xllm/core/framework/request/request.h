@@ -83,6 +83,8 @@ class Request {
 
   RequestState& state() { return state_; }
 
+  void update_connection_status();
+
  private:
   // request create time
   absl::Time created_time_;

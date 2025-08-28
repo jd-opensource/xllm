@@ -29,6 +29,8 @@ class Call {
   std::string get_x_request_id() { return x_request_id_; }
   std::string get_x_request_time() { return x_request_time_; }
 
+  virtual bool is_disconnected() const = 0;
+
  protected:
   void init();
 

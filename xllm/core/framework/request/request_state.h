@@ -34,6 +34,8 @@ using OutputFunc = std::function<bool(const RequestOutput& output)>;
 using OutputsFunc =
     std::function<std::vector<bool>(const std::vector<RequestOutput>& outputs)>;
 
+class Call;
+
 struct RequestState final {
  public:
   RequestState() {}
@@ -52,7 +54,8 @@ struct RequestState final {
                bool enable_schedule_overlap,
                const OutputFunc& output_func,
                const OutputsFunc& outputs_func,
-               const std::string& decode_address = "");
+               const std::string& decode_address = "",
+               std::optional<Call*> call = std::nullopt);
 
   RequestState(const std::string& prompt,
                const std::vector<int32_t>& prompt_tokens,
@@ -140,6 +143,8 @@ struct RequestState final {
 
   // This will be used in enable_scheduler_overlap
   bool handle_last_token_done = false;
+
+  std::optional<Call*> call_;
 };
 
 }  // namespace xllm

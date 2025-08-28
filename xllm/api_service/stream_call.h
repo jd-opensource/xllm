@@ -107,7 +107,7 @@ class StreamCall : public Call {
     }
     io_buf_.append("\n\n");
 
-    pa_->Write(io_buf_);
+    connection_status_ |= pa_->Write(io_buf_);
     return true;
   }
 
@@ -118,6 +118,17 @@ class StreamCall : public Call {
 
     pa_->Write(io_buf_);
     return true;
+  }
+
+  bool is_disconnected() const override {
+    if (stream_) {
+      return connection_status_ != 0;
+    } else {
+      if (controller_) {
+        return controller_->IsCanceled();
+      }
+      return true;
+    }
   }
 
   const Request& request() const { return *request_; }
@@ -135,6 +146,8 @@ class StreamCall : public Call {
   butil::IOBuf io_buf_;
 
   json2pb::Pb2JsonOptions json_options_;
+
+  int connection_status_ = 0;
 };
 
 }  // namespace xllm

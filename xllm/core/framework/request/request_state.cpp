@@ -21,6 +21,8 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "api_service/call.h"
+
 namespace xllm {
 
 RequestState::RequestState(const std::string& prompt,
@@ -37,7 +39,8 @@ RequestState::RequestState(const std::string& prompt,
                            bool enable_schedule_overlap,
                            const OutputFunc& output_func,
                            const OutputsFunc& outputs_func,
-                           const std::string& decode_address)
+                           const std::string& decode_address,
+                           std::optional<Call*> call)
     : prompt(std::move(prompt)),
       prompt_tokens(std::move(prompt_tokens)),
       sampling_param(std::move(sampling_param)),
@@ -52,7 +55,8 @@ RequestState::RequestState(const std::string& prompt,
       enable_schedule_overlap(enable_schedule_overlap),
       output_func(output_func),
       outputs_func(outputs_func),
-      decode_address(decode_address) {
+      decode_address(decode_address),
+      call_(call) {
   if (best_of < n) {
     LOG(FATAL) << "best_of must greater than n.";
   }

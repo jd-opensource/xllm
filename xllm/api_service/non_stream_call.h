@@ -68,6 +68,8 @@ class NonStreamCall : public Call {
     return true;
   }
 
+  bool is_disconnected() const override { return controller_->IsCanceled(); }
+
   const Request& request() const { return *request_; }
   Response& response() { return *response_; }
   ::google::protobuf::Closure* done() { return done_; }

@@ -97,6 +97,7 @@ void EmbeddingServiceImpl::process_async_impl(
       std::move(input),
       std::nullopt,
       std::move(request_params),
+      call.get(),
       [call,
        model,
        request_id = request_params.request_id,

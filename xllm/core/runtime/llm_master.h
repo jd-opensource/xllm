@@ -35,6 +35,8 @@ limitations under the License.
 
 namespace xllm {
 
+class Call;
+
 class LLMMaster : public Master {
  public:
   explicit LLMMaster(const Options& options);
@@ -45,12 +47,14 @@ class LLMMaster : public Master {
   void handle_request(std::string prompt,
                       std::optional<std::vector<int>> prompt_tokens,
                       RequestParams sp,
+                      std::optional<Call*> call,
                       OutputCallback callback);
 
   // chat
   void handle_request(std::vector<Message> messages,
                       std::optional<std::vector<int>> prompt_tokens,
                       RequestParams sp,
+                      std::optional<Call*> call,
                       OutputCallback callback);
 
   // batch completion
@@ -92,12 +96,14 @@ class LLMMaster : public Master {
       std::string prompt,
       std::optional<std::vector<int>> prompt_tokens,
       const RequestParams& sp,
+      std::optional<Call*> call,
       OutputCallback callback);
 
   std::shared_ptr<Request> generate_request(
       const std::vector<Message>& messages,
       std::optional<std::vector<int>> prompt_tokens,
       const RequestParams& sp,
+      std::optional<Call*> call,
       OutputCallback callback);
 
  private:

@@ -27,6 +27,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "api_service/call.h"
 #include "common/metrics.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
@@ -165,6 +166,7 @@ void LLMMaster::handle_batch_request(std::vector<std::string> prompts,
                    std::nullopt,
                    // the sampling parameter may be shared
                    sps.size() == 1 ? sps[0] : std::move(sps[i]),
+                   std::nullopt,
                    [i, callback](const RequestOutput& output) {
                      output.log_request_status();
                      return callback(i, output);
@@ -186,6 +188,7 @@ void LLMMaster::handle_batch_request(
                    std::nullopt,
                    // the sampling parameter may be shared
                    sps.size() == 1 ? sps[0] : std::move(sps[i]),
+                   std::nullopt,
                    [i, callback](const RequestOutput& output) {
                      output.log_request_status();
                      return callback(i, output);
@@ -196,6 +199,7 @@ void LLMMaster::handle_batch_request(
 void LLMMaster::handle_request(std::string prompt,
                                std::optional<std::vector<int>> prompt_tokens,
                                RequestParams sp,
+                               std::optional<Call*> call,
                                OutputCallback callback) {
   scheduler_->incr_pending_requests(1);
   auto cb = [callback = std::move(callback)](const RequestOutput& output) {
@@ -207,7 +211,8 @@ void LLMMaster::handle_request(std::string prompt,
                          prompt = std::move(prompt),
                          prompt_token = std::move(prompt_tokens),
                          sp = std::move(sp),
-                         callback = std::move(cb)]() mutable {
+                         callback = std::move(cb),
+                         call]() mutable {
     AUTO_COUNTER(request_handling_latency_seconds_completion);
 
     // remove the pending request after scheduling
@@ -220,7 +225,7 @@ void LLMMaster::handle_request(std::string prompt,
     }
 
     auto request = generate_request(
-        std::move(prompt), std::move(prompt_token), sp, callback);
+        std::move(prompt), std::move(prompt_token), sp, call, callback);
     if (!request) {
       return;
     }
@@ -235,6 +240,7 @@ void LLMMaster::handle_request(std::string prompt,
 void LLMMaster::handle_request(std::vector<Message> messages,
                                std::optional<std::vector<int>> prompt_tokens,
                                RequestParams sp,
+                               std::optional<Call*> call,
                                OutputCallback callback) {
   scheduler_->incr_pending_requests(1);
   auto cb = [callback = std::move(callback)](const RequestOutput& output) {
@@ -246,7 +252,8 @@ void LLMMaster::handle_request(std::vector<Message> messages,
                          messages = std::move(messages),
                          prompt_token = std::move(prompt_tokens),
                          sp = std::move(sp),
-                         callback = std::move(cb)]() mutable {
+                         callback = std::move(cb),
+                         call]() mutable {
     AUTO_COUNTER(request_handling_latency_seconds_chat);
     // remove the pending request after scheduling
     SCOPE_GUARD([this] { scheduler_->decr_pending_requests(); });
@@ -257,7 +264,7 @@ void LLMMaster::handle_request(std::vector<Message> messages,
     }
 
     auto request =
-        generate_request(messages, std::move(prompt_token), sp, callback);
+        generate_request(messages, std::move(prompt_token), sp, call, callback);
     if (!request) {
       return;
     }
@@ -304,6 +311,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     std::string prompt,
     std::optional<std::vector<int>> prompt_tokens,
     const RequestParams& sp,
+    std::optional<Call*> call,
     OutputCallback callback) {
   if (prompt.empty()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Prompt is empty");
@@ -427,7 +435,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                          options_.enable_schedule_overlap(),
                          callback,
                          nullptr,
-                         sp.decode_address);
+                         sp.decode_address,
+                         call);
 
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,
@@ -443,6 +452,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     const std::vector<Message>& messages,
     std::optional<std::vector<int>> prompt_tokens,
     const RequestParams& sp,
+    std::optional<Call*> call,
     OutputCallback callback) {
   Timer timer;
   std::optional<std::string> prompt;
@@ -461,7 +471,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   COUNTER_ADD(chat_template_latency_seconds, timer.elapsed_seconds());
 
   return generate_request(
-      std::move(prompt.value()), std::move(prompt_tokens), sp, callback);
+      std::move(prompt.value()), std::move(prompt_tokens), sp, call, callback);
 }
 
 void LLMMaster::get_cache_info(std::vector<uint64_t>& cluster_ids,
