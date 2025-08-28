@@ -102,6 +102,9 @@ class RemoteWorker : public WorkerClient {
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks);
 
+  virtual folly::SemiFuture<uint32_t> load_kv_blocks_from_store_async(
+      const std::vector<CacheBlockInfo> cache_block_info);
+
   // Run the model and return the output.
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const ForwardInput& inputs) override;
@@ -133,6 +136,9 @@ class RemoteWorker : public WorkerClient {
   std::unique_ptr<proto::DistributeWorker_Stub> stub_;
 
   ThreadPool threadpool_;
+  // general working thread
+  // do some overlap work with model execute
+  ThreadPool general_threadpool_{5};
   const torch::Device device_;
 };
 
@@ -152,6 +158,15 @@ class ExecuteModelClosure : public google::protobuf::Closure {
   proto::ForwardOutput pb_output;
   brpc::Controller cntl;
   folly::Promise<std::optional<RawForwardOutput>> promise;
+};
+
+class LoadKVCacheFromStoreClosure : public google::protobuf::Closure {
+ public:
+  void Run();
+
+  proto::StoreResponse response;
+  brpc::Controller cntl;
+  folly::Promise<uint32_t> promise;
 };
 
 }  // namespace xllm

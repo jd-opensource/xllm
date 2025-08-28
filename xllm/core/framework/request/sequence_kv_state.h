@@ -41,6 +41,7 @@ class KVCacheState {
 
   // returns allocated cache blocks
   Slice<Block> kv_blocks() const;
+  std::vector<Block>* mutable_kv_blocks();
   // get the number of blocks
   size_t num_kv_blocks() const;
   std::vector<int32_t> kv_cache_slots(int32_t pos_start, int32_t pos_end);

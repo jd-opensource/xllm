@@ -46,6 +46,8 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:ms_tools_ext>
     SMHasherSupport
     Boost::serialization
+    absl::synchronization
+    ${Python_LIBRARIES}
 )
 target_link_libraries(util PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 add_dependencies(util brpc-static)

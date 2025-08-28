@@ -33,6 +33,7 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/params_utils.h"
+#include "util/hash_util.h"
 
 namespace xllm {
 RemoteWorker::RemoteWorker(int32_t global_rank,
@@ -442,6 +443,39 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
     }
   });
   return future;
+}
+
+folly::SemiFuture<uint32_t> RemoteWorker::load_kv_blocks_from_store_async(
+    const std::vector<CacheBlockInfo> cache_block_info) {
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+  general_threadpool_.schedule([this,
+                                cache_block_info = std::move(cache_block_info),
+                                promise = std::move(promise)]() mutable {
+    proto::CacheBlockInfos pb_cache_block_info;
+    if (!cache_block_info_to_proto(cache_block_info, &pb_cache_block_info)) {
+      promise.setValue(0);
+      return;
+    }
+
+    auto done = new LoadKVCacheFromStoreClosure();
+    done->promise = std::move(promise);
+    stub_->LoadKVCacheFromStore(
+        &done->cntl, &pb_cache_block_info, &done->response, done);
+  });
+  return future;
+}
+
+void LoadKVCacheFromStoreClosure::Run() {
+  std::unique_ptr<LoadKVCacheFromStoreClosure> self_guard(this);
+
+  bool success = !cntl.Failed();
+  if (!success) {
+    promise.setValue(0);
+  } else {
+    promise.setValue(response.success_cnt());
+  }
+  return;
 }
 
 const torch::Device& RemoteWorker::device() const {

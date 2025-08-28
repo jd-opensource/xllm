@@ -60,6 +60,20 @@ message PullKVCacheRequest {
   repeated uint64 dst_blocks = 5;
 }
 
+message CacheBlockInfo {
+  int32 device_block_id = 1;
+  int32 host_block_id = 2;
+  bytes hash_key = 3;
+}
+
+message CacheBlockInfos {
+  repeated CacheBlockInfo contents = 1;
+}
+
+message StoreResponse {
+ uint32 success_cnt = 1;
+}
+
 message DeviceInfo {
   string device_ip = 1;
   uint32 listen_port = 2;
@@ -123,6 +137,11 @@ message BlockTables {
   repeated int32 block_tables = 1;
 }
 
+message BlockPair {
+  int32 device_block_id = 1;
+  int32 host_block_id = 2;
+}
+
 message ForwardInput {
   // flatten the token ids and positions
   repeated int32 flatten_tokens_vec = 1;
@@ -155,6 +174,9 @@ message ForwardInput {
   repeated Embeddings embeds = 23;
   uint32 prefill_seq_len = 24;
   repeated int32 embedding_ids = 25;
+  repeated CacheBlockInfo async_copy_out_blocks = 26;
+  repeated CacheBlockInfo copy_out_blocks = 27;
+  repeated CacheBlockInfo copy_in_blocks = 28;
 }
 
 message Embeddings {
@@ -202,4 +224,5 @@ service DistributeWorker {
   rpc ExecuteModel (ForwardInput) returns (ForwardOutput);
   rpc GetLastStepResult (Empty) returns (ForwardOutput);
   rpc GetActiveActivationMemory (Empty) returns (ActivationMemory);
+  rpc LoadKVCacheFromStore(CacheBlockInfos) returns (StoreResponse) {}
 }

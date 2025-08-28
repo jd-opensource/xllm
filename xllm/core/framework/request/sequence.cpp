@@ -315,14 +315,23 @@ void Sequence::add_kv_blocks(const std::vector<Block>& blocks) {
   }
 }
 
+void Sequence::add_host_kv_blocks(const std::vector<Block>& blocks) {
+  host_kv_state_.add_kv_blocks(blocks);
+}
+
 // release all cache blocks
 void Sequence::reset() {
   kv_state_.reset();
+  host_kv_state_.reset();
   volatile_num_prompt_tokens_ = num_tokens_;
 }
 
 void Sequence::add_shared_kv_blocks(std::vector<Block>&& blocks) {
   kv_state_.add_shared_kv_blocks(std::move(blocks), num_tokens_);
+}
+
+void Sequence::add_shared_host_kv_blocks(std::vector<Block>&& blocks) {
+  host_kv_state_.add_shared_kv_blocks(std::move(blocks), num_tokens_);
 }
 
 bool Sequence::finished() const {

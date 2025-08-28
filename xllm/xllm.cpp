@@ -132,7 +132,16 @@ int run() {
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .etcd_addr(FLAGS_etcd_addr)
       .enable_service_routing(FLAGS_enable_service_routing)
-      .tool_call_parser(FLAGS_tool_call_parser);
+      .tool_call_parser(FLAGS_tool_call_parser)
+      .enable_cache_upload(FLAGS_enable_service_routing &&
+                           FLAGS_enable_cache_upload)
+      .host_blocks_factor(FLAGS_host_blocks_factor)
+      .enable_kvcache_store(FLAGS_enable_kvcache_store &&
+                            FLAGS_enable_prefix_cache &&
+                            (FLAGS_host_blocks_factor > 0.0))
+      .store_protocol(FLAGS_store_protocol)
+      .store_master_server_entry(FLAGS_store_master_server_entry)
+      .store_metadata_connstring(FLAGS_store_metadata_connstring);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 

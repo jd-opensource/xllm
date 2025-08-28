@@ -7,13 +7,12 @@ cc_library(
     prefix_cache
   HDRS
     prefix_cache.h
-    prefix_cache_hash.h
-    prefix_cache_hash_murmur3.h
-    prefix_cache_hash_sha256.h
+    prefix_cache_with_upload.h
+    prefix_cache_factory.h
   SRCS 
     prefix_cache.cpp
-    prefix_cache_hash_murmur3.cpp
-    prefix_cache_hash_sha256.cpp
+    prefix_cache_with_upload.cpp
+    prefix_cache_factory.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:llm_engine>
@@ -27,7 +26,7 @@ cc_library(
 )
 
 set(TEST_SRCS
-  prefix_cache_hash_test.cpp
+  prefix_cache_test.cpp
 )
 
 cc_test(
@@ -45,7 +44,7 @@ cc_test(
     GTest::gtest_main
 )
 
-target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto ascendcl Folly::folly)
 add_dependencies(prefix_test brpc-static)
 
 cc_binary(

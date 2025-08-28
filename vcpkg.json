@@ -32,6 +32,14 @@
       "version>=": "1.84.0"
     },
     {
+      "name": "boost-uuid",
+      "version>=": "1.84.0"
+    },
+    {
+      "name": "boost-lockfree",
+      "version>=": "1.84.0"
+    },
+    {
       "name": "benchmark",
       "version>=": "1.8.0"
     },
@@ -92,6 +100,21 @@
     {
       "name": "opencv",
       "version>=": "4.7.0",
+      "default-features": false
+    },
+    {
+      "name": "yaml-cpp",
+      "version>=": "0.7.0",
+      "default-features": false
+    },
+    {
+      "name": "jsoncpp",
+      "version>=": "1.9.5",
+      "default-features": false
+    },
+    {
+      "name": "curl",
+      "version>=": "8.5.0",
       "default-features": false
     }
   ],

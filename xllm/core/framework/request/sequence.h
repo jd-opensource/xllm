@@ -17,6 +17,7 @@ limitations under the License.
 #pragma once
 
 #include <absl/time/time.h>
+#include <folly/futures/Future.h>
 
 #include <cstdint>
 #include <vector>
@@ -121,6 +122,18 @@ class Sequence final {
   Slice<int32_t> cached_tokens() const {
     return {tokens_, kv_state_.kv_cache_tokens_num()};
   }
+
+  // get token ids in host kv cache
+  Slice<int32_t> cached_host_tokens() const {
+    return {tokens_, host_kv_state_.kv_cache_tokens_num()};
+  }
+
+  // get the number of tokens need compute
+  size_t num_need_compute_tokens() const {
+    return num_tokens_ - std::max(kv_state_.kv_cache_tokens_num(),
+                                  host_kv_state_.kv_cache_tokens_num());
+  }
+
   // add a new token id to the sequence and update the count
   // the token would be discarded if the sequence is still in prefill stage
   void append_token(const Token& token);
@@ -137,7 +150,9 @@ class Sequence final {
   torch::Tensor get_input_embedding() const { return input_embedding_; }
 
   void add_kv_blocks(const std::vector<Block>& blocks);
+  void add_host_kv_blocks(const std::vector<Block>& blocks);
   void add_shared_kv_blocks(std::vector<Block>&& blocks);
+  void add_shared_host_kv_blocks(std::vector<Block>&& blocks);
 
   // whether the prefill stage has been cached.
   bool if_cache_block_for_prefill() {
@@ -199,6 +214,8 @@ class Sequence final {
 
   KVCacheState& kv_state() { return kv_state_; }
 
+  KVCacheState& host_kv_state() { return host_kv_state_; }
+
   // for generated tokens
   float get_average_logprob();
   void generate_output_tokens_logprobs(
@@ -207,6 +224,27 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
+  void set_async_result(std::vector<folly::SemiFuture<uint32_t>>&& futures) {
+    futures_ = std::move(futures);
+  }
+
+  void sync_result() {
+    if (futures_.has_value()) {
+      auto success_cnt = host_kv_state_.num_kv_blocks();
+      for (auto& future : futures_.value()) {
+        if (future.isReady()) {
+          success_cnt = std::min(success_cnt, size_t(future.value()));
+        } else {
+          return;
+        }
+      }
+      if (success_cnt > 0) {
+        host_kv_state_.incr_kv_cache_tokens_num(
+            success_cnt * host_kv_state_.kv_blocks()[0].size());
+      }
+    }
+  }
+
   void reset();
 
  private:
@@ -214,6 +252,8 @@ class Sequence final {
   size_t index_ = 0;
 
   KVCacheState kv_state_;
+
+  KVCacheState host_kv_state_;
 
   std::unique_ptr<LogprobState> logprob_state_;
 
@@ -292,6 +332,9 @@ class Sequence final {
   // update stage, we pop the state from the queue.
   // 2 valid elements at most, maximum 2 steps pre scheduled.
   std::queue<bool> is_pre_scheduled_step_prefill_;
+
+  // kvcache store copy async result
+  std::optional<std::vector<folly::SemiFuture<uint32_t>>> futures_;
 };
 
 }  // namespace xllm

@@ -16,8 +16,8 @@ limitations under the License.
 
 #include "block_manager_impl.h"
 
-#include "framework/prefix_cache/prefix_cache_hash_murmur3.h"
-
+#include "framework/prefix_cache/prefix_cache.h"
+#include "framework/prefix_cache/prefix_cache_with_upload.h"
 namespace xllm {
 
 BlockManagerImpl::BlockManagerImpl(const Options& options)
@@ -25,8 +25,9 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
   CHECK_GT(options.num_blocks(), 0) << "No blocks to allocate";
   CHECK_GT(options.block_size(), 0) << "Block size must be positive";
   if (options_.enable_prefix_cache()) {
-    prefix_cache_ = std::make_unique<PrefixCacheHashMurmur3>(
-        options.block_size(), options.enable_service_routing());
+    prefix_cache_ = create_prefix_cache(options.block_size(),
+                                        options.enable_cache_upload());
+    CHECK(prefix_cache_) << "Failed to create prefix cache!";
   }
 
   size_t total_blocks = options_.num_blocks();
@@ -130,7 +131,7 @@ std::vector<Block> BlockManagerImpl::allocate_shared(
 }
 
 void BlockManagerImpl::cache(const Slice<int32_t>& token_ids,
-                             const Slice<Block>& blocks) {
+                             std::vector<Block>& blocks) {
   if (options_.enable_prefix_cache()) {
     AUTO_COUNTER(prefix_cache_latency_seconds_insert);
     // Add the kv cache to the prefix cache

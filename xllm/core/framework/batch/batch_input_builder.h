@@ -36,6 +36,8 @@ class BatchInputBuilder {
       const std::vector<uint32_t>& allowed_max_tokens,
       const std::vector<torch::Tensor>& input_embeddings_vec,
       const std::vector<MMData>& mm_data_vec,
+      const std::vector<CacheBlockInfo>* copy_in_cache_block_infos,
+      const std::vector<CacheBlockInfo>* copy_out_cache_block_infos,
       const ModelArgs* args);
 
   ForwardInput build_forward_input(uint32_t num_decoding_tokens,
@@ -118,6 +120,11 @@ class BatchInputBuilder {
   // Configuration
   bool use_mrope_ = false;
   int32_t num_sequences_ = 0;
+
+  // copy in and out cache contents
+  std::unordered_set<int32_t> write_block_ids_;
+  const std::vector<CacheBlockInfo>* copy_in_cache_block_infos_ = nullptr;
+  const std::vector<CacheBlockInfo>* copy_out_cache_block_infos_ = nullptr;
 };
 
 }  // namespace xllm

@@ -41,6 +41,17 @@ class Batch {
 
   void add(const std::vector<Sequence*>& sequences);
 
+  void set_copy_in_cache_block_infos(
+      std::vector<CacheBlockInfo>* copy_in_cache_block_infos) {
+    copy_in_cache_block_infos_ = copy_in_cache_block_infos;
+  }
+
+  void set_copy_out_cache_block_infos(
+      std::vector<CacheBlockInfo>* copy_out_cache_block_infos) {
+    copy_out_cache_block_infos_ = copy_out_cache_block_infos;
+  }
+
+  // get the number of sequences in the batch
   size_t size() const { return sequences_.size(); }
   bool empty() const { return sequences_.empty(); }
 
@@ -80,7 +91,11 @@ class Batch {
                                  bool enable_schedule_overlap);
 
   std::vector<Sequence*> sequences_;
+  std::vector<CacheBlockInfo>* copy_in_cache_block_infos_ = nullptr;
+  std::vector<CacheBlockInfo>* copy_out_cache_block_infos_ = nullptr;
 
+  // max number of tokens to process for each sequence
+  // default to max value
   std::vector<uint32_t> allowed_max_tokens_;
 
   std::vector<torch::Tensor> input_embeddings_vec_;

@@ -26,6 +26,26 @@ limitations under the License.
 #include "util/tensor_helper.h"
 
 namespace xllm {
+struct CacheBlockInfo {
+  int32_t device_block_id = 0;
+  int32_t host_block_id = 0;
+  uint8_t* hash_key = nullptr;
+
+  CacheBlockInfo() {}
+
+  CacheBlockInfo(int32_t device_block_id, int32_t host_block_id) {
+    this->device_block_id = device_block_id;
+    this->host_block_id = host_block_id;
+  }
+
+  CacheBlockInfo(int32_t device_block_id,
+                 int32_t host_block_id,
+                 const uint8_t* hash_key) {
+    this->device_block_id = device_block_id;
+    this->host_block_id = host_block_id;
+    this->hash_key = const_cast<uint8_t*>(hash_key);
+  }
+};
 
 struct ModelInputParams {
   ModelInputParams to(const torch::Device& device) const {
@@ -56,6 +76,9 @@ struct ModelInputParams {
     params.layer_synchronizer = layer_synchronizer;
 #endif
 
+    params.async_copy_out_blocks = std::move(async_copy_out_blocks);
+    params.copy_out_blocks = std::move(copy_out_blocks);
+    params.copy_in_blocks = std::move(copy_in_blocks);
     return params;
   }
 
@@ -115,6 +138,11 @@ struct ModelInputParams {
   std::vector<int32_t> embedding_ids;
 
 #if defined(USE_NPU)
+  // copy in / copy out
+  std::vector<CacheBlockInfo> async_copy_out_blocks;
+  std::vector<CacheBlockInfo> copy_out_blocks;
+  std::vector<CacheBlockInfo> copy_in_blocks;
+
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #endif
 

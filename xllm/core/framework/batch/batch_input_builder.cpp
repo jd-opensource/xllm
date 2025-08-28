@@ -34,18 +34,38 @@ limitations under the License.
 
 namespace xllm {
 
+void split_copy_out_blocks(RawForwardInput& raw_forward_input,
+                           std::unordered_set<int32_t>& write_block_ids) {
+  std::vector<CacheBlockInfo> async_copy_out_blocks;
+  std::vector<CacheBlockInfo> sync_copy_out_blocks;
+  for (CacheBlockInfo content : raw_forward_input.copy_out_blocks) {
+    if (write_block_ids.find(content.device_block_id) !=
+        write_block_ids.end()) {
+      sync_copy_out_blocks.push_back(content);
+    } else {
+      async_copy_out_blocks.push_back(content);
+    }
+  }
+  raw_forward_input.copy_out_blocks = std::move(sync_copy_out_blocks);
+  raw_forward_input.async_copy_out_blocks = std::move(async_copy_out_blocks);
+}
+
 BatchInputBuilder::BatchInputBuilder(
     const std::vector<Sequence*>& sequences,
     const std::vector<uint32_t>& allowed_max_tokens,
     const std::vector<torch::Tensor>& input_embeddings_vec,
     const std::vector<MMData>& mm_data_vec,
+    const std::vector<CacheBlockInfo>* copy_in_cache_block_infos,
+    const std::vector<CacheBlockInfo>* copy_out_cache_block_infos,
     const ModelArgs* args)
     : sequences_(sequences),
       allowed_max_tokens_(allowed_max_tokens),
       input_embeddings_vec_(input_embeddings_vec),
       mm_data_vec_(mm_data_vec),
       args_(args),
-      num_sequences_(static_cast<int32_t>(sequences.size())) {
+      num_sequences_(static_cast<int32_t>(sequences.size())),
+      copy_in_cache_block_infos_(copy_in_cache_block_infos),
+      copy_out_cache_block_infos_(copy_out_cache_block_infos) {
   // Reserve space for better performance
   state_.flatten_tokens_vec.reserve(1000);
   state_.flatten_positions_vec.reserve(1000);
@@ -54,6 +74,7 @@ BatchInputBuilder::BatchInputBuilder(
   if (args_ != nullptr) {
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
   }
+  write_block_ids_.clear();
 }
 
 ForwardInput BatchInputBuilder::build_forward_input(
@@ -228,6 +249,13 @@ void BatchInputBuilder::setup_kv_cache_info(Sequence* sequence,
     u_block_ids.emplace_back(block.id());
   }
 
+  int32_t kv_cache_block_idx = n_kv_cache_tokens / block_size;
+  for (auto iter = block_ids.begin() + kv_cache_block_idx;
+       iter != block_ids.end();
+       ++iter) {
+    write_block_ids_.insert(*iter);
+  }
+
   auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   if (transfer_kv_info.has_value()) {
     state_.transfer_kv_infos.emplace_back(transfer_kv_info.value());
@@ -382,6 +410,24 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       }
     }
   }
+
+  if (copy_out_cache_block_infos_ != nullptr &&
+      copy_out_cache_block_infos_->size() > 0) {
+    raw_forward_input.copy_out_blocks.insert(
+        raw_forward_input.copy_out_blocks.end(),
+        copy_out_cache_block_infos_->begin(),
+        copy_out_cache_block_infos_->end());
+  }
+  if (copy_in_cache_block_infos_ != nullptr &&
+      copy_in_cache_block_infos_->size() > 0) {
+    raw_forward_input.copy_in_blocks.insert(
+        raw_forward_input.copy_in_blocks.end(),
+        copy_in_cache_block_infos_->begin(),
+        copy_in_cache_block_infos_->end());
+  }
+
+  split_copy_out_blocks(raw_forward_input, write_block_ids_);
+
   return raw_forward_input;
 }
 

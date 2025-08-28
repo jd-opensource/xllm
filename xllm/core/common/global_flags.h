@@ -53,6 +53,8 @@ DECLARE_double(max_memory_utilization);
 
 DECLARE_bool(enable_prefix_cache);
 
+DECLARE_bool(enable_cache_upload);
+
 DECLARE_int32(max_tokens_per_batch);
 
 DECLARE_int32(max_seqs_per_batch);
@@ -126,3 +128,13 @@ DECLARE_int32(heart_beat_interval);
 DECLARE_int32(chunked_match_frequency);
 
 DECLARE_bool(use_zero_evict);
+
+DECLARE_double(host_blocks_factor);
+
+DECLARE_bool(enable_kvcache_store);
+
+DECLARE_string(store_protocol);
+
+DECLARE_string(store_master_server_entry);
+
+DECLARE_string(store_metadata_connstring);

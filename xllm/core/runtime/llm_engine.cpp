@@ -272,12 +272,14 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   LOG(INFO) << "Initializing v cache with shape: [" << kv_cache_shape[1] << "]";
 
   // initialize block manager
-  BlockManager::Options options;
+  BlockManagerPool::Options options;
   options.num_blocks(kv_cache_cap.n_blocks)
       .block_size(block_size)
+      .host_num_blocks(kv_cache_cap.n_blocks * options_.host_blocks_factor())
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_service_routing(options_.enable_service_routing());
+      .enable_cache_upload(options_.enable_cache_upload())
+      .enable_kvcache_store(options_.enable_kvcache_store());
   block_manager_pool_ =
       std::make_unique<BlockManagerPool>(options, options_.dp_size());
 
@@ -347,6 +349,22 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
     }
   }
   return true;
+}
+
+std::vector<folly::SemiFuture<uint32_t>>
+LLMEngine::load_kv_blocks_from_store_async(
+    const uint32_t dp_rank,
+    const std::vector<CacheBlockInfo>& cache_block_info) {
+  std::vector<folly::SemiFuture<uint32_t>> futures;
+  auto tp_size = this->worker_clients_.size() / this->options_.dp_size();
+
+  futures.reserve(tp_size);
+  for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
+    futures.emplace_back(
+        this->worker_clients_[tp_rank + tp_size * dp_rank]
+            ->load_kv_blocks_from_store_async(cache_block_info));
+  }
+  return std::move(futures);
 }
 
 void LLMEngine::get_device_info(std::vector<std::string>& device_ips,

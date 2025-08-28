@@ -109,6 +109,32 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->embedding_ids().begin(),
                            pb_forward_input->embedding_ids().end());
 
+  std::vector<CacheBlockInfo> async_copy_out_blocks;
+  for (size_t i = 0; i < pb_forward_input->async_copy_out_blocks().size();
+       ++i) {
+    async_copy_out_blocks.emplace_back(
+        pb_forward_input->async_copy_out_blocks()[i].device_block_id(),
+        pb_forward_input->async_copy_out_blocks()[i].host_block_id(),
+        reinterpret_cast<const uint8_t*>(
+            pb_forward_input->async_copy_out_blocks()[i].hash_key().data()));
+  }
+  std::vector<CacheBlockInfo> copy_out_blocks;
+  for (size_t i = 0; i < pb_forward_input->copy_out_blocks().size(); ++i) {
+    copy_out_blocks.emplace_back(
+        pb_forward_input->copy_out_blocks()[i].device_block_id(),
+        pb_forward_input->copy_out_blocks()[i].host_block_id(),
+        reinterpret_cast<const uint8_t*>(
+            pb_forward_input->copy_out_blocks()[i].hash_key().data()));
+  }
+  std::vector<CacheBlockInfo> copy_in_blocks;
+  for (size_t i = 0; i < pb_forward_input->copy_in_blocks().size(); ++i) {
+    copy_in_blocks.emplace_back(
+        pb_forward_input->copy_in_blocks()[i].device_block_id(),
+        pb_forward_input->copy_in_blocks()[i].host_block_id(),
+        reinterpret_cast<const uint8_t*>(
+            pb_forward_input->copy_in_blocks()[i].hash_key().data()));
+  }
+
   std::vector<const RequestSamplingParam*> sampling_params;
   std::vector<RequestSamplingParam> tmp_sampling_params;
   for (auto sp : pb_forward_input->sampling_params()) {
@@ -169,6 +195,10 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
 
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.embedding_ids = std::move(embedding_ids);
+
+  input_params.async_copy_out_blocks = std::move(async_copy_out_blocks);
+  input_params.copy_out_blocks = std::move(copy_out_blocks);
+  input_params.copy_in_blocks = std::move(copy_in_blocks);
 
   if (pb_forward_input->embeds().size() > 0) {
     const int32_t rows = pb_forward_input->embeds().size();
@@ -376,6 +406,36 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   pb_forward_input->set_prefill_seq_len(inputs.prefill_seq_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
+  pb_forward_input->mutable_async_copy_out_blocks()->Reserve(
+      inputs.async_copy_out_blocks.size());
+  for (auto t : inputs.async_copy_out_blocks) {
+    proto::CacheBlockInfo cache_block_info;
+    cache_block_info.set_device_block_id(t.device_block_id);
+    cache_block_info.set_host_block_id(t.host_block_id);
+    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
+    *pb_forward_input->mutable_async_copy_out_blocks()->Add() =
+        cache_block_info;
+  }
+  pb_forward_input->mutable_copy_out_blocks()->Reserve(
+      inputs.copy_out_blocks.size());
+  for (auto t : inputs.copy_out_blocks) {
+    proto::CacheBlockInfo cache_block_info;
+    cache_block_info.set_device_block_id(t.device_block_id);
+    cache_block_info.set_host_block_id(t.host_block_id);
+    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
+    *pb_forward_input->mutable_copy_out_blocks()->Add() = cache_block_info;
+  }
+  pb_forward_input->mutable_copy_in_blocks()->Reserve(
+      inputs.copy_in_blocks.size());
+  for (auto t : inputs.copy_in_blocks) {
+    proto::CacheBlockInfo cache_block_info;
+    cache_block_info.set_device_block_id(t.device_block_id);
+    cache_block_info.set_host_block_id(t.host_block_id);
+    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
+    *pb_forward_input->mutable_copy_in_blocks()->Add() = cache_block_info;
+  }
+
+  COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());
 }
 
 void proto_to_forward_output(const proto::ForwardOutput& pb_output,
@@ -539,6 +599,40 @@ Token build_token(int64_t index,
     }
   }
   return token;
+}
+
+void proto_to_cache_block_info(
+    const proto::CacheBlockInfos& cache_block_info_pb,
+    std::vector<CacheBlockInfo>& cache_block_info) {
+  cache_block_info.reserve(cache_block_info_pb.contents_size());
+
+  for (int i = 0; i < cache_block_info_pb.contents_size(); ++i) {
+    cache_block_info.emplace_back(
+        cache_block_info_pb.contents(i).device_block_id(),
+        cache_block_info_pb.contents(i).host_block_id(),
+        reinterpret_cast<const uint8_t*>(
+            cache_block_info_pb.contents(i).hash_key().data()));
+  }
+}
+
+bool cache_block_info_to_proto(
+    const std::vector<CacheBlockInfo>& cache_block_info,
+    proto::CacheBlockInfos* cache_block_info_pb) {
+  cache_block_info_pb->mutable_contents()->Reserve(cache_block_info.size());
+  for (const CacheBlockInfo block_info : cache_block_info) {
+    proto::CacheBlockInfo pb_cache;
+    pb_cache.set_device_block_id(block_info.device_block_id);
+    pb_cache.set_host_block_id(block_info.host_block_id);
+    if (block_info.hash_key != nullptr) {
+      pb_cache.set_hash_key(block_info.hash_key, MURMUR_HASH3_VALUE_LEN);
+    } else {
+      LOG(ERROR) << "convert to CacheBlockInfos fail, hash key is nullptr!";
+      return false;
+    }
+    *cache_block_info_pb->mutable_contents()->Add() = pb_cache;
+  }
+
+  return true;
 }
 
 }  // namespace xllm
