@@ -86,7 +86,7 @@ class ContinuousScheduler : public Scheduler {
     // TODO: think if distinguish prefill and decode priority strategy
     PROPERTY(std::string,
              priority_strategy) = "FCFS";  // priority, deadline, FCFS
-    PROPERTY(bool, enable_on_preempt_off) = true;
+    PROPERTY(bool, enable_online_preempt_offline) = true;
   };
 
   ContinuousScheduler(Engine* engine, const Options& options);
@@ -204,14 +204,14 @@ class ContinuousScheduler : public Scheduler {
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       RequestPriorityQueue& waiting_priority_queue,
-      size_t& num_onp_preempt_off_requests,
+      size_t& num_online_prefill_preempt_offline_requests,
       std::vector<std::shared_ptr<Request>>& finished_requests);
   void handle_decode_requests(
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
-      size_t& num_offd_preempt_off_requests,
-      size_t& num_ond_preempt_on_requests,
-      size_t& num_ond_preempt_off_requests,
+      size_t& num_offline_decode_preempt_offline_requests,
+      size_t& num_online_decode_preempt_online_requests,
+      size_t& num_online_decode_preempt_offline_requests,
       std::unique_ptr<DecodePriorityQueue>& running_queue);
   void handle_abnormal_request(
       std::unique_ptr<DecodePriorityQueue>& running_queue,
@@ -241,6 +241,10 @@ class ContinuousScheduler : public Scheduler {
   std::vector<int64_t> get_active_activation_in_bytes();
 
   void create_running_queue(const Options& options);
+
+  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
+                                Sequence* prefill_sequence,
+                                size_t& num_request_to_evict);
 
  private:
   // tokenizer

@@ -134,7 +134,7 @@ int run() {
       .enable_service_routing(FLAGS_enable_service_routing)
       .tool_call_parser(FLAGS_tool_call_parser)
       .priority_strategy(FLAGS_priority_strategy)
-      .enable_on_preempt_off(FLAGS_enable_on_preempt_off);
+      .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 

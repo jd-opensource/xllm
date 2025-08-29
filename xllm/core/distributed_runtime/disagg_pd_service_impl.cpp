@@ -90,14 +90,15 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
                          output_callback,
                          batch_output_callback);
 
-  auto new_request = std::make_shared<Request>(req.req_id(),
-                                               req.x_request_id(),
-                                               req.x_request_time(),
-                                               std::move(req_state),
-                                               req.service_req_id(),
-                                               req.offline(),
-                                               req.slo_ms(),
-                                               req.priority());
+  auto new_request = std::make_shared<Request>(
+      req.req_id(),
+      req.x_request_id(),
+      req.x_request_time(),
+      std::move(req_state),
+      req.service_req_id(),
+      req.offline(),
+      req.slo_ms(),
+      static_cast<xllm::RequestPriority>(req.priority()));
 
   // add one sequence, rest will be added by scheduler
   return new_request;

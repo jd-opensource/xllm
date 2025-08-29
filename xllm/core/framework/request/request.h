@@ -31,6 +31,8 @@ limitations under the License.
 
 namespace xllm {
 
+enum class RequestPriority { DEFAULT = 0, HIGH = 1, NORMAL = 2, LOW = 3 };
+
 class Request {
  public:
   Request(const std::string& request_id,
@@ -40,7 +42,7 @@ class Request {
           const std::string& service_request_id = "",
           bool offline = false,
           int32_t slo_ms = 0,
-          xllm::proto::Priority priority = xllm::proto::Priority::NORMAL);
+          RequestPriority priority = RequestPriority::NORMAL);
 
   bool finished() const;
 
@@ -86,7 +88,7 @@ class Request {
 
   const bool offline() const { return offline_; }
   const int32_t slo_ms() const { return slo_ms_; }
-  const xllm::proto::Priority priority() const { return priority_; }
+  const RequestPriority priority() const { return priority_; }
 
   RequestState& state() { return state_; }
 
@@ -119,7 +121,7 @@ class Request {
 
   int32_t slo_ms_;
 
-  xllm::proto::Priority priority_;
+  RequestPriority priority_;
 
  private:
   void create_sequences_group();

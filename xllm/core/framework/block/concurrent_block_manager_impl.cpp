@@ -43,15 +43,6 @@ void ConcurrentBlockManagerImpl::cache(const Slice<int32_t>& token_ids,
   BlockManagerImpl::cache(token_ids, blocks);
 }
 
-bool ConcurrentBlockManagerImpl::check_if_enough_to_evict(
-    DecodePriorityQueue* running_queue_to_evict,
-    Sequence* prefill_sequence,
-    size_t& num_request_to_evict) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return BlockManagerImpl::check_if_enough_to_evict(
-      running_queue_to_evict, prefill_sequence, num_request_to_evict);
-}
-
 size_t ConcurrentBlockManagerImpl::num_blocks_in_prefix_cache() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return BlockManagerImpl::num_blocks_in_prefix_cache();

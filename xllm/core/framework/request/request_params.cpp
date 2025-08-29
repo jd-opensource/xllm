@@ -54,7 +54,7 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
     slo_ms = request.slo_ms();
   }
   if (request.has_priority()) {
-    priority = request.priority();
+    priority = static_cast<xllm::RequestPriority>(request.priority());
   }
 
   if (request.has_service_request_id()) {
@@ -203,7 +203,7 @@ void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
     params.slo_ms = request.slo_ms();
   }
   if (request.has_priority()) {
-    params.priority = request.priority();
+    params.priority = static_cast<xllm::RequestPriority>(request.priority());
   }
 
   if (request.has_service_request_id()) {

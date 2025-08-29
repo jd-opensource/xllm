@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "embedding.pb.h"
 #include "multimodal.pb.h"
+#include "request.h"
 #include "request_output.h"
 
 namespace xllm {
@@ -130,7 +131,7 @@ struct RequestParams {
 
   int32_t slo_ms = 0;
 
-  xllm::proto::Priority priority = xllm::proto::Priority::NORMAL;
+  RequestPriority priority = RequestPriority::NORMAL;
 };
 
 }  // namespace xllm
