@@ -70,6 +70,12 @@ class EmbeddingLMImpl<xllm::hf::QWen3ForEmbedding> : public EmbeddingLM {
     return model_->options();
   }
 
+  virtual void prepare_expert_weight(int32_t layer_id,
+                                     const std::vector<int32_t>& expert_ids) {
+    return;
+  }
+  virtual void update_expert_weight(int32_t layer_id) { return; }
+
   // Delegate head/embedding accessors to underlying model implementation.
   hf::LlmHead get_lm_head() override { return model_->get_lm_head(); }
   void set_lm_head(hf::LlmHead& head) override { model_->set_lm_head(head); }

@@ -69,7 +69,9 @@ DECLARE_string(communication_backend);
 
 DECLARE_bool(enable_eplb);
 
-DECLARE_int64(eplb_update_rate);
+DECLARE_int32(redundant_experts_num);
+
+DECLARE_int64(eplb_update_interval);
 
 DECLARE_double(eplb_update_threshold);
 

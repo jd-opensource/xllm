@@ -273,8 +273,9 @@ DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const Context& context,
   CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
   num_experts_per_partition_ = model_args.n_routed_experts() / ep_size_;
+  redundant_experts_num_ = FLAGS_redundant_experts_num;
   if (FLAGS_enable_eplb) {
-    num_experts_per_partition_++;
+    num_experts_per_partition_ += redundant_experts_num_;
   }
   ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
@@ -328,15 +329,17 @@ void DeepseekV2DecoderImpl::initialize_tensors(
 
 void DeepseekV2DecoderImpl::initialize_device_expert_list(
     int num_device,
-    int num_device_route_expert) {
+    int num_device_expert) {
+  int32_t num_device_route_expert = num_device_expert;
   if (FLAGS_enable_eplb) {
-    --num_device_route_expert;
+    num_device_route_expert = num_device_expert - redundant_experts_num_;
   }
   for (int i = 0; i < num_device * num_device_route_expert; ++i) {
-    std::vector<int> subvec;
     device_expert_list_.emplace_back(i);
     if (FLAGS_enable_eplb && (i + 1) % num_device_route_expert == 0) {
-      device_expert_list_.emplace_back(i);
+      for (int redundant_expert = 0; redundant_expert < redundant_experts_num_;
+           ++redundant_expert)
+        device_expert_list_.emplace_back(i);
     }
   }
 }
@@ -527,7 +530,7 @@ void DeepseekV2DecoderImpl::initialize_mlp_parameters(
     if (FLAGS_enable_eplb) {
       param.enableExpertCumSumOutput = param.isPrefill ? false : true;
       param.enableEPWB = true;
-      param.numOfRedundantExpert = ep_size_;
+      param.numOfRedundantExpert = ep_size_ * redundant_experts_num_;
     }
   }
   if (layer_id_ < param.firstKDenseReplace) {
@@ -681,37 +684,19 @@ void DeepseekV2DecoderImpl::process_expert_weights(
     const StateDict& state_dict,
     const std::string& name,
     const torch::Tensor& tensor) {
+  // Step 1: Early checks and basic info extraction
   int expert_index = extract_expert_index(name);
   const std::string suffix = extract_endswith(name);
   const int index = get_mapped_index(suffix, WEIGHT_MAPPING_W8A8);
   if (index == -1) {
     return;
   }
+
   const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
-  if (FLAGS_enable_eplb &&
-      (rank_ % localWorldSize_ == expert_index % localWorldSize_)) {
-    std::lock_guard<std::mutex> lock(experts_mutex_);
-    torch::Tensor tmp_tensor_shm =
-        is_sharded ? get_sharded_tensor(state_dict,
-                                        name,
-                                        WEIGHT_SHARD_W8A8.at(index),
-                                        ep_local_tp_rank_,
-                                        ep_local_tp_size_)
-                   : tensor;
-    std::string shm_key = get_expert_shm_key(layer_id_, expert_index, suffix);
-    if (!decode_param_.isBF16) {
-      if (absl::EndsWith(name, "_offset")) {
-        tmp_tensor_shm = tmp_tensor_shm.to(torch::kFloat16);
-      } else if (absl::EndsWith(name, "_scale")) {
-        tmp_tensor_shm = tmp_tensor_shm.to(torch::kFloat32);
-      }
-    }
-    shared_buffer_->add_tensor(expert_index,
-                               layer_id_ - first_k_dense_replace_,
-                               shm_key,
-                               tmp_tensor_shm.contiguous());
-    // all_experts_weights_buffer_[shm_key].emplace_back(tmp_tensor.clone());
-  }
+  const bool needs_eplb = FLAGS_enable_eplb && (rank_ % localWorldSize_ ==
+                                                expert_index % localWorldSize_);
+
+  // Step 2: Check if expert is in partition
   const int start_idx = ep_rank_ * num_experts_per_partition_;
   const int end_idx = (ep_rank_ + 1) * num_experts_per_partition_;
   const int safe_end =
@@ -720,29 +705,61 @@ void DeepseekV2DecoderImpl::process_expert_weights(
   auto it = std::find(device_expert_list_.begin() + start_idx,
                       device_expert_list_.begin() + safe_end,
                       expert_index);
-  if (it == device_expert_list_.begin() + safe_end) {
+  const bool in_partition = it != device_expert_list_.begin() + safe_end;
+
+  // Early return if neither EPLB nor partition needs this expert
+  if (!needs_eplb && !in_partition) {
     return;
   }
-  std::vector<size_t> matches_pos;
-  for (auto iter = device_expert_list_.begin() + start_idx;
-       iter != device_expert_list_.begin() + safe_end;
-       ++iter) {
-    if (*iter == expert_index) {
-      matches_pos.emplace_back(
-          std::distance(device_expert_list_.begin(), iter) - start_idx);
+
+  // Step 3: Process tensor
+  torch::Tensor processed_tensor;
+  {
+    std::lock_guard<std::mutex> lock(experts_mutex_);
+    processed_tensor = is_sharded
+                           ? get_sharded_tensor(state_dict,
+                                                name,
+                                                WEIGHT_SHARD_W8A8.at(index),
+                                                ep_local_tp_rank_,
+                                                ep_local_tp_size_)
+                           : tensor;
+
+    if (!decode_param_.isBF16) {
+      if (absl::EndsWith(name, "_offset")) {
+        processed_tensor = processed_tensor.to(torch::kFloat16);
+      } else if (absl::EndsWith(name, "_scale")) {
+        processed_tensor = processed_tensor.to(torch::kFloat32);
+      }
     }
   }
-  std::lock_guard<std::mutex> lock(experts_mutex_);
-  torch::Tensor tmp_tensor =
-      is_sharded ? get_sharded_tensor(state_dict,
-                                      name,
-                                      WEIGHT_SHARD_W8A8.at(index),
-                                      ep_local_tp_rank_,
-                                      ep_local_tp_size_)
-                 : tensor;
 
-  for (auto pos : matches_pos) {
-    experts_weights_[suffix][pos] = tmp_tensor.clone();
+  // Step 4: Handle EPLB case
+  if (needs_eplb) {
+    std::lock_guard<std::mutex> lock(experts_mutex_);
+    std::string shm_key = get_expert_shm_key(layer_id_, expert_index, suffix);
+    shared_buffer_->add_tensor(expert_index,
+                               layer_id_ - first_k_dense_replace_,
+                               shm_key,
+                               processed_tensor.contiguous());
+  }
+
+  // Step 5: Handle partition case
+  if (in_partition) {
+    std::vector<size_t> matches_pos;
+    for (auto iter = it; iter != device_expert_list_.begin() + safe_end;
+         ++iter) {
+      if (*iter == expert_index) {
+        matches_pos.emplace_back(
+            std::distance(device_expert_list_.begin(), iter) - start_idx);
+      }
+    }
+
+    if (!matches_pos.empty()) {
+      std::lock_guard<std::mutex> lock(experts_mutex_);
+      for (auto pos : matches_pos) {
+        experts_weights_[suffix][pos] = processed_tensor.clone();
+      }
+    }
   }
 }
 
@@ -1221,8 +1238,6 @@ torch::Tensor DeepseekV2DecoderImpl::merge_experts_weights(
     std::vector<torch::Tensor>& experts_up,
     at::Device device,
     bool transpose) {
-  auto merge_experts_weights_sart = std::chrono::high_resolution_clock::now();
-
   for (size_t i = 0; i < experts_up.size(); ++i) {
     experts_gate[i] = torch::cat({experts_gate[i], experts_up[i]}, 0);
   }
@@ -1248,12 +1263,8 @@ void DeepseekV2DecoderImpl::merge_and_copy_gate_up_weights(
   const int64_t up_dim = experts_up[0].size(0);
   const int64_t hidden_dim = experts_gate[0].size(1);
 
-  auto prepare_experts_weights_start =
-      std::chrono::high_resolution_clock::now();
   target_buffer = at_npu::native::npu_format_cast(target_buffer.contiguous(), 2)
                       .reshape({num_experts, gate_dim + up_dim, hidden_dim});
-
-  prepare_experts_weights_start = std::chrono::high_resolution_clock::now();
 
   for (int64_t index = 0; index < num_experts; ++index) {
     target_buffer[index].slice(0, 0, gate_dim).copy_(experts_gate[index]);
@@ -1281,9 +1292,6 @@ void DeepseekV2DecoderImpl::merge_and_copy_down_weights(
 
 void DeepseekV2DecoderImpl::prepare_expert_weight(
     const std::vector<int32_t>& expert_list) {
-  auto prepare_experts_weights_start =
-      std::chrono::high_resolution_clock::now();
-
   expert_routing_map_buffer_ = build_expert_routing_map(expert_list);
   auto& expert_buffer = ExpertBuffer::Instance();
 
@@ -1350,11 +1358,6 @@ void DeepseekV2DecoderImpl::prepare_expert_weight(
 
   expert_buffer.gateup_weight =
       at_npu::native::npu_format_cast(expert_buffer.gateup_weight, 29);
-  auto prepare_experts_weights_end = std::chrono::high_resolution_clock::now();
-  auto prepare__experts_weights_duration =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          prepare_experts_weights_end - prepare_experts_weights_start)
-          .count();
 }
 
 torch::Tensor DeepseekV2DecoderImpl::build_expert_routing_map(
@@ -1366,22 +1369,20 @@ torch::Tensor DeepseekV2DecoderImpl::build_expert_routing_map(
     expert_routing_map[v].emplace_back(i);
   }
 
+  std::vector<int64_t> keys;
+  std::vector<int32_t> values;
   for (auto& [key, indices] : expert_routing_map) {
     int num_of_duplications = indices.size();
     int selected_index = ep_rank_ % num_of_duplications;
     indices = {indices[selected_index]};
+
+    keys.emplace_back(key);
+    values.emplace_back(static_cast<int32_t>(indices[0]));
   }
 
   int64_t map_size = expert_routing_map.size();
   auto options = torch::TensorOptions().dtype(torch::kInt32);
   auto input = torch::zeros({map_size}, options);
-  std::vector<int64_t> keys;
-  std::vector<int32_t> values;
-
-  for (const auto& [k, v] : expert_routing_map) {
-    keys.emplace_back(k);
-    values.emplace_back(static_cast<int32_t>(v[0]));
-  }
 
   auto index_tensor = torch::tensor(keys, torch::kInt64);
   auto value_tensor = torch::tensor(values, torch::kInt32);

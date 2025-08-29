@@ -270,7 +270,6 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->eplb_info().expert_ids().begin(),
                            pb_forward_input->eplb_info().expert_ids().end());
   eplb_info.update_layer_id = pb_forward_input->eplb_info().update_layer_id();
-  forward_inputs.eplb_info = eplb_info;
   COUNTER_ADD(proto_latency_seconds_proto2i, timer.elapsed_seconds());
 }
 

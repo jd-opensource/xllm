@@ -18,14 +18,14 @@ xLLM eplb功能主要通过以下三个模块实现：
 
 - xLLM中提供了gflags参数`enable_eplb`，默认false，如需开启动态专家负载均衡，在xLLM的服务启动脚本中设置为true即可。
 - `expert_parallel_degree`与`ep_size`为moe相关参数，`expert_parallel_degree`需要设置为`2`，`ep_size`要与实际NPU/GPU卡个数保持一致。参考 [moe_params](./moe_params.md)
-- `eplb_update_rate`为专家分布更新时间间隔，单位为妙，默认值为1000.
-- 专家分布更新采用根据专家负载的逐层更新机制，当某一层专家的前后两次的负载相似度小于`eplb_update_threshold`时选择更新该层，默认值为1，取之范围为(0,1)。
+- `eplb_update_interval`为专家分布更新时间间隔，单位为妙，默认值为1000.
+- 专家分布更新采用根据专家负载的逐层更新机制，当某一层专家的前后两次的负载相似度小于`eplb_update_interval`时选择更新该层，默认值为1，取之范围为(0,1)。
 
 ```bash
   --enable_eplb=true 
   --expert_parallel_degree=2 
   --ep_size=16  
-  --eplb_update_rate=2000
+  --eplb_update_interval=2000
   --eplb_update_threshold=0.9
 ```
 

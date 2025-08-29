@@ -301,6 +301,7 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
   int32_t start_expert_id_;
   int32_t end_expert_id_;
   int32_t ep_rank_;
+  int32_t redundant_experts_num_;
 
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
@@ -309,6 +310,7 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
 
   float sm_scale_;
   int32_t num_speculative_tokens_ = 0;
+
   atb_speed::deepseekV2::DecoderLayerParam prefill_param_;
   atb_speed::deepseekV2::DecoderLayerParam decode_param_;
 

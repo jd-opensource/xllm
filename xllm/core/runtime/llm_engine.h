@@ -127,7 +127,6 @@ class LLMEngine : public Engine {
   std::shared_ptr<DistManager> dist_manager_ = nullptr;
 
   std::unique_ptr<EplbManager> eplb_manager_ = nullptr;
-  std::unique_ptr<EplbPolicy> eplb_policy_ = nullptr;
   void process_eplb_data(
       const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
       int32_t worker_clients_num);

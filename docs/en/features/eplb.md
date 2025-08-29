@@ -23,8 +23,8 @@ Simply add the following gflag parameters when launching xLLM:
 
 - xLLM provides the gflag parameter `enable_eplb` (default: false). Set to true in the xLLM service startup script to enable dynamic expert load balancing.
 - `expert_parallel_degree` and `ep_size` are MoE-related parameters. `expert_parallel_degree` should be set to `2`, and `ep_size` must match the actual number of NPU/GPU devices. See [moe_params](./moe_params.md)
-- `eplb_update_rate` sets the expert distribution update interval in seconds (default: 1000).
+- `eplb_update_interval` sets the expert distribution update interval in seconds (default: 1000).
 - The expert distribution update uses a layer-by-layer mechanism based on expert load. When the similarity between consecutive loads for a layer is below `eplb_update_threshold`, that layer is updated (default: 1, range: 0-1).
 
 ```bash
---enable_eplb=true --expert_parallel_degree=2 --ep_size=16 --eplb_update_rate=2000 --eplb_update_threshold=0.9
+--enable_eplb=true --expert_parallel_degree=2 --ep_size=16 --eplb_update_interval=2000 --eplb_update_threshold=0.9

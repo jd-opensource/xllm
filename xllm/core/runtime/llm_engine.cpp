@@ -125,15 +125,8 @@ bool LLMEngine::init_model() {
   if (FLAGS_enable_eplb) {
     int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
     int32_t num_experts = args_.n_routed_experts();
-    expert_load_data_ =
-        torch::zeros({num_layers, num_experts + worker_clients_.size()})
-            .to(torch::kInt64);
-    eplb_policy_ =
-        std::make_unique<EplbPolicy>(num_experts / worker_clients_.size() + 1,
-                                     worker_clients_.size(),
-                                     num_layers);
     eplb_manager_ = std::make_unique<EplbManager>(
-        eplb_policy_.get(), num_layers, worker_clients_.size(), num_experts);
+        num_layers, worker_clients_.size(), num_experts);
   }
 
   // key + value for all layers
@@ -643,9 +636,10 @@ void LLMEngine::process_eplb_data(
     int32_t worker_clients_num) {
   int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
   int32_t num_device_experts =
-      args_.n_routed_experts() / worker_clients_.size() + 1;
+      args_.n_routed_experts() / worker_clients_.size() +
+      FLAGS_redundant_experts_num;
   std::vector<torch::Tensor> tensors;
-  std::vector<int32_t> layer_ids(num_device_experts - 1, -1);
+  std::vector<int32_t> layer_ids(results.size(), -1);
   tensors.reserve(worker_clients_.size());
   for (size_t worker_rank = 0; worker_rank < results.size(); ++worker_rank) {
     auto result = results[worker_rank].value();

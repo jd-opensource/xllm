@@ -18,8 +18,16 @@ class EplbExecutor final {
   EplbExecutor(CausalLM* model);
 
   virtual ~EplbExecutor();
+
+  // Reset the ready layer ID marker to -1 (no layer ready)
   void reset_ready_layer_id();
+
+  // Get the currently ready layer ID
+  // return int32_t Layer ID with prepared weights (-1 if none)
   int32_t get_ready_layer_id() const;
+
+  // Execute EPLB operation based on coordination info
+  // param eplb_info Contains layer preparation/activation instructions
   void eplb_execute(const EplbInfo& eplb_info);
 
  private:

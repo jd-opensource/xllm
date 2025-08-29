@@ -118,7 +118,11 @@ DEFINE_string(communication_backend, "hccl", "npu communication backend.");
 
 DEFINE_bool(enable_eplb, false, "Whether to use ep load balance.");
 
-DEFINE_int64(eplb_update_rate, 1000, "eplb update rate.");
+DEFINE_int32(redundant_experts_num,
+             1,
+             "num of redundant experts on per device.");
+
+DEFINE_int64(eplb_update_interval, 1000, "eplb update rate.");
 
 DEFINE_double(eplb_update_threshold, 0.8, "eplb update threshold.");
 

@@ -13,14 +13,24 @@ namespace xllm {
 
 class EplbManager {
  public:
-  EplbManager(EplbPolicy* eplb_policy,
-              int32_t layer_num,
-              int32_t device_num,
-              int32_t experts_num);
+  // Initialize with model dimensions:
+  // - layer_num: Total layers in the model
+  // - device_num: Parallel devices in cluster
+  // - experts_num: Experts per model layer
+  EplbManager(int32_t layer_num, int32_t device_num, int32_t experts_num);
+
   ~EplbManager();
 
+  // Feed new expert workload data for load balancing
+  // Input tensors should have shape [layer_num, experts_num]
   void update_expert_load(const std::vector<torch::Tensor> expert_load);
+
+  // Fetch current coordination instructions for expert updates
+  // Returns struct containing layer preparation/activation commands
   EplbInfo get_eplb_info();
+
+  // Mark specified layers as prepared (call after async loading completes)
+  // expert_layer_ids: Prepared layer IDs per device
   void set_prepared_layer_ids(const std::vector<int32_t>& expert_layer_ids);
 
  private:
@@ -49,7 +59,7 @@ class EplbManager {
   };
 
   // Components
-  EplbPolicy* eplb_policy_;
+  std::unique_ptr<EplbPolicy> eplb_policy_ = nullptr;
   ThreadSafeData state_;
 
   // Constants

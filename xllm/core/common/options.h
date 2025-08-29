@@ -72,7 +72,9 @@ class Options {
 
   PROPERTY(std::optional<bool>, enable_eplb);
 
-  PROPERTY(std::optional<int64_t>, eplb_update_rate);
+  PROPERTY(std::optional<int32_t>, redundant_experts_num);
+
+  PROPERTY(std::optional<int64_t>, eplb_update_interval);
 
   PROPERTY(std::optional<double>, eplb_update_threshold);
 

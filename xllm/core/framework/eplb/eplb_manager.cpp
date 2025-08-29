@@ -20,17 +20,18 @@ namespace xllm {
 
 using namespace std::chrono_literals;
 
-EplbManager::EplbManager(EplbPolicy* eplb_policy,
-                         int32_t layer_num,
+EplbManager::EplbManager(int32_t layer_num,
                          int32_t device_num,
                          int32_t experts_num)
-    : eplb_policy_(eplb_policy),
-      layer_num_(layer_num),
+    : layer_num_(layer_num),
       device_num_(device_num),
       experts_num_(experts_num),
-      device_experts_num_((experts_num + device_num) / device_num) {
+      device_experts_num_(experts_num / device_num +
+                          FLAGS_redundant_experts_num) {
   // Initialize tensors with mutex protection
   {
+    eplb_policy_ = std::make_unique<EplbPolicy>(
+        device_experts_num_, device_num_, layer_num_);
     std::lock_guard<std::mutex> lock(state_.mtx);
     state_.expert_load =
         torch::zeros({layer_num_, experts_num_}, torch::kInt64);
@@ -39,11 +40,13 @@ EplbManager::EplbManager(EplbPolicy* eplb_policy,
         {layer_num_, device_num_, device_experts_num_}, torch::kInt32);
     for (int32_t layer = 0; layer < layer_num_; ++layer) {
       for (int32_t device = 0; device < device_num_; ++device) {
-        int32_t base = device * (device_experts_num_ - 1);
+        int32_t device_route_experts_num =
+            device_experts_num_ - FLAGS_redundant_experts_num;
+        int32_t base = device * device_route_experts_num;
         for (int32_t expert = 0; expert < device_experts_num_; ++expert) {
           int32_t value = base + expert;
-          if (expert == device_experts_num_ - 1) {
-            --value;
+          if (expert >= device_route_experts_num) {
+            value = base + device_route_experts_num - 1;
           }
           state_.expert_distribution[layer][device][expert] = value;
         }
@@ -105,7 +108,6 @@ void EplbManager::aggregate_multi_layer_expert_loads(
       layer_ids.emplace_back(ids.flatten().to(torch::kInt64));
       layer_loads.emplace_back(loads.flatten().to(torch::kInt64));
     }
-
     torch::Tensor all_ids = torch::cat(layer_ids);
     torch::Tensor all_loads = torch::cat(layer_loads);
     expert_load[layer].scatter_add_(0, all_ids, all_loads);
@@ -125,14 +127,12 @@ void EplbManager::rebalance_experts_loop() {
       if (state_.stop) return;
 
       while (!state_.expert_load_queue.empty()) {
-        // expert_load_batch.emplace_back(state_.expert_load_queue.front());
-        // state_.expert_load_queue.pop();
         aggregate_multi_layer_expert_loads(state_.expert_load,
                                            state_.expert_distribution,
                                            state_.expert_load_queue.front());
         state_.expert_load_queue.pop();
         int64_t current_time = absl::ToUnixSeconds(absl::Now());
-        if (current_time - latest_record_time >= FLAGS_eplb_update_rate) {
+        if (current_time - latest_record_time >= FLAGS_eplb_update_interval) {
           latest_record_time = current_time;
           auto result = eplb_policy_->rebalance_experts(state_.expert_load);
           state_.expert_distribution = result.first;

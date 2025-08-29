@@ -68,8 +68,11 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
   if (options.enable_eplb().has_value()) {
     FLAGS_enable_eplb = options.enable_eplb().value();
   }
-  if (options.eplb_update_rate().has_value()) {
-    FLAGS_eplb_update_rate = options.eplb_update_rate().value();
+  if (options.redundant_experts_num().has_value()) {
+    FLAGS_redundant_experts_num = options.redundant_experts_num().value();
+  }
+  if (options.eplb_update_interval().has_value()) {
+    FLAGS_eplb_update_interval = options.eplb_update_interval().value();
   }
   if (options.eplb_update_threshold().has_value()) {
     FLAGS_eplb_update_threshold = options.eplb_update_threshold().value();

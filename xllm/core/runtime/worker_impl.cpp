@@ -289,7 +289,7 @@ void WorkerImpl::update_last_step_output(
     last_step_output_ = std::move(output.value());
     last_step_output_valid_ = true;
   } else {
-    if(FLAGS_enable_eplb) {
+    if (FLAGS_enable_eplb) {
       last_step_output_ = std::move(output.value());
     }
     last_step_output_valid_ = false;
@@ -465,7 +465,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path) {
   if (FLAGS_enable_eplb) {
     int32_t num_layers = args.n_layers() - args.first_k_dense_replace();
     int32_t num_device_experts =
-        args.n_routed_experts() / context_.get_parallel_args().world_size() + 1;
+        args.n_routed_experts() / context_.get_parallel_args().world_size() +
+        FLAGS_redundant_experts_num;
     expert_load_data_ = torch::zeros({num_layers, num_device_experts})
                             .to(torch::kInt64)
                             .to(device_)
