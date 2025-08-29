@@ -129,4 +129,4 @@ DECLARE_bool(use_zero_evict);
 
 DECLARE_string(priority_strategy);
 
-DECLARE_bool(enable_on_preempt_off);
+DECLARE_bool(enable_online_preempt_offline);

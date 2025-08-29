@@ -116,7 +116,7 @@ class Options {
 
   PROPERTY(std::string, priority_strategy) = "FCFS";
 
-  PROPERTY(bool, enable_on_preempt_off) = true;
+  PROPERTY(bool, enable_online_preempt_offline) = true;
 };
 
 }  // namespace xllm

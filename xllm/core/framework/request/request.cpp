@@ -36,7 +36,7 @@ Request::Request(const std::string& request_id,
                  const std::string& service_request_id,
                  bool offline,
                  int32_t slo_ms,
-                 xllm::proto::Priority priority)
+                 RequestPriority priority)
     : request_id_(request_id),
       service_request_id_(service_request_id),
       x_request_id_(x_request_id),

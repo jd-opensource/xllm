@@ -88,13 +88,13 @@ DEFINE_GAUGE(num_running_requests, "Number of running requests in scheduler");
 DEFINE_GAUGE(num_waiting_requests, "Number of waiting requests in scheduler");
 DEFINE_GAUGE(num_preempted_requests,
              "Number of preempted requests in scheduler");
-DEFINE_GAUGE(num_offd_preempt_off_requests,
+DEFINE_GAUGE(num_offline_decode_preempt_offline_requests,
              "Number of offline decode preempt offline requests in scheduler");
-DEFINE_GAUGE(num_ond_preempt_on_requests,
+DEFINE_GAUGE(num_online_decode_preempt_online_requests,
              "Number of online decode preempt online requests in scheduler");
-DEFINE_GAUGE(num_onp_preempt_off_requests,
+DEFINE_GAUGE(num_online_prefill_preempt_offline_requests,
              "Number of online prefill preempt offline requests in scheduler");
-DEFINE_GAUGE(num_ond_preempt_off_requests,
+DEFINE_GAUGE(num_online_decode_preempt_offline_requests,
              "Number of online decode preempt offline requests in scheduler");
 
 DEFINE_GAUGE(num_running_sequences, "Number of running sequences");

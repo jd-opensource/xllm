@@ -111,15 +111,15 @@ std::vector<std::shared_ptr<Request>> generate_request(
                            false,
                            nullptr,
                            nullptr);
-    auto request = std::make_shared<Request>(
-        "1",
-        "1",
-        "1",
-        std::move(req_state),
-        "1",
-        offlines[i],
-        0,
-        static_cast<xllm::proto::Priority>(priorities[i]));
+    auto request =
+        std::make_shared<Request>("1",
+                                  "1",
+                                  "1",
+                                  std::move(req_state),
+                                  "1",
+                                  offlines[i],
+                                  0,
+                                  static_cast<RequestPriority>(priorities[i]));
     requests.emplace_back(request);
   }
 
@@ -314,8 +314,10 @@ TEST(ContinuousSchedulerTest, PrioritySchedule) {
   EXPECT_TRUE(batch.size() == 1);
   EXPECT_TRUE(batch[0].size() == 2);
   EXPECT_TRUE(scheduler->get_running_requests().size() == 2);
-  EXPECT_TRUE(scheduler->get_running_requests()[0]->priority() == 2 /*NORMAL*/);
-  EXPECT_TRUE(scheduler->get_running_requests()[1]->priority() == 3 /*LOW*/);
+  EXPECT_TRUE(scheduler->get_running_requests()[0]->priority() ==
+              RequestPriority::NORMAL /*NORMAL*/);
+  EXPECT_TRUE(scheduler->get_running_requests()[1]->priority() ==
+              RequestPriority::LOW /*LOW*/);
   running_requests = scheduler->get_running_requests();
   update_requests(running_requests);
 
@@ -334,8 +336,10 @@ TEST(ContinuousSchedulerTest, PrioritySchedule) {
   EXPECT_TRUE(batch.size() == 1);
   EXPECT_TRUE(batch[0].size() == 2);
   EXPECT_TRUE(scheduler->get_running_requests().size() == 2);
-  EXPECT_TRUE(scheduler->get_running_requests()[0]->priority() == 1 /*HIGH*/);
-  EXPECT_TRUE(scheduler->get_running_requests()[1]->priority() == 2 /*NORMAL*/);
+  EXPECT_TRUE(scheduler->get_running_requests()[0]->priority() ==
+              RequestPriority::HIGH /*HIGH*/);
+  EXPECT_TRUE(scheduler->get_running_requests()[1]->priority() ==
+              RequestPriority::NORMAL /*NORMAL*/);
 }
 
 }  // namespace xllm

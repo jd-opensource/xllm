@@ -202,6 +202,6 @@ DEFINE_int32(heart_beat_interval, 3, "heart beat interval");
 
 DEFINE_string(priority_strategy, "FCFS", "priority strategy for requests");
 
-DEFINE_bool(enable_on_preempt_off,
+DEFINE_bool(enable_online_preempt_offline,
             true,
             "whether enable online preempt offline");

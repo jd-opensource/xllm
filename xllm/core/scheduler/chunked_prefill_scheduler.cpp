@@ -222,7 +222,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       if (request_to_preempt.get() != request.get()) {
         ++num_preempted_requests;
         block_manager_pool_->deallocate(request_to_preempt.get());
-        running_queue_.->pop_back();
+        running_queue_->pop_back();
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
         waiting_priority_queue_.push(request_to_preempt);

@@ -184,18 +184,19 @@ bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
 void DisaggPDScheduler::dispatch_requests() {
   while (true) {
     std::vector<std::shared_ptr<Request>> requests;
-
-    auto poped_result = prefill_request_queue_.try_pop();
-    // OPTIMIZE 之后改为：多次尝试读取在线 prefill
-    // 请求，只有较长时间未获取在线请求时，才读取离线 prefill 请求。
-    if (!poped_result.has_value()) {
+    const auto timeout = absl::Milliseconds(100);
+    // Wait for online request until timeout.
+    // If timeout, try to get offline request once. If no offline request,
+    // continue to wait for online request. This can avoid offline request
+    // blocking online request for too long time.
+    auto poped_result = prefill_request_queue_.pop(timeout);
+    if (!poped_result.has_value()) {  // try get online request timeout
       poped_result = prefill_request_queue_offline_.try_pop();
       if (!poped_result.has_value()) {
-        // no offline request, sleep for a while and try again
-        absl::SleepFor(absl::Milliseconds(100));
         continue;
       }
     }
+
     auto request = poped_result.value();
     if (request == nullptr) {
       // nullptr is a signal to exit
