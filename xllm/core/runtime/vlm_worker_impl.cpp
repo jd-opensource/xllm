@@ -28,7 +28,11 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include "pytorch/adapter/utils/utils.h"
+#elif defined(USE_MLU)
+#include <cnrt.h>
+#include <torch_mlu/csrc/framework/core/device.h>
 #endif
+
 #include <memory>
 #include <optional>
 #include <utility>
@@ -62,7 +66,11 @@ bool VLMWorkerImpl::init_model(torch::ScalarType dtype,
                << " failed, ret:" << ret;
   }
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu set device
+  int ret = cnrtSetDevice(currentDevId);
+  if (ret != 0) {
+    LOG(ERROR) << "CNRT set device id:" << currentDevId
+               << " failed, ret:" << ret;
+  }
 #endif
 
   // initialize model
@@ -86,7 +94,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& inputs) {
 #if defined(USE_NPU)
   c10_npu::SetDevice(device_.index());
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu set device
+  cnrtSetDevice(device_.index());
 #endif
   Timer timer;
   // all tensors should be on the same device as model
@@ -108,7 +116,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& inputs) {
 #if defined(USE_NPU)
   torch::npu::synchronize();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
+  torch_mlu::synchronize();
 #endif
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 

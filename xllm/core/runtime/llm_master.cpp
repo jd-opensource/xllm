@@ -28,6 +28,14 @@ limitations under the License.
 #include <vector>
 
 #include "api_service/call.h"
+
+#if defined(USE_NPU)
+#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
+#include "torch_npu/csrc/core/npu/THNPUCachingHostAllocator.h"
+#elif defined(USE_MLU)
+#include <torch_mlu/csrc/framework/core/caching_allocator.h>
+#endif
+
 #include "common/metrics.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
@@ -36,10 +44,6 @@ limitations under the License.
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
-#if defined(USE_NPU)
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
-#include "torch_npu/csrc/core/npu/THNPUCachingHostAllocator.h"
-#endif
 #include "util/device_name_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
@@ -149,7 +153,7 @@ LLMMaster::~LLMMaster() {
 #if defined(USE_NPU)
   c10_npu::NPUCachingAllocator::emptyCache();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu empty cache
+  torch_mlu::MLUCachingAllocator::emptyCache();
 #endif
 }
 

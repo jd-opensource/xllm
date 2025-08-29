@@ -21,6 +21,11 @@ if(USE_NPU)
   list(APPEND BASE_DEPS :npu_layers)
 endif()
 
+if(USE_MLU)
+  # Modify dependencies for MLU
+  list(APPEND BASE_DEPS :mlu_layers)
+endif()
+
 # Define the library
 cc_library(
   NAME 
@@ -34,11 +39,12 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:minicpmv.h>
     $<$<BOOL:${USE_NPU}>:qwen2.h>
     $<$<BOOL:${USE_NPU}>:qwen2_5_vl.h>
-    $<$<BOOL:${USE_NPU}>:qwen3.h>
     $<$<BOOL:${USE_NPU}>:qwen3_moe.h>
-    $<$<BOOL:${USE_NPU}>:qwen_base.h>
+    qwen3.h
+    qwen_base.h
   SRCS
     model_registry.cpp
   DEPS
     :model
+    ${BASE_DEPS}
 )

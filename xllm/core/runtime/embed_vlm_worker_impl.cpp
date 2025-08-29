@@ -27,6 +27,8 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include "pytorch/adapter/utils/utils.h"
+#elif defined(USE_MLU)
+#include <torch_mlu/csrc/framework/core/device.h>
 #endif
 
 #include <memory>
@@ -79,7 +81,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
 #if defined(USE_NPU)
   torch::npu::synchronize();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
+  torch_mlu::synchronize();
 #endif
 
   Timer timer;
@@ -97,7 +99,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
 #if defined(USE_NPU)
   torch::npu::synchronize();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
+  torch_mlu::synchronize();
 #endif
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 

@@ -44,6 +44,8 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
 #include "xllm_kernels/models/base/param/mapping.h"
+#elif defined(USE_MLU)
+#include "cnrt.h"
 #endif
 
 namespace xllm {
@@ -64,7 +66,10 @@ void WorkerServer::create_server(const runtime::Options& options,
     LOG(ERROR) << "ACL set device id: " << device_id << " failed, ret:" << ret;
   }
 #elif defined(USE_MLU)
-// TODO(mlu): implement mlu device set
+  int ret = cnrtSetDevice(device_id);
+  if (ret != 0) {
+    LOG(ERROR) << "CNRT set device id: " << device_id << " failed, ret:" << ret;
+  }
 #endif
 
   auto worker_global_rank = global_rank;

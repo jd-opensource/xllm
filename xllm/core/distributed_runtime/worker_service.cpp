@@ -29,6 +29,10 @@ limitations under the License.
 #include <torch_npu/csrc/core/npu/NPUFunctions.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
+#elif defined(USE_MLU)
+#include <torch_mlu/csrc/framework/core/MLUStream.h>
+
+#include "cnrt.h"
 #endif
 
 #include "common/metrics.h"
@@ -52,7 +56,13 @@ void init_npu_context(const torch::Device& device) {
   torch_npu::init_npu(device_name);
 }
 #elif defined(USE_MLU)
-// TODO(mlu): implement mlu init context
+void init_mlu_context(const torch::Device& device) {
+  int device_id = device.index();
+  int ret = cnrtSetDevice(device_id);
+  if (ret != 0) {
+    LOG(ERROR) << "CNRT set device id: " << device_id << " failed, ret:" << ret;
+  }
+}
 #endif
 }  // namespace
 
@@ -62,7 +72,10 @@ struct WorkerService::NPUStreamHelper {
   NPUStreamHelper() : D2H_memcpy_stream(c10_npu::getNPUStreamFromPool()) {}
 };
 #elif defined(USE_MLU)
-// TODO(mlu): implement mlu stream helper
+struct WorkerService::MLUStreamHelper {
+  torch_mlu::MLUStream D2H_memcpy_stream;
+  MLUStreamHelper() : D2H_memcpy_stream(torch_mlu::getStreamFromPool()) {}
+};
 #endif
 
 WorkerService::WorkerService(runtime::Options options,
@@ -72,7 +85,8 @@ WorkerService::WorkerService(runtime::Options options,
   init_npu_context(device);
   npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu init context
+  init_mlu_context(device);
+  mlu_stream_helper_ = std::make_unique<MLUStreamHelper>();
 #endif
 }
 
@@ -87,7 +101,8 @@ WorkerService::WorkerService(runtime::Options options,
   init_npu_context(device);
   npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu init context
+  init_mlu_context(device);
+  mlu_stream_helper_ = std::make_unique<MLUStreamHelper>();
 #endif
 }
 
@@ -314,7 +329,7 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
 #if defined(USE_NPU)
         c10_npu::SetDevice(device_.index());
 #elif defined(USE_MLU)
-    // TODO(mlu): implement mlu execute model
+        cnrtSetDevice(device_.index());
 #endif
         Timer timer;
         int32_t num_sequences = pb_forward_input->num_sequences();
@@ -346,7 +361,8 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
               c10::StreamGuard streamGuard(
                   npu_stream_helper_->D2H_memcpy_stream.unwrap());
 #elif defined(USE_MLU)
-          // TODO(mlu): implement mlu synchronize stream
+              c10::StreamGuard streamGuard(
+                  mlu_stream_helper_->D2H_memcpy_stream.unwrap());
 #endif
               // only driver worker (rank=0) need to fill this
               // [num_seq, ..., embed_dim] FloatTensor
@@ -372,7 +388,7 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
               aclrtSynchronizeStream(
                   npu_stream_helper_->D2H_memcpy_stream.stream());
 #elif defined(USE_MLU)
-          // TODO(mlu): implement mlu synchronize stream
+              cnrtQueueSync(mlu_stream_helper_->D2H_memcpy_stream.stream());
 #endif
             }
           }
@@ -407,7 +423,7 @@ void WorkerService::GetLastStepResult(
 #if defined(USE_NPU)
         c10_npu::SetDevice(device_.index());
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu set device
+        cnrtSetDevice(device_.index());
 #endif
         brpc::ClosureGuard done_guard(done);
 
@@ -419,7 +435,8 @@ void WorkerService::GetLastStepResult(
           c10::StreamGuard streamGuard(
               npu_stream_helper_->D2H_memcpy_stream.unwrap());
 #elif defined(USE_MLU)
-      // TODO(mlu): implement mlu synchronize stream
+          c10::StreamGuard streamGuard(
+              mlu_stream_helper_->D2H_memcpy_stream.unwrap());
 #endif
           // [num_seq, ..., embed_dim]
           auto embeddings =
@@ -443,7 +460,7 @@ void WorkerService::GetLastStepResult(
             aclrtSynchronizeStream(
                 npu_stream_helper_->D2H_memcpy_stream.stream());
 #elif defined(USE_MLU)
-        // TODO(mlu): implement mlu synchronize stream
+            cnrtQueueSync(mlu_stream_helper_->D2H_memcpy_stream.stream());
 #endif
 
             forward_output_to_proto(next_tokens,

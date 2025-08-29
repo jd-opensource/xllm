@@ -22,7 +22,18 @@ cc_library(
 cc_library(
   NAME 
     layers
+  HDRS
+    embedding.h
+    normalization.h
+    linear.h
+    linear_impl.h
+    weight_utils.h
+  SRCS
+    linear.cpp
+    linear_impl.cpp
+    weight_utils.cpp
   DEPS
+    :parallel_state
     :state_dict
     :kv_cache
     :prefix_cache
@@ -35,4 +46,7 @@ cc_library(
 
 if(USE_NPU)
   add_subdirectory(npu)
+endif()
+if(USE_MLU)
+  add_subdirectory(mlu)
 endif()

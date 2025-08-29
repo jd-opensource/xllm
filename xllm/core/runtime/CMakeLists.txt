@@ -63,6 +63,8 @@ cc_library(
     absl::synchronization
     absl::flat_hash_map
     proto::xllm_proto
+    $<$<BOOL:${USE_MLU}>:cnrt>
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
 )
 
 cc_library(
@@ -87,4 +89,5 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:npu_layers>
     :chat_template
     glog::glog
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
 )

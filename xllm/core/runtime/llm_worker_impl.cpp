@@ -28,6 +28,10 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include "pytorch/adapter/utils/utils.h"
+#elif defined(USE_MLU)
+#include <cnrt.h>
+#include <torch_mlu/csrc/framework/core/MLUStream.h>
+#include <torch_mlu/csrc/framework/core/device.h>
 #endif
 
 #include <memory>
@@ -64,7 +68,12 @@ bool LLMWorkerImpl::init_model(torch::ScalarType dtype,
                << " failed, ret:" << ret;
   }
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu init device
+  int currentDevId = device_.index();
+  int ret = cnrtSetDevice(currentDevId);
+  if (ret != 0) {
+    LOG(ERROR) << "CNRT set device id:" << currentDevId
+               << " failed, ret:" << ret;
+  }
 #endif
 
   // initialize model
@@ -87,7 +96,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
 #if defined(USE_NPU)
   c10_npu::SetDevice(device_.index());
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu set device
+  cnrtSetDevice(device_.index());
 #endif
   Timer timer;
   auto& flatten_tokens = inputs.token_ids;
@@ -131,7 +140,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
     aclrtSynchronizeStream(
         c10_npu::getCurrentNPUStream(device_.index()).stream());
 #elif defined(USE_MLU)
-    // TODO(mlu): implement mlu synchronize stream
+    cnrtQueueSync(torch_mlu::getCurrentMLUStream(device_.index()).stream());
 #endif
     if (options_.instance_role() == InstanceRole::PREFILL &&
         options_.kv_cache_transfer_mode() == "PUSH" &&
@@ -178,7 +187,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& inputs) {
   aclrtSynchronizeStream(
       c10_npu::getCurrentNPUStream(device_.index()).stream());
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
+  cnrtQueueSync(torch_mlu::getCurrentMLUStream(device_.index()).stream());
 #endif
 
   if (options_.instance_role() == InstanceRole::PREFILL &&

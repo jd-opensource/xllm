@@ -44,7 +44,6 @@ void CollectiveService::Sync(::google::protobuf::RpcController* controller,
                              const proto::AddressInfo* request,
                              proto::CommUniqueIdList* response,
                              ::google::protobuf::Closure* done) {
-#if defined(USE_NPU)
   brpc::ClosureGuard done_guard(done);
 
   std::string address = request->address();
@@ -53,10 +52,9 @@ void CollectiveService::Sync(::google::protobuf::RpcController* controller,
     std::lock_guard<std::mutex> lock(mutex_);
     addrs_map_[global_rank] = address;
   }
-
+#if defined(USE_NPU)
   to_proto_list(root_infos_, response);
 #endif
-  return;
 }
 
 std::unordered_map<int32_t, std::string> CollectiveService::wait() {

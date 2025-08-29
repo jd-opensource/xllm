@@ -1,0 +1,31 @@
+include(cc_library)
+include(cc_test)
+
+
+cc_library(
+  NAME
+    mlu_layers 
+  HDRS
+    qwen3_attention.h
+    attention.h
+    qwen3_mlp.h
+    qwen3_decoder_layer.h
+  SRCS
+    qwen3_attention.cpp
+    attention.cpp
+    qwen3_mlp.cpp
+    qwen3_decoder_layer.cpp
+  DEPS
+    "-Wl,--whole-archive"
+    "-Wl,--no-whole-archive"
+    :kv_cache
+    :prefix_cache
+    :block
+    :parallel_state
+    :state_dict
+    :rotary_embedding
+    :xllm_mlu_ops
+    glog::glog
+    gflags::gflags
+    torch
+)

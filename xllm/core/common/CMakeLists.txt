@@ -38,6 +38,7 @@ cc_library(
     Boost::serialization
     cpprest
     etcd-cpp-api
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
 )
 
 cc_library(

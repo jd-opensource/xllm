@@ -15,25 +15,37 @@ limitations under the License.
 
 #pragma once
 
+#if defined(USE_NPU)
 #include <atb/atb_infer.h>
+#endif
 #include <gflags/gflags.h>
-#include <mstx/ms_tools_ext.h>
 #include <torch/torch.h>
 
 #include <string>
 #include <typeinfo>
 #include <vector>
 
+#if defined(USE_NPU)
+// test
+#include <mstx/ms_tools_ext.h>
+#endif
+
 #include "core/common/global_flags.h"
 #include "core/framework/context.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
+#if defined(USE_NPU)
 #include "core/layers/npu/attn_mask.h"
 #include "core/layers/npu/llm_head.h"
 #include "core/layers/npu/pos_embedding.h"
 #include "core/layers/npu/rms_norm.h"
-#include "model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
+#elif defined(USE_MLU)
+#include "core/layers/embedding.h"
+#include "core/layers/mlu/attention.h"
+#include "core/layers/normalization.h"
+#endif
+#include "model_registry.h"
 
 namespace xllm::hf {
 
@@ -110,6 +122,7 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
   }
 
+#if defined(USE_NPU)
   virtual torch::Tensor forward(torch::Tensor& x,
                                 torch::Tensor& cos_pos,
                                 torch::Tensor& sin_pos,
@@ -134,17 +147,29 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
                           node_id);
   }
 
-  // load the weight from the checkpoint
-  virtual void load_state_dict(const StateDict& state_dict) {
-    // call each submodule's load_state_dict function
-    decoder_layer_->load_state_dict(state_dict);
-  }
-
   virtual void verify_loaded_weights(const std::string& prefix) const {
     decoder_layer_->verify_loaded_weights();
   }
   virtual void merge_loaded_weights() {
     decoder_layer_->merge_loaded_weights();
+  }
+#elif defined(USE_MLU)
+  virtual torch::Tensor forward(
+      torch::Tensor& x,
+      torch::Tensor& positions,
+      torch::Tensor& residual,
+      const xllm::mlu::AttentionMetadata& attn_metadata,
+      KVCache& kv_cache,
+      const ModelInputParams& input_params) {
+    return decoder_layer_(
+        x, positions, residual, attn_metadata, kv_cache, input_params);
+  }
+#endif
+
+  // load the weight from the checkpoint
+  virtual void load_state_dict(const StateDict& state_dict) {
+    // call each submodule's load_state_dict function
+    decoder_layer_->load_state_dict(state_dict);
   }
 
  private:
@@ -161,7 +186,11 @@ class QWenModelImplBase : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
+#if defined(USE_NPU)
     return embed_tokens_(input_ids, context_, work_space_, 0);
+#elif defined(USE_MLU)
+    return embed_tokens_(input_ids);
+#endif
   }
 
   // tokens: [num_tokens]
@@ -171,6 +200,7 @@ class QWenModelImplBase : public torch::nn::Module {
                                 std::vector<KVCache>& kv_caches,
                                 const ModelInputParams& input_params) {
     auto inputs_embeds = input_params.input_embedding;
+#if defined(USE_NPU)
     // test
     torch::Tensor h;
     if (inputs_embeds.defined()) {
@@ -263,6 +293,26 @@ class QWenModelImplBase : public torch::nn::Module {
     }
     h = norm_(h, context_, work_space_, 0);
     return h;
+#elif defined(USE_MLU)
+    // FIXME(mlu): temp method to distinguish prefill and decode
+    bool is_prefill = input_params.q_max_seq_len > 1;
+    auto attn_metadata =
+        xllm::mlu::AttentionMetadata::build(input_params, is_prefill);
+
+    torch::Tensor h;
+    if (inputs_embeds.defined()) {
+      h = inputs_embeds;
+    } else {
+      h = embed_tokens_(tokens);
+    }
+    torch::Tensor residual;
+    for (size_t i = 0; i < layers_.size(); i++) {
+      auto& layer = layers_[i];
+      h = layer(
+          h, positions, residual, attn_metadata, kv_caches[i], input_params);
+    }
+    return norm_(h, residual);
+#endif
   }
 
   // load the weight from the checkpoint
@@ -277,6 +327,7 @@ class QWenModelImplBase : public torch::nn::Module {
     norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
   }
 
+#if defined(USE_NPU)
   virtual void verify_loaded_weights(const std::string& prefix) const {
     embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
     for (int i = 0; i < layers_.size(); i++) {
@@ -300,8 +351,10 @@ class QWenModelImplBase : public torch::nn::Module {
   virtual void set_word_embedding(AtbWordEmbedding& word_embedding) {
     embed_tokens_ = word_embedding;
   }
+#endif
 
  protected:
+#if defined(USE_NPU)
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
   torch::Tensor cos_sin_;
@@ -317,6 +370,13 @@ class QWenModelImplBase : public torch::nn::Module {
   //  ParallelEmbedding embed_tokens_{nullptr};
   AtbWordEmbedding embed_tokens_{nullptr};
   RmsNorm norm_{nullptr};
+#endif
+
+#if defined(USE_MLU)
+  std::vector<int64_t> mrope_section_;
+  RMSNormResidual norm_{nullptr};
+  ParallelEmbedding embed_tokens_{nullptr};
+#endif
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
@@ -334,6 +394,7 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     // register submodules
     model_ = register_module("model", QWenModelType(context));
 
+#if defined(USE_NPU)
     auto options = context.get_tensor_options();
     device_id = options.device().index();
     work_space_ = AtbWorkspace(options.device());
@@ -342,6 +403,16 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     context_->SetExecuteStream(stream);
     context_->SetAsyncTilingCopyStatus(true);
     lm_head_ = register_module("lm_head", LlmHead(context));
+#elif defined(USE_MLU)
+    lm_head_ = register_module(
+        "lm_head",
+        ColumnParallelLinear(context.get_model_args().hidden_size(),
+                             context.get_model_args().vocab_size(),
+                             /*bias=*/false,
+                             /*gather_output=*/true,
+                             context.get_parallel_args(),
+                             context.get_tensor_options()));
+#endif
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -367,7 +438,14 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     // select tokens if provided
     auto h = hidden_states;
     // test
+#if defined(USE_NPU)
     return lm_head_(hidden_states, seleted_idxes, context_, work_space_, 0);
+#elif defined(USE_MLU)
+    if (seleted_idxes.defined()) {
+      h = h.index_select(/*dim=*/0, seleted_idxes);
+    }
+    return lm_head_(h);
+#endif
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader,
@@ -383,6 +461,7 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
             state_dict->get_dict_with_prefix(prefix + "lm_head."));
       }
     }
+#if defined(USE_NPU)
     // verify
     model_->verify_loaded_weights(prefix + "model.");
     lm_head_->verify_loaded_weights(prefix + "lm_head.");
@@ -390,8 +469,10 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     model_->merge_loaded_weights();
     // test
     lm_head_->merge_loaded_weights();
+#endif
   }
 
+#if defined(USE_NPU)
   virtual LlmHead get_lm_head() { return lm_head_; }
 
   virtual void set_lm_head(LlmHead& head) { lm_head_ = head; }
@@ -403,6 +484,7 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
   virtual void set_word_embedding(AtbWordEmbedding& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
+#endif
 
  protected:
   // parameter members, must be registered
@@ -410,9 +492,13 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
   int device_id = 0;
   bool tie_word_embeddings{false};
   // test
+#if defined(USE_NPU)
   LlmHead lm_head_{nullptr};
   AtbWorkspace work_space_;
   atb::Context* context_;
+#elif defined(USE_MLU)
+  ColumnParallelLinear lm_head_{nullptr};
+#endif
 };
 
 }  // namespace xllm::hf

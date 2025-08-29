@@ -32,3 +32,7 @@ limitations under the License.
 #include "qwen3_moe.h"   // IWYU pragma: keep
 #endif
 #endif
+#if defined(USE_MLU)
+#include "qwen3.h"      // IWYU pragma: keep
+#include "qwen_base.h"  // IWYU pragma: keep
+#endif

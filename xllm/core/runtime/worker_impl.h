@@ -213,6 +213,9 @@ class WorkerImpl {
 #if defined(USE_NPU)
   struct NPUStreamHelper;
   std::unique_ptr<NPUStreamHelper> npu_stream_helper_;
+#elif defined(USE_MLU)
+  struct MLUStreamHelper;
+  std::unique_ptr<MLUStreamHelper> mlu_stream_helper_;
 #endif
 
   bool is_spec_draft_ = false;

@@ -29,6 +29,10 @@ limitations under the License.
 
 #include "kernels/npu/xllm_ops/replace_token.h"
 #include "pytorch/adapter/utils/utils.h"
+#elif defined(USE_MLU)
+#include <cnrt.h>
+#include <torch_mlu/csrc/framework/core/MLUStream.h>
+#include <torch_mlu/csrc/framework/core/caching_allocator.h>
 #endif
 
 #include <memory>
@@ -58,7 +62,10 @@ struct WorkerImpl::NPUStreamHelper {
   NPUStreamHelper() : H2D_memcpy_stream(c10_npu::getNPUStreamFromPool()) {}
 };
 #elif defined(USE_MLU)
-// TODO(mlu): implement mlu stream helper
+struct WorkerImpl::MLUStreamHelper {
+  torch_mlu::MLUStream H2D_memcpy_stream;
+  MLUStreamHelper() : H2D_memcpy_stream(torch_mlu::getStreamFromPool()) {}
+};
 #endif
 
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
@@ -89,7 +96,13 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   torch_npu::init_npu(device_name);
   npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu init context
+  int currentDevId = device.index();
+  int ret = cnrtSetDevice(currentDevId);
+  if (ret != 0) {
+    LOG(ERROR) << "CNRT set device id:" << currentDevId
+               << " failed, ret:" << ret;
+  }
+  mlu_stream_helper_ = std::make_unique<MLUStreamHelper>();
 #endif
   sampler_ = std::make_unique<Sampler>();
 }
@@ -242,7 +255,7 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
   c10_npu::NPUCachingAllocator::cacheInfo(
       device_.index(), &torch_cache, &torch_largest_block);
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu estimate kv cache capacity
+  torch_mlu::MLUCachingAllocator::emptyCache();
 #endif
   const auto available_memory = DeviceMemory::available_memory(device_);
   const auto total_memory = DeviceMemory::total_memory(device_);
@@ -256,7 +269,7 @@ void WorkerImpl::process_group_test() {
 #if defined(USE_NPU)
   c10_npu::SetDevice(device_.index());
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu process group test
+  cnrtSetDevice(device_.index());
 #endif
 
   // create random tensors
@@ -332,6 +345,27 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
     processed_inputs.input_params.dp_ep_padding_data = dp_ep_padding.build();
   }
   aclrtSynchronizeStream(npu_stream_helper_->H2D_memcpy_stream.stream());
+#elif defined(USE_MLU)
+  c10::StreamGuard streamGuard(mlu_stream_helper_->H2D_memcpy_stream.unwrap());
+  processed_inputs = inputs.to(device_, dtype_);
+
+  // if (!context_.get_parallel_args().mapping_data().empty()) {
+  //   torch::Tensor token_size_per_dp_group =
+  //       torch::tensor(processed_inputs.input_params.dp_global_token_nums,
+  //                     torch::TensorOptions()
+  //                         .device(torch::kCPU)
+  //                         .dtype(torch::kInt32)
+  //                         .pinned_memory(true));
+  //   bool is_prefill =
+  //       processed_inputs.input_params.global_empty_kv_cache ? true : false;
+  //   DpEpPadding dp_ep_padding(token_size_per_dp_group,
+  //                             context_.get_model_args().num_experts_per_tok(),
+  //                             context_.get_parallel_args().mapping_data(),
+  //                             device_,
+  //                             is_prefill);
+  //   processed_inputs.input_params.dp_ep_padding_data = dp_ep_padding.build();
+  // }
+  // aclrtSynchronizeStream(npu_stream_helper_->H2D_memcpy_stream.stream());
 #endif
 }
 

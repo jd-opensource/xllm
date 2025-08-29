@@ -36,6 +36,10 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 #endif
 
+#if defined(USE_MLU)
+#include <torch_mlu/csrc/framework/core/caching_allocator.h>
+#endif
+
 namespace xllm {
 
 #if defined(USE_NPU)
@@ -72,7 +76,15 @@ int64_t DeviceMemory::available_memory(const torch::Device& device) {
 #endif
 
 #if defined(USE_MLU)
-// TODO(mlu): implement mlu device memory
+int64_t DeviceMemory::total_memory(const torch::Device& device) {
+  auto info = torch_mlu::MLUCachingAllocator::MemGetInfo(device.index());
+  return static_cast<int64_t>(info.second);
+}
+
+int64_t DeviceMemory::available_memory(const torch::Device& device) {
+  auto info = torch_mlu::MLUCachingAllocator::MemGetInfo(device.index());
+  return static_cast<int64_t>(info.first);
+}
 #endif
 
 }  // namespace xllm

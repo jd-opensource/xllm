@@ -18,18 +18,17 @@ limitations under the License.
 
 #include <absl/strings/numbers.h>
 #include <absl/strings/str_split.h>
-#include <glog/logging.h>
-#include <torch/torch.h>
-#include <torch/types.h>
-
-#if defined(USE_NPU)
 #include <c10/core/StorageImpl.h>
+#include <glog/logging.h>
 #include <torch/csrc/Device.h>
 #include <torch/extension.h>
+#include <torch/torch.h>
+#include <torch/types.h>
+#if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFunctions.h>
 #include <torch_npu/torch_npu.h>
 #elif defined(USE_MLU)
-// TODO(mlu): include mlu device name utils
+#include <torch_mlu/csrc/framework/core/device.h>
 #endif
 
 namespace xllm {
@@ -75,7 +74,45 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
   return devices;
 }
 #elif defined(USE_MLU)
-// TODO(mlu): implement mlu device name utils
+std::vector<torch::Device> DeviceNameUtils::parse_devices(
+    const std::string& device_str) {
+  std::vector<torch::Device> devices;
+  if (device_str == "auto" || device_str.empty()) {
+    // use all available mlus if any
+    const auto num_mlus = torch_mlu::device_count();
+    if (num_mlus == 0) {
+      LOG(INFO) << "no mlus found, using cpu.";
+      return {torch::kCPU};
+    }
+    devices.reserve(num_mlus);
+    for (int i = 0; i < num_mlus; ++i) {
+      std::string device_name = "mlu:" + std::to_string(i);
+      devices.emplace_back(torch::Device(device_name));
+    }
+    return devices;
+  }
+
+  // parse device string
+  const std::vector<std::string> device_strs = absl::StrSplit(device_str, ',');
+  std::set<torch::DeviceType> device_types;
+  devices.reserve(device_strs.size());
+  for (const auto& device_str : device_strs) {
+    std::vector<std::string> parts = absl::StrSplit(device_str, ':');
+    CHECK(parts.size() == 2) << "Invalid device string format: " << device_str;
+    CHECK(parts[0] == "mlu") << "Unsupported device type: " << parts[0];
+
+    int device_index;
+    CHECK(absl::SimpleAtoi(parts[1], &device_index))
+        << "Invalid device index: " << parts[1];
+
+    devices.emplace_back(c10::DeviceType::PrivateUse1, device_index);
+    device_types.insert(devices.back().type());
+  }
+  CHECK(!devices.empty()) << "No devices specified.";
+  CHECK(device_types.size() == 1)
+      << "All devices must be of the same type. Got: " << device_str;
+  return devices;
+}
 #endif
 
 }  // namespace xllm
