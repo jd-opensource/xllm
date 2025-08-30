@@ -1,21 +1,14 @@
 include(cc_library)
 
-file(GLOB_RECURSE HEADER_FILES
-  "${CMAKE_CURRENT_LIST_DIR}/*.h"
-  "${CMAKE_CURRENT_LIST_DIR}/*.hpp"
-)
-
-file(GLOB_RECURSE SOURCE_FILES
-  "${CMAKE_CURRENT_LIST_DIR}/*.cpp"
-)
-
 cc_library(
   NAME
     xllm_ops
   HDRS
-    ${HEADER_FILES}
+    replace_token.h
+    top_k_top_p.h
   SRCS
-    ${SOURCE_FILES}
+    replace_token.cpp
+    top_k_top_p.cpp
   DEPS
     atb
     torch_npu
