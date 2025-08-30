@@ -11,9 +11,8 @@ build:
     python: "3.13"
   jobs:
     pre_build:
-      - echo "copy index page"
-      - cp docs/zh/index.md docs/index.md
-      - sed -i 's#../assets/#assets/#g' docs/index.md
+      - cp -r docs/zh/* docs/
+      - find docs/ -name "*.md" -exec sed -i 's#../assets/#assets/#g' {} \;
 
 # Build documentation with Mkdocs
 mkdocs:

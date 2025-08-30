@@ -6,7 +6,7 @@ repo_name: jd-opensource/xllm
 repo_url: https://github.com/jd-opensource/xllm
 
 edit_uri: edit/main/docs/
-
+use_directory_urls: true
 # Copyright
 copyright: Copyright &copy; 2025 xLLM Team
 # docs_dir: docs/zh
@@ -78,6 +78,7 @@ theme:
   #   logo: logo
 # Plugins
 plugins:
+  # - awesome-pages
   # - blog
   # - static-i18n
   - git-revision-date-localized:
@@ -180,47 +181,99 @@ markdown_extensions:
 extra_javascript:
   - mkdocs/javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+
 nav:
-  - 主页: zh/index.md
+  - 主页: index.md
   - 开始使用:
-    - zh/getting_started/compile.md
+    - getting_started/compile.md
     - 快速开始:
       - 在线服务: 
-        - zh/getting_started/single_node.md
-        - zh/getting_started/multi_node.md
-        - zh/getting_started/PD_disagg.md
+        - getting_started/single_node.md
+        - getting_started/multi_node.md
+        - getting_started/PD_disagg.md
       - 多模态支持:
-        - zh/getting_started/start_vlm_service.md
-    - zh/getting_started/scripts.md
+        - getting_started/start_vlm_service.md
+    - getting_started/scripts.md
   - 功能介绍:
     - 概览:
-      - zh/features/overview.md
+      - features/overview.md
     - 功能列表:
       - 运行时:
-        - zh/features/async_schedule.md
-        - zh/features/multi_streams.md
+        - features/async_schedule.md
+        - features/multi_streams.md
       - 调度算法:
-        - zh/features/continuous_scheduler.md
-        - zh/features/chunked_scheduler.md
-        - zh/features/zero_evict_scheduler.md
-        - zh/features/prefix_cache.md
+        - features/continuous_scheduler.md
+        - features/chunked_scheduler.md
+        - features/zero_evict_scheduler.md
+        - features/prefix_cache.md
       - 分布式:
-        - zh/features/disagg_pd.md
+        - features/disagg_pd.md
       - 算子:
-        - zh/features/groupgemm.md
-        - zh/features/ppmatmul.md
-        - zh/features/topk_topP.md
+        - features/groupgemm.md
+        - features/ppmatmul.md
+        - features/topk_topP.md
       - KV存储管理:
-        - zh/features/global_kvcache.md
-        - zh/features/xtensor_memory.md
+        - features/global_kvcache.md
+        - features/xtensor_memory.md
       - 多模态:
-        - zh/features/multimodal.md
+        - features/multimodal.md
       - MoE优化:
-        - zh/features/moe_params.md
-        - zh/features/eplb.md
+        - features/moe_params.md
+        - features/eplb.md
       - 进阶指南:
-        - 投机推理: zh/features/mtp.md
-        - ACLGraph: zh/features/acl_graph.md
-      - xLLM Service概览: zh/features/xllm_service_overview.md
+        - 投机推理: features/mtp.md
+        - ACLGraph: features/acl_graph.md
+      - xLLM Service概览: features/xllm_service_overview.md
   - CLI参考:
-    - zh/cli_reference.md
+    - cli_reference.md
+
+# nav:
+#   - 主页: index.md
+#   - 开始使用: getting_started/
+#   - 功能介绍: features/
+#   - CLI参考: cli_reference.md
+# nav:
+#   - 主页: zh/index.md
+#   - 开始使用:
+#     - zh/getting_started/compile.md
+#     - 快速开始:
+#       - 在线服务: 
+#         - zh/getting_started/single_node.md
+#         - zh/getting_started/multi_node.md
+#         - zh/getting_started/PD_disagg.md
+#       - 多模态支持:
+#         - zh/getting_started/start_vlm_service.md
+#     - zh/getting_started/scripts.md
+#   - 功能介绍:
+#     - 概览:
+#       - zh/features/overview.md
+#     - 功能列表:
+#       - 运行时:
+#         - zh/features/async_schedule.md
+#         - zh/features/multi_streams.md
+#       - 调度算法:
+#         - zh/features/continuous_scheduler.md
+#         - zh/features/chunked_scheduler.md
+#         - zh/features/zero_evict_scheduler.md
+#         - zh/features/prefix_cache.md
+#       - 分布式:
+#         - zh/features/disagg_pd.md
+#       - 算子:
+#         - zh/features/groupgemm.md
+#         - zh/features/ppmatmul.md
+#         - zh/features/topk_topP.md
+#       - KV存储管理:
+#         - zh/features/global_kvcache.md
+#         - zh/features/xtensor_memory.md
+#       - 多模态:
+#         - zh/features/multimodal.md
+#       - MoE优化:
+#         - zh/features/moe_params.md
+#         - zh/features/eplb.md
+#       - 进阶指南:
+#         - 投机推理: zh/features/mtp.md
+#         - ACLGraph: zh/features/acl_graph.md
+#       - xLLM Service概览: zh/features/xllm_service_overview.md
+#   - CLI参考:
+#     - zh/cli_reference.md
