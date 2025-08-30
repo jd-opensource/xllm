@@ -114,7 +114,7 @@ int run() {
       .num_handling_threads(FLAGS_num_handling_threads)
       .communication_backend(FLAGS_communication_backend)
       .enable_eplb(FLAGS_enable_eplb)
-      .enable_eplb(FLAGS_redundant_experts_num)
+      .redundant_experts_num(FLAGS_redundant_experts_num)
       .eplb_update_interval(FLAGS_eplb_update_interval)
       .eplb_update_threshold(FLAGS_eplb_update_threshold)
       .rank_tablefile(FLAGS_rank_tablefile)
