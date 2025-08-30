@@ -26,9 +26,11 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "framework/batch/batch_factory.h"
+#include "framework/request/priority_comparator.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "runtime/engine.h"
+#include "scheduler/decode_priority_queue.h"
 #include "util/utils.h"
 
 namespace xllm {
@@ -37,7 +39,12 @@ constexpr size_t kRequestQueueSize = 100000;
 }  // namespace
 
 ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
-    : options_(options), engine_(engine), request_queue_(kRequestQueueSize) {
+    : options_(options),
+      engine_(engine),
+      request_queue_(kRequestQueueSize),
+      waiting_priority_queue_(create_comparator(options.priority_strategy())),
+      waiting_priority_queue_offline_(
+          create_comparator(options.priority_strategy())) {
   CHECK(engine_ != nullptr);
   block_manager_pool_ = engine_->block_manager_pool();
   CHECK(block_manager_pool_ != nullptr);
@@ -50,7 +57,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       options_.instance_role(),
       options_.enable_schedule_overlap(),
       options_.enable_decode_response_to_service());
-
+  create_running_queue(options);
   if (options_.enable_service_routing()) {
     XServiceClient::get_instance()->set_scheduler(this);
   }
@@ -69,9 +76,57 @@ bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   return false;
 }
 
+void ContinuousScheduler::create_running_queue(const Options& options) {
+  if (options.priority_strategy() == "FCFS") {
+    running_queue_offline_ = std::make_unique<FCFSQueue>();
+    running_queue_ = std::make_unique<FCFSQueue>();
+  } else {
+    std::unique_ptr<PriorityComparator> comparator;
+    if (options.priority_strategy() == "deadline") {
+      comparator = std::make_unique<DeadlineComparator>();
+    } else if (options.priority_strategy() == "priority") {
+      comparator = std::make_unique<StrictPriorityComparator>();
+    } else {
+      LOG(FATAL) << "Unknown strategy: " << options.priority_strategy();
+    }
+    running_queue_ =
+        std::make_unique<DynamicPriorityQueue>(std::move(comparator));
+    running_queue_offline_ =
+        std::make_unique<DynamicPriorityQueue>(std::move(comparator));
+  }
+}
+
+bool ContinuousScheduler::check_if_enough_to_evict(
+    DecodePriorityQueue* running_queue_to_evict,
+    Sequence* prefill_sequence,
+    size_t& num_request_to_evict) {
+  // check if it's enough when we evict this requests queue
+  auto block_size = block_manager_pool_->options().block_size();
+  const size_t num_blocks_needed =
+      (prefill_sequence->num_tokens() + block_size - 1) / block_size;
+  size_t num_blocks_can_evict = 0;
+  // count the number of blocks can be preempted
+  for (auto it = running_queue_to_evict->rbegin();
+       it != running_queue_to_evict->rend();
+       ++it) {
+    std::shared_ptr<Request> request_to_preempt = *it;
+    num_request_to_evict++;
+    // count the number of blocks belong to the request
+    for (const auto& seq : request_to_preempt->sequences()) {
+      num_blocks_can_evict += seq->kv_state().num_kv_blocks();
+    }
+    if (num_blocks_needed <= num_blocks_can_evict) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void ContinuousScheduler::handle_prefill_requests(
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
+    RequestPriorityQueue& waiting_priority_queue,
+    size_t& num_online_prefill_preempt_offline_requests,
     std::vector<std::shared_ptr<Request>>& finished_requests) {
   // Handle new request prompt first.
   // Include those requests that are preempted by others.
@@ -83,17 +138,17 @@ void ContinuousScheduler::handle_prefill_requests(
   //
   // NOTE: preempted requests will be pushed in waiting_priority_queue,
   // they may contian many sequences, so we should check here.
-  while (!waiting_priority_queue_.empty() && remaining_seq_budget > 0 &&
+  while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 &&
          block_manager_pool_->kv_cache_utilization() <
              FLAGS_prefill_scheduling_memory_usage_threshold) {
-    std::shared_ptr<Request> request(waiting_priority_queue_.top());
+    std::shared_ptr<Request> request(waiting_priority_queue.top());
     if (request->finished() || request->cancelled()) {
       block_manager_pool_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
-      waiting_priority_queue_.pop();
+      waiting_priority_queue.pop();
       continue;
     }
 
@@ -105,6 +160,8 @@ void ContinuousScheduler::handle_prefill_requests(
 
     // TODO: FIXME later
     // Optimization of the scheduling algorithm under multiple sequences
+    // TODO: can refactor like handle_decode otherwise request with multiple
+    // long sequences may stuck when n>1
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
     bool can_schedule = true;
@@ -124,12 +181,45 @@ void ContinuousScheduler::handle_prefill_requests(
         break;
       }
 
+      // preempt offline decode
       if (!block_manager_pool_->allocate(prefill_sequence.get())) {
-        block_manager_pool_->deallocate(prefill_sequence.get());
         can_schedule = false;
-        break;
+        if (options_.enable_online_preempt_offline() && !request->offline() &&
+            !running_queue_offline_->empty()) {
+          size_t num_request_to_evict = 0;
+          // according to the prefill_sequence num tokens to check if can
+          // allocate blocks for it through evict
+          bool enough_to_evict =
+              check_if_enough_to_evict(running_queue_offline_.get(),
+                                       prefill_sequence.get(),
+                                       num_request_to_evict);
+          if (enough_to_evict) {
+            for (size_t i = 0; i < num_request_to_evict; ++i) {
+              std::shared_ptr<Request> request_to_preempt =
+                  running_queue_offline_->back();
+              ++num_online_prefill_preempt_offline_requests;
+              block_manager_pool_->deallocate(request_to_preempt.get());
+              running_queue_offline_->pop_back();
+              // add preemptable request to waiting priority queue
+              // TO IMPROVE?: not process this offline request in current batch
+              request_to_preempt->set_preempted();
+              waiting_priority_queue_offline_.push(request_to_preempt);
+            }
+            if (!block_manager_pool_->allocate(prefill_sequence.get())) {
+              LOG(ERROR) << "Should be able to allocate after preempting "
+                         << num_request_to_evict
+                         << " offline requests, but failed.";
+              can_schedule = false;
+            } else {
+              can_schedule = true;
+            }
+          }
+        }
+        if (!can_schedule) {
+          block_manager_pool_->deallocate(prefill_sequence.get());
+          break;
+        }
       }
-
       prefill_sequences_budget.emplace_back(num_tokens);
       prefill_sequences.emplace_back(prefill_sequence.get());
       allocated_tokens += num_tokens;
@@ -143,14 +233,13 @@ void ContinuousScheduler::handle_prefill_requests(
       }
       break;
     }
-
     if (prefill_sequences.empty()) {
       continue;
     }
 
     remaining_token_budget -= allocated_tokens;
     remaining_seq_budget -= allocated_seqs;
-    waiting_priority_queue_.pop();
+    waiting_priority_queue.pop();
     running_requests_.emplace_back(request);
     running_sequences_.insert(running_sequences_.end(),
                               prefill_sequences.begin(),
@@ -159,10 +248,9 @@ void ContinuousScheduler::handle_prefill_requests(
                                       prefill_sequences_budget.begin(),
                                       prefill_sequences_budget.end());
   }
-
-  if (running_sequences_.empty() && !waiting_priority_queue_.empty() &&
-      running_queue_.empty() &&
-      block_manager_pool_->kv_cache_utilization() == 0) {
+  // maybe can pre-compute if prompt beyond lnegth
+  if (running_sequences_.empty() && !waiting_priority_queue.empty() &&
+      running_queue_->empty() && running_queue_offline_->empty()) {
     LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                   "a single sequence.";
     // no enough memory to schedule single sequence, just finish the request
@@ -183,20 +271,14 @@ void ContinuousScheduler::handle_prefill_requests(
 void ContinuousScheduler::handle_decode_requests(
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
-    size_t& num_preempted_requests) {
-  // Do nothing: have new prefill requests to handle, or have no running
-  // requests
-  if (!running_sequences_.empty() || running_queue_.empty()) {
-    return;
-  }
-
-  // Handle decoding requests.
-  // no prefill request, schedule the decode requests in the running priority
-  // queue
-  while (!running_queue_.empty() &&
+    size_t& num_offline_decode_preempt_offline_requests,
+    size_t& num_online_decode_preempt_online_requests,
+    size_t& num_online_decode_preempt_offline_requests,
+    std::unique_ptr<DecodePriorityQueue>& running_queue) {
+  while (!running_queue->empty() &&
          remaining_token_budget > options_.num_speculative_tokens() &&
          remaining_seq_budget > 0) {
-    std::shared_ptr<Request> request = running_queue_.front();
+    std::shared_ptr<Request> request = running_queue->top();
     // TODO: check if request is timeout
 
     const size_t num_sequences = request->sequences().size();
@@ -221,9 +303,9 @@ void ContinuousScheduler::handle_decode_requests(
         has_enough_budget = false;
         break;
       }
-
+      // sequence token already appended
       size_t updated_num_tokens =
-          sequence->num_tokens() + options_.num_speculative_tokens() + 1;
+          sequence->num_tokens() + options_.num_speculative_tokens();
       // no blocks left
       if (!block_manager_pool_->allocate(sequence.get(), updated_num_tokens)) {
         has_enough_blocks = false;
@@ -246,9 +328,9 @@ void ContinuousScheduler::handle_decode_requests(
     // schedule candidates in the request if there are enough blocks
     if (has_enough_budget && has_enough_blocks) {
       // remove the request from the priority queue
-      running_queue_.pop_front();
+      running_queue->pop_top();
       // add the request to the batch
-      running_requests_.push_back(request);
+      running_requests_.emplace_back(request);
       running_sequences_.insert(running_sequences_.end(),
                                 candidate_sequences.begin(),
                                 candidate_sequences.end());
@@ -263,7 +345,8 @@ void ContinuousScheduler::handle_decode_requests(
 
     // budget exhausted, do partially schedule the request
     if (!has_enough_budget) {
-      handle_abnormal_request(candidate_sequences,
+      handle_abnormal_request(running_queue,
+                              candidate_sequences,
                               candidate_token_budgets,
                               allocated_tokens,
                               allocated_seqs,
@@ -275,13 +358,31 @@ void ContinuousScheduler::handle_decode_requests(
     }
 
     // memory exhausted, try to preempt lowest priority request
-    if (running_queue_.size() > 1) {
-      std::shared_ptr<Request> request_to_preempt = running_queue_.back();
-
+    // continue to evict blocks until enough or no other requests that can be
+    // preempted TO IMPROVE: preplan if is enough to evict, if not, then not
+    // evict the offline request or online request with lowest priority
+    if (options_.enable_online_preempt_offline() && !request->offline() &&
+        !running_queue_offline_->empty()) {
+      std::shared_ptr<Request> request_to_preempt =
+          running_queue_offline_->back();
+      ++num_online_decode_preempt_offline_requests;
+      block_manager_pool_->deallocate(request_to_preempt.get());
+      running_queue_offline_->pop_back();
+      // add preemptable request to waiting priority queue
+      request_to_preempt->set_preempted();
+      waiting_priority_queue_offline_.push(request_to_preempt);
+      continue;
+    } else if (running_queue->size() > 1) {
+      std::shared_ptr<Request> request_to_preempt = running_queue->back();
       if (request_to_preempt.get() != request.get()) {
-        ++num_preempted_requests;
+        if (request->offline()) {
+          ++num_offline_decode_preempt_offline_requests;
+        } else {
+          ++num_online_decode_preempt_online_requests;
+        }
+        // TO IMPROVE: kv cache offload to cpu
         block_manager_pool_->deallocate(request_to_preempt.get());
-        running_queue_.pop_back();
+        running_queue->pop_back();
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
         waiting_priority_queue_.push(request_to_preempt);
@@ -293,7 +394,8 @@ void ContinuousScheduler::handle_decode_requests(
     }
 
     // no requests left to preempt
-    handle_abnormal_request(candidate_sequences,
+    handle_abnormal_request(running_queue,
+                            candidate_sequences,
                             candidate_token_budgets,
                             allocated_tokens,
                             allocated_seqs,
@@ -307,6 +409,7 @@ void ContinuousScheduler::handle_decode_requests(
 
 // NOTE: refactor ChunkedPrefillScheduler and ContinuousScheduler later.
 void ContinuousScheduler::handle_abnormal_request(
+    std::unique_ptr<DecodePriorityQueue>& running_queue,
     const std::vector<Sequence*>& candidate_sequences,
     const std::vector<size_t>& candidate_token_budgets,
     const size_t& allocated_tokens,
@@ -315,7 +418,7 @@ void ContinuousScheduler::handle_abnormal_request(
     size_t& remaining_seq_budget,
     bool budget_exhausted,
     bool blocks_exhausted) {
-  std::shared_ptr<Request> request = running_queue_.front();
+  std::shared_ptr<Request> request = running_queue->top();
   if (candidate_sequences.empty()) {
     if (!running_sequences_.empty()) {
       return;
@@ -336,10 +439,10 @@ void ContinuousScheduler::handle_abnormal_request(
       LOG(ERROR) << "Request prompt is too long, please set a larger "
                     "max_tokens value via --max_tokens_per_batch.";
     } else {
-      CHECK(running_queue_.size() == 1)
+      CHECK(running_queue->size() == 1)
           << "Running queue size is not 1, there maybe a bug of request "
              "preemption logic. running_queue_.size ="
-          << running_queue_.size();
+          << running_queue_->size();
       if (util::sum(block_manager_pool_->num_used_blocks()) !=
           request->total_num_blocks()) {
         // blocks_exhausted is true.
@@ -353,7 +456,7 @@ void ContinuousScheduler::handle_abnormal_request(
     }
 
     // request is too long, budget or memory no enough.
-    running_queue_.pop_front();
+    running_queue_->pop_top();
     block_manager_pool_->deallocate(request.get());
     response_processor_->process_failed_request(
         request,
@@ -361,7 +464,7 @@ void ContinuousScheduler::handle_abnormal_request(
          "No enough resource to schedule a single sequence"});
   } else {
     // partially schedule the sequences in request
-    running_queue_.pop_front();
+    running_queue->pop_top();
     running_requests_.emplace_back(request);
     running_sequences_.insert(running_sequences_.end(),
                               candidate_sequences.begin(),
@@ -406,13 +509,20 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     CHECK(request);
 
     // expand sequences to the target number if prefix cache is disabled.
+    // TODO: for no prefix cache, we can expand sequence when one sequence's
+    // prefill finishes and set to share the blocks among the sequences
+    // otherwise it's unfriendly for n>1 and no prefix cache.
     if (!enable_prefix_cache_) {
       // expand sequences to the target number
       request->expand_sequences(false);
     }
 
     if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
-      waiting_priority_queue_.push(request);
+      if (request->offline()) {
+        waiting_priority_queue_offline_.push(request);
+      } else {
+        waiting_priority_queue_.push(request);
+      }
     } else {
       // request from prefill instance in disagge pd mode.
       running_requests_.emplace_back(request);
@@ -437,44 +547,63 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     }
   }
 
-  // insert running requests back to the running queue, iterating from
-  // the highest priority to the lowest
-  // insert running requests back to the running queue, iterating from
-  // the highest priority to the lowest
-  if (last_step_prefill_) {
-    // insert all requests to the back of running_queue_
-    // 1. last step is prefill step:
-    // new prefill has high priority, but these requests has lower priority
-    // then existed requests in running_queue_ in decoding stage.
-    // so we need to push them to the back of running_queue_.
-    for (auto it = running_requests_.begin(); it != running_requests_.end();
-         ++it) {
-      // finished request is set to nullptr
-      if (*it == nullptr) {
-        continue;
+  if (options_.priority_strategy() == "FCFS") {
+    if (last_step_prefill_) {
+      // insert all requests to the back of running_queue_
+      // 1. last step is prefill step:
+      // new prefill has high priority, but these requests has lower priority
+      // then existed requests in running_queue_ in decoding stage.
+      // so we need to push them to the back of running_queue_.
+      for (auto it = running_requests_.begin(); it != running_requests_.end();
+           ++it) {
+        // finished request is set to nullptr
+        if (*it == nullptr) {
+          continue;
+        }
+        handle_running_requests(*it);
+        if ((*it)->offline()) {
+          running_queue_offline_->push(*it, last_step_prefill_);
+        } else {
+          running_queue_->push(*it, last_step_prefill_);
+        }
       }
-      handle_running_requests(*it);
-      running_queue_.push_back(*it);
+    } else {
+      // insert all requests to the front of running_queue_
+      // 2. last step is decode step:
+      // We need to traverse running_requests_ array in reverse order.
+      // Because there may be some unexecuted requests with
+      // lower priorities remaining in the running_queue_.
+      // For the requests in running_requests_,
+      // their priorities are all higher than those of the
+      // remaining requests. Therefore, the `push_front`
+      // method needs to be used.
+      //
+      for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
+           ++it) {
+        // finished request is set to nullptr
+        if (*it == nullptr) {
+          continue;
+        }
+        handle_running_requests(*it);
+        if ((*it)->offline()) {
+          running_queue_offline_->push(*it, last_step_prefill_);
+        } else {
+          running_queue_->push(*it, last_step_prefill_);
+        }
+      }
     }
   } else {
-    // insert all requests to the front of running_queue_
-    // 2. last step is decode step:
-    // We need to traverse running_requests_ array in reverse order.
-    // Because there may be some unexecuted requests with
-    // lower priorities remaining in the running_queue_.
-    // For the requests in running_requests_,
-    // their priorities are all higher than those of the
-    // remaining requests. Therefore, the `push_front`
-    // method needs to be used.
-    //
-    for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
+    // directly push running requests to the priority queue
+    for (auto it = running_requests_.begin(); it != running_requests_.end();
          ++it) {
-      // finished request is set to nullptr
       if (*it == nullptr) {
         continue;
       }
-      handle_running_requests(*it);
-      running_queue_.push_front(*it);
+      if ((*it)->offline()) {
+        running_queue_offline_->push(*it);
+      } else {
+        running_queue_->push(*it);
+      }
     }
   }
 
@@ -488,13 +617,44 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   size_t remaining_token_budget = options_.max_tokens_per_batch();
   size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
   size_t num_preempted_requests = 0;
+  size_t num_offline_decode_preempt_offline_requests = 0;
+  size_t num_online_decode_preempt_online_requests = 0;
+  size_t num_online_prefill_preempt_offline_requests = 0;
+  size_t num_online_decode_preempt_offline_requests = 0;
+  // TO IMPROVE?: handle online decode request before prefill offline request
+  handle_prefill_requests(remaining_token_budget,
+                          remaining_seq_budget,
+                          waiting_priority_queue_,
+                          num_online_prefill_preempt_offline_requests,
+                          finished_requests);
+  handle_prefill_requests(remaining_token_budget,
+                          remaining_seq_budget,
+                          waiting_priority_queue_offline_,
+                          num_online_prefill_preempt_offline_requests,
+                          finished_requests);
 
-  handle_prefill_requests(
-      remaining_token_budget, remaining_seq_budget, finished_requests);
+  if (running_sequences_.empty()) {
+    // Handle decoding requests.
+    // no prefill request, schedule the decode requests in the running priority
+    // queue
+    handle_decode_requests(remaining_token_budget,
+                           remaining_seq_budget,
+                           num_offline_decode_preempt_offline_requests,
+                           num_online_decode_preempt_online_requests,
+                           num_online_decode_preempt_offline_requests,
+                           running_queue_);
+    handle_decode_requests(remaining_token_budget,
+                           remaining_seq_budget,
+                           num_offline_decode_preempt_offline_requests,
+                           num_online_decode_preempt_online_requests,
+                           num_online_decode_preempt_offline_requests,
+                           running_queue_offline_);
+  }
 
-  handle_decode_requests(
-      remaining_token_budget, remaining_seq_budget, num_preempted_requests);
-
+  num_preempted_requests = num_offline_decode_preempt_offline_requests +
+                           num_online_decode_preempt_online_requests +
+                           num_online_decode_preempt_offline_requests +
+                           num_online_prefill_preempt_offline_requests;
   if (!finished_requests.empty()) {
     response_processor_->process_completed_requests(finished_requests);
   }
@@ -512,8 +672,17 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
             pending_requests_.load(std::memory_order_relaxed));
   GAUGE_SET(num_running_requests, running_requests_.size());
   GAUGE_SET(num_waiting_requests,
-            waiting_priority_queue_.size() + running_queue_.size());
-  GAUGE_SET(num_preempted_requests, num_preempted_requests);
+            waiting_priority_queue_.size() + running_queue_->size());
+
+  GAUGE_ADD(num_preempted_requests, num_preempted_requests);
+  GAUGE_ADD(num_offline_decode_preempt_offline_requests,
+            num_offline_decode_preempt_offline_requests);
+  GAUGE_ADD(num_online_decode_preempt_online_requests,
+            num_online_decode_preempt_online_requests);
+  GAUGE_ADD(num_online_prefill_preempt_offline_requests,
+            num_online_prefill_preempt_offline_requests);
+  GAUGE_ADD(num_online_decode_preempt_offline_requests,
+            num_online_decode_preempt_offline_requests);
 
   GAUGE_SET(num_running_sequences, running_sequences_.size());
 
@@ -540,7 +709,9 @@ std::vector<Batch> ContinuousScheduler::schedule_request(
       return batch;
     }
 
-    if (!waiting_priority_queue_.empty() || !running_queue_.empty()) {
+    if (!waiting_priority_queue_.empty() || !running_queue_->empty() ||
+        !waiting_priority_queue_offline_.empty() ||
+        !running_queue_offline_->empty()) {
       continue;
     }
 

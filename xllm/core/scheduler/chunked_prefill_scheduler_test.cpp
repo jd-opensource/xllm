@@ -309,6 +309,7 @@ TEST(ChunkedPrefillSchedulerTest, NormalSchedule) {
 // test preempt
 TEST(ChunkedPrefillSchedulerTest, PreemptSchedule) {
   // set max free blocks: 9, support 9*32=288 tokens
+  // actually only 8 free blocks , because default 1 block is for padding
   int block_num = 9;
   int block_size = 32;
   int max_tokens_per_chunk_for_prefill = 1024;
@@ -347,6 +348,7 @@ TEST(ChunkedPrefillSchedulerTest, PreemptSchedule) {
   int free_blocks_after_preempt =
       util::max(block_manager_pool->num_free_blocks());
   EXPECT_TRUE(free_blocks_after_preempt > free_blocks_before_preempt);
+  EXPECT_TRUE(scheduler->get_waiting_requests_num() == 1);
   // append a new block
   block_manager_pool->allocate(batch[0][0]);
   // remove preempted request from running_requests

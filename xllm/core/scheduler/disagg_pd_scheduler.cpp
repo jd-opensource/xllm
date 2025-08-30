@@ -169,6 +169,11 @@ bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
+  if (request->offline()) {
+    // offline request, push to offline queue
+    prefill_request_queue_offline_.push(request);
+    return true;
+  }
   // push and wait
   prefill_request_queue_.push(request);
 
@@ -179,7 +184,20 @@ bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
 void DisaggPDScheduler::dispatch_requests() {
   while (true) {
     std::vector<std::shared_ptr<Request>> requests;
-    std::shared_ptr<Request> request = prefill_request_queue_.pop();
+    const auto timeout = absl::Milliseconds(100);
+    // Wait for online request until timeout.
+    // If timeout, try to get offline request once. If no offline request,
+    // continue to wait for online request. This can avoid offline request
+    // blocking online request for too long time.
+    auto poped_result = prefill_request_queue_.pop(timeout);
+    if (!poped_result.has_value()) {  // try get online request timeout
+      poped_result = prefill_request_queue_offline_.try_pop();
+      if (!poped_result.has_value()) {
+        continue;
+      }
+    }
+
+    auto request = poped_result.value();
     if (request == nullptr) {
       // nullptr is a signal to exit
       break;
@@ -210,6 +228,8 @@ void DisaggPDScheduler::dispatch_requests() {
         sleep(1);
       }
       // select a D instance use RR currently.
+      // TODO: use better decode selection strategy later. maybe different
+      // strategy for offline and online request. or implement in xllm service.
       int try_decode_count = 0;
       while (!stub) {
         if (try_decode_count == decode_inst_names_.size()) {
@@ -319,7 +339,12 @@ void DisaggPDScheduler::dispatch_requests() {
     for (size_t i = 0; i < requests.size(); ++i) {
       if (resps.resps()[i].status_code() != 200) {
         // push back to prefill_request_queue_
-        prefill_request_queue_.push(requests[i]);
+        if (requests[i]->offline()) {
+          prefill_request_queue_offline_.push(requests[i]);
+        } else {
+          prefill_request_queue_.push(requests[i]);
+        }
+
       } else {
         for (auto& sequence : requests[i]->sequences()) {
           TransferKVInfo info;

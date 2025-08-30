@@ -136,7 +136,9 @@ int run() {
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .etcd_addr(FLAGS_etcd_addr)
       .enable_service_routing(FLAGS_enable_service_routing)
-      .tool_call_parser(FLAGS_tool_call_parser);
+      .tool_call_parser(FLAGS_tool_call_parser)
+      .priority_strategy(FLAGS_priority_strategy)
+      .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 

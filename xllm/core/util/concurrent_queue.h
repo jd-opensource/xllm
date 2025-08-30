@@ -21,6 +21,8 @@ limitations under the License.
 #include <optional>
 #include <queue>
 
+#include "absl/types/optional.h"
+
 #if __has_attribute(guarded_by)
 #define GUARDED_BY(x) __attribute__((guarded_by(x)))
 #else
@@ -73,6 +75,20 @@ class ConcurrentQueue {
     T value = std::move(queue_.front());
     queue_.pop();
     return value;
+  }
+  // pop an element from the queue, block if the queue is empty, with timeout
+  absl::optional<T> pop(absl::Duration timeout) {
+    absl::MutexLock lock(&mutex_);
+
+    auto not_empty = +[](std::queue<T>* q) { return !q->empty(); };
+
+    if (mutex_.AwaitWithTimeout(absl::Condition(not_empty, &queue_), timeout)) {
+      T value = std::move(queue_.front());
+      queue_.pop();
+      return value;
+    }
+
+    return absl::nullopt;
   }
 
   std::optional<T> try_pop() {

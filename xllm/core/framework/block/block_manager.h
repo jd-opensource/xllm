@@ -32,10 +32,13 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "framework/prefix_cache/prefix_cache.h"
+#include "framework/request/request.h"
+#include "framework/request/sequence.h"
+#include "scheduler/decode_priority_queue.h"
 #include "util/timer.h"
 
 namespace xllm {
-
+// class DecodePriorityQueue;
 class BlockManager {
  public:
   struct Options {

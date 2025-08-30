@@ -53,6 +53,10 @@ message DisaggRequest {
   bool echo = 26;
   bool skip_special_tokens = 27;
   repeated int32 prompt_tokens = 28;
+  bool offline = 29;
+  optional int32 slo_ms = 30;
+  optional Priority priority = 31;
+
 }
 
 // response for DisaggRequests from decode instance.

@@ -30,6 +30,7 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
   }
 
   size_t total_blocks = options_.num_blocks();
+  block_size_ = options_.block_size();
   num_free_blocks_ = total_blocks;
   free_blocks_.reserve(total_blocks);
   for (int32_t i = 0; i < total_blocks; ++i) {

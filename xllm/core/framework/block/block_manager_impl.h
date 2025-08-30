@@ -99,6 +99,9 @@ class BlockManagerImpl : public BlockManager {
   // free block count
   size_t num_free_blocks_ = 0;
 
+  // block size
+  size_t block_size_ = 0;
+
   // free block list
   std::vector<int32_t> free_blocks_;
 };

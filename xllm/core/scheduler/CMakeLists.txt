@@ -12,6 +12,7 @@ cc_library(
     async_response_processor.h
     scheduler.h
     scheduler_factory.h
+    decode_priority_queue.h
   SRCS
     chunked_prefill_scheduler.cpp
     zero_eviction_scheduler.cpp
@@ -32,8 +33,10 @@ cc_library(
 cc_test(
   NAME
     chunked_prefill_scheduler_test
+    continuous_scheduler_test
   SRCS
     chunked_prefill_scheduler_test.cpp
+    continuous_scheduler_test.cpp
   DEPS
     :scheduler
     GTest::gtest_main

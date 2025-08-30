@@ -33,10 +33,11 @@ uint32_t ceiling_div(uint32_t left, uint32_t right) {
 }
 
 std::vector<Sequence*> get_running_sequences(
-    const std::deque<std::shared_ptr<Request>>& running_queue) {
+    const std::unique_ptr<DecodePriorityQueue>& running_queue) {
   std::vector<Sequence*> running_sequences;
 
-  for (auto& running_request : running_queue) {
+  for (auto it = running_queue->rbegin(); it != running_queue->rend(); ++it) {
+    std::shared_ptr<Request> running_request = *it;
     if (Request* request = running_request.get()) {
       for (auto& sequence : request->sequences()) {
         // skip finished sequence.
@@ -234,7 +235,7 @@ bool BlockCapacityGuard::simulate_is_satisfied_for_candidate_sequences() {
 
 bool BlockCapacityGuard::if_accept_candidate_sequences(
     const std::vector<Sequence*>& candidate_sequences,
-    const std::deque<std::shared_ptr<Request>>& running_queue,
+    const std::unique_ptr<DecodePriorityQueue>& running_queue,
     const std::vector<Sequence*>& running_sequences) {
   num_reserved_block_for_prefill_ = 0;
 
@@ -261,8 +262,8 @@ ZeroEvictionScheduler::~ZeroEvictionScheduler() {
   }
 
   // release all requests in the running priority queue
-  while (!running_queue_.empty()) {
-    running_queue_.pop_front();
+  while (!running_queue_->empty()) {
+    running_queue_->pop_top();
   }
 }
 
@@ -412,7 +413,7 @@ void ZeroEvictionScheduler::handle_prefill_requests(
   }
 
   if (running_sequences_.empty() && !waiting_priority_queue_.empty() &&
-      running_queue_.empty() &&
+      running_queue_->empty() &&
       block_manager_pool_->kv_cache_utilization() == 0) {
     LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                   "a single sequence.";

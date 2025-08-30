@@ -114,6 +114,11 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // for prefill, dispatch request to Decode instance
   std::unique_ptr<std::thread> dispatch_thread_;
   ConcurrentQueue<std::shared_ptr<Request>> prefill_request_queue_;
+
+  //   folly::MPMCQueue<std::shared_ptr<Request>>
+  //   prefill_request_queue_offline_;
+  ConcurrentQueue<std::shared_ptr<Request>> prefill_request_queue_offline_;
+
   // for prefill save all remote requests
   std::unordered_map<std::string, std::shared_ptr<Request>>
       remote_requests_map_;
@@ -121,8 +126,10 @@ class DisaggPDScheduler : public ContinuousScheduler {
   using RequestPriorityQueue =
       std::priority_queue<std::shared_ptr<Request>,
                           std::vector<std::shared_ptr<Request>>,
-                          RequestComparator>;
+                          std::function<bool(const std::shared_ptr<Request>&,
+                                             const std::shared_ptr<Request>&)>>;
   RequestPriorityQueue waiting_priority_queue_;
+  RequestPriorityQueue waiting_priority_queue_offline_;
 
   // use threadpool to handle prefill-completed request
   ThreadPool prefill_threadpool_;

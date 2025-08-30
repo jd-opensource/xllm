@@ -22,12 +22,14 @@ limitations under the License.
 #include <vector>
 
 #include "chat.pb.h"
+#include "common.pb.h"
 #include "common/macros.h"
 #include "completion.pb.h"
 #include "core/common/macros.h"
 #include "core/common/types.h"
 #include "embedding.pb.h"
 #include "multimodal.pb.h"
+#include "request.h"
 #include "request_output.h"
 
 namespace xllm {
@@ -124,6 +126,12 @@ struct RequestParams {
   std::vector<xllm::JsonTool> tools;
   std::string tool_choice = "auto";
   bool has_tools() const { return !tools.empty(); }
+
+  bool offline = false;
+
+  int32_t slo_ms = 0;
+
+  RequestPriority priority = RequestPriority::NORMAL;
 };
 
 }  // namespace xllm
