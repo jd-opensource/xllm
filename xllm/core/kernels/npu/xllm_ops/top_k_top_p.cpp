@@ -13,28 +13,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "top_k_top_p.h"
-
 #include <c10/core/Device.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
-#include <vector>
-
-#include "acl/acl.h"
-#include "aclnn_apply_top_k_top_p.h"
-
+#include <nlohmann/json.hpp>
 #ifdef TORCH_HIGHER_THAN_PTA6
-// #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #else
 #include <torch_npu/csrc/aten/NPUNativeFunctions.h>
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 
-#include <nlohmann/json.hpp>
+#include "acl/acl.h"
+#include "aclnn_apply_top_k_top_p.h"
+#include "top_k_top_p.h"
 
 #define CHECK_ACL_SUCCESS(expr, msg) \
   do {                               \

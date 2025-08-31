@@ -21,9 +21,9 @@ limitations under the License.
 
 #include "acl/acl.h"
 #include "aclnn_replace_token.h"
+#include "acltensor_utils.h"
 #include "util/tensor_helper.h"
-#include "utils/tensor_checks.h"
-#include "utils/tensor_utils.h"
+
 namespace xllm_ops {
 void replace_token(torch::Tensor& forked, torch::Tensor& lastStepOutPut);
 }  // namespace xllm_ops
