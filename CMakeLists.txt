@@ -21,13 +21,20 @@ if(USE_NPU)
       set(USE_A2 ON)
       message(STATUS "Building for device: A2 (macro USE_A2 defined)")
   endif()
+  if(USE_A2)
+    execute_process(
+      COMMAND git -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD
+      OUTPUT_VARIABLE XLLM_OPS_GIT_HEAD
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
 
-  option(PRECOMPILE_XLLM_OPS "Precompile xllm ops before main build" ON)
-  if(PRECOMPILE_XLLM_OPS)
-    set(XLLM_OPS_MARKER "${CMAKE_BINARY_DIR}/xllm_ops_compiled.marker")
-  
-    if(NOT EXISTS ${XLLM_OPS_MARKER})
-      message(STATUS "Precompiling xllm ops (first time)...")
+    if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED)
+      set(XLLM_OPS_GIT_HEAD_CACHED "" CACHE INTERNAL "")
+    endif()
+
+    if(NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
+      message(STATUS "xllm_ops git HEAD changed; running precompile via execute_process")
       execute_process(
         COMMAND bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/xllm_ops
@@ -36,11 +43,10 @@ if(USE_NPU)
       if(NOT XLLM_OPS_RESULT EQUAL 0)
         message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
       endif()
-    
-      file(TOUCH ${XLLM_OPS_MARKER})
-      message(STATUS "xllm ops precompiled successfully")
+      set(XLLM_OPS_GIT_HEAD_CACHED "${XLLM_OPS_GIT_HEAD}" CACHE INTERNAL "" FORCE)
+      message(STATUS "xllm ops precompiled and HEAD cache updated")
     else()
-      message(STATUS "xllm ops already compiled, skipping...")
+      message(STATUS "xllm_ops git HEAD unchanged; skipping precompile")
     endif()
   endif()
 endif()
