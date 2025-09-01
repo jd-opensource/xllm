@@ -99,6 +99,7 @@ xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与
 - Kimi-k2
 - Llama2/3
 - MiniCPM-V
+- MiMo-VL
 - Qwen2/2.5/QwQ
 - Qwen2.5-VL
 - Qwen3 / Qwen3-MoE

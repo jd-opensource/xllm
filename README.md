@@ -99,6 +99,7 @@ Supported models list:
 - Kimi-k2
 - Llama2/3
 - MiniCPM-V
+- MiMo-VL
 - Qwen2/2.5/QwQ
 - Qwen2.5-VL
 - Qwen3 / Qwen3-MoE
