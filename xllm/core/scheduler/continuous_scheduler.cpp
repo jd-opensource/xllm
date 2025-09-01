@@ -317,10 +317,11 @@ void ContinuousScheduler::handle_decode_requests(
       }
 
       // update the allocated tokens for the sequence
-      allocated_tokens += options_.num_speculative_tokens();
+      allocated_tokens += options_.num_speculative_tokens() + 1;
       allocated_seqs += 1;
       candidate_sequences.emplace_back(sequence.get());
-      candidate_token_budgets.emplace_back(options_.num_speculative_tokens());
+      candidate_token_budgets.emplace_back(options_.num_speculative_tokens() +
+                                           1);
     }
     CHECK(allocated_tokens <= remaining_token_budget);
     CHECK(allocated_seqs <= remaining_seq_budget);
