@@ -39,19 +39,29 @@ JinjaChatTemplate::JinjaChatTemplate(const TokenizerArgs& args) : args_(args) {
 std::optional<std::string> JinjaChatTemplate::apply(
     const ChatMessages& messages) const {
   const std::vector<xllm::JsonTool> empty_tools;
-  return apply(messages, empty_tools);
+  const nlohmann::ordered_json chat_template_kwargs;
+  return apply(messages, empty_tools, chat_template_kwargs);
+}
+
+std::optional<std::string> JinjaChatTemplate::apply(
+    const ChatMessages& messages,
+    const nlohmann::ordered_json& chat_template_kwargs) const {
+  const std::vector<xllm::JsonTool> empty_tools;
+  return apply(messages, empty_tools, chat_template_kwargs);
 }
 
 std::optional<std::string> JinjaChatTemplate::apply(
     nlohmann::ordered_json& messages) const {
   // Call the overloaded method with empty tools
   nlohmann::ordered_json empty_tools = nlohmann::json::array();
-  return apply(messages, empty_tools);
+  const nlohmann::ordered_json chat_template_kwargs = nlohmann::json::object();
+  return apply(messages, empty_tools, chat_template_kwargs);
 }
 
 std::optional<std::string> JinjaChatTemplate::apply(
     const ChatMessages& messages,
-    const std::vector<xllm::JsonTool>& json_tools) const {
+    const std::vector<xllm::JsonTool>& json_tools,
+    const nlohmann::ordered_json& chat_template_kwargs) const {
   // convert the messages to json object
   nlohmann::ordered_json messages_json = nlohmann::json::array();
   for (const auto& message : messages) {
@@ -82,16 +92,18 @@ std::optional<std::string> JinjaChatTemplate::apply(
     tools_json.push_back(tool_json);
   }
   // apply the template
-  return apply(messages_json, tools_json);
+  return apply(messages_json, tools_json, chat_template_kwargs);
 }
 
 std::optional<std::string> JinjaChatTemplate::apply(
     nlohmann::ordered_json& messages,
-    const nlohmann::ordered_json& tools) const {
+    const nlohmann::ordered_json& tools,
+    const nlohmann::ordered_json& chat_template_kwargs) const {
   minja::chat_template_inputs input;
   input.messages = messages;
   input.tools = tools;
   input.add_generation_prompt = true;
+  input.extra_context = chat_template_kwargs;
   minja::chat_template_options options;
 
   return template_->apply(input, options);

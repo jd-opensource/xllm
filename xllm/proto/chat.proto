@@ -4,6 +4,7 @@ option go_package = "jd.com/jd-infer/xllm;xllm";
 package xllm.proto;
 
 import "common.proto";
+import "google/protobuf/struct.proto";
 
 message ChatMessage {
   // the role of the messages author. One of "system", "user", "assistant".
@@ -123,6 +124,8 @@ message ChatRequest {
   // request priority. default = DEFAULT
   optional Priority priority = 32;
 
+
+  optional google.protobuf.Struct chat_template_kwargs = 33;
 }
 
 message ChatLogProbData {

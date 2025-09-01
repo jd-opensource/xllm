@@ -132,6 +132,8 @@ struct RequestParams {
   int32_t slo_ms = 0;
 
   RequestPriority priority = RequestPriority::NORMAL;
+
+  nlohmann::json chat_template_kwargs = nlohmann::json::object();
 };
 
 }  // namespace xllm

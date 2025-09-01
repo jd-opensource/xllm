@@ -460,9 +460,9 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   Timer timer;
   std::optional<std::string> prompt;
   if (sp.has_tools()) {
-    prompt = chat_template_->apply(messages, sp.tools);
+    prompt = chat_template_->apply(messages, sp.tools, sp.chat_template_kwargs);
   } else {
-    prompt = chat_template_->apply(messages);
+    prompt = chat_template_->apply(messages, sp.chat_template_kwargs);
   }
 
   if (!prompt.has_value()) {

@@ -275,6 +275,11 @@ void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
       params.tool_choice = "auto";
     }
   }
+
+  if (request.has_chat_template_kwargs()) {
+    params.chat_template_kwargs =
+        proto_struct_to_json(request.chat_template_kwargs());
+  }
 }
 }  // namespace
 

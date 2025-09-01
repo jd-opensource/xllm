@@ -4,6 +4,7 @@ option go_package = "jd.com/jd-infer/xllm;xllm";
 package xllm.proto;
 
 import "common.proto";
+import "google/protobuf/struct.proto";
 
 message ImageURL {
   string url = 1;
@@ -136,4 +137,6 @@ message MMChatRequest {
 
   // request priority. default = DEFAULT
   optional Priority priority = 31;
+
+  optional google.protobuf.Struct chat_template_kwargs = 32;
 }
