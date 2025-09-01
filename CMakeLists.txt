@@ -29,11 +29,7 @@ if(USE_NPU)
       ERROR_QUIET
     )
 
-    if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED)
-      set(XLLM_OPS_GIT_HEAD_CACHED "" CACHE INTERNAL "")
-    endif()
-
-    if(NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
+    if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
       message(STATUS "xllm_ops git HEAD changed; running precompile via execute_process")
       execute_process(
         COMMAND bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
