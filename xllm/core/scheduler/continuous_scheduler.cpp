@@ -105,11 +105,12 @@ void ContinuousScheduler::create_running_queue(const Options& options) {
 bool ContinuousScheduler::check_if_enough_to_evict(
     DecodePriorityQueue* running_queue_to_evict,
     Sequence* prefill_sequence,
+    size_t max_handle_num_tokens,
     size_t& num_request_to_evict) {
   // check if it's enough when we evict this requests queue
   auto block_size = block_manager_pool_->options().block_size();
   const size_t num_blocks_needed =
-      (prefill_sequence->num_tokens() + block_size - 1) / block_size;
+      (max_handle_num_tokens + block_size - 1) / block_size;
   size_t num_blocks_can_evict = 0;
   // count the number of blocks can be preempted
   for (auto it = running_queue_to_evict->rbegin();
@@ -119,7 +120,18 @@ bool ContinuousScheduler::check_if_enough_to_evict(
     num_request_to_evict++;
     // count the number of blocks belong to the request
     for (const auto& seq : request_to_preempt->sequences()) {
-      num_blocks_can_evict += seq->kv_state().num_kv_blocks();
+      // num_blocks_can_evict += seq->kv_state().num_kv_blocks();
+      size_t shared_kv_blocks_num = seq->kv_state().shared_kv_blocks_num();
+      size_t num_kv_blocks = seq->kv_state().num_kv_blocks();
+      CHECK_GE(num_kv_blocks, shared_kv_blocks_num);
+      for (size_t i = 0; i < shared_kv_blocks_num; i++) {
+        // if ==2, prefix cache block will be evicted when allocate
+        const auto& block = seq->kv_state().kv_blocks()[i];
+        if (block.ref_count() <= 2) {
+          num_blocks_can_evict += 1;
+        }
+      }
+      num_blocks_can_evict += (num_kv_blocks - shared_kv_blocks_num);
     }
     if (num_blocks_needed <= num_blocks_can_evict) {
       return true;
@@ -197,9 +209,11 @@ void ContinuousScheduler::handle_prefill_requests(
           size_t num_request_to_evict = 0;
           // according to the prefill_sequence num tokens to check if can
           // allocate blocks for it through evict
+
           bool enough_to_evict =
               check_if_enough_to_evict(running_queue_offline_.get(),
                                        prefill_sequence.get(),
+                                       num_tokens,
                                        num_request_to_evict);
           if (enough_to_evict) {
             for (size_t i = 0; i < num_request_to_evict; ++i) {
@@ -240,9 +254,6 @@ void ContinuousScheduler::handle_prefill_requests(
         block_manager_pool_->deallocate(seq);
       }
       break;
-    }
-    if (prefill_sequences.empty()) {
-      continue;
     }
 
     remaining_token_budget -= allocated_tokens;
@@ -383,17 +394,19 @@ void ContinuousScheduler::handle_decode_requests(
     } else if (running_queue->size() > 1) {
       std::shared_ptr<Request> request_to_preempt = running_queue->back();
       if (request_to_preempt.get() != request.get()) {
-        if (request->offline()) {
-          ++num_offline_decode_preempt_offline_requests;
-        } else {
-          ++num_online_decode_preempt_online_requests;
-        }
         // TO IMPROVE: kv cache offload to cpu
         block_manager_pool_->deallocate(request_to_preempt.get());
         running_queue->pop_back();
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
-        waiting_priority_queue_.push(request_to_preempt);
+        if (request_to_preempt->offline()) {
+          ++num_offline_decode_preempt_offline_requests;
+          waiting_priority_queue_offline_.push(request_to_preempt);
+        } else {
+          ++num_online_decode_preempt_online_requests;
+          waiting_priority_queue_.push(request_to_preempt);
+        }
+
       } else {
         LOG(FATAL) << "Unexpected error: preempting the candidate itself.";
       }
@@ -517,9 +530,6 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     CHECK(request);
 
     // expand sequences to the target number if prefix cache is disabled.
-    // TODO: for no prefix cache, we can expand sequence when one sequence's
-    // prefill finishes and set to share the blocks among the sequences
-    // otherwise it's unfriendly for n>1 and no prefix cache.
     if (!enable_prefix_cache_) {
       // expand sequences to the target number
       request->expand_sequences(false);

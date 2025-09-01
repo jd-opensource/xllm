@@ -36,37 +36,26 @@ class ChunkedPrefillScheduler final : public ContinuousScheduler {
   ChunkedPrefillScheduler(Engine* engine, const Options& options);
   virtual ~ChunkedPrefillScheduler();
 
-  std::vector<Batch> prepare_batch_test() { return prepare_batch(); }
-
-  uint32_t get_waiting_requests_num() const override {
-    return waiting_priority_queue_.size();
-  };
-
  private:
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch() override;
-  void handle_abnormal_request(
-      const std::vector<Sequence*>& candidate_sequences,
-      const std::vector<size_t>& candidate_token_budgets,
-      const size_t& allocated_tokens,
-      const size_t& allocated_seqs,
-      size_t& remaining_token_budget,
-      size_t& remaining_seq_budget,
-      bool budget_exhausted,
-      bool block_exhausted);
   void handle_running_queue_requests(
       const size_t max_tokens_per_chunk_for_prefill,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       size_t& num_preempted_requests,
       std::vector<Sequence*>& prefill_stage_sequences,
+      std::unique_ptr<DecodePriorityQueue>& running_queue,
       bool& budget_exhausted,
       bool& blocks_exhausted);
   void handle_prefill_requests(
       const size_t max_tokens_per_chunk_for_prefill,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
+      size_t& num_preempted_requests,
       std::vector<Sequence*>& prefill_stage_sequences,
+      RequestPriorityQueue& waiting_priority_queue,
+      bool& budget_exhausted,
       bool& blocks_exhausted,
       std::vector<std::shared_ptr<Request>>& finished_requests);
   void handle_remaining_budget(size_t& remaining_token_budget,

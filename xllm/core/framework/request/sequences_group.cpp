@@ -69,7 +69,7 @@ bool SequencesGroup::expand_sequences(bool share_prefix) {
   // prefill is not finished, can not expand
   // FIXME later share_prefix
   if (!share_prefix ||
-      seq->kv_state().kv_cache_tokens_num() < seq->num_prompt_tokens()) {
+      seq->kv_state().kv_cache_tokens_num() >= seq->num_prompt_tokens()) {
     while (sequences_.size() < best_of) {
       add();
     }

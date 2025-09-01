@@ -84,7 +84,7 @@ ContinuousScheduler::Options create_scheduler_options(
 std::vector<std::shared_ptr<Request>> generate_request(
     const std::vector<int32_t>& prompt_lens,
     const std::vector<int32_t>& max_tokens,
-    const std::vector<int32_t>& offlines,
+    const std::vector<bool>& offlines,
     const std::vector<int32_t>& priorities,
     int32_t max_context_len) {
   std::vector<std::shared_ptr<Request>> requests;
@@ -249,8 +249,6 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
 
     // offline is evicted
     EXPECT_TRUE(util::max(block_manager_pool->num_free_blocks()) == 1);
-    running_requests.pop_back();
-    update_requests(new_requests);
   }
 
   // 2. another case: longer online prefill request arrives, but can not evict

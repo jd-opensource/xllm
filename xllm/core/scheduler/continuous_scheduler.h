@@ -118,7 +118,7 @@ class ContinuousScheduler : public Scheduler {
     return pending_requests_.load(std::memory_order_relaxed);
   }
 
-  virtual uint32_t get_waiting_requests_num() const override {
+  uint32_t get_waiting_requests_num() const override {
     return waiting_priority_queue_.size() +
            waiting_priority_queue_offline_.size();
   }
@@ -241,6 +241,11 @@ class ContinuousScheduler : public Scheduler {
       bool block_exhausted);
   void handle_running_requests(std::shared_ptr<Request> request);
 
+  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
+                                Sequence* prefill_sequence,
+                                size_t max_handle_num_tokens,
+                                size_t& num_request_to_evict);
+
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch();
 
@@ -259,10 +264,6 @@ class ContinuousScheduler : public Scheduler {
   std::vector<int64_t> get_active_activation_in_bytes();
 
   void create_running_queue(const Options& options);
-
-  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
-                                Sequence* prefill_sequence,
-                                size_t& num_request_to_evict);
 
  private:
   // tokenizer

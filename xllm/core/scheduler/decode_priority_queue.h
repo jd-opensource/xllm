@@ -131,7 +131,7 @@ class FCFSQueue : public DecodePriorityQueue {
   std::deque<std::shared_ptr<Request>> queue_;
 
  public:
-  void push(std::shared_ptr<Request> req) override { queue_.push_back(req); }
+  void push(std::shared_ptr<Request> req) override { queue_.push_front(req); }
 
   void push(std::shared_ptr<Request> req, bool if_back) override {
     if (if_back) {
