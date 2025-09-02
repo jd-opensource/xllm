@@ -13,6 +13,7 @@ if(USE_NPU)
   add_subdirectory(spdlog)
   add_subdirectory(hccl_transfer/hccl_transfer)
 endif()
+
 add_subdirectory(Mooncake)
 
 target_include_directories(mooncake_store PUBLIC
@@ -20,3 +21,5 @@ target_include_directories(mooncake_store PUBLIC
 )
 
 target_link_libraries(mooncake_store PUBLIC transfer_engine cachelib_memory_allocator)
+
+include_directories(concurrentqueue)

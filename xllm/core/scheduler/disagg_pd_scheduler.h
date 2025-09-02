@@ -23,13 +23,13 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
+#include "concurrentqueue/blockingconcurrentqueue.h"
 #include "disagg_pd.pb.h"
 #include "framework/request/request.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
 #include "server/xllm_server_registry.h"
-#include "util/concurrent_queue.h"
 #include "util/threadpool.h"
 
 namespace xllm {
@@ -113,11 +113,11 @@ class DisaggPDScheduler : public ContinuousScheduler {
 
   // for prefill, dispatch request to Decode instance
   std::unique_ptr<std::thread> dispatch_thread_;
-  ConcurrentQueue<std::shared_ptr<Request>> prefill_request_queue_;
 
-  //   folly::MPMCQueue<std::shared_ptr<Request>>
-  //   prefill_request_queue_offline_;
-  ConcurrentQueue<std::shared_ptr<Request>> prefill_request_queue_offline_;
+  moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
+      prefill_request_queue_;
+  moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
+      prefill_request_queue_offline_;
 
   // for prefill save all remote requests
   std::unordered_map<std::string, std::shared_ptr<Request>>

@@ -7,7 +7,6 @@ cc_library(
   HDRS
     blocking_counter.h
     closure_guard.h
-    concurrent_queue.h
     device_name_utils.h
     double_buffer.h
     env_var.h
