@@ -68,6 +68,11 @@ DEFINE_string(draft_devices,
               "npu:0",
               "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1.");
 
+DEFINE_int32(limit_image_per_prompt,
+             4,
+             "Maximum number of image per prompt. Only applicable for "
+             "multimodal models.");
+
 DEFINE_int32(block_size,
              128,
              "Number of slots per kv cache block. Default is 128.");

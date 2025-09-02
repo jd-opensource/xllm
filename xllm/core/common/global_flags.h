@@ -45,6 +45,8 @@ DECLARE_string(draft_model);
 
 DECLARE_string(draft_devices);
 
+DECLARE_int32(limit_image_per_prompt);
+
 DECLARE_int32(block_size);
 
 DECLARE_int64(max_cache_size);

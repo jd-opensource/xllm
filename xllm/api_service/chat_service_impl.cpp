@@ -610,12 +610,29 @@ MMChatServiceImpl::MMChatServiceImpl(VLMMaster* master,
 
 void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
   const auto& rpc_request = call->request();
+  const auto& req_messages = rpc_request.messages();
   const auto& model = rpc_request.model();
   if (!models_.contains(model)) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
 
+  // check if the request image number exceeds the allowed image limit.
+  int image_count = 0;
+  const int image_limit = master_->get_image_limit();
+  for (const auto& message : req_messages) {
+    for (const auto& content_item : message.content()) {
+      if (content_item.type() == "image_url") {
+        ++image_count;
+        if (image_count > image_limit) {
+          call->finish_with_error(
+              StatusCode::INVALID_ARGUMENT,
+              "Number of images exceeds the allowed image limit.");
+          return;
+        }
+      }
+    }
+  }
   // Check if the request is being rate-limited.
   if (master_->get_rate_limiter()->is_limited()) {
     call->finish_with_error(
@@ -631,7 +648,7 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
   MMInput mm_inputs;
 
   MMInputHelper helper;
-  if (!helper.trans(rpc_request.messages(), messages, mm_inputs.items_)) {
+  if (!helper.trans(req_messages, messages, mm_inputs.items_)) {
     call->finish_with_error(StatusCode::INVALID_ARGUMENT,
                             "inputs argument is invalid.");
     return;

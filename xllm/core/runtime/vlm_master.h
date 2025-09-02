@@ -82,6 +82,8 @@ class VLMMaster : public Master {
   // generate will run all requests, this is an blocking call
   void generate();
 
+  int get_image_limit() { return options_.limit_image_per_prompt(); }
+
  private:
   using Task = folly::Function<void()>;
   std::shared_ptr<Request> generate_request(std::string prompt,

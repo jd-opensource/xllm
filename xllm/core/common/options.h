@@ -43,6 +43,9 @@ class Options {
 
   PROPERTY(std::optional<std::string>, draft_devices);
 
+  // max image num per prompt, default 4
+  PROPERTY(int32_t, limit_image_per_prompt) = 4;
+
   // block size, default 16
   PROPERTY(int32_t, block_size) = 16;
 

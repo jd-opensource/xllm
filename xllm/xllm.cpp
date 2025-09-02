@@ -103,6 +103,7 @@ int run() {
       .devices(FLAGS_devices)
       .draft_model_path(FLAGS_draft_model)
       .draft_devices(FLAGS_draft_devices)
+      .limit_image_per_prompt(FLAGS_limit_image_per_prompt)
       .block_size(FLAGS_block_size)
       .max_cache_size(FLAGS_max_cache_size)
       .max_memory_utilization(FLAGS_max_memory_utilization)
