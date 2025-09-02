@@ -437,7 +437,11 @@ void DeepseekV2DecoderImpl::initialize_basic_parameters(
   }
   param.maskfree = true;                            // TODO
   param.enableSwiGLUQuantForSharedExperts = false;  // TODO
-
+#if defined(USE_A3)
+  param.scaledTopk = -1;
+  param.enableATBGateMatmul = 1;
+  param.enableLcocAll2All = 1;
+#endif
   num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
   qk_nope_head_dim_ = args.qk_nope_head_dim();
   v_head_dim_ = args.v_head_dim();
@@ -1052,32 +1056,34 @@ void DeepseekV2DecoderImpl::merge_loaded_weights() {
   }
   // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT] =
   // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT].transpose(0, 1);
-  if (!prefill_param_.isBF16 && quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
-        convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_A_DESCALE]);
-    at_weight_tensors_[IN_Q_PROJ_B_DESCALE] =
-        convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_B_DESCALE]);
-    at_weight_tensors_[IN_ATTENTION_OUT_DESCALE] =
-        convert_fp16_to_int64(at_weight_tensors_[IN_ATTENTION_OUT_DESCALE]);
-
-    at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
-        at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].to(
-            torch::kFloat16);
-    at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
-        at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].to(
-            torch::kFloat32);
-    at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
-        at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(torch::kFloat32);
+  if (quantize_type_ == "w8a8_dynamic") {
     at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
         at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
-    at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
-        at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT].to(torch::kFloat16);
-    at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
-        at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT].to(torch::kFloat32);
-    at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] =
-        at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT].to(torch::kFloat16);
-    at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
-        at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT].to(torch::kFloat32);
+    if(!prefill_param_.isBF16){ 
+      at_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
+          convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_A_DESCALE]);
+      at_weight_tensors_[IN_Q_PROJ_B_DESCALE] =
+          convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_B_DESCALE]);
+      at_weight_tensors_[IN_ATTENTION_OUT_DESCALE] =
+          convert_fp16_to_int64(at_weight_tensors_[IN_ATTENTION_OUT_DESCALE]);
+
+      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
+          at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].to(
+              torch::kFloat16);
+      at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
+          at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].to(
+              torch::kFloat32);
+      at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
+          at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(torch::kFloat32);
+      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
+          at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT].to(torch::kFloat16);
+      at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
+          at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT].to(torch::kFloat32);
+      at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] =
+          at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT].to(torch::kFloat16);
+      at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
+          at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT].to(torch::kFloat32);
+    }
   }
   c10_npu::NPUCachingAllocator::emptyCache();
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
@@ -1193,6 +1199,7 @@ void DeepseekV2DecoderImpl::merge_experts_weights() {
 #if defined(USE_A3)
   torch::Tensor mlp_down_weight =
       merge_experts_weights(experts_weights_["down_proj.weight"],
+                            device_,
                             /*transpose=*/false);
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
       at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();

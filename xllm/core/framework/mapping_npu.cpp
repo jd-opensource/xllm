@@ -50,7 +50,9 @@ MappingNPU::MappingNPU(const std::string rank_table_file,
   get_tp_group(lm_head_tp_);
   get_dp_group(lm_head_dp_);
   get_tp_group(attn_inner_sp_);
+  get_tp_group(attn_cp_);
 
+  attn_cp_.group_size_ = 1;
   // o_proj mixture of tp and dp
   if (ENV_enable_extra_o_proj_tp) {
     get_domain(attn_o_proj_tp_, attn_o_proj_dp_, 0);
@@ -343,6 +345,7 @@ nlohmann::json MappingNPU::to_json() {
   data["lmHeadTp"] = lmhead_tp;
   data["lmHeadDp"] = lmhead_dp;
   data["lcocAttnTp"] = attn_tp_.to_json();
+  data["attnCp"] = attn_cp_.to_json();
 
   return data;
 }

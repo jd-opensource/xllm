@@ -21,29 +21,56 @@ if(USE_NPU)
       set(USE_A2 ON)
       message(STATUS "Building for device: A2 (macro USE_A2 defined)")
   endif()
-  if(USE_A2)
-    execute_process(
-      COMMAND git -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD
-      OUTPUT_VARIABLE XLLM_OPS_GIT_HEAD
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-    )
 
-    if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
-      message(STATUS "xllm_ops git HEAD changed; running precompile via execute_process")
-      execute_process(
-        COMMAND bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/xllm_ops
-        RESULT_VARIABLE XLLM_OPS_RESULT
-      )
-      if(NOT XLLM_OPS_RESULT EQUAL 0)
-        message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
+  option(INSTALL_XLLM_KERNELS "Install xllm_kernels RPM" ON)  
+  message(STATUS "INSTALL_XLLM_KERNELS enabled: ${INSTALL_XLLM_KERNELS}")
+  if(INSTALL_XLLM_KERNELS)
+    if(DEVICE_TYPE STREQUAL "USE_A3")
+        message("downloading a3 arm xllm kernels")
+        file(DOWNLOAD 
+            "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.6.0/xllm_kernels-1.0.0-Linux.a3.arm.rpm"
+            "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
+        )
+    else()  
+       message("downloading a2 arm xllm_kernels")
+      if(DEVICE_ARCH STREQUAL "ARM")
+          file(DOWNLOAD 
+              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.6.0/xllm_kernels-1.2.0-Linux.a2.arm.rpm"
+              "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
+          )
+      else()
+          message("downloading a3 x86 xllm_kernels")
+          file(DOWNLOAD 
+              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.6.0/xllm_kernels-1.2.0-Linux.a2.x86.rpm"
+              "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
+          )
       endif()
-      set(XLLM_OPS_GIT_HEAD_CACHED "${XLLM_OPS_GIT_HEAD}" CACHE INTERNAL "" FORCE)
-      message(STATUS "xllm ops precompiled and HEAD cache updated")
-    else()
-      message(STATUS "xllm_ops git HEAD unchanged; skipping precompile")
     endif()
+      execute_process(COMMAND rpm -ivh "${CMAKE_BINARY_DIR}/xllm_kernels.rpm")
+      file(WRITE "${CMAKE_BINARY_DIR}/.xllm_installed" "")
+  endif()
+
+  execute_process(
+    COMMAND git -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD
+    OUTPUT_VARIABLE XLLM_OPS_GIT_HEAD
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+
+  if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
+    message(STATUS "xllm_ops git HEAD changed; running precompile via execute_process")
+    execute_process(
+      COMMAND bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/xllm_ops
+      RESULT_VARIABLE XLLM_OPS_RESULT
+    )
+    if(NOT XLLM_OPS_RESULT EQUAL 0)
+      message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
+    endif()
+    set(XLLM_OPS_GIT_HEAD_CACHED "${XLLM_OPS_GIT_HEAD}" CACHE INTERNAL "" FORCE)
+    message(STATUS "xllm ops precompiled and HEAD cache updated")
+  else()
+    message(STATUS "xllm_ops git HEAD unchanged; skipping precompile")
   endif()
 endif()
 

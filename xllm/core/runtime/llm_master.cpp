@@ -38,7 +38,6 @@ limitations under the License.
 #include "server/xllm_server_registry.h"
 #if defined(USE_NPU)
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
-#include "torch_npu/csrc/core/npu/THNPUCachingHostAllocator.h"
 #endif
 #include "util/device_name_utils.h"
 #include "util/scope_guard.h"

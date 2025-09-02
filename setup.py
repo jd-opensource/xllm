@@ -109,7 +109,7 @@ def set_npu_envs():
     os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
     os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
     os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
-
+    os.environ["INSTALL_XLLM_KERNELS"] = "ON" if install_kernels else "OFF"
     NPU_TOOLKIT_HOME = os.getenv("NPU_TOOLKIT_HOME")
     if not NPU_TOOLKIT_HOME:
         os.environ["NPU_TOOLKIT_HOME"] = "/usr/local/Ascend/ascend-toolkit/latest"
@@ -204,6 +204,7 @@ class ExtBuild(build_ext):
         ("base-dir=", None, "base directory of xLLM project"),
         ("device=", None, "target device type (a3 or a2 or mlu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
+        ("install-xllm-kernels=", None, "install xllm_kernels RPM package (true/false)"),
     ]
 
     def initialize_options(self):
@@ -211,6 +212,7 @@ class ExtBuild(build_ext):
         self.base_dir = get_base_dir()
         self.device = "a2"  
         self.arch = "x86"
+        self.install_xllm_kernels = "true"
 
     def finalize_options(self):
         build_ext.finalize_options(self)
@@ -278,6 +280,7 @@ class ExtBuild(build_ext):
             f"-DBUILD_SHARED_LIBS=OFF",
             f"-DDEVICE_TYPE=USE_{self.device.upper()}",
             f"-DDEVICE_ARCH={self.arch.upper()}",
+            f"-DINSTALL_XLLM_KERNELS={'ON' if self.install_xllm_kernels else 'OFF'}",
         ]
         
         if self.device == "a2" or self.device == "a3":
@@ -346,6 +349,7 @@ class BuildDistWheel(bdist_wheel):
         super().initialize_options()
         self.device = None
         self.arch = None
+        self.install_xllm_kernels = "true"
 
     def finalize_options(self):
         super().finalize_options()
@@ -512,6 +516,7 @@ def apply_patch():
 if __name__ == "__main__":
     device = 'a2'  # default
     arch = "x86" # default
+    install_kernels = True
     if '--device' in sys.argv:
         idx = sys.argv.index('--device')
         if idx + 1 < len(sys.argv):
@@ -536,7 +541,19 @@ if __name__ == "__main__":
         apply_patch()
     else:
         sys.argv.remove("--dry_run") 
-
+    if '--install-xllm-kernels' in sys.argv:
+        idx = sys.argv.index('--install-xllm-kernels')
+        if idx + 1 < len(sys.argv):
+            install_kernels = sys.argv[idx+1].lower()
+            if install_kernels in ('true', '1', 'yes', 'y', 'on'):
+                install_kernels = True
+            elif install_kernels in ('false', '0', 'no', 'n', 'off'):
+                install_kernels = False
+            else:
+                print("Error: --install-xllm-kernels must be true or false")
+                sys.exit(1)
+            sys.argv.pop(idx)
+            sys.argv.pop(idx)
 
     version = get_version()
 
@@ -577,7 +594,12 @@ if __name__ == "__main__":
         cmdclass={"build_ext": ExtBuild,
                   "test": TestUT,
                   'bdist_wheel': BuildDistWheel},
-        options={'build_ext': {'device': device,'arch': arch}},
+        options={'build_ext': {
+                    'device': device,
+                    'arch': arch,
+                    'install_xllm_kernels': install_kernels if install_kernels is not None else "false"
+                    }
+                },
         zip_safe=False,
         py_modules=["xllm/launch_xllm", "xllm/__init__",
                     "xllm/pybind/llm", "xllm/pybind/args"],

@@ -131,15 +131,18 @@ void WorkerServer::create_server(const runtime::Options& options,
 #if defined(USE_NPU)
   atb_speed::base::Mapping mapping;
   mapping.ParseParam(mapping_data);
+#if defined(USE_A3)
+  mapping.InitGlobalCommDomain(FLAGS_communication_backend);
+#else
   mapping.InitCommDomain(FLAGS_communication_backend);
-
+#endif
   auto moeEpParallelInfo = mapping.Get(atb_speed::base::MOE_EP);
   auto dispatchAndCombinecommDomain =
       atb_speed::GetSingleton<atb_speed::ExternalCommManager>().GetCommDomain(
           moeEpParallelInfo.groupId,
           moeEpParallelInfo.rankIds,
           moeEpParallelInfo.rank,
-          moeEpParallelInfo.backend,
+          FLAGS_communication_backend,
           moeEpParallelInfo.bufferSize,
           false);
   auto dispatchAndCombineHcclComm =

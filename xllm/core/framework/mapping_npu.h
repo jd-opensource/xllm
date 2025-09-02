@@ -50,7 +50,7 @@ struct ParallelInfo {
 
   nlohmann::json to_json() {
     nlohmann::json data;
-    // data["group_size"] = group_size_;
+    data["group_size"] = group_size_;
     // data["num_group"] = num_group_;
     data["rankIds"] = rank_per_group_[current_group_id_];
     data["groupId"] = current_group_id_;
@@ -149,6 +149,8 @@ class MappingNPU final {
   ParallelInfo lm_head_tp_ = ParallelInfo();
   ParallelInfo lm_head_dp_ = ParallelInfo();
   ParallelInfo attn_inner_sp_ = ParallelInfo();
+  ParallelInfo attn_cp_ = ParallelInfo();
+
   int32_t lccl_comm_domain_lower_bound_;
   int32_t lccl_comm_domain_upper_bound_;
 };
