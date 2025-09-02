@@ -61,6 +61,10 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   if (options_.enable_service_routing()) {
     XServiceClient::get_instance()->set_scheduler(this);
   }
+
+  instance_info_.name = options_.instance_name().value_or("");
+  instance_info_.type = options_.instance_role().value().to_string();
+  instance_info_.dp_size = options.dp_size();
 }
 
 ContinuousScheduler::~ContinuousScheduler() { running_requests_.clear(); }

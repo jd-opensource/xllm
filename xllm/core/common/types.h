@@ -180,7 +180,7 @@ struct RawToken {
 struct InstanceInfo {
   std::string name = "";
   std::string rpc_address = "";
-  // default/prefill/decode
+  // DEFAULT/PREFILL/DECODE
   std::string type = "";
   // remote kv cache info
   std::vector<uint64_t> cluster_ids;
@@ -188,16 +188,18 @@ struct InstanceInfo {
   std::vector<int64_t> k_cache_ids;
   std::vector<int64_t> v_cache_ids;
   int32_t dp_size;
+  // ttft profiling data
+  std::vector<std::pair<int32_t, int64_t>> ttft_profiling_data;
 
   nlohmann::json serialize_to_json() const {
     nlohmann::json json_val;
     json_val["name"] = name;
     json_val["rpc_address"] = rpc_address;
-    if (type == "default") {
+    if (InstanceRole(type) == InstanceRole::DEFAULT) {
       json_val["type"] = 0;
-    } else if (type == "prefill") {
+    } else if (InstanceRole(type) == InstanceRole::PREFILL) {
       json_val["type"] = 1;
-    } else if (type == "decode") {
+    } else if (InstanceRole(type) == InstanceRole::DECODE) {
       json_val["type"] = 2;
     } else {
       LOG(ERROR) << "Unsupported instance type: " << type;
@@ -208,6 +210,7 @@ struct InstanceInfo {
     json_val["k_cache_ids"] = k_cache_ids;
     json_val["v_cache_ids"] = v_cache_ids;
     json_val["dp_size"] = dp_size;
+    json_val["ttft_profiling_data"] = ttft_profiling_data;
     return json_val;
   }
 };

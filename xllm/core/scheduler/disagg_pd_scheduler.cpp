@@ -20,11 +20,14 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <brpc/server.h>
 
+#include <random>
+
 #include "common/global_flags.h"
 #include "common/macros.h"
 #include "disagg_pd.pb.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request.h"
+#include "framework/request/request_state.h"
 #include "framework/request/sequence.h"
 #include "runtime/engine.h"
 #include "runtime/xservice_client.h"
@@ -72,6 +75,9 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
                          instance_info_.k_cache_ids,
                          instance_info_.v_cache_ids);
   instance_info_.dp_size = options.dp_size();
+
+  // profile ttft and update instance info
+  profile_ttft();
 }
 
 DisaggPDScheduler::~DisaggPDScheduler() {
@@ -82,6 +88,71 @@ DisaggPDScheduler::~DisaggPDScheduler() {
   if (dispatch_thread_ && dispatch_thread_->joinable()) {
     dispatch_thread_->join();
   }
+}
+
+void DisaggPDScheduler::profile_ttft() {
+  // get the maximum prefill token length
+  auto& model_args = engine_->model_args();
+  int32_t max_context_len = model_args.max_position_embeddings();
+  if (!options_.enable_chunked_prefill()) {
+    max_context_len =
+        std::min(max_context_len, options_.max_tokens_per_batch());
+  }
+  int32_t vocab_size = model_args.vocab_size();
+
+  // warm up
+  run_prefill_request(max_context_len, vocab_size);
+
+  // get TTFT starting from max_context_len, dividing the token length by 2 in
+  // each loop iteration
+  for (int32_t token_length = max_context_len; token_length > 1;
+       token_length >>= 1) {
+    int64_t latency = run_prefill_request(token_length, vocab_size);
+    instance_info_.ttft_profiling_data.emplace_back(
+        std::make_pair(token_length, latency));
+  }
+}
+
+int64_t DisaggPDScheduler::run_prefill_request(int32_t token_length,
+                                               int32_t vocab_size) {
+  // generate random token ids and request
+  std::random_device rd;
+  std::mt19937_64 gen(rd());
+  // generate token id within the range [0, vocab_size - 1]
+  std::uniform_int_distribution<int32_t> dis(0, vocab_size - 1);
+  std::vector<int32_t> token_ids(token_length);
+  std::generate(token_ids.begin(), token_ids.end(), [&]() { return dis(gen); });
+
+  // generate request
+  RequestState req_state(token_ids);
+  Request request(/*request_id=*/"",
+                  /*x_request_id=*/"",
+                  /*x_request_time=*/"",
+                  req_state);
+
+  // allocate blocks
+  if (!block_manager_pool_->allocate(request.sequences()[0].get())) {
+    LOG(FATAL) << "Profiling TTFT failed! Not enough blocks, token length : "
+               << token_length;
+  }
+
+  // build batch
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(
+                         {request.sequences()[0].get()},
+                         {token_length},
+                         block_manager_pool_->get_copy_in_cache_block_infos(),
+                         block_manager_pool_->get_copy_out_cache_block_infos());
+
+  absl::Time start_time = absl::Now();
+  engine_->step(batches);
+  if (options_.enable_schedule_overlap()) {
+    engine_->update_last_step_result(batches);
+  }
+  const int64_t latency = absl::ToInt64Milliseconds(absl::Now() - start_time);
+  block_manager_pool_->deallocate(&request);
+
+  return latency;
 }
 
 // TODO: maybe we should consider update info case even if info already exists

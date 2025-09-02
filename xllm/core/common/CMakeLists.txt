@@ -33,7 +33,7 @@ cc_library(
     absl::strings
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
-    $<$<BOOL:${USE_NPU}>:mspti>
+    $<$<BOOL:${USE_MSPTI}>:mspti>
     $<$<BOOL:${USE_NPU}>:ms_tools_ext>
     Boost::serialization
     cpprest

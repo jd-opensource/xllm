@@ -47,6 +47,8 @@ class Scheduler {
 
   virtual void get_latency_metrics(std::vector<int64_t>& ttft,
                                    std::vector<int64_t>& tbt) = 0;
+
+  virtual const InstanceInfo& get_instance_info() = 0;
 };
 
 }  // namespace xllm

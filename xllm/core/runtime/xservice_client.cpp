@@ -150,13 +150,13 @@ std::string XServiceClient::get_instance_name() { return instance_name_; }
 void XServiceClient::register_instance(const InstanceInfo& instance_info) {
   if (etcd_client_) {
     std::string key_prefix = "";
-    if (instance_info.type == "default") {
+    if (InstanceRole(instance_info.type) == InstanceRole::DEFAULT) {
       key_prefix =
           ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DEFAULT];
-    } else if (instance_info.type == "prefill") {
+    } else if (InstanceRole(instance_info.type) == InstanceRole::PREFILL) {
       key_prefix =
           ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::PREFILL];
-    } else if (instance_info.type == "decode") {
+    } else if (InstanceRole(instance_info.type) == InstanceRole::DECODE) {
       key_prefix =
           ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DECODE];
     } else {
@@ -203,11 +203,11 @@ void XServiceClient::register_instance(const InstanceInfo& instance_info) {
           << "currently is empty, we will use `default` type.";
       req.set_type(xllm_service::proto::InstanceType::DEFAULT);
     } else {
-      if (instance_info.type == "default") {
+      if (InstanceRole(instance_info.type) == InstanceRole::DEFAULT) {
         req.set_type(xllm_service::proto::InstanceType::DEFAULT);
-      } else if (instance_info.type == "prefill") {
+      } else if (InstanceRole(instance_info.type) == InstanceRole::PREFILL) {
         req.set_type(xllm_service::proto::InstanceType::PREFILL);
-      } else if (instance_info.type == "decode") {
+      } else if (InstanceRole(instance_info.type) == InstanceRole::DECODE) {
         req.set_type(xllm_service::proto::InstanceType::DECODE);
       } else {
         LOG(ERROR) << "Unsupported instance type: " << instance_info.type;

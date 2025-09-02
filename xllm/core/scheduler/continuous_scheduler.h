@@ -64,6 +64,9 @@ class ContinuousScheduler : public Scheduler {
     // enable decode response to service directly
     PROPERTY(bool, enable_decode_response_to_service) = false;
 
+    // for master service, current instance name(ID).
+    PROPERTY(std::optional<std::string>, instance_name);
+
     PROPERTY(std::optional<InstanceRole>, instance_role);
 
     PROPERTY(std::string, kv_cache_transfer_mode) = "PUSH";
@@ -139,6 +142,8 @@ class ContinuousScheduler : public Scheduler {
   virtual void get_latency_metrics(std::vector<int64_t>& ttft,
                                    std::vector<int64_t>& tbt) {}
 
+  const InstanceInfo& get_instance_info() { return instance_info_; }
+
  protected:
   // allocate actual token_num slots.
   std::vector<Block> allocate_blocks_for(size_t token_num, int32_t& dp_rank);
@@ -204,6 +209,8 @@ class ContinuousScheduler : public Scheduler {
   // std::deque<std::shared_ptr<Request>> running_queue_offline_;
   std::unique_ptr<DecodePriorityQueue> running_queue_;
   std::unique_ptr<DecodePriorityQueue> running_queue_offline_;
+
+  InstanceInfo instance_info_;
 
   void handle_prefill_requests(
       size_t& remaining_token_budget,

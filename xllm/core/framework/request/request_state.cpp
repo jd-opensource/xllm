@@ -136,4 +136,8 @@ RequestState::RequestState(const std::string& prompt,
   }
 }
 
+RequestState::RequestState(const std::vector<int32_t>& prompt_tokens)
+    : prompt_tokens(std::move(prompt_tokens)),
+      seq_capacity(prompt_tokens.size() + 1) {}
+
 }  // namespace xllm

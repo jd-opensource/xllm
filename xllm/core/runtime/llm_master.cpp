@@ -81,6 +81,7 @@ LLMMaster::LLMMaster(const Options& options)
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_schedule_overlap(options_.enable_schedule_overlap())
       .enable_chunked_prefill(options_.enable_chunked_prefill())
+      .instance_name(options_.instance_name())
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
@@ -88,45 +89,7 @@ LLMMaster::LLMMaster(const Options& options)
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {
-    InstanceInfo instance_info;
-
-    instance_info.name = options_.instance_name().value_or("");
-    switch (options_.instance_role()) {
-      case InstanceRole::DEFAULT:
-        instance_info.rpc_address = "";
-        instance_info.type = "default";
-        break;
-
-      case InstanceRole::PREFILL:
-        instance_info.rpc_address = ServerRegistry::get_instance()
-                                        .get_server("DisaggPDServer")
-                                        ->listen_address();
-        instance_info.type = "prefill";
-        engine_->get_cache_info(instance_info.cluster_ids,
-                                instance_info.addrs,
-                                instance_info.k_cache_ids,
-                                instance_info.v_cache_ids);
-        break;
-
-      case InstanceRole::DECODE:
-        instance_info.rpc_address = ServerRegistry::get_instance()
-                                        .get_server("DisaggPDServer")
-                                        ->listen_address();
-        instance_info.type = "decode";
-        engine_->get_cache_info(instance_info.cluster_ids,
-                                instance_info.addrs,
-                                instance_info.k_cache_ids,
-                                instance_info.v_cache_ids);
-        break;
-
-      default:
-        LOG(FATAL) << "Unrecognized InstanceRole:"
-                   << options_.instance_role().to_string();
-        return;
-    }
-
-    instance_info.dp_size = options.dp_size();
-
+    auto& instance_info = scheduler_->get_instance_info();
     XServiceClient::get_instance()->register_instance(instance_info);
   }
 

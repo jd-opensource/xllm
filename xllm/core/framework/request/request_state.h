@@ -91,6 +91,9 @@ struct RequestState final {
                const OutputsFunc& outputs_func,
                const std::string& decode_address = "");
 
+  // for profiling run, only provide prompt tokens
+  RequestState(const std::vector<int32_t>& prompt_tokens);
+
  public:
   // sampling parameters
   RequestSamplingParam sampling_param;
