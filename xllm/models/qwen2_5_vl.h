@@ -695,12 +695,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   Qwen2_5_VLForConditionalGenerationImpl(const Context& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    Context vision_context(ParallelArgs(0, 1, nullptr));
-    vision_context.set_model_args(model_args_);
-    vision_context.set_quant_args(context.get_quant_args());
-    vision_context.set_tensor_options(options_);
-    visual_ =
-        register_module("visual", Qwen2_5_VisionTransformer(vision_context));
+    visual_ = register_module("visual", Qwen2_5_VisionTransformer(context));
 
     language_model_ =
         register_module("language_model", QWen2ForCausalLM(context));

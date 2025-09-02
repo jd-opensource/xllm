@@ -158,15 +158,8 @@ void Qwen2_5VisionEncoderImpl::pad_qkv_weights() {
   auto qkv_proj_weight_reshaped =
       qkv_proj_weight.reshape({num_heads_pre_rank, 3, 80, hidden_size});
 
-  auto first_half =
-      qkv_proj_weight_reshaped.index({torch::indexing::Slice(),
-                                      torch::indexing::Slice(),
-                                      torch::indexing::Slice(0, 40),
-                                      torch::indexing::Slice()});
-  auto second_half = qkv_proj_weight_reshaped.index({torch::indexing::Slice(),
-                                                     torch::indexing::Slice(),
-                                                     torch::indexing::Slice(40),
-                                                     torch::indexing::Slice()});
+  auto first_half = qkv_proj_weight_reshaped.slice(2, 0, 40);
+  auto second_half = qkv_proj_weight_reshaped.slice(2, 40, 80);
 
   auto first_half_padded = torch::nn::functional::pad(
       first_half, torch::nn::functional::PadFuncOptions({0, 0, 0, 24}));
@@ -182,12 +175,9 @@ void Qwen2_5VisionEncoderImpl::pad_qkv_weights() {
 
   auto qkv_proj_bias_reshaped =
       qkv_proj_bias.reshape({num_heads_pre_rank, 3, 80});
-  first_half = qkv_proj_bias_reshaped.index({torch::indexing::Slice(),
-                                             torch::indexing::Slice(),
-                                             torch::indexing::Slice(0, 40)});
-  second_half = qkv_proj_bias_reshaped.index({torch::indexing::Slice(),
-                                              torch::indexing::Slice(),
-                                              torch::indexing::Slice(40)});
+  first_half = qkv_proj_bias_reshaped.slice(2, 0, 40);
+  second_half = qkv_proj_bias_reshaped.slice(2, 40, 80);
+
   first_half_padded = torch::nn::functional::pad(
       first_half, torch::nn::functional::PadFuncOptions({0, 24}));
   second_half_padded = torch::nn::functional::pad(
@@ -202,31 +192,11 @@ void Qwen2_5VisionEncoderImpl::pad_qkv_weights() {
 
   auto out_proj_weight = at_weight_tensors_[IN_WATTENTION_OUT_WEIGHT];
 
-  if (encode_param_.worldSize == 1) {
-    out_proj_weight =
-        torch::nn::functional::pad(
-            out_proj_weight.reshape({hidden_size, num_heads_pre_rank * 2, 40}),
-            torch::nn::functional::PadFuncOptions({0, 24, 0, 0}))
-            .reshape({hidden_size, num_heads_pre_rank * 128});
-  } else if (encode_param_.worldSize > 1) {
-    auto reshaped =
-        out_proj_weight.reshape({num_heads_pre_rank, 80, hidden_size});
-
-    auto first_half = reshaped.slice(1, 0, 40);
-    auto second_half = reshaped.slice(1, 40, 80);
-
-    auto first_half_padded = torch::nn::functional::pad(
-        first_half, torch::nn::functional::PadFuncOptions({0, 0, 0, 24}));
-
-    auto second_half_padded = torch::nn::functional::pad(
-        second_half, torch::nn::functional::PadFuncOptions({0, 0, 0, 24}));
-
-    auto out_proj_weight_padded =
-        torch::cat({first_half_padded, second_half_padded}, 1);
-
-    out_proj_weight =
-        out_proj_weight_padded.reshape({num_heads_pre_rank * 128, hidden_size});
-  }
+  out_proj_weight =
+      torch::nn::functional::pad(
+          out_proj_weight.reshape({hidden_size, num_heads_pre_rank * 2, 40}),
+          torch::nn::functional::PadFuncOptions({0, 24, 0, 0}))
+          .reshape({hidden_size, num_heads_pre_rank * 128});
   at_weight_tensors_[IN_WATTENTION_OUT_WEIGHT] = out_proj_weight;
 }
 void Qwen2_5VisionEncoderImpl::merge_loaded_weights() {
