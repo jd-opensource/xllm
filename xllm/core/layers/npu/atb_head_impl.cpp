@@ -60,16 +60,9 @@ void AtbLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
           parallelInfo.rankIds.size();
       param.linearParallelParam.tensorParallelInfo.backend =
           FLAGS_communication_backend;
-#if defined(USE_A3)
       parallelInfo.InitCommDomain(
           param.linearParallelParam.tensorParallelInfo.hcommInfo,
           param.linearParallelParam.tensorParallelInfo.commDomain);
-#else
-      param.linearParallelParam.tensorParallelInfo.hcommInfo =
-          parallelInfo.hcclComm;
-      param.linearParallelParam.tensorParallelInfo.commDomain =
-          parallelInfo.commDomain;
-#endif
     }
   }
 }

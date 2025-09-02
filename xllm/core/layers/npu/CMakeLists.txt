@@ -20,8 +20,8 @@ cc_library(
     atb_head_impl.h
     siglip_encoder_layer.h
     multi_head_attention.h
-    $<$<BOOL:${USE_A2}>:qwen2_5_vision_encoder_layer.h>
-    $<$<BOOL:${USE_A2}>:qwen3_moe_decoder_layer.h>
+    qwen2_5_vision_encoder_layer.h
+    qwen3_moe_decoder_layer.h
     atb_linear.h
     atb_parallel_linear.h
     buffer/atb_buffer.h
@@ -30,8 +30,8 @@ cc_library(
     llama_decoder_layer.cpp
     qwen2_decoder_layer.cpp
     qwen3_decoder_layer.cpp
-    $<$<BOOL:${USE_A2}>:qwen2_5_vision_encoder_layer.cpp>
-    $<$<BOOL:${USE_A2}>:qwen3_moe_decoder_layer.cpp>
+    qwen2_5_vision_encoder_layer.cpp
+    qwen3_moe_decoder_layer.cpp
     attn_mask.cpp
     atb_base.cpp
     word_embedding.cpp

@@ -112,18 +112,18 @@ Supported models list:
 First, download the image we provide:
 ```bash
 # A2 x86
-docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts
+docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts
 # A2 arm
-docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64
+docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts-aarch64
 # A3 arm
-docker pull xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64
+docker pull xllm/xllm-ai:xllm-0.6.0-dev-hc-rc2-py3.11-oe24.03-lts-aarch64
 # or
 # A2 x86
-docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts
 # A2 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts-aarch64
 # A3 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hc-rc2-py3.11-oe24.03-lts-aarch64
 ```
 Then create the corresponding container:
 ```bash

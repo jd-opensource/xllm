@@ -14,9 +14,9 @@ sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host 
 
 | Device    |    Arch     |   Images      |
 |:---------:|:-----------:|:-------------:|
-| A2        |     x86     | xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts | 
-| A2        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64 |
-| A3        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64 |
+| A2        |     x86     | xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts | 
+| A2        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts-aarch64 |
+| A3        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hc-rc2-py3.11-oe24.03-lts-aarch64 |
 
 
 ## Installation

@@ -437,9 +437,9 @@ void DeepseekV2DecoderImpl::initialize_basic_parameters(
   }
   param.maskfree = true;                            // TODO
   param.enableSwiGLUQuantForSharedExperts = false;  // TODO
-#if defined(USE_A3)
   param.scaledTopk = -1;
   param.enableATBGateMatmul = 1;
+#if defined(USE_A3)
   param.enableLcocAll2All = 1;
 #endif
   num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
@@ -526,7 +526,11 @@ void DeepseekV2DecoderImpl::initialize_mlp_parameters(
   param.dispatchAndCombineHcclComm = parallel_args.dispatchAndCombineHcclComm();
   param.dispatchAndCombinecommDomain =
       parallel_args.dispatchAndCombinecommDomain();
-
+#if defined(USE_A3)
+  param.enableIndexGmm = false;
+#else
+  param.enableIndexGmm = true;
+#endif
   if (layer_id_ >= param.firstKDenseReplace) {
     param.enableQkvdownDp = false;
     param.enableSharedExpertDp = false;
