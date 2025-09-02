@@ -223,6 +223,7 @@ find_package(benchmark CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenCV CONFIG REQUIRED)
 find_package(Python COMPONENTS Development REQUIRED)
+find_package(pybind11 CONFIG REQUIRED)
 
 if (USE_MANYLINUX)
   # manylinux doesn't ship Development.Embed

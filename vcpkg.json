@@ -116,6 +116,11 @@
       "name": "curl",
       "version>=": "8.5.0",
       "default-features": false
+    },
+    {
+      "name": "pybind11",
+      "version>=": "2.11.1",
+      "default-features": false
     }
   ],
   "builtin-baseline": "fba75d09065fcc76a25dcf386b1d00d33f5175af"
