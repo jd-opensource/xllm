@@ -17,7 +17,9 @@
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
+#if defined(USE_A2)
 #include "qwen2_5_vl.h"
+#endif
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm::hf {

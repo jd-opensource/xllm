@@ -1059,7 +1059,7 @@ void DeepseekV2DecoderImpl::merge_loaded_weights() {
   if (quantize_type_ == "w8a8_dynamic") {
     at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
         at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
-    if(!prefill_param_.isBF16){ 
+    if (!prefill_param_.isBF16) {
       at_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
           convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_A_DESCALE]);
       at_weight_tensors_[IN_Q_PROJ_B_DESCALE] =
@@ -1074,7 +1074,8 @@ void DeepseekV2DecoderImpl::merge_loaded_weights() {
           at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].to(
               torch::kFloat32);
       at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(torch::kFloat32);
+          at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(
+              torch::kFloat32);
       at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
           at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT].to(torch::kFloat16);
       at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =

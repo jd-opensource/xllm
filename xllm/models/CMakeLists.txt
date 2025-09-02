@@ -33,7 +33,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:llama.h>
     $<$<BOOL:${USE_NPU}>:minicpmv.h>
     $<$<BOOL:${USE_NPU}>:qwen2.h>
-    $<$<BOOL:${USE_NPU}>:qwen2_5_vl.h>
+    $<$<BOOL:${USE_A2}>:qwen2_5_vl.h>
     $<$<BOOL:${USE_NPU}>:qwen3.h>
     $<$<BOOL:${USE_NPU}>:qwen3_moe.h>
     $<$<BOOL:${USE_NPU}>:qwen_base.h>
