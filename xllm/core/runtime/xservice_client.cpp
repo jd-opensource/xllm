@@ -65,7 +65,7 @@ bool XServiceClient::init(const std::string& etcd_addr,
     instance_name_ = instance_name;
     chan_options_.protocol = "http";
     chan_options_.max_retry = 3;
-    chan_options_.timeout_ms = 100;
+    chan_options_.timeout_ms = FLAGS_timeout_ms;
 
     etcd_client_ = std::make_unique<EtcdClient>(etcd_addr);
 
@@ -112,7 +112,7 @@ bool XServiceClient::init(const std::string& etcd_addr,
 
     chan_options_.protocol = "http";
     chan_options_.max_retry = 3;
-    chan_options_.timeout_ms = 100;
+    chan_options_.timeout_ms = FLAGS_timeout_ms;
 
     xservice_channel_ = std::make_unique<brpc::Channel>();
     if (xservice_channel_->Init(xservice_addr_.c_str(), "", &chan_options_) !=
@@ -134,7 +134,7 @@ bool XServiceClient::init(const std::string& etcd_addr,
   return true;
 }
 
-void XServiceClient::set_scheduler(const Scheduler* scheduler) {
+void XServiceClient::set_scheduler(Scheduler* scheduler) {
   scheduler_ = scheduler;
 }
 
@@ -168,7 +168,7 @@ void XServiceClient::register_instance(const InstanceInfo& instance_info) {
     while (!etcd_client_->register_instance(
         key_prefix.append(instance_info.name),
         instance_info.serialize_to_json().dump(),
-        FLAGS_heart_beat_interval)) {
+        FLAGS_etcd_ttl)) {
       if (retry_cnt >= 30) {
         LOG(FATAL) << "Register Instance to etcd faill!";
         return;
@@ -296,8 +296,8 @@ void XServiceClient::heartbeat() {
     KvCacheEvent event;
     while (!exited_) {
       event.clear();
-      std::this_thread::sleep_for(
-          std::chrono::seconds(FLAGS_heart_beat_interval));
+      std::this_thread::sleep_for(std::chrono::milliseconds(
+          static_cast<int64_t>(FLAGS_heart_beat_interval * 1000)));
       if (!register_done_) continue;
       if (block_manager_pool_ == nullptr || scheduler_ == nullptr) continue;
 
@@ -340,6 +340,19 @@ void XServiceClient::heartbeat() {
       req.mutable_load_metrics()->set_waiting_requests_num(
           scheduler_->get_waiting_requests_num());
 
+      std::vector<int64_t> ttft;
+      std::vector<int64_t> tbt;
+      scheduler_->get_latency_metrics(ttft, tbt);
+      if (!ttft.empty()) {
+        auto max_ttft = std::max_element(ttft.begin(), ttft.end());
+        req.mutable_latency_metrics()->set_recent_max_ttft(*max_ttft);
+      }
+
+      if (!tbt.empty()) {
+        auto max_tbt = std::max_element(tbt.begin(), tbt.end());
+        req.mutable_latency_metrics()->set_recent_max_tbt(*max_tbt);
+      }
+
       xllm_service::proto::Status resp;
       {
         std::shared_lock<std::shared_mutex> lock(mutex_);
@@ -354,8 +367,8 @@ void XServiceClient::heartbeat() {
     }
   } else {
     while (!exited_) {
-      std::this_thread::sleep_for(
-          std::chrono::seconds(FLAGS_heart_beat_interval));
+      std::this_thread::sleep_for(std::chrono::milliseconds(
+          static_cast<int64_t>(FLAGS_heart_beat_interval * 1000)));
       if (!register_done_) continue;
 
       brpc::Controller cntl;

@@ -843,14 +843,10 @@ void ContinuousScheduler::generate() {
   response_processor_->wait_completion();
 }
 
-void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
-  std::vector<Sequence*>& to_be_processed_sequences =
-      enable_schedule_overlap ? last_running_sequences_ : running_sequences_;
-  std::vector<std::shared_ptr<Request>>& to_be_processed_requests =
-      enable_schedule_overlap ? last_running_requests_ : running_requests_;
-  // update token latency metrics
+void ContinuousScheduler::update_token_latency_metrics(
+    std::vector<Sequence*>& sequences) {
   const auto now = absl::Now();
-  for (Sequence* sequence : to_be_processed_sequences) {
+  for (Sequence* sequence : sequences) {
     int64_t tbt_milliseconds = sequence->tbt(now);
     if (sequence->is_first_token()) {
       HISTOGRAM_OBSERVE(time_to_first_token_latency_milliseconds,
@@ -861,6 +857,15 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
       HISTOGRAM_OBSERVE(inter_token_latency_milliseconds, tbt_milliseconds);
     }
   }
+}
+
+void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
+  std::vector<Sequence*>& to_be_processed_sequences =
+      enable_schedule_overlap ? last_running_sequences_ : running_sequences_;
+  std::vector<std::shared_ptr<Request>>& to_be_processed_requests =
+      enable_schedule_overlap ? last_running_requests_ : running_requests_;
+  // update token latency metrics
+  update_token_latency_metrics(to_be_processed_sequences);
 
   // update slot usage and activation metrics
   std::vector<int64_t> num_occupied_slots =

@@ -131,7 +131,11 @@ DECLARE_string(etcd_addr);
 
 DECLARE_bool(enable_service_routing);
 
-DECLARE_int32(heart_beat_interval);
+DECLARE_double(heart_beat_interval);
+
+DECLARE_int32(etcd_ttl);
+
+DECLARE_int32(timeout_ms);
 
 DECLARE_int32(chunked_match_frequency);
 

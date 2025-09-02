@@ -83,6 +83,9 @@ class DisaggPDScheduler : public ContinuousScheduler {
 
   bool enable_schedule_overlap() { return options_.enable_schedule_overlap(); };
 
+  void get_latency_metrics(std::vector<int64_t>& ttft,
+                           std::vector<int64_t>& tbt);
+
  private:
   // check remote instance info, if not exist, get from master service
   bool check_remote_instance_info(const std::string& instance_name);
@@ -93,6 +96,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
       const std::string& instance_name);
 
   void start_rpc_server();
+
+  void update_token_latency_metrics(std::vector<Sequence*>& sequences) override;
 
   // remote instance name(ID) -> instance info
   std::unordered_map<std::string, InstanceInfo> remote_instances_info_;
@@ -166,6 +171,11 @@ class DisaggPDScheduler : public ContinuousScheduler {
   std::unordered_map<proto::DisaggPDService_Stub*, size_t>
       remote_prefill_thread_map_;
   size_t next_prefill_thread_idx = 0;
+
+  // Lock for multi-threaded read-write latency metrics
+  std::vector<int64_t> recent_ttft_;
+  std::vector<int64_t> recent_tbt_;
+  std::mutex latency_metrics_mutex_;
 };
 
 }  // namespace xllm

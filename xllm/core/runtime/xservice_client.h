@@ -48,7 +48,7 @@ class XServiceClient {
             const std::string& xservice_addr,
             const std::string& instance_name = "",
             const BlockManagerPool* block_manager_pool = nullptr);
-  void set_scheduler(const Scheduler* scheduler);
+  void set_scheduler(Scheduler* scheduler);
   bool initialize_done() { return initialize_done_; }
 
   std::string get_instance_name();
@@ -81,7 +81,7 @@ class XServiceClient {
   brpc::ChannelOptions chan_options_;
   std::unique_ptr<EtcdClient> etcd_client_;
   const BlockManagerPool* block_manager_pool_;  // not own
-  const Scheduler* scheduler_;                  // not own
+  Scheduler* scheduler_;                        // not own
 };
 
 }  // namespace xllm

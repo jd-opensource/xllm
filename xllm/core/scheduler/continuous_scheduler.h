@@ -136,6 +136,9 @@ class ContinuousScheduler : public Scheduler {
     return result;
   }
 
+  virtual void get_latency_metrics(std::vector<int64_t>& ttft,
+                                   std::vector<int64_t>& tbt) {}
+
  protected:
   // allocate actual token_num slots.
   std::vector<Block> allocate_blocks_for(size_t token_num, int32_t& dp_rank);
@@ -235,6 +238,8 @@ class ContinuousScheduler : public Scheduler {
 
  private:
   std::vector<Batch> schedule_request(const absl::Duration& timeout);
+
+  virtual void update_token_latency_metrics(std::vector<Sequence*>& sequences);
 
   // process the batch output
   void process_batch_output(bool enable_schedule_overlap);

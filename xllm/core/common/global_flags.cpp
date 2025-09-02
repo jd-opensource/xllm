@@ -215,7 +215,13 @@ DEFINE_bool(enable_service_routing,
             false,
             "whether to use xllm service routing.");
 
-DEFINE_int32(heart_beat_interval, 3, "heart beat interval");
+DEFINE_double(heart_beat_interval, 0.5, "heart beat interval");
+
+DEFINE_int32(etcd_ttl, 3, "time to live for etcd");
+
+DEFINE_int32(timeout_ms,
+             -1,
+             "Max duration of bRPC Channel. -1 means wait indefinitely.");
 
 DEFINE_string(priority_strategy, "FCFS", "priority strategy for requests");
 

@@ -122,7 +122,7 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
     // create channel to prefill instance
     brpc::Channel* channel = new brpc::Channel();
     brpc::ChannelOptions options;
-    options.timeout_ms = 10000; /*milliseconds*/
+    options.timeout_ms = FLAGS_timeout_ms;
     options.max_retry = 3;
     std::string load_balancer = "";
     if (channel->Init(remote_instances_info_[instance_name].rpc_address.c_str(),
@@ -954,6 +954,33 @@ std::vector<Block> DisaggPDScheduler::allocate_raw_blocks(int token_num,
   } else {
     return {};
   }
+}
+
+void DisaggPDScheduler::update_token_latency_metrics(
+    std::vector<Sequence*>& sequences) {
+  std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
+
+  const auto now = absl::Now();
+  for (Sequence* sequence : sequences) {
+    int64_t tbt_milliseconds = sequence->tbt(now);
+    if (sequence->is_first_token()) {
+      HISTOGRAM_OBSERVE(time_to_first_token_latency_milliseconds,
+                        tbt_milliseconds);
+      sequence->set_time_to_first_token_latency_seconds(
+          static_cast<double>(tbt_milliseconds) / 1000);
+      recent_ttft_.emplace_back(tbt_milliseconds);
+    } else {
+      HISTOGRAM_OBSERVE(inter_token_latency_milliseconds, tbt_milliseconds);
+      recent_tbt_.emplace_back(tbt_milliseconds);
+    }
+  }
+}
+
+void DisaggPDScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
+                                            std::vector<int64_t>& tbt) {
+  std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
+  ttft = std::move(recent_ttft_);
+  tbt = std::move(recent_tbt_);
 }
 
 }  // namespace xllm

@@ -44,6 +44,9 @@ class Scheduler {
   virtual size_t num_pending_requests() { return 0; }
 
   virtual uint32_t get_waiting_requests_num() const = 0;
+
+  virtual void get_latency_metrics(std::vector<int64_t>& ttft,
+                                   std::vector<int64_t>& tbt) = 0;
 };
 
 }  // namespace xllm
