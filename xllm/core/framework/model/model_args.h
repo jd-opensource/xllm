@@ -308,6 +308,74 @@ struct ModelArgs {
 
   // number of speculative decoding tokens
   PROPERTY(int64_t, num_speculative_tokens) = 0;
+
+  // VAE related args
+  PROPERTY(int64_t, in_channels) = 3;
+  PROPERTY(int64_t, out_channels) = 3;
+  PROPERTY(std::vector<std::string>, down_block_types) = {
+    "DownEncoderBlock2D",
+    "DownEncoderBlock2D",
+    "DownEncoderBlock2D",
+    "DownEncoderBlock2D"
+  };
+  PROPERTY(std::vector<std::string>, up_block_types) = {
+    "UpDecoderBlock2D",
+    "UpDecoderBlock2D",
+    "UpDecoderBlock2D",
+    "UpDecoderBlock2D"
+  };
+  PROPERTY(std::vector<int64_t>, block_out_channels) = { 128, 256, 512, 512 };
+  PROPERTY(int64_t, layers_per_block) = 2;
+  PROPERTY(std::string, act_fn) = "silu";
+  PROPERTY(int64_t, latent_channels) = 16;
+  PROPERTY(int64_t, norm_num_groups) = 32;
+  PROPERTY(int64_t, sample_size) = 1024;
+  PROPERTY(float, scale_factor) = 0.3611f;
+  PROPERTY(float, shift_factor) = 0.1159f;
+  PROPERTY(bool, mid_block_add_attention) = true;
+  PROPERTY(bool, force_upcast) = true;
+  PROPERTY(bool, use_quant_conv) = false;
+  PROPERTY(bool, use_post_quant_conv) = false;
+
+  // dit related args
+  PROPERTY(int64_t, dit_num_layers) = 19;
+  PROPERTY(int64_t, dit_patch_size) = 1;
+  PROPERTY(int64_t, dit_in_channels) = 64;
+  PROPERTY(int64_t, dit_attention_head_dim) = 128;
+  PROPERTY(int64_t, dit_num_attention_heads) = 24;
+  PROPERTY(int64_t, dit_joint_attention_dim) = 4096;
+  PROPERTY(int64_t, dit_pooled_projection_dim) = 768;
+  PROPERTY(bool, dit_guidance_embeds) = true;
+  PROPERTY(std::vector<int64_t>, dit_axes_dims_rope) = { 16, 56, 56 };
+  PROPERTY(int64_t, dit_num_single_layers) = 38;
+
+  // t5 related args
+  PROPERTY(int64_t, t5_vocab_size) = 32128;
+  PROPERTY(int64_t, t5_d_model) = 4096;
+  PROPERTY(int64_t, t5_num_layers) = 24;
+  PROPERTY(int64_t, t5_d_kv) = 64;
+  PROPERTY(int64_t, t5_num_heads) = 64;
+  PROPERTY(int64_t, t5_d_ff) = 10240;
+  PROPERTY(float, t5_dropout_rate) = 0.1f;
+  PROPERTY(std::string, t5_dense_act_fn) = "gelu_new";
+  PROPERTY(bool, t5_is_gated_act) = true;
+  PROPERTY(int64_t, t5_relative_attention_num_buckets) = 32;
+  PROPERTY(int64_t, t5_relative_attention_max_distance) = 128;
+  PROPERTY(float, t5_layer_norm_epsilon) = 1e-6f;
+
+  // scheduler related args
+  PROPERTY(int64_t, scheduler_num_train_timesteps) = 1000;
+  PROPERTY(int64_t, scheduler_shift) = 3;
+  PROPERTY(bool, scheduler_use_dynamic_shifting) = true;
+  PROPERTY(float, scheduler_base_shift) = 0.5f;
+  PROPERTY(float, scheduler_max_shift) = 1.15f;
+  PROPERTY(int64_t, scheduler_base_image_seq_len) = 256;
+  PROPERTY(int64_t, scheduler_max_image_seq_len) = 4096;
+
+  // clip related args
+  PROPERTY(int64_t, projection_dim) = 768;
+  PROPERTY(float, initializer_factor) = 1.0f;
+  PROPERTY(int64_t, num_hidden_layers) = 12;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {

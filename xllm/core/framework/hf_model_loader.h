@@ -39,7 +39,9 @@ class HFModelLoader : public ModelLoader {
   bool load_quant_args(const std::string& model_weights_path);
   bool load_tokenizer_args(const std::string& model_weights_path);
   bool load_image_preprocessor_args(const std::string& model_weights_path);
-
+  std::string model_weights_path() const override {
+    return model_weights_path_;
+  }
   std::string model_weights_path_;
 
   // sorted model weights files
