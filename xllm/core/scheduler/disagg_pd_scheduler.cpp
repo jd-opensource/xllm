@@ -171,11 +171,11 @@ bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
 
   if (request->offline()) {
     // offline request, push to offline queue
-    prefill_request_queue_offline_.push(request);
+    prefill_request_queue_offline_.enqueue(request);
     return true;
   }
   // push and wait
-  prefill_request_queue_.push(request);
+  prefill_request_queue_.enqueue(request);
 
   return true;
 }
@@ -183,25 +183,24 @@ bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
 // prefill send new request to remote instance
 void DisaggPDScheduler::dispatch_requests() {
   while (true) {
-    std::vector<std::shared_ptr<Request>> requests;
-    const auto timeout = absl::Milliseconds(100);
+    const auto timeout = std::chrono::milliseconds(100);
     // Wait for online request until timeout.
     // If timeout, try to get offline request once. If no offline request,
     // continue to wait for online request. This can avoid offline request
     // blocking online request for too long time.
-    auto poped_result = prefill_request_queue_.pop(timeout);
-    if (!poped_result.has_value()) {  // try get online request timeout
-      poped_result = prefill_request_queue_offline_.try_pop();
-      if (!poped_result.has_value()) {
+    std::shared_ptr<Request> request;
+    if (!prefill_request_queue_.wait_dequeue_timed(request, timeout)) {
+      if (!prefill_request_queue_offline_.try_dequeue(request)) {
         continue;
       }
     }
 
-    auto request = poped_result.value();
     if (request == nullptr) {
       // nullptr is a signal to exit
       break;
     }
+
+    std::vector<std::shared_ptr<Request>> requests;
     requests.emplace_back(request);
     std::string selected_instance = "";
     proto::DisaggPDService_Stub* stub = nullptr;
@@ -340,9 +339,9 @@ void DisaggPDScheduler::dispatch_requests() {
       if (resps.resps()[i].status_code() != 200) {
         // push back to prefill_request_queue_
         if (requests[i]->offline()) {
-          prefill_request_queue_offline_.push(requests[i]);
+          prefill_request_queue_offline_.enqueue(requests[i]);
         } else {
-          prefill_request_queue_.push(requests[i]);
+          prefill_request_queue_.enqueue(requests[i]);
         }
 
       } else {

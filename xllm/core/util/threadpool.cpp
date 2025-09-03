@@ -29,7 +29,7 @@ ThreadPool::ThreadPool(size_t num_threads) : queues_(num_threads) {
 ThreadPool::~ThreadPool() {
   // push nullptr to the queue to signal threads to exit
   for (size_t i = 0; i < threads_.size(); ++i) {
-    queues_[i].push(nullptr);
+    queues_[i].enqueue(nullptr);
   }
   // wait for all threads to finish
   for (auto& thread : threads_) {
@@ -50,7 +50,7 @@ int32_t ThreadPool::schedule(Runnable runnable) {
     next = (current + 1) % queues_.size();
   } while (!index_.compare_exchange_weak(
       current, next, std::memory_order_relaxed, std::memory_order_relaxed));
-  queues_[current].push(std::move(runnable));
+  queues_[current].enqueue(std::move(runnable));
   return current;
 }
 
@@ -59,12 +59,14 @@ void ThreadPool::schedule_with_tid(Runnable runnable, size_t tid) {
     return;
   }
 
-  queues_[tid].push(std::move(runnable));
+  queues_[tid].enqueue(std::move(runnable));
 }
 
 void ThreadPool::internal_loop(size_t index) {
   while (true) {
-    Runnable runnable = queues_[index].pop();
+    Runnable runnable;
+    queues_[index].wait_dequeue(runnable);
+
     if (runnable == nullptr) {
       // nullptr is a signal to exit
       break;

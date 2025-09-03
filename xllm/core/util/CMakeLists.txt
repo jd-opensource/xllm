@@ -6,13 +6,15 @@ cc_library(
     util
   HDRS
     blocking_counter.h
+    blockingconcurrentqueue.h
     closure_guard.h
-    concurrent_queue.h
+    concurrentqueue.h
     device_name_utils.h
     double_buffer.h
     env_var.h
     hash_util.h
     json_reader.h
+    lightweightsemaphore.h
     net.h
     pretty_print.h
     scope_guard.h

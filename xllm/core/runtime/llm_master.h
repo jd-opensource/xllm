@@ -31,7 +31,6 @@ limitations under the License.
 #include "runtime/llm_engine.h"
 #include "runtime/master.h"
 #include "scheduler/continuous_scheduler.h"
-#include "util/concurrent_queue.h"
 
 namespace xllm {
 

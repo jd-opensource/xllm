@@ -33,7 +33,6 @@ limitations under the License.
 #include "runtime/engine.h"
 #include "runtime/master.h"
 #include "scheduler/continuous_scheduler.h"
-#include "util/concurrent_queue.h"
 #include "xllm/processors/input_processor.h"
 
 namespace xllm {

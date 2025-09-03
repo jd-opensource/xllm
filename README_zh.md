@@ -199,6 +199,7 @@ python setup.py bdist_wheel
 - [tokenizers-cpp](https://github.com/mlc-ai/tokenizers-cpp) - 依赖tokenizers-cpp构建了c++ tokenizer。
 - [safetensors](https://github.com/huggingface/safetensors) - 依赖其c binding safetensors能力。
 - [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - xLLM的C++版本JSON解析器，参考Python与Go实现的设计思路。
+- [concurrentqueue](https://github.com/cameron314/concurrentqueue) - 高性能无锁Queue.
 
 感谢以下合作的高校实验室：
 
