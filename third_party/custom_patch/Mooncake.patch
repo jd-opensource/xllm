@@ -11,6 +11,20 @@ index 047ae3e..b4ae201 100644
  set(PYTHON_EXECUTABLE "python3")
  execute_process(
      COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print(sys.path[-1])"
+diff --git a/mooncake-store/CMakeLists.txt b/mooncake-store/CMakeLists.txt
+index 8483085..9d263dd 100644
+--- a/mooncake-store/CMakeLists.txt
++++ b/mooncake-store/CMakeLists.txt
+@@ -20,5 +20,7 @@ include_directories(
+ 
+ # Add subdirectories
+ add_subdirectory(src)
+-add_subdirectory(tests)
++if (BUILD_UNIT_TESTS)
++  add_subdirectory(tests)
++endif()
+ add_subdirectory(benchmarks)
+\ No newline at end of file
 diff --git a/mooncake-store/include/offset_allocator/offset_allocator.hpp b/mooncake-store/include/offset_allocator/offset_allocator.hpp
 index fde978b..ac54f8c 100644
 --- a/mooncake-store/include/offset_allocator/offset_allocator.hpp

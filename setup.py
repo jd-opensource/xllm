@@ -423,13 +423,69 @@ def check_and_install_pre_commit():
             print("Run 'pre-commit install' failed. Please install pre-commit: pip install pre-commit")
             exit(0)
 
+def run_git_command(command, cwd=None, check=True):
+    try:
+        subprocess.run(command, cwd=cwd, check=check, shell=True, capture_output=True, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error: {e.stderr.strip()}")
+        return False
+
+def has_uncommitted_changes(repo_path):
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True
+    )
+    return bool(result.stdout.strip())
+
+def is_safe_directory_set(repo_path):
+    try:
+        result = subprocess.run(
+            ["git", "config", "--global", "--get-all", "safe.directory"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        existing_paths = result.stdout.strip().split("\n")
+        return repo_path in existing_paths
+    except subprocess.CalledProcessError:
+        return False 
+
+def apply_patch_safely(patch_file_path, repo_path="."):
+    print(f"🔍 Checking repo status...")
+    if has_uncommitted_changes(repo_path):
+        print(f"⚠️ Uncommitted changes detected. Running `git reset --hard` for {repo_path}")
+        if not run_git_command("git reset --hard", cwd=repo_path):
+            print("❌ Failed to reset changes!")
+            return False
+    
+    print(f"🛠️ Apply patch: {patch_file_path}")
+    apply_success = run_git_command(f"git apply --check {patch_file_path}", cwd=repo_path, check=False)
+    
+    if apply_success:
+        if not run_git_command(f"git apply {patch_file_path}", cwd=repo_path):
+            print("❌ apply patch fail!")
+            apply_success = False
+    
+    if apply_success:
+        print("🎉 Success apply patch!")
+        return True
+    else:
+        print("\n❌ Conflicts detected! Please resolve manually and retry:")
+        print(f"  1. Resolve conflicts manually: `git apply --reject {patch_file_path}`")
+        print(f"  2. Or apply interactively using: `git am {patch_file_path}`")
+        return False
+
 def apply_patch():
     if os.path.exists("third_party/custom_patch"):
-        os.system("cd third_party/Mooncake && git apply ../custom_patch/Mooncake.patch")
-        os.system("cd third_party/cpprestsdk && git apply ../custom_patch/cpprestsdk.patch")
+        if not apply_patch_safely("../custom_patch/Mooncake.patch", "./third_party/Mooncake"):
+            exit(0)
+        if not apply_patch_safely("../custom_patch/cpprestsdk.patch", "./third_party/cpprestsdk"):
+            exit(0)
 
 if __name__ == "__main__":
-    apply_patch()
     device = 'a2'  # default
     arch = "x86" # default
     if '--device' in sys.argv:
@@ -452,6 +508,11 @@ if __name__ == "__main__":
             # Remove the arguments so setup() doesn't see them
             del sys.argv[idx]
             del sys.argv[idx]
+    if '--dry_run' not in sys.argv:
+        apply_patch()
+    else:
+        sys.argv.remove("--dry_run") 
+
 
     version = get_version()
 
