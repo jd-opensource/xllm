@@ -462,8 +462,21 @@ def is_safe_directory_set(repo_path):
     except subprocess.CalledProcessError:
         return False 
 
-def apply_patch_safely(patch_file_path, repo_path="."):
-    print(f"🔍 Checking repo status...")
+def apply_patch_safely(patch_file_path, repo_path):
+    print(f"🔍 Checking repo status: {repo_path}")
+
+    if not is_safe_directory_set(repo_path):
+        try:
+            subprocess.run(
+                ["git", "config", "--global", "--add", "safe.directory", repo_path],
+                check=True
+            )
+            print(f"✅ Add safe.directory success: {repo_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Add safe.directory fail: {e.stderr}")
+            print(f"   Please manually set 'git config --global --add safe.directory {repo_path}'")
+            return False
+
     if has_uncommitted_changes(repo_path):
         print(f"⚠️ Uncommitted changes detected. Running `git reset --hard` for {repo_path}")
         if not run_git_command("git reset --hard", cwd=repo_path):
@@ -483,15 +496,17 @@ def apply_patch_safely(patch_file_path, repo_path="."):
         return True
     else:
         print("\n❌ Conflicts detected! Please resolve manually and retry:")
-        print(f"  1. Resolve conflicts manually: `git apply --reject {patch_file_path}`")
-        print(f"  2. Or apply interactively using: `git am {patch_file_path}`")
+        print(f"  cd {repo_path} && git apply {patch_file_path}")
         return False
 
 def apply_patch():
     if os.path.exists("third_party/custom_patch"):
-        if not apply_patch_safely("../custom_patch/Mooncake.patch", "./third_party/Mooncake"):
+        script_path = os.path.dirname(os.path.abspath(__file__))
+        mooncake_repo_path = os.path.join(script_path, "third_party/Mooncake")
+        if not apply_patch_safely("../custom_patch/Mooncake.patch", mooncake_repo_path):
             exit(0)
-        if not apply_patch_safely("../custom_patch/cpprestsdk.patch", "./third_party/cpprestsdk"):
+        cpprestsdk_repo_path = os.path.join(script_path, "third_party/cpprestsdk")
+        if not apply_patch_safely("../custom_patch/cpprestsdk.patch", cpprestsdk_repo_path):
             exit(0)
 
 if __name__ == "__main__":
