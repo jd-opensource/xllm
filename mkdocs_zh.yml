@@ -5,7 +5,7 @@ site_url: !ENV READTHEDOCS_CANONICAL_URL
 repo_name: jd-opensource/xllm
 repo_url: https://github.com/jd-opensource/xllm
 
-edit_uri: edit/main/docs/
+edit_uri: edit/main/docs/zh
 use_directory_urls: true
 # Copyright
 copyright: Copyright &copy; 2025 xLLM Team
@@ -100,7 +100,7 @@ extra_css:
 # Additional configuration
 extra:
   source:
-    path: https://github.com/jd-opensource/xllm/blob/main/docs/
+    path: https://github.com/jd-opensource/xllm/blob/main/docs/zh/
 
   status:
     new: Recently added

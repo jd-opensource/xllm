@@ -1,5 +1,7 @@
 # Overall Architecture
 
+## Backgroud
+
 In recent years, with the groundbreaking progress of large language models (LLMs) ranging from tens of billions to trillions of parameters (such as GPT, Claude, DeepSeek, LLaMA, etc.) in the fields of natural language processing and multimodal interaction, the industry has an urgent need for efficient inference engines and service systems. How to reduce cluster inference costs and improve inference efficiency has become a key challenge for achieving large-scale commercial deployment.
 
 Although a number of optimization engines for large model inference have emerged, several technical bottlenecks remain in practical deployment:
@@ -47,12 +49,3 @@ xLLM implements expert weight updates based on historical expert load statistics
 ### Multimodal Support
 
 xLLM provides comprehensive support for various multimodal models, including Qwen2-VL and MiniCPMV.
-
-## Performance Results
-
-![1](../../assets/DeepSeek-R1_performance.png)
-The figure above shows a comparison of throughput for the DeepSeek-R1-w8a8 model across different inference frameworks under benchmark conditions. Across different combinations of prompt length and output length ([2048,2048] and [2500,1500]) and TPOT settings (50ms and 100ms), xLLM consistently demonstrates the highest throughput. Specifically, under various experimental conditions, xLLM achieves a **throughput increase ranging from 5.6x to 15.7x** compared to vLLM.
-
-![2](../../assets/Qwen3_performance.png)
-
-The figure above shows a comparison of throughput for various versions of the Qwen3 model across different inference frameworks under benchmark conditions. The input and output lengths are both set to 2048, and TOPT is set to 50ms. The results indicate that xLLM consistently delivers the best throughput, both across different versions of the Qwen3 model and as the number of accelerator cards changes. Specifically, compared to vLLM, xLLM achieves an **average performance improvement ranging from 27% to 186%**.
