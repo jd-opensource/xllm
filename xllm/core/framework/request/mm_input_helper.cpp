@@ -15,6 +15,10 @@ limitations under the License.
 
 #include "mm_input_helper.h"
 
+#include <brpc/channel.h>
+#include <brpc/controller.h>
+#include <glog/logging.h>
+
 #include <opencv2/opencv.hpp>
 
 #include "butil/base64.h"
@@ -39,6 +43,73 @@ class OpenCVImageDecoder {
     t = tensor.permute({2, 0, 1}).clone();  // [C, H, W]
     return true;
   }
+};
+
+class FileHelper {
+ public:
+  FileHelper(int max_connextion_size = 5)
+      : max_connextion_size_(max_connextion_size),
+        option_(std::make_shared<brpc::ChannelOptions>()),
+        cntl_(std::make_shared<brpc::Controller>()) {
+    option_->protocol = brpc::PROTOCOL_HTTP;
+    option_->connection_type = brpc::CONNECTION_TYPE_POOLED;
+  }
+  ~FileHelper() {}
+  bool fetch_data(const std::string& url, std::string& data) {
+    // parse url
+    size_t scheme_end = url.find("://");
+    if (scheme_end == std::string::npos) {
+      LOG(ERROR)
+          << "Error: Invalid URL, missing protocol (http:// or https://)";
+      return -1;
+    }
+    std::string protocol = url.substr(0, scheme_end);
+    bool is_https = (protocol == "https");
+    size_t host_start = scheme_end + 3;
+    size_t path_pos = url.find('/', host_start);
+    if (path_pos == std::string::npos) {
+      LOG(ERROR) << "Error: No path in URL\n";
+      return -1;
+    }
+    std::string host = url.substr(host_start, path_pos - host_start);
+    if (channels_.find(url) == channels_.end()) {
+      if (channels_.size() == max_connextion_size_) {
+        EvictRandom();
+      }
+      channels_[url] = std::make_shared<brpc::Channel>();
+      channels_[url]->Init(host.c_str(), option_.get());
+    }
+    // fetch data
+    cntl_->http_request().uri() = url;
+    cntl_->set_timeout_ms(2000);
+    channels_[url]->CallMethod(nullptr, cntl_.get(), nullptr, nullptr, nullptr);
+    if (cntl_->Failed()) {
+      LOG(ERROR) << "Request failed: " << cntl_->ErrorText() << std::endl;
+      return false;
+    }
+    if (cntl_->http_response().status_code() != 200) {
+      LOG(ERROR) << "HTTP error: " << cntl_->http_response().status_code()
+                 << std::endl;
+      return false;
+    }
+
+    const butil::IOBuf& io = cntl_->response_attachment();
+    data = io.to_string();
+    return true;
+  }
+
+ private:
+  void EvictRandom() {
+    if (channels_.empty()) return;
+    int rand_index = std::rand() % max_connextion_size_;
+    auto it = channels_.begin();
+    std::advance(it, rand_index);
+    channels_.erase(it);
+  }
+  std::unordered_map<std::string, std::shared_ptr<brpc::Channel>> channels_;
+  std::shared_ptr<brpc::Controller> cntl_;
+  std::shared_ptr<brpc::ChannelOptions> option_;
+  int max_connextion_size_;
 };
 
 class Handler {
@@ -74,13 +145,16 @@ class Handler {
   }
 
   bool load_from_http(const std::string& url, std::string& data) {
-    return false;
+    return helper_.fetch_data(url, data);
   }
+
+ private:
+  FileHelper helper_;
 };
 
 class ImageHandler : public Handler {
  public:
-  ImageHandler() : dataurl_prefix_("data:image") {}
+  ImageHandler() : dataurl_prefix_("data:image"), http_prefix_("http") {}
 
   virtual bool load(const proto::MMInputData& msg, MMInputItem& input) {
     input.clear();
@@ -93,8 +167,10 @@ class ImageHandler : public Handler {
 
       input.type_ = MMType::IMAGE;
       return this->load_from_dataurl(url, input.raw_data_);
-    } else {
-      return false;
+    } else if (url.compare(0, http_prefix_.size(), http_prefix_) ==
+               0) {  // http url
+      input.type_ = MMType::IMAGE;
+      return this->load_from_http(url, input.raw_data_);
     }
   }
 
@@ -105,6 +181,7 @@ class ImageHandler : public Handler {
 
  private:
   const std::string dataurl_prefix_;
+  const std::string http_prefix_;
 };
 
 class MMHandlerSet {
@@ -128,7 +205,7 @@ class MMHandlerSet {
   }
 
  private:
-  std::unordered_map<std::string, std::unique_ptr<Handler> > handlers_;
+  std::unordered_map<std::string, std::unique_ptr<Handler>> handlers_;
 };
 
 MMInputHelper::MMInputHelper() {
