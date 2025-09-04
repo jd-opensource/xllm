@@ -647,7 +647,7 @@ void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
   std::vector<Message> messages;
   MMInput mm_inputs;
 
-  MMInputHelper helper;
+  static MMInputHelper helper;
   if (!helper.trans(req_messages, messages, mm_inputs.items_)) {
     call->finish_with_error(StatusCode::INVALID_ARGUMENT,
                             "inputs argument is invalid.");

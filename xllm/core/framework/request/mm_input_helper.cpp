@@ -15,6 +15,11 @@ limitations under the License.
 
 #include "mm_input_helper.h"
 
+#include <brpc/channel.h>
+#include <brpc/controller.h>
+#include <bthread/rwlock.h>
+#include <glog/logging.h>
+
 #include <opencv2/opencv.hpp>
 
 #include "butil/base64.h"
@@ -39,6 +44,91 @@ class OpenCVImageDecoder {
     t = tensor.permute({2, 0, 1}).clone();  // [C, H, W]
     return true;
   }
+};
+
+class FileDownloadHelper {
+ public:
+  FileDownloadHelper() {}
+  ~FileDownloadHelper() {}
+  std::string parse_url(const std::string& url) {
+    size_t scheme_end = url.find("://");
+    if (scheme_end == std::string::npos) {
+      LOG(ERROR)
+          << "Error: Invalid URL, missing protocol (http:// or https://)";
+    }
+    size_t host_start = scheme_end + 3;
+    size_t path_pos = url.find('/', host_start);
+    if (path_pos == std::string::npos) {
+      LOG(ERROR) << "Error: No path in URL";
+    }
+    return url.substr(host_start, path_pos - host_start);
+  }
+
+  std::shared_ptr<brpc::Channel> get_channel(const std::string& host) {
+    {
+      bthread::RWLockRdGuard rd_guard(instance_channel_map_mutex_);
+      auto it = channels_.find(host);
+      if (it != channels_.end()) {
+        return it->second;
+      }
+    }
+    bthread::RWLockWrGuard wr_guard(instance_channel_map_mutex_);
+    auto it = channels_.find(host);
+    if (it != channels_.end()) {
+      return it->second;
+    }
+
+    brpc::ChannelOptions option;
+    option.protocol = brpc::PROTOCOL_HTTP;
+    option.connection_type = brpc::CONNECTION_TYPE_POOLED;
+    option.max_retry = 3;
+    auto channel = std::make_shared<brpc::Channel>();
+    if (channel->Init(host.c_str(), &option) != 0) {
+      LOG(ERROR) << "fail to init channel for " << host;
+      return nullptr;
+    }
+    channels_[host] = channel;
+    return channel;
+  }
+
+  bool download_data(const std::string& host,
+                     const std::string& url,
+                     std::string& data) {
+    brpc::Controller cntl;
+    cntl.http_request().uri() = url;
+    cntl.set_timeout_ms(2000);
+    auto channel = get_channel(host);
+    if (!channel) {
+      LOG(ERROR) << "Channel is null";
+      return false;
+    }
+    channel->CallMethod(nullptr, &cntl, nullptr, nullptr, nullptr);
+    if (cntl.Failed()) {
+      LOG(ERROR) << "Request failed: " << cntl.ErrorText();
+      return false;
+    }
+
+    if (cntl.http_response().status_code() != 200) {
+      LOG(ERROR) << "HTTP error: " << cntl.http_response().status_code();
+      return false;
+    }
+
+    const butil::IOBuf& io = cntl.response_attachment();
+    data = io.to_string();
+    return true;
+  }
+
+  bool fetch_data(const std::string& url, std::string& data) {
+    // parse url
+    std::string host = parse_url(url);
+    // fetch data
+    return download_data(host, url, data);
+  }
+
+ private:
+  bthread::RWLock instance_channel_map_mutex_;
+  inline static std::unordered_map<std::string, std::shared_ptr<brpc::Channel>>
+      channels_;
 };
 
 class Handler {
@@ -74,13 +164,19 @@ class Handler {
   }
 
   bool load_from_http(const std::string& url, std::string& data) {
-    return false;
+    return helper_.fetch_data(url, data);
   }
+
+  std::string dataurl_prefix_{"data:image"};
+  std::string httpurl_prefix_{"http"};
+
+ private:
+  FileDownloadHelper helper_;
 };
 
 class ImageHandler : public Handler {
  public:
-  ImageHandler() : dataurl_prefix_("data:image") {}
+  ImageHandler() {}
 
   virtual bool load(const proto::MMInputData& msg, MMInputItem& input) {
     input.clear();
@@ -93,8 +189,11 @@ class ImageHandler : public Handler {
 
       input.type_ = MMType::IMAGE;
       return this->load_from_dataurl(url, input.raw_data_);
-    } else {
-      return false;
+    } else if (url.compare(0, httpurl_prefix_.size(), httpurl_prefix_) ==
+               0) {  // http url
+
+      input.type_ = MMType::IMAGE;
+      return this->load_from_http(url, input.raw_data_);
     }
   }
 
@@ -102,9 +201,6 @@ class ImageHandler : public Handler {
     OpenCVImageDecoder decoder;
     return decoder.decode(input.raw_data_, input.decode_data_);
   }
-
- private:
-  const std::string dataurl_prefix_;
 };
 
 class MMHandlerSet {
@@ -128,7 +224,7 @@ class MMHandlerSet {
   }
 
  private:
-  std::unordered_map<std::string, std::unique_ptr<Handler> > handlers_;
+  std::unordered_map<std::string, std::unique_ptr<Handler>> handlers_;
 };
 
 MMInputHelper::MMInputHelper() {
