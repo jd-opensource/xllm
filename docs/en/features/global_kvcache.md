@@ -17,27 +17,26 @@ The overall architecture is shown in the diagram below:
 ### Preparation
 
 #### Install Dependencies
--   **etcd**: [etcd Installation Guide](https://etcd.io/docs/v3.6/install/)
--   **xLLM Service**: Refer to the xLLM Service compilation documentation.
--   **xLLM**: Refer to the xLLM compilation documentation.
+- **xLLM**: Refer to [Installation && Compilation](../getting_started/compile.md)
+- **xLLM Service**: Refer to [PD disaggregation](../getting_started/PD_disagg.md)
 
 ### Usage Instructions
 
 1.  **etcd Startup Configuration:**
-    ```
+    ```bash
     ./etcd --listen-peer-urls=http://0.0.0.0:10999 --listen-client-urls=http://0.0.0.0:10998
     ```
 
 2.  **xLLM Service Startup Configuration:**
-    ```
-    ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.0.1:10998" --http_server_port 28888 --rpc_server_port 28889 --tokenizer_path=/path/to/tokenizer_config_dir/
+    ```bash
+    ./xllm_master_serving --etcd_addr="127.0.0.1:10998" --http_server_port 28888 --rpc_server_port 28889 --tokenizer_path=/path/to/tokenizer_config_dir/
     ```
 
 3.  **xLLM Startup Configuration:**
     Add the following gflag parameters when starting xLLM:
-    ```
+    ```bash
     --enable_service_routing=true
     --enable_cache_upload=true
-    # Global KVCache currently does not support PD separation
-    --enable_disagg_pd=true
+    # PD separation currently does not support Global KVCache Management 
+    --enable_disagg_pd=false
     ```

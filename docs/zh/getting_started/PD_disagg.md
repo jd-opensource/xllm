@@ -9,12 +9,8 @@ cd xllm_service
 git submodule init
 git submodule update
 ```
-`xllm_service`编译运行依赖[vcpkg](https://github.com/microsoft/vcpkg)和[etcd](https://github.com/etcd-io/etcd)。先确保在前面[编译xllm](./compile.md)时已经进行了`vcpkg`的安装且设置了`vcpkg`的路径：
-```bash
-export VCPKG_ROOT=/your/path/to/vcpkg
-```
 ### etcd安装
-使用etcd官方提供的[安装脚本](https://github.com/etcd-io/etcd/releases)进行安装，其脚本提供的默认安装路径是`/tmp/etcd-download-test/etcd`，我们可以手动修改其脚本中的安装路径，也可以运行完脚本之后手动迁移：
+`xllm_service`依赖[etcd](https://github.com/etcd-io/etcd)，使用etcd官方提供的[安装脚本](https://github.com/etcd-io/etcd/releases)进行安装，其脚本提供的默认安装路径是`/tmp/etcd-download-test/etcd`，我们可以手动修改其脚本中的安装路径，也可以运行完脚本之后手动迁移：
 ```bash
 mv /tmp/etcd-download-test/etcd /path/to/your/etcd
 ```
@@ -45,7 +41,7 @@ cd ..
 ENABLE_DECODE_RESPONSE_TO_SERVICE=0 \
 ENABLE_XLLM_DEBUG_LOG=1 \
 ./build/xllm_service/xllm_master_serving \
-    --etcd_addr="127.0.0.1:2389" \
+    --etcd_addr=127.0.0.1:2389 \
     --http_server_port=9888 \
     --rpc_server_port=9889
 ```
@@ -88,13 +84,12 @@ if [ "$1" = "decode" ]; then
   --enable_prefix_cache=false \
   --backend=llm \
   --port=9996  \
-  --xservice_addr=127.0.0.1:9889  \
+  --etcd_addr=127.0.0.1:2389 \
   --host=127.0.0.1 \
   --disagg_pd_port=7780 \
   --cluster_id=1 \
-  --device_ip=0.0.0.0 \
-  --transfer_listen_port=26001 \
-  --enable_service_routing=true
+  --device_ip=xx.xx.xx.xx \
+  --transfer_listen_port=26001
 else
   # prefill模式
   echo ">>>>> prefill"
@@ -111,13 +106,12 @@ else
   --enable_prefix_cache=false \
   --backend=llm \
   --port=9997  \
-  --xservice_addr=127.0.0.1:9889  \
+  --etcd_addr=127.0.0.1:2389 \
   --host=127.0.0.1 \
   --cluster_id=0 \
-  --device_ip=0.0.0.0 \
+  --device_ip=xx.xx.xx.xx \
   --transfer_listen_port=26000 \
-  --disagg_pd_port=7781 \
-  --enable_service_routing=true
+  --disagg_pd_port=7781
 fi
 ```
 需要注意：
@@ -126,6 +120,6 @@ fi
 ```bash
 sudo cat /etc/hccn.conf
 ```
-- `xservice_addr`需与`xllm_service`的`rpc_server_port`相同
+- `etcd_addr`需与`xllm_service`的`etcd_addr`相同
 
 测试命令和上面类似，注意`curl http://localhost:{PORT}/v1/chat/completions ...`的`PORT`选择为prefill节点的`port`或者`xllm service`的`http_server_port`。

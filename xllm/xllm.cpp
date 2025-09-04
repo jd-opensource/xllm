@@ -139,7 +139,8 @@ int run() {
       .tool_call_parser(FLAGS_tool_call_parser)
       .priority_strategy(FLAGS_priority_strategy)
       .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline)
-      .enable_cache_upload(FLAGS_enable_service_routing &&
+      .enable_cache_upload(FLAGS_enable_prefix_cache &&
+                           FLAGS_enable_service_routing &&
                            FLAGS_enable_cache_upload)
       .host_blocks_factor(FLAGS_host_blocks_factor)
       .enable_kvcache_store(FLAGS_enable_kvcache_store &&

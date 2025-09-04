@@ -13,23 +13,22 @@ xLLM 全局KV Cache功能主要通过以下三个模块实现：
 ## 功能使用示例
 ### 使用准备
 #### 安装相关依赖
-- etcd: [etcd安装](https://etcd.io/docs/v3.6/install/)
-- xLLM Service: 参见xLLM Service编译文档
-- xLLM: 参见xLLM编译文档
+- **xLLM**: 参见[安装编译](../getting_started/compile.md)
+- **xLLM Service**: 参见[PD分离部署](../getting_started/PD_disagg.md)
 
 ### 使用方式
 1. etcd启动配置：
-```
+```bash
 ./etcd  --listen-peer-urls=http://0.0.0.0:10999 --listen-client-urls=http://0.0.0.0:10998
 ```
 2. xLLM Service启动配置：
-```
-ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving  --etcd_addr="127.0.0.1:10998" --http_server_port 28888 --rpc_server_port 28889 --tokenizer_path=/path/to/tokenizer_config_dir/
+```bash
+./xllm_master_serving  --etcd_addr="127.0.0.1:10998" --http_server_port 28888 --rpc_server_port 28889 --tokenizer_path=/path/to/tokenizer_config_dir/
 ```
 3. xLLM启动添加上下面的 gflag 参数即可：
-```
---enable_service_routing=true 
+```bash
+--enable_service_routing=true
 --enable_cache_upload=true
-# 全局KVCache暂时不支持PD分离
---enable_disagg_pd=true
+# PD分离暂时不支持全局KVCache管理
+--enable_disagg_pd=false
 ```

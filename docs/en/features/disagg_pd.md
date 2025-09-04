@@ -15,10 +15,8 @@ The overall architecture is shown below:
 ## Usage
 ### Preparation
 #### Install Dependencies
-
-- **etcd**: [etcd Installation](https://etcd.io/docs/v3.6/install/)  
-- **xLLM Service**: Refer to xLLM Service compilation documentation.
-- **xLLM**: Refer to xLLM compilation documentation.
+- **xLLM**: Refer to [Installation && Compilation](../getting_started/compile.md)
+- **xLLM Service**: Refer to [PD disaggregation](../getting_started/PD_disagg.md)
 
 #### Obtain Environment Information  
 Deploying Disaggregated PD Service requires obtaining the Device IP of the machine to create communication resources. Execute the command `cat /etc/hccn.conf | grep address` on the current AI Server to get the Device IP, for example:
@@ -30,11 +28,11 @@ address_1=xx.xx.xx.xx
 
 ### Start Disaggregated PD Service
 1. Start etcd
-```
+```bash
 ./etcd
 ```
 2. Start xLLM Service
-```
+```bash
 ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.0.1:12389" --http_server_port 28888 --rpc_server_port 28889
 ```
 3. Start xLLM  
@@ -49,7 +47,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
                --enable_chunked_prefill=false \
                --enable_disagg_pd=true \
                --instance_role=PREFILL \
-               --xservice_addr=127.0.0.1:28889 \
+               --etcd_addr="127.0.0.1:12389" \
                --device_ip=xx.xx.xx.xx \ # Replace with actual Device IP 
                --transfer_listen_port=26000 \
                --disagg_pd_port=7777 \
@@ -66,7 +64,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
                --enable_chunked_prefill=false \
                --enable_disagg_pd=true \
                --instance_role=DECODE \
-               --xservice_addr=127.0.0.1:28889 \
+               --etcd_addr="127.0.0.1:12389" \
                --device_ip=xx.xx.xx.xx \  # Replace with actual Device IP  
                --transfer_listen_port=26100 \
                --disagg_pd_port=7787 \
@@ -77,7 +75,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
     
     - For PD disaggregation when specifying NPU Device, the corresponding `device_ip` is required. This is different for each device. You can see this by executing the following command on the physical machine outside the container environment. The value after `address_{i}=` displayed is the `device_ip` corresponding to `NPU {i}`.
 
-    - `xservice_addr` must match the `rpc_server_port` of `xllm_service`
+    - `etcd_addr` must match the `etcd_addr` of `xllm_service`
 
 ## Notice
 Disaggregated PD **does not support** enabling prefix cache or chunked prefill. These features must be disabled using the following parameters:

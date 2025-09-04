@@ -10,7 +10,6 @@ prefix_cache已在xLLM实现，并向外暴露gflag参数，控制功能的开�
 
 - 开启zero_evict策略，并设置max_decode_token_per_sequence。
 ```
---prefix_cache_policy=murmur_hash3
 --enable_prefix_cache=true
 ```
 

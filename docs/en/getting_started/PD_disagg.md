@@ -12,14 +12,10 @@ git submodule init
 git submodule update
 ```
 
-`xllm_service` compilation and operation depend on [vcpkg](https://github.com/microsoft/vcpkg) and [etcd](https://github.com/etcd-io/etcd). First, ensure that `vcpkg` was installed during the previous [xllm compilation](./compile.md) and that the `vcpkg` path is set:
-```bash
-export VCPKG_ROOT=/your/path/to/vcpkg
-```
 
 ### etcd Installation
 
-Use the [installation script](https://github.com/etcd-io/etcd/releases) provided by etcd for installation. The default installation path provided by the script is `/tmp/etcd-download-test/etcd`. You can either manually modify the installation path in the script or manually migrate after running the script:
+`xllm_service` compilation and operation depend on [etcd](https://github.com/etcd-io/etcd).Use the [installation script](https://github.com/etcd-io/etcd/releases) provided by etcd for installation. The default installation path provided by the script is `/tmp/etcd-download-test/etcd`. You can either manually modify the installation path in the script or manually migrate after running the script:
 ```bash
 mv /tmp/etcd-download-test/etcd /path/to/your/etcd
 ```
@@ -104,7 +100,7 @@ if [ "$1" = "decode" ]; then
   --enable_prefix_cache=false \
   --backend=llm \
   --port=9996  \
-  --xservice_addr=127.0.0.1:9889  \
+  --etcd_addr="127.0.0.1:2389" \
   --host=127.0.0.1 \
   --disagg_pd_port=7780 \
   --cluster_id=1 \
@@ -127,7 +123,7 @@ else
   --enable_prefix_cache=false \
   --backend=llm \
   --port=9997  \
-  --xservice_addr=127.0.0.1:9889  \
+  --etcd_addr="127.0.0.1:2389" \
   --host=127.0.0.1 \
   --cluster_id=0 \
   --device_ip=0.0.0.0 \
@@ -144,6 +140,6 @@ Important notes:
 sudo cat /etc/hccn.conf
 ```
 
-- `xservice_addr` must match the `rpc_server_port` of `xllm_service`
+- `etcd_addr` must match the `etcd_addr` of `xllm_service`
 
 The test command is similar to above. Note that the `PORT` in `curl http://localhost:{PORT}/v1/chat/completions ...` should be the `port` of the prefill node or the `http_server_port` of `xllm service`.

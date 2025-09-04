@@ -9,7 +9,6 @@ The prefix cache is implemented in xLLM and exposed through gflags parameters to
 
 - Enable prefix cache with specific policy and settings:
 ```
---prefix_cache_policy=murmur_hash3
 --enable_prefix_cache=true
 ```
 

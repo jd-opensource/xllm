@@ -115,23 +115,24 @@ docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts
 ```
 然后创建对应的容器
 ```bash
-sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /mnt/cfs/9n-das-admin/llm_models:/mnt/cfs/9n-das-admin/llm_models -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/  xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts
+sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/  xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts
 ```
 
 下载官方仓库与模块依赖：
-```
+```bash
 git clone https://github.com/jd-opensource/xllm
 cd xllm 
 git submodule init
 git submodule update
 ```
-编译依赖vcpkg，我们编译的时候会默认下载vcpkg，也可以先提前下载vcpkg，然后设置环境变量:
-```
+编译依赖[vcpkg](https://github.com/microsoft/vcpkg)，镜像中已经提前配置完成。如果您想要手动配置，可以执行如下命令:
+```bash
 git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg && git checkout ffc42e97c866ce9692f5c441394832b86548422c
 export VCPKG_ROOT=/your/path/to/vcpkg
 ```
 下载安装python依赖:
-```
+```bash
 cd xllm
 pip install -r cibuild/requirements-dev.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 pip install --upgrade setuptools wheel
@@ -139,17 +140,17 @@ pip install --upgrade setuptools wheel
 
 #### 编译
 执行编译，在`build/`下生成可执行文件`build/xllm/core/server/xllm`：
-```
+```bash
 python setup.py build
 ```
 或直接用以下命令编译在`dist/`下生成whl包:
-```
+```bash
 python setup.py bdist_wheel
 ```
 
 #### 执行
 运行例如如下命令启动xllm引擎：
-```
+```bash
 ./build/xllm/core/server/xllm \    # 启动 xllm 服务器程序
     --model=/path/to/your/llm  \   # 指定模型路径（需替换为实际路径）
     --backend=llm \                # 指定后端类型为 LLM

@@ -27,9 +27,10 @@ cd xllm
 git submodule init
 git submodule update
 ```
-The compilation depends on [vcpkg](https://github.com/microsoft/vcpkg). `vcpkg` will be downloaded by default during compilation. You can also download `vcpkg` in advance and set the environment variable:
+The compilation depends on [vcpkg](https://github.com/microsoft/vcpkg). The Docker image already includes VCPKG_ROOT preconfigured. If you want to manually set it up, you can:
 ```bash
 git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg && git checkout ffc42e97c866ce9692f5c441394832b86548422c
 export VCPKG_ROOT=/your/path/to/vcpkg
 ```
 Then download and install Python dependencies:

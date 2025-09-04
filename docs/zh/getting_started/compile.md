@@ -28,9 +28,10 @@ cd xllm
 git submodule init
 git submodule update
 ```
-编译依赖[vcpkg](https://github.com/microsoft/vcpkg)，我们编译的时候会默认下载`vcpkg`，也可以先提前下载`vcpkg`，然后设置环境变量:
+编译依赖[vcpkg](https://github.com/microsoft/vcpkg)，镜像中已经提前配置完成。如果您想要手动配置，可以执行如下命令:
 ```bash
 git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg && git checkout ffc42e97c866ce9692f5c441394832b86548422c
 export VCPKG_ROOT=/your/path/to/vcpkg
 ```
 然后下载安装python依赖:
