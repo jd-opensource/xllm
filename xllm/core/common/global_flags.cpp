@@ -250,3 +250,20 @@ DEFINE_string(store_master_server_entry,
 DEFINE_string(store_metadata_connstring,
               "",
               "the address of the kvcache store metadata service .");
+
+// --- continuous kvcache config ---
+DEFINE_bool(enable_continuous_kvcache,
+            false,
+            "whether to enable continuous kvcache.");
+
+DEFINE_int64(granularity_size,
+             2 * 1024 * 1024,
+             "granularity size of a physical page");
+
+DEFINE_int64(cache_size_per_token,
+             0,
+             "cache size per token for continuous kvcache.");
+
+DEFINE_int64(buffer_size_per_seq,
+             0,
+             "buffer size per sequence for continuous kvcache.");

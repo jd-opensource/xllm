@@ -31,4 +31,5 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
     mooncake_store
+    :page
 )

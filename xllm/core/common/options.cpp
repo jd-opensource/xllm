@@ -53,7 +53,8 @@ std::string Options::to_string() const {
      << ", enable_kvcache_store: " << enable_kvcache_store()
      << ", store_protocol: " << store_protocol()
      << ", store_master_server_entry: " << store_master_server_entry()
-     << ", store_metadata_connstring: " << store_metadata_connstring();
+     << ", store_metadata_connstring: " << store_metadata_connstring()
+     << ", enable_continuous_kvcache: " << enable_continuous_kvcache();
   ss << "]";
   return ss.str();
 }

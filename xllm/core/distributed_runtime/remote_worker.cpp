@@ -105,6 +105,36 @@ bool RemoteWorker::allocate_kv_cache(
   return true;
 }
 
+bool RemoteWorker::allocate_continuous_kv_cache(
+    const std::vector<XTensor::Options>& options) {
+  proto::XTensorOptionsVec xtensor_options_vec;
+  xtensor_options_vec.mutable_key_options()->set_num_kv_heads(
+      options[0].num_kv_heads());
+  xtensor_options_vec.mutable_key_options()->set_head_size(
+      options[0].head_size());
+  xtensor_options_vec.mutable_key_options()->set_max_context_len(
+      options[0].max_context_len());
+  xtensor_options_vec.mutable_key_options()->set_max_seqs_per_batch(
+      options[0].max_seqs_per_batch());
+  xtensor_options_vec.mutable_value_options()->set_num_kv_heads(
+      options[1].num_kv_heads());
+  xtensor_options_vec.mutable_value_options()->set_head_size(
+      options[1].head_size());
+  xtensor_options_vec.mutable_value_options()->set_max_context_len(
+      options[1].max_context_len());
+  xtensor_options_vec.mutable_value_options()->set_max_seqs_per_batch(
+      options[1].max_seqs_per_batch());
+
+  proto::Status s;
+  brpc::Controller cntl;
+  stub_->AllocateContinuousKVCache(&cntl, &xtensor_options_vec, &s, nullptr);
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "allocate_continuous_kv_cache failed, " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
 void RemoteWorker::get_device_info(std::string& device_ip, uint16_t& port) {
   proto::Empty req;
   proto::DeviceInfo resp;
@@ -373,6 +403,42 @@ folly::SemiFuture<bool> RemoteWorker::allocate_kv_cache_async(
           promise.setValue(s.ok());
         }
       });
+  return future;
+}
+
+folly::SemiFuture<bool> RemoteWorker::allocate_continuous_kv_cache_async(
+    const std::vector<XTensor::Options>& options) {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, options, promise = std::move(promise)]() mutable {
+    proto::XTensorOptionsVec xtensor_options_vec;
+    xtensor_options_vec.mutable_key_options()->set_num_kv_heads(
+        options[0].num_kv_heads());
+    xtensor_options_vec.mutable_key_options()->set_head_size(
+        options[0].head_size());
+    xtensor_options_vec.mutable_key_options()->set_max_context_len(
+        options[0].max_context_len());
+    xtensor_options_vec.mutable_key_options()->set_max_seqs_per_batch(
+        options[0].max_seqs_per_batch());
+    xtensor_options_vec.mutable_value_options()->set_num_kv_heads(
+        options[1].num_kv_heads());
+    xtensor_options_vec.mutable_value_options()->set_head_size(
+        options[1].head_size());
+    xtensor_options_vec.mutable_value_options()->set_max_context_len(
+        options[1].max_context_len());
+    xtensor_options_vec.mutable_value_options()->set_max_seqs_per_batch(
+        options[1].max_seqs_per_batch());
+    proto::Status s;
+    brpc::Controller cntl;
+    stub_->AllocateContinuousKVCache(&cntl, &xtensor_options_vec, &s, nullptr);
+    if (cntl.Failed() || !s.ok()) {
+      LOG(ERROR) << "allocate_continuous_kv_cache_async failed, "
+                 << cntl.ErrorText();
+      promise.setValue(false);
+    } else {
+      promise.setValue(s.ok());
+    }
+  });
   return future;
 }
 

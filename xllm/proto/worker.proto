@@ -7,25 +7,10 @@ option cc_generic_services = true;
 
 import "common.proto";
 
-message Empty {}
-
-message AddressInfo {
-  // the ip adderss of worker process.
-  string address = 1;
-  int32 global_rank = 2;
-}
 
 // NPU: HcclRootInfo
 message CommInfo {
   bytes comm_info = 1;
-}
-
-message CommUniqueId {
-  bytes comm_unique_id = 1;
-}
-
-message CommUniqueIdList {
-  repeated CommUniqueId comm_unique_ids = 1;
 }
 
 message ModelPath {
@@ -44,6 +29,18 @@ message DeviceMemory {
 message KVCacheShape {
   repeated int64 key_shape = 1;
   repeated int64 value_shape = 2;
+}
+
+message XTensorOptions {
+  int64 num_kv_heads = 1;
+  int64 head_size = 2;
+  int32 max_context_len = 3;
+  int32 max_seqs_per_batch = 4;
+}
+
+message XTensorOptionsVec{
+  XTensorOptions key_options = 1;
+  XTensorOptions value_options = 2;
 }
 
 message AllocateKVCacheWithTransferRequest {
@@ -184,6 +181,9 @@ message ForwardInput {
   repeated CacheBlockInfo async_copy_out_blocks = 27;
   repeated CacheBlockInfo copy_out_blocks = 28;
   repeated CacheBlockInfo copy_in_blocks = 29;
+  // for continuous kvcache
+  repeated int64 new_cache_slot_offsets = 30;
+  repeated int64 kv_cache_start_offsets = 31;
 }
 
 message Embeddings {
@@ -224,6 +224,7 @@ service DistributeWorker {
   rpc ProcessGroupTest (Empty) returns (Status);
   rpc ProfileDeviceMemory (Empty) returns (DeviceMemory);
   rpc AllocateKVCache (KVCacheShape) returns (Status);
+  rpc AllocateContinuousKVCache (XTensorOptionsVec) returns (Status);
   rpc AllocateKVCacheWithTransfer(AllocateKVCacheWithTransferRequest) returns (Status) {}
   rpc PullKVCache(PullKVCacheRequest) returns (Status) {}
   rpc GetDeviceInfo(Empty) returns (DeviceInfo) {}
