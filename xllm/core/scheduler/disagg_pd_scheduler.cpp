@@ -101,58 +101,17 @@ void DisaggPDScheduler::profile_ttft() {
   int32_t vocab_size = model_args.vocab_size();
 
   // warm up
-  run_prefill_request(max_context_len, vocab_size);
+  profile_manager_->run_request(max_context_len, 0, vocab_size);
 
   // get TTFT starting from max_context_len, dividing the token length by 2 in
   // each loop iteration
   for (int32_t token_length = max_context_len; token_length > 1;
        token_length >>= 1) {
-    int64_t latency = run_prefill_request(token_length, vocab_size);
+    int64_t latency =
+        profile_manager_->run_request(token_length, 0, vocab_size);
     instance_info_.ttft_profiling_data.emplace_back(
         std::make_pair(token_length, latency));
   }
-}
-
-int64_t DisaggPDScheduler::run_prefill_request(int32_t token_length,
-                                               int32_t vocab_size) {
-  // generate random token ids and request
-  std::random_device rd;
-  std::mt19937_64 gen(rd());
-  // generate token id within the range [0, vocab_size - 1]
-  std::uniform_int_distribution<int32_t> dis(0, vocab_size - 1);
-  std::vector<int32_t> token_ids(token_length);
-  std::generate(token_ids.begin(), token_ids.end(), [&]() { return dis(gen); });
-
-  // generate request
-  RequestState req_state(token_ids);
-  Request request(/*request_id=*/"",
-                  /*x_request_id=*/"",
-                  /*x_request_time=*/"",
-                  req_state);
-
-  // allocate blocks
-  if (!block_manager_pool_->allocate(request.sequences()[0].get())) {
-    LOG(FATAL) << "Profiling TTFT failed! Not enough blocks, token length : "
-               << token_length;
-  }
-
-  // build batch
-  auto batches = BatchFactory::get_instance(options_.dp_size())
-                     ->create_batches(
-                         {request.sequences()[0].get()},
-                         {token_length},
-                         block_manager_pool_->get_copy_in_cache_block_infos(),
-                         block_manager_pool_->get_copy_out_cache_block_infos());
-
-  absl::Time start_time = absl::Now();
-  engine_->step(batches);
-  if (options_.enable_schedule_overlap()) {
-    engine_->update_last_step_result(batches);
-  }
-  const int64_t latency = absl::ToInt64Milliseconds(absl::Now() - start_time);
-  block_manager_pool_->deallocate(&request);
-
-  return latency;
 }
 
 // TODO: maybe we should consider update info case even if info already exists

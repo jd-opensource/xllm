@@ -35,6 +35,7 @@ limitations under the License.
 #include "runtime/xservice_client.h"
 #include "scheduler.h"
 #include "scheduler/decode_priority_queue.h"
+#include "scheduler/profile/profile_manager.h"
 
 namespace xllm {
 class Engine;
@@ -93,6 +94,18 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(std::string,
              priority_strategy) = "FCFS";  // priority, deadline, FCFS
     PROPERTY(bool, enable_online_preempt_offline) = true;
+
+    PROPERTY(bool, enable_profile_step_time) = false;
+    // use predicted latency for latency aware schedule
+    PROPERTY(bool, enable_latency_aware_schedule) = false;
+    // the max prompt length for profile
+    PROPERTY(int32_t, profile_max_prompt_length) = 2048;
+    // true if generate kv cache for profile
+    PROPERTY(bool, if_profile_kv_blocks) = true;
+    // all requests use single global ttft
+    PROPERTY(int32_t, global_ttft_ms) = std::numeric_limits<int32_t>::max();
+    // all requests use single global tpot
+    PROPERTY(int32_t, global_tpot_ms) = std::numeric_limits<int32_t>::max();
   };
 
   ContinuousScheduler(Engine* engine, const Options& options);
@@ -122,10 +135,14 @@ class ContinuousScheduler : public Scheduler {
     return waiting_priority_queue_.size() +
            waiting_priority_queue_offline_.size();
   }
+
   // for test only
   std::vector<Batch> prepare_batch_test() { return prepare_batch(); }
   std::vector<std::shared_ptr<Request>> get_running_requests() {
     return running_requests_;
+  }
+  std::vector<size_t> get_running_sequences_budgets() {
+    return running_sequences_budgets_;
   }
   std::vector<std::shared_ptr<Request>> get_waiting_requests() {
     std::vector<std::shared_ptr<Request>> result;
@@ -139,6 +156,8 @@ class ContinuousScheduler : public Scheduler {
 
     return result;
   }
+
+  ProfileManager* get_profile_manager() { return profile_manager_.get(); }
 
   virtual void get_latency_metrics(std::vector<int64_t>& ttft,
                                    std::vector<int64_t>& tbt) {}
@@ -178,6 +197,8 @@ class ContinuousScheduler : public Scheduler {
 
   std::unique_ptr<AsyncResponseProcessor> response_processor_;
 
+  std::unique_ptr<ProfileManager> profile_manager_;
+
   bool enable_prefix_cache_ = false;
 
   // the number of requests that are waiting to be scheduled
@@ -214,12 +235,16 @@ class ContinuousScheduler : public Scheduler {
   InstanceInfo instance_info_;
 
   void handle_prefill_requests(
+      size_t& latency_budget,
+      size_t& estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       RequestPriorityQueue& waiting_priority_queue,
       size_t& num_online_prefill_preempt_offline_requests,
       std::vector<std::shared_ptr<Request>>& finished_requests);
   void handle_decode_requests(
+      size_t& latency_budget,
+      size_t& estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       size_t& num_offline_decode_preempt_offline_requests,
@@ -235,8 +260,10 @@ class ContinuousScheduler : public Scheduler {
       const std::vector<size_t>& candidate_token_budgets,
       const size_t& allocated_tokens,
       const size_t& allocated_seqs,
+      size_t& allocated_estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
+      size_t& estimate_latency,
       bool budget_exhausted,
       bool block_exhausted);
   void handle_running_requests(std::shared_ptr<Request> request);

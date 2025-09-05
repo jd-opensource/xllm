@@ -1,6 +1,9 @@
 include(cc_library)
 include(cc_test)
 
+
+add_subdirectory(profile)
+
 cc_library(
   NAME 
     scheduler
@@ -24,6 +27,7 @@ cc_library(
     :batch
     :request
     :runtime
+    :profile
     glog::glog
     Folly::folly
     absl::time

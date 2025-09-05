@@ -139,6 +139,32 @@ DEFINE_bool(enable_mla,
             false,
             "whether to enable multi-head latent attention.");
 
+// --- profile config ---
+
+DEFINE_bool(enable_profile_step_time,
+            false,
+            "Whether to enable profile step time.");
+
+DEFINE_bool(enable_latency_aware_schedule,
+            false,
+            "use predicted latency for latency aware schedule.");
+
+DEFINE_int32(profile_max_prompt_length,
+             2048,
+             "The max prompt length for profile.");
+
+DEFINE_bool(if_profile_kv_blocks,
+            true,
+            "true if generate kv cache for profile");
+
+DEFINE_int32(global_ttft_ms,
+             std::numeric_limits<int32_t>::max(),
+             "all requests use single global ttft");
+
+DEFINE_int32(global_tpot_ms,
+             std::numeric_limits<int32_t>::max(),
+             "all requests use single global ttft");
+
 // --- prefix cache config ---
 
 DEFINE_bool(enable_prefix_cache,

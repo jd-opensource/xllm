@@ -149,8 +149,13 @@ int run() {
                             (FLAGS_host_blocks_factor > 0.0))
       .store_protocol(FLAGS_store_protocol)
       .store_master_server_entry(FLAGS_store_master_server_entry)
-      .store_metadata_connstring(FLAGS_store_metadata_connstring);
-
+      .store_metadata_connstring(FLAGS_store_metadata_connstring)
+      .enable_profile_step_time(FLAGS_enable_profile_step_time)
+      .enable_latency_aware_schedule(FLAGS_enable_latency_aware_schedule)
+      .profile_max_prompt_length(FLAGS_profile_max_prompt_length)
+      .if_profile_kv_blocks(FLAGS_if_profile_kv_blocks)
+      .global_ttft_ms(FLAGS_global_ttft_ms)
+      .global_tpot_ms(FLAGS_global_tpot_ms);
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 
   // working node

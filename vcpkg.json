@@ -121,6 +121,10 @@
       "name": "pybind11",
       "version>=": "2.11.1",
       "default-features": false
+    },
+    {
+      "name": "eigen3",
+      "version>=": "3.4.0"
     }
   ],
   "builtin-baseline": "fba75d09065fcc76a25dcf386b1d00d33f5175af"
