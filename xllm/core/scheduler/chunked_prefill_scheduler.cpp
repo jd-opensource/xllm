@@ -21,9 +21,6 @@ limitations under the License.
 #include "util/timer.h"
 #include "util/utils.h"
 
-DEFINE_int32(chunked_match_frequency,
-             2,
-             "Number of sequence prefix cache match frequency");
 namespace xllm {
 
 ChunkedPrefillScheduler::ChunkedPrefillScheduler(Engine* engine,
@@ -459,7 +456,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
   //
   // If we don't set `max_tokens_per_chunk_for_prefill`, the default value is
   // int32_t::max(), which means we process high-priority prefill first.
-  // If set `max_tokens_per_chunk_for_prefill`, for example 2048,
+  // If set `max_tokens_per_chunk_for_prefill`, for example 512,
   // If a high-priority prefill request is very long, each step only
   // handle 2028 promote tolkens, the scheduler will allocate
   // part of the resources to subsequent prefill requests

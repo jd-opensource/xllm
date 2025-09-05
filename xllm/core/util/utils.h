@@ -69,5 +69,6 @@ const T& max(const std::vector<T>& vec) {
 
 bool match_suffix(const Slice<int32_t>& data, const Slice<int32_t>& suffix);
 
+void print_hex_array(uint8_t* array);
 }  // namespace util
 }  // namespace xllm

@@ -46,8 +46,8 @@ class Options {
   // max image num per prompt, default 4
   PROPERTY(int32_t, limit_image_per_prompt) = 4;
 
-  // block size, default 16
-  PROPERTY(int32_t, block_size) = 16;
+  // block size, default 128
+  PROPERTY(int32_t, block_size) = 128;
 
   // the maximum cache size in bytes, default is 0 which means cache size is
   // caculated by available memory * max_memory_utilization
@@ -59,13 +59,13 @@ class Options {
   PROPERTY(bool, enable_prefix_cache) = true;
 
   // max tokens num per batch
-  PROPERTY(int32_t, max_tokens_per_batch) = std::numeric_limits<int32_t>::max();
+  PROPERTY(int32_t, max_tokens_per_batch) = 20000;
 
   // max sequences num per batch
   PROPERTY(int32_t, max_seqs_per_batch) = 256;
 
   // the max tokens per chunk for request in prefill stage.
-  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 2048;
+  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 512;
 
   // sps tokens
   PROPERTY(int32_t, num_speculative_tokens) = 0;

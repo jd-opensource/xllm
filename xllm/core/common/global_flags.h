@@ -57,6 +57,8 @@ DECLARE_bool(enable_prefix_cache);
 
 DECLARE_bool(enable_cache_upload);
 
+DECLARE_uint32(murmur_hash3_seed);
+
 DECLARE_int32(max_tokens_per_batch);
 
 DECLARE_int32(max_seqs_per_batch);
@@ -121,8 +123,6 @@ DECLARE_int32(max_connect_count);
 
 DECLARE_int32(sleep_time_second);
 
-DECLARE_bool(disable_custom_kernels);
-
 DECLARE_bool(enable_atb_comm_multiprocess);
 
 DECLARE_string(tool_call_parser);
@@ -142,6 +142,8 @@ DECLARE_int32(timeout_ms);
 DECLARE_int32(chunked_match_frequency);
 
 DECLARE_bool(use_zero_evict);
+
+DECLARE_int32(max_decode_token_per_sequence);
 
 DECLARE_string(priority_strategy);
 

@@ -25,15 +25,12 @@ cc_library(
     torch
 )
 
-set(TEST_SRCS
-  prefix_cache_test.cpp
-)
 
 cc_test(
   NAME
     prefix_test
   SRCS
-    ${TEST_SRCS}
+    prefix_cache_test.cpp
   DEPS
     :flags
     :kv_cache

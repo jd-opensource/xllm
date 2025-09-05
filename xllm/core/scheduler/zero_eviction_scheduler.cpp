@@ -20,10 +20,6 @@ limitations under the License.
 #include "util/timer.h"
 #include "util/utils.h"
 
-DEFINE_int32(max_decode_token_per_sequence,
-             200,
-             "max decode token per sequence");
-
 namespace xllm {
 
 namespace {

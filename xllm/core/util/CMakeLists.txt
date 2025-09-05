@@ -30,7 +30,6 @@ cc_library(
   SRCS
     device_name_utils.cpp
     env_var.cpp
-    hash_util.cpp
     json_reader.cpp
     net.cpp
     pretty_print.cpp
@@ -46,7 +45,6 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ms_tools_ext>
-    SMHasherSupport
     Boost::serialization
     absl::synchronization
     ${Python_LIBRARIES}
@@ -59,7 +57,6 @@ cc_test(
     util_test
   SRCS
     blocking_counter_test.cpp
-    hash_util_test.cpp
     threadpool_test.cpp
   DEPS
     util

@@ -15,26 +15,26 @@ limitations under the License.
 
 #include "global_flags.h"
 
-#include <limits>
-
 #include "brpc/reloadable_flags.h"
+
+// NOTE: related flags should be placed together.
 
 // --- xllm service config ---
 
 DEFINE_string(host, "", "Host name for brpc server.");
 
-DEFINE_int32(port, 8080, "Port for brpc server.");
+DEFINE_int32(port, 18000, "Port for brpc server.");
 
 DEFINE_int32(idle_timeout_s,
              -1,
              "Connection will be closed if there is no read/write operations "
-             "during the last `idle_timeout_s`");
+             "during the last `idle_timeout_s`. -1 means wait indefinitely.");
 
-DEFINE_int32(num_threads, 32, "Number of threads to process requests");
+DEFINE_int32(num_threads, 32, "Number of threads to process requests.");
 
 DEFINE_int32(max_concurrency,
              0,
-             "Limit number of requests processed in parallel");
+             "Limit number of requests processed in parallel.");
 
 DEFINE_int32(
     max_concurrent_requests,
@@ -43,7 +43,7 @@ DEFINE_int32(
 
 BRPC_VALIDATE_GFLAG(max_concurrent_requests, brpc::NonNegativeInteger);
 
-// --- model serving config ---
+// --- model config ---
 
 DEFINE_string(model_id, "", "hf model name.");
 
@@ -56,7 +56,7 @@ DEFINE_string(backend,
 
 DEFINE_string(task,
               "generate",
-              "The task to use the model for. generate/embed.");
+              "The task to use the model for(e.g. generate, embed).");
 
 DEFINE_string(devices,
               "npu:0",
@@ -68,10 +68,26 @@ DEFINE_string(draft_devices,
               "npu:0",
               "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1.");
 
+DEFINE_bool(enable_mla,
+            false,
+            "Whether to enable multi-head latent attention.");
+
+// --- vlm config ---
+
 DEFINE_int32(limit_image_per_prompt,
              4,
              "Maximum number of image per prompt. Only applicable for "
              "multimodal models.");
+
+// --- threading config ---
+
+DEFINE_int32(num_handling_threads, 4, "Number of handling threads.");
+
+DEFINE_int32(num_response_handling_threads,
+             4,
+             "Number of response handling threads.");
+
+// --- kvcache config ---
 
 DEFINE_int32(block_size,
              128,
@@ -87,29 +103,11 @@ DEFINE_double(max_memory_utilization,
               "The fraction of GPU memory to be used for model inference, "
               "including model weights and kv cache.");
 
-DEFINE_int32(max_tokens_per_batch,
-             std::numeric_limits<int32_t>::max(),
-             "Max number of tokens per batch.");
+// --- scheduler config ---
+
+DEFINE_int32(max_tokens_per_batch, 20000, "Max number of tokens per batch.");
 
 DEFINE_int32(max_seqs_per_batch, 256, "Max number of sequences per batch.");
-
-DEFINE_int32(max_tokens_per_chunk_for_prefill,
-             2048,
-             "Max number of token per chunk in prefill stage.");
-
-DEFINE_int32(num_speculative_tokens, 0, "Number of speculative tokens.");
-
-DEFINE_int32(num_handling_threads, 4, "Number of handling threads.");
-
-DEFINE_int32(num_response_handling_threads,
-             4,
-             "Number of response handling threads.");
-
-DEFINE_bool(enable_chunked_prefill, true, "Whether to enable chunked prefill.");
-
-DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
-
-DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
 
 DEFINE_bool(enable_schedule_overlap,
             true,
@@ -119,36 +117,63 @@ DEFINE_double(prefill_scheduling_memory_usage_threshold,
               0.95,
               "The memory usage threshold during prefill scheduling.");
 
-DEFINE_string(communication_backend, "hccl", "npu communication backend.");
+DEFINE_bool(enable_chunked_prefill, true, "Whether to enable chunked prefill.");
 
-DEFINE_bool(enable_eplb, false, "Whether to use ep load balance.");
+DEFINE_int32(max_tokens_per_chunk_for_prefill,
+             512,
+             "Max number of token per chunk in prefill stage.");
+
+DEFINE_int32(chunked_match_frequency,
+             2,
+             "Number of sequence prefix cache match frequency.");
+
+DEFINE_bool(use_zero_evict,
+            false,
+            "Use ZeroEvictionScheduler but ContinuousScheduler.");
+
+DEFINE_int32(max_decode_token_per_sequence,
+             200,
+             "Max decode token per sequence.");
+
+// --- parallel config ---
+
+DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
+
+DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
+
+DEFINE_string(
+    communication_backend,
+    "lccl",
+    "NPU communication backend.(e.g. lccl, hccl). When enable dp, use hccl.");
+
+// --- ep load balance config ---
+
+DEFINE_bool(enable_eplb, false, "Whether to use expert parallel load balance.");
 
 DEFINE_int32(redundant_experts_num,
              1,
-             "num of redundant experts on per device.");
+             "Number of redundant experts on per device.");
 
-DEFINE_int64(eplb_update_interval, 1000, "eplb update rate.");
+DEFINE_int64(eplb_update_interval, 1000, "EPLB update rate.");
 
-DEFINE_double(eplb_update_threshold, 0.8, "eplb update threshold.");
+DEFINE_double(eplb_update_threshold, 0.8, "EPLB update threshold.");
 
-DEFINE_string(rank_tablefile, "", "atb hccl rank table file.");
+DEFINE_string(rank_tablefile, "", "ATB HCCL rank table file.");
 
-DEFINE_int32(expert_parallel_degree, 0, "ep degree");
-
-DEFINE_bool(enable_mla,
-            false,
-            "whether to enable multi-head latent attention.");
+DEFINE_int32(expert_parallel_degree, 0, "Expert parallel degree.");
 
 // --- prefix cache config ---
 
 DEFINE_bool(enable_prefix_cache,
             true,
-            "enable the prefix cache for the block manager");
+            "Whether to enable the prefix cache for the block manager.");
 
 DEFINE_bool(enable_cache_upload,
             false,
             "Whether to upload cache info to service. This feature is only "
             "available when service routing is enabled.");
+
+DEFINE_uint32(murmur_hash3_seed, 1024, "Default Murmur Hash seed.");
 
 // --- serving on multi-nodes config ---
 
@@ -163,11 +188,11 @@ DEFINE_int32(node_rank, 0, "The node rank.");
 
 // --- disaggregated prefill and decode config ---
 
-DEFINE_string(xservice_addr, "", "xservice server address.");
+DEFINE_string(xservice_addr, "", "XService server address.");
 
 DEFINE_bool(enable_disagg_pd,
             false,
-            "Enable disaggregated prefill and decode execution.");
+            "Whether to enable disaggregated prefill and decode execution.");
 
 DEFINE_int32(disagg_pd_port, 7777, "Port for brpc disagg pd server.");
 
@@ -197,56 +222,64 @@ DEFINE_int32(sleep_time_second,
              3,
              "The sleep time for worker try to connect to server next time.");
 
-// --- kernel config ---
-
-DEFINE_bool(disable_custom_kernels, false, "disable all custom kernels");
-
 // --- function call config ---
 
 DEFINE_string(tool_call_parser,
               "",
-              "Specify the parser for handling tool-call interactions. "
-              "Options include: 'qwen25'");
+              "Specify the parser for handling tool-call interactions(e.g. "
+              "qwen25, qwen3, kimi_k2, deepseekv3).");
+
+// --- speculative config ---
+
+DEFINE_int32(num_speculative_tokens, 0, "Number of speculative tokens.");
 
 DEFINE_bool(enable_atb_spec_kernel,
             false,
-            "whether to use ATB speculative kernel.");
+            "Whether to use ATB speculative kernel.");
 
 // --- service routing config ---
 
-DEFINE_string(etcd_addr, "", "etcd adderss for save instance meta info");
+DEFINE_string(etcd_addr, "", "Etcd adderss for save instance meta info.");
 
 DEFINE_bool(enable_service_routing,
             false,
-            "whether to use xllm service routing.");
+            "Whether to use xllm service routing.");
 
-DEFINE_double(heart_beat_interval, 0.5, "heart beat interval");
+DEFINE_double(heart_beat_interval, 0.5, "Heart beat interval.");
 
-DEFINE_int32(etcd_ttl, 3, "time to live for etcd");
+DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
 
 DEFINE_int32(timeout_ms,
              -1,
              "Max duration of bRPC Channel. -1 means wait indefinitely.");
 
-DEFINE_string(priority_strategy, "FCFS", "priority strategy for requests");
+// --- priority strategy config ---
+
+DEFINE_string(priority_strategy,
+              "FCFS",
+              "Priority strategy for requests(e.g. FCFS, priority, deadline).");
 
 DEFINE_bool(enable_online_preempt_offline,
             true,
-            "whether enable online preempt offline");
+            "Whether to enable online preempt offline.");
+
+// --- kvcache store config ---
 
 DEFINE_double(host_blocks_factor,
               0.0,
-              "host block factor, e.g. host block num = host_blocks_factor * "
-              "hbm block num");
+              "Host block factor, e.g. host block num = host_blocks_factor * "
+              "hbm block num.");
 
-DEFINE_bool(enable_kvcache_store, false, "whether to use kvcache store.");
+DEFINE_bool(enable_kvcache_store, false, "Whether to use kvcache store.");
 
-DEFINE_string(store_protocol, "tcp", "kvcache store protocol.");
+DEFINE_string(store_protocol,
+              "tcp",
+              "KV cache store protocol(e.g. tcp, rdma).");
 
 DEFINE_string(store_master_server_entry,
-              "tcp",
-              "address information of the store master service.");
+              "",
+              "The address information of the store master service.");
 
 DEFINE_string(store_metadata_connstring,
               "",
-              "the address of the kvcache store metadata service .");
+              "The address of the kv cache store metadata service.");

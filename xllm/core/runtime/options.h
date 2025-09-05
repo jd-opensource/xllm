@@ -39,8 +39,8 @@ struct Options {
   // devices for execute draft model
   PROPERTY(std::vector<torch::Device>, draft_devices);
 
-  // the number of slots per block, default 16, value must be multiple of 16
-  PROPERTY(int32_t, block_size) = 16;
+  // the number of slots per block, default 128, value must be multiple of 16
+  PROPERTY(int32_t, block_size) = 128;
 
   // 0 means that cache size is caculated by available memory
   PROPERTY(int64_t, max_cache_size) = 0;
@@ -95,7 +95,7 @@ struct Options {
   PROPERTY(int32_t, max_seqs_per_batch) = 256;
 
   // the max tokens per chunk for request in prefill stage.
-  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 2048;
+  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 512;
 
   // for master service, master server addr
   PROPERTY(std::optional<std::string>, xservice_addr);

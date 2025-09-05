@@ -43,14 +43,13 @@ class ContinuousScheduler : public Scheduler {
  public:
   struct Options {
     // the maximum number of tokens per batch
-    PROPERTY(int32_t,
-             max_tokens_per_batch) = std::numeric_limits<int32_t>::max();
+    PROPERTY(int32_t, max_tokens_per_batch) = 20000;
 
     // the maximum number of sequences per batch
     PROPERTY(int32_t, max_seqs_per_batch) = 256;
 
     // the max tokens per chunk for request in prefill stage.
-    PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 2048;
+    PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 512;
 
     // the number of speculative tokens per step
     PROPERTY(int32_t, num_speculative_tokens) = 0;

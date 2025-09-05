@@ -1,12 +1,8 @@
 #include "rate_limiter.h"
 
-#include <gflags/gflags.h>
 #include <gtest/gtest.h>
 
-DEFINE_int32(
-    max_concurrent_requests,
-    0,
-    "Maximum number of concurrent requests the xllm service can handle.");
+#include "global_flags.h"
 
 namespace xllm {
 

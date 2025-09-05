@@ -20,9 +20,6 @@ limitations under the License.
 #include "scheduler/disagg_pd_scheduler.h"
 #include "scheduler/zero_eviction_scheduler.h"
 
-DEFINE_bool(use_zero_evict,
-            false,
-            "Use ZeroEvictionScheduler but ContinuousScheduler.");
 namespace xllm {
 
 std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
