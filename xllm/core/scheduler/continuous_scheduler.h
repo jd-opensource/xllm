@@ -83,7 +83,7 @@ class ContinuousScheduler : public Scheduler {
     // default value is 1.
     PROPERTY(int32_t, max_reqs_p2d_once) = 1;
 
-    PROPERTY(bool, enable_schedule_overlap) = false;
+    PROPERTY(bool, enable_schedule_overlap) = true;
 
     PROPERTY(bool, enable_chunked_prefill) = true;
 

@@ -112,7 +112,7 @@ DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
 DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
 
 DEFINE_bool(enable_schedule_overlap,
-            false,
+            true,
             "Whether to enable schedule overlap.");
 
 DEFINE_double(prefill_scheduling_memory_usage_threshold,

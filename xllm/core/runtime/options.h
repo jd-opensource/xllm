@@ -86,7 +86,7 @@ struct Options {
   PROPERTY(int32_t, ep_size) = 1;
 
   // enable enable_schedule_overlap to improve runtime execution efficiency.
-  PROPERTY(bool, enable_schedule_overlap) = false;
+  PROPERTY(bool, enable_schedule_overlap) = true;
 
   // enable chunked prefill.
   PROPERTY(bool, enable_chunked_prefill) = true;

@@ -17,9 +17,9 @@ xLLM在框架层支持了异步调度功能，在device执行 step-i 计算的�
 
 ## 使用方式
 
-xLLM中提供了gflags参数`enable_schedule_overlap`，默认false，如需开启在xLLM的服务启动脚本中设置为true即可，示例如下：
+xLLM中提供了gflags参数`enable_schedule_overlap`，默认true，如需关闭在xLLM的服务启动脚本中设置为false即可，示例如下：
 ```shell
---enable_schedule_overlap=true
+--enable_schedule_overlap=false
 ```
 
 
@@ -29,4 +29,5 @@ xLLM中提供了gflags参数`enable_schedule_overlap`，默认false，如需开�
 
 
 !!! warning "注意"
-    - 异步调度功能会在服务端额外计算一个step，当使用场景中输出token数量较少，或是类似embedding模型只一次性输出的场景，不建议开启，会影响服务端吞吐。
+    - 异步调度功能会在服务端额外计算一个step，当使用场景中输出token数量较少，或是类似embedding模型只一次性输出的场景，会影响服务端吞吐，所以强制关闭异步调度。
+    - VLM模型正在适配中，暂时会强制关闭异步调度。

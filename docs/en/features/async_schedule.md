@@ -13,16 +13,17 @@ In the overall architecture, stages 1 and 3 on the CPU side are handled by diffe
 
 ## Usage
 
-xLLM provides the gflags parameter enable_schedule_overlap, which defaults to false. To enable this feature, simply set it to true in xLLM’s service startup script, as
+xLLM provides the gflags parameter enable_schedule_overlap, which defaults to true. To disable this feature, simply set it to false in xLLM's service startup script, as
 ```shell
---enable_schedule_overlap=true
+--enable_schedule_overlap=false
 ```
 
 ## Performance
 
-- With asynchronous scheduling enabled, the device idle time between two steps is approximately 200μs - comparable to a single kernel launch duration.
+- With asynchronous scheduling enabled, the device idle time between two steps is approximately 200us - comparable to a single kernel launch duration.
 - On the DeepSeek-R1-Distill-Qwen-1.5B model with TPOT constrained to 50ms, this achieves 17% throughput improvement.
 
 
 ## Notice
-The asynchronous scheduling feature requires the server to compute one additional step. For use cases involving limited output tokens (e.g., few-token generation) or single-output scenarios like embedding models, enabling this feature is not recommended as it may reduce server-side throughput.
+The asynchronous scheduling feature requires the server to compute one additional step. For use cases involving limited output tokens (e.g., few-token generation) or single-output scenarios like embedding models, enabling this feature is not recommended as it may reduce server-side throughput, thus hard-disabled internally.
+The VLM model is currently being adapted, will be temporarily disabled.

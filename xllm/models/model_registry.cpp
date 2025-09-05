@@ -93,7 +93,7 @@ void ModelRegistry::register_model_args_loader(const std::string& name,
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].model_args_loader != nullptr) {
-    LOG(WARNING) << "model args loader for " << name << "already registered.";
+    LOG(WARNING) << "model args loader for " << name << " already registered.";
   } else {
     instance->model_registry_[name].model_args_loader = loader;
   }

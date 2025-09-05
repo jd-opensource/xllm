@@ -98,6 +98,9 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
   }
 
   if (type == EngineType::VLM) {
+    options_.enable_schedule_overlap(false);
+    LOG(WARNING) << "Force to disable schedule overlap for VLM model, not "
+                    "supported yet.";
     runtime::Options eng_options;
     eng_options.model_path(options_.model_path())
         .devices(devices)
@@ -109,7 +112,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .enable_disagg_pd(options_.enable_disagg_pd())
         .enable_service_routing(options_.enable_service_routing())
-        .enable_cache_upload(options_.enable_cache_upload());
+        .enable_cache_upload(options_.enable_cache_upload())
+        .enable_schedule_overlap(options_.enable_schedule_overlap());
 
     auto engine = std::make_unique<VLMEngine>(eng_options);
     engine_ = std::move(engine);
@@ -157,6 +161,11 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
     auto spec_engine = std::make_unique<SpeculativeEngine>(spec_options);
     engine_ = std::move(spec_engine);
   } else if (type == EngineType::LLM) {
+    if (options_.task_type() == "embed") {
+      options_.enable_schedule_overlap(false);
+      LOG(WARNING) << "Force to disable schedule overlap for embedding model, "
+                      "avoiding performance degradation.";
+    }
     runtime::Options eng_options;
     eng_options.model_path(options_.model_path())
         .devices(devices)
