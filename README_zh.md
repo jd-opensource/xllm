@@ -111,7 +111,19 @@ xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与
 #### 安装
 首先下载我们提供的镜像：
 ```bash
+# A2 x86
 docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts
+# A2 arm
+docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64
+# A3 arm
+docker pull xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64
+# 或者
+# A2 x86
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts
+# A2 arm
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64
+# A3 arm
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64
 ```
 然后创建对应的容器
 ```bash
