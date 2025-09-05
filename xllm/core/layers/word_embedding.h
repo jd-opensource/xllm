@@ -15,9 +15,22 @@ limitations under the License.
 
 #pragma once
 
-#include "llama.h"
+#if defined(USE_NPU)
+#include "npu/npu_word_embedding_impl.h"
+#endif
 
 namespace xllm {
-// register the causal model
-REGISTER_CAUSAL_MODEL(llama3, LlamaForCausalLM);
+namespace layer {
+
+#if defined(USE_NPU)
+class WordEmbedding : public torch::nn::ModuleHolder<NpuWordEmbeddingImpl> {
+ public:
+  using torch::nn::ModuleHolder<NpuWordEmbeddingImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuWordEmbeddingImpl;
+  WordEmbedding(const Context& context)
+      : ModuleHolder(std::make_shared<NpuWordEmbeddingImpl>(context)) {}
+};
+#endif
+
+}  // namespace layer
 }  // namespace xllm

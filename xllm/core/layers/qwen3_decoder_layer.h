@@ -15,9 +15,24 @@ limitations under the License.
 
 #pragma once
 
-#include "llama.h"
+#if defined(USE_NPU)
+#include "npu/npu_qwen3_decoder_layer_impl.h"
+#endif
 
 namespace xllm {
-// register the causal model
-REGISTER_CAUSAL_MODEL(llama3, LlamaForCausalLM);
+namespace layer {
+
+#if defined(USE_NPU)
+class Qwen3DecoderLayer
+    : public torch::nn::ModuleHolder<NpuQwen3DecoderLayerImpl> {
+ public:
+  using torch::nn::ModuleHolder<NpuQwen3DecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuQwen3DecoderLayerImpl;
+
+  Qwen3DecoderLayer(const Context& context)
+      : ModuleHolder(std::make_shared<NpuQwen3DecoderLayerImpl>(context)) {}
+};
+#endif
+
+}  // namespace layer
 }  // namespace xllm

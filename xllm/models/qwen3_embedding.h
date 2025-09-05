@@ -5,7 +5,7 @@
 #include "core/framework/model/embedding_lm.h"
 #include "qwen3.h"
 
-namespace xllm::hf {
+namespace xllm {
 
 class QWen3ForEmbeddingImpl : public QWenForCausalLMImplBase<QWen3Model> {
  public:
@@ -32,14 +32,14 @@ class QWen3ForEmbeddingImpl : public QWenForCausalLMImplBase<QWen3Model> {
 };
 TORCH_MODULE(QWen3ForEmbedding);
 
-}  // namespace xllm::hf
+}  // namespace xllm
 
 namespace xllm {
 
 template <>
-class EmbeddingLMImpl<xllm::hf::QWen3ForEmbedding> : public EmbeddingLM {
+class EmbeddingLMImpl<xllm::QWen3ForEmbedding> : public EmbeddingLM {
  public:
-  EmbeddingLMImpl(xllm::hf::QWen3ForEmbedding model,
+  EmbeddingLMImpl(xllm::QWen3ForEmbedding model,
                   const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
@@ -77,23 +77,23 @@ class EmbeddingLMImpl<xllm::hf::QWen3ForEmbedding> : public EmbeddingLM {
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
   // Delegate head/embedding accessors to underlying model implementation.
-  hf::LlmHead get_lm_head() override { return model_->get_lm_head(); }
-  void set_lm_head(hf::LlmHead& head) override { model_->set_lm_head(head); }
-  hf::AtbWordEmbedding get_word_embedding() override {
+  layer::LmHead get_lm_head() override { return model_->get_lm_head(); }
+  void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); }
+  layer::WordEmbedding get_word_embedding() override {
     return model_->get_word_embedding();
   }
-  void set_word_embedding(hf::AtbWordEmbedding& embedding) override {
+  void set_word_embedding(layer::WordEmbedding& embedding) override {
     model_->set_word_embedding(embedding);
   }
 
  private:
-  xllm::hf::QWen3ForEmbedding model_;
+  xllm::QWen3ForEmbedding model_;
   torch::TensorOptions options_;
 };
 
 }  // namespace xllm
 
-namespace xllm::hf {
+namespace xllm {
 
 REGISTER_EMBEDDING_MODEL_WITH_VARNAME(qwen3_embedding,
                                       qwen3,
@@ -126,4 +126,4 @@ REGISTER_MODEL_ARGS_WITH_VARNAME(qwen3_embedding, qwen3, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
-}  // namespace xllm::hf
+}  // namespace xllm

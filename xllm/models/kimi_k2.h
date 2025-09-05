@@ -17,7 +17,7 @@ limitations under the License.
 
 #include "deepseek_v2.h"
 
-namespace xllm::hf {
+namespace xllm {
 // register the causal model
 REGISTER_CAUSAL_MODEL(kimi_k2, DeepseekV2ForCausalLM);
 // register the model args
@@ -99,4 +99,4 @@ REGISTER_TOKENIZER_ARGS(kimi_k2, [&] {
       R"([\p{Han}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+[^\s]|\s+)";
   SET_ARG(pattern, pattern_str);
 });
-}  // namespace xllm::hf
+}  // namespace xllm

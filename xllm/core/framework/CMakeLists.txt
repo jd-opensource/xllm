@@ -3,6 +3,12 @@ include(cc_test)
 
 include_directories(.)
 
+if(USE_NPU)
+  include_directories(
+    ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
+  )
+endif()
+
 add_subdirectory(batch)
 add_subdirectory(block)
 add_subdirectory(chat_template)

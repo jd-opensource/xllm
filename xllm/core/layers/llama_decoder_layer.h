@@ -15,9 +15,24 @@ limitations under the License.
 
 #pragma once
 
-#include "llama.h"
+#if defined(USE_NPU)
+#include "npu/npu_llama_decoder_layer_impl.h"
+#endif
 
 namespace xllm {
-// register the causal model
-REGISTER_CAUSAL_MODEL(llama3, LlamaForCausalLM);
+namespace layer {
+
+#if defined(USE_NPU)
+class LlamaDecoderLayer
+    : public torch::nn::ModuleHolder<NpuLlamaDecoderLayerImpl> {
+ public:
+  using torch::nn::ModuleHolder<NpuLlamaDecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuLlamaDecoderLayerImpl;
+
+  LlamaDecoderLayer(const Context& context)
+      : ModuleHolder(std::make_shared<NpuLlamaDecoderLayerImpl>(context)) {}
+};
+#endif
+
+}  // namespace layer
 }  // namespace xllm

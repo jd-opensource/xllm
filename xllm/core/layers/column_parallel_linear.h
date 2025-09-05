@@ -15,9 +15,24 @@ limitations under the License.
 
 #pragma once
 
-#include "llama.h"
+#if defined(USE_NPU)
+#include "npu/npu_column_parallel_linear_impl.h"
+#endif
 
 namespace xllm {
-// register the causal model
-REGISTER_CAUSAL_MODEL(llama3, LlamaForCausalLM);
+namespace layer {
+
+#if defined(USE_NPU)
+class ColumnParallelLinear
+    : public torch::nn::ModuleHolder<NpuColumnParallelLinearImpl> {
+ public:
+  using torch::nn::ModuleHolder<NpuColumnParallelLinearImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuColumnParallelLinearImpl;
+
+  ColumnParallelLinear(const Context& context)
+      : ModuleHolder(std::make_shared<NpuColumnParallelLinearImpl>(context)) {}
+};
+#endif
+
+}  // namespace layer
 }  // namespace xllm

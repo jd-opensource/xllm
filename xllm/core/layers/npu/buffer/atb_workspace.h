@@ -40,7 +40,7 @@ class AtbWorkspace {
 
   AtbWorkspace& operator=(AtbWorkspace&&) = default;
 
-  void* GetWorkspaceBuffer(uint64_t bufferSize);
+  void* get_workspace_buffer(uint64_t bufferSize);
 
  private:
   static std::map<int32_t, std::unique_ptr<AtbBuffer>> buffer_map_;

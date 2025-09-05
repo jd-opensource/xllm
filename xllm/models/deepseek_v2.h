@@ -27,20 +27,20 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
-#include "core/layers/npu/attn_mask.h"
-#include "core/layers/npu/deepseek_v2_decoder_layer.h"
-#include "core/layers/npu/llm_head.h"
-#include "core/layers/npu/pos_embedding.h"
-#include "core/layers/npu/rms_norm.h"
-#include "core/layers/npu/word_embedding.h"
+#include "core/layers/attention_mask.h"
+#include "core/layers/deepseek_v2_decoder_layer.h"
+#include "core/layers/lm_head.h"
+#include "core/layers/pos_embedding.h"
+#include "core/layers/rms_norm.h"
 #include "core/layers/rotary_embedding.h"
+#include "core/layers/word_embedding.h"
 #include "framework/context.h"
 #include "model_registry.h"
 // DeepSeek v2 compatible with huggingface weights
 // ref to:
 // https://github.com/vllm-project/vllm/blob/v0.6.6/vllm/model_executor/models/deepseek_v2.py
 
-namespace xllm::hf {
+namespace xllm {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -51,8 +51,8 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                              const int32_t i,
                              const float sm_scale) {
     // register submodules
-    decoder_layer_ = register_module("decoder_layer",
-                                     DeepseekV2Decoder(context, i, sm_scale));
+    decoder_layer_ = register_module(
+        "decoder_layer", layer::DeepseekV2DecoderLayer(context, i, sm_scale));
   }
 
   torch::Tensor forward(torch::Tensor x,
@@ -94,7 +94,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   void update_expert_weight() { decoder_layer_->update_expert_weight(); }
 
  private:
-  DeepseekV2Decoder decoder_layer_{nullptr};
+  layer::DeepseekV2DecoderLayer decoder_layer_{nullptr};
 };
 TORCH_MODULE(DeepseekV2DecoderLayer);
 
@@ -112,7 +112,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
-    embed_tokens_ = register_module("embed_tokens", AtbWordEmbedding(context));
+    embed_tokens_ =
+        register_module("embed_tokens", layer::WordEmbedding(context));
 
     // rotary positional embedding
     auto inv_freq = rotary::apply_deepseek_yarn_rope_scaling(
@@ -130,12 +131,12 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                                        /*interleaved=*/false,
                                        sm_scale,
                                        options);
-    atb_pos_emb_ = AtbRotaryEmbedding(context);
+    atb_pos_emb_ = layer::PosEmbedding(context);
     max_seq_len_ = model_args.max_position_embeddings();
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
-    attn_mask_ = AttentionMaskImpl(options.device(),
-                                   options.dtype().toScalarType(),
-                                   /*mask_value=*/mask_value);
+    attn_mask_ = layer::AttentionMask(options.device(),
+                                      options.dtype().toScalarType(),
+                                      /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
       auto block = DeepseekV2DecoderLayer(context, i, sm_scale);
@@ -143,7 +144,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    norm_ = register_module("norm", RmsNorm(context));
+    norm_ = register_module("norm", layer::RmsNorm(context));
     // dp_size_=4;
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
@@ -245,9 +246,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     layers_[layer_id]->update_expert_weight();
   }
 
-  AtbWordEmbedding get_word_embedding() { return embed_tokens_; }
+  layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
 
-  void set_word_embedding(AtbWordEmbedding& word_embedding) {
+  void set_word_embedding(layer::WordEmbedding& word_embedding) {
     embed_tokens_ = word_embedding;
   }
 
@@ -264,11 +265,11 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   int32_t num_speculative_tokens_ = 0;
   at::Device device_;
   torch::Dtype dtype_;
-  AtbWordEmbedding embed_tokens_{nullptr};
+  layer::WordEmbedding embed_tokens_{nullptr};
   std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
-  AtbRotaryEmbedding atb_pos_emb_{nullptr};
-  AttentionMaskImpl attn_mask_;
-  RmsNorm norm_{nullptr};
+  layer::PosEmbedding atb_pos_emb_{nullptr};
+  layer::AttentionMask attn_mask_;
+  layer::RmsNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Model);
 
@@ -284,7 +285,7 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
     void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
     context_->SetExecuteStream(stream);
     context_->SetAsyncTilingCopyStatus(true);
-    lm_head_ = register_module("lm_head", LlmHead(context));
+    lm_head_ = register_module("lm_head", layer::LmHead(context));
     first_k_dense_replace_ = context.get_model_args().first_k_dense_replace();
   }
 
@@ -331,19 +332,21 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
     model_->update_expert_weight(layer_id + first_k_dense_replace_);
   }
 
-  LlmHead get_lm_head() { return lm_head_; }
+  layer::LmHead get_lm_head() { return lm_head_; }
 
-  void set_lm_head(LlmHead& head) { lm_head_ = head; }
+  void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
 
-  AtbWordEmbedding get_word_embedding() { return model_->get_word_embedding(); }
+  layer::WordEmbedding get_word_embedding() {
+    return model_->get_word_embedding();
+  }
 
-  void set_word_embedding(AtbWordEmbedding& word_embedding) {
+  void set_word_embedding(layer::WordEmbedding& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
 
  private:
   DeepseekV2Model model_{nullptr};
-  LlmHead lm_head_{nullptr};
+  layer::LmHead lm_head_{nullptr};
   AtbWorkspace work_space_;
   atb::Context* context_;
   int32_t first_k_dense_replace_;
@@ -411,4 +414,4 @@ REGISTER_MODEL_ARGS(deepseek_v2, [&] {
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({100001}));
 });
-}  // namespace xllm::hf
+}  // namespace xllm

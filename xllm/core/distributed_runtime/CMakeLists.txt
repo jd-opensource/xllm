@@ -1,5 +1,11 @@
 include(cc_library)
 
+if(USE_NPU)
+  include_directories(
+    ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
+  )
+endif()
+
 cc_library(
   NAME 
     distributed_runtime
