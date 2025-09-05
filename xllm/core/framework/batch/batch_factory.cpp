@@ -69,10 +69,14 @@ std::vector<Batch> BatchFactory::create_batches(
   COUNTER_ADD(num_processing_tokens_total_prompt, num_prompt_tokens);
   COUNTER_ADD(num_processing_tokens_total_generated, num_generated_tokens);
 
-  HISTOGRAM_OBSERVE(num_prompt_tokens_per_request,
-                    num_prompt_tokens / running_sequences.size());
-  HISTOGRAM_OBSERVE(num_generated_tokens_per_request,
-                    num_generated_tokens / running_sequences.size());
+  if (running_sequences.size() > 0) {
+    HISTOGRAM_OBSERVE(
+        num_prompt_tokens_per_request,
+        static_cast<int64_t>(num_prompt_tokens / running_sequences.size()));
+    HISTOGRAM_OBSERVE(
+        num_generated_tokens_per_request,
+        static_cast<int64_t>(num_generated_tokens / running_sequences.size()));
+  }
 
   return batches;
 }
