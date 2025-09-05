@@ -54,7 +54,7 @@ std::vector<Block> PrefixCache::match(
       existed_shared_blocks.empty()
           ? Murmur3Key{}
           : Murmur3Key{existed_shared_blocks.back().get_immutable_hash_value()};
-  for (size_t i = 0; i < n_tokens; i += block_size_) {
+  for (size_t i = start_index; i < n_tokens; i += block_size_) {
     if (i == 0) {
       murmur_hash3(
           nullptr, token_ids.slice(i, i + block_size_), token_hash_key.data);
