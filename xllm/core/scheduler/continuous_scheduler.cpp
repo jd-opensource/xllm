@@ -48,9 +48,19 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   CHECK(engine_ != nullptr);
   block_manager_pool_ = engine_->block_manager_pool();
   CHECK(block_manager_pool_ != nullptr);
+
   enable_prefix_cache_ = block_manager_pool_->options().enable_prefix_cache();
 
   last_batch_.resize(options_.dp_size());
+
+  ProfileManager::Options profile_manager_options;
+  profile_manager_options.dp_size(options.dp_size())
+      .enable_schedule_overlap(options.enable_schedule_overlap())
+      .enable_profile_step_time(options.enable_profile_step_time())
+      .profile_max_prompt_length(options.profile_max_prompt_length())
+      .if_profile_kv_blocks(options.if_profile_kv_blocks());
+  profile_manager_ =
+      std::make_unique<ProfileManager>(engine, profile_manager_options);
 
   response_processor_ = std::make_unique<AsyncResponseProcessor>(
       engine_->tokenizer(),
@@ -141,6 +151,8 @@ bool ContinuousScheduler::check_if_enough_to_evict(
 }
 
 void ContinuousScheduler::handle_prefill_requests(
+    size_t& latency_budget,
+    size_t& estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
     RequestPriorityQueue& waiting_priority_queue,
@@ -156,8 +168,10 @@ void ContinuousScheduler::handle_prefill_requests(
   //
   // NOTE: preempted requests will be pushed in waiting_priority_queue,
   // they may contian many sequences, so we should check here.
+  bool budget_exhausted = false;
+  bool blocks_exhausted = false;
   while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
-         remaining_token_budget > 0 &&
+         remaining_token_budget > 0 && latency_budget > estimate_latency &&
          block_manager_pool_->kv_cache_utilization() <
              FLAGS_prefill_scheduling_memory_usage_threshold) {
     std::shared_ptr<Request> request(waiting_priority_queue.top());
@@ -182,6 +196,7 @@ void ContinuousScheduler::handle_prefill_requests(
     // long sequences may stuck when n>1
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
+    size_t allocated_estimate_latency = 0;
     bool can_schedule = true;
     std::vector<Sequence*> prefill_sequences;
     std::vector<size_t> prefill_sequences_budget;
@@ -193,11 +208,14 @@ void ContinuousScheduler::handle_prefill_requests(
       }
 
       prefill_sequence->sync_result();
-
+      // FIXME: use actual num_tokens to handle
+      // Currently overestimating the number of tokens actually processed when
+      // enable prefix cache
       size_t num_tokens = prefill_sequence->num_need_compute_tokens();
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
         can_schedule = false;
+        budget_exhausted = true;
         break;
       }
 
@@ -238,14 +256,35 @@ void ContinuousScheduler::handle_prefill_requests(
           }
         }
         if (!can_schedule) {
+          // release shared prefix blocks
           block_manager_pool_->deallocate(prefill_sequence.get());
+          blocks_exhausted = true;
           break;
         }
       }
+
+      // OPTIMIZE for multi-slo requests
+      // for prefill requests, check latency after prefix cache match
+      size_t seq_estimate_latency = 0;
+      if (options_.enable_latency_aware_schedule()) {
+        seq_estimate_latency =
+            profile_manager_->predict_step_time(prefill_sequence.get());
+        if (estimate_latency + allocated_estimate_latency +
+                seq_estimate_latency >
+            latency_budget) {
+          // release shared prefix blocks
+          block_manager_pool_->deallocate(prefill_sequence.get());
+          can_schedule = false;
+          budget_exhausted = true;
+          break;
+        }
+      }
+
       prefill_sequences_budget.emplace_back(num_tokens);
       prefill_sequences.emplace_back(prefill_sequence.get());
       allocated_tokens += num_tokens;
       allocated_seqs += 1;
+      allocated_estimate_latency += seq_estimate_latency;
     }
 
     if (!can_schedule) {
@@ -258,6 +297,7 @@ void ContinuousScheduler::handle_prefill_requests(
 
     remaining_token_budget -= allocated_tokens;
     remaining_seq_budget -= allocated_seqs;
+    estimate_latency += allocated_estimate_latency;
     waiting_priority_queue.pop();
     running_requests_.emplace_back(request);
     running_sequences_.insert(running_sequences_.end(),
@@ -270,16 +310,29 @@ void ContinuousScheduler::handle_prefill_requests(
   // maybe can pre-compute if prompt beyond length
   if (running_sequences_.empty() && !waiting_priority_queue.empty() &&
       running_queue_->empty()) {
-    LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
-                  "a single sequence.";
-    // no enough memory to schedule single sequence, just finish the request
     std::shared_ptr<Request> request(waiting_priority_queue.top());
     waiting_priority_queue.pop();
     block_manager_pool_->deallocate(request.get());
-    response_processor_->process_failed_request(
-        request,
-        {StatusCode::RESOURCE_EXHAUSTED,
-         "No enough memory to schedule single sequence"});
+    if (blocks_exhausted) {
+      LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
+                    "a single sequence.";
+      // no enough memory to schedule single sequence, just finish the request
+      response_processor_->process_failed_request(
+          request,
+          {StatusCode::RESOURCE_EXHAUSTED,
+           "No enough memory to schedule single sequence"});
+    } else if (budget_exhausted) {
+      LOG(ERROR) << "Request prompt is too long, no enough budget to schedule "
+                    "a single sequence. Please set a larger budegt.";
+      // no enough memory to schedule single sequence, just finish the request
+      response_processor_->process_failed_request(
+          request,
+          {StatusCode::RESOURCE_EXHAUSTED,
+           "No enough budget to schedule single sequence."});
+    } else {
+      LOG(FATAL) << "Unexpected error: blocks and budget are enough but can "
+                    "not schedule.";
+    }
   }
 
   if (!running_sequences_.empty()) {
@@ -288,6 +341,8 @@ void ContinuousScheduler::handle_prefill_requests(
 }
 
 void ContinuousScheduler::handle_decode_requests(
+    size_t& latency_budget,
+    size_t& estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
     size_t& num_offline_decode_preempt_offline_requests,
@@ -296,7 +351,7 @@ void ContinuousScheduler::handle_decode_requests(
     std::unique_ptr<DecodePriorityQueue>& running_queue) {
   while (!running_queue->empty() &&
          remaining_token_budget > options_.num_speculative_tokens() &&
-         remaining_seq_budget > 0) {
+         latency_budget > estimate_latency && remaining_seq_budget > 0) {
     std::shared_ptr<Request> request = running_queue->top();
     // TODO: check if request is timeout
 
@@ -310,12 +365,24 @@ void ContinuousScheduler::handle_decode_requests(
     bool has_enough_blocks = true;
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
+    size_t allocated_estimate_latency = 0;
     for (auto& sequence : request->sequences()) {
       // skip finished sequence.
       if (sequence->finished()) {
         continue;
       }
       // no budget left
+      size_t seq_estimate_latency = 0;
+      if (options_.enable_latency_aware_schedule()) {
+        seq_estimate_latency =
+            profile_manager_->predict_step_time(sequence.get());
+        if (estimate_latency + allocated_estimate_latency +
+                seq_estimate_latency >
+            latency_budget) {
+          has_enough_budget = false;
+          break;
+        }
+      }
       if (allocated_tokens + options_.num_speculative_tokens() >=
               remaining_token_budget ||
           allocated_seqs >= remaining_seq_budget) {
@@ -338,6 +405,7 @@ void ContinuousScheduler::handle_decode_requests(
       // update the allocated tokens for the sequence
       allocated_tokens += options_.num_speculative_tokens() + 1;
       allocated_seqs += 1;
+      allocated_estimate_latency += seq_estimate_latency;
       candidate_sequences.emplace_back(sequence.get());
       candidate_token_budgets.emplace_back(options_.num_speculative_tokens() +
                                            1);
@@ -359,6 +427,7 @@ void ContinuousScheduler::handle_decode_requests(
                                         candidate_token_budgets.end());
       remaining_token_budget -= allocated_tokens;
       remaining_seq_budget -= allocated_seqs;
+      estimate_latency += allocated_estimate_latency;
 
       continue;
     }
@@ -370,8 +439,10 @@ void ContinuousScheduler::handle_decode_requests(
                               candidate_token_budgets,
                               allocated_tokens,
                               allocated_seqs,
+                              allocated_estimate_latency,
                               remaining_token_budget,
                               remaining_seq_budget,
+                              estimate_latency,
                               true, /*budget_exhausted*/
                               false /*blocks_exhausted*/);
       break;
@@ -420,8 +491,10 @@ void ContinuousScheduler::handle_decode_requests(
                             candidate_token_budgets,
                             allocated_tokens,
                             allocated_seqs,
+                            allocated_estimate_latency,
                             remaining_token_budget,
                             remaining_seq_budget,
+                            estimate_latency,
                             false, /*budget_exhausted*/
                             true /*blocks_exhausted*/);
     break;
@@ -435,8 +508,10 @@ void ContinuousScheduler::handle_abnormal_request(
     const std::vector<size_t>& candidate_token_budgets,
     const size_t& allocated_tokens,
     const size_t& allocated_seqs,
+    size_t& allocated_estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
+    size_t& estimate_latency,
     bool budget_exhausted,
     bool blocks_exhausted) {
   std::shared_ptr<Request> request = running_queue->top();
@@ -495,6 +570,7 @@ void ContinuousScheduler::handle_abnormal_request(
                                       candidate_token_budgets.end());
     remaining_token_budget -= allocated_tokens;
     remaining_seq_budget -= allocated_seqs;
+    estimate_latency += allocated_estimate_latency;
   }
 }
 
@@ -632,6 +708,11 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   running_sequences_.clear();
   running_sequences_budgets_.clear();
 
+  // maintain estimate_latency for current batch for support requests with
+  // different ttft TO IMPROVE: use min remaining time (i.e. slo - elapsed_time)
+  // of the reuquest in current decode queue to replace.
+  size_t latency_budget = options_.global_ttft_ms();
+  size_t estimate_latency = 0;
   // remaining budget for the current batch
   size_t remaining_token_budget = options_.max_tokens_per_batch();
   size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
@@ -641,28 +722,37 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   size_t num_online_prefill_preempt_offline_requests = 0;
   size_t num_online_decode_preempt_offline_requests = 0;
   // TO IMPROVE?: handle online decode request before prefill offline request
-  handle_prefill_requests(remaining_token_budget,
+  handle_prefill_requests(latency_budget,
+                          estimate_latency,
+                          remaining_token_budget,
                           remaining_seq_budget,
                           waiting_priority_queue_,
                           num_online_prefill_preempt_offline_requests,
                           finished_requests);
-  handle_prefill_requests(remaining_token_budget,
+  handle_prefill_requests(latency_budget,
+                          estimate_latency,
+                          remaining_token_budget,
                           remaining_seq_budget,
                           waiting_priority_queue_offline_,
                           num_online_prefill_preempt_offline_requests,
                           finished_requests);
 
   if (running_sequences_.empty()) {
+    latency_budget = options_.global_tpot_ms();
     // Handle decoding requests.
     // no prefill request, schedule the decode requests in the running priority
     // queue
-    handle_decode_requests(remaining_token_budget,
+    handle_decode_requests(latency_budget,
+                           estimate_latency,
+                           remaining_token_budget,
                            remaining_seq_budget,
                            num_offline_decode_preempt_offline_requests,
                            num_online_decode_preempt_online_requests,
                            num_online_decode_preempt_offline_requests,
                            running_queue_);
-    handle_decode_requests(remaining_token_budget,
+    handle_decode_requests(latency_budget,
+                           estimate_latency,
+                           remaining_token_budget,
                            remaining_seq_budget,
                            num_offline_decode_preempt_offline_requests,
                            num_online_decode_preempt_online_requests,

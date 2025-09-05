@@ -91,10 +91,6 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // corresponding TTFT for calculating the estimated TTFT of requests.
   void profile_ttft();
 
-  // Generate a prefill request of token_length and execute inference, finally
-  // returning the inference time.
-  int64_t run_prefill_request(int32_t token_length, int32_t vocab_size);
-
   // check remote instance info, if not exist, get from master service
   bool check_remote_instance_info(const std::string& instance_name);
 
