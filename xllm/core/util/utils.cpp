@@ -20,8 +20,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
-#include <iomanip>
-#include <iostream>
 
 namespace xllm {
 namespace util {
@@ -125,24 +123,6 @@ bool match_suffix(const Slice<int32_t>& data, const Slice<int32_t>& suffix) {
   const auto data_start = data.data() + (data_len - suf_len);
   const auto data_end = data.data() + data_len;
   return std::equal(data_start, data_end, suffix.data());
-}
-
-constexpr uint32_t MURMUR_HASH3_VALUE_LEN = 16;
-void print_hex_array(uint8_t* array) {
-  for (size_t i = 0; i < MURMUR_HASH3_VALUE_LEN; ++i) {
-    unsigned char uc = static_cast<unsigned char>(array[i]);
-    std::cout << std::hex << std::setw(2) << std::setfill('0')
-              << static_cast<int>(uc);
-
-    if (i % MURMUR_HASH3_VALUE_LEN == MURMUR_HASH3_VALUE_LEN - 1) {
-      std::cout << std::endl;
-    }
-
-    else {
-      std::cout << " ";
-    }
-  }
-  std::cout << std::dec << std::endl;
 }
 
 }  // namespace util
