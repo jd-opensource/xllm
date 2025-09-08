@@ -200,7 +200,8 @@ void Qwen2_5VisionEncoderImpl::pad_qkv_weights() {
   at_weight_tensors_[IN_WATTENTION_OUT_WEIGHT] = out_proj_weight;
 }
 void Qwen2_5VisionEncoderImpl::merge_loaded_weights() {
-  pad_qkv_weights();
+  // spilt pack qkv weight when enable tp
+  get_weights_col_packed_qkv();
   if (encode_param_.worldSize > 1) {
     // merge qkv weight
     auto new_qkv_weight = torch::cat({at_weight_tensors_[IN_VISION_Q_WEIGHT],
@@ -222,6 +223,8 @@ void Qwen2_5VisionEncoderImpl::merge_loaded_weights() {
     at_weight_tensors_[IN_VISION_K_BIAS] = torch::zeros({1}).to(device_);
     at_weight_tensors_[IN_VISION_V_BIAS] = torch::zeros({1}).to(device_);
   }
+  // pad qkv weights
+  pad_qkv_weights();
   // merge gate up
   auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_GATE_WEIGHT],
                                     at_weight_tensors_[IN_MLP_UP_WEIGHT]},
@@ -232,6 +235,7 @@ void Qwen2_5VisionEncoderImpl::merge_loaded_weights() {
                                  0);
   at_weight_tensors_[IN_MLP_GATE_BIAS] = new_mlp_bias;
   at_weight_tensors_[IN_MLP_UP_BIAS] = torch::zeros({1}).to(device_);
+  // pad mlp weights
   pad_mlp_weights();
   c10_npu::NPUCachingAllocator::emptyCache();
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
