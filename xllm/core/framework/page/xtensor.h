@@ -56,6 +56,7 @@ class XTensor final {
   }
 
   const Options& options() const { return options_; }
+  torch::ScalarType dtype() const { return dtype_; }
 
  private:
   void reserve_base_ptr();

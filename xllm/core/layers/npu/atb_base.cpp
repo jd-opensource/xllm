@@ -102,6 +102,43 @@ torch::Dtype ATBBase::string_2_dtype(const std::string& dtype_str) {
   throw std::runtime_error("Unsupported dtype string");
 }
 
+atb::Tensor ATBBase::XTensor2Tensor(
+    const std::shared_ptr<xllm::XTensor>& xtensor) {
+  static std::map<at::ScalarType, aclDataType> dtypeMap = {
+      {at::ScalarType::Bool, ACL_BOOL},
+      {at::ScalarType::Byte, ACL_UINT8},
+      {at::ScalarType::Char, ACL_INT8},
+      {at::ScalarType::Half, ACL_FLOAT16},
+      {at::ScalarType::Float, ACL_FLOAT},
+      {at::ScalarType::Int, ACL_INT32},
+      {at::ScalarType::Long, ACL_INT64},
+      {at::ScalarType::BFloat16, ACL_BF16},
+  };
+
+  atb::Tensor tensor;
+  // continuous kvcache only support ND format
+  tensor.desc.format = ACL_FORMAT_ND;
+  tensor.deviceData = xtensor->get_base_ptr();
+
+  tensor.desc.shape.dimNum = 4;
+  tensor.desc.shape.dims[0] = 0;
+  tensor.desc.shape.dims[1] = 128;  // block_size
+  tensor.desc.shape.dims[2] =
+      xtensor->options().num_kv_heads();                       // num_kv_heads
+  tensor.desc.shape.dims[3] = xtensor->options().head_size();  // head_size
+
+  auto it = dtypeMap.find(xtensor->dtype());
+  if (it != dtypeMap.end()) {
+    tensor.desc.dtype = it->second;
+  } else {
+    throw std::runtime_error("XTensor2Tensor: not support dtype");
+  }
+
+  tensor.dataSize = 0;
+
+  return tensor;
+}
+
 void ATBBase::correct_tensor_dtype(torch::Tensor& tensor,
                                    const std::string& tensorName) {
   if (absl::EndsWith(tensorName, "deq_scale") && torch_dtype_ == "bfloat16") {

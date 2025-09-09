@@ -145,6 +145,8 @@ class ATBBase {
 
   void run_task(std::string taskName, std::function<int()> task) const;
 
+  atb::Tensor XTensor2Tensor(const std::shared_ptr<xllm::XTensor>& xtensor);
+
   torch::Dtype string_2_dtype(const std::string& dtype_str);
 
   void correct_tensor_dtype(torch::Tensor& tensor,
