@@ -23,7 +23,7 @@ limitations under the License.
 
 DEFINE_string(host, "", "Host name for brpc server.");
 
-DEFINE_int32(port, 18000, "Port for brpc server.");
+DEFINE_int32(port, 8010, "Port for brpc server.");
 
 DEFINE_int32(idle_timeout_s,
              -1,
@@ -105,7 +105,7 @@ DEFINE_double(max_memory_utilization,
 
 // --- scheduler config ---
 
-DEFINE_int32(max_tokens_per_batch, 20000, "Max number of tokens per batch.");
+DEFINE_int32(max_tokens_per_batch, 20480, "Max number of tokens per batch.");
 
 DEFINE_int32(max_seqs_per_batch, 256, "Max number of sequences per batch.");
 
@@ -132,7 +132,7 @@ DEFINE_bool(use_zero_evict,
             "Use ZeroEvictionScheduler but ContinuousScheduler.");
 
 DEFINE_int32(max_decode_token_per_sequence,
-             200,
+             256,
              "Max decode token per sequence.");
 
 // --- parallel config ---
