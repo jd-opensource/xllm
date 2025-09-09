@@ -36,6 +36,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
+#include "framework/page/multi_layer_xtensor_transfer.h"
 #include "framework/parallel_state.h"
 #include "llm_worker_impl.h"
 #include "runtime/worker.h"
@@ -65,7 +66,6 @@ LLMEngine::LLMEngine(const runtime::Options& options,
     FLAGS_enable_atb_comm_multiprocess = (options.nnodes() > 1);
 #endif
   }
-  FLAGS_enable_mla = options.enable_mla();
 
   // setup all workers and create worker clients in nnode_rank=0 engine side.
   setup_workers(options);
@@ -92,8 +92,10 @@ bool LLMEngine::init() {
 
   auto kv_cache_cap = estimate_kv_cache_capacity();
 
-  if (!allocate_kv_cache(kv_cache_cap)) {
-    LOG(ERROR) << "Failed to initialize kv cache";
+  if (!(FLAGS_enable_continuous_kvcache
+            ? allocate_continuous_kv_cache(kv_cache_cap)
+            : allocate_kv_cache(kv_cache_cap))) {
+    LOG(ERROR) << "Failed to initialize  kv cache";
     return false;
   }
 
@@ -233,13 +235,23 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
   kv_cache_cap.slot_size = slot_size;
 
-  // compute kv cache n_blocks
-  const int32_t block_size = options_.block_size();
-  const int64_t block_size_in_bytes = block_size * slot_size;
-  kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                          (args_.n_layers() * block_size_in_bytes);
-  CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
-
+  if (!FLAGS_enable_continuous_kvcache) {
+    // compute kv cache n_blocks
+    const int32_t block_size = options_.block_size();
+    const int64_t block_size_in_bytes = block_size * slot_size;
+    kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
+                            (args_.n_layers() * block_size_in_bytes);
+    CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
+  } else {
+    int32_t n_pages = kv_cache_cap.cache_size_in_bytes / FLAGS_granularity_size;
+    if (FLAGS_enable_mla) {
+      n_pages -= n_pages % (args_.n_layers());
+    } else {
+      n_pages -= n_pages % (2 * args_.n_layers());
+    }
+    kv_cache_cap.n_pages = n_pages;
+    CHECK_GT(kv_cache_cap.n_pages, 0) << "no n_pages for kv cache";
+  }
   return kv_cache_cap;
 }
 
@@ -314,6 +326,75 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       return false;
     }
   }
+  return true;
+}
+
+bool LLMEngine::allocate_continuous_kv_cache(
+    const Engine::KVCacheCapacity& kv_cache_cap) {
+  LOG(INFO) << "kv cache capacity: "
+            << "bytes: " << kv_cache_cap.cache_size_in_bytes
+            << ", blocks: " << kv_cache_cap.n_blocks
+            << ", slot_size: " << kv_cache_cap.slot_size;
+
+  std::vector<XTensor::Options> xtensor_options_vec;
+  xtensor_options_vec.reserve(2);
+  // int64_t head_dim = head_dim_;
+  // if (options_.enable_mla()) {
+  //   head_dim = args_.kv_lora_rank() + args_.qk_rope_head_dim();
+  // }
+
+  XTensor::Options k_xtensor_options;
+  XTensor::Options v_xtensor_options;
+  k_xtensor_options.num_kv_heads(n_local_kv_heads_)
+      .max_context_len(args_.max_position_embeddings())
+      .max_seqs_per_batch(options_.max_seqs_per_batch());
+  v_xtensor_options.num_kv_heads(n_local_kv_heads_)
+      .max_context_len(args_.max_position_embeddings())
+      .max_seqs_per_batch(options_.max_seqs_per_batch());
+  if (FLAGS_enable_mla) {
+    k_xtensor_options.head_size(args_.kv_lora_rank());
+    v_xtensor_options.head_size(args_.qk_rope_head_dim());
+  } else {
+    k_xtensor_options.head_size(head_dim_);
+    v_xtensor_options.head_size(head_dim_);
+  }
+
+  xtensor_options_vec.emplace_back(k_xtensor_options);
+  xtensor_options_vec.emplace_back(v_xtensor_options);
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_.size());
+  for (auto& worker : worker_clients_) {
+    futures.push_back(
+        worker->allocate_continuous_kv_cache_async(xtensor_options_vec));
+  }
+  // wait for all futures to complete
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      return false;
+    }
+  }
+
+  int64_t cache_size_per_token = 0;
+  if (FLAGS_enable_mla) {
+    cache_size_per_token =
+        args_.kv_lora_rank() * torch::scalarTypeToTypeMeta(dtype_).itemsize();
+  } else {
+    cache_size_per_token = kv_cache_cap.slot_size / 2;
+  }
+
+  FLAGS_cache_size_per_token = cache_size_per_token;
+
+  // init page manager pool
+  page::Options page_options;
+  page_options.devices(options_.devices())
+      .num_total_pages(kv_cache_cap.n_pages)
+      .num_layers(args_.n_layers())
+      .cache_size_per_token(cache_size_per_token);
+  page_manager_pool_ =
+      std::make_unique<PageManagerPool>(page_options, options_.dp_size());
+
   return true;
 }
 

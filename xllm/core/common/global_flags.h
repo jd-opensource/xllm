@@ -158,3 +158,11 @@ DECLARE_string(store_protocol);
 DECLARE_string(store_master_server_entry);
 
 DECLARE_string(store_metadata_connstring);
+
+DECLARE_bool(enable_continuous_kvcache);
+
+DECLARE_int64(granularity_size);
+
+DECLARE_int64(cache_size_per_token);
+
+DECLARE_int64(buffer_size_per_seq);

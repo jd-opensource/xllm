@@ -194,7 +194,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .enable_kvcache_store(options_.enable_kvcache_store())
         .store_protocol(options_.store_protocol())
         .store_master_server_entry(options_.store_master_server_entry())
-        .store_metadata_connstring(options_.store_metadata_connstring());
+        .store_metadata_connstring(options_.store_metadata_connstring())
+        .enable_continuous_kvcache(options_.enable_continuous_kvcache());
 
     if (options_.device_ip().has_value()) {
       eng_options.device_ip(options_.device_ip().value());

@@ -145,6 +145,9 @@ struct Options {
   // the address of the metadata service (e.g., etcd/Redis) required for
   // Transfer Engine initialization
   PROPERTY(std::string, store_metadata_connstring) = "";
+
+  // enable continuous kvcache
+  PROPERTY(bool, enable_continuous_kvcache) = false;
 };
 
 }  // namespace runtime

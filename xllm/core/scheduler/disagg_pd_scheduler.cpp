@@ -131,18 +131,19 @@ int64_t DisaggPDScheduler::run_prefill_request(int32_t token_length,
                   req_state);
 
   // allocate blocks
-  if (!block_manager_pool_->allocate(request.sequences()[0].get())) {
+  if (!kv_cache_manager_client_->allocate(request.sequences()[0].get())) {
     LOG(FATAL) << "Profiling TTFT failed! Not enough blocks, token length : "
                << token_length;
   }
 
   // build batch
-  auto batches = BatchFactory::get_instance(options_.dp_size())
-                     ->create_batches(
-                         {request.sequences()[0].get()},
-                         {token_length},
-                         block_manager_pool_->get_copy_in_cache_block_infos(),
-                         block_manager_pool_->get_copy_out_cache_block_infos());
+  auto batches =
+      BatchFactory::get_instance(options_.dp_size())
+          ->create_batches(
+              {request.sequences()[0].get()},
+              {token_length},
+              kv_cache_manager_client_->get_copy_in_cache_block_infos(),
+              kv_cache_manager_client_->get_copy_out_cache_block_infos());
 
   absl::Time start_time = absl::Now();
   engine_->step(batches);
@@ -150,7 +151,7 @@ int64_t DisaggPDScheduler::run_prefill_request(int32_t token_length,
     engine_->update_last_step_result(batches);
   }
   const int64_t latency = absl::ToInt64Milliseconds(absl::Now() - start_time);
-  block_manager_pool_->deallocate(&request);
+  kv_cache_manager_client_->deallocate(&request);
 
   return latency;
 }
@@ -550,13 +551,13 @@ void DisaggPDScheduler::prefill_send_first_generation() {
           std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
           req_to_channel_map_.erase(request->request_id());
         }
-        block_manager_pool_->deallocate(request.get());
+        kv_cache_manager_client_->deallocate(request.get());
       } else {
         // release the memory for other requests.
         // TODO: FIXME
         // Here, we should decide whether to recycle the allocated blocks
         // according to whether all the blocks have been transmitted or not.
-        block_manager_pool_->deallocate(request.get());
+        kv_cache_manager_client_->deallocate(request.get());
       }
     }
   });
@@ -616,7 +617,7 @@ bool DisaggPDScheduler::decode_schedule(
   if (!stub) {
     LOG(ERROR) << "Failed to create rpc channel for prefill instance: "
                << prefill_instance_name;
-    block_manager_pool_->deallocate(request.get());
+    kv_cache_manager_client_->deallocate(request.get());
     return false;
   }
 
@@ -1018,7 +1019,7 @@ std::vector<Block> DisaggPDScheduler::allocate_raw_blocks(int token_num,
                                                           int32_t& dp_rank) {
   // When the KV Cache usage reaches the threshold, prefill requests will no
   // longer be scheduled to avoid frequent preemption.
-  if (block_manager_pool_->kv_cache_utilization() <
+  if (kv_cache_manager_client_->kv_cache_utilization() <
       FLAGS_prefill_scheduling_memory_usage_threshold) {
     return allocate_blocks_for(token_num, dp_rank);
   } else {

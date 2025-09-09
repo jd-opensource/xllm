@@ -283,3 +283,23 @@ DEFINE_string(store_master_server_entry,
 DEFINE_string(store_metadata_connstring,
               "",
               "The address of the kv cache store metadata service.");
+
+// --- continuous kv cache config ---
+
+DEFINE_bool(enable_continuous_kvcache,
+            false,
+            "Whether to enable continuous kv cache.");
+
+DEFINE_int64(granularity_size,
+             2 * 1024 * 1024,
+             "Granularity size for one page in bytes, default 2MB, when enable "
+             "continuous kv cache.");
+
+DEFINE_int64(cache_size_per_token,
+             0,
+             "Cache size per token in bytes, default 0, which means it is "
+             "calculated by head_dim and n_local_kv_heads.");
+
+DEFINE_int64(buffer_size_per_seq,
+             0,
+             "Buffer size per sequence in bytes, default 0.");
