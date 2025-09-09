@@ -103,16 +103,17 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       }
 
       // for chunked prefill, we need to estimate latency according to
-      // current_step_handle_tokens TO IMPROVE and REFACTOR: seperate allocate
+      // current_step_handle_tokens.
+      // TO IMPROVE and REFACTOR: seperate allocate
       // prefix cache blocks and compute prefix cache match to estimate latency
       // before acctually allocating blocks
-      // TODO:
       size_t seq_estimate_latency = 0;
       if (options_.enable_latency_aware_schedule()) {
         size_t kv_cache_tokens_num = sequence->kv_state().kv_cache_tokens_num();
         seq_estimate_latency = profile_manager_->predict_step_time(
             current_step_handle_tokens + kv_cache_tokens_num,
-            kv_cache_tokens_num);
+            kv_cache_tokens_num,
+            true);
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
@@ -348,7 +349,8 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
             prefill_sequence->kv_state().kv_cache_tokens_num();
         seq_estimate_latency = profile_manager_->predict_step_time(
             current_step_handle_tokens + kv_cache_tokens_num,
-            kv_cache_tokens_num);
+            kv_cache_tokens_num,
+            true);
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
@@ -440,13 +442,15 @@ void ChunkedPrefillScheduler::handle_remaining_budget(
     remaining_token_budget += token_budget;
     if (options_.enable_latency_aware_schedule()) {
       auto origin_estimate_seq_latency =
-          profile_manager_->predict_step_time(sequence);
+          profile_manager_->predict_step_time(sequence, true);
       // subtract the allocated latency back
       estimate_latency -= origin_estimate_seq_latency;
 
       // check latency budget
       auto cur_estimate_seq_latency = profile_manager_->predict_step_time(
-          remaining_token_budget, sequence->kv_state().kv_cache_tokens_num());
+          remaining_token_budget,
+          sequence->kv_state().kv_cache_tokens_num(),
+          true);
       if (estimate_latency + cur_estimate_seq_latency > latency_budget) {
         // beyond latency budget, break
         break;
@@ -562,13 +566,18 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
       options_.max_tokens_per_chunk_for_prefill();
 
   // maintain estimate_latency for current batch for support requests with
-  // different tpot and ttft only support one unified tpot for ChunkedPrefill TO
-  // IMPROVE: use min remaining time (i.e. tpot_slo - elapsed_time) of the
-  // reuquest in current decode queue to replace.
-  size_t latency_budget = options_.global_tpot_ms();
+  // different tpot. Currently only support one unified tpot for ChunkedPrefill.
+  // TO IMPROVE: use min remaining time (i.e. tpot_slo - elapsed_time) of the
+  // reuquest in current decode queue to replace latency_budget.
+  size_t latency_budget = options_.max_global_tpot_ms();
+  // size_t estimate_latency =
+  // profile_manager_->get_time_predictor()->get_constant_overhead(); // add
+  // constant overhead ahead
   size_t estimate_latency = 0;
   // Max tokens be handled in once chunked prefill schedule.
-  size_t remaining_token_budget = options_.max_tokens_per_batch();
+  size_t remaining_token_budget = options_.enable_profile_token_budget()
+                                      ? profile_manager_->get_token_budget()
+                                      : options_.max_tokens_per_batch();
   size_t remaining_seq_budget = options_.max_seqs_per_batch();
   size_t num_preempted_requests = 0;
   bool budget_exhausted = false;

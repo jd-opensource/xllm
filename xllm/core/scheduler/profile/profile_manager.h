@@ -38,30 +38,50 @@ class ProfileManager {
     // config for profile
     PROPERTY(bool, enable_profile_step_time) = false;
 
+    PROPERTY(bool, enable_profile_token_budget) = false;
+
     PROPERTY(int32_t, profile_max_prompt_length) = 2048;
 
-    PROPERTY(bool, if_profile_kv_blocks) = true;
+    PROPERTY(bool, enable_profile_kv_blocks) = true;
+
+    PROPERTY(int32_t,
+             max_tokens_per_batch) = std::numeric_limits<int32_t>::max();
+
+    PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
+
+    PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
   };
   ProfileManager(Engine* engine, const Options& options);
 
-  int32_t get_token_budget(int32_t tpot_slo_ms);
+  int32_t get_token_budget();
+  // for single sequence
+  int32_t predict_step_time(int32_t length,
+                            int32_t prefix_length = 0,
+                            bool if_need_add_constant_term = true);
 
-  int32_t predict_step_time(int32_t length, int32_t prefix_length);
-
-  int32_t predict_step_time(Sequence* sequence);
+  int32_t predict_step_time(Sequence* sequence,
+                            bool if_need_add_constant_term = true);
+  // for single batch or sequences
+  int32_t predict_step_time(int32_t length,
+                            int32_t prefix_length,
+                            int32_t batch_size);
 
   int32_t predict_step_time(std::vector<Sequence*>& sequences);
   // Generate a request of token_length and prefix_length, finally
   // executing and returning the inference time.
   int32_t run_request(int32_t token_length,
                       int32_t prefix_length,
-                      int32_t vocab_size);
+                      int32_t vocab_size,
+                      int32_t batch_size = 1,
+                      int32_t extra_token_length = 0);
 
   void train_time_predictor(
       std::vector<std::tuple<int32_t, int32_t, int32_t>> time_profiling_data);
 
   void train_time_predictor(
       std::vector<std::pair<int32_t, int32_t>> time_profiling_data);
+
+  TimePredictor* get_time_predictor() { return time_predictor_.get(); }
 
  private:
   void dump_step_time_profile_to_file(
@@ -71,11 +91,25 @@ class ProfileManager {
       const std::vector<std::tuple<int32_t, int32_t, int32_t>>&
           time_profiling_data);
 
+  std::shared_ptr<Request> generate_single_request(int32_t token_length,
+                                                   int32_t prefix_length,
+                                                   int32_t vocab_size);
+
   std::string generate_filename(const std::string& file_suffix);
 
   void profile_step_time(bool if_dump_to_file);
 
-  void profile_token_budget(int32_t tpot_slo_ms);
+  void eval_sequence_latency_prediction();
+
+  void eval_batch_latency_prediction();
+
+  void profile_token_budget();
+
+  bool check_if_satisfy_slo(int32_t num_tokens, int32_t tpot_slo_ms);
+
+  int32_t binary_search_max_tokens(int32_t tpot_slo_ms,
+                                   int32_t lower_bound,
+                                   int32_t upper_bound);
 
   std::unique_ptr<TimePredictor> time_predictor_;
 
@@ -84,6 +118,12 @@ class ProfileManager {
   Engine* engine_;
 
   BlockManagerPool* block_manager_pool_;
+
+  int32_t profile_length_step_ = 256;
+
+  int32_t profile_count_per_step_ = 3;
+
+  int32_t profile_token_budget_ = std::numeric_limits<int32_t>::max();
 };
 
 }  // namespace xllm

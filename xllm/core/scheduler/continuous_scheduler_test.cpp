@@ -73,10 +73,10 @@ ContinuousScheduler::Options create_scheduler_options(
     int32_t max_tokens_per_chunk_for_prefill,
     int32_t dp_size,
     const std::string& priority_strategy = "FCFS",
-    bool if_profile_kv_blocks = true,
+    bool enable_profile_kv_blocks = true,
     bool enable_latency_aware_schedule = false,
-    int32_t global_ttft_ms = std::numeric_limits<int32_t>::max(),
-    int32_t global_tpot_ms = std::numeric_limits<int32_t>::max()) {
+    int32_t max_global_ttft_ms = std::numeric_limits<int32_t>::max(),
+    int32_t max_global_tpot_ms = std::numeric_limits<int32_t>::max()) {
   ContinuousScheduler::Options opt;
   opt.num_speculative_tokens_ = num_speculative_tokens;
   opt.max_tokens_per_chunk_for_prefill_ = max_tokens_per_chunk_for_prefill;
@@ -84,10 +84,10 @@ ContinuousScheduler::Options create_scheduler_options(
   opt.max_seqs_per_batch_ = max_seqs_per_batch;
   opt.dp_size_ = dp_size;
   opt.priority_strategy_ = priority_strategy;
-  opt.if_profile_kv_blocks_ = if_profile_kv_blocks;
+  opt.enable_profile_kv_blocks_ = enable_profile_kv_blocks;
   opt.enable_latency_aware_schedule_ = enable_latency_aware_schedule;
-  opt.global_ttft_ms_ = global_ttft_ms;
-  opt.global_tpot_ms_ = global_tpot_ms;
+  opt.max_global_ttft_ms_ = max_global_ttft_ms;
+  opt.max_global_tpot_ms_ = max_global_tpot_ms;
   return opt;
 }
 

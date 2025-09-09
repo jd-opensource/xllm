@@ -88,11 +88,12 @@ LLMMaster::LLMMaster(const Options& options)
       .priority_strategy(options_.priority_strategy())
       .enable_online_preempt_offline(options_.enable_online_preempt_offline())
       .enable_profile_step_time(options_.enable_profile_step_time())
+      .enable_profile_token_budget(options_.enable_profile_token_budget())
       .enable_latency_aware_schedule(options_.enable_latency_aware_schedule())
       .profile_max_prompt_length(options_.profile_max_prompt_length())
-      .if_profile_kv_blocks(options_.if_profile_kv_blocks())
-      .global_ttft_ms(options_.global_ttft_ms())
-      .global_tpot_ms(options_.global_tpot_ms());
+      .enable_profile_kv_blocks(options_.enable_profile_kv_blocks())
+      .max_global_ttft_ms(options_.max_global_ttft_ms())
+      .max_global_tpot_ms(options_.max_global_tpot_ms());
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {

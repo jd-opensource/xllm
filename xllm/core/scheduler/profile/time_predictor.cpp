@@ -63,6 +63,15 @@ void TimePredictor::fit(
   LOG(INFO) << equation.str();
 }
 
+int32_t TimePredictor::get_constant_overhead() {
+  double result = coefficients_(0);
+  if (result < 0) {
+    LOG(ERROR) << "Negative constant term: " << result;
+    result = 0;
+  }
+  return static_cast<int32_t>(result);
+}
+
 void TimePredictor::fit(
     const std::vector<std::tuple<int32_t, int32_t, int32_t>>&
         time_profiling_data) {
@@ -75,11 +84,12 @@ void TimePredictor::fit(
     int32_t prefix_length = std::get<1>(time_profiling_data[i]);
     int32_t diff = token_length - prefix_length;
 
-    matrix(i, 0) = diff * diff;           // (token_length-prefix_length)^2
-    matrix(i, 1) = diff;                  // (token_length-prefix_length)
-    matrix(i, 2) = diff * prefix_length;  // prefix_length
-    matrix(i, 3) = prefix_length;         // (token_length-prefix_length)
-    matrix(i, 4) = 1.0;                   // constant
+    matrix(i, 0) = 1.0;          // the index 0 is always for constant
+    matrix(i, 1) = diff * diff;  // (token_length-prefix_length)^2
+    matrix(i, 2) = diff;         // (token_length-prefix_length)
+    matrix(i, 3) =
+        diff * prefix_length;      // (token_length-prefix_length)*prefix_length
+    matrix(i, 4) = prefix_length;  // prefix_length
   }
   // construct target vector
   Eigen::VectorXd target(m);
@@ -89,19 +99,24 @@ void TimePredictor::fit(
   // get coefficients
   coefficients_ = matrix.colPivHouseholderQr().solve(target);
   // output equation
-  LOG(INFO) << "Fitted equation: time = " << coefficients_(0) << " * diff^2 + "
-            << coefficients_(1) << " * diff + " << coefficients_(2)
-            << " * (diff * prefix_length) + " << coefficients_(3)
-            << " * prefix_length + " << coefficients_(4);
+  LOG(INFO) << "Fitted equation: time = " << coefficients_(1) << " * diff^2 + "
+            << coefficients_(2) << " * diff + " << coefficients_(3)
+            << " * (diff * prefix_length) + " << coefficients_(4)
+            << " * prefix_length + " << coefficients_(0);
 }
 
-int32_t TimePredictor::predict_time(int32_t length, int32_t prefix_length) {
+int32_t TimePredictor::predict_time(int32_t length,
+                                    int32_t prefix_length,
+                                    bool if_need_add_constant_term) {
   double result = 0.0;
+  if (if_need_add_constant_term) {
+    result = coefficients_(0);
+  }
   if (!if_profile_prefix_) {
     // use prefix-free profile
     int32_t effective_length = length - prefix_length;
-    double power = 1.0;
-    for (int32_t i = 0; i < coefficients_.size(); ++i) {
+    double power = effective_length;
+    for (int32_t i = 1; i < coefficients_.size(); ++i) {
       result += coefficients_(i) * power;
       power *= effective_length;
     }
@@ -109,12 +124,12 @@ int32_t TimePredictor::predict_time(int32_t length, int32_t prefix_length) {
   } else {
     // prefix profile
     int32_t diff = length - prefix_length;
-    result = coefficients_(0) * diff * diff + coefficients_(1) * diff +
-             coefficients_(2) * diff * prefix_length +
-             coefficients_(3) * prefix_length + coefficients_(4);
+    result += (coefficients_(1) * diff * diff + coefficients_(2) * diff +
+               coefficients_(3) * diff * prefix_length +
+               coefficients_(4) * prefix_length);
   }
   if (result < 0) {
-    LOG(WARNING) << "Negative time prediction: " << result;
+    LOG(ERROR) << "Negative time prediction: " << result;
     result = 0;
   }
   return static_cast<int32_t>(result);

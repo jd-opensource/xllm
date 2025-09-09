@@ -19,10 +19,10 @@ limitations under the License.
 
 namespace xllm {
 
-// Predictor for predicting TTFT based on input length
+// Predictor for predicting time based on input length
 class TimePredictor final {
  public:
-  TimePredictor(bool if_profile_prefix);
+  explicit TimePredictor(bool if_profile_prefix);
 
   void fit(const std::vector<std::pair<int32_t, int32_t>>& time_profiling_data);
 
@@ -31,7 +31,11 @@ class TimePredictor final {
 
   ~TimePredictor() = default;
 
-  int32_t predict_time(int32_t length, int32_t prefix_length = 0);
+  int32_t predict_time(int32_t length,
+                       int32_t prefix_length = 0,
+                       bool if_need_add_constant_term = true);
+
+  int32_t get_constant_overhead();
 
  private:
   Eigen::VectorXd coefficients_;

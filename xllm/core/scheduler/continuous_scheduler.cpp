@@ -53,14 +53,21 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
 
   last_batch_.resize(options_.dp_size());
 
-  ProfileManager::Options profile_manager_options;
-  profile_manager_options.dp_size(options.dp_size())
-      .enable_schedule_overlap(options.enable_schedule_overlap())
-      .enable_profile_step_time(options.enable_profile_step_time())
-      .profile_max_prompt_length(options.profile_max_prompt_length())
-      .if_profile_kv_blocks(options.if_profile_kv_blocks());
-  profile_manager_ =
-      std::make_unique<ProfileManager>(engine, profile_manager_options);
+  if (options.enable_profile_token_budget() ||
+      options.enable_latency_aware_schedule()) {
+    ProfileManager::Options profile_manager_options;
+    profile_manager_options.dp_size(options.dp_size())
+        .enable_schedule_overlap(options.enable_schedule_overlap())
+        .enable_profile_step_time(options.enable_profile_step_time())
+        .profile_max_prompt_length(options.profile_max_prompt_length())
+        .enable_profile_kv_blocks(options.enable_profile_kv_blocks())
+        .max_tokens_per_batch(options.max_tokens_per_batch())
+        .max_global_tpot_ms(options.max_global_tpot_ms())
+        .max_global_ttft_ms(options.max_global_ttft_ms())
+        .enable_profile_token_budget(options.enable_profile_token_budget());
+    profile_manager_ =
+        std::make_unique<ProfileManager>(engine, profile_manager_options);
+  }
 
   response_processor_ = std::make_unique<AsyncResponseProcessor>(
       engine_->tokenizer(),
@@ -268,7 +275,7 @@ void ContinuousScheduler::handle_prefill_requests(
       size_t seq_estimate_latency = 0;
       if (options_.enable_latency_aware_schedule()) {
         seq_estimate_latency =
-            profile_manager_->predict_step_time(prefill_sequence.get());
+            profile_manager_->predict_step_time(prefill_sequence.get(), false);
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
@@ -375,7 +382,7 @@ void ContinuousScheduler::handle_decode_requests(
       size_t seq_estimate_latency = 0;
       if (options_.enable_latency_aware_schedule()) {
         seq_estimate_latency =
-            profile_manager_->predict_step_time(sequence.get());
+            profile_manager_->predict_step_time(sequence.get(), false);
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
@@ -709,9 +716,10 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   running_sequences_budgets_.clear();
 
   // maintain estimate_latency for current batch for support requests with
-  // different ttft TO IMPROVE: use min remaining time (i.e. slo - elapsed_time)
-  // of the reuquest in current decode queue to replace.
-  size_t latency_budget = options_.global_ttft_ms();
+  // different ttft. TO IMPROVE: use min remaining time (i.e. slo -
+  // elapsed_time) of the reuquest in current decode queue to replace current
+  // latency_budget.
+  size_t latency_budget = options_.max_global_ttft_ms();
   size_t estimate_latency = 0;
   // remaining budget for the current batch
   size_t remaining_token_budget = options_.max_tokens_per_batch();
@@ -738,7 +746,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
                           finished_requests);
 
   if (running_sequences_.empty()) {
-    latency_budget = options_.global_tpot_ms();
+    latency_budget = options_.max_global_tpot_ms();
     // Handle decoding requests.
     // no prefill request, schedule the decode requests in the running priority
     // queue
