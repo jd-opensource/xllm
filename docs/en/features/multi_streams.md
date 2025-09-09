@@ -13,9 +13,9 @@ This overlap of computation and communication effectively hides the communicatio
 
 ## Usage
 
-xLLM provides the gflags parameter enable_comp_comm_overlap, which defaults to false. To enable this feature, set it to true in xLLM’s service startup script, as:
+xLLM provides the gflags parameter `enable_multi_stream_parallel`, which defaults to false. To enable this feature, set it to true in xLLM’s service startup script, as:
 ```shell
---enable_comp_comm_overlap=true
+--enable_multi_stream_parallel=true
 ```
 
 

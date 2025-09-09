@@ -150,6 +150,7 @@ int run() {
       .store_protocol(FLAGS_store_protocol)
       .store_master_server_entry(FLAGS_store_master_server_entry)
       .store_metadata_connstring(FLAGS_store_metadata_connstring)
+      .enable_multi_stream_parallel(FLAGS_enable_multi_stream_parallel)
       .enable_profile_step_time(FLAGS_enable_profile_step_time)
       .enable_profile_token_budget(FLAGS_enable_profile_token_budget)
       .enable_latency_aware_schedule(FLAGS_enable_latency_aware_schedule)

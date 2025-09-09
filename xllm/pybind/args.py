@@ -35,6 +35,7 @@ class ArgumentParser:
         self.parser.add_argument('--enable_disagg_pd', action='store_true', help='Enable disaggregated prefill and decode execution.')
         self.parser.add_argument('--enable_schedule_overlap', action='store_true', help='Whether to enable schedule overlap.')
         self.parser.add_argument('--kv_cache_transfer_mode', type=str, default='PUSH', help='The mode of kv cache transfer(e.g. PUSH, PULL).')
+        self.parser.add_argument('--enable_multi_stream_parallel', action='store_true', help='Whether to enable computation communication overlap.')
 
     def parse_args(self):
         return self.parser.parse_args()

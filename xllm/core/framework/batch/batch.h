@@ -75,12 +75,15 @@ class Batch {
   // process the accepted output embedding
   void process_embedding_output(const torch::Tensor& embedding);
 
-  // split the whole batch into several micro batches
-  std::vector<Batch> split(const size_t num_micro_batches);
-
   const std::vector<uint32_t>& get_allowed_max_tokens() const {
     return allowed_max_tokens_;
   }
+
+  void set_batch_prefill_status(const bool all_seqs_in_prefill) {
+    all_seqs_in_prefill_ = all_seqs_in_prefill;
+  }
+
+  bool get_batch_prefill_status() const { return all_seqs_in_prefill_; }
 
  private:
   bool update_sequence_state(Sequence* seq, bool enable_schedule_overlap);
@@ -102,6 +105,9 @@ class Batch {
 
   // mm_data in the batch
   std::vector<MMData> mm_data_vec_;
+
+  // all sequences in this batch are in prefill stage
+  bool all_seqs_in_prefill_ = true;
 };
 
 }  // namespace xllm

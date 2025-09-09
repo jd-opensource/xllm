@@ -119,4 +119,14 @@ inline bool file_exists(const std::string& path) {
   return file.good();
 }
 
+inline torch::Tensor safe_concat(const torch::Tensor& t1,
+                                 const torch::Tensor& t2,
+                                 const uint32_t dim) {
+  if (t1.defined() && t2.defined()) {
+    return torch::cat({t1, t2}, dim);
+  } else if (!t2.defined()) {
+    return t1;
+  }
+}
+
 }  // namespace xllm

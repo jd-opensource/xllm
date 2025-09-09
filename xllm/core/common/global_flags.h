@@ -159,6 +159,8 @@ DECLARE_string(store_master_server_entry);
 
 DECLARE_string(store_metadata_connstring);
 
+DECLARE_bool(enable_multi_stream_parallel);
+
 DECLARE_bool(enable_profile_step_time);
 
 DECLARE_bool(enable_profile_token_budget);

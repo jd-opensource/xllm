@@ -315,3 +315,11 @@ DEFINE_string(store_master_server_entry,
 DEFINE_string(store_metadata_connstring,
               "",
               "The address of the kv cache store metadata service.");
+
+// --- for computation communication parallel ---
+
+DEFINE_bool(
+    enable_multi_stream_parallel,
+    false,
+    "Whether to enable computation communication parallel by two streams "
+    "and two micro batches in prefill stage.");

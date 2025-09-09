@@ -22,10 +22,11 @@ cc_library(
 
 cc_test(
   NAME
-    rejection_sampler_test
+    sampler_test
   SRCS
     rejection_sampler_test.cpp
     rejection_sampler.cpp
+    sampling_params_test.cpp
   DEPS
     absl::strings
     GTest::gtest_main
@@ -33,12 +34,12 @@ cc_test(
     :sampler
     glog::glog
 )
-target_link_libraries(rejection_sampler_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
-target_link_libraries(rejection_sampler_test
+target_link_libraries(sampler_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
+target_link_libraries(sampler_test
                       PUBLIC
                       Python::Python
                       $<$<BOOL:${USE_NPU}>:ascendcl>
                       $<$<BOOL:${USE_NPU}>:hccl>
                       $<$<BOOL:${USE_NPU}>:c_sec>
                       $<$<BOOL:${USE_NPU}>:nnopbase>)
-add_dependencies(rejection_sampler_test brpc-static)
+add_dependencies(sampler_test brpc-static)

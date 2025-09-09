@@ -43,11 +43,10 @@ std::vector<Batch> BatchFactory::create_batches(
 
     // if dp enabled, each sequence is required to
     // dispatch to the same rank in the whole lifetime
-    if (sequence->dp_rank() >= 0) {
-      batches[sequence->dp_rank()].add(sequence, token_budget);
-    } else {
-      batches[i % dp_size_].add(sequence, token_budget);
-      sequence->set_dp_rank(i % dp_size_);
+    batches[sequence->dp_rank()].add(sequence, token_budget);
+    if (sequence->stage() == SequenceStage::DECODE &&
+        sequence->kv_state().kv_cache_tokens_num() > 0) {
+      batches[sequence->dp_rank()].set_batch_prefill_status(false);
     }
   }
 

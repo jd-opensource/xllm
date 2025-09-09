@@ -139,4 +139,42 @@ void SamplingParameters::init(
   this->is_embeddings = is_embeddings;
 }
 
+void SamplingParameters::concat(const SamplingParameters& param) {
+  // selected_token_idxes and sample_idxes are accumulated variable across
+  // all sequences in the batch, so the offset of first
+  // SamplingParameters is added to the second SamplingParameters
+  this->selected_token_idxes =
+      safe_concat(this->selected_token_idxes,
+                  (param.selected_token_idxes.defined()
+                       ? (param.selected_token_idxes +
+                          this->selected_token_idxes[-1] + torch::tensor(1))
+                       : param.selected_token_idxes),
+                  0);
+  this->sample_idxes = safe_concat(
+      this->sample_idxes,
+      (param.sample_idxes.defined()
+           ? (param.sample_idxes + this->sample_idxes[-1] + torch::tensor(1))
+           : param.sample_idxes),
+      0);
+  this->frequency_penalties =
+      safe_concat(this->frequency_penalties, param.frequency_penalties, 0);
+  this->repetition_penalties =
+      safe_concat(this->repetition_penalties, param.repetition_penalties, 0);
+  this->temperatures = safe_concat(this->temperatures, param.temperatures, 0);
+  this->top_p = safe_concat(this->top_p, param.top_p, 0);
+  this->top_k = safe_concat(this->top_k, param.top_k, 0);
+  this->unique_token_ids =
+      safe_concat(this->unique_token_ids, param.unique_token_ids, 0);
+  this->unique_token_counts =
+      safe_concat(this->unique_token_counts, param.unique_token_counts, 0);
+  this->unique_token_ids_lens =
+      safe_concat(this->unique_token_ids_lens, param.unique_token_ids_lens, 0);
+  this->do_sample = safe_concat(this->do_sample, param.do_sample, 0);
+  this->logprobs = this->logprobs || param.logprobs;
+  this->is_embeddings = this->is_embeddings || param.is_embeddings;
+  this->max_top_logprobs =
+      std::max(this->max_top_logprobs, param.max_top_logprobs);
+  return;
+}
+
 }  // namespace xllm

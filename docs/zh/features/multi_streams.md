@@ -11,9 +11,9 @@ xLLM在模型图层支持了多流并行功能，将输入的batch拆分成2个m
 
 ## 使用方式
 
-xLLM中提供了gflags参数`enable_comp_comm_overlap`，默认false，如需开启在xLLM的服务启动脚本中设置为true即可，示例如下：
+xLLM中提供了gflags参数`enable_multi_stream_parallel`，默认false，如需开启在xLLM的服务启动脚本中设置为true即可，示例如下：
 ```shell
---enable_comp_comm_overlap=true
+--enable_multi_stream_parallel=true
 ```
 
 

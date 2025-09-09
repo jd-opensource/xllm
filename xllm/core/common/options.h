@@ -141,6 +141,8 @@ class Options {
 
   PROPERTY(std::string, store_metadata_connstring) = "";
 
+  PROPERTY(bool, enable_multi_stream_parallel) = false;
+
   PROPERTY(bool, enable_profile_step_time) = false;
 
   PROPERTY(bool, enable_profile_token_budget) = false;

@@ -78,6 +78,9 @@ struct SamplingParameters {
     return params;
   }
 
+  // concat two SamplingParameters into one
+  void concat(const SamplingParameters& param);
+
   // selected tokens are tokens for sampling the next token,
   // including the generated tokens and the last prompt token
   // IntTensor
