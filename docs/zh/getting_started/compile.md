@@ -19,6 +19,14 @@ sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host 
 | A2        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64 |
 | A3        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64 |
 
+如果下载不下来可以换用下面的源：
+
+| Device    |    Arch     |   Images      |
+|:---------:|:-----------:|:-------------:|
+| A2        |     x86     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts | 
+| A2        |     arm     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64 |
+| A3        |     arm     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64 |
+
 
 ## 安装
 进入到容器后，使用我们的[官方仓库](https://github.com/jd-opensource/xllm)下载编译：

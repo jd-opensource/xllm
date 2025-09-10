@@ -18,6 +18,13 @@ sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host 
 | A2        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64 |
 | A3        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64 |
 
+If you can't download it, you can use the following source instead：
+
+| Device    |    Arch     |   Images      |
+|:---------:|:-----------:|:-------------:|
+| A2        |     x86     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts | 
+| A2        |     arm     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-py3.11-oe24.03-lts-aarch64 |
+| A3        |     arm     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hc-py3.11-oe24.03-lts-aarch64 |
 
 ## Installation
 After entering the container, download and compile using our [official repository](https://github.com/jd-opensource/xllm):

@@ -189,7 +189,7 @@ nav:
       - Online Service: 
         - getting_started/single_node.md
         - getting_started/multi_node.md
-        - getting_started/PD_disagg.md
+        - getting_started/disagg_pd.md
       - Multimodal Support:
         - getting_started/start_vlm_service.md
     - getting_started/scripts.md

@@ -191,7 +191,7 @@ nav:
       - 在线服务: 
         - getting_started/single_node.md
         - getting_started/multi_node.md
-        - getting_started/PD_disagg.md
+        - getting_started/disagg_pd.md
       - 多模态支持:
         - getting_started/start_vlm_service.md
     - getting_started/scripts.md
