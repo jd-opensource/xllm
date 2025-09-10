@@ -124,7 +124,9 @@ inline torch::Tensor safe_concat(const torch::Tensor& t1,
                                  const uint32_t dim) {
   if (t1.defined() && t2.defined()) {
     return torch::cat({t1, t2}, dim);
-  } else if (!t2.defined()) {
+  } else if (!t1.defined()) {
+    return t2;
+  } else {
     return t1;
   }
 }
