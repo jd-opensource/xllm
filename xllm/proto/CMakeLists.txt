@@ -4,6 +4,7 @@ proto_library(
   NAME
     xllm_proto
   SRCS
+    tensor.proto
     common.proto
     completion.proto
     chat.proto
@@ -14,4 +15,5 @@ proto_library(
     disagg_pd.proto
     xllm_service.proto
     xservice.proto
+    image_generation.proto
 )

@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
 #include "models/model_registry.h"
+#include "runtime/dit_master.h"
 #include "runtime/llm_engine.h"
 #include "runtime/llm_master.h"
 #include "runtime/speculative_engine.h"
@@ -116,6 +117,9 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
 
     auto engine = std::make_unique<VLMEngine>(eng_options);
     engine_ = std::move(engine);
+  } else if (type == EngineType::DIT) {
+    LOG(INFO) << "Creating DiT engine";
+    // TODO: create dit engine
   } else if (type == EngineType::SSM) {
     // create a speculative engine if draft model path is provided
     const auto draft_model_path = options_.draft_model_path().value_or("");
@@ -212,6 +216,9 @@ std::unique_ptr<Master> create_master(const std::string& backend,
     return std::make_unique<LLMMaster>(options);
   } else if (backend == "vlm") {
     return std::make_unique<VLMMaster>(options);
+  } else if (backend == "dit") {
+    LOG(INFO) << "creating dit master";
+    return std::make_unique<DITMaster>(options);
   } else {
     LOG(FATAL) << "Failed to create master, backend is" << backend;
     return nullptr;

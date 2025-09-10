@@ -16,33 +16,29 @@ limitations under the License.
 #pragma once
 #include <absl/container/flat_hash_set.h>
 
-#include <memory>
+#include "api_service/api_service_impl.h"
+#include "api_service/call.h"
+#include "api_service/non_stream_call.h"
+#include "image_generation.pb.h"
 
-#include "call.h"
-#include "core/runtime/dit_master.h"
-#include "core/runtime/llm_master.h"
 namespace xllm {
 
-template <typename T>
-class APIServiceImpl {
+using ImageGenerationCall = NonStreamCall<proto::ImageGenerationRequest,
+                                          proto::ImageGenerationResponse>;
+class DITMaster;
+// a class to handle image generation requests
+class ImageGenerationServiceImpl final {
  public:
-  APIServiceImpl(LLMMaster* master, const std::vector<std::string>& models)
-      : master_(master), models_(models.begin(), models.end()) {
-    CHECK(master != nullptr);
-    CHECK(!models_.empty());
-  }
-  virtual ~APIServiceImpl() = default;
+  ImageGenerationServiceImpl(DITMaster* master,
+                             const std::vector<std::string>& models);
+  ImageGenerationServiceImpl() {}
+  // brpc call_data needs to use shared_ptr
+  void process_async(std::shared_ptr<ImageGenerationCall> call);
 
-  void process_async(std::shared_ptr<Call> call) {
-    std::shared_ptr<T> call_cast = std::dynamic_pointer_cast<T>(call);
-    process_async_impl(call_cast);
-  }
-
-  virtual void process_async_impl(std::shared_ptr<T> call) = 0;
-
- protected:
-  LLMMaster* master_;
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ImageGenerationServiceImpl);
   absl::flat_hash_set<std::string> models_;
+  DITMaster* master_ = nullptr;
 };
 
 }  // namespace xllm
