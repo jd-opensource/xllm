@@ -77,20 +77,48 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       }
 
       // no budget left
-      // FIXME: Incorrect conditional judgment. it does not consider the
-      // sequence in the prefill stage and enable prefix cache. need to refactor
-      // to seperate counting actual token and allocating blocks
-      if (allocated_seqs >= remaining_seq_budget ||
-          allocated_tokens + options_.num_speculative_tokens() >=
-              remaining_token_budget) {
-        has_enough_budget = false;
-        break;
-      }
 
       // The max tokens current sequence can handle.
       const size_t assume_max_tokens =
           std::min(max_tokens_per_chunk_for_prefill,
                    remaining_token_budget - allocated_tokens);
+
+      size_t num_tokens = sequence->num_tokens();
+      size_t kv_cache_tokens_num = sequence->kv_state().kv_cache_tokens_num();
+
+      // FIXME: It does not consider the
+      // acutual handle token changes when enabling prefix cache. Need to
+      // refactor to seperate counting actual handling token and allocating
+      // blocks in `allocate_blocks_for`. Distinguish the number of tokens
+      // actually handled by current sequence in the prefill stage and the
+      // decode stage. Now Partially use `num_tokens_to_handle` to replace
+      // `current_step_handle_tokens`.
+      size_t num_tokens_to_handle =
+          sequence->is_prefill_stage()
+              ? std::min(assume_max_tokens, num_tokens - kv_cache_tokens_num)
+              : 1 + options_.num_speculative_tokens();
+
+      if (allocated_seqs + 1 > remaining_seq_budget ||
+          allocated_tokens + num_tokens_to_handle > remaining_token_budget) {
+        has_enough_budget = false;
+        break;
+      }
+      // for chunked prefill, we need to estimate latency according to
+      // `current_step_handle_tokens` which is totally precise.
+      size_t seq_estimate_latency = 0;
+      if (options_.enable_latency_aware_schedule()) {
+        seq_estimate_latency = profile_manager_->predict_step_time(
+            num_tokens_to_handle + kv_cache_tokens_num,
+            kv_cache_tokens_num,
+            true);
+        if (estimate_latency + allocated_estimate_latency +
+                seq_estimate_latency >
+            latency_budget) {
+          has_enough_budget = false;
+          break;
+        }
+      }
+
       // actual tokens be handled,
       // decode: 1 + num_speculative_tokens
       // prefill: std::min(seq.num_tokens(), min_tokens_per_iter_for_prefill)
@@ -107,20 +135,6 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       // TO IMPROVE and REFACTOR: seperate allocate
       // prefix cache blocks and compute prefix cache match to estimate latency
       // before acctually allocating blocks
-      size_t seq_estimate_latency = 0;
-      if (options_.enable_latency_aware_schedule()) {
-        size_t kv_cache_tokens_num = sequence->kv_state().kv_cache_tokens_num();
-        seq_estimate_latency = profile_manager_->predict_step_time(
-            current_step_handle_tokens + kv_cache_tokens_num,
-            kv_cache_tokens_num,
-            true);
-        if (estimate_latency + allocated_estimate_latency +
-                seq_estimate_latency >
-            latency_budget) {
-          has_enough_budget = false;
-          break;
-        }
-      }
 
       // if (sequence->if_cache_block_for_prefill()) {
       //   block_manager_pool_->cache(sequence.get());
@@ -291,6 +305,25 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
         budget_exhausted = true;
         break;
       }
+
+      // OPTIMIZE: for prefill requests, need to compute num_tokens_to_handle
+      // after prefix cache match
+      size_t seq_estimate_latency = 0;
+      if (options_.enable_latency_aware_schedule()) {
+        size_t kv_cache_tokens_num =
+            prefill_sequence->kv_state().kv_cache_tokens_num();
+        seq_estimate_latency = profile_manager_->predict_step_time(
+            num_tokens + kv_cache_tokens_num, kv_cache_tokens_num, true);
+        if (estimate_latency + allocated_estimate_latency +
+                seq_estimate_latency >
+            latency_budget) {
+          block_manager_pool_->deallocate(prefill_sequence.get());
+          can_schedule = false;
+          budget_exhausted = true;
+          break;
+        }
+      }
+
       size_t current_step_handle_tokens = 0;
       if (!allocate_blocks_for(prefill_sequence.get(),
                                num_tokens,
@@ -335,28 +368,6 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
         if (!can_schedule) {
           block_manager_pool_->deallocate(prefill_sequence.get());
           blocks_exhausted = true;
-          break;
-        }
-      }
-
-      // check latency budget
-      // for prefill requests, check latency after prefix cache match
-      size_t seq_estimate_latency = 0;
-      if (options_.enable_latency_aware_schedule()) {
-        // use current_step_handle_tokens to predict for chunked prefill
-        // sequence
-        size_t kv_cache_tokens_num =
-            prefill_sequence->kv_state().kv_cache_tokens_num();
-        seq_estimate_latency = profile_manager_->predict_step_time(
-            current_step_handle_tokens + kv_cache_tokens_num,
-            kv_cache_tokens_num,
-            true);
-        if (estimate_latency + allocated_estimate_latency +
-                seq_estimate_latency >
-            latency_budget) {
-          block_manager_pool_->deallocate(prefill_sequence.get());
-          can_schedule = false;
-          budget_exhausted = true;
           break;
         }
       }
