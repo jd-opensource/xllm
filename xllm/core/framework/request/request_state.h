@@ -24,6 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/sampling/sampling_params.h"
+#include "dit_request_params.h"
 #include "mm_data.h"
 #include "request_output.h"
 #include "stopping_checker.h"
@@ -150,4 +151,18 @@ struct RequestState final {
   std::optional<Call*> call_;
 };
 
+struct DITRequestState {
+ public:
+  DITRequestState(InputParams&& input_params,
+                  GenerationParams&& generation_params)
+      : input_params_(std::move(input_params)),
+        generation_params_(std::move(generation_params)) {}
+  DITRequestState() {}
+  InputParams& input_params() { return input_params_; }
+  GenerationParams& generation_params() { return generation_params_; }
+
+ private:
+  InputParams input_params_;
+  GenerationParams generation_params_;
+};
 }  // namespace xllm
