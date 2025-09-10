@@ -48,6 +48,23 @@ Request::Request(const std::string& request_id,
       slo_ms_(slo_ms) {
   create_sequences_group();
 }
+Request::Request(const std::string& request_id,
+                 const std::string& x_request_id,
+                 const std::string& x_request_time,
+                 const DITRequestState& state,
+                 const std::string& service_request_id,
+                 bool offline,
+                 int32_t slo_ms,
+                 RequestPriority priority)
+    : request_id_(request_id),
+      service_request_id_(service_request_id),
+      x_request_id_(x_request_id),
+      x_request_time_(x_request_time),
+      dit_state_(std::move(state)),
+      created_time_(absl::Now()),
+      offline_(offline),
+      priority_(priority),
+      slo_ms_(slo_ms) {}
 
 void Request::create_sequences_group() {
   SequenceParams sequence_params;

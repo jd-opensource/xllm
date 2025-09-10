@@ -24,6 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/types.h"
+#include "image_generation.pb.h"
 
 namespace xllm {
 struct Usage {
@@ -75,6 +76,22 @@ struct SequenceOutput {
   // the embeddings of the prompt token
   std::optional<std::vector<float>> embeddings;
 };
+struct ImageGenerationOutput {
+  // the index of the sequence in the request.
+  size_t index;
+
+  // the generated image in proto tensor format.
+  proto::Tensor image_tensor;
+
+  // the height of the generated image.
+  int32_t height;
+
+  // the width of the generated image.
+  int32_t width;
+
+  // seed used for image generation.
+  int64_t seed;
+};
 
 struct RequestOutput {
   RequestOutput() = default;
@@ -108,10 +125,44 @@ struct RequestOutput {
   bool cancelled = false;
 };
 
+struct ImageRequestOutput {
+  ImageRequestOutput() = default;
+
+  ImageRequestOutput(Status&& _status) : status(std::move(_status)) {}
+
+  void log_request_status() const;
+
+  // the id of the request.
+  std::string request_id;
+
+  // the id of the request which generated in xllm service.
+  std::string service_request_id;
+
+  // the status of the request.
+  std::optional<Status> status;
+
+  // the output for each sequence in the request.
+  std::vector<ImageGenerationOutput> outputs;
+
+  // whether the request is finished.
+  bool finished = false;
+
+  // whether the request is cancelled.
+  bool cancelled = false;
+};
+
 // callback function for output, return true to continue, false to stop/cancel
 using OutputCallback = std::function<bool(RequestOutput output)>;
-
+// callback function for image request output, return true to continue, false to
+// stop/cancel
+using ImageOutputCallback = std::function<bool(ImageRequestOutput output)>;
+// callback function for batch output, return true to continue, false to
+// stop/cancel
 using BatchOutputCallback =
     std::function<bool(size_t index, RequestOutput output)>;
+// callback function for batch image output, return true to continue, false to
+// stop/cancel
+using BatchImageOutputCallback =
+    std::function<bool(size_t index, ImageRequestOutput output)>;
 
 }  // namespace xllm

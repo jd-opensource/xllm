@@ -43,6 +43,14 @@ class Request {
           bool offline = false,
           int32_t slo_ms = 0,
           RequestPriority priority = RequestPriority::NORMAL);
+  Request(const std::string& request_id,
+          const std::string& x_request_id,
+          const std::string& x_request_time,
+          const DITRequestState& state,
+          const std::string& service_request_id = "",
+          bool offline = false,
+          int32_t slo_ms = 0,
+          RequestPriority priority = RequestPriority::NORMAL);
 
   bool finished() const;
 
@@ -91,7 +99,7 @@ class Request {
   const RequestPriority priority() const { return priority_; }
 
   RequestState& state() { return state_; }
-
+  DITRequestState& dit_state() { return dit_state_; }
   void update_connection_status();
 
  private:
@@ -109,7 +117,7 @@ class Request {
   std::string x_request_time_;
 
   RequestState state_;
-
+  DITRequestState dit_state_;
   // list of sequences to generate completions for the prompt
   // use deque instead of vector to avoid no-copy move for Sequence
   //  std::deque<Sequence> sequences;
