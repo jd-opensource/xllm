@@ -75,7 +75,9 @@ VLMMaster::VLMMaster(const Options& options)
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
-      .enable_decode_response_to_service(enable_decode_response_to_service);
+      .enable_decode_response_to_service(enable_decode_response_to_service)
+      // TODO: support later for VLM.
+      .enable_schedule_overlap(false);
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {
