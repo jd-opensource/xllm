@@ -43,26 +43,15 @@ namespace layer {
 
 class NpuLmHeadImpl : public NpuBaseLayer {
  public:
-  using Task = std::function<int()>;
-  using RunTaskFunc =
-      std::function<void(const std::string& taskName, Task task)>;
-
   explicit NpuLmHeadImpl(const Context& context);
 
   ~NpuLmHeadImpl() {};
 
   void load_state_dict(const StateDict& state_dict) override;
 
-  virtual void verify_loaded_weights(const std::string weight_str) const;
+  void verify_loaded_weights(const std::string weight_str) const override;
 
   void merge_loaded_weights() override;
-
-  void param_from_args(atb_speed::common::LmHeadParam& param,
-                       const ModelArgs& args,
-                       const ParallelArgs& parallel_args,
-                       bool isPrefill);
-
-  int64_t init_layer();
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& seleted_idxes,
@@ -70,16 +59,23 @@ class NpuLmHeadImpl : public NpuBaseLayer {
                         AtbWorkspace& workspace,
                         int nodeId);
 
+ private:
+  void param_from_args(atb_speed::common::LmHeadParam& param,
+                       const ModelArgs& args,
+                       const ParallelArgs& parallel_args,
+                       bool isPrefill);
+
+  int64_t init_layer() override;
+
+  int64_t init_node(atb_speed::Model::Node& node,
+                    atb_speed::common::LmHeadParam& param);
+
   // void build_node_variant_pack(atb_speed::Model::Node& node, torch::Tensor&
   // hidden_states,torch::Tensor&
   // seleted_idxes,std::vector<std::shared_ptr<at::Tensor>>& tensor_storage);
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes);
-
- private:
-  int64_t init_node(atb_speed::Model::Node& node,
-                    atb_speed::common::LmHeadParam& param);
 
   atb_speed::Model::Node lm_head_node_prefill_;
   atb_speed::Model::Node lm_head_node_decode_;

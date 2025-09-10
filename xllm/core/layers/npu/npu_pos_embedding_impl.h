@@ -46,15 +46,9 @@ namespace layer {
 
 class NpuRotaryEmbeddingImpl : public NpuBaseLayer {
  public:
-  using Task = std::function<int()>;
-  using RunTaskFunc =
-      std::function<void(const std::string& taskName, Task task)>;
-
   explicit NpuRotaryEmbeddingImpl(const Context& context);
 
   ~NpuRotaryEmbeddingImpl() {};
-
-  int64_t init_layer();
 
   torch::Tensor forward(const torch::Tensor& cos_sin_pos,
                         const torch::Tensor& position,
@@ -62,12 +56,15 @@ class NpuRotaryEmbeddingImpl : public NpuBaseLayer {
                         AtbWorkspace& workspace,
                         int nodeId);
 
+ private:
+  int64_t init_layer() override;
+
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                const torch::Tensor& cos_sin_pos,
                                const torch::Tensor& position);
 
- private:
   int64_t init_node(atb_speed::Model::Node& node);
+
   atb_speed::Model::Node embedding_node_;
   std::string modelName_;
   std::vector<at::Tensor> atOutTensors_;

@@ -48,13 +48,11 @@ class NpuRmsNormImpl : public NpuBaseLayer {
 
   ~NpuRmsNormImpl() {};
 
-  virtual void load_state_dict(const StateDict& state_dict) override;
+  void load_state_dict(const StateDict& state_dict) override;
 
-  void verify_loaded_weights(const std::string weight_str) const;
+  void verify_loaded_weights(const std::string weight_str) const override;
 
-  virtual void merge_loaded_weights() override;
-
-  virtual int64_t init_layer() override;
+  void merge_loaded_weights() override;
 
   torch::Tensor forward(torch::Tensor& x,
                         atb::Context* context,
@@ -62,10 +60,12 @@ class NpuRmsNormImpl : public NpuBaseLayer {
                         int nodeId);
 
  private:
-  void build_node_variant_pack(atb_speed::Model::Node& node, torch::Tensor& x);
+  int64_t init_layer() override;
 
   int64_t init_node(atb_speed::Model::Node& node,
                     atb::infer::RmsNormParam& param);
+
+  void build_node_variant_pack(atb_speed::Model::Node& node, torch::Tensor& x);
 
   void param_from_args(atb::infer::RmsNormParam& param, const ModelArgs& args);
 

@@ -71,8 +71,6 @@ class NpuBaseLayer : public BaseLayer {
                            aclrtEvent* event,
                            std::atomic<bool>* event_flag);
 
-  void print_atbtensor(const atb::Tensor& tensor, int i);
-
   virtual void run_task(std::string taskName,
                         std::function<int()> task) const override;
 
