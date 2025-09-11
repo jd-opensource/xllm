@@ -95,6 +95,8 @@ DECLARE_string(master_node_addr);
 
 DECLARE_bool(enable_disagg_pd);
 
+DECLARE_bool(enable_pd_ooc);
+
 DECLARE_int32(nnodes);
 
 DECLARE_int32(node_rank);
