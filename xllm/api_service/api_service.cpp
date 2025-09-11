@@ -22,12 +22,15 @@ limitations under the License.
 
 #include "call.h"
 #include "chat.pb.h"
+#include "common.pb.h"
 #include "completion.pb.h"
 #include "core/common/metrics.h"
+#include "core/runtime/dit_master.h"
 #include "core/runtime/llm_master.h"
 #include "core/runtime/vlm_master.h"
 #include "core/util/closure_guard.h"
 #include "embedding.pb.h"
+#include "image_generation.pb.h"
 #include "models.pb.h"
 #include "service_impl_factory.h"
 #include "xllm_metrics.h"
@@ -52,6 +55,10 @@ APIService::APIService(Master* master,
     auto vlm_master = dynamic_cast<VLMMaster*>(master);
     mm_chat_service_impl_ =
         std::make_unique<MMChatServiceImpl>(vlm_master, model_names);
+  } else if (FLAGS_backend == "dit") {
+    image_generation_service_impl_ =
+        std::make_unique<ImageGenerationServiceImpl>(
+            dynamic_cast<DiTMaster*>(master), model_names);
   }
   models_service_impl_ =
       ServiceImplFactory<ModelsServiceImpl>::create_service_impl(
@@ -208,6 +215,49 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
   std::shared_ptr<Call> call = std::make_shared<EmbeddingCall>(
       ctrl, done_guard.release(), req_pb, resp_pb);
   embedding_service_impl_->process_async(call);
+}
+
+void APIService::ImageGeneration(::google::protobuf::RpcController* controller,
+                                 const proto::ImageGenerationRequest* request,
+                                 proto::ImageGenerationResponse* response,
+                                 ::google::protobuf::Closure* done) {
+  // TODO with xllm-service
+}
+
+void APIService::ImageGenerationHttp(
+    ::google::protobuf::RpcController* controller,
+    const proto::HttpRequest* request,
+    proto::HttpResponse* response,
+    ::google::protobuf::Closure* done) {
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto arena = response->GetArena();
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::ImageGenerationRequest>(
+          arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::ImageGenerationResponse>(
+          arena);
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  std::string attachment = std::move(ctrl->request_attachment().to_string());
+  std::string error;
+  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+  std::shared_ptr<ImageGenerationCall> call =
+      std::make_shared<ImageGenerationCall>(
+          ctrl, done_guard.release(), req_pb, resp_pb);
+  image_generation_service_impl_->process_async(call);
 }
 
 void APIService::Models(::google::protobuf::RpcController* controller,

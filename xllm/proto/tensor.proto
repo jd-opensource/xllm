@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package xllm.proto;
+
+message TensorContents
+{
+  repeated bool bool_contents = 1;
+  repeated int32 int_contents = 2;
+  repeated int64 int64_contents = 3;
+  repeated uint32 uint_contents = 4;
+  repeated uint64 uint64_contents = 5;
+  repeated float fp32_contents = 6;
+  repeated double fp64_contents = 7;
+  repeated bytes bytes_contents = 8;
+}
+
+message Tensor {
+  string name = 1;
+  string datatype = 2;
+  repeated int64 shape = 3;
+  TensorContents contents = 4;           
+}

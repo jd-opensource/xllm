@@ -26,7 +26,6 @@ limitations under the License.
 #include "core/common/types.h"
 
 namespace xllm {
-
 struct Usage {
   // the number of tokens in the prompt.
   size_t num_prompt_tokens = 0;
@@ -111,7 +110,8 @@ struct RequestOutput {
 
 // callback function for output, return true to continue, false to stop/cancel
 using OutputCallback = std::function<bool(RequestOutput output)>;
-
+// callback function for batch output, return true to continue, false to
+// stop/cancel
 using BatchOutputCallback =
     std::function<bool(size_t index, RequestOutput output)>;
 

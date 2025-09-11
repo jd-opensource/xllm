@@ -10,6 +10,7 @@ cc_library(
     completion_service_impl.h
     chat_service_impl.h
     embedding_service_impl.h
+    image_generation_service_impl.h
     non_stream_call.h
     service_impl_factory.h
     stream_call.h
@@ -20,6 +21,7 @@ cc_library(
     completion_service_impl.cpp
     chat_service_impl.cpp
     embedding_service_impl.cpp
+    image_generation_service_impl.cpp
     models_service_impl.cpp
   DEPS
     :master

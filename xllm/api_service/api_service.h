@@ -18,6 +18,7 @@ limitations under the License.
 #include "chat_service_impl.h"
 #include "completion_service_impl.h"
 #include "embedding_service_impl.h"
+#include "image_generation_service_impl.h"
 #include "models_service_impl.h"
 #include "xllm_service.pb.h"
 
@@ -60,6 +61,15 @@ class APIService : public proto::XllmAPIService {
                       proto::HttpResponse* response,
                       ::google::protobuf::Closure* done) override;
 
+  void ImageGeneration(::google::protobuf::RpcController* controller,
+                       const proto::ImageGenerationRequest* request,
+                       proto::ImageGenerationResponse* response,
+                       ::google::protobuf::Closure* done) override;
+
+  void ImageGenerationHttp(::google::protobuf::RpcController* controller,
+                           const proto::HttpRequest* request,
+                           proto::HttpResponse* response,
+                           ::google::protobuf::Closure* done) override;
   void Models(::google::protobuf::RpcController* controller,
               const proto::ModelListRequest* request,
               proto::ModelListResponse* response,
@@ -98,6 +108,7 @@ class APIService : public proto::XllmAPIService {
   std::unique_ptr<MMChatServiceImpl> mm_chat_service_impl_;
   std::unique_ptr<EmbeddingServiceImpl> embedding_service_impl_;
   std::unique_ptr<ModelsServiceImpl> models_service_impl_;
+  std::unique_ptr<ImageGenerationServiceImpl> image_generation_service_impl_;
 };
 
 }  // namespace xllm

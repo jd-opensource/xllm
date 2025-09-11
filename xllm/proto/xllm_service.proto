@@ -8,6 +8,7 @@ option cc_generic_services = true;
 import "completion.proto";
 import "chat.proto";
 import "embedding.proto";
+import "image_generation.proto";
 import "models.proto";
 
 message HttpRequest {
@@ -49,6 +50,9 @@ service XllmAPIService {
   rpc Embeddings (EmbeddingRequest) returns (EmbeddingResponse);
   rpc EmbeddingsHttp (HttpRequest) returns (HttpResponse);
 
+  rpc ImageGeneration(ImageGenerationRequest) returns (ImageGenerationResponse);
+  rpc ImageGenerationHttp(HttpRequest) returns (HttpResponse);
+  
   rpc Models (ModelListRequest) returns (ModelListResponse);
   rpc ModelsHttp (HttpRequest) returns (HttpResponse);
 

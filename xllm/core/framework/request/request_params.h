@@ -27,11 +27,12 @@ limitations under the License.
 #include "completion.pb.h"
 #include "core/common/macros.h"
 #include "core/common/types.h"
+#include "dit_request_output.h"
 #include "embedding.pb.h"
+#include "image_generation.pb.h"
 #include "multimodal.pb.h"
 #include "request.h"
 #include "request_output.h"
-
 namespace xllm {
 
 struct RequestParams {
