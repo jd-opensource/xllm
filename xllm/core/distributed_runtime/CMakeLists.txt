@@ -12,6 +12,8 @@ cc_library(
   HDRS
     disagg_pd_service.h
     disagg_pd_service_impl.h
+    pd_ooc_service.h
+    pd_ooc_service_impl.h
     dist_manager.h
     remote_worker.h
     worker_server.h
@@ -19,6 +21,8 @@ cc_library(
   SRCS
     disagg_pd_service.cpp
     disagg_pd_service_impl.cpp
+    pd_ooc_service.cpp
+    pd_ooc_service_impl.cpp
     dist_manager.cpp
     remote_worker.cpp
     worker_server.cpp

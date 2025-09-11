@@ -234,6 +234,11 @@ DEFINE_bool(enable_disagg_pd,
             false,
             "Whether to enable disaggregated prefill and decode execution.");
 
+DEFINE_bool(
+    enable_pd_ooc,
+    false,
+    "Whether to enable online-offline co-location in disaggregated PD mode.");
+
 DEFINE_int32(disagg_pd_port, 7777, "Port for brpc disagg pd server.");
 
 DEFINE_string(instance_role,

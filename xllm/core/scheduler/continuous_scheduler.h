@@ -62,6 +62,8 @@ class ContinuousScheduler : public Scheduler {
     // enable disaggregated PD mode.
     PROPERTY(bool, enable_disagg_pd) = false;
 
+    PROPERTY(bool, enable_pd_ooc) = false;
+
     // enable decode response to service directly
     PROPERTY(bool, enable_decode_response_to_service) = false;
 

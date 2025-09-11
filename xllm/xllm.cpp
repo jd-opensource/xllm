@@ -140,6 +140,7 @@ int run() {
       .xservice_addr(FLAGS_xservice_addr)
       .instance_name(FLAGS_host + ":" + std::to_string(FLAGS_port))
       .enable_disagg_pd(FLAGS_enable_disagg_pd)
+      .enable_pd_ooc(FLAGS_enable_pd_ooc)
       .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .etcd_addr(FLAGS_etcd_addr)
