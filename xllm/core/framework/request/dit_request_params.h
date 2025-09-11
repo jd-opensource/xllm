@@ -24,22 +24,15 @@ struct DiTRequestParams {
 
   // request id
   std::string request_id;
-  std::string service_request_id = "";
   std::string x_request_id;
   std::string x_request_time;
 
   std::string model;
 
-  bool offline = false;
-
-  int32_t slo_ms = 0;
-
-  RequestPriority priority = RequestPriority::NORMAL;
-
-  InputParams input_params;
+  DiTInputParams input_params;
   // Mandatory: Generation control parameters (encapsulates all fields related
   // to "image generation process")
-  GenerationParams generation_params;
+  DiTGenerationParams generation_params;
 };
 
 }  // namespace xllm

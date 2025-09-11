@@ -32,7 +32,7 @@ struct DiTGenerationOutput {
   size_t index;
 
   // the generated image in torch tensor format.
-  torch::Tensor image_tensor;
+  torch::Tensor image;
 
   // the height of the generated image.
   int32_t height;

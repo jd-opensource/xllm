@@ -32,10 +32,8 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/request/dit_request.h"
 #include "models/model_registry.h"
-#include "runtime/speculative_engine.h"
-#include "runtime/xservice_client.h"
+#include "runtime/dit_engine.h"
 #include "scheduler/scheduler_factory.h"
-#include "server/xllm_server_registry.h"
 #if defined(USE_NPU)
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/THNPUCachingHostAllocator.h"
@@ -47,29 +45,25 @@ limitations under the License.
 namespace xllm {
 DiTMaster::DiTMaster(const Options& options)
     : Master(options, EngineType::DIT) {
-  // TODO: init master
-  CHECK(dit_engine_->init());
-  LOG(INFO) << "DiT engine initialized in DiTMaster.";
-  ContinuousScheduler::Options scheduler_options;
-  scheduler_options.max_tokens_per_batch(options.max_tokens_per_batch())
-      .max_seqs_per_batch(options.max_seqs_per_batch())
-      .max_tokens_per_chunk_for_prefill(
-          options.max_tokens_per_chunk_for_prefill())
-      .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_chunked_prefill(options_.enable_chunked_prefill())
-      .instance_name(options_.instance_name())
-      .instance_role(options_.instance_role())
-      .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
-      .enable_service_routing(options_.enable_service_routing());
-  // scheduler_ =
-  //     create_continuous_scheduler(dit_engine_.get(), scheduler_options);
-  LOG(INFO) << "ContinuousScheduler created in DiTMaster.";
-  InstanceInfo instance_info;
-  if (options_.enable_service_routing()) {
-    auto& instance_info = scheduler_->get_instance_info();
-    XServiceClient::get_instance()->register_instance(instance_info);
-  }
-  LOG(INFO) << "Instance registered with service routing.";
+  // construct engine
+  const auto devices =
+      DeviceNameUtils::parse_devices(options_.devices().value_or("auto"));
+  CHECK_GT(devices.size(), 0) << "At least one device is required";
+  LOG(INFO) << "Creating engine with devices: "
+            << DeviceNameUtils::to_string(devices);
+
+  runtime::Options eng_options;
+  eng_options.model_path(options.model_path()).devices(devices);
+
+  engine_ = std::make_unique<DiTEngine>(eng_options);
+  CHECK(engine_->init());
+
+  DiTScheduler::Options scheduler_options;
+  scheduler_options.max_request_per_batch(options.max_seqs_per_batch());
+
+  scheduler_ = create_dit_scheduler(engine_.get(), scheduler_options);
+  LOG(INFO) << "created dit scheduler in DiTMaster.";
+
   threadpool_ = std::make_unique<ThreadPool>(options.num_handling_threads());
   LOG(INFO) << "ThreadPool with " << options.num_handling_threads()
             << " threads created in DiTMaster.";
@@ -107,12 +101,12 @@ void DiTMaster::handle_batch_request(std::vector<DiTRequestParams> sps,
 void DiTMaster::handle_request(DiTRequestParams sp,
                                std::optional<Call*> call,
                                DiTOutputCallback callback) {
-  LOG(INFO) << "in MM_master.cpp, into handle_request";
+  scheduler_->incr_pending_requests(1);
   auto cb = [callback = std::move(callback)](const DiTRequestOutput& output) {
     output.log_request_status();
     return callback(output);
   };
-  LOG(INFO) << "in MM_master.cpp, into handle_request with prompt";
+
   // add into the queue
   threadpool_->schedule(
       [this, sp = std::move(sp), callback = std::move(cb), call]() mutable {
@@ -131,28 +125,19 @@ void DiTMaster::handle_request(DiTRequestParams sp,
         auto request = std::make_shared<DiTRequest>(sp.request_id,
                                                     sp.x_request_id,
                                                     sp.x_request_time,
-                                                    std::move(dit_state),
-                                                    sp.service_request_id,
-                                                    sp.offline,
-                                                    sp.slo_ms,
-                                                    sp.priority);
-        if (!request) {
-          return;
+                                                    std::move(dit_state));
+
+        if (!scheduler_->add_request(request)) {
+          CALLBACK_WITH_ERROR(StatusCode::RESOURCE_EXHAUSTED,
+                              "No available resources to schedule request");
         }
-        LOG(INFO) << "Request " << request->request_id()
-                  << " created and pushing to scheduler.";
-        // if (!scheduler_->add_request(request)) {
-        //   CALLBACK_WITH_ERROR(StatusCode::RESOURCE_EXHAUSTED,
-        //                       "No available resources to schedule request");
-        // }
-        LOG(INFO) << "master end handle_request";
       });
 }
 
 void DiTMaster::run() {
   const bool already_running = running_.load(std::memory_order_relaxed);
   if (already_running) {
-    LOG(WARNING) << "DITMaster is already running.";
+    LOG(WARNING) << "DiTMaster is already running.";
     return;
   }
 
@@ -160,18 +145,16 @@ void DiTMaster::run() {
   loop_thread_ = std::thread([this]() {
     const auto timeout = absl::Milliseconds(500);
     while (!stoped_.load(std::memory_order_relaxed)) {
-      LOG(INFO) << "into DiTMaster::run loop";
       scheduler_->step(timeout);
     }
-    LOG(INFO) << "DITMaster loop thread exiting.";
+    LOG(INFO) << "DiTMaster loop thread exiting.";
     running_.store(false, std::memory_order_relaxed);
   });
 }
 
 void DiTMaster::generate() {
   LOG(INFO) << "into DiTMaster::generate";
-  DCHECK(options_.enable_schedule_overlap())
-      << "Mode generate does not support schedule overlap yet.";
+
   const bool already_running = running_.load(std::memory_order_relaxed);
   if (already_running) {
     LOG(WARNING) << "Generate is already running.";
@@ -181,31 +164,6 @@ void DiTMaster::generate() {
   running_.store(true, std::memory_order_relaxed);
   scheduler_->generate();
   running_.store(false, std::memory_order_relaxed);
-}
-
-void DiTMaster::get_cache_info(std::vector<uint64_t>& cluster_ids,
-                               std::vector<std::string>& addrs,
-                               std::vector<int64_t>& k_cache_ids,
-                               std::vector<int64_t>& v_cache_ids) {
-  dit_engine_->get_cache_info(cluster_ids, addrs, k_cache_ids, v_cache_ids);
-}
-
-bool DiTMaster::link_cluster(const std::vector<uint64_t>& cluster_ids,
-                             const std::vector<std::string>& addrs,
-                             const std::vector<std::string>& device_ips,
-                             const std::vector<uint16_t>& ports,
-                             const int32_t dp_size) {
-  return dit_engine_->link_cluster(
-      cluster_ids, addrs, device_ips, ports, dp_size);
-}
-
-bool DiTMaster::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
-                               const std::vector<std::string>& addrs,
-                               const std::vector<std::string>& device_ips,
-                               const std::vector<uint16_t>& ports,
-                               const int32_t dp_size) {
-  return dit_engine_->unlink_cluster(
-      cluster_ids, addrs, device_ips, ports, dp_size);
 }
 
 }  // namespace xllm

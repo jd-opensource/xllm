@@ -31,19 +31,9 @@ DiTRequest::DiTRequest(const std::string& request_id,
                        const std::string& x_request_id,
                        const std::string& x_request_time,
                        const DiTRequestState& state,
-                       const std::string& service_request_id,
-                       bool offline,
-                       int32_t slo_ms,
-                       RequestPriority priority)
-    : created_time_(absl::Now()),
-      request_id_(request_id),
-      service_request_id_(service_request_id),
-      x_request_id_(x_request_id),
-      x_request_time_(x_request_time),
-      state_(state),
-      offline_(offline),
-      slo_ms_(slo_ms),
-      priority_(priority) {}
+                       const std::string& service_request_id)
+    : RequestBase(request_id, x_request_id, x_request_time, service_request_id),
+      state_(state) {}
 
 bool DiTRequest::finished() const { return true; }
 
@@ -54,16 +44,22 @@ void DiTRequest::log_statistic(double total_latency) {
             << "total_latency: " << total_latency * 1000 << "ms";
 }
 
-DiTRequestOutput DiTRequest::generate_dit_output(DiTForwardOutput dit_output) {
+DiTRequestOutput DiTRequest::generate_output(DiTForwardOutput dit_output) {
   DiTRequestOutput output;
   output.request_id = request_id_;
   output.service_request_id = service_request_id_;
   output.status = Status(StatusCode::OK);
   output.finished = finished();
   output.cancelled = false;
+
   DiTGenerationOutput result;
-  result.image_tensor = dit_output.image;
+  result.image = dit_output.image;
+  result.height = state_.generation_params().height;
+  result.width = state_.generation_params().width;
+  result.seed = state_.generation_params().seed.value();
   output.outputs.push_back(result);
+
   return output;
 }
+
 }  // namespace xllm

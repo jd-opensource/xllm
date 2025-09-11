@@ -138,32 +138,4 @@ struct RequestParams {
   nlohmann::json chat_template_kwargs = nlohmann::json::object();
 };
 
-struct ImageRequestParams {
-  ImageRequestParams() = default;
-  ImageRequestParams(const proto::ImageGenerationRequest& request,
-                     const std::string& x_rid,
-                     const std::string& x_rtime);
-
-  bool verify_params(ImageOutputCallback callback) const;
-
-  // request id
-  std::string request_id;
-  std::string service_request_id = "";
-  std::string x_request_id;
-  std::string x_request_time;
-
-  std::string model;
-
-  bool offline = false;
-
-  int32_t slo_ms = 0;
-
-  RequestPriority priority = RequestPriority::NORMAL;
-
-  InputParams input_params;
-  // Mandatory: Generation control parameters (encapsulates all fields related
-  // to "image generation process")
-  GenerationParams generation_params;
-};
-
 }  // namespace xllm

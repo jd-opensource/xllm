@@ -41,8 +41,8 @@ class DiTExecutor {
 
   DiTForwardInput prepare_inputs(DiTBatch& batch);
 
-  torch::Tensor forward(const InputParams& input_params,
-                        const GenerationParams& generation_params);
+  torch::Tensor forward(const DiTInputParams& input_params,
+                        const DiTGenerationParams& generation_params);
 
  private:
   // not own

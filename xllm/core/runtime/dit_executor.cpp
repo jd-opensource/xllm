@@ -32,8 +32,9 @@ DiTForwardInput DiTExecutor::prepare_inputs(DiTBatch& batch) {
   return batch.prepare_forward_input();
 }
 
-torch::Tensor DiTExecutor::forward(const InputParams& input_params,
-                                   const GenerationParams& generation_params) {
+torch::Tensor DiTExecutor::forward(
+    const DiTInputParams& input_params,
+    const DiTGenerationParams& generation_params) {
   return model_->forward(input_params, generation_params);
 }
 

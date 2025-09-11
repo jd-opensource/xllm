@@ -14,6 +14,7 @@ cc_library(
     disagg_pd_scheduler.h
     async_response_processor.h
     scheduler.h
+    dit_scheduler.h
     scheduler_factory.h
     decode_priority_queue.h
   SRCS
@@ -22,6 +23,7 @@ cc_library(
     continuous_scheduler.cpp
     disagg_pd_scheduler.cpp
     async_response_processor.cpp
+    dit_scheduler.cpp
     scheduler_factory.cpp
   DEPS
     :batch

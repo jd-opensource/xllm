@@ -17,11 +17,16 @@ limitations under the License.
 
 #include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
+#include "scheduler/dit_scheduler.h"
 
 namespace xllm {
 
 std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
     Engine* engine,
     ContinuousScheduler::Options options);
+
+std::unique_ptr<DiTScheduler> create_dit_scheduler(
+    DiTEngine* engine,
+    DiTScheduler::Options options);
 
 }  // namespace xllm
