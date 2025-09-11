@@ -51,4 +51,8 @@ xllm/version.py
 # compile_commands.json from nvbench
 compile_commands.json
 
+# ascend kernel meta files
 /kernel_meta
+
+# local files
+/local
