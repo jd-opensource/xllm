@@ -18,6 +18,7 @@ limitations under the License.
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
+#include "scheduler/dit_scheduler.h"
 #include "scheduler/zero_eviction_scheduler.h"
 
 namespace xllm {
@@ -38,6 +39,12 @@ std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
   }
 
   return std::make_unique<ContinuousScheduler>(engine, options);
+}
+
+std::unique_ptr<DiTScheduler> create_dit_scheduler(
+    DiTEngine* engine,
+    DiTScheduler::Options options) {
+  return std::make_unique<DiTDynamicBatchScheduler>(engine, options);
 }
 
 }  // namespace xllm

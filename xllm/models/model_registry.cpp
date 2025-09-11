@@ -234,7 +234,7 @@ std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
   return nullptr;
 }
 
-std::unique_ptr<DiTModel> create_dit_model(const Context& context) {
+std::unique_ptr<DiTModel> create_dit_model(const ModelContext& context) {
   // get the factory function for the model type from model registry
   auto factory = ModelRegistry::get_dit_model_factory(
       context.get_model_args().model_type());

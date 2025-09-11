@@ -191,73 +191,85 @@ static std::optional<torch::Tensor> proto_to_torch(
   return tensor;
 }
 
+std::pair<int, int> splitResolution(const std::string& s) {
+  size_t pos = s.find('*');
+  int width = std::stoi(s.substr(0, pos));
+  int height = std::stoi(s.substr(pos + 1));
+  return {width, height};
+}
+
 DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
                                    const std::string& x_rid,
                                    const std::string& x_rtime) {
-  request_id = generate_image_generation_request_id();
+  if (request.has_request_id()) {
+    request_id = request.request_id();
+  } else {
+    request_id = generate_image_generation_request_id();
+  }
   x_request_id = x_rid;
   x_request_time = x_rtime;
+
   model = request.model();
-  if (request.has_service_request_id()) {
-    service_request_id = request.service_request_id();
+
+  // input params
+  const auto& input = request.input();
+  input_params.prompt = input.prompt();
+  if (input.has_prompt_2()) {
+    input_params.prompt_2 = input.prompt_2();
   }
-  const auto& proto_input = request.input();
-  input_params.prompt = proto_input.prompt();
-  if (proto_input.has_prompt_2()) {
-    input_params.prompt_2 = proto_input.prompt_2();
+  if (input.has_negative_prompt()) {
+    input_params.negative_prompt = input.negative_prompt();
   }
-  if (proto_input.has_negative_prompt()) {
-    input_params.negative_prompt = proto_input.negative_prompt();
+  if (input.has_negative_prompt_2()) {
+    input_params.negative_prompt_2 = input.negative_prompt_2();
   }
-  if (proto_input.has_negative_prompt_2()) {
-    input_params.negative_prompt_2 = proto_input.negative_prompt_2();
+
+  if (input.has_prompt_embeds()) {
+    input_params.prompt_embeds = proto_to_torch(input.prompt_embeds());
   }
-  LOG(INFO) << "Prompt: " << input_params.prompt
-            << "start to convert prompt_embeds";
-  if (proto_input.has_prompt_embeds()) {
-    const auto& proto_tensor = proto_input.prompt_embeds();
-    input_params.prompt_embeds = proto_to_torch(proto_tensor);
-  }
-  if (proto_input.has_pooled_prompt_embeds()) {
+  if (input.has_pooled_prompt_embeds()) {
     input_params.pooled_prompt_embeds =
-        proto_to_torch(proto_input.pooled_prompt_embeds());
+        proto_to_torch(input.pooled_prompt_embeds());
   }
-  if (proto_input.has_negative_prompt_embeds()) {
+  if (input.has_negative_prompt_embeds()) {
     input_params.negative_prompt_embeds =
-        proto_to_torch(proto_input.negative_prompt_embeds());
+        proto_to_torch(input.negative_prompt_embeds());
   }
-  if (proto_input.has_negative_pooled_prompt_embeds()) {
+  if (input.has_negative_pooled_prompt_embeds()) {
     input_params.negative_pooled_prompt_embeds =
-        proto_to_torch(proto_input.negative_pooled_prompt_embeds());
+        proto_to_torch(input.negative_pooled_prompt_embeds());
   }
-  if (proto_input.has_latents()) {
-    const auto& proto_tensor = proto_input.latents();
-    input_params.latents = proto_to_torch(proto_tensor);
+  if (input.has_latents()) {
+    input_params.latents = proto_to_torch(input.latents());
   }
-  const auto& proto_params = request.parameters();
-  if (proto_params.has_size()) {
-    generation_params.size = proto_params.size();
+
+  // generation params
+  const auto& params = request.parameters();
+  if (params.has_size()) {
+    auto size = splitResolution(params.size());
+    generation_params.width = size.first;
+    generation_params.height = size.second;
   }
-  if (proto_params.has_num_inference_steps()) {
-    generation_params.num_inference_steps = proto_params.num_inference_steps();
+  if (params.has_num_inference_steps()) {
+    generation_params.num_inference_steps = params.num_inference_steps();
   }
-  if (proto_params.has_true_cfg_scale()) {
-    generation_params.true_cfg_scale = proto_params.true_cfg_scale();
+  if (params.has_true_cfg_scale()) {
+    generation_params.true_cfg_scale = params.true_cfg_scale();
   }
-  if (proto_params.has_guidance_scale()) {
-    generation_params.guidance_scale = proto_params.guidance_scale();
+  if (params.has_guidance_scale()) {
+    generation_params.guidance_scale = params.guidance_scale();
   }
-  if (proto_params.has_num_images_per_prompt()) {
+  if (params.has_num_images_per_prompt()) {
     generation_params.num_images_per_prompt =
-        static_cast<uint32_t>(proto_params.num_images_per_prompt());
+        static_cast<uint32_t>(params.num_images_per_prompt());
   } else {
     generation_params.num_images_per_prompt = 1;
   }
-  if (proto_params.has_seed()) {
-    generation_params.seed = proto_params.seed();
+  if (params.has_seed()) {
+    generation_params.seed = params.seed();
   }
-  if (proto_params.has_max_sequence_length()) {
-    generation_params.max_sequence_length = proto_params.max_sequence_length();
+  if (params.has_max_sequence_length()) {
+    generation_params.max_sequence_length = params.max_sequence_length();
   }
 }
 

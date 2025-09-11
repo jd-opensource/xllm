@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "common.pb.h"
+#include "request_base.h"
 #include "request_state.h"
 #include "sequences_group.h"
 #include "stopping_checker.h"
@@ -33,20 +34,12 @@ namespace xllm {
 
 enum class RequestPriority { DEFAULT = 0, HIGH = 1, NORMAL = 2, LOW = 3 };
 
-class Request {
+class Request : public RequestBase {
  public:
   Request(const std::string& request_id,
           const std::string& x_request_id,
           const std::string& x_request_time,
           const RequestState& state,
-          const std::string& service_request_id = "",
-          bool offline = false,
-          int32_t slo_ms = 0,
-          RequestPriority priority = RequestPriority::NORMAL);
-  Request(const std::string& request_id,
-          const std::string& x_request_id,
-          const std::string& x_request_time,
-          const DITRequestState& state,
           const std::string& service_request_id = "",
           bool offline = false,
           int32_t slo_ms = 0,
@@ -86,22 +79,11 @@ class Request {
 
   void log_error_statistic(Status status);
 
-  absl::Time created_time() const { return created_time_; }
-
-  const std::string& request_id() const { return request_id_; }
-
-  const std::string& service_request_id() const { return service_request_id_; }
-
-  const std::string& x_request_id() const { return x_request_id_; }
-
-  const std::string& x_request_time() const { return x_request_time_; }
-
   const bool offline() const { return offline_; }
   const int32_t slo_ms() const { return slo_ms_; }
   const RequestPriority priority() const { return priority_; }
 
   RequestState& state() { return state_; }
-  DITRequestState& dit_state() { return dit_state_; }
   void update_connection_status();
 
   bool check_beam_search() const {
@@ -109,21 +91,7 @@ class Request {
   }
 
  private:
-  // request create time
-  absl::Time created_time_;
-
-  std::string request_id_;
-
-  std::string service_request_id_;
-
-  // x-request-id header value from client
-  std::string x_request_id_;
-
-  // x-request-time header value from client
-  std::string x_request_time_;
-
   RequestState state_;
-  DITRequestState dit_state_;
   // list of sequences to generate completions for the prompt
   // use deque instead of vector to avoid no-copy move for Sequence
   //  std::deque<Sequence> sequences;

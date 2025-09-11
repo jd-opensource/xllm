@@ -44,8 +44,8 @@ bool send_result_to_client_brpc(std::shared_ptr<ImageGenerationCall> call,
   proto_output->mutable_results()->Reserve(outputs.size());
   for (const auto& output : outputs) {
     auto* proto_result = proto_output->add_results();
-    // proto_result->set_base64(output.image_tensor); // TODO proto tensor to
-    // base64
+
+    // proto_result->set_image(output.image);
     proto_result->set_width(output.width);
     proto_result->set_height(output.height);
     proto_result->set_seed(output.seed);
@@ -73,12 +73,11 @@ void ImageGenerationServiceImpl::process_async(
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
-  // create RequestParams for image generation request
-  // set is_image_generation and max_tokens = 1 to control engine step once.
+
+  // create DiTRequestParams for image generation request
   DiTRequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
-  // TODO only support input_str for now
-  auto& input = rpc_request.input().prompt();
+
   // schedule the request
   master_->handle_request(
       std::move(request_params),
@@ -88,16 +87,13 @@ void ImageGenerationServiceImpl::process_async(
        request_id = request_params.request_id,
        created_time = absl::ToUnixSeconds(absl::Now())](
           const DiTRequestOutput& req_output) -> bool {
-        LOG(INFO) << "into callback before request finished";
-        LOG(INFO) << req_output.outputs.size();
-        LOG(INFO) << req_output.outputs[0].image_tensor;
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
           if (!status.ok()) {
             return call->finish_with_error(status.code(), status.message());
           }
         }
-        LOG(INFO) << "into callback after request finished";
+
         return send_result_to_client_brpc(
             call, request_id, created_time, model, req_output);
       });

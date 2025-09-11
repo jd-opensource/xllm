@@ -48,7 +48,7 @@ namespace xllm {
 DiTWorker::DiTWorker(const ParallelArgs& parallel_args,
                      const torch::Device& device,
                      const runtime::Options& options)
-    : device_(device), options_(options), context_(parallel_args) {}
+    : device_(device), options_(options), parallel_args_(parallel_args) {}
 
 bool DiTWorker::init_model(const std::string& model_weights_path) {
   LOG(INFO) << "Initialize DiT model on device: " << device_;
@@ -70,9 +70,8 @@ bool DiTWorker::init_model(const std::string& model_weights_path) {
   auto loader = std::make_unique<DiTModelLoader>(model_weights_path);
   ModelArgs model_args = loader->model_args();
   model_args.model_type() = "flux";
-  context_.set_model_args(model_args);
-  // dtype_ = dtype;
-  context_.set_tensor_options(torch::device(device_));
+  torch::TensorOptions options = torch::TensorOptions().device(device_);
+  context_ = ModelContext(parallel_args_, model_args, QuantArgs(), options);
   dit_model_ = create_dit_model(context_);
   LOG(INFO) << "DiT Model created.";
   CHECK(dit_model_ != nullptr) << "Failed to create model.";
@@ -109,8 +108,7 @@ std::optional<DiTForwardOutput> DiTWorker::step(const DiTForwardInput& inputs) {
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   DiTForwardOutput output;
-  output.image = hidden_states;
-  LOG(INFO) << "worker end step";
+  output.image = std::move(hidden_states);
   return output;
 }
 

@@ -222,7 +222,6 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& image_rotary_emb) {
     int64_t batch_size, channel, height, width;
-    LOG(INFO) << "FluxSingleAttentionImpl forward";
 
     // Reshape 4D input to [B, seq_len, C]
     torch::Tensor hidden_states_ =
@@ -1564,7 +1563,6 @@ class FluxSingleTransformerBlockImpl : public torch::nn::Module {
       const torch::Tensor& hidden_states,
       const torch::Tensor& temb,
       const torch::Tensor& image_rotary_emb = torch::Tensor()) {
-    LOG(INFO) << "FluxSingleTransformerBlock forward called";
     auto residual = hidden_states;
     auto [norm_hidden_states, gate] = norm_(hidden_states, temb);
     auto mlp_hidden_states = act_mlp_(proj_mlp_(norm_hidden_states));
@@ -1581,7 +1579,6 @@ class FluxSingleTransformerBlockImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict) {
     proj_mlp_->to(device_);
     proj_out_->to(device_);
-    LOG(INFO) << "load weights for FluxSingleTransformerModel";
     // attn
     attn_->load_state_dict(state_dict.get_dict_with_prefix("attn."));
     // norm
@@ -1692,7 +1689,6 @@ class FluxTransformerBlockImpl : public torch::nn::Module {
       const torch::Tensor& encoder_hidden_states,
       const torch::Tensor& temb,
       const torch::Tensor& image_rotary_emb = torch::Tensor()) {
-    LOG(INFO) << "FluxTransformerBlock forward called";
     auto [norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp] =
         norm1_(hidden_states, torch::Tensor(), torch::Tensor(), dtype_, temb);
     auto [norm_encoder_hidden_states,
@@ -1730,7 +1726,6 @@ class FluxTransformerBlockImpl : public torch::nn::Module {
     return std::make_tuple(new_hidden_states, new_encoder_hidden_states);
   }
   void load_state_dict(const StateDict& state_dict) {
-    LOG(INFO) << "load weights for FluxTransformerModel";
     // norm1
     norm1_->load_state_dict(state_dict.get_dict_with_prefix("norm1."));
     // norm1_context
@@ -1848,7 +1843,6 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
                         const torch::Tensor& txt_ids,
                         const torch::Tensor& guidance,
                         int64_t step_idx = 0) {
-    LOG(INFO) << "FluxTransformer2DModel forward";
     torch::Tensor ids = torch::cat(
         {txt_ids.to(device_).to(dtype_), img_ids.to(device_).to(dtype_)}, 0);
     auto [rot_emb1, rot_emb2] = pos_embed_->forward(ids);
@@ -1899,7 +1893,6 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
     x_embedder_->to(device_);
     proj_out_->to(device_);
     // Load model parameters from the loader
-    LOG(INFO) << "load weights for FluxTransformereDModel";
     for (const auto& state_dict : loader->get_state_dicts()) {
       // context_embedder
       const auto weight = state_dict->get_tensor("context_embedder.weight");
@@ -1983,11 +1976,11 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
   at::ScalarType dtype_;
 };
 TORCH_MODULE(FluxTransformer2DModel);
-class DiTModelPipelineImpl : public torch::nn::Module {
+class FluxDiTModelImpl : public torch::nn::Module {
  public:
-  DiTModelPipelineImpl(const ModelContext& context,
-               torch::Device device,
-               torch::ScalarType dtype)
+  FluxDiTModelImpl(const ModelContext& context,
+                   torch::Device device,
+                   torch::ScalarType dtype)
       : args_(context.get_model_args()), device_(device), dtype_(dtype) {
     flux_transformer_2d_model_ = register_module(
         "flux_transformer_2d_model",
@@ -2013,7 +2006,6 @@ class DiTModelPipelineImpl : public torch::nn::Module {
                         const torch::Tensor& txt_ids,
                         const torch::Tensor& guidance,
                         int64_t step_idx = 0) {
-    LOG(INFO) << "DiTModel forward called ";
     torch::Tensor output =
         flux_transformer_2d_model_->forward(hidden_states_input,
                                             encoder_hidden_states_input,
@@ -2069,7 +2061,6 @@ class DiTModelPipelineImpl : public torch::nn::Module {
     return output;
   }
   void load_model(std::unique_ptr<DiTFolderLoader> loader) {
-    LOG(INFO) << "Loading model parameters into DiTModel.";
     flux_transformer_2d_model_->load_model(std::move(loader));
   }
   int64_t in_channels() { return flux_transformer_2d_model_->in_channels(); }
@@ -2083,7 +2074,7 @@ class DiTModelPipelineImpl : public torch::nn::Module {
   at::Device device_;
   at::ScalarType dtype_;
 };
-TORCH_MODULE(DiTModelPipeline);
+TORCH_MODULE(FluxDiTModel);
 REGISTER_MODEL_ARGS(FluxTransformer2DModel, [&] {
   LOAD_ARG_OR(dit_patch_size, "patch_size", 1);
   LOAD_ARG_OR(dit_in_channels, "in_channels", 64);

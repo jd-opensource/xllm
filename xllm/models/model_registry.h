@@ -44,7 +44,7 @@ using EmbeddingLMFactory =
     std::function<std::unique_ptr<EmbeddingLM>(const ModelContext& context)>;
 
 using DiTModelFactory =
-    std::function<std::unique_ptr<DiTModel>(const Context& context)>;
+    std::function<std::unique_ptr<DiTModel>(const ModelContext& context)>;
 
 using InputProcessorFactory =
     std::function<std::unique_ptr<InputProcessor>(const ModelArgs& args)>;
@@ -137,7 +137,7 @@ std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context);
 std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
     const ModelContext& context);
 
-std::unique_ptr<DiTModel> create_dit_model(const Context& context);
+std::unique_ptr<DiTModel> create_dit_model(const ModelContext& context);
 
 // Macro to register a model with the ModelRegistry
 #define REGISTER_CAUSAL_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
@@ -189,7 +189,7 @@ std::unique_ptr<DiTModel> create_dit_model(const Context& context);
 #define REGISTER_DIT_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
   const bool VarName##_registered = []() {                              \
     ModelRegistry::register_dit_model_factory(                          \
-        #ModelType, [](const Context& context) {                        \
+        #ModelType, [](const ModelContext& context) {                   \
           ModelClass model(context);                                    \
           model->eval();                                                \
           return std::make_unique<xllm::DiTModelImpl<ModelClass>>(      \

@@ -15,9 +15,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/framework/dit_model_loader.h"
 #include "core/framework/request/dit_request_state.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/layers/npu/pos_embedding.h"
@@ -151,8 +151,6 @@ torch::Tensor randn_tensor(
   // if (generator_provided && !generator.value().defined()) {
   //     throw std::invalid_argument("Provided generator is not defined.");
   // }
-  LOG(INFO) << "begin to generate random tensor with shape: " << shape
-            << ", device: " << rand_device << ", dtype: " << dtype;
   torch::manual_seed(42);
   torch::Tensor latents;
   torch::TensorOptions options =
@@ -160,12 +158,8 @@ torch::Tensor randn_tensor(
 
   try {
     if (generator_provided) {
-      LOG(INFO) << "Generating random latents with shape: " << shape
-                << ", device: " << rand_device << ", dtype: " << dtype;
       latents = torch::randn(shape, generator.value(), options);
     } else {
-      LOG(INFO) << "Generating random latents with shape: " << shape
-                << ", device: " << rand_device << ", dtype: " << dtype;
       latents = torch::randn(shape, options);
     }
 
@@ -188,7 +182,7 @@ class FluxPipelineImpl : public torch::nn::Module {
   FlowMatchEulerDiscreteScheduler scheduler_{nullptr};
   VAE vae_{nullptr};
   VAEImageProcessor vae_image_processor_{nullptr};
-  DiTModelPipeline transformer_{nullptr};
+  FluxDiTModel transformer_{nullptr};
   T5EncoderModel t5_{nullptr};
   CLIPTextModel clip_text_model_{nullptr};
   int vae_scale_factor_;
@@ -225,8 +219,7 @@ class FluxPipelineImpl : public torch::nn::Module {
     LOG(INFO) << "VAE image processor initialized.";
     vae_ = VAE(context, _execution_device, _execution_dtype);
     LOG(INFO) << "VAE initialized.";
-    transformer_ =
-        DiTModelPipeline(context, _execution_device, _execution_dtype);
+    transformer_ = FluxDiTModel(context, _execution_device, _execution_dtype);
     LOG(INFO) << "DiT transformer initialized.";
     t5_ = T5EncoderModel(context, _execution_device, _execution_dtype);
     LOG(INFO) << "T5 initialized.";
@@ -400,9 +393,8 @@ class FluxPipelineImpl : public torch::nn::Module {
         batch_size, adjusted_height / 2, adjusted_width / 2, device, dtype);
     return {packed_latents, latent_image_ids};
   }
-  torch::Tensor forward(const InputParams& input_params,
-                        const GenerationParams& generation_params) {
-    LOG(INFO) << "FluxPipelineImpl forward called" << input_params.prompt;
+  torch::Tensor forward(const DiTInputParams& input_params,
+                        const DiTGenerationParams& generation_params) {
     torch::Generator generator = torch::Generator();
     torch::manual_seed(generation_params.seed.value_or(42));
     std::vector<torch::Generator> generators_vec;
@@ -638,7 +630,6 @@ class FluxPipelineImpl : public torch::nn::Module {
       std::optional<torch::Tensor> negative_pooled_prompt_embeds = std::nullopt,
       std::string output_type = "pil",
       int64_t max_sequence_length = 512) {
-    LOG(INFO) << "FluxPipeline operator() called";
     torch::NoGradGuard no_grad;
     int64_t actual_height = height.has_value()
                                 ? height.value()
@@ -737,7 +728,6 @@ class FluxPipelineImpl : public torch::nn::Module {
     // prepare guidance
     torch::Tensor guidance;
     if (transformer_->guidance_embeds()) {
-      LOG(INFO) << "Preparing guidance tensor with scale: " << guidance_scale;
       torch::TensorOptions options =
           torch::dtype(torch::kFloat32).device(device);
 
@@ -745,8 +735,6 @@ class FluxPipelineImpl : public torch::nn::Module {
       guidance = guidance.expand({prepared_latents.size(0)});
     }
     scheduler_->set_begin_index(0);
-    LOG(INFO) << "Starting inference with " << num_inference_steps_actual
-              << " steps.";
     torch::Tensor timestep =
         torch::empty({prepared_latents.size(0)}, prepared_latents.options());
     for (int64_t i = 0; i < timesteps.numel(); ++i) {
@@ -803,12 +791,7 @@ class FluxPipelineImpl : public torch::nn::Module {
       image = vae_->decode(unpacked_latents).sample;
       image = vae_image_processor_->postprocess(image, output_type);
     }
-    auto bytes = torch::pickle_save(image.cpu());  // 转成二进制 pickle 数据
-    std::ofstream fout(
-        "/export/home/liuyiming54/precision_test/flux/xllm/final_image.pkl",
-        std::ios::out | std::ios::binary);
-    fout.write(bytes.data(), bytes.size());
-    fout.close();
+
     return FluxPipelineOutput{{image}};
   }
 

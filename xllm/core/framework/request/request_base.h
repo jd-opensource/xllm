@@ -15,6 +15,7 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
 
@@ -24,30 +25,35 @@ limitations under the License.
 #include <vector>
 
 #include "common.pb.h"
-#include "dit_request_output.h"
-#include "dit_request_state.h"
-#include "request.h"
-#include "runtime/dit_forward_params.h"
+#include "request_state.h"
+#include "sequences_group.h"
+#include "stopping_checker.h"
 
 namespace xllm {
 
-class DiTRequest : public RequestBase {
+class RequestBase {
  public:
-  DiTRequest(const std::string& request_id,
-             const std::string& x_request_id,
-             const std::string& x_request_time,
-             const DiTRequestState& state,
-             const std::string& service_request_id = "");
+  RequestBase(const std::string& request_id,
+              const std::string& x_request_id,
+              const std::string& x_request_time,
+              const std::string& service_request_id = "")
+      : request_id_(request_id),
+        x_request_id_(x_request_id),
+        x_request_time_(x_request_time),
+        service_request_id_(service_request_id),
+        created_time_(absl::Now()) {}
 
-  bool finished() const;
+  absl::Time created_time() const { return created_time_; }
 
-  const DiTRequestOutput generate_output(DiTForwardOutput dit_output);
+  const std::string& request_id() const { return request_id_; }
 
-  void log_statistic(double total_latency);
+  const std::string& service_request_id() const { return service_request_id_; }
 
-  DiTRequestState& state() { return state_; }
+  const std::string& x_request_id() const { return x_request_id_; }
 
- private:
+  const std::string& x_request_time() const { return x_request_time_; }
+
+ protected:
   // request create time
   absl::Time created_time_;
 
@@ -60,16 +66,6 @@ class DiTRequest : public RequestBase {
 
   // x-request-time header value from client
   std::string x_request_time_;
-
-  DiTRequestState state_;
-
-  std::atomic<bool> cancelled_{false};
-
-  bool offline_;
-
-  int32_t slo_ms_;
-
-  RequestPriority priority_;
 };
 
 }  // namespace xllm
