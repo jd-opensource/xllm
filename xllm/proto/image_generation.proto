@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package xllm.proto;
+
+import "common.proto";
+import "tensor.proto";
+
+// Input parameters container
+message Input {
+  // Primary input text description for image generation
+  string prompt = 1;
+
+  // Secondary prompt for additional details (e.g., color, lighting)
+  optional string prompt_2 = 2;
+
+  // Negative prompt to exclude low-quality features
+  optional string negative_prompt = 3;
+
+  // Secondary negative prompt to exclude additional unwanted features
+  optional string negative_prompt_2 = 4;
+
+  // Base64 encoded image for IP Adapter reference (format: "data:image/png;base64,...")
+  //optional string ip_adapter_image = 5;
+
+  // URL of negative reference image for IP Adapter
+  //optional string negative_ip_adapter_image = 6;
+
+  // prompt embeddings
+  optional Tensor prompt_embeds = 5;
+
+  // pooled prompt embeddings
+  optional Tensor pooled_prompt_embeds = 6;
+
+  //IP Adapter image embeddings: [num_images][num_layers][embedding_dim]
+  //optional Tensor ip_adapter_image_embeds = 9; 
+
+  // negative prompt embeddings: [num_prompts][embedding_dim]
+  optional Tensor negative_prompt_embeds = 7;
+
+  //pooled negative prompt embeddings
+  optional Tensor negative_pooled_prompt_embeds = 8;
+
+  //negative IP Adapter image embeddings: [num_images][num_layers][embedding_dim]
+  //optional Tensor negative_ip_adapter_image_embeds = 9;
+
+  // initial latents: [batch_size][channels][height/8][width/8]
+  optional Tensor latents = 9;
+}
+// Generation parameters container
+message Parameters {
+  // Size of the generated image in pixels, default in 1024*1024
+  optional string size = 1;
+
+  // Number of inference steps for image generation
+  optional int32 num_inference_steps = 2;
+
+  // Array of sigma values for noise scheduling
+  // repeated float sigmas = 3;
+
+  // True CFG scale value for balancing generation
+  optional float true_cfg_scale = 3;
+
+  // Guidance scale value for prompt adherence
+  optional float guidance_scale = 4;
+
+  // Number of images to generate per prompt
+  optional int32 num_images_per_prompt = 5;
+
+  // Random seed value for image generation
+  optional int64 seed = 6;
+
+  // Maximum sequence length for prompt processing
+  optional int32 max_sequence_length = 7;
+
+  // Output type, either "base64" or "url"
+  // optional string output_type = 9;
+}
+// Request structure for image generation tasks using FLUX models
+message ImageGenerationRequest {
+  // ID of the FLUX text-to-image model to use. Currently supported values are "flux-schnell" and "flux-dev".
+  string model = 1;
+  Input input = 2;
+  Parameters parameters = 3;
+
+  // Unique identifier representing the end-user
+  optional string user = 4;
+
+  // ID used by server to identify the request for tracking and troubleshooting
+  optional string service_request_id = 5;
+}
+
+// Individual image generation result data
+message ImageGenData {
+
+  // Base64 encoded image data (when output_type is "base64")
+  optional string base64 = 1;
+
+  // Width of the generated image in pixels
+  int32 width = 3;
+
+  // Height of the generated image in pixels
+  int32 height = 4;
+
+  // Seed used for generating this image
+  int64 seed = 5;
+}
+
+// Output container for image generation task results
+message ImageGenerationOutput {
+
+  // List of generated image data
+  repeated ImageGenData results = 1;
+}
+
+// Response structure for image generation requests
+message ImageGenerationResponse {
+  // The ID of the response.
+  string id = 1;
+
+  // The object type of the image response.
+  // [default = "list"]
+  string object = 2;
+
+  // The Unix timestamp of when the embedding response was created.
+  int64 created = 3;
+
+  // The model used to generate the embedding response.
+  string model = 4;
+
+  // Contains task details and generation results
+  ImageGenerationOutput output = 5;
+}

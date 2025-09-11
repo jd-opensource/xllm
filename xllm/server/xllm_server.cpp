@@ -39,6 +39,7 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
                           "v1/chat/completions => ChatCompletionsHttp,"
                           "v1/embeddings => EmbeddingsHttp,"
                           "v1/models => ModelsHttp,"
+                          "v1/image/generation => ImageGenerationHttp,"
                           "get_cache_info => GetCacheInfo,"
                           "link_cluster => LinkCluster,"
                           "unlink_cluster => UnlinkCluster,"

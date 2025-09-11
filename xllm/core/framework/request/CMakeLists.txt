@@ -11,6 +11,8 @@ cc_library(
     mm_input_helper.h
     request.h
     request_output.h
+    dit_request_output.h
+    dit_request_params.h
     request_params.h
     sequence.h
     sequence_logprob_state.h
@@ -26,7 +28,9 @@ cc_library(
     mm_input_helper.cpp
     request.cpp
     request_output.cpp
+    dit_request_output.cpp
     request_params.cpp
+    dit_request_params.cpp
     sequence.cpp
     sequence_logprob_state.cpp
     sequence_kv_state.cpp

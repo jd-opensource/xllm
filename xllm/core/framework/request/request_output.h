@@ -26,7 +26,6 @@ limitations under the License.
 #include "core/common/types.h"
 
 namespace xllm {
-
 struct Usage {
   // the number of tokens in the prompt.
   size_t num_prompt_tokens = 0;
