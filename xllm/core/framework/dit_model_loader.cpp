@@ -237,13 +237,13 @@ DiTModelLoader::DiTModelLoader(const std::string& model_root_path)
 
   const nlohmann::json root_json = model_index_reader.data();
   if (!root_json.is_object()) {
-    LOG(FATAL) << "DITModelLoader: model_index.json root is not an object!";
+    LOG(FATAL) << "DiTModelLoader: model_index.json root is not an object!";
   }
 
   // parse model_index.json & initialize model_loader
   for (const auto& [json_key, json_value] : root_json.items()) {
     if (!json_value.is_array() || json_value.size() != 2) {
-      LOG(WARNING) << "DITModelLoader: Invalid format for component! "
+      LOG(WARNING) << "DiTModelLoader: Invalid format for component! "
                    << "JsonKey=" << json_key
                    << ", Expected [library, class_name] array";
       continue;
@@ -254,13 +254,13 @@ DiTModelLoader::DiTModelLoader(const std::string& model_root_path)
         std::filesystem::path(model_root_path_) / json_key;
     const std::string component_folder = component_folder_path.string();
     if (!std::filesystem::exists(component_folder)) {
-      LOG(WARNING) << "DITModelLoader: Component folder not found! "
+      LOG(WARNING) << "DiTModelLoader: Component folder not found! "
                    << "ComponentName=" << component_name
                    << ", Folder=" << component_folder;
       continue;
     }
     if (!std::filesystem::is_directory(component_folder)) {
-      LOG(WARNING) << "DITModelLoader: Component path is not a directory! "
+      LOG(WARNING) << "DiTModelLoader: Component path is not a directory! "
                    << "ComponentName=" << component_name
                    << ", Path=" << component_folder;
       continue;

@@ -110,7 +110,6 @@ std::optional<DiTForwardOutput> DiTWorker::step(const DiTForwardInput& inputs) {
 
   DiTForwardOutput output;
   output.image = hidden_states;
-  LOG(INFO) << "worker end step";
   return output;
 }
 

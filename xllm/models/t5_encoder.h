@@ -867,7 +867,6 @@ class T5EncoderModelImpl : public torch::nn::Module {
         .to(device_);
   }
   torch::Tensor forward(torch::Tensor input_ids) {
-    LOG(INFO) << "Forwarding T5EncoderModel";
     // prepare input parameters
     // input parameters
     // input_ids

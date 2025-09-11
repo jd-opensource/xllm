@@ -21,7 +21,7 @@ limitations under the License.
 #include <limits>
 #include <vector>
 
-#include "framework/request/dit_request_params.h"
+#include "framework/request/dit_request.h"
 #include "runtime/dit_forward_params.h"
 
 namespace xllm {
@@ -29,17 +29,17 @@ namespace xllm {
 struct DiTBatch {
  public:
   DiTBatch() = default;
-  void add(const DiTRequestParams& dit_request_state) {
-    dit_request_data_vec_.emplace_back(dit_request_state);
+  void add(const std::shared_ptr<DiTRequest>& request) {
+    dit_request_vec_.emplace_back(request);
   }
-  size_t size() const { return dit_request_data_vec_.size(); }
-  bool empty() const { return dit_request_data_vec_.empty(); }
+  size_t size() const { return dit_request_vec_.size(); }
+  bool empty() const { return dit_request_vec_.empty(); }
 
   // prepare forward input
   DiTForwardInput prepare_forward_input();
 
  private:
-  std::vector<DiTRequestParams> dit_request_data_vec_;
+  std::vector<std::shared_ptr<DiTRequest>> dit_request_vec_;
 };
 
 }  // namespace xllm

@@ -24,7 +24,7 @@ limitations under the License.
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
 #include "framework/sampling/sampling_params.h"
-#include "tensor.pb.h"
+
 namespace xllm {
 
 class WorkerType {
@@ -124,8 +124,6 @@ struct ForwardOutput {
 
   int32_t prepared_layer_id;
 
-  // dit related output
-  torch::Tensor image;
 };
 
 // Model input with raw data, which will be

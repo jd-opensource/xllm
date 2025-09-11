@@ -111,7 +111,6 @@ DiTForwardOutput DiTEngine::step(std::vector<DiTBatch>& batches) {
   // return the result from the driver
   auto forward_output = results.front().value();
   DCHECK(forward_output.has_value()) << "Failed to execute model";
-  LOG(INFO) << "engine end step";
   return forward_output.value();
 }
 void DiTEngine::update_last_step_result(std::vector<DiTBatch>& batch) {}

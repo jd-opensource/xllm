@@ -24,12 +24,13 @@ limitations under the License.
 namespace xllm {
 
 DiTForwardInput xllm::DiTBatch::prepare_forward_input() {
+  CHECK(!dit_request_vec_.empty());
+
   DiTForwardInput forward_input;
-  if (dit_request_data_vec_.empty()) {
-    return forward_input;
-  }
-  forward_input.input_params = dit_request_data_vec_[0].input_params;
-  forward_input.generation_params = dit_request_data_vec_[0].generation_params;
+  forward_input.input_params = dit_request_vec_[0]->state().input_params();
+  forward_input.generation_params =
+      dit_request_vec_[0]->state().generation_params();
+
   return forward_input;
 }
 

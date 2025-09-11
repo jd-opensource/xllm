@@ -21,7 +21,6 @@ limitations under the License.
 #include <limits>
 #include <vector>
 
-#include "framework/request/dit_request_params.h"
 #include "framework/request/mm_data.h"
 #include "framework/request/sequence.h"
 #include "runtime/forward_params.h"

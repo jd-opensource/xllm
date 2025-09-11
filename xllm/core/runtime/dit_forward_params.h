@@ -34,8 +34,8 @@ struct DiTForwardInput {
     return inputs;
   }
 
-  InputParams input_params;
-  GenerationParams generation_params;
+  DiTInputParams input_params;
+  DiTGenerationParams generation_params;
 };
 
 // dit related forward output params

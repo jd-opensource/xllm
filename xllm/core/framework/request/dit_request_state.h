@@ -32,9 +32,7 @@ using DiTOutputsFunc = std::function<std::vector<bool>(
 
 class Call;
 
-struct GenerationParams {
-  std::optional<std::string> size;
-
+struct DiTGenerationParams {
   int32_t width = 512;
 
   int32_t height = 512;
@@ -52,7 +50,7 @@ struct GenerationParams {
   std::optional<int32_t> max_sequence_length;
 };
 
-struct InputParams {
+struct DiTInputParams {
   std::string prompt;
 
   std::optional<std::string> prompt_2;
@@ -81,8 +79,8 @@ struct InputParams {
 
   std::optional<torch::Tensor> latents;
 
-  InputParams to(torch::Device device, torch::ScalarType dtype) const {
-    InputParams copy = *this;
+  DiTInputParams to(torch::Device device, torch::ScalarType dtype) const {
+    DiTInputParams copy = *this;
     if (copy.prompt_embeds) {
       copy.prompt_embeds = copy.prompt_embeds->to(device, dtype);
     }
@@ -106,8 +104,8 @@ struct InputParams {
 
 struct DiTRequestState {
  public:
-  DiTRequestState(InputParams& input_params,
-                  GenerationParams& generation_params,
+  DiTRequestState(DiTInputParams& input_params,
+                  DiTGenerationParams& generation_params,
                   const DiTOutputFunc& output_func,
                   const DiTOutputsFunc& outputs_func,
                   std::optional<Call*> call = std::nullopt)
@@ -117,15 +115,15 @@ struct DiTRequestState {
         outputs_func_(outputs_func),
         call_(call) {}
   DiTRequestState() {}
-  InputParams& input_params() { return input_params_; }
-  GenerationParams& generation_params() { return generation_params_; }
+  DiTInputParams& input_params() { return input_params_; }
+  DiTGenerationParams& generation_params() { return generation_params_; }
   DiTOutputFunc& output_func() { return output_func_; }
   DiTOutputsFunc& outputs_func() { return outputs_func_; }
   std::optional<Call*>& call() { return call_; }
 
  private:
-  InputParams input_params_;
-  GenerationParams generation_params_;
+  DiTInputParams input_params_;
+  DiTGenerationParams generation_params_;
   DiTOutputFunc output_func_;
   DiTOutputsFunc outputs_func_;
   std::optional<Call*> call_;
