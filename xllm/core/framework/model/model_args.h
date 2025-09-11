@@ -310,72 +310,78 @@ struct ModelArgs {
   PROPERTY(int64_t, num_speculative_tokens) = 0;
 
   // VAE related args
-  PROPERTY(int64_t, in_channels) = 3;
-  PROPERTY(int64_t, out_channels) = 3;
-  PROPERTY(std::vector<std::string>, down_block_types) = {
-    "DownEncoderBlock2D",
-    "DownEncoderBlock2D",
-    "DownEncoderBlock2D",
-    "DownEncoderBlock2D"
+  PROPERTY(int64_t, vae_in_channels) = -1;
+  PROPERTY(int64_t, vae_out_channels) = -1;
+  PROPERTY(std::vector<std::string>, vae_down_block_types) = {
+
   };
-  PROPERTY(std::vector<std::string>, up_block_types) = {
-    "UpDecoderBlock2D",
-    "UpDecoderBlock2D",
-    "UpDecoderBlock2D",
-    "UpDecoderBlock2D"
+  PROPERTY(std::vector<std::string>, vae_up_block_types) = {
+
   };
-  PROPERTY(std::vector<int64_t>, block_out_channels) = { 128, 256, 512, 512 };
-  PROPERTY(int64_t, layers_per_block) = 2;
-  PROPERTY(std::string, act_fn) = "silu";
-  PROPERTY(int64_t, latent_channels) = 16;
-  PROPERTY(int64_t, norm_num_groups) = 32;
-  PROPERTY(int64_t, sample_size) = 1024;
-  PROPERTY(float, scale_factor) = 0.3611f;
-  PROPERTY(float, shift_factor) = 0.1159f;
-  PROPERTY(bool, mid_block_add_attention) = true;
-  PROPERTY(bool, force_upcast) = true;
-  PROPERTY(bool, use_quant_conv) = false;
-  PROPERTY(bool, use_post_quant_conv) = false;
+  PROPERTY(std::vector<int64_t>, vae_block_out_channels) = {};
+  PROPERTY(int64_t, vae_layers_per_block) = 1;
+  PROPERTY(std::string, vae_act_fn) = "";
+  PROPERTY(int64_t, vae_latent_channels) = -1;
+  PROPERTY(int64_t, vae_norm_num_groups) = -1;
+  PROPERTY(int64_t, vae_sample_size) = -1;
+  PROPERTY(float, vae_scale_factor) = 0.0f;
+  PROPERTY(float, vae_shift_factor) = 0.0f;
+  PROPERTY(bool, vae_mid_block_add_attention) = true;
+  PROPERTY(bool, vae_force_upcast) = true;
+  PROPERTY(bool, vae_use_quant_conv) = false;
+  PROPERTY(bool, vae_use_post_quant_conv) = false;
 
   // dit related args
-  PROPERTY(int64_t, dit_num_layers) = 19;
-  PROPERTY(int64_t, dit_patch_size) = 1;
-  PROPERTY(int64_t, dit_in_channels) = 64;
-  PROPERTY(int64_t, dit_attention_head_dim) = 128;
-  PROPERTY(int64_t, dit_num_attention_heads) = 24;
-  PROPERTY(int64_t, dit_joint_attention_dim) = 4096;
-  PROPERTY(int64_t, dit_pooled_projection_dim) = 768;
+  PROPERTY(int64_t, dit_num_layers) = 0;
+  PROPERTY(int64_t, dit_patch_size) = 0;
+  PROPERTY(int64_t, dit_in_channels) = 0;
+  PROPERTY(int64_t, dit_attention_head_dim) = 0;
+  PROPERTY(int64_t, dit_num_attention_heads) = 0;
+  PROPERTY(int64_t, dit_joint_attention_dim) = 0;
+  PROPERTY(int64_t, dit_pooled_projection_dim) = 0;
   PROPERTY(bool, dit_guidance_embeds) = true;
-  PROPERTY(std::vector<int64_t>, dit_axes_dims_rope) = { 16, 56, 56 };
-  PROPERTY(int64_t, dit_num_single_layers) = 38;
+  PROPERTY(std::vector<int64_t>, dit_axes_dims_rope) = {};
+  PROPERTY(int64_t, dit_num_single_layers) = 0;
 
   // t5 related args
-  PROPERTY(int64_t, t5_vocab_size) = 32128;
-  PROPERTY(int64_t, t5_d_model) = 4096;
-  PROPERTY(int64_t, t5_num_layers) = 24;
-  PROPERTY(int64_t, t5_d_kv) = 64;
-  PROPERTY(int64_t, t5_num_heads) = 64;
-  PROPERTY(int64_t, t5_d_ff) = 10240;
-  PROPERTY(float, t5_dropout_rate) = 0.1f;
-  PROPERTY(std::string, t5_dense_act_fn) = "gelu_new";
+  PROPERTY(int64_t, t5_vocab_size) = 0;
+  PROPERTY(int64_t, t5_d_model) = 0;
+  PROPERTY(int64_t, t5_num_layers) = 0;
+  PROPERTY(int64_t, t5_d_kv) = 0;
+  PROPERTY(int64_t, t5_num_heads) = 0;
+  PROPERTY(int64_t, t5_d_ff) = 0;
+  PROPERTY(float, t5_dropout_rate) = 0.0f;
+  PROPERTY(std::string, t5_dense_act_fn) = "";
   PROPERTY(bool, t5_is_gated_act) = true;
-  PROPERTY(int64_t, t5_relative_attention_num_buckets) = 32;
-  PROPERTY(int64_t, t5_relative_attention_max_distance) = 128;
-  PROPERTY(float, t5_layer_norm_epsilon) = 1e-6f;
+  PROPERTY(int64_t, t5_relative_attention_num_buckets) = 0;
+  PROPERTY(int64_t, t5_relative_attention_max_distance) = 0;
+  PROPERTY(float, t5_layer_norm_epsilon) = 0.0f;
 
   // scheduler related args
-  PROPERTY(int64_t, scheduler_num_train_timesteps) = 1000;
-  PROPERTY(int64_t, scheduler_shift) = 3;
-  PROPERTY(bool, scheduler_use_dynamic_shifting) = true;
-  PROPERTY(float, scheduler_base_shift) = 0.5f;
-  PROPERTY(float, scheduler_max_shift) = 1.15f;
-  PROPERTY(int64_t, scheduler_base_image_seq_len) = 256;
-  PROPERTY(int64_t, scheduler_max_image_seq_len) = 4096;
-
+  PROPERTY(int64_t, scheduler_num_train_timesteps) = 0;
+  PROPERTY(int64_t, scheduler_shift) = 0;
+  PROPERTY(bool, scheduler_use_dynamic_shifting) = false;
+  PROPERTY(float, scheduler_base_shift) = 0;
+  PROPERTY(float, scheduler_max_shift) = 0;
+  PROPERTY(int64_t, scheduler_base_image_seq_len) = 0;
+  PROPERTY(int64_t, scheduler_max_image_seq_len) = 0;
   // clip related args
-  PROPERTY(int64_t, projection_dim) = 768;
-  PROPERTY(float, initializer_factor) = 1.0f;
-  PROPERTY(int64_t, num_hidden_layers) = 12;
+  PROPERTY(int64_t, clip_vocab_size) = -1;
+  PROPERTY(int64_t, clip_hidden_size) = -1;
+  PROPERTY(int64_t, clip_intermediate_size) = -1;
+  PROPERTY(int64_t, clip_projection_dim) = -1;
+  PROPERTY(int64_t, clip_num_attention_heads) = -1;
+  PROPERTY(int64_t, clip_num_hidden_layers) = -1;
+  PROPERTY(float, clip_layer_norm_eps) = -1;
+  PROPERTY(std::string, clip_hidden_act) = "quick_gelu";
+  PROPERTY(int64_t, clip_max_position_embeddings) = -1;
+  PROPERTY(int32_t, clip_bos_token_id) = 0;
+  PROPERTY(int32_t, clip_eos_token_id) = 0;
+  PROPERTY(int32_t, clip_pad_token_id) = 0;
+  PROPERTY(float, clip_attention_dropout) = 0.0f;
+  PROPERTY(float, clip_initializer_factor) = 0.0f;
+  PROPERTY(float, clip_initializer_range) = 0.0f;
+  PROPERTY(int64_t, clip_head_dim) = 0;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
@@ -504,6 +510,91 @@ inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
   os << ", use_sliding_window: " << args.use_sliding_window();
   os << ", sliding_window: " << args.sliding_window();
   os << ", max_window_layers: " << args.max_window_layers();
+  os << ", query_num: " << args.query_num();
+  os << ", num_speculative_tokens: " << args.num_speculative_tokens();
+  os << ", vae_in_channels: " << args.vae_in_channels();
+  os << ", vae_out_channels: " << args.vae_out_channels();
+  os << ", vae_down_block_types: [";
+  for (const auto& type : args.vae_down_block_types()) {
+    os << type << ", ";
+  }
+  os << "]";
+  os << ", vae_up_block_types: [";
+  for (const auto& type : args.vae_up_block_types()) {
+    os << type << ", ";
+  }
+  os << "]";
+  os << ", vae_block_out_channels: [";
+  for (const auto& channel : args.vae_block_out_channels()) {
+    os << channel << ", ";
+  }
+  os << "]";
+  os << ", vae_layers_per_block: " << args.vae_layers_per_block();
+  os << ", vae_act_fn: " << args.vae_act_fn();
+  os << ", vae_latent_channels: " << args.vae_latent_channels();
+  os << ", vae_norm_num_groups: " << args.vae_norm_num_groups();
+  os << ", vae_sample_size: " << args.vae_sample_size();
+  os << ", vae_scale_factor: " << args.vae_scale_factor();
+  os << ", vae_shift_factor: " << args.vae_shift_factor();
+  os << ", vae_mid_block_add_attention: " << args.vae_mid_block_add_attention();
+  os << ", vae_force_upcast: " << args.vae_force_upcast();
+  os << ", vae_use_quant_conv: " << args.vae_use_quant_conv();
+  os << ", vae_use_post_quant_conv: " << args.vae_use_post_quant_conv();
+  os << ", dit_num_layers: " << args.dit_num_layers();
+  os << ", dit_patch_size: " << args.dit_patch_size();
+  os << ", dit_in_channels: " << args.dit_in_channels();
+  os << ", dit_attention_head_dim: " << args.dit_attention_head_dim();
+  os << ", dit_num_attention_heads: " << args.dit_num_attention_heads();
+  os << ", dit_joint_attention_dim: " << args.dit_joint_attention_dim();
+  os << ", dit_pooled_projection_dim: " << args.dit_pooled_projection_dim();
+  os << ", dit_guidance_embeds: " << args.dit_guidance_embeds();
+  os << ", dit_axes_dims_rope: [";
+  for (const auto& dim : args.dit_axes_dims_rope()) {
+    os << dim << ", ";
+  }
+  os << "]";
+  os << ", dit_num_single_layers: " << args.dit_num_single_layers();
+  os << ", t5_vocab_size: " << args.t5_vocab_size();
+  os << ", t5_d_model: " << args.t5_d_model();
+  os << ", t5_num_layers: " << args.t5_num_layers();
+  os << ", t5_d_kv: " << args.t5_d_kv();
+  os << ", t5_num_heads: " << args.t5_num_heads();
+  os << ", t5_d_ff: " << args.t5_d_ff();
+  os << ", t5_dropout_rate: " << args.t5_dropout_rate();
+  os << ", t5_dense_act_fn: " << args.t5_dense_act_fn();
+  os << ", t5_is_gated_act: " << args.t5_is_gated_act();
+  os << ", t5_relative_attention_num_buckets: "
+     << args.t5_relative_attention_num_buckets();
+  os << ", t5_relative_attention_max_distance: "
+     << args.t5_relative_attention_max_distance();
+  os << ", t5_layer_norm_epsilon: " << args.t5_layer_norm_epsilon();
+  os << ", scheduler_num_train_timesteps: "
+     << args.scheduler_num_train_timesteps();
+  os << ", scheduler_shift: " << args.scheduler_shift();
+  os << ", scheduler_use_dynamic_shifting: "
+     << args.scheduler_use_dynamic_shifting();
+  os << ", scheduler_base_shift: " << args.scheduler_base_shift();
+  os << ", scheduler_max_shift: " << args.scheduler_max_shift();
+  os << ", scheduler_base_image_seq_len: "
+     << args.scheduler_base_image_seq_len();
+  os << ", scheduler_max_image_seq_len: " << args.scheduler_max_image_seq_len();
+  os << ", clip_vocab_size: " << args.clip_vocab_size();
+  os << ", clip_hidden_size: " << args.clip_hidden_size();
+  os << ", clip_intermediate_size: " << args.clip_intermediate_size();
+  os << ", clip_projection_dim: " << args.clip_projection_dim();
+  os << ", clip_num_attention_heads: " << args.clip_num_attention_heads();
+  os << ", clip_num_hidden_layers: " << args.clip_num_hidden_layers();
+  os << ", clip_layer_norm_eps: " << args.clip_layer_norm_eps();
+  os << ", clip_hidden_act: " << args.clip_hidden_act();
+  os << ", clip_max_position_embeddings: "
+     << args.clip_max_position_embeddings();
+  os << ", clip_bos_token_id: " << args.clip_bos_token_id();
+  os << ", clip_eos_token_id: " << args.clip_eos_token_id();
+  os << ", clip_pad_token_id: " << args.clip_pad_token_id();
+  os << ", clip_attention_dropout: " << args.clip_attention_dropout();
+  os << ", clip_initializer_factor: " << args.clip_initializer_factor();
+  os << ", clip_initializer_range: " << args.clip_initializer_range();
+  os << ", clip_num_hidden_layers: " << args.clip_num_hidden_layers();
   os << "]";
   return os;
 }

@@ -207,13 +207,13 @@ class FluxPipelineImpl : public torch::nn::Module {
   FluxPipelineImpl(const Context& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    vae_scale_factor_ = 1 << (model_args_.block_out_channels().size() - 1);
+    vae_scale_factor_ = 1 << (model_args_.vae_block_out_channels().size() - 1);
     _execution_device = options_.device();
     _execution_dtype = torch::kBFloat16;
     LOG(INFO) << _execution_device << " is the execution device";
     LOG(INFO) << _execution_dtype << " is the execution dtype";
-    vae_shift_factor_ = model_args_.shift_factor();
-    vae_scaling_factor_ = model_args_.scale_factor();
+    vae_shift_factor_ = model_args_.vae_shift_factor();
+    vae_scaling_factor_ = model_args_.vae_scale_factor();
     default_sample_size_ = 128;
     tokenizer_max_length_ = 77;  // TODO: get from config file
     vae_image_processor_ = VAEImageProcessor(
@@ -801,69 +801,4 @@ class FluxPipelineImpl : public torch::nn::Module {
   }
 };
 TORCH_MODULE(FluxPipeline);
-REGISTER_MODEL_ARGS(flux, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "flux");
-  //   //vae
-  //   LOAD_ARG_OR(in_channels, "in_channels", 3);
-  //   LOAD_ARG_OR(out_channels, "out_channels", 3);
-  //   LOAD_ARG_OR(down_block_types,
-  //               "down_block_types",
-  //               std::vector<std::string>{"DownEncoderBlock2D"});
-  //   LOAD_ARG_OR(up_block_types,
-  //               "up_block_types",
-  //               std::vector<std::string>{"UpDecoderBlock2D"});
-  //   LOAD_ARG_OR(
-  //       block_out_channels, "block_out_channels", std::vector<int64_t>{64});
-  //   LOAD_ARG_OR(layers_per_block, "layers_per_block", 1);
-  //   LOAD_ARG_OR(act_fn, "act_fn", "silu");
-  //   LOAD_ARG_OR(latent_channels, "latent_channels", 4);
-  //   LOAD_ARG_OR(norm_num_groups, "norm_num_groups", 32);
-  //   LOAD_ARG_OR(sample_size, "sample_size", 32);
-  //   LOAD_ARG_OR(scale_factor, "scale_factor", 0.18215f);
-  //   LOAD_ARG_OR(shift_factor, "shift_factor", 0.1159f);
-  //   LOAD_ARG_OR(mid_block_add_attention, "mid_block_add_attention", true);
-  //   LOAD_ARG_OR(force_upcast, "force_upcast", true);
-  //   LOAD_ARG_OR(use_quant_conv, "use_quant_conv", false);
-  //   LOAD_ARG_OR(use_post_quant_conv, "use_post_quant_conv", false);
-  //   //dit
-  //   LOAD_ARG_OR(dit_patch_size, "patch_size", 1);
-  //   LOAD_ARG_OR(dit_in_channels, "in_channels", 64);
-  //   LOAD_ARG_OR(dit_num_layers, "num_layers", 19);
-  //   LOAD_ARG_OR(dit_num_single_layers, "num_single_layers", 38);
-  //   LOAD_ARG_OR(dit_attention_head_dim, "attention_head_dim", 128);
-  //   LOAD_ARG_OR(dit_num_attention_heads, "num_attention_heads", 24);
-  //   LOAD_ARG_OR(dit_joint_attention_dim, "joint_attention_dim", 4096);
-  //   LOAD_ARG_OR(dit_pooled_projection_dim, "pooled_projection_dim", 768);
-  //   LOAD_ARG_OR(dit_guidance_embeds, "guidance_embeds", false);
-  //   LOAD_ARG_OR(
-  //       dit_axes_dims_rope, "axes_dims_rope", (std::vector<int64_t>{16, 56,
-  //       56}));
-
-  //   LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
-  //   LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
-  //   LOAD_ARG_OR(head_dim, "head_dim", 56);
-  //   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 128000);
-
-  //   //t5 encoder
-  //   LOAD_ARG_OR(t5_vocab_size, "vocab_size", 32128);
-  //   LOAD_ARG_OR(t5_d_model, "d_model", 4096);
-  //   LOAD_ARG_OR(t5_num_layers, "num_layers", 24);
-  //   LOAD_ARG_OR(t5_d_kv, "d_kv", 64);
-  //   LOAD_ARG_OR(t5_num_heads, "num_heads", 64);
-  //   LOAD_ARG_OR(t5_d_ff, "d_ff", 10240);
-  //   LOAD_ARG_OR(t5_dropout_rate, "dropout_rate", 0.1f);
-  //   LOAD_ARG_OR(t5_dense_act_fn, "dense_act_fn", "gelu_new");
-  //   LOAD_ARG_OR(t5_is_gated_act, "is_gated_act", true);
-  //   LOAD_ARG_OR(
-  //       t5_relative_attention_num_buckets, "relative_attention_num_buckets",
-  //       32);
-  //   LOAD_ARG_OR(t5_relative_attention_max_distance,
-  //               "relative_attention_max_distance",
-  //               128);
-  //   LOAD_ARG_OR(t5_layer_norm_epsilon, "layer_norm_epsilon", 1e-6f);
-  LOAD_ARG_OR(n_layers, "num_hidden_layers", 12);
-  LOAD_ARG_OR(n_heads, "num_attention_heads", 12);
-  LOAD_ARG_OR(head_dim, "head_dim", 64);
-  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 77);
-});
 }  // namespace xllm::hf

@@ -2083,8 +2083,7 @@ class DiTModelImpl : public torch::nn::Module {
   at::ScalarType dtype_;
 };
 TORCH_MODULE(DiTModel);
-REGISTER_MODEL_ARGS(dit, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "dit");
+REGISTER_MODEL_ARGS(FluxTransformer2DModel, [&] {
   LOAD_ARG_OR(dit_patch_size, "patch_size", 1);
   LOAD_ARG_OR(dit_in_channels, "in_channels", 64);
   LOAD_ARG_OR(dit_num_layers, "num_layers", 19);

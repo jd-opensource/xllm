@@ -969,7 +969,7 @@ class T5EncoderModelImpl : public torch::nn::Module {
   }
 };
 TORCH_MODULE(T5EncoderModel);
-REGISTER_MODEL_ARGS(t5, [&] {
+REGISTER_MODEL_ARGS(T5EncoderModel, [&] {
   LOAD_ARG_OR(model_type, "model_type", "t5encoder");
   LOAD_ARG_OR(t5_vocab_size, "vocab_size", 32128);
   LOAD_ARG_OR(t5_d_model, "d_model", 4096);

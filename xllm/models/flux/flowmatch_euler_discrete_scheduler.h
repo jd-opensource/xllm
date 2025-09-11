@@ -25,7 +25,6 @@ struct FlowMatchEulerDiscreteSchedulerOutput {
 };
 class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
  private:
-  // 配置参数（原config结构体的成员变量）
   int num_train_timesteps_;
   float shift_;
   bool use_dynamic_shifting_;
@@ -41,7 +40,6 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   std::string time_shift_type_;
   bool stochastic_sampling_;
 
-  // 状态变量
   torch::Tensor timesteps_;
   torch::Tensor sigmas_;
   float sigma_min_;
@@ -49,7 +47,6 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   std::optional<int> step_index_;
   std::optional<int> begin_index_;
 
-  // 私有工具函数
   torch::Tensor convert_to_karras(const torch::Tensor& in_sigmas,
                                   int num_inference_steps) {
     float sigma_min = sigma_min_;
@@ -99,7 +96,6 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
                                 int num_inference_steps,
                                 float alpha = 0.6f,
                                 float beta = 0.6f) {
-    // 注意：实际使用需要链接scipy的beta分布实现，此处仅为框架示意
     throw std::runtime_error(
         "Beta sigmas implementation requires scipy integration");
   }
@@ -137,7 +133,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   }
 
  public:
-  int64_t order = 1;  // 默认阶数为1
+  int64_t order = 1;
   ModelArgs args;
   int base_image_seq_len() { return base_image_seq_len_.value(); }
   int max_image_seq_len() { return max_image_seq_len_.value(); }
@@ -400,27 +396,22 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
                         const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
-    // 1. 测试参数（可通过input_params传入，或硬编码用于调试）
     const int num_inference_steps = 50;
-    const float mu = 0.5f;              // 动态偏移参数
-    const bool use_stochastic = false;  // 先测试确定性模式
+    const float mu = 0.5f;
+    const bool use_stochastic = false;
 
-    // 2. 配置调度器
     this->set_timesteps(
         num_inference_steps, tokens.device(), /*sigmas=*/std::nullopt, mu);
     this->set_begin_index(0);
 
-    // 3. 生成测试输入（与Python端保持一致的随机种子）
-    torch::manual_seed(42);  // 固定随机种子，确保结果可复现
-    torch::Tensor sample = torch::randn(
-        {1, 3, 32, 32}, torch::dtype(torch::kFloat32));      // 模拟样本
-    torch::Tensor model_output = torch::randn_like(sample);  // 模拟模型输出
-    torch::Tensor timestep = this->timesteps()[0];           // 初始时间步
-    model_output = model_output.to(timestep.device())
-                       .to(torch::kFloat32);  // 确保与sample同设备和dtype
-    sample = sample.to(timestep.device())
-                 .to(torch::kFloat32);  // 确保与timestep同设备和dtype
-    // 4. 执行一步调度器计算
+    torch::manual_seed(42);
+    torch::Tensor sample =
+        torch::randn({1, 3, 32, 32}, torch::dtype(torch::kFloat32));
+    torch::Tensor model_output = torch::randn_like(sample);
+    torch::Tensor timestep = this->timesteps()[0];
+    model_output = model_output.to(timestep.device()).to(torch::kFloat32);
+    sample = sample.to(timestep.device()).to(torch::kFloat32);
+
     auto output = this->step(model_output,
                              timestep,
                              sample,
@@ -435,8 +426,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   }
 };
 TORCH_MODULE(FlowMatchEulerDiscreteScheduler);
-REGISTER_MODEL_ARGS(flowmatcheulerdiscretedescheduler, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "flowmatcheulerdiscretedescheduler");
+REGISTER_MODEL_ARGS(FlowMatchEulerDiscreteScheduler, [&] {
   LOAD_ARG_OR(scheduler_num_train_timesteps, "num_train_timesteps", 1000);
   LOAD_ARG_OR(scheduler_shift, "shift", 1);
   LOAD_ARG_OR(scheduler_use_dynamic_shifting, "use_dynamic_shifting", true);
@@ -444,10 +434,5 @@ REGISTER_MODEL_ARGS(flowmatcheulerdiscretedescheduler, [&] {
   LOAD_ARG_OR(scheduler_max_shift, "max_shift", 1.15f);
   LOAD_ARG_OR(scheduler_base_image_seq_len, "base_image_seq_len", 256);
   LOAD_ARG_OR(scheduler_max_image_seq_len, "max_image_seq_len", 4096);
-
-  LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
-  LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
-  LOAD_ARG_OR(head_dim, "head_dim", 56);
-  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 128000);
 });
 }  // namespace xllm::hf
