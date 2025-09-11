@@ -50,3 +50,5 @@ xllm/version.py
 
 # compile_commands.json from nvbench
 compile_commands.json
+
+/kernel_meta
