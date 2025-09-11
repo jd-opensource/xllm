@@ -73,10 +73,12 @@ cc_library(
     llm_master.h
     master.h
     vlm_master.h
+    dit_master.h
   SRCS
     llm_master.cpp
     master.cpp
     vlm_master.cpp
+    dit_master.cpp
   DEPS
     :common
     :distributed_runtime
