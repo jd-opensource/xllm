@@ -166,4 +166,9 @@ struct RawForwardOutput {
   int32_t prepared_layer_id;
 };
 
+struct BatchedForwardInputs {
+  std::vector<ForwardInput> micro_inputs;
+  SamplingParameters concated_sampling_params;
+};
+
 }  // namespace xllm

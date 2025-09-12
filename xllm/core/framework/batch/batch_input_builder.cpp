@@ -80,19 +80,21 @@ BatchInputBuilder::BatchInputBuilder(
 ForwardInput BatchInputBuilder::build_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
-  process_sequences();
+  process_sequences(0, static_cast<uint32_t>(num_sequences_));
   padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
 
   return state_to_forward_input();
 }
 
-RawForwardInput BatchInputBuilder::build_raw_forward_input() {
-  process_sequences();
+RawForwardInput BatchInputBuilder::build_raw_forward_input(uint32_t start_idx,
+                                                           uint32_t end_idx) {
+  process_sequences(start_idx, end_idx);
   return state_to_raw_forward_input();
 }
 
-void BatchInputBuilder::process_sequences() {
-  for (int32_t i = 0; i < num_sequences_; ++i) {
+void BatchInputBuilder::process_sequences(uint32_t start_idx,
+                                          uint32_t end_idx) {
+  for (int32_t i = start_idx; i < end_idx; ++i) {
     process_single_sequence(i);
   }
 }

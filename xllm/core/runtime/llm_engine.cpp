@@ -70,12 +70,16 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   // setup all workers and create worker clients in nnode_rank=0 engine side.
   setup_workers(options);
 
+  dp_size_ = options_.dp_size();
+  worker_clients_num_ = worker_clients_.size();
+  dp_local_tp_size_ = worker_clients_num_ / dp_size_;
+
   // In multi-node serving mode, only driver engine
   // create worker_clients_.
-  if (worker_clients_.size() > 1) {
+  if (worker_clients_num_ > 1) {
     // test process group
     std::vector<folly::SemiFuture<folly::Unit>> futures;
-    futures.reserve(worker_clients_.size());
+    futures.reserve(worker_clients_num_);
     for (auto& worker : worker_clients_) {
       futures.emplace_back(worker->process_group_test_async());
     }
@@ -113,9 +117,8 @@ bool LLMEngine::init_model() {
   tokenizer_args_ = model_loader->tokenizer_args();
 
   // compute the number of local kv heads and head dim
-  const int world_size = options_.dp_size() > 1
-                             ? (worker_clients_.size() / options_.dp_size())
-                             : static_cast<int>(worker_clients_.size());
+  const int world_size = dp_size_ > 1 ? (dp_local_tp_size_)
+                                      : static_cast<int>(worker_clients_num_);
   const int64_t n_heads = args_.n_heads();
   const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
   n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
@@ -126,7 +129,7 @@ bool LLMEngine::init_model() {
     int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
     int32_t num_experts = args_.n_routed_experts();
     eplb_manager_ = std::make_unique<EplbManager>(
-        num_layers, worker_clients_.size(), num_experts);
+        num_layers, worker_clients_num_, num_experts);
   }
 
   // key + value for all layers
@@ -156,7 +159,7 @@ bool LLMEngine::init_model() {
   // init model for each worker in parallel
   // multiple workers, call async init
   std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(worker_clients_.size());
+  futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
     futures.push_back(worker->init_model_async(model_path));
   }
@@ -176,7 +179,7 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   const double max_memory_utilization = options_.max_memory_utilization();
 
   std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
-  futures.reserve(worker_clients_.size());
+  futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
     futures.push_back(worker->estimate_kv_cache_capacity_async());
   }
@@ -286,12 +289,11 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload())
       .enable_kvcache_store(options_.enable_kvcache_store());
-  block_manager_pool_ =
-      std::make_unique<BlockManagerPool>(options, options_.dp_size());
+  block_manager_pool_ = std::make_unique<BlockManagerPool>(options, dp_size_);
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(worker_clients_.size());
+  futures.reserve(worker_clients_num_);
   if (options_.instance_role() == InstanceRole::DEFAULT) {
     for (auto& worker : worker_clients_) {
       futures.push_back(worker->allocate_kv_cache_async(kv_cache_shape));
@@ -329,7 +331,7 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
   int32_t src_world_size = src_cluster_ids.size();
   int32_t src_tp_size = src_world_size / src_dp_size;
   int32_t dst_world_size = options_.nnodes();
-  int32_t dst_tp_size = dst_world_size / options_.dp_size();
+  int32_t dst_tp_size = dst_world_size / dp_size_;
 
   std::vector<bool> results;
   results.reserve(dst_tp_size);
@@ -362,12 +364,11 @@ LLMEngine::load_kv_blocks_from_store_async(
     const uint32_t dp_rank,
     const std::vector<CacheBlockInfo>& cache_block_info) {
   std::vector<folly::SemiFuture<uint32_t>> futures;
-  auto tp_size = this->worker_clients_.size() / this->options_.dp_size();
 
-  futures.reserve(tp_size);
-  for (auto tp_rank = 0; tp_rank < tp_size; ++tp_rank) {
+  futures.reserve(dp_local_tp_size_);
+  for (auto tp_rank = 0; tp_rank < dp_local_tp_size_; ++tp_rank) {
     futures.emplace_back(
-        this->worker_clients_[tp_rank + tp_size * dp_rank]
+        worker_clients_[tp_rank + dp_local_tp_size_ * dp_rank]
             ->load_kv_blocks_from_store_async(cache_block_info));
   }
   return std::move(futures);
@@ -375,9 +376,9 @@ LLMEngine::load_kv_blocks_from_store_async(
 
 void LLMEngine::get_device_info(std::vector<std::string>& device_ips,
                                 std::vector<uint16_t>& ports) {
-  device_ips.reserve(worker_clients_.size());
-  ports.reserve(worker_clients_.size());
-  for (size_t worker_rank = 0; worker_rank < worker_clients_.size();
+  device_ips.reserve(worker_clients_num_);
+  ports.reserve(worker_clients_num_);
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
     std::string device_ip;
     uint16_t port;
@@ -391,11 +392,11 @@ void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
                                std::vector<std::string>& addrs,
                                std::vector<int64_t>& k_cache_ids,
                                std::vector<int64_t>& v_cache_ids) {
-  cluster_ids.reserve(worker_clients_.size());
-  addrs.reserve(worker_clients_.size());
-  k_cache_ids.reserve(worker_clients_.size());
-  v_cache_ids.reserve(worker_clients_.size());
-  for (size_t worker_rank = 0; worker_rank < worker_clients_.size();
+  cluster_ids.reserve(worker_clients_num_);
+  addrs.reserve(worker_clients_num_);
+  k_cache_ids.reserve(worker_clients_num_);
+  v_cache_ids.reserve(worker_clients_num_);
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
     uint64_t cluster_id;
     std::string addr;
@@ -421,7 +422,7 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
   int32_t src_dp_worker_index = 0;
   int32_t src_world_size = cluster_ids.size();
   int32_t src_tp_size = src_world_size / src_dp_size;
-  for (size_t worker_rank = 0; worker_rank < worker_clients_.size();
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
     // The worker for decoding needs to establish a connection for each dp group
     // in prefill.
@@ -463,7 +464,7 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   int32_t src_dp_worker_index = 0;
   int32_t src_world_size = cluster_ids.size();
   int32_t src_tp_size = src_world_size / src_dp_size;
-  for (size_t worker_rank = 0; worker_rank < worker_clients_.size();
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
     // The worker for decoding needs to unlink for each dp group in prefill.
     std::vector<uint64_t> dp_cluster_ids;
@@ -499,55 +500,39 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
     return {};
   }
   Timer timer;
-  DCHECK(options_.dp_size() == batch.size())
-      << "Split Dp batch failed with dp_size as " << options_.dp_size()
-      << "micro batch size as " << batch.size() << ".";
+  DCHECK(dp_size_ == batch.size())
+      << "Split DP batch failed with dp_size as " << dp_size_
+      << " and actual batch size as " << batch.size() << ".";
 
-  auto worker_clients_num = worker_clients_.size();
-  auto dp_size = options_.dp_size();
-  auto dp_local_tp_size = worker_clients_num / dp_size;
-  std::vector<RawForwardInput> raw_forward_inputs;
-  raw_forward_inputs.reserve(dp_size);
-  std::vector<int32_t> dp_global_token_nums(dp_size);
-  bool global_empty_kv_cache = true;
-  EplbInfo eplb_info;
-  for (auto dp_rank = 0; dp_rank < dp_size; ++dp_rank) {
-    // assume the order in workers_ is its rank
-    RawForwardInput raw_forward_input = batch[dp_rank].prepare_forward_input();
-    raw_forward_inputs.push_back(raw_forward_input);
-    dp_global_token_nums[dp_rank] = raw_forward_input.flatten_tokens_vec.size();
-    global_empty_kv_cache =
-        raw_forward_inputs[dp_rank].empty_kv_cache && global_empty_kv_cache;
-  }
+  // prepare input with DP and multi-stream parallel, 2-D micro batches
+  auto batched_raw_forward_inputs = prepare_inputs(batch);
+  DCHECK(dp_size_ == batched_raw_forward_inputs.size())
+      << "The processed raw forward inputs size "
+      << batched_raw_forward_inputs.size() << " is not equal to dp size "
+      << dp_size_ << ".";
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
-  futures.reserve(worker_clients_num);
-  if (FLAGS_enable_eplb) {
-    eplb_info = eplb_manager_->get_eplb_info();
-  }
+  futures.reserve(worker_clients_num_);
+
   // update dp related global paramters and then execute model
-  for (auto worker_rank = 0; worker_rank < worker_clients_num; ++worker_rank) {
-    auto dp_rank = worker_rank / dp_local_tp_size;
-    raw_forward_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
-    raw_forward_inputs[dp_rank].global_empty_kv_cache = global_empty_kv_cache;
-    if (FLAGS_enable_eplb) {
-      raw_forward_inputs[dp_rank].eplb_info = eplb_info;
-    }
-    futures.emplace_back(
-        worker_clients_[worker_rank]->step_async(raw_forward_inputs[dp_rank]));
+  for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
+    auto dp_rank = worker_rank / dp_local_tp_size_;
+    // temporarily use dimension[0], will adapted in later pr
+    futures.emplace_back(worker_clients_[worker_rank]->step_async(
+        batched_raw_forward_inputs[dp_rank][0]));
   }
 
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
 
   if (FLAGS_enable_eplb && !options_.enable_schedule_overlap()) {
-    process_eplb_data(results, worker_clients_num);
+    process_eplb_data(results);
   }
   // concat results from dp ranks
   std::vector<std::optional<RawForwardOutput>> raw_forward_outputs;
-  raw_forward_outputs.reserve(dp_size);
-  for (auto worker_rank = 0; worker_rank < worker_clients_num;
-       worker_rank += dp_local_tp_size) {
+  raw_forward_outputs.reserve(dp_size_);
+  for (auto worker_rank = 0; worker_rank < worker_clients_num_;
+       worker_rank += dp_local_tp_size_) {
     auto result = results[worker_rank].value();
     if (result.has_value()) {
       raw_forward_outputs.push_back(result);
@@ -560,7 +545,7 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // if it's not enabled, process_sample_output will append the real token,
   // if it's enabled, this false here will append the fake token in
   // process_sample_output
-  for (auto dp_rank = 0; dp_rank < dp_size; ++dp_rank) {
+  for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batch[dp_rank].process_sample_output(raw_forward_outputs[dp_rank].value(),
                                          false);
   }
@@ -569,16 +554,12 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
 }
 
 void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
-  auto dp_size = options_.dp_size();
-  auto worker_clients_num = worker_clients_.size();
-  auto dp_local_tp_size = worker_clients_num / dp_size;
-
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
-  futures.reserve(dp_size);
+  futures.reserve(dp_size_);
   std::vector<RawForwardOutput> raw_forward_outputs;
-  raw_forward_outputs.reserve(dp_size);
+  raw_forward_outputs.reserve(dp_size_);
   if (FLAGS_enable_eplb) {
-    for (auto worker_rank = 0; worker_rank < worker_clients_num;
+    for (auto worker_rank = 0; worker_rank < worker_clients_num_;
          worker_rank++) {
       futures.emplace_back(
           worker_clients_[worker_rank]->get_last_step_result_async());
@@ -586,9 +567,9 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
     // wait for the all future to complete
     auto last_step_results = folly::collectAll(futures).get();
     // concat last step results from dp ranks
-    process_eplb_data(last_step_results, worker_clients_num);
-    for (auto worker_rank = 0; worker_rank < worker_clients_num;
-         worker_rank += dp_local_tp_size) {
+    process_eplb_data(last_step_results);
+    for (auto worker_rank = 0; worker_rank < worker_clients_num_;
+         worker_rank += dp_local_tp_size_) {
       auto result = last_step_results[worker_rank].value();
       if (result.has_value()) {
         raw_forward_outputs.emplace_back(std::move(result.value()));
@@ -597,8 +578,8 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
       }
     }
   } else {
-    for (auto worker_rank = 0; worker_rank < worker_clients_num;
-         worker_rank += dp_local_tp_size) {
+    for (auto worker_rank = 0; worker_rank < worker_clients_num_;
+         worker_rank += dp_local_tp_size_) {
       futures.emplace_back(
           worker_clients_[worker_rank]->get_last_step_result_async());
     }
@@ -607,9 +588,9 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
     auto last_step_results = folly::collectAll(futures).get();
     // concat last step results from dp ranks
 
-    for (auto worker_rank = 0; worker_rank < worker_clients_num;
-         worker_rank += dp_local_tp_size) {
-      auto result = last_step_results[worker_rank / dp_local_tp_size].value();
+    for (auto worker_rank = 0; worker_rank < worker_clients_num_;
+         worker_rank += dp_local_tp_size_) {
+      auto result = last_step_results[worker_rank / dp_local_tp_size_].value();
       if (result.has_value()) {
         raw_forward_outputs.emplace_back(std::move(result.value()));
       } else {
@@ -627,7 +608,7 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
 std::vector<int64_t> LLMEngine::get_active_activation_memory() const {
   // call worker to get active activation memory
   std::vector<folly::SemiFuture<int64_t>> futures;
-  futures.reserve(worker_clients_.size());
+  futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
     futures.push_back(worker->get_active_activation_memory_async());
   }
@@ -635,7 +616,7 @@ std::vector<int64_t> LLMEngine::get_active_activation_memory() const {
   // wait for all futures to complete
   auto results = folly::collectAll(futures).get();
   std::vector<int64_t> active_activation_memories;
-  active_activation_memories.reserve(worker_clients_.size());
+  active_activation_memories.reserve(worker_clients_num_);
   for (auto& result : results) {
     active_activation_memories.push_back(result.value());
   }
@@ -650,15 +631,13 @@ void LLMEngine::setup_workers(const runtime::Options& options) {
 }
 
 void LLMEngine::process_eplb_data(
-    const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
-    int32_t worker_clients_num) {
+    const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results) {
   int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
-  int32_t num_device_experts =
-      args_.n_routed_experts() / worker_clients_.size() +
-      FLAGS_redundant_experts_num;
+  int32_t num_device_experts = args_.n_routed_experts() / worker_clients_num_ +
+                               FLAGS_redundant_experts_num;
   std::vector<torch::Tensor> tensors;
   std::vector<int32_t> layer_ids(results.size(), -1);
-  tensors.reserve(worker_clients_.size());
+  tensors.reserve(worker_clients_num_);
   for (size_t worker_rank = 0; worker_rank < results.size(); ++worker_rank) {
     auto result = results[worker_rank].value();
     if (result.has_value()) {
@@ -674,6 +653,70 @@ void LLMEngine::process_eplb_data(
   }
   eplb_manager_->set_prepared_layer_ids(layer_ids);
   eplb_manager_->update_expert_load(tensors);
+}
+
+uint32_t determine_micro_batches_num(std::vector<Batch>& batch) {
+  bool is_all_prefill =
+      std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
+        return one_batch.get_batch_prefill_status();
+      });
+  if (!is_all_prefill ||
+      (is_all_prefill && !FLAGS_enable_multi_stream_parallel)) {
+    return 1;
+  } else if (FLAGS_enable_multi_stream_parallel) {
+    return 2;
+  }
+}
+
+std::vector<std::vector<RawForwardInput>> LLMEngine::prepare_inputs(
+    std::vector<Batch>& batch) {
+  // this is a nested 2-D inputs, with outer dimension indicates dp batches,
+  // inner dimension indicates multi-stream parallel micro batches
+  std::vector<std::vector<RawForwardInput>> batched_inputs(dp_size_);
+  // determine micro batches number with current batch prefill/decode status
+  auto micro_batches_num = determine_micro_batches_num(batch);
+
+  // some dp related variables
+  std::vector<std::vector<int32_t>> dp_global_token_nums;
+  dp_global_token_nums.resize(micro_batches_num,
+                              std::vector<int32_t>(dp_size_));
+  bool global_empty_kv_cache = true;
+
+  // eplb related
+  EplbInfo eplb_info;
+
+  // build model input for every single micro batch
+  for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+    // calculate micro batch split indexes
+    auto split_seq_index = xllm::util::cal_vec_split_index(
+        batch[dp_rank].size(), micro_batches_num);
+    for (auto i = 0; i < micro_batches_num; ++i) {
+      batched_inputs[dp_rank].push_back(
+          std::move(batch[dp_rank].prepare_forward_input(
+              split_seq_index[i], split_seq_index[i + 1])));
+      dp_global_token_nums[i][dp_rank] =
+          batched_inputs[dp_rank][i].flatten_tokens_vec.size();
+      global_empty_kv_cache =
+          batched_inputs[dp_rank][i].empty_kv_cache && global_empty_kv_cache;
+    }
+  }
+
+  if (FLAGS_enable_eplb) {
+    eplb_info = eplb_manager_->get_eplb_info();
+  }
+
+  // update dp_global_token_nums and global_empty_kv_cache
+  for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+    for (auto i = 0; i < micro_batches_num; ++i) {
+      batched_inputs[dp_rank][i].dp_global_token_nums = dp_global_token_nums[i];
+      batched_inputs[dp_rank][i].global_empty_kv_cache = global_empty_kv_cache;
+      if (FLAGS_enable_eplb) {
+        batched_inputs[dp_rank][i].eplb_info = eplb_info;
+      }
+    }
+  }
+
+  return batched_inputs;
 }
 
 }  // namespace xllm

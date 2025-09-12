@@ -125,5 +125,24 @@ bool match_suffix(const Slice<int32_t>& data, const Slice<int32_t>& suffix) {
   return std::equal(data_start, data_end, suffix.data());
 }
 
+std::vector<uint32_t> cal_vec_split_index(uint32_t vec_size,
+                                          uint32_t part_num) {
+  std::vector<uint32_t> split_index;
+  split_index.reserve(part_num + 1);
+  split_index.push_back(0);
+
+  if (part_num == 1) {
+    split_index.push_back(vec_size);
+  } else {
+    auto base = vec_size / part_num;
+    auto remainder = vec_size % part_num;
+    for (auto i = 0; i < part_num; ++i) {
+      split_index.push_back(split_index[i] +
+                            ((i < remainder) ? (base + 1) : base));
+    }
+  }
+  return split_index;
+}
+
 }  // namespace util
 }  // namespace xllm

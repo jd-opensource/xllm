@@ -69,5 +69,7 @@ const T& max(const std::vector<T>& vec) {
 
 bool match_suffix(const Slice<int32_t>& data, const Slice<int32_t>& suffix);
 
+std::vector<uint32_t> cal_vec_split_index(uint32_t vec_size, uint32_t part_num);
+
 }  // namespace util
 }  // namespace xllm
