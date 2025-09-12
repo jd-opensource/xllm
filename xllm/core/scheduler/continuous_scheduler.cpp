@@ -54,7 +54,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   last_batch_.resize(options_.dp_size());
 
   if (options.enable_profile_token_budget() ||
-      options.enable_latency_aware_schedule()) {
+      options.enable_latency_aware_schedule() || options.enable_disagg_pd()) {
     ProfileManager::Options profile_manager_options;
     profile_manager_options.dp_size(options.dp_size())
         .enable_schedule_overlap(options.enable_schedule_overlap())
