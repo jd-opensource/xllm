@@ -201,7 +201,7 @@ else()
     )
   else()
     FetchContent_Declare(vcpkg
-      GIT_REPOSITORY "https://github.com/vectorch-ai/vcpkg.git"
+      GIT_REPOSITORY "https://gitcode.com/xLLM-AI/vcpkg.git"
       GIT_TAG "ffc42e97c866ce9692f5c441394832b86548422c" #disable cxx11_abi
       SOURCE_DIR ${VCPKG_SOURCE_DIR}
     )

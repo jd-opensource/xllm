@@ -15,6 +15,11 @@ git submodule update
 mv /tmp/etcd-download-test/etcd /path/to/your/etcd
 ```
 ### xLLM Service编译
+先应用patch:
+```bash
+sh prepare.sh
+```
+
 再执行编译:
 ```bash
 mkdir -p build
@@ -38,7 +43,7 @@ cd ..
 ```
 启动xllm service:
 ```bash
-ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.0.1:12389" --http_server_port 28888 --rpc_server_port 28889
+ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.0.1:12389" --http_server_port 28888 --rpc_server_port 28889 --tokenizer_path=/path/to/tokenizer_config_dir/
 ```
 
 以Qwen2-7B为例

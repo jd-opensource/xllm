@@ -21,7 +21,10 @@ mv /tmp/etcd-download-test/etcd /path/to/your/etcd
 ```
 
 ### xLLM Service Compilation
-
+Apply patch:
+```bash
+sh prepare.sh
+```
 Then execute the compilation:
 ```bash
 mkdir -p build
@@ -49,7 +52,7 @@ Start etcd:
 
 Start xllm service:
 ```bash
-ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.0.1:12389" --http_server_port 28888 --rpc_server_port 28889
+ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.0.1:12389" --http_server_port 28888 --rpc_server_port 28889 --tokenizer_path=/path/to/tokenizer_config_dir/
 ```
 
 Taking Qwen2-7B as an example:

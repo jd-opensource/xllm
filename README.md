@@ -139,7 +139,7 @@ git submodule update
 ```
 The compilation depends on [vcpkg](https://github.com/microsoft/vcpkg). The Docker image already includes VCPKG_ROOT preconfigured. If you want to manually set it up, you can:
 ```bash
-git clone https://github.com/microsoft/vcpkg.git
+git clone https://gitcode.com/xLLM-AI/vcpkg.git
 cd vcpkg && git checkout ffc42e97c866ce9692f5c441394832b86548422c
 export VCPKG_ROOT=/your/path/to/vcpkg
 ```
