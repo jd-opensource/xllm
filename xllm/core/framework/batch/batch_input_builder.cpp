@@ -134,7 +134,12 @@ void BatchInputBuilder::process_single_sequence(int32_t seq_index) {
   extract_tokens_and_positions(sequence, n_kv_cache_tokens, seq_len);
 
   // Setup KV cache
-  setup_kv_cache_info(sequence, n_kv_cache_tokens, seq_len, q_seq_len);
+  if (!FLAGS_enable_continuous_kvcache) {
+    setup_kv_cache_info(sequence, n_kv_cache_tokens, seq_len, q_seq_len);
+  } else {
+    setup_continuous_kv_cache_info(
+        sequence, n_kv_cache_tokens, seq_len, q_seq_len);
+  }
 
   // Track prefill sequences
   if (sequence->is_prefill_stage()) {
