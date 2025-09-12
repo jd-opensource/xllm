@@ -30,6 +30,7 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
 #include "framework/request/sequence.h"
+#include "pd_ooc_scheduler.h"
 #include "runtime/engine.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/chunked_prefill_scheduler.h"
@@ -39,9 +40,8 @@ limitations under the License.
 namespace xllm {
 
 PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
-    : ContinuousScheduler(engine, options) {
+    : ContinuousScheduler(engine, options), step_status(StepStatus::IDLE) {
   VLOG(1) << "[VLOG(1)] Creating a PD OOC Scheduler";
-  LOG(INFO) << "[LOG(INFO)] Creating a PD OOC Scheduler";
 
   if (!options_.instance_role().has_value()) {
     LOG(FATAL) << "Instance type is not set in disagg pd mode.";
@@ -141,6 +141,7 @@ int64_t PDOOCScheduler::run_prefill_request(int32_t token_length,
   }
 
   // build batch
+  // WIP Build batches
   auto batches = BatchFactory::get_instance(options_.dp_size())
                      ->create_batches(
                          {request.sequences()[0].get()},
@@ -235,6 +236,8 @@ void PDOOCScheduler::step(const absl::Duration& timeout) {
   // send first generation token to decode instance
   // and remove the request from running_requests_ to remote_requests_map_
   if (options_.instance_role() == InstanceRole::PREFILL) {
+    // TODO When request is offline-prefill, do not send first generation to the
+    // decode instance.
     prefill_send_first_generation();
   }
 }
@@ -274,6 +277,16 @@ void PDOOCScheduler::dispatch_requests() {
       break;
     }
 
+    if (request->offline()) {
+      // Handle offline requests locally. No need to dispatch them to decoding
+      // instances.
+      request_queue_.write(request);
+      DLOG << "Wrote an offline request to request_queue_: "
+           << request->request_id();
+      continue;
+    }
+
+    // Create a RPC stub with given decoding instance.
     std::vector<std::shared_ptr<Request>> requests;
     requests.emplace_back(request);
     std::string selected_instance = "";
@@ -283,12 +296,8 @@ void PDOOCScheduler::dispatch_requests() {
       stub = create_rpc_channel(request->state().decode_address);
     }
 
-    // NOTE: TODO: maybe we need to support batch disatch
-    // later, this meybe decrease the communication cost.
-    // currently we only support one request per dispatch.
-
-    // TODO: try to get a batch request.
-
+    // If no decoding instance is specified, randomly select one to create a
+    // stub.
     if (selected_instance.empty() && !stub) {
       // get allocated decode instance list from Master
       while (decode_inst_names_.empty()) {
@@ -327,89 +336,19 @@ void PDOOCScheduler::dispatch_requests() {
     // Send 'DisaggRequests' and recv 'DisaggResponses'
     xllm::proto::DisaggRequests reqs;
     xllm::proto::DisaggResponses resps;
-    // prefill name (ID)
-    reqs.set_prefill_name(xservice_client_->get_instance_name());
-    reqs.mutable_reqs()->Reserve(requests.size());
-    // currently we only support one request once.
-    for (size_t i = 0; i < requests.size(); ++i) {
-      // proto::DisaggRequest req;
-      auto req = reqs.mutable_reqs()->Add();
-      req->set_req_id(requests[i]->request_id());
-      req->set_service_req_id(requests[i]->service_request_id());
-      req->set_tokens_num(requests[i]->state().prompt_tokens.size());
-      req->set_prompt(requests[i]->state().prompt);
-      ADD_VECTOR_TO_PROTO(req->mutable_prompt_tokens(),
-                          requests[i]->state().prompt_tokens);
-      req->set_stream(requests[i]->state().stream);
-      req->set_x_request_id(requests[i]->x_request_id());
-      req->set_x_request_time(requests[i]->x_request_time());
-      req->set_seq_capacity(requests[i]->state().seq_capacity);
-      req->set_max_tokens(
-          requests[i]->state().stopping_checker.get_max_generated_tokens());
-      req->set_max_context_len(
-          requests[i]->state().stopping_checker.get_max_context_len());
-      req->set_ignore_eos(
-          requests[i]->state().stopping_checker.get_ignore_eos());
-      req->set_eos_token_id(
-          requests[i]->state().stopping_checker.get_eos_token());
-      if (requests[i]->state().stopping_checker.get_stop_tokens().size() > 0) {
-        ADD_VECTOR_TO_PROTO(
-            req->mutable_stop_token_ids(),
-            requests[i]->state().stopping_checker.get_stop_tokens());
-      }
-      if (requests[i]->state().stopping_checker.get_stop_sequences().size() >
-          0) {
-        for (auto& stop_sequence :
-             requests[i]->state().stopping_checker.get_stop_sequences()) {
-          // proto::StopSequence proto_seq;
-          auto proto_seq = req->mutable_stop_sequences()->Add();
-          ADD_VECTOR_TO_PROTO(proto_seq->mutable_seq_tokens(), stop_sequence);
-          //*req->mutable_stop_sequences()->Add() = proto_seq;
-        }
-      }
-      req->set_n(requests[i]->state().n);
-      req->set_best_of(requests[i]->state().best_of);
-      req->set_frequency_penalty(
-          requests[i]->state().sampling_param.frequency_penalty);
-      req->set_presence_penalty(
-          requests[i]->state().sampling_param.presence_penalty);
-      req->set_repetition_penalty(
-          requests[i]->state().sampling_param.repetition_penalty);
-      req->set_temperature(requests[i]->state().sampling_param.temperature);
-      req->set_top_p(requests[i]->state().sampling_param.top_p);
-      req->set_top_k(requests[i]->state().sampling_param.top_k);
-      req->set_logprobs(requests[i]->state().sampling_param.logprobs);
-      req->set_top_logprobs(requests[i]->state().sampling_param.top_logprobs);
-      req->set_is_embeddings(requests[i]->state().sampling_param.is_embeddings);
-      req->set_echo(requests[i]->state().echo);
-      req->set_skip_special_tokens(requests[i]->state().skip_special_tokens);
-      //*reqs.mutable_reqs()->Add() = req;
-    }
-    std::vector<std::string> device_ips;
-    std::vector<uint16_t> ports;
-    engine_->get_device_info(device_ips, ports);
-    reqs.mutable_cluster_infos()->mutable_cluster_ids()->Add(
-        instance_info_.cluster_ids.begin(), instance_info_.cluster_ids.end());
-    reqs.mutable_cluster_infos()->mutable_addrs()->Add(
-        instance_info_.addrs.begin(), instance_info_.addrs.end());
-    reqs.mutable_cluster_infos()->mutable_device_ips()->Add(device_ips.begin(),
-                                                            device_ips.end());
-    reqs.mutable_cluster_infos()->mutable_ports()->Add(ports.begin(),
-                                                       ports.end());
-    reqs.mutable_cluster_infos()->set_dp_size(options_.dp_size());
+
+    // Build DisaggRequests proto from Request objects
+    build_disagg_requests(requests, reqs);
 
     // TODO: sync rpc here currently
     brpc::Controller cntl;
     stub->AddNewRequests(&cntl, &reqs, &resps, nullptr);
-    // TODO: error handler
-    // if (rpc failed) {
-    //  // push all request back to prefill_request_queue_
-    //}
 
     // check reqs which can not dispatch to D instance,
     // and push back to prefill_request_queue_
     CHECK_EQ(requests.size(), resps.resps().size());
     for (size_t i = 0; i < requests.size(); ++i) {
+      CHECK(!requests[i]->offline());
       if (resps.resps()[i].status_code() != 200) {
         // push back to prefill_request_queue_
         if (requests[i]->offline()) {
@@ -449,6 +388,10 @@ void PDOOCScheduler::prefill_send_first_generation() {
     std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
     for (size_t i = 0; i < running_requests_.size(); ++i) {
       auto request = running_requests_[i];
+      if (request->offline()) {
+        DLOG << "Found an offline request in running_requests_. Skip";
+        continue;
+      }
       // Check if the request is a recently completed prefill request
       if (request->sequences()[0]->num_generated_tokens() == 1) {
         if (remote_requests_map_.find(request->request_id()) !=
@@ -1053,6 +996,78 @@ void PDOOCScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
   std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
   ttft = std::move(recent_ttft_);
   tbt = std::move(recent_tbt_);
+}
+
+void PDOOCScheduler::build_disagg_requests(
+    const std::vector<std::shared_ptr<Request>>& requests,
+    proto::DisaggRequests& reqs) {
+  // prefill name (ID)
+  reqs.set_prefill_name(xservice_client_->get_instance_name());
+  reqs.mutable_reqs()->Reserve(requests.size());
+
+  // Build proto::DisaggRequest for each request
+  for (size_t i = 0; i < requests.size(); ++i) {
+    auto req = reqs.mutable_reqs()->Add();
+    req->set_req_id(requests[i]->request_id());
+    req->set_service_req_id(requests[i]->service_request_id());
+    req->set_tokens_num(requests[i]->state().prompt_tokens.size());
+    req->set_prompt(requests[i]->state().prompt);
+    ADD_VECTOR_TO_PROTO(req->mutable_prompt_tokens(),
+                        requests[i]->state().prompt_tokens);
+    req->set_stream(requests[i]->state().stream);
+    req->set_x_request_id(requests[i]->x_request_id());
+    req->set_x_request_time(requests[i]->x_request_time());
+    req->set_seq_capacity(requests[i]->state().seq_capacity);
+    req->set_max_tokens(
+        requests[i]->state().stopping_checker.get_max_generated_tokens());
+    req->set_max_context_len(
+        requests[i]->state().stopping_checker.get_max_context_len());
+    req->set_ignore_eos(requests[i]->state().stopping_checker.get_ignore_eos());
+    req->set_eos_token_id(
+        requests[i]->state().stopping_checker.get_eos_token());
+    if (requests[i]->state().stopping_checker.get_stop_tokens().size() > 0) {
+      ADD_VECTOR_TO_PROTO(
+          req->mutable_stop_token_ids(),
+          requests[i]->state().stopping_checker.get_stop_tokens());
+    }
+    if (requests[i]->state().stopping_checker.get_stop_sequences().size() > 0) {
+      for (auto& stop_sequence :
+           requests[i]->state().stopping_checker.get_stop_sequences()) {
+        auto proto_seq = req->mutable_stop_sequences()->Add();
+        ADD_VECTOR_TO_PROTO(proto_seq->mutable_seq_tokens(), stop_sequence);
+      }
+    }
+    req->set_n(requests[i]->state().n);
+    req->set_best_of(requests[i]->state().best_of);
+    req->set_frequency_penalty(
+        requests[i]->state().sampling_param.frequency_penalty);
+    req->set_presence_penalty(
+        requests[i]->state().sampling_param.presence_penalty);
+    req->set_repetition_penalty(
+        requests[i]->state().sampling_param.repetition_penalty);
+    req->set_temperature(requests[i]->state().sampling_param.temperature);
+    req->set_top_p(requests[i]->state().sampling_param.top_p);
+    req->set_top_k(requests[i]->state().sampling_param.top_k);
+    req->set_logprobs(requests[i]->state().sampling_param.logprobs);
+    req->set_top_logprobs(requests[i]->state().sampling_param.top_logprobs);
+    req->set_is_embeddings(requests[i]->state().sampling_param.is_embeddings);
+    req->set_echo(requests[i]->state().echo);
+    req->set_skip_special_tokens(requests[i]->state().skip_special_tokens);
+  }
+
+  // Add cluster info
+  std::vector<std::string> device_ips;
+  std::vector<uint16_t> ports;
+  engine_->get_device_info(device_ips, ports);
+  reqs.mutable_cluster_infos()->mutable_cluster_ids()->Add(
+      instance_info_.cluster_ids.begin(), instance_info_.cluster_ids.end());
+  reqs.mutable_cluster_infos()->mutable_addrs()->Add(
+      instance_info_.addrs.begin(), instance_info_.addrs.end());
+  reqs.mutable_cluster_infos()->mutable_device_ips()->Add(device_ips.begin(),
+                                                          device_ips.end());
+  reqs.mutable_cluster_infos()->mutable_ports()->Add(ports.begin(),
+                                                     ports.end());
+  reqs.mutable_cluster_infos()->set_dp_size(options_.dp_size());
 }
 
 }  // namespace xllm

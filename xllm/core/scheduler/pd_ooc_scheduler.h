@@ -34,6 +34,8 @@ limitations under the License.
 
 namespace xllm {
 
+enum class StepStatus { ONLINE_PREFILL, OFFLINE_PREFILL, OFFLINE_DECODE, IDLE };
+
 class PDOOCScheduler : public ContinuousScheduler {
  public:
   PDOOCScheduler(Engine* engine, const Options& options);
@@ -104,6 +106,11 @@ class PDOOCScheduler : public ContinuousScheduler {
       const std::string& instance_name);
 
   void start_rpc_server();
+
+  // Build DisaggRequests proto from Request objects
+  void build_disagg_requests(
+      const std::vector<std::shared_ptr<Request>>& requests,
+      proto::DisaggRequests& reqs);
 
   void update_token_latency_metrics(std::vector<Sequence*>& sequences) override;
 
@@ -182,6 +189,8 @@ class PDOOCScheduler : public ContinuousScheduler {
   std::vector<int64_t> recent_ttft_;
   std::vector<int64_t> recent_tbt_;
   std::mutex latency_metrics_mutex_;
+
+  StepStatus step_status;
 };
 
 }  // namespace xllm
