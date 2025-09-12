@@ -93,6 +93,9 @@ class LLMEngine : public Engine {
 
   std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; };
 
+  std::vector<std::vector<RawForwardInput>> prepare_inputs(
+      std::vector<Batch>& batch);
+
  private:
   friend class SpeculativeEngine;
   // setup workers internal
@@ -122,6 +125,11 @@ class LLMEngine : public Engine {
   int64_t n_local_q_heads_ = 0;
   int64_t head_dim_ = 0;
 
+  // common frequently used args
+  uint32_t dp_size_;
+  uint32_t worker_clients_num_;
+  uint32_t dp_local_tp_size_;
+
   torch::Tensor expert_load_data_;
   // For multi-node serving
   // engine brpc server, all workers connect to engine_server_,
@@ -133,8 +141,7 @@ class LLMEngine : public Engine {
 
   std::unique_ptr<EplbManager> eplb_manager_ = nullptr;
   void process_eplb_data(
-      const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results,
-      int32_t worker_clients_num);
+      const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results);
 
   ThreadPool threadpool_;
 };

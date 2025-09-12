@@ -43,11 +43,11 @@ class BatchInputBuilder {
   ForwardInput build_forward_input(uint32_t num_decoding_tokens,
                                    uint32_t min_decoding_batch_size);
 
-  RawForwardInput build_raw_forward_input();
+  RawForwardInput build_raw_forward_input(uint32_t start_idx, uint32_t end_idx);
 
  private:
   // Core building methods
-  void process_sequences();
+  void process_sequences(uint32_t start_idx, uint32_t end_idx);
   void padding_decode_batch_size(uint32_t num_decoding_tokens,
                                  uint32_t min_decoding_batch_size);
   ForwardInput state_to_forward_input();
