@@ -62,6 +62,17 @@ void ModelRegistry::register_embeddinglm_factory(const std::string& name,
   }
 }
 
+void ModelRegistry::register_dit_model_factory(const std::string& name,
+                                               DiTModelFactory factory) {
+  ModelRegistry* instance = get_instance();
+
+  if (instance->model_registry_[name].dit_model_factory != nullptr) {
+    LOG(WARNING) << "DiT model factory for " << name << "already registered.";
+  } else {
+    instance->model_registry_[name].dit_model_factory = factory;
+  }
+}
+
 void ModelRegistry::register_input_processor_factory(
     const std::string& name,
     InputProcessorFactory factory) {
@@ -141,6 +152,12 @@ EmbeddingLMFactory ModelRegistry::get_embeddinglm_factory(
   return instance->model_registry_[name].embedding_lm_factory;
 }
 
+DiTModelFactory ModelRegistry::get_dit_model_factory(const std::string& name) {
+  ModelRegistry* instance = get_instance();
+  LOG(INFO) << "Getting DiT model factory for: " << name;
+  return instance->model_registry_[name].dit_model_factory;
+}
+
 InputProcessorFactory ModelRegistry::get_input_processor_factory(
     const std::string& name) {
   ModelRegistry* instance = get_instance();
@@ -211,6 +228,20 @@ std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
     return factory(context);
   }
 
+  LOG(ERROR) << "Unsupported model type: "
+             << context.get_model_args().model_type();
+
+  return nullptr;
+}
+
+std::unique_ptr<DiTModel> create_dit_model(const Context& context) {
+  // get the factory function for the model type from model registry
+  auto factory = ModelRegistry::get_dit_model_factory(
+      context.get_model_args().model_type());
+  if (factory) {
+    return factory(context);
+  }
+  LOG(INFO) << "DiT Model type: " << context.get_model_args().model_type();
   LOG(ERROR) << "Unsupported model type: "
              << context.get_model_args().model_type();
 

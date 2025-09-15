@@ -10,6 +10,7 @@ cc_library(
     mm_data.h
     mm_input_helper.h
     request.h
+    dit_request.h
     request_output.h
     dit_request_output.h
     dit_request_params.h
@@ -27,6 +28,7 @@ cc_library(
     mm_data.cpp
     mm_input_helper.cpp
     request.cpp
+    dit_request.cpp
     request_output.cpp
     dit_request_output.cpp
     request_params.cpp
