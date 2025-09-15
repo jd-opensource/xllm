@@ -20,6 +20,7 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <brpc/server.h>
 
+#include <chrono>
 #include <random>
 
 #include "common/global_flags.h"
@@ -40,15 +41,27 @@ limitations under the License.
 namespace xllm {
 
 PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
-    : ContinuousScheduler(engine, options), step_status(StepStatus::IDLE) {
-  VLOG(1) << "[VLOG(1)] Creating a PD OOC Scheduler";
+    : ContinuousScheduler(engine, options) {
+  VLOG(1) << "Creating a PD OOC Scheduler";
 
   if (!options_.instance_role().has_value()) {
     LOG(FATAL) << "Instance type is not set in disagg pd mode.";
   }
-  // start dispatch thread for prefill instance
-  dispatch_thread_ =
-      std::make_unique<std::thread>(&PDOOCScheduler::dispatch_requests, this);
+
+  if (options_.instance_role().value() == InstanceRole::PREFILL) {
+    DVLOG << "Running dispatch_thread_";
+    // start dispatch thread for prefill instance
+    dispatch_thread_ =
+        std::make_unique<std::thread>(&PDOOCScheduler::dispatch_requests, this);
+    dispatch_offline_thread_ = std::make_unique<std::thread>(
+        &PDOOCScheduler::dispatch_offline_requests, this);
+  }
+
+  if (options_.instance_role().value() == InstanceRole::DECODE) {
+    DVLOG << "Running send_pull_signal_thread_";
+    send_pull_signal_thread_ = std::make_unique<std::thread>(
+        &PDOOCScheduler::decode_send_pull_signal, this);
+  }
 
   rpc_server_thread_ =
       std::make_unique<std::thread>(&PDOOCScheduler::start_rpc_server, this);
@@ -91,6 +104,10 @@ PDOOCScheduler::~PDOOCScheduler() {
 
   if (dispatch_thread_ && dispatch_thread_->joinable()) {
     dispatch_thread_->join();
+  }
+
+  if (send_pull_signal_thread_ && send_pull_signal_thread_->joinable()) {
+    send_pull_signal_thread_->join();
   }
 }
 
@@ -232,13 +249,86 @@ void PDOOCScheduler::start_rpc_server() {
 }
 
 void PDOOCScheduler::step(const absl::Duration& timeout) {
-  ContinuousScheduler::step(timeout);
-  // send first generation token to decode instance
-  // and remove the request from running_requests_ to remote_requests_map_
   if (options_.instance_role() == InstanceRole::PREFILL) {
-    // TODO When request is offline-prefill, do not send first generation to the
-    // decode instance.
-    prefill_send_first_generation();
+    prefill_step(timeout);
+  } else if (options_.instance_role() == InstanceRole::DECODE) {
+    decode_step(timeout);
+  } else {
+    LOG(FATAL) << "Unknown instance role";
+  }
+}
+
+void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
+  // WIP Check pull signals. Move offline requests from local queue to remote
+  // queue.
+  prepare_offline_dispatch_queue();
+  ContinuousScheduler::step(timeout);
+  prefill_send_first_generation();
+  prefill_send_multi_generations();
+}
+
+void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
+  ContinuousScheduler::step(timeout);
+  // Check memory utilization rate to see if the scheduler is able to pull an
+  // offline request from a P node
+  if (check_able_to_pull()) {
+    // Trigger decode_send_pull_signal()
+    // DVLOG << "Able to pull";
+    decode_send_pull_signal_pending_.store(false);
+    decode_send_pull_signal_cv_.notify_all();
+  }
+}
+
+void PDOOCScheduler::decode_send_pull_signal() {
+  while (true) {
+    // Wait until step thread triggers
+    // DVLOG << "Waiting for trigger";
+    std::unique_lock<std::mutex> lock(decode_send_pull_signal_mtx_);
+    decode_send_pull_signal_cv_.wait(
+        lock, [this] { return !decode_send_pull_signal_pending_.load(); });
+
+    if (waiting_pull_finished_.load()) {
+      // FIXME Add timeout for waiting_pull_finished_ in unreliable network
+      // conditions.
+      decode_send_pull_signal_pending_.store(true);
+      absl::SleepFor(absl::Milliseconds(100));
+      continue;
+    }
+
+    DVLOG << "Sending a pull signal to a P node";
+
+    // WIP Send a pull signal to a P node
+
+    // Select a P node
+    std::string selected_prefill_instance = select_prefill_instance();
+    DVLOG << "Selected prefill instance: " << selected_prefill_instance;
+
+    // Build a stub
+    proto::PDOOCService_Stub* stub =
+        create_rpc_channel(selected_prefill_instance);
+    if (!stub) {
+      LOG(ERROR) << "Failed to create RPC channel to prefill instance: "
+                 << selected_prefill_instance;
+      decode_send_pull_signal_pending_.store(true);
+      absl::SleepFor(absl::Milliseconds(100));
+      continue;
+    }
+
+    // Send a pull signal to the selected prefill instance
+    proto::PullSignal pull_signal;
+    pull_signal.set_source_instance_name(xservice_client_->get_instance_name());
+    proto::Status resp;
+    brpc::Controller cntl;
+    stub->SendPullSignal(&cntl, &pull_signal, &resp, nullptr);
+
+    // Pend until next trigger
+    if (cntl.Failed() || !resp.ok()) {
+      waiting_pull_finished_.store(false);
+    } else {
+      waiting_pull_finished_.store(true);
+    }
+    decode_send_pull_signal_pending_.store(true);
+    absl::SleepFor(absl::Milliseconds(100));
   }
 }
 
@@ -249,10 +339,12 @@ bool PDOOCScheduler::add_request(std::shared_ptr<Request>& request) {
   if (request->offline()) {
     // offline request, push to offline queue
     prefill_request_queue_offline_.enqueue(request);
+    DVLOG << "Received an offline request: " << request->request_id();
     return true;
   }
   // push and wait
   prefill_request_queue_.enqueue(request);
+  DVLOG << "Received an online request: " << request->request_id();
 
   return true;
 }
@@ -281,8 +373,8 @@ void PDOOCScheduler::dispatch_requests() {
       // Handle offline requests locally. No need to dispatch them to decoding
       // instances.
       request_queue_.write(request);
-      DLOG << "Wrote an offline request to request_queue_: "
-           << request->request_id();
+      // DVLOG << "Wrote an offline request to request_queue_: "
+      //      << request->request_id();
       continue;
     }
 
@@ -299,28 +391,13 @@ void PDOOCScheduler::dispatch_requests() {
     // If no decoding instance is specified, randomly select one to create a
     // stub.
     if (selected_instance.empty() && !stub) {
-      // get allocated decode instance list from Master
-      while (decode_inst_names_.empty()) {
-        decode_inst_names_ = xservice_client_->get_static_decode_list();
-        if (!decode_inst_names_.empty()) {
-          LOG(INFO) << "Get PD decode instance list: "
-                    << absl::StrJoin(decode_inst_names_, "; ");
-          break;
-        }
-        sleep(1);
-      }
-      // select a D instance use RR currently.
-      // TODO: use better decode selection strategy later. maybe different
-      // strategy for offline and online request. or implement in xllm service.
       int try_decode_count = 0;
       while (!stub) {
         if (try_decode_count == decode_inst_names_.size()) {
           LOG(FATAL) << "Can not connect to all decode instances.";
         }
         ++try_decode_count;
-        selected_instance = decode_inst_names_[current_decode_idx_];
-        current_decode_idx_ =
-            (++current_decode_idx_) % decode_inst_names_.size();
+        selected_instance = select_decode_instance();
         stub = create_rpc_channel(selected_instance);
       }
     }
@@ -388,8 +465,11 @@ void PDOOCScheduler::prefill_send_first_generation() {
     std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
     for (size_t i = 0; i < running_requests_.size(); ++i) {
       auto request = running_requests_[i];
+      if (request == nullptr) {
+        continue;
+      }
       if (request->offline()) {
-        DLOG << "Found an offline request in running_requests_. Skip";
+        // DVLOG << "Found an offline request in running_requests_. Skip";
         continue;
       }
       // Check if the request is a recently completed prefill request
@@ -589,6 +669,10 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
     }
   }
 
+  if (request->offline()) {
+    waiting_pull_finished_.store(false);
+  }
+
   return true;
 }
 
@@ -645,6 +729,87 @@ bool PDOOCScheduler::decode_recv_first_generation(
   }
 
   // pull kv cache
+  if (kv_cache_transfer_mode == "PULL") {
+    const auto blocks = request->sequences()[0]->kv_state().kv_blocks();
+    std::vector<uint64_t> dst_block_ids;
+    dst_block_ids.reserve(blocks.size());
+    for (const auto& block : blocks) {
+      dst_block_ids.push_back(block.id());
+    }
+
+    int32_t dst_dp_rank = request->sequences()[0]->dp_rank();
+    engine_->pull_kv_blocks(src_dp_size,
+                            src_dp_rank,
+                            src_cluster_ids,
+                            src_addrs,
+                            src_k_cache_ids,
+                            src_v_cache_ids,
+                            src_block_ids,
+                            dst_dp_rank,
+                            dst_block_ids);
+  }
+
+  request_queue_.write(request);
+  return true;
+}
+
+bool PDOOCScheduler::decode_recv_multi_generations(
+    const std::string& req_id,
+    const std::vector<proto::RemoteToken>& migration_tokens,
+    const std::string& kv_cache_transfer_mode,
+    std::vector<uint64_t> src_cluster_ids,
+    std::vector<std::string> src_addrs,
+    std::vector<int64_t> src_k_cache_ids,
+    std::vector<int64_t> src_v_cache_ids,
+    std::vector<uint64_t> src_block_ids,
+    int32_t src_dp_size,
+    int32_t src_dp_rank) {
+  // push to request_queue_, and will be executed by engine.
+  std::shared_ptr<Request> request = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(received_request_map_mutex_);
+    auto it = received_request_map_.find(req_id);
+    if (it == received_request_map_.end()) {
+      LOG(ERROR) << "Failed to find request, request id: " << req_id;
+      return false;
+    }
+    request = it->second;
+    received_request_map_.erase(it);
+  }
+
+  // Enable checking whether to skip the prefill token
+  if (request->state().stream) {
+    request->sequences()[0]->enable_checking_prefill_token();
+  }
+
+  // Add all migration tokens to the sequence
+  for (const auto& remote_token : migration_tokens) {
+    Token token(remote_token.token_id());
+    if (remote_token.has_logprob()) {
+      token.logprob = remote_token.logprob();
+      if (!remote_token.top_tokens().empty() &&
+          !remote_token.top_logprobs().empty()) {
+        // Convert from repeated fields to vectors
+        std::vector<int64_t> top_tokens(remote_token.top_tokens().begin(),
+                                        remote_token.top_tokens().end());
+        std::vector<float> top_logprobs(remote_token.top_logprobs().begin(),
+                                        remote_token.top_logprobs().end());
+        token.top_tokens = top_tokens;
+        token.top_logprobs = top_logprobs;
+      }
+    }
+
+    // Add token to sequence
+    if (enable_schedule_overlap()) {
+      Token fake_token(-1);
+      request->sequences()[0]->append_token(fake_token);
+      request->sequences()[0]->update_last_step_token(token);
+    } else {
+      request->sequences()[0]->append_token(token);
+    }
+  }
+
+  // pull kv cache (only needed once for the entire request)
   if (kv_cache_transfer_mode == "PULL") {
     const auto blocks = request->sequences()[0]->kv_state().kv_blocks();
     std::vector<uint64_t> dst_block_ids;
@@ -991,11 +1156,322 @@ void PDOOCScheduler::update_token_latency_metrics(
   }
 }
 
+// TODO Need parameters tuning
+bool PDOOCScheduler::check_able_to_pull() {
+  // Estimated usage of current requests: half of current used blocks.
+  return block_manager_pool_->kv_cache_utilization() * 2 <
+         FLAGS_prefill_scheduling_memory_usage_threshold;
+}
+
+bool PDOOCScheduler::write_pull_signal(const proto::PullSignal& pull_signal) {
+  if (pull_signals_.enqueue(pull_signal)) {
+    DVLOG << "Wrote a pull signal into a queue: "
+          << pull_signal.source_instance_name();
+    return true;
+  } else {
+    DVLOG << "Failed to write a pull signal into a queue";
+    return false;
+  }
+}
+
+void PDOOCScheduler::prepare_offline_dispatch_queue() {
+  // Read pull signals from pull_signals_ queue
+  proto::PullSignal pull_signal;
+  std::deque<proto::PullSignal> unused_signals;
+  while (pull_signals_.try_dequeue(pull_signal)) {
+    // DVLOG << "Processing a pull signal from: " <<
+    // pull_signal.source_instance_name();
+
+    // Find an offline decoding request in running_requests_ to move to dispatch
+    // queue
+    std::shared_ptr<Request> offline_request = nullptr;
+    for (size_t i = 0; i < running_requests_.size(); ++i) {
+      auto& request = running_requests_[i];
+      if (request && request->offline() && !request->sequences().empty() &&
+          !request->sequences()[0]->is_prefill_stage()) {
+        offline_request = request;
+        running_requests_[i] =
+            nullptr;  // Remove the request from running_requests_
+        break;
+      }
+    }
+
+    if (offline_request) {
+      // Add to offline dispatch queue with the source instance name
+      std::pair<std::shared_ptr<Request>, std::string> dispatch_pair =
+          std::make_pair(offline_request, pull_signal.source_instance_name());
+      offline_requests_to_dispatch_.enqueue(dispatch_pair);
+
+      DVLOG << "Moved offline request " << offline_request->request_id()
+            << " to dispatch queue for instance "
+            << pull_signal.source_instance_name();
+    } else {
+      // If no offline request, put the signal back for future use.
+      unused_signals.push_back(pull_signal);
+    }
+  }
+
+  while (!unused_signals.empty()) {
+    pull_signal = unused_signals.front();
+    pull_signals_.enqueue(pull_signal);
+    unused_signals.pop_front();
+  }
+}
+
+void PDOOCScheduler::dispatch_offline_requests() {
+  while (true) {
+    const auto timeout = std::chrono::milliseconds(100);
+    // Get offline request with target instance from dispatch queue
+    std::pair<std::shared_ptr<Request>, std::string> dispatch_pair;
+    if (!offline_requests_to_dispatch_.wait_dequeue_timed(dispatch_pair,
+                                                          timeout)) {
+      continue;
+    }
+
+    DVLOG << "Dispatching offline requests";
+
+    auto request = dispatch_pair.first;
+    auto target_instance = dispatch_pair.second;
+
+    if (request == nullptr) {
+      // nullptr is a signal to exit
+      break;
+    }
+
+    // Create a RPC stub with the target decoding instance
+    proto::PDOOCService_Stub* stub = create_rpc_channel(target_instance);
+    if (!stub) {
+      LOG(ERROR) << "Failed to create RPC channel to target instance: "
+                 << target_instance;
+      // Put the request back to dispatch queue for retry
+      offline_requests_to_dispatch_.enqueue(dispatch_pair);
+      absl::SleepFor(absl::Milliseconds(100));
+      continue;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
+      req_to_channel_map_[request->request_id()] = stub;
+    }
+
+    // Build DisaggRequests proto from Request object
+    std::vector<std::shared_ptr<Request>> requests;
+    requests.emplace_back(request);
+    xllm::proto::DisaggRequests reqs;
+    xllm::proto::DisaggResponses resps;
+    build_disagg_requests(requests, reqs);
+
+    // Send to target decode instance
+    brpc::Controller cntl;
+    stub->AddNewRequests(&cntl, &reqs, &resps, nullptr);
+
+    // Check response and handle accordingly
+    if (cntl.Failed() || resps.resps().empty() ||
+        resps.resps()[0].status_code() != 200) {
+      LOG(ERROR) << "Failed to dispatch offline request "
+                 << request->request_id() << " to " << target_instance
+                 << ". Status: "
+                 << (resps.resps().empty() ? -1
+                                           : resps.resps()[0].status_code());
+      // Put the request back to dispatch queue for retry
+      offline_requests_to_dispatch_.enqueue(dispatch_pair);
+    } else {
+      // Successfully dispatched, set up KV transfer info
+      for (auto& sequence : request->sequences()) {
+        TransferKVInfo info;
+        info.request_id = request->request_id();
+        for (auto& bid : resps.resps()[0].blocks_ids()) {
+          info.remote_blocks_ids.emplace_back(bid);
+        }
+        info.dp_rank = resps.resps()[0].dp_rank();
+        info.remote_instance_info = remote_instances_info_[target_instance];
+        sequence->kv_state().set_transfer_kv_info(std::move(info));
+      }
+
+      // Move to transfer queue for KV cache transfer
+      std::pair<std::shared_ptr<Request>, std::string> transfer_pair =
+          std::make_pair(request, target_instance);
+      offline_requests_to_transfer_.enqueue(transfer_pair);
+
+      DVLOG << "Successfully dispatched offline request "
+            << request->request_id() << " to " << target_instance;
+    }
+  }
+}
+
 void PDOOCScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
                                          std::vector<int64_t>& tbt) {
   std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
   ttft = std::move(recent_ttft_);
   tbt = std::move(recent_tbt_);
+}
+
+std::string PDOOCScheduler::select_decode_instance() {
+  // get allocated decode instance list from Master
+  while (decode_inst_names_.empty()) {
+    decode_inst_names_ = xservice_client_->get_static_decode_list();
+    if (!decode_inst_names_.empty()) {
+      LOG(INFO) << "Get PD decode instance list: "
+                << absl::StrJoin(decode_inst_names_, "; ");
+      break;
+    }
+    sleep(1);
+  }
+
+  // select a D instance use RR currently.
+  // TODO: use better decode selection strategy later. maybe different
+  // strategy for offline and online request. or implement in xllm service.
+  std::string selected_instance = decode_inst_names_[current_decode_idx_];
+  current_decode_idx_ = (++current_decode_idx_) % decode_inst_names_.size();
+
+  return selected_instance;
+}
+
+std::string PDOOCScheduler::select_prefill_instance() {
+  // get allocated prefill instance list from Master
+  while (prefill_inst_names_.empty()) {
+    prefill_inst_names_ = xservice_client_->get_static_prefill_list();
+    if (!prefill_inst_names_.empty()) {
+      LOG(INFO) << "Get PD prefill instance list: "
+                << absl::StrJoin(prefill_inst_names_, "; ");
+      break;
+    }
+    sleep(1);
+  }
+
+  // select a P instance use RR currently.
+  // TODO: use better prefill selection strategy later.
+  std::string selected_instance = prefill_inst_names_[current_prefill_idx_];
+  current_prefill_idx_ = (++current_prefill_idx_) % prefill_inst_names_.size();
+
+  return selected_instance;
+}
+
+void PDOOCScheduler::prefill_send_multi_generations() {
+  // Process offline requests from transfer queue
+  std::vector<std::pair<std::shared_ptr<Request>, std::string>> transfer_pairs;
+  std::pair<std::shared_ptr<Request>, std::string> transfer_pair;
+
+  // Dequeue all available offline requests to transfer
+  while (offline_requests_to_transfer_.try_dequeue(transfer_pair)) {
+    transfer_pairs.push_back(transfer_pair);
+  }
+
+  // No offline request needs to be transferred to decode.
+  if (transfer_pairs.size() == 0) {
+    return;
+  }
+
+  prefill_threadpool_.schedule([this,
+                                transfer_pairs =
+                                    std::move(transfer_pairs)]() mutable {
+    // Add requests to remote_requests_map_ for response handling
+    {
+      std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
+      for (auto& pair : transfer_pairs) {
+        auto& request = pair.first;
+        if (remote_requests_map_.find(request->request_id()) !=
+            remote_requests_map_.end()) {
+          LOG(FATAL)
+              << "Two request has the same request_id, check the requests map.";
+        }
+        remote_requests_map_[request->request_id()] = request;
+        remote_requests_output_thread_map_[request->request_id()] =
+            next_thread_idx;
+        next_thread_idx = (++next_thread_idx) % kOutputTheadNum_;
+      }
+    }
+
+    // send multiple tokens to remote instance
+    for (auto& pair : transfer_pairs) {
+      auto request = pair.first;
+      auto target_instance = pair.second;
+      proto::MultiGenerationsRequests multi_reqs;
+      auto multi_req = multi_reqs.mutable_multi_gens()->Add();
+      multi_req->set_req_id(request->request_id());
+
+      // Get all generated tokens from the sequence
+      auto* sequence = request->sequences()[0].get();
+      auto generated_tokens = sequence->get_generated_tokens();
+      // auto generated_tokens =
+      // request->sequences()[0]->get_generated_tokens();
+
+      // Add all generated tokens to migration_tokens
+      for (const auto& token : generated_tokens) {
+        auto remote_token = multi_req->mutable_tokens()->Add();
+        remote_token->set_token_id(token.id);
+        remote_token->set_has_logprob(token.logprob.has_value());
+        if (token.logprob.has_value()) {
+          remote_token->set_logprob(token.logprob.value());
+        }
+        if (!token.top_tokens.empty() && !token.top_logprobs.empty()) {
+          for (auto top_token : token.top_tokens) {
+            remote_token->mutable_top_tokens()->Add(top_token);
+          }
+          for (auto top_logprob : token.top_logprobs) {
+            remote_token->mutable_top_logprobs()->Add(top_logprob);
+          }
+        }
+      }
+
+      multi_req->set_kv_cache_transfer_mode(options_.kv_cache_transfer_mode());
+      if (options_.kv_cache_transfer_mode() == "PULL") {
+        for (auto cluster_id : instance_info_.cluster_ids) {
+          multi_req->mutable_cluster_ids()->Add(cluster_id);
+        }
+        for (auto& addr : instance_info_.addrs) {
+          // multi_req->mutable_addrs()->Add(addr);
+          multi_req->add_addrs(addr);
+        }
+        for (auto k_cache_id : instance_info_.k_cache_ids) {
+          multi_req->mutable_k_cache_ids()->Add(k_cache_id);
+        }
+        for (auto v_cache_id : instance_info_.v_cache_ids) {
+          multi_req->mutable_v_cache_ids()->Add(v_cache_id);
+        }
+
+        const auto blocks = sequence->kv_state().kv_blocks();
+        for (const auto& block : blocks) {
+          multi_req->mutable_block_ids()->Add(block.id());
+        }
+        multi_req->set_dp_size(instance_info_.dp_size);
+        multi_req->set_dp_rank(sequence->dp_rank());
+      }
+
+      // send multi generations to remote instance
+      proto::PDOOCService_Stub* stub = create_rpc_channel(target_instance);
+      if (!stub) {
+        LOG(ERROR) << "Failed to create RPC channel to target instance: "
+                   << target_instance;
+        continue;
+      }
+
+      // TODO: Async call later
+      proto::Status resp;
+      brpc::Controller cntl;
+      stub->MultiGenerations(&cntl, &multi_reqs, &resp, nullptr);
+      if (options_.enable_decode_response_to_service() || cntl.Failed() ||
+          !resp.ok()) {
+        if (cntl.Failed() || !resp.ok()) {
+          LOG(ERROR) << "Failed to send multi generations, " << cntl.ErrorText()
+                     << ", status: " << resp.ok();
+        }
+        {
+          std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
+          remote_requests_map_.erase(request->request_id());
+          remote_requests_output_thread_map_.erase(request->request_id());
+        }
+        {
+          std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
+          req_to_channel_map_.erase(request->request_id());
+        }
+        block_manager_pool_->deallocate(request.get());
+      } else {
+        // release the memory for other requests.
+        block_manager_pool_->deallocate(request.get());
+      }
+    }
+  });
 }
 
 void PDOOCScheduler::build_disagg_requests(
@@ -1053,6 +1529,7 @@ void PDOOCScheduler::build_disagg_requests(
     req->set_is_embeddings(requests[i]->state().sampling_param.is_embeddings);
     req->set_echo(requests[i]->state().echo);
     req->set_skip_special_tokens(requests[i]->state().skip_special_tokens);
+    req->set_offline(requests[i]->offline());
   }
 
   // Add cluster info
