@@ -1,6 +1,6 @@
-include(cargo_shared_library)
+include(cargo_library)
 
-cargo_shared_library(
+cargo_library(
   NAME 
     rust_safetensors
   HDRS

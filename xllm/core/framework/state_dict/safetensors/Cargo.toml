@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "rust_safetensors"
-crate-type = ["cdylib"]
+crate-type = ["staticlib"]
 
 [dependencies]
 thiserror = "1.0"

@@ -5,7 +5,7 @@ edition = "2018"
 
 [lib]
 name = "rust_tokenizers"
-crate-type = ["cdylib"]
+crate-type = ["staticlib"]
 
 [dependencies]
 tokenizers = { version = "0.21.0", default-features = false, features = ["onig"] }
