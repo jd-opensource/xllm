@@ -50,6 +50,17 @@ class PDOOCService : public proto::PDOOCService {
                        proto::Status* response,
                        ::google::protobuf::Closure* done) override;
 
+  // for decode recv multiple tokens from prefill
+  void MultiGenerations(::google::protobuf::RpcController* controller,
+                        const proto::MultiGenerationsRequests* request,
+                        proto::Status* response,
+                        ::google::protobuf::Closure* done) override;
+
+  void SendPullSignal(::google::protobuf::RpcController* controller,
+                      const proto::PullSignal* request,
+                      proto::Status* response,
+                      ::google::protobuf::Closure* done) override;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(PDOOCService);
   std::unique_ptr<PDOOCServiceImpl> pd_ooc_service_impl_;

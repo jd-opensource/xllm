@@ -403,6 +403,23 @@ std::vector<std::string> XServiceClient::get_static_decode_list() {
   return std::vector<std::string>(resp.names().begin(), resp.names().end());
 }
 
+std::vector<std::string> XServiceClient::get_static_prefill_list() {
+  brpc::Controller cntl;
+  xllm_service::proto::InstanceID req;
+  xllm_service::proto::InstanceIDs resp;
+  req.set_name(instance_name_);
+  {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    xservice_stub_->GetStaticPrefillList(&cntl, &req, &resp, nullptr);
+  }
+  if (cntl.Failed()) {
+    LOG(ERROR) << "Fail to get static prefill list from xservice server "
+               << xservice_addr_ << ", error text: " << cntl.ErrorText();
+    return {};
+  }
+  return std::vector<std::string>(resp.names().begin(), resp.names().end());
+}
+
 ServiceConfig XServiceClient::get_config() {
   brpc::Controller cntl;
   xllm_service::proto::Empty req;
