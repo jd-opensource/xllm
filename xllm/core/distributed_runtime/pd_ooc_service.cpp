@@ -62,4 +62,22 @@ void PDOOCService::FirstGeneration(
   pd_ooc_service_impl_->decode_recv_first_generation(request, response);
 }
 
+void PDOOCService::MultiGenerations(
+    ::google::protobuf::RpcController* controller,
+    const proto::MultiGenerationsRequests* request,
+    proto::Status* response,
+    ::google::protobuf::Closure* done) {
+  // Receive multiple tokens from Prefill, schedule the request to running queue
+  brpc::ClosureGuard done_guard(done);
+  pd_ooc_service_impl_->decode_recv_multi_generations(request, response);
+}
+
+void PDOOCService::SendPullSignal(::google::protobuf::RpcController* controller,
+                                  const proto::PullSignal* request,
+                                  proto::Status* response,
+                                  ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  pd_ooc_service_impl_->prefill_recv_pull_signal(request, response);
+}
+
 }  // namespace xllm

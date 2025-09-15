@@ -154,6 +154,12 @@ void PDOOCServiceImpl::decode_recv_new_requests(
       // push the request to scheduler request buffer
       bool success =
           scheduler_->decode_schedule(new_request, request->prefill_name());
+      if (req.offline()) {
+        DVLOG << "Received an offline request: " << req.req_id();
+      } else {
+        DVLOG << "Received an online request: " << req.req_id();
+      }
+
       if (!success) {
         LOG(ERROR) << "Failed to schedule new decode instance request: "
                    << req.req_id();
@@ -283,6 +289,59 @@ void PDOOCServiceImpl::prefill_recv_generations(
   for (auto& gen : requests->gens()) {
     responses->mutable_all_status()->Add()->set_ok(
         prefill_recv_generation(&gen, nullptr));
+  }
+}
+
+void PDOOCServiceImpl::decode_recv_multi_generations(
+    const proto::MultiGenerationsRequests* request,
+    proto::Status* response) {
+  bool overall_success = true;
+
+  for (auto& multi_gen : request->multi_gens()) {
+    // Convert proto repeated field to vector
+    std::vector<proto::RemoteToken> migration_tokens(multi_gen.tokens().begin(),
+                                                     multi_gen.tokens().end());
+
+    std::vector<uint64_t> cluster_ids(multi_gen.cluster_ids().begin(),
+                                      multi_gen.cluster_ids().end());
+    std::vector<std::string> addrs(multi_gen.addrs().begin(),
+                                   multi_gen.addrs().end());
+    std::vector<int64_t> k_cache_ids(multi_gen.k_cache_ids().begin(),
+                                     multi_gen.k_cache_ids().end());
+    std::vector<int64_t> v_cache_ids(multi_gen.v_cache_ids().begin(),
+                                     multi_gen.v_cache_ids().end());
+    std::vector<uint64_t> block_ids(multi_gen.block_ids().begin(),
+                                    multi_gen.block_ids().end());
+
+    bool success = scheduler_->decode_recv_multi_generations(
+        multi_gen.req_id(),
+        migration_tokens,
+        multi_gen.kv_cache_transfer_mode(),
+        std::move(cluster_ids),
+        std::move(addrs),
+        std::move(k_cache_ids),
+        std::move(v_cache_ids),
+        std::move(block_ids),
+        multi_gen.dp_size(),
+        multi_gen.dp_rank());
+
+    if (!success) {
+      overall_success = false;
+      break;
+    }
+  }
+
+  response->set_ok(overall_success);
+}
+
+void PDOOCServiceImpl::prefill_recv_pull_signal(
+    const proto::PullSignal* request,
+    proto::Status* response) {
+  // Put the pull signal into a queue and response
+  bool result = scheduler_->write_pull_signal(proto::PullSignal(*request));
+
+  if (response) {
+    response->set_ok(result);
   }
 }
 
