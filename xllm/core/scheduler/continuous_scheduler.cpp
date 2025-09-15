@@ -612,9 +612,9 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   while (request_queue_.read(request)) {
     CHECK(request);
 
-    if (request->offline()) {
-      DLOG << "Read an offline request from request_queue_";
-    }
+    // if (request->offline()) {
+    //   DVLOG << "Read an offline request from request_queue_";
+    // }
 
     // expand sequences to the target number if prefix cache is disabled.
     if (!enable_prefix_cache_) {
@@ -625,10 +625,12 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
       if (request->offline()) {
         waiting_priority_queue_offline_.push(request);
-        DLOG << "Put an offline request into waiting_priority_queue_offline_";
+        // DVLOG << "Put an offline request into
+        // waiting_priority_queue_offline_";
       } else {
         waiting_priority_queue_.push(request);
-        DLOG << "Put an online request into waiting_priority_queue_offline_";
+        // DVLOG << "Put an online request into
+        // waiting_priority_queue_offline_";
       }
     } else {
       // request from prefill instance in disagge pd mode.
@@ -646,7 +648,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
-      DLOG << "Found a finished request in running_requests_";
+      // DVLOG << "Found a finished request in running_requests_";
       block_manager_pool_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
@@ -671,10 +673,10 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
         handle_running_requests(*it);
         if ((*it)->offline()) {
           running_queue_offline_->push(*it, last_step_prefill_);
-          DLOG << "Put an offline request into running_queue_offline_";
+          // DVLOG << "Put an offline request into running_queue_offline_";
         } else {
           running_queue_->push(*it, last_step_prefill_);
-          DLOG << "Put an online request into running_queue_";
+          // DVLOG << "Put an online request into running_queue_";
         }
       }
     } else {
@@ -697,16 +699,17 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
         handle_running_requests(*it);
         if ((*it)->offline()) {
           running_queue_offline_->push(*it, last_step_prefill_);
-          DLOG << "Pushed an offline request into running_queue_offline_";
+          // DVLOG << "Pushed an offline request into running_queue_offline_";
         } else {
           running_queue_->push(*it, last_step_prefill_);
-          DLOG << "Pushed an online request into running_queue_";
+          // DVLOG << "Pushed an online request into running_queue_";
         }
       }
     }
   } else {
-    DLOG << "Using unknown priority_strategy: " << options_.priority_strategy();
-    // directly push running requests to the priority queue
+    // DVLOG << "Using unknown priority_strategy: " <<
+    // options_.priority_strategy(); directly push running requests to the
+    // priority queue
     for (auto it = running_requests_.begin(); it != running_requests_.end();
          ++it) {
       if (*it == nullptr) {
@@ -715,10 +718,10 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
       handle_running_requests(*it);
       if ((*it)->offline()) {
         running_queue_offline_->push(*it);
-        DLOG << "Pushed an offline request into running_queue_offline_";
+        // DVLOG << "Pushed an offline request into running_queue_offline_";
       } else {
         running_queue_->push(*it);
-        DLOG << "Pushed an online request into running_queue_";
+        // DVLOG << "Pushed an online request into running_queue_";
       }
     }
   }
@@ -827,7 +830,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   GAUGE_SET(num_free_blocks, util::max(block_manager_pool_->num_free_blocks()));
   GAUGE_SET(num_used_blocks, util::min(block_manager_pool_->num_used_blocks()));
   if (!batches[0].empty()) {
-    DLOG << "Built a batch";
+    DVLOG << "Built a batch";
   }
   return batches;
 }

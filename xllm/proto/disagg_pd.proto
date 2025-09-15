@@ -167,6 +167,11 @@ message StatusSet {
   repeated Status all_status = 1;
 }
 
+message PullSignal {
+  string source_instance_name = 1;
+  int64 preferred_len = 2;
+}
+
 service DisaggPDService {
   rpc Generation(DisaggStreamGeneration) returns (Status) {}
   rpc Generations(DisaggStreamGenerations) returns (StatusSet) {}
@@ -179,4 +184,5 @@ service PDOOCService {
   rpc Generations(DisaggStreamGenerations) returns (StatusSet) {}
   rpc AddNewRequests(DisaggRequests) returns (DisaggResponses) {}
   rpc FirstGeneration(DisaggGenerations) returns (Status) {}
+  rpc SendPullSignal(PullSignal) returns (Status) {}
 }

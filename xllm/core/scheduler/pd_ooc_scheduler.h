@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <brpc/channel.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -88,6 +90,16 @@ class PDOOCScheduler : public ContinuousScheduler {
   void get_latency_metrics(std::vector<int64_t>& ttft,
                            std::vector<int64_t>& tbt);
 
+  void prefill_step(const absl::Duration& timeout);
+
+  void decode_step(const absl::Duration& timeout);
+
+  void decode_send_pull_signal();
+
+  bool check_able_to_pull();
+
+  bool write_pull_signal(const proto::PullSignal& pull_signal);
+
  private:
   // Pre-execute prefill requests of different lengths at startup and obtain the
   // corresponding TTFT for calculating the estimated TTFT of requests.
@@ -111,6 +123,12 @@ class PDOOCScheduler : public ContinuousScheduler {
   void build_disagg_requests(
       const std::vector<std::shared_ptr<Request>>& requests,
       proto::DisaggRequests& reqs);
+
+  // Select a decode instance for dispatching requests
+  std::string select_decode_instance();
+
+  // Select a prefill instance for pulling requests
+  std::string select_prefill_instance();
 
   void update_token_latency_metrics(std::vector<Sequence*>& sequences) override;
 
@@ -190,7 +208,19 @@ class PDOOCScheduler : public ContinuousScheduler {
   std::vector<int64_t> recent_tbt_;
   std::mutex latency_metrics_mutex_;
 
-  StepStatus step_status;
+  StepStatus step_status = StepStatus::IDLE;
+
+  std::mutex decode_send_pull_signal_mtx_;
+  std::condition_variable decode_send_pull_signal_cv_;
+  std::atomic<bool> decode_send_pull_signal_pending_ = true;
+  std::atomic<bool> waiting_pull_finished = false;
+
+  moodycamel::BlockingConcurrentQueue<proto::PullSignal> pull_signals_;
+
+  std::vector<std::string> prefill_inst_names_;
+  int current_prefill_idx_ = 0;
+
+  std::unique_ptr<std::thread> send_pull_signal_thread_;
 };
 
 }  // namespace xllm

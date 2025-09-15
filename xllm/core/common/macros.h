@@ -62,6 +62,6 @@ namespace xllm {
 
 #define CALLBACK_WITH_ERROR(CODE, MSG) callback(Status{CODE, MSG});
 
-#define DLOG VLOG(1) << "[Local offline] "
+#define DVLOG VLOG(1) << "[Offline pull] "
 
 }  // namespace xllm
