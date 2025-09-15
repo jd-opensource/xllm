@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "framework/context.h"
@@ -1351,7 +1352,7 @@ inline torch::Tensor get_1d_rotary_pos_embed(
   auto tensors = {pos_tensor, freqs};
 
   auto freqs_outer = torch::einsum("s,d->sd", tensors);  // [S, D/2]
-#ifdef USE_ASCEND
+#if defined(USE_NPU)
   freqs_outer = freqs_outer.to(torch::kFloat32);
 #endif
   if (use_real && repeat_interleave_real) {
@@ -1893,7 +1894,7 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
 
     return proj_out_(output_hidden);
   }
-  void load_model(std::unique_ptr<ModelLoader> loader) {
+  void load_model(std::unique_ptr<DiTFolderLoader> loader) {
     context_embedder_->to(device_);
     x_embedder_->to(device_);
     proj_out_->to(device_);
@@ -1982,11 +1983,11 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
   at::ScalarType dtype_;
 };
 TORCH_MODULE(FluxTransformer2DModel);
-class DiTModelImpl : public torch::nn::Module {
+class DiTModelPipelineImpl : public torch::nn::Module {
  public:
-  DiTModelImpl(const Context& context,
-               torch::Device device,
-               torch::ScalarType dtype)
+  DiTModelPipelineImpl(const Context& context,
+                       torch::Device device,
+                       torch::ScalarType dtype)
       : args_(context.get_model_args()), device_(device), dtype_(dtype) {
     flux_transformer_2d_model_ = register_module(
         "flux_transformer_2d_model",
@@ -2067,7 +2068,7 @@ class DiTModelImpl : public torch::nn::Module {
                           guidance);
     return output;
   }
-  void load_model(std::unique_ptr<ModelLoader> loader) {
+  void load_model(std::unique_ptr<DiTFolderLoader> loader) {
     LOG(INFO) << "Loading model parameters into DiTModel.";
     flux_transformer_2d_model_->load_model(std::move(loader));
   }
@@ -2082,9 +2083,8 @@ class DiTModelImpl : public torch::nn::Module {
   at::Device device_;
   at::ScalarType dtype_;
 };
-TORCH_MODULE(DiTModel);
-REGISTER_MODEL_ARGS(dit, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "dit");
+TORCH_MODULE(DiTModelPipeline);
+REGISTER_MODEL_ARGS(FluxTransformer2DModel, [&] {
   LOAD_ARG_OR(dit_patch_size, "patch_size", 1);
   LOAD_ARG_OR(dit_in_channels, "in_channels", 64);
   LOAD_ARG_OR(dit_num_layers, "num_layers", 19);

@@ -212,6 +212,8 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   if (proto_input.has_negative_prompt_2()) {
     input_params.negative_prompt_2 = proto_input.negative_prompt_2();
   }
+  LOG(INFO) << "Prompt: " << input_params.prompt
+            << "start to convert prompt_embeds";
   if (proto_input.has_prompt_embeds()) {
     const auto& proto_tensor = proto_input.prompt_embeds();
     input_params.prompt_embeds = proto_to_torch(proto_tensor);

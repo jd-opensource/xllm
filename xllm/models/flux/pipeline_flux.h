@@ -16,7 +16,8 @@
 #include <vector>
 
 #include "core/framework/context.h"
-#include "core/framework/model/model_input_params.h"
+#include "core/framework/dit_model_loader.h"
+#include "core/framework/request/dit_request_state.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/layers/npu/pos_embedding.h"
 #include "core/layers/npu/rms_norm.h"
@@ -186,7 +187,7 @@ class FluxPipelineImpl : public torch::nn::Module {
   FlowMatchEulerDiscreteScheduler scheduler_{nullptr};
   VAE vae_{nullptr};
   VAEImageProcessor vae_image_processor_{nullptr};
-  DiTModel transformer_{nullptr};
+  DiTModelPipeline transformer_{nullptr};
   T5EncoderModel t5_{nullptr};
   CLIPTextModel clip_text_model_{nullptr};
   int vae_scale_factor_;
@@ -207,30 +208,45 @@ class FluxPipelineImpl : public torch::nn::Module {
   FluxPipelineImpl(const Context& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    vae_scale_factor_ = 1 << (model_args_.block_out_channels().size() - 1);
+    vae_scale_factor_ = 1 << (model_args_.vae_block_out_channels().size() - 1);
     _execution_device = options_.device();
     _execution_dtype = torch::kBFloat16;
     LOG(INFO) << _execution_device << " is the execution device";
     LOG(INFO) << _execution_dtype << " is the execution dtype";
-    vae_shift_factor_ = model_args_.shift_factor();
-    vae_scaling_factor_ = model_args_.scale_factor();
+    LOG(INFO) << model_args_;
+    vae_shift_factor_ = model_args_.vae_shift_factor();
+    vae_scaling_factor_ = model_args_.vae_scale_factor();
     default_sample_size_ = 128;
     tokenizer_max_length_ = 77;  // TODO: get from config file
+    LOG(INFO) << "Initializing Flux pipeline...";
     vae_image_processor_ = VAEImageProcessor(
         true, vae_scale_factor_, 4, "lanczos", -1, true, false, false, false);
+    LOG(INFO) << "VAE image processor initialized.";
     vae_ = VAE(context, _execution_device, _execution_dtype);
-    transformer_ = DiTModel(context, _execution_device, _execution_dtype);
+    LOG(INFO) << "VAE initialized.";
+    transformer_ =
+        DiTModelPipeline(context, _execution_device, _execution_dtype);
+    LOG(INFO) << "DiT transformer initialized.";
     t5_ = T5EncoderModel(context, _execution_device, _execution_dtype);
+    LOG(INFO) << "T5 initialized.";
     clip_text_model_ =
         CLIPTextModel(context, _execution_device, _execution_dtype);
+    LOG(INFO) << "CLIP text model initialized.";
     scheduler_ = FlowMatchEulerDiscreteScheduler(context);
+    LOG(INFO) << "Flux pipeline initialized.";
     // register modules
     register_module("vae", vae_);
+    LOG(INFO) << "VAE registered.";
     register_module("vae_image_processor", vae_image_processor_);
+    LOG(INFO) << "VAE image processor registered.";
     register_module("transformer", transformer_);
+    LOG(INFO) << "DiT transformer registered.";
     register_module("t5", t5_);
+    LOG(INFO) << "T5 registered.";
     register_module("scheduler", scheduler_);
+    LOG(INFO) << "Scheduler registered.";
     register_module("clip_text_model", clip_text_model_);
+    LOG(INFO) << "CLIP text model registered.";
   }
   void check_inputs(
       std::optional<torch::optional<std::vector<std::string>>> prompt,
@@ -364,8 +380,6 @@ class FluxPipelineImpl : public torch::nn::Module {
       std::optional<torch::Tensor> latents = std::nullopt) {
     int64_t adjusted_height = 2 * (height / (vae_scale_factor_ * 2));
     int64_t adjusted_width = 2 * (width / (vae_scale_factor_ * 2));
-    LOG(INFO) << height << " " << width << " " << adjusted_height << " "
-              << adjusted_width << " " << vae_scale_factor_;
     std::vector<int64_t> shape = {
         batch_size, num_channels_latents, adjusted_height, adjusted_width};
     if (latents.has_value()) {
@@ -385,40 +399,48 @@ class FluxPipelineImpl : public torch::nn::Module {
         batch_size, adjusted_height / 2, adjusted_width / 2, device, dtype);
     return {packed_latents, latent_image_ids};
   }
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    LOG(INFO) << "FluxPipelineImpl forward called";
+  torch::Tensor forward(const InputParams& input_params,
+                        const GenerationParams& generation_params) {
+    LOG(INFO) << "FluxPipelineImpl forward called" << input_params.prompt;
     torch::Generator generator = torch::Generator();
-    torch::manual_seed(42);
+    torch::manual_seed(generation_params.seed.value_or(42));
     std::vector<torch::Generator> generators_vec;
     generators_vec.push_back(generator);
     std::optional<std::vector<torch::Generator>> generators_opt =
         generators_vec;
-    FluxPipelineOutput output =
-        forward_(std::vector<std::string>(),  // prompt
-                 std::nullopt,                // prompt_2
-                 std::nullopt,                // negative_prompt
-                 std::nullopt,                // negative_prompt_2
-                 1.0f,                        // cfg scale
-                 1440,
-                 1440,            // height, width
-                 25,              // num_inference_steps
-                 std::nullopt,    // sigmas
-                 3.5f,            // guidance_scale
-                 1,               // num_images_per_prompt
-                 generators_opt,  // generator
-                 std::nullopt,    // latents
-                 std::nullopt,    // prompt_embeds
-                 std::nullopt,    // negative_prompt_embeds
-                 std::nullopt,    // pooled_prompt_embeds
-                 std::nullopt,    // pooled_negative_prompt_embeds
-                 "pil",           // output_type
-                 512              // max_sequence_length
-        );
-    LOG(INFO) << "flux output" << output.images;
-    return torch::Tensor();
+    FluxPipelineOutput output = forward_(
+        std::make_optional(c10::optional<std::vector<std::string>>{
+            std::vector<std::string>{input_params.prompt}}),  // prompt
+        std::make_optional(
+            c10::optional<std::vector<std::string>>{std::vector<std::string>{
+                input_params.prompt_2.value_or("")}}),  // prompt_2
+        std::make_optional(c10::optional<std::vector<std::string>>{
+            std::vector<std::string>{input_params.negative_prompt.value_or(
+                "")}}),  // negative_prompt
+        std::make_optional(c10::optional<std::vector<std::string>>{
+            std::vector<std::string>{input_params.negative_prompt_2.value_or(
+                "")}}),                                // negative_prompt_2
+        generation_params.true_cfg_scale.value_or(1),  // cfg scale
+        std::make_optional(generation_params.height),  // height
+        std::make_optional(generation_params.width),   // width
+        generation_params.num_inference_steps.value_or(
+            28),                                         // num_inference_steps
+        std::nullopt,                                    // sigmas
+        generation_params.guidance_scale.value_or(3.5),  // guidance_scale
+        generation_params.num_images_per_prompt.value_or(
+            1),                               // num_images_per_prompt
+        generators_opt,                       // generator
+        input_params.latents,                 // latents
+        input_params.prompt_embeds,           // prompt_embeds
+        input_params.negative_prompt_embeds,  // negative_prompt_embeds
+        input_params.pooled_prompt_embeds,    // pooled_prompt_embeds
+        input_params
+            .negative_pooled_prompt_embeds,  // negative_pooled_prompt_embeds
+        "pil",                               // output_type
+        generation_params.max_sequence_length.value_or(
+            512)  // max_sequence_length
+    );
+    return output.images[0];
   }
   torch::Tensor _get_clip_prompt_embeds(
       std::vector<std::string>& prompt,
@@ -780,16 +802,27 @@ class FluxPipelineImpl : public torch::nn::Module {
       image = vae_->decode(unpacked_latents).sample;
       image = vae_image_processor_->postprocess(image, output_type);
     }
+    auto bytes = torch::pickle_save(image.cpu());  // 转成二进制 pickle 数据
+    std::ofstream fout(
+        "/export/home/liuyiming54/precision_test/flux/xllm/final_image.pkl",
+        std::ios::out | std::ios::binary);
+    fout.write(bytes.data(), bytes.size());
+    fout.close();
     return FluxPipelineOutput{{image}};
   }
 
-  void load_model(std::unique_ptr<ModelLoader> loader) {
-    std::string model_path = loader->model_weights_path();
-    auto transformer_loader = ModelLoader::create(model_path + "/transformer");
-    auto vae_loader = ModelLoader::create(model_path + "/vae");
-    auto t5_loader = ModelLoader::create(model_path + "/text_encoder_2");
-    auto clip_loader = ModelLoader::create(model_path + "/text_encoder");
-    int card_id = 14;
+  void load_model(std::unique_ptr<DiTModelLoader> loader) {
+    LOG(INFO) << "FluxPipeline loading model...";
+    LOG(INFO) << "Loading Flux model from: " << loader->model_root_path()
+              << loader->component_names();
+    std::string model_path = loader->model_root_path();
+    auto transformer_loader =
+        loader->take_sub_model_loader_by_folder("transformer");
+    auto vae_loader = loader->take_sub_model_loader_by_folder("vae");
+    auto t5_loader = loader->take_sub_model_loader_by_folder("text_encoder_2");
+    auto clip_loader = loader->take_sub_model_loader_by_folder("text_encoder");
+    LOG(INFO)
+        << "Flux model components loaded, start to load weights to sub models";
     transformer_->load_model(std::move(transformer_loader));
     transformer_->to(_execution_device);
     vae_->load_model(std::move(vae_loader));
@@ -801,69 +834,5 @@ class FluxPipelineImpl : public torch::nn::Module {
   }
 };
 TORCH_MODULE(FluxPipeline);
-REGISTER_MODEL_ARGS(flux, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "flux");
-  //   //vae
-  //   LOAD_ARG_OR(in_channels, "in_channels", 3);
-  //   LOAD_ARG_OR(out_channels, "out_channels", 3);
-  //   LOAD_ARG_OR(down_block_types,
-  //               "down_block_types",
-  //               std::vector<std::string>{"DownEncoderBlock2D"});
-  //   LOAD_ARG_OR(up_block_types,
-  //               "up_block_types",
-  //               std::vector<std::string>{"UpDecoderBlock2D"});
-  //   LOAD_ARG_OR(
-  //       block_out_channels, "block_out_channels", std::vector<int64_t>{64});
-  //   LOAD_ARG_OR(layers_per_block, "layers_per_block", 1);
-  //   LOAD_ARG_OR(act_fn, "act_fn", "silu");
-  //   LOAD_ARG_OR(latent_channels, "latent_channels", 4);
-  //   LOAD_ARG_OR(norm_num_groups, "norm_num_groups", 32);
-  //   LOAD_ARG_OR(sample_size, "sample_size", 32);
-  //   LOAD_ARG_OR(scale_factor, "scale_factor", 0.18215f);
-  //   LOAD_ARG_OR(shift_factor, "shift_factor", 0.1159f);
-  //   LOAD_ARG_OR(mid_block_add_attention, "mid_block_add_attention", true);
-  //   LOAD_ARG_OR(force_upcast, "force_upcast", true);
-  //   LOAD_ARG_OR(use_quant_conv, "use_quant_conv", false);
-  //   LOAD_ARG_OR(use_post_quant_conv, "use_post_quant_conv", false);
-  //   //dit
-  //   LOAD_ARG_OR(dit_patch_size, "patch_size", 1);
-  //   LOAD_ARG_OR(dit_in_channels, "in_channels", 64);
-  //   LOAD_ARG_OR(dit_num_layers, "num_layers", 19);
-  //   LOAD_ARG_OR(dit_num_single_layers, "num_single_layers", 38);
-  //   LOAD_ARG_OR(dit_attention_head_dim, "attention_head_dim", 128);
-  //   LOAD_ARG_OR(dit_num_attention_heads, "num_attention_heads", 24);
-  //   LOAD_ARG_OR(dit_joint_attention_dim, "joint_attention_dim", 4096);
-  //   LOAD_ARG_OR(dit_pooled_projection_dim, "pooled_projection_dim", 768);
-  //   LOAD_ARG_OR(dit_guidance_embeds, "guidance_embeds", false);
-  //   LOAD_ARG_OR(
-  //       dit_axes_dims_rope, "axes_dims_rope", (std::vector<int64_t>{16, 56,
-  //       56}));
-
-  //   LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
-  //   LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
-  //   LOAD_ARG_OR(head_dim, "head_dim", 56);
-  //   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 128000);
-
-  //   //t5 encoder
-  //   LOAD_ARG_OR(t5_vocab_size, "vocab_size", 32128);
-  //   LOAD_ARG_OR(t5_d_model, "d_model", 4096);
-  //   LOAD_ARG_OR(t5_num_layers, "num_layers", 24);
-  //   LOAD_ARG_OR(t5_d_kv, "d_kv", 64);
-  //   LOAD_ARG_OR(t5_num_heads, "num_heads", 64);
-  //   LOAD_ARG_OR(t5_d_ff, "d_ff", 10240);
-  //   LOAD_ARG_OR(t5_dropout_rate, "dropout_rate", 0.1f);
-  //   LOAD_ARG_OR(t5_dense_act_fn, "dense_act_fn", "gelu_new");
-  //   LOAD_ARG_OR(t5_is_gated_act, "is_gated_act", true);
-  //   LOAD_ARG_OR(
-  //       t5_relative_attention_num_buckets, "relative_attention_num_buckets",
-  //       32);
-  //   LOAD_ARG_OR(t5_relative_attention_max_distance,
-  //               "relative_attention_max_distance",
-  //               128);
-  //   LOAD_ARG_OR(t5_layer_norm_epsilon, "layer_norm_epsilon", 1e-6f);
-  LOAD_ARG_OR(n_layers, "num_hidden_layers", 12);
-  LOAD_ARG_OR(n_heads, "num_attention_heads", 12);
-  LOAD_ARG_OR(head_dim, "head_dim", 64);
-  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 77);
-});
+REGISTER_DIT_MODEL(flux, FluxPipeline);
 }  // namespace xllm::hf

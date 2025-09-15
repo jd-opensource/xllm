@@ -23,6 +23,7 @@ limitations under the License.
 #include "core/framework/context.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/causal_vlm.h"
+#include "core/framework/model/dit_model.h"
 #include "core/framework/model/embedding_lm.h"
 #include "core/framework/parallel_state.h"
 #include "core/framework/tokenizer/tokenizer_args.h"
@@ -41,6 +42,9 @@ using CausalVLMFactory =
 
 using EmbeddingLMFactory =
     std::function<std::unique_ptr<EmbeddingLM>(const Context& context)>;
+
+using DiTModelFactory =
+    std::function<std::unique_ptr<DiTModel>(const Context& context)>;
 
 using InputProcessorFactory =
     std::function<std::unique_ptr<InputProcessor>(const ModelArgs& args)>;
@@ -62,6 +66,7 @@ struct ModelMeta {
   CausalLMFactory causal_lm_factory;
   CausalVLMFactory causal_vlm_factory;
   EmbeddingLMFactory embedding_lm_factory;
+  DiTModelFactory dit_model_factory;
   InputProcessorFactory input_processor_factory;
   ImageProcessorFactory image_processor_factory;
   ModelArgsLoader model_args_loader;
@@ -84,6 +89,9 @@ class ModelRegistry {
   static void register_embeddinglm_factory(const std::string& name,
                                            EmbeddingLMFactory factory);
 
+  static void register_dit_model_factory(const std::string& name,
+                                         DiTModelFactory factory);
+
   static void register_model_args_loader(const std::string& name,
                                          ModelArgsLoader loader);
 
@@ -103,6 +111,8 @@ class ModelRegistry {
   static CausalVLMFactory get_causalvlm_factory(const std::string& name);
 
   static EmbeddingLMFactory get_embeddinglm_factory(const std::string& name);
+
+  static DiTModelFactory get_dit_model_factory(const std::string& name);
 
   static ModelArgsLoader get_model_args_loader(const std::string& name);
 
@@ -125,6 +135,8 @@ std::unique_ptr<CausalLM> create_llm_model(const Context& context);
 std::unique_ptr<CausalVLM> create_vlm_model(const Context& context);
 
 std::unique_ptr<EmbeddingLM> create_embeddinglm_model(const Context& context);
+
+std::unique_ptr<DiTModel> create_dit_model(const Context& context);
 
 // Macro to register a model with the ModelRegistry
 #define REGISTER_CAUSAL_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
@@ -172,6 +184,21 @@ std::unique_ptr<EmbeddingLM> create_embeddinglm_model(const Context& context);
 
 #define REGISTER_EMBEDDING_MODEL(ModelType, ModelClass) \
   REGISTER_EMBEDDING_MODEL_WITH_VARNAME(ModelType, ModelType, ModelClass)
+
+#define REGISTER_DIT_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
+  const bool VarName##_registered = []() {                              \
+    ModelRegistry::register_dit_model_factory(                          \
+        #ModelType, [](const Context& context) {                        \
+          ModelClass model(context);                                    \
+          model->eval();                                                \
+          return std::make_unique<xllm::DiTModelImpl<ModelClass>>(      \
+              std::move(model), context.get_tensor_options());          \
+        });                                                             \
+    return true;                                                        \
+  }()
+
+#define REGISTER_DIT_MODEL(ModelType, ModelClass) \
+  REGISTER_DIT_MODEL_WITH_VARNAME(ModelType, ModelType, ModelClass)
 
 #define REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                \
     VarName, ModelType, InputProcessorClass)                  \

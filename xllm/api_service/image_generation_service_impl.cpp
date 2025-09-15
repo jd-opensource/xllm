@@ -88,13 +88,16 @@ void ImageGenerationServiceImpl::process_async(
        request_id = request_params.request_id,
        created_time = absl::ToUnixSeconds(absl::Now())](
           const DiTRequestOutput& req_output) -> bool {
+        LOG(INFO) << "into callback before request finished";
+        LOG(INFO) << req_output.outputs.size();
+        LOG(INFO) << req_output.outputs[0].image_tensor;
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
           if (!status.ok()) {
             return call->finish_with_error(status.code(), status.message());
           }
         }
-
+        LOG(INFO) << "into callback after request finished";
         return send_result_to_client_brpc(
             call, request_id, created_time, model, req_output);
       });
