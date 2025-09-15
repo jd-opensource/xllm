@@ -36,6 +36,10 @@ class PDOOCServiceImplInterface {
       const proto::DisaggGenerations* request,
       proto::Status* response) {}
 
+  virtual void decode_recv_multi_generations(
+      const proto::MultiGenerationsRequests* request,
+      proto::Status* response) {}
+
   virtual bool prefill_recv_generation(
       const proto::DisaggStreamGeneration* request,
       proto::Status* response) {
@@ -66,6 +70,10 @@ class PDOOCServiceImpl final : public PDOOCServiceImplInterface {
 
   void decode_recv_first_generation(const proto::DisaggGenerations* request,
                                     proto::Status* response) override;
+
+  void decode_recv_multi_generations(
+      const proto::MultiGenerationsRequests* request,
+      proto::Status* response) override;
 
   void prefill_recv_pull_signal(const proto::PullSignal* request,
                                 proto::Status* response) override;

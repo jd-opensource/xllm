@@ -56,6 +56,8 @@ class PDOOCScheduler : public ContinuousScheduler {
   void dispatch_requests();
   // prefill-2: for prefill send first token to decode
   void prefill_send_first_generation();
+  // prefill-2b: for prefill send multiple tokens to decode
+  void prefill_send_multi_generations();
   // prefill-3: for prefill receive stream generation from decode
   bool prefill_recv_generation(const RequestOutput& output);
 
@@ -78,6 +80,19 @@ class PDOOCScheduler : public ContinuousScheduler {
                                     int32_t src_dp_size,
                                     int32_t src_dp_rank);
 
+  // decode-2b: for decode receive multiple tokens from prefill
+  bool decode_recv_multi_generations(
+      const std::string& req_id,
+      const std::vector<proto::RemoteToken>& migration_tokens,
+      const std::string& kv_cache_transfer_mode,
+      std::vector<uint64_t> src_cluster_ids,
+      std::vector<std::string> src_addrs,
+      std::vector<int64_t> src_k_cache_ids,
+      std::vector<int64_t> src_v_cache_ids,
+      std::vector<uint64_t> src_block_ids,
+      int32_t src_dp_size,
+      int32_t src_dp_rank);
+
   // decode allocate blocks for request prompt when receive from prefill.
   std::vector<Block> allocate_raw_blocks(int token_num, int32_t& dp_rank);
   // decode-3: decode send response to prefill
@@ -99,6 +114,10 @@ class PDOOCScheduler : public ContinuousScheduler {
   bool check_able_to_pull();
 
   bool write_pull_signal(const proto::PullSignal& pull_signal);
+
+  void prepare_offline_dispatch_queue();
+
+  void dispatch_offline_requests();
 
  private:
   // Pre-execute prefill requests of different lengths at startup and obtain the
@@ -213,7 +232,7 @@ class PDOOCScheduler : public ContinuousScheduler {
   std::mutex decode_send_pull_signal_mtx_;
   std::condition_variable decode_send_pull_signal_cv_;
   std::atomic<bool> decode_send_pull_signal_pending_ = true;
-  std::atomic<bool> waiting_pull_finished = false;
+  std::atomic<bool> waiting_pull_finished_ = false;
 
   moodycamel::BlockingConcurrentQueue<proto::PullSignal> pull_signals_;
 
@@ -221,6 +240,18 @@ class PDOOCScheduler : public ContinuousScheduler {
   int current_prefill_idx_ = 0;
 
   std::unique_ptr<std::thread> send_pull_signal_thread_;
+
+  std::unique_ptr<std::thread> dispatch_offline_thread_;
+
+  // moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
+  // offline_requests_to_dispatch_;
+  moodycamel::BlockingConcurrentQueue<
+      std::pair<std::shared_ptr<Request>, std::string>>
+      offline_requests_to_dispatch_;  // Requests to dispatch and their
+                                      // specified decoding instance names.
+  moodycamel::BlockingConcurrentQueue<
+      std::pair<std::shared_ptr<Request>, std::string>>
+      offline_requests_to_transfer_;
 };
 
 }  // namespace xllm
