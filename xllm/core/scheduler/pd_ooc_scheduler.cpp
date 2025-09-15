@@ -20,6 +20,7 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <brpc/server.h>
 
+#include <chrono>
 #include <random>
 
 #include "common/global_flags.h"
@@ -40,15 +41,25 @@ limitations under the License.
 namespace xllm {
 
 PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
-    : ContinuousScheduler(engine, options), step_status(StepStatus::IDLE) {
-  VLOG(1) << "[VLOG(1)] Creating a PD OOC Scheduler";
+    : ContinuousScheduler(engine, options) {
+  VLOG(1) << "Creating a PD OOC Scheduler";
 
   if (!options_.instance_role().has_value()) {
     LOG(FATAL) << "Instance type is not set in disagg pd mode.";
   }
-  // start dispatch thread for prefill instance
-  dispatch_thread_ =
-      std::make_unique<std::thread>(&PDOOCScheduler::dispatch_requests, this);
+
+  if (options_.instance_role().value() == InstanceRole::PREFILL) {
+    DVLOG << "Running dispatch_thread_";
+    // start dispatch thread for prefill instance
+    dispatch_thread_ =
+        std::make_unique<std::thread>(&PDOOCScheduler::dispatch_requests, this);
+  }
+
+  if (options_.instance_role().value() == InstanceRole::DECODE) {
+    DVLOG << "Running send_pull_signal_thread_";
+    send_pull_signal_thread_ = std::make_unique<std::thread>(
+        &PDOOCScheduler::decode_send_pull_signal, this);
+  }
 
   rpc_server_thread_ =
       std::make_unique<std::thread>(&PDOOCScheduler::start_rpc_server, this);
@@ -91,6 +102,10 @@ PDOOCScheduler::~PDOOCScheduler() {
 
   if (dispatch_thread_ && dispatch_thread_->joinable()) {
     dispatch_thread_->join();
+  }
+
+  if (send_pull_signal_thread_ && send_pull_signal_thread_->joinable()) {
+    send_pull_signal_thread_->join();
   }
 }
 
@@ -232,13 +247,80 @@ void PDOOCScheduler::start_rpc_server() {
 }
 
 void PDOOCScheduler::step(const absl::Duration& timeout) {
-  ContinuousScheduler::step(timeout);
-  // send first generation token to decode instance
-  // and remove the request from running_requests_ to remote_requests_map_
   if (options_.instance_role() == InstanceRole::PREFILL) {
-    // TODO When request is offline-prefill, do not send first generation to the
-    // decode instance.
-    prefill_send_first_generation();
+    prefill_step(timeout);
+  } else if (options_.instance_role() == InstanceRole::DECODE) {
+    decode_step(timeout);
+  } else {
+    LOG(FATAL) << "Unknown instance role";
+  }
+}
+
+void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
+  ContinuousScheduler::step(timeout);
+  prefill_send_first_generation();
+}
+
+void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
+  ContinuousScheduler::step(timeout);
+  // Check memory utilization rate to see if the scheduler is able to pull an
+  // offline request from a P node
+  if (check_able_to_pull()) {
+    // Trigger decode_send_pull_signal()
+    // DVLOG << "Able to pull";
+    decode_send_pull_signal_pending_.store(false);
+    decode_send_pull_signal_cv_.notify_all();
+  }
+}
+
+void PDOOCScheduler::decode_send_pull_signal() {
+  while (true) {
+    // Wait until step thread triggers
+    // DVLOG << "Waiting for trigger";
+    std::unique_lock<std::mutex> lock(decode_send_pull_signal_mtx_);
+    decode_send_pull_signal_cv_.wait(
+        lock, [this] { return !decode_send_pull_signal_pending_.load(); });
+
+    if (waiting_pull_finished.load()) {
+      decode_send_pull_signal_pending_.store(true);
+      absl::SleepFor(absl::Milliseconds(100));
+      continue;
+    }
+
+    DVLOG << "Sending a pull signal to a P node";
+
+    // WIP Send a pull signal to a P node
+
+    // Select a P node
+    std::string selected_prefill_instance = select_prefill_instance();
+    DVLOG << "Selected prefill instance: " << selected_prefill_instance;
+
+    // Build a stub
+    proto::PDOOCService_Stub* stub =
+        create_rpc_channel(selected_prefill_instance);
+    if (!stub) {
+      LOG(ERROR) << "Failed to create RPC channel to prefill instance: "
+                 << selected_prefill_instance;
+      decode_send_pull_signal_pending_.store(true);
+      absl::SleepFor(absl::Milliseconds(100));
+      continue;
+    }
+
+    // Send a pull signal to the selected prefill instance
+    proto::PullSignal pull_signal;
+    pull_signal.set_source_instance_name(xservice_client_->get_instance_name());
+    proto::Status resp;
+    brpc::Controller cntl;
+    stub->SendPullSignal(&cntl, &pull_signal, &resp, nullptr);
+
+    // Pend until next trigger
+    if (cntl.Failed() || !resp.ok()) {
+      waiting_pull_finished.store(false);
+    } else {
+      waiting_pull_finished.store(true);
+    }
+    decode_send_pull_signal_pending_.store(true);
+    absl::SleepFor(absl::Milliseconds(100));
   }
 }
 
@@ -281,8 +363,8 @@ void PDOOCScheduler::dispatch_requests() {
       // Handle offline requests locally. No need to dispatch them to decoding
       // instances.
       request_queue_.write(request);
-      DLOG << "Wrote an offline request to request_queue_: "
-           << request->request_id();
+      // DVLOG << "Wrote an offline request to request_queue_: "
+      //      << request->request_id();
       continue;
     }
 
@@ -299,28 +381,13 @@ void PDOOCScheduler::dispatch_requests() {
     // If no decoding instance is specified, randomly select one to create a
     // stub.
     if (selected_instance.empty() && !stub) {
-      // get allocated decode instance list from Master
-      while (decode_inst_names_.empty()) {
-        decode_inst_names_ = xservice_client_->get_static_decode_list();
-        if (!decode_inst_names_.empty()) {
-          LOG(INFO) << "Get PD decode instance list: "
-                    << absl::StrJoin(decode_inst_names_, "; ");
-          break;
-        }
-        sleep(1);
-      }
-      // select a D instance use RR currently.
-      // TODO: use better decode selection strategy later. maybe different
-      // strategy for offline and online request. or implement in xllm service.
       int try_decode_count = 0;
       while (!stub) {
         if (try_decode_count == decode_inst_names_.size()) {
           LOG(FATAL) << "Can not connect to all decode instances.";
         }
         ++try_decode_count;
-        selected_instance = decode_inst_names_[current_decode_idx_];
-        current_decode_idx_ =
-            (++current_decode_idx_) % decode_inst_names_.size();
+        selected_instance = select_decode_instance();
         stub = create_rpc_channel(selected_instance);
       }
     }
@@ -389,7 +456,7 @@ void PDOOCScheduler::prefill_send_first_generation() {
     for (size_t i = 0; i < running_requests_.size(); ++i) {
       auto request = running_requests_[i];
       if (request->offline()) {
-        DLOG << "Found an offline request in running_requests_. Skip";
+        // DVLOG << "Found an offline request in running_requests_. Skip";
         continue;
       }
       // Check if the request is a recently completed prefill request
@@ -587,6 +654,10 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
       remote_prefill_thread_map_[stub] = next_prefill_thread_idx;
       next_prefill_thread_idx = (++next_prefill_thread_idx) % kOutputTheadNum_;
     }
+  }
+
+  if (request->offline()) {
+    waiting_pull_finished.store(false);
   }
 
   return true;
@@ -991,11 +1062,70 @@ void PDOOCScheduler::update_token_latency_metrics(
   }
 }
 
+// TODO Need parameters tuning
+bool PDOOCScheduler::check_able_to_pull() {
+  // Estimated usage of current requests: half of current used blocks.
+  return block_manager_pool_->kv_cache_utilization() * 2 <
+         FLAGS_prefill_scheduling_memory_usage_threshold;
+}
+
+bool PDOOCScheduler::write_pull_signal(const proto::PullSignal& pull_signal) {
+  if (pull_signals_.try_enqueue(pull_signal)) {
+    DVLOG << "Wrote a pull signal into a queue: "
+          << pull_signal.source_instance_name();
+    return true;
+  } else {
+    DVLOG << "Failed to write a pull signal into a queue";
+    return false;
+  }
+}
+
 void PDOOCScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
                                          std::vector<int64_t>& tbt) {
   std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
   ttft = std::move(recent_ttft_);
   tbt = std::move(recent_tbt_);
+}
+
+std::string PDOOCScheduler::select_decode_instance() {
+  // get allocated decode instance list from Master
+  while (decode_inst_names_.empty()) {
+    decode_inst_names_ = xservice_client_->get_static_decode_list();
+    if (!decode_inst_names_.empty()) {
+      LOG(INFO) << "Get PD decode instance list: "
+                << absl::StrJoin(decode_inst_names_, "; ");
+      break;
+    }
+    sleep(1);
+  }
+
+  // select a D instance use RR currently.
+  // TODO: use better decode selection strategy later. maybe different
+  // strategy for offline and online request. or implement in xllm service.
+  std::string selected_instance = decode_inst_names_[current_decode_idx_];
+  current_decode_idx_ = (++current_decode_idx_) % decode_inst_names_.size();
+
+  return selected_instance;
+}
+
+std::string PDOOCScheduler::select_prefill_instance() {
+  // get allocated prefill instance list from Master
+  while (prefill_inst_names_.empty()) {
+    prefill_inst_names_ = xservice_client_->get_static_prefill_list();
+    if (!prefill_inst_names_.empty()) {
+      LOG(INFO) << "Get PD prefill instance list: "
+                << absl::StrJoin(prefill_inst_names_, "; ");
+      break;
+    }
+    sleep(1);
+  }
+
+  // select a P instance use RR currently.
+  // TODO: use better prefill selection strategy later.
+  std::string selected_instance = prefill_inst_names_[current_prefill_idx_];
+  current_prefill_idx_ = (++current_prefill_idx_) % prefill_inst_names_.size();
+
+  return selected_instance;
 }
 
 void PDOOCScheduler::build_disagg_requests(

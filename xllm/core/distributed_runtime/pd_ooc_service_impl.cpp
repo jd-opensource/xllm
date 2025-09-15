@@ -286,4 +286,15 @@ void PDOOCServiceImpl::prefill_recv_generations(
   }
 }
 
+void PDOOCServiceImpl::prefill_recv_pull_signal(
+    const proto::PullSignal* request,
+    proto::Status* response) {
+  // Put the pull signal into a queue and response
+  bool result = scheduler_->write_pull_signal(proto::PullSignal(*request));
+
+  if (response) {
+    response->set_ok(result);
+  }
+}
+
 }  // namespace xllm
