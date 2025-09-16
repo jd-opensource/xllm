@@ -399,7 +399,7 @@ void DeepseekV2DecoderImpl::initialize_basic_parameters(
   param.isPrefill = is_prefill;
   param.isBF16 = args.dtype() == "bfloat16";
   param.enableSwiGLU = true;
-  param.enableLcoc = false;
+  param.enableLcoc = true;
 
   param.attnLinearTransposeType = {1, 1, 1, 1, 1, 1};
   param.mlpLinearTransposeType = {1, -1, 1, -1};
@@ -437,11 +437,6 @@ void DeepseekV2DecoderImpl::initialize_basic_parameters(
   }
   param.maskfree = true;                            // TODO
   param.enableSwiGLUQuantForSharedExperts = false;  // TODO
-  param.scaledTopk = -1;
-  param.enableATBGateMatmul = 1;
-#if defined(USE_A3)
-  param.enableLcocAll2All = 1;
-#endif
   num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
   qk_nope_head_dim_ = args.qk_nope_head_dim();
   v_head_dim_ = args.v_head_dim();
@@ -526,8 +521,13 @@ void DeepseekV2DecoderImpl::initialize_mlp_parameters(
   param.dispatchAndCombineHcclComm = parallel_args.dispatchAndCombineHcclComm();
   param.dispatchAndCombinecommDomain =
       parallel_args.dispatchAndCombinecommDomain();
+
+  param.scaledTopk = -1;
+  param.enableATBGateMatmul = true;
+
 #if defined(USE_A3)
   param.enableIndexGmm = false;
+  param.enableLcocAll2All = param.isPrefill && dp_size_ == 1;
 #else
   param.enableIndexGmm = true;
 #endif
