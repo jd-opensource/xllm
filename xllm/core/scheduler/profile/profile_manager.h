@@ -55,45 +55,53 @@ class ProfileManager {
 
   int32_t get_token_budget();
   // for single sequence
-  int32_t predict_step_time(int32_t length,
-                            int32_t prefix_length = 0,
-                            bool if_need_add_constant_term = true);
+  double predict_step_time(int32_t length,
+                           int32_t prefix_length = 0,
+                           bool if_need_add_constant_term = true,
+                           bool force_use_prefill_predictor = false);
 
-  int32_t predict_step_time(Sequence* sequence,
-                            bool if_need_add_constant_term = true);
+  double predict_step_time(Sequence* sequence,
+                           bool if_need_add_constant_term = true,
+                           bool force_use_prefill_predictor = false);
   // for single batch or sequences
-  int32_t predict_step_time(int32_t length,
-                            int32_t prefix_length,
-                            int32_t batch_size);
+  double predict_step_time(int32_t length,
+                           int32_t prefix_length,
+                           int32_t batch_size);
 
-  int32_t predict_step_time(std::vector<Sequence*>& sequences);
+  double predict_step_time(const std::vector<int32_t>& length_vec,
+                           const std::vector<int32_t>& prefix_length_vec);
   // Generate a request of token_length and prefix_length, finally
   // executing and returning the inference time.
-  int32_t run_request(int32_t token_length,
-                      int32_t prefix_length,
-                      int32_t vocab_size,
-                      int32_t batch_size = 1,
-                      int32_t extra_token_length = 0);
+  double run_request(int32_t token_length,
+                     int32_t prefix_length,
+                     int32_t batch_size = 1,
+                     int32_t extra_token_length = 0);
+  double run_request(const std::vector<int32_t>& token_length_vec,
+                     const std::vector<int32_t>& prefix_length_vec);
 
-  void train_time_predictor(
-      std::vector<std::tuple<int32_t, int32_t, int32_t>> time_profiling_data);
+  void train_prefill_time_predictor(
+      std::vector<std::tuple<int32_t, int32_t, double>> time_profiling_data);
 
-  void train_time_predictor(
-      std::vector<std::pair<int32_t, int32_t>> time_profiling_data);
+  void train_decode_time_predictor(
+      std::vector<std::tuple<int32_t, int32_t, double>> time_profiling_data);
 
-  TimePredictor* get_time_predictor() { return time_predictor_.get(); }
+  void train_prefill_time_predictor(
+      std::vector<std::pair<int32_t, double>> time_profiling_data);
+
+  double get_constant_overhead();
 
  private:
   void dump_step_time_profile_to_file(
-      const std::vector<std::pair<int32_t, int32_t>>& time_profiling_data);
+      const std::vector<std::pair<int32_t, double>>& time_profiling_data,
+      bool is_prefill);
 
   void dump_step_time_profile_to_file(
-      const std::vector<std::tuple<int32_t, int32_t, int32_t>>&
-          time_profiling_data);
+      const std::vector<std::tuple<int32_t, int32_t, double>>&
+          time_profiling_data,
+      bool is_prefill);
 
   std::shared_ptr<Request> generate_single_request(int32_t token_length,
-                                                   int32_t prefix_length,
-                                                   int32_t vocab_size);
+                                                   int32_t prefix_length);
 
   std::string generate_filename(const std::string& file_suffix);
 
@@ -101,7 +109,7 @@ class ProfileManager {
 
   void eval_sequence_latency_prediction();
 
-  void eval_batch_latency_prediction();
+  void eval_batch_latency_prediction(const std::string mode);
 
   void profile_token_budget();
 
@@ -111,7 +119,8 @@ class ProfileManager {
                                    int32_t lower_bound,
                                    int32_t upper_bound);
 
-  std::unique_ptr<TimePredictor> time_predictor_;
+  std::unique_ptr<TimePredictor> prefill_time_predictor_;
+  std::unique_ptr<TimePredictor> decode_time_predictor_;
 
   const Options options_;
 

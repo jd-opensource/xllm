@@ -43,8 +43,8 @@ ChunkedPrefillScheduler::~ChunkedPrefillScheduler() {
 
 void ChunkedPrefillScheduler::handle_running_queue_requests(
     const size_t max_tokens_per_chunk_for_prefill,
-    size_t& latency_budget,
-    size_t& estimate_latency,
+    double& latency_budget,
+    double& estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
     size_t& num_preempted_requests,
@@ -68,7 +68,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     bool has_enough_blocks = true;
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
-    size_t allocated_estimate_latency = 0;
+    double allocated_estimate_latency = 0;
 
     for (auto& sequence : request->sequences()) {
       // skip finished sequence.
@@ -105,12 +105,12 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       }
       // for chunked prefill, we need to estimate latency according to
       // `current_step_handle_tokens` which is totally precise.
-      size_t seq_estimate_latency = 0;
+      double seq_estimate_latency = 0.0;
       if (options_.enable_latency_aware_schedule()) {
         seq_estimate_latency = profile_manager_->predict_step_time(
             num_tokens_to_handle + kv_cache_tokens_num,
             kv_cache_tokens_num,
-            true);
+            false);
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
@@ -246,8 +246,8 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
 
 void ChunkedPrefillScheduler::handle_prefill_requests(
     const size_t max_tokens_per_chunk_for_prefill,
-    size_t& latency_budget,
-    size_t& estimate_latency,
+    double& latency_budget,
+    double& estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
     size_t& num_preempted_requests,
@@ -313,7 +313,7 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
         size_t kv_cache_tokens_num =
             prefill_sequence->kv_state().kv_cache_tokens_num();
         seq_estimate_latency = profile_manager_->predict_step_time(
-            num_tokens + kv_cache_tokens_num, kv_cache_tokens_num, true);
+            num_tokens + kv_cache_tokens_num, kv_cache_tokens_num, false);
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
@@ -431,8 +431,8 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
 }
 
 void ChunkedPrefillScheduler::handle_remaining_budget(
-    size_t& latency_budget,
-    size_t& estimate_latency,
+    double& latency_budget,
+    double& estimate_latency,
     size_t& remaining_token_budget,
     std::vector<Sequence*>& prefill_stage_sequences,
     bool& blocks_exhausted) {
@@ -452,7 +452,7 @@ void ChunkedPrefillScheduler::handle_remaining_budget(
     remaining_token_budget += token_budget;
     if (options_.enable_latency_aware_schedule()) {
       auto origin_estimate_seq_latency =
-          profile_manager_->predict_step_time(sequence, true);
+          profile_manager_->predict_step_time(sequence, false);
       // subtract the allocated latency back
       estimate_latency -= origin_estimate_seq_latency;
 
@@ -460,7 +460,7 @@ void ChunkedPrefillScheduler::handle_remaining_budget(
       auto cur_estimate_seq_latency = profile_manager_->predict_step_time(
           remaining_token_budget,
           sequence->kv_state().kv_cache_tokens_num(),
-          true);
+          false);
       if (estimate_latency + cur_estimate_seq_latency > latency_budget) {
         // beyond latency budget, break
         break;
@@ -579,11 +579,11 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
   // different tpot. Currently only support one unified tpot for ChunkedPrefill.
   // TO IMPROVE: use min remaining time (i.e. tpot_slo - elapsed_time) of the
   // reuquest in current decode queue to replace latency_budget.
-  size_t latency_budget = options_.max_global_tpot_ms();
+  double latency_budget = options_.max_global_tpot_ms();
   // size_t estimate_latency =
-  // profile_manager_->get_time_predictor()->get_constant_overhead(); // add
+  // profile_manager_->get_constant_overhead()->get_constant_overhead(); // add
   // constant overhead ahead
-  size_t estimate_latency = 0;
+  double estimate_latency = profile_manager_->get_constant_overhead();
   // Max tokens be handled in once chunked prefill schedule.
   size_t remaining_token_budget = options_.enable_profile_token_budget()
                                       ? profile_manager_->get_token_budget()
