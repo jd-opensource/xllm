@@ -47,8 +47,9 @@ LlmDataDistTransfer::LlmDataDistTransfer(const std::string& device_ip,
     LOG(INFO) << "Create LlmDataDistTransfer for decode instance.";
     role = LlmRole::kDecoder;
   } else {
-    LOG(INFO) << "Create LlmDataDistTransfer for mix instance.";
-    role = LlmRole::kMix;
+    LOG(FATAL)
+        << "Unsupported instance role for LlmDataDistTransfer. InstanceRole : "
+        << instance_role.to_string();
   }
 
   host_ip_ = net::get_local_ip_addr();

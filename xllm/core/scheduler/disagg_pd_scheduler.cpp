@@ -211,7 +211,7 @@ void DisaggPDScheduler::step(const absl::Duration& timeout) {
   ContinuousScheduler::step(timeout);
   // send first generation token to decode instance
   // and remove the request from running_requests_ to remote_requests_map_
-  if (options_.instance_role() == InstanceRole::PREFILL) {
+  if (options_.instance_role() != InstanceRole::DECODE) {
     prefill_send_first_generation();
   }
 }
@@ -700,12 +700,32 @@ bool DisaggPDScheduler::decode_recv_first_generation(
                             dst_block_ids);
   }
 
+  // update latest_generate_time_ for sequence
+  request->sequences()[0]->tbt(absl::Now());
+
   request_queue_.write(request);
   return true;
 }
 
 bool DisaggPDScheduler::decode_send_stream_generation(
     const RequestOutput& output) {
+  // 1. response to xllm service to avoid the redirect cost.
+  if (options_.enable_decode_response_to_service()) {
+    output_threadpools_[0].schedule(
+        [this, output = std::move(output)]() mutable {
+          xservice_client_->generations({output});
+          // TODO: error handler
+          // TODO: handle resp status
+          {
+            std::lock_guard<std::mutex> lock(received_request_map_mutex_);
+            if (output.finished) {
+              received_request_output_thread_map_.erase(output.request_id);
+            }
+          }
+        });
+    return true;
+  }
+
   int request_thread_idx = -1;
   {
     std::lock_guard<std::mutex> lock(received_request_map_mutex_);

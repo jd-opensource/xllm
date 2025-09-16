@@ -19,6 +19,7 @@ enum InstanceType {
   DEFAULT = 0;
   PREFILL = 1;
   DECODE = 2;
+  MIX = 3;
 }
 
 message WorkerKVAddr {

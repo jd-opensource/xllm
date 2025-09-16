@@ -84,8 +84,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
     input_params_micro_batches.push_back(
         std::move(inputs.micro_inputs[i].input_params));
 
-    if (options_.instance_role() == InstanceRole::PREFILL &&
-        options_.kv_cache_transfer_mode() == "PUSH" &&
+    if (options_.kv_cache_transfer_mode() == "PUSH" &&
         !inputs.micro_inputs[i].transfer_kv_infos.empty()) {
 #if defined(USE_NPU)
       std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer =
@@ -137,8 +136,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
     // in p-d disaggregation scene, all micro batches should be in same
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
     // just use micro inputs.micro_inputs[0] here
-    if (options_.instance_role() == InstanceRole::PREFILL &&
-        options_.kv_cache_transfer_mode() == "PUSH" &&
+    if (options_.kv_cache_transfer_mode() == "PUSH" &&
         !inputs.micro_inputs[0].transfer_kv_infos.empty()) {
       auto results =
           folly::collectAll(futures).within(std::chrono::seconds(60)).get();
@@ -214,8 +212,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
 
   auto ret = device_.synchronize_default_stream();
 
-  if (options_.instance_role() == InstanceRole::PREFILL &&
-      options_.kv_cache_transfer_mode() == "PUSH" &&
+  if (options_.kv_cache_transfer_mode() == "PUSH" &&
       !inputs.micro_inputs[0].transfer_kv_infos.empty()) {
     auto results =
         folly::collectAll(futures).within(std::chrono::seconds(60)).get();

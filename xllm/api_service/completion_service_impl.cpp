@@ -195,6 +195,7 @@ void CompletionServiceImpl::process_async_impl(
 
     request_params.decode_address = rpc_request.routing().decode_name();
   }
+
   // schedule the request
   master_->handle_request(
       std::move(rpc_request.prompt()),

@@ -111,7 +111,7 @@ struct Options {
   // enable online-offline co-location in disaggregated prefill-decode mode.
   PROPERTY(bool, enable_pd_ooc) = false;
 
-  // instance role, support `DEFAULT`, `PREFILL`, `DECODE`
+  // instance role, support `DEFAULT`, `PREFILL`, `DECODE`, `MIX`
   PROPERTY(InstanceRole, instance_role) = InstanceRole::DEFAULT;
 
   // transfer kv mode in disaggregated prefill and decode execution.

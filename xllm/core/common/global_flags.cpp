@@ -261,7 +261,7 @@ DEFINE_int32(disagg_pd_port, 7777, "Port for brpc disagg pd server.");
 
 DEFINE_string(instance_role,
               "DEFAULT",
-              "The role of instance(e.g. DEFAULT, PREFILL, DECODE).");
+              "The role of instance(e.g. DEFAULT, PREFILL, DECODE, MIX).");
 
 DEFINE_string(kv_cache_transfer_type,
               "LlmDataDist",

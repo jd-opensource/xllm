@@ -117,6 +117,7 @@ class InstanceRole {
     DEFAULT = 0,
     PREFILL = 1,
     DECODE = 2,
+    MIX = 3,
     INVALID = -1,
   };
 
@@ -128,6 +129,8 @@ class InstanceRole {
       role_ = PREFILL;
     } else if (role == "DECODE") {
       role_ = DECODE;
+    } else if (role == "MIX") {
+      role_ = MIX;
     } else {
       role_ = INVALID;
     }
@@ -149,6 +152,8 @@ class InstanceRole {
       return "PREFILL";
     } else if (this->role_ == DECODE) {
       return "DECODE";
+    } else if (this->role_ == MIX) {
+      return "MIX";
     } else {
       return "INVALID";
     }
@@ -185,7 +190,7 @@ struct RawToken {
 struct InstanceInfo {
   std::string name = "";
   std::string rpc_address = "";
-  // DEFAULT/PREFILL/DECODE
+  // DEFAULT/PREFILL/DECODE/MIX
   std::string type = "";
   // remote kv cache info
   std::vector<uint64_t> cluster_ids;
@@ -206,6 +211,8 @@ struct InstanceInfo {
       json_val["type"] = 1;
     } else if (InstanceRole(type) == InstanceRole::DECODE) {
       json_val["type"] = 2;
+    } else if (InstanceRole(type) == InstanceRole::MIX) {
+      json_val["type"] = 3;
     } else {
       LOG(ERROR) << "Unsupported instance type: " << type;
       return json_val;

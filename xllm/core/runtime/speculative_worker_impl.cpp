@@ -276,8 +276,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
 
 #if defined(USE_NPU)
   for (auto i = 0; i < inputs.micro_inputs.size(); ++i) {
-    if (options_.instance_role() == InstanceRole::PREFILL &&
-        options_.kv_cache_transfer_mode() == "PUSH" &&
+    if (options_.kv_cache_transfer_mode() == "PUSH" &&
         !inputs.micro_inputs[i].transfer_kv_infos.empty()) {
       auto future = kv_cache_transfer_->push_kv_blocks_async(
           inputs.micro_inputs[i].transfer_kv_infos,

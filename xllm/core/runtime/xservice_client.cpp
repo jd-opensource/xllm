@@ -29,6 +29,7 @@ static std::unordered_map<xllm_service::proto::InstanceType, std::string>
         {xllm_service::proto::InstanceType::DEFAULT, "XLLM:DEFAULT:"},
         {xllm_service::proto::InstanceType::PREFILL, "XLLM:PREFILL:"},
         {xllm_service::proto::InstanceType::DECODE, "XLLM:DECODE:"},
+        {xllm_service::proto::InstanceType::MIX, "XLLM:MIX:"},
 };
 
 std::string parse_instance_name(const std::string& name) {
@@ -159,6 +160,8 @@ void XServiceClient::register_instance(const InstanceInfo& instance_info) {
     } else if (InstanceRole(instance_info.type) == InstanceRole::DECODE) {
       key_prefix =
           ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DECODE];
+    } else if (InstanceRole(instance_info.type) == InstanceRole::MIX) {
+      key_prefix = ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::MIX];
     } else {
       LOG(ERROR) << "Unsupported instance type: " << instance_info.type;
       return;
@@ -209,6 +212,8 @@ void XServiceClient::register_instance(const InstanceInfo& instance_info) {
         req.set_type(xllm_service::proto::InstanceType::PREFILL);
       } else if (InstanceRole(instance_info.type) == InstanceRole::DECODE) {
         req.set_type(xllm_service::proto::InstanceType::DECODE);
+      } else if (InstanceRole(instance_info.type) == InstanceRole::MIX) {
+        req.set_type(xllm_service::proto::InstanceType::MIX);
       } else {
         LOG(ERROR) << "Unsupported instance type: " << instance_info.type;
         return;
@@ -267,11 +272,13 @@ InstanceInfo XServiceClient::get_instance_info(
   result.name = resp.name();
   result.rpc_address = resp.rpc_address();
   if (resp.type() == xllm_service::proto::InstanceType::PREFILL) {
-    result.type = "prefill";
+    result.type = "PREFILL";
   } else if (resp.type() == xllm_service::proto::InstanceType::DECODE) {
-    result.type = "decode";
+    result.type = "DECODE";
+  } else if (resp.type() == xllm_service::proto::InstanceType::MIX) {
+    result.type = "MIX";
   } else {
-    result.type = "default";
+    result.type = "DEFAULT";
   }
   // parse kv cache info
   for (auto& cluster_id : resp.cluster_ids()) {
