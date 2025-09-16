@@ -655,16 +655,15 @@ void LLMEngine::process_eplb_data(
   eplb_manager_->update_expert_load(tensors);
 }
 
-uint32_t determine_micro_batches_num(std::vector<Batch>& batch) {
+uint32_t determine_micro_batches_num(const std::vector<Batch>& batch) {
   bool is_all_prefill =
       std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
         return one_batch.get_batch_prefill_status();
       });
-  if (!is_all_prefill ||
-      (is_all_prefill && !FLAGS_enable_multi_stream_parallel)) {
-    return 1;
-  } else if (FLAGS_enable_multi_stream_parallel) {
+  if (is_all_prefill && FLAGS_enable_multi_stream_parallel) {
     return 2;
+  } else {
+    return 1;
   }
 }
 
