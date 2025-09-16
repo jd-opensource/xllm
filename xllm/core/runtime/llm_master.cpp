@@ -342,6 +342,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   sampling_param.logprobs = sp.logprobs;
   sampling_param.top_logprobs = sp.top_logprobs;
   sampling_param.is_embeddings = sp.is_embeddings;
+  sampling_param.beam_width = sp.beam_width;
   if (best_of > sp.n) {
     // enable logprobs for best_of to generate sequence logprob
     sampling_param.logprobs = true;

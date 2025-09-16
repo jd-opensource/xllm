@@ -393,6 +393,13 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
     offload_kv_blocks_to_store_async(inputs.input_params.copy_out_blocks);
   }
 
+  if (input_params.swap_blocks.size() > 0) {
+    const int64_t num_layers = context_.get_model_args().n_layers();
+    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+      kv_caches_[layer_id].swap_blocks(input_params.swap_blocks);
+    }
+  }
+
   if (!context_.get_parallel_args().mapping_data().empty()) {
     torch::Tensor token_size_per_dp_group =
         torch::tensor(processed_inputs.input_params.dp_global_token_nums,

@@ -38,6 +38,7 @@ class BatchInputBuilder {
       const std::vector<MMData>& mm_data_vec,
       const std::vector<CacheBlockInfo>* copy_in_cache_block_infos,
       const std::vector<CacheBlockInfo>* copy_out_cache_block_infos,
+      const std::vector<CacheBlockInfo>* swap_cache_block_infos,
       const ModelArgs* args);
 
   ForwardInput build_forward_input(uint32_t num_decoding_tokens,
@@ -125,6 +126,7 @@ class BatchInputBuilder {
   std::unordered_set<int32_t> write_block_ids_;
   const std::vector<CacheBlockInfo>* copy_in_cache_block_infos_ = nullptr;
   const std::vector<CacheBlockInfo>* copy_out_cache_block_infos_ = nullptr;
+  const std::vector<CacheBlockInfo>* swap_cache_block_infos_ = nullptr;
 };
 
 }  // namespace xllm

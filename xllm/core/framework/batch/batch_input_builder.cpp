@@ -57,6 +57,7 @@ BatchInputBuilder::BatchInputBuilder(
     const std::vector<MMData>& mm_data_vec,
     const std::vector<CacheBlockInfo>* copy_in_cache_block_infos,
     const std::vector<CacheBlockInfo>* copy_out_cache_block_infos,
+    const std::vector<CacheBlockInfo>* swap_cache_block_infos,
     const ModelArgs* args)
     : sequences_(sequences),
       allowed_max_tokens_(allowed_max_tokens),
@@ -65,7 +66,8 @@ BatchInputBuilder::BatchInputBuilder(
       args_(args),
       num_sequences_(static_cast<int32_t>(sequences.size())),
       copy_in_cache_block_infos_(copy_in_cache_block_infos),
-      copy_out_cache_block_infos_(copy_out_cache_block_infos) {
+      copy_out_cache_block_infos_(copy_out_cache_block_infos),
+      swap_cache_block_infos_(swap_cache_block_infos) {
   // Reserve space for better performance
   state_.flatten_tokens_vec.reserve(1000);
   state_.flatten_positions_vec.reserve(1000);
@@ -348,6 +350,13 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
   }
 
+  if (swap_cache_block_infos_ != nullptr &&
+      swap_cache_block_infos_->size() > 0) {
+    input_params.swap_blocks.insert(input_params.swap_blocks.end(),
+                                    swap_cache_block_infos_->begin(),
+                                    swap_cache_block_infos_->end());
+  }
+
   CHECK_EQ(state_.sampling_params.size(), state_.selected_token_idxes.size());
   // Setup sampling parameters
   if (!state_.selected_token_idxes.empty()) {
@@ -426,6 +435,12 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
         raw_forward_input.copy_in_blocks.end(),
         copy_in_cache_block_infos_->begin(),
         copy_in_cache_block_infos_->end());
+  }
+  if (swap_cache_block_infos_ != nullptr &&
+      swap_cache_block_infos_->size() > 0) {
+    raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
+                                         swap_cache_block_infos_->begin(),
+                                         swap_cache_block_infos_->end());
   }
 
   split_copy_out_blocks(raw_forward_input, write_block_ids_);

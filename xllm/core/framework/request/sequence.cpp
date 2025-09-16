@@ -65,6 +65,38 @@ Sequence::Sequence(size_t index,
   cur_generated_token_idx_ = num_prompt_tokens_;
 }
 
+Sequence::Sequence(const Sequence& other)
+    : index_(other.index_),
+      kv_state_(other.kv_state_),
+      host_kv_state_(other.host_kv_state_),
+      latest_generate_time_(other.latest_generate_time_),
+      time_to_first_token_latency_seconds_(
+          other.time_to_first_token_latency_seconds_),
+      is_first_token_(other.is_first_token_),
+      is_cache_block_for_prefill_(other.is_cache_block_for_prefill_),
+      sequence_params_(other.sequence_params_),
+      decoder_(other.decoder_),
+      tokens_(other.tokens_),
+      input_embedding_(other.input_embedding_),
+      mm_data_(other.mm_data_),
+      mrope_position_delta_(other.mrope_position_delta_),
+      output_embedding_(other.output_embedding_),
+      num_tokens_(other.num_tokens_),
+      token_to_count_map_(other.token_to_count_map_),
+      num_prompt_tokens_(other.num_prompt_tokens_),
+      volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
+      embedding_id_(other.embedding_id_),
+      finished_(other.finished_),
+      finish_status_invalidated_(other.finish_status_invalidated_),
+      finish_reason_(other.finish_reason_),
+      closed_(other.closed_),
+      dp_rank_(other.dp_rank_),
+      cur_generated_token_idx_(other.cur_generated_token_idx_),
+      first_token_(other.first_token_),
+      is_pre_scheduled_step_prefill_(other.is_pre_scheduled_step_prefill_) {
+  logprob_state_ = std::make_unique<LogprobState>(*other.logprob_state_);
+}
+
 void Sequence::append_token(const Token& token) {
   CHECK_LT(num_tokens_, tokens_.size())
       << "exceed the token capacity of the sequence";
@@ -151,6 +183,33 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
         sequence_params_.sampling_param->top_logprobs);
   }
   ++cur_generated_token_idx_;
+  finish_status_invalidated_ = true;
+}
+
+void Sequence::update_token(size_t index, const Token& token) {
+  // TODO: not record in non-disagg pd mode.
+  if (is_first_token_) {
+    RemoteToken t;
+    t.token_id = token.id;
+    if (token.logprob.has_value()) {
+      t.token_logprob = token.logprob.value();
+    }
+    t.token_top_tokens = token.top_tokens;
+    t.token_top_logprobs = token.top_logprobs;
+    first_token_ = std::move(t);
+  }
+
+  const int32_t origin_token_id = tokens_[index];
+  const int32_t token_id = static_cast<int32_t>(token.id);
+  tokens_[index] = token_id;
+  --token_to_count_map_[origin_token_id];
+  ++token_to_count_map_[token_id];
+  // update logprobs if needed
+  if (sequence_params_.sampling_param->logprobs) {
+    logprob_state_->update_logprob(
+        index, token, sequence_params_.sampling_param->top_logprobs);
+  }
+  // logprobs_[index] = token.logprob;
   finish_status_invalidated_ = true;
 }
 

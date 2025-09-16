@@ -46,7 +46,11 @@ class SequencesGroup {
   void generate_outputs(std::vector<SequenceOutput>& outputs,
                         const Tokenizer& tokenizer);
 
+  void process_beam_search();
+
   std::vector<std::unique_ptr<Sequence>>& sequences() { return sequences_; }
+
+  int32_t dp_rank() { return sequences_[0]->dp_rank(); }
 
  private:
   void add();

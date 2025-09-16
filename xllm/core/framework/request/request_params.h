@@ -133,6 +133,9 @@ struct RequestParams {
 
   RequestPriority priority = RequestPriority::NORMAL;
 
+  // beam search
+  int32_t beam_width = 0;
+
   nlohmann::json chat_template_kwargs = nlohmann::json::object();
 };
 

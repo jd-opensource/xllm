@@ -28,11 +28,14 @@ class BatchFactory {
   }
 
   std::vector<Batch> create_batches(
+      const std::vector<std::shared_ptr<Request>>& running_requests,
       const std::vector<Sequence*>& running_sequences,
       const std::vector<size_t>& running_sequences_budgets,
       std::vector<std::vector<CacheBlockInfo>>* copy_in_cache_block_infos =
           nullptr,
       std::vector<std::vector<CacheBlockInfo>>* copy_out_cache_block_infos =
+          nullptr,
+      std::vector<std::vector<CacheBlockInfo>>* swap_cache_block_infos =
           nullptr);
 
  private:

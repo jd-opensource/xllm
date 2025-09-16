@@ -83,6 +83,8 @@ class Sequence final {
            const IncrementalDecoder& incremental_decoder,
            const SequenceParams& seq_params);
 
+  Sequence(const Sequence& other);
+
   // get mm data
   const MMData& get_mm_data() const { return mm_data_; }
   void set_mrope_position_delta(int val) { mrope_position_delta_ = val; }
@@ -138,6 +140,7 @@ class Sequence final {
   // the token would be discarded if the sequence is still in prefill stage
   void append_token(const Token& token);
   void append_token(int64_t token_id) { append_token(Token(token_id)); }
+  void update_token(size_t index, const Token& token);
   void update_last_step_token(const Token& token, size_t token_offset = 0);
   bool has_new_tokens_generated() const {
     return num_tokens_ > decoder_.output_offset();
@@ -246,6 +249,12 @@ class Sequence final {
   }
 
   void reset();
+
+  bool check_beam_search() {
+    return sequence_params_.sampling_param->beam_width > 1;
+  }
+
+  LogprobState* logprob_state() { return logprob_state_.get(); }
 
  private:
   // the index of the sequence in the request

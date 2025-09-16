@@ -124,8 +124,9 @@ message ChatRequest {
   // request priority. default = DEFAULT
   optional Priority priority = 32;
 
+  optional int32 beam_width = 33;
 
-  optional google.protobuf.Struct chat_template_kwargs = 33;
+  optional google.protobuf.Struct chat_template_kwargs = 34;
 }
 
 message ChatLogProbData {

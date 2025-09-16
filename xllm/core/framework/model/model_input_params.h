@@ -80,6 +80,7 @@ struct ModelInputParams {
     params.async_copy_out_blocks = std::move(async_copy_out_blocks);
     params.copy_out_blocks = std::move(copy_out_blocks);
     params.copy_in_blocks = std::move(copy_in_blocks);
+    params.swap_blocks = std::move(swap_blocks);
     return params;
   }
 
@@ -143,6 +144,7 @@ struct ModelInputParams {
   std::vector<CacheBlockInfo> async_copy_out_blocks;
   std::vector<CacheBlockInfo> copy_out_blocks;
   std::vector<CacheBlockInfo> copy_in_blocks;
+  std::vector<CacheBlockInfo> swap_blocks;
 
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #endif

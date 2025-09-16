@@ -51,6 +51,8 @@ class Request {
   }
   bool expand_sequences(bool share_prefix = true);
 
+  SequencesGroup* sequence_group() { return sequences_group_.get(); }
+
   void set_cancel() { cancelled_.store(true, std::memory_order_relaxed); }
 
   bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
@@ -93,6 +95,10 @@ class Request {
   RequestState& state() { return state_; }
 
   void update_connection_status();
+
+  bool check_beam_search() const {
+    return state_.sampling_param.beam_width > 1;
+  }
 
  private:
   // request create time

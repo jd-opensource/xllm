@@ -15,6 +15,10 @@ limitations under the License.
 
 #include "sequences_group.h"
 
+#include <unordered_set>
+
+#include "framework/batch/beam_search.h"
+
 namespace xllm {
 
 SequencesGroup::SequencesGroup(const std::string& prompt,
@@ -55,6 +59,10 @@ bool SequencesGroup::finished() const {
 }
 
 bool SequencesGroup::expand_sequences(bool share_prefix) {
+  // when enable beam search, dont need to expand sequences
+  if (sequence_params_.sampling_param->beam_width > 1) {
+    return false;
+  }
   size_t current_seq_count = sequences_.size();
   size_t best_of = sequence_params_.best_of;
   if (current_seq_count == best_of) {
@@ -91,8 +99,9 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
   auto n = sequence_params_.n;
   auto num = std::min(sequences_.size(), n);
   outputs.reserve(num);
-  if (sequences_.size() > n) {
-    std::vector<std::pair<float, size_t> > logprobs_vec;
+  if (sequences_.size() > n &&
+      sequence_params_.sampling_param->beam_width <= 1) {
+    std::vector<std::pair<float, size_t>> logprobs_vec;
     logprobs_vec.reserve(sequences_.size());
     for (size_t i = 0; i < sequences_.size(); ++i) {
       logprobs_vec.emplace_back(sequences_[i]->get_average_logprob(), i);
@@ -111,6 +120,125 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
       outputs.push_back(seq->generate_output(tokenizer));
     }
   }
+}
+
+void SequencesGroup::process_beam_search() {
+  size_t beam_width = sequence_params_.sampling_param->beam_width;
+  if (beam_width <= 1) {
+    return;
+  }
+
+  size_t seq_size = sequences_.size();
+  size_t topk = sequence_params_.sampling_param->top_logprobs;
+  size_t num_candidates = topk * seq_size;
+
+  if (num_candidates <= beam_width || seq_size == 1) {
+    std::vector<std::unique_ptr<Sequence>> result;
+    result.reserve(num_candidates);
+
+    int32_t last_token_idx = sequences_[0]->num_tokens() - 1;
+    size_t k = std::min(topk, beam_width);
+    for (size_t i = 0; i < seq_size; i++) {
+      std::unique_ptr<Sequence>& seq = sequences_[i];
+      auto src_blocks = seq->kv_state().kv_blocks();
+      const auto& top_logprobs =
+          seq->logprob_state()->get_top_logprobs()[last_token_idx];
+      const auto& top_tokens =
+          seq->logprob_state()->get_top_tokens()[last_token_idx];
+      for (int idx = 0; idx < k; ++idx) {
+        result.emplace_back(std::make_unique<Sequence>(*(seq.get())));
+        Token new_token(top_tokens[idx]);
+        new_token.logprob = top_logprobs[idx];
+        result.back()->update_token(last_token_idx, new_token);
+        result.back()->kv_state().set_src_blocks(src_blocks,
+                                                 /*need_swap*/ idx != 0);
+      }
+    }
+    sequences_ = std::move(result);
+    return;
+  }
+
+  SimpleTopKOptimizerBeamCandidate topk_optimizer(beam_width);
+  int32_t last_token_idx = sequences_[0]->num_tokens() - 1;
+
+  auto compute_candidates_for_sequence = [&](size_t i) {
+    std::unique_ptr<Sequence>& seq = sequences_[i];
+    int32_t num_generated_tokens = seq->num_generated_tokens();
+
+    Slice<int32_t> token_ids = seq->tokens();
+    const auto& log_probs = seq->logprob_state()->get_logprobs();
+    const auto& top_logprobs =
+        seq->logprob_state()->get_top_logprobs()[last_token_idx];
+    const auto& top_tokens =
+        seq->logprob_state()->get_top_tokens()[last_token_idx];
+    float base_logprob =
+        seq->get_average_logprob() * num_generated_tokens - top_logprobs[0];
+
+    for (int idx = 0; idx < topk; ++idx) {
+      float new_logprob = base_logprob + top_logprobs[idx];
+
+      if (!topk_optimizer.worthInserting(new_logprob)) {
+        break;
+      }
+
+      auto new_token_ids = std::vector<int32_t>(token_ids);
+      new_token_ids[last_token_idx] = top_tokens[idx];
+      auto new_log_probs = log_probs;
+      new_log_probs[last_token_idx] = top_logprobs[idx];
+
+      BeamCandidate candidate;
+      candidate.seq_index = i;
+      candidate.logprob_sum = new_logprob;
+      candidate.token_ids = std::move(new_token_ids);
+      candidate.logprobs = std::move(new_log_probs);
+      topk_optimizer.insert(std::move(candidate));
+    }
+  };
+
+  for (size_t i = 0; i < seq_size; ++i) {
+    compute_candidates_for_sequence(i);
+  }
+
+  // std::vector<BeamCandidate> candidates = topk_optimizer.getTopKMove();
+  std::vector<BeamCandidate> candidates = topk_optimizer.getTopKSorted();
+
+  if (candidates.empty()) return;
+
+  auto update_for_sequence = [&](size_t work_id, size_t num_tasks_pre) {
+    std::unordered_set<int32_t> seq_idx_set;
+    for (size_t i = 0; i < num_tasks_pre; ++i) {
+      size_t task_id = work_id * num_tasks_pre + i;
+      if (task_id >= beam_width) break;
+
+      const BeamCandidate& c = candidates[task_id];
+      auto& base_seq = sequences_[task_id];
+      auto& src_seq = sequences_[c.seq_index];
+
+      CHECK_EQ(base_seq->num_tokens(), c.token_ids.size());
+      for (size_t token_idx = base_seq->num_prompt_tokens();
+           token_idx < base_seq->num_tokens();
+           token_idx++) {
+        Token new_token(c.token_ids[token_idx]);
+        new_token.logprob = c.logprobs[token_idx].has_value()
+                                ? c.logprobs[token_idx].value()
+                                : 0;
+        base_seq->update_token(token_idx, new_token);
+      }
+
+      bool need_swap = false;
+      if (seq_idx_set.find(c.seq_index) != seq_idx_set.end()) {
+        need_swap = true;
+      } else {
+        seq_idx_set.insert(c.seq_index);
+      }
+
+      auto src_blocks = src_seq->kv_state().kv_blocks();
+      base_seq->kv_state().set_src_blocks(src_blocks, need_swap);
+    }
+  };
+
+  CHECK_EQ(sequences_.size(), beam_width);
+  update_for_sequence(0, beam_width);
 }
 
 }  // namespace xllm

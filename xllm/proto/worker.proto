@@ -184,6 +184,7 @@ message ForwardInput {
   repeated CacheBlockInfo async_copy_out_blocks = 27;
   repeated CacheBlockInfo copy_out_blocks = 28;
   repeated CacheBlockInfo copy_in_blocks = 29;
+  repeated CacheBlockInfo swap_blocks = 30;
 }
 
 message Embeddings {

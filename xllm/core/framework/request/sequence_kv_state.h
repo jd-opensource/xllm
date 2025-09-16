@@ -42,6 +42,17 @@ class KVCacheState {
   // returns allocated cache blocks
   Slice<Block> kv_blocks() const;
   std::vector<Block>* mutable_kv_blocks();
+
+  Slice<Block> src_blocks() const { return src_blocks_; };
+
+  void set_src_blocks(const std::vector<Block>& src_blocks,
+                      bool need_swap = false) {
+    src_blocks_ = std::move(src_blocks);
+    need_swap_ = need_swap;
+  };
+
+  bool need_swap() const { return need_swap_; }
+
   // get the number of blocks
   size_t num_kv_blocks() const;
   std::vector<int32_t> kv_cache_slots(int32_t pos_start, int32_t pos_end);
@@ -51,12 +62,20 @@ class KVCacheState {
 
   void reset();
 
+  void process_beam_search(const std::vector<Block>& new_blocks);
+
  private:
   // number of tokens in kv cache
   size_t kv_cache_tokens_num_ = 0;
 
   // kv cache blocks.
   std::vector<Block> blocks_;
+
+  // source kv cache blocks for swap
+  std::vector<Block> src_blocks_;
+
+  // if need to swap last block
+  bool need_swap_ = false;
 
   // transfer kv info for disaggregated PD mode.
   std::optional<TransferKVInfo> transfer_kv_info_;

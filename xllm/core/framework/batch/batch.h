@@ -22,7 +22,9 @@ limitations under the License.
 #include <vector>
 
 #include "framework/request/mm_data.h"
+#include "framework/request/request.h"
 #include "framework/request/sequence.h"
+#include "framework/request/sequences_group.h"
 #include "runtime/forward_params.h"
 
 namespace xllm {
@@ -41,6 +43,10 @@ class Batch {
 
   void add(const std::vector<Sequence*>& sequences);
 
+  void add(SequencesGroup* sequence_group) {
+    sequence_groups_.push_back(sequence_group);
+  };
+
   void set_copy_in_cache_block_infos(
       std::vector<CacheBlockInfo>* copy_in_cache_block_infos) {
     copy_in_cache_block_infos_ = copy_in_cache_block_infos;
@@ -49,6 +55,11 @@ class Batch {
   void set_copy_out_cache_block_infos(
       std::vector<CacheBlockInfo>* copy_out_cache_block_infos) {
     copy_out_cache_block_infos_ = copy_out_cache_block_infos;
+  }
+
+  void set_swap_cache_block_infos(
+      std::vector<CacheBlockInfo>* swap_cache_block_infos) {
+    swap_cache_block_infos_ = swap_cache_block_infos;
   }
 
   // get the number of sequences in the batch
@@ -93,9 +104,13 @@ class Batch {
                                  int token_idx,
                                  bool enable_schedule_overlap);
 
+  void process_beam_search();
+
   std::vector<Sequence*> sequences_;
+  std::vector<SequencesGroup*> sequence_groups_;
   std::vector<CacheBlockInfo>* copy_in_cache_block_infos_ = nullptr;
   std::vector<CacheBlockInfo>* copy_out_cache_block_infos_ = nullptr;
+  std::vector<CacheBlockInfo>* swap_cache_block_infos_ = nullptr;
 
   // max number of tokens to process for each sequence
   // default to max value

@@ -19,6 +19,8 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
+#include "framework/model/model_input_params.h"
+
 namespace xllm {
 class KVCache final {
  public:
@@ -33,6 +35,8 @@ class KVCache final {
   bool empty() const {
     return !key_cache_.defined() || !value_cache_.defined();
   }
+
+  void swap_blocks(const std::vector<CacheBlockInfo>& swap_blocks);
 
  private:
   torch::Tensor key_cache_;

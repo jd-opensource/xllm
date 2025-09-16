@@ -75,6 +75,7 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                             mm_data_vec_,
                             copy_in_cache_block_infos_,
                             copy_out_cache_block_infos_,
+                            swap_cache_block_infos_,
                             &args);
   return builder.build_forward_input(num_decoding_tokens,
                                      min_decoding_batch_size);
@@ -88,6 +89,7 @@ RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
                             mm_data_vec_,
                             copy_in_cache_block_infos_,
                             copy_out_cache_block_infos_,
+                            swap_cache_block_infos_,
                             nullptr);
   return builder.build_raw_forward_input(start_idx, end_idx);
 }
@@ -134,6 +136,7 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
     }
   }
   CHECK_EQ(output_idx, num_seqs);
+  process_beam_search();
 }
 
 void Batch::process_sample_output(const SampleOutput& sample_output,
@@ -175,6 +178,7 @@ void Batch::process_sample_output(const SampleOutput& sample_output,
     append_token_for_sequence(seq, token, 0, enable_schedule_overlap);
   }
   CHECK_EQ(output_idx, num_seqs);
+  process_beam_search();
 }
 
 bool Batch::update_sequence_state(Sequence* seq, bool enable_schedule_overlap) {
@@ -244,6 +248,12 @@ void Batch::process_embedding_output(const torch::Tensor& output_embedding) {
       seq->update_embeddings(seq_img_embedding);
       seq->append_token(token);
     }
+  }
+}
+
+void Batch::process_beam_search() {
+  for (auto* sequence_group : sequence_groups_) {
+    sequence_group->process_beam_search();
   }
 }
 }  // namespace xllm

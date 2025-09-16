@@ -131,11 +131,11 @@ void LogprobState::generate_output_tokens_logprobs(
 void LogprobState::update_logprob(size_t index,
                                   const Token& token,
                                   int64_t num_top_tokens) {
-  CHECK(!logprobs_[index].has_value())
-      << "logprob at index " << index << " is already set";
+  // CHECK(!logprobs_[index].has_value())
+  //     << "logprob at index " << index << " is already set";
   logprobs_[index] = token.logprob;
 
-  if (num_top_tokens > 0) {
+  if (num_top_tokens > 0 && token.top_tokens.size() > 0) {
     DCHECK_EQ(token.top_tokens.size(), token.top_logprobs.size());
     if (token.top_tokens.size() > num_top_tokens) {
       top_tokens_[index] = token.top_tokens.slice(0, num_top_tokens);

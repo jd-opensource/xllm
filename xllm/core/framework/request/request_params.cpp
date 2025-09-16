@@ -116,6 +116,13 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
       streaming = false;
     }
   }
+  // beam search
+  if (request.has_beam_width()) {
+    beam_width = request.beam_width();
+    if (beam_width > 1) {
+      ignore_eos = true;
+    }
+  }
 }
 
 namespace {
@@ -276,6 +283,14 @@ void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
     }
   }
 
+  // beam search
+  if (request.has_beam_width()) {
+    params.beam_width = request.beam_width();
+    if (params.beam_width > 1) {
+      params.ignore_eos = true;
+    }
+  }
+
   if (request.has_chat_template_kwargs()) {
     params.chat_template_kwargs =
         proto_struct_to_json(request.chat_template_kwargs());
@@ -357,9 +372,9 @@ bool RequestParams::verify_params(OutputCallback callback) const {
                           "logprobs is not supported with echo");
       return false;
     }
-    if (top_logprobs < 0 || top_logprobs > 20) {
+    if (top_logprobs < 0 || top_logprobs > 2000) {
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                          "logprobs must be between 0 and 20");
+                          "logprobs must be between 0 and 2000");
       return false;
     }
   }

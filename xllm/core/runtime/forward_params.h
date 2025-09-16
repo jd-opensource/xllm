@@ -154,6 +154,7 @@ struct RawForwardInput {
   std::vector<CacheBlockInfo> async_copy_out_blocks;
   std::vector<CacheBlockInfo> copy_out_blocks;
   std::vector<CacheBlockInfo> copy_in_blocks;
+  std::vector<CacheBlockInfo> swap_blocks;
 };
 
 struct RawSampleOutput {

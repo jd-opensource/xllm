@@ -134,11 +134,18 @@ BlockManagerPool::get_copy_out_cache_block_infos() {
   return &copy_out_cache_block_infos_;
 }
 
+std::vector<std::vector<CacheBlockInfo>>*
+BlockManagerPool::get_swap_cache_block_infos() {
+  return &swap_cache_block_infos_;
+}
+
 void BlockManagerPool::reset_copy_content() {
   copy_in_cache_block_infos_.clear();
   copy_in_cache_block_infos_.resize(host_block_managers_.size());
   copy_out_cache_block_infos_.clear();
   copy_out_cache_block_infos_.resize(host_block_managers_.size());
+  swap_cache_block_infos_.clear();
+  swap_cache_block_infos_.resize(block_managers_.size());
   evict_host_blocks_.clear();
 }
 
@@ -175,8 +182,11 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   const size_t block_size = options_.block_size();
   const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
   if (num_blocks_needed <= num_blocks) {
+    process_beam_search(sequence, /*need_swap*/ true);
     return true;
   }
+  process_beam_search(sequence);
+
   const uint32_t num_additional_blocks = num_blocks_needed - num_blocks;
 
   int32_t dp_rank = get_dp_rank(sequence);
@@ -216,6 +226,29 @@ std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
   const size_t block_size = options_.block_size();
   const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
   return block_managers_[dp_rank]->allocate(num_blocks_needed);
+}
+
+void BlockManagerPool::process_beam_search(Sequence* sequence, bool need_swap) {
+  if (!sequence->check_beam_search()) {
+    return;
+  }
+
+  auto src_blocks = sequence->kv_state().src_blocks();
+  if (src_blocks.size() == 0) {
+    return;
+  }
+
+  // when sequence need to swap the last block and no new block appended,
+  // allocate a new block for this sequence
+  if (need_swap && sequence->kv_state().need_swap()) {
+    int32_t dp_rank = get_dp_rank(sequence);
+    auto new_blocks = block_managers_[dp_rank]->allocate(1);
+    swap_cache_block_infos_[dp_rank].emplace_back(src_blocks.back().id(),
+                                                  new_blocks[0].id());
+    sequence->kv_state().process_beam_search(new_blocks);
+  } else {
+    sequence->kv_state().process_beam_search({});
+  }
 }
 
 uint32_t BlockManagerPool::pre_allocate(Sequence* sequence) {

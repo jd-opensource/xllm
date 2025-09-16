@@ -567,17 +567,19 @@ void ContinuousScheduler::handle_abnormal_request(
          "No enough resource to schedule a single sequence"});
   } else {
     // partially schedule the sequences in request
-    running_queue->pop_top();
-    running_requests_.emplace_back(request);
-    running_sequences_.insert(running_sequences_.end(),
-                              candidate_sequences.begin(),
-                              candidate_sequences.end());
-    running_sequences_budgets_.insert(running_sequences_budgets_.end(),
-                                      candidate_token_budgets.begin(),
-                                      candidate_token_budgets.end());
-    remaining_token_budget -= allocated_tokens;
-    remaining_seq_budget -= allocated_seqs;
-    estimate_latency += allocated_estimate_latency;
+    if (!request->check_beam_search()) {
+      running_queue->pop_top();
+      running_requests_.emplace_back(request);
+      running_sequences_.insert(running_sequences_.end(),
+                                candidate_sequences.begin(),
+                                candidate_sequences.end());
+      running_sequences_budgets_.insert(running_sequences_budgets_.end(),
+                                        candidate_token_budgets.begin(),
+                                        candidate_token_budgets.end());
+      remaining_token_budget -= allocated_tokens;
+      remaining_seq_budget -= allocated_seqs;
+      estimate_latency += allocated_estimate_latency;
+    }
   }
 }
 
@@ -778,10 +780,12 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
 
   auto batches = BatchFactory::get_instance(options_.dp_size())
                      ->create_batches(
+                         running_requests_,
                          running_sequences_,
                          running_sequences_budgets_,
                          block_manager_pool_->get_copy_in_cache_block_infos(),
-                         block_manager_pool_->get_copy_out_cache_block_infos());
+                         block_manager_pool_->get_copy_out_cache_block_infos(),
+                         block_manager_pool_->get_swap_cache_block_infos());
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process

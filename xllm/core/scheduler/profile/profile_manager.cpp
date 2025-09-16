@@ -412,7 +412,8 @@ int32_t ProfileManager::run_request(int32_t token_length,
   // build batch
   auto batches =
       BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(sequences, sequences_budget, nullptr, nullptr);
+          ->create_batches(
+              requests, sequences, sequences_budget, nullptr, nullptr);
 
   absl::Time start_time = absl::Now();
   engine_->step(batches);

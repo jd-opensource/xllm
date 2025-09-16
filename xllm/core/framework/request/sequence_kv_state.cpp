@@ -140,4 +140,15 @@ void KVCacheState::reset() {
   transfer_kv_info_.reset();
 }
 
+void KVCacheState::process_beam_search(const std::vector<Block>& new_blocks) {
+  blocks_.clear();
+  blocks_ = std::move(src_blocks_);
+
+  if (!new_blocks.empty()) {
+    CHECK_EQ(new_blocks.size(), 1);
+    blocks_.pop_back();
+    blocks_.insert(blocks_.end(), new_blocks.begin(), new_blocks.end());
+  }
+}
+
 }  // namespace xllm

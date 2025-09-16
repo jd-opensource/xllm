@@ -138,5 +138,7 @@ message MMChatRequest {
   // request priority. default = DEFAULT
   optional Priority priority = 31;
 
-  optional google.protobuf.Struct chat_template_kwargs = 32;
+  optional int32 beam_width = 32;
+
+  optional google.protobuf.Struct chat_template_kwargs = 33;
 }

@@ -17,11 +17,25 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+
+bool is_beam_search(const std::vector<std::shared_ptr<Request>>& requests) {
+  for (const auto& request : requests) {
+    if (request->check_beam_search()) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace
+
 std::vector<Batch> BatchFactory::create_batches(
+    const std::vector<std::shared_ptr<Request>>& running_requests,
     const std::vector<Sequence*>& running_sequences,
     const std::vector<size_t>& running_sequences_budgets,
     std::vector<std::vector<CacheBlockInfo>>* copy_in_cache_block_infos,
-    std::vector<std::vector<CacheBlockInfo>>* copy_out_cache_block_infos) {
+    std::vector<std::vector<CacheBlockInfo>>* copy_out_cache_block_infos,
+    std::vector<std::vector<CacheBlockInfo>>* swap_cache_block_infos) {
   size_t num_prompt_tokens = 0;
   size_t num_generated_tokens = 0;
   std::vector<Batch> batches(dp_size_);
@@ -50,6 +64,14 @@ std::vector<Batch> BatchFactory::create_batches(
     }
   }
 
+  if (is_beam_search(running_requests)) {
+    for (const auto& request : running_requests) {
+      auto seq_group = request->sequence_group();
+      int32_t dp_rank = seq_group->dp_rank();
+      batches[dp_rank].add(seq_group);
+    }
+  }
+
   for (int i = 0; i < dp_size_; i++) {
     if (!batches[i].empty()) {
       if (copy_in_cache_block_infos != nullptr &&
@@ -61,6 +83,10 @@ std::vector<Batch> BatchFactory::create_batches(
           copy_out_cache_block_infos->size() == dp_size_) {
         batches[i].set_copy_out_cache_block_infos(
             &(copy_out_cache_block_infos->at(i)));
+      }
+      if (swap_cache_block_infos != nullptr &&
+          swap_cache_block_infos->size() == dp_size_) {
+        batches[i].set_swap_cache_block_infos(&(swap_cache_block_infos->at(i)));
       }
     }
   }

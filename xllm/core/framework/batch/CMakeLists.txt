@@ -15,6 +15,7 @@ cc_library(
     batch_factory.cpp
     batch_input_builder.cpp
     mposition.cpp
+    beam_search.h
   DEPS
     :request
     :runtime

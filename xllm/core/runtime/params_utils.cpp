@@ -135,6 +135,12 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
         reinterpret_cast<const uint8_t*>(
             pb_forward_input->copy_in_blocks()[i].hash_key().data()));
   }
+  std::vector<CacheBlockInfo> swap_blocks;
+  for (size_t i = 0; i < pb_forward_input->swap_blocks().size(); ++i) {
+    swap_blocks.emplace_back(
+        pb_forward_input->swap_blocks()[i].device_block_id(),
+        pb_forward_input->swap_blocks()[i].host_block_id());
+  }
 
   std::vector<const RequestSamplingParam*> sampling_params;
   std::vector<RequestSamplingParam> tmp_sampling_params;
@@ -200,6 +206,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.async_copy_out_blocks = std::move(async_copy_out_blocks);
   input_params.copy_out_blocks = std::move(copy_out_blocks);
   input_params.copy_in_blocks = std::move(copy_in_blocks);
+  input_params.swap_blocks = std::move(swap_blocks);
 
   if (pb_forward_input->embeds().size() > 0) {
     const int32_t rows = pb_forward_input->embeds().size();
@@ -447,6 +454,13 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     cache_block_info.set_host_block_id(t.host_block_id);
     cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
     *pb_forward_input->mutable_copy_in_blocks()->Add() = cache_block_info;
+  }
+  pb_forward_input->mutable_swap_blocks()->Reserve(inputs.swap_blocks.size());
+  for (auto t : inputs.swap_blocks) {
+    proto::CacheBlockInfo cache_block_info;
+    cache_block_info.set_device_block_id(t.device_block_id);
+    cache_block_info.set_host_block_id(t.host_block_id);
+    *pb_forward_input->mutable_swap_blocks()->Add() = cache_block_info;
   }
 
   COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());

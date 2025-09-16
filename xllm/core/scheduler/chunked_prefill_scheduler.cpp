@@ -684,9 +684,10 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(running_sequences_, running_sequences_budgets_);
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(running_requests_,
+                                      running_sequences_,
+                                      running_sequences_budgets_);
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process
