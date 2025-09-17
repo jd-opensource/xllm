@@ -33,7 +33,7 @@ limitations under the License.
 #include "core/layers/npu/rms_norm.h"
 #include "core/layers/npu/word_embedding.h"
 #include "core/util/tensor_helper.h"
-#include "model_registry.h"
+#include "models/model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
 // llama2 model compatible with huggingface weights

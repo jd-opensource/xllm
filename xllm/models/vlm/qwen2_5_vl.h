@@ -27,10 +27,10 @@ limitations under the License.
 #include "core/layers/npu/qwen2_5_vision_encoder_layer.h"
 #include "core/layers/npu/qwen2_decoder_layer.h"
 #include "core/layers/npu/rms_norm.h"
-#include "model_registry.h"
+#include "models/llm/qwen2.h"
+#include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
-#include "qwen2.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm::hf {

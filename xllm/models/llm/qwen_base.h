@@ -32,7 +32,7 @@ limitations under the License.
 #include "core/layers/npu/llm_head.h"
 #include "core/layers/npu/pos_embedding.h"
 #include "core/layers/npu/rms_norm.h"
-#include "model_registry.h"
+#include "models/model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm::hf {

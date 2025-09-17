@@ -15,6 +15,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "autoencoder_kl.h"
+#include "clip_text_model.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
@@ -24,13 +26,11 @@
 #include "core/layers/npu/rms_norm.h"
 #include "core/layers/npu/word_embedding.h"
 #include "core/layers/rotary_embedding.h"
+#include "dit.h"
+#include "flowmatch_euler_discrete_scheduler.h"
 #include "framework/model_context.h"
-#include "models/autoencoder_kl.h"
-#include "models/clip_text_model.h"
-#include "models/flux/dit.h"
-#include "models/flux/flowmatch_euler_discrete_scheduler.h"
 #include "models/model_registry.h"
-#include "models/t5_encoder.h"
+#include "t5_encoder.h"
 namespace xllm::hf {
 float calculate_shift(int64_t image_seq_len,
                       int64_t base_seq_len = 256,

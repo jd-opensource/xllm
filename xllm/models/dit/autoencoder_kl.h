@@ -16,7 +16,7 @@
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "framework/model_context.h"
-#include "model_registry.h"
+#include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
 // VAE model compatible with huggingface weights

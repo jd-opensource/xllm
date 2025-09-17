@@ -13,12 +13,12 @@
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/siglip_encoder_layer.h"
-#include "model_registry.h"
+#include "models/model_registry.h"
+#include "models/vlm/qwen2_5_vl.h"
 #include "processors/clip_image_processor.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
-#include "qwen2_5_vl.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm::hf {
@@ -166,13 +166,17 @@ class CLIPTextEmbeddingImpl : public torch::nn::Module {
     LOG(INFO) << "check embedding weights device: "
               << token_embedding_->weight.device()
               << ", dtype: " << token_embedding_->weight.dtype();
+
     torch::Tensor inputs_embeds = token_embedding_->forward(input_ids);
     LOG(INFO) << "token embeddings: " << inputs_embeds.device()
               << ", dtype: " << inputs_embeds.dtype();
+
     torch::Tensor position_ids = position_ids_.index(
-        {torch::indexing::Slice(), torch::indexing::Slice(None, seq_length)});
+        {torch::indexing::Slice(),
+         torch::indexing::Slice(torch::indexing::None, seq_length)});
     LOG(INFO) << "position ids: " << position_ids.device()
               << ", dtype: " << position_ids.dtype();
+
     torch::Tensor embeddings =
         inputs_embeds + position_embedding_.index({position_ids});
     LOG(INFO) << "embeddings: " << embeddings.device()
