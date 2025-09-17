@@ -16,8 +16,6 @@ limitations under the License.
 #pragma once
 #include <absl/container/flat_hash_set.h>
 
-#include "api_service/api_service_impl.h"
-#include "api_service/call.h"
 #include "api_service/non_stream_call.h"
 #include "image_generation.pb.h"
 

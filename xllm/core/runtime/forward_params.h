@@ -24,7 +24,7 @@ limitations under the License.
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
 #include "framework/sampling/sampling_params.h"
-
+#include "tensor.pb.h"
 namespace xllm {
 
 class WorkerType {
@@ -33,6 +33,7 @@ class WorkerType {
     INVALID = 0,
     LLM,   // LLM
     VLM,   // VLM
+    DIT,   // DIT
     ELM,   // Embedding LM
     EVLM,  // Embedding VLM
   };
@@ -43,6 +44,8 @@ class WorkerType {
       value_ = LLM;
     } else if (str == "VLM") {
       value_ = VLM;
+    } else if (str == "DIT") {
+      value_ = DIT;
     } else if (str == "ELM") {
       value_ = ELM;
     } else if (str == "EVLM") {
@@ -67,6 +70,8 @@ class WorkerType {
       return "LLM";
     } else if (this->value_ == VLM) {
       return "VLM";
+    } else if (this->value_ == DIT) {
+      return "DIT";
     } else if (this->value_ == ELM) {
       return "ELM";
     } else if (this->value_ == EVLM) {
@@ -118,6 +123,9 @@ struct ForwardOutput {
   torch::Tensor expert_load_data;
 
   int32_t prepared_layer_id;
+
+  // dit related output
+  torch::Tensor image;
 };
 
 // Model input with raw data, which will be

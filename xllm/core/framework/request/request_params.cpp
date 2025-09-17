@@ -39,6 +39,11 @@ std::string generate_chat_request_id() {
          short_uuid.random();
 }
 
+std::string generate_image_generation_request_id() {
+  return "imggen-" + InstanceName::name()->get_name_hash() + "-" +
+         short_uuid.random();
+}
+
 }  // namespace
 
 RequestParams::RequestParams(const proto::CompletionRequest& request,

@@ -1,5 +1,4 @@
 #pragma once
-// lym
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -146,33 +145,31 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   float base_shift() { return base_shift_.value(); }
   float max_shift() { return max_shift_.value(); }
   FlowMatchEulerDiscreteSchedulerImpl(const Context& context)
-      : args(context.get_model_args()),
-        num_train_timesteps_(args.scheduler_num_train_timesteps()),
-        shift_(args.scheduler_shift()),
-        use_dynamic_shifting_(args.scheduler_use_dynamic_shifting()),
-        base_shift_(args.scheduler_base_shift()),
-        max_shift_(args.scheduler_max_shift()),
-        base_image_seq_len_(args.scheduler_base_image_seq_len()),
-        max_image_seq_len_(args.scheduler_max_image_seq_len()),
-        invert_sigmas_(false),
-        shift_terminal_(std::nullopt),
-        use_karras_sigmas_(false),
-        use_exponential_sigmas_(false),
-        use_beta_sigmas_(false),
-        time_shift_type_("exponential"),
-        stochastic_sampling_(false) {
+      : args(context.get_model_args()) {
+    num_train_timesteps_ = args.scheduler_num_train_timesteps();
+    shift_ = args.scheduler_shift();
+    use_dynamic_shifting_ = args.scheduler_use_dynamic_shifting();
+    base_shift_ = args.scheduler_base_shift();
+    max_shift_ = args.scheduler_max_shift();
+    base_image_seq_len_ = args.scheduler_base_image_seq_len();
+    max_image_seq_len_ = args.scheduler_max_image_seq_len();
+    invert_sigmas_ = false;
+    shift_terminal_ = std::nullopt;
+    use_karras_sigmas_ = false;
+    use_exponential_sigmas_ = false;
+    use_beta_sigmas_ = false;
+    time_shift_type_ = "exponential";
+    stochastic_sampling_ = false;
     std::vector<float> timesteps_vec(num_train_timesteps_);
     for (int i = 0; i < num_train_timesteps_; ++i) {
       timesteps_vec[i] = num_train_timesteps_ - i;
     }
     torch::Tensor timesteps = torch::from_blob(
         timesteps_vec.data(), {num_train_timesteps_}, torch::kFloat32);
-
     torch::Tensor sigmas = timesteps / num_train_timesteps_;
     if (!use_dynamic_shifting_) {
       sigmas = shift_ * sigmas / (1 + (shift_ - 1) * sigmas);
     }
-
     timesteps_ = sigmas * num_train_timesteps_;
     sigmas_ = sigmas.to(torch::kCPU);
     sigma_min_ = sigmas_.index({-1}).item<float>();
@@ -236,18 +233,6 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
       const std::optional<std::vector<float>>& sigmas = std::nullopt,
       const std::optional<float>& mu = std::nullopt,
       const std::optional<std::vector<float>>& timesteps = std::nullopt) {
-    LOG(INFO) << "Setting timesteps for FluxScheduler";
-    LOG(INFO) << "num_inference_steps: " << num_inference_steps;
-    LOG(INFO) << "device: " << device;
-    if (sigmas.has_value()) {
-      LOG(INFO) << "sigmas: " << sigmas.value();
-    }
-    if (timesteps.has_value()) {
-      LOG(INFO) << "timesteps: " << timesteps.value();
-    }
-    if (mu.has_value()) {
-      LOG(INFO) << "mu: " << mu.value();
-    }
     if (use_dynamic_shifting_ && !mu.has_value()) {
       throw std::invalid_argument(
           "mu must be provided when use_dynamic_shifting is true");
@@ -347,7 +332,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     if (!step_index_.has_value()) {
       init_step_index(timestep);
     }
-    LOG(INFO) << "FlowMatchEulerDiscreteScheduler";
+
     torch::Tensor sample_float = sample.to(torch::kFloat32);
     torch::Tensor prev_sample;
 
@@ -442,8 +427,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   }
 };
 TORCH_MODULE(FlowMatchEulerDiscreteScheduler);
-REGISTER_MODEL_ARGS(flowmatcheulerdiscretedescheduler, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "flowmatcheulerdiscretedescheduler");
+REGISTER_MODEL_ARGS(FlowMatchEulerDiscreteScheduler, [&] {
   LOAD_ARG_OR(scheduler_num_train_timesteps, "num_train_timesteps", 1000);
   LOAD_ARG_OR(scheduler_shift, "shift", 1);
   LOAD_ARG_OR(scheduler_use_dynamic_shifting, "use_dynamic_shifting", true);
@@ -451,10 +435,5 @@ REGISTER_MODEL_ARGS(flowmatcheulerdiscretedescheduler, [&] {
   LOAD_ARG_OR(scheduler_max_shift, "max_shift", 1.15f);
   LOAD_ARG_OR(scheduler_base_image_seq_len, "base_image_seq_len", 256);
   LOAD_ARG_OR(scheduler_max_image_seq_len, "max_image_seq_len", 4096);
-
-  LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
-  LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
-  LOAD_ARG_OR(head_dim, "head_dim", 56);
-  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 128000);
 });
 }  // namespace xllm::hf

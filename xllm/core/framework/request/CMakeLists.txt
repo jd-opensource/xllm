@@ -5,11 +5,15 @@ cc_library(
   NAME 
     request
   HDRS
+    dit_request.h
+    dit_request_params.h
     finish_reason.h
     incremental_decoder.h
     mm_data.h
     mm_input_helper.h
+    request_base.h
     request.h
+    dit_request.h
     request_output.h
     dit_request_output.h
     dit_request_params.h
@@ -22,11 +26,13 @@ cc_library(
     stopping_checker.h
     priority_comparator.h
   SRCS
+    dit_request.cpp
     finish_reason.cpp
     incremental_decoder.cpp
     mm_data.cpp
     mm_input_helper.cpp
     request.cpp
+    dit_request.cpp
     request_output.cpp
     dit_request_output.cpp
     request_params.cpp

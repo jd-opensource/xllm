@@ -13,20 +13,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
+#include "dit_executor.h"
 
-#include "runtime/xservice_client.h"
-#include "scheduler/continuous_scheduler.h"
-#include "scheduler/dit_scheduler.h"
+#include <glog/logging.h>
+
+#include "common/metrics.h"
 
 namespace xllm {
 
-std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
-    Engine* engine,
-    ContinuousScheduler::Options options);
+DiTExecutor::DiTExecutor(DiTModel* model,
+                         DiTModelLoader&& model_loader,
+                         const runtime::Options& options)
+    : model_(model), model_loader_(std::move(model_loader)), options_(options) {
+  LOG(INFO) << "DiTExecutor created. in dit_executor.cpp";
+}
 
-std::unique_ptr<DiTScheduler> create_dit_scheduler(
-    DiTEngine* engine,
-    DiTScheduler::Options options);
+DiTForwardInput DiTExecutor::prepare_inputs(DiTBatch& batch) {
+  return batch.prepare_forward_input();
+}
+
+torch::Tensor DiTExecutor::forward(
+    const DiTInputParams& input_params,
+    const DiTGenerationParams& generation_params) {
+  return model_->forward(input_params, generation_params);
+}
 
 }  // namespace xllm

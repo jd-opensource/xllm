@@ -1,4 +1,5 @@
 /* Copyright 2025 The xLLM Authors. All Rights Reserved.
+Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,20 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
+#include "dit_batch.h"
 
-#include "runtime/xservice_client.h"
-#include "scheduler/continuous_scheduler.h"
-#include "scheduler/dit_scheduler.h"
+#include <c10/core/DeviceType.h>
+#include <torch/torch.h>
+
+#include <vector>
 
 namespace xllm {
 
-std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
-    Engine* engine,
-    ContinuousScheduler::Options options);
+DiTForwardInput xllm::DiTBatch::prepare_forward_input() {
+  CHECK(!dit_request_vec_.empty());
 
-std::unique_ptr<DiTScheduler> create_dit_scheduler(
-    DiTEngine* engine,
-    DiTScheduler::Options options);
+  DiTForwardInput forward_input;
+  forward_input.input_params = dit_request_vec_[0]->state().input_params();
+  forward_input.generation_params =
+      dit_request_vec_[0]->state().generation_params();
+
+  return forward_input;
+}
 
 }  // namespace xllm

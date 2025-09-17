@@ -117,9 +117,6 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
 
     auto engine = std::make_unique<VLMEngine>(eng_options);
     engine_ = std::move(engine);
-  } else if (type == EngineType::DIT) {
-    LOG(INFO) << "Creating DiT engine";
-    // TODO: create dit engine
   } else if (type == EngineType::SSM) {
     // create a speculative engine if draft model path is provided
     const auto draft_model_path = options_.draft_model_path().value_or("");
@@ -205,8 +202,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
     }
     engine_ = std::make_unique<LLMEngine>(eng_options);
   } else {
-    LOG(FATAL) << "Not supported llm engine type: "
-               << static_cast<size_t>(type);
+    LOG(WARNING) << "Not supported llm engine type: "
+                 << static_cast<size_t>(type);
   }
 }
 

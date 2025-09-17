@@ -25,13 +25,10 @@ limitations under the License.
 
 #include "common/options.h"
 #include "common/rate_limiter.h"
-#include "framework/chat_template/jinja_chat_template.h"
+#include "framework/request/dit_request_output.h"
 #include "framework/request/dit_request_params.h"
-#include "framework/request/request_output.h"
-#include "framework/request/request_params.h"
 #include "runtime/master.h"
-// #include "runtime/mm_engine.h"
-#include "scheduler/continuous_scheduler.h"
+#include "scheduler/dit_scheduler.h"
 
 namespace xllm {
 
@@ -58,25 +55,10 @@ class DiTMaster : public Master {
   // this is a blocking call
   void generate();
 
-  void get_cache_info(std::vector<uint64_t>& cluster_ids,
-                      std::vector<std::string>& addrs,
-                      std::vector<int64_t>& k_cache_ids,
-                      std::vector<int64_t>& v_cache_ids);
-
-  bool link_cluster(const std::vector<uint64_t>& cluster_ids,
-                    const std::vector<std::string>& addrs,
-                    const std::vector<std::string>& device_ips,
-                    const std::vector<uint16_t>& ports,
-                    const int32_t dp_size);
-
-  bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
-                      const std::vector<std::string>& addrs,
-                      const std::vector<std::string>& device_ips,
-                      const std::vector<uint16_t>& ports,
-                      const int32_t dp_size);
-
  private:
-  std::unique_ptr<Scheduler> scheduler_;
+  std::unique_ptr<DiTEngine> engine_;
+
+  std::unique_ptr<DiTScheduler> scheduler_;
 
   // model args
   ModelArgs model_args_;

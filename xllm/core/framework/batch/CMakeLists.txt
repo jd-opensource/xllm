@@ -6,11 +6,13 @@ cc_library(
   NAME 
     batch
   HDRS
+    dit_batch.h
     batch.h
     batch_factory.h
     batch_input_builder.h
     mposition.h
   SRCS 
+    dit_batch.cpp
     batch.cpp
     batch_factory.cpp
     batch_input_builder.cpp

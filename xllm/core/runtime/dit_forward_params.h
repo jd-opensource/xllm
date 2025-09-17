@@ -1,4 +1,5 @@
 /* Copyright 2025 The xLLM Authors. All Rights Reserved.
+Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,18 +16,32 @@ limitations under the License.
 
 #pragma once
 
-#include "runtime/xservice_client.h"
-#include "scheduler/continuous_scheduler.h"
-#include "scheduler/dit_scheduler.h"
+#include <torch/torch.h>
+
+#include <nlohmann/json.hpp>
+#include <optional>
+
+#include "framework/request/dit_request_state.h"
 
 namespace xllm {
 
-std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
-    Engine* engine,
-    ContinuousScheduler::Options options);
+// dit related forward input params
+struct DiTForwardInput {
+  DiTForwardInput to(const torch::Device& device,
+                     torch::ScalarType dtype) const {
+    DiTForwardInput inputs;
+    inputs.input_params = input_params.to(device, dtype);
+    return inputs;
+  }
 
-std::unique_ptr<DiTScheduler> create_dit_scheduler(
-    DiTEngine* engine,
-    DiTScheduler::Options options);
+  DiTInputParams input_params;
+  DiTGenerationParams generation_params;
+};
+
+// dit related forward output params
+struct DiTForwardOutput {
+  // generated image
+  torch::Tensor image;
+};
 
 }  // namespace xllm

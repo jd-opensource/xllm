@@ -19,8 +19,8 @@ limitations under the License.
 #include <memory>
 
 #include "call.h"
+#include "core/runtime/dit_master.h"
 #include "core/runtime/llm_master.h"
-
 namespace xllm {
 
 template <typename T>

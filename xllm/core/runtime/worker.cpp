@@ -53,7 +53,8 @@ Worker::Worker(const ParallelArgs& parallel_args,
   } else if (worker_type == WorkerType::EVLM) {
     impl_ = new EmbedVLMWorkerImpl(parallel_args, device, options);
   } else {
-    LOG(ERROR) << "Unknown worker type, please check logic";
+    impl_ = new LLMWorkerImpl(parallel_args, device, options);
+    LOG(INFO) << "Unknown worker type, defaulting to LLMWorkerImpl";
   }
 }
 
