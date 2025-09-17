@@ -33,7 +33,8 @@ namespace xllm::hf {
 
 class Qwen3MoeDecoderImpl : public torch::nn::Module, public ATBBase {
  public:
-  explicit Qwen3MoeDecoderImpl(const Context& context, const int32_t layer_id);
+  explicit Qwen3MoeDecoderImpl(const ModelContext& context,
+                               const int32_t layer_id);
 
   ~Qwen3MoeDecoderImpl() {};
 
@@ -51,8 +52,6 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module, public ATBBase {
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
                         torch::Tensor& expert_array,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
@@ -227,11 +226,11 @@ class Qwen3MoeDecoder : public torch::nn::ModuleHolder<Qwen3MoeDecoderImpl> {
   using torch::nn::ModuleHolder<Qwen3MoeDecoderImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = Qwen3MoeDecoderImpl;
 
-  Qwen3MoeDecoder(const Context& context, int32_t layer_id);
+  Qwen3MoeDecoder(const ModelContext& context, int32_t layer_id);
 };
 
 std::shared_ptr<Qwen3MoeDecoderImpl> create_qwen3_moe_decoder_layer(
-    const Context& context,
+    const ModelContext& context,
     int32_t layer_id);
 
 std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,

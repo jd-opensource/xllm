@@ -19,11 +19,12 @@ limitations under the License.
 
 namespace xllm::hf {
 
-std::shared_ptr<LlmHeadImpl> create_llm_head_layer(const Context& context) {
+std::shared_ptr<LlmHeadImpl> create_llm_head_layer(
+    const ModelContext& context) {
   return std::make_shared<AtbLmHeadImpl>(context);
 }
 
-LlmHead::LlmHead(const Context& context)
+LlmHead::LlmHead(const ModelContext& context)
     : ModuleHolder(create_llm_head_layer(context)) {}
 
 }  // namespace xllm::hf

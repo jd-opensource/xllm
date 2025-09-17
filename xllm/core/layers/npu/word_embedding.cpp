@@ -20,11 +20,11 @@ limitations under the License.
 namespace xllm::hf {
 
 std::shared_ptr<AtbEmbeddingImpl> create_word_embedding_layer(
-    const Context& context) {
+    const ModelContext& context) {
   return std::make_shared<AtbWordEmbeddingImpl>(context);
 }
 
-AtbWordEmbedding::AtbWordEmbedding(const Context& context)
+AtbWordEmbedding::AtbWordEmbedding(const ModelContext& context)
     : ModuleHolder(create_word_embedding_layer(context)) {}
 
 }  // namespace xllm::hf

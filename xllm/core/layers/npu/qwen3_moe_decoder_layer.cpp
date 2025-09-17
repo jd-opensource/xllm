@@ -206,7 +206,7 @@ static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
     {IN_MLP_DOWN_WEIGHT_EXPERT, 1},
 };
 
-Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const Context& context,
+Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
                                          const int32_t layer_id)
     : ATBBase(context),
       device_id_(context.get_tensor_options().device().index()),
@@ -859,8 +859,6 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(torch::Tensor& x,
                                            torch::Tensor& attn_mask,
                                            KVCache& kv_cache,
                                            const ModelInputParams& input_params,
-                                           atb::Context* context,
-                                           AtbWorkspace& workspace,
                                            torch::Tensor& expert_array,
                                            aclrtEvent* event,
                                            std::atomic<bool>* event_flag,
@@ -876,10 +874,9 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(torch::Tensor& x,
                             input_params,
                             expert_array,
                             true);
-    st = execute_node(
-        prefill_node_, context, workspace, node_id, event, event_flag);
+    st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute decode layer fail, error code: " << st;
+                           << "excute prefill layer fail, error code: " << st;
   } else {
     build_node_variant_pack(decode_node_,
                             x,
@@ -890,8 +887,7 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(torch::Tensor& x,
                             input_params,
                             expert_array,
                             false);
-    st = execute_node(
-        decode_node_, context, workspace, node_id + 1000, event, event_flag);
+    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute decode layer fail, error code: " << st;
   }
@@ -980,11 +976,12 @@ void Qwen3MoeDecoderImpl::build_node_variant_pack(
   node.variantPack.outTensors.at(0) = internal_tensor_;
 }
 
-Qwen3MoeDecoder::Qwen3MoeDecoder(const Context& context, const int32_t layer_id)
+Qwen3MoeDecoder::Qwen3MoeDecoder(const ModelContext& context,
+                                 const int32_t layer_id)
     : ModuleHolder(create_qwen3_moe_decoder_layer(context, layer_id)) {}
 
 std::shared_ptr<Qwen3MoeDecoderImpl> create_qwen3_moe_decoder_layer(
-    const Context& context,
+    const ModelContext& context,
     int32_t layer_id) {
   return std::make_shared<Qwen3MoeDecoderImpl>(context, layer_id);
 }

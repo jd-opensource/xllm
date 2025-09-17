@@ -22,7 +22,7 @@ namespace xllm::hf {
 
 class QWen3DecoderLayerImpl : public QWenDecoderLayerImplBase<Qwen3Decoder> {
  public:
-  QWen3DecoderLayerImpl(const Context& context)
+  QWen3DecoderLayerImpl(const ModelContext& context)
       : QWenDecoderLayerImplBase<Qwen3Decoder>(context) {}
 };
 TORCH_MODULE(QWen3DecoderLayer);
@@ -36,7 +36,7 @@ torch::Tensor get_qwen3_rotary_embedding(int64_t dim,
 
 class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
  public:
-  QWen3ModelImpl(const Context& context)
+  QWen3ModelImpl(const ModelContext& context)
       : QWenModelImplBase<QWen3DecoderLayer>("qwen3",
                                              context.get_model_args()) {
     // register submodules
@@ -45,7 +45,7 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    work_space_ = AtbWorkspace(options.device());
+
     embed_tokens_ = register_module("embed_tokens", AtbWordEmbedding(context));
     norm_ = register_module("norm", RmsNorm(context));
 
@@ -62,14 +62,6 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
     attn_mask_ = AttentionMaskImpl(options.device(),
                                    options.dtype().toScalarType(),
                                    /*mask_value=*/mask_value);
-    atb::Status st = atb::CreateContext(&context_);
-    LOG_IF(ERROR, st != 0) << "ContextFactory create atb::Context fail";
-    device_id = options.device().index();
-    void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
-    LOG_IF(ERROR, stream == nullptr) << "get current stream fail";
-    // context_->SetExecuteStream(atb_speed::Utils::GetCurrentStream());
-    context_->SetExecuteStream(stream);
-    context_->SetAsyncTilingCopyStatus(true);
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
       auto block = QWen3DecoderLayer(context);
@@ -82,7 +74,7 @@ TORCH_MODULE(QWen3Model);
 
 class QWen3ForCausalLMImpl : public QWenForCausalLMImplBase<QWen3Model> {
  public:
-  QWen3ForCausalLMImpl(const Context& context)
+  QWen3ForCausalLMImpl(const ModelContext& context)
       : QWenForCausalLMImplBase<QWen3Model>(context) {}
 };
 TORCH_MODULE(QWen3ForCausalLM);

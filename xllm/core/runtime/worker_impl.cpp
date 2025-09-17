@@ -66,7 +66,7 @@ constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
                        const runtime::Options& options)
-    : options_(options), device_(device), context_(parallel_args) {
+    : options_(options), device_(device), parallel_args_(parallel_args) {
   if (options_.enable_speculative_decode() &&
       options_.num_decoding_tokens() == 1) {
     is_spec_draft_ = true;
@@ -571,8 +571,13 @@ bool WorkerImpl::init_model(const std::string& model_weights_path) {
     args.num_speculative_tokens(options_.num_speculative_tokens());
   }
 
+  // create model context
+  dtype_ = dtype;
+  auto tensor_options = torch::dtype(dtype_).device(device_);
+  context_ = ModelContext(parallel_args_, args, quant_args, tensor_options);
+
   // init model, create model executor
-  bool status = this->init_model(dtype, args, quant_args);
+  bool status = this->init_model(context_);
   if (!status) {
     return false;
   }

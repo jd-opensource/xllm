@@ -21,7 +21,8 @@ limitations under the License.
 
 namespace xllm::hf {
 
-std::shared_ptr<RmsNormImpl> create_rms_norm_layer(const Context& context) {
+std::shared_ptr<RmsNormImpl> create_rms_norm_layer(
+    const ModelContext& context) {
   return std::make_shared<RmsNormImpl>(context);
 }
 
@@ -31,7 +32,7 @@ void RmsNormImpl::param_from_args(atb::infer::RmsNormParam& param,
   param.normParam.epsilon = args.rms_norm_eps();
 }
 
-RmsNormImpl::RmsNormImpl(const Context& context) : ATBBase(context) {
+RmsNormImpl::RmsNormImpl(const ModelContext& context) : ATBBase(context) {
   param_from_args(norm_param_, context.get_model_args());
 
   at_weight_tensors_.resize(1);
@@ -99,13 +100,10 @@ int64_t RmsNormImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor RmsNormImpl::forward(torch::Tensor& x,
-                                   atb::Context* context,
-                                   AtbWorkspace& workspace,
-                                   int nodeId) {
+torch::Tensor RmsNormImpl::forward(torch::Tensor& x, int nodeId) {
   atb::Status st;
   build_node_variant_pack(norm_node_, x);
-  st = execute_node(norm_node_, context, workspace, nodeId);
+  st = execute_node(norm_node_, nodeId);
   LOG_IF(FATAL, st != 0) << model_name_
                          << "infer shape fail, error code: " << st;
   return x;
@@ -120,7 +118,7 @@ void RmsNormImpl::build_node_variant_pack(atb_speed::Model::Node& node,
   node.variantPack.outTensors.at(0) = internal_tensors_;
 }
 
-RmsNorm::RmsNorm(const Context& context)
+RmsNorm::RmsNorm(const ModelContext& context)
     : ModuleHolder(create_rms_norm_layer(context)) {}
 
 }  // namespace xllm::hf

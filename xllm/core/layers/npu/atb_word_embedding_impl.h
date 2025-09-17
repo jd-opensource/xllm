@@ -45,7 +45,7 @@ class AtbWordEmbeddingImpl : public AtbEmbeddingImpl, public ATBBase {
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
 
-  explicit AtbWordEmbeddingImpl(const Context& context);
+  explicit AtbWordEmbeddingImpl(const ModelContext& context);
 
   ~AtbWordEmbeddingImpl() {};
 
@@ -61,10 +61,7 @@ class AtbWordEmbeddingImpl : public AtbEmbeddingImpl, public ATBBase {
 
   int64_t init_layer();
 
-  torch::Tensor forward(const torch::Tensor& x,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
-                        int nodeId) override;
+  torch::Tensor forward(const torch::Tensor& x, int nodeId) override;
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                const torch::Tensor& x);

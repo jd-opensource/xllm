@@ -53,9 +53,7 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
                              const runtime::Options& options)
     : WorkerImpl(parallel_args, device, options) {}
 
-bool LLMWorkerImpl::init_model(torch::ScalarType dtype,
-                               const ModelArgs& model_args,
-                               const QuantArgs& quant_args) {
+bool LLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 #if defined(USE_NPU)
   int currentDevId = device_.index();
@@ -68,18 +66,13 @@ bool LLMWorkerImpl::init_model(torch::ScalarType dtype,
   // TODO(mlu): implement mlu init device
 #endif
 
-  // initialize model
-  context_.set_model_args(model_args);
-  context_.set_quant_args(quant_args);
-  dtype_ = dtype;
-  context_.set_tensor_options(torch::dtype(dtype_).device(device_));
   // Try to create a causal LM model
-  model_ = create_llm_model(context_);
+  model_ = create_llm_model(context);
 
   // Dont find model in causal models
   CHECK(model_ != nullptr) << "Failed to create model.";
-  model_executor_ =
-      std::make_unique<Executor>(model_.get(), model_args, device_, options_);
+  model_executor_ = std::make_unique<Executor>(
+      model_.get(), context.get_model_args(), device_, options_);
 
   eplb_executor_ = std::make_unique<EplbExecutor>(model_.get());
   return true;

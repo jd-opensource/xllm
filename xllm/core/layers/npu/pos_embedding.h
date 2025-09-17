@@ -29,9 +29,9 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "atb_base.h"
-#include "framework/context.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
 #include "pytorch/adapter/utils/utils.h"
@@ -49,7 +49,7 @@ class AtbRotaryEmbeddingImpl : public torch::nn::Module, public ATBBase {
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
 
-  explicit AtbRotaryEmbeddingImpl(const Context& context);
+  explicit AtbRotaryEmbeddingImpl(const ModelContext& context);
 
   ~AtbRotaryEmbeddingImpl() {};
 
@@ -57,8 +57,6 @@ class AtbRotaryEmbeddingImpl : public torch::nn::Module, public ATBBase {
 
   torch::Tensor forward(const torch::Tensor& cos_sin_pos,
                         const torch::Tensor& position,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
                         int nodeId);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
@@ -81,10 +79,10 @@ class AtbRotaryEmbedding
   using torch::nn::ModuleHolder<AtbRotaryEmbeddingImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = AtbRotaryEmbeddingImpl;
 
-  AtbRotaryEmbedding(const Context& context);
+  AtbRotaryEmbedding(const ModelContext& context);
 };
 
 std::shared_ptr<AtbRotaryEmbeddingImpl> create_pos_embedding_layer(
-    const Context& context);
+    const ModelContext& context);
 
 }  // namespace xllm::hf

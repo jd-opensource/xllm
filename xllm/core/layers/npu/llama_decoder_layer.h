@@ -47,7 +47,7 @@ class LlamaDecoderImpl : public torch::nn::Module, public ATBBase {
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
 
-  explicit LlamaDecoderImpl(const Context& context);
+  explicit LlamaDecoderImpl(const ModelContext& context);
 
   ~LlamaDecoderImpl() {};
 
@@ -70,8 +70,6 @@ class LlamaDecoderImpl : public torch::nn::Module, public ATBBase {
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
                         ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
                         int node_id = 0);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
@@ -111,10 +109,10 @@ class LlamaDecoder : public torch::nn::ModuleHolder<LlamaDecoderImpl> {
   using torch::nn::ModuleHolder<LlamaDecoderImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = LlamaDecoderImpl;
 
-  LlamaDecoder(const Context& context);
+  LlamaDecoder(const ModelContext& context);
 };
 
 std::shared_ptr<LlamaDecoderImpl> create_llama_decode_layer(
-    const Context& context);
+    const ModelContext& context);
 
 }  // namespace xllm::hf

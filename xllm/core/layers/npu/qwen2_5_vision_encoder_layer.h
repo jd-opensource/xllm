@@ -67,7 +67,7 @@ class Qwen2_5VisionEncoderImpl : public torch::nn::Module, public ATBBase {
   using Task = std::function<int()>;
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
-  explicit Qwen2_5VisionEncoderImpl(const Context& context);
+  explicit Qwen2_5VisionEncoderImpl(const ModelContext& context);
 
   ~Qwen2_5VisionEncoderImpl() {};
   void load_state_dict(const StateDict& state_dict);
@@ -85,8 +85,6 @@ class Qwen2_5VisionEncoderImpl : public torch::nn::Module, public ATBBase {
                         torch::Tensor& cu_seqlen,
                         std::vector<int>& cu_seqlen_vec,
                         ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
                         int node_id = 0,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr);
@@ -141,9 +139,9 @@ class Qwen2_5VisionEncoder
   using torch::nn::ModuleHolder<Qwen2_5VisionEncoderImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = Qwen2_5VisionEncoderImpl;
 
-  Qwen2_5VisionEncoder(const Context& context);
+  Qwen2_5VisionEncoder(const ModelContext& context);
 };
 
 std::shared_ptr<Qwen2_5VisionEncoderImpl> create_qwen2_5_vision_encoder_layer(
-    const Context& context);
+    const ModelContext& context);
 }  // namespace xllm::hf

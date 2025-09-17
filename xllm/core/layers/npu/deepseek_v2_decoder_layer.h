@@ -107,7 +107,7 @@ class ExpertBuffer {
 
 class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
  public:
-  explicit DeepseekV2DecoderImpl(const Context& context,
+  explicit DeepseekV2DecoderImpl(const ModelContext& context,
                                  const int32_t layer_id,
                                  const float sm_scale);
 
@@ -131,8 +131,6 @@ class DeepseekV2DecoderImpl : public torch::nn::Module, public ATBBase {
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
@@ -353,13 +351,13 @@ class DeepseekV2Decoder
   using torch::nn::ModuleHolder<DeepseekV2DecoderImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = DeepseekV2DecoderImpl;
 
-  DeepseekV2Decoder(const Context& context,
+  DeepseekV2Decoder(const ModelContext& context,
                     const int32_t layer_id,
                     const float sm_scale);
 };
 
 std::shared_ptr<DeepseekV2DecoderImpl> create_deepseek_v2_decoder_layer(
-    const Context& context,
+    const ModelContext& context,
     const int32_t layer_id,
     const float sm_scale);
 

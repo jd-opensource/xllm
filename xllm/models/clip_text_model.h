@@ -8,9 +8,9 @@
 #include <regex>
 #include <unordered_map>
 
-#include "core/framework/context.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_context.h"
 #include "core/layers/npu/siglip_encoder_layer.h"
 #include "model_registry.h"
 #include "processors/clip_image_processor.h"
@@ -137,7 +137,7 @@ class CLIPVLInputProcessor : public InputProcessor {
 
 class CLIPTextEmbeddingImpl : public torch::nn::Module {
  public:
-  CLIPTextEmbeddingImpl(const Context& context) {
+  CLIPTextEmbeddingImpl(const ModelContext& context) {
     auto args = context.get_model_args();
     auto options = context.get_tensor_options();
     options = options.dtype(torch::kFloat32).device(torch::kCPU);
@@ -205,7 +205,7 @@ TORCH_MODULE(CLIPTextEmbedding);
 
 class CLIPMLPImpl : public torch::nn::Module {
  public:
-  CLIPMLPImpl(const Context& context) {
+  CLIPMLPImpl(const ModelContext& context) {
     auto args = context.get_model_args();
     auto options = context.get_tensor_options();
     options = options.dtype(torch::kFloat32).device(torch::kCPU);
@@ -293,7 +293,7 @@ TORCH_MODULE(CLIPMLP);
 // TODO: Optimize CLIPAttention
 class CLIPAttentionImpl : public torch::nn::Module {
  public:
-  CLIPAttentionImpl(const Context& context) {
+  CLIPAttentionImpl(const ModelContext& context) {
     auto args = context.get_model_args();
     auto options = context.get_tensor_options();
     options = options.dtype(torch::kFloat32).device(torch::kCPU);
@@ -495,7 +495,7 @@ TORCH_MODULE(CLIPAttention);
 
 class CLIPEncoderLayerImpl : public torch::nn::Module {
  public:
-  CLIPEncoderLayerImpl(const Context& context) {
+  CLIPEncoderLayerImpl(const ModelContext& context) {
     auto args = context.get_model_args();
     auto options = context.get_tensor_options();
     options = options.dtype(torch::kFloat32).device(torch::kCPU);
@@ -597,7 +597,7 @@ TORCH_MODULE(CLIPEncoderLayer);
 
 class CLIPEncoderImpl : public torch::nn::Module {
  public:
-  CLIPEncoderImpl(const Context& context) {
+  CLIPEncoderImpl(const ModelContext& context) {
     auto args = context.get_model_args();
     auto options = context.get_tensor_options();
     options = options.dtype(torch::kFloat32).device(torch::kCPU);
@@ -661,7 +661,7 @@ TORCH_MODULE(CLIPEncoder);
 
 class CLIPTextTransformerImpl : public torch::nn::Module {
  public:
-  CLIPTextTransformerImpl(const Context& context) {
+  CLIPTextTransformerImpl(const ModelContext& context) {
     auto args = context.get_model_args();
     auto options = context.get_tensor_options();
     options = options.dtype(torch::kFloat32).device(torch::kCPU);
@@ -741,7 +741,7 @@ TORCH_MODULE(CLIPTextTransformer);
 
 class CLIPTextModelImpl : public torch::nn::Module {
  public:
-  CLIPTextModelImpl(const Context& context,
+  CLIPTextModelImpl(const ModelContext& context,
                     torch::Device device = torch::kCPU,
                     torch::ScalarType dtype = torch::kFloat32) {
     auto args = context.get_model_args();

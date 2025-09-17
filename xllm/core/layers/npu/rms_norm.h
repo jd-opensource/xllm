@@ -46,7 +46,7 @@ class RmsNormImpl : public torch::nn::Module, public ATBBase {
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
 
-  explicit RmsNormImpl(const Context& context);
+  explicit RmsNormImpl(const ModelContext& context);
 
   ~RmsNormImpl() {};
 
@@ -60,10 +60,7 @@ class RmsNormImpl : public torch::nn::Module, public ATBBase {
 
   int64_t init_layer();
 
-  torch::Tensor forward(torch::Tensor& x,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
-                        int nodeId);
+  torch::Tensor forward(torch::Tensor& x, int nodeId);
 
   void build_node_variant_pack(atb_speed::Model::Node& node, torch::Tensor& x);
 
@@ -82,9 +79,9 @@ class RmsNorm : public torch::nn::ModuleHolder<RmsNormImpl> {
   using torch::nn::ModuleHolder<RmsNormImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = RmsNormImpl;
 
-  RmsNorm(const Context& context);
+  RmsNorm(const ModelContext& context);
 };
 
-std::shared_ptr<RmsNormImpl> create_rms_norm_layer(const Context& context);
+std::shared_ptr<RmsNormImpl> create_rms_norm_layer(const ModelContext& context);
 
 }  // namespace xllm::hf

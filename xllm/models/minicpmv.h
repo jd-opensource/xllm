@@ -22,9 +22,9 @@ limitations under the License.
 #include <regex>
 #include <unordered_map>
 
-#include "core/framework/context.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_context.h"
 #include "core/layers/npu/multi_head_attention.h"
 #include "core/layers/npu/siglip_encoder_layer.h"
 #include "model_registry.h"
@@ -190,7 +190,7 @@ class MiniCPMInputProcessor : public InputProcessor {
 
 class BaseResamplerImpl : public torch::nn::Module {
  public:
-  BaseResamplerImpl(const Context& context)
+  BaseResamplerImpl(const ModelContext& context)
       : num_queries_(context.get_model_args().query_num()),
         embed_dim_(context.get_model_args().hidden_size()),
         num_heads_(context.get_model_args().n_heads()),
@@ -264,7 +264,7 @@ TORCH_MODULE(BaseResampler);
 
 class KVProjectorLinearImpl : public torch::nn::Module {
  public:
-  KVProjectorLinearImpl(const Context& context) {
+  KVProjectorLinearImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
 
     linear_ = register_module(
@@ -377,7 +377,7 @@ torch::Tensor get_2d_sincos_pos_embed(int embed_dim,
 
 class Resampler2_5Impl : public BaseResamplerImpl {
  public:
-  Resampler2_5Impl(const Context& context) : BaseResamplerImpl(context) {
+  Resampler2_5Impl(const ModelContext& context) : BaseResamplerImpl(context) {
     set_2d_pos_cache(max_size_, context.get_tensor_options().device());
     kv_proj_ = register_module("kv_proj", KVProjectorLinear(context));
   }
@@ -562,7 +562,7 @@ TORCH_MODULE(Resampler2_5);
 
 class Idefics2VisionEmbeddingsImpl : public torch::nn::Module {
  public:
-  Idefics2VisionEmbeddingsImpl(const Context& context) {
+  Idefics2VisionEmbeddingsImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -707,7 +707,7 @@ TORCH_MODULE(Idefics2VisionEmbeddings);
 
 class Idefics2EncoderImpl : public torch::nn::Module {
  public:
-  Idefics2EncoderImpl(const Context& context) {
+  Idefics2EncoderImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
 
     layers_.reserve(model_args.mm_num_hidden_layers());
@@ -762,7 +762,7 @@ class VisionAdapterMLPImpl : public torch::nn::Module {
       MLPDef;
 
  public:
-  VisionAdapterMLPImpl(const Context& context) {
+  VisionAdapterMLPImpl(const ModelContext& context) {
     auto options = context.get_tensor_options();
 
     auto embed_dim = context.get_model_args().hidden_size();
@@ -891,7 +891,7 @@ TORCH_MODULE(VisionAdapterMLP);
 
 class Idefics2VisionTransformerImpl : public torch::nn::Module {
  public:
-  Idefics2VisionTransformerImpl(const Context& context) {
+  Idefics2VisionTransformerImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -959,7 +959,7 @@ struct MiniCPMVImageInputs {
 
 class MiniCPMV2_6Impl : public torch::nn::Module {
  public:
-  MiniCPMV2_6Impl(const Context& context)
+  MiniCPMV2_6Impl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
     use_vision_adapter_ =

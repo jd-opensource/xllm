@@ -20,7 +20,7 @@ limitations under the License.
 
 namespace xllm::hf {
 
-SiglipEncoderLayerUpImpl::SiglipEncoderLayerUpImpl(const Context& context,
+SiglipEncoderLayerUpImpl::SiglipEncoderLayerUpImpl(const ModelContext& context,
                                                    const std::string& prefix)
     : graph_("siglip_encoder_layer_up"),
       model_args_(context.get_model_args()),
@@ -181,17 +181,17 @@ torch::Tensor SiglipEncoderLayerUpImpl::forward(torch::Tensor& x) {
 }
 
 std::shared_ptr<SiglipEncoderLayerUpImpl> create_siglip_encoder_layer_up(
-    const Context& context,
+    const ModelContext& context,
     const std::string& prefix) {
   return std::make_shared<SiglipEncoderLayerUpImpl>(context, prefix);
 }
 
-SiglipEncoderLayerUp::SiglipEncoderLayerUp(const Context& context,
+SiglipEncoderLayerUp::SiglipEncoderLayerUp(const ModelContext& context,
                                            const std::string& prefix)
     : ModuleHolder(create_siglip_encoder_layer_up(context, prefix)) {}
 
 SiglipEncoderLayerDownImpl::SiglipEncoderLayerDownImpl(
-    const Context& context,
+    const ModelContext& context,
     const std::string& prefix)
     : graph_("siglip_encoder_layer_down"),
       model_args_(context.get_model_args()),
@@ -340,16 +340,16 @@ torch::Tensor SiglipEncoderLayerDownImpl::forward(torch::Tensor& x,
 }
 
 std::shared_ptr<SiglipEncoderLayerDownImpl> create_siglip_encoder_layer_down(
-    const Context& context,
+    const ModelContext& context,
     const std::string& prefix) {
   return std::make_shared<SiglipEncoderLayerDownImpl>(context, prefix);
 }
 
-SiglipEncoderLayerDown::SiglipEncoderLayerDown(const Context& context,
+SiglipEncoderLayerDown::SiglipEncoderLayerDown(const ModelContext& context,
                                                const std::string& prefix)
     : ModuleHolder(create_siglip_encoder_layer_down(context, prefix)) {}
 
-SiglipEncoderLayerImpl::SiglipEncoderLayerImpl(const Context& context,
+SiglipEncoderLayerImpl::SiglipEncoderLayerImpl(const ModelContext& context,
                                                const std::string& prefix)
     : model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
@@ -378,12 +378,12 @@ torch::Tensor SiglipEncoderLayerImpl::forward(torch::Tensor& x) {
 }
 
 std::shared_ptr<SiglipEncoderLayerImpl> create_siglip_encoder_layer(
-    const Context& context,
+    const ModelContext& context,
     const std::string& prefix) {
   return std::make_shared<SiglipEncoderLayerImpl>(context, prefix);
 }
 
-SiglipEncoderLayer::SiglipEncoderLayer(const Context& context,
+SiglipEncoderLayer::SiglipEncoderLayer(const ModelContext& context,
                                        const std::string& prefix)
     : ModuleHolder(create_siglip_encoder_layer(context, prefix)) {}
 

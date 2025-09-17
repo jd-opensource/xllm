@@ -15,14 +15,14 @@
 #include <unordered_set>
 #include <vector>
 
-#include "core/framework/context.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_context.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/layers/npu/pos_embedding.h"
 #include "core/layers/npu/rms_norm.h"
 #include "core/layers/npu/word_embedding.h"
 #include "core/layers/rotary_embedding.h"
-#include "framework/context.h"
+#include "framework/model_context.h"
 #include "models/autoencoder_kl.h"
 #include "models/clip_text_model.h"
 #include "models/flux/dit.h"
@@ -204,7 +204,7 @@ class FluxPipelineImpl : public torch::nn::Module {
   torch::TensorOptions options_;
 
  public:
-  FluxPipelineImpl(const Context& context)
+  FluxPipelineImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
     vae_scale_factor_ = 1 << (model_args_.block_out_channels().size() - 1);

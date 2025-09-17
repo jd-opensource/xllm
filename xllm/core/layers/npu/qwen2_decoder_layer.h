@@ -108,7 +108,7 @@ class Qwen2DecoderImpl : public torch::nn::Module, public ATBBase {
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
 
-  explicit Qwen2DecoderImpl(const Context& context);
+  explicit Qwen2DecoderImpl(const ModelContext& context);
 
   ~Qwen2DecoderImpl() {};
 
@@ -133,8 +133,6 @@ class Qwen2DecoderImpl : public torch::nn::Module, public ATBBase {
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
                         ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
@@ -178,10 +176,10 @@ class Qwen2Decoder : public torch::nn::ModuleHolder<Qwen2DecoderImpl> {
   using torch::nn::ModuleHolder<Qwen2DecoderImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = Qwen2DecoderImpl;
 
-  Qwen2Decoder(const Context& context);
+  Qwen2Decoder(const ModelContext& context);
 };
 
 std::shared_ptr<Qwen2DecoderImpl> create_qwen2_decode_layer(
-    const Context& context);
+    const ModelContext& context);
 
 }  // namespace xllm::hf

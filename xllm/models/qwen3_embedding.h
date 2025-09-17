@@ -9,7 +9,7 @@ namespace xllm::hf {
 
 class QWen3ForEmbeddingImpl : public QWenForCausalLMImplBase<QWen3Model> {
  public:
-  QWen3ForEmbeddingImpl(const Context& context)
+  QWen3ForEmbeddingImpl(const ModelContext& context)
       : QWenForCausalLMImplBase<QWen3Model>(context),
         options_(context.get_tensor_options()) {}
 

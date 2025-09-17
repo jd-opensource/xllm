@@ -23,7 +23,7 @@ limitations under the License.
 #include "common/types.h"
 #include "executor.h"
 #include "forward_params.h"
-#include "framework/context.h"
+#include "framework/model_context.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache/hccl_kv_cache_transfer.h"
 #include "framework/kv_cache/kv_cache_store.h"
@@ -56,9 +56,7 @@ class WorkerImpl {
   virtual ~WorkerImpl();
 
   // initialize model, cache manager. blocking call
-  virtual bool init_model(torch::ScalarType dtype,
-                          const ModelArgs& args,
-                          const QuantArgs& quant_args) = 0;
+  virtual bool init_model(ModelContext& context) = 0;
 
   virtual bool init_model(const std::string& model_weights_path);
 
@@ -201,8 +199,11 @@ class WorkerImpl {
   // device to run the model on
   torch::Device device_;
 
+  // parallel args of current instance
+  ParallelArgs parallel_args_;
+
   // model context, includes model args, parallel args and date type etc.
-  mutable Context context_;
+  mutable ModelContext context_;
 
   // kv caches
   std::vector<xllm::KVCache> kv_caches_;

@@ -15,6 +15,10 @@ limitations under the License.
 
 #pragma once
 
+#if defined(USE_NPU)
+#include <acl/acl.h>
+#endif
+
 #include <memory>
 
 #include "core/framework/model/model_args.h"
@@ -23,38 +27,41 @@ limitations under the License.
 
 namespace xllm {
 
-class Context {
+class ModelContext {
  public:
-  Context(const ParallelArgs& input_parallel_args)
-      : parallel_args(input_parallel_args) {}
+  ModelContext() : parallel_args_(1, 1, nullptr) {};
 
-  const ModelArgs& get_model_args() const { return model_args; }
-  void set_model_args(const ModelArgs& model_args) {
-    this->model_args = model_args;
-  }
+  ModelContext(const ParallelArgs& input_parallel_args,
+               const ModelArgs& model_args,
+               const QuantArgs& quant_args,
+               const torch::TensorOptions& tensor_options);
 
-  const QuantArgs& get_quant_args() const { return quant_args; }
-  void set_quant_args(const QuantArgs& quant_args) {
-    this->quant_args = quant_args;
-  }
+  const ModelArgs& get_model_args() const { return model_args_; }
 
-  const ParallelArgs& get_parallel_args() const { return parallel_args; }
-  //   void set_paralle_args(const ParallelArgs& parallel_args) {
-  //     this->parallel_args = parallel_args;
-  //   }
+  const QuantArgs& get_quant_args() const { return quant_args_; }
+
+  const ParallelArgs& get_parallel_args() const { return parallel_args_; }
 
   const torch::TensorOptions& get_tensor_options() const {
-    return tensor_options;
+    return tensor_options_;
   }
-  void set_tensor_options(const torch::TensorOptions& tensor_options) {
-    this->tensor_options = tensor_options;
+
+  const atb::Context* get_atb_context() const { return context_; }
+
+  void set_image_embedding_mode(bool image_embedding_mode) {
+    model_args_.image_embedding_mode() = image_embedding_mode;
   }
 
  private:
-  ModelArgs model_args;
-  QuantArgs quant_args;
-  ParallelArgs parallel_args;
-  torch::TensorOptions tensor_options;
+  ModelArgs model_args_;
+  QuantArgs quant_args_;
+  ParallelArgs parallel_args_;
+  torch::TensorOptions tensor_options_;
+
+#if defined(USE_NPU)
+  // used for npu atb
+  atb::Context* context_;
+#endif
 };
 
 }  // namespace xllm

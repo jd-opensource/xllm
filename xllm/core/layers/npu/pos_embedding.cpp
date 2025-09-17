@@ -19,11 +19,11 @@ limitations under the License.
 
 namespace xllm::hf {
 std::shared_ptr<AtbRotaryEmbeddingImpl> create_pos_embedding_layer(
-    const Context& context) {
+    const ModelContext& context) {
   return std::make_shared<AtbRotaryEmbeddingImpl>(context);
 }
 
-AtbRotaryEmbeddingImpl::AtbRotaryEmbeddingImpl(const Context& context)
+AtbRotaryEmbeddingImpl::AtbRotaryEmbeddingImpl(const ModelContext& context)
     : ATBBase(context) {
   atOutTensors_.resize(2);
   dtype_ = c10::typeMetaToScalarType(context.get_tensor_options().dtype());
@@ -78,12 +78,10 @@ int64_t AtbRotaryEmbeddingImpl::init_node(atb_speed::Model::Node& node) {
 
 torch::Tensor AtbRotaryEmbeddingImpl::forward(const torch::Tensor& cos_sin_pos,
                                               const torch::Tensor& position,
-                                              atb::Context* context,
-                                              AtbWorkspace& workspace,
                                               int nodeId) {
   atb::Status st;
   build_node_variant_pack(embedding_node_, cos_sin_pos, position);
-  st = execute_node(embedding_node_, context, workspace, nodeId);
+  st = execute_node(embedding_node_, nodeId);
   LOG_IF(FATAL, st != 0) << modelName_
                          << "infer shape fail, error code: " << st;
 
@@ -119,7 +117,7 @@ void AtbRotaryEmbeddingImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(atOutTensors_.at(0));
 }
 
-AtbRotaryEmbedding::AtbRotaryEmbedding(const Context& context)
+AtbRotaryEmbedding::AtbRotaryEmbedding(const ModelContext& context)
     : ModuleHolder(create_pos_embedding_layer(context)) {}
 
 }  // namespace xllm::hf

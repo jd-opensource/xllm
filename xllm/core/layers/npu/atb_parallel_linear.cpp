@@ -19,7 +19,7 @@ limitations under the License.
 
 namespace xllm::hf {
 std::shared_ptr<AtbColumnParallelLinearImpl>
-create_atb_column_parallel_linear_layer(const Context& context) {
+create_atb_column_parallel_linear_layer(const ModelContext& context) {
   return std::make_shared<AtbColumnParallelLinearImpl>(context);
 }
 
@@ -46,7 +46,8 @@ void AtbColumnParallelLinearImpl::param_from_args(
   }
 }
 
-AtbColumnParallelLinearImpl::AtbColumnParallelLinearImpl(const Context& context)
+AtbColumnParallelLinearImpl::AtbColumnParallelLinearImpl(
+    const ModelContext& context)
     : ATBBase(context) {
   param_from_args(
       linear_param_, context.get_model_args(), context.get_parallel_args());
@@ -134,12 +135,10 @@ int64_t AtbColumnParallelLinearImpl::init_node(
 }
 
 torch::Tensor AtbColumnParallelLinearImpl::forward(const torch::Tensor& input,
-                                                   atb::Context* context,
-                                                   AtbWorkspace& workspace,
                                                    int nodeId) {
   atb::Status st;
   build_node_variant_pack(linear_node_, input);
-  st = execute_node(linear_node_, context, workspace, nodeId);
+  st = execute_node(linear_node_, nodeId);
   LOG_IF(FATAL, st != 0) << model_name_
                          << "infer shape fail, error code: " << st;
 
@@ -178,7 +177,7 @@ void AtbColumnParallelLinearImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(at_out_tensors_.at(0));
 }
 
-AtbColumnParallelLinear::AtbColumnParallelLinear(const Context& context)
+AtbColumnParallelLinear::AtbColumnParallelLinear(const ModelContext& context)
     : ModuleHolder(create_atb_column_parallel_linear_layer(context)) {}
 
 }  // namespace xllm::hf

@@ -13,7 +13,7 @@
 
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
-#include "framework/context.h"
+#include "framework/model_context.h"
 #include "model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
@@ -793,7 +793,7 @@ class T5EncoderModelImpl : public torch::nn::Module {
   torch::Device device_ = torch::kCPU;
   torch::ScalarType dtype_ = torch::kBFloat16;  // Default dtype for the model
  public:
-  T5EncoderModelImpl(const Context& context,
+  T5EncoderModelImpl(const ModelContext& context,
                      torch::Device device = torch::kCPU,
                      torch::ScalarType dtype = torch::kBFloat16) {
     device_ = device;

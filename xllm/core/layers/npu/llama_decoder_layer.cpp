@@ -111,7 +111,8 @@ static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
                                           {IN_MLP_W1_WEIGHT, 0},
                                           {IN_MLP_CPROJ_WEIGHT, 1}};
 
-LlamaDecoderImpl::LlamaDecoderImpl(const Context& context) : ATBBase(context) {
+LlamaDecoderImpl::LlamaDecoderImpl(const ModelContext& context)
+    : ATBBase(context) {
   param_from_args(prefill_param_,
                   context.get_model_args(),
                   context.get_parallel_args(),
@@ -272,8 +273,6 @@ torch::Tensor LlamaDecoderImpl::forward(torch::Tensor& x,
                                         torch::Tensor& attn_mask,
                                         KVCache& kv_cache,
                                         ModelInputParams& input_params,
-                                        atb::Context* context,
-                                        AtbWorkspace& workspace,
                                         int node_id) {
   atb::Status st;
 
@@ -288,9 +287,9 @@ torch::Tensor LlamaDecoderImpl::forward(torch::Tensor& x,
                             input_params,
                             true);
     // mstxRangeEnd(id);
-    st = execute_node(prefill_node_, context, workspace, node_id);
+    st = execute_node(prefill_node_, node_id);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute decode layer fail, error code: " << st;
+                           << "excute prefill layer fail, error code: " << st;
   } else {
     build_node_variant_pack(decode_node_,
                             x,
@@ -300,7 +299,7 @@ torch::Tensor LlamaDecoderImpl::forward(torch::Tensor& x,
                             kv_cache,
                             input_params,
                             false);
-    st = execute_node(decode_node_, context, workspace, node_id + 1000);
+    st = execute_node(decode_node_, node_id + 1000);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute decode layer fail, error code: " << st;
   }
@@ -355,11 +354,11 @@ void LlamaDecoderImpl::build_node_variant_pack(atb_speed::Model::Node& node,
   node.variantPack.outTensors.at(0) = internal_tensors_;
 }
 
-LlamaDecoder::LlamaDecoder(const Context& context)
+LlamaDecoder::LlamaDecoder(const ModelContext& context)
     : ModuleHolder(create_llama_decode_layer(context)) {}
 
 std::shared_ptr<LlamaDecoderImpl> create_llama_decode_layer(
-    const Context& context) {
+    const ModelContext& context) {
   return std::make_shared<LlamaDecoderImpl>(context);
 }
 

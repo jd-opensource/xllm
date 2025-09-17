@@ -49,26 +49,14 @@ EmbedVLMWorkerImpl::EmbedVLMWorkerImpl(const ParallelArgs& parallel_args,
                                        const runtime::Options& options)
     : WorkerImpl(parallel_args, device, options) {}
 
-bool EmbedVLMWorkerImpl::init_model(torch::ScalarType dtype,
-                                    const ModelArgs& model_args,
-                                    const QuantArgs& quant_args) {
+bool EmbedVLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
-  // initialize model
-  ModelArgs tmp_model_args = model_args;
-  // TODO refactor later
-  tmp_model_args.image_embedding_mode() = true;
-  context_.set_model_args(tmp_model_args);
-
-  context_.set_quant_args(quant_args);
-
-  dtype_ = dtype;
-  context_.set_tensor_options(torch::dtype(dtype_).device(device_));
-
-  model_ = create_vlm_model(context_);
+  context.set_image_embedding_mode(true);
+  model_ = create_vlm_model(context);
   CHECK(model_ != nullptr) << "Failed to create model.";
   model_executor_ = std::make_unique<Executor>(
-      model_.get(), tmp_model_args, device_, options_);
+      model_.get(), context.get_model_args(), device_, options_);
 
   return true;
 }

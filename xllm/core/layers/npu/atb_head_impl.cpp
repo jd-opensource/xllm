@@ -67,7 +67,7 @@ void AtbLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
   }
 }
 
-AtbLmHeadImpl::AtbLmHeadImpl(const Context& context) : ATBBase(context) {
+AtbLmHeadImpl::AtbLmHeadImpl(const ModelContext& context) : ATBBase(context) {
   param_from_args(llm_head_param_prefill_,
                   context.get_model_args(),
                   context.get_parallel_args(),
@@ -161,22 +161,10 @@ int64_t AtbLmHeadImpl::init_node(atb_speed::Model::Node& node,
 
 torch::Tensor AtbLmHeadImpl::forward(const torch::Tensor& hidden_states,
                                      const torch::Tensor& seleted_idxes,
-                                     atb::Context* context,
-                                     AtbWorkspace& workspace,
                                      int nodeId) {
   atb::Status st;
   build_node_variant_pack(llm_head_node_prefill_, hidden_states, seleted_idxes);
-  st = execute_node(llm_head_node_prefill_, context, workspace, nodeId);
-  // if (is_prefill) {
-  //   build_node_variant_pack(llm_head_node_prefill_,
-  //   hidden_states,seleted_idxes); st = execute_node(llm_head_node_prefill_,
-  //   context, workspace ,nodeId);
-  // } else {
-  //   build_node_variant_pack(llm_head_node_decode_,
-  //   hidden_states,seleted_idxes); st = execute_node(llm_head_node_decode_,
-  //   context, workspace ,nodeId);
-  // }
-  // c10_npu::NPUCachingAllocator::emptyCache();
+  st = execute_node(llm_head_node_prefill_, nodeId);
   LOG_IF(FATAL, st != 0) << model_name_
                          << "execute llmhead node fail, error code: " << st;
   return atOutTensors_[0];

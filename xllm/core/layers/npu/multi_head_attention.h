@@ -17,14 +17,14 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "framework/context.h"
+#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 
 namespace xllm {
 
 class MultiheadAttentionImpl : public torch::nn::Module {
  public:
-  MultiheadAttentionImpl(const Context& context);
+  MultiheadAttentionImpl(const ModelContext& context);
 
   torch::Tensor forward(torch::Tensor query,
                         torch::Tensor key,

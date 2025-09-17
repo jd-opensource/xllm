@@ -25,9 +25,9 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/framework/context.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_context.h"
 #include "core/layers/npu/attn_mask.h"
 #include "core/layers/npu/llm_head.h"
 #include "core/layers/npu/pos_embedding.h"
@@ -105,7 +105,7 @@ torch::Tensor get_qwen_concat_rotary_embedding(
 template <typename DecoderType>
 class QWenDecoderLayerImplBase : public torch::nn::Module {
  public:
-  QWenDecoderLayerImplBase(const Context& context) {
+  QWenDecoderLayerImplBase(const ModelContext& context) {
     // register submodules
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
   }
@@ -116,8 +116,6 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
                                 torch::Tensor& attn_mask,
                                 KVCache& kv_cache,
                                 ModelInputParams& input_params,
-                                atb::Context* context,
-                                AtbWorkspace& work_space,
                                 int node_id,
                                 aclrtEvent* event = nullptr,
                                 std::atomic<bool>* event_flag = nullptr) {
@@ -127,8 +125,6 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
                           attn_mask,
                           kv_cache,
                           input_params,
-                          context,
-                          work_space,
                           event,
                           event_flag,
                           node_id);
@@ -161,7 +157,7 @@ class QWenModelImplBase : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
-    return embed_tokens_(input_ids, context_, work_space_, 0);
+    return embed_tokens_(input_ids, 0);
   }
 
   // tokens: [num_tokens]
@@ -176,11 +172,10 @@ class QWenModelImplBase : public torch::nn::Module {
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
     } else {
-      h = embed_tokens_(tokens, context_, work_space_, 0);
+      h = embed_tokens_(tokens, 0);
     }
     // auto h = embed_tokens_(tokens);
-    auto target_cos_sin =
-        atb_pos_emb_(cos_sin_, positions, context_, work_space_, 0);
+    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
@@ -255,13 +250,11 @@ class QWenModelImplBase : public torch::nn::Module {
             attn_mask,
             kv_caches[i],
             input_params_new,
-            context_,
-            work_space_,
             i,
             event,
             event_flag);
     }
-    h = norm_(h, context_, work_space_, 0);
+    h = norm_(h, 0);
     return h;
   }
 
@@ -305,10 +298,8 @@ class QWenModelImplBase : public torch::nn::Module {
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
   torch::Tensor cos_sin_;
-  atb::Context* context_;
   int max_seq_len_ = 0;
   int device_id = 0;
-  AtbWorkspace work_space_;
   AttentionMaskImpl attn_mask_;
   AtbRotaryEmbedding atb_pos_emb_{nullptr};
 
@@ -329,18 +320,10 @@ class QWenModelImplBase : public torch::nn::Module {
 template <typename QWenModelType>
 class QWenForCausalLMImplBase : public torch::nn::Module {
  public:
-  QWenForCausalLMImplBase(const Context& context) {
+  QWenForCausalLMImplBase(const ModelContext& context) {
     tie_word_embeddings = context.get_model_args().tie_word_embeddings();
     // register submodules
     model_ = register_module("model", QWenModelType(context));
-
-    auto options = context.get_tensor_options();
-    device_id = options.device().index();
-    work_space_ = AtbWorkspace(options.device());
-    atb::Status st = atb::CreateContext(&context_);
-    void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
-    context_->SetExecuteStream(stream);
-    context_->SetAsyncTilingCopyStatus(true);
     lm_head_ = register_module("lm_head", LlmHead(context));
   }
 
@@ -367,7 +350,7 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
     // select tokens if provided
     auto h = hidden_states;
     // test
-    return lm_head_(hidden_states, seleted_idxes, context_, work_space_, 0);
+    return lm_head_(hidden_states, seleted_idxes, 0);
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader,
@@ -417,8 +400,6 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
   bool tie_word_embeddings{false};
   // test
   LlmHead lm_head_{nullptr};
-  AtbWorkspace work_space_;
-  atb::Context* context_;
 };
 
 }  // namespace xllm::hf

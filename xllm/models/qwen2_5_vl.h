@@ -146,7 +146,7 @@ class Qwen2_5_VLInputProcessor : public InputProcessor {
 
 class Qwen2_5_VisionBlockImpl : public torch::nn::Module {
  public:
-  Qwen2_5_VisionBlockImpl(const Context& context) {
+  Qwen2_5_VisionBlockImpl(const ModelContext& context) {
     // register submodules
     encoder_layer_ =
         register_module("encoder_layer", Qwen2_5VisionEncoder(context));
@@ -158,8 +158,6 @@ class Qwen2_5_VisionBlockImpl : public torch::nn::Module {
                         torch::Tensor& cu_seq_len,
                         std::vector<int>& cu_seq_len_vec,
                         ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& work_space,
                         int node_id) {
     return encoder_layer_(x,
                           m_cos_pos,
@@ -167,8 +165,6 @@ class Qwen2_5_VisionBlockImpl : public torch::nn::Module {
                           cu_seq_len,
                           cu_seq_len_vec,
                           input_params,
-                          context,
-                          work_space,
                           node_id);
   }
 
@@ -190,7 +186,7 @@ TORCH_MODULE(Qwen2_5_VisionBlock);
 
 class Qwen2_5_VisionPatchEmbedImpl : public torch::nn::Module {
  public:
-  Qwen2_5_VisionPatchEmbedImpl(const Context& context) {
+  Qwen2_5_VisionPatchEmbedImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -234,7 +230,7 @@ TORCH_MODULE(Qwen2_5_VisionPatchEmbed);
 
 class Qwen2_5_VisionRotaryEmbeddingImpl : public torch::nn::Module {
  public:
-  Qwen2_5_VisionRotaryEmbeddingImpl(const Context& context) {
+  Qwen2_5_VisionRotaryEmbeddingImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -279,7 +275,7 @@ TORCH_MODULE(Qwen2_5_VisionRotaryEmbedding);
 
 class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
  public:
-  Qwen2_5_VisionPatchMergerImpl(const Context& context) {
+  Qwen2_5_VisionPatchMergerImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     auto quant_args = context.get_quant_args();
@@ -306,10 +302,8 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
     layers_ = std::make_tuple(cpl, act, rpl);
   }
 
-  torch::Tensor forward(torch::Tensor x,
-                        atb::Context* context,
-                        AtbWorkspace& work_space) {
-    x = ln_q_(x, context, work_space, 0);
+  torch::Tensor forward(torch::Tensor x) {
+    x = ln_q_(x, 0);
     x = x.view({-1, hidden_size_});
     return mlp_->forward(x);
   }
@@ -382,7 +376,7 @@ TORCH_MODULE(Qwen2_5_VisionPatchMerger);
 
 class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
  public:
-  Qwen2_5_VisionTransformerImpl(const Context& context) {
+  Qwen2_5_VisionTransformerImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -408,15 +402,6 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
       layers_.push_back(block);
     }
     merger_ = register_module("merger", Qwen2_5_VisionPatchMerger(context));
-
-    work_space_ = AtbWorkspace(options.device());
-    atb::Status st = atb::CreateContext(&context_);
-    LOG_IF(ERROR, st != 0) << "ContextFactory create atb::Context fail";
-    device_id = options.device().index();
-    void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
-    LOG_IF(ERROR, stream == nullptr) << "get current stream fail";
-    context_->SetExecuteStream(stream);
-    context_->SetAsyncTilingCopyStatus(true);
   }
 
   torch::Tensor rot_pos_emb(torch::Tensor grid_thw) {
@@ -616,12 +601,10 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
                                    cu_seqlens_now,
                                    cu_seqlens_now_vec,
                                    input_params_new,
-                                   context_,
-                                   work_space_,
                                    idx);
     }
     // adapter
-    hidden_states = merger_(hidden_states, context_, work_space_);
+    hidden_states = merger_(hidden_states);
 
     auto reverse_indices = torch::argsort(window_index);
     hidden_states =
@@ -673,9 +656,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
 
   torch::Tensor m_cos;
   torch::Tensor m_sin;
-  atb::Context* context_;
   int device_id = 0;
-  AtbWorkspace work_space_;
 };
 TORCH_MODULE(Qwen2_5_VisionTransformer);
 
@@ -692,7 +673,7 @@ struct Qwen2_5_VLVideoInputs {
 
 class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
  public:
-  Qwen2_5_VLForConditionalGenerationImpl(const Context& context)
+  Qwen2_5_VLForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
     visual_ = register_module("visual", Qwen2_5_VisionTransformer(context));

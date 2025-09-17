@@ -39,9 +39,7 @@ class EmbedVLMWorkerImpl : public WorkerImpl {
 
   ~EmbedVLMWorkerImpl() override = default;
 
-  bool init_model(torch::ScalarType dtype,
-                  const ModelArgs& args,
-                  const QuantArgs& quant_args) override;
+  bool init_model(ModelContext& context) override;
 
   std::optional<ForwardOutput> step(const ForwardInput& inputs) override;
 };

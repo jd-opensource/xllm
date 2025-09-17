@@ -23,10 +23,10 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/framework/context.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
+#include "core/framework/model_context.h"
 #include "core/layers/npu/attn_mask.h"
 #include "core/layers/npu/deepseek_v2_decoder_layer.h"
 #include "core/layers/npu/llm_head.h"
@@ -34,7 +34,7 @@ limitations under the License.
 #include "core/layers/npu/rms_norm.h"
 #include "core/layers/npu/word_embedding.h"
 #include "core/layers/rotary_embedding.h"
-#include "framework/context.h"
+#include "framework/model_context.h"
 #include "model_registry.h"
 // DeepSeek v2 compatible with huggingface weights
 // ref to:
@@ -47,7 +47,7 @@ using ISlice = torch::indexing::Slice;
 
 class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
-  DeepseekV2DecoderLayerImpl(const Context& context,
+  DeepseekV2DecoderLayerImpl(const ModelContext& context,
                              const int32_t i,
                              const float sm_scale) {
     // register submodules
@@ -61,8 +61,6 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor attn_mask,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& work_space,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr) {
     return decoder_layer_(x,
@@ -71,8 +69,6 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                           attn_mask,
                           kv_cache,
                           input_params,
-                          context,
-                          work_space,
                           event,
                           event_flag);
   }
@@ -100,7 +96,7 @@ TORCH_MODULE(DeepseekV2DecoderLayer);
 
 class DeepseekV2ModelImpl : public torch::nn::Module {
  public:
-  DeepseekV2ModelImpl(const Context& context)
+  DeepseekV2ModelImpl(const ModelContext& context)
       : device_(context.get_tensor_options().device()) {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
@@ -160,9 +156,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   torch::Tensor forward(torch::Tensor tokens,
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& work_space) {
+                        const ModelInputParams& input_params) {
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
@@ -170,9 +164,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       }
     }
 
-    auto h = embed_tokens_(tokens, context, work_space, 0);
-    auto cos_sin = atb_pos_emb_(
-        pos_emb_->get_cos_sin_cache(), positions, context, work_space, 0);
+    auto h = embed_tokens_(tokens, 0);
+    auto cos_sin = atb_pos_emb_(pos_emb_->get_cos_sin_cache(), positions, 0);
     auto cos_sin_chunks = cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = cos_sin_chunks[0].contiguous();
     auto sin_pos = cos_sin_chunks[1].contiguous();
@@ -199,12 +192,10 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
             attn_mask,
             kv_caches[i],
             input_params,
-            context,
-            work_space,
             event,
             event_flag);
     }
-    return norm_(h, context, work_space, 0);
+    return norm_(h, 0);
   }
 
   // load the weight from the checkpoint
@@ -274,16 +265,8 @@ TORCH_MODULE(DeepseekV2Model);
 
 class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
  public:
-  DeepseekV2ForCausalLMImpl(const Context& context) {
-    auto options = context.get_tensor_options();
-
+  DeepseekV2ForCausalLMImpl(const ModelContext& context) {
     model_ = register_module("model", DeepseekV2Model(context));
-    work_space_ = AtbWorkspace(options.device());
-    atb::CreateContext(&context_);
-    int32_t device_id = options.device().index();
-    void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
-    context_->SetExecuteStream(stream);
-    context_->SetAsyncTilingCopyStatus(true);
     lm_head_ = register_module("lm_head", LlmHead(context));
     first_k_dense_replace_ = context.get_model_args().first_k_dense_replace();
   }
@@ -295,8 +278,7 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
                         const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
-    return model_(
-        tokens, positions, kv_caches, input_params, context_, work_space_);
+    return model_(tokens, positions, kv_caches, input_params);
   }
 
   // hidden_states: [num_tokens, hidden_size]
@@ -304,7 +286,7 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
   // returns: [num_tokens, vocab_size]
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
-    return lm_head_(hidden_states, seleted_idxes, context_, work_space_, 0);
+    return lm_head_(hidden_states, seleted_idxes, 0);
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
@@ -344,8 +326,6 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
  private:
   DeepseekV2Model model_{nullptr};
   LlmHead lm_head_{nullptr};
-  AtbWorkspace work_space_;
-  atb::Context* context_;
   int32_t first_k_dense_replace_;
 };
 TORCH_MODULE(DeepseekV2ForCausalLM);

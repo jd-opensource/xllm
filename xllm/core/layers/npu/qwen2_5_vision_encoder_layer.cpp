@@ -53,7 +53,7 @@ static std::map<int, int> WEIGHT_SHARD = {
 };
 
 std::shared_ptr<Qwen2_5VisionEncoderImpl> create_qwen2_5_vision_encoder_layer(
-    const Context& context) {
+    const ModelContext& context) {
   return std::make_shared<Qwen2_5VisionEncoderImpl>(context);
 }
 
@@ -76,7 +76,7 @@ void Qwen2_5VisionEncoderImpl::param_from_args(
   param.enableLogN = false;
 }
 
-Qwen2_5VisionEncoderImpl::Qwen2_5VisionEncoderImpl(const Context& context)
+Qwen2_5VisionEncoderImpl::Qwen2_5VisionEncoderImpl(const ModelContext& context)
     : ATBBase(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
@@ -322,8 +322,6 @@ torch::Tensor Qwen2_5VisionEncoderImpl::forward(torch::Tensor& x,
                                                 torch::Tensor& cu_seqlen,
                                                 std::vector<int>& cu_seqlen_vec,
                                                 ModelInputParams& input_params,
-                                                atb::Context* context,
-                                                AtbWorkspace& workspace,
                                                 int node_id,
                                                 aclrtEvent* event,
                                                 std::atomic<bool>* event_flag) {
@@ -338,7 +336,7 @@ torch::Tensor Qwen2_5VisionEncoderImpl::forward(torch::Tensor& x,
                           input_params,
                           true);
   // mstxRangeEnd(id);
-  st = execute_node(encode_node_, context, workspace, node_id);
+  st = execute_node(encode_node_, node_id);
   LOG_IF(FATAL, st != 0) << model_name_
                          << "excute encode layer fail, error code: " << st;
   return x;
@@ -377,6 +375,6 @@ void Qwen2_5VisionEncoderImpl::build_node_variant_pack(
   node.variantPack.outTensors.at(0) = internal_tensors_;
 }
 
-Qwen2_5VisionEncoder::Qwen2_5VisionEncoder(const Context& context)
+Qwen2_5VisionEncoder::Qwen2_5VisionEncoder(const ModelContext& context)
     : ModuleHolder(create_qwen2_5_vision_encoder_layer(context)) {}
 }  // namespace xllm::hf

@@ -17,7 +17,7 @@ limitations under the License.
 
 namespace xllm {
 
-MultiheadAttentionImpl::MultiheadAttentionImpl(const Context& context)
+MultiheadAttentionImpl::MultiheadAttentionImpl(const ModelContext& context)
     : n_head_(context.get_model_args().n_heads()),
       head_dim_(context.get_model_args().head_dim()),
       hidden_size_(context.get_model_args().hidden_size()),

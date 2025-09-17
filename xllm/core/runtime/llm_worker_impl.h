@@ -41,9 +41,7 @@ class LLMWorkerImpl : public WorkerImpl {
   ~LLMWorkerImpl() override = default;
 
   // initialize model, cache manager. blocking call
-  bool init_model(torch::ScalarType dtype,
-                  const ModelArgs& args,
-                  const QuantArgs& quant_args) override;
+  bool init_model(ModelContext& context) override;
 
   std::optional<ForwardOutput> step(const ForwardInput& inputs) override;
 

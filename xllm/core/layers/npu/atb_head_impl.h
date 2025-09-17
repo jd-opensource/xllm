@@ -28,8 +28,8 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "atb_base.h"
-#include "framework/context.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
 #include "layers/npu/llm_head.h"
 #include "nlohmann/json.hpp"
 #include "pytorch/adapter/utils/utils.h"
@@ -47,7 +47,7 @@ class AtbLmHeadImpl : public LlmHeadImpl, public ATBBase {
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
 
-  explicit AtbLmHeadImpl(const Context& context);
+  explicit AtbLmHeadImpl(const ModelContext& context);
 
   ~AtbLmHeadImpl() {};
 
@@ -66,8 +66,6 @@ class AtbLmHeadImpl : public LlmHeadImpl, public ATBBase {
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& seleted_idxes,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
                         int nodeId) override;
 
   // void build_node_variant_pack(atb_speed::Model::Node& node, torch::Tensor&

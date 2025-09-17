@@ -29,8 +29,8 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "atb_base.h"
-#include "framework/context.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
 #include "pytorch/adapter/utils/utils.h"
@@ -47,7 +47,7 @@ class AtbLinearImpl : public torch::nn::Module, public ATBBase {
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
 
-  explicit AtbLinearImpl(const Context& context);
+  explicit AtbLinearImpl(const ModelContext& context);
 
   ~AtbLinearImpl() {};
 
@@ -59,10 +59,7 @@ class AtbLinearImpl : public torch::nn::Module, public ATBBase {
 
   int64_t init_layer();
 
-  torch::Tensor forward(const torch::Tensor& input,
-                        atb::Context* context,
-                        AtbWorkspace& workspace,
-                        int nodeId);
+  torch::Tensor forward(const torch::Tensor& input, int nodeId);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                const torch::Tensor& input);
@@ -83,9 +80,10 @@ class AtbLinear : public torch::nn::ModuleHolder<AtbLinearImpl> {
   using torch::nn::ModuleHolder<AtbLinearImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = AtbLinearImpl;
 
-  AtbLinear(const Context& context);
+  AtbLinear(const ModelContext& context);
 };
 
-std::shared_ptr<AtbLinearImpl> create_atb_linear_layer(const Context& context);
+std::shared_ptr<AtbLinearImpl> create_atb_linear_layer(
+    const ModelContext& context);
 
 }  // namespace xllm::hf

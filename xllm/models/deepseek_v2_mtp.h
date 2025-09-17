@@ -21,10 +21,10 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/context.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
+#include "core/framework/model_context.h"
 #include "core/framework/parallel_state.h"
 #include "core/layers/npu/atb_parallel_linear.h"
 #include "core/layers/npu/attn_mask.h"
@@ -45,7 +45,7 @@ namespace xllm::hf {
 
 class DeepseekV2MtpModelImpl : public torch::nn::Module {
  public:
-  DeepseekV2MtpModelImpl(const Context& context)
+  DeepseekV2MtpModelImpl(const ModelContext& context)
       : device_(context.get_tensor_options().device()) {
     blocks_ = register_module("layers", torch::nn::ModuleList());
 
@@ -110,9 +110,7 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
   torch::Tensor forward(torch::Tensor tokens,
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& work_space) {
+                        const ModelInputParams& input_params) {
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
@@ -120,8 +118,8 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
       }
     }
 
-    torch::Tensor h = embed_tokens_(tokens, context, work_space, 0);
-    torch::Tensor enorm = enorm_(h, context, work_space, 0);
+    torch::Tensor h = embed_tokens_(tokens, 0);
+    torch::Tensor enorm = enorm_(h, 0);
     const auto& res = input_params.mm_data.get<torch::Tensor>("embedding");
     if (res) {
       h = res.value();
@@ -129,14 +127,13 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
       LOG(WARNING) << "hnorm use embedding from tokens.";
     }
 
-    torch::Tensor hnorm = hnorm_(h, context, work_space, 0);
+    torch::Tensor hnorm = hnorm_(h, 0);
     CHECK_EQ(enorm.dim(), hnorm.dim());
     CHECK_EQ(enorm.size(0), hnorm.size(0));
     h = torch::cat({enorm, hnorm}, /*dim=*/-1);
-    h = eh_proj_(h, context, work_space, 0);
+    h = eh_proj_(h, 0);
 
-    auto cos_sin = atb_pos_emb_(
-        pos_emb_->get_cos_sin_cache(), positions, context, work_space, 0);
+    auto cos_sin = atb_pos_emb_(pos_emb_->get_cos_sin_cache(), positions, 0);
     auto cos_sin_chunks = cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = cos_sin_chunks[0].contiguous();
     auto sin_pos = cos_sin_chunks[1].contiguous();
@@ -158,12 +155,10 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
             attn_mask,
             kv_caches[i],
             input_params,
-            context,
-            work_space,
             event,
             event_flag);
     }
-    return final_norm_(h, context, work_space, 0);
+    return final_norm_(h, 0);
   }
 
   // load the weight from the checkpoint
@@ -234,17 +229,8 @@ TORCH_MODULE(DeepseekV2MtpModel);
 
 class DeepseekV2MtpForCausalLMImpl : public torch::nn::Module {
  public:
-  DeepseekV2MtpForCausalLMImpl(const Context& context) {
-    auto options = context.get_tensor_options();
-
+  DeepseekV2MtpForCausalLMImpl(const ModelContext& context) {
     model_ = register_module("model", DeepseekV2MtpModel(context));
-
-    work_space_ = AtbWorkspace(options.device());
-    atb::CreateContext(&context_);
-    int32_t device_id = options.device().index();
-    void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
-    context_->SetExecuteStream(stream);
-    context_->SetAsyncTilingCopyStatus(true);
     // lm_head_ = register_module(
     //     "lm_head", LlmHead(context));
   }
@@ -256,8 +242,7 @@ class DeepseekV2MtpForCausalLMImpl : public torch::nn::Module {
                         const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
-    return model_(
-        tokens, positions, kv_caches, input_params, context_, work_space_);
+    return model_(tokens, positions, kv_caches, input_params);
   }
 
   // hidden_states: [num_tokens, hidden_size]
@@ -266,7 +251,7 @@ class DeepseekV2MtpForCausalLMImpl : public torch::nn::Module {
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
     // select tokens if provided
-    return lm_head_(hidden_states, seleted_idxes, context_, work_space_, 0);
+    return lm_head_(hidden_states, seleted_idxes, 0);
   }
 
   // load model
@@ -302,8 +287,6 @@ class DeepseekV2MtpForCausalLMImpl : public torch::nn::Module {
  private:
   DeepseekV2MtpModel model_{nullptr};
   LlmHead lm_head_{nullptr};
-  AtbWorkspace work_space_;
-  atb::Context* context_;
 };
 TORCH_MODULE(DeepseekV2MtpForCausalLM);
 

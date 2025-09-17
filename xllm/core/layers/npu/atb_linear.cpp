@@ -23,11 +23,12 @@ limitations under the License.
 #include "xllm_kernels/operations/fusion/utils.h"
 
 namespace xllm::hf {
-std::shared_ptr<AtbLinearImpl> create_atb_linear_layer(const Context& context) {
+std::shared_ptr<AtbLinearImpl> create_atb_linear_layer(
+    const ModelContext& context) {
   return std::make_shared<AtbLinearImpl>(context);
 }
 
-AtbLinearImpl::AtbLinearImpl(const Context& context) : ATBBase(context) {
+AtbLinearImpl::AtbLinearImpl(const ModelContext& context) : ATBBase(context) {
   at_weight_tensors_.resize(1);
   atb_weight_tensors_.resize(1);
   at_out_tensors_.resize(1);
@@ -103,14 +104,11 @@ int64_t AtbLinearImpl::init_node(atb_speed::Model::Node& node) {
   return atb::NO_ERROR;
 }
 
-torch::Tensor AtbLinearImpl::forward(const torch::Tensor& input,
-                                     atb::Context* context,
-                                     AtbWorkspace& workspace,
-                                     int nodeId) {
+torch::Tensor AtbLinearImpl::forward(const torch::Tensor& input, int nodeId) {
   atb::Status st;
 
   build_node_variant_pack(linear_node_, input);
-  st = execute_node(linear_node_, context, workspace, nodeId);
+  st = execute_node(linear_node_, nodeId);
   LOG_IF(FATAL, st != 0) << model_name_
                          << "infer shape fail, error code: " << st;
 
@@ -156,7 +154,7 @@ void AtbLinearImpl::build_node_variant_pack(atb_speed::Model::Node& node,
       atb_speed::Utils::AtTensor2Tensor(at_out_tensors_.at(0));
 }
 
-AtbLinear::AtbLinear(const Context& context)
+AtbLinear::AtbLinear(const ModelContext& context)
     : ModuleHolder(create_atb_linear_layer(context)) {}
 
 }  // namespace xllm::hf

@@ -20,10 +20,10 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 
-#include "core/framework/context.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/causal_vlm.h"
 #include "core/framework/model/embedding_lm.h"
+#include "core/framework/model_context.h"
 #include "core/framework/parallel_state.h"
 #include "core/framework/tokenizer/tokenizer_args.h"
 #include "core/util/json_reader.h"
@@ -34,13 +34,13 @@ limitations under the License.
 namespace xllm {
 
 using CausalLMFactory =
-    std::function<std::unique_ptr<CausalLM>(const Context& context)>;
+    std::function<std::unique_ptr<CausalLM>(const ModelContext& context)>;
 
 using CausalVLMFactory =
-    std::function<std::unique_ptr<CausalVLM>(const Context& context)>;
+    std::function<std::unique_ptr<CausalVLM>(const ModelContext& context)>;
 
 using EmbeddingLMFactory =
-    std::function<std::unique_ptr<EmbeddingLM>(const Context& context)>;
+    std::function<std::unique_ptr<EmbeddingLM>(const ModelContext& context)>;
 
 using InputProcessorFactory =
     std::function<std::unique_ptr<InputProcessor>(const ModelArgs& args)>;
@@ -120,17 +120,18 @@ class ModelRegistry {
   std::unordered_map<std::string, ModelMeta> model_registry_;
 };
 
-std::unique_ptr<CausalLM> create_llm_model(const Context& context);
+std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context);
 
-std::unique_ptr<CausalVLM> create_vlm_model(const Context& context);
+std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context);
 
-std::unique_ptr<EmbeddingLM> create_embeddinglm_model(const Context& context);
+std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
+    const ModelContext& context);
 
 // Macro to register a model with the ModelRegistry
 #define REGISTER_CAUSAL_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
   const bool VarName##_registered = []() {                                 \
     ModelRegistry::register_causallm_factory(                              \
-        #ModelType, [](const Context& context) {                           \
+        #ModelType, [](const ModelContext& context) {                      \
           ModelClass model(context);                                       \
           model->eval();                                                   \
           return std::make_unique<xllm::CausalLMImpl<ModelClass>>(         \
@@ -145,7 +146,7 @@ std::unique_ptr<EmbeddingLM> create_embeddinglm_model(const Context& context);
 #define REGISTER_CAUSAL_VLM_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
   const bool VarName##_registered = []() {                                     \
     ModelRegistry::register_causalvlm_factory(                                 \
-        #ModelType, [](const Context& context) {                               \
+        #ModelType, [](const ModelContext& context) {                          \
           ModelClass model(context);                                           \
           model->eval();                                                       \
           return std::make_unique<xllm::CausalVLMImpl<ModelClass>>(            \
@@ -161,7 +162,7 @@ std::unique_ptr<EmbeddingLM> create_embeddinglm_model(const Context& context);
 #define REGISTER_EMBEDDING_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
   const bool VarName##_registered = []() {                                    \
     ModelRegistry::register_embeddinglm_factory(                              \
-        #ModelType, [](const Context& context) {                              \
+        #ModelType, [](const ModelContext& context) {                         \
           ModelClass model(context);                                          \
           model->eval();                                                      \
           return std::make_unique<xllm::EmbeddingLMImpl<ModelClass>>(         \

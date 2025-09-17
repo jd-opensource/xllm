@@ -174,7 +174,7 @@ TokenizerArgsLoader ModelRegistry::get_tokenizer_args_loader(
   return instance->model_registry_[name].tokenizer_args_loader;
 }
 
-std::unique_ptr<CausalLM> create_llm_model(const Context& context) {
+std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context) {
   // get the factory function for the model type from model registry
   auto factory = ModelRegistry::get_causallm_factory(
       context.get_model_args().model_type());
@@ -188,7 +188,7 @@ std::unique_ptr<CausalLM> create_llm_model(const Context& context) {
   return nullptr;
 }
 
-std::unique_ptr<CausalVLM> create_vlm_model(const Context& context) {
+std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context) {
   // get the factory function for the model type from model registry
   auto factory = ModelRegistry::get_causalvlm_factory(
       context.get_model_args().model_type());
@@ -202,7 +202,8 @@ std::unique_ptr<CausalVLM> create_vlm_model(const Context& context) {
   return nullptr;
 }
 
-std::unique_ptr<EmbeddingLM> create_embeddinglm_model(const Context& context) {
+std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
+    const ModelContext& context) {
   // get the factory function for the model type from model registry
   auto factory = ModelRegistry::get_embeddinglm_factory(
       context.get_model_args().model_type());

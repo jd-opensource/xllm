@@ -29,9 +29,9 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "buffer/atb_workspace.h"
-#include "framework/context.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "pytorch/adapter/workspace/workspace.h"
@@ -97,7 +97,7 @@ enum class LinearTypeV2 : int {
 
 class ATBBase {
  public:
-  ATBBase(const Context& context);
+  ATBBase(const ModelContext& context);
   virtual ~ATBBase() {};
 
   using Task = std::function<int()>;
@@ -132,8 +132,6 @@ class ATBBase {
   // void get_sharded(at::Tensor weight_tensor,int dim);
 
   atb::Status execute_node(atb_speed::Model::Node& node,
-                           atb::Context* context,
-                           AtbWorkspace& workspace,
                            int nodeId = 0,
                            aclrtEvent* event = nullptr,
                            std::atomic<bool>* event_flag = nullptr);
@@ -152,6 +150,7 @@ class ATBBase {
 
  protected:
   atb::Context* context_;
+  AtbWorkspace work_space_;
   std::vector<at::Tensor> at_weight_tensors_;
   std::vector<atb::Tensor> atb_weight_tensors_;
   at::Device device_;

@@ -251,7 +251,7 @@ static std::vector<std::string> LINEAR_FOR_ROPE = {
     "self_attn.kv_a_proj_with_mqa.deq_scale",
 };
 
-DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const Context& context,
+DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const ModelContext& context,
                                              const int32_t layer_id,
                                              const float sm_scale)
     : ATBBase(context),
@@ -1497,8 +1497,6 @@ torch::Tensor DeepseekV2DecoderImpl::forward(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     const ModelInputParams& input_params,
-    atb::Context* context,
-    AtbWorkspace& workspace,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     int node_id) {
@@ -1513,10 +1511,9 @@ torch::Tensor DeepseekV2DecoderImpl::forward(
                             kv_cache,
                             input_params,
                             true);
-    st = execute_node(
-        prefill_node_, context, workspace, node_id, event, event_flag);
+    st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute decode layer fail, error code: " << st;
+                           << "excute prefill layer fail, error code: " << st;
   } else {
     build_node_variant_pack(decode_node_,
                             x,
@@ -1526,8 +1523,7 @@ torch::Tensor DeepseekV2DecoderImpl::forward(
                             kv_cache,
                             input_params,
                             false);
-    st = execute_node(
-        decode_node_, context, workspace, node_id + 1000, event, event_flag);
+    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute decode layer fail, error code: " << st;
   }
@@ -1671,14 +1667,14 @@ void DeepseekV2DecoderImpl::build_node_variant_pack(
   }
 }
 
-DeepseekV2Decoder::DeepseekV2Decoder(const Context& context,
+DeepseekV2Decoder::DeepseekV2Decoder(const ModelContext& context,
                                      const int32_t layer_id,
                                      const float sm_scale)
     : ModuleHolder(
           create_deepseek_v2_decoder_layer(context, layer_id, sm_scale)) {}
 
 std::shared_ptr<DeepseekV2DecoderImpl> create_deepseek_v2_decoder_layer(
-    const Context& context,
+    const ModelContext& context,
     const int32_t layer_id,
     const float sm_scale) {
   return std::make_shared<DeepseekV2DecoderImpl>(context, layer_id, sm_scale);

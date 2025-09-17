@@ -16,8 +16,8 @@ limitations under the License.
 #pragma once
 #include <torch/torch.h>
 
-#include "framework/context.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "xllm_kernels/pytorch/atb_torch/core/include/base_operation.h"
 #include "xllm_kernels/pytorch/atb_torch/core/include/graph_operation.h"
@@ -26,7 +26,7 @@ namespace xllm::hf {
 
 class SiglipEncoderLayerUpImpl : public torch::nn::Module {
  public:
-  SiglipEncoderLayerUpImpl(const Context& context,
+  SiglipEncoderLayerUpImpl(const ModelContext& context,
                            const std::string& prefix = "");
 
   ~SiglipEncoderLayerUpImpl() {};
@@ -56,12 +56,13 @@ class SiglipEncoderLayerUp
   using torch::nn::ModuleHolder<SiglipEncoderLayerUpImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = SiglipEncoderLayerUpImpl;
 
-  SiglipEncoderLayerUp(const Context& context, const std::string& prefix = "");
+  SiglipEncoderLayerUp(const ModelContext& context,
+                       const std::string& prefix = "");
 };
 
 class SiglipEncoderLayerDownImpl : public torch::nn::Module {
  public:
-  SiglipEncoderLayerDownImpl(const Context& context,
+  SiglipEncoderLayerDownImpl(const ModelContext& context,
                              const std::string& prefix = "");
 
   ~SiglipEncoderLayerDownImpl() {};
@@ -91,13 +92,13 @@ class SiglipEncoderLayerDown
   using torch::nn::ModuleHolder<SiglipEncoderLayerDownImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = SiglipEncoderLayerDownImpl;
 
-  SiglipEncoderLayerDown(const Context& context,
+  SiglipEncoderLayerDown(const ModelContext& context,
                          const std::string& prefix = "");
 };
 
 class SiglipEncoderLayerImpl : public torch::nn::Module {
  public:
-  SiglipEncoderLayerImpl(const Context& context,
+  SiglipEncoderLayerImpl(const ModelContext& context,
                          const std::string& prefix = "");
 
   ~SiglipEncoderLayerImpl() {};
@@ -124,7 +125,8 @@ class SiglipEncoderLayer
   using torch::nn::ModuleHolder<SiglipEncoderLayerImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = SiglipEncoderLayerImpl;
 
-  SiglipEncoderLayer(const Context& context, const std::string& prefix = "");
+  SiglipEncoderLayer(const ModelContext& context,
+                     const std::string& prefix = "");
 };
 
 }  // namespace xllm::hf

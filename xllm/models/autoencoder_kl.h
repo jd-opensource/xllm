@@ -14,7 +14,7 @@
 
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
-#include "framework/context.h"
+#include "framework/model_context.h"
 #include "model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
@@ -1698,7 +1698,7 @@ struct DecoderOutput {
 // This class is used to encode images into latent representations.
 class VAEEncoderImpl : public torch::nn::Module {
  public:
-  VAEEncoderImpl(const Context& context) {
+  VAEEncoderImpl(const ModelContext& context) {
     ModelArgs args = context.get_model_args();
     down_blocks_ = register_module("down_blocks", torch::nn::ModuleList());
     conv_in_ = register_module(
@@ -1855,7 +1855,7 @@ TORCH_MODULE(VAEEncoder);
 //  This class is used to decode the latent representations into images.
 class VAEDecoderImpl : public torch::nn::Module {
  public:
-  VAEDecoderImpl(const Context& context) {
+  VAEDecoderImpl(const ModelContext& context) {
     ModelArgs args = context.get_model_args();
     up_blocks_ = register_module("up_blocks", torch::nn::ModuleList());
     conv_in_ = register_module(
@@ -2020,7 +2020,9 @@ TORCH_MODULE(VAEDecoder);
 // VAE implementation, including encoder and decoder
 class VAEImpl : public torch::nn::Module {
  public:
-  VAEImpl(const Context& context, torch::Device device, torch::ScalarType dtype)
+  VAEImpl(const ModelContext& context,
+          torch::Device device,
+          torch::ScalarType dtype)
       : args_(context.get_model_args()), device_(device), dtype_(dtype) {
     encoder_ = register_module("encoder", VAEEncoder(context));
     decoder_ = register_module("decoder", VAEDecoder(context));

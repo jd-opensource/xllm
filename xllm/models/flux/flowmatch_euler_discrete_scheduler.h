@@ -145,7 +145,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   int max_image_seq_len() { return max_image_seq_len_.value(); }
   float base_shift() { return base_shift_.value(); }
   float max_shift() { return max_shift_.value(); }
-  FlowMatchEulerDiscreteSchedulerImpl(const Context& context)
+  FlowMatchEulerDiscreteSchedulerImpl(const ModelContext& context)
       : args(context.get_model_args()),
         num_train_timesteps_(args.scheduler_num_train_timesteps()),
         shift_(args.scheduler_shift()),

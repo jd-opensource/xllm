@@ -11,7 +11,7 @@
 
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
-#include "framework/context.h"
+#include "framework/model_context.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
@@ -1984,7 +1984,7 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
 TORCH_MODULE(FluxTransformer2DModel);
 class DiTModelImpl : public torch::nn::Module {
  public:
-  DiTModelImpl(const Context& context,
+  DiTModelImpl(const ModelContext& context,
                torch::Device device,
                torch::ScalarType dtype)
       : args_(context.get_model_args()), device_(device), dtype_(dtype) {

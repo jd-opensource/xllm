@@ -109,7 +109,7 @@ static std::map<int, int> WEIGHT_SHARD_W8A8 = {{IN_Q_WEIGHT, 0},
                                                {IN_MLP_CPROJ_WEIGHT, 1}};
 
 std::shared_ptr<Qwen2DecoderImpl> create_qwen2_decode_layer(
-    const Context& context) {
+    const ModelContext& context) {
   return std::make_shared<Qwen2DecoderImpl>(context);
 }
 
@@ -158,7 +158,8 @@ void Qwen2DecoderImpl::param_from_args(
   param.enableLogN = false;
 }
 
-Qwen2DecoderImpl::Qwen2DecoderImpl(const Context& context) : ATBBase(context) {
+Qwen2DecoderImpl::Qwen2DecoderImpl(const ModelContext& context)
+    : ATBBase(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -403,8 +404,6 @@ torch::Tensor Qwen2DecoderImpl::forward(torch::Tensor& x,
                                         torch::Tensor& attn_mask,
                                         KVCache& kv_cache,
                                         ModelInputParams& input_params,
-                                        atb::Context* context,
-                                        AtbWorkspace& workspace,
                                         aclrtEvent* event,
                                         std::atomic<bool>* event_flag,
                                         int node_id) {
@@ -422,10 +421,9 @@ torch::Tensor Qwen2DecoderImpl::forward(torch::Tensor& x,
                             input_params,
                             true);
     // mstxRangeEnd(id);
-    st = execute_node(
-        prefill_node_, context, workspace, node_id, event, event_flag);
+    st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute decode layer fail, error code: " << st;
+                           << "excute prefill layer fail, error code: " << st;
   } else {
     build_node_variant_pack(decode_node_,
                             x,
@@ -435,8 +433,7 @@ torch::Tensor Qwen2DecoderImpl::forward(torch::Tensor& x,
                             kv_cache,
                             input_params,
                             false);
-    st = execute_node(
-        decode_node_, context, workspace, node_id + 1000, event, event_flag);
+    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute decode layer fail, error code: " << st;
   }
@@ -496,7 +493,7 @@ void Qwen2DecoderImpl::build_node_variant_pack(atb_speed::Model::Node& node,
   node.variantPack.outTensors.at(0) = internal_tensors_;
 }
 
-Qwen2Decoder::Qwen2Decoder(const Context& context)
+Qwen2Decoder::Qwen2Decoder(const ModelContext& context)
     : ModuleHolder(create_qwen2_decode_layer(context)) {}
 
 }  // namespace xllm::hf

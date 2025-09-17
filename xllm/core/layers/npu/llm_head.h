@@ -17,7 +17,7 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "buffer/atb_workspace.h"
-#include "framework/context.h"
+#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 
 namespace xllm::hf {
@@ -34,8 +34,6 @@ class LlmHeadImpl : public torch::nn::Module {
 
   virtual torch::Tensor forward(const torch::Tensor& hidden_states,
                                 const torch::Tensor& seleted_idxes,
-                                atb::Context* context,
-                                AtbWorkspace& workspace,
                                 int nodeId) = 0;
 };
 
@@ -44,9 +42,9 @@ class LlmHead : public torch::nn::ModuleHolder<LlmHeadImpl> {
   using torch::nn::ModuleHolder<LlmHeadImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = LlmHeadImpl;
 
-  LlmHead(const Context& context);
+  LlmHead(const ModelContext& context);
 };
 
-std::shared_ptr<LlmHeadImpl> create_llm_head_layer(const Context& context);
+std::shared_ptr<LlmHeadImpl> create_llm_head_layer(const ModelContext& context);
 
 }  // namespace xllm::hf

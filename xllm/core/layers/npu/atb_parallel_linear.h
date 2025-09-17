@@ -29,8 +29,8 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "atb_base.h"
-#include "framework/context.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
 #include "pytorch/adapter/utils/utils.h"
@@ -50,7 +50,7 @@ class AtbColumnParallelLinearImpl : public torch::nn::Module, public ATBBase {
   using RunTaskFunc =
       std::function<void(const std::string& taskName, Task task)>;
 
-  AtbColumnParallelLinearImpl(const Context& context);
+  AtbColumnParallelLinearImpl(const ModelContext& context);
 
   ~AtbColumnParallelLinearImpl() {};
 
@@ -66,10 +66,7 @@ class AtbColumnParallelLinearImpl : public torch::nn::Module, public ATBBase {
 
   int64_t init_layer();
 
-  virtual torch::Tensor forward(const torch::Tensor& input,
-                                atb::Context* context,
-                                AtbWorkspace& workspace,
-                                int nodeId);
+  virtual torch::Tensor forward(const torch::Tensor& input, int nodeId);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                const torch::Tensor& input);
@@ -95,9 +92,9 @@ class AtbColumnParallelLinear
   using torch::nn::ModuleHolder<AtbColumnParallelLinearImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = AtbColumnParallelLinearImpl;
 
-  AtbColumnParallelLinear(const Context& context);
+  AtbColumnParallelLinear(const ModelContext& context);
 };
 
 std::shared_ptr<AtbColumnParallelLinearImpl>
-create_atb_column_parallel_linear_layer(const Context& context);
+create_atb_column_parallel_linear_layer(const ModelContext& context);
 }  // namespace xllm::hf

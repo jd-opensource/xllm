@@ -20,10 +20,11 @@ limitations under the License.
 namespace xllm::hf {
 static std::atomic<bool> g_executeOk(true);
 
-ATBBase::ATBBase(const Context& context)
+ATBBase::ATBBase(const ModelContext& context)
     : device_(context.get_tensor_options().device()),
       name_(""),
       parallel_args_(context.get_parallel_args()) {
+  context_ = const_cast<atb::Context*>(context.get_atb_context());
   auto quant_args = context.get_quant_args();
   if (!quant_args.quantize_type().empty()) {
     quantize_type_ = quant_args.quantize_type();
@@ -38,6 +39,8 @@ ATBBase::ATBBase(const Context& context)
   dp_rank_ = parallel_args_.rank() / dp_local_tp_size_;
   CHECK_EQ(parallel_args_.world_size(), dp_size_ * dp_local_tp_size_);
   dp_local_tp_rank_ = parallel_args_.rank() % dp_local_tp_size_;
+
+  work_space_ = AtbWorkspace(device_);
 
   runTaskFunc_ = std::bind(
       &ATBBase::run_task, this, std::placeholders::_1, std::placeholders::_2);
@@ -195,8 +198,6 @@ void ATBBase::run_task(std::string taskName, std::function<int()> task) const {
 }
 
 atb::Status ATBBase::execute_node(atb_speed::Model::Node& node,
-                                  atb::Context* context,
-                                  AtbWorkspace& workspace,
                                   int nodeId,
                                   aclrtEvent* event,
                                   std::atomic<bool>* event_flag) {
@@ -208,7 +209,7 @@ atb::Status ATBBase::execute_node(atb_speed::Model::Node& node,
        << std::endl;
     throw std::runtime_error(ss.str());
   }
-  context_ = context;
+
   atb::Status st =
       node.operation->Setup(node.variantPack, node.workspaceSize, context_);
   if (st != 0) {
@@ -217,7 +218,7 @@ atb::Status ATBBase::execute_node(atb_speed::Model::Node& node,
   }
 
   if (node.workspaceSize > 0) {
-    node.workspace = workspace.GetWorkspaceBuffer(node.workspaceSize);
+    node.workspace = work_space_.GetWorkspaceBuffer(node.workspaceSize);
   }
 
   runTaskFunc_(name_ + std::to_string(nodeId), [=]() {

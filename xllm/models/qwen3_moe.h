@@ -17,8 +17,8 @@ limitations under the License.
 
 #include <boost/algorithm/string.hpp>
 
-#include "core/framework/context.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
+#include "core/framework/model_context.h"
 #include "core/layers/npu/qwen3_moe_decoder_layer.h"
 #include "qwen_base.h"
 
@@ -29,7 +29,7 @@ using ISlice = torch::indexing::Slice;
 
 class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
  public:
-  Qwen3MoeDecoderLayerImpl(const Context& context, const int32_t i) {
+  Qwen3MoeDecoderLayerImpl(const ModelContext& context, const int32_t i) {
     // register submodules
     decoder_layer_ =
         register_module("decoder_layer", Qwen3MoeDecoder(context, i));
@@ -41,8 +41,6 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor attn_mask,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& work_space,
                         torch::Tensor expert_array,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr) {
@@ -52,8 +50,6 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                           attn_mask,
                           kv_cache,
                           input_params,
-                          context,
-                          work_space,
                           expert_array,
                           event,
                           event_flag);
@@ -84,7 +80,7 @@ torch::Tensor get_qwen3_moe_rotary_embedding(
 
 class Qwen3MoeModelImpl : public torch::nn::Module {
  public:
-  Qwen3MoeModelImpl(const Context& context)
+  Qwen3MoeModelImpl(const ModelContext& context)
       : device_(context.get_tensor_options().device()) {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
@@ -135,9 +131,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   torch::Tensor forward(torch::Tensor tokens,
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& work_space) {
+                        const ModelInputParams& input_params) {
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
@@ -145,14 +139,13 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
     }
 
-    auto h = embed_tokens_(tokens, context, work_space, 0);
+    auto h = embed_tokens_(tokens, 0);
     int64_t input_length = tokens.size(0);
     torch::Tensor expert_array = torch::arange(
         0,
         input_length * num_experts_per_tok_,
         torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
-    auto target_cos_sin =
-        atb_pos_emb_(cos_sin_, positions, context, work_space, 0);
+    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
@@ -179,13 +172,11 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
             attn_mask,
             kv_caches[i],
             input_params,
-            context,
-            work_space,
             expert_array,
             event,
             event_flag);
     }
-    return norm_(h, context, work_space, 0);
+    return norm_(h, 0);
   }
 
   // load the weight from the checkpoint
@@ -246,16 +237,8 @@ TORCH_MODULE(Qwen3MoeModel);
 
 class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
  public:
-  Qwen3MoeForCausalLMImpl(const Context& context) {
-    auto options = context.get_tensor_options();
-
+  Qwen3MoeForCausalLMImpl(const ModelContext& context) {
     model_ = register_module("model", Qwen3MoeModel(context));
-    work_space_ = AtbWorkspace(options.device());
-    atb::CreateContext(&context_);
-    int32_t device_id = options.device().index();
-    void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
-    context_->SetExecuteStream(stream);
-    context_->SetAsyncTilingCopyStatus(true);
     lm_head_ = register_module("lm_head", LlmHead(context));
   }
 
@@ -266,8 +249,7 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
                         const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
-    return model_(
-        tokens, positions, kv_caches, input_params, context_, work_space_);
+    return model_(tokens, positions, kv_caches, input_params);
   }
 
   // hidden_states: [num_tokens, hidden_size]
@@ -277,7 +259,7 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
                        const torch::Tensor& seleted_idxes) {
     // select tokens if provided
     auto h = hidden_states;
-    return lm_head_(hidden_states, seleted_idxes, context_, work_space_, 0);
+    return lm_head_(hidden_states, seleted_idxes, 0);
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
@@ -313,8 +295,6 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
  private:
   Qwen3MoeModel model_{nullptr};
   LlmHead lm_head_{nullptr};
-  AtbWorkspace work_space_;
-  atb::Context* context_;
 };
 TORCH_MODULE(Qwen3MoeForCausalLM);
 

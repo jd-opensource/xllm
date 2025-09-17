@@ -42,7 +42,7 @@ void AtbWordEmbeddingImpl::param_from_args(
   // param.tensorParallelInfo.rankTableFile = FLAGS_rank_tablefile;
 }
 
-AtbWordEmbeddingImpl::AtbWordEmbeddingImpl(const Context& context)
+AtbWordEmbeddingImpl::AtbWordEmbeddingImpl(const ModelContext& context)
     : ATBBase(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
@@ -116,13 +116,11 @@ int64_t AtbWordEmbeddingImpl::init_node(
 }
 
 torch::Tensor AtbWordEmbeddingImpl::forward(const torch::Tensor& x,
-                                            atb::Context* context,
-                                            AtbWorkspace& workspace,
                                             int nodeId) {
   atb::Status st;
   // std::cout<<"x:"<<x<<std::endl;
   build_node_variant_pack(embedding_node_, x);
-  st = execute_node(embedding_node_, context, workspace, nodeId);
+  st = execute_node(embedding_node_, nodeId);
   LOG_IF(FATAL, st != 0) << modelName_
                          << "infer shape fail, error code: " << st;
   return atOutTensors_.at(0);

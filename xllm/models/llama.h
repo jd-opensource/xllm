@@ -22,10 +22,10 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "core/common/global_flags.h"
-#include "core/framework/context.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model_context.h"
 #include "core/framework/parallel_state.h"
 #include "core/layers/npu/attn_mask.h"
 #include "core/layers/npu/llama_decoder_layer.h"
@@ -41,7 +41,7 @@ namespace xllm::hf {
 
 class LlamaDecoderLayerImpl : public torch::nn::Module {
  public:
-  LlamaDecoderLayerImpl(const Context& context) {
+  LlamaDecoderLayerImpl(const ModelContext& context) {
     // register submodules
     decoder_layer_ = register_module("decoder_layer", LlamaDecoder(context));
   }
@@ -52,18 +52,9 @@ class LlamaDecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
                         ModelInputParams& input_params,
-                        atb::Context* context,
-                        AtbWorkspace& work_space,
                         int node_id) {
-    return decoder_layer_(x,
-                          cos_pos,
-                          sin_pos,
-                          attn_mask,
-                          kv_cache,
-                          input_params,
-                          context,
-                          work_space,
-                          node_id);
+    return decoder_layer_(
+        x, cos_pos, sin_pos, attn_mask, kv_cache, input_params, node_id);
   }
 
   // load the weight from the checkpoint
@@ -116,13 +107,13 @@ std::tuple<torch::Tensor, torch::Tensor> get_llama_rotary_embedding(
 
 class LlamaModelImpl : public torch::nn::Module {
  public:
-  LlamaModelImpl(const Context& context) {
+  LlamaModelImpl(const ModelContext& context) {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
     // register submodules
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(context.get_model_args().n_layers());
-    work_space_ = AtbWorkspace(options.device());
+
     embed_tokens_ = register_module("embed_tokens", AtbWordEmbedding(context));
     norm_ = register_module("norm", RmsNorm(context));
 
@@ -140,14 +131,6 @@ class LlamaModelImpl : public torch::nn::Module {
                                    options.dtype().toScalarType(),
                                    /*mask_value=*/mask_value);
     max_seq_len_ = 0;
-    atb::Status st = atb::CreateContext(&context_);
-    LOG_IF(ERROR, st != 0) << "ContextFactory create atb::Context fail";
-    device_id_ = options.device().index();
-    void* stream = c10_npu::getCurrentNPUStream(device_id_).stream();
-    LOG_IF(ERROR, stream == nullptr) << "get current stream fail";
-    // context_->SetExecuteStream(atb_speed::Utils::GetCurrentStream());
-    context_->SetExecuteStream(stream);
-    context_->SetAsyncTilingCopyStatus(true);
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
       auto block = LlamaDecoderLayer(context);
@@ -163,7 +146,7 @@ class LlamaModelImpl : public torch::nn::Module {
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
     // test
-    torch::Tensor h = embed_tokens_(tokens, context_, work_space_, 0);
+    torch::Tensor h = embed_tokens_(tokens, 0);
     // auto h = embed_tokens_(tokens);
     auto cos_pos = cos_pos_.index_select(0, positions);
     auto sin_pos = sin_pos_.index_select(0, positions);
@@ -196,17 +179,9 @@ class LlamaModelImpl : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
 
-      layer(h,
-            cos_pos,
-            sin_pos,
-            attn_mask,
-            kv_caches[i],
-            input_params_new,
-            context_,
-            work_space_,
-            i);
+      layer(h, cos_pos, sin_pos, attn_mask, kv_caches[i], input_params_new, i);
     }
-    h = norm_(h, context_, work_space_, 0);
+    h = norm_(h, 0);
     return h;
   }
 
@@ -249,10 +224,8 @@ class LlamaModelImpl : public torch::nn::Module {
  private:
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
-  atb::Context* context_;
   int max_seq_len_ = 0;
   int device_id_ = 0;
-  AtbWorkspace work_space_;
   AttentionMaskImpl attn_mask_;
   AtbWordEmbedding embed_tokens_{nullptr};
   RmsNorm norm_{nullptr};
@@ -265,17 +238,12 @@ TORCH_MODULE(LlamaModel);
 
 class LlamaForCausalLMImpl : public torch::nn::Module {
  public:
-  LlamaForCausalLMImpl(const Context& context) {
+  LlamaForCausalLMImpl(const ModelContext& context) {
     auto options = context.get_tensor_options();
 
     // register submodules
     model_ = register_module("model", LlamaModel(context));
     device_id_ = options.device().index();
-    work_space_ = AtbWorkspace(options.device());
-    atb::Status st = atb::CreateContext(&context_);
-    void* stream = c10_npu::getCurrentNPUStream(device_id_).stream();
-    context_->SetExecuteStream(stream);
-    context_->SetAsyncTilingCopyStatus(true);
     lm_head_ = register_module("lm_head", LlmHead(context));
   }
   // tokens: [num_tokens]
@@ -293,7 +261,7 @@ class LlamaForCausalLMImpl : public torch::nn::Module {
   // returns: [num_tokens, vocab_size]
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
-    return lm_head_(hidden_states, seleted_idxes, context_, work_space_, 0);
+    return lm_head_(hidden_states, seleted_idxes, 0);
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
@@ -331,8 +299,6 @@ class LlamaForCausalLMImpl : public torch::nn::Module {
   LlamaModel model_{nullptr};
   int device_id_ = 0;
   LlmHead lm_head_{nullptr};
-  AtbWorkspace work_space_;
-  atb::Context* context_;
 };
 TORCH_MODULE(LlamaForCausalLM);
 
