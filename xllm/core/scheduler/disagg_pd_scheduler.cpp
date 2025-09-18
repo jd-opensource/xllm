@@ -77,7 +77,9 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
   instance_info_.dp_size = options.dp_size();
 
   // profile ttft and update instance info
-  profile_ttft();
+  if (options_.instance_role().value() != InstanceRole::DECODE) {
+    profile_ttft();
+  }
 }
 
 DisaggPDScheduler::~DisaggPDScheduler() {
