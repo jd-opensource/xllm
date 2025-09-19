@@ -112,7 +112,7 @@ class WorkerClient {
 
   // for multi-node serving, we pass an non-tensor params to remote workers.
   virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_async(
-      const RawForwardInput& inputs);
+      const std::vector<RawForwardInput>& inputs);
 
   virtual folly::SemiFuture<folly::Unit> process_group_test_async();
 

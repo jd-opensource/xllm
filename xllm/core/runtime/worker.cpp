@@ -102,7 +102,10 @@ ForwardInput Worker::prepare_inputs(Batch& batch) {
 }
 
 std::optional<ForwardOutput> Worker::step(const ForwardInput& inputs) {
-  return impl_->step(inputs);
+  // TODO to adapt multi stream parallel later
+  BatchedForwardInputs batched_inputs;
+  batched_inputs.micro_inputs = {std::move(inputs)};
+  return impl_->step(batched_inputs);
 }
 
 const bool Worker::is_driver() { return impl_->is_driver(); }
@@ -113,7 +116,7 @@ Worker::estimate_kv_cache_capacity_async() {
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
-    const ForwardInput& inputs) {
+    const BatchedForwardInputs& inputs) {
   return impl_->step_async(inputs);
 }
 

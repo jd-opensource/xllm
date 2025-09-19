@@ -102,10 +102,12 @@ class WorkerImpl {
   virtual ForwardInput prepare_inputs(Batch& batch);
 
   // prepare work before model execution
-  virtual void prepare_work_before_execute(const ForwardInput& inputs,
-                                           ForwardInput& processed_inputs);
+  virtual void prepare_work_before_execute(
+      const BatchedForwardInputs& inputs,
+      BatchedForwardInputs& processed_inputs);
 
-  virtual std::optional<ForwardOutput> step(const ForwardInput& inputs) = 0;
+  virtual std::optional<ForwardOutput> step(
+      const BatchedForwardInputs& inputs) = 0;
 
   virtual void process_group_test();
 
@@ -146,7 +148,7 @@ class WorkerImpl {
   // Run the model on the given input. async call
   // the future returns a successfull status with no meaningful value
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
-      const ForwardInput& inputs);
+      const BatchedForwardInputs& inputs);
 
   virtual folly::SemiFuture<folly::Unit> process_group_test_async();
 

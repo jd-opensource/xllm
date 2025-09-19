@@ -106,7 +106,7 @@ class Worker {
   // Run the model on the given input. async call
   // the future returns a successfull status with no meaningful value
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
-      const ForwardInput& inputs);
+      const BatchedForwardInputs& inputs);
 
   folly::SemiFuture<folly::Unit> process_group_test_async();
 

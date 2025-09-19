@@ -517,9 +517,8 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // update dp related global paramters and then execute model
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     auto dp_rank = worker_rank / dp_local_tp_size_;
-    // temporarily use dimension[0], will adapted in later pr
     futures.emplace_back(worker_clients_[worker_rank]->step_async(
-        batched_raw_forward_inputs[dp_rank][0]));
+        batched_raw_forward_inputs[dp_rank]));
   }
 
   // wait for the all future to complete

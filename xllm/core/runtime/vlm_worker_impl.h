@@ -42,7 +42,8 @@ class VLMWorkerImpl : public WorkerImpl {
   // initialize model, cache manager. blocking call
   bool init_model(ModelContext& context) override;
 
-  std::optional<ForwardOutput> step(const ForwardInput& inputs) override;
+  std::optional<ForwardOutput> step(
+      const BatchedForwardInputs& inputs) override;
 };
 
 }  // namespace xllm

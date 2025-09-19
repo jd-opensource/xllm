@@ -72,18 +72,21 @@ bool VLMWorkerImpl::init_model(ModelContext& context) {
   return true;
 }
 
-std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& inputs) {
+std::optional<ForwardOutput> VLMWorkerImpl::step(
+    const BatchedForwardInputs& inputs) {
 #if defined(USE_NPU)
   c10_npu::SetDevice(device_.index());
 #elif defined(USE_MLU)
   // TODO(mlu): implement mlu set device
 #endif
   Timer timer;
+  // TODO guojinrong, to adapt multi stream parallel later
   // all tensors should be on the same device as model
-  auto flatten_tokens = inputs.token_ids.to(device_);
-  auto flatten_positions = inputs.positions.to(device_);
-  auto params = inputs.input_params.to(device_);
-  auto sampling_params = inputs.sampling_params.to(device_, dtype_);
+  auto flatten_tokens = inputs.micro_inputs[0].token_ids.to(device_);
+  auto flatten_positions = inputs.micro_inputs[0].positions.to(device_);
+  auto params = inputs.micro_inputs[0].input_params.to(device_);
+  auto sampling_params =
+      inputs.micro_inputs[0].sampling_params.to(device_, dtype_);
 
   // call model executor forward to get hidden states
   auto hidden_states = model_executor_->forward(

@@ -360,67 +360,77 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
   return inputs;
 }
 
-void WorkerImpl::prepare_work_before_execute(const ForwardInput& inputs,
-                                             ForwardInput& processed_inputs) {
+void WorkerImpl::prepare_work_before_execute(
+    const BatchedForwardInputs& inputs,
+    BatchedForwardInputs& processed_inputs) {
 #if defined(USE_NPU)
   c10::StreamGuard streamGuard(npu_stream_helper_->H2D_memcpy_stream.unwrap());
-  processed_inputs = inputs.to(device_, dtype_);
 
-  auto& input_params = processed_inputs.input_params;
-  if (input_params.copy_out_blocks.size() > 0 ||
-      input_params.copy_in_blocks.size() > 0) {
-    const int64_t num_layers = context_.get_model_args().n_layers();
-    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-      auto key_cache = kv_caches_[layer_id].get_k_cache();
-      auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
-      auto value_cache = kv_caches_[layer_id].get_v_cache();
-      auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
+  for (auto i = 0; i < inputs.micro_inputs.size(); ++i) {
+    ForwardInput fwd_inputs_on_device;
+    fwd_inputs_on_device = inputs.micro_inputs[i].to(device_, dtype_);
+    auto& input_params = fwd_inputs_on_device.input_params;
+    if (input_params.copy_out_blocks.size() > 0 ||
+        input_params.copy_in_blocks.size() > 0) {
+      const int64_t num_layers = context_.get_model_args().n_layers();
+      for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+        auto key_cache = kv_caches_[layer_id].get_k_cache();
+        auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
+        auto value_cache = kv_caches_[layer_id].get_v_cache();
+        auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
 
-      for (auto block_info : input_params.copy_out_blocks) {
-        host_k_cache[block_info.host_block_id].copy_(
-            key_cache[block_info.device_block_id]);
-        host_v_cache[block_info.host_block_id].copy_(
-            value_cache[block_info.device_block_id]);
+        for (auto block_info : input_params.copy_out_blocks) {
+          host_k_cache[block_info.host_block_id].copy_(
+              key_cache[block_info.device_block_id]);
+          host_v_cache[block_info.host_block_id].copy_(
+              value_cache[block_info.device_block_id]);
+        }
+        for (auto block_info : input_params.copy_in_blocks) {
+          key_cache[block_info.device_block_id].copy_(
+              host_k_cache[block_info.host_block_id]);
+          value_cache[block_info.device_block_id].copy_(
+              host_v_cache[block_info.host_block_id]);
+        }
       }
-      for (auto block_info : input_params.copy_in_blocks) {
-        key_cache[block_info.device_block_id].copy_(
-            host_k_cache[block_info.host_block_id]);
-        value_cache[block_info.device_block_id].copy_(
-            host_v_cache[block_info.host_block_id]);
+
+      offload_kv_blocks_to_store_async(
+          inputs.micro_inputs[i].input_params.copy_out_blocks);
+
+      if (input_params.swap_blocks.size() > 0) {
+        const int64_t num_layers = context_.get_model_args().n_layers();
+        for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+          kv_caches_[layer_id].swap_blocks(input_params.swap_blocks);
+        }
       }
     }
 
-    offload_kv_blocks_to_store_async(inputs.input_params.copy_out_blocks);
-  }
-
-  if (input_params.swap_blocks.size() > 0) {
-    const int64_t num_layers = context_.get_model_args().n_layers();
-    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-      kv_caches_[layer_id].swap_blocks(input_params.swap_blocks);
+    if (!context_.get_parallel_args().mapping_data().empty()) {
+      torch::Tensor token_size_per_dp_group =
+          torch::tensor(fwd_inputs_on_device.input_params.dp_global_token_nums,
+                        torch::TensorOptions()
+                            .device(torch::kCPU)
+                            .dtype(torch::kInt32)
+                            .pinned_memory(true));
+      bool is_prefill = fwd_inputs_on_device.input_params.global_empty_kv_cache
+                            ? true
+                            : false;
+      DpEpPadding dp_ep_padding(token_size_per_dp_group,
+                                context_.get_model_args().num_experts_per_tok(),
+                                context_.get_parallel_args().mapping_data(),
+                                device_,
+                                dtype_,
+                                is_prefill);
+      fwd_inputs_on_device.input_params.dp_ep_padding_data =
+          dp_ep_padding.build();
+      if (FLAGS_enable_eplb) {
+        // expert_load_data_.fill_(0);
+        fwd_inputs_on_device.input_params.expert_load_data = expert_load_data_;
+      }
     }
+    processed_inputs.micro_inputs.push_back(std::move(fwd_inputs_on_device));
   }
-
-  if (!context_.get_parallel_args().mapping_data().empty()) {
-    torch::Tensor token_size_per_dp_group =
-        torch::tensor(processed_inputs.input_params.dp_global_token_nums,
-                      torch::TensorOptions()
-                          .device(torch::kCPU)
-                          .dtype(torch::kInt32)
-                          .pinned_memory(true));
-    bool is_prefill =
-        processed_inputs.input_params.global_empty_kv_cache ? true : false;
-    DpEpPadding dp_ep_padding(token_size_per_dp_group,
-                              context_.get_model_args().num_experts_per_tok(),
-                              context_.get_parallel_args().mapping_data(),
-                              device_,
-                              dtype_,
-                              is_prefill);
-    processed_inputs.input_params.dp_ep_padding_data = dp_ep_padding.build();
-    if (FLAGS_enable_eplb) {
-      // expert_load_data_.fill_(0);
-      processed_inputs.input_params.expert_load_data = expert_load_data_;
-    }
-  }
+  processed_inputs.concated_sampling_params =
+      inputs.concated_sampling_params.to(device_, dtype_);
   aclrtSynchronizeStream(npu_stream_helper_->H2D_memcpy_stream.stream());
 #endif
 }
@@ -466,25 +476,39 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
 }
 
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
-    const ForwardInput& inputs) {
-  ForwardInput forward_inputs_on_device;
-  prepare_work_before_execute(inputs, forward_inputs_on_device);
+    const BatchedForwardInputs& inputs) {
+  BatchedForwardInputs batched_inputs_on_device;
+  batched_inputs_on_device.micro_inputs.reserve(inputs.micro_inputs.size());
+
+  prepare_work_before_execute(inputs, batched_inputs_on_device);
 
   folly::Promise<std::optional<ForwardOutput>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this,
-                        inputs = forward_inputs_on_device,
+                        inputs = std::move(batched_inputs_on_device),
                         promise = std::move(promise)]() mutable {
     // run the model on the given input in working thread
-    auto copy_future = copy_out_blocks_async(inputs.input_params);
+    std::vector<folly::SemiFuture<bool>> copy_futures;
+    for (auto& input : inputs.micro_inputs) {
+      copy_futures.push_back(
+          std::move(copy_out_blocks_async(input.input_params)));
+    }
     if (!enable_schedule_overlap()) {
       const auto output = this->step(inputs);
-      std::move(copy_future).get();
+      std::for_each(copy_futures.begin(),
+                    copy_futures.end(),
+                    [](folly::SemiFuture<bool>& copy_future) {
+                      std::move(copy_future).get();
+                    });
       promise.setValue(output);
     } else {
-      if (last_step_output_valid_ && !inputs.input_params.empty_kv_cache) {
-        // replace step i model input with true output of step i-1
-        inputs = update_input_by_last_step_output(inputs);
+      for (auto i = 0; i < inputs.micro_inputs.size(); ++i) {
+        if (last_step_output_valid_ &&
+            !inputs.micro_inputs[i].input_params.empty_kv_cache) {
+          // replace step i model input with true output of step i-1
+          inputs.micro_inputs[i] =
+              update_input_by_last_step_output(inputs.micro_inputs[i]);
+        }
       }
       const auto output = this->step(inputs);
       if (output.has_value()) {
@@ -508,7 +532,11 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
           last_step_output_valid_ = false;
         }
       }
-      std::move(copy_future).get();
+      std::for_each(copy_futures.begin(),
+                    copy_futures.end(),
+                    [](folly::SemiFuture<bool>& copy_future) {
+                      std::move(copy_future).get();
+                    });
       promise.setValue(output);
     }
   });

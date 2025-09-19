@@ -97,7 +97,7 @@ class WorkerService : public proto::DistributeWorker {
                      ::google::protobuf::Closure* done) override;
 
   void ExecuteModel(::google::protobuf::RpcController* controller,
-                    const proto::ForwardInput* pb_forward_input,
+                    const proto::BatchedForwardInputs* pb_batched_fwd_inputs,
                     proto::ForwardOutput* pb_forward_output,
                     ::google::protobuf::Closure* done) override;
 

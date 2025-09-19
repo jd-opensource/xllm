@@ -276,7 +276,10 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batches) {
   std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
   futures.reserve(workers_.size());
   for (auto& worker : workers_) {
-    futures.emplace_back(worker->step_async(forward_inputs));
+    // TODO to adapt multi stream parallel later
+    BatchedForwardInputs batched_fwd_inputs;
+    batched_fwd_inputs.micro_inputs = {std::move(forward_inputs)};
+    futures.emplace_back(worker->step_async(batched_fwd_inputs));
   }
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
