@@ -17,8 +17,6 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "attn_mask.h"
-
 namespace xllm::hf {
 
 std::shared_ptr<RmsNormImpl> create_rms_norm_layer(

@@ -24,6 +24,7 @@ cc_library(
     qwen3_moe_decoder_layer.h
     atb_linear.h
     atb_parallel_linear.h
+    block_copy.h
     buffer/atb_buffer.h
     buffer/atb_workspace.h
   SRCS
@@ -45,6 +46,7 @@ cc_library(
     deepseek_v2_decoder_layer.cpp
     atb_linear.cpp
     atb_parallel_linear.cpp
+    block_copy.cpp
     buffer/atb_buffer.cpp
     buffer/atb_workspace.cpp
   DEPS

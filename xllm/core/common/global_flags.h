@@ -129,6 +129,8 @@ DECLARE_string(tool_call_parser);
 
 DECLARE_bool(enable_atb_spec_kernel);
 
+DECLARE_bool(enable_block_copy_kernel);
+
 DECLARE_string(etcd_addr);
 
 DECLARE_bool(enable_service_routing);

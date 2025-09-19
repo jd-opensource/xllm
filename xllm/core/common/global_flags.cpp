@@ -269,6 +269,12 @@ DEFINE_bool(enable_atb_spec_kernel,
             false,
             "Whether to use ATB speculative kernel.");
 
+// --- block copy config ---
+
+DEFINE_bool(enable_block_copy_kernel,
+            true,
+            "Whether to use ATB block copy kernel.");
+
 // --- service routing config ---
 
 DEFINE_string(etcd_addr, "", "Etcd adderss for save instance meta info.");
