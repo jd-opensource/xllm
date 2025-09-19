@@ -6,3 +6,7 @@ add_subdirectory(layers)
 add_subdirectory(runtime)
 add_subdirectory(scheduler)
 add_subdirectory(util)
+
+if(USE_NPU)
+  add_subdirectory(nn)
+endif()

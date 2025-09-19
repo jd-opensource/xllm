@@ -1,0 +1,123 @@
+include(cc_library)
+include(cc_test)
+
+
+cc_library(
+  NAME
+    nn_layers
+  HDRS
+    split.h
+    rms_norm.h
+    linear.h
+  SRCS
+    split.cpp
+    rms_norm.cpp
+    linear.cpp
+  DEPS
+    :npu_layers
+    :model_context
+    :state_dict
+    glog::glog
+    torch
+    torch_npu
+)
+
+cc_test(
+  NAME
+    nn_rms_norm_test
+  SRCS
+    rms_norm_test.cpp
+  DEPS
+    :nn_layers
+    :npu_layers
+    :model_context
+    GTest::gtest
+    GTest::gtest_main
+    torch
+    torch_npu
+    xllm_kernels
+    opapi
+)
+
+cc_test(
+  NAME
+    nn_linear_test
+  SRCS
+    linear_test.cpp
+  DEPS
+    :nn_layers
+    :npu_layers
+    :model_context
+    GTest::gtest
+    GTest::gtest_main
+    torch
+    torch_npu
+    xllm_kernels
+    opapi
+)
+
+cc_test(
+  NAME
+    nn_split_test
+  SRCS
+    split_test.cpp
+  DEPS
+    :nn_layers
+    :npu_layers
+    :model_context
+    GTest::gtest
+    GTest::gtest_main
+    torch
+    torch_npu
+    xllm_kernels
+    opapi
+)
+
+cc_test(
+  NAME
+    nn_sample_model_test
+  SRCS
+    sample_model_test.cpp
+  DEPS
+    :nn_layers
+    :npu_layers
+    :model_context
+    GTest::gtest
+    GTest::gtest_main
+    torch
+    torch_npu
+    xllm_kernels
+    opapi
+)
+
+target_link_libraries(nn_rms_norm_test
+                 PUBLIC
+                 $<$<BOOL:${USE_NPU}>:ascendcl>
+                 $<$<BOOL:${USE_NPU}>:hccl>
+                 $<$<BOOL:${USE_NPU}>:c_sec>
+                 $<$<BOOL:${USE_NPU}>:atb>
+                 $<$<BOOL:${USE_NPU}>:nnopbase>)
+
+target_link_libraries(nn_linear_test
+                 PUBLIC
+                 $<$<BOOL:${USE_NPU}>:ascendcl>
+                 $<$<BOOL:${USE_NPU}>:hccl>
+                 $<$<BOOL:${USE_NPU}>:c_sec>
+                 $<$<BOOL:${USE_NPU}>:atb>
+                 $<$<BOOL:${USE_NPU}>:nnopbase>)
+
+target_link_libraries(nn_split_test
+                 PUBLIC
+                 $<$<BOOL:${USE_NPU}>:ascendcl>
+                 $<$<BOOL:${USE_NPU}>:hccl>
+                 $<$<BOOL:${USE_NPU}>:c_sec>
+                 $<$<BOOL:${USE_NPU}>:atb>
+                 $<$<BOOL:${USE_NPU}>:nnopbase>)
+
+target_link_libraries(nn_sample_model_test
+                 PUBLIC
+                 $<$<BOOL:${USE_NPU}>:ascendcl>
+                 $<$<BOOL:${USE_NPU}>:hccl>
+                 $<$<BOOL:${USE_NPU}>:c_sec>
+                 $<$<BOOL:${USE_NPU}>:atb>
+                 $<$<BOOL:${USE_NPU}>:nnopbase>)
