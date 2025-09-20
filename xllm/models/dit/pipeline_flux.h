@@ -199,6 +199,9 @@ class FluxPipelineImpl : public torch::nn::Module {
   ModelArgs model_args_;
   torch::TensorOptions options_;
 
+  std::unique_ptr<Tokenizer> tokenizer_;
+  std::unique_ptr<Tokenizer> tokenizer_2_;
+
  public:
   FluxPipelineImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
@@ -401,18 +404,26 @@ class FluxPipelineImpl : public torch::nn::Module {
     generators_vec.push_back(generator);
     std::optional<std::vector<torch::Generator>> generators_opt =
         generators_vec;
+    auto prompt_2_input = input_params.prompt_2.has_value()
+                              ? std::make_optional(std::vector<std::string>{
+                                    input_params.prompt_2.value()})
+                              : std::nullopt;
+    auto negative_prompt_input =
+        input_params.negative_prompt.has_value()
+            ? std::make_optional(std::vector<std::string>{
+                  input_params.negative_prompt.value()})
+            : std::nullopt;
+    auto negative_prompt_2_input =
+        input_params.negative_prompt_2.has_value()
+            ? std::make_optional(std::vector<std::string>{
+                  input_params.negative_prompt_2.value()})
+            : std::nullopt;
     FluxPipelineOutput output = forward_(
-        std::make_optional(c10::optional<std::vector<std::string>>{
-            std::vector<std::string>{input_params.prompt}}),  // prompt
         std::make_optional(
-            c10::optional<std::vector<std::string>>{std::vector<std::string>{
-                input_params.prompt_2.value_or("")}}),  // prompt_2
-        std::make_optional(c10::optional<std::vector<std::string>>{
-            std::vector<std::string>{input_params.negative_prompt.value_or(
-                "")}}),  // negative_prompt
-        std::make_optional(c10::optional<std::vector<std::string>>{
-            std::vector<std::string>{input_params.negative_prompt_2.value_or(
-                "")}}),                                // negative_prompt_2
+            std::vector<std::string>{input_params.prompt}),  // prompt
+        prompt_2_input,                                      // prompt_2
+        negative_prompt_input,                               // negative_prompt
+        negative_prompt_2_input,                       // negative_prompt_2
         generation_params.true_cfg_scale.value_or(1),  // cfg scale
         std::make_optional(generation_params.height),  // height
         std::make_optional(generation_params.width),   // width
@@ -445,51 +456,13 @@ class FluxPipelineImpl : public torch::nn::Module {
     int64_t batch_size = prompt_list.size();
     TORCH_CHECK(batch_size > 0, "Prompt list cannot be empty");
     std::vector<std::string> processed_prompt = prompt_list;
-    // TODO add CLIP tokenizer
-    //    auto text_inputs = tokenizer.encode(
-    //        processed_prompt,
-    //        tokenizer_max_length_,
-    //        true,
-    //        true
-    //    );
-    //    torch::Tensor text_input_ids = text_inputs.input_ids;
-    //    auto untruncated = tokenizer.encode(
-    //        processed_prompt,
-    //        0,
-    //        true,
-    //        false
-    //    );
-    //    torch::Tensor untruncated_ids = untruncated.input_ids;
-    //    if (untruncated_ids.size(1) >= text_input_ids.size(1) &&
-    //        !torch::equal(
-    //            text_input_ids,
-    //            untruncated_ids.index({torch::indexing::Slice(),
-    //            torch::indexing::Slice(0, text_input_ids.size(1))})
-    //        )) {
-    //
-    //        auto truncated_part = untruncated_ids.index({
-    //            torch::indexing::Slice(),
-    //            torch::indexing::Slice(tokenizer_max_length_ - 1, -1)
-    //        });
-    //        auto removed_text = tokenizer.batch_decode(truncated_part);
 
-    //       std::cerr << "Warning: The following part of your input was
-    //       truncated because CLIP can only handle sequences up to "
-    //                 << tokenizer_max_length_ << " tokens: ";
-    //       for (const auto& text : removed_text) {
-    //           std::cerr << text << " ";
-    //       }
-    //       std::cerr << std::endl;
-    //   }
-    std::vector<int64_t> text_input_ids = {
-        49406, 40555, 3155,  1844,  267,   12177, 2463,  268,   8893,  6469,
-        268,   1844,  1611,  49407, 49407, 49407, 49407, 49407, 49407, 49407,
-        49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
-        49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
-        49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
-        49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
-        49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
-        49407, 49407, 49407, 49407, 49407, 49407, 49407};
+    std::vector<int32_t> text_input_ids;
+    text_input_ids.reserve(tokenizer_max_length_);
+    CHECK(tokenizer_->encode(processed_prompt[0], &text_input_ids));
+    text_input_ids.resize(tokenizer_max_length_, 49407);
+    text_input_ids.back() = 49407;
+
     auto encoder_output = clip_text_model_->forward(text_input_ids);
     torch::Tensor prompt_embeds = encoder_output;
     prompt_embeds = prompt_embeds.to(used_device).to(_execution_dtype);
@@ -513,41 +486,17 @@ class FluxPipelineImpl : public torch::nn::Module {
     int64_t batch_size = prompt_list.size();
     TORCH_CHECK(batch_size > 0, "Prompt list cannot be empty");
     std::vector<std::string> processed_prompt = prompt_list;
-    // TODO add T5 tokenizer
-    //    auto text_inputs = tokenizer_2.encode(
-    //        processed_prompt,
-    //        max_sequence_length,
-    //        true,
-    //        true
-    //    );
-    //  torch::Tensor text_input_ids = text_inputs.input_ids;
-    torch::Tensor text_input_ids = t5_->create_text_ids();
-    //   auto untruncated = tokenizer_2.encode(
-    //       processed_prompt,
-    //       0,
-    //       true,
-    //       false
-    //   );
-    //   torch::Tensor untruncated_ids = untruncated.input_ids;
-    //   if (untruncated_ids.size(1) >= text_input_ids.size(1) &&
-    //       !torch::equal(text_input_ids,
-    //       untruncated_ids.index({torch::indexing::Slice(),
-    //       torch::indexing::Slice(0, text_input_ids.size(1))}))) { auto
-    //       truncated_part = untruncated_ids.index({
-    //           torch::indexing::Slice(),
-    //           torch::indexing::Slice(max_sequence_length - 1, -1)
-    //       });
-    //       auto removed_text = tokenizer_2.batch_decode(truncated_part);
 
-    //       std::cerr << "Warning: The following part of your input was
-    //       truncated because `max_sequence_length` is set to "
-    //                 << max_sequence_length << " tokens: ";
-    //       for (const auto& text : removed_text) {
-    //           std::cerr << text << " ";
-    //       }
-    //       std::cerr << std::endl;
-    //   }
-    torch::Tensor prompt_embeds = t5_->forward(text_input_ids.to(used_device));
+    std::vector<int32_t> text_input_ids;
+    text_input_ids.reserve(max_sequence_length);
+    CHECK(tokenizer_2_->encode(processed_prompt[0], &text_input_ids));
+    text_input_ids.resize(max_sequence_length, 0);
+
+    auto input_ids = torch::tensor(text_input_ids, torch::dtype(torch::kLong))
+                         .view({1, max_sequence_length})
+                         .to(used_device);
+
+    torch::Tensor prompt_embeds = t5_->forward(input_ids);
     prompt_embeds = prompt_embeds.to(used_dtype).to(used_device);
     int64_t seq_len = prompt_embeds.size(1);
     prompt_embeds = prompt_embeds.repeat({1, num_images_per_prompt, 1});
@@ -556,8 +505,8 @@ class FluxPipelineImpl : public torch::nn::Module {
     return prompt_embeds;
   }
   std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> encode_prompt(
-      std::optional<torch::optional<std::vector<std::string>>> prompt,
-      std::optional<torch::optional<std::vector<std::string>>> prompt_2,
+      std::optional<std::vector<std::string>> prompt,
+      std::optional<std::vector<std::string>> prompt_2,
       std::optional<torch::Tensor> prompt_embeds,
       std::optional<torch::Tensor> pooled_prompt_embeds,
       std::optional<torch::Device> device,
@@ -567,10 +516,7 @@ class FluxPipelineImpl : public torch::nn::Module {
         device.has_value() ? device.value() : _execution_device;
     std::vector<std::string> prompt_list;
     if (prompt.has_value()) {
-      auto inner_prompt = prompt.value();
-      if (inner_prompt.has_value()) {
-        prompt_list = inner_prompt.value();
-      }
+      prompt_list = prompt.value();
     }
     if (prompt_list.empty()) {
       prompt_list = {""};
@@ -578,15 +524,11 @@ class FluxPipelineImpl : public torch::nn::Module {
     if (!prompt_embeds.has_value()) {
       std::vector<std::string> prompt_2_list;
       if (prompt_2.has_value()) {
-        auto inner_prompt2 = prompt_2.value();
-        if (inner_prompt2.has_value()) {
-          prompt_2_list = inner_prompt2.value();
-        }
+        prompt_2_list = prompt_2.value();
       }
       if (prompt_2_list.empty()) {
         prompt_2_list = prompt_list;
       }
-
       pooled_prompt_embeds = _get_clip_prompt_embeds(
           prompt_list, used_device, num_images_per_prompt);
       prompt_embeds = _get_t5_prompt_embeds(prompt_2_list,
@@ -607,14 +549,10 @@ class FluxPipelineImpl : public torch::nn::Module {
                            text_ids);
   }
   FluxPipelineOutput forward_(
-      std::optional<torch::optional<std::vector<std::string>>> prompt =
-          std::nullopt,
-      std::optional<torch::optional<std::vector<std::string>>> prompt_2 =
-          std::nullopt,
-      std::optional<torch::optional<std::vector<std::string>>> negative_prompt =
-          std::nullopt,
-      std::optional<torch::optional<std::vector<std::string>>>
-          negative_prompt_2 = std::nullopt,
+      std::optional<std::vector<std::string>> prompt = std::nullopt,
+      std::optional<std::vector<std::string>> prompt_2 = std::nullopt,
+      std::optional<std::vector<std::string>> negative_prompt = std::nullopt,
+      std::optional<std::vector<std::string>> negative_prompt_2 = std::nullopt,
       float true_cfg_scale = 1.0f,
       std::optional<int64_t> height = std::nullopt,
       std::optional<int64_t> width = std::nullopt,
@@ -650,21 +588,16 @@ class FluxPipelineImpl : public torch::nn::Module {
     _interrupt = false;
     int64_t batch_size;
     if (prompt.has_value()) {
-      if (prompt.value().has_value()) {
-        batch_size = prompt.value().value().size();
-      } else {
-        batch_size = prompt_embeds.value().size(0);
-      }
+      batch_size = prompt.value().size();
     } else {
       batch_size = prompt_embeds.value().size(0);
     }
-    int64_t total_batch_size = 1;  // batch_size * num_images_per_prompt;
+    int64_t total_batch_size = batch_size * num_images_per_prompt;
     torch::Device device = _execution_device;
     bool has_neg_prompt = negative_prompt.has_value() ||
                           (negative_prompt_embeds.has_value() &&
                            negative_pooled_prompt_embeds.has_value());
     bool do_true_cfg = (true_cfg_scale > 1.0f) && has_neg_prompt;
-    batch_size = 1;
     // encode prompt
     auto [encoded_prompt_embeds, encoded_pooled_embeds, text_ids] =
         encode_prompt(prompt,
@@ -805,6 +738,10 @@ class FluxPipelineImpl : public torch::nn::Module {
     auto vae_loader = loader->take_sub_model_loader_by_folder("vae");
     auto t5_loader = loader->take_sub_model_loader_by_folder("text_encoder_2");
     auto clip_loader = loader->take_sub_model_loader_by_folder("text_encoder");
+    auto tokenizer_loader =
+        loader->take_sub_model_loader_by_folder("tokenizer");
+    auto tokenizer_2_loader =
+        loader->take_sub_model_loader_by_folder("tokenizer_2");
     LOG(INFO)
         << "Flux model components loaded, start to load weights to sub models";
     transformer_->load_model(std::move(transformer_loader));
@@ -815,6 +752,8 @@ class FluxPipelineImpl : public torch::nn::Module {
     t5_->to(_execution_device);
     clip_text_model_->load_model(std::move(clip_loader));
     clip_text_model_->to(_execution_device);
+    tokenizer_ = tokenizer_loader->tokenizer();
+    tokenizer_2_ = tokenizer_2_loader->tokenizer();
   }
 };
 TORCH_MODULE(FluxPipeline);

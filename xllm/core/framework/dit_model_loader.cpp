@@ -25,8 +25,10 @@ limitations under the License.
 #include <filesystem>
 #include <vector>
 
+#include "core/framework/tokenizer/tokenizer_factory.h"
 #include "core/util/json_reader.h"
 #include "models/model_registry.h"
+
 namespace xllm {
 DiTFolderLoader::DiTFolderLoader(const std::string& folder_path,
                                  const std::string& component_name)
@@ -44,6 +46,11 @@ DiTFolderLoader::DiTFolderLoader(const std::string& folder_path,
     // sort the model weights files by name
     std::sort(model_weights_files_.begin(), model_weights_files_.end());
   }
+}
+
+std::unique_ptr<Tokenizer> DiTFolderLoader::tokenizer() const {
+  return TokenizerFactory::create_tokenizer(model_weights_path_,
+                                            tokenizer_args_);
 }
 
 std::vector<std::unique_ptr<StateDict>>& DiTFolderLoader::get_state_dicts() {
@@ -181,7 +188,6 @@ bool DiTFolderLoader::load_tokenizer_args(
     return true;
   }
   if (tokenizer_reader.parse(tokenizer_args_file_path)) {
-    // read chat template if exists
     if (auto v = tokenizer_reader.value<bool>("add_bos_token")) {
       tokenizer_args_.add_bos_token() = v.value();
     }

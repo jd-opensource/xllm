@@ -145,21 +145,21 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   float base_shift() { return base_shift_.value(); }
   float max_shift() { return max_shift_.value(); }
   FlowMatchEulerDiscreteSchedulerImpl(const ModelContext& context)
-      : args(context.get_model_args()),
-        num_train_timesteps_(args.scheduler_num_train_timesteps()),
-        shift_(args.scheduler_shift()),
-        use_dynamic_shifting_(args.scheduler_use_dynamic_shifting()),
-        base_shift_(args.scheduler_base_shift()),
-        max_shift_(args.scheduler_max_shift()),
-        base_image_seq_len_(args.scheduler_base_image_seq_len()),
-        max_image_seq_len_(args.scheduler_max_image_seq_len()),
-        invert_sigmas_(false),
-        shift_terminal_(std::nullopt),
-        use_karras_sigmas_(false),
-        use_exponential_sigmas_(false),
-        use_beta_sigmas_(false),
-        time_shift_type_("exponential"),
-        stochastic_sampling_(false) {
+      : args(context.get_model_args()) {
+    num_train_timesteps_ = args.scheduler_num_train_timesteps();
+    shift_ = args.scheduler_shift();
+    use_dynamic_shifting_ = args.scheduler_use_dynamic_shifting();
+    base_shift_ = args.scheduler_base_shift();
+    max_shift_ = args.scheduler_max_shift(),
+    base_image_seq_len_ = args.scheduler_base_image_seq_len();
+    max_image_seq_len_ = args.scheduler_max_image_seq_len();
+    invert_sigmas_ = false;
+    shift_terminal_ = std::nullopt;
+    use_karras_sigmas_ = false;
+    use_exponential_sigmas_ = false;
+    use_beta_sigmas_ = false;
+    time_shift_type_ = "exponential";
+    stochastic_sampling_ = false;
     std::vector<float> timesteps_vec(num_train_timesteps_);
     for (int i = 0; i < num_train_timesteps_; ++i) {
       timesteps_vec[i] = num_train_timesteps_ - i;

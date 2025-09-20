@@ -837,35 +837,7 @@ class T5EncoderModelImpl : public torch::nn::Module {
   void set_input_embeddings(const torch::nn::Embedding& new_embeddings) {
     embed_tokens_ = new_embeddings;
   }
-  torch::Tensor create_text_ids() {
-    std::vector<int64_t> non_zero_values = {20730,
-                                            7437,
-                                            5929,
-                                            869,
-                                            6,
-                                            20330,
-                                            53,
-                                            609,
-                                            18,
-                                            19489,
-                                            29,
-                                            21705,
-                                            18,
-                                            4084,
-                                            3202,
-                                            1};
 
-    std::vector<int64_t> text_ids_values;
-    text_ids_values.reserve(512);
-    text_ids_values.insert(
-        text_ids_values.end(), non_zero_values.begin(), non_zero_values.end());
-    text_ids_values.insert(
-        text_ids_values.end(), 512 - non_zero_values.size(), 0);
-
-    return torch::tensor(text_ids_values, torch::dtype(torch::kLong))
-        .view({1, 512})
-        .to(device_);
-  }
   torch::Tensor forward(torch::Tensor input_ids) {
     // prepare input parameters
     // input parameters

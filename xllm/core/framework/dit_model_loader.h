@@ -30,6 +30,8 @@ class DiTFolderLoader {
  public:
   DiTFolderLoader(const std::string& folder_path,
                   const std::string& component_name);
+
+  std::unique_ptr<Tokenizer> tokenizer() const;
   const ModelArgs& model_args() const { return args_; }
   const QuantArgs& quant_args() const { return quant_args_; }
   const TokenizerArgs& tokenizer_args() const { return tokenizer_args_; }

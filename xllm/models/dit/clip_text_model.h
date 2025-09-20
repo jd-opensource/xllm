@@ -771,7 +771,7 @@ class CLIPTextModelImpl : public torch::nn::Module {
     transformer_ = register_module("transformer", CLIPTextTransformer(context));
   }
 
-  torch::Tensor forward(std::vector<int64_t> input_ids_data) {
+  torch::Tensor forward(std::vector<int32_t> input_ids_data) {
     torch::Tensor input_ids =
         torch::tensor(input_ids_data, torch::kLong).view({1, -1});
     input_ids = input_ids.to(device_);

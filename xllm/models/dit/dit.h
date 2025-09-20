@@ -1355,9 +1355,17 @@ inline torch::Tensor get_1d_rotary_pos_embed(
   freqs_outer = freqs_outer.to(torch::kFloat32);
 #endif
   if (use_real && repeat_interleave_real) {
-    auto freqs_cos = torch::repeat_interleave(torch::cos(freqs_outer), 2, 1)
+    auto cos_vals = torch::cos(freqs_outer);  // [S, D/2]
+    auto sin_vals = torch::sin(freqs_outer);  // [S, D/2]
+
+    auto freqs_cos = cos_vals.transpose(-1, -2)
+                         .repeat_interleave(2, -2)
+                         .transpose(-1, -2)
                          .to(torch::kFloat32);  // [S, D]
-    auto freqs_sin = torch::repeat_interleave(torch::sin(freqs_outer), 2, 1)
+
+    auto freqs_sin = sin_vals.transpose(-1, -2)
+                         .repeat_interleave(2, -2)
+                         .transpose(-1, -2)
                          .to(torch::kFloat32);  // [S, D]
     return torch::cat({freqs_cos.unsqueeze(0), freqs_sin.unsqueeze(0)},
                       0);  // [2, S, D]
