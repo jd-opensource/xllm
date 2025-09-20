@@ -16,6 +16,7 @@ limitations under the License.
 #include "profile_manager.h"
 
 #include <absl/time/time.h>
+#include <gflags/gflags.h>
 #include <glog/logging.h>
 
 #include <chrono>
@@ -42,12 +43,12 @@ ProfileManager::ProfileManager(Engine* engine, const Options& options)
       options.enable_profile_kv_blocks(), false /*is_prefill*/);
   if (options.enable_profile_step_time()) {
     LOG(INFO) << "Starting profiliing step time.";
-    profile_step_time(true);
+    profile_step_time(false);
     // test accuracy
-    eval_sequence_latency_prediction();
-    eval_batch_latency_prediction("only_prefill");
-    eval_batch_latency_prediction("only_decode");
-    eval_batch_latency_prediction("mix");
+    // eval_sequence_latency_prediction();
+    // eval_batch_latency_prediction("only_prefill");
+    // eval_batch_latency_prediction("only_decode");
+    // eval_batch_latency_prediction("mix");
   }
   if (options.enable_profile_token_budget()) {
     LOG(INFO) << "Starting profiliing token budget.";
@@ -307,7 +308,7 @@ void ProfileManager::profile_step_time(bool if_dump_to_file) {
     // not consider kv cache
     std::vector<std::pair<int32_t, double>> time_profiling_data;
     for (int32_t token_length = profile_max_prompt_length; token_length > 1;
-         token_length >>= 1) {
+         token_length *= 0.8) {
       double latency_mean = 0;
       for (int32_t k = 0; k < profile_count_per_step_; k++) {
         latency_mean += run_request(token_length, 0);
@@ -320,8 +321,12 @@ void ProfileManager::profile_step_time(bool if_dump_to_file) {
     }
     train_prefill_time_predictor(time_profiling_data);
   }
-
+  if (FLAGS_enable_disagg_pd) {
+    LOG(INFO) << "Disagg PD enabled, skip decode time profile.";
+    return;
+  }
   // decode time profile
+
   std::vector<std::tuple<int32_t, int32_t, double>> time_profiling_data;
   int32_t max_batch_size = 50;
   // for (int32_t token_length = profile_max_prompt_length; token_length >
@@ -357,6 +362,13 @@ void ProfileManager::train_decode_time_predictor(
 }
 
 // ----------------------predict step time-----------------------
+std::vector<double> ProfileManager::get_coefficients(bool is_prefill) {
+  if (is_prefill) {
+    return prefill_time_predictor_->get_coefficients();
+  } else {
+    return decode_time_predictor_->get_coefficients();
+  }
+}
 
 double ProfileManager::get_constant_overhead() {
   if (prefill_time_predictor_->is_trained() &&
@@ -372,22 +384,33 @@ double ProfileManager::get_constant_overhead() {
   return 0.0;
 }
 
+int32_t ProfileManager::get_quadratic_root(Sequence* sequence, double budget) {
+  auto length = sequence->num_tokens();
+  auto prefix_length = sequence->kv_state().kv_cache_tokens_num();
+  if (prefill_time_predictor_->is_trained()) {
+    return prefill_time_predictor_->get_quadratic_root(prefix_length, budget);
+  }
+  LOG(ERROR) << "Prefill time predictor is not trained yet.";
+  return 0;
+}
+
 // for single sequence
 double ProfileManager::predict_step_time(int32_t length,
                                          int32_t prefix_length,
                                          bool if_need_add_constant_term,
                                          bool force_use_prefill_predictor) {
   CHECK(length > prefix_length);
+  double ratio = 1.0;
   if (force_use_prefill_predictor) {
-    return prefill_time_predictor_->predict_time(
-        length, prefix_length, if_need_add_constant_term);
+    return ratio * prefill_time_predictor_->predict_time(
+                       length, prefix_length, if_need_add_constant_term);
   }
   if (length - 1 == prefix_length) {
-    return decode_time_predictor_->predict_time(
-        length, prefix_length, if_need_add_constant_term);
+    return ratio * decode_time_predictor_->predict_time(
+                       length, prefix_length, if_need_add_constant_term);
   } else {
-    return prefill_time_predictor_->predict_time(
-        length, prefix_length, if_need_add_constant_term);
+    return ratio * prefill_time_predictor_->predict_time(
+                       length, prefix_length, if_need_add_constant_term);
   }
 }
 
@@ -434,22 +457,28 @@ double ProfileManager::predict_step_time(int32_t length,
 void ProfileManager::profile_token_budget() {
   // use token budget means defaultly ignoring prefix cache and decode request's
   // kv cache load overhead
-  profile_token_budget_ = binary_search_max_tokens(
-      options_.max_global_tpot_ms(), 1, options_.max_tokens_per_batch());
+  // warm up
+  run_request(options_.profile_max_prompt_length(), 0);
+  profile_token_budget_ =
+      binary_search_max_tokens(options_.max_global_tpot_ms(), 1, 4096);
   LOG(INFO) << "Profile token budget: " << profile_token_budget_
             << "for TPOT SLO: " << options_.max_global_tpot_ms();
 }
 
 bool ProfileManager::check_if_satisfy_slo(int32_t num_tokens,
                                           int32_t tpot_slo_ms) {
-  int32_t prompt_tokens_per_batch = 1024;
-
-  auto batch_size = num_tokens / prompt_tokens_per_batch;
-  int32_t extra_token_length = num_tokens % prompt_tokens_per_batch;
+  // int32_t prompt_tokens_per_batch = 1024;
+  // auto batch_size = num_tokens / prompt_tokens_per_batch;
+  // int32_t extra_token_length = num_tokens % prompt_tokens_per_batch;
+  // double batch_latency = 0;
+  // for (int32_t k = 0; k < profile_count_per_step_; k++) {
+  //   batch_latency +=
+  //       run_request(prompt_tokens_per_batch, 0, batch_size,
+  //       extra_token_length);
+  // }
   double batch_latency = 0;
   for (int32_t k = 0; k < profile_count_per_step_; k++) {
-    batch_latency +=
-        run_request(prompt_tokens_per_batch, 0, batch_size, extra_token_length);
+    batch_latency += run_request(num_tokens, 0, 1, 0);
   }
   batch_latency /= profile_count_per_step_;
   if (batch_latency <= tpot_slo_ms) {

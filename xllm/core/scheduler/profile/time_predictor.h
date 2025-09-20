@@ -43,6 +43,12 @@ class TimePredictor final {
 
   bool is_trained() { return trained_; }
 
+  void check_coefficients_non_neg(int32_t num);
+
+  int32_t get_quadratic_root(int32_t prefix_length, double budget);
+
+  std::vector<double> get_coefficients();
+
  private:
   Eigen::VectorXd coefficients_;
   bool if_profile_prefix_ = false;

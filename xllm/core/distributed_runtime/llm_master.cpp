@@ -413,8 +413,14 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                                            std::move(req_state),
                                            sp.service_request_id,
                                            sp.offline,
-                                           sp.slo_ms,
-                                           sp.priority);
+                                           sp.ttlt_slo_ms,
+                                           sp.priority,
+                                           sp.ttft_slo_ms,
+                                           sp.tpot_slo_ms,
+                                           sp.tpot_priority_weight,
+                                           sp.ttft_priority_weight,
+                                           sp.ttlt_priority_weight,
+                                           sp.priority_weight);
 
   // add one sequence, rest will be added by scheduler
   return request;

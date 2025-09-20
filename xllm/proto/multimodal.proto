@@ -138,7 +138,7 @@ message MMChatRequest {
 
   optional bool offline = 29;
 
-  optional int32 slo_ms = 30;
+  optional int32 ttlt_slo_ms = 30;
 
   // request priority. default = DEFAULT
   optional Priority priority = 31;
@@ -148,4 +148,16 @@ message MMChatRequest {
   optional bool add_special_tokens = 33;
 
   optional google.protobuf.Struct chat_template_kwargs = 34;
+
+  optional int32 ttft_slo_ms = 35;
+
+  optional int32 tpot_slo_ms = 36;
+
+  optional int32 tpot_priority_weight = 37;
+
+  optional int32 ttft_priority_weight = 38;
+
+  optional int32 ttlt_priority_weight = 39;
+
+  optional int32 priority_weight = 40;
 }

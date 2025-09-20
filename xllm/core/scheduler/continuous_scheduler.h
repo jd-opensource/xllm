@@ -94,7 +94,7 @@ class ContinuousScheduler : public Scheduler {
 
     // TODO: think if distinguish prefill and decode priority strategy
     PROPERTY(std::string,
-             priority_strategy) = "FCFS";  // priority, deadline, FCFS
+             priority_strategy) = "fcfs";  // priority, deadline, fcfs
     PROPERTY(bool, enable_online_preempt_offline) = true;
 
     PROPERTY(bool, enable_profile_step_time) = false;
@@ -289,6 +289,21 @@ class ContinuousScheduler : public Scheduler {
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch();
 
+  virtual bool if_queue_not_empty() {
+    return !waiting_priority_queue_.empty() || !running_queue_->empty() ||
+           !waiting_priority_queue_offline_.empty() ||
+           !running_queue_offline_->empty();
+  }
+
+  // tokenizer
+  std::unique_ptr<Tokenizer> tokenizer_;
+
+  // params for enable_schedule_overlap case
+  std::vector<Batch> last_batch_;
+  std::vector<std::shared_ptr<Request>> last_running_requests_;
+  std::vector<Sequence*> last_running_sequences_;
+  bool is_first_step_ = true;
+
  private:
   std::vector<Batch> schedule_request(const absl::Duration& timeout);
 
@@ -307,16 +322,6 @@ class ContinuousScheduler : public Scheduler {
   void update_memory_metrics(std::vector<Sequence*>& sequences);
 
   void create_running_queue(const Options& options);
-
- private:
-  // tokenizer
-  std::unique_ptr<Tokenizer> tokenizer_;
-
-  // params for enable_schedule_overlap case
-  std::vector<Batch> last_batch_;
-  std::vector<std::shared_ptr<Request>> last_running_requests_;
-  std::vector<Sequence*> last_running_sequences_;
-  bool is_first_step_ = true;
 };
 
 }  // namespace xllm

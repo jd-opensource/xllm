@@ -333,8 +333,12 @@ DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
 // --- priority strategy config ---
 
 DEFINE_string(priority_strategy,
-              "FCFS",
-              "Priority strategy for requests(e.g. FCFS, priority, deadline).");
+              "fcfs",
+              "Priority strategy for requests(e.g. fcfs, priority, deadline).");
+
+DEFINE_string(scheduler_strategy,
+              "base",
+              "Scheduler strategy for requests(e.g. base, )");
 
 DEFINE_bool(enable_online_preempt_offline,
             true,

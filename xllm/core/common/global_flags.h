@@ -161,6 +161,8 @@ DECLARE_uint32(layers_wise_copy_batchs);
 
 DECLARE_string(priority_strategy);
 
+DECLARE_string(scheduler_strategy);
+
 DECLARE_bool(enable_online_preempt_offline);
 
 DECLARE_double(host_blocks_factor);

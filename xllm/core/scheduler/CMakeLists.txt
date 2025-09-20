@@ -8,6 +8,7 @@ cc_library(
   NAME
     scheduler
   HDRS
+    mix_scheduler.h
     chunked_prefill_scheduler.h
     zero_eviction_scheduler.h
     continuous_scheduler.h
@@ -22,6 +23,7 @@ cc_library(
     perf_model.h
     fixed_steps_scheduler.h
   SRCS
+    mix_scheduler.cpp
     chunked_prefill_scheduler.cpp
     zero_eviction_scheduler.cpp
     continuous_scheduler.cpp

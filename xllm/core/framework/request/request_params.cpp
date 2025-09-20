@@ -56,11 +56,30 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
   if (request.has_offline()) {
     offline = request.offline();
   }
-  if (request.has_slo_ms()) {
-    slo_ms = request.slo_ms();
+  if (request.has_ttlt_slo_ms()) {
+    ttlt_slo_ms = request.ttlt_slo_ms();
   }
   if (request.has_priority()) {
     priority = static_cast<xllm::RequestPriority>(request.priority());
+  }
+
+  if (request.has_ttft_slo_ms()) {
+    ttft_slo_ms = request.ttft_slo_ms();
+  }
+  if (request.has_tpot_slo_ms()) {
+    tpot_slo_ms = request.tpot_slo_ms();
+  }
+  if (request.has_tpot_priority_weight()) {
+    tpot_priority_weight = request.tpot_priority_weight();
+  }
+  if (request.has_ttft_priority_weight()) {
+    ttft_priority_weight = request.ttft_priority_weight();
+  }
+  if (request.has_ttlt_priority_weight()) {
+    ttlt_priority_weight = request.ttlt_priority_weight();
+  }
+  if (request.has_priority_weight()) {
+    priority_weight = request.priority_weight();
   }
 
   if (request.has_service_request_id()) {
@@ -217,11 +236,30 @@ void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
   if (request.has_offline()) {
     params.offline = request.offline();
   }
-  if (request.has_slo_ms()) {
-    params.slo_ms = request.slo_ms();
+  if (request.has_ttlt_slo_ms()) {
+    params.ttlt_slo_ms = request.ttlt_slo_ms();
   }
   if (request.has_priority()) {
     params.priority = static_cast<xllm::RequestPriority>(request.priority());
+  }
+
+  if (request.has_ttft_slo_ms()) {
+    params.ttft_slo_ms = request.ttft_slo_ms();
+  }
+  if (request.has_tpot_slo_ms()) {
+    params.tpot_slo_ms = request.tpot_slo_ms();
+  }
+  if (request.has_tpot_priority_weight()) {
+    params.tpot_priority_weight = request.tpot_priority_weight();
+  }
+  if (request.has_ttft_priority_weight()) {
+    params.ttft_priority_weight = request.ttft_priority_weight();
+  }
+  if (request.has_ttlt_priority_weight()) {
+    params.ttlt_priority_weight = request.ttlt_priority_weight();
+  }
+  if (request.has_priority_weight()) {
+    params.priority_weight = request.priority_weight();
   }
 
   if (request.has_service_request_id()) {

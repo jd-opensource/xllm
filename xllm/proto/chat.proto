@@ -122,7 +122,7 @@ message ChatRequest {
 
   optional bool offline = 30;
 
-  optional int32 slo_ms = 31;
+  optional int32 ttlt_slo_ms = 31;
 
   // request priority. default = DEFAULT
   optional Priority priority = 32;
@@ -132,6 +132,18 @@ message ChatRequest {
   optional bool add_special_tokens = 34;
 
   optional google.protobuf.Struct chat_template_kwargs = 35;
+
+  optional int32 ttft_slo_ms = 36;
+
+  optional int32 tpot_slo_ms = 37;
+
+  optional int32 tpot_priority_weight = 38;
+
+  optional int32 ttft_priority_weight = 39;
+
+  optional int32 ttlt_priority_weight = 40;
+
+  optional int32 priority_weight = 41;
 }
 
 message ChatLogProbData {

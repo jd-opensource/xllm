@@ -31,14 +31,26 @@ namespace xllm {
 //    Subsequently, based on the remaining token quota,
 //    split sequences requiring Prefill into chunks and
 //    add them to the batch.
-class ChunkedPrefillScheduler final : public ContinuousScheduler {
+class ChunkedPrefillScheduler : public ContinuousScheduler {
  public:
   ChunkedPrefillScheduler(Engine* engine, const Options& options);
   virtual ~ChunkedPrefillScheduler();
 
- private:
+ protected:
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch() override;
+  // 1. for prefill sequence: the allocated_tokens will be within
+  // [1, num_prompt_tokens - num_tokens_in_kv_cache].
+  // 2. for decode sequence: the allocated_tokens usually would
+  // be 1 or K for speculative decoding.
+  // returns false if no blocks can be allocated.
+  bool allocate_blocks_for(Sequence* sequence,
+                           size_t token_budget,
+                           size_t* actual_tokens);
+
+  void allocate_shared_blocks_for(Sequence* sequence);
+
+ private:
   void handle_running_queue_requests(
       const size_t max_tokens_per_chunk_for_prefill,
       double& latency_budget,
@@ -67,17 +79,6 @@ class ChunkedPrefillScheduler final : public ContinuousScheduler {
                                size_t& remaining_token_budget,
                                std::vector<Sequence*>& prefill_stage_sequences,
                                bool& blocks_exhausted);
-
-  // 1. for prefill sequence: the allocated_tokens will be within
-  // [1, num_prompt_tokens - num_tokens_in_kv_cache].
-  // 2. for decode sequence: the allocated_tokens usually would
-  // be 1 or K for speculative decoding.
-  // returns false if no blocks can be allocated.
-  bool allocate_blocks_for(Sequence* sequence,
-                           size_t token_budget,
-                           size_t* actual_tokens);
-
-  void allocate_shared_blocks_for(Sequence* sequence);
 };
 
 }  // namespace xllm
