@@ -149,18 +149,6 @@ void BlockManagerImpl::get_merged_kvcache_event(KvCacheEvent* event) const {
   }
 }
 
-// // allocate a list of block ids
-// std::vector<Block> BlockManagerImpl::allocate(uint32_t n_blocks) {
-//   CHECK(n_blocks <= num_free_blocks_) << "Not enough blocks available";
-//   std::vector<Block> blocks;
-//   blocks.reserve(n_blocks);
-//   for (uint32_t i = 0; i < n_blocks; ++i) {
-//     const int32_t block_id = free_blocks_[--num_free_blocks_];
-//     blocks.emplace_back(block_id, this);
-//   }
-//   return blocks;
-// }
-
 // allocate a block id
 Block BlockManagerImpl::allocate() {
   CHECK(num_free_blocks_ > 0) << "No more blocks available";

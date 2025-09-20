@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/attn_mask.h"
+#include "core/layers/npu/block_copy.h"
 #include "core/layers/npu/llm_head.h"
 #include "core/layers/npu/pos_embedding.h"
 #include "core/layers/npu/rms_norm.h"
@@ -108,6 +109,7 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
   QWenDecoderLayerImplBase(const ModelContext& context) {
     // register submodules
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
+    block_copy_ = register_module("block_copy", BlockCopy(context));
   }
 
   virtual torch::Tensor forward(torch::Tensor& x,
@@ -119,6 +121,14 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
                                 int node_id,
                                 aclrtEvent* event = nullptr,
                                 std::atomic<bool>* event_flag = nullptr) {
+    if (input_params.src_block_indices.numel() > 0) {
+      block_copy_(kv_cache.get_k_cache(),
+                  kv_cache.get_v_cache(),
+                  input_params.src_block_indices,
+                  input_params.dst_block_indices,
+                  input_params.cum_sum,
+                  0);
+    }
     return decoder_layer_(x,
                           cos_pos,
                           sin_pos,
@@ -141,10 +151,12 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
   }
   virtual void merge_loaded_weights() {
     decoder_layer_->merge_loaded_weights();
+    block_copy_->merge_loaded_weights();
   }
 
  private:
   DecoderType decoder_layer_{nullptr};
+  BlockCopy block_copy_{nullptr};
 };
 
 template <typename DecoderLayerType>
@@ -174,6 +186,7 @@ class QWenModelImplBase : public torch::nn::Module {
     } else {
       h = embed_tokens_(tokens, 0);
     }
+
     // auto h = embed_tokens_(tokens);
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);

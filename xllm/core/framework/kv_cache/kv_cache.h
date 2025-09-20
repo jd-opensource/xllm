@@ -36,7 +36,7 @@ class KVCache final {
     return !key_cache_.defined() || !value_cache_.defined();
   }
 
-  void swap_blocks(const std::vector<CacheBlockInfo>& swap_blocks);
+  void swap_blocks(torch::Tensor& src_tensor, torch::Tensor& dst_tensor);
 
  private:
   torch::Tensor key_cache_;
