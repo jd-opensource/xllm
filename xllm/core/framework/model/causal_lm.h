@@ -15,7 +15,11 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-
+// clang-format off
+#if defined(USE_NPU)
+#include "graph/types.h"
+#endif
+// clang-format on
 #include <c10/core/Device.h>
 #include <torch/torch.h>
 
@@ -26,10 +30,8 @@ limitations under the License.
 #include "core/framework/parallel_state.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
-#if defined(USE_NPU)
-#include "layers/npu/llm_head.h"
-#include "layers/npu/word_embedding.h"
-#endif
+#include "layers/lm_head.h"
+#include "layers/word_embedding.h"
 #include "model_args.h"
 #include "model_input_params.h"
 
@@ -65,10 +67,10 @@ class CausalLM : public torch::nn::Module {
   virtual const torch::TensorOptions& options() const = 0;
 
 #if defined(USE_NPU)
-  virtual hf::LlmHead get_lm_head() = 0;
-  virtual void set_lm_head(hf::LlmHead& head) = 0;
-  virtual hf::AtbWordEmbedding get_word_embedding() = 0;
-  virtual void set_word_embedding(hf::AtbWordEmbedding& embedding) = 0;
+  virtual layer::LmHead get_lm_head() = 0;
+  virtual void set_lm_head(layer::LmHead& head) = 0;
+  virtual layer::WordEmbedding get_word_embedding() = 0;
+  virtual void set_word_embedding(layer::WordEmbedding& embedding) = 0;
 #endif
 };
 
@@ -104,15 +106,15 @@ class CausalLMImpl : public CausalLM {
   }
 
 #if defined(USE_NPU)
-  hf::LlmHead get_lm_head() override { return model_->get_lm_head(); };
+  layer::LmHead get_lm_head() override { return model_->get_lm_head(); };
 
-  void set_lm_head(hf::LlmHead& head) override { model_->set_lm_head(head); };
+  void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); };
 
-  hf::AtbWordEmbedding get_word_embedding() override {
+  layer::WordEmbedding get_word_embedding() override {
     return model_->get_word_embedding();
   };
 
-  void set_word_embedding(hf::AtbWordEmbedding& embedding) override {
+  void set_word_embedding(layer::WordEmbedding& embedding) override {
     model_->set_word_embedding(embedding);
   };
 #endif

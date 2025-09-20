@@ -1,6 +1,11 @@
 include(cc_library)
 include(cc_test)
 
+if(USE_NPU)
+  include_directories(
+    ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
+  )
+endif()
 
 cc_library(
   NAME 
@@ -21,12 +26,48 @@ cc_library(
 
 cc_library(
   NAME 
+    base_layer
+  HDRS
+    attention_mask.h
+    base_layer.h
+  SRCS
+    attention_mask.cpp
+    base_layer.cpp
+  DEPS
+    :state_dict
+    :block
+    :kv_cache
+    :prefix_cache
+    glog::glog
+    gflags::gflags
+    torch
+)
+
+cc_library(
+  NAME 
     layers
+  HDRS
+    column_parallel_linear.h
+    deepseek_v2_decoder_layer.h
+    llama_decoder_layer.h
+    multi_head_attention.h
+    qwen2_decoder_layer.h
+    qwen2dot5_vision_decode_layer.h
+    qwen3_decoder_layer.h
+    qwen3_moe_decoder_layer.h
+    rms_norm.h
+    siglip_encoder_layer.h
+    pos_embedding.h
+    word_embedding.h
+    lm_head.h
+  SRCS
+    multi_head_attention.cpp
   DEPS
     :state_dict
     :kv_cache
     :prefix_cache
     :block
+    :base_layer
     :rotary_embedding
     glog::glog
     gflags::gflags
