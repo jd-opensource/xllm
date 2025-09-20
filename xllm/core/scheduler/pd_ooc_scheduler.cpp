@@ -24,6 +24,7 @@ limitations under the License.
 #include <random>
 
 #include "common/global_flags.h"
+#include "common/interruption_bus.h"
 #include "common/macros.h"
 #include "core/distributed_runtime/pd_ooc_service.h"
 #include "disagg_pd.pb.h"
@@ -37,6 +38,7 @@ limitations under the License.
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
 #include "util/env_var.h"
+#include "util/utils.h"
 
 namespace xllm {
 
@@ -94,7 +96,7 @@ PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
   instance_info_.dp_size = options.dp_size();
 
   // profile ttft and update instance info
-  profile_ttft();
+  // profile_ttft();
 }
 
 PDOOCScheduler::~PDOOCScheduler() {
@@ -251,20 +253,313 @@ void PDOOCScheduler::start_rpc_server() {
 void PDOOCScheduler::step(const absl::Duration& timeout) {
   if (options_.instance_role() == InstanceRole::PREFILL) {
     prefill_step(timeout);
-  } else if (options_.instance_role() == InstanceRole::DECODE) {
-    decode_step(timeout);
   } else {
-    LOG(FATAL) << "Unknown instance role";
+    decode_step(timeout);
   }
 }
 
 void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
-  // WIP Check pull signals. Move offline requests from local queue to remote
-  // queue.
-  prepare_offline_dispatch_queue();
-  ContinuousScheduler::step(timeout);
-  prefill_send_first_generation();
-  prefill_send_multi_generations();
+  try {
+    prepare_offline_dispatch_queue();
+    /*
+    WIP Determine the status of current step
+    If request_queue_ has online requests or waiting_priority_queue_ is not
+    empty, set current status to ONLINE_PREFILL If running_queue_offline_ is not
+    empty, set current status to OFFLINE_PREFILL If request_queue_ has offline
+    requests or waiting_priority_queue_offline_ is not empty, set current status
+    to OFFLINE_PREFILL
+    */
+    InterruptionBus::get_instance().publish(false);
+    ContinuousScheduler::step(timeout);
+    prefill_send_first_generation();
+    prefill_send_multi_generations();
+  } catch (const ForwardInterruptedException& e) {
+    DVLOG << "PDOOCScheduler catched a ForwardInterruptedException";
+    handle_prefill_interruption();
+  }
+}
+
+std::vector<Batch> PDOOCScheduler::prepare_batch() {
+  Timer timer;
+  // propogate new requests to waiting_priority_queue_
+  // Include those requests that are preempted by others.
+  std::shared_ptr<Request> request;
+  // read from request queue then push to waiting priority queue
+  while (request_queue_.read(request)) {
+    CHECK(request);
+
+    // if (request->offline()) {
+    //   DVLOG << "Read an offline request from request_queue_";
+    // }
+
+    // expand sequences to the target number if prefix cache is disabled.
+    if (!enable_prefix_cache_) {
+      // expand sequences to the target number
+      request->expand_sequences(false);
+    }
+
+    if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
+      if (request->offline()) {
+        waiting_priority_queue_offline_.push(request);
+        // DVLOG << "Put an offline request into
+        // waiting_priority_queue_offline_";
+      } else {
+        waiting_priority_queue_.push(request);
+        // DVLOG << "Put an online request into
+        // waiting_priority_queue_offline_";
+      }
+    } else {
+      // request from prefill instance in disagge pd mode.
+      running_requests_.emplace_back(request);
+    }
+  }
+
+  // handle finished/cancelled requests
+  std::vector<std::shared_ptr<Request>> finished_requests;
+  for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
+       ++it) {
+    if (*it == nullptr) {
+      continue;
+    }
+    std::shared_ptr<Request> request = *it;
+    request->update_connection_status();
+    if (request->finished() || request->cancelled()) {
+      // DVLOG << "Found a finished request in running_requests_";
+      block_manager_pool_->deallocate(request.get());
+      // release the ownership of the request
+      finished_requests.emplace_back(request);
+      // finished request is set to nullptr
+      *it = nullptr;
+    }
+  }
+
+  if (options_.priority_strategy() == "FCFS") {
+    if (last_step_prefill_) {
+      // insert all requests to the back of running_queue_
+      // 1. last step is prefill step:
+      // new prefill has high priority, but these requests has lower priority
+      // then existed requests in running_queue_ in decoding stage.
+      // so we need to push them to the back of running_queue_.
+      for (auto it = running_requests_.begin(); it != running_requests_.end();
+           ++it) {
+        // finished request is set to nullptr
+        if (*it == nullptr) {
+          continue;
+        }
+        handle_running_requests(*it);
+        if ((*it)->offline()) {
+          running_queue_offline_->push(*it, last_step_prefill_);
+          // DVLOG << "Put an offline request into running_queue_offline_";
+        } else {
+          running_queue_->push(*it, last_step_prefill_);
+          // DVLOG << "Put an online request into running_queue_";
+        }
+      }
+    } else {
+      // insert all requests to the front of running_queue_
+      // 2. last step is decode step:
+      // We need to traverse running_requests_ array in reverse order.
+      // Because there may be some unexecuted requests with
+      // lower priorities remaining in the running_queue_.
+      // For the requests in running_requests_,
+      // their priorities are all higher than those of the
+      // remaining requests. Therefore, the `push_front`
+      // method needs to be used.
+      //
+      for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
+           ++it) {
+        // finished request is set to nullptr
+        if (*it == nullptr) {
+          continue;
+        }
+        handle_running_requests(*it);
+        if ((*it)->offline()) {
+          running_queue_offline_->push(*it, last_step_prefill_);
+          // DVLOG << "Pushed an offline request into running_queue_offline_";
+        } else {
+          running_queue_->push(*it, last_step_prefill_);
+          // DVLOG << "Pushed an online request into running_queue_";
+        }
+      }
+    }
+  } else {
+    // DVLOG << "Using unknown priority_strategy: " <<
+    // options_.priority_strategy(); directly push running requests to the
+    // priority queue
+    for (auto it = running_requests_.begin(); it != running_requests_.end();
+         ++it) {
+      if (*it == nullptr) {
+        continue;
+      }
+      handle_running_requests(*it);
+      if ((*it)->offline()) {
+        running_queue_offline_->push(*it);
+        // DVLOG << "Pushed an offline request into running_queue_offline_";
+      } else {
+        running_queue_->push(*it);
+        // DVLOG << "Pushed an online request into running_queue_";
+      }
+    }
+  }
+
+  // clear previous batch
+  last_step_prefill_ = false;
+  running_requests_.clear();
+  running_sequences_.clear();
+  running_sequences_budgets_.clear();
+
+  // maintain estimate_latency for current batch for support requests with
+  // different ttft. TO IMPROVE: use min remaining time (i.e. slo -
+  // elapsed_time) of the reuquest in current decode queue to replace current
+  // latency_budget.
+  size_t latency_budget = options_.max_global_ttft_ms();
+  size_t estimate_latency = 0;
+  // remaining budget for the current batch
+  size_t remaining_token_budget = options_.max_tokens_per_batch();
+  size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
+  size_t num_preempted_requests = 0;
+  size_t num_offline_decode_preempt_offline_requests = 0;
+  size_t num_online_decode_preempt_online_requests = 0;
+  size_t num_online_prefill_preempt_offline_requests = 0;
+  size_t num_online_decode_preempt_offline_requests = 0;
+  // TO IMPROVE?: handle online decode request before prefill offline request
+  bool previous_idle = (step_status_ == StepStatus::IDLE);
+  CHECK(options_.enable_pd_ooc());
+  handle_prefill_requests(latency_budget,
+                          estimate_latency,
+                          remaining_token_budget,
+                          remaining_seq_budget,
+                          waiting_priority_queue_,
+                          num_online_prefill_preempt_offline_requests,
+                          finished_requests);
+  if (!running_sequences_.empty()) {
+    step_status_ = StepStatus::ONLINE_PREFILL;
+    DVLOG << "Set step status to ONLINE PREFILL";
+  } else {
+    // In PD OOC mode, a batch can only consist entirely of online requests or
+    // entirely of offline requests
+    handle_prefill_requests(latency_budget,
+                            estimate_latency,
+                            remaining_token_budget,
+                            remaining_seq_budget,
+                            waiting_priority_queue_offline_,
+                            num_online_prefill_preempt_offline_requests,
+                            finished_requests);
+    if (!running_sequences_.empty()) {
+      step_status_ = StepStatus::OFFLINE_PREFILL;
+      DVLOG << "Set step status to OFFLINE PREFILL";
+    } else {
+      latency_budget = options_.max_global_tpot_ms();
+      // Handle decoding requests.
+      // no prefill request, schedule the decode requests in the running
+      // priority queue
+      handle_decode_requests(latency_budget,
+                             estimate_latency,
+                             remaining_token_budget,
+                             remaining_seq_budget,
+                             num_offline_decode_preempt_offline_requests,
+                             num_online_decode_preempt_online_requests,
+                             num_online_decode_preempt_offline_requests,
+                             running_queue_);
+      handle_decode_requests(latency_budget,
+                             estimate_latency,
+                             remaining_token_budget,
+                             remaining_seq_budget,
+                             num_offline_decode_preempt_offline_requests,
+                             num_online_decode_preempt_online_requests,
+                             num_online_decode_preempt_offline_requests,
+                             running_queue_offline_);
+      if (!running_sequences_.empty()) {
+        step_status_ = StepStatus::DECODE;
+        DVLOG << "Set step status to DECODE";
+      } else {
+        step_status_ = StepStatus::IDLE;
+        if (!previous_idle) {
+          DVLOG << "Reset step status to IDLE";
+        }
+      }
+    }
+  }
+
+  num_preempted_requests = num_offline_decode_preempt_offline_requests +
+                           num_online_decode_preempt_online_requests +
+                           num_online_decode_preempt_offline_requests +
+                           num_online_prefill_preempt_offline_requests;
+  if (!finished_requests.empty()) {
+    response_processor_->process_completed_requests(finished_requests);
+  }
+
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(
+                         running_sequences_,
+                         running_sequences_budgets_,
+                         block_manager_pool_->get_copy_in_cache_block_infos(),
+                         block_manager_pool_->get_copy_out_cache_block_infos());
+
+  if (!batches[0].empty()) {
+    // only update the scheduling latency when there are requests to process
+    COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
+  }
+
+  GAUGE_SET(num_pending_requests,
+            pending_requests_.load(std::memory_order_relaxed));
+  GAUGE_SET(num_running_requests, running_requests_.size());
+  GAUGE_SET(num_waiting_requests,
+            waiting_priority_queue_.size() + running_queue_->size());
+
+  GAUGE_ADD(num_preempted_requests, num_preempted_requests);
+  GAUGE_ADD(num_offline_decode_preempt_offline_requests,
+            num_offline_decode_preempt_offline_requests);
+  GAUGE_ADD(num_online_decode_preempt_online_requests,
+            num_online_decode_preempt_online_requests);
+  GAUGE_ADD(num_online_prefill_preempt_offline_requests,
+            num_online_prefill_preempt_offline_requests);
+  GAUGE_ADD(num_online_decode_preempt_offline_requests,
+            num_online_decode_preempt_offline_requests);
+
+  GAUGE_SET(num_running_sequences, running_sequences_.size());
+
+  GAUGE_SET(kv_cache_utilization_perc,
+            block_manager_pool_->kv_cache_utilization());
+  GAUGE_SET(num_blocks_in_prefix_cache,
+            util::min(block_manager_pool_->num_blocks_in_prefix_cache()));
+  GAUGE_SET(num_free_blocks, util::max(block_manager_pool_->num_free_blocks()));
+  GAUGE_SET(num_used_blocks, util::min(block_manager_pool_->num_used_blocks()));
+  if (!batches[0].empty()) {
+    DVLOG << "Built a batch";
+  }
+  return batches;
+}
+
+void PDOOCScheduler::handle_prefill_interruption() {
+  std::vector<std::shared_ptr<Request>> offline_requests_to_preempt;
+
+  // Find all offline requests in running_requests_ and mark them for preemption
+  for (auto it = running_requests_.begin(); it != running_requests_.end();
+       ++it) {
+    if (*it && (*it)->offline()) {
+      offline_requests_to_preempt.emplace_back(*it);
+      *it = nullptr;  // Remove from running_requests_
+    }
+  }
+
+  // Preempt offline requests and move them back to waiting queue
+  for (auto& request : offline_requests_to_preempt) {
+    // Deallocate KV cache blocks
+    block_manager_pool_->deallocate(request.get());
+
+    // Mark request as preempted
+    request->set_preempted();
+
+    // Add back to offline waiting queue for rescheduling
+    waiting_priority_queue_offline_.push(request);
+
+    DVLOG << "Preempted offline request due to interruption: "
+          << request->request_id();
+  }
+
+  LOG(INFO) << "Handled prefill interruption: preempted "
+            << offline_requests_to_preempt.size() << " offline requests";
 }
 
 void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
@@ -273,7 +568,6 @@ void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
   // offline request from a P node
   if (check_able_to_pull()) {
     // Trigger decode_send_pull_signal()
-    // DVLOG << "Able to pull";
     decode_send_pull_signal_pending_.store(false);
     decode_send_pull_signal_cv_.notify_all();
   }
@@ -341,12 +635,12 @@ bool PDOOCScheduler::add_request(std::shared_ptr<Request>& request) {
     prefill_request_queue_offline_.enqueue(request);
     DVLOG << "Received an offline request: " << request->request_id();
     return true;
+  } else {
+    // push and wait
+    prefill_request_queue_.enqueue(request);
+    DVLOG << "Received an online request: " << request->request_id();
+    return true;
   }
-  // push and wait
-  prefill_request_queue_.enqueue(request);
-  DVLOG << "Received an online request: " << request->request_id();
-
-  return true;
 }
 
 // prefill send new request to remote instance
@@ -449,6 +743,14 @@ void PDOOCScheduler::dispatch_requests() {
 
         // push to request_queue_, and will be executed by engine.
         request_queue_.write(requests[i]);
+        DVLOG << "Put a request into request_queue_";
+      }
+    }
+    // WIP Interrupt ongoing offline prefill requests when online requests come
+    if (!requests.empty()) {
+      if (step_status_ == StepStatus::OFFLINE_PREFILL) {
+        InterruptionBus::get_instance().publish(true);
+        DVLOG << "Sent an interruption signal";
       }
     }
   }

@@ -28,6 +28,7 @@ limitations under the License.
 
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
+#include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
@@ -633,6 +634,10 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
        worker_rank += dp_local_tp_size_) {
     auto result = results[worker_rank].value();
     if (result.has_value()) {
+      if (result.value().outputs.empty()) { 
+        // Receiving an empty tensor means forward has been interrupted
+        throw ForwardInterruptedException();
+      }
       // set second input param enable_schedule_overlap to false,
       // if it's not enabled, process_sample_output will append the real token,
       // if it's enabled, this false here will append the fake token in

@@ -36,7 +36,7 @@ limitations under the License.
 
 namespace xllm {
 
-enum class StepStatus { ONLINE_PREFILL, OFFLINE_PREFILL, OFFLINE_DECODE, IDLE };
+enum class StepStatus { ONLINE_PREFILL, OFFLINE_PREFILL, DECODE, IDLE };
 
 class PDOOCScheduler : public ContinuousScheduler {
  public:
@@ -119,7 +119,10 @@ class PDOOCScheduler : public ContinuousScheduler {
 
   void dispatch_offline_requests();
 
+  std::vector<Batch> prepare_batch() override;
+
  private:
+  void handle_prefill_interruption();
   // Pre-execute prefill requests of different lengths at startup and obtain the
   // corresponding TTFT for calculating the estimated TTFT of requests.
   void profile_ttft();
@@ -227,7 +230,7 @@ class PDOOCScheduler : public ContinuousScheduler {
   std::vector<int64_t> recent_tbt_;
   std::mutex latency_metrics_mutex_;
 
-  StepStatus step_status = StepStatus::IDLE;
+  StepStatus step_status_ = StepStatus::IDLE;
 
   std::mutex decode_send_pull_signal_mtx_;
   std::condition_variable decode_send_pull_signal_cv_;
