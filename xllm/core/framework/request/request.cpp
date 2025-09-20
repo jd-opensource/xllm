@@ -36,13 +36,25 @@ Request::Request(const std::string& request_id,
                  const RequestState& state,
                  const std::string& service_request_id,
                  bool offline,
-                 int32_t slo_ms,
-                 RequestPriority priority)
+                 int32_t ttlt_slo_ms,
+                 RequestPriority priority,
+                 int32_t ttft_slo_ms,
+                 int32_t tpot_slo_ms,
+                 int32_t tpot_priority_weight,
+                 int32_t ttft_priority_weight,
+                 int32_t ttlt_priority_weight,
+                 int32_t priority_weight)
     : RequestBase(request_id, x_request_id, x_request_time, service_request_id),
       state_(std::move(state)),
       offline_(offline),
       priority_(priority),
-      slo_ms_(slo_ms) {
+      ttlt_slo_ms_(ttlt_slo_ms),
+      ttft_slo_ms_(ttft_slo_ms),
+      tpot_slo_ms_(tpot_slo_ms),
+      tpot_priority_weight_(tpot_priority_weight),
+      ttft_priority_weight_(ttft_priority_weight),
+      ttlt_priority_weight_(ttlt_priority_weight),
+      priority_weight_(priority_weight) {
   create_sequences_group();
 }
 

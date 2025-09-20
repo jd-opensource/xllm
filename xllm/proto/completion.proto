@@ -90,7 +90,7 @@ message CompletionRequest {
 
   optional bool offline = 26;
 
-  optional int32 slo_ms = 27;
+  optional int32 ttlt_slo_ms = 27;
 
   // request priority. default = DEFAULT
   optional Priority priority = 28;
@@ -100,6 +100,18 @@ message CompletionRequest {
   optional bool add_special_tokens = 30;
   // tensor for rec embedding.
   repeated InferInputTensor input_tensors = 31;
+
+  optional int32 ttft_slo_ms = 32;
+
+  optional int32 tpot_slo_ms = 33;
+
+  optional int32 tpot_priority_weight = 34;
+
+  optional int32 ttft_priority_weight = 35;
+
+  optional int32 ttlt_priority_weight = 36;
+
+  optional int32 priority_weight = 37;
 }
 
 message LogProbs {

@@ -97,8 +97,14 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
       std::move(req_state),
       req.service_req_id(),
       req.offline(),
-      req.slo_ms(),
-      static_cast<xllm::RequestPriority>(req.priority()));
+      req.ttlt_slo_ms(),
+      static_cast<xllm::RequestPriority>(req.priority()),
+      req.ttft_slo_ms(),
+      req.tpot_slo_ms(),
+      req.tpot_priority_weight(),
+      req.ttft_priority_weight(),
+      req.ttlt_priority_weight(),
+      req.priority_weight());
 
   // add one sequence, rest will be added by scheduler
   return new_request;

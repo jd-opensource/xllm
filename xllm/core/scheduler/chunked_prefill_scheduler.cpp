@@ -56,7 +56,6 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
          remaining_token_budget > min_speculative_tokens_required_ &&
          latency_budget > estimate_latency && remaining_seq_budget > 0) {
     std::shared_ptr<Request> request(running_queue->top());
-    // TODO: check if request is timeout
 
     const size_t num_sequences = request->sequences().size();
     std::vector<Sequence*> candidate_sequences;

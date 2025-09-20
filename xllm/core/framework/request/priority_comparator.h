@@ -39,13 +39,48 @@ struct StrictPriorityComparator : public PriorityComparator {
                   const std::shared_ptr<Request>& b) const override;
 };
 
+struct DensityComparator : public PriorityComparator {
+  bool operator()(const std::shared_ptr<Request>& a,
+                  const std::shared_ptr<Request>& b) const override;
+};
+
 struct DeadlineComparator : public PriorityComparator {
+  bool operator()(const std::shared_ptr<Request>& a,
+                  const std::shared_ptr<Request>& b) const override;
+};
+
+struct SJFComparator : public PriorityComparator {
+  bool operator()(const std::shared_ptr<Request>& a,
+                  const std::shared_ptr<Request>& b) const override;
+};
+
+struct DecodeDeadlineComparator : public PriorityComparator {
+  bool operator()(const std::shared_ptr<Request>& a,
+                  const std::shared_ptr<Request>& b) const override;
+};
+
+struct DecodeDensityComparator : public PriorityComparator {
+  bool operator()(const std::shared_ptr<Request>& a,
+                  const std::shared_ptr<Request>& b) const override;
+};
+
+struct UrgencyDensityComparator : public PriorityComparator {
+  bool operator()(const std::shared_ptr<Request>& a,
+                  const std::shared_ptr<Request>& b) const override;
+};
+
+struct UrgencyPriorityComparator : public PriorityComparator {
+  bool operator()(const std::shared_ptr<Request>& a,
+                  const std::shared_ptr<Request>& b) const override;
+};
+
+struct DecodeUrgencyDensityComparator : public PriorityComparator {
   bool operator()(const std::shared_ptr<Request>& a,
                   const std::shared_ptr<Request>& b) const override;
 };
 
 std::function<bool(const std::shared_ptr<Request>&,
                    const std::shared_ptr<Request>&)>
-create_comparator(const std::string& priority_strategy);
+create_comparator(const std::string& priority_strategy, bool reverse = false);
 
 }  // namespace xllm
