@@ -33,6 +33,7 @@ limitations under the License.
 
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
+#include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
@@ -539,6 +540,13 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
 
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
+  for (size_t i = 0; i < results.size(); ++i) {
+    if (results[i].hasException()) {
+      VLOG(1) << "LLMEngine catched an exception";
+      auto& ew = results[i].exception();
+      ew.throw_exception();
+    }
+  }
 
   if (FLAGS_enable_eplb && !options_.enable_schedule_overlap()) {
     process_eplb_data(results, worker_clients_num);

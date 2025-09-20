@@ -468,41 +468,47 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   threadpool_.schedule([this,
                         inputs = forward_inputs_on_device,
                         promise = std::move(promise)]() mutable {
-    // run the model on the given input in working thread
-    auto copy_future = copy_out_blocks_async(inputs.input_params);
-    if (!enable_schedule_overlap()) {
-      const auto output = this->step(inputs);
-      std::move(copy_future).get();
-      promise.setValue(output);
-    } else {
-      if (last_step_output_valid_ && !inputs.input_params.empty_kv_cache) {
-        // replace step i model input with true output of step i-1
-        inputs = update_input_by_last_step_output(inputs);
-      }
-      const auto output = this->step(inputs);
-      if (output.has_value()) {
-        if (is_driver() || FLAGS_enable_eplb) {
-          std::unique_lock<std::mutex> lock(mtx_);
-          cv_.wait(lock, [this] { return !is_recorded_; });
-          update_last_step_output(output);
-          is_recorded_ = true;
-          cv_.notify_one();
-        } else {
-          update_last_step_output(output);
-        }
+    try {
+      // run the model on the given input in working thread
+      auto copy_future = copy_out_blocks_async(inputs.input_params);
+      if (!enable_schedule_overlap()) {
+        const auto output = this->step(inputs);
+        std::move(copy_future).get();
+        promise.setValue(output);
       } else {
-        if (is_driver() || FLAGS_enable_eplb) {
-          std::unique_lock<std::mutex> lock(mtx_);
-          cv_.wait(lock, [this] { return !is_recorded_; });
-          last_step_output_valid_ = false;
-          is_recorded_ = true;
-          cv_.notify_one();
-        } else {
-          last_step_output_valid_ = false;
+        if (last_step_output_valid_ && !inputs.input_params.empty_kv_cache) {
+          // replace step i model input with true output of step i-1
+          inputs = update_input_by_last_step_output(inputs);
         }
+        const auto output = this->step(inputs);
+        if (output.has_value()) {
+          if (is_driver() || FLAGS_enable_eplb) {
+            std::unique_lock<std::mutex> lock(mtx_);
+            cv_.wait(lock, [this] { return !is_recorded_; });
+            update_last_step_output(output);
+            is_recorded_ = true;
+            cv_.notify_one();
+          } else {
+            update_last_step_output(output);
+          }
+        } else {
+          if (is_driver() || FLAGS_enable_eplb) {
+            std::unique_lock<std::mutex> lock(mtx_);
+            cv_.wait(lock, [this] { return !is_recorded_; });
+            last_step_output_valid_ = false;
+            is_recorded_ = true;
+            cv_.notify_one();
+          } else {
+            last_step_output_valid_ = false;
+          }
+        }
+        std::move(copy_future).get();
+        promise.setValue(output);
       }
-      std::move(copy_future).get();
-      promise.setValue(output);
+    } catch (const std::exception& e) {
+      DVLOG << "WorkerImpl catched an exception";
+      promise.setException(folly::exception_wrapper(std::current_exception()));
+      DVLOG << "WorkerImpl set an exception";
     }
   });
   return future;
