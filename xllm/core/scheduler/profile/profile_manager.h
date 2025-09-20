@@ -97,6 +97,12 @@ class ProfileManager {
 
   double get_constant_overhead();
 
+  int32_t get_quadratic_root(Sequence* sequence, double budget);
+
+  std::vector<double> get_coefficients(bool is_prefill = true);
+
+  void profile_step_time(bool if_dump_to_file);
+
  private:
   void dump_step_time_profile_to_file(
       const std::vector<std::pair<int32_t, double>>& time_profiling_data,
@@ -111,8 +117,6 @@ class ProfileManager {
                                                    int32_t prefix_length);
 
   std::string generate_filename(const std::string& file_suffix);
-
-  void profile_step_time(bool if_dump_to_file);
 
   void eval_sequence_latency_prediction();
 
