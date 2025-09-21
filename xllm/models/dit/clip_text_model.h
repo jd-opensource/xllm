@@ -13,6 +13,7 @@
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/siglip_encoder_layer.h"
+#include "dit_linear.h"
 #include "models/model_registry.h"
 #include "models/vlm/qwen2_5_vl.h"
 #include "processors/clip_image_processor.h"
@@ -228,16 +229,14 @@ class CLIPMLPImpl : public torch::nn::Module {
     // CHECK(act_ != nullptr);
     act_ = register_module("act", torch::nn::Functional(quick_gelu));
 
-    fc1_ = register_module("fc1",
-                           torch::nn::Linear(torch::nn::LinearOptions(
-                                                 args.clip_hidden_size(),
-                                                 args.clip_intermediate_size())
-                                                 .bias(true)));
-    fc2_ = register_module("fc2",
-                           torch::nn::Linear(torch::nn::LinearOptions(
-                                                 args.clip_intermediate_size(),
-                                                 args.clip_hidden_size())
-                                                 .bias(true)));
+    fc1_ = register_module(
+        "fc1",
+        DiTLinear(
+            args.clip_hidden_size(), args.clip_intermediate_size(), true));
+    fc2_ = register_module(
+        "fc2",
+        DiTLinear(
+            args.clip_intermediate_size(), args.clip_hidden_size(), true));
 
     fc1_->weight.set_data(fc1_->weight.to(options));
     fc2_->weight.set_data(fc2_->weight.to(options));
@@ -296,8 +295,8 @@ class CLIPMLPImpl : public torch::nn::Module {
 
  private:
   torch::nn::Functional act_{nullptr};
-  torch::nn::Linear fc1_{nullptr};
-  torch::nn::Linear fc2_{nullptr};
+  DiTLinear fc1_{nullptr};
+  DiTLinear fc2_{nullptr};
   bool fc1_weight_loaded_{false};
   bool fc1_bias_loaded_{false};
   bool fc2_weight_loaded_{false};
@@ -327,24 +326,16 @@ class CLIPAttentionImpl : public torch::nn::Module {
     dropout_ = args.clip_attention_dropout();
     q_proj_ = register_module(
         "q_proj",
-        torch::nn::Linear(torch::nn::LinearOptions(args.clip_hidden_size(),
-                                                   num_heads_ * head_dim_)
-                              .bias(true)));
+        DiTLinear(args.clip_hidden_size(), num_heads_ * head_dim_, true));
     k_proj_ = register_module(
         "k_proj",
-        torch::nn::Linear(torch::nn::LinearOptions(args.clip_hidden_size(),
-                                                   num_heads_ * head_dim_)
-                              .bias(true)));
+        DiTLinear(args.clip_hidden_size(), num_heads_ * head_dim_, true));
     v_proj_ = register_module(
         "v_proj",
-        torch::nn::Linear(torch::nn::LinearOptions(args.clip_hidden_size(),
-                                                   num_heads_ * head_dim_)
-                              .bias(true)));
+        DiTLinear(args.clip_hidden_size(), num_heads_ * head_dim_, true));
     o_proj_ = register_module(
         "o_proj",
-        torch::nn::Linear(torch::nn::LinearOptions(args.clip_hidden_size(),
-                                                   args.clip_hidden_size())
-                              .bias(true)));
+        DiTLinear(args.clip_hidden_size(), args.clip_hidden_size(), true));
 
     q_proj_->weight.set_data(q_proj_->weight.to(options));
     k_proj_->weight.set_data(k_proj_->weight.to(options));
@@ -492,10 +483,10 @@ class CLIPAttentionImpl : public torch::nn::Module {
   float dropout_;
   std::vector<int64_t> qkv_sizes_;
 
-  torch::nn::Linear o_proj_{nullptr};
-  torch::nn::Linear q_proj_{nullptr};
-  torch::nn::Linear k_proj_{nullptr};
-  torch::nn::Linear v_proj_{nullptr};
+  DiTLinear o_proj_{nullptr};
+  DiTLinear q_proj_{nullptr};
+  DiTLinear k_proj_{nullptr};
+  DiTLinear v_proj_{nullptr};
 
   bool q_proj_weight_loaded_{false};
   bool q_proj_bias_loaded_{false};

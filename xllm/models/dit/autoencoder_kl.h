@@ -15,6 +15,7 @@
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
+#include "dit_linear.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
@@ -278,22 +279,10 @@ class AttentionImpl : public torch::nn::Module {
                                                    .eps(eps)));
     }
     int64_t inner_dim = head_dim * num_heads;
-    to_q_ = register_module(
-        "to_q",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, inner_dim).bias(true)));
-    to_k_ = register_module(
-        "to_k",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, inner_dim).bias(true)));
-    to_v_ = register_module(
-        "to_v",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, inner_dim).bias(true)));
-    to_out_ = register_module(
-        "to_out",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(inner_dim, query_dim).bias(true)));
+    to_q_ = register_module("to_q", DiTLinear(query_dim, inner_dim, true));
+    to_k_ = register_module("to_k", DiTLinear(query_dim, inner_dim, true));
+    to_v_ = register_module("to_v", DiTLinear(query_dim, inner_dim, true));
+    to_out_ = register_module("to_out", DiTLinear(inner_dim, query_dim, true));
   }
   torch::Tensor forward(torch::Tensor hidden_states, torch::Tensor temb) {
     torch::Tensor residual = hidden_states;
@@ -446,10 +435,10 @@ class AttentionImpl : public torch::nn::Module {
  private:
   SpatialNorm spatial_norm_{nullptr};
   torch::nn::GroupNorm group_norm_{nullptr};
-  torch::nn::Linear to_q_{nullptr};
-  torch::nn::Linear to_k_{nullptr};
-  torch::nn::Linear to_v_{nullptr};
-  torch::nn::Linear to_out_{nullptr};
+  DiTLinear to_q_{nullptr};
+  DiTLinear to_k_{nullptr};
+  DiTLinear to_v_{nullptr};
+  DiTLinear to_out_{nullptr};
   int64_t num_heads_;
   bool residual_connection_;
   float rescale_output_factor_;
@@ -766,7 +755,7 @@ class ResnetBlock2DImpl : public torch::nn::Module {
       }
       time_emb_proj_ = register_module(
           "time_emb_proj",
-          torch::nn::Linear(temb_channels.value(), time_proj_out_channels));
+          DiTLinear(temb_channels.value(), time_proj_out_channels));
     }
 
     norm2_ =
@@ -969,7 +958,7 @@ class ResnetBlock2DImpl : public torch::nn::Module {
 
   torch::nn::GroupNorm norm1_{nullptr};
   torch::nn::Conv2d conv1_{nullptr};
-  torch::nn::Linear time_emb_proj_{nullptr};
+  DiTLinear time_emb_proj_{nullptr};
   torch::nn::GroupNorm norm2_{nullptr};
   torch::nn::Dropout dropout_{nullptr};
   torch::nn::Conv2d conv2_{nullptr};

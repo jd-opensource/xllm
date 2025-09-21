@@ -1,4 +1,5 @@
 #pragma once
+#include <torch/nn/functional/linear.h>
 #include <torch/torch.h>
 
 #include <cmath>
@@ -12,6 +13,7 @@
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
+#include "dit_linear.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
@@ -20,6 +22,7 @@
 //   ref to:
 //   https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/transformers/transformer_flux.py
 namespace xllm::hf {
+
 inline torch::Tensor apply_rotary_emb(const torch::Tensor& x,
                                       const torch::Tensor& freqs_cis) {
   // assume freqs_cis is [2, S, D]，[0] is cos，[1] is sin
@@ -125,9 +128,9 @@ TORCH_MODULE(DiTRMSNorm);
 
 class FluxSingleAttentionImpl : public torch::nn::Module {
  private:
-  torch::nn::Linear to_q_{nullptr};
-  torch::nn::Linear to_k_{nullptr};
-  torch::nn::Linear to_v_{nullptr};
+  DiTLinear to_q_{nullptr};
+  DiTLinear to_k_{nullptr};
+  DiTLinear to_v_{nullptr};
   int64_t heads_;
   DiTRMSNorm norm_q_{nullptr};
   DiTRMSNorm norm_k_{nullptr};
@@ -202,23 +205,19 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
                           const at::Device& device,
                           const at::ScalarType& dtype = torch::kBFloat16)
       : heads_(heads), device_(device), dtype_(dtype) {
-    to_q_ = register_module(
-        "to_q",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, out_dim).bias(true)));
-    to_k_ = register_module(
-        "to_k",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, out_dim).bias(true)));
-    to_v_ = register_module(
-        "to_v",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, out_dim).bias(true)));
+    to_q_ = register_module("to_q",
+                            DiTLinear(query_dim, out_dim, true /*has_bias*/));
+    to_k_ = register_module("to_k",
+                            DiTLinear(query_dim, out_dim, true /*has_bias*/));
+    to_v_ = register_module("to_v",
+                            DiTLinear(query_dim, out_dim, true /*has_bias*/));
+
     norm_q_ = register_module(
         "norm_q", DiTRMSNorm(head_dim, 1e-6f, true, false, device_, dtype_));
     norm_k_ = register_module(
         "norm_k", DiTRMSNorm(head_dim, 1e-6f, true, false, device_, dtype_));
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& image_rotary_emb) {
     int64_t batch_size, channel, height, width;
@@ -261,14 +260,14 @@ TORCH_MODULE(FluxSingleAttention);
 
 class FluxAttentionImpl : public torch::nn::Module {
  private:
-  torch::nn::Linear to_q_{nullptr};
-  torch::nn::Linear to_k_{nullptr};
-  torch::nn::Linear to_v_{nullptr};
-  torch::nn::Linear add_q_proj_{nullptr};
-  torch::nn::Linear add_k_proj_{nullptr};
-  torch::nn::Linear add_v_proj_{nullptr};
-  torch::nn::Linear to_out_{nullptr};
-  torch::nn::Linear to_add_out_{nullptr};
+  DiTLinear to_q_{nullptr};
+  DiTLinear to_k_{nullptr};
+  DiTLinear to_v_{nullptr};
+  DiTLinear add_q_proj_{nullptr};
+  DiTLinear add_k_proj_{nullptr};
+  DiTLinear add_v_proj_{nullptr};
+  DiTLinear to_out_{nullptr};
+  DiTLinear to_add_out_{nullptr};
   torch::nn::Dropout dropout_{nullptr};
   DiTRMSNorm norm_q_{nullptr};
   DiTRMSNorm norm_k_{nullptr};
@@ -456,38 +455,23 @@ class FluxAttentionImpl : public torch::nn::Module {
                     at::Device device,
                     const at::ScalarType& dtype = torch::kBFloat16)
       : heads_(heads), device_(device), dtype_(dtype) {
-    to_q_ = register_module(
-        "to_q",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, out_dim).bias(true)));
-    to_k_ = register_module(
-        "to_k",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, out_dim).bias(true)));
-    to_v_ = register_module(
-        "to_v",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(query_dim, out_dim).bias(true)));
-    add_q_proj_ = register_module(
-        "add_q_proj",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(added_kv_proj_dim, out_dim).bias(true)));
-    add_k_proj_ = register_module(
-        "add_k_proj",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(added_kv_proj_dim, out_dim).bias(true)));
-    add_v_proj_ = register_module(
-        "add_v_proj",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(added_kv_proj_dim, out_dim).bias(true)));
-    to_out_ = register_module(
-        "to_out",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(out_dim, query_dim).bias(true)));
-    to_add_out_ = register_module(
-        "to_add_out",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(out_dim, added_kv_proj_dim).bias(true)));
+    to_q_ = register_module("to_q", DiTLinear(query_dim, out_dim, true));
+    to_k_ = register_module("to_k", DiTLinear(query_dim, out_dim, true));
+    to_v_ = register_module("to_v", DiTLinear(query_dim, out_dim, true));
+    add_q_proj_ = register_module("add_q_proj",
+                                  DiTLinear(added_kv_proj_dim, out_dim, true));
+
+    add_k_proj_ = register_module("add_k_proj",
+                                  DiTLinear(added_kv_proj_dim, out_dim, true));
+
+    add_v_proj_ = register_module("add_v_proj",
+                                  DiTLinear(added_kv_proj_dim, out_dim, true));
+
+    to_out_ = register_module("to_out", DiTLinear(out_dim, query_dim, true));
+
+    to_add_out_ = register_module("to_add_out",
+                                  DiTLinear(out_dim, added_kv_proj_dim, true));
+
     dropout_ = register_module("dropout", torch::nn::Dropout(0.1));
 
     norm_q_ = register_module(
@@ -605,14 +589,12 @@ class PixArtAlphaTextProjectionImpl : public torch::nn::Module {
                                 at::ScalarType dtype = torch::kFloat32)
       : device_(device), dtype_(dtype) {
     int64_t out_dim = (out_features == -1) ? hidden_size : out_features;
-    linear_1_ = register_module(
-        "linear_1",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(in_features, hidden_size).bias(true)));
-    linear_2_ = register_module(
-        "linear_2",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(hidden_size, out_dim).bias(true)));
+    linear_1_ =
+        register_module("linear_1", DiTLinear(in_features, hidden_size, true));
+
+    linear_2_ =
+        register_module("linear_2", DiTLinear(hidden_size, out_dim, true));
+
     act_1_ = register_module("act_1", torch::nn::SiLU());
     linear_1_->to(dtype_);
     linear_2_->to(dtype_);
@@ -661,13 +643,14 @@ class PixArtAlphaTextProjectionImpl : public torch::nn::Module {
   }
 
  private:
-  torch::nn::Linear linear_1_{nullptr};
-  torch::nn::Linear linear_2_{nullptr};
+  DiTLinear linear_1_{nullptr};
+  DiTLinear linear_2_{nullptr};
   torch::nn::SiLU act_1_{nullptr};
   at::Device device_;
   at::ScalarType dtype_;
 };
 TORCH_MODULE(PixArtAlphaTextProjection);
+
 inline torch::Tensor get_timestep_embedding(
     const torch::Tensor& timesteps,
     int64_t embedding_dim,
@@ -763,14 +746,11 @@ class TimestepEmbeddingImpl : public torch::nn::Module {
                         at::ScalarType dtype = torch::kFloat32)
       : has_cond_proj_(cond_proj_dim != -1), device_(device), dtype_(dtype) {
     linear_1_ = register_module(
-        "linear_1",
-        torch::nn::Linear(torch::nn::LinearOptions(in_channels, time_embed_dim)
-                              .bias(sample_proj_bias)));
+        "linear_1", DiTLinear(in_channels, time_embed_dim, sample_proj_bias));
+
     if (cond_proj_dim != -1) {
       cond_proj_ = register_module(
-          "cond_proj",
-          torch::nn::Linear(torch::nn::LinearOptions(cond_proj_dim, in_channels)
-                                .bias(false)));
+          "cond_proj", DiTLinear(cond_proj_dim, in_channels, false));
     }
 
     act_fn_ = register_module("act_fn", torch::nn::SiLU());
@@ -778,9 +758,8 @@ class TimestepEmbeddingImpl : public torch::nn::Module {
     int64_t time_embed_dim_out = (out_dim == -1) ? time_embed_dim : out_dim;
     linear_2_ = register_module(
         "linear_2",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(time_embed_dim, time_embed_dim_out)
-                .bias(sample_proj_bias)));
+        DiTLinear(time_embed_dim, time_embed_dim_out, sample_proj_bias));
+
     if (!post_act_fn.empty()) {
       post_act_ = register_module("post_act", torch::nn::SiLU());
     }
@@ -846,9 +825,9 @@ class TimestepEmbeddingImpl : public torch::nn::Module {
   }
 
  private:
-  torch::nn::Linear linear_1_{nullptr};
-  torch::nn::Linear linear_2_{nullptr};
-  torch::nn::Linear cond_proj_{nullptr};
+  DiTLinear linear_1_{nullptr};
+  DiTLinear linear_2_{nullptr};
+  DiTLinear cond_proj_{nullptr};
   torch::nn::SiLU post_act_{nullptr};
   torch::nn::SiLU act_fn_{nullptr};
   bool has_cond_proj_;
@@ -1112,11 +1091,8 @@ class AdaLayerNormZeroImpl : public torch::nn::Module {
               num_embeddings, embedding_dim, 0.1, device, dtype));
     }
     silu_ = register_module("silu", torch::nn::SiLU());
-    linear_ =
-        register_module("linear",
-                        torch::nn::Linear(torch::nn::LinearOptions(
-                                              embedding_dim, 6 * embedding_dim)
-                                              .bias(bias)));
+    linear_ = register_module(
+        "linear", DiTLinear(embedding_dim, 6 * embedding_dim, bias));
 
     if (norm_type == "layer_norm") {
       norm_ = register_module(
@@ -1177,7 +1153,7 @@ class AdaLayerNormZeroImpl : public torch::nn::Module {
 
  private:
   torch::nn::SiLU silu_{nullptr};
-  torch::nn::Linear linear_{nullptr};
+  DiTLinear linear_{nullptr};
   torch::nn::LayerNorm norm_{nullptr};
   CombinedTimestepLabelEmbeddings emb_{nullptr};
   at::Device device_;
@@ -1194,11 +1170,8 @@ class AdaLayerNormZeroSingleImpl : public torch::nn::Module {
                              at::ScalarType dtype = torch::kFloat32)
       : device_(device), dtype_(dtype) {
     silu_ = register_module("silu", torch::nn::SiLU());
-    linear_ =
-        register_module("linear",
-                        torch::nn::Linear(torch::nn::LinearOptions(
-                                              embedding_dim, 3 * embedding_dim)
-                                              .bias(bias)));
+    linear_ = register_module(
+        "linear", DiTLinear(embedding_dim, 3 * embedding_dim, bias));
 
     if (norm_type == "layer_norm") {
       norm_ = register_module(
@@ -1246,7 +1219,7 @@ class AdaLayerNormZeroSingleImpl : public torch::nn::Module {
 
  private:
   torch::nn::SiLU silu_{nullptr};
-  torch::nn::Linear linear_{nullptr};
+  DiTLinear linear_{nullptr};
   torch::nn::LayerNorm norm_{nullptr};
   at::Device device_;
   at::ScalarType dtype_;
@@ -1267,9 +1240,7 @@ class AdaLayerNormContinuousImpl : public torch::nn::Module {
     silu_ = register_module("silu", torch::nn::SiLU());
     linear_ = register_module(
         "linear",
-        torch::nn::Linear(torch::nn::LinearOptions(conditioning_embedding_dim,
-                                                   2 * embedding_dim)
-                              .bias(bias)));
+        DiTLinear(conditioning_embedding_dim, 2 * embedding_dim, bias));
     norm_ = register_module(
         "norm",
         torch::nn::LayerNorm(torch::nn::LayerNormOptions({embedding_dim})
@@ -1310,7 +1281,7 @@ class AdaLayerNormContinuousImpl : public torch::nn::Module {
 
  private:
   torch::nn::SiLU silu_{nullptr};
-  torch::nn::Linear linear_{nullptr};
+  DiTLinear linear_{nullptr};
   torch::nn::LayerNorm norm_{nullptr};
   std::string norm_type_;
   double eps_;
@@ -1435,14 +1406,12 @@ class FeedForwardImpl : public torch::nn::Module {
     // linear1
     linear1_ = register_module(
         "linear1",
-        torch::nn::Linear(torch::nn::LinearOptions(
-                              dim,
-                              activation_fn == "geglu" ||
-                                      activation_fn == "swiglu" ||
-                                      activation_fn == "geglu-approximate"
-                                  ? inner_dim * 2
-                                  : inner_dim)
-                              .bias(bias)));
+        DiTLinear(dim,
+                  activation_fn == "geglu" || activation_fn == "swiglu" ||
+                          activation_fn == "geglu-approximate"
+                      ? inner_dim * 2
+                      : inner_dim,
+                  bias));
 
     // activation
     if (activation_fn == "gelu") {
@@ -1463,10 +1432,8 @@ class FeedForwardImpl : public torch::nn::Module {
     dropout1_ = register_module("dropout1", torch::nn::Dropout(dropout));
 
     // linear2
-    linear2_ = register_module(
-        "linear2",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(inner_dim, dim_out).bias(out_bias)));
+    linear2_ =
+        register_module("linear2", DiTLinear(inner_dim, dim_out, out_bias));
 
     // Dropout
     if (final_dropout) {
@@ -1518,10 +1485,10 @@ class FeedForwardImpl : public torch::nn::Module {
   }
 
  private:
-  torch::nn::Linear linear1_{nullptr};
+  DiTLinear linear1_{nullptr};
   torch::nn::Functional activation_{nullptr};
   torch::nn::Dropout dropout1_{nullptr};
-  torch::nn::Linear linear2_{nullptr};
+  DiTLinear linear2_{nullptr};
   torch::nn::Dropout dropout2_{nullptr};  // optional
   at::Device device_;
   at::ScalarType dtype_;
@@ -1542,17 +1509,12 @@ class FluxSingleTransformerBlockImpl : public torch::nn::Module {
         "norm", AdaLayerNormZeroSingle(dim, "layer_norm", true, device, dtype));
 
     int64_t mlp_out_dim = mlp_hidden_dim_;
-    proj_mlp_ = register_module(
-        "proj_mlp",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(dim, mlp_out_dim).bias(true)));
+    proj_mlp_ = register_module("proj_mlp", DiTLinear(dim, mlp_out_dim, true));
 
     int64_t proj_in_dim = dim + mlp_hidden_dim_;
     int64_t proj_out_dim = dim;
-    proj_out_ = register_module(
-        "proj_out",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(proj_in_dim, proj_out_dim).bias(true)));
+    proj_out_ =
+        register_module("proj_out", DiTLinear(proj_in_dim, proj_out_dim, true));
 
     act_mlp_ =
         register_module("gelu",
@@ -1625,8 +1587,8 @@ class FluxSingleTransformerBlockImpl : public torch::nn::Module {
 
  private:
   AdaLayerNormZeroSingle norm_{nullptr};
-  torch::nn::Linear proj_mlp_{nullptr};
-  torch::nn::Linear proj_out_{nullptr};
+  DiTLinear proj_mlp_{nullptr};
+  DiTLinear proj_out_{nullptr};
   torch::nn::Functional act_mlp_{nullptr};
   FluxSingleAttention attn_{nullptr};
   int64_t mlp_hidden_dim_;
@@ -1803,10 +1765,11 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
           CombinedTimestepTextProjEmbeddings(
               inner_dim_, pooled_projection_dim, device_, dtype_));
     }
+    // TODO: check it;
     context_embedder_ = register_module(
-        "context_embedder", torch::nn::Linear(joint_attention_dim, inner_dim_));
-    x_embedder_ = register_module("x_embedder",
-                                  torch::nn::Linear(in_channels, inner_dim_));
+        "context_embedder", DiTLinear(joint_attention_dim, inner_dim_));
+    x_embedder_ =
+        register_module("x_embedder", DiTLinear(in_channels, inner_dim_));
     // mm-dit block
     for (int64_t i = 0; i < num_layers; ++i) {
       transformer_blocks_->push_back(FluxTransformerBlock(inner_dim_,
@@ -1838,10 +1801,7 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
                                                        dtype_));
     proj_out_ = register_module(
         "proj_out",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(inner_dim_,
-                                     patch_size * patch_size * out_channels_)
-                .bias(true)));
+        DiTLinear(inner_dim_, patch_size * patch_size * out_channels_, true));
   }
   torch::Tensor forward(const torch::Tensor& hidden_states_input,
                         const torch::Tensor& encoder_hidden_states_input,
@@ -1973,12 +1933,12 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
   FluxPosEmbed pos_embed_{nullptr};
   CombinedTimestepTextProjEmbeddings time_text_embed_{nullptr};
   CombinedTimestepGuidanceTextProjEmbeddings time_text_guidance_embed_{nullptr};
-  torch::nn::Linear context_embedder_{nullptr};
-  torch::nn::Linear x_embedder_{nullptr};
+  DiTLinear context_embedder_{nullptr};
+  DiTLinear x_embedder_{nullptr};
   torch::nn::ModuleList transformer_blocks_{nullptr};
   torch::nn::ModuleList single_transformer_blocks_{nullptr};
   AdaLayerNormContinuous norm_out_{nullptr};
-  torch::nn::Linear proj_out_{nullptr};
+  DiTLinear proj_out_{nullptr};
   at::Device device_;
   bool guidance_embeds_;
   at::ScalarType dtype_;
