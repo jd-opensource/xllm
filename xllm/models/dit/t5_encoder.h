@@ -14,6 +14,7 @@
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
+#include "dit.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
@@ -75,8 +76,8 @@ class T5DenseInterface : public torch::nn::Module {
 };
 class T5DenseActDenseImpl : public T5DenseInterface {
  private:
-  torch::nn::Linear wi_{nullptr};
-  torch::nn::Linear wo_{nullptr};
+  Linear wi_{nullptr};
+  Linear wo_{nullptr};
   torch::nn::Dropout dropout_{nullptr};
   torch::nn::Functional act_{nullptr};
   torch::Device device_;
@@ -90,12 +91,8 @@ class T5DenseActDenseImpl : public T5DenseInterface {
                       torch::Device device = torch::kCPU,
                       torch::ScalarType dtype = torch::kBFloat16)
       : device_(device), dtype_(dtype) {
-    wi_ = register_module(
-        "wi",
-        torch::nn::Linear(torch::nn::LinearOptions(d_model, d_ff).bias(false)));
-    wo_ = register_module(
-        "wo",
-        torch::nn::Linear(torch::nn::LinearOptions(d_ff, d_model).bias(false)));
+    wi_ = register_module("wi", Linear(d_model, d_ff, false));
+    wo_ = register_module("wo", Linear(d_ff, d_model, false));
     dropout_ = register_module("dropout", torch::nn::Dropout(dropout_rate));
     if (dense_act_fn == "relu") {
       act_ = register_module("act", torch::nn::Functional(torch::relu));
@@ -143,9 +140,9 @@ class T5DenseActDenseImpl : public T5DenseInterface {
 };
 class T5DenseGatedActDenseImpl : public T5DenseInterface {
  private:
-  torch::nn::Linear wi_0_{nullptr};
-  torch::nn::Linear wi_1_{nullptr};
-  torch::nn::Linear wo_{nullptr};
+  Linear wi_0_{nullptr};
+  Linear wi_1_{nullptr};
+  Linear wo_{nullptr};
   torch::nn::Dropout dropout_{nullptr};
   torch::nn::Functional act_{nullptr};
   torch::Device device_;
@@ -159,15 +156,9 @@ class T5DenseGatedActDenseImpl : public T5DenseInterface {
                            torch::Device device = torch::kCPU,
                            torch::ScalarType dtype = torch::kBFloat16)
       : device_(device), dtype_(dtype) {
-    wi_0_ = register_module(
-        "wi_0",
-        torch::nn::Linear(torch::nn::LinearOptions(d_model, d_ff).bias(false)));
-    wi_1_ = register_module(
-        "wi_1",
-        torch::nn::Linear(torch::nn::LinearOptions(d_model, d_ff).bias(false)));
-    wo_ = register_module(
-        "wo",
-        torch::nn::Linear(torch::nn::LinearOptions(d_ff, d_model).bias(false)));
+    wi_0_ = register_module("wi_0", Linear(d_model, d_ff, false));
+    wi_1_ = register_module("wi_1", Linear(d_model, d_ff, false));
+    wo_ = register_module("wo", Linear(d_ff, d_model, false));
     dropout_ = register_module("dropout", torch::nn::Dropout(dropout_rate));
     if (dense_act_fn == "relu") {
       act_ = register_module("act", torch::nn::Functional(torch::relu));
@@ -297,9 +288,9 @@ find_pruneable_heads_and_indices(
 
   return {heads_to_prune, index};
 }
-torch::nn::Linear prune_linear_layer(const torch::nn::Linear& layer,
-                                     const torch::Tensor& index,
-                                     int64_t dim = 0) {
+Linear prune_linear_layer(const Linear& layer,
+                          const torch::Tensor& index,
+                          int64_t dim = 0) {
   torch::Device device = layer->weight.device();
   torch::Tensor pruned_weight =
       layer->weight.index_select(dim, index.to(device)).detach().clone();
@@ -311,13 +302,9 @@ torch::nn::Linear prune_linear_layer(const torch::nn::Linear& layer,
       pruned_bias = layer->bias.index({index.to(device)}).detach().clone();
     }
   }
-  torch::nn::LinearOptions options(pruned_weight.size(1),  // in_features
-                                   pruned_weight.size(0)   // out_features
-  );
-  options.bias(pruned_bias.has_value());
 
-  torch::nn::Linear new_layer(options);
-  new_layer->to(device);
+  Linear new_layer(
+      pruned_weight.size(1), pruned_weight.size(0), pruned_bias.has_value());
   new_layer->weight.requires_grad_(false);
   new_layer->weight.copy_(pruned_weight.contiguous());
   new_layer->weight.requires_grad_(true);
@@ -353,22 +340,14 @@ class T5AttentionImpl : public torch::nn::Module {
         layer_idx_(layer_idx),
         device_(device),
         dtype_(dtype) {
-    q_ = register_module(
-        "q",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(d_model_, inner_dim_).bias(false)));
-    k_ = register_module(
-        "k",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(d_model_, inner_dim_).bias(false)));
-    v_ = register_module(
-        "v",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(d_model_, inner_dim_).bias(false)));
-    o_ = register_module(
-        "o",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(inner_dim_, d_model_).bias(false)));
+    q_ = register_module("q", Linear(d_model_, inner_dim_, false));
+
+    k_ = register_module("k", Linear(d_model_, inner_dim_, false));
+
+    v_ = register_module("v", Linear(d_model_, inner_dim_, false));
+
+    o_ = register_module("o", Linear(inner_dim_, d_model_, false));
+
     if (has_relative_attention_bias_) {
       relative_attention_bias_ = register_module(
           "relative_attention_bias",
@@ -605,10 +584,10 @@ class T5AttentionImpl : public torch::nn::Module {
   double dropout_;
   int64_t inner_dim_;
   c10::optional<int64_t> layer_idx_;
-  torch::nn::Linear q_{nullptr};
-  torch::nn::Linear k_{nullptr};
-  torch::nn::Linear v_{nullptr};
-  torch::nn::Linear o_{nullptr};
+  Linear q_{nullptr};
+  Linear k_{nullptr};
+  Linear v_{nullptr};
+  Linear o_{nullptr};
   torch::nn::Embedding relative_attention_bias_{nullptr};
   torch::nn::Dropout dropout_layer_{nullptr};
   std::unordered_set<int64_t> pruned_heads_;
