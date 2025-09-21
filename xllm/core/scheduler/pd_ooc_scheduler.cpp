@@ -96,7 +96,7 @@ PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
   instance_info_.dp_size = options.dp_size();
 
   // profile ttft and update instance info
-  profile_ttft();
+  // profile_ttft();
 }
 
 PDOOCScheduler::~PDOOCScheduler() {
@@ -273,12 +273,9 @@ void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
     ContinuousScheduler::step(timeout);
     prefill_send_first_generation();
     prefill_send_multi_generations();
-  } catch (const ForwardInterruptedException& e) {
+  } catch (const std::exception& e) {
     DVLOG << "PDOOCScheduler catched a ForwardInterruptedException";
     handle_prefill_interruption();
-  } catch (const std::exception& e) {
-    DVLOG << "PDOOCScheduler catched an unknown exception";
-    throw;
   }
 }
 
@@ -557,8 +554,8 @@ void PDOOCScheduler::handle_prefill_interruption() {
     // Add back to offline waiting queue for rescheduling
     waiting_priority_queue_offline_.push(request);
 
-    LOG(INFO) << "Preempted offline request due to interruption: "
-              << request->request_id();
+    DVLOG << "Preempted offline request due to interruption: "
+          << request->request_id();
   }
 
   LOG(INFO) << "Handled prefill interruption: preempted "
@@ -752,8 +749,8 @@ void PDOOCScheduler::dispatch_requests() {
     // WIP Interrupt ongoing offline prefill requests when online requests come
     if (!requests.empty()) {
       if (step_status_ == StepStatus::OFFLINE_PREFILL) {
-        // InterruptionBus::get_instance().publish(true);
-        // DVLOG << "Sent a interruption signal";
+        InterruptionBus::get_instance().publish(true);
+        DVLOG << "Sent an interruption signal";
       }
     }
   }

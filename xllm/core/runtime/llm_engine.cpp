@@ -540,13 +540,6 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
 
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
-  for (size_t i = 0; i < results.size(); ++i) {
-    if (results[i].hasException()) {
-      VLOG(1) << "LLMEngine catched an exception";
-      auto& ew = results[i].exception();
-      ew.throw_exception();
-    }
-  }
 
   if (FLAGS_enable_eplb && !options_.enable_schedule_overlap()) {
     process_eplb_data(results, worker_clients_num);
@@ -557,10 +550,11 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   for (auto worker_rank = 0; worker_rank < worker_clients_num;
        worker_rank += dp_local_tp_size) {
     auto result = results[worker_rank].value();
-    if (result.has_value()) {
-      raw_forward_outputs.push_back(result);
-    } else {
+    if (!result.has_value() || result.value().outputs.empty()) {
+      // VLOG(1) << "Engine catched a nullopt or empty output";
       throw std::runtime_error("Failed to execute model");
+    } else {
+      raw_forward_outputs.push_back(result);
     }
   }
 

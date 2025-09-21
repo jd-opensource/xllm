@@ -253,8 +253,8 @@ class QWenModelImplBase : public torch::nn::Module {
       auto& layer = layers_[i];
 
       if (interrupted_) {
-        VLOG(1) << "[OFFLINE PULL] " << "Forward interrupted at layer: " << i;
-        throw ForwardInterruptedException();
+        VLOG(1) << "Forward interrupted at layer: " << i;
+        return torch::Tensor();
       }
 
       layer(h,
@@ -268,6 +268,8 @@ class QWenModelImplBase : public torch::nn::Module {
             i,
             event,
             event_flag);
+
+      // std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     h = norm_(h, context_, work_space_, 0);
     return h;
