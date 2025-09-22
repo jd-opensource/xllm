@@ -28,6 +28,7 @@ limitations under the License.
 #include "disagg_pd.pb.h"
 #include "framework/request/request.h"
 #include "framework/tokenizer/tokenizer.h"
+#include "perf_model.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
 #include "server/xllm_server_registry.h"
@@ -120,6 +121,17 @@ class PDOOCScheduler : public ContinuousScheduler {
   void dispatch_offline_requests();
 
   std::vector<Batch> prepare_batch() override;
+
+ protected:
+  void handle_decode_requests(
+      size_t& latency_budget,
+      size_t& estimate_latency,
+      size_t& remaining_token_budget,
+      size_t& remaining_seq_budget,
+      size_t& num_offline_decode_preempt_offline_requests,
+      size_t& num_online_decode_preempt_online_requests,
+      size_t& num_online_decode_preempt_offline_requests,
+      std::unique_ptr<DecodePriorityQueue>& running_queue) override;
 
  private:
   void handle_prefill_interruption();
@@ -255,6 +267,12 @@ class PDOOCScheduler : public ContinuousScheduler {
   moodycamel::BlockingConcurrentQueue<
       std::pair<std::shared_ptr<Request>, std::string>>
       offline_requests_to_transfer_;
+
+  perf_model::LLMFlops llm_flops_;
+  int linear_saturation_bs_;
+  vector<int> _decode_step_global_batch_req_lens;
+  double _decode_last_step_latency = 0;
+  vector<int> _last_decode_step_global_batch_req_lens;
 };
 
 }  // namespace xllm

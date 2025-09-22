@@ -76,6 +76,7 @@ LLMMaster::LLMMaster(const Options& options)
       .max_tokens_per_chunk_for_prefill(
           options_.max_tokens_per_chunk_for_prefill())
       .num_speculative_tokens(options_.num_speculative_tokens())
+      .nnodes(options_.nnodes())
       .dp_size(options_.dp_size())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_pd_ooc(options_.enable_pd_ooc())

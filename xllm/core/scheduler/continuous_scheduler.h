@@ -56,6 +56,9 @@ class ContinuousScheduler : public Scheduler {
     // the number of speculative tokens per step
     PROPERTY(int32_t, num_speculative_tokens) = 0;
 
+    // the number of tp*dp nodes
+    PROPERTY(int32_t, nnodes) = 1;
+
     // the number of speculative tokens per step
     PROPERTY(int32_t, dp_size) = 1;
 
@@ -167,6 +170,8 @@ class ContinuousScheduler : public Scheduler {
                                    std::vector<int64_t>& tbt) {}
 
   const InstanceInfo& get_instance_info() { return instance_info_; }
+
+  std::vector<int> _debug_last_batch_lengths;
 
  protected:
   // allocate actual token_num slots.
