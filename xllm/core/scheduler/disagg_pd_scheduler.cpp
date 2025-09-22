@@ -25,6 +25,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/macros.h"
 #include "disagg_pd.pb.h"
+#include "disagg_pd_scheduler.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
@@ -42,17 +43,48 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
   if (!options_.instance_role().has_value()) {
     LOG(FATAL) << "Instance type is not set in disagg pd mode.";
   }
-  // start dispatch thread for prefill instance
-  dispatch_thread_ = std::make_unique<std::thread>(
-      &DisaggPDScheduler::dispatch_requests, this);
 
-  rpc_server_thread_ =
-      std::make_unique<std::thread>(&DisaggPDScheduler::start_rpc_server, this);
+  // Only initialize for non-OOC mode
+  // OOC mode (PDOOCScheduler) will handle initialization in its own constructor
+  if (!options_.enable_pd_ooc()) {
+    // Start dispatch thread for prefill instance
+    dispatch_thread_ = std::make_unique<std::thread>(
+        &DisaggPDScheduler::dispatch_requests, this);
+
+    // Start RPC server thread
+    rpc_server_thread_ = std::make_unique<std::thread>(
+        &DisaggPDScheduler::start_rpc_server, this);
+    initialize_rpc_server_and_client("DisaggPDServer");
+    register_instance_info("DisaggPDServer", engine);
+
+    // Profile ttft and update instance info (for non-decode instances)
+    if (!options_.disable_ttft_profiling() &&
+        options_.instance_role().value() != InstanceRole::DECODE) {
+      profile_ttft();
+    }
+  }
+}
+
+DisaggPDScheduler::~DisaggPDScheduler() {
+  // Clean up common threads (shared by both OOC and non-OOC modes)
+  if (rpc_server_thread_ && rpc_server_thread_->joinable()) {
+    rpc_server_thread_->join();
+  }
+
+  // Clean up dispatch thread (created in base class for non-OOC mode,
+  // or in subclass for OOC mode)
+  if (dispatch_thread_ && dispatch_thread_->joinable()) {
+    dispatch_thread_->join();
+  }
+}
+
+void DisaggPDScheduler::initialize_rpc_server_and_client(
+    const std::string& server_name) {
   // wait rpc server initialized
-  auto rpc_server = ServerRegistry::get_instance().get_server("DisaggPDServer");
+  auto rpc_server = ServerRegistry::get_instance().get_server(server_name);
   while (!rpc_server || !rpc_server->has_initialized()) {
     absl::SleepFor(absl::Milliseconds(100));
-    rpc_server = ServerRegistry::get_instance().get_server("DisaggPDServer");
+    rpc_server = ServerRegistry::get_instance().get_server(server_name);
   }
   // connect to master service
   xservice_client_ = XServiceClient::get_instance();
@@ -61,9 +93,13 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
     return;
   }
   xservice_client_->set_scheduler(this);
+}
 
+void DisaggPDScheduler::register_instance_info(const std::string& server_name,
+                                               Engine* engine) {
   // register instance info
   instance_info_.name = xservice_client_->get_instance_name();
+  auto rpc_server = ServerRegistry::get_instance().get_server(server_name);
   instance_info_.rpc_address = rpc_server->listen_address();
   instance_info_.type = options_.instance_role().value().to_string();
   LOG(INFO) << "Instance info: instance name = " << instance_info_.name
@@ -74,22 +110,7 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
                          instance_info_.addrs,
                          instance_info_.k_cache_ids,
                          instance_info_.v_cache_ids);
-  instance_info_.dp_size = options.dp_size();
-
-  // profile ttft and update instance info
-  if (options_.instance_role().value() != InstanceRole::DECODE) {
-    profile_ttft();
-  }
-}
-
-DisaggPDScheduler::~DisaggPDScheduler() {
-  if (rpc_server_thread_ && rpc_server_thread_->joinable()) {
-    rpc_server_thread_->join();
-  }
-
-  if (dispatch_thread_ && dispatch_thread_->joinable()) {
-    dispatch_thread_->join();
-  }
+  instance_info_.dp_size = options_.dp_size();
 }
 
 void DisaggPDScheduler::profile_ttft() {
@@ -434,30 +455,30 @@ void DisaggPDScheduler::prefill_send_first_generation() {
     // TODO: here we only support one sequence for now.
     for (auto& request : requests) {
       // TODO: support batch request later
-      proto::DisaggGenerations gens;
-      // proto::DisaggGeneration gen;
-      auto gen = gens.mutable_gens()->Add();
+      proto::DisaggGenerationsRequests gens;
+      auto gen = gens.mutable_multi_gens()->Add();
       gen->set_req_id(request->request_id());
       if (request->sequences()[0]->first_token().has_value()) {
-        gen->set_token_id(
+        auto token = gen->mutable_tokens()->Add();
+        token->set_token_id(
             request->sequences()[0]->first_token().value().token_id);
         if (request->sequences()[0]
                 ->first_token()
                 .value()
                 .token_logprob.has_value()) {
-          gen->set_logprob(request->sequences()[0]
-                               ->first_token()
-                               .value()
-                               .token_logprob.value());
-          gen->set_has_logprob(true);
+          token->set_logprob(request->sequences()[0]
+                                 ->first_token()
+                                 .value()
+                                 .token_logprob.value());
+          token->set_has_logprob(true);
         } else {
-          gen->set_has_logprob(false);
+          token->set_has_logprob(false);
         }
         ADD_VECTOR_TO_PROTO(
-            gen->mutable_top_tokens(),
+            token->mutable_top_tokens(),
             request->sequences()[0]->first_token().value().token_top_tokens);
         ADD_VECTOR_TO_PROTO(
-            gen->mutable_top_logprobs(),
+            token->mutable_top_logprobs(),
             request->sequences()[0]->first_token().value().token_top_logprobs);
       }
       gen->set_kv_cache_transfer_mode(options_.kv_cache_transfer_mode());
@@ -480,7 +501,6 @@ void DisaggPDScheduler::prefill_send_first_generation() {
         gen->set_dp_size(instance_info_.dp_size);
         gen->set_dp_rank(request->sequences()[0]->dp_rank());
       }
-      //*gens.mutable_gens()->Add() = gen;
 
       // send first gens to remote instance
       proto::DisaggPDService_Stub* stub = nullptr;

@@ -5,7 +5,7 @@ include(cc_test)
 add_subdirectory(profile)
 
 cc_library(
-  NAME 
+  NAME
     scheduler
   HDRS
     chunked_prefill_scheduler.h
@@ -18,6 +18,7 @@ cc_library(
     dit_scheduler.h
     scheduler_factory.h
     decode_priority_queue.h
+    perf_model.h
   SRCS
     chunked_prefill_scheduler.cpp
     zero_eviction_scheduler.cpp
@@ -27,6 +28,7 @@ cc_library(
     async_response_processor.cpp
     dit_scheduler.cpp
     scheduler_factory.cpp
+    perf_model.cpp
   DEPS
     :batch
     :request

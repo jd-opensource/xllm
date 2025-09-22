@@ -56,6 +56,9 @@ class ContinuousScheduler : public Scheduler {
     // the number of speculative tokens per step
     PROPERTY(int32_t, num_speculative_tokens) = 0;
 
+    // the number of tp*dp nodes
+    PROPERTY(int32_t, nnodes) = 1;
+
     // the number of speculative tokens per step
     PROPERTY(int32_t, dp_size) = 1;
 
@@ -106,6 +109,10 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(int32_t, profile_max_prompt_length) = 2048;
     // true if generate kv cache for profile
     PROPERTY(bool, enable_profile_kv_blocks) = true;
+    // true if disable ttft profiling
+    PROPERTY(bool, disable_ttft_profiling) = false;
+    // true if enable forward interruption
+    PROPERTY(bool, enable_forward_interruption) = false;
     // all requests use single global ttft
     PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
     // all requests use single global tpot
@@ -167,6 +174,8 @@ class ContinuousScheduler : public Scheduler {
                                    std::vector<int64_t>& tbt) {}
 
   const InstanceInfo& get_instance_info() { return instance_info_; }
+
+  std::vector<int> last_batch_lengths_;
 
  protected:
   // allocate actual token_num slots.
@@ -237,7 +246,7 @@ class ContinuousScheduler : public Scheduler {
 
   InstanceInfo instance_info_;
 
-  void handle_prefill_requests(
+  virtual void handle_prefill_requests(
       double& latency_budget,
       double& estimate_latency,
       size_t& remaining_token_budget,
@@ -245,7 +254,7 @@ class ContinuousScheduler : public Scheduler {
       RequestPriorityQueue& waiting_priority_queue,
       size_t& num_online_prefill_preempt_offline_requests,
       std::vector<std::shared_ptr<Request>>& finished_requests);
-  void handle_decode_requests(
+  virtual void handle_decode_requests(
       double& latency_budget,
       double& estimate_latency,
       size_t& remaining_token_budget,
@@ -288,6 +297,8 @@ class ContinuousScheduler : public Scheduler {
   void process_batch_output(bool enable_schedule_overlap);
 
   void step_with_schedule_overlap(const absl::Duration& timeout);
+
+  void step_with_pd_ooc(std::vector<Batch>& batch);
 
   std::vector<int64_t> get_num_occupied_slots(
       std::vector<Sequence*>& sequences) const;

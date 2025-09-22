@@ -181,6 +181,10 @@ DECLARE_int32(profile_max_prompt_length);
 
 DECLARE_bool(enable_profile_kv_blocks);
 
+DECLARE_bool(disable_ttft_profiling);
+
+DECLARE_bool(enable_forward_interruption);
+
 DECLARE_int32(max_global_ttft_ms);
 
 DECLARE_int32(max_global_tpot_ms);

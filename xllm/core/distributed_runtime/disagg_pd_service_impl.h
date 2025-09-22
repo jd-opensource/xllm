@@ -24,45 +24,27 @@ class Request;
 class DisaggPDScheduler;
 
 // a class to handle disagg_pd requests
-class DisaggPDServiceImplInterface {
- public:
-  DisaggPDServiceImplInterface() = default;
-  virtual ~DisaggPDServiceImplInterface() = default;
-
-  virtual void decode_recv_new_requests(const proto::DisaggRequests* request,
-                                        proto::DisaggResponses* response) = 0;
-
-  virtual void decode_recv_first_generation(
-      const proto::DisaggGenerations* request,
-      proto::Status* response) = 0;
-
-  virtual bool prefill_recv_generation(
-      const proto::DisaggStreamGeneration* request,
-      proto::Status* response) = 0;
-
-  virtual void prefill_recv_generations(
-      const proto::DisaggStreamGenerations* requests,
-      proto::StatusSet* responses) = 0;
-};
-
-class DisaggPDServiceImpl final : public DisaggPDServiceImplInterface {
+class DisaggPDServiceImpl {
  public:
   explicit DisaggPDServiceImpl(DisaggPDScheduler* scheduler, Engine* engine);
   ~DisaggPDServiceImpl() = default;
 
-  bool prefill_recv_generation(const proto::DisaggStreamGeneration* request,
-                               proto::Status* response) override;
+  virtual bool prefill_recv_generation(
+      const proto::DisaggStreamGeneration* request,
+      proto::Status* response);
 
-  void prefill_recv_generations(const proto::DisaggStreamGenerations* requests,
-                                proto::StatusSet* responses) override;
+  virtual void prefill_recv_generations(
+      const proto::DisaggStreamGenerations* requests,
+      proto::StatusSet* responses);
 
-  void decode_recv_new_requests(const proto::DisaggRequests* request,
-                                proto::DisaggResponses* response) override;
+  virtual void decode_recv_new_requests(const proto::DisaggRequests* request,
+                                        proto::DisaggResponses* response);
 
-  void decode_recv_first_generation(const proto::DisaggGenerations* request,
-                                    proto::Status* response) override;
+  virtual void decode_recv_first_generation(
+      const proto::DisaggGenerationsRequests* request,
+      proto::Status* response);
 
- private:
+ protected:
   std::shared_ptr<Request> generate_request(const proto::DisaggRequest& req);
 
   DisaggPDScheduler* scheduler_;  // not owned

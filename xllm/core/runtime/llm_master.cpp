@@ -73,6 +73,7 @@ LLMMaster::LLMMaster(const Options& options)
       .max_tokens_per_chunk_for_prefill(
           options_.max_tokens_per_chunk_for_prefill())
       .num_speculative_tokens(options_.num_speculative_tokens())
+      .nnodes(options_.nnodes())
       .dp_size(options_.dp_size())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_pd_ooc(options_.enable_pd_ooc())
@@ -90,6 +91,8 @@ LLMMaster::LLMMaster(const Options& options)
       .enable_latency_aware_schedule(options_.enable_latency_aware_schedule())
       .profile_max_prompt_length(options_.profile_max_prompt_length())
       .enable_profile_kv_blocks(options_.enable_profile_kv_blocks())
+      .disable_ttft_profiling(options_.disable_ttft_profiling())
+      .enable_forward_interruption(options_.enable_forward_interruption())
       .max_global_ttft_ms(options_.max_global_ttft_ms())
       .max_global_tpot_ms(options_.max_global_tpot_ms());
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);

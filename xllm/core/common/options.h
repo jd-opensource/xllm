@@ -156,6 +156,10 @@ class Options {
   PROPERTY(int32_t, profile_max_prompt_length) = 2048;
   // true if generate kv cache for profile
   PROPERTY(bool, enable_profile_kv_blocks) = true;
+  // true if disable ttft profiling
+  PROPERTY(bool, disable_ttft_profiling) = false;
+  // true if enable forward interruption
+  PROPERTY(bool, enable_forward_interruption) = false;
   // all requests use single global ttft
   PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
   // all requests use single global tpot

@@ -74,32 +74,34 @@ message DisaggResponse {
   int32 dp_rank = 4;
 }
 
+// Deprecated: Use DisaggGenerationsRequest instead
 // TODO: support multi sequences in one request.
 //       Now only consider one sequence case.
 // TODO: support embedding, now we only support tokens.
-message DisaggGeneration {
-  // req id
-  string req_id = 1;
-  // token id
-  int64 token_id = 2;
-  bool has_logprob = 3;
-  float logprob = 4;
-  repeated int64 top_tokens = 5;
-  repeated float top_logprobs = 6;
-  string kv_cache_transfer_mode = 7;
-  repeated uint64 cluster_ids = 8;
-  repeated string addrs = 14;
-  repeated int64 k_cache_ids = 9;
-  repeated int64 v_cache_ids = 10;
-  repeated int32 block_ids = 11;
-  int32 dp_size = 12;
-  int32 dp_rank = 13;
-}
+// message DisaggGeneration {
+//   // req id
+//   string req_id = 1;
+//   // token id
+//   int64 token_id = 2;
+//   bool has_logprob = 3;
+//   float logprob = 4;
+//   repeated int64 top_tokens = 5;
+//   repeated float top_logprobs = 6;
+//   string kv_cache_transfer_mode = 7;
+//   repeated uint64 cluster_ids = 8;
+//   repeated string addrs = 14;
+//   repeated int64 k_cache_ids = 9;
+//   repeated int64 v_cache_ids = 10;
+//   repeated int32 block_ids = 11;
+//   int32 dp_size = 12;
+//   int32 dp_rank = 13;
+// }
 
+// Deprecated: Use DisaggGenerationsRequests instead
 // First token from prefill instance to decode instance.
-message DisaggGenerations {
-  repeated DisaggGeneration gens = 1;
-}
+// message DisaggGenerations {
+//   repeated DisaggGeneration gens = 1;
+// }
 
 message OutputUsage {
   // the number of tokens in the prompt.
@@ -169,7 +171,8 @@ message StatusSet {
 
 message PullSignal {
   string source_instance_name = 1;
-  int64 preferred_len = 2;
+  int64 preferred_req_len = 2;
+  int64 max_total_len = 3;
 }
 
 message RemoteToken {
@@ -180,7 +183,7 @@ message RemoteToken {
   repeated float top_logprobs = 5;
 }
 
-message MultiGenerationsRequest {
+message DisaggGenerationsRequest {
   string req_id = 1;
   repeated RemoteToken tokens = 2;
   string kv_cache_transfer_mode = 3;
@@ -193,22 +196,15 @@ message MultiGenerationsRequest {
   int32 dp_rank = 10;
 }
 
-message MultiGenerationsRequests {
-  repeated MultiGenerationsRequest multi_gens = 1;
+message DisaggGenerationsRequests {
+  repeated DisaggGenerationsRequest multi_gens = 1;
 }
 
 service DisaggPDService {
   rpc Generation(DisaggStreamGeneration) returns (Status) {}
   rpc Generations(DisaggStreamGenerations) returns (StatusSet) {}
   rpc AddNewRequests(DisaggRequests) returns (DisaggResponses) {}
-  rpc FirstGeneration(DisaggGenerations) returns (Status) {}
-}
-
-service PDOOCService {
-  rpc Generation(DisaggStreamGeneration) returns (Status) {}
-  rpc Generations(DisaggStreamGenerations) returns (StatusSet) {}
-  rpc AddNewRequests(DisaggRequests) returns (DisaggResponses) {}
-  rpc FirstGeneration(DisaggGenerations) returns (Status) {}
-  rpc MultiGenerations(MultiGenerationsRequests) returns (Status) {}
+  rpc FirstGeneration(DisaggGenerationsRequests) returns (Status) {}
+  rpc MultiGenerations(DisaggGenerationsRequests) returns (Status) {}
   rpc SendPullSignal(PullSignal) returns (Status) {}
 }

@@ -211,8 +211,8 @@ class Sequence final {
     decoder_.enable_checking_prefill_token();
   }
 
-  // get all generated tokens (excluding prompt tokens)
-  std::vector<Token> get_generated_tokens() const;
+  // get all generated token IDs (excluding prompt tokens)
+  Slice<int32_t> get_generated_tokens() const;
 
   std::queue<bool>& pre_scheduled_step_prefill_queue() {
     return is_pre_scheduled_step_prefill_;

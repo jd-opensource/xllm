@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "disagg_pd.pb.h"
+#include "disagg_pd_service_impl.h"
 
 namespace xllm {
 
@@ -23,66 +24,21 @@ class Engine;
 class Request;
 class PDOOCScheduler;
 
-// a class to handle disagg_pd requests
-class PDOOCServiceImplInterface {
- public:
-  PDOOCServiceImplInterface() = default;
-  virtual ~PDOOCServiceImplInterface() = default;
-
-  virtual void decode_recv_new_requests(const proto::DisaggRequests* request,
-                                        proto::DisaggResponses* response) {}
-
-  virtual void decode_recv_first_generation(
-      const proto::DisaggGenerations* request,
-      proto::Status* response) {}
-
-  virtual void decode_recv_multi_generations(
-      const proto::MultiGenerationsRequests* request,
-      proto::Status* response) {}
-
-  virtual bool prefill_recv_generation(
-      const proto::DisaggStreamGeneration* request,
-      proto::Status* response) {
-    return true;
-  }
-
-  virtual void prefill_recv_generations(
-      const proto::DisaggStreamGenerations* requests,
-      proto::StatusSet* responses) {}
-
-  virtual void prefill_recv_pull_signal(const proto::PullSignal* request,
-                                        proto::Status* response) {}
-};
-
-class PDOOCServiceImpl final : public PDOOCServiceImplInterface {
+// a class to handle disagg_pd OOC requests
+class PDOOCServiceImpl final : public DisaggPDServiceImpl {
  public:
   explicit PDOOCServiceImpl(PDOOCScheduler* scheduler, Engine* engine);
   ~PDOOCServiceImpl() = default;
 
-  bool prefill_recv_generation(const proto::DisaggStreamGeneration* request,
-                               proto::Status* response) override;
+  virtual void decode_recv_multi_generations(
+      const proto::DisaggGenerationsRequests* request,
+      proto::Status* response);
 
-  void prefill_recv_generations(const proto::DisaggStreamGenerations* requests,
-                                proto::StatusSet* responses) override;
-
-  void decode_recv_new_requests(const proto::DisaggRequests* request,
-                                proto::DisaggResponses* response) override;
-
-  void decode_recv_first_generation(const proto::DisaggGenerations* request,
-                                    proto::Status* response) override;
-
-  void decode_recv_multi_generations(
-      const proto::MultiGenerationsRequests* request,
-      proto::Status* response) override;
-
-  void prefill_recv_pull_signal(const proto::PullSignal* request,
-                                proto::Status* response) override;
+  virtual void prefill_recv_pull_signal(const proto::PullSignal* request,
+                                        proto::Status* response);
 
  private:
-  std::shared_ptr<Request> generate_request(const proto::DisaggRequest& req);
-
-  PDOOCScheduler* scheduler_;  // not owned
-  Engine* engine_;             // not owned
+  PDOOCScheduler* pd_ooc_scheduler_;  // not owned
 };
 
 }  // namespace xllm

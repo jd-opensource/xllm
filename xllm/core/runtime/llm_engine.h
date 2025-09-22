@@ -157,6 +157,8 @@ class LLMEngine : public Engine {
 
   std::vector<std::string> worker_device_ips_;
   std::vector<uint16_t> worker_ports_;
+
+  bool layer_forward_interrupted_ = false;
 };
 
 }  // namespace xllm

@@ -28,57 +28,43 @@ limitations under the License.
 #include "disagg_pd.pb.h"
 #include "framework/request/request.h"
 #include "framework/tokenizer/tokenizer.h"
+#include "perf_model.h"
 #include "runtime/xservice_client.h"
-#include "scheduler/continuous_scheduler.h"
+#include "scheduler/disagg_pd_scheduler.h"
 #include "server/xllm_server_registry.h"
 #include "util/blockingconcurrentqueue.h"
 #include "util/threadpool.h"
 
 namespace xllm {
 
+// Show the type of requests handled by current step.
+// Status DECODE means both online and offline decoding requests.
+// Status IDLE means current step is not handling any request.
 enum class StepStatus { ONLINE_PREFILL, OFFLINE_PREFILL, DECODE, IDLE };
 
-class PDOOCScheduler : public ContinuousScheduler {
+// Online-offline co-location scheduler in Disaggregated PD mode
+class PDOOCScheduler : public DisaggPDScheduler {
  public:
   PDOOCScheduler(Engine* engine, const Options& options);
 
   virtual ~PDOOCScheduler();
 
-  virtual uint32_t get_waiting_requests_num() const override {
-    return waiting_priority_queue_.size();
-  };
-
   void step(const absl::Duration& timeout) override;
 
-  bool add_request(std::shared_ptr<Request>& request) override;
-
   // prefill-1: for prefill send new request to decode
-  void dispatch_requests();
+  void dispatch_requests() override;
   // prefill-2: for prefill send first token to decode
-  void prefill_send_first_generation();
+  void prefill_send_first_generation() override;
   // prefill-2b: for prefill send multiple tokens to decode
   void prefill_send_multi_generations();
   // prefill-3: for prefill receive stream generation from decode
-  bool prefill_recv_generation(const RequestOutput& output);
+  // bool prefill_recv_generation(const RequestOutput& output) override;
 
   // decode-1: for decode recveive new request from prefill
   bool decode_schedule(std::shared_ptr<Request>& request,
-                       const std::string& prefill_instance_name);
+                       const std::string& prefill_instance_name) override;
   // decode-2: for decode receive first token from prefill
-  bool decode_recv_first_generation(const std::string& req_id,
-                                    int64_t token_id,
-                                    bool has_logprob,
-                                    float logprob,
-                                    std::vector<int64_t> top_tokens,
-                                    std::vector<float> top_logprobs,
-                                    const std::string& kv_cache_transfer_mode,
-                                    std::vector<uint64_t> src_cluster_ids,
-                                    std::vector<std::string> src_addrs,
-                                    std::vector<int64_t> src_k_cache_ids,
-                                    std::vector<int64_t> src_v_cache_ids,
-                                    std::vector<uint64_t> src_block_ids,
-                                    int32_t src_dp_size,
-                                    int32_t src_dp_rank);
+  // bool decode_recv_first_generation(...);
 
   // decode-2b: for decode receive multiple tokens from prefill
   bool decode_recv_multi_generations(
@@ -93,17 +79,10 @@ class PDOOCScheduler : public ContinuousScheduler {
       int32_t src_dp_size,
       int32_t src_dp_rank);
 
-  // decode allocate blocks for request prompt when receive from prefill.
-  std::vector<Block> allocate_raw_blocks(int token_num, int32_t& dp_rank);
   // decode-3: decode send response to prefill
-  bool decode_send_stream_generation(const RequestOutput& output);
-  std::vector<bool> decode_send_stream_generations(
-      const std::vector<RequestOutput>& outputs);
-
-  bool enable_schedule_overlap() { return options_.enable_schedule_overlap(); };
-
-  void get_latency_metrics(std::vector<int64_t>& ttft,
-                           std::vector<int64_t>& tbt);
+  // bool decode_send_stream_generation(const RequestOutput& output) override;
+  // std::vector<bool> decode_send_stream_generations(
+  //     const std::vector<RequestOutput>& outputs) override;
 
   void prefill_step(const absl::Duration& timeout);
 
@@ -121,25 +100,20 @@ class PDOOCScheduler : public ContinuousScheduler {
 
   std::vector<Batch> prepare_batch() override;
 
+  void handle_decode_requests(
+      double& latency_budget,
+      double& estimate_latency,
+      size_t& remaining_token_budget,
+      size_t& remaining_seq_budget,
+      size_t& num_offline_decode_preempt_offline_requests,
+      size_t& num_online_decode_preempt_online_requests,
+      size_t& num_online_decode_preempt_offline_requests,
+      std::unique_ptr<DecodePriorityQueue>& running_queue) override;
+
  private:
   void handle_prefill_interruption();
-  // Pre-execute prefill requests of different lengths at startup and obtain the
-  // corresponding TTFT for calculating the estimated TTFT of requests.
-  void profile_ttft();
 
-  // Generate a prefill request of token_length and execute inference, finally
-  // returning the inference time.
-  int64_t run_prefill_request(int32_t token_length, int32_t vocab_size);
-
-  // check remote instance info, if not exist, get from master service
-  bool check_remote_instance_info(const std::string& instance_name);
-
-  // create rpc channel to remote instance,
-  // we can get remote instance info from master service.
-  proto::PDOOCService_Stub* create_rpc_channel(
-      const std::string& instance_name);
-
-  void start_rpc_server();
+  void start_rpc_server() override;
 
   // Build DisaggRequests proto from Request objects
   void build_disagg_requests(
@@ -151,84 +125,6 @@ class PDOOCScheduler : public ContinuousScheduler {
 
   // Select a prefill instance for pulling requests
   std::string select_prefill_instance();
-
-  void update_token_latency_metrics(std::vector<Sequence*>& sequences) override;
-
-  // remote instance name(ID) -> instance info
-  std::unordered_map<std::string, InstanceInfo> remote_instances_info_;
-
-  // rpc server for prefill/decode instance
-  std::unique_ptr<std::thread> rpc_server_thread_;
-
-  // request_id -> brpc channel
-  // brpc channel is connected to remote instance rpc server
-  std::unordered_map<std::string, proto::PDOOCService_Stub*>
-      req_to_channel_map_;
-  std::unordered_map<std::string, proto::PDOOCService_Stub*>
-      instance_channel_map_;
-  std::mutex req_to_channel_map_mutex_;
-  std::mutex instance_channel_map_mutex_;
-
-  XServiceClient* xservice_client_;
-
-  // for prefill, dispatch request to Decode instance
-  std::unique_ptr<std::thread> dispatch_thread_;
-
-  moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
-      prefill_request_queue_;
-  moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
-      prefill_request_queue_offline_;
-
-  // for prefill save all remote requests
-  std::unordered_map<std::string, std::shared_ptr<Request>>
-      remote_requests_map_;
-  std::mutex remote_requests_map_mutex_;
-  using RequestPriorityQueue =
-      std::priority_queue<std::shared_ptr<Request>,
-                          std::vector<std::shared_ptr<Request>>,
-                          std::function<bool(const std::shared_ptr<Request>&,
-                                             const std::shared_ptr<Request>&)>>;
-  RequestPriorityQueue waiting_priority_queue_;
-  RequestPriorityQueue waiting_priority_queue_offline_;
-
-  // use threadpool to handle prefill-completed request
-  ThreadPool prefill_threadpool_;
-
-  // use threadpool to handle all RequestOuputs queue
-  static constexpr size_t kOutputTheadNum_ = 128;  // magic num
-  size_t next_thread_idx = 0;
-  ThreadPool output_threadpools_[kOutputTheadNum_];
-  // keep the thread to handle request output
-  // A request will be handled in the same thread to guarantee the token's
-  // order.
-  std::unordered_map<std::string, size_t> remote_requests_output_thread_map_;
-
-  // related decode instance name(ID) list
-  std::vector<std::string> decode_inst_names_;
-  // TODO later
-  // std::vector<std::string> updated_decode_inst_names;
-  int current_decode_idx_ = 0;
-
-  // for decode
-  std::unordered_map<std::string, std::shared_ptr<Request>>
-      received_request_map_;
-  std::mutex received_request_map_mutex_;
-
-  // for decode non-batch response, each request will allocate a thread to
-  // handle response. keep the thread to handle request output
-  std::unordered_map<std::string, size_t> received_request_output_thread_map_;
-
-  // for decode batch response, each prefill instance will allocate a thread to
-  // handle response. the requests from the same prefill will be handled in one
-  // thread.
-  std::unordered_map<proto::PDOOCService_Stub*, size_t>
-      remote_prefill_thread_map_;
-  size_t next_prefill_thread_idx = 0;
-
-  // Lock for multi-threaded read-write latency metrics
-  std::vector<int64_t> recent_ttft_;
-  std::vector<int64_t> recent_tbt_;
-  std::mutex latency_metrics_mutex_;
 
   StepStatus step_status_ = StepStatus::IDLE;
 
@@ -255,6 +151,12 @@ class PDOOCScheduler : public ContinuousScheduler {
   moodycamel::BlockingConcurrentQueue<
       std::pair<std::shared_ptr<Request>, std::string>>
       offline_requests_to_transfer_;
+
+  perf_model::LLMFlops llm_flops_;
+  int linear_saturation_bs_;
+  vector<int> decode_step_global_batch_req_lens_;
+  double decode_last_step_latency_ = 0;
+  vector<int> last_decode_step_global_batch_req_lens_;
 };
 
 }  // namespace xllm

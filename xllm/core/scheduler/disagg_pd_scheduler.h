@@ -49,36 +49,37 @@ class DisaggPDScheduler : public ContinuousScheduler {
   bool add_request(std::shared_ptr<Request>& request) override;
 
   // prefill-1: for prefill send new request to decode
-  void dispatch_requests();
+  virtual void dispatch_requests();
   // prefill-2: for prefill send first token to decode
-  void prefill_send_first_generation();
+  virtual void prefill_send_first_generation();
   // prefill-3: for prefill receive stream generation from decode
-  bool prefill_recv_generation(const RequestOutput& output);
+  virtual bool prefill_recv_generation(const RequestOutput& output);
 
   // decode-1: for decode recveive new request from prefill
-  bool decode_schedule(std::shared_ptr<Request>& request,
-                       const std::string& prefill_instance_name);
+  virtual bool decode_schedule(std::shared_ptr<Request>& request,
+                               const std::string& prefill_instance_name);
   // decode-2: for decode receive first token from prefill
-  bool decode_recv_first_generation(const std::string& req_id,
-                                    int64_t token_id,
-                                    bool has_logprob,
-                                    float logprob,
-                                    std::vector<int64_t> top_tokens,
-                                    std::vector<float> top_logprobs,
-                                    const std::string& kv_cache_transfer_mode,
-                                    std::vector<uint64_t> src_cluster_ids,
-                                    std::vector<std::string> src_addrs,
-                                    std::vector<int64_t> src_k_cache_ids,
-                                    std::vector<int64_t> src_v_cache_ids,
-                                    std::vector<uint64_t> src_block_ids,
-                                    int32_t src_dp_size,
-                                    int32_t src_dp_rank);
+  virtual bool decode_recv_first_generation(
+      const std::string& req_id,
+      int64_t token_id,
+      bool has_logprob,
+      float logprob,
+      std::vector<int64_t> top_tokens,
+      std::vector<float> top_logprobs,
+      const std::string& kv_cache_transfer_mode,
+      std::vector<uint64_t> src_cluster_ids,
+      std::vector<std::string> src_addrs,
+      std::vector<int64_t> src_k_cache_ids,
+      std::vector<int64_t> src_v_cache_ids,
+      std::vector<uint64_t> src_block_ids,
+      int32_t src_dp_size,
+      int32_t src_dp_rank);
 
   // decode allocate blocks for request prompt when receive from prefill.
   std::vector<Block> allocate_raw_blocks(int token_num, int32_t& dp_rank);
   // decode-3: decode send response to prefill
-  bool decode_send_stream_generation(const RequestOutput& output);
-  std::vector<bool> decode_send_stream_generations(
+  virtual bool decode_send_stream_generation(const RequestOutput& output);
+  virtual std::vector<bool> decode_send_stream_generations(
       const std::vector<RequestOutput>& outputs);
 
   bool enable_schedule_overlap() { return options_.enable_schedule_overlap(); };
@@ -86,7 +87,7 @@ class DisaggPDScheduler : public ContinuousScheduler {
   void get_latency_metrics(std::vector<int64_t>& ttft,
                            std::vector<int64_t>& tbt);
 
- private:
+ protected:
   // Pre-execute prefill requests of different lengths at startup and obtain the
   // corresponding TTFT for calculating the estimated TTFT of requests.
   void profile_ttft();
@@ -99,7 +100,16 @@ class DisaggPDScheduler : public ContinuousScheduler {
   proto::DisaggPDService_Stub* create_rpc_channel(
       const std::string& instance_name);
 
-  void start_rpc_server();
+  virtual void start_rpc_server();
+
+  // Initialize RPC server and xservice client
+  // This method waits for the RPC server to be initialized and sets up the
+  // xservice client connection.
+  void initialize_rpc_server_and_client(const std::string& server_name);
+
+  // Register instance information including name, RPC address, type, and cache
+  // info
+  void register_instance_info(const std::string& server_name, Engine* engine);
 
   void update_token_latency_metrics(std::vector<Sequence*>& sequences) override;
 

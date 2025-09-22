@@ -109,7 +109,6 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
                                                 kv_caches_,
                                                 input_params_micro_batches);
   if (!hidden_states.defined()) {
-    // VLOG(1) << "LLMWorkerImpl catched an empty tensor";
     return std::nullopt;
   }
 

@@ -18,53 +18,20 @@ limitations under the License.
 #include <brpc/closure_guard.h>
 #include <glog/logging.h>
 
+#include "scheduler/pd_ooc_scheduler.h"
+
 namespace xllm {
 
 PDOOCService::PDOOCService(PDOOCScheduler* scheduler, Engine* engine) {
-  pd_ooc_service_impl_ = std::make_unique<PDOOCServiceImpl>(scheduler, engine);
-}
-
-void PDOOCService::Generation(::google::protobuf::RpcController* controller,
-                              const proto::DisaggStreamGeneration* request,
-                              proto::Status* response,
-                              ::google::protobuf::Closure* done) {
-  // receive generations from Decode
-  brpc::ClosureGuard done_guard(done);
-  pd_ooc_service_impl_->prefill_recv_generation(request, response);
-}
-
-void PDOOCService::Generations(::google::protobuf::RpcController* controller,
-                               const proto::DisaggStreamGenerations* requests,
-                               proto::StatusSet* responses,
-                               ::google::protobuf::Closure* done) {
-  // receive generations from Decode
-  brpc::ClosureGuard done_guard(done);
-  pd_ooc_service_impl_->prefill_recv_generations(requests, responses);
-}
-
-void PDOOCService::AddNewRequests(::google::protobuf::RpcController* controller,
-                                  const proto::DisaggRequests* request,
-                                  proto::DisaggResponses* response,
-                                  ::google::protobuf::Closure* done) {
-  brpc::ClosureGuard done_guard(done);
-  // try to allocate blocks for new requests
-  pd_ooc_service_impl_->decode_recv_new_requests(request, response);
-}
-
-// TODO: support embedding later, now we only support tokens
-void PDOOCService::FirstGeneration(
-    ::google::protobuf::RpcController* controller,
-    const proto::DisaggGenerations* request,
-    proto::Status* response,
-    ::google::protobuf::Closure* done) {
-  // Receive first token from Prefill, schedule the request to running queue
-  brpc::ClosureGuard done_guard(done);
-  pd_ooc_service_impl_->decode_recv_first_generation(request, response);
+  auto pd_ooc_impl = std::make_unique<PDOOCServiceImpl>(scheduler, engine);
+  pd_ooc_service_impl_ = pd_ooc_impl.get();
+  disagg_pd_service_impl_ = std::move(pd_ooc_impl);
+  CHECK(pd_ooc_service_impl_ != nullptr);
 }
 
 void PDOOCService::MultiGenerations(
     ::google::protobuf::RpcController* controller,
-    const proto::MultiGenerationsRequests* request,
+    const proto::DisaggGenerationsRequests* request,
     proto::Status* response,
     ::google::protobuf::Closure* done) {
   // Receive multiple tokens from Prefill, schedule the request to running queue

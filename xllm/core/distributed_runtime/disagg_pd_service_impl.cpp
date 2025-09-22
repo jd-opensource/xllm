@@ -26,7 +26,7 @@ namespace xllm {
 
 DisaggPDServiceImpl::DisaggPDServiceImpl(DisaggPDScheduler* scheduler,
                                          Engine* engine)
-    : DisaggPDServiceImplInterface(), scheduler_(scheduler), engine_(engine) {}
+    : scheduler_(scheduler), engine_(engine) {}
 
 std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
     const proto::DisaggRequest& req) {
@@ -167,14 +167,21 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
 
 // TODO: support embedding later, now we only support tokens
 void DisaggPDServiceImpl::decode_recv_first_generation(
-    const proto::DisaggGenerations* request,
+    const proto::DisaggGenerationsRequests* request,
     proto::Status* response) {
   // TODO: we only support one request generation currently
-  for (auto& gen : request->gens()) {
-    std::vector<int64_t> top_tokens(gen.top_tokens().begin(),
-                                    gen.top_tokens().end());
-    std::vector<float> top_logprobs(gen.top_logprobs().begin(),
-                                    gen.top_logprobs().end());
+  for (auto& gen : request->multi_gens()) {
+    // Process the first token from the tokens array
+    if (gen.tokens().empty()) {
+      response->set_ok(false);
+      return;
+    }
+
+    const auto& first_token = gen.tokens(0);
+    std::vector<int64_t> top_tokens(first_token.top_tokens().begin(),
+                                    first_token.top_tokens().end());
+    std::vector<float> top_logprobs(first_token.top_logprobs().begin(),
+                                    first_token.top_logprobs().end());
     std::vector<uint64_t> cluster_ids(gen.cluster_ids().begin(),
                                       gen.cluster_ids().end());
     std::vector<std::string> addrs(gen.addrs().begin(), gen.addrs().end());
@@ -187,9 +194,9 @@ void DisaggPDServiceImpl::decode_recv_first_generation(
 
     bool success =
         scheduler_->decode_recv_first_generation(gen.req_id(),
-                                                 gen.token_id(),
-                                                 gen.has_logprob(),
-                                                 gen.logprob(),
+                                                 first_token.token_id(),
+                                                 first_token.has_logprob(),
+                                                 first_token.logprob(),
                                                  std::move(top_tokens),
                                                  std::move(top_logprobs),
                                                  gen.kv_cache_transfer_mode(),

@@ -447,29 +447,13 @@ void Sequence::generate_output_tokens_logprobs(
       tokens_);
 }
 
-std::vector<Token> Sequence::get_generated_tokens() const {
-  std::vector<Token> generated_tokens;
-
-  // Get only the generated tokens (excluding prompt tokens)
+Slice<int32_t> Sequence::get_generated_tokens() const {
+  // Return a slice of generated token IDs (excluding prompt tokens)
   if (num_tokens_ > num_prompt_tokens_) {
-    generated_tokens.reserve(num_tokens_ - num_prompt_tokens_);
-
-    for (size_t i = num_prompt_tokens_; i < num_tokens_; ++i) {
-      Token token(tokens_[i]);
-
-      // Try to get logprob if available
-      if (logprob_state_ && sequence_params_.sampling_param &&
-          sequence_params_.sampling_param->logprobs) {
-        // Note: LogprobState doesn't expose direct access to individual
-        // logprobs For now, we just create tokens with IDs. In the future, this
-        // could be enhanced to retrieve logprob information if needed.
-      }
-
-      generated_tokens.push_back(token);
-    }
+    return {tokens_.data() + num_prompt_tokens_,
+            num_tokens_ - num_prompt_tokens_};
   }
-
-  return generated_tokens;
+  return {tokens_.data(), 0};
 }
 
 }  // namespace xllm

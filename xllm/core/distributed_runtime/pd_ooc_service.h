@@ -17,42 +17,19 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "disagg_pd.pb.h"
+#include "disagg_pd_service.h"
 #include "pd_ooc_service_impl.h"
 
 namespace xllm {
 
-class PDOOCService : public proto::PDOOCService {
+class PDOOCService : public DisaggPDService {
  public:
   explicit PDOOCService(PDOOCScheduler* scheduler, Engine* engine);
   virtual ~PDOOCService() = default;
 
-  // for prefill recv decode response
-  void Generation(::google::protobuf::RpcController* controller,
-                  const proto::DisaggStreamGeneration* request,
-                  proto::Status* response,
-                  ::google::protobuf::Closure* done) override;
-
-  // for prefill recv decode response
-  void Generations(::google::protobuf::RpcController* controller,
-                   const proto::DisaggStreamGenerations* requests,
-                   proto::StatusSet* responses,
-                   ::google::protobuf::Closure* done) override;
-
-  // for decode recv prefill request
-  void AddNewRequests(::google::protobuf::RpcController* controller,
-                      const proto::DisaggRequests* request,
-                      proto::DisaggResponses* response,
-                      ::google::protobuf::Closure* done) override;
-
-  // for decode recv first token from prefill
-  void FirstGeneration(::google::protobuf::RpcController* controller,
-                       const proto::DisaggGenerations* request,
-                       proto::Status* response,
-                       ::google::protobuf::Closure* done) override;
-
   // for decode recv multiple tokens from prefill
   void MultiGenerations(::google::protobuf::RpcController* controller,
-                        const proto::MultiGenerationsRequests* request,
+                        const proto::DisaggGenerationsRequests* request,
                         proto::Status* response,
                         ::google::protobuf::Closure* done) override;
 
@@ -63,7 +40,7 @@ class PDOOCService : public proto::PDOOCService {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PDOOCService);
-  std::unique_ptr<PDOOCServiceImpl> pd_ooc_service_impl_;
+  PDOOCServiceImpl* pd_ooc_service_impl_;  // owned by base class
 };
 
 }  // namespace xllm
