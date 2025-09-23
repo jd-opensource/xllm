@@ -31,7 +31,6 @@ on:
 env:
   IMAGE: 9d0b6f5a80f6
   JOBNAME: xllm-x86_64-cibuild-${{ github.run_id }}
-  VCPKG_ROOT: /export/home/vcpkg-src
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -53,4 +52,4 @@ jobs:
       timeout-minutes: 60
       run: |
         chmod +x ./cibuild/build.sh
-        bash cibuild/build.sh 'pip uninstall setuptools -y; pip install setuptools -i https://pypi.tuna.tsinghua.edu.cn/simple; pip install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple; VCPKG_ROOT=/export/home/vcpkg-src VCPKG_INSTALLED_DIR=/export/home/vcpkg_installed python setup.py build; VCPKG_ROOT=/export/home/vcpkg-src VCPKG_INSTALLED_DIR=/export/home/vcpkg_installed python setup.py test'
+        bash cibuild/build.sh 'pip install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple; VCPKG_INSTALLED_DIR=/export/home/vcpkg_installed python setup.py build; VCPKG_INSTALLED_DIR=/export/home/vcpkg_installed python setup.py test'
