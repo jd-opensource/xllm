@@ -119,7 +119,9 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
   std::vector<uint16_t> ports(request->cluster_infos().ports().begin(),
                               request->cluster_infos().ports().end());
   int32_t dp_size = request->cluster_infos().dp_size();
-  engine_->link_cluster(cluster_ids, addrs, device_ips, ports, dp_size);
+  if (!engine_->link_cluster(cluster_ids, addrs, device_ips, ports, dp_size)) {
+    return;
+  }
 
   for (auto& req : request->reqs()) {
     // Try to allocate blocks for new requests

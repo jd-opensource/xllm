@@ -30,7 +30,7 @@ class LlmDataDistTransfer : public KVCacheTransfer {
                       const InstanceRole& instance_role);
   virtual ~LlmDataDistTransfer() = default;
 
-  virtual void initialize(int32_t device_id, uint64_t buf_pool_size) override;
+  virtual void initialize(int32_t device_id) override;
 
   virtual void finalize() override;
 
@@ -81,6 +81,7 @@ class LlmDataDistTransfer : public KVCacheTransfer {
 
  protected:
   uint64_t cluster_id_;
+  std::string host_ip_;
   std::string device_ip_;
   uint16_t listen_port_;
   int64_t num_layers_;

@@ -15,7 +15,6 @@ cc_library(
     prefix_cache_factory.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>
-    $<$<BOOL:${USE_NPU}>:llm_engine>
     $<$<BOOL:${USE_NPU}>:graph>
     :request
     :common

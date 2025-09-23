@@ -28,6 +28,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:graph>
     glog::glog
     $<$<BOOL:${USE_NPU}>:hccl_transfer>
+    $<$<BOOL:${USE_NPU}>:llm_datadist>
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
     mooncake_store

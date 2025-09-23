@@ -18,7 +18,6 @@ cc_library(
     block_manager_impl.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>
-    $<$<BOOL:${USE_NPU}>:llm_engine>
     $<$<BOOL:${USE_NPU}>:graph>
     :request
     :common
