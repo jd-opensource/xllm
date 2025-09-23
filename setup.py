@@ -308,7 +308,7 @@ class ExtBuild(build_ext):
         
         build_args = ["--config", build_type]
         max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
-        build_args += ["-j" + max_jobs]
+        build_args += ["-j" + "16"]
 
         env = os.environ.copy()
         print("CMake Args: ", cmake_args)
