@@ -48,7 +48,7 @@ pip install --upgrade setuptools wheel
 ```
 
 ## Compilation
-Execute the compilation to generate the executable file `build/xllm/core/server/xllm` under `build/`,The default architecture is x86 (A2). For ARM, add `--arch arm`, and for A3, add `--device a3`.:
+Execute the compilation to generate the executable file `build/xllm/core/server/xllm` under `build/`. The default device is A2, for A3, add `--device a3`, for mlu, add `--device mlu`:
 ```bash
 python setup.py build
 ```

@@ -19,6 +19,16 @@ from setuptools.command.build_ext import build_ext
 
 BUILD_TEST_FILE = True
 
+# get cpu architecture
+def get_cpu_arch():
+    arch = platform.machine()
+    if "x86" in arch or "amd64" in arch:
+        return "x86"
+    elif "arm" in arch or "aarch64" in arch:
+        return "arm"
+    else:
+        raise ValueError(f"Unsupported architecture: {arch}")
+
 def get_cxx_abi():
     try:
         import torch
@@ -210,22 +220,12 @@ class ExtBuild(build_ext):
     def initialize_options(self):
         build_ext.initialize_options(self)
         self.base_dir = get_base_dir()
-        self.device = "a2"  
-        self.arch = "x86"
-        self.install_xllm_kernels = "true"
+        self.device = None  
+        self.arch = None
+        self.install_xllm_kernels = None
 
     def finalize_options(self):
         build_ext.finalize_options(self)
-        self.device = self.device.lower()
-        if self.device is None:
-          self.device = "a2"
-        if self.device not in ("a2", "a3", "mlu"):
-            raise ValueError("--device must be either 'a2' or 'a3' or 'mlu' (case-insensitive)")
-        if self.arch is None:
-          self.arch = "x86"
-        self.arch = self.arch.lower()
-        if self.arch not in ("x86", "arm"):
-            raise ValueError("--arch must be either 'x86' or 'arm' (case-insensitive)")
 
     def run(self):
         # check if cmake is installed
@@ -308,7 +308,7 @@ class ExtBuild(build_ext):
         
         build_args = ["--config", build_type]
         max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
-        build_args += ["-j" + "16"]
+        build_args += ["-j" + max_jobs]
 
         env = os.environ.copy()
         print("CMake Args: ", cmake_args)
@@ -515,24 +515,14 @@ def apply_patch():
 
 if __name__ == "__main__":
     device = 'a2'  # default
-    arch = "x86" # default
+    arch = get_cpu_arch()
     install_kernels = True
     if '--device' in sys.argv:
         idx = sys.argv.index('--device')
         if idx + 1 < len(sys.argv):
             device = sys.argv[idx+1].lower()
             if device not in ('a2', 'a3', 'mlu'):
-                print("Error: --device must be a2 or a3 or mlu")
-                sys.exit(1)
-            # Remove the arguments so setup() doesn't see them
-            del sys.argv[idx]
-            del sys.argv[idx]
-    if '--arch' in sys.argv:
-        idx = sys.argv.index('--arch')
-        if idx + 1 < len(sys.argv):
-            arch = sys.argv[idx+1].lower()
-            if arch not in ('x86', 'arm'):
-                print("Error: --arch must be x86 or arm")
+                print("Error: --device must be a2 or a3 or mlu (case-insensitive)")
                 sys.exit(1)
             # Remove the arguments so setup() doesn't see them
             del sys.argv[idx]
