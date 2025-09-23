@@ -340,7 +340,7 @@ class ExtBuild(build_ext):
             subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
 class BuildDistWheel(bdist_wheel):
-    user_options = build_ext.user_options + [
+    user_options = bdist_wheel.user_options + [
         ("device=", None, "target device type (a3 or a2 or mlu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
     ]
@@ -349,12 +349,9 @@ class BuildDistWheel(bdist_wheel):
         super().initialize_options()
         self.device = None
         self.arch = None
-        self.install_xllm_kernels = "true"
 
     def finalize_options(self):
         super().finalize_options()
-        if not self.device or not self.arch:
-            raise ValueError("Must set device and arch, like: python setup.py bdist_wheel --device='a3' --arch='arm'")
 
     def run(self):
         build_ext_cmd = self.get_finalized_command('build_ext')
@@ -598,6 +595,10 @@ if __name__ == "__main__":
                     'device': device,
                     'arch': arch,
                     'install_xllm_kernels': install_kernels if install_kernels is not None else "false"
+                    },
+                 'bdist_wheel': {
+                    'device': device,
+                    'arch': arch,
                     }
                 },
         zip_safe=False,
