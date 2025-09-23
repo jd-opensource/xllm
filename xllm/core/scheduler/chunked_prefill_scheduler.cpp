@@ -317,7 +317,6 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
-          block_manager_pool_->deallocate(prefill_sequence.get());
           can_schedule = false;
           budget_exhausted = true;
           break;
