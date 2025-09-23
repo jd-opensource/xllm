@@ -173,10 +173,6 @@ bool SpecKVCacheTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     bool is_spec_draft) {
-#if defined(USE_A3)
-  LOG(FATAL) << "A3 does not support llmdatadist.";
-  return false;
-#else
   if (!layer_synchronizer) {
     return push_embed_blocks(merged_kv_infos);
   }
@@ -212,16 +208,11 @@ bool SpecKVCacheTransfer::push_kv_blocks(
     }
   }
   return true;
-#endif
 }
 
 bool SpecKVCacheTransfer::push_kv_blocks_spec(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer) {
-#if defined(USE_A3)
-  LOG(FATAL) << "A3 does not support llmdatadist.";
-  return false;
-#else
   for (int64_t layer_index = 0; layer_index < spec_num_layers_; ++layer_index) {
     // Wait for the KV cache computation of this layer to complete.
     layer_synchronizer->synchronize_layer(layer_index);
@@ -251,15 +242,10 @@ bool SpecKVCacheTransfer::push_kv_blocks_spec(
     }
   }
   return true;
-#endif
 }
 
 bool SpecKVCacheTransfer::push_embed_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos) {
-#if defined(USE_A3)
-  LOG(FATAL) << "A3 does not support llmdatadist.";
-  return false;
-#else
   for (const auto& pair : merged_kv_infos) {
     const KVCacheInfo& kv_info = pair.second;
     CacheIndex cache_index{kv_info.dst_cluster_id, embed_cache_.cache_id};
@@ -274,7 +260,6 @@ bool SpecKVCacheTransfer::push_embed_blocks(
                                                ext_param));
   }
   return true;
-#endif
 }
 
 folly::SemiFuture<bool> SpecKVCacheTransfer::push_kv_blocks_async(

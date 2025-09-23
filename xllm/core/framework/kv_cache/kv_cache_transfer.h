@@ -41,7 +41,7 @@ class KVCacheTransfer {
   KVCacheTransfer() = default;
   virtual ~KVCacheTransfer() = default;
 
-  virtual void initialize(int32_t device_id, uint64_t buf_pool_size) {};
+  virtual void initialize(int32_t device_id) {};
 
   virtual void finalize() {};
 

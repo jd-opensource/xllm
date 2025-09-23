@@ -26,7 +26,6 @@ cc_library(
     expert_buffer_manager.cpp
   DEPS
     torch_npu
-    llm_engine
     :request
     :common
     glog::glog

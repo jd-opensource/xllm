@@ -148,8 +148,7 @@ bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
                                               options_.instance_role());
 
     int32_t device_id = device_.index();
-    uint64_t buf_pool_size = kv_cache_size + MBUF_SIZE;
-    kv_cache_transfer_->initialize(device_id, buf_pool_size);
+    kv_cache_transfer_->initialize(device_id);
     impl_->allocate_kv_cache_with_transfer(kv_cache_transfer_, kv_cache_shape);
   } else {
     CHECK_EQ(draft_impl_->get_status(), WorkerImpl::Status::LOADED);

@@ -51,28 +51,21 @@ LlmDataDistTransfer::LlmDataDistTransfer(const std::string& device_ip,
     role = LlmRole::kMix;
   }
 
-  std::string instance_ip = net::get_local_ip_addr();
-  cluster_id_ = net::convert_ip_port_to_uint64(instance_ip, listen_port);
+  host_ip_ = net::get_local_ip_addr();
+  cluster_id_ = net::convert_ip_port_to_uint64(host_ip_, listen_port);
   llm_data_dist_ = std::make_shared<LlmDataDist>(cluster_id_, role);
 }
 
-void LlmDataDistTransfer::initialize(int32_t device_id,
-                                     uint64_t buf_pool_size) {
+void LlmDataDistTransfer::initialize(int32_t device_id) {
   std::map<AscendString, AscendString> options;
   options[OPTION_DEVICE_ID] = std::to_string(device_id).c_str();
 
-  std::string local_ip_info = device_ip_ + ":" + std::to_string(listen_port_);
+  std::string local_ip_info = host_ip_ + ":" + std::to_string(listen_port_);
   options[OPTION_LISTEN_IP_INFO] = local_ip_info.c_str();
 
-  // TODO: Set all parameters in buf_cfg to option.
-  std::ostringstream oss;
-  oss << R"({"buf_cfg":[{"total_size":)" << 2097152 << R"(,"blk_size":)" << 256
-      << R"(,"max_buf_size":)" << 8192 << R"(}],"buf_pool_size":)"
-      << buf_pool_size << "}";
-  options[OPTION_BUF_POOL_CFG] = oss.str().c_str();
-  options[OPTION_ENABLE_SET_ROLE] = "1";
   auto ret = llm_data_dist_->Initialize(options);
-  CHECK(ret == LLM_SUCCESS) << "Initialize LlmDataList failed, ret = " << ret;
+  CHECK(ret == LLM_SUCCESS)
+      << "Initialize LlmDataList failed, ret = " << std::hex << ret;
   LOG(INFO) << "Initialize LlmDataList success.";
 }
 
@@ -88,22 +81,44 @@ void LlmDataDistTransfer::allocate_kv_cache(
   const auto& it = kScalarTypeToDtype.find(dtype);
   CHECK(it != kScalarTypeToDtype.cend()) << "Unsupport data type : " << dtype;
   auto ge_dtype = it->second;
-  CacheDesc k_cache_desc;
-  k_cache_desc.num_tensors = num_layers;
-  k_cache_desc.data_type = ge_dtype;
-  k_cache_desc.shape = kv_cache_shape[0];
-  auto ret = llm_data_dist_->AllocateCache(k_cache_desc, k_cache_);
-  CHECK(ret == LLM_SUCCESS)
-      << "Allocate key cache failed, ret = " << std::hex << ret;
 
-  CacheDesc v_cache_desc;
-  v_cache_desc.num_tensors = num_layers;
-  v_cache_desc.data_type = ge_dtype;
-  v_cache_desc.shape = kv_cache_shape[1];
-  ret = llm_data_dist_->AllocateCache(v_cache_desc, v_cache_);
-  CHECK(ret == LLM_SUCCESS)
-      << "Allocate value cache failed, ret = " << std::hex << ret;
+  // calculate the size of kv cache for each layer
+  auto data_size = torch::elementSize(dtype);
+  int64_t k_cache_size_per_layer = data_size;
+  for (int64_t i = 0; i < kv_cache_shape[0].size(); ++i) {
+    k_cache_size_per_layer *= kv_cache_shape[0][i];
+  }
+  int64_t v_cache_size_per_layer = data_size;
+  for (int64_t i = 0; i < kv_cache_shape[1].size(); ++i) {
+    v_cache_size_per_layer *= kv_cache_shape[1][i];
+  }
 
+  // allocate device memory for kv cache
+  std::vector<uint64_t> k_cache_addrs;
+  std::vector<uint64_t> v_cache_addrs;
+  k_cache_addrs.reserve(num_layers);
+  v_cache_addrs.reserve(num_layers);
+  k_cache_.tensor_addrs.reserve(num_layers);
+  v_cache_.tensor_addrs.reserve(num_layers);
+  for (int64_t i = 0; i < num_layers; ++i) {
+    void* k_cache_buffer = nullptr;
+    void* v_cache_buffer = nullptr;
+    auto acl_ret = aclrtMalloc(
+        &k_cache_buffer, k_cache_size_per_layer, ACL_MEM_MALLOC_HUGE_ONLY);
+    CHECK(acl_ret == ACL_SUCCESS) << "aclrtMalloc k cache failed.";
+    acl_ret = aclrtMalloc(
+        &v_cache_buffer, v_cache_size_per_layer, ACL_MEM_MALLOC_HUGE_ONLY);
+    CHECK(acl_ret == ACL_SUCCESS) << "aclrtMalloc v cache failed.";
+
+    k_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(k_cache_buffer));
+    v_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(v_cache_buffer));
+    k_cache_.tensor_addrs.emplace_back(
+        reinterpret_cast<uintptr_t>(k_cache_buffer));
+    v_cache_.tensor_addrs.emplace_back(
+        reinterpret_cast<uintptr_t>(v_cache_buffer));
+  }
+
+  // convert memory addrs to torch tensors
   auto k_torch_tensors =
       convert_to_torch_tensor(kv_cache_shape[0], dtype, k_cache_.tensor_addrs);
   auto v_torch_tensors =
@@ -114,11 +129,38 @@ void LlmDataDistTransfer::allocate_kv_cache(
     value_cache = v_torch_tensors[i];
     kv_caches.emplace_back(key_cache, value_cache);
   }
+
+  // register key cache
+  CacheDesc& k_cache_desc = k_cache_.cache_desc;
+  k_cache_desc.num_tensors = num_layers;
+  k_cache_desc.data_type = ge_dtype;
+  k_cache_desc.shape = kv_cache_shape[0];
+  auto ret = llm_data_dist_->RegisterKvCache(
+      k_cache_desc, k_cache_addrs, {}, k_cache_.cache_id);
+  CHECK(ret == LLM_SUCCESS)
+      << "Register key cache failed, ret = " << std::hex << ret;
+
+  // register value cache
+  CacheDesc& v_cache_desc = v_cache_.cache_desc;
+  v_cache_desc.num_tensors = num_layers;
+  v_cache_desc.data_type = ge_dtype;
+  v_cache_desc.shape = kv_cache_shape[1];
+  ret = llm_data_dist_->RegisterKvCache(
+      v_cache_desc, v_cache_addrs, {}, v_cache_.cache_id);
+  CHECK(ret == LLM_SUCCESS)
+      << "Register value cache failed, ret = " << std::hex << ret;
+
+  LOG(INFO) << "Register KV cache success.";
 }
 
 void LlmDataDistTransfer::free_kv_cache() {
-  llm_data_dist_->DeallocateCache(k_cache_.cache_id);
-  llm_data_dist_->DeallocateCache(v_cache_.cache_id);
+  for (auto& k_cache_buffer : k_cache_.tensor_addrs) {
+    aclrtFree(reinterpret_cast<void*>(k_cache_buffer));
+  }
+
+  for (auto& v_cache_buffer : v_cache_.tensor_addrs) {
+    aclrtFree(reinterpret_cast<void*>(v_cache_buffer));
+  }
 }
 
 void LlmDataDistTransfer::get_cache_info(uint64_t& cluster_id,
@@ -146,7 +188,7 @@ bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
 
   auto ret = llm_data_dist_->LinkLlmClusters(clusters, rets);
   if (ret != LLM_SUCCESS) {
-    LOG(ERROR) << "LinkLlmClusters failed, ret = " << ret;
+    LOG(ERROR) << "LinkLlmClusters failed, ret = " << std::hex << ret;
     return false;
   }
   LOG(INFO) << "LinkLlmClusters success.";
@@ -169,7 +211,7 @@ bool LlmDataDistTransfer::unlink_cluster(const uint64_t& cluster_id,
   auto ret =
       llm_data_dist_->UnlinkLlmClusters(clusters, rets, 1000, force_flag);
   if (ret != LLM_SUCCESS) {
-    LOG(ERROR) << "UnlinkLlmClusters failed, ret = " << ret;
+    LOG(ERROR) << "UnlinkLlmClusters failed, ret = " << std::hex << ret;
     return false;
   }
   return true;
@@ -189,8 +231,8 @@ bool LlmDataDistTransfer::pull_kv_blocks(
   auto v_ret = llm_data_dist_->PullKvBlocks(
       v_cache_index, v_cache_, src_blocks, dst_blocks);
   if (k_ret != LLM_SUCCESS || v_ret != LLM_SUCCESS) {
-    LOG(ERROR) << "PullKvBlocks failed, k_ret = " << k_ret
-               << ", v_ret = " << v_ret;
+    LOG(ERROR) << "PullKvBlocks failed, k_ret = " << std::hex << k_ret
+               << ", v_ret = " << std::hex << v_ret;
     return false;
   }
   return true;
@@ -200,10 +242,6 @@ bool LlmDataDistTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     bool is_spec_draft) {
-#if defined(USE_A3)
-  LOG(FATAL) << "A3 does not support llmdatadist.";
-  return false;
-#else
   for (int64_t layer_index = 0; layer_index < num_layers_; ++layer_index) {
     // Wait for the KV cache computation of this layer to complete.
     layer_synchronizer->synchronize_layer(layer_index);
@@ -232,13 +270,13 @@ bool LlmDataDistTransfer::push_kv_blocks(
                                                 ext_param);
       if (k_ret != LLM_SUCCESS || v_ret != LLM_SUCCESS) {
         LOG(ERROR) << "PushKvBlocks failed, layer = " << layer_index
-                   << ", k_ret = " << k_ret << ", v_ret = " << v_ret;
+                   << ", k_ret = " << std::hex << k_ret
+                   << ", v_ret = " << std::hex << v_ret;
         return false;
       }
     }
   }
   return true;
-#endif
 }
 
 std::vector<torch::Tensor> LlmDataDistTransfer::convert_to_torch_tensor(
@@ -283,7 +321,8 @@ ClusterInfo LlmDataDistTransfer::create_cluster_info(
   IpInfo local_ip_info;
   IpInfo remote_ip_info;
 
-  local_ip_info.ip = device_ip_.c_str();
+  local_ip_info.ip = host_ip_.c_str();
+  local_ip_info.port = listen_port_;
   remote_ip_info.ip = remote_ip.c_str();
   remote_ip_info.port = remote_port;
   cluster_info.remote_cluster_id = cluster_id;

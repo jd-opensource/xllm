@@ -45,6 +45,7 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
+#include "util/net.h"
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
@@ -190,8 +191,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
     kv_caches_.reserve(num_layers);
 
     int32_t device_id = device_.index();
-    uint64_t buf_pool_size = kv_cache_size + MBUF_SIZE;
-    kv_cache_transfer_->initialize(device_id, buf_pool_size);
+    kv_cache_transfer_->initialize(device_id);
     kv_cache_transfer_->allocate_kv_cache(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
   } else {
@@ -235,7 +235,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
 #endif
 
 void WorkerImpl::get_device_info(std::string& device_ip, uint16_t& port) {
-  device_ip = options_.device_ip().value();
+  // device_ip = options_.device_ip().value();
+  device_ip = net::get_local_ip_addr();
   port = options_.transfer_listen_port();
 }
 
