@@ -6,7 +6,7 @@ function error() {
   exit 1
 }
 
-IMAGE="quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts"
+IMAGE="quay.io/jd_xllm/xllm-ai:0.6.0-dev-hb-rc2-x86"
 
 RUN_OPTS=(
   --rm
