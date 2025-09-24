@@ -1291,96 +1291,6 @@ class AdaLayerNormContinuousImpl : public torch::nn::Module {
 };
 TORCH_MODULE(AdaLayerNormContinuous);
 
-inline torch::Tensor get_1d_rotary_pos_embed(
-    int64_t dim,
-    const torch::Tensor& pos,
-    float theta = 10000.0,
-    bool use_real = false,
-    float linear_factor = 1.0,
-    float ntk_factor = 1.0,
-    bool repeat_interleave_real = true,
-    torch::Dtype freqs_dtype = torch::kFloat32) {
-  TORCH_CHECK(dim % 2 == 0, "Dimension must be even");
-
-  torch::Tensor pos_tensor = pos;
-  if (pos.dim() == 0) {
-    pos_tensor = torch::arange(pos.item<int64_t>(), pos.options());
-  }
-
-  theta = theta * ntk_factor;
-
-  auto freqs =
-      1.0 /
-      (torch::pow(
-           theta,
-           torch::arange(
-               0, dim, 2, torch::dtype(freqs_dtype).device(pos.device())) /
-               dim) *
-       linear_factor);  // [D/2]
-
-  auto tensors = {pos_tensor, freqs};
-
-  auto freqs_outer = torch::einsum("s,d->sd", tensors);  // [S, D/2]
-#if defined(USE_NPU)
-  freqs_outer = freqs_outer.to(torch::kFloat32);
-#endif
-  if (use_real && repeat_interleave_real) {
-    auto cos_vals = torch::cos(freqs_outer);  // [S, D/2]
-    auto sin_vals = torch::sin(freqs_outer);  // [S, D/2]
-
-    auto freqs_cos = cos_vals.transpose(-1, -2)
-                         .repeat_interleave(2, -2)
-                         .transpose(-1, -2)
-                         .to(torch::kFloat32);  // [S, D]
-
-    auto freqs_sin = sin_vals.transpose(-1, -2)
-                         .repeat_interleave(2, -2)
-                         .transpose(-1, -2)
-                         .to(torch::kFloat32);  // [S, D]
-    return torch::cat({freqs_cos.unsqueeze(0), freqs_sin.unsqueeze(0)},
-                      0);  // [2, S, D]
-  }
-}
-
-class FluxPosEmbedImpl : public torch::nn::Module {
- private:
-  int64_t theta_;
-  std::vector<int64_t> axes_dim_;
-
- public:
-  FluxPosEmbedImpl(int64_t theta, std::vector<int64_t> axes_dim) {
-    theta_ = theta;
-    axes_dim_ = axes_dim;
-  }
-  std::pair<torch::Tensor, torch::Tensor> forward(const torch::Tensor& ids) {
-    int64_t n_axes = ids.size(-1);
-    std::vector<torch::Tensor> cos_out, sin_out;
-    auto pos = ids.to(torch::kFloat32);
-    bool is_mps = (ids.device().type() == torch::kMPS);
-    torch::Dtype freqs_dtype = is_mps ? torch::kFloat32 : torch::kFloat64;
-    for (int64_t i = 0; i < n_axes; ++i) {
-      auto pos_slice = pos.select(-1, i);
-      auto result = get_1d_rotary_pos_embed(axes_dim_[i],
-                                            pos_slice,
-                                            theta_,
-                                            true,  // repeat_interleave_real
-                                            1,
-                                            1,
-                                            true,  // use_real
-                                            freqs_dtype);
-      auto cos = result[0];
-      auto sin = result[1];
-      cos_out.push_back(cos);
-      sin_out.push_back(sin);
-    }
-
-    auto freqs_cos = torch::cat(cos_out, -1);
-    auto freqs_sin = torch::cat(sin_out, -1);
-
-    return {freqs_cos, freqs_sin};
-  }
-};
-TORCH_MODULE(FluxPosEmbed);
 class FeedForwardImpl : public torch::nn::Module {
  public:
   FeedForwardImpl(int64_t dim,
@@ -1735,7 +1645,6 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
                              int64_t joint_attention_dim = 4096,
                              int64_t pooled_projection_dim = 768,
                              bool guidance_embeds = true,
-                             std::vector<int64_t> axes_dims_rope = {16, 56, 56},
                              at::Device device = torch::kCPU,
                              at::ScalarType dtype = torch::kFloat32)
       : out_channels_(in_channels),
@@ -1751,8 +1660,6 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
     single_transformer_blocks_ =
         register_module("single_transformer_blocks", torch::nn::ModuleList());
 
-    pos_embed_ =
-        register_module("pos_embed", FluxPosEmbed(10000, axes_dims_rope));
     if (guidance_embeds) {
       time_text_guidance_embed_ = register_module(
           "time_text_guidance_embed",
@@ -1802,21 +1709,14 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
         "proj_out",
         DiTLinear(inner_dim_, patch_size * patch_size * out_channels_, true));
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states_input,
                         const torch::Tensor& encoder_hidden_states_input,
                         const torch::Tensor& pooled_projections,
                         const torch::Tensor& timestep,
-                        const torch::Tensor& img_ids,
-                        const torch::Tensor& txt_ids,
+                        const torch::Tensor& image_rotary_emb,
                         const torch::Tensor& guidance,
                         int64_t step_idx = 0) {
-    torch::Tensor ids = torch::cat(
-        {txt_ids.to(device_).to(dtype_), img_ids.to(device_).to(dtype_)}, 0);
-    auto [rot_emb1, rot_emb2] = pos_embed_->forward(ids);
-    rot_emb1 = rot_emb1.to(dtype_);
-    rot_emb2 = rot_emb2.to(dtype_);
-    torch::Tensor image_rotary_emb =
-        torch::stack({rot_emb1, rot_emb2}, 0).to(dtype_);
     torch::Tensor hidden_states =
         x_embedder_->forward(hidden_states_input.to(device_));
     auto timestep_scaled = timestep.to(hidden_states.dtype()) * 1000.0f;
@@ -1929,7 +1829,6 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
  private:
   int64_t out_channels_;
   int64_t inner_dim_;
-  FluxPosEmbed pos_embed_{nullptr};
   CombinedTimestepTextProjEmbeddings time_text_embed_{nullptr};
   CombinedTimestepGuidanceTextProjEmbeddings time_text_guidance_embed_{nullptr};
   DiTLinear context_embedder_{nullptr};
@@ -1960,17 +1859,16 @@ class FluxDiTModelImpl : public torch::nn::Module {
                                args_.dit_joint_attention_dim(),
                                args_.dit_pooled_projection_dim(),
                                args_.dit_guidance_embeds(),
-                               args_.dit_axes_dims_rope(),
                                device_,
                                dtype_));
     flux_transformer_2d_model_->to(dtype_);
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states_input,
                         const torch::Tensor& encoder_hidden_states_input,
                         const torch::Tensor& pooled_projections,
                         const torch::Tensor& timestep,
-                        const torch::Tensor& img_ids,
-                        const torch::Tensor& txt_ids,
+                        const torch::Tensor& image_rotary_emb,
                         const torch::Tensor& guidance,
                         int64_t step_idx = 0) {
     torch::Tensor output =
@@ -1978,8 +1876,7 @@ class FluxDiTModelImpl : public torch::nn::Module {
                                             encoder_hidden_states_input,
                                             pooled_projections,
                                             timestep,
-                                            img_ids,
-                                            txt_ids,
+                                            image_rotary_emb,
                                             guidance,
                                             0);
     return output;
@@ -2001,36 +1898,13 @@ class FluxDiTModelImpl : public torch::nn::Module {
 
     return latent_image_ids;
   }
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    int seed = 42;
-    torch::manual_seed(seed);
-    auto hidden_states = torch::randn({1, 8100, 64}, device_);
-    torch::manual_seed(seed);
-    auto encoder_hidden_states = torch::randn({1, 512, 4096}, device_);
-    torch::manual_seed(seed);
-    auto pooled_projections = torch::randn({1, 768}, device_);
-    auto txt_ids = torch::zeros({512, 3}, device_);
-    auto img_ids = _prepare_latent_image_ids(1, 90, 90, device_, dtype_);
-    torch::Tensor timestep =
-        torch::tensor({1.0f}, torch::dtype(dtype_).device(device_));
-    torch::Tensor guidance =
-        torch::tensor({3.5f}, torch::dtype(dtype_).device(device_));
-    auto output = forward(hidden_states,
-                          encoder_hidden_states,
-                          pooled_projections,
-                          timestep,
-                          img_ids,
-                          txt_ids,
-                          guidance);
-    return output;
-  }
+
   void load_model(std::unique_ptr<DiTFolderLoader> loader) {
     flux_transformer_2d_model_->load_model(std::move(loader));
   }
+
   int64_t in_channels() { return flux_transformer_2d_model_->in_channels(); }
+
   bool guidance_embeds() {
     return flux_transformer_2d_model_->guidance_embeds();
   }
