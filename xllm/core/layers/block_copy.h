@@ -14,33 +14,23 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include <torch/torch.h>
 
-#include <cstdint>
-#include <vector>
-
-#include "framework/model/model_input_params.h"
+#if defined(USE_NPU)
+#include "npu/npu_block_copy_impl.h"
+#endif
 
 namespace xllm {
-class KVCache final {
+namespace layer {
+
+#if defined(USE_NPU)
+class BlockCopy : public torch::nn::ModuleHolder<NpuBlockCopyImpl> {
  public:
-  KVCache() = default;
-  KVCache(torch::Tensor key_cache, torch::Tensor value_cache);
-  ~KVCache() = default;
-
-  // TODO: pass in kv_shape and options instead
-  torch::Tensor get_k_cache() const;
-  torch::Tensor get_v_cache() const;
-
-  bool empty() const {
-    return !key_cache_.defined() || !value_cache_.defined();
-  }
-
-  void swap_blocks(torch::Tensor& src_tensor, torch::Tensor& dst_tensor);
-
- private:
-  torch::Tensor key_cache_;
-  torch::Tensor value_cache_;
+  using torch::nn::ModuleHolder<NpuBlockCopyImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuBlockCopyImpl;
+  BlockCopy(const ModelContext& context)
+      : ModuleHolder(std::make_shared<NpuBlockCopyImpl>(context)) {}
 };
+#endif
 
+}  // namespace layer
 }  // namespace xllm

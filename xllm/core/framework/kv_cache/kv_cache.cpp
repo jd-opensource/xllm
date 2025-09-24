@@ -23,27 +23,8 @@ KVCache::KVCache(torch::Tensor key_cache, torch::Tensor value_cache)
 torch::Tensor KVCache::get_k_cache() const { return key_cache_; }
 torch::Tensor KVCache::get_v_cache() const { return value_cache_; }
 
-void KVCache::swap_blocks(const std::vector<CacheBlockInfo>& swap_blocks) {
-  if (swap_blocks.empty()) {
-    return;
-  }
-
-  // collect src and dst indices
-  std::vector<int64_t> src_indices, dst_indices;
-  src_indices.reserve(swap_blocks.size());
-  dst_indices.reserve(swap_blocks.size());
-
-  for (const auto& block : swap_blocks) {
-    src_indices.push_back(block.device_block_id);
-    dst_indices.push_back(block.host_block_id);
-  }
-
-  // batch select keys and values
-  auto src_tensor = torch::tensor(
-      src_indices, torch::dtype(torch::kLong).device(key_cache_.device()));
-  auto dst_tensor = torch::tensor(
-      dst_indices, torch::dtype(torch::kLong).device(key_cache_.device()));
-
+void KVCache::swap_blocks(torch::Tensor& src_tensor,
+                          torch::Tensor& dst_tensor) {
   // batch select keys and values
   auto selected_keys = torch::index_select(key_cache_, 0, src_tensor);
   auto selected_values = torch::index_select(value_cache_, 0, src_tensor);

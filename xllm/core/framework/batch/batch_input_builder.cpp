@@ -57,7 +57,7 @@ BatchInputBuilder::BatchInputBuilder(
     const std::vector<MMData>& mm_data_vec,
     const std::vector<CacheBlockInfo>* copy_in_cache_block_infos,
     const std::vector<CacheBlockInfo>* copy_out_cache_block_infos,
-    const std::vector<CacheBlockInfo>* swap_cache_block_infos,
+    std::vector<CacheBlockInfo>* swap_cache_block_infos,
     const ModelArgs* args)
     : sequences_(sequences),
       allowed_max_tokens_(allowed_max_tokens),
@@ -436,16 +436,53 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
         copy_in_cache_block_infos_->begin(),
         copy_in_cache_block_infos_->end());
   }
-  if (swap_cache_block_infos_ != nullptr &&
-      swap_cache_block_infos_->size() > 0) {
-    raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
-                                         swap_cache_block_infos_->begin(),
-                                         swap_cache_block_infos_->end());
-  }
-
   split_copy_out_blocks(raw_forward_input, write_block_ids_);
+  process_swap_block_infos(raw_forward_input);
 
   return raw_forward_input;
 }
 
+void BatchInputBuilder::process_swap_block_infos(
+    RawForwardInput& raw_forward_input) {
+  if (swap_cache_block_infos_ == nullptr ||
+      swap_cache_block_infos_->size() == 0) {
+    return;
+  }
+
+  if (FLAGS_enable_block_copy_kernel) {
+    auto& swap_blocks = *swap_cache_block_infos_;
+    std::sort(swap_blocks.begin(),
+              swap_blocks.end(),
+              [](const CacheBlockInfo& a, const CacheBlockInfo& b) {
+                return a.device_block_id < b.device_block_id;
+              });
+    if (swap_blocks.size() > 0) {
+      std::vector<int32_t> src_indices, dst_indices, cum_sum;
+      int32_t current_src = swap_blocks[0].device_block_id;
+      src_indices.reserve(swap_blocks.size());
+      dst_indices.reserve(swap_blocks.size());
+
+      src_indices.push_back(swap_blocks[0].device_block_id);
+      dst_indices.push_back(swap_blocks[0].host_block_id);
+      for (size_t i = 1; i < swap_blocks.size(); i++) {
+        dst_indices.push_back(swap_blocks[i].host_block_id);
+        if (swap_blocks[i].device_block_id != current_src) {
+          src_indices.push_back(swap_blocks[i].device_block_id);
+          cum_sum.push_back(i);
+          current_src = swap_blocks[i].device_block_id;
+        }
+      }
+      cum_sum.push_back(swap_blocks.size());
+
+      raw_forward_input.swap_blocks.clear();
+      raw_forward_input.src_block_indices = std::move(src_indices);
+      raw_forward_input.dst_block_indices = std::move(dst_indices);
+      raw_forward_input.cum_sum = std::move(cum_sum);
+    }
+  } else {
+    raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
+                                         swap_cache_block_infos_->begin(),
+                                         swap_cache_block_infos_->end());
+  }
+}
 }  // namespace xllm

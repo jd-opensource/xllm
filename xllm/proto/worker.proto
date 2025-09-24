@@ -185,6 +185,10 @@ message ForwardInput {
   repeated CacheBlockInfo copy_out_blocks = 28;
   repeated CacheBlockInfo copy_in_blocks = 29;
   repeated CacheBlockInfo swap_blocks = 30;
+  // block copy kernel
+  repeated int32 src_block_indices = 31;
+  repeated int32 dst_block_indices = 32;
+  repeated int32 cum_sum = 33;
 }
 
  message BatchedForwardInputs {

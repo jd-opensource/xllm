@@ -35,44 +35,50 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/base/model.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
-#include "xllm_kernels/operations/fusion/embedding/word_embedding.h"
 
 namespace xllm {
 namespace layer {
 
-class NpuWordEmbeddingImpl : public NpuBaseLayer {
+class NpuBlockCopyImpl : public NpuBaseLayer {
  public:
-  explicit NpuWordEmbeddingImpl(const ModelContext& context);
+  explicit NpuBlockCopyImpl(const ModelContext& context);
 
-  ~NpuWordEmbeddingImpl() {};
+  ~NpuBlockCopyImpl() {};
 
-  void load_state_dict(const StateDict& state_dict) override;
+  void load_state_dict(const StateDict& state_dict) {};
 
-  void verify_loaded_weights(const std::string weight_str) const;
+  void verify_loaded_weights(const std::string weight_str) const {};
 
-  void merge_loaded_weights() override;
-
-  void param_from_args(atb_speed::common::WordEmbeddingParam& param,
-                       const xllm::ModelArgs& args,
-                       const xllm::ParallelArgs& parallel_args);
+  void merge_loaded_weights();
 
   int64_t init_layer();
 
-  torch::Tensor forward(const torch::Tensor& x, int nodeId);
+  torch::Tensor forward(const torch::Tensor& key_cache,
+                        const torch::Tensor& value_cache,
+                        const torch::Tensor& src_block_ids,
+                        const torch::Tensor& dst_block_ids,
+                        const torch::Tensor& cum_sum,
+                        int nodeId = 0);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
-                               const torch::Tensor& x);
+                               const torch::Tensor& key_cache,
+                               const torch::Tensor& value_cache,
+                               const torch::Tensor& src_block_ids,
+                               const torch::Tensor& dst_block_ids,
+                               const torch::Tensor& cum_sum);
 
  private:
   int64_t init_node(atb_speed::Model::Node& node,
-                    atb_speed::common::WordEmbeddingParam& param);
+                    atb::infer::BlockCopyParam& param);
 
-  atb_speed::Model::Node embedding_node_;
-  std::string modelName_;
-  std::vector<at::Tensor> atOutTensors_;
-  // std::string name_;
-  atb_speed::common::WordEmbeddingParam embedding_param_;
-  atb::Tensor internalTensors;
+  atb_speed::Model::Node node_;
+  std::string model_name_;
+  atb::infer::BlockCopyParam param_;
+  atb::Tensor internal_key_tensors_;
+  atb::Tensor internal_value_tensors_;
+  atb::Tensor internal_src_block_ids_tensors_;
+  atb::Tensor internal_dst_block_ids_tensors_;
+  atb::Tensor internal_cum_sum_tensors_;
 };
 
 }  // namespace layer

@@ -160,6 +160,10 @@ struct RawForwardInput {
   std::vector<CacheBlockInfo> copy_out_blocks;
   std::vector<CacheBlockInfo> copy_in_blocks;
   std::vector<CacheBlockInfo> swap_blocks;
+  // block copy kernel
+  std::vector<int32_t> src_block_indices;
+  std::vector<int32_t> dst_block_indices;
+  std::vector<int32_t> cum_sum;
 };
 
 struct RawSampleOutput {

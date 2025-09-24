@@ -112,7 +112,7 @@ void BlockManagerPool::deallocate(std::vector<Sequence*>& sequences) {
 void BlockManagerPool::deallocate(Sequence* sequence) {
   DCHECK(sequence != nullptr);
   // add blocks to the prefix cache
-  int32_t dp_rank = sequence->dp_rank();
+  int32_t dp_rank = get_dp_rank(sequence);
   cache(sequence);
   if (!host_block_managers_.empty()) {
     cache_host(sequence);
@@ -208,7 +208,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
     for (int i = hbm_cache_token_num / options_.block_size();
          i < host_cache_token_num / options_.block_size();
          i++) {
-      copy_in_cache_block_infos_[sequence->dp_rank()].emplace_back(
+      copy_in_cache_block_infos_[dp_rank].emplace_back(
           hbm_blocks[i].id(),
           host_blocks[i].id(),
           host_blocks[i].get_immutable_hash_value());
@@ -300,7 +300,7 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
 }
 
 void BlockManagerPool::cache(Sequence* sequence) {
-  int32_t dp_rank = sequence->dp_rank();
+  int32_t dp_rank = get_dp_rank(sequence);
   const auto token_ids = sequence->cached_tokens();
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
   return block_managers_[dp_rank]->cache(token_ids, *blocks);
@@ -324,7 +324,7 @@ void BlockManagerPool::allocate_host_shared(Sequence* sequence) {
 void BlockManagerPool::cache_host(Sequence* sequence) {
   DCHECK(sequence != nullptr);
 
-  int32_t dp_rank = sequence->dp_rank();
+  int32_t dp_rank = get_dp_rank(sequence);
   size_t needed_block_num = (sequence->num_tokens() / options_.block_size() -
                              sequence->host_kv_state().num_kv_blocks());
 

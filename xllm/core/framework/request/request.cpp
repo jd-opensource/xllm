@@ -26,6 +26,7 @@ limitations under the License.
 
 #include "api_service/call.h"
 #include "sequence.h"
+#include "util/timer.h"
 
 namespace xllm {
 
@@ -92,6 +93,10 @@ void Request::log_statistic(double total_latency) {
               << "ttft: " << seq->time_to_first_token_latency_seconds() * 1000
               << "ms, "
               << "total_latency: " << total_latency * 1000 << "ms";
+    // only log once when beam search is enabled
+    if (check_beam_search()) {
+      break;
+    }
   }
 }
 

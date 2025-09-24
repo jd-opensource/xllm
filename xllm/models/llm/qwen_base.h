@@ -17,24 +17,18 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 #include <gflags/gflags.h>
-#include <mstx/ms_tools_ext.h>
 #include <torch/torch.h>
 
 #include <string>
 #include <typeinfo>
 #include <vector>
 
-#include "core/layers/attention_mask.h"
-#include "core/layers/rms_norm.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
-// test
-#include <mstx/ms_tools_ext.h>
-
 #include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/attention_mask.h"
+#include "core/layers/block_copy.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/pos_embedding.h"
 #include "core/layers/rms_norm.h"
@@ -114,6 +108,9 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
   QWenDecoderLayerImplBase(const ModelContext& context) {
     // register submodules
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
+#if defined(USE_NPU)
+    block_copy_ = register_module("block_copy", layer::BlockCopy(context));
+#endif
   }
 
   virtual torch::Tensor forward(torch::Tensor& x,
@@ -125,6 +122,16 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
                                 int node_id,
                                 aclrtEvent* event = nullptr,
                                 std::atomic<bool>* event_flag = nullptr) {
+#if defined(USE_NPU)
+    if (input_params.src_block_indices.numel() > 0) {
+      block_copy_(kv_cache.get_k_cache(),
+                  kv_cache.get_v_cache(),
+                  input_params.src_block_indices,
+                  input_params.dst_block_indices,
+                  input_params.cum_sum,
+                  0);
+    }
+#endif
     return decoder_layer_(x,
                           cos_pos,
                           sin_pos,
@@ -147,10 +154,16 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
   }
   virtual void merge_loaded_weights() {
     decoder_layer_->merge_loaded_weights();
+#if defined(USE_NPU)
+    block_copy_->merge_loaded_weights();
+#endif
   }
 
  private:
   DecoderType decoder_layer_{nullptr};
+#if defined(USE_NPU)
+  layer::BlockCopy block_copy_{nullptr};
+#endif
 };
 
 template <typename DecoderLayerType>
@@ -180,6 +193,7 @@ class QWenModelImplBase : public torch::nn::Module {
     } else {
       h = embed_tokens_(tokens, 0);
     }
+
     // auto h = embed_tokens_(tokens);
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);

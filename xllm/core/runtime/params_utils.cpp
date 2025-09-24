@@ -141,6 +141,15 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
         pb_forward_input->swap_blocks()[i].device_block_id(),
         pb_forward_input->swap_blocks()[i].host_block_id());
   }
+  // block copy kernel
+  std::vector<int32_t> src_block_indices =
+      std::vector<int32_t>(pb_forward_input->src_block_indices().begin(),
+                           pb_forward_input->src_block_indices().end());
+  std::vector<int32_t> dst_block_indices =
+      std::vector<int32_t>(pb_forward_input->dst_block_indices().begin(),
+                           pb_forward_input->dst_block_indices().end());
+  std::vector<int32_t> cum_sum = std::vector<int32_t>(
+      pb_forward_input->cum_sum().begin(), pb_forward_input->cum_sum().end());
 
   std::vector<const RequestSamplingParam*> sampling_params;
   std::vector<RequestSamplingParam> tmp_sampling_params;
@@ -209,6 +218,12 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.copy_out_blocks = std::move(copy_out_blocks);
   input_params.copy_in_blocks = std::move(copy_in_blocks);
   input_params.swap_blocks = std::move(swap_blocks);
+  // block copy kernel
+  input_params.src_block_indices =
+      torch::tensor(src_block_indices, tensor_options);
+  input_params.dst_block_indices =
+      torch::tensor(dst_block_indices, tensor_options);
+  input_params.cum_sum = torch::tensor(cum_sum, tensor_options);
 
   if (pb_forward_input->embeds().size() > 0) {
     const int32_t rows = pb_forward_input->embeds().size();
@@ -464,6 +479,13 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     cache_block_info.set_host_block_id(t.host_block_id);
     *pb_forward_input->mutable_swap_blocks()->Add() = cache_block_info;
   }
+
+  // block copy kernel
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_src_block_indices(),
+                      inputs.src_block_indices);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dst_block_indices(),
+                      inputs.dst_block_indices);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_cum_sum(), inputs.cum_sum);
 
   COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());
 }

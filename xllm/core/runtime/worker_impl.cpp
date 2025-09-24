@@ -396,10 +396,28 @@ void WorkerImpl::prepare_work_before_execute(
       offload_kv_blocks_to_store_async(
           inputs.micro_inputs[i].input_params.copy_out_blocks);
 
-      if (input_params.swap_blocks.size() > 0) {
+      if (input_params.swap_blocks.size() > 0 &&
+          !FLAGS_enable_block_copy_kernel) {
+        auto& swap_blocks = input_params.swap_blocks;
+
+        // collect src and dst indices
+        std::vector<int64_t> src_indices, dst_indices;
+        src_indices.reserve(swap_blocks.size());
+        dst_indices.reserve(swap_blocks.size());
+
+        for (const auto& block : swap_blocks) {
+          src_indices.push_back(block.device_block_id);
+          dst_indices.push_back(block.host_block_id);
+        }
+
+        // batch select keys and values
+        auto src_tensor = torch::tensor(
+            src_indices, torch::dtype(torch::kLong).device(device_));
+        auto dst_tensor = torch::tensor(
+            dst_indices, torch::dtype(torch::kLong).device(device_));
         const int64_t num_layers = context_.get_model_args().n_layers();
         for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-          kv_caches_[layer_id].swap_blocks(input_params.swap_blocks);
+          kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
         }
       }
     }

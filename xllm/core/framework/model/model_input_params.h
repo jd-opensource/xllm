@@ -81,6 +81,10 @@ struct ModelInputParams {
     params.copy_out_blocks = std::move(copy_out_blocks);
     params.copy_in_blocks = std::move(copy_in_blocks);
     params.swap_blocks = std::move(swap_blocks);
+
+    params.src_block_indices = safe_to(src_block_indices, device, true);
+    params.dst_block_indices = safe_to(dst_block_indices, device, true);
+    params.cum_sum = safe_to(cum_sum, device, true);
     return params;
   }
 
@@ -145,6 +149,11 @@ struct ModelInputParams {
   std::vector<CacheBlockInfo> copy_out_blocks;
   std::vector<CacheBlockInfo> copy_in_blocks;
   std::vector<CacheBlockInfo> swap_blocks;
+
+  // block copy kernel
+  torch::Tensor src_block_indices;
+  torch::Tensor dst_block_indices;
+  torch::Tensor cum_sum;
 
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #endif
