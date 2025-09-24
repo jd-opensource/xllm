@@ -19,10 +19,11 @@
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
+
 namespace xllm {
 // T5 model compatible with huggingface weights
-//    ref to:
-//   https://github.com/huggingface/transformers/tree/main/src/transformers/models/t5
+// ref to:
+// https://github.com/huggingface/transformers/tree/main/src/transformers/models/t5
 class T5LayerNormImpl : public torch::nn::Module {
  public:
   torch::Tensor weight;
@@ -49,6 +50,7 @@ class T5LayerNormImpl : public torch::nn::Module {
     }
     return weight * hidden_states;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     auto weight_tensor = state_dict.get_tensor("weight");
     if (weight_tensor.defined()) {
@@ -60,6 +62,7 @@ class T5LayerNormImpl : public torch::nn::Module {
   }
 };
 TORCH_MODULE(T5LayerNorm);
+
 torch::Tensor gelu_new(const torch::Tensor& x) {
   // 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
   const double sqrt_2_over_pi = std::sqrt(2.0 / M_PI);
@@ -67,42 +70,35 @@ torch::Tensor gelu_new(const torch::Tensor& x) {
          (1.0 +
           torch::tanh(sqrt_2_over_pi * (x + 0.044715 * torch::pow(x, 3))));
 }
+
 class T5DenseInterface : public torch::nn::Module {
  public:
   virtual torch::Tensor forward(const torch::Tensor& hidden_states) = 0;
-  virtual std::shared_ptr<T5DenseInterface> clone(
-      const torch::Device& device = torch::kCPU) const = 0;
   virtual void load_state_dict(const StateDict& state_dict) = 0;
 };
-class T5DenseActDenseImpl : public T5DenseInterface {
- private:
-  DiTLinear wi_{nullptr};
-  DiTLinear wo_{nullptr};
-  torch::nn::Dropout dropout_{nullptr};
-  torch::nn::Functional act_{nullptr};
-  torch::Device device_;
-  torch::ScalarType dtype_;
 
+class T5DenseActDenseImpl : public T5DenseInterface {
  public:
-  T5DenseActDenseImpl(int64_t d_model,
-                      int64_t d_ff,
-                      double dropout_rate,
-                      const std::string& dense_act_fn,
-                      torch::Device device = torch::kCPU,
-                      torch::ScalarType dtype = torch::kBFloat16)
-      : device_(device), dtype_(dtype) {
-    wi_ = register_module("wi", DiTLinear(d_model, d_ff, false));
-    wo_ = register_module("wo", DiTLinear(d_ff, d_model, false));
-    dropout_ = register_module("dropout", torch::nn::Dropout(dropout_rate));
-    if (dense_act_fn == "relu") {
+  T5DenseActDenseImpl(const ModelContext& context) {
+    auto model_args = context.get_model_args();
+    auto options = context.get_tensor_options();
+    wi_ = register_module(
+        "wi", DiTLinear(model_args.t5_d_model(), model_args.t5_d_ff(), false));
+    wo_ = register_module(
+        "wo", DiTLinear(model_args.t5_d_ff(), model_args.t5_d_model(), false));
+
+    wi_->weight.set_data(wi_->weight.to(options));
+    wo_->weight.set_data(wo_->weight.to(options));
+    if (model_args.t5_dense_act_fn() == "relu") {
       act_ = register_module("act", torch::nn::Functional(torch::relu));
-    } else if (dense_act_fn == "gelu_new") {
+    } else if (model_args.t5_dense_act_fn() == "gelu_new") {
       act_ = register_module("act", torch::nn::Functional(gelu_new));
     } else {
       throw std::invalid_argument("Unsupported activation function: " +
-                                  dense_act_fn);
+                                  model_args.t5_dense_act_fn());
     }
   }
+
   void load_state_dict(const StateDict& state_dict) {
     // wi
     const auto wi_weight = state_dict.get_tensor("wi.weight");
@@ -120,10 +116,10 @@ class T5DenseActDenseImpl : public T5DenseInterface {
       wo_->weight.data().copy_(wo_weight);
     }
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states) {
     torch::Tensor hidden = wi_->forward(hidden_states);
     hidden = act_(hidden);
-    hidden = dropout_->forward(hidden);
     if (wo_->weight.dtype() != torch::kInt8 &&
         hidden.dtype() != wo_->weight.dtype()) {
       hidden = hidden.to(wo_->weight.dtype());
@@ -131,44 +127,40 @@ class T5DenseActDenseImpl : public T5DenseInterface {
     hidden = wo_->forward(hidden);
     return hidden;
   }
-  std::shared_ptr<T5DenseInterface> clone(
-      const torch::Device& device = torch::kCPU) const override {
-    auto clone = std::make_shared<T5DenseActDenseImpl>(*this);
-    clone->to(device);
-    return clone;
-  }
-};
-class T5DenseGatedActDenseImpl : public T5DenseInterface {
- private:
-  DiTLinear wi_0_{nullptr};
-  DiTLinear wi_1_{nullptr};
-  DiTLinear wo_{nullptr};
-  torch::nn::Dropout dropout_{nullptr};
-  torch::nn::Functional act_{nullptr};
-  torch::Device device_;
-  torch::ScalarType dtype_;
 
+ private:
+  DiTLinear wi_{nullptr};
+  DiTLinear wo_{nullptr};
+  torch::nn::Functional act_{nullptr};
+};
+
+class T5DenseGatedActDenseImpl : public T5DenseInterface {
  public:
-  T5DenseGatedActDenseImpl(int64_t d_model,
-                           int64_t d_ff,
-                           double dropout_rate,
-                           const std::string& dense_act_fn,
-                           torch::Device device = torch::kCPU,
-                           torch::ScalarType dtype = torch::kBFloat16)
-      : device_(device), dtype_(dtype) {
-    wi_0_ = register_module("wi_0", DiTLinear(d_model, d_ff, false));
-    wi_1_ = register_module("wi_1", DiTLinear(d_model, d_ff, false));
-    wo_ = register_module("wo", DiTLinear(d_ff, d_model, false));
-    dropout_ = register_module("dropout", torch::nn::Dropout(dropout_rate));
-    if (dense_act_fn == "relu") {
+  T5DenseGatedActDenseImpl(const ModelContext& context) {
+    auto model_args = context.get_model_args();
+    auto options = context.get_tensor_options();
+    wi_0_ = register_module(
+        "wi_0",
+        DiTLinear(model_args.t5_d_model(), model_args.t5_d_ff(), false));
+    wi_1_ = register_module(
+        "wi_1",
+        DiTLinear(model_args.t5_d_model(), model_args.t5_d_ff(), false));
+    wo_ = register_module(
+        "wo", DiTLinear(model_args.t5_d_ff(), model_args.t5_d_model(), false));
+
+    wi_0_->weight.set_data(wi_0_->weight.to(options));
+    wi_1_->weight.set_data(wi_1_->weight.to(options));
+    wo_->weight.set_data(wo_->weight.to(options));
+    if (model_args.t5_dense_act_fn() == "relu") {
       act_ = register_module("act", torch::nn::Functional(torch::relu));
-    } else if (dense_act_fn == "gelu_new") {
+    } else if (model_args.t5_dense_act_fn() == "gelu_new") {
       act_ = register_module("act", torch::nn::Functional(gelu_new));
     } else {
       throw std::invalid_argument("Unsupported activation function: " +
-                                  dense_act_fn);
+                                  model_args.t5_dense_act_fn());
     }
   }
+
   void load_state_dict(const StateDict& state_dict) {
     // wi_0
     const auto wi_0_weight = state_dict.get_tensor("wi_0.weight");
@@ -192,11 +184,11 @@ class T5DenseGatedActDenseImpl : public T5DenseInterface {
       wo_->weight.data().copy_(wo_weight);
     }
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states) {
     torch::Tensor hidden_gelu = act_(wi_0_->forward(hidden_states));
     torch::Tensor hidden_linear = wi_1_->forward(hidden_states);
     torch::Tensor new_hidden_states = hidden_gelu * hidden_linear;
-    new_hidden_states = dropout_->forward(new_hidden_states);
     if (wo_->weight.dtype() != torch::kInt8 &&
         new_hidden_states.dtype() != wo_->weight.dtype()) {
       new_hidden_states = new_hidden_states.to(wo_->weight.dtype());
@@ -205,60 +197,52 @@ class T5DenseGatedActDenseImpl : public T5DenseInterface {
     return new_hidden_states;
   }
 
-  std::shared_ptr<T5DenseInterface> clone(
-      const torch::Device& device = torch::kCPU) const override {
-    auto clone = std::make_shared<T5DenseGatedActDenseImpl>(*this);
-    clone->to(device);
-    return clone;
-  }
-};
-class T5LayerFFNImpl : public torch::nn::Module {
  private:
-  std::shared_ptr<T5DenseInterface> dense_relu_dense_{nullptr};
-  T5LayerNorm layer_norm_{nullptr};
-  torch::nn::Dropout dropout_{nullptr};
-  torch::Device device_;
-  torch::ScalarType dtype_;
+  DiTLinear wi_0_{nullptr};
+  DiTLinear wi_1_{nullptr};
+  DiTLinear wo_{nullptr};
+  torch::nn::Functional act_{nullptr};
+};
 
+class T5LayerFFNImpl : public torch::nn::Module {
  public:
-  T5LayerFFNImpl(int64_t d_model,
-                 int64_t d_ff,
-                 double dropout_rate,
-                 const std::string& dense_act_fn,
-                 bool is_gated_act,
-                 double layer_norm_epsilon = 1e-6,
-                 torch::Device device = torch::kCPU,
-                 torch::ScalarType dtype = torch::kBFloat16)
-      : layer_norm_(d_model, layer_norm_epsilon, device, dtype),
-        device_(device),
-        dtype_(dtype) {
-    if (is_gated_act) {
-      dense_relu_dense_ = register_module(
-          "DenseReluDense",
-          std::make_shared<T5DenseGatedActDenseImpl>(
-              d_model, d_ff, dropout_rate, dense_act_fn, device, dtype));
+  T5LayerFFNImpl(const ModelContext& context) {
+    auto model_args = context.get_model_args();
+    auto options = context.get_tensor_options();
+    layer_norm_ =
+        register_module("layer_norm",
+                        T5LayerNorm(model_args.t5_d_model(),
+                                    model_args.t5_layer_norm_epsilon()));
+    if (model_args.t5_is_gated_act()) {
+      dense_relu_dense_ =
+          register_module("DenseReluDense",
+                          std::make_shared<T5DenseGatedActDenseImpl>(context));
     } else {
       dense_relu_dense_ = register_module(
-          "DenseReluDense",
-          std::make_shared<T5DenseActDenseImpl>(
-              d_model, d_ff, dropout_rate, dense_act_fn, device, dtype));
+          "DenseReluDense", std::make_shared<T5DenseActDenseImpl>(context));
     }
-    dropout_ = register_module("dropout", torch::nn::Dropout(dropout_rate));
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states) {
     torch::Tensor forwarded_states = layer_norm_->forward(hidden_states);
     forwarded_states = dense_relu_dense_->forward(forwarded_states);
-    torch::Tensor output = hidden_states + dropout_->forward(forwarded_states);
+    torch::Tensor output = hidden_states + forwarded_states;
     return output;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     dense_relu_dense_->load_state_dict(
         state_dict.get_dict_with_prefix("DenseReluDense."));
     layer_norm_->load_state_dict(
         state_dict.get_dict_with_prefix("layer_norm."));
   }
+
+ private:
+  std::shared_ptr<T5DenseInterface> dense_relu_dense_{nullptr};
+  T5LayerNorm layer_norm_{nullptr};
 };
 TORCH_MODULE(T5LayerFFN);
+
 std::pair<std::unordered_set<int64_t>, torch::Tensor>
 find_pruneable_heads_and_indices(
     const std::vector<int64_t>& heads,
@@ -288,13 +272,14 @@ find_pruneable_heads_and_indices(
 
   return {heads_to_prune, index};
 }
+
 DiTLinear prune_linear_layer(const DiTLinear& layer,
                              const torch::Tensor& index,
                              int64_t dim = 0) {
   torch::Device device = layer->weight.device();
   torch::Tensor pruned_weight =
       layer->weight.index_select(dim, index.to(device)).detach().clone();
-  c10::optional<torch::Tensor> pruned_bias = c10::nullopt;
+  std::optional<torch::Tensor> pruned_bias = std::nullopt;
   if (layer->bias.defined()) {
     if (dim == 1) {
       pruned_bias = layer->bias.detach().clone();
@@ -317,44 +302,42 @@ DiTLinear prune_linear_layer(const DiTLinear& layer,
 
   return new_layer;
 }
+
 class T5AttentionImpl : public torch::nn::Module {
  public:
-  T5AttentionImpl(int64_t d_model,
-                  int64_t d_kv,
-                  int64_t num_heads,
-                  double dropout_rate,
-                  bool has_relative_attention_bias,
-                  int64_t relative_attention_num_buckets,
-                  int64_t relative_attention_max_distance,
-                  c10::optional<int64_t> layer_idx = c10::nullopt,
-                  torch::Device device = torch::kCPU,
-                  torch::ScalarType dtype = torch::kBFloat16)
-      : has_relative_attention_bias_(has_relative_attention_bias),
-        relative_attention_num_buckets_(relative_attention_num_buckets),
-        relative_attention_max_distance_(relative_attention_max_distance),
-        d_model_(d_model),
-        key_value_proj_dim_(d_kv),
-        n_heads_(num_heads),
-        dropout_(dropout_rate),
-        inner_dim_(num_heads * d_kv),
-        layer_idx_(layer_idx),
-        device_(device),
-        dtype_(dtype) {
+  T5AttentionImpl(const ModelContext& context,
+                  bool has_relative_attention_bias) {
+    auto model_args = context.get_model_args();
+    auto options = context.get_tensor_options();
+    has_relative_attention_bias_ = has_relative_attention_bias;
+    inner_dim_ = model_args.t5_num_heads() * model_args.t5_d_kv();
+
+    n_heads_ = model_args.t5_num_heads();
+    key_value_proj_dim_ = model_args.t5_d_kv();
+    d_model_ = model_args.t5_d_model();
+    relative_attention_num_buckets_ =
+        model_args.t5_relative_attention_num_buckets();
+    relative_attention_max_distance_ =
+        model_args.t5_relative_attention_max_distance();
+
+    inner_dim_ = n_heads_ * key_value_proj_dim_;
     q_ = register_module("q", DiTLinear(d_model_, inner_dim_, false));
-
     k_ = register_module("k", DiTLinear(d_model_, inner_dim_, false));
-
     v_ = register_module("v", DiTLinear(d_model_, inner_dim_, false));
-
     o_ = register_module("o", DiTLinear(inner_dim_, d_model_, false));
+
+    q_->weight.set_data(q_->weight.to(options));
+    k_->weight.set_data(k_->weight.to(options));
+    v_->weight.set_data(v_->weight.to(options));
+    o_->weight.set_data(o_->weight.to(options));
 
     if (has_relative_attention_bias_) {
       relative_attention_bias_ = register_module(
           "relative_attention_bias",
           torch::nn::Embedding(relative_attention_num_buckets_, n_heads_));
     }
-    dropout_layer_ = register_module("dropout", torch::nn::Dropout(dropout_));
   }
+
   void prune_heads(const std::vector<int64_t>& heads,
                    torch::ScalarType dtype = torch::kBFloat16) {
     if (heads.empty()) return;
@@ -372,6 +355,7 @@ class T5AttentionImpl : public torch::nn::Module {
       pruned_heads_.insert(h);
     }
   }
+
   torch::Tensor _relative_position_bucket(torch::Tensor& relative_position,
                                           bool bidirectional = true,
                                           int64_t num_buckets = 32,
@@ -406,11 +390,12 @@ class T5AttentionImpl : public torch::nn::Module {
         torch::where(is_small, relative_position, relative_position_if_large);
     return relative_buckets;
   }
+
   torch::Tensor compute_bias(
       int64_t query_length,
       int64_t key_length,
-      c10::optional<torch::Device> device = c10::nullopt,
-      const c10::optional<torch::Tensor>& cache_position = c10::nullopt) const {
+      std::optional<torch::Device> device = std::nullopt,
+      const std::optional<torch::Tensor>& cache_position = std::nullopt) const {
     if (!has_relative_attention_bias_) {
       return torch::zeros(
           {1, n_heads_, query_length, key_length},
@@ -448,10 +433,10 @@ class T5AttentionImpl : public torch::nn::Module {
 
   std::vector<torch::Tensor> forward(
       const torch::Tensor& hidden_states,
-      const c10::optional<torch::Tensor>& mask = c10::nullopt,
-      const c10::optional<torch::Tensor>& key_value_states = c10::nullopt,
-      const c10::optional<torch::Tensor>& position_bias = c10::nullopt,
-      const c10::optional<torch::Tensor>& layer_head_mask = c10::nullopt,
+      const std::optional<torch::Tensor>& mask = std::nullopt,
+      const std::optional<torch::Tensor>& key_value_states = std::nullopt,
+      const std::optional<torch::Tensor>& position_bias = std::nullopt,
+      const std::optional<torch::Tensor>& layer_head_mask = std::nullopt,
       bool output_attentions = false) {
     int64_t batch_size = hidden_states.size(0);
     int64_t seq_length = hidden_states.size(1);
@@ -516,7 +501,6 @@ class T5AttentionImpl : public torch::nn::Module {
     scores += curr_position_bias;
     torch::Tensor attn_weights =
         torch::softmax(scores.to(torch::kFloat), -1).to(scores.dtype());
-    attn_weights = dropout_layer_->forward(attn_weights);
     if (layer_head_mask.has_value() && layer_head_mask.value().numel() > 0) {
       attn_weights = attn_weights * layer_head_mask.value();
     }
@@ -532,6 +516,7 @@ class T5AttentionImpl : public torch::nn::Module {
     }
     return outputs;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     auto q_weight = state_dict.get_tensor("q.weight");
     if (q_weight.defined()) {
@@ -581,72 +566,52 @@ class T5AttentionImpl : public torch::nn::Module {
   int64_t d_model_;
   int64_t key_value_proj_dim_;
   int64_t n_heads_;
-  double dropout_;
   int64_t inner_dim_;
-  c10::optional<int64_t> layer_idx_;
+  std::optional<int64_t> layer_idx_;
   DiTLinear q_{nullptr};
   DiTLinear k_{nullptr};
   DiTLinear v_{nullptr};
   DiTLinear o_{nullptr};
   torch::nn::Embedding relative_attention_bias_{nullptr};
-  torch::nn::Dropout dropout_layer_{nullptr};
   std::unordered_set<int64_t> pruned_heads_;
-  torch::Device device_ = torch::kCPU;          // Device for the module
-  torch::ScalarType dtype_ = torch::kBFloat16;  // Default dtype
 };
 TORCH_MODULE(T5Attention);
+
 class T5LayerSelfAttentionImpl : public torch::nn::Module {
  public:
-  T5LayerSelfAttentionImpl(int64_t d_model,
-                           int64_t d_kv,
-                           int64_t num_heads,
-                           double dropout_rate,
-                           bool has_relative_attention_bias,
-                           int64_t relative_attention_num_buckets,
-                           int64_t relative_attention_max_distance,
-                           double layer_norm_epsilon,
-                           c10::optional<int64_t> layer_idx = c10::nullopt,
-                           torch::Device device = torch::kCPU,
-                           torch::ScalarType dtype = torch::kBFloat16)
-      : device_(device), dtype_(dtype) {
-    self_attention_ =
-        register_module("SelfAttention",
-                        T5Attention(d_model,
-                                    d_kv,
-                                    num_heads,
-                                    dropout_rate,
-                                    has_relative_attention_bias,
-                                    relative_attention_num_buckets,
-                                    relative_attention_max_distance,
-                                    layer_idx,
-                                    device_,
-                                    dtype_));
-    layer_norm_ = register_module(
-        "layer_norm",
-        T5LayerNorm(d_model, layer_norm_epsilon, device_, dtype_));
-    dropout_ = register_module("dropout", torch::nn::Dropout(dropout_rate));
+  T5LayerSelfAttentionImpl(const ModelContext& context,
+                           bool has_relative_attention_bias) {
+    auto model_args = context.get_model_args();
+    auto options = context.get_tensor_options();
+    self_attention_ = register_module(
+        "SelfAttention", T5Attention(context, has_relative_attention_bias));
+    layer_norm_ =
+        register_module("layer_norm",
+                        T5LayerNorm(model_args.t5_d_model(),
+                                    model_args.t5_layer_norm_epsilon()));
   }
+
   void load_state_dict(const StateDict& state_dict) {
     self_attention_->load_state_dict(
         state_dict.get_dict_with_prefix("SelfAttention."));
     layer_norm_->load_state_dict(
         state_dict.get_dict_with_prefix("layer_norm."));
   }
+
   std::vector<torch::Tensor> forward(
       const torch::Tensor& hidden_states,
-      const c10::optional<torch::Tensor>& attention_mask = c10::nullopt,
-      const c10::optional<torch::Tensor>& position_bias = c10::nullopt,
-      const c10::optional<torch::Tensor>& layer_head_mask = c10::nullopt,
+      const std::optional<torch::Tensor>& attention_mask = std::nullopt,
+      const std::optional<torch::Tensor>& position_bias = std::nullopt,
+      const std::optional<torch::Tensor>& layer_head_mask = std::nullopt,
       bool output_attentions = false) {
     torch::Tensor normed_hidden_states = layer_norm_->forward(hidden_states);
     auto attention_output = self_attention_->forward(normed_hidden_states,
                                                      attention_mask,
-                                                     c10::nullopt,
+                                                     std::nullopt,
                                                      position_bias,
                                                      layer_head_mask,
                                                      output_attentions);
-    torch::Tensor updated_hidden_states =
-        hidden_states + dropout_->forward(attention_output[0]);
+    torch::Tensor updated_hidden_states = hidden_states + attention_output[0];
     // hidden_states, position_bias, [attn_weights])
     std::vector<torch::Tensor> outputs = {updated_hidden_states};
     outputs.push_back(attention_output[1]);
@@ -659,63 +624,31 @@ class T5LayerSelfAttentionImpl : public torch::nn::Module {
  private:
   T5Attention self_attention_{nullptr};
   T5LayerNorm layer_norm_{nullptr};
-  torch::nn::Dropout dropout_{nullptr};
-  torch::Device device_ = torch::kCPU;          // Device for the module
-  torch::ScalarType dtype_ = torch::kBFloat16;  // Default dtype for the module
 };
 TORCH_MODULE(T5LayerSelfAttention);
+
 class T5BlockImpl : public torch::nn::Module {
  public:
-  T5BlockImpl(int64_t d_model,
-              int64_t d_kv,
-              int64_t num_heads,
-              int64_t d_ff,
-              double dropout_rate,
-              const std::string& dense_act_fn,
-              bool is_gated_act,
-              bool has_relative_attention_bias,
-              int64_t relative_attention_num_buckets,
-              int64_t relative_attention_max_distance,
-              double layer_norm_epsilon,
-              c10::optional<int64_t> layer_idx = c10::nullopt,
-              torch::Device device = torch::kCPU,
-              torch::ScalarType dtype = torch::kBFloat16)
-      : device_(device), dtype_(dtype) {
-    self_attention_ =
-        register_module("SelfAttention",
-                        T5LayerSelfAttention(d_model,
-                                             d_kv,
-                                             num_heads,
-                                             dropout_rate,
-                                             has_relative_attention_bias,
-                                             relative_attention_num_buckets,
-                                             relative_attention_max_distance,
-                                             layer_norm_epsilon,
-                                             layer_idx,
-                                             device_,
-                                             dtype_));
-    ff_layer_ = register_module("LayerFFN",
-                                T5LayerFFN(d_model,
-                                           d_ff,
-                                           dropout_rate,
-                                           dense_act_fn,
-                                           is_gated_act,
-                                           layer_norm_epsilon,
-                                           device_,
-                                           dtype_));
+  T5BlockImpl(const ModelContext& context, bool has_relative_attention_bias) {
+    auto model_args = context.get_model_args();
+    auto options = context.get_tensor_options();
+    self_attention_ = register_module(
+        "SelfAttention",
+        T5LayerSelfAttention(context, has_relative_attention_bias));
+    ff_layer_ = register_module("LayerFFN", T5LayerFFN(context));
   }
+
   std::vector<torch::Tensor> forward(
       const torch::Tensor& hidden_states,
-      const c10::optional<torch::Tensor>& attention_mask = c10::nullopt,
-      const c10::optional<torch::Tensor>& position_bias = c10::nullopt,
-      const c10::optional<torch::Tensor>& layer_head_mask = c10::nullopt,
+      const std::optional<torch::Tensor>& attention_mask = std::nullopt,
+      const std::optional<torch::Tensor>& position_bias = std::nullopt,
+      const std::optional<torch::Tensor>& layer_head_mask = std::nullopt,
       bool output_attentions = false) {
-    auto self_attention_outputs =
-        self_attention_->forward(hidden_states.to(device_),
-                                 attention_mask,
-                                 position_bias,
-                                 layer_head_mask,
-                                 output_attentions);
+    auto self_attention_outputs = self_attention_->forward(hidden_states,
+                                                           attention_mask,
+                                                           position_bias,
+                                                           layer_head_mask,
+                                                           output_attentions);
     torch::Tensor curr_hidden_states = self_attention_outputs[0];
     std::vector<torch::Tensor> attention_outputs;
     for (size_t i = 1; i < self_attention_outputs.size(); ++i) {
@@ -733,6 +666,7 @@ class T5BlockImpl : public torch::nn::Module {
         outputs.end(), attention_outputs.begin(), attention_outputs.end());
     return outputs;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     self_attention_->load_state_dict(
         state_dict.get_dict_with_prefix("layer.0."));
@@ -760,56 +694,28 @@ class T5BlockImpl : public torch::nn::Module {
   }
   T5LayerSelfAttention self_attention_{nullptr};
   T5LayerFFN ff_layer_{nullptr};
-  torch::Device device_ = torch::kCPU;          // Device for the module
-  torch::ScalarType dtype_ = torch::kBFloat16;  // Default dtype for the module
 };
 TORCH_MODULE(T5Block);
+
 class T5EncoderModelImpl : public torch::nn::Module {
- private:
-  T5LayerNorm final_layer_norm_{nullptr};
-  torch::nn::Embedding embed_tokens_{nullptr};
-  std::vector<T5Block> blocks_;
-  torch::nn::Dropout dropout_{nullptr};
-  torch::Device device_ = torch::kCPU;
-  torch::ScalarType dtype_ = torch::kBFloat16;  // Default dtype for the model
  public:
-  T5EncoderModelImpl(const ModelContext& context,
-                     torch::Device device = torch::kCPU,
-                     torch::ScalarType dtype = torch::kBFloat16) {
-    device_ = device;
-    dtype_ = dtype;
-    ModelArgs args = context.get_model_args();
-    embed_tokens_ = register_module(
-        "embed_tokens",
-        torch::nn::Embedding(args.t5_vocab_size(), args.t5_d_model()));
-    embed_tokens_->to(dtype_);  // Set dtype for embeddings
-    for (int64_t i = 0; i < args.t5_num_layers(); ++i) {
+  T5EncoderModelImpl(const ModelContext& context) {
+    auto model_args = context.get_model_args();
+    auto options = context.get_tensor_options();
+    embed_tokens_ =
+        register_module("embed_tokens",
+                        torch::nn::Embedding(model_args.t5_vocab_size(),
+                                             model_args.t5_d_model()));
+    embed_tokens_->weight.set_data(embed_tokens_->weight.to(options));
+    for (int64_t i = 0; i < model_args.t5_num_layers(); ++i) {
       bool has_relative_bias = (i == 0);
-      blocks_.push_back(
-          register_module("block_" + std::to_string(i),
-                          T5Block(args.t5_d_model(),
-                                  args.t5_d_kv(),
-                                  args.t5_num_heads(),
-                                  args.t5_d_ff(),
-                                  args.t5_dropout_rate(),
-                                  args.t5_dense_act_fn(),
-                                  args.t5_is_gated_act(),
-                                  has_relative_bias,
-                                  args.t5_relative_attention_num_buckets(),
-                                  args.t5_relative_attention_max_distance(),
-                                  args.t5_layer_norm_epsilon(),
-                                  i,
-                                  device_,
-                                  dtype_)));
-      blocks_[i]->to(dtype_);  // Set dtype for each block
+      blocks_.push_back(register_module("block_" + std::to_string(i),
+                                        T5Block(context, has_relative_bias)));
     }
-    final_layer_norm_ = register_module(
-        "final_layer_norm",
-        T5LayerNorm(
-            args.t5_d_model(), args.t5_layer_norm_epsilon(), device_, dtype_));
-    final_layer_norm_->to(dtype_);
-    dropout_ =
-        register_module("dropout", torch::nn::Dropout(args.t5_dropout_rate()));
+    final_layer_norm_ =
+        register_module("final_layer_norm",
+                        T5LayerNorm(model_args.t5_d_model(),
+                                    model_args.t5_layer_norm_epsilon()));
   }
 
   torch::nn::Embedding& get_input_embeddings() { return embed_tokens_; }
@@ -817,30 +723,30 @@ class T5EncoderModelImpl : public torch::nn::Module {
     embed_tokens_ = new_embeddings;
   }
 
-  torch::Tensor forward(torch::Tensor input_ids) {
+  torch::Tensor forward(const torch::Tensor& input_ids) {
     // prepare input parameters
     // input parameters
     // input_ids
+    auto options = torch::TensorOptions()
+                       .dtype(torch::typeMetaToScalarType(input_ids.dtype()))
+                       .device(input_ids.device());
     bool output_hidden_states = false;
     bool output_attentions = false;
-    c10::optional<torch::Tensor> attention_mask = c10::nullopt;
-    c10::optional<torch::Tensor> head_mask = c10::nullopt;
-    torch::Tensor embeddings = embed_tokens_->forward(input_ids);
-    auto input_shape = embeddings.sizes();  // (batch_size, seq_length, d_model)
+    std::optional<torch::Tensor> attention_mask = std::nullopt;
+    std::optional<torch::Tensor> head_mask = std::nullopt;
+    torch::Tensor hidden_states = embed_tokens_->forward(input_ids);
+    auto input_shape =
+        hidden_states.sizes();  // (batch_size, seq_length, d_model)
     int64_t batch_size = input_shape[0];
     int64_t seq_length = input_shape[1];
     torch::Tensor causal_mask;
     if (attention_mask.has_value()) {
-      causal_mask = attention_mask.value()
-                        .to(torch::kFloat)
-                        .to(device_)
-                        .unsqueeze(1)
-                        .unsqueeze(1);
+      causal_mask =
+          attention_mask.value().unsqueeze(1).unsqueeze(1).to(options);
       causal_mask = (1.0 - causal_mask) * std::numeric_limits<float>::lowest();
     } else {
       causal_mask = torch::Tensor();
     }
-    torch::Tensor hidden_states = dropout_->forward(embeddings);
     std::vector<torch::Tensor> all_hidden_states;
     std::vector<torch::Tensor> all_attentions;
     if (output_hidden_states) {
@@ -851,7 +757,7 @@ class T5EncoderModelImpl : public torch::nn::Module {
       torch::Tensor layer_head_mask;
       if (head_mask.has_value()) {
         layer_head_mask =
-            head_mask.value().index({torch::tensor((int64_t)i)}).to(device_);
+            head_mask.value().index({torch::tensor((int64_t)i)}).to(options);
       } else {
         layer_head_mask = torch::Tensor();
       }
@@ -872,7 +778,6 @@ class T5EncoderModelImpl : public torch::nn::Module {
       layer_outputs.clear();
     }
     hidden_states = final_layer_norm_->forward(hidden_states);
-    hidden_states = dropout_->forward(hidden_states);
     if (output_hidden_states) {
       all_hidden_states.push_back(hidden_states);
     }
@@ -918,9 +823,16 @@ class T5EncoderModelImpl : public torch::nn::Module {
     }
     LOG(INFO) << "T5EncoderModel loaded successfully.";
   }
+
+ private:
+  T5LayerNorm final_layer_norm_{nullptr};
+  torch::nn::Embedding embed_tokens_{nullptr};
+  std::vector<T5Block> blocks_;
 };
 TORCH_MODULE(T5EncoderModel);
+
 REGISTER_MODEL_ARGS(T5EncoderModel, [&] {
+  LOAD_ARG_OR(dtype, "torch_dtype", "bfloat16");
   LOAD_ARG_OR(model_type, "model_type", "t5encoder");
   LOAD_ARG_OR(t5_vocab_size, "vocab_size", 32128);
   LOAD_ARG_OR(t5_d_model, "d_model", 4096);
@@ -928,7 +840,6 @@ REGISTER_MODEL_ARGS(T5EncoderModel, [&] {
   LOAD_ARG_OR(t5_d_kv, "d_kv", 64);
   LOAD_ARG_OR(t5_num_heads, "num_heads", 64);
   LOAD_ARG_OR(t5_d_ff, "d_ff", 10240);
-  LOAD_ARG_OR(t5_dropout_rate, "dropout_rate", 0.1f);
   LOAD_ARG_OR(t5_dense_act_fn, "dense_act_fn", "gelu_new");
   LOAD_ARG_OR(t5_is_gated_act, "is_gated_act", true);
   LOAD_ARG_OR(
