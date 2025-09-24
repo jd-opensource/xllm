@@ -224,13 +224,9 @@ class FluxPipelineImpl : public torch::nn::Module {
                                 _execution_device,
                                 _execution_dtype);
     LOG(INFO) << "DiT transformer initialized.";
-    t5_ = T5EncoderModel(context.get_model_context("text_encoder_2"),
-                         _execution_device,
-                         _execution_dtype);
+    t5_ = T5EncoderModel(context.get_model_context("text_encoder_2"));
     LOG(INFO) << "T5 initialized.";
-    clip_text_model_ = CLIPTextModel(context.get_model_context("text_encoder"),
-                                     _execution_device,
-                                     _execution_dtype);
+    clip_text_model_ = CLIPTextModel(context.get_model_context("text_encoder"));
     LOG(INFO) << "CLIP text model initialized.";
     scheduler_ =
         FlowMatchEulerDiscreteScheduler(context.get_model_context("scheduler"));
@@ -482,7 +478,11 @@ class FluxPipelineImpl : public torch::nn::Module {
     text_input_ids.resize(tokenizer_max_length_, 49407);
     text_input_ids.back() = 49407;
 
-    auto encoder_output = clip_text_model_->forward(text_input_ids);
+    auto input_ids = torch::tensor(text_input_ids, torch::dtype(torch::kLong))
+                         .view({1, -1})
+                         .to(used_device);
+
+    auto encoder_output = clip_text_model_->forward(input_ids);
     torch::Tensor prompt_embeds = encoder_output;
     prompt_embeds = prompt_embeds.to(used_device).to(_execution_dtype);
     prompt_embeds = prompt_embeds.repeat({1, num_images_per_prompt});
