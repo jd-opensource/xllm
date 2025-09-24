@@ -4,7 +4,7 @@
 ## 容器环境准备
 首先下载我们提供的镜像：
 ```bash
-docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts
+docker pull xllm/xllm-ai:0.6.0-dev-hb-rc2-x86
 ```
 然后创建对应的容器
 ```bash
@@ -23,9 +23,9 @@ sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host 
 
 | Device    |    Arch     |   Images      |
 |:---------:|:-----------:|:-------------:|
-| A2        |     x86     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts |
-| A2        |     arm     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts-aarch64 |
-| A3        |     arm     | quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hc-rc2-py3.11-oe24.03-lts-aarch64 |
+| A2        |     x86     | quay.io/jd_xllm/xllm-ai:0.6.0-dev-hb-rc2-x86 |
+| A2        |     arm     | quay.io/jd_xllm/xllm-ai:0.6.0-dev-hb-rc2-arm |
+| A3        |     arm     | quay.io/jd_xllm/xllm-ai:0.6.0-dev-hc-rc2-arm |
 
 
 ## 安装

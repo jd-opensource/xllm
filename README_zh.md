@@ -119,11 +119,11 @@ docker pull xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts-aarch64
 docker pull xllm/xllm-ai:xllm-0.6.0-dev-hc-rc2-py3.11-oe24.03-lts-aarch64
 # 或者
 # A2 x86
-docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts
+docker pull quay.io/jd_xllm/xllm-ai:0.6.0-dev-hb-rc2-x86
 # A2 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts-aarch64
+docker pull quay.io/jd_xllm/xllm-ai:0.6.0-dev-hb-rc2-arm
 # A3 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-0.6.0-dev-hc-rc2-py3.11-oe24.03-lts-aarch64
+docker pull quay.io/jd_xllm/xllm-ai:0.6.0-dev-hc-rc2-arm
 ```
 然后创建对应的容器
 ```bash
