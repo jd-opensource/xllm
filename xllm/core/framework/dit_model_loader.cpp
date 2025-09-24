@@ -53,7 +53,8 @@ DiTFolderLoader::DiTFolderLoader(const std::string& folder_path,
 
 std::unique_ptr<Tokenizer> DiTFolderLoader::tokenizer() const {
   return TokenizerFactory::create_tokenizer(model_weights_path_,
-                                            tokenizer_args_);
+                                            tokenizer_args_,
+                                            /*proxy*/ false);
 }
 
 std::vector<std::unique_ptr<StateDict>>& DiTFolderLoader::get_state_dicts() {

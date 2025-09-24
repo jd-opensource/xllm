@@ -21,7 +21,8 @@ namespace xllm {
 
 std::unique_ptr<Tokenizer> TokenizerFactory::create_tokenizer(
     const std::string& model_weights_path,
-    TokenizerArgs tokenizer_args) {
+    TokenizerArgs tokenizer_args,
+    bool proxy) {
   const std::string tokenizer_json_path =
       model_weights_path + "/tokenizer.json";
   std::unique_ptr<Tokenizer> tokenizer;
@@ -41,7 +42,10 @@ std::unique_ptr<Tokenizer> TokenizerFactory::create_tokenizer(
     tokenizer = std::make_unique<SentencePieceTokenizer>(model_weights_path,
                                                          tokenizer_args);
   }
-  return std::make_unique<TokenizerProxy>(std::move(tokenizer));
+  if (proxy) {
+    return std::make_unique<TokenizerProxy>(std::move(tokenizer));
+  }
+  return tokenizer;
 }
 
 }  // namespace xllm
