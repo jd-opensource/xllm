@@ -26,6 +26,7 @@ limitations under the License.
 #include "framework/request/sequence.h"
 #include "framework/request/sequences_group.h"
 #include "runtime/forward_params.h"
+#include "util/threadpool.h"
 
 namespace xllm {
 
@@ -74,7 +75,9 @@ class Batch {
                                      const ModelArgs& args);
 
   // Convert Batch to pb type, which will be pass to remote worker.
-  RawForwardInput prepare_forward_input(uint32_t start_idx, uint32_t end_idx);
+  RawForwardInput prepare_forward_input(uint32_t start_idx,
+                                        uint32_t end_idx,
+                                        ThreadPool* thread_pool = nullptr);
 
   // process output
   void process_sample_output(const SampleOutput& sample_output,

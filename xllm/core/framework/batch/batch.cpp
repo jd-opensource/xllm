@@ -82,7 +82,8 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
 }
 
 RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
-                                             uint32_t end_idx) {
+                                             uint32_t end_idx,
+                                             ThreadPool* thread_pool) {
   BatchInputBuilder builder(sequences_,
                             allowed_max_tokens_,
                             input_embeddings_vec_,
@@ -90,7 +91,8 @@ RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
                             copy_in_cache_block_infos_,
                             copy_out_cache_block_infos_,
                             swap_cache_block_infos_,
-                            nullptr);
+                            nullptr,
+                            thread_pool);
   return builder.build_raw_forward_input(start_idx, end_idx);
 }
 

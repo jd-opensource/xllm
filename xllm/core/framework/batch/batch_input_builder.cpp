@@ -18,6 +18,7 @@ limitations under the License.
 #include <c10/core/DeviceType.h>
 #include <torch/torch.h>
 
+#include <thread>
 #include <vector>
 
 #include "common/global_flags.h"
@@ -28,8 +29,10 @@ limitations under the License.
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
 #include "runtime/params_utils.h"
+#include "util/blocking_counter.h"
 #include "util/slice.h"
 #include "util/tensor_helper.h"
+#include "util/threadpool.h"
 #include "util/utils.h"
 
 namespace xllm {
@@ -58,12 +61,14 @@ BatchInputBuilder::BatchInputBuilder(
     const std::vector<CacheBlockInfo>* copy_in_cache_block_infos,
     const std::vector<CacheBlockInfo>* copy_out_cache_block_infos,
     const std::vector<CacheBlockInfo>* swap_cache_block_infos,
-    const ModelArgs* args)
+    const ModelArgs* args,
+    ThreadPool* thread_pool)
     : sequences_(sequences),
       allowed_max_tokens_(allowed_max_tokens),
       input_embeddings_vec_(input_embeddings_vec),
       mm_data_vec_(mm_data_vec),
       args_(args),
+      thread_pool_(thread_pool),
       num_sequences_(static_cast<int32_t>(sequences.size())),
       copy_in_cache_block_infos_(copy_in_cache_block_infos),
       copy_out_cache_block_infos_(copy_out_cache_block_infos),
@@ -90,7 +95,12 @@ ForwardInput BatchInputBuilder::build_forward_input(
 
 RawForwardInput BatchInputBuilder::build_raw_forward_input(uint32_t start_idx,
                                                            uint32_t end_idx) {
-  process_sequences(start_idx, end_idx);
+  if (!thread_pool_ ||
+      end_idx - start_idx < static_cast<uint32_t>(thread_pool_->size())) {
+    process_sequences(start_idx, end_idx);
+  } else {
+    process_sequences_multithreaded(start_idx, end_idx);
+  }
   return state_to_raw_forward_input();
 }
 
@@ -101,7 +111,140 @@ void BatchInputBuilder::process_sequences(uint32_t start_idx,
   }
 }
 
-void BatchInputBuilder::process_single_sequence(int32_t seq_index) {
+void BatchInputBuilder::process_sequences_multithreaded(uint32_t start_idx,
+                                                        uint32_t end_idx) {
+  const size_t threads_num = thread_pool_->size();
+  const size_t sequences_per_thread =
+      (end_idx - start_idx + threads_num - 1) / threads_num;
+
+  BlockingCounter counter(threads_num);
+
+  // safe state for each thread
+  std::vector<BuilderState> thread_builder_states;
+  std::vector<std::unordered_set<int32_t>> thread_write_block_ids;
+  thread_builder_states.resize(threads_num);
+  thread_write_block_ids.resize(threads_num);
+
+  // parallel processing function
+  auto process_sequences_range =
+      [&](size_t thread_start_idx,
+          size_t thread_end_idx,
+          BuilderState& state,
+          std::unordered_set<int32_t>& write_block_ids) {
+        for (size_t i = thread_start_idx;
+             i < thread_end_idx && i < static_cast<size_t>(end_idx);
+             ++i) {
+          process_single_sequence(i, &state, &write_block_ids);
+        }
+      };
+
+  // Start parallel tasks
+  for (size_t thread_idx = 0; thread_idx < threads_num; ++thread_idx) {
+    size_t thread_start_idx = start_idx + thread_idx * sequences_per_thread;
+    size_t thread_end_idx = std::min(thread_start_idx + sequences_per_thread,
+                                     static_cast<size_t>(end_idx));
+
+    thread_pool_->schedule([process_sequences_range,
+                            thread_start_idx,
+                            thread_end_idx,
+                            &thread_builder_states,
+                            &thread_write_block_ids,
+                            thread_idx,
+                            &counter]() mutable {
+      process_sequences_range(thread_start_idx,
+                              thread_end_idx,
+                              thread_builder_states[thread_idx],
+                              thread_write_block_ids[thread_idx]);
+      counter.decrement_count();
+    });
+  }
+
+  // Wait for all tasks to complete
+  counter.wait();
+
+  // Merge results from all threads
+  for (const auto& state : thread_builder_states) {
+    state_.flatten_tokens_vec.insert(state_.flatten_tokens_vec.end(),
+                                     state.flatten_tokens_vec.begin(),
+                                     state.flatten_tokens_vec.end());
+    if (!use_mrope_) {
+      state_.flatten_positions_vec.insert(state_.flatten_positions_vec.end(),
+                                          state.flatten_positions_vec.begin(),
+                                          state.flatten_positions_vec.end());
+    } else {
+      state_.mrope_positions_vec.insert(state_.mrope_positions_vec.end(),
+                                        state.mrope_positions_vec.begin(),
+                                        state.mrope_positions_vec.end());
+    }
+    state_.block_tables_vec.insert(state_.block_tables_vec.end(),
+                                   state.block_tables_vec.begin(),
+                                   state.block_tables_vec.end());
+    // selected_token_idxes and sample_idxes need offset
+    int32_t selected_token_idxes_offset =
+        static_cast<int32_t>(state_.flatten_tokens_vec.size()) -
+        static_cast<int32_t>(state.flatten_tokens_vec.size());
+    for (const auto& idx : state.selected_token_idxes) {
+      state_.selected_token_idxes.push_back(idx + selected_token_idxes_offset);
+    }
+    state_.sampling_params.insert(state_.sampling_params.end(),
+                                  state.sampling_params.begin(),
+                                  state.sampling_params.end());
+    int32_t sample_idxes_offset =
+        static_cast<int32_t>(state_.sample_idxes.size());
+    for (const auto& idx : state.sample_idxes) {
+      state_.sample_idxes.push_back(idx + sample_idxes_offset);
+    }
+    state_.unique_token_ids_vec.insert(state_.unique_token_ids_vec.end(),
+                                       state.unique_token_ids_vec.begin(),
+                                       state.unique_token_ids_vec.end());
+    state_.unique_token_counts_vec.insert(state_.unique_token_counts_vec.end(),
+                                          state.unique_token_counts_vec.begin(),
+                                          state.unique_token_counts_vec.end());
+    state_.unique_token_lens_vec.insert(state_.unique_token_lens_vec.end(),
+                                        state.unique_token_lens_vec.begin(),
+                                        state.unique_token_lens_vec.end());
+    state_.empty_kv_cache = state_.empty_kv_cache && state.empty_kv_cache;
+    state_.max_seq_len = std::max(state_.max_seq_len, state.max_seq_len);
+    state_.q_max_seq_len = std::max(state_.q_max_seq_len, state.q_max_seq_len);
+#if defined(USE_NPU)
+    state_.seq_lens.insert(
+        state_.seq_lens.end(), state.seq_lens.begin(), state.seq_lens.end());
+    state_.q_seq_lens.insert(state_.q_seq_lens.end(),
+                             state.q_seq_lens.begin(),
+                             state.q_seq_lens.end());
+#elif defined(USE_MLU)
+    int32_t seq_len_offset = state_.seq_lens.back();
+    // skip the first element which is 0
+    for (size_t i = 1; i < state.seq_lens.size(); ++i) {
+      state_.seq_lens.push_back(state.seq_lens[i] + seq_len_offset);
+    }
+    int32_t q_seq_len_offset = state_.q_seq_lens.back();
+    for (size_t i = 1; i < state.q_seq_lens.size(); ++i) {
+      state_.q_seq_lens.push_back(state.q_seq_lens[i] + q_seq_len_offset);
+    }
+#endif
+    state_.new_token_slot_ids.insert(state_.new_token_slot_ids.end(),
+                                     state.new_token_slot_ids.begin(),
+                                     state.new_token_slot_ids.end());
+    state_.prefill_seq_len += state.prefill_seq_len;
+    state_.embedding_ids.insert(state_.embedding_ids.end(),
+                                state.embedding_ids.begin(),
+                                state.embedding_ids.end());
+    state_.transfer_kv_infos.insert(state_.transfer_kv_infos.end(),
+                                    state.transfer_kv_infos.begin(),
+                                    state.transfer_kv_infos.end());
+  }
+  for (const auto& write_block_ids : thread_write_block_ids) {
+    write_block_ids_.insert(write_block_ids.begin(), write_block_ids.end());
+  }
+}
+
+void BatchInputBuilder::process_single_sequence(
+    int32_t seq_index,
+    BuilderState* state_ptr,
+    std::unordered_set<int32_t>* write_block_ids_ptr) {
+  BuilderState& state = state_ptr ? *state_ptr : state_;
+
   auto* sequence = sequences_[seq_index];
   const auto token_ids = sequence->tokens();
   const uint32_t n_tokens = token_ids.size();
@@ -124,32 +267,40 @@ void BatchInputBuilder::process_single_sequence(int32_t seq_index) {
                          << allowed_max_tokens_[seq_index];
 
   // Update state
-  state_.empty_kv_cache = state_.empty_kv_cache && (n_kv_cache_tokens == 0);
-  state_.max_seq_len = std::max(state_.max_seq_len, seq_len);
-  state_.q_max_seq_len = std::max(state_.q_max_seq_len, q_seq_len);
+  state.empty_kv_cache = state.empty_kv_cache && (n_kv_cache_tokens == 0);
+  state.max_seq_len = std::max(state.max_seq_len, seq_len);
+  state.q_max_seq_len = std::max(state.q_max_seq_len, q_seq_len);
 #if defined(USE_NPU)
-  state_.seq_lens.push_back(seq_len);
-  state_.q_seq_lens.push_back(q_seq_len);
+  state.seq_lens.push_back(seq_len);
+  state.q_seq_lens.push_back(q_seq_len);
 #elif defined(USE_MLU)
-  state_.seq_lens.push_back(state_.seq_lens.back() + seq_len);
-  state_.q_seq_lens.push_back(state_.q_seq_lens.back() + q_seq_len);
+  state.seq_lens.push_back(state.seq_lens.back() + seq_len);
+  state.q_seq_lens.push_back(state.q_seq_lens.back() + q_seq_len);
 #endif
   // Process tokens and positions
-  extract_tokens_and_positions(sequence, n_kv_cache_tokens, seq_len);
+  extract_tokens_and_positions(sequence, n_kv_cache_tokens, seq_len, state_ptr);
 
   // Setup KV cache
-  setup_kv_cache_info(sequence, n_kv_cache_tokens, seq_len, q_seq_len);
+  setup_kv_cache_info(sequence,
+                      n_kv_cache_tokens,
+                      seq_len,
+                      q_seq_len,
+                      state_ptr,
+                      write_block_ids_ptr);
 
   // Track prefill sequences
   if (sequence->is_prefill_stage()) {
-    state_.prefill_seq_len++;
+    state.prefill_seq_len++;
   }
-  state_.embedding_ids.push_back(sequence->get_embedding_id());
+  state.embedding_ids.push_back(sequence->get_embedding_id());
 }
 
 void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
                                                      uint32_t n_kv_cache_tokens,
-                                                     uint32_t seq_len) {
+                                                     uint32_t seq_len,
+                                                     BuilderState* state_ptr) {
+  BuilderState& state = state_ptr ? *state_ptr : state_;
+
   const auto& token_ids = sequence->tokens();
   const uint32_t n_tokens = token_ids.size();
 
@@ -165,22 +316,22 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   if (use_mrope_) {
     const auto& args = *args_;
     MPositionHelper helper(*sequence, args);
-    state_.mrope_positions_vec.push_back(helper.get_positions());
+    state.mrope_positions_vec.push_back(helper.get_positions());
   }
 
   // Process each token
   for (uint32_t j = n_kv_cache_tokens; j < seq_len; ++j) {
-    state_.flatten_tokens_vec.push_back(token_ids[j]);
+    state.flatten_tokens_vec.push_back(token_ids[j]);
 
     if (!use_mrope_) {
-      state_.flatten_positions_vec.push_back(static_cast<int32_t>(j));
+      state.flatten_positions_vec.push_back(static_cast<int32_t>(j));
     }
 
     // Handle sampling for last tokens
     if (j + 1 < n_tokens) continue;
 
     handle_sampling_parameters(
-        sequence, j, seq_len, adjusted_token_to_count_map);
+        sequence, j, seq_len, adjusted_token_to_count_map, state_ptr);
   }
 }
 
@@ -188,7 +339,10 @@ void BatchInputBuilder::handle_sampling_parameters(
     Sequence* sequence,
     uint32_t token_position,
     uint32_t seq_len,
-    std::unordered_map<int32_t, int32_t>& adjusted_token_to_count_map) {
+    std::unordered_map<int32_t, int32_t>& adjusted_token_to_count_map,
+    BuilderState* state_ptr) {
+  BuilderState& state = state_ptr ? *state_ptr : state_;
+
   // const auto token_ids = sequence->token_ids();
   const auto token_id = sequence->tokens()[token_position];
 
@@ -196,13 +350,13 @@ void BatchInputBuilder::handle_sampling_parameters(
   --adjusted_token_to_count_map[token_id];
 
   // Select token for sampling
-  state_.selected_token_idxes.push_back(state_.flatten_tokens_vec.size() - 1);
-  state_.sampling_params.push_back(sequence->sampling_param());
+  state.selected_token_idxes.push_back(state.flatten_tokens_vec.size() - 1);
+  state.sampling_params.push_back(sequence->sampling_param());
 
   // Process unique tokens
   const auto& seq_token_counts = sequence->token_to_count_map();
-  auto& ids = state_.unique_token_ids_vec.emplace_back();
-  auto& counts = state_.unique_token_counts_vec.emplace_back();
+  auto& ids = state.unique_token_ids_vec.emplace_back();
+  auto& counts = state.unique_token_counts_vec.emplace_back();
 
   ids.reserve(seq_token_counts.size());
   counts.reserve(seq_token_counts.size());
@@ -218,30 +372,37 @@ void BatchInputBuilder::handle_sampling_parameters(
     }
   }
 
-  state_.unique_token_lens_vec.push_back(static_cast<int32_t>(ids.size()));
+  state.unique_token_lens_vec.push_back(static_cast<int32_t>(ids.size()));
 
   // Mark sample token if it's the last token
   // TODO add test
   // in chunked prefill condition, if allowed_max_token = 128, n_tokens=1000,
   // n_kv_cache_tokens=256, q_seq_len = 128, seq_len=384
   if (token_position == seq_len - 1) {
-    state_.sample_idxes.push_back(
-        static_cast<int32_t>(state_.selected_token_idxes.size() - 1));
+    state.sample_idxes.push_back(
+        static_cast<int32_t>(state.selected_token_idxes.size() - 1));
   }
 }
 
-void BatchInputBuilder::setup_kv_cache_info(Sequence* sequence,
-                                            uint32_t n_kv_cache_tokens,
-                                            uint32_t seq_len,
-                                            uint32_t q_seq_len) {
+void BatchInputBuilder::setup_kv_cache_info(
+    Sequence* sequence,
+    uint32_t n_kv_cache_tokens,
+    uint32_t seq_len,
+    uint32_t q_seq_len,
+    BuilderState* state_ptr,
+    std::unordered_set<int32_t>* write_block_ids_ptr) {
+  BuilderState& state = state_ptr ? *state_ptr : state_;
+  std::unordered_set<int32_t>& write_block_ids =
+      write_block_ids_ptr ? *write_block_ids_ptr : write_block_ids_;
+
   // update kv cache tokens num
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
   const auto blocks = sequence->kv_state().kv_blocks();
   const auto slot_ids =
       sequence->kv_state().kv_cache_slots(n_kv_cache_tokens, seq_len);
-  state_.new_token_slot_ids.insert(
-      state_.new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
+  state.new_token_slot_ids.insert(
+      state.new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
 
   std::vector<int32_t> block_ids;
   std::vector<uint64_t> u_block_ids;
@@ -257,16 +418,16 @@ void BatchInputBuilder::setup_kv_cache_info(Sequence* sequence,
   for (auto iter = block_ids.begin() + kv_cache_block_idx;
        iter != block_ids.end();
        ++iter) {
-    write_block_ids_.insert(*iter);
+    write_block_ids.insert(*iter);
   }
 
   auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   if (transfer_kv_info.has_value()) {
-    state_.transfer_kv_infos.emplace_back(transfer_kv_info.value());
-    state_.transfer_kv_infos.back().local_blocks_ids = std::move(u_block_ids);
+    state.transfer_kv_infos.emplace_back(transfer_kv_info.value());
+    state.transfer_kv_infos.back().local_blocks_ids = std::move(u_block_ids);
   }
 
-  state_.block_tables_vec.emplace_back(std::move(block_ids));
+  state.block_tables_vec.emplace_back(std::move(block_ids));
 }
 
 void BatchInputBuilder::padding_decode_batch_size(

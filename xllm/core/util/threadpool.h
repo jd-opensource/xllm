@@ -52,6 +52,8 @@ class ThreadPool final {
     });
   }
 
+  size_t size() const { return threads_.size(); }
+
  private:
   void internal_loop(size_t tid);
 
