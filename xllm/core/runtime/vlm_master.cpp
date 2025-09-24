@@ -289,11 +289,6 @@ void VLMMaster::generate() {
   running_.store(false, std::memory_order_relaxed);
 }
 
-Tokenizer* VLMMaster::get_tls_tokenizer() {
-  thread_local std::unique_ptr<Tokenizer> tls_tokenizer(tokenizer_->clone());
-  return tls_tokenizer.get();
-}
-
 std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
                                                      const MMData& mm_data,
                                                      const RequestParams& sp,
@@ -307,7 +302,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
   input_processor_->process(prompt, mm_data);
 
   std::vector<int> prompt_tokens;
-  if (!get_tls_tokenizer()->encode(prompt, &prompt_tokens)) {
+  if (!tokenizer_->encode(prompt, &prompt_tokens)) {
     LOG(ERROR) << "Failed to encode prompt: " << prompt;
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Failed to encode prompt");
@@ -365,7 +360,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
   if (sp.stop.has_value()) {
     for (const auto& s : sp.stop.value()) {
       std::vector<int> tmp_tokens;
-      if (!get_tls_tokenizer()->encode(s, &tmp_tokens)) {
+      if (!tokenizer_->encode(s, &tmp_tokens)) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "Failed to encode stop sequence");
         LOG(ERROR) << "Failed to encode stop sequence: " << s;

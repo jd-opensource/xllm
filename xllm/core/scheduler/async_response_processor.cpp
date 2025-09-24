@@ -88,11 +88,10 @@ void AsyncResponseProcessor::process_completed_request(
                       static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
     request->log_statistic(end_2_end_latency_seconds);
 
-    auto tokenizer = this->get_tls_tokenizer();
     if (callback != nullptr) {
-      callback(request->generate_output(*tokenizer));
+      callback(request->generate_output(*tokenizer_));
     } else {
-      request->state().output_func(request->generate_output(*tokenizer));
+      request->state().output_func(request->generate_output(*tokenizer_));
     }
   };
   if (request->state().response_thread_id < 0) {
@@ -154,8 +153,7 @@ void AsyncResponseProcessor::batch_process_completed_requests(
           static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
       request->log_statistic(end_2_end_latency_seconds);
 
-      auto tokenizer = this->get_tls_tokenizer();
-      *request_output = std::move(request->generate_output(*tokenizer));
+      *request_output = std::move(request->generate_output(*tokenizer_));
       counter->decrement_count();
     };
     if (request->state().response_thread_id < 0) {
@@ -222,7 +220,6 @@ void AsyncResponseProcessor::process_stream_request(
                      num_tokens = std::move(num_tokens)]() {
       AUTO_COUNTER(responsing_latency_seconds_stream);
 
-      auto tokenizer = this->get_tls_tokenizer();
       RequestOutput req_output;
       req_output.request_id = request->request_id();
       req_output.service_request_id = request->service_request_id();
@@ -230,7 +227,7 @@ void AsyncResponseProcessor::process_stream_request(
         const size_t index = indexes[i];
         const size_t size = num_tokens[i];
         auto& seq = request->sequences()[index];
-        auto seq_output = seq->generate_streaming_output(size, *tokenizer);
+        auto seq_output = seq->generate_streaming_output(size, *tokenizer_);
         if (seq_output.has_value()) {
           req_output.outputs.push_back(std::move(seq_output.value()));
         }
@@ -312,8 +309,7 @@ void AsyncResponseProcessor::process_stream_requests(
         const size_t size = num_tokens[i];
         auto& seq = request->sequences()[index];
 
-        auto tokenizer = this->get_tls_tokenizer();
-        auto seq_output = seq->generate_streaming_output(size, *tokenizer);
+        auto seq_output = seq->generate_streaming_output(size, *tokenizer_);
         if (seq_output.has_value()) {
           req_output->outputs.push_back(std::move(seq_output.value()));
         }
@@ -352,11 +348,6 @@ void AsyncResponseProcessor::wait_completion() {
     // NOTE: FIXME
     sleep(1);
   }
-}
-
-Tokenizer* AsyncResponseProcessor::get_tls_tokenizer() {
-  thread_local std::unique_ptr<Tokenizer> tls_tokenizer(tokenizer_->clone());
-  return tls_tokenizer.get();
 }
 
 }  // namespace xllm

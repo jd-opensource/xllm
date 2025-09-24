@@ -97,8 +97,6 @@ class VLMMaster : public Master {
       const RequestParams& sp,
       OutputCallback callback);
 
-  Tokenizer* get_tls_tokenizer();
-
   std::unique_ptr<Scheduler> scheduler_;
 
   // model args

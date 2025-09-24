@@ -296,7 +296,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   if (prompt_tokens.has_value()) {
     local_prompt_tokens = std::move(prompt_tokens.value());
   } else {
-    if (!get_tls_tokenizer()->encode(prompt, &local_prompt_tokens)) {
+    if (!tokenizer_->encode(prompt, &local_prompt_tokens)) {
       LOG(ERROR) << "Failed to encode prompt: " << prompt;
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                           "Failed to encode prompt");
@@ -360,7 +360,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   if (sp.stop.has_value()) {
     for (const auto& s : sp.stop.value()) {
       std::vector<int> tmp_tokens;
-      if (!get_tls_tokenizer()->encode(s, &tmp_tokens)) {
+      if (!tokenizer_->encode(s, &tmp_tokens)) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "Failed to encode stop sequence");
         LOG(ERROR) << "Failed to encode stop sequence: " << s;
@@ -471,11 +471,6 @@ bool LLMMaster::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                const int32_t dp_size) {
   return engine_->unlink_cluster(
       cluster_ids, addrs, device_ips, ports, dp_size);
-}
-
-Tokenizer* LLMMaster::get_tls_tokenizer() {
-  thread_local std::unique_ptr<Tokenizer> tls_tokenizer(tokenizer_->clone());
-  return tls_tokenizer.get();
 }
 
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)

@@ -106,8 +106,6 @@ class LLMMaster : public Master {
       OutputCallback callback);
 
  private:
-  Tokenizer* get_tls_tokenizer();
-
   std::unique_ptr<Scheduler> scheduler_;
 
   // model args

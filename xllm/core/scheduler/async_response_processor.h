@@ -54,7 +54,6 @@ class AsyncResponseProcessor final {
  private:
   DISALLOW_COPY_AND_ASSIGN(AsyncResponseProcessor);
 
-  Tokenizer* get_tls_tokenizer();
   void batch_process_completed_requests(
       std::vector<std::shared_ptr<Request>>& requests);
 

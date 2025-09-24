@@ -19,6 +19,7 @@ limitations under the License.
 #include "sentencepiece_tokenizer.h"
 #include "tiktoken_tokenizer.h"
 #include "tokenizer_args.h"
+#include "tokenizer_proxy.h"
 
 namespace xllm {
 
