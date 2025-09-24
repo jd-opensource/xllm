@@ -85,6 +85,9 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   worker_clients_num_ = worker_clients_.size();
   dp_local_tp_size_ = worker_clients_num_ / dp_size_;
 
+  // create ThreadPool for link cluster
+  link_threadpool_ = std::make_unique<ThreadPool>(worker_clients_num_);
+
   // In multi-node serving mode, only driver engine
   // create worker_clients_.
   if (worker_clients_num_ > 1) {
@@ -525,6 +528,9 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
   int32_t src_dp_worker_index = 0;
   int32_t src_world_size = cluster_ids.size();
   int32_t src_tp_size = src_world_size / src_dp_size;
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
     // The worker for decoding needs to establish a connection for each dp group
@@ -547,9 +553,25 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
     // Increment the rank.
     src_dp_worker_index = (src_dp_worker_index + 1) % src_tp_size;
 
-    bool ret = worker_clients_[worker_rank]->link_cluster(
-        dp_cluster_ids, dp_addrs, dp_device_ips, dp_ports);
-    if (!ret) {
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                dp_cluster_ids = std::move(dp_cluster_ids),
+                                dp_addrs = std::move(dp_addrs),
+                                dp_device_ips = std::move(dp_device_ips),
+                                dp_ports = std::move(dp_ports)]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->link_cluster(
+          dp_cluster_ids, dp_addrs, dp_device_ips, dp_ports));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  // wait for all futures to complete
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
       LOG(ERROR) << "Link cluster failed.";
       return false;
     }
@@ -567,6 +589,9 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   int32_t src_dp_worker_index = 0;
   int32_t src_world_size = cluster_ids.size();
   int32_t src_tp_size = src_world_size / src_dp_size;
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
     // The worker for decoding needs to unlink for each dp group in prefill.
@@ -587,9 +612,25 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
     }
     src_dp_worker_index = (src_dp_worker_index + 1) % src_tp_size;
 
-    bool ret = worker_clients_[worker_rank]->unlink_cluster(
-        dp_cluster_ids, dp_addrs, dp_device_ips, dp_ports);
-    if (!ret) {
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                dp_cluster_ids = std::move(dp_cluster_ids),
+                                dp_addrs = std::move(dp_addrs),
+                                dp_device_ips = std::move(dp_device_ips),
+                                dp_ports = std::move(dp_ports)]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->unlink_cluster(
+          dp_cluster_ids, dp_addrs, dp_device_ips, dp_ports));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  // wait for all futures to complete
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
       LOG(ERROR) << "Unlink cluster failed.";
       return false;
     }

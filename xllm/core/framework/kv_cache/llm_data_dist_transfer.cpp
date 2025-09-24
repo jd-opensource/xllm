@@ -186,7 +186,8 @@ bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
   ClusterInfo cluster_info = create_cluster_info(cluster_id, device_ip, port);
   clusters.emplace_back(std::move(cluster_info));
 
-  auto ret = llm_data_dist_->LinkLlmClusters(clusters, rets);
+  auto ret = llm_data_dist_->LinkLlmClusters(
+      clusters, rets, /*timeout_in_millis=*/60000);
   if (ret != LLM_SUCCESS) {
     LOG(ERROR) << "LinkLlmClusters failed, ret = " << std::hex << ret;
     return false;

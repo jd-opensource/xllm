@@ -159,6 +159,9 @@ class LLMEngine : public Engine {
   std::vector<uint16_t> worker_ports_;
 
   bool layer_forward_interrupted_ = false;
+
+  // threadpool for link cluster
+  std::unique_ptr<ThreadPool> link_threadpool_;
 };
 
 }  // namespace xllm
