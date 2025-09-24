@@ -143,7 +143,7 @@ class LLMEngine : public Engine {
   void process_eplb_data(
       const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results);
 
-  ThreadPool threadpool_;
+  std::unique_ptr<ThreadPool> threadpool_;
 };
 
 }  // namespace xllm
