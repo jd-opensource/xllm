@@ -64,6 +64,9 @@ class AsyncResponseProcessor final {
   // the threadpool to handle rpc
   ThreadPool rpc_threadpool_;
 
+  // the threadpool to generate outputs
+  ThreadPool generate_output_threadpool_{16};
+
   // tokenizer instance to decode token ids
   std::unique_ptr<Tokenizer> tokenizer_;
 

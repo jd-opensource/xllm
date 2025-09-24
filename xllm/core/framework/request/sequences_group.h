@@ -28,6 +28,7 @@ limitations under the License.
 #include "mm_data.h"
 #include "sequence.h"
 #include "stopping_checker.h"
+#include "util/threadpool.h"
 
 namespace xllm {
 
@@ -44,9 +45,14 @@ class SequencesGroup {
   bool expand_sequences(bool share_prefix);
 
   void generate_outputs(std::vector<SequenceOutput>& outputs,
-                        const Tokenizer& tokenizer);
+                        const Tokenizer& tokenizer,
+                        ThreadPool* thread_pool = nullptr);
 
   void process_beam_search();
+
+  bool check_beam_search() {
+    return sequence_params_.sampling_param->beam_width > 1;
+  }
 
   std::vector<std::unique_ptr<Sequence>>& sequences() { return sequences_; }
 
@@ -54,6 +60,10 @@ class SequencesGroup {
 
  private:
   void add();
+
+  void generate_outputs_parallel(std::vector<SequenceOutput>& outputs,
+                                 const Tokenizer& tokenizer,
+                                 ThreadPool* thread_pool = nullptr);
 
  private:
   const std::string& prompt_;                  // ref from request

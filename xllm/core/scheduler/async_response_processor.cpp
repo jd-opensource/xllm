@@ -89,9 +89,11 @@ void AsyncResponseProcessor::process_completed_request(
     request->log_statistic(end_2_end_latency_seconds);
 
     if (callback != nullptr) {
-      callback(request->generate_output(*tokenizer_));
+      callback(
+          request->generate_output(*tokenizer_, &generate_output_threadpool_));
     } else {
-      request->state().output_func(request->generate_output(*tokenizer_));
+      request->state().output_func(
+          request->generate_output(*tokenizer_, &generate_output_threadpool_));
     }
   };
   if (request->state().response_thread_id < 0) {

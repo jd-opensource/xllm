@@ -18,6 +18,7 @@ limitations under the License.
 #include <unordered_set>
 
 #include "framework/batch/beam_search.h"
+#include "util/blocking_counter.h"
 
 namespace xllm {
 
@@ -60,7 +61,7 @@ bool SequencesGroup::finished() const {
 
 bool SequencesGroup::expand_sequences(bool share_prefix) {
   // when enable beam search, dont need to expand sequences
-  if (sequence_params_.sampling_param->beam_width > 1) {
+  if (check_beam_search()) {
     return false;
   }
   size_t current_seq_count = sequences_.size();
@@ -88,7 +89,8 @@ bool SequencesGroup::expand_sequences(bool share_prefix) {
 }
 
 void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
-                                      const Tokenizer& tokenizer) {
+                                      const Tokenizer& tokenizer,
+                                      ThreadPool* thread_pool) {
   if (sequence_params_.streaming) {
     for (auto& seq : sequences_) {
       outputs.push_back(std::move(seq->generate_output()));
@@ -99,8 +101,7 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
   auto n = sequence_params_.n;
   auto num = std::min(sequences_.size(), n);
   outputs.reserve(num);
-  if (sequences_.size() > n &&
-      sequence_params_.sampling_param->beam_width <= 1) {
+  if (sequences_.size() > n && !check_beam_search()) {
     std::vector<std::pair<float, size_t>> logprobs_vec;
     logprobs_vec.reserve(sequences_.size());
     for (size_t i = 0; i < sequences_.size(); ++i) {
@@ -116,18 +117,65 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
       outputs.push_back(std::move(seq_output));
     }
   } else {
+    // speed up when using thread pool
+    if (thread_pool && sequences_.size() > 1) {
+      generate_outputs_parallel(outputs, tokenizer, thread_pool);
+      return;
+    }
     for (auto& seq : sequences_) {
       outputs.push_back(seq->generate_output(tokenizer));
     }
   }
 }
 
+void SequencesGroup::generate_outputs_parallel(
+    std::vector<SequenceOutput>& outputs,
+    const Tokenizer& tokenizer,
+    ThreadPool* thread_pool) {
+  size_t seq_size = sequences_.size();
+  outputs.reserve(seq_size);
+  size_t num_tasks = std::min(thread_pool->size(), seq_size);
+  size_t num_tasks_pre =
+      (seq_size + thread_pool->size() - 1) / thread_pool->size();
+  std::vector<std::vector<SequenceOutput>> local_outputs;
+  local_outputs.resize(num_tasks);
+
+  auto gererate_output_local = [&](size_t work_id) {
+    local_outputs[work_id].reserve(num_tasks_pre);
+    for (size_t i = 0; i < num_tasks_pre; ++i) {
+      size_t task_id = work_id * num_tasks_pre + i;
+      if (task_id >= seq_size) break;
+
+      const auto& base_seq = sequences_[task_id];
+      local_outputs[work_id].emplace_back(base_seq->generate_output(tokenizer));
+    }
+  };
+
+  BlockingCounter counter(num_tasks);
+
+  {
+    for (size_t i = 0; i < num_tasks; ++i) {
+      thread_pool->schedule([gererate_output_local, i, &counter]() mutable {
+        gererate_output_local(i);
+        counter.decrement_count();
+      });
+    }
+
+    counter.wait();
+  }
+
+  for (size_t i = 0; i < num_tasks; ++i) {
+    outputs.insert(
+        outputs.end(), local_outputs[i].begin(), local_outputs[i].end());
+  }
+}
+
 void SequencesGroup::process_beam_search() {
-  size_t beam_width = sequence_params_.sampling_param->beam_width;
-  if (beam_width <= 1) {
+  if (!check_beam_search()) {
     return;
   }
 
+  size_t beam_width = sequence_params_.sampling_param->beam_width;
   size_t seq_size = sequences_.size();
   size_t topk = sequence_params_.sampling_param->top_logprobs;
   size_t num_candidates = topk * seq_size;
