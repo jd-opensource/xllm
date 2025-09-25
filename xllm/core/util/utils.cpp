@@ -24,11 +24,14 @@ limitations under the License.
 namespace xllm {
 namespace util {
 
+// Find the range of decode sequence indices (q_seq_lens == 1) in q_seq_lens
+// Returns {start_index, end_index} of decode sequences,
+// or {-1, -1} if no decode sequences found
 std::pair<int, int> find_ones_indices(std::vector<int>& q_seq_lens) {
   int left = 0, right = q_seq_lens.size() - 1;
   int start_index = -1, end_index = -1;
 
-  // Binary search for the start index of 1s
+  // Binary search for the start index of decode sequences (q_seq_lens == 1)
   while (left < right) {
     int mid = (left + right) / 2;
     if (q_seq_lens[mid] < 1) {
@@ -40,12 +43,13 @@ std::pair<int, int> find_ones_indices(std::vector<int>& q_seq_lens) {
   if (q_seq_lens[left] == 1) {
     start_index = left;
   } else {
-    return {start_index, end_index};  // No 1s found
+    return {start_index, end_index};  // No decode sequences found
   }
 
   left = 0;
   right = q_seq_lens.size() - 1;
 
+  // Binary search for the end index of decode sequences (q_seq_lens == 1)
   while (left < right) {
     int mid = (left + right + 1) / 2;
     if (q_seq_lens[mid] > 1) {

@@ -17,7 +17,7 @@ limitations under the License.
 #pragma once
 
 #include "block_manager.h"
-#include "kv_cache/kv_cache_event.h"
+#include "framework/kv_cache/kv_cache_event.h"
 
 namespace xllm {
 

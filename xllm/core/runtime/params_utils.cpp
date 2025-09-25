@@ -183,10 +183,10 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   forward_inputs.token_ids = torch::tensor(flatten_tokens_vec, tensor_options);
   forward_inputs.positions =
       torch::tensor(flatten_positions_vec, tensor_options);
-  std::pair<int, int> prefill_indices{0, 0};
+  std::pair<int, int> decode_seq_range{0, 0};
 #if defined(USE_NPU)
   if (q_seq_lens.size() >= 1) {
-    prefill_indices = util::find_ones_indices(q_seq_lens);
+    decode_seq_range = util::find_ones_indices(q_seq_lens);
   }
 #endif
   auto& input_params = forward_inputs.input_params;
@@ -205,7 +205,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
 
   input_params.new_cache_slots =
       torch::tensor(new_token_slot_ids, tensor_options);
-  input_params.prefill_indices = prefill_indices;
+  input_params.decode_seq_range = decode_seq_range;
 
   util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
   input_params.block_tables =

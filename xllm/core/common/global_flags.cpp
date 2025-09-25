@@ -74,6 +74,14 @@ DEFINE_bool(enable_mla,
             false,
             "Whether to enable multi-head latent attention.");
 
+DEFINE_bool(enable_acl_graph,
+            false,
+            "Whether to enable ACL graph execution for decode phase.");
+
+DEFINE_int32(max_tokens_per_seq,
+             20480,
+             "Maximum number of tokens per sequence for ACL graph execution.");
+
 // --- vlm config ---
 
 DEFINE_int32(limit_image_per_prompt,

@@ -63,7 +63,7 @@ struct ModelInputParams {
     params.block_tables = safe_to(block_tables, device, true);
     params.kv_seq_lens_vec = kv_seq_lens_vec;
     params.q_seq_lens_vec = q_seq_lens_vec;
-    params.prefill_indices = prefill_indices;
+    params.decode_seq_range = decode_seq_range;
 
     params.input_embedding = safe_to(input_embedding, device);
 
@@ -90,6 +90,8 @@ struct ModelInputParams {
     params.new_cache_slot_offsets = safe_to(new_cache_slot_offsets, device);
     params.kv_cache_start_offsets = safe_to(kv_cache_start_offsets, device);
 
+    // Copy graph_buffer to device
+    params.graph_buffer = safe_to(graph_buffer, device, true);
     return params;
   }
 
@@ -102,7 +104,7 @@ struct ModelInputParams {
               << " , prefill_seq_len is " << prefill_seq_len;
     LOG(INFO) << "ModelInputParams: kv_seq_lens_vec is " << kv_seq_lens_vec;
     LOG(INFO) << "ModelInputParams: q_seq_lens_vec is " << q_seq_lens_vec;
-    LOG(INFO) << "ModelInputParams: prefill_indices is " << prefill_indices;
+    LOG(INFO) << "ModelInputParams: decode_seq_range is " << decode_seq_range;
     print_tensor(kv_seq_lens, "ModelInputParams: kv_seq_lens", 4);
     print_tensor(q_seq_lens, "ModelInputParams: q_seq_lens", 4);
     print_tensor(new_cache_slots, "ModelInputParams: new_cache_slots", 4);
@@ -120,7 +122,15 @@ struct ModelInputParams {
   torch::Tensor kv_seq_lens;
   std::vector<int> kv_seq_lens_vec;
   std::vector<int> q_seq_lens_vec;
-  std::pair<int, int> prefill_indices;
+  // Range of decode sequence indices in the batch [start, end].
+  // Decode sequences are identified by q_seq_lens == 1,
+  // prefill sequences by  q_seq_lens > 1 .
+  // Used to determine whether to use prefill_node_ or
+  // decode_node_ in NPU layers
+  // Values: {-1, -1} if no decode requests (all prefill),
+  //         {0, batch_size-1} if all decode requests,
+  //         {start_idx, end_idx} if mixed prefill/decode requests
+  std::pair<int, int> decode_seq_range;
   // max length for qkv.
   int32_t kv_max_seq_len = 0;
   int32_t q_max_seq_len = 0;
@@ -174,6 +184,9 @@ struct ModelInputParams {
   // kvcache offset of sequence in the xtensor for all layers
   // IntTensor: [n_seq]
   torch::Tensor kv_cache_start_offsets;
+  // Graph execution buffer for temporary tensor storage
+  // Used by ACL Graph Executor to avoid repeated memory allocation
+  torch::Tensor graph_buffer;
 };
 
 }  // namespace xllm

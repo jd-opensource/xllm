@@ -277,7 +277,7 @@ torch::Tensor NpuLlamaDecoderLayerImpl::forward(torch::Tensor& x,
                                                 int node_id) {
   atb::Status st;
 
-  if (input_params.prefill_indices.second !=
+  if (input_params.decode_seq_range.second !=
       input_params.q_seq_lens.size(0) - 1) {
     build_node_variant_pack(prefill_node_,
                             x,

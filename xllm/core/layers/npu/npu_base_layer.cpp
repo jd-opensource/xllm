@@ -22,6 +22,7 @@ limitations under the License.
 #include <torch_npu/csrc/aten/NPUNativeFunctions.h>
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
+#include "core/common/global_flags.h"
 
 namespace xllm {
 namespace layer {
@@ -36,6 +37,43 @@ atb::Status NpuBaseLayer::execute_node(
     int node_id,
     std::vector<aclrtEvent*> event,
     std::vector<std::atomic<bool>*> event_flag) {
+  // TODO（by zhangminchao1@jd.com): Stream management needs to be refactored
+  // for better separation of concerns Current issues:
+  // 1. ACLGraph capture requires execution on a non-default stream, so we
+  // temporarily set the current stream
+  // 2. After ACLGraph capture ends, the stream will be modified back to the
+  // default stream
+  // 3. In non-ACL graph capture mode, the context stream should be set to the
+  // default stream
+  // 4. The actual requirement is to separate decode node context from prefill
+  // node context
+  //
+  // Note: The commented code below will cause runtime errors because:
+  // - aclmdlRICaptureGetInfo() may fail when called at inappropriate times
+  // - The capture status check logic is not robust enough for all scenarios
+  // - Stream management conflicts: ATB context stream must be consistent with
+  // libtorch_npu current stream.
+  //   However, libtorch_npu current stream is set to default stream after
+  //   capture ends, causing inconsistency between ATB context and the actual
+  //   execution stream
+  if (FLAGS_enable_acl_graph) {
+    void* stream = c10_npu::getCurrentNPUStream(device_.index()).stream();
+    context_->SetExecuteStream(stream);
+  }
+  // if (FLAGS_enable_acl_graph && !graph_captured_) {
+  //   void* stream = c10_npu::getCurrentNPUStream(device_.index()).stream();
+  //   aclmdlRICaptureStatus status;
+  //   aclmdlRI modelRI;
+  //   auto error = aclmdlRICaptureGetInfo(stream, &status, &modelRI);
+  //   if (error != ACL_SUCCESS) {
+  //     LOG(ERROR) << "aclmdlRICaptureGetInfo failed, acl error code: " <<
+  //     error;
+  //   }
+  //   if (status == ACL_MODEL_RI_CAPTURE_STATUS_ACTIVE) {
+  //     context_->SetExecuteStream(stream);
+  //     graph_captured_ = true;
+  //   }
+  // }
   atb::Status st =
       node.operation->Setup(node.variantPack, node.workspaceSize, context_);
   if (st != 0) {

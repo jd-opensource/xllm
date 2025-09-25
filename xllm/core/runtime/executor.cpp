@@ -18,8 +18,12 @@ limitations under the License.
 #include <c10/core/TensorOptions.h>
 #include <glog/logging.h>
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
-#include "runtime/npu_executor_impl.h"
+#include "runtime/base_executor_impl.h"
+#if defined(USE_NPU)
+#include "runtime/acl_graph_executor_impl.h"
+#endif
 #include "runtime/options.h"
 
 namespace xllm {
@@ -28,7 +32,15 @@ Executor::Executor(CausalLM* model,
                    const ModelArgs& args,
                    const torch::Device& device,
                    const runtime::Options& options) {
-  impl_ = std::make_unique<NpuExecutorImpl>(model, args, device, options);
+#if defined(USE_NPU)
+  if (FLAGS_enable_acl_graph && device.is_privateuseone()) {
+    LOG(INFO) << "Creating ACL Graph Executor for NPU device";
+    impl_ =
+        std::make_unique<AclGraphExecutorImpl>(model, args, device, options);
+    return;
+  }
+#endif
+  impl_ = std::make_unique<BaseExecutorImpl>(model, args, device, options);
 }
 
 ForwardInput Executor::prepare_inputs(Batch& batch) {

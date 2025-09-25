@@ -82,6 +82,7 @@ class NpuBaseLayer : public BaseLayer {
   AtbWorkspace work_space_;
   // std::vector<at::Tensor> at_weight_tensors_;
   std::vector<atb::Tensor> atb_weight_tensors_;
+  bool graph_captured_{false};
 };
 
 }  // namespace layer
