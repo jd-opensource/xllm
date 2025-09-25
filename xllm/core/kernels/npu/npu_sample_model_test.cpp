@@ -14,27 +14,13 @@ limitations under the License.
 ==============================================================================*/
 
 #include <gtest/gtest.h>
-#include <signal.h>
 #include <sys/resource.h>
-#include <torch/torch.h>
-#include <torch_npu/torch_npu.h>
-#include <unistd.h>
 
-#include <chrono>
-#include <csignal>
-#include <memory>
-#include <thread>
+#include "core/kernels/linear.h"
+#include "core/kernels/rms_norm.h"
+#include "core/kernels/split.h"
 
-#include "core/framework/model/model_args.h"
-#include "core/framework/model_context.h"
-#include "core/framework/parallel_state.h"
-#include "core/framework/quant_args.h"
-#include "linear.h"
-#include "rms_norm.h"
-#include "split.h"
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
-
-namespace xllm::hf {
+namespace xllm::kernel {
 
 class SampleModelTest : public ::testing::Test {
  protected:
@@ -124,8 +110,8 @@ TEST_F(SampleModelTest, ConstructorTest) {
   }
 
   ASSERT_NO_THROW({
-    auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
-    auto linear = std::make_shared<AtbLinearImpl>(*context_);
+    auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
+    auto linear = std::make_shared<NpuLinearImpl>(*context_);
     EXPECT_NE(rms_norm, nullptr);
     EXPECT_NE(linear, nullptr);
   });
@@ -139,7 +125,7 @@ TEST_F(SampleModelTest, WrapperConstructionTest) {
 
   ASSERT_NO_THROW({
     auto rms_norm = RmsNorm(*context_);
-    auto linear = AtbLinear(*context_);
+    auto linear = Linear(*context_);
   });
 }
 
@@ -149,8 +135,8 @@ TEST_F(SampleModelTest, LoadStateDictTest) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
-  auto linear = std::make_shared<AtbLinearImpl>(*context_);
+  auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
+  auto linear = std::make_shared<NpuLinearImpl>(*context_);
 
   auto rms_norm_weight =
       torch::randn({model_args_.hidden_size()}, tensor_options_);
@@ -173,8 +159,8 @@ TEST_F(SampleModelTest, VerifyLoadedWeightsTest) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
-  auto linear = std::make_shared<AtbLinearImpl>(*context_);
+  auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
+  auto linear = std::make_shared<NpuLinearImpl>(*context_);
 
   auto rms_norm_weight =
       torch::randn({model_args_.hidden_size()}, tensor_options_);
@@ -199,8 +185,8 @@ TEST_F(SampleModelTest, MergeLoadedWeightsTest) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
-  auto linear = std::make_shared<AtbLinearImpl>(*context_);
+  auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
+  auto linear = std::make_shared<NpuLinearImpl>(*context_);
 
   auto rms_norm_weight =
       torch::randn({model_args_.hidden_size()}, tensor_options_);
@@ -226,7 +212,7 @@ TEST_F(SampleModelTest, CombinedForwardPassTest) {
   }
 
   auto rms_norm = RmsNorm(*context_);
-  auto qkv_proj = AtbLinear(*context_);
+  auto qkv_proj = Linear(*context_);
   auto split_layer = Split(*context_);
 
   auto rms_norm_weight =
@@ -323,7 +309,7 @@ TEST_F(SampleModelTest, CombinedForwardPassBatchTest) {
   }
 
   auto rms_norm = RmsNorm(*context_);
-  auto qkv_proj = AtbLinear(*context_);
+  auto qkv_proj = Linear(*context_);
   auto split_layer = Split(*context_);
 
   auto rms_norm_weight =
@@ -404,7 +390,7 @@ TEST_F(SampleModelTest, DataFlowTest) {
   }
 
   auto rms_norm = RmsNorm(*context_);
-  auto qkv_proj = AtbLinear(*context_);
+  auto qkv_proj = Linear(*context_);
   auto split_layer = Split(*context_);
 
   auto rms_norm_weight =
@@ -467,7 +453,7 @@ TEST_F(SampleModelTest, DataFlowTest) {
   }
 }
 
-}  // namespace xllm::hf
+}  // namespace xllm::kernel
 
 int main(int argc, char** argv) {
   struct rlimit core_limit;

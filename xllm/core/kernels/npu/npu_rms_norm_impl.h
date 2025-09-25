@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
@@ -28,10 +27,10 @@ limitations under the License.
 #include <functional>
 
 #include "atb/atb_infer.h"
+#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
-#include "layers/npu/atb_base.h"
+#include "layers/npu/npu_base_layer.h"
 #include "nlohmann/json.hpp"
 #include "pytorch/adapter/utils/utils.h"
 #include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
@@ -39,17 +38,13 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
 
-namespace xllm::hf {
+namespace xllm::kernel {
 
-class AtbLinearImpl : public torch::nn::Module, public ATBBase {
+class NpuRmsNormImpl : public xllm::layer::NpuBaseLayer {
  public:
-  using Task = std::function<int()>;
-  using RunTaskFunc =
-      std::function<void(const std::string& taskName, Task task)>;
+  explicit NpuRmsNormImpl(const ModelContext& context);
 
-  explicit AtbLinearImpl(const ModelContext& context);
-
-  ~AtbLinearImpl() {};
+  ~NpuRmsNormImpl() {};
 
   void load_state_dict(const StateDict& state_dict);
 
@@ -57,31 +52,20 @@ class AtbLinearImpl : public torch::nn::Module, public ATBBase {
 
   void merge_loaded_weights();
 
-  torch::Tensor forward(const torch::Tensor& input, int nodeId);
-
-  void build_node_variant_pack(atb_speed::Model::Node& node,
-                               const torch::Tensor& input);
+  torch::Tensor forward(torch::Tensor& x, int nodeId);
 
  private:
-  int64_t init_node(atb_speed::Model::Node& node);
+  int64_t init_node(atb_speed::Model::Node& node,
+                    atb::infer::RmsNormParam& param);
 
-  atb_speed::Model::Node linear_node_;
+  void build_node_variant_pack(atb_speed::Model::Node& node, torch::Tensor& x);
+
+  void param_from_args(atb::infer::RmsNormParam& param, const ModelArgs& args);
+
+  atb_speed::Model::Node norm_node_;
   std::string model_name_;
-
-  std::vector<at::Tensor> at_out_tensors_;
-  atb::Tensor internal_input;
-  torch::Tensor tensor_placeholder_;
+  atb::infer::RmsNormParam norm_param_;
+  atb::Tensor internal_tensors_;
 };
 
-class AtbLinear : public torch::nn::ModuleHolder<AtbLinearImpl> {
- public:
-  using torch::nn::ModuleHolder<AtbLinearImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = AtbLinearImpl;
-
-  AtbLinear(const ModelContext& context);
-};
-
-std::shared_ptr<AtbLinearImpl> create_atb_linear_layer(
-    const ModelContext& context);
-
-}  // namespace xllm::hf
+}  // namespace xllm::kernel

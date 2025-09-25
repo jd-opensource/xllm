@@ -15,22 +15,20 @@ limitations under the License.
 
 #pragma once
 #if defined(USE_NPU)
-#include "npu/npu_rms_norm_impl.h"
+#include "npu/npu_linear_impl.h"
 #endif
 
-namespace xllm {
-namespace layer {
+namespace xllm::kernel {
 
 #if defined(USE_NPU)
-class RmsNorm : public torch::nn::ModuleHolder<NpuRmsNormImpl> {
+class Linear : public torch::nn::ModuleHolder<NpuLinearImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuRmsNormImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuRmsNormImpl;
+  using torch::nn::ModuleHolder<NpuLinearImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuLinearImpl;
 
-  RmsNorm(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuRmsNormImpl>(context)) {}
+  Linear(const ModelContext& context)
+      : ModuleHolder(std::make_shared<NpuLinearImpl>(context)) {}
 };
 #endif
 
-}  // namespace layer
-}  // namespace xllm
+}  // namespace xllm::kernel

@@ -58,29 +58,3 @@ cc_library(
     torch_npu
     xllm_kernels
 )
-
-cc_test(
-  NAME
-    rms_norm_test
-  SRCS
-    rms_norm_test.cpp
-  DEPS
-    :npu_layers
-    :model_context
-    GTest::gtest
-    GTest::gtest_main
-    torch
-    torch_npu
-    xllm_kernels
-    opapi
-)
-
-target_link_libraries(rms_norm_test
-                 PUBLIC
-                 $<$<BOOL:${USE_NPU}>:ascendcl>
-                 $<$<BOOL:${USE_NPU}>:hccl>
-                 $<$<BOOL:${USE_NPU}>:c_sec>
-                 $<$<BOOL:${USE_NPU}>:atb>
-                 $<$<BOOL:${USE_NPU}>:nnopbase>)
-
-

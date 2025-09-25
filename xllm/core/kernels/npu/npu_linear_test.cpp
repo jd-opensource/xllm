@@ -13,31 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "linear.h"
-
 #include <gtest/gtest.h>
-#include <signal.h>
 #include <sys/resource.h>
-#include <torch/torch.h>
-#include <torch_npu/torch_npu.h>
-#include <unistd.h>
 
-#include <chrono>
-#include <csignal>
-#include <memory>
-#include <thread>
+#include "core/kernels/linear.h"
 
-#include "core/framework/model/model_args.h"
-#include "core/framework/model_context.h"
-#include "core/framework/parallel_state.h"
-#include "core/framework/quant_args.h"
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
+namespace xllm::kernel {
 
-namespace xllm::hf {
-
-class NNLinearTest : public ::testing::Test {
+class NpuLinearTest : public ::testing::Test {
  protected:
-  NNLinearTest() : parallel_args_(1, 1, nullptr) {
+  NpuLinearTest() : parallel_args_(1, 1, nullptr) {
     try {
       torch::zeros({1}, torch::TensorOptions().device("npu:0"));
 
@@ -95,44 +80,34 @@ class NNLinearTest : public ::testing::Test {
   bool npu_available_ = true;
 };
 
-// Test AtbLinearImpl construction
-TEST_F(NNLinearTest, ConstructorTest) {
+// Test NpuLinearImpl construction
+TEST_F(NpuLinearTest, ConstructorTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
   ASSERT_NO_THROW({
-    auto linear = std::make_shared<AtbLinearImpl>(*context_);
+    auto linear = std::make_shared<NpuLinearImpl>(*context_);
     EXPECT_NE(linear, nullptr);
   });
 }
 
-// Test create_atb_linear_layer factory function
-TEST_F(NNLinearTest, CreateAtbLinearLayerTest) {
+// Test Linear wrapper construction
+TEST_F(NpuLinearTest, NpuLinearWrapperTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = create_atb_linear_layer(*context_);
-  EXPECT_NE(linear, nullptr);
-}
-
-// Test AtbLinear wrapper construction
-TEST_F(NNLinearTest, AtbLinearWrapperTest) {
-  if (!npu_available_) {
-    GTEST_SKIP() << "Skipping NPU test - NPU device not available";
-  }
-
-  ASSERT_NO_THROW({ auto linear = AtbLinear(*context_); });
+  ASSERT_NO_THROW({ auto linear = Linear(*context_); });
 }
 
 // Test state dict loading with mock weights
-TEST_F(NNLinearTest, LoadStateDictTest) {
+TEST_F(NpuLinearTest, LoadStateDictTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = std::make_shared<AtbLinearImpl>(*context_);
+  auto linear = std::make_shared<NpuLinearImpl>(*context_);
 
   // Create weight tensor with shape [output_size, input_size] for linear layer
   auto weight_tensor =
@@ -144,19 +119,19 @@ TEST_F(NNLinearTest, LoadStateDictTest) {
 }
 
 // Test weight verification (should fail with uninitialized weights)
-TEST_F(NNLinearTest, VerifyLoadedWeightsFailTest) {
-  auto linear = std::make_shared<AtbLinearImpl>(*context_);
+TEST_F(NpuLinearTest, VerifyLoadedWeightsFailTest) {
+  auto linear = std::make_shared<NpuLinearImpl>(*context_);
 
   EXPECT_DEATH({ linear->verify_loaded_weights("test_weight"); }, ".*");
 }
 
 // Test weight verification (should pass with loaded weights)
-TEST_F(NNLinearTest, VerifyLoadedWeightsPassTest) {
+TEST_F(NpuLinearTest, VerifyLoadedWeightsPassTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = std::make_shared<AtbLinearImpl>(*context_);
+  auto linear = std::make_shared<NpuLinearImpl>(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.intermediate_size(), model_args_.hidden_size()},
@@ -168,12 +143,12 @@ TEST_F(NNLinearTest, VerifyLoadedWeightsPassTest) {
 }
 
 // Test merge loaded weights
-TEST_F(NNLinearTest, MergeLoadedWeightsTest) {
+TEST_F(NpuLinearTest, MergeLoadedWeightsTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = std::make_shared<AtbLinearImpl>(*context_);
+  auto linear = std::make_shared<NpuLinearImpl>(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.intermediate_size(), model_args_.hidden_size()},
@@ -185,12 +160,12 @@ TEST_F(NNLinearTest, MergeLoadedWeightsTest) {
 }
 
 // Test forward pass with mock input (may fail without proper NPU setup)
-TEST_F(NNLinearTest, ForwardPassBasicTest) {
+TEST_F(NpuLinearTest, ForwardPassBasicTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = AtbLinear(*context_);
+  auto linear = Linear(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.intermediate_size(), model_args_.hidden_size()},
@@ -221,12 +196,12 @@ TEST_F(NNLinearTest, ForwardPassBasicTest) {
 }
 
 // Test tensor shape consistency
-TEST_F(NNLinearTest, TensorShapeTest) {
+TEST_F(NpuLinearTest, TensorShapeTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = std::make_shared<AtbLinearImpl>(*context_);
+  auto linear = std::make_shared<NpuLinearImpl>(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.intermediate_size(), model_args_.hidden_size()},
@@ -240,7 +215,7 @@ TEST_F(NNLinearTest, TensorShapeTest) {
 }
 
 // Test different weight matrix dimensions
-TEST_F(NNLinearTest, DifferentWeightDimensionsTest) {
+TEST_F(NpuLinearTest, DifferentWeightDimensionsTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -258,7 +233,7 @@ TEST_F(NNLinearTest, DifferentWeightDimensionsTest) {
     auto context = std::make_unique<ModelContext>(
         parallel_args_, model_args_, local_quant_args, tensor_options_);
 
-    auto linear = std::make_shared<AtbLinearImpl>(*context);
+    auto linear = std::make_shared<NpuLinearImpl>(*context);
 
     auto weight_tensor =
         torch::randn({output_size, input_size}, tensor_options_);
@@ -272,12 +247,12 @@ TEST_F(NNLinearTest, DifferentWeightDimensionsTest) {
 }
 
 // Test linear transformation mathematical properties
-TEST_F(NNLinearTest, LinearTransformationPropertiesTest) {
+TEST_F(NpuLinearTest, LinearTransformationPropertiesTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = AtbLinear(*context_);
+  auto linear = Linear(*context_);
 
   auto weight_tensor = torch::eye(model_args_.hidden_size(),
                                   torch::TensorOptions()
@@ -304,7 +279,9 @@ TEST_F(NNLinearTest, LinearTransformationPropertiesTest) {
   auto input = torch::ones({1, 1, model_args_.hidden_size()}, tensor_options_);
 
   try {
+    auto npu_stream = c10_npu::getCurrentNPUStream(0);
     auto output = linear(input, 0);
+    aclrtSynchronizeStream(npu_stream.stream());
 
     EXPECT_EQ(output.dim(), 3);
     EXPECT_EQ(output.size(0), 1);
@@ -320,12 +297,12 @@ TEST_F(NNLinearTest, LinearTransformationPropertiesTest) {
 }
 
 // Test batch processing
-TEST_F(NNLinearTest, BatchProcessingTest) {
+TEST_F(NpuLinearTest, BatchProcessingTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = AtbLinear(*context_);
+  auto linear = Linear(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.intermediate_size(), model_args_.hidden_size()},
@@ -350,8 +327,7 @@ TEST_F(NNLinearTest, BatchProcessingTest) {
 
       EXPECT_EQ(output.size(0), shape[0]);
       EXPECT_EQ(output.size(1), shape[1]);
-      EXPECT_EQ(output.size(2),
-                model_args_.intermediate_size());  // output features
+      EXPECT_EQ(output.size(2), model_args_.intermediate_size());
 
     } catch (const std::exception& e) {
       GTEST_SKIP() << "Skipping batch processing test for shape [" << shape[0]
@@ -363,12 +339,12 @@ TEST_F(NNLinearTest, BatchProcessingTest) {
 }
 
 // Test error handling with invalid inputs
-TEST_F(NNLinearTest, ErrorHandlingTest) {
+TEST_F(NpuLinearTest, ErrorHandlingTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto linear = AtbLinear(*context_);
+  auto linear = Linear(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.intermediate_size(), model_args_.hidden_size()},
@@ -391,7 +367,7 @@ TEST_F(NNLinearTest, ErrorHandlingTest) {
   }
 }
 
-}  // namespace xllm::hf
+}  // namespace xllm::kernel
 
 int main(int argc, char** argv) {
   struct rlimit core_limit;

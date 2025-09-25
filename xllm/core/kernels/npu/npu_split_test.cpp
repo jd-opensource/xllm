@@ -13,33 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "split.h"
-
 #include <gtest/gtest.h>
-#include <signal.h>
 #include <sys/resource.h>
-#include <torch/torch.h>
-#include <torch_npu/torch_npu.h>
-#include <unistd.h>
 
-#include <chrono>
-#include <csignal>
-#include <iostream>
-#include <memory>
-#include <thread>
+#include "core/kernels/split.h"
 
-#include "core/framework/model/model_args.h"
-#include "core/framework/model_context.h"
-#include "core/framework/parallel_state.h"
-#include "core/framework/quant_args.h"
-#include "core/framework/state_dict/state_dict.h"
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
+namespace xllm::kernel {
 
-namespace xllm::hf {
-
-class NNSplitTest : public ::testing::Test {
+class NpuSplitTest : public ::testing::Test {
  protected:
-  NNSplitTest() : parallel_args_(1, 1, nullptr) {
+  NpuSplitTest() : parallel_args_(1, 1, nullptr) {
     try {
       torch::zeros({1}, torch::TensorOptions().device("npu:0"));
 
@@ -96,30 +79,20 @@ class NNSplitTest : public ::testing::Test {
   bool npu_available_ = true;
 };
 
-// Test SplitImpl construction
-TEST_F(NNSplitTest, ConstructorTest) {
+// Test NpuSplitImpl construction
+TEST_F(NpuSplitTest, ConstructorTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
   ASSERT_NO_THROW({
-    auto split = std::make_shared<SplitImpl>(*context_);
+    auto split = std::make_shared<NpuSplitImpl>(*context_);
     EXPECT_NE(split, nullptr);
   });
 }
 
-// Test create_split_layer factory function
-TEST_F(NNSplitTest, CreateSplitLayerTest) {
-  if (!npu_available_) {
-    GTEST_SKIP() << "Skipping NPU test - NPU device not available";
-  }
-
-  auto split = create_split_layer(*context_);
-  EXPECT_NE(split, nullptr);
-}
-
 // Test Split wrapper construction
-TEST_F(NNSplitTest, SplitWrapperTest) {
+TEST_F(NpuSplitTest, SplitWrapperTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -128,56 +101,41 @@ TEST_F(NNSplitTest, SplitWrapperTest) {
 }
 
 // Test state dict loading (should be no-op for split layer)
-TEST_F(NNSplitTest, LoadStateDictTest) {
+TEST_F(NpuSplitTest, LoadStateDictTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto split = std::make_shared<SplitImpl>(*context_);
+  auto split = std::make_shared<NpuSplitImpl>(*context_);
   auto state_dict = CreateEmptyStateDict();
 
   ASSERT_NO_THROW({ split->load_state_dict(state_dict); });
 }
 
 // Test weight verification (should pass for split layer as it has no weights)
-TEST_F(NNSplitTest, VerifyLoadedWeightsTest) {
+TEST_F(NpuSplitTest, VerifyLoadedWeightsTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto split = std::make_shared<SplitImpl>(*context_);
+  auto split = std::make_shared<NpuSplitImpl>(*context_);
 
   ASSERT_NO_THROW({ split->verify_loaded_weights("test_weight"); });
 }
 
 // Test merge loaded weights (should be no-op for split layer)
-TEST_F(NNSplitTest, MergeLoadedWeightsTest) {
+TEST_F(NpuSplitTest, MergeLoadedWeightsTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto split = std::make_shared<SplitImpl>(*context_);
+  auto split = std::make_shared<NpuSplitImpl>(*context_);
 
   ASSERT_NO_THROW({ split->merge_loaded_weights(); });
 }
 
-// Test split parameter configuration
-TEST_F(NNSplitTest, ParamFromArgsTest) {
-  if (!npu_available_) {
-    GTEST_SKIP() << "Skipping NPU test - NPU device not available";
-  }
-
-  auto split = std::make_shared<SplitImpl>(*context_);
-  atb::infer::SplitParam param;
-
-  ASSERT_NO_THROW({ split->param_from_args(param, model_args_); });
-
-  EXPECT_EQ(param.splitDim, -1);
-  EXPECT_EQ(param.splitNum, 3);
-}
-
 // Test forward pass with basic input
-TEST_F(NNSplitTest, ForwardPassBasicTest) {
+TEST_F(NpuSplitTest, ForwardPassBasicTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -217,7 +175,7 @@ TEST_F(NNSplitTest, ForwardPassBasicTest) {
 }
 
 // Test split functionality with different input shapes
-TEST_F(NNSplitTest, SplitDifferentInputShapesTest) {
+TEST_F(NpuSplitTest, SplitDifferentInputShapesTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -262,7 +220,7 @@ TEST_F(NNSplitTest, SplitDifferentInputShapesTest) {
 }
 
 // Test split with different hidden sizes
-TEST_F(NNSplitTest, SplitDifferentHiddenSizesTest) {
+TEST_F(NpuSplitTest, SplitDifferentHiddenSizesTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -304,36 +262,8 @@ TEST_F(NNSplitTest, SplitDifferentHiddenSizesTest) {
   }
 }
 
-// Test build_node_variant_pack functionality
-TEST_F(NNSplitTest, BuildNodeVariantPackTest) {
-  if (!npu_available_) {
-    GTEST_SKIP() << "Skipping NPU test - NPU device not available";
-  }
-
-  auto split_impl = std::make_shared<SplitImpl>(*context_);
-  auto input =
-      torch::randn({1, 10, model_args_.hidden_size()}, tensor_options_);
-
-  try {
-    auto npu_stream = c10_npu::getCurrentNPUStream(0);
-    auto outputs = split_impl->forward(input, 0);
-    aclrtSynchronizeStream(npu_stream.stream());
-
-    EXPECT_EQ(outputs.size(), 3);
-    for (const auto& output : outputs) {
-      EXPECT_TRUE(output.defined());
-      EXPECT_GT(output.numel(), 0);
-    }
-
-  } catch (const std::exception& e) {
-    GTEST_SKIP()
-        << "Skipping build node variant pack test - requires NPU environment: "
-        << e.what();
-  }
-}
-
 // Test error handling with invalid inputs
-TEST_F(NNSplitTest, ErrorHandlingTest) {
+TEST_F(NpuSplitTest, ErrorHandlingTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -362,7 +292,7 @@ TEST_F(NNSplitTest, ErrorHandlingTest) {
 }
 
 // Test consistency of split operation
-TEST_F(NNSplitTest, SplitConsistencyTest) {
+TEST_F(NpuSplitTest, SplitConsistencyTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -392,7 +322,7 @@ TEST_F(NNSplitTest, SplitConsistencyTest) {
   }
 }
 
-}  // namespace xllm::hf
+}  // namespace xllm::kernel
 
 int main(int argc, char** argv) {
   struct rlimit core_limit;

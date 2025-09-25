@@ -15,22 +15,18 @@ limitations under the License.
 
 #pragma once
 #if defined(USE_NPU)
-#include "npu/npu_rms_norm_impl.h"
+#include "npu/npu_split_impl.h"
 #endif
 
-namespace xllm {
-namespace layer {
-
+namespace xllm::kernel {
 #if defined(USE_NPU)
-class RmsNorm : public torch::nn::ModuleHolder<NpuRmsNormImpl> {
+class Split : public torch::nn::ModuleHolder<NpuSplitImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuRmsNormImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuRmsNormImpl;
+  using torch::nn::ModuleHolder<NpuSplitImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuSplitImpl;
 
-  RmsNorm(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuRmsNormImpl>(context)) {}
+  Split(const ModelContext& context)
+      : ModuleHolder(std::make_shared<NpuSplitImpl>(context)) {}
 };
 #endif
-
-}  // namespace layer
-}  // namespace xllm
+}  // namespace xllm::kernel

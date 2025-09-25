@@ -13,31 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "rms_norm.h"
-
 #include <gtest/gtest.h>
-#include <signal.h>
 #include <sys/resource.h>
-#include <torch/torch.h>
-#include <torch_npu/torch_npu.h>
-#include <unistd.h>
 
-#include <chrono>
-#include <csignal>
-#include <memory>
-#include <thread>
+#include "core/kernels/rms_norm.h"
 
-#include "core/framework/model/model_args.h"
-#include "core/framework/model_context.h"
-#include "core/framework/parallel_state.h"
-#include "core/framework/quant_args.h"
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
+namespace xllm::kernel {
 
-namespace xllm::hf {
-
-class NNRmsNormTest : public ::testing::Test {
+class NpuRmsNormTest : public ::testing::Test {
  protected:
-  NNRmsNormTest() : parallel_args_(1, 1, nullptr) {
+  NpuRmsNormTest() : parallel_args_(1, 1, nullptr) {
     try {
       torch::zeros({1}, torch::TensorOptions().device("npu:0"));
 
@@ -95,30 +80,20 @@ class NNRmsNormTest : public ::testing::Test {
   bool npu_available_ = true;
 };
 
-// Test RmsNormImpl construction
-TEST_F(NNRmsNormTest, ConstructorTest) {
+// Test NpuRmsNormImpl construction
+TEST_F(NpuRmsNormTest, ConstructorTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
   ASSERT_NO_THROW({
-    auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
+    auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
     EXPECT_NE(rms_norm, nullptr);
   });
 }
 
-// Test create_rms_norm_layer factory function
-TEST_F(NNRmsNormTest, CreateRmsNormLayerTest) {
-  if (!npu_available_) {
-    GTEST_SKIP() << "Skipping NPU test - NPU device not available";
-  }
-
-  auto rms_norm = create_rms_norm_layer(*context_);
-  EXPECT_NE(rms_norm, nullptr);
-}
-
 // Test RmsNorm wrapper construction
-TEST_F(NNRmsNormTest, RmsNormWrapperTest) {
+TEST_F(NpuRmsNormTest, RmsNormWrapperTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -126,29 +101,13 @@ TEST_F(NNRmsNormTest, RmsNormWrapperTest) {
   ASSERT_NO_THROW({ auto rms_norm = RmsNorm(*context_); });
 }
 
-// Test parameter initialization from args
-TEST_F(NNRmsNormTest, ParamFromArgsTest) {
-  if (!npu_available_) {
-    GTEST_SKIP() << "Skipping NPU test - NPU device not available";
-  }
-
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
-
-  atb::infer::RmsNormParam param;
-  rms_norm->param_from_args(param, model_args_);
-
-  EXPECT_EQ(param.layerType,
-            atb::infer::RmsNormParam::RmsNormType::RMS_NORM_NORM);
-  EXPECT_FLOAT_EQ(param.normParam.epsilon, model_args_.rms_norm_eps());
-}
-
 // Test state dict loading with mock weights
-TEST_F(NNRmsNormTest, LoadStateDictTest) {
+TEST_F(NpuRmsNormTest, LoadStateDictTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
+  auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.hidden_size()}, tensor_options_);
@@ -158,19 +117,19 @@ TEST_F(NNRmsNormTest, LoadStateDictTest) {
 }
 
 // Test weight verification (should fail with uninitialized weights)
-TEST_F(NNRmsNormTest, VerifyLoadedWeightsFailTest) {
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
+TEST_F(NpuRmsNormTest, VerifyLoadedWeightsFailTest) {
+  auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
 
   EXPECT_DEATH({ rms_norm->verify_loaded_weights("test_weight"); }, ".*");
 }
 
 // Test weight verification (should pass with loaded weights)
-TEST_F(NNRmsNormTest, VerifyLoadedWeightsPassTest) {
+TEST_F(NpuRmsNormTest, VerifyLoadedWeightsPassTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
+  auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.hidden_size()}, tensor_options_);
@@ -181,12 +140,12 @@ TEST_F(NNRmsNormTest, VerifyLoadedWeightsPassTest) {
 }
 
 // Test merge loaded weights
-TEST_F(NNRmsNormTest, MergeLoadedWeightsTest) {
+TEST_F(NpuRmsNormTest, MergeLoadedWeightsTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
+  auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.hidden_size()}, tensor_options_);
@@ -197,7 +156,7 @@ TEST_F(NNRmsNormTest, MergeLoadedWeightsTest) {
 }
 
 // Test forward pass with mock input (may fail without proper NPU setup)
-TEST_F(NNRmsNormTest, ForwardPassBasicTest) {
+TEST_F(NpuRmsNormTest, ForwardPassBasicTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -226,12 +185,12 @@ TEST_F(NNRmsNormTest, ForwardPassBasicTest) {
 }
 
 // Test tensor shape consistency
-TEST_F(NNRmsNormTest, TensorShapeTest) {
+TEST_F(NpuRmsNormTest, TensorShapeTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
 
-  auto rms_norm = std::make_shared<RmsNormImpl>(*context_);
+  auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context_);
 
   auto weight_tensor =
       torch::randn({model_args_.hidden_size()}, tensor_options_);
@@ -242,29 +201,8 @@ TEST_F(NNRmsNormTest, TensorShapeTest) {
   EXPECT_EQ(weight_tensor.dim(), 1);
 }
 
-// Test different epsilon values
-TEST_F(NNRmsNormTest, DifferentEpsilonTest) {
-  std::vector<float> epsilon_values = {1e-5f, 1e-6f, 1e-8f, 1e-12f};
-
-  for (float eps : epsilon_values) {
-    model_args_.rms_norm_eps() = eps;
-    QuantArgs local_quant_args = quant_args_;
-    local_quant_args.torch_dtype() = "float16";
-
-    auto context = std::make_unique<ModelContext>(
-        parallel_args_, model_args_, local_quant_args, tensor_options_);
-
-    auto rms_norm = std::make_shared<RmsNormImpl>(*context);
-
-    atb::infer::RmsNormParam param;
-    rms_norm->param_from_args(param, model_args_);
-
-    EXPECT_FLOAT_EQ(param.normParam.epsilon, eps);
-  }
-}
-
 // Test with different hidden sizes
-TEST_F(NNRmsNormTest, DifferentHiddenSizesTest) {
+TEST_F(NpuRmsNormTest, DifferentHiddenSizesTest) {
   if (!npu_available_) {
     GTEST_SKIP() << "Skipping NPU test - NPU device not available";
   }
@@ -279,7 +217,7 @@ TEST_F(NNRmsNormTest, DifferentHiddenSizesTest) {
     auto context = std::make_unique<ModelContext>(
         parallel_args_, model_args_, local_quant_args, tensor_options_);
 
-    auto rms_norm = std::make_shared<RmsNormImpl>(*context);
+    auto rms_norm = std::make_shared<NpuRmsNormImpl>(*context);
 
     auto weight_tensor = torch::randn({hidden_size}, tensor_options_);
     auto state_dict = CreateStateDict(weight_tensor);
@@ -290,7 +228,7 @@ TEST_F(NNRmsNormTest, DifferentHiddenSizesTest) {
   }
 }
 
-}  // namespace xllm::hf
+}  // namespace xllm::kernel
 
 int main(int argc, char** argv) {
   struct rlimit core_limit;

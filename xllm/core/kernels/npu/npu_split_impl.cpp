@@ -13,30 +13,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "split.h"
+#include "npu_split_impl.h"
 
 #include <glog/logging.h>
 
-#include "layers/npu/attn_mask.h"
+namespace xllm::kernel {
 
-namespace xllm::hf {
-
-std::shared_ptr<SplitImpl> create_split_layer(const ModelContext& context) {
-  return std::make_shared<SplitImpl>(context);
-}
-
-void SplitImpl::param_from_args(atb::infer::SplitParam& param,
-                                const ModelArgs& args) {
+void NpuSplitImpl::param_from_args(atb::infer::SplitParam& param,
+                                   const ModelArgs& args) {
   param.splitDim = -1;
   param.splitNum = 3;
 }
 
-int64_t SplitImpl::init_node(atb_speed::Model::Node& node,
-                             atb::infer::SplitParam& param) {
-  ATBBase::name_ = "split_layer";
+int64_t NpuSplitImpl::init_node(atb_speed::Model::Node& node,
+                                atb::infer::SplitParam& param) {
+  name_ = "split";
   model_name_ = "llm";
-  runTaskFunc_ = std::bind(
-      &SplitImpl::run_task, this, std::placeholders::_1, std::placeholders::_2);
+  run_task_func_ = std::bind(&NpuSplitImpl::run_task,
+                             this,
+                             std::placeholders::_1,
+                             std::placeholders::_2);
 
   atb::Operation* operation = nullptr;
   atb::Status atbStatus = atb::CreateOperation(param, &operation);
@@ -57,7 +53,8 @@ int64_t SplitImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-SplitImpl::SplitImpl(const ModelContext& context) : ATBBase(context) {
+NpuSplitImpl::NpuSplitImpl(const ModelContext& context)
+    : NpuBaseLayer(context) {
   param_from_args(norm_param_, context.get_model_args());
 
   at_weight_tensors_.resize(1);
@@ -71,25 +68,26 @@ SplitImpl::SplitImpl(const ModelContext& context) : ATBBase(context) {
   atb::Status status = init_node(split_node_, norm_param_);
   if (status != atb::NO_ERROR) {
     LOG(ERROR) << "Failed to initialize node, status: " << status;
-    throw std::runtime_error("SplitImpl initialization failed with status: " +
-                             std::to_string(status));
+    throw std::runtime_error(
+        "NpuSplitImpl initialization failed with status: " +
+        std::to_string(status));
   }
 }
 
-void SplitImpl::verify_loaded_weights(const std::string weight_str) const {
+void NpuSplitImpl::verify_loaded_weights(const std::string weight_str) const {
   // No operation needed for split layer
 }
 
-void SplitImpl::merge_loaded_weights() {
+void NpuSplitImpl::merge_loaded_weights() {
   // No operation needed for split layer
 }
 
-void SplitImpl::load_state_dict(const StateDict& state_dict) {
+void NpuSplitImpl::load_state_dict(const StateDict& state_dict) {
   // No operation needed for split layer
 }
 
-std::vector<at::Tensor> SplitImpl::forward(const torch::Tensor& input,
-                                           int nodeId) {
+std::vector<at::Tensor> NpuSplitImpl::forward(const torch::Tensor& input,
+                                              int nodeId) {
   atb::Status st;
   build_node_variant_pack(split_node_, input);
   st = execute_node(split_node_, nodeId);
@@ -98,8 +96,8 @@ std::vector<at::Tensor> SplitImpl::forward(const torch::Tensor& input,
   return at_out_tensors_;
 }
 
-void SplitImpl::build_node_variant_pack(atb_speed::Model::Node& node,
-                                        const torch::Tensor& input) {
+void NpuSplitImpl::build_node_variant_pack(atb_speed::Model::Node& node,
+                                           const torch::Tensor& input) {
   internal_input = atb_speed::Utils::AtTensor2Tensor(input);
 
   atb::SVector<atb::Tensor> ins = {internal_input};
@@ -127,7 +125,4 @@ void SplitImpl::build_node_variant_pack(atb_speed::Model::Node& node,
                                  atb_speed::Utils::AtTensor2Tensor(output_2)};
 }
 
-Split::Split(const ModelContext& context)
-    : ModuleHolder(create_split_layer(context)) {}
-
-}  // namespace xllm::hf
+}  // namespace xllm::kernel

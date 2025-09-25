@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
@@ -27,10 +28,10 @@ limitations under the License.
 #include <functional>
 
 #include "atb/atb_infer.h"
-#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
-#include "layers/npu/atb_base.h"
+#include "layers/npu/npu_base_layer.h"
 #include "nlohmann/json.hpp"
 #include "pytorch/adapter/utils/utils.h"
 #include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
@@ -38,17 +39,13 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
 
-namespace xllm::hf {
+namespace xllm::kernel {
 
-class SplitImpl : public torch::nn::Module, public ATBBase {
+class NpuLinearImpl : public xllm::layer::NpuBaseLayer {
  public:
-  using Task = std::function<int()>;
-  using RunTaskFunc =
-      std::function<void(const std::string& taskName, Task task)>;
+  explicit NpuLinearImpl(const ModelContext& context);
 
-  explicit SplitImpl(const ModelContext& context);
-
-  ~SplitImpl() {};
+  ~NpuLinearImpl() {};
 
   void load_state_dict(const StateDict& state_dict);
 
@@ -56,34 +53,18 @@ class SplitImpl : public torch::nn::Module, public ATBBase {
 
   void merge_loaded_weights();
 
-  void param_from_args(atb::infer::SplitParam& param, const ModelArgs& args);
-
-  std::vector<at::Tensor> forward(const torch::Tensor& input, int nodeId);
-
-  void build_node_variant_pack(atb_speed::Model::Node& node,
-                               const torch::Tensor& input);
+  torch::Tensor forward(const torch::Tensor& input, int nodeId);
 
  private:
-  int64_t init_node(atb_speed::Model::Node& node,
-                    atb::infer::SplitParam& param);
+  int64_t init_node(atb_speed::Model::Node& node);
+  void build_node_variant_pack(atb_speed::Model::Node& node,
+                               const torch::Tensor& input);
+  atb_speed::Model::Node linear_node_;
+  std::string model_name_;
 
   std::vector<at::Tensor> at_out_tensors_;
   atb::Tensor internal_input;
-
-  atb_speed::Model::Node split_node_;
-  std::string model_name_;
-  atb::infer::SplitParam norm_param_;
-  atb::Tensor internal_tensors_;
+  torch::Tensor tensor_placeholder_;
 };
 
-class Split : public torch::nn::ModuleHolder<SplitImpl> {
- public:
-  using torch::nn::ModuleHolder<SplitImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = SplitImpl;
-
-  Split(const ModelContext& context);
-};
-
-std::shared_ptr<SplitImpl> create_split_layer(const ModelContext& context);
-
-}  // namespace xllm::hf
+}  // namespace xllm::kernel

@@ -1,1 +1,80 @@
+include(cc_library)
+include(cc_test)
+
 add_subdirectory(xllm_ops)
+
+cc_library(
+  NAME
+    npu_kernels
+  HDRS
+    npu_split_impl.h
+    npu_linear_impl.h
+    npu_rms_norm_impl.h
+  SRCS
+    npu_split_impl.cpp
+    npu_linear_impl.cpp
+    npu_rms_norm_impl.cpp
+  DEPS
+    :npu_layers
+    :model_context
+    :state_dict
+    glog::glog
+    torch
+    torch_npu
+)
+
+cc_test(
+  NAME
+    npu_rms_norm_test
+  SRCS
+    npu_rms_norm_test.cpp
+  DEPS
+    :npu_kernels
+    GTest::gtest
+    GTest::gtest_main
+    xllm_kernels
+    c_sec
+    atb
+)
+
+cc_test(
+  NAME
+    npu_linear_test
+  SRCS
+    npu_linear_test.cpp
+  DEPS
+    :npu_kernels
+    GTest::gtest
+    GTest::gtest_main
+    xllm_kernels
+    c_sec
+    atb
+)
+
+cc_test(
+  NAME
+    npu_split_test
+  SRCS
+    npu_split_test.cpp
+  DEPS
+    :npu_kernels
+    GTest::gtest
+    GTest::gtest_main
+    xllm_kernels
+    c_sec
+    atb
+)
+
+cc_test(
+  NAME
+    npu_sample_model_test
+  SRCS
+    npu_sample_model_test.cpp
+  DEPS
+    :npu_kernels
+    GTest::gtest
+    GTest::gtest_main
+    xllm_kernels
+    c_sec
+    atb
+)

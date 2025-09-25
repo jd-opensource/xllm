@@ -19,7 +19,7 @@ limitations under the License.
 #endif
 
 namespace xllm {
-namespace layer {
+namespace kernel {
 
 #if defined(USE_NPU)
 class RmsNorm : public torch::nn::ModuleHolder<NpuRmsNormImpl> {
@@ -32,5 +32,5 @@ class RmsNorm : public torch::nn::ModuleHolder<NpuRmsNormImpl> {
 };
 #endif
 
-}  // namespace layer
+}  // namespace kernel
 }  // namespace xllm

@@ -13,22 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "linear.h"
+#include "npu_linear_impl.h"
 
 #include <glog/logging.h>
 
-#include "xllm_kernels/operations/aclnn/ops/repeat_operation.h"
-#include "xllm_kernels/operations/fusion/linear/linear.h"
-#include "xllm_kernels/operations/fusion/linear/linear_parallel.h"
-#include "xllm_kernels/operations/fusion/utils.h"
+namespace xllm::kernel {
 
-namespace xllm::hf {
-std::shared_ptr<AtbLinearImpl> create_atb_linear_layer(
-    const ModelContext& context) {
-  return std::make_shared<AtbLinearImpl>(context);
-}
-
-AtbLinearImpl::AtbLinearImpl(const ModelContext& context) : ATBBase(context) {
+NpuLinearImpl::NpuLinearImpl(const ModelContext& context)
+    : NpuBaseLayer(context) {
   at_weight_tensors_.resize(1);
   atb_weight_tensors_.resize(1);
   at_out_tensors_.resize(1);
@@ -40,32 +32,32 @@ AtbLinearImpl::AtbLinearImpl(const ModelContext& context) : ATBBase(context) {
   if (status != atb::NO_ERROR) {
     LOG(ERROR) << "Failed to initialize node, status: " << status;
     throw std::runtime_error(
-        "AtbLinearImpl initialization failed with status: " +
+        "NpuLinearImpl initialization failed with status: " +
         std::to_string(status));
   }
 }
 
-void AtbLinearImpl::verify_loaded_weights(const std::string weight_str) const {
+void NpuLinearImpl::verify_loaded_weights(const std::string weight_str) const {
   CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
       << "weight is not loaded for " << weight_str;
 }
 
-void AtbLinearImpl::merge_loaded_weights() {
+void NpuLinearImpl::merge_loaded_weights() {
   atb_weight_tensors_[0] =
       atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[0]);
 }
 
-void AtbLinearImpl::load_state_dict(const StateDict& state_dict) {
+void NpuLinearImpl::load_state_dict(const StateDict& state_dict) {
   set_weight(state_dict, "weight", 0);
 }
 
-int64_t AtbLinearImpl::init_node(atb_speed::Model::Node& node) {
-  ATBBase::name_ = "atb_linear_layer";
-  model_name_ = "Atb Linear";
-  runTaskFunc_ = std::bind(&AtbLinearImpl::run_task,
-                           this,
-                           std::placeholders::_1,
-                           std::placeholders::_2);
+int64_t NpuLinearImpl::init_node(atb_speed::Model::Node& node) {
+  name_ = "linear";
+  model_name_ = "llm";
+  run_task_func_ = std::bind(&NpuLinearImpl::run_task,
+                             this,
+                             std::placeholders::_1,
+                             std::placeholders::_2);
 
   atb::Operation* operation = nullptr;
   atb::infer::LinearParam linearParam;
@@ -96,7 +88,7 @@ int64_t AtbLinearImpl::init_node(atb_speed::Model::Node& node) {
   return atb::NO_ERROR;
 }
 
-torch::Tensor AtbLinearImpl::forward(const torch::Tensor& input, int nodeId) {
+torch::Tensor NpuLinearImpl::forward(const torch::Tensor& input, int nodeId) {
   atb::Status st;
 
   build_node_variant_pack(linear_node_, input);
@@ -113,7 +105,7 @@ torch::Tensor AtbLinearImpl::forward(const torch::Tensor& input, int nodeId) {
   return at_out_tensors_.at(0);
 }
 
-void AtbLinearImpl::build_node_variant_pack(atb_speed::Model::Node& node,
+void NpuLinearImpl::build_node_variant_pack(atb_speed::Model::Node& node,
                                             const torch::Tensor& input) {
   internal_input = atb_speed::Utils::AtTensor2Tensor(input);
 
@@ -135,7 +127,4 @@ void AtbLinearImpl::build_node_variant_pack(atb_speed::Model::Node& node,
   node.variantPack.outTensors = {atb_speed::Utils::AtTensor2Tensor(output)};
 }
 
-AtbLinear::AtbLinear(const ModelContext& context)
-    : ModuleHolder(create_atb_linear_layer(context)) {}
-
-}  // namespace xllm::hf
+}  // namespace xllm::kernel
