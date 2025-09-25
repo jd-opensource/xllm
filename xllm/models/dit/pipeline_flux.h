@@ -93,7 +93,7 @@ class FluxPipelineImpl : public FluxPipelineBaseImpl {
             ? std::make_optional(input.negative_pooled_prompt_embeds)
             : std::nullopt;
 
-    std::vector<torch::Tensor> output = forward_(
+    auto output = forward_impl(
         prompts,                                  // prompt
         prompts_2,                                // prompt_2
         negative_prompts,                         // negative_prompt
@@ -114,8 +114,7 @@ class FluxPipelineImpl : public FluxPipelineBaseImpl {
     );
 
     DiTForwardOutput out;
-    out.tensors = torch::chunk(output[0], output[0].size(0), 0);
-    LOG(INFO) << "Output tensor chunks size: " << out.tensors.size();
+    out.tensors = torch::chunk(output, input.batch_size);
     return out;
   }
 
@@ -170,7 +169,7 @@ class FluxPipelineImpl : public FluxPipelineBaseImpl {
     return {packed_latents, latent_image_ids};
   }
 
-  std::vector<torch::Tensor> forward_(
+  torch::Tensor forward_impl(
       std::optional<std::vector<std::string>> prompt = std::nullopt,
       std::optional<std::vector<std::string>> prompt_2 = std::nullopt,
       std::optional<std::vector<std::string>> negative_prompt = std::nullopt,
@@ -270,7 +269,9 @@ class FluxPipelineImpl : public FluxPipelineBaseImpl {
                                   latent_image_ids,
                                   height / (vae_scale_factor_ * 2),
                                   width / (vae_scale_factor_ * 2));
-    torch::Tensor image_rotary_emb = torch::stack({rot_emb1, rot_emb2}, 0);
+    torch::Tensor image_rotary_emb =
+        torch::stack({rot_emb1, rot_emb2}, 0).to(options_.dtype());
+
     for (int64_t i = 0; i < timesteps.numel(); ++i) {
       torch::Tensor t = timesteps[i].unsqueeze(0);
       timestep.fill_(t.item<float>())
@@ -317,7 +318,7 @@ class FluxPipelineImpl : public FluxPipelineBaseImpl {
     unpacked_latents = unpacked_latents.to(options_.dtype());
     image = vae_->decode(unpacked_latents);
     image = vae_image_processor_->postprocess(image);
-    return std::vector<torch::Tensor>{{image}};
+    return image;
   }
 
  private:

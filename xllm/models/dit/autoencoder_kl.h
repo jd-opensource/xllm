@@ -30,7 +30,7 @@ limitations under the License.
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
-#include "dit_linear.h"
+#include "core/layers/common/add_matmul.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
 // VAE model compatible with huggingface weights
@@ -49,8 +49,7 @@ torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
   gen = gen.clone();
   gen.set_current_seed(seed);
   torch::Tensor latents;
-  latents = torch::randn(
-      shape, gen, options.device(torch::kCPU).dtype(torch::kFloat32));
+  latents = torch::randn(shape, gen, options.device(torch::kCPU));
   latents = latents.to(options);
   return latents;
 }
@@ -220,10 +219,20 @@ class AttentionImpl : public torch::nn::Module {
                                                    .eps(1e-6f)));
     }
     int64_t inner_dim = head_dim * num_heads;
-    to_q_ = register_module("to_q", DiTLinear(query_dim, inner_dim, true));
-    to_k_ = register_module("to_k", DiTLinear(query_dim, inner_dim, true));
-    to_v_ = register_module("to_v", DiTLinear(query_dim, inner_dim, true));
-    to_out_ = register_module("to_out", DiTLinear(inner_dim, query_dim, true));
+    auto options = context.get_tensor_options();
+
+    to_q_ = register_module(
+        "to_q",
+        layer::AddMatmul(query_dim, inner_dim, /*with_bias=*/true, options));
+    to_k_ = register_module(
+        "to_k",
+        layer::AddMatmul(query_dim, inner_dim, /*with_bias=*/true, options));
+    to_v_ = register_module(
+        "to_v",
+        layer::AddMatmul(query_dim, inner_dim, /*with_bias=*/true, options));
+    to_out_ = register_module(
+        "to_out",
+        layer::AddMatmul(inner_dim, query_dim, /*with_bias=*/true, options));
   }
 
   torch::Tensor forward(torch::Tensor hidden_states, torch::Tensor temb) {
@@ -322,10 +331,10 @@ class AttentionImpl : public torch::nn::Module {
   torch::nn::GroupNorm group_norm_ = nullptr;
   bool group_norm_weight_loaded_ = false;
   bool group_norm_bias_loaded_ = false;
-  DiTLinear to_q_ = nullptr;
-  DiTLinear to_k_ = nullptr;
-  DiTLinear to_v_ = nullptr;
-  DiTLinear to_out_ = nullptr;
+  layer::AddMatmul to_q_ = nullptr;
+  layer::AddMatmul to_k_ = nullptr;
+  layer::AddMatmul to_v_ = nullptr;
+  layer::AddMatmul to_out_ = nullptr;
   int64_t num_heads_ = 1;
 };
 TORCH_MODULE(Attention);
@@ -935,6 +944,7 @@ class VAEEncoderImpl : public torch::nn::Module {
   explicit VAEEncoderImpl(const ModelContext& context) {
     ModelArgs args = context.get_model_args();
     down_blocks_ = register_module("down_blocks", torch::nn::ModuleList());
+    auto options = context.get_tensor_options();
     conv_in_ = register_module(
         "conv_in",
         torch::nn::Conv2d(torch::nn::Conv2dOptions(args.in_channels(),
@@ -1061,6 +1071,7 @@ class VAEDecoderImpl : public torch::nn::Module {
  public:
   explicit VAEDecoderImpl(const ModelContext& context) {
     ModelArgs args = context.get_model_args();
+    auto options = context.get_tensor_options();
     up_blocks_ = register_module("up_blocks", torch::nn::ModuleList());
     conv_in_ = register_module(
         "conv_in",
@@ -1306,6 +1317,7 @@ TORCH_MODULE(VAE);
 
 // register the VAE model with the model registry
 REGISTER_MODEL_ARGS(AutoencoderKL, [&] {
+  LOAD_ARG_OR(dtype, "dtype", "bfloat16");
   LOAD_ARG_OR(in_channels, "in_channels", 3);
   LOAD_ARG_OR(out_channels, "out_channels", 3);
   LOAD_ARG_OR(down_block_types,
