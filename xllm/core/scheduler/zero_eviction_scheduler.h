@@ -55,7 +55,7 @@ class ResourceGuard {
 
 class BlockCapacityGuard {
  public:
-  BlockCapacityGuard(KVCacheManagerClient* kv_cache_manager_client);
+  BlockCapacityGuard(KVCacheManager* kv_cache_manager);
 
   bool if_accept_candidate_sequences(
       const std::vector<Sequence*>& candidate_sequences,
@@ -63,24 +63,13 @@ class BlockCapacityGuard {
       const std::vector<Sequence*>& running_sequences);
 
  private:
-  uint32_t block_size() const {
-    const auto& option = kv_cache_manager_client_->options();
-    return option.block_size();
-  }
+  int32_t block_size() const { return kv_cache_manager_->block_size(); }
 
-  uint32_t num_block() const {
-    const auto& option = kv_cache_manager_client_->options();
-    return option.num_blocks();
-  }
-
-  bool is_prefix_cache() const {
-    const auto& option = kv_cache_manager_client_->options();
-    return option.enable_prefix_cache();
-  }
+  uint32_t num_block() const { return kv_cache_manager_->num_blocks(); }
 
   uint32_t num_blocks_in_useless() const {
     // TODO for mutil dp
-    return num_block() - kv_cache_manager_client_->num_used_blocks()[0];
+    return num_block() - kv_cache_manager_->num_used_blocks()[0];
   }
 
   bool simulate_is_satisfied_for_candidate_sequences();
@@ -100,7 +89,7 @@ class BlockCapacityGuard {
   std::vector<SequenceStatus> get_running_sequence_status();
 
  private:
-  KVCacheManagerClient* kv_cache_manager_client_;
+  KVCacheManager* kv_cache_manager_;
 
   std::vector<Sequence*> candidate_sequences_;
   std::vector<Sequence*> running_queue_;

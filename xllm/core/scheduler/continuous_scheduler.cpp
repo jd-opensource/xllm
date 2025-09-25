@@ -48,16 +48,11 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   CHECK(engine_ != nullptr);
 
   if (!FLAGS_enable_continuous_kvcache) {
-    auto block_manager_pool = engine_->block_manager_pool();
-    CHECK(block_manager_pool != nullptr);
-    kv_cache_manager_client_ =
-        std::make_unique<KVCacheManagerClient>(block_manager_pool);
+    kv_cache_manager_ = engine_->block_manager_pool();
   } else {
-    auto page_manager_pool = engine_->page_manager_pool();
-    CHECK(page_manager_pool != nullptr);
-    kv_cache_manager_client_ =
-        std::make_unique<KVCacheManagerClient>(page_manager_pool);
+    kv_cache_manager_ = engine_->page_manager_pool();
   }
+  CHECK(kv_cache_manager_ != nullptr);
 
   enable_prefix_cache_ = FLAGS_enable_prefix_cache;
 
@@ -135,8 +130,7 @@ bool ContinuousScheduler::check_if_enough_to_evict(
     size_t max_handle_num_tokens,
     size_t& num_request_to_evict) {
   // check if it's enough when we evict this requests queue
-  // TODO(zhangxu)
-  auto block_size = kv_cache_manager_client_->options().block_size();
+  auto block_size = kv_cache_manager_->block_size();
   const size_t num_blocks_needed =
       (max_handle_num_tokens + block_size - 1) / block_size;
   size_t num_blocks_can_evict = 0;
@@ -190,11 +184,11 @@ void ContinuousScheduler::handle_prefill_requests(
   bool blocks_exhausted = false;
   while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 && latency_budget > estimate_latency &&
-         kv_cache_manager_client_->kv_cache_utilization() <
+         kv_cache_manager_->kv_cache_utilization() <
              FLAGS_prefill_scheduling_memory_usage_threshold) {
     std::shared_ptr<Request> request(waiting_priority_queue.top());
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_client_->deallocate(request.get());
+      kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
@@ -238,7 +232,7 @@ void ContinuousScheduler::handle_prefill_requests(
       }
 
       // preempt offline decode
-      if (!kv_cache_manager_client_->allocate(prefill_sequence.get())) {
+      if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
@@ -256,14 +250,14 @@ void ContinuousScheduler::handle_prefill_requests(
               std::shared_ptr<Request> request_to_preempt =
                   running_queue_offline_->back();
               ++num_online_prefill_preempt_offline_requests;
-              kv_cache_manager_client_->deallocate(request_to_preempt.get());
+              kv_cache_manager_->deallocate(request_to_preempt.get());
               running_queue_offline_->pop_back();
               // add preemptable request to waiting priority queue
               // TO IMPROVE?: not process this offline request in current batch
               request_to_preempt->set_preempted();
               waiting_priority_queue_offline_.push(request_to_preempt);
             }
-            if (!kv_cache_manager_client_->allocate(prefill_sequence.get())) {
+            if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
               LOG(ERROR) << "Should be able to allocate after preempting "
                          << num_request_to_evict
                          << " offline requests, but failed.";
@@ -275,7 +269,7 @@ void ContinuousScheduler::handle_prefill_requests(
         }
         if (!can_schedule) {
           // release shared prefix blocks
-          kv_cache_manager_client_->deallocate(prefill_sequence.get());
+          kv_cache_manager_->deallocate(prefill_sequence.get());
           blocks_exhausted = true;
           break;
         }
@@ -291,7 +285,7 @@ void ContinuousScheduler::handle_prefill_requests(
                 seq_estimate_latency >
             latency_budget) {
           // release shared prefix blocks
-          kv_cache_manager_client_->deallocate(prefill_sequence.get());
+          kv_cache_manager_->deallocate(prefill_sequence.get());
           can_schedule = false;
           budget_exhausted = true;
           break;
@@ -308,7 +302,7 @@ void ContinuousScheduler::handle_prefill_requests(
     if (!can_schedule) {
       for (auto& seq : prefill_sequences) {
         // release shared blocks
-        kv_cache_manager_client_->deallocate(seq);
+        kv_cache_manager_->deallocate(seq);
       }
       break;
     }
@@ -330,7 +324,7 @@ void ContinuousScheduler::handle_prefill_requests(
       running_queue_->empty()) {
     std::shared_ptr<Request> request(waiting_priority_queue.top());
     waiting_priority_queue.pop();
-    kv_cache_manager_client_->deallocate(request.get());
+    kv_cache_manager_->deallocate(request.get());
     if (blocks_exhausted) {
       LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                     "a single sequence.";
@@ -411,14 +405,13 @@ void ContinuousScheduler::handle_decode_requests(
       size_t updated_num_tokens =
           sequence->num_tokens() + options_.num_speculative_tokens();
       // no blocks left
-      if (!kv_cache_manager_client_->allocate(sequence.get(),
-                                              updated_num_tokens)) {
+      if (!kv_cache_manager_->allocate(sequence.get(), updated_num_tokens)) {
         has_enough_blocks = false;
         break;
       }
 
       if (sequence->if_cache_block_for_prefill()) {
-        kv_cache_manager_client_->cache(sequence.get());
+        kv_cache_manager_->cache(sequence.get());
       }
 
       // update the allocated tokens for the sequence
@@ -475,7 +468,7 @@ void ContinuousScheduler::handle_decode_requests(
       std::shared_ptr<Request> request_to_preempt =
           running_queue_offline_->back();
       ++num_online_decode_preempt_offline_requests;
-      kv_cache_manager_client_->deallocate(request_to_preempt.get());
+      kv_cache_manager_->deallocate(request_to_preempt.get());
       running_queue_offline_->pop_back();
       // add preemptable request to waiting priority queue
       request_to_preempt->set_preempted();
@@ -485,7 +478,7 @@ void ContinuousScheduler::handle_decode_requests(
       std::shared_ptr<Request> request_to_preempt = running_queue->back();
       if (request_to_preempt.get() != request.get()) {
         // TO IMPROVE: kv cache offload to cpu
-        kv_cache_manager_client_->deallocate(request_to_preempt.get());
+        kv_cache_manager_->deallocate(request_to_preempt.get());
         running_queue->pop_back();
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
@@ -559,7 +552,7 @@ void ContinuousScheduler::handle_abnormal_request(
              "preemption logic. running_queue_.size ="
           << running_queue_->size();
       if (!FLAGS_enable_continuous_kvcache &&
-          (util::sum(kv_cache_manager_client_->num_used_blocks()) !=
+          (util::sum(kv_cache_manager_->num_used_blocks()) !=
            request->total_num_blocks())) {
         // blocks_exhausted is true.
         // NOTE: consider dp > 1, here we need get all num blocks in use.
@@ -573,7 +566,7 @@ void ContinuousScheduler::handle_abnormal_request(
 
     // request is too long, budget or memory no enough.
     running_queue_->pop_top();
-    kv_cache_manager_client_->deallocate(request.get());
+    kv_cache_manager_->deallocate(request.get());
     response_processor_->process_failed_request(
         request,
         {StatusCode::RESOURCE_EXHAUSTED,
@@ -607,13 +600,13 @@ void ContinuousScheduler::handle_running_requests(
   // check if the request can be expanded
   if (request->expand_sequences()) {
     // cache the blocks to share among the sequences
-    kv_cache_manager_client_->cache(request->sequences()[0].get());
+    kv_cache_manager_->cache(request->sequences()[0].get());
   }
 
   // release blocks for finished sequences here
   for (auto& sequence : request->sequences()) {
     if (sequence->finished()) {
-      kv_cache_manager_client_->deallocate(sequence.get());
+      kv_cache_manager_->deallocate(sequence.get());
     }
   }
 }
@@ -655,7 +648,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_client_->deallocate(request.get());
+      kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // finished request is set to nullptr
@@ -793,13 +786,12 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
 
   auto batches =
       BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(
-              running_requests_,
-              running_sequences_,
-              running_sequences_budgets_,
-              kv_cache_manager_client_->get_copy_in_cache_block_infos(),
-              kv_cache_manager_client_->get_copy_out_cache_block_infos(),
-              kv_cache_manager_client_->get_swap_cache_block_infos());
+          ->create_batches(running_requests_,
+                           running_sequences_,
+                           running_sequences_budgets_,
+                           kv_cache_manager_->get_copy_in_cache_block_infos(),
+                           kv_cache_manager_->get_copy_out_cache_block_infos(),
+                           kv_cache_manager_->get_swap_cache_block_infos());
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process
@@ -825,15 +817,12 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   GAUGE_SET(num_running_sequences, running_sequences_.size());
 
   GAUGE_SET(kv_cache_utilization_perc,
-            kv_cache_manager_client_->kv_cache_utilization());
+            kv_cache_manager_->kv_cache_utilization());
   if (!FLAGS_enable_continuous_kvcache) {
-    GAUGE_SET(
-        num_blocks_in_prefix_cache,
-        util::min(kv_cache_manager_client_->num_blocks_in_prefix_cache()));
-    GAUGE_SET(num_free_blocks,
-              util::max(kv_cache_manager_client_->num_free_blocks()));
-    GAUGE_SET(num_used_blocks,
-              util::min(kv_cache_manager_client_->num_used_blocks()));
+    GAUGE_SET(num_blocks_in_prefix_cache,
+              util::min(kv_cache_manager_->num_blocks_in_prefix_cache()));
+    GAUGE_SET(num_free_blocks, util::max(kv_cache_manager_->num_free_blocks()));
+    GAUGE_SET(num_used_blocks, util::min(kv_cache_manager_->num_used_blocks()));
   }
   return batches;
 }
@@ -880,7 +869,7 @@ void ContinuousScheduler::prepare_cache_async(
   }
   for (auto& prefill_sequence : request->sequences()) {
     const size_t num_additional_blocks =
-        kv_cache_manager_client_->pre_allocate(prefill_sequence.get());
+        kv_cache_manager_->pre_allocate(prefill_sequence.get());
     if (num_additional_blocks > 0) {
       const auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
       std::vector<CacheBlockInfo> contents;
@@ -913,7 +902,7 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
       return;
     }
     engine_->step(batch);
-    kv_cache_manager_client_->reset_copy_content();
+    kv_cache_manager_->reset_copy_content();
     // process request output in batch
     process_batch_output(false);
   } else {
@@ -939,7 +928,7 @@ void ContinuousScheduler::step_with_schedule_overlap(
 
   if (!cur_batch_all_empty) {
     engine_->step(batch);
-    kv_cache_manager_client_->reset_copy_content();
+    kv_cache_manager_->reset_copy_content();
   }
 
   // producer-consumer mode, make sure only one step is scheduled in advance
@@ -968,7 +957,7 @@ void ContinuousScheduler::generate() {
 
     // run inference for the batch
     engine_->step(batch);
-    kv_cache_manager_client_->reset_copy_content();
+    kv_cache_manager_->reset_copy_content();
 
     // process request output in batch
     process_batch_output(false);
@@ -1031,17 +1020,16 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
 
 std::vector<Block> ContinuousScheduler::allocate_blocks_for(size_t token_num,
                                                             int32_t& dp_rank) {
-  return kv_cache_manager_client_->allocate(token_num, dp_rank);
+  return kv_cache_manager_->allocate(token_num, dp_rank);
 }
 
 std::vector<int64_t> ContinuousScheduler::get_num_occupied_slots(
     std::vector<Sequence*>& sequences) const {
   std::vector<int64_t> num_occupied_slots(options_.dp_size());
   std::vector<int64_t> num_unfilled_blocks(options_.dp_size());
-  std::vector<size_t> num_used_blocks =
-      kv_cache_manager_client_->num_used_blocks();
+  std::vector<size_t> num_used_blocks = kv_cache_manager_->num_used_blocks();
 
-  const int block_size = kv_cache_manager_client_->options().block_size();
+  auto block_size = kv_cache_manager_->block_size();
 
   for (auto& sequence : sequences) {
     const int32_t dp_rank = sequence->dp_rank();
@@ -1079,8 +1067,8 @@ void ContinuousScheduler::update_memory_metrics(
   std::vector<int64_t> num_occupied_slots = get_num_occupied_slots(sequences);
   std::vector<int64_t> active_activation_size_in_bytes =
       get_active_activation_in_bytes();
-  int64_t num_total_slots = kv_cache_manager_client_->options().num_blocks() *
-                            kv_cache_manager_client_->options().block_size();
+  int64_t num_total_slots =
+      kv_cache_manager_->num_blocks() * kv_cache_manager_->block_size();
 
   for (int32_t dp_rank = 0; dp_rank < options_.dp_size(); ++dp_rank) {
     double occupied_slots_ratio =

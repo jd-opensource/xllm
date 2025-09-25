@@ -80,17 +80,6 @@ void PageManagerService::Deallocate(
   return;
 }
 
-void PageManagerService::Cache(::google::protobuf::RpcController* controller,
-                               const proto::SeqId* request,
-                               proto::Empty* response,
-                               ::google::protobuf::Closure* done) {
-  threadpool_.schedule([this, controller, request, response, done]() mutable {
-    brpc::ClosureGuard done_guard(done);
-    page_manager_->cache_async(request->seq_id());
-  });
-  return;
-}
-
 void PageManagerService::NumFreePagesPerLayer(
     ::google::protobuf::RpcController* controller,
     const proto::Empty* request,

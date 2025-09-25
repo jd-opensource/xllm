@@ -28,14 +28,13 @@ limitations under the License.
 #include "common/macros.h"
 #include "common/types.h"
 #include "framework/batch/batch.h"
-#include "framework/block/block_manager_pool.h"
+#include "framework/block/kv_cache_manager.h"
 #include "framework/request/priority_comparator.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "runtime/xservice_client.h"
 #include "scheduler.h"
 #include "scheduler/decode_priority_queue.h"
-#include "scheduler/kv_cache_manager_client.h"
 #include "scheduler/profile/profile_manager.h"
 
 namespace xllm {
@@ -176,8 +175,8 @@ class ContinuousScheduler : public Scheduler {
   // the engine to run the batch
   Engine* engine_;
 
-  // the kv cache manager client to manage the cache blocks or pages
-  std::unique_ptr<KVCacheManagerClient> kv_cache_manager_client_;
+  // the kvcache manager to manage the blocks or pages of kvcache
+  KVCacheManager* kv_cache_manager_;
 
   // a thread safe queue of requests, bounded by kRequestQueueSize
   // the schedule owns the requests and manages their lifetimes.

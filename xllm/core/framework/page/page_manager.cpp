@@ -38,11 +38,9 @@ void PageManager::add_multi_layer_kv_xtensors() {
                      std::move(multi_layer_kv_xtensor.second));
 }
 
-int32_t PageManager::allocate_seq_id() {
-  int32_t seq_id = -1;
-  // TODO: refine this
-  seq_id = multi_layer_kv_xtensor_.first->allocate_seq_id();
-  seq_id = multi_layer_kv_xtensor_.second->allocate_seq_id();
+void PageManager::allocate_seq_id(int32_t& seq_id) {
+  multi_layer_kv_xtensor_.first->allocate_seq_id(seq_id);
+  multi_layer_kv_xtensor_.second->allocate_seq_id(seq_id);
 }
 
 void PageManager::deallocate_seq_id(int32_t seq_id) {
@@ -54,8 +52,9 @@ void PageManager::deallocate_seq_id(int32_t seq_id) {
 
 // num_tokens is the number of all tokens in sequence
 bool PageManager::allocate(int32_t& seq_id, size_t num_tokens) {
+  int32_t original_seq_id = seq_id;
   if (seq_id < 0) {
-    seq_id = allocate_seq_id();
+    allocate_seq_id(seq_id);
   }
 
   const size_t k_num_pages =
@@ -83,6 +82,7 @@ bool PageManager::allocate(int32_t& seq_id, size_t num_tokens) {
   const size_t v_num_additional_pages = v_num_pages_needed - v_num_pages;
 
   if (!has_enough_pages(k_num_additional_pages, v_num_additional_pages)) {
+    seq_id = original_seq_id;
     return false;
   }
 
@@ -154,20 +154,6 @@ void PageManager::deallocate(int32_t seq_id) {
                               v_num_pages_used_per_layer;
 }
 
-void PageManager::cache(int32_t seq_id) {
-  CHECK_GE(seq_id, 0) << "seq_id is not valid!";
-
-  const size_t k_num_pages_used_per_layer =
-      multi_layer_kv_xtensor_.first->get_num_pages_per_layer(seq_id);
-  const size_t v_num_pages_used_per_layer =
-      multi_layer_kv_xtensor_.second->get_num_pages_per_layer(seq_id);
-
-  // key cache
-  num_used_pages_per_layer_ = num_used_pages_per_layer_ -
-                              k_num_pages_used_per_layer -
-                              v_num_pages_used_per_layer;
-}
-
 folly::SemiFuture<bool> PageManager::allocate_async(int32_t& seq_id,
                                                     size_t num_tokens) {
   folly::Promise<bool> promise;
@@ -185,16 +171,6 @@ folly::SemiFuture<folly::Unit> PageManager::deallocate_async(int32_t seq_id) {
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this, seq_id, promise = std::move(promise)]() mutable {
     this->deallocate(seq_id);
-    promise.setValue();
-  });
-  return future;
-}
-
-folly::SemiFuture<folly::Unit> PageManager::cache_async(int32_t seq_id) {
-  folly::Promise<folly::Unit> promise;
-  auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, seq_id, promise = std::move(promise)]() mutable {
-    this->cache(seq_id);
     promise.setValue();
   });
   return future;

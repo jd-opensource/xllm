@@ -185,16 +185,6 @@ void PageManagerPool::deallocate(Sequence* sequence) {
   }
 }
 
-void PageManagerPool::cache(Sequence* sequence) {
-  int32_t dp_rank = sequence->dp_rank();
-  int32_t seq_id = sequence->seq_id();
-  for (int32_t i = dp_rank * dp_local_tp_size_;
-       i < (dp_rank + 1) * dp_local_tp_size_;
-       ++i) {
-    page_manager_clients_[i]->cache_async(seq_id);
-  }
-}
-
 std::vector<size_t> PageManagerPool::num_free_pages_per_layer() const {
   std::vector<folly::SemiFuture<size_t>> futures;
   futures.reserve(dp_size_);

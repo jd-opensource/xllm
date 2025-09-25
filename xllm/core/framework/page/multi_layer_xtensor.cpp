@@ -51,9 +51,9 @@ void MultiLayerXTensor::free(int32_t seq_id) {
   deallocate_seq_id(seq_id);
 }
 
-int32_t MultiLayerXTensor::allocate_seq_id() {
+void MultiLayerXTensor::allocate_seq_id(int32_t& seq_id) {
   CHECK_GT(num_free_seq_ids_, 0) << "No more available seq_id!";
-  return free_seq_ids_[--num_free_seq_ids_];
+  seq_id = free_seq_ids_[--num_free_seq_ids_];
 }
 
 void MultiLayerXTensor::deallocate_seq_id(int32_t seq_id) {

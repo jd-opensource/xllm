@@ -47,11 +47,6 @@ class PageManagerService : public proto::DistributePageManager {
                   proto::Empty* response,
                   ::google::protobuf::Closure* done) override;
 
-  void Cache(::google::protobuf::RpcController* controller,
-             const proto::SeqId* request,
-             proto::Empty* response,
-             ::google::protobuf::Closure* done) override;
-
   void NumFreePagesPerLayer(::google::protobuf::RpcController* controller,
                             const proto::Empty* request,
                             proto::NumPages* response,

@@ -18,13 +18,11 @@ limitations under the License.
 #include <vector>
 
 #include "block_manager.h"
-#include "framework/model/model_input_params.h"
-#include "framework/request/request.h"
-#include "framework/request/sequence.h"
+#include "framework/block/kv_cache_manager.h"
 
 namespace xllm {
 
-class BlockManagerPool {
+class BlockManagerPool final : public KVCacheManager {
  public:
   struct Options {
     PROPERTY(uint32_t, num_blocks) = 0;
@@ -42,35 +40,40 @@ class BlockManagerPool {
 
   BlockManager* get_block_manager(Sequence* sequence, bool is_host);
 
-  bool allocate(Sequence* sequence);
-  bool allocate(std::vector<Sequence*>& sequences);
-  bool allocate(Sequence* sequence, size_t num_tokens);
+  bool allocate(Sequence* sequence) override;
+  bool allocate(std::vector<Sequence*>& sequences) override;
+  bool allocate(Sequence* sequence, size_t num_tokens) override;
 
-  uint32_t pre_allocate(Sequence* sequence);
+  uint32_t pre_allocate(Sequence* sequence) override;
 
   // Try to allocate blocks with num_tokens,
   // return {} if not enough blocks
-  std::vector<Block> allocate(size_t num_tokens, int32_t& dp_rank);
+  std::vector<Block> allocate(size_t num_tokens, int32_t& dp_rank) override;
 
-  void deallocate(Request* request);
-  void deallocate(std::vector<Sequence*>& sequences);
-  void deallocate(Sequence* sequence);
+  void deallocate(Request* request) override;
+  void deallocate(std::vector<Sequence*>& sequences) override;
+  void deallocate(Sequence* sequence) override;
 
-  void allocate_shared(Sequence* sequence);
-  void cache(Sequence* sequence);
+  void allocate_shared(Sequence* sequence) override;
+  void cache(Sequence* sequence) override;
 
-  std::vector<std::vector<CacheBlockInfo>>* get_copy_in_cache_block_infos();
-  std::vector<std::vector<CacheBlockInfo>>* get_copy_out_cache_block_infos();
-  std::vector<std::vector<CacheBlockInfo>>* get_swap_cache_block_infos();
-  void reset_copy_content();
+  std::vector<std::vector<CacheBlockInfo>>* get_copy_in_cache_block_infos()
+      override;
+  std::vector<std::vector<CacheBlockInfo>>* get_copy_out_cache_block_infos()
+      override;
+  std::vector<std::vector<CacheBlockInfo>>* get_swap_cache_block_infos()
+      override;
+  void reset_copy_content() override;
 
   void get_merged_kvcache_event(KvCacheEvent* event) const;
   float get_gpu_cache_usage_perc() const;
 
-  std::vector<size_t> num_blocks_in_prefix_cache() const;
-  std::vector<size_t> num_free_blocks() const;
-  std::vector<size_t> num_used_blocks() const;
-  double kv_cache_utilization() const;
+  uint32_t num_blocks() const override;
+  int32_t block_size() const override;
+  std::vector<size_t> num_blocks_in_prefix_cache() const override;
+  std::vector<size_t> num_free_blocks() const override;
+  std::vector<size_t> num_used_blocks() const override;
+  double kv_cache_utilization() const override;
 
   // get the options for the block manager
   const Options& options() const { return options_; }

@@ -106,17 +106,6 @@ void RemotePageManager::deallocate(int32_t seq_id) {
   }
 }
 
-void RemotePageManager::cache(int32_t seq_id) {
-  proto::SeqId req;
-  req.set_seq_id(seq_id);
-  proto::Empty resp;
-  brpc::Controller cntl;
-  stub_->Cache(&cntl, &req, &resp, nullptr);
-  if (cntl.Failed()) {
-    LOG(ERROR) << "Cache method failed: " << cntl.ErrorText();
-  }
-}
-
 folly::SemiFuture<bool> RemotePageManager::allocate_async(int32_t& seq_id,
                                                           size_t num_tokens) {
   folly::Promise<bool> promise;
@@ -151,24 +140,6 @@ folly::SemiFuture<folly::Unit> RemotePageManager::deallocate_async(
     stub_->Deallocate(&cntl, &req, &resp, nullptr);
     if (cntl.Failed()) {
       LOG(ERROR) << "Deallocate method failed: " << cntl.ErrorText();
-    }
-    promise.setValue();
-  });
-  return future;
-}
-
-folly::SemiFuture<folly::Unit> RemotePageManager::cache_async(int32_t seq_id) {
-  folly::Promise<folly::Unit> promise;
-  auto future = promise.getSemiFuture();
-
-  threadpool_.schedule([this, seq_id, promise = std::move(promise)]() mutable {
-    proto::SeqId req;
-    req.set_seq_id(seq_id);
-    proto::Empty resp;
-    brpc::Controller cntl;
-    stub_->Cache(&cntl, &req, &resp, nullptr);
-    if (cntl.Failed()) {
-      LOG(ERROR) << "Cache method failed: " << cntl.ErrorText();
     }
     promise.setValue();
   });

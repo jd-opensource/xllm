@@ -32,7 +32,7 @@ class MultiLayerXTensor final {
 
   void free(int32_t seq_id);
 
-  int32_t allocate_seq_id();
+  void allocate_seq_id(int32_t& seq_id);
 
   void deallocate_seq_id(int32_t seq_id);
 

@@ -31,11 +31,9 @@ class PageManagerClient {
 
   bool allocate(int32_t& seq_id, size_t num_tokens);
   void deallocate(int32_t seq_id);
-  void cache(int32_t seq_id);
 
   folly::SemiFuture<bool> allocate_async(int32_t& seq_id, size_t num_tokens);
   folly::SemiFuture<folly::Unit> deallocate_async(int32_t seq_id);
-  folly::SemiFuture<folly::Unit> cache_async(int32_t seq_id);
 
   size_t num_free_pages_per_layer() const;
   size_t num_used_pages_per_layer() const;

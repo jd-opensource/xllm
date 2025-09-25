@@ -38,7 +38,6 @@ class PageManager {
 
   bool allocate(int32_t& seq_id, size_t num_tokens);
   void deallocate(int32_t seq_id);
-  void cache(int32_t seq_id);
 
   folly::SemiFuture<bool> allocate_async(int32_t& seq_id, size_t num_tokens);
   folly::SemiFuture<folly::Unit> deallocate_async(int32_t seq_id);
@@ -54,7 +53,7 @@ class PageManager {
  private:
   void add_multi_layer_kv_xtensors();
   // allocate seq id for sequence
-  int32_t allocate_seq_id();
+  void allocate_seq_id(int32_t& seq_id);
   // release seq id for sequence
   void deallocate_seq_id(int32_t seq_id);
   bool has_enough_pages(size_t k_num_pages_needed, size_t v_num_pages_needed);
