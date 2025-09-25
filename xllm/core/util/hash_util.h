@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -29,13 +30,13 @@ struct Murmur3Key {
 
   Murmur3Key() {}
   Murmur3Key(const uint8_t* const input_data) {
-    memcpy(data, input_data, MURMUR_HASH3_VALUE_LEN);
+    std::memcpy(data, input_data, MURMUR_HASH3_VALUE_LEN);
   }
 
   bool operator==(const Murmur3Key& other) {
-    return strncmp(reinterpret_cast<const char*>(data),
-                   reinterpret_cast<const char*>(other.data),
-                   MURMUR_HASH3_VALUE_LEN);
+    return std::strncmp(reinterpret_cast<const char*>(data),
+                        reinterpret_cast<const char*>(other.data),
+                        MURMUR_HASH3_VALUE_LEN);
   }
   std::string debug_string() {
     std::string rt;
@@ -55,9 +56,9 @@ struct FixedStringKeyHash {
 
 struct FixedStringKeyEqual {
   bool operator()(const Murmur3Key& left, const Murmur3Key& right) const {
-    return strncmp(reinterpret_cast<const char*>(left.data),
-                   reinterpret_cast<const char*>(right.data),
-                   sizeof(left.data)) == 0;
+    return std::strncmp(reinterpret_cast<const char*>(left.data),
+                        reinterpret_cast<const char*>(right.data),
+                        sizeof(left.data)) == 0;
   }
 };
 

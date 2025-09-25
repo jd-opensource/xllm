@@ -1,0 +1,315 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#include "acl_graph_executor_impl.h"
+
+#include <c10/core/Device.h>
+#include <c10/core/TensorOptions.h>
+#include <glog/logging.h>
+#include <torch/torch.h>
+#include <torch_npu/csrc/libs/init_npu.h>
+#include <torch_npu/torch_npu.h>
+
+#include "../common/global_flags.h"
+#ifdef TORCH_HIGHER_THAN_PTA6
+#include <torch_npu/csrc/framework/OpCommand.h>
+#else
+#include <torch_npu/csrc/aten/NPUNativeFunctions.h>
+#include <torch_npu/csrc/framework/utils/OpPreparation.h>
+#endif
+#include "../common/global_flags.h"
+#include "../common/metrics.h"
+#include "../framework/kv_cache/kv_cache.h"
+#include "../framework/model/causal_lm.h"
+#include "../framework/model/model_input_params.h"
+
+namespace xllm {
+
+bool AclGraph::capture(CausalLM* model,
+                       const ModelArgs& args,
+                       const runtime::Options& options,
+                       const torch::Tensor& tokens,
+                       const torch::Tensor& positions,
+                       const ModelInputParams& params,
+                       std::vector<KVCache>& kv_cache) {
+  // Save batch size for this graph instance
+  batch_size_ = params.num_sequences;
+
+  // Note: This implementation only supports decode phase where all sequences in
+  // batch have q_len=1 It does not support chunked_prefill, so
+  // num_decode_tokens equals batch_size
+  const int64_t num_decode_tokens = batch_size_;
+
+  // Create persistent tensors for this specific batch size
+  // These tensors will be reused across replay calls to avoid memory allocation
+  auto& tensor_options = model->options();
+
+  // Input tensors for decode tokens
+  flatten_tokens_ =
+      torch::zeros({num_decode_tokens},
+                   torch::dtype(torch::kInt).device(tensor_options.device()));
+  flatten_positions_ =
+      torch::zeros({num_decode_tokens},
+                   torch::dtype(torch::kInt).device(tensor_options.device()));
+  new_cache_slots_ =
+      torch::zeros({num_decode_tokens},
+                   torch::dtype(torch::kInt).device(tensor_options.device()));
+
+  // Sequence length tensors
+  q_seq_lens_ = torch::zeros(
+      {batch_size_}, torch::dtype(torch::kInt).device(tensor_options.device()));
+  kv_seq_lens_ = torch::zeros(
+      {batch_size_}, torch::dtype(torch::kInt).device(tensor_options.device()));
+
+  // Block table tensors with maximum possible size
+  const auto block_size = options.block_size();
+  const int64_t max_block_table_len =
+      (FLAGS_max_tokens_per_seq + block_size - 1) / block_size + 1;
+  block_tables_ =
+      torch::zeros({batch_size_, max_block_table_len},
+                   torch::dtype(torch::kInt).device(tensor_options.device()));
+
+  // Output tensor for hidden states
+  hidden_states_ =
+      torch::zeros({num_decode_tokens, args.hidden_size()},
+                   torch::dtype(torch::kFloat).device(tensor_options.device()));
+
+  torch::npu::synchronize();
+
+  // Begin graph capture using NPUGraph mempool for temporary tensor management
+  // Get current NPU stream from libtorch NPU API
+  aclrtStream stream =
+      c10_npu::getCurrentNPUStream(tensor_options.device().index()).stream();
+
+  // Create ModelInputParams using graph's own persistent buffers
+  ModelInputParams graph_params = params;
+  graph_params.kv_seq_lens = kv_seq_lens_;
+  graph_params.q_seq_lens = q_seq_lens_;
+  graph_params.new_cache_slots = new_cache_slots_;
+  graph_params.block_tables = block_tables_;
+
+  // Set graph_buffer if available in params
+  graph_params.graph_buffer = graph_buffer_;
+
+  // Copy input data to graph persistent buffers before capture
+  copy_data_to_graph_buffer(tokens, positions, params);
+
+  aclrtSynchronizeStream(stream);
+
+  // Use secondary stream for graph capture to avoid blocking main stream
+  bool need_restore_stream = false;
+  if (c10_npu::getCurrentNPUStream(tensor_options.device().index()) ==
+      c10_npu::getDefaultNPUStream(tensor_options.device().index())) {
+    auto secondary_stream =
+        c10_npu::getStreamFromPool(true, tensor_options.device().index());
+    c10_npu::setCurrentNPUStream(secondary_stream);
+    need_restore_stream = true;
+  }
+  std::cout << "capture begin, batch_size: " << batch_size_ << std::endl;
+  graph_.capture_begin();
+
+  // Execute forward pass - NPUGraph mempool manages temporary tensors
+  auto forward_result = model->forward(
+      flatten_tokens_, flatten_positions_, kv_cache, graph_params);
+
+  // Store result in persistent buffer owned by NPUGraph mempool
+  hidden_states_ = forward_result;
+  graph_.capture_end();
+  if (need_restore_stream) {
+    c10_npu::setCurrentNPUStream(
+        c10_npu::getDefaultNPUStream(tensor_options.device().index()));
+  }
+
+  // Synchronize and test replay to verify graph capture
+  aclrtSynchronizeStream(stream);
+
+  graph_.replay();
+  aclrtSynchronizeStream(stream);
+  return true;
+}
+
+torch::Tensor AclGraph::replay(const torch::Tensor& tokens,
+                               const torch::Tensor& positions,
+                               const ModelInputParams& params) {
+  const int64_t batch_size = params.num_sequences;
+  CHECK_EQ(batch_size, batch_size_) << "batch size mismatch";
+
+  std::cout << "replay tokens: " << tokens << std::endl;
+  std::cout << "replay positions: " << positions << std::endl;
+  std::cout << "replay params.q_seq_lens: " << params.q_seq_lens << std::endl;
+  std::cout << "replay params.kv_seq_lens: " << params.kv_seq_lens << std::endl;
+  std::cout << "replay params.new_cache_slots: " << params.new_cache_slots
+            << std::endl;
+  std::cout << "replay params.block_tables: " << params.block_tables
+            << std::endl;
+
+  // Copy new input data to graph persistent buffers
+  copy_data_to_graph_buffer(tokens, positions, params);
+
+  // Replay captured graph - NPUGraph mempool reuses temporary tensors
+  // Get current NPU stream from libtorch NPU API
+  std::cout << "replay prepare done." << std::endl;
+  aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+
+  graph_.replay();
+  aclError st = aclrtSynchronizeStream(stream);
+  CHECK_EQ(st, ACL_SUCCESS)
+      << "aclrtSynchronizeStream failed, error code: " << st;
+  std::cout << "replay execute done." << std::endl;
+  return hidden_states_;
+}
+
+AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
+                                           const ModelArgs& args,
+                                           const torch::Device& device,
+                                           const runtime::Options& options)
+    : model_(model), args_(args), device_(device), options_(options) {
+  // No pre-initialization needed, graphs will be created lazily in run() method
+}
+
+ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
+  // Prepare inputs for workers
+  // No need to adjust batch size since graphs are created lazily
+  return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+}
+
+// Main execution method with graph optimization for decode phase
+// tokens: [num_decode_tokens]
+// positions: [num_decode_tokens] token pos in the sequence
+// returns: [num_decode_tokens, hidden_size]
+torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
+                                        const torch::Tensor& positions,
+                                        std::vector<KVCache>& kv_caches,
+                                        const ModelInputParams& params) {
+  // Identify decode phase at the beginning of the function
+  const bool in_decoding_phase = !params.empty_kv_cache;
+
+  // If not in decode phase, use eager mode directly without acl graph
+  if (!in_decoding_phase) {
+    COUNTER_INC(num_model_execution_total_eager);
+    return model_->forward(tokens, positions, kv_caches, params);
+  }
+
+  // Only use acl graph in decode phase for performance optimization
+  const uint32_t batch_size = params.num_sequences;
+
+  // Check if captured graph exists for this batch size
+  auto it = graphs_.find(batch_size);
+  if (it != graphs_.end()) {
+    // Validate sequence length is supported by captured graph
+    const auto max_seq_len = FLAGS_max_tokens_per_seq > 0
+                                 ? FLAGS_max_tokens_per_seq
+                                 : args_.max_position_embeddings();
+    const bool seq_len_supported = params.kv_max_seq_len <= max_seq_len;
+    // Each sequence has the same number of decoding tokens
+    const uint32_t n_tokens = tokens.size(/*dim=*/0);
+    const bool same_num_decoding_tokens =
+        params.q_max_seq_len == options_.num_decoding_tokens() &&
+        n_tokens == batch_size * options_.num_decoding_tokens();
+
+    // Replay the graph if all conditions are met
+    if (seq_len_supported && same_num_decoding_tokens) {
+      // TODO: Add ACL graph metrics
+      // COUNTER_INC(num_acl_graph_replayed_total);
+      if (params.graph_buffer.defined()) {
+        LOG(INFO) << "Replaying graph with graph_buffer size: "
+                  << params.graph_buffer.numel() << " elements";
+      } else {
+        LOG(INFO) << "Replaying graph without graph_buffer";
+      }
+      return it->second->replay(tokens, positions, params);
+    }
+  } else {
+    // Graph doesn't exist for this batch size, try to create it lazily
+    const auto max_seq_len = FLAGS_max_tokens_per_seq > 0
+                                 ? FLAGS_max_tokens_per_seq
+                                 : args_.max_position_embeddings();
+    const bool seq_len_supported = params.kv_max_seq_len <= max_seq_len;
+    const uint32_t n_tokens = tokens.size(/*dim=*/0);
+    const bool same_num_decoding_tokens =
+        params.q_max_seq_len == options_.num_decoding_tokens() &&
+        n_tokens == batch_size * options_.num_decoding_tokens();
+
+    // Only create graph if conditions are suitable for graph capture
+    if (seq_len_supported && same_num_decoding_tokens) {
+      // Create and capture graph for this batch size with NPUGraph mempool
+      auto graph = std::make_unique<AclGraph>();
+      bool capture_success = graph->capture(
+          model_, args_, options_, tokens, positions, params, kv_caches);
+
+      if (capture_success) {
+        LOG(INFO) << "Lazy capturing ACL graph for batch size: " << batch_size
+                  << " done";
+
+        // Save the graph for future reuse
+        graphs_[batch_size] = std::move(graph);
+
+        // Return the output from capture (no need to replay since capture
+        // already executed)
+        return graphs_[batch_size]->get_hidden_states();
+      } else {
+        LOG(ERROR) << "Failed to capture ACL graph for batch size: "
+                   << batch_size;
+        // Fallback to eager mode if capture fails
+        COUNTER_INC(num_model_execution_total_eager);
+        return model_->forward(tokens, positions, kv_caches, params);
+      }
+    }
+  }
+
+  // If in decode phase but cannot use acl graph, fallback to eager mode
+  COUNTER_INC(num_model_execution_total_eager);
+  return model_->forward(tokens, positions, kv_caches, params);
+}
+
+void AclGraph::copy_data_to_graph_buffer(const torch::Tensor& tokens,
+                                         const torch::Tensor& positions,
+                                         const ModelInputParams& params) {
+  // Copy data from input parameters to persistent graph tensors
+  // This avoids memory allocation during replay by reusing pre-allocated
+  // buffers
+  flatten_tokens_.copy_(tokens, /*non_blocking=*/true);
+  flatten_positions_.copy_(positions, /*non_blocking=*/true);
+  q_seq_lens_.copy_(params.q_seq_lens, /*non_blocking=*/true);
+  kv_seq_lens_.copy_(params.kv_seq_lens, /*non_blocking=*/true);
+  new_cache_slots_.copy_(params.new_cache_slots, /*non_blocking=*/true);
+
+  // Copy block table data with left alignment (2D matrix view)
+  // batch_size must be the same, only block_table_len may be smaller than
+  // buffer
+  const int64_t actual_block_table_len = params.block_tables.size(1);
+
+  // Copy data to the left-aligned portion of the buffer
+  block_tables_.slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len)
+      .copy_(params.block_tables, /*non_blocking=*/true);
+}
+
+void AclGraph::print_graph_tensors() const {
+  std::cout << "graph flatten_tokens_: " << flatten_tokens_ << std::endl;
+  std::cout << "graph flatten_positions_: " << flatten_positions_ << std::endl;
+  std::cout << "graph new_cache_slots_: " << new_cache_slots_ << std::endl;
+  std::cout << "graph q_seq_lens_: " << q_seq_lens_ << std::endl;
+  std::cout << "graph kv_seq_lens_: " << kv_seq_lens_ << std::endl;
+  std::cout << "graph block_tables_: " << block_tables_ << std::endl;
+  std::cout << "graph hidden_states_: " << hidden_states_ << std::endl;
+  std::cout << "graph graph_buffer_ defined: " << graph_buffer_.defined()
+            << std::endl;
+  if (graph_buffer_.defined()) {
+    std::cout << "graph graph_buffer_ size: " << graph_buffer_.numel()
+              << std::endl;
+  }
+}
+
+}  // namespace xllm

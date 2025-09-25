@@ -18,6 +18,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <iostream>
+
 #include "models.h"
 
 namespace xllm {
@@ -33,7 +35,8 @@ void ModelRegistry::register_causallm_factory(const std::string& name,
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].causal_lm_factory != nullptr) {
-    LOG(WARNING) << "causal lm factory for " << name << "already registered.";
+    std::cerr << "WARNING: causal lm factory for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].causal_lm_factory = factory;
   }
@@ -44,7 +47,8 @@ void ModelRegistry::register_causalvlm_factory(const std::string& name,
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].causal_vlm_factory != nullptr) {
-    LOG(WARNING) << "causal vlm factory for " << name << "already registered.";
+    std::cerr << "WARNING: causal vlm factory for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].causal_vlm_factory = factory;
   }
@@ -55,8 +59,8 @@ void ModelRegistry::register_embeddinglm_factory(const std::string& name,
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].embedding_lm_factory != nullptr) {
-    LOG(WARNING) << "embedding lm factory for " << name
-                 << "already registered.";
+    std::cerr << "WARNING: embedding lm factory for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].embedding_lm_factory = factory;
   }
@@ -67,7 +71,8 @@ void ModelRegistry::register_dit_model_factory(const std::string& name,
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].dit_model_factory != nullptr) {
-    LOG(WARNING) << "DiT model factory for " << name << "already registered.";
+    std::cerr << "WARNING: DiT model factory for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].dit_model_factory = factory;
   }
@@ -79,8 +84,8 @@ void ModelRegistry::register_input_processor_factory(
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].input_processor_factory != nullptr) {
-    LOG(WARNING) << "input processor factory for " << name
-                 << "already registered.";
+    std::cerr << "WARNING: input processor factory for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].input_processor_factory = factory;
   }
@@ -92,8 +97,8 @@ void ModelRegistry::register_image_processor_factory(
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].image_processor_factory != nullptr) {
-    LOG(WARNING) << "image processor factory for " << name
-                 << "already registered.";
+    std::cerr << "WARNING: image processor factory for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].image_processor_factory = factory;
   }
@@ -104,7 +109,8 @@ void ModelRegistry::register_model_args_loader(const std::string& name,
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].model_args_loader != nullptr) {
-    LOG(WARNING) << "model args loader for " << name << " already registered.";
+    std::cerr << "WARNING: model args loader for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].model_args_loader = loader;
   }
@@ -115,7 +121,8 @@ void ModelRegistry::register_quant_args_loader(const std::string& name,
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].quant_args_loader != nullptr) {
-    LOG(WARNING) << "quant args loader for " << name << "already registered.";
+    std::cerr << "WARNING: quant args loader for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].quant_args_loader = loader;
   }
@@ -126,8 +133,8 @@ void ModelRegistry::register_tokenizer_args_loader(const std::string& name,
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].tokenizer_args_loader != nullptr) {
-    LOG(WARNING) << "tokenizer args loader for " << name
-                 << "already registered.";
+    std::cerr << "WARNING: tokenizer args loader for " << name
+              << " already registered." << std::endl;
   } else {
     instance->model_registry_[name].tokenizer_args_loader = loader;
   }

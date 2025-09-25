@@ -85,6 +85,9 @@ struct ModelInputParams {
     params.src_block_indices = safe_to(src_block_indices, device, true);
     params.dst_block_indices = safe_to(dst_block_indices, device, true);
     params.cum_sum = safe_to(cum_sum, device, true);
+
+    // Copy graph_buffer to device
+    params.graph_buffer = safe_to(graph_buffer, device, true);
     return params;
   }
 
@@ -160,6 +163,10 @@ struct ModelInputParams {
 
   DpEpPaddingData dp_ep_padding_data;
   torch::Tensor expert_load_data;
+
+  // Graph execution buffer for temporary tensor storage
+  // Used by ACL Graph Executor to avoid repeated memory allocation
+  torch::Tensor graph_buffer;
 };
 
 }  // namespace xllm

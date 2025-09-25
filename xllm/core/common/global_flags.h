@@ -85,6 +85,10 @@ DECLARE_string(rank_tablefile);
 
 DECLARE_bool(enable_mla);
 
+DECLARE_bool(enable_acl_graph);
+
+DECLARE_int32(max_tokens_per_seq);
+
 DECLARE_bool(enable_chunked_prefill);
 
 DECLARE_string(master_node_addr);
