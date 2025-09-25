@@ -28,11 +28,11 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
-#include "dit_linear.h"
 #include "models/model_registry.h"
 #include "processors/clip_image_processor.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
+#include "xllm/core/layers/common/add_matmul.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
@@ -220,16 +220,15 @@ class CLIPMLPImpl : public torch::nn::Module {
     act_ = register_module("act", torch::nn::Functional(quick_gelu));
 
     fc1_ = register_module("fc1",
-                           DiTLinear(model_args.mm_hidden_size(),
-                                     model_args.mm_intermediate_size(),
-                                     true));
+                           layer::AddMatmul(model_args.mm_hidden_size(),
+                                            model_args.mm_intermediate_size(),
+                                            /*with_bias=*/true,
+                                            options));
     fc2_ = register_module("fc2",
-                           DiTLinear(model_args.mm_intermediate_size(),
-                                     model_args.mm_hidden_size(),
-                                     true));
-
-    fc1_->to(options);
-    fc2_->to(options);
+                           layer::AddMatmul(model_args.mm_intermediate_size(),
+                                            model_args.mm_hidden_size(),
+                                            /*with_bias=*/true,
+                                            options));
   }
 
   torch::Tensor forward(const torch::Tensor& hidden_states) {
@@ -238,32 +237,18 @@ class CLIPMLPImpl : public torch::nn::Module {
 
   void load_state_dict(const StateDict& state_dict) {
     fc1_->load_state_dict(state_dict.get_dict_with_prefix("fc1."));
-    fc1_weight_loaded_ = true;
-    fc1_bias_loaded_ = true;
     fc2_->load_state_dict(state_dict.get_dict_with_prefix("fc2."));
-    fc2_weight_loaded_ = true;
-    fc2_bias_loaded_ = true;
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    CHECK(fc1_weight_loaded_)
-        << "weight is not loaded for " << prefix + "fc1.weight";
-    CHECK(fc1_bias_loaded_)
-        << "weight is not loaded for " << prefix + "fc1.bias";
-    CHECK(fc2_weight_loaded_)
-        << "weight is not loaded for " << prefix + "fc2.weight";
-    CHECK(fc2_bias_loaded_)
-        << "weight is not loaded for " << prefix + "fc2.bias";
+    fc1_->verify_loaded_weights(prefix + "fc1.");
+    fc2_->verify_loaded_weights(prefix + "fc2.");
   }
 
  private:
   torch::nn::Functional act_ = nullptr;
-  DiTLinear fc1_ = nullptr;
-  DiTLinear fc2_ = nullptr;
-  bool fc1_weight_loaded_ = false;
-  bool fc1_bias_loaded_ = false;
-  bool fc2_weight_loaded_ = false;
-  bool fc2_bias_loaded_ = false;
+  layer::AddMatmul fc1_ = nullptr;
+  layer::AddMatmul fc2_ = nullptr;
 };
 TORCH_MODULE(CLIPMLP);
 
@@ -285,24 +270,26 @@ class CLIPAttentionImpl : public torch::nn::Module {
                   n_local_heads * model_args.mm_head_dim()};
 
     scale_ = 1.0f / std::sqrt(static_cast<float>(model_args.mm_head_dim()));
-    q_proj_ = register_module(
-        "q_proj",
-        DiTLinear(model_args.mm_hidden_size(), num_heads_ * head_dim_, true));
-    k_proj_ = register_module(
-        "k_proj",
-        DiTLinear(model_args.mm_hidden_size(), num_heads_ * head_dim_, true));
-    v_proj_ = register_module(
-        "v_proj",
-        DiTLinear(model_args.mm_hidden_size(), num_heads_ * head_dim_, true));
-    o_proj_ = register_module(
-        "o_proj",
-        DiTLinear(
-            model_args.mm_hidden_size(), model_args.mm_hidden_size(), true));
-
-    q_proj_->to(options);
-    k_proj_->to(options);
-    v_proj_->to(options);
-    o_proj_->to(options);
+    q_proj_ = register_module("q_proj",
+                              layer::AddMatmul(model_args.mm_hidden_size(),
+                                               num_heads_ * head_dim_,
+                                               /*with_bias=*/true,
+                                               options));
+    k_proj_ = register_module("k_proj",
+                              layer::AddMatmul(model_args.mm_hidden_size(),
+                                               num_heads_ * head_dim_,
+                                               /*with_bias=*/true,
+                                               options));
+    v_proj_ = register_module("v_proj",
+                              layer::AddMatmul(model_args.mm_hidden_size(),
+                                               num_heads_ * head_dim_,
+                                               /*with_bias=*/true,
+                                               options));
+    o_proj_ = register_module("o_proj",
+                              layer::AddMatmul(model_args.mm_hidden_size(),
+                                               model_args.mm_hidden_size(),
+                                               /*with_bias=*/true,
+                                               options));
   }
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
@@ -322,55 +309,30 @@ class CLIPAttentionImpl : public torch::nn::Module {
     auto src_len = key_states.size(1);
     auto attn_weights =
         torch::matmul(query_states, key_states.transpose(-1, -2)) * scale_;
+
     if (causal_mask.defined()) attn_weights = attn_weights + causal_mask;
+
     attn_weights = torch::softmax(attn_weights, -1);
     auto attn_output = torch::matmul(attn_weights, value_states);
 
-    DCHECK_EQ(attn_output.sizes(),
-              torch::IntArrayRef({bsz * num_heads_, tgt_len, head_dim_}));
-    attn_output =
-        attn_output
-            .view(torch::IntArrayRef({bsz, num_heads_, tgt_len, head_dim_}))
-            .transpose(1, 2)
-            .contiguous();
-    attn_output =
-        attn_output.view(torch::IntArrayRef({bsz, tgt_len, embed_dim_}));
+    attn_output = attn_output.transpose(1, 2).contiguous().view(
+        {bsz, tgt_len, embed_dim_});
 
     return o_proj_(attn_output);
   }
 
   void load_state_dict(const StateDict& state_dict) {
     q_proj_->load_state_dict(state_dict.get_dict_with_prefix("q_proj."));
-    q_proj_weight_loaded_ = true;
-    q_proj_bias_loaded_ = true;
     k_proj_->load_state_dict(state_dict.get_dict_with_prefix("k_proj."));
-    k_proj_weight_loaded_ = true;
-    k_proj_bias_loaded_ = true;
     v_proj_->load_state_dict(state_dict.get_dict_with_prefix("v_proj."));
-    v_proj_weight_loaded_ = true;
-    v_proj_bias_loaded_ = true;
     o_proj_->load_state_dict(state_dict.get_dict_with_prefix("out_proj."));
-    o_proj_weight_loaded_ = true;
-    o_proj_bias_loaded_ = true;
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    CHECK(q_proj_weight_loaded_)
-        << "weight is not loaded for " << prefix + "q_proj.weight";
-    CHECK(q_proj_bias_loaded_)
-        << "weight is not loaded for " << prefix + "q_proj.bias";
-    CHECK(k_proj_weight_loaded_)
-        << "weight is not loaded for " << prefix + "k_proj.weight";
-    CHECK(k_proj_bias_loaded_)
-        << "weight is not loaded for " << prefix + "k_proj.bias";
-    CHECK(v_proj_weight_loaded_)
-        << "weight is not loaded for " << prefix + "v_proj.weight";
-    CHECK(v_proj_bias_loaded_)
-        << "weight is not loaded for " << prefix + "v_proj.bias";
-    CHECK(o_proj_weight_loaded_)
-        << "weight is not loaded for " << prefix + "out_proj.weight";
-    CHECK(o_proj_bias_loaded_)
-        << "weight is not loaded for " << prefix + "out_proj.bias";
+    q_proj_->verify_loaded_weights(prefix + "q_proj.");
+    k_proj_->verify_loaded_weights(prefix + "k_proj.");
+    v_proj_->verify_loaded_weights(prefix + "v_proj.");
+    o_proj_->verify_loaded_weights(prefix + "out_proj.");
   }
 
  private:
@@ -387,19 +349,10 @@ class CLIPAttentionImpl : public torch::nn::Module {
   float scale_;
   std::vector<int64_t> qkv_sizes_;
 
-  DiTLinear o_proj_ = nullptr;
-  DiTLinear q_proj_ = nullptr;
-  DiTLinear k_proj_ = nullptr;
-  DiTLinear v_proj_ = nullptr;
-
-  bool q_proj_weight_loaded_ = false;
-  bool q_proj_bias_loaded_ = false;
-  bool k_proj_weight_loaded_ = false;
-  bool k_proj_bias_loaded_ = false;
-  bool v_proj_weight_loaded_ = false;
-  bool v_proj_bias_loaded_ = false;
-  bool o_proj_weight_loaded_ = false;
-  bool o_proj_bias_loaded_ = false;
+  layer::AddMatmul o_proj_ = nullptr;
+  layer::AddMatmul q_proj_ = nullptr;
+  layer::AddMatmul k_proj_ = nullptr;
+  layer::AddMatmul v_proj_ = nullptr;
 };
 TORCH_MODULE(CLIPAttention);
 
