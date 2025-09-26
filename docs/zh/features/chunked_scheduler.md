@@ -7,10 +7,10 @@ xLLM支持chunked prefill调度策略。Chunked prefill是一种优化大语言�
 ## 使用方式
 上述策略已在xLLM实现，并向外暴露gflag参数，控制功能的开关。
 
-- 开启chunked prefill，并设置chunked_size。
-```
+- 开启chunked prefill，并设置chunked_size，如果不手动设置chunked size，则默认等于max_tokens_per_batch。
+```bash
 --enable_chunked_prefill=true
---max_tokens_per_chunk_for_prefill=256
+--max_tokens_per_chunk_for_prefill=20480 # optional
 ```
 
 ## 性能效果

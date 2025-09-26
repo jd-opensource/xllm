@@ -97,7 +97,7 @@ struct Options {
   PROPERTY(int32_t, max_seqs_per_batch) = 256;
 
   // the max tokens per chunk for request in prefill stage.
-  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 512;
+  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill);
 
   // for master service, master server addr
   PROPERTY(std::optional<std::string>, xservice_addr);

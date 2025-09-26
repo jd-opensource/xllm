@@ -50,7 +50,7 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(int32_t, max_seqs_per_batch) = 256;
 
     // the max tokens per chunk for request in prefill stage.
-    PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 512;
+    PROPERTY(int32_t, max_tokens_per_chunk_for_prefill);
 
     // the number of speculative tokens per step
     PROPERTY(int32_t, num_speculative_tokens) = 0;

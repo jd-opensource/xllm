@@ -61,13 +61,13 @@ class Options {
   PROPERTY(bool, enable_prefix_cache) = true;
 
   // max tokens num per batch
-  PROPERTY(int32_t, max_tokens_per_batch) = 20000;
+  PROPERTY(int32_t, max_tokens_per_batch) = 20480;
 
   // max sequences num per batch
   PROPERTY(int32_t, max_seqs_per_batch) = 256;
 
   // the max tokens per chunk for request in prefill stage.
-  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill) = 512;
+  PROPERTY(int32_t, max_tokens_per_chunk_for_prefill);
 
   // sps tokens
   PROPERTY(int32_t, num_speculative_tokens) = 0;

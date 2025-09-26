@@ -122,7 +122,7 @@ DEFINE_double(prefill_scheduling_memory_usage_threshold,
 DEFINE_bool(enable_chunked_prefill, true, "Whether to enable chunked prefill.");
 
 DEFINE_int32(max_tokens_per_chunk_for_prefill,
-             512,
+             -1,
              "Max number of token per chunk in prefill stage.");
 
 DEFINE_int32(chunked_match_frequency,

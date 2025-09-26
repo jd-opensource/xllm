@@ -96,6 +96,12 @@ int run() {
     FLAGS_enable_chunked_prefill = false;
   }
 
+  // if max_tokens_per_chunk_for_prefill is not set, set its value to
+  // max_tokens_per_batch
+  if (FLAGS_max_tokens_per_chunk_for_prefill < 0) {
+    FLAGS_max_tokens_per_chunk_for_prefill = FLAGS_max_tokens_per_batch;
+  }
+
   // Create Master
   Options options;
   options.model_path(FLAGS_model)
