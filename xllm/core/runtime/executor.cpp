@@ -35,10 +35,10 @@ ForwardInput Executor::prepare_inputs(Batch& batch) {
   return impl_->prepare_inputs(batch);
 }
 
-torch::Tensor Executor::forward(const torch::Tensor& tokens,
-                                const torch::Tensor& positions,
+torch::Tensor Executor::forward(const std::vector<torch::Tensor>& tokens,
+                                const std::vector<torch::Tensor>& positions,
                                 std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& params) {
+                                const std::vector<ModelInputParams>& params) {
   COUNTER_INC(num_model_execution_total_eager);
   return impl_->run(tokens, positions, kv_caches, params);
 }

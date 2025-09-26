@@ -55,11 +55,6 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
 
     layers_.reserve(model_args.n_layers());
 
-    // register submodules
-    // embed_tokens_ = register_module(
-    //     "embed_tokens",
-    //     layer::WordEmbedding(context));
-
     // rotary positional embedding
     auto inv_freq = rotary::apply_deepseek_yarn_rope_scaling(
         model_args.rope_scaling_factor(),
@@ -70,13 +65,6 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
         model_args.rope_theta(),
         model_args.rope_scaling_original_max_position_embeddings());
     float sm_scale = 1.0f;
-    pos_emb_ = create_rotary_embedding(model_args,
-                                       model_args.rotary_dim(),
-                                       inv_freq,
-                                       /*interleaved=*/false,
-                                       sm_scale,
-                                       options);
-    atb_pos_emb_ = layer::PosEmbedding(context);
     max_seq_len_ = model_args.max_position_embeddings();
     attn_mask_ = layer::AttentionMask(
         options.device(), options.dtype().toScalarType(), /*mask_value=*/1);
@@ -86,8 +74,16 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
       layers_.push_back(block);
       blocks_->push_back(block);
     }
-
-    eh_proj_ = register_module("eh_proj", layer::ColumnParallelLinear(context));
+    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+      pos_embs_.push_back(create_rotary_embedding(model_args,
+                                                  model_args.rotary_dim(),
+                                                  inv_freq,
+                                                  /*interleaved=*/false,
+                                                  sm_scale,
+                                                  options));
+      atb_pos_embs_.push_back(layer::PosEmbedding(context));
+      eh_projs_.push_back(layer::ColumnParallelLinear(context));
+    }
     enorm_ = register_module("enorm", layer::RmsNorm(context));
     hnorm_ = register_module("hnorm", layer::RmsNorm(context));
     final_norm_ = register_module("final_norm", layer::RmsNorm(context));
@@ -107,69 +103,91 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  torch::Tensor forward(torch::Tensor tokens,
-                        torch::Tensor positions,
+  torch::Tensor forward(std::vector<torch::Tensor> tokens,
+                        std::vector<torch::Tensor> positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    if (dp_size_ > 1) {
-      if (tokens.sizes() == 0) {
-        tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
-        positions = torch::tensor({0}).to(torch::kInt32).to(device_);
+                        const std::vector<ModelInputParams>& input_params) {
+    auto micro_batch_num = tokens.size();
+    std::vector<torch::Tensor> hs;
+    hs.reserve(micro_batch_num);
+    std::vector<torch::Tensor> cos_poss;
+    cos_poss.reserve(micro_batch_num);
+    std::vector<torch::Tensor> sin_poss;
+    sin_poss.reserve(micro_batch_num);
+    std::vector<torch::Tensor> attn_masks;
+    attn_masks.reserve(micro_batch_num);
+
+    for (auto i = 0; i < micro_batch_num; ++i) {
+      if (dp_size_ > 1) {
+        if (tokens[i].sizes() == 0) {
+          tokens[i] = torch::tensor({1}).to(torch::kInt32).to(device_);
+          positions[i] = torch::tensor({0}).to(torch::kInt32).to(device_);
+        }
       }
+
+      hs.push_back(std::move(embed_tokens_[i](tokens[i], 0)));
+      torch::Tensor enorm = enorm_(hs[i], 0);
+      const auto& res = input_params[i].mm_data.get<torch::Tensor>("embedding");
+      if (res) {
+        hs[i] = res.value();
+      } else {
+        LOG(WARNING) << "hnorm use embedding from tokens.";
+      }
+
+      torch::Tensor hnorm = hnorm_(hs[i], 0);
+      CHECK_EQ(enorm.dim(), hnorm.dim());
+      CHECK_EQ(enorm.size(0), hnorm.size(0));
+      hs[i] = torch::cat({enorm, hnorm}, /*dim=*/-1);
+      hs[i] = eh_projs_[i](hs[i], 0);
+
+      auto cos_sin =
+          atb_pos_embs_[i](pos_embs_[i]->get_cos_sin_cache(), positions[i], 0);
+      auto cos_sin_chunks = cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
+      auto cos_pos = cos_sin_chunks[0].contiguous();
+      auto sin_pos = cos_sin_chunks[1].contiguous();
+
+      auto attn_mask = attn_mask_.get_attn_mask(
+          128, cos_pos.dtype().toScalarType(), cos_pos.device());
+      cos_poss.push_back(std::move(cos_pos));
+      sin_poss.push_back(std::move(sin_pos));
+      attn_masks.push_back(std::move(attn_mask));
     }
-
-    torch::Tensor h = embed_tokens_(tokens, 0);
-    torch::Tensor enorm = enorm_(h, 0);
-    const auto& res = input_params.mm_data.get<torch::Tensor>("embedding");
-    if (res) {
-      h = res.value();
-    } else {
-      LOG(WARNING) << "hnorm use embedding from tokens.";
-    }
-
-    torch::Tensor hnorm = hnorm_(h, 0);
-    CHECK_EQ(enorm.dim(), hnorm.dim());
-    CHECK_EQ(enorm.size(0), hnorm.size(0));
-    h = torch::cat({enorm, hnorm}, /*dim=*/-1);
-    h = eh_proj_(h, 0);
-
-    auto cos_sin = atb_pos_emb_(pos_emb_->get_cos_sin_cache(), positions, 0);
-    auto cos_sin_chunks = cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
-    auto cos_pos = cos_sin_chunks[0].contiguous();
-    auto sin_pos = cos_sin_chunks[1].contiguous();
-
-    auto attn_mask = attn_mask_.get_attn_mask(
-        128, cos_pos.dtype().toScalarType(), cos_pos.device());
 
     for (size_t i = 0; i < layers_.size(); i++) {
-      aclrtEvent* event = nullptr;
-      std::atomic<bool>* event_flag = nullptr;
-      if (input_params.layer_synchronizer != nullptr) {
-        event = input_params.layer_synchronizer->get_event(i);
-        event_flag = input_params.layer_synchronizer->get_event_flag(i);
+      std::vector<aclrtEvent*> events(micro_batch_num, nullptr);
+      std::vector<std::atomic<bool>*> event_flags(micro_batch_num, nullptr);
+      for (auto j = 0; j < micro_batch_num; ++j) {
+        if (input_params[j].layer_synchronizer != nullptr) {
+          events[j] = input_params[j].layer_synchronizer->get_event(i);
+          event_flags[j] =
+              input_params[j].layer_synchronizer->get_event_flag(i);
+        }
       }
       auto& layer = layers_[i];
-      layer(h,
-            cos_pos,
-            sin_pos,
-            attn_mask,
+      layer(hs,
+            cos_poss,
+            sin_poss,
+            attn_masks,
             kv_caches[i],
             input_params,
-            event,
-            event_flag);
+            events,
+            event_flags);
     }
-    return final_norm_(h, 0);
+    auto cancated_h = torch::cat(hs, 0);
+    return final_norm_(cancated_h, 0);
   }
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) {
-    // embed_tokens_->load_state_dict(state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
-    eh_proj_->load_state_dict(state_dict.get_dict_with_prefix("eh_proj."));
+    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+      eh_projs_[i]->load_state_dict(
+          state_dict.get_dict_with_prefix("eh_proj."));
+    }
     enorm_->load_state_dict(state_dict.get_dict_with_prefix("enorm."));
     hnorm_->load_state_dict(state_dict.get_dict_with_prefix("hnorm."));
     final_norm_->load_state_dict(
@@ -177,31 +195,35 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    // embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
-    eh_proj_->verify_loaded_weights(prefix + "eh_proj.");
+    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+      eh_projs_[i]->verify_loaded_weights(prefix + "eh_proj.");
+    }
     enorm_->verify_loaded_weights(prefix + "enorm.");
     hnorm_->verify_loaded_weights(prefix + "hnorm.");
     final_norm_->verify_loaded_weights(prefix + "shared_head.norm.");
   }
 
   void merge_loaded_weights() {
-    // embed_tokens_->merge_loaded_weights();
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
-    eh_proj_->merge_loaded_weights();
+    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+      eh_projs_[i]->merge_loaded_weights();
+    }
     enorm_->merge_loaded_weights();
     hnorm_->merge_loaded_weights();
     final_norm_->merge_loaded_weights();
   }
 
-  layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
+  std::vector<layer::WordEmbedding> get_word_embedding() {
+    return embed_tokens_;
+  }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
+  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     embed_tokens_ = word_embedding;
   }
 
@@ -216,11 +238,11 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
   nlohmann::json mapping_data_;
   int32_t num_experts_per_tok_;
   at::Device device_;
-  layer::WordEmbedding embed_tokens_{nullptr};
-  std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
-  layer::PosEmbedding atb_pos_emb_{nullptr};
+  std::vector<layer::WordEmbedding> embed_tokens_;
+  std::vector<std::shared_ptr<RotaryEmbedding>> pos_embs_;
+  std::vector<layer::PosEmbedding> atb_pos_embs_;
   layer::AttentionMask attn_mask_;
-  layer::ColumnParallelLinear eh_proj_{nullptr};
+  std::vector<layer::ColumnParallelLinear> eh_projs_;
   layer::RmsNorm enorm_{nullptr};
   layer::RmsNorm hnorm_{nullptr};
   layer::RmsNorm final_norm_{nullptr};
@@ -238,10 +260,10 @@ class DeepseekV2MtpForCausalLMImpl : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
+  torch::Tensor forward(const std::vector<torch::Tensor>& tokens,
+                        const std::vector<torch::Tensor>& positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+                        const std::vector<ModelInputParams>& input_params) {
     return model_(tokens, positions, kv_caches, input_params);
   }
 
@@ -278,11 +300,11 @@ class DeepseekV2MtpForCausalLMImpl : public torch::nn::Module {
 
   void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
 
-  layer::WordEmbedding get_word_embedding() {
+  std::vector<layer::WordEmbedding> get_word_embedding() {
     return model_->get_word_embedding();
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
+  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
 

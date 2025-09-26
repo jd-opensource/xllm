@@ -975,12 +975,12 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     }
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
+  torch::Tensor forward(const std::vector<torch::Tensor>& tokens,
+                        const std::vector<torch::Tensor>& positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+                        const std::vector<ModelInputParams>& input_params) {
     torch::NoGradGuard no_grad;
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params[0].mm_data;
 
     torch::Tensor image_embeds;
     if (const auto& res = mm_data.get<torch::Tensor>("image_embeds"))
@@ -995,10 +995,11 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     torch::Tensor image_embedding;
     std::optional<MiniCPMVImageInputs> image_inputs;
     if (image_embeds.defined()) {
-      image_inputs = generate_image_inputs({}, tokens, image_embeds, tgt_sizes);
+      image_inputs =
+          generate_image_inputs({}, tokens[0], image_embeds, tgt_sizes);
     } else if (pixel_values.size() > 0) {
       image_inputs = generate_image_inputs(
-          pixel_values, tokens, torch::Tensor(), tgt_sizes);
+          pixel_values, tokens[0], torch::Tensor(), tgt_sizes);
     }
     image_embedding = get_vision_embedding(image_inputs);
 
@@ -1010,8 +1011,8 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
       image_embedding = mlp_(image_embedding);
     }
 
-    input_params.input_embedding =
-        merge_text_vision_embeddings(tokens, image_inputs, image_embedding);
+    input_params[0].input_embedding =
+        merge_text_vision_embeddings(tokens[0], image_inputs, image_embedding);
 
     return language_model_(tokens, positions, kv_caches, input_params);
   }
@@ -1253,11 +1254,11 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
 
   void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
 
-  layer::WordEmbedding get_word_embedding() {
+  std::vector<layer::WordEmbedding> get_word_embedding() {
     return language_model_->get_word_embedding();
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
+  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     language_model_->set_word_embedding(word_embedding);
   }
 

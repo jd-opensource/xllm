@@ -122,7 +122,7 @@ class Batch {
   std::vector<MMData> mm_data_vec_;
 
   // all sequences in this batch are in prefill stage
-  bool all_seqs_in_prefill_ = true;
+  bool all_seqs_in_prefill_ = false;
 };
 
 }  // namespace xllm
