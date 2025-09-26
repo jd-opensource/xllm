@@ -74,7 +74,9 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
   model_executor_ = std::make_unique<Executor>(
       model_.get(), context.get_model_args(), device_, options_);
 
-  eplb_executor_ = std::make_unique<EplbExecutor>(model_.get());
+  if (FLAGS_enable_eplb) {
+    eplb_executor_ = std::make_unique<EplbExecutor>(model_.get());
+  }
   return true;
 }
 
