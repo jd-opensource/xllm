@@ -40,10 +40,10 @@ class NpuExecutorImpl : public ExecutorImpl {
 
   ForwardInput prepare_inputs(Batch& batch) override;
 
-  torch::Tensor run(const torch::Tensor& tokens,
-                    const torch::Tensor& positions,
+  torch::Tensor run(const std::vector<torch::Tensor>& tokens,
+                    const std::vector<torch::Tensor>& positions,
                     std::vector<KVCache>& kv_caches,
-                    const ModelInputParams& params) override;
+                    const std::vector<ModelInputParams>& params) override;
 
  private:
   // not own

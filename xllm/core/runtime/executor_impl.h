@@ -35,10 +35,10 @@ class ExecutorImpl {
 
   virtual ForwardInput prepare_inputs(Batch& batch) = 0;
 
-  virtual torch::Tensor run(const torch::Tensor& tokens,
-                            const torch::Tensor& positions,
+  virtual torch::Tensor run(const std::vector<torch::Tensor>& tokens,
+                            const std::vector<torch::Tensor>& positions,
                             std::vector<KVCache>& kv_caches,
-                            const ModelInputParams& params) = 0;
+                            const std::vector<ModelInputParams>& params) = 0;
 };
 
 }  // namespace xllm

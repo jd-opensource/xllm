@@ -209,10 +209,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     norm_->merge_loaded_weights();
   }
 
-  layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
+  std::vector<layer::WordEmbedding> get_word_embedding() {
+    return {embed_tokens_};
+  }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    embed_tokens_ = word_embedding;
+  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+    embed_tokens_ = word_embedding[0];
   }
 
  private:
@@ -246,11 +248,11 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
+  torch::Tensor forward(const std::vector<torch::Tensor>& tokens,
+                        const std::vector<torch::Tensor>& positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    return model_(tokens, positions, kv_caches, input_params);
+                        const std::vector<ModelInputParams>& input_params) {
+    return model_(tokens[0], positions[0], kv_caches, input_params[0]);
   }
 
   // hidden_states: [num_tokens, hidden_size]
@@ -287,11 +289,11 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
 
   void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
 
-  layer::WordEmbedding get_word_embedding() {
+  std::vector<layer::WordEmbedding> get_word_embedding() {
     return model_->get_word_embedding();
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
+  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
 

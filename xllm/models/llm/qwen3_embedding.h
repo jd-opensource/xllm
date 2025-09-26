@@ -43,10 +43,11 @@ class EmbeddingLMImpl<xllm::QWen3ForEmbedding> : public EmbeddingLM {
                   const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& parameters) override {
+  torch::Tensor forward(
+      const std::vector<torch::Tensor>& tokens,
+      const std::vector<torch::Tensor>& positions,
+      std::vector<KVCache>& kv_caches,
+      const std::vector<ModelInputParams>& parameters) override {
     return model_->forward(tokens, positions, kv_caches, parameters);
   }
 
@@ -79,10 +80,11 @@ class EmbeddingLMImpl<xllm::QWen3ForEmbedding> : public EmbeddingLM {
   // Delegate head/embedding accessors to underlying model implementation.
   layer::LmHead get_lm_head() override { return model_->get_lm_head(); }
   void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); }
-  layer::WordEmbedding get_word_embedding() override {
+  std::vector<layer::WordEmbedding> get_word_embedding() override {
     return model_->get_word_embedding();
   }
-  void set_word_embedding(layer::WordEmbedding& embedding) override {
+  void set_word_embedding(
+      std::vector<layer::WordEmbedding>& embedding) override {
     model_->set_word_embedding(embedding);
   }
 

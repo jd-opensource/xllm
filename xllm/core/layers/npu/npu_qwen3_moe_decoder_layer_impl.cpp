@@ -17,9 +17,7 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
-DECLARE_string(rank_tablefile);
-DECLARE_string(communication_backend);
-DECLARE_int32(expert_parallel_degree);
+#include "common/global_flags.h"
 
 namespace xllm {
 namespace layer {
@@ -881,7 +879,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
                             input_params,
                             expert_array,
                             true);
-    st = execute_node(prefill_node_, node_id, event, event_flag);
+    st = execute_node(prefill_node_, node_id, {event}, {event_flag});
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute prefill layer fail, error code: " << st;
   } else {
@@ -894,7 +892,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
                             input_params,
                             expert_array,
                             false);
-    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
+    st = execute_node(decode_node_, node_id + 1000, {event}, {event_flag});
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute decode layer fail, error code: " << st;
   }

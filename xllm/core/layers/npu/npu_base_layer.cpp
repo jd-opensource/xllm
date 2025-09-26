@@ -31,10 +31,11 @@ NpuBaseLayer::NpuBaseLayer(const ModelContext& context) : BaseLayer(context) {
   work_space_ = AtbWorkspace(device_);
 }
 
-atb::Status NpuBaseLayer::execute_node(atb_speed::Model::Node& node,
-                                       int node_id,
-                                       aclrtEvent* event,
-                                       std::atomic<bool>* event_flag) {
+atb::Status NpuBaseLayer::execute_node(
+    atb_speed::Model::Node& node,
+    int node_id,
+    std::vector<aclrtEvent*> event,
+    std::vector<std::atomic<bool>*> event_flag) {
   atb::Status st =
       node.operation->Setup(node.variantPack, node.workspaceSize, context_);
   if (st != 0) {
@@ -54,25 +55,28 @@ atb::Status NpuBaseLayer::execute_node(atb_speed::Model::Node& node,
   return st;
 }
 
-atb::Status NpuBaseLayer::execute_plan(const atb_speed::Model::Node& node,
-                                       const std::string& op_name,
-                                       aclrtEvent* event,
-                                       std::atomic<bool>* event_flag) {
+atb::Status NpuBaseLayer::execute_plan(
+    const atb_speed::Model::Node& node,
+    const std::string& op_name,
+    std::vector<aclrtEvent*> event,
+    std::vector<std::atomic<bool>*> event_flag) {
   atb::Status st = node.operation->Execute(
       node.variantPack, (uint8_t*)node.workspace, node.workspaceSize, context_);
   LOG_IF(ERROR, st != 0) << name_ << " execute plan fail, error code: " << st;
-  if (st == 0 && event != nullptr) {
-    aclrtStream stream = context_->GetExecuteStream();
+  for (auto i = 0; i < event.size(); ++i) {
+    if (st == 0 && event[i] != nullptr) {
+      aclrtStream stream = context_->GetExecuteStream();
 
-    aclrtEvent* aclrt_event = reinterpret_cast<aclrtEvent*>(event);
+      aclrtEvent* aclrt_event = reinterpret_cast<aclrtEvent*>(event[i]);
 
-    auto ret = aclrtRecordEvent(*aclrt_event, stream);
-    if (ret != ACL_SUCCESS) {
-      LOG(ERROR) << "Record event failed.";
-      return st;
+      auto ret = aclrtRecordEvent(*aclrt_event, stream);
+      if (ret != ACL_SUCCESS) {
+        LOG(ERROR) << "Record event failed.";
+        return st;
+      }
+
+      event_flag[i]->store(true, std::memory_order_release);
     }
-
-    event_flag->store(true, std::memory_order_release);
   }
 
   return st;
