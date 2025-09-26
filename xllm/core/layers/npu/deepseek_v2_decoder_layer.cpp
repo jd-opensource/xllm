@@ -1242,6 +1242,7 @@ torch::Tensor DeepseekV2DecoderImpl::merge_experts_weights(
     merged_tensor = merged_tensor.transpose(1, 2);
   }
   merged_tensor = merged_tensor.contiguous();
+  experts.clear();
   return merged_tensor;
 }
 
@@ -1261,6 +1262,8 @@ torch::Tensor DeepseekV2DecoderImpl::merge_experts_weights(
   }
 
   merged_tensor = merged_tensor.contiguous();
+  experts_gate.clear();
+  experts_up.clear();
   return merged_tensor;
 }
 
