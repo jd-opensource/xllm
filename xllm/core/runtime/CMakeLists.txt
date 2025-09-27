@@ -12,9 +12,9 @@ cc_library(
     params_utils.h
     executor.h
     executor_impl.h
-    npu_executor_impl.h
+    base_executor_impl.h
     dit_executor.h
-    acl_graph_executor_impl.h
+    $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.h>
     worker.h
     worker_impl.h
     llm_worker_impl.h
@@ -32,9 +32,9 @@ cc_library(
     speculative_worker_impl.h
   SRCS
     executor.cpp
-    npu_executor_impl.cpp
+    base_executor_impl.cpp
     dit_executor.cpp
-    acl_graph_executor_impl.cpp
+    $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.cpp>
     worker.cpp
     worker_impl.cpp
     llm_worker_impl.cpp
@@ -102,6 +102,7 @@ cc_library(
     glog::glog
 )
 
+if(USE_NPU)
 cc_test(
   NAME
     acl_graph_executor_test
@@ -117,21 +118,20 @@ cc_test(
     :sampler
     :kv_cache
     GTest::gtest_main
-    $<$<BOOL:${USE_NPU}>:torch_npu>
+    torch_npu
 )
 target_link_libraries(acl_graph_executor_test
                       PRIVATE
-                      $<$<BOOL:${USE_NPU}>:torch_npu>
-                      $<$<BOOL:${USE_NPU}>:ascendcl>
-                      $<$<BOOL:${USE_NPU}>:hccl>
-                      $<$<BOOL:${USE_NPU}>:c_sec>
-                      $<$<BOOL:${USE_NPU}>:nnopbase>
+                      torch_npu
+                      ascendcl
+                      hccl
+                      c_sec
+                      nnopbase
                       )
 # Use --whole-archive for spdlog to ensure all symbols are available for xllm_kernels
 # This resolves the undefined reference issues in xllm_kernels
-if(USE_NPU)
-  target_link_options(acl_graph_executor_test PRIVATE 
-    "-Wl,--whole-archive" 
-    "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
-    "-Wl,--no-whole-archive")
+target_link_options(acl_graph_executor_test PRIVATE 
+  "-Wl,--whole-archive" 
+  "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
+  "-Wl,--no-whole-archive")
 endif()

@@ -22,19 +22,19 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "../framework/batch/batch.h"
-#include "../framework/block/block.h"
-#include "../framework/block/block_manager_impl.h"
-#include "../framework/kv_cache/kv_cache.h"
-#include "../framework/model/model_args.h"
-#include "../framework/model_loader.h"
-#include "../framework/request/sequence.h"
-#include "../framework/request/stopping_checker.h"
-#include "../framework/sampling/sampling_params.h"
-#include "../layers/lm_head.h"
-#include "../layers/word_embedding.h"
 #include "acl_graph_executor_impl.h"
-#include "npu_executor_impl.h"
+#include "base_executor_impl.h"
+#include "core/framework/batch/batch.h"
+#include "core/framework/block/block.h"
+#include "core/framework/block/block_manager_impl.h"
+#include "core/framework/kv_cache/kv_cache.h"
+#include "core/framework/model/model_args.h"
+#include "core/framework/model_loader.h"
+#include "core/framework/request/sequence.h"
+#include "core/framework/request/stopping_checker.h"
+#include "core/framework/sampling/sampling_params.h"
+#include "core/layers/lm_head.h"
+#include "core/layers/word_embedding.h"
 #include "runtime/options.h"
 
 // Global test environment for ACL graph executor tests
@@ -520,7 +520,7 @@ TEST_F(AclGraphExecutorTest, DifferentBatchSizes) {
 }
 
 // Test ACL graph executor against original NPU executor implementation
-TEST_F(AclGraphExecutorTest, AclGraphExecutorVsNpuExecutorImpl) {
+TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImpl) {
   // Create test batch
   auto batch = CreateTestBatch();
   ASSERT_FALSE(batch->empty());
@@ -530,7 +530,7 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsNpuExecutorImpl) {
       options_.num_decoding_tokens(), 0, model_args_);
   forward_input = forward_input.to(*device_, torch::kFloat32);
   // Test NPU Executor Impl (original implementation)
-  auto npu_executor = std::make_unique<NpuExecutorImpl>(
+  auto npu_executor = std::make_unique<BaseExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
   auto npu_output = npu_executor->run(forward_input.token_ids,
@@ -561,7 +561,7 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsNpuExecutorImpl) {
 }
 
 // Test multiple runs to verify consistency across different execution modes
-TEST_F(AclGraphExecutorTest, AclGraphExecutorVsNpuExecutorImplMultipleRuns) {
+TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImplMultipleRuns) {
   // Create test batch
   auto batch = CreateTestBatch();
   ASSERT_FALSE(batch->empty());
@@ -571,7 +571,7 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsNpuExecutorImplMultipleRuns) {
       options_.num_decoding_tokens(), 0, model_args_);
   forward_input = forward_input.to(*device_, torch::kFloat32);
   // Create both executors
-  auto npu_executor = std::make_unique<NpuExecutorImpl>(
+  auto npu_executor = std::make_unique<BaseExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
   auto graph_executor = std::make_unique<AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
