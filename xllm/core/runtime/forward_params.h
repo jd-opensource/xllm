@@ -164,6 +164,9 @@ struct RawForwardInput {
   std::vector<int32_t> src_block_indices;
   std::vector<int32_t> dst_block_indices;
   std::vector<int32_t> cum_sum;
+  // for continuous kvcache
+  std::vector<int64_t> new_cache_slot_offsets;  //[n_tokens]
+  std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
 };
 
 struct RawSampleOutput {

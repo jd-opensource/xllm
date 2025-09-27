@@ -182,6 +182,37 @@ void WorkerService::AllocateKVCache(
   return;
 }
 
+void WorkerService::AllocateContinuousKVCache(
+    ::google::protobuf::RpcController* controller,
+    const proto::XTensorOptionsVec* request,
+    proto::Status* response,
+    ::google::protobuf::Closure* done) {
+  threadpool_.schedule([this, controller, request, response, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    XTensor::Options key_options;
+    XTensor::Options value_options;
+    key_options.num_kv_heads() = request->key_options().num_kv_heads();
+    key_options.head_size() = request->key_options().head_size();
+    key_options.max_context_len() = request->key_options().max_context_len();
+    key_options.max_seqs_per_batch() =
+        request->key_options().max_seqs_per_batch();
+    value_options.num_kv_heads() = request->value_options().num_kv_heads();
+    value_options.head_size() = request->value_options().head_size();
+    value_options.max_context_len() =
+        request->value_options().max_context_len();
+    value_options.max_seqs_per_batch() =
+        request->value_options().max_seqs_per_batch();
+    std::vector<XTensor::Options> options_vec;
+    options_vec.emplace_back(key_options);
+    options_vec.emplace_back(value_options);
+
+    auto future = worker_->allocate_continuous_kv_cache_async(options_vec);
+    bool status = std::move(future).get();
+    response->set_ok(status);
+  });
+  return;
+}
+
 void WorkerService::AllocateKVCacheWithTransfer(
     ::google::protobuf::RpcController* controller,
     const proto::AllocateKVCacheWithTransferRequest* req,

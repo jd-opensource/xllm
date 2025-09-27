@@ -17,6 +17,10 @@ limitations under the License.
 #pragma once
 #include <optional>
 
+#if defined(USE_NPU)
+#include "acl/acl.h"
+#endif
+
 namespace xllm {
 
 template <typename value_type>
@@ -34,4 +38,11 @@ struct remove_optional<std::optional<value_type>> {
 template <typename value_type>
 using remove_optional_t = typename remove_optional<value_type>::type;
 
+#if defined(USE_NPU)
+using VirPtr = void*;
+using PhyMemHandle = aclrtDrvMemHandle;
+using VmmResult = aclError;
+#endif
+
+constexpr int VmmSuccess = 0;
 }  // namespace xllm

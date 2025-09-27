@@ -28,7 +28,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "common/types.h"
 #include "framework/batch/batch.h"
-#include "framework/block/block_manager_pool.h"
+#include "framework/block/kv_cache_manager.h"
 #include "framework/request/priority_comparator.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
@@ -40,6 +40,7 @@ limitations under the License.
 namespace xllm {
 class Engine;
 class DecodePriorityQueue;
+
 class ContinuousScheduler : public Scheduler {
  public:
   struct Options {
@@ -174,8 +175,7 @@ class ContinuousScheduler : public Scheduler {
   // the engine to run the batch
   Engine* engine_;
 
-  // the block manager to manage the cache blocks
-  BlockManagerPool* block_manager_pool_;
+  KVCacheManager* kv_cache_manager_;
 
   // a thread safe queue of requests, bounded by kRequestQueueSize
   // the schedule owns the requests and manages their lifetimes.
@@ -290,6 +290,7 @@ class ContinuousScheduler : public Scheduler {
   std::vector<int64_t> get_num_occupied_slots(
       std::vector<Sequence*>& sequences) const;
   std::vector<int64_t> get_active_activation_in_bytes();
+  void update_memory_metrics(std::vector<Sequence*>& sequences);
 
   void create_running_queue(const Options& options);
 

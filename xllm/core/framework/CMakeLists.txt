@@ -18,6 +18,7 @@ add_subdirectory(sampling)
 add_subdirectory(state_dict)
 add_subdirectory(tokenizer)
 add_subdirectory(eplb)
+add_subdirectory(xtensor)
 
 cc_library(
   NAME 

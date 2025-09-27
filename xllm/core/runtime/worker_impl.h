@@ -35,6 +35,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
+#include "framework/xtensor/xtensor.h"
 #include "memory"
 #include "options.h"
 #include "util/threadpool.h"
@@ -80,6 +81,9 @@ class WorkerImpl {
       std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 #endif
+
+  virtual bool allocate_continuous_kv_cache(
+      const std::vector<XTensor::Options>& options);
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -127,6 +131,9 @@ class WorkerImpl {
   virtual folly::SemiFuture<bool> allocate_kv_cache_with_transfer_async(
       uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
+
+  virtual folly::SemiFuture<bool> allocate_continuous_kv_cache_async(
+      const std::vector<XTensor::Options>& options);
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       uint64_t src_cluster_id,

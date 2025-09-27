@@ -10,7 +10,6 @@ cc_library(
   NAME 
     distributed_runtime
   HDRS
-    collective_service.h
     disagg_pd_service.h
     disagg_pd_service_impl.h
     dist_manager.h
@@ -18,7 +17,6 @@ cc_library(
     worker_server.h
     worker_service.h
   SRCS
-    collective_service.cpp
     disagg_pd_service.cpp
     disagg_pd_service_impl.cpp
     dist_manager.cpp
@@ -48,5 +46,19 @@ cc_library(
     glog::glog
     proto::xllm_proto
 )
+
+cc_library(
+  NAME
+    collective_service
+  HDRS
+    collective_service.h
+  SRCS
+    collective_service.cpp
+  DEPS
+    absl::flat_hash_set
+    glog::glog
+    proto::xllm_proto
+)
+
 target_link_libraries(worker_service PRIVATE brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
 

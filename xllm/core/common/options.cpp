@@ -54,7 +54,8 @@ std::string Options::to_string() const {
      << ", store_protocol: " << store_protocol()
      << ", store_master_server_entry: " << store_master_server_entry()
      << ", store_metadata_connstring: " << store_metadata_connstring()
-     << ", enable_multi_stream_parallel: " << enable_multi_stream_parallel();
+     << ", enable_multi_stream_parallel: " << enable_multi_stream_parallel()
+     << ", enable_continuous_kvcache: " << enable_continuous_kvcache();
   ss << "]";
   return ss.str();
 }

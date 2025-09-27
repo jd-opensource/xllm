@@ -256,6 +256,12 @@ class Sequence final {
 
   LogprobState* logprob_state() { return logprob_state_.get(); }
 
+  // set sequence id
+  void set_seq_id(int32_t seq_id) { seq_id_ = seq_id; }
+
+  // get sequence id
+  int32_t seq_id() const { return seq_id_; }
+
  private:
   // the index of the sequence in the request
   size_t index_ = 0;
@@ -328,6 +334,9 @@ class Sequence final {
 
   // dp_rank
   int32_t dp_rank_ = -1;
+
+  // seq id in the batch
+  int32_t seq_id_ = -1;
 
   // for enable_schedule_overlap case
   uint32_t cur_generated_token_idx_;

@@ -368,6 +368,10 @@ float BlockManagerPool::get_gpu_cache_usage_perc() const {
   return perc / block_managers_.size();
 }
 
+uint32_t BlockManagerPool::num_blocks() const { return options_.num_blocks(); }
+
+int32_t BlockManagerPool::block_size() const { return options_.block_size(); }
+
 std::vector<size_t> BlockManagerPool::num_blocks_in_prefix_cache() const {
   std::vector<size_t> num_blocks_in_prefix_cache(block_managers_.size());
   for (size_t dp_rank = 0; dp_rank < block_managers_.size(); ++dp_rank) {
