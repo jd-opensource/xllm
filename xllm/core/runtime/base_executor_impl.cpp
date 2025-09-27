@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "npu_executor_impl.h"
+#include "base_executor_impl.h"
 
 #include <glog/logging.h>
 
@@ -21,23 +21,23 @@ limitations under the License.
 
 namespace xllm {
 
-NpuExecutorImpl::NpuExecutorImpl(CausalLM* model,
-                                 const ModelArgs& args,
-                                 const torch::Device& device,
-                                 const runtime::Options& options)
+BaseExecutorImpl::BaseExecutorImpl(CausalLM* model,
+                                   const ModelArgs& args,
+                                   const torch::Device& device,
+                                   const runtime::Options& options)
     : model_(model), args_(args), device_(device), options_(options) {}
 
-ForwardInput NpuExecutorImpl::prepare_inputs(Batch& batch) {
+ForwardInput BaseExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
 }
 
 // tokens: [num_tokens]
 // positions: [num_tokens] token pos in the sequence
 // returns: [num_tokens, hidden_size]
-torch::Tensor NpuExecutorImpl::run(const torch::Tensor& tokens,
-                                   const torch::Tensor& positions,
-                                   std::vector<KVCache>& kv_caches,
-                                   const ModelInputParams& params) {
+torch::Tensor BaseExecutorImpl::run(const torch::Tensor& tokens,
+                                    const torch::Tensor& positions,
+                                    std::vector<KVCache>& kv_caches,
+                                    const ModelInputParams& params) {
   return model_->forward(tokens, positions, kv_caches, params);
 }
 

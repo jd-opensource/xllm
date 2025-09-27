@@ -29,14 +29,14 @@ limitations under the License.
 
 namespace xllm {
 
-class NpuExecutorImpl : public ExecutorImpl {
+class BaseExecutorImpl : public ExecutorImpl {
  public:
-  NpuExecutorImpl(CausalLM* model,
-                  const ModelArgs& args,
-                  const torch::Device& device,
-                  const runtime::Options& options);
+  BaseExecutorImpl(CausalLM* model,
+                   const ModelArgs& args,
+                   const torch::Device& device,
+                   const runtime::Options& options);
 
-  ~NpuExecutorImpl() override = default;
+  ~BaseExecutorImpl() override = default;
 
   ForwardInput prepare_inputs(Batch& batch) override;
 
