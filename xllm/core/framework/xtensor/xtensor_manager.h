@@ -24,7 +24,7 @@ limitations under the License.
 
 #include "multi_layer_xtensor_transfer.h"
 #include "options.h"
-#include "page_allocator.h"
+#include "phy_page_pool.h"
 #include "util/threadpool.h"
 
 namespace xllm {
@@ -61,7 +61,7 @@ class XTensorManager {
  private:
   xtensor::Options options_;
   torch::Device device_;
-  std::unique_ptr<PageAllocator> page_allocator_;
+  std::unique_ptr<PhyPagePool> phy_page_pool_;
   MultiLayerXTensorPair multi_layer_kv_xtensor_;
   size_t num_used_pages_per_layer_ = 0;
   ThreadPool threadpool_;

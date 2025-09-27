@@ -24,7 +24,7 @@ namespace xllm {
 XTensorManager::XTensorManager(const xtensor::Options& options,
                                const torch::Device& device)
     : options_(options), device_(device) {
-  page_allocator_ = std::make_unique<PageAllocator>(options_, device_);
+  phy_page_pool_ = std::make_unique<PhyPagePool>(options_, device_);
   add_multi_layer_kv_xtensors();
 }
 
@@ -89,7 +89,7 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
   if (k_num_additional_pages > 0) {
     auto& multi_layer_k_xtensor = multi_layer_kv_xtensor_.first;
     std::vector<uint32_t> new_k_phy_page_ids =
-        page_allocator_->allocate(k_num_additional_pages);
+        phy_page_pool_->allocate(k_num_additional_pages);
     multi_layer_k_xtensor->append_phy_pages(seq_id, new_k_phy_page_ids);
 
     std::vector<uint32_t> k_phy_page_ids =
@@ -97,7 +97,7 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
     for (int64_t layer_idx = 0; layer_idx < options_.num_layers();
          ++layer_idx) {
       VirPtr k_vit_ptr = multi_layer_k_xtensor->get_vir_ptr(seq_id, layer_idx);
-      page_allocator_->batch_map(
+      phy_page_pool_->batch_map(
           k_vit_ptr, k_phy_page_ids, k_num_additional_pages, layer_idx);
     }
 
@@ -107,7 +107,7 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
   if (v_num_additional_pages > 0) {
     auto& multi_layer_v_xtensor = multi_layer_kv_xtensor_.second;
     std::vector<uint32_t> new_v_phy_page_ids =
-        page_allocator_->allocate(v_num_additional_pages);
+        phy_page_pool_->allocate(v_num_additional_pages);
     multi_layer_v_xtensor->append_phy_pages(seq_id, new_v_phy_page_ids);
 
     std::vector<uint32_t> v_phy_page_ids =
@@ -115,7 +115,7 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
     for (int64_t layer_idx = 0; layer_idx < options_.num_layers();
          ++layer_idx) {
       VirPtr v_vit_ptr = multi_layer_v_xtensor->get_vir_ptr(seq_id, layer_idx);
-      page_allocator_->batch_map(
+      phy_page_pool_->batch_map(
           v_vit_ptr, v_phy_page_ids, v_num_additional_pages, layer_idx);
     }
 
@@ -137,13 +137,13 @@ void XTensorManager::deallocate(int32_t seq_id) {
   multi_layer_k_xtensor->free(seq_id);
   std::vector<uint32_t> k_used_page_ids =
       multi_layer_k_xtensor->get_phy_page_ids(seq_id);
-  page_allocator_->deallocate(k_used_page_ids);
+  phy_page_pool_->deallocate(k_used_page_ids);
 
   auto& multi_layer_v_xtensor = multi_layer_kv_xtensor_.second;
   multi_layer_v_xtensor->free(seq_id);
   std::vector<uint32_t> v_used_page_ids =
       multi_layer_v_xtensor->get_phy_page_ids(seq_id);
-  page_allocator_->deallocate(v_used_page_ids);
+  phy_page_pool_->deallocate(v_used_page_ids);
 
   // deallocate seq id for sequence
   deallocate_seq_id(seq_id);
@@ -178,7 +178,7 @@ folly::SemiFuture<folly::Unit> XTensorManager::deallocate_async(
 }
 
 size_t XTensorManager::num_free_pages_per_layer() const {
-  return page_allocator_->get_num_free_phy_pages_per_layer();
+  return phy_page_pool_->get_num_free_phy_pages_per_layer();
 }
 
 size_t XTensorManager::num_used_pages_per_layer() const {
@@ -187,7 +187,7 @@ size_t XTensorManager::num_used_pages_per_layer() const {
 
 double XTensorManager::kv_cache_utilization() const {
   return static_cast<double>(num_used_pages_per_layer_) /
-         page_allocator_->get_num_total_phy_pages_per_layer();
+         phy_page_pool_->get_num_total_phy_pages_per_layer();
 }
 
 folly::SemiFuture<size_t> XTensorManager::num_free_pages_per_layer_async() {
@@ -214,7 +214,7 @@ bool XTensorManager::has_enough_pages(size_t k_num_pages_needed,
                                       size_t v_num_pages_needed) {
   // still have enough pages
   if (k_num_pages_needed + v_num_pages_needed <=
-      page_allocator_->get_num_free_phy_pages_per_layer()) {
+      phy_page_pool_->get_num_free_phy_pages_per_layer()) {
     return true;
   }
   return false;

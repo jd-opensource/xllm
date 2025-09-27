@@ -13,14 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "page_allocator.h"
+#include "phy_page_pool.h"
 
 #include "common/global_flags.h"
 
 namespace xllm {
 
-PageAllocator::PageAllocator(const xtensor::Options& options,
-                             const torch::Device& device)
+PhyPagePool::PhyPagePool(const xtensor::Options& options,
+                         const torch::Device& device)
     : options_(options) {
   CHECK_GT(options_.num_total_pages(), 0) << "No pages to allocate";
   CHECK_EQ(options_.num_total_pages() % options_.num_layers(), 0)
@@ -45,7 +45,7 @@ PageAllocator::PageAllocator(const xtensor::Options& options,
   }
 }
 
-std::vector<uint32_t> PageAllocator::allocate(int64_t n_pages_per_layer) {
+std::vector<uint32_t> PhyPagePool::allocate(int64_t n_pages_per_layer) {
   CHECK_LT(n_pages_per_layer, num_free_phy_pages_per_layer_)
       << "Not enough physical pages available";
   std::vector<uint32_t> phy_page_ids;
@@ -58,7 +58,7 @@ std::vector<uint32_t> PageAllocator::allocate(int64_t n_pages_per_layer) {
   return phy_page_ids;
 }
 
-uint32_t PageAllocator::allocate() {
+uint32_t PhyPagePool::allocate() {
   CHECK_GT(num_free_phy_pages_per_layer_, 0)
       << "No more physical pages available";
 
@@ -68,20 +68,20 @@ uint32_t PageAllocator::allocate() {
   return phy_page_id;
 }
 
-void PageAllocator::deallocate(std::vector<uint32_t>& page_ids) {
+void PhyPagePool::deallocate(std::vector<uint32_t>& page_ids) {
   for (auto& page_id : page_ids) {
     deallocate(page_id);
   }
 }
 
 // caller should make sure the page_id is valid
-void PageAllocator::deallocate(uint32_t page_id) {
+void PhyPagePool::deallocate(uint32_t page_id) {
   CHECK_LT(num_free_phy_pages_per_layer_, free_phy_page_ids_.size());
   free_phy_page_ids_[num_free_phy_pages_per_layer_++] = page_id;
 }
 
 // map one virtual pointer to one physical page
-void PageAllocator::map(VirPtr vir_ptr, PhyMemHandle phy_handle) const {
+void PhyPagePool::map(VirPtr vir_ptr, PhyMemHandle phy_handle) const {
   VmmResult status;
 #if defined(USE_NPU)
   status = aclrtMapMem(vir_ptr, FLAGS_granularity_size, 0, phy_handle, 0);
@@ -90,18 +90,18 @@ void PageAllocator::map(VirPtr vir_ptr, PhyMemHandle phy_handle) const {
 #endif
 }
 
-void PageAllocator::map(VirPtr vir_ptr,
-                        uint32_t page_id,
-                        int64_t layer_idx) const {
+void PhyPagePool::map(VirPtr vir_ptr,
+                      uint32_t page_id,
+                      int64_t layer_idx) const {
   PhyMemHandle phy_handle =
       free_phy_pages_[layer_idx][page_id]->get_phy_handle();
   map(vir_ptr, phy_handle);
 }
 
-void PageAllocator::batch_map(VirPtr vir_ptr,
-                              std::vector<uint32_t>& page_ids,
-                              uint32_t num_new_pages,
-                              int64_t layer_idx) const {
+void PhyPagePool::batch_map(VirPtr vir_ptr,
+                            std::vector<uint32_t>& page_ids,
+                            uint32_t num_new_pages,
+                            int64_t layer_idx) const {
   size_t num_pages = page_ids.size();
 
   size_t ptr_offset = (num_pages - num_new_pages) * FLAGS_granularity_size;

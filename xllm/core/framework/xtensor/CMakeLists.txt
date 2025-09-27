@@ -7,7 +7,7 @@ cc_library(
   HDRS
     options.h
     phy_page.h
-    page_allocator.h
+    phy_page_pool.h
     xtensor.h
     xtensor_manager.h
     xtensor_manager_client.h
@@ -19,7 +19,7 @@ cc_library(
     multi_layer_xtensor_transfer.h
   SRCS
     phy_page.cpp
-    page_allocator.cpp
+    phy_page_pool.cpp
     xtensor.cpp
     xtensor_manager.cpp
     xtensor_manager_client.cpp

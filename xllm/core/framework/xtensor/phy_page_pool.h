@@ -24,13 +24,13 @@ limitations under the License.
 
 namespace xllm {
 
-// PageAllocator is used to track memory pages of key and value. It is not
+// PhyPagePool is used to track memory pages of key and value. It is not
 // thread safe. This class manages the allocation and deallocation of page.
-class PageAllocator final {
+class PhyPagePool final {
  public:
-  PageAllocator(const xtensor::Options& options, const torch::Device& device);
+  PhyPagePool(const xtensor::Options& options, const torch::Device& device);
 
-  ~PageAllocator() = default;
+  ~PhyPagePool() = default;
 
   // allocate a list of page_ids for key or value for all layers
   std::vector<uint32_t> allocate(int64_t n_pages_per_layer);
@@ -38,10 +38,10 @@ class PageAllocator final {
   // allocate a page id for key or value for all layers
   uint32_t allocate();
 
-  // get back one page to allocator
+  // get back one page to phy_page_pool
   void deallocate(uint32_t page_id);
 
-  // get back a list of pages to allocator
+  // get back a list of pages to phy_page_pool
   void deallocate(std::vector<uint32_t>& page_ids);
 
   void map(VirPtr vir_ptr, PhyMemHandle phy_handle) const;
@@ -67,7 +67,7 @@ class PageAllocator final {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PageAllocator);
+  DISALLOW_COPY_AND_ASSIGN(PhyPagePool);
 
  private:
   xtensor::Options options_;
