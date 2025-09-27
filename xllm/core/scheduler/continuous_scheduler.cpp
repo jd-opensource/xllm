@@ -50,7 +50,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   if (!FLAGS_enable_continuous_kvcache) {
     kv_cache_manager_ = engine_->block_manager_pool();
   } else {
-    kv_cache_manager_ = engine_->page_manager_pool();
+    kv_cache_manager_ = engine_->xtensor_manager_pool();
   }
   CHECK(kv_cache_manager_ != nullptr);
 

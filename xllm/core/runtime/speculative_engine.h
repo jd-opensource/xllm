@@ -44,8 +44,8 @@ class SpeculativeEngine : public Engine {
     return engine_->block_manager_pool();
   }
 
-  PageManagerPool* page_manager_pool() const override {
-    return engine_->page_manager_pool();
+  XTensorManagerPool* xtensor_manager_pool() const override {
+    return engine_->xtensor_manager_pool();
   }
 
   const ModelArgs& model_args() const override { return model_args_; }

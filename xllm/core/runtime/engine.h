@@ -20,9 +20,9 @@ limitations under the License.
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/model/model_args.h"
-#include "framework/page/page_manager_pool.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
+#include "framework/xtensor/xtensor_manager_pool.h"
 #include "options.h"
 
 namespace xllm {
@@ -45,8 +45,8 @@ class Engine {
     return block_manager_pool_.get();
   }
 
-  virtual PageManagerPool* page_manager_pool() const {
-    return page_manager_pool_.get();
+  virtual XTensorManagerPool* xtensor_manager_pool() const {
+    return xtensor_manager_pool_.get();
   }
 
   // return the model args
@@ -125,8 +125,8 @@ class Engine {
   // block manager
   std::unique_ptr<BlockManagerPool> block_manager_pool_;
 
-  // page manager
-  std::unique_ptr<PageManagerPool> page_manager_pool_;
+  // xtensor manager
+  std::unique_ptr<XTensorManagerPool> xtensor_manager_pool_;
 
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;

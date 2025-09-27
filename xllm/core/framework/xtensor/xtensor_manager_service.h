@@ -18,18 +18,18 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
-#include "page_manager.h"
-#include "page_manager.pb.h"
+#include "xtensor_manager.h"
+#include "xtensor_manager.pb.h"
 
 namespace xllm {
-class PageManagerService : public proto::DistributePageManager {
+class XTensorManagerService : public proto::DistributeXTensorManager {
  public:
-  PageManagerService(int32_t global_rank,
-                     int32_t world_size,
-                     const torch::Device& d);
-  ~PageManagerService() = default;
+  XTensorManagerService(int32_t global_rank,
+                        int32_t world_size,
+                        const torch::Device& d);
+  ~XTensorManagerService() = default;
 
-  void set_page_manager(std::unique_ptr<PageManager> page_manager);
+  void set_xtensor_manager(std::unique_ptr<XTensorManager> xtensor_manager);
 
   // service functions
   void Hello(::google::protobuf::RpcController* controller,
@@ -63,7 +63,7 @@ class PageManagerService : public proto::DistributePageManager {
                           ::google::protobuf::Closure* done) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PageManagerService);
+  DISALLOW_COPY_AND_ASSIGN(XTensorManagerService);
 
  private:
   bool initialized_;
@@ -71,7 +71,7 @@ class PageManagerService : public proto::DistributePageManager {
   int32_t world_size_;
   torch::Device device_;
   ThreadPool threadpool_{5};
-  std::unique_ptr<PageManager> page_manager_;
+  std::unique_ptr<XTensorManager> xtensor_manager_;
 };
 
 }  // namespace xllm

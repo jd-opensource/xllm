@@ -38,8 +38,8 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
-#include "framework/page/xtensor.h"
 #include "framework/state_dict/state_dict.h"
+#include "framework/xtensor/xtensor.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "pytorch/adapter/workspace/workspace.h"
 

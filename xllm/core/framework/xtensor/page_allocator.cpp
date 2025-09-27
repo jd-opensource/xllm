@@ -19,7 +19,7 @@ limitations under the License.
 
 namespace xllm {
 
-PageAllocator::PageAllocator(const page::Options& options,
+PageAllocator::PageAllocator(const xtensor::Options& options,
                              const torch::Device& device)
     : options_(options) {
   CHECK_GT(options_.num_total_pages(), 0) << "No pages to allocate";

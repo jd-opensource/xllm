@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "remote_page_manager.h"
+#include "remote_xtensor_manager.h"
 
 #include <brpc/controller.h>
 #include <folly/Unit.h>
@@ -27,12 +27,11 @@ limitations under the License.
 #include <utility>
 
 #include "common/global_flags.h"
-#include "page_manager.pb.h"
 
 namespace xllm {
-RemotePageManager::RemotePageManager(int32_t global_rank,
-                                     const std::string& server_address,
-                                     const torch::Device& d)
+RemoteXTensorManager::RemoteXTensorManager(int32_t global_rank,
+                                           const std::string& server_address,
+                                           const torch::Device& d)
     : global_rank_(global_rank), device_(d) {
   // Initialize brpc channel
   options_.connection_type = "pooled";
@@ -44,12 +43,12 @@ RemotePageManager::RemotePageManager(int32_t global_rank,
     return;
   }
   // Initialize stub
-  stub_.reset(new proto::DistributePageManager_Stub(&channel_));
+  stub_.reset(new proto::DistributeXTensorManager_Stub(&channel_));
 
   wait_for_server_ready(server_address);
 }
 
-bool RemotePageManager::wait_for_server_ready(
+bool RemoteXTensorManager::wait_for_server_ready(
     const std::string& server_address) {
   proto::Status req;
   proto::Status resp;
@@ -64,7 +63,7 @@ bool RemotePageManager::wait_for_server_ready(
       std::this_thread::sleep_for(
           std::chrono::seconds(FLAGS_sleep_time_second));
     } else {
-      LOG(INFO) << "RemotePageManager Hello connected, server_address: "
+      LOG(INFO) << "RemoteXTensorManager Hello connected, server_address: "
                 << server_address << ", global_rank_: " << global_rank_;
       break;
     }
@@ -73,7 +72,7 @@ bool RemotePageManager::wait_for_server_ready(
   }
 
   if (try_count >= FLAGS_max_connect_count) {
-    LOG(ERROR) << "RemotePageManager Hello method failed, global_rank_ is "
+    LOG(ERROR) << "RemoteXTensorManager Hello method failed, global_rank_ is "
                << global_rank_ << ", error: " << cntl.ErrorText();
     return false;
   }
@@ -81,7 +80,7 @@ bool RemotePageManager::wait_for_server_ready(
   return true;
 }
 
-bool RemotePageManager::allocate(int32_t& seq_id, size_t num_tokens) {
+bool RemoteXTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
   proto::AllocatePagesRequest req;
   req.set_seq_id(seq_id);
   req.set_num_tokens(num_tokens);
@@ -95,7 +94,7 @@ bool RemotePageManager::allocate(int32_t& seq_id, size_t num_tokens) {
   return resp.ok();
 }
 
-void RemotePageManager::deallocate(int32_t seq_id) {
+void RemoteXTensorManager::deallocate(int32_t seq_id) {
   proto::SeqId req;
   req.set_seq_id(seq_id);
   proto::Empty resp;
@@ -106,8 +105,9 @@ void RemotePageManager::deallocate(int32_t seq_id) {
   }
 }
 
-folly::SemiFuture<bool> RemotePageManager::allocate_async(int32_t& seq_id,
-                                                          size_t num_tokens) {
+folly::SemiFuture<bool> RemoteXTensorManager::allocate_async(
+    int32_t& seq_id,
+    size_t num_tokens) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
 
@@ -127,7 +127,7 @@ folly::SemiFuture<bool> RemotePageManager::allocate_async(int32_t& seq_id,
   return future;
 }
 
-folly::SemiFuture<folly::Unit> RemotePageManager::deallocate_async(
+folly::SemiFuture<folly::Unit> RemoteXTensorManager::deallocate_async(
     int32_t seq_id) {
   folly::Promise<folly::Unit> promise;
   auto future = promise.getSemiFuture();
@@ -146,7 +146,7 @@ folly::SemiFuture<folly::Unit> RemotePageManager::deallocate_async(
   return future;
 }
 
-size_t RemotePageManager::num_free_pages_per_layer() const {
+size_t RemoteXTensorManager::num_free_pages_per_layer() const {
   proto::Empty req;
   proto::NumPages resp;
   brpc::Controller cntl;
@@ -157,7 +157,7 @@ size_t RemotePageManager::num_free_pages_per_layer() const {
   return resp.num_pages();
 }
 
-size_t RemotePageManager::num_used_pages_per_layer() const {
+size_t RemoteXTensorManager::num_used_pages_per_layer() const {
   proto::Empty req;
   proto::NumPages resp;
   brpc::Controller cntl;
@@ -168,7 +168,7 @@ size_t RemotePageManager::num_used_pages_per_layer() const {
   return resp.num_pages();
 }
 
-double RemotePageManager::kv_cache_utilization() const {
+double RemoteXTensorManager::kv_cache_utilization() const {
   proto::Empty req;
   proto::Utilization resp;
   brpc::Controller cntl;
@@ -179,7 +179,8 @@ double RemotePageManager::kv_cache_utilization() const {
   return resp.utilization();
 }
 
-folly::SemiFuture<size_t> RemotePageManager::num_free_pages_per_layer_async() {
+folly::SemiFuture<size_t>
+RemoteXTensorManager::num_free_pages_per_layer_async() {
   folly::Promise<size_t> promise;
   auto future = promise.getSemiFuture();
 
@@ -196,7 +197,8 @@ folly::SemiFuture<size_t> RemotePageManager::num_free_pages_per_layer_async() {
   return future;
 }
 
-folly::SemiFuture<size_t> RemotePageManager::num_used_pages_per_layer_async() {
+folly::SemiFuture<size_t>
+RemoteXTensorManager::num_used_pages_per_layer_async() {
   folly::Promise<size_t> promise;
   auto future = promise.getSemiFuture();
 

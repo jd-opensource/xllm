@@ -135,12 +135,12 @@ bool XllmServer::start(std::shared_ptr<WorkerService> service,
   return true;
 }
 
-bool XllmServer::start(std::shared_ptr<PageManagerService> service,
+bool XllmServer::start(std::shared_ptr<XTensorManagerService> service,
                        const std::string& addr) {
   server_ = std::make_unique<brpc::Server>();
   if (server_->AddService(service.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
       0) {
-    LOG(ERROR) << "Fail to add DistributePageManager service";
+    LOG(ERROR) << "Fail to add DistributeXTensorManager service";
     return false;
   }
 
@@ -154,7 +154,7 @@ bool XllmServer::start(std::shared_ptr<PageManagerService> service,
     return false;
   }
   listen_port_ = server_->listen_address().port;
-  LOG(INFO) << "DistributePageManager started on address "
+  LOG(INFO) << "DistributeXTensorManager started on address "
             << server_->listen_address()
             << ", idle_timeout_sec: " << FLAGS_idle_timeout_s
             << ", num_threads: " << FLAGS_num_threads

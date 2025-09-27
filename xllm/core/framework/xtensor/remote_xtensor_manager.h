@@ -14,34 +14,30 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-
-#include <folly/Unit.h>
+#include <brpc/channel.h>
 #include <folly/futures/Future.h>
 #include <torch/torch.h>
 
-#include <memory>
-#include <vector>
-
-#include "multi_layer_xtensor_transfer.h"
-#include "options.h"
-#include "page_allocator.h"
 #include "util/threadpool.h"
+#include "xtensor_manager.pb.h"
+#include "xtensor_manager_client.h"
 
 namespace xllm {
 
-class PageManager {
+class RemoteXTensorManager : public XTensorManagerClient {
  public:
-  explicit PageManager(const page::Options& options,
-                       const torch::Device& device);
+  explicit RemoteXTensorManager(int32_t global_rank,
+                                const std::string& server_address,
+                                const torch::Device& d);
+  virtual ~RemoteXTensorManager() = default;
 
-  ~PageManager() = default;
+  bool wait_for_server_ready(const std::string& server_address);
 
   bool allocate(int32_t& seq_id, size_t num_tokens);
   void deallocate(int32_t seq_id);
 
   folly::SemiFuture<bool> allocate_async(int32_t& seq_id, size_t num_tokens);
   folly::SemiFuture<folly::Unit> deallocate_async(int32_t seq_id);
-  folly::SemiFuture<folly::Unit> cache_async(int32_t seq_id);
 
   size_t num_free_pages_per_layer() const;
   size_t num_used_pages_per_layer() const;
@@ -51,20 +47,17 @@ class PageManager {
   folly::SemiFuture<size_t> num_used_pages_per_layer_async();
 
  private:
-  void add_multi_layer_kv_xtensors();
-  // allocate seq id for sequence
-  void allocate_seq_id(int32_t& seq_id);
-  // release seq id for sequence
-  void deallocate_seq_id(int32_t seq_id);
-  bool has_enough_pages(size_t k_num_pages_needed, size_t v_num_pages_needed);
+  DISALLOW_COPY_AND_ASSIGN(RemoteXTensorManager);
 
  private:
-  page::Options options_;
-  torch::Device device_;
-  std::unique_ptr<PageAllocator> page_allocator_;
-  MultiLayerXTensorPair multi_layer_kv_xtensor_;
-  size_t num_used_pages_per_layer_ = 0;
-  ThreadPool threadpool_;
-};
+  int32_t global_rank_;
 
+  // brpc connection resource
+  brpc::Channel channel_;
+  brpc::ChannelOptions options_;
+  std::unique_ptr<proto::DistributeXTensorManager_Stub> stub_;
+
+  ThreadPool threadpool_;
+  const torch::Device device_;
+};
 }  // namespace xllm

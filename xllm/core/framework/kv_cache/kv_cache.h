@@ -21,7 +21,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "framework/model/model_input_params.h"
-#include "framework/page/xtensor.h"
+#include "framework/xtensor/xtensor.h"
 
 namespace xllm {
 class KVCache final {

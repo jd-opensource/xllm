@@ -175,7 +175,6 @@ class ContinuousScheduler : public Scheduler {
   // the engine to run the batch
   Engine* engine_;
 
-  // the kvcache manager to manage the blocks or pages of kvcache
   KVCacheManager* kv_cache_manager_;
 
   // a thread safe queue of requests, bounded by kRequestQueueSize

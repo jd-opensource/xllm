@@ -28,7 +28,7 @@ namespace xllm {
 // thread safe. This class manages the allocation and deallocation of page.
 class PageAllocator final {
  public:
-  PageAllocator(const page::Options& options, const torch::Device& device);
+  PageAllocator(const xtensor::Options& options, const torch::Device& device);
 
   ~PageAllocator() = default;
 
@@ -70,7 +70,7 @@ class PageAllocator final {
   DISALLOW_COPY_AND_ASSIGN(PageAllocator);
 
  private:
-  page::Options options_;
+  xtensor::Options options_;
 
   // free physical pages
   std::vector<std::vector<std::shared_ptr<PhyPage>>>

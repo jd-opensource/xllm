@@ -22,19 +22,19 @@ limitations under the License.
 #include "common/macros.h"
 
 namespace xllm {
-namespace page {
+namespace xtensor {
 struct Options {
-  // devices for page manager pool
+  // devices for xtensor manager pool
   PROPERTY(std::vector<torch::Device>, devices);
 
   // num of layers
   PROPERTY(int64_t, num_layers) = 0;
 
-  // total pages for page manager
+  // total pages for xtensor manager
   PROPERTY(int64_t, num_total_pages) = 0;
 
   // key or value cache size in bytes per token
   PROPERTY(int64_t, cache_size_per_token) = 0;
 };
-}  // namespace page
+}  // namespace xtensor
 }  // namespace xllm

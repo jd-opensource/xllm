@@ -9,7 +9,6 @@ if(USE_NPU)
 endif()
 add_subdirectory(batch)
 add_subdirectory(block)
-add_subdirectory(page)
 add_subdirectory(chat_template)
 add_subdirectory(kv_cache)
 add_subdirectory(model)
@@ -19,6 +18,7 @@ add_subdirectory(sampling)
 add_subdirectory(state_dict)
 add_subdirectory(tokenizer)
 add_subdirectory(eplb)
+add_subdirectory(xtensor)
 
 cc_library(
   NAME 

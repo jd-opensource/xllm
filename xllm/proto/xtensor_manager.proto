@@ -25,7 +25,7 @@ message Utilization {
 }
 
 // PageManager receive action from master engine.
-service DistributePageManager{
+service DistributeXTensorManager{
   rpc Hello (Status) returns (Status);
   rpc Allocate (AllocatePagesRequest) returns (Status);
   rpc Deallocate (SeqId) returns (Empty);

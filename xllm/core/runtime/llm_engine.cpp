@@ -36,8 +36,8 @@ limitations under the License.
 #include "common/metrics.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
-#include "framework/page/multi_layer_xtensor_transfer.h"
 #include "framework/parallel_state.h"
+#include "framework/xtensor/multi_layer_xtensor_transfer.h"
 #include "llm_worker_impl.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
@@ -388,14 +388,14 @@ bool LLMEngine::allocate_continuous_kv_cache(
 
   FLAGS_cache_size_per_token = cache_size_per_token;
 
-  // init page manager pool
-  page::Options page_options;
-  page_options.devices(options_.devices())
+  // init xtensor manager pool
+  xtensor::Options xtensor_manager_options;
+  xtensor_manager_options.devices(options_.devices())
       .num_total_pages(kv_cache_cap.n_pages)
       .num_layers(args_.n_layers())
       .cache_size_per_token(cache_size_per_token);
-  page_manager_pool_ =
-      std::make_unique<PageManagerPool>(page_options, options_.dp_size());
+  xtensor_manager_pool_ = std::make_unique<XTensorManagerPool>(
+      xtensor_manager_options, options_.dp_size());
 
   return true;
 }

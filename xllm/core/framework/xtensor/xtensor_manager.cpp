@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "page_manager.h"
+#include "xtensor_manager.h"
 
 #include "common/global_flags.h"
 #include "multi_layer_xtensor_transfer.h"
@@ -21,14 +21,14 @@ limitations under the License.
 
 namespace xllm {
 
-PageManager::PageManager(const page::Options& options,
-                         const torch::Device& device)
+XTensorManager::XTensorManager(const xtensor::Options& options,
+                               const torch::Device& device)
     : options_(options), device_(device) {
   page_allocator_ = std::make_unique<PageAllocator>(options_, device_);
   add_multi_layer_kv_xtensors();
 }
 
-void PageManager::add_multi_layer_kv_xtensors() {
+void XTensorManager::add_multi_layer_kv_xtensors() {
   MultiLayerXTensorPair multi_layer_kv_xtensor =
       MultiLayerXTensorTransfer::get_instance().move_multi_layer_xtensor(
           device_.index());
@@ -38,12 +38,12 @@ void PageManager::add_multi_layer_kv_xtensors() {
                      std::move(multi_layer_kv_xtensor.second));
 }
 
-void PageManager::allocate_seq_id(int32_t& seq_id) {
+void XTensorManager::allocate_seq_id(int32_t& seq_id) {
   multi_layer_kv_xtensor_.first->allocate_seq_id(seq_id);
   multi_layer_kv_xtensor_.second->allocate_seq_id(seq_id);
 }
 
-void PageManager::deallocate_seq_id(int32_t seq_id) {
+void XTensorManager::deallocate_seq_id(int32_t seq_id) {
   CHECK_GE(seq_id, 0) << "seq_id is not valid!";
 
   multi_layer_kv_xtensor_.first->deallocate_seq_id(seq_id);
@@ -51,7 +51,7 @@ void PageManager::deallocate_seq_id(int32_t seq_id) {
 }
 
 // num_tokens is the number of all tokens in sequence
-bool PageManager::allocate(int32_t& seq_id, size_t num_tokens) {
+bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
   int32_t original_seq_id = seq_id;
   if (seq_id < 0) {
     allocate_seq_id(seq_id);
@@ -125,7 +125,7 @@ bool PageManager::allocate(int32_t& seq_id, size_t num_tokens) {
   return true;
 }
 
-void PageManager::deallocate(int32_t seq_id) {
+void XTensorManager::deallocate(int32_t seq_id) {
   CHECK_GE(seq_id, 0) << "seq_id is not valid!";
 
   const size_t k_num_pages_used_per_layer =
@@ -154,8 +154,8 @@ void PageManager::deallocate(int32_t seq_id) {
                               v_num_pages_used_per_layer;
 }
 
-folly::SemiFuture<bool> PageManager::allocate_async(int32_t& seq_id,
-                                                    size_t num_tokens) {
+folly::SemiFuture<bool> XTensorManager::allocate_async(int32_t& seq_id,
+                                                       size_t num_tokens) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
@@ -166,7 +166,8 @@ folly::SemiFuture<bool> PageManager::allocate_async(int32_t& seq_id,
   return future;
 }
 
-folly::SemiFuture<folly::Unit> PageManager::deallocate_async(int32_t seq_id) {
+folly::SemiFuture<folly::Unit> XTensorManager::deallocate_async(
+    int32_t seq_id) {
   folly::Promise<folly::Unit> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this, seq_id, promise = std::move(promise)]() mutable {
@@ -176,20 +177,20 @@ folly::SemiFuture<folly::Unit> PageManager::deallocate_async(int32_t seq_id) {
   return future;
 }
 
-size_t PageManager::num_free_pages_per_layer() const {
+size_t XTensorManager::num_free_pages_per_layer() const {
   return page_allocator_->get_num_free_phy_pages_per_layer();
 }
 
-size_t PageManager::num_used_pages_per_layer() const {
+size_t XTensorManager::num_used_pages_per_layer() const {
   return num_used_pages_per_layer_;
 }
 
-double PageManager::kv_cache_utilization() const {
+double XTensorManager::kv_cache_utilization() const {
   return static_cast<double>(num_used_pages_per_layer_) /
          page_allocator_->get_num_total_phy_pages_per_layer();
 }
 
-folly::SemiFuture<size_t> PageManager::num_free_pages_per_layer_async() {
+folly::SemiFuture<size_t> XTensorManager::num_free_pages_per_layer_async() {
   folly::Promise<size_t> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this, promise = std::move(promise)]() mutable {
@@ -199,7 +200,7 @@ folly::SemiFuture<size_t> PageManager::num_free_pages_per_layer_async() {
   return future;
 }
 
-folly::SemiFuture<size_t> PageManager::num_used_pages_per_layer_async() {
+folly::SemiFuture<size_t> XTensorManager::num_used_pages_per_layer_async() {
   folly::Promise<size_t> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this, promise = std::move(promise)]() mutable {
@@ -209,8 +210,8 @@ folly::SemiFuture<size_t> PageManager::num_used_pages_per_layer_async() {
   return future;
 }
 
-bool PageManager::has_enough_pages(size_t k_num_pages_needed,
-                                   size_t v_num_pages_needed) {
+bool XTensorManager::has_enough_pages(size_t k_num_pages_needed,
+                                      size_t v_num_pages_needed) {
   // still have enough pages
   if (k_num_pages_needed + v_num_pages_needed <=
       page_allocator_->get_num_free_phy_pages_per_layer()) {

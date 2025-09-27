@@ -339,10 +339,11 @@ DEFINE_bool(enable_continuous_kvcache,
             false,
             "Whether to enable continuous kv cache.");
 
-DEFINE_int64(granularity_size,
-             2 * 1024 * 1024,
-             "Granularity size for one page in bytes, default 2MB, when enable "
-             "continuous kv cache.");
+DEFINE_int64(
+    granularity_size,
+    2 * 1024 * 1024,
+    "Granularity size for one physical page in bytes, default 2MB, when enable "
+    "continuous kv cache.");
 
 DEFINE_int64(cache_size_per_token,
              0,

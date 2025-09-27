@@ -24,22 +24,22 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "options.h"
-#include "page_manager.pb.h"
+#include "xtensor_manager.pb.h"
 
 namespace xllm {
-class PageManagerServer {
+class XTensorManagerServer {
  public:
-  PageManagerServer(int local_page_manager_idx,
-                    const std::string& master_node_addr,
-                    std::atomic<bool>& done,
-                    const torch::Device& device,
-                    const page::Options& options);
-  virtual ~PageManagerServer();
+  XTensorManagerServer(int local_xtensor_manager_idx,
+                       const std::string& master_node_addr,
+                       std::atomic<bool>& done,
+                       const torch::Device& device,
+                       const xtensor::Options& options);
+  virtual ~XTensorManagerServer();
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PageManagerServer);
+  DISALLOW_COPY_AND_ASSIGN(XTensorManagerServer);
 
-  void create_server(const page::Options& options,
+  void create_server(const xtensor::Options& options,
                      std::atomic<bool>& done,
                      const std::string& master_node_addr,
                      const torch::Device& device,
@@ -53,6 +53,6 @@ class PageManagerServer {
                         proto::CommUniqueIdList& uids);
 
  private:
-  std::unique_ptr<std::thread> page_manager_thread_;
+  std::unique_ptr<std::thread> xtensor_manager_thread_;
 };
 }  // namespace xllm

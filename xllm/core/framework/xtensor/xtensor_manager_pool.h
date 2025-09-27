@@ -17,14 +17,14 @@ limitations under the License.
 #include <memory>
 
 #include "framework/block/kv_cache_manager.h"
-#include "page_manager_client.h"
-#include "page_manager_server.h"
+#include "xtensor_manager_client.h"
+#include "xtensor_manager_server.h"
 
 namespace xllm {
-class PageManagerPool final : public KVCacheManager {
+class XTensorManagerPool final : public KVCacheManager {
  public:
-  explicit PageManagerPool(const page::Options& options, int32_t dp_size);
-  ~PageManagerPool() = default;
+  explicit XTensorManagerPool(const xtensor::Options& options, int32_t dp_size);
+  ~XTensorManagerPool() = default;
 
   bool allocate(Sequence* sequence) override;
   bool allocate(std::vector<Sequence*>& sequences) override;
@@ -99,18 +99,18 @@ class PageManagerPool final : public KVCacheManager {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PageManagerPool);
-  void setup_single_node_page_managers();
-  void setup_multi_node_page_managers(const std::string& master_node_addr);
+  DISALLOW_COPY_AND_ASSIGN(XTensorManagerPool);
+  void setup_single_node_xtensor_managers();
+  void setup_multi_node_xtensor_managers(const std::string& master_node_addr);
   int32_t get_manager_with_max_free_pages() const;
   int32_t get_dp_rank(Sequence* sequence) const;
 
  private:
-  page::Options options_;
+  xtensor::Options options_;
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
-  std::vector<std::shared_ptr<PageManagerClient>> page_manager_clients_;
-  std::vector<std::shared_ptr<PageManager>> page_managers_;
-  std::vector<std::unique_ptr<PageManagerServer>> page_manager_servers_;
+  std::vector<std::shared_ptr<XTensorManagerClient>> xtensor_manager_clients_;
+  std::vector<std::shared_ptr<XTensorManager>> xtensor_managers_;
+  std::vector<std::unique_ptr<XTensorManagerServer>> xtensor_manager_servers_;
 };
 }  // namespace xllm
