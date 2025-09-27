@@ -244,20 +244,17 @@ TEST_F(SampleModelTest, CombinedForwardPassTest) {
 
     // Step 1: hidden_states = self.norm(hidden_states)
     auto normalized_output = rms_norm(input, 0);
-    aclrtSynchronizeStream(npu_stream.stream());
     std::cout << "RMS norm output shape: " << normalized_output.sizes()
               << std::endl;
 
     // Step 2: qkv, _ = self.qkv_proj(hidden_states)
     auto qkv_output = qkv_proj(normalized_output, 0);
-    aclrtSynchronizeStream(npu_stream.stream());
     std::cout << "QKV projection output shape: " << qkv_output.sizes()
               << std::endl;
 
     // Step 3: q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
     // dim=-1)
     auto split_outputs = split_layer(qkv_output, 0);
-    aclrtSynchronizeStream(npu_stream.stream());
 
     EXPECT_EQ(split_outputs.size(), 3)
         << "Split should produce 3 tensors (q, k, v)";
@@ -293,7 +290,7 @@ TEST_F(SampleModelTest, CombinedForwardPassTest) {
     std::cout << "Combined forward pass test (norm -> qkv_proj -> split) "
                  "completed successfully!"
               << std::endl;
-
+    aclrtSynchronizeStream(npu_stream.stream());
   } catch (const std::exception& e) {
     GTEST_SKIP()
         << "Skipping combined forward pass test - requires NPU environment: "
@@ -340,13 +337,8 @@ TEST_F(SampleModelTest, CombinedForwardPassBatchTest) {
       auto npu_stream = c10_npu::getCurrentNPUStream(0);
 
       auto normalized_output = rms_norm(input, 0);
-      aclrtSynchronizeStream(npu_stream.stream());
-
       auto qkv_output = qkv_proj(normalized_output, 0);
-      aclrtSynchronizeStream(npu_stream.stream());
-
       auto split_outputs = split_layer(qkv_output, 0);
-      aclrtSynchronizeStream(npu_stream.stream());
 
       EXPECT_EQ(normalized_output.size(0), shape[0]);
       EXPECT_EQ(normalized_output.size(1), shape[1]);
@@ -373,7 +365,7 @@ TEST_F(SampleModelTest, CombinedForwardPassBatchTest) {
         EXPECT_EQ(split_outputs[2].size(1), shape[1]);
         EXPECT_EQ(split_outputs[2].size(2), kv_size_);
       }
-
+      aclrtSynchronizeStream(npu_stream.stream());
     } catch (const std::exception& e) {
       GTEST_SKIP() << "Skipping batch processing test for shape [" << shape[0]
                    << ", " << shape[1] << ", " << shape[2]
@@ -416,13 +408,8 @@ TEST_F(SampleModelTest, DataFlowTest) {
     auto npu_stream = c10_npu::getCurrentNPUStream(0);
 
     auto normalized_output = rms_norm(input, 0);
-    aclrtSynchronizeStream(npu_stream.stream());
-
     auto qkv_output = qkv_proj(normalized_output, 0);
-    aclrtSynchronizeStream(npu_stream.stream());
-
     auto split_outputs = split_layer(qkv_output, 0);
-    aclrtSynchronizeStream(npu_stream.stream());
 
     EXPECT_FALSE(torch::isnan(normalized_output).any().item<bool>())
         << "NaN detected in normalized output";
@@ -446,7 +433,7 @@ TEST_F(SampleModelTest, DataFlowTest) {
     std::cout << "Data flow test completed - no NaN or Inf values detected in "
                  "pipeline!"
               << std::endl;
-
+    aclrtSynchronizeStream(npu_stream.stream());
   } catch (const std::exception& e) {
     GTEST_SKIP() << "Skipping data flow test - requires NPU environment: "
                  << e.what();
