@@ -561,7 +561,8 @@ class FluxPipelineImpl : public torch::nn::Module {
     );
 
     DiTForwardOutput out;
-    out.tensors = torch::chunk(output.images[0], input.batch_size);
+    out.tensors = torch::chunk(output.images[0], output.images[0].size(0), 0);
+    LOG(INFO) << "Output tensor chunks size: " << out.tensors.size();
     return out;
   }
 
@@ -576,16 +577,24 @@ class FluxPipelineImpl : public torch::nn::Module {
     TORCH_CHECK(batch_size > 0, "Prompt list cannot be empty");
     std::vector<std::string> processed_prompt = prompt_list;
 
-    std::vector<int32_t> text_input_ids;
-    text_input_ids.reserve(tokenizer_max_length_);
-    CHECK(tokenizer_->encode(processed_prompt[0], &text_input_ids));
-    text_input_ids.resize(tokenizer_max_length_, 49407);
-    text_input_ids.back() = 49407;
-
-    auto input_ids = torch::tensor(text_input_ids, torch::dtype(torch::kLong))
-                         .view({1, -1})
-                         .to(used_device);
-
+    std::vector<std::vector<int32_t>> text_input_ids;
+    text_input_ids.reserve(batch_size);
+    CHECK(tokenizer_->batch_encode(processed_prompt, &text_input_ids));
+    for (auto& ids : text_input_ids) {
+      LOG(INFO) << "CLIP Original IDs size: " << ids;
+      ids.resize(tokenizer_max_length_, 49407);
+      ids.back() = 49407;
+    }
+    std::vector<int32_t> text_input_ids_flat;
+    text_input_ids_flat.reserve(batch_size * tokenizer_max_length_);
+    for (const auto& ids : text_input_ids) {
+      text_input_ids_flat.insert(
+          text_input_ids_flat.end(), ids.begin(), ids.end());
+    }
+    auto input_ids =
+        torch::tensor(text_input_ids_flat, torch::dtype(torch::kLong))
+            .view({batch_size, tokenizer_max_length_})
+            .to(used_device);
     auto encoder_output = clip_text_model_->forward(input_ids);
     torch::Tensor prompt_embeds = encoder_output;
     prompt_embeds = prompt_embeds.to(used_device).to(_execution_dtype);
@@ -610,15 +619,24 @@ class FluxPipelineImpl : public torch::nn::Module {
     TORCH_CHECK(batch_size > 0, "Prompt list cannot be empty");
     std::vector<std::string> processed_prompt = prompt_list;
 
-    std::vector<int32_t> text_input_ids;
-    text_input_ids.reserve(max_sequence_length);
-    CHECK(tokenizer_2_->encode(processed_prompt[0], &text_input_ids));
-    text_input_ids.resize(max_sequence_length, 0);
+    std::vector<std::vector<int32_t>> text_input_ids;
+    text_input_ids.reserve(batch_size);
+    CHECK(tokenizer_2_->batch_encode(processed_prompt, &text_input_ids));
+    for (auto& ids : text_input_ids) {
+      LOG(INFO) << "T5 Original IDs size: " << ids;
+      ids.resize(max_sequence_length, 0);
+    }
 
-    auto input_ids = torch::tensor(text_input_ids, torch::dtype(torch::kLong))
-                         .view({1, max_sequence_length})
-                         .to(used_device);
-
+    std::vector<int32_t> text_input_ids_flat;
+    text_input_ids_flat.reserve(batch_size * max_sequence_length);
+    for (const auto& ids : text_input_ids) {
+      text_input_ids_flat.insert(
+          text_input_ids_flat.end(), ids.begin(), ids.end());
+    }
+    auto input_ids =
+        torch::tensor(text_input_ids_flat, torch::dtype(torch::kLong))
+            .view({batch_size, max_sequence_length})
+            .to(used_device);
     torch::Tensor prompt_embeds = t5_->forward(input_ids);
     prompt_embeds = prompt_embeds.to(used_dtype).to(used_device);
     int64_t seq_len = prompt_embeds.size(1);
