@@ -22,10 +22,10 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 
-#include "../common/macros.h"
-#include "../framework/kv_cache/kv_cache.h"
-#include "../framework/model/causal_lm.h"
-#include "../framework/model/model_input_params.h"
+#include "core/common/macros.h"
+#include "core/framework/kv_cache/kv_cache.h"
+#include "core/framework/model/causal_lm.h"
+#include "core/framework/model/model_input_params.h"
 #include "executor_impl.h"
 #include "options.h"
 #include "torch_npu/csrc/core/npu/NPUGraph.h"
@@ -38,14 +38,15 @@ class AclGraph {
  public:
   AclGraph() : batch_size_(0) {}
 
-  // Capture computation graph for given batch size
+  // Capture computation graph for given bucket size
   bool capture(CausalLM* model,
                const ModelArgs& args,
                const runtime::Options& options,
                const torch::Tensor& tokens,
                const torch::Tensor& positions,
                const ModelInputParams& params,
-               std::vector<KVCache>& kv_cache);
+               std::vector<KVCache>& kv_cache,
+               uint32_t bucket_size);
 
   // Replay captured graph with new input data
   torch::Tensor replay(const torch::Tensor& tokens,
@@ -55,11 +56,18 @@ class AclGraph {
   // Get the hidden states from the last capture
   torch::Tensor get_hidden_states() const { return hidden_states_; }
 
+  // Get the hidden states for actual batch size (slice to avoid padded data)
+  torch::Tensor get_hidden_states(uint32_t actual_batch_size) const {
+    return hidden_states_.slice(
+        /*dim=*/0, /*start=*/0, /*end=*/actual_batch_size);
+  }
+
  private:
   // Copy data to graph persistent buffers
   void copy_data_to_graph_buffer(const torch::Tensor& tokens,
                                  const torch::Tensor& positions,
-                                 const ModelInputParams& params);
+                                 const ModelInputParams& params,
+                                 uint32_t actual_batch_size);
 
   // Print graph held tensors for debugging
   void print_graph_tensors() const;
@@ -108,6 +116,11 @@ class AclGraphExecutorImpl : public ExecutorImpl {
 
   // Lazy-loaded ACL graphs for different batch sizes
   absl::flat_hash_map<uint32_t, std::unique_ptr<AclGraph>> graphs_;
+
+  // Get bucket size for given batch size
+  // For batch_size < 8: use 1, 2, 4, 8
+  // For batch_size >= 8: use multiples of 8
+  uint32_t get_bucket_size(uint32_t batch_size) const;
 };
 
 }  // namespace xllm
