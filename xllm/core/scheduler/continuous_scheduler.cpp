@@ -53,21 +53,18 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
 
   last_batch_.resize(options_.dp_size());
 
-  if (options.enable_profile_token_budget() ||
-      options.enable_latency_aware_schedule() || options.enable_disagg_pd()) {
-    ProfileManager::Options profile_manager_options;
-    profile_manager_options.dp_size(options.dp_size())
-        .enable_schedule_overlap(options.enable_schedule_overlap())
-        .enable_profile_step_time(options.enable_profile_step_time())
-        .profile_max_prompt_length(options.profile_max_prompt_length())
-        .enable_profile_kv_blocks(options.enable_profile_kv_blocks())
-        .max_tokens_per_batch(options.max_tokens_per_batch())
-        .max_global_tpot_ms(options.max_global_tpot_ms())
-        .max_global_ttft_ms(options.max_global_ttft_ms())
-        .enable_profile_token_budget(options.enable_profile_token_budget());
-    profile_manager_ =
-        std::make_unique<ProfileManager>(engine, profile_manager_options);
-  }
+  ProfileManager::Options profile_manager_options;
+  profile_manager_options.dp_size(options.dp_size())
+      .enable_schedule_overlap(options.enable_schedule_overlap())
+      .enable_profile_step_time(options.enable_profile_step_time())
+      .profile_max_prompt_length(options.profile_max_prompt_length())
+      .enable_profile_kv_blocks(options.enable_profile_kv_blocks())
+      .max_tokens_per_batch(options.max_tokens_per_batch())
+      .max_global_tpot_ms(options.max_global_tpot_ms())
+      .max_global_ttft_ms(options.max_global_ttft_ms())
+      .enable_profile_token_budget(options.enable_profile_token_budget());
+  profile_manager_ =
+      std::make_unique<ProfileManager>(engine, profile_manager_options);
 
   response_processor_ = std::make_unique<AsyncResponseProcessor>(
       engine_->tokenizer(),
@@ -158,8 +155,8 @@ bool ContinuousScheduler::check_if_enough_to_evict(
 }
 
 void ContinuousScheduler::handle_prefill_requests(
-    size_t& latency_budget,
-    size_t& estimate_latency,
+    double& latency_budget,
+    double& estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
     RequestPriorityQueue& waiting_priority_queue,
@@ -203,7 +200,7 @@ void ContinuousScheduler::handle_prefill_requests(
     // long sequences may stuck when n>1
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
-    size_t allocated_estimate_latency = 0;
+    double allocated_estimate_latency = 0;
     bool can_schedule = true;
     std::vector<Sequence*> prefill_sequences;
     std::vector<size_t> prefill_sequences_budget;
@@ -272,7 +269,7 @@ void ContinuousScheduler::handle_prefill_requests(
 
       // OPTIMIZE for multi-slo requests
       // for prefill requests, check latency after prefix cache match
-      size_t seq_estimate_latency = 0;
+      double seq_estimate_latency = 0;
       if (options_.enable_latency_aware_schedule()) {
         seq_estimate_latency =
             profile_manager_->predict_step_time(prefill_sequence.get(), false);
@@ -348,8 +345,8 @@ void ContinuousScheduler::handle_prefill_requests(
 }
 
 void ContinuousScheduler::handle_decode_requests(
-    size_t& latency_budget,
-    size_t& estimate_latency,
+    double& latency_budget,
+    double& estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
     size_t& num_offline_decode_preempt_offline_requests,
@@ -372,14 +369,14 @@ void ContinuousScheduler::handle_decode_requests(
     bool has_enough_blocks = true;
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
-    size_t allocated_estimate_latency = 0;
+    double allocated_estimate_latency = 0;
     for (auto& sequence : request->sequences()) {
       // skip finished sequence.
       if (sequence->finished()) {
         continue;
       }
       // no budget left
-      size_t seq_estimate_latency = 0;
+      double seq_estimate_latency = 0;
       if (options_.enable_latency_aware_schedule()) {
         seq_estimate_latency =
             profile_manager_->predict_step_time(sequence.get(), false);
@@ -515,10 +512,10 @@ void ContinuousScheduler::handle_abnormal_request(
     const std::vector<size_t>& candidate_token_budgets,
     const size_t& allocated_tokens,
     const size_t& allocated_seqs,
-    size_t& allocated_estimate_latency,
+    double& allocated_estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
-    size_t& estimate_latency,
+    double& estimate_latency,
     bool budget_exhausted,
     bool blocks_exhausted) {
   std::shared_ptr<Request> request = running_queue->top();
@@ -721,8 +718,8 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   // different ttft. TO IMPROVE: use min remaining time (i.e. slo -
   // elapsed_time) of the reuquest in current decode queue to replace current
   // latency_budget.
-  size_t latency_budget = options_.max_global_ttft_ms();
-  size_t estimate_latency = 0;
+  double latency_budget = options_.max_global_ttft_ms();
+  double estimate_latency = profile_manager_->get_constant_overhead();
   // remaining budget for the current batch
   size_t remaining_token_budget = options_.max_tokens_per_batch();
   size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);

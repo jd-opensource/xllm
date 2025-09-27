@@ -41,8 +41,8 @@ class ChunkedPrefillScheduler final : public ContinuousScheduler {
   virtual std::vector<Batch> prepare_batch() override;
   void handle_running_queue_requests(
       const size_t max_tokens_per_chunk_for_prefill,
-      size_t& latency_budget,
-      size_t& estimate_latency,
+      double& latency_budget,
+      double& estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       size_t& num_preempted_requests,
@@ -52,8 +52,8 @@ class ChunkedPrefillScheduler final : public ContinuousScheduler {
       bool& blocks_exhausted);
   void handle_prefill_requests(
       const size_t max_tokens_per_chunk_for_prefill,
-      size_t& latency_budget,
-      size_t& estimate_latency,
+      double& latency_budget,
+      double& estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       size_t& num_preempted_requests,
@@ -62,8 +62,8 @@ class ChunkedPrefillScheduler final : public ContinuousScheduler {
       bool& budget_exhausted,
       bool& blocks_exhausted,
       std::vector<std::shared_ptr<Request>>& finished_requests);
-  void handle_remaining_budget(size_t& latency_budget,
-                               size_t& estimate_latency,
+  void handle_remaining_budget(double& latency_budget,
+                               double& estimate_latency,
                                size_t& remaining_token_budget,
                                std::vector<Sequence*>& prefill_stage_sequences,
                                bool& blocks_exhausted);

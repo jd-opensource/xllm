@@ -236,16 +236,16 @@ class ContinuousScheduler : public Scheduler {
   InstanceInfo instance_info_;
 
   void handle_prefill_requests(
-      size_t& latency_budget,
-      size_t& estimate_latency,
+      double& latency_budget,
+      double& estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       RequestPriorityQueue& waiting_priority_queue,
       size_t& num_online_prefill_preempt_offline_requests,
       std::vector<std::shared_ptr<Request>>& finished_requests);
   void handle_decode_requests(
-      size_t& latency_budget,
-      size_t& estimate_latency,
+      double& latency_budget,
+      double& estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       size_t& num_offline_decode_preempt_offline_requests,
@@ -261,10 +261,10 @@ class ContinuousScheduler : public Scheduler {
       const std::vector<size_t>& candidate_token_budgets,
       const size_t& allocated_tokens,
       const size_t& allocated_seqs,
-      size_t& allocated_estimate_latency,
+      double& allocated_estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
-      size_t& estimate_latency,
+      double& estimate_latency,
       bool budget_exhausted,
       bool block_exhausted);
   void handle_running_requests(std::shared_ptr<Request> request);
