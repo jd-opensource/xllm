@@ -31,6 +31,7 @@
 #include "models/model_registry.h"
 #include "t5_encoder.h"
 namespace xllm {
+
 float calculate_shift(int64_t image_seq_len,
                       int64_t base_seq_len = 256,
                       int64_t max_seq_len = 4096,
@@ -42,6 +43,7 @@ float calculate_shift(int64_t image_seq_len,
   float mu = static_cast<float>(image_seq_len) * m + b;
   return mu;
 }
+
 std::pair<torch::Tensor, int64_t> retrieve_timesteps(
     FlowMatchEulerDiscreteScheduler scheduler,
     std::optional<int64_t> num_inference_steps = std::nullopt,
@@ -98,66 +100,17 @@ std::pair<torch::Tensor, int64_t> retrieve_timesteps(
   }
   return {scheduler_timesteps, steps};
 }
+
 torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
-                           torch::Generator generator,
+                           int64_t seed,
                            torch::TensorOptions& options) {
   if (shape.empty()) {
     throw std::invalid_argument("Shape cannot be empty.");
   }
-  torch::Device rand_device = options.device();
-  bool generator_provided = false;  // generator.has_value();
-
-  // if (generator_provided) {
-  //     LOG(INFO) << "Generator provided, device: " << device;
-
-  //     torch::DeviceType gen_device_type = generator.value().device().type();
-  //     LOG(INFO) << "Generator device type: " << gen_device_type << ", target
-  //     device type: " << device.type();
-  //     if (gen_device_type != device.type() && gen_device_type == torch::kCPU)
-  //     {
-  //       LOG(INFO)
-  //           << "Generator is on CPU, but target device is " << device
-  //           << ". Generating on CPU and moving to target device.";
-  //         rand_device = torch::kCPU;
-  //         if (device.type() != torch::kMPS) {
-  //             LOG(INFO)
-  //                 << "The passed generator was created on 'cpu' even though a
-  //                 tensor on "
-  //                 << device << " was expected. Tensors will be created on
-  //                 'cpu' and then moved to "
-  //                 << device << ".";
-  //         }
-  //     }
-  //     else if (gen_device_type != device.type() && gen_device_type !=
-  //     torch::kCPU) {
-  //         LOG(ERROR)
-  //             << "Generator device type (" << gen_device_type
-  //             << ") does not match target device type (" << device.type() <<
-  //             ").";
-  //         throw std::invalid_argument(
-  //             "Cannot generate a " + device.str() + " tensor from a generator
-  //             of type " + torch::Device(gen_device_type).str() + "."
-  //         );
-  //     }
-  // } else {
-  //     LOG(INFO) << "No generator provided, using default, device: " <<
-  //     device;
-  // }
-
-  // if (generator_provided && !generator.value().defined()) {
-  //     throw std::invalid_argument("Provided generator is not defined.");
-  // }
-  torch::manual_seed(42);
+  torch::manual_seed(seed);
   torch::Tensor latents;
-  // torch::TensorOptions options =
-  //     torch::dtype(dtype).device(rand_device).layout(layout);
-
   try {
-    if (generator_provided) {
-      latents = torch::randn(shape, generator, options);
-    } else {
-      latents = torch::randn(shape, options);
-    }
+    latents = torch::randn(shape, options.device(torch::kCPU)).to(options);
 
   } catch (const std::exception& e) {
     LOG(ERROR) << "Error generating random tensor: " << e.what();
@@ -478,7 +431,7 @@ class FluxPipelineImpl : public torch::nn::Module {
       int64_t num_channels_latents,
       int64_t height,
       int64_t width,
-      torch::Generator generator,
+      int64_t seed,
       std::optional<torch::Tensor> latents = std::nullopt) {
     int64_t adjusted_height = 2 * (height / (vae_scale_factor_ * 2));
     int64_t adjusted_width = 2 * (width / (vae_scale_factor_ * 2));
@@ -489,8 +442,7 @@ class FluxPipelineImpl : public torch::nn::Module {
           batch_size, adjusted_height / 2, adjusted_width / 2);
       return {latents.value(), latent_image_ids};
     }
-    torch::manual_seed(42);
-    torch::Tensor latents_tensor = randn_tensor(shape, generator, options_);
+    torch::Tensor latents_tensor = randn_tensor(shape, seed, options_);
     torch::Tensor packed_latents = _pack_latents(latents_tensor,
                                                  batch_size,
                                                  num_channels_latents,
@@ -504,10 +456,6 @@ class FluxPipelineImpl : public torch::nn::Module {
     const auto& generation_params = input.generation_params;
 
     auto seed = generation_params.seed > 0 ? generation_params.seed : 42;
-    torch::manual_seed(seed);
-    std::vector<torch::Generator> generators;
-    generators.push_back(torch::Generator());
-
     auto prompts = std::make_optional(input.prompts);
     auto prompts_2 = input.prompts_2.empty()
                          ? std::nullopt
@@ -550,7 +498,7 @@ class FluxPipelineImpl : public torch::nn::Module {
         std::nullopt,                                  // sigmas
         generation_params.guidance_scale,              // guidance_scale
         generation_params.num_images_per_prompt,       // num_images_per_prompt
-        std::make_optional(generators),                // generator
+        seed,                                          // seed
         latents,                                       // latents
         prompt_embeds,                                 // prompt_embeds
         negative_prompt_embeds,                        // negative_prompt_embeds
@@ -701,7 +649,7 @@ class FluxPipelineImpl : public torch::nn::Module {
       std::optional<std::vector<float>> sigmas = std::nullopt,
       float guidance_scale = 3.5f,
       int64_t num_images_per_prompt = 1,
-      std::optional<std::vector<torch::Generator>> generators = std::nullopt,
+      std::optional<int64_t> seed = std::nullopt,
       std::optional<torch::Tensor> latents = std::nullopt,
       std::optional<torch::Tensor> prompt_embeds = std::nullopt,
       std::optional<torch::Tensor> pooled_prompt_embeds = std::nullopt,
@@ -766,14 +714,13 @@ class FluxPipelineImpl : public torch::nn::Module {
     }
     // prepare latent
     int64_t num_channels_latents = transformer_->in_channels() / 4;
-    auto [prepared_latents, latent_image_ids] = prepare_latents(
-        total_batch_size,
-        num_channels_latents,
-        actual_height,
-        actual_width,
-        // TODO:
-        generators.has_value() ? generators.value()[0] : torch::Generator(),
-        latents);
+    auto [prepared_latents, latent_image_ids] =
+        prepare_latents(total_batch_size,
+                        num_channels_latents,
+                        actual_height,
+                        actual_width,
+                        seed.has_value() ? seed.value() : 42,
+                        latents);
     // prepare timestep
     std::vector<float> new_sigmas;
     if (!sigmas.has_value()) {
