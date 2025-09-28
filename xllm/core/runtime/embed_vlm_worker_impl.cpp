@@ -82,7 +82,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
 
   // call model executor forward to get hidden states
   auto hidden_states = model_executor_->forward(
-      flatten_tokens, flatten_positions, kv_caches_, params);
+      {flatten_tokens}, {flatten_positions}, kv_caches_, {params});
 
 #if defined(USE_NPU)
   torch::npu::synchronize();

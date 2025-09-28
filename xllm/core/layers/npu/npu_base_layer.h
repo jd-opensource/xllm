@@ -61,13 +61,15 @@ class NpuBaseLayer : public BaseLayer {
 
   atb::Status execute_node(atb_speed::Model::Node& node,
                            int nodeId = 0,
-                           aclrtEvent* event = nullptr,
-                           std::atomic<bool>* event_flag = nullptr);
+                           std::vector<aclrtEvent*> event = {nullptr, nullptr},
+                           std::vector<std::atomic<bool>*> event_flag = {
+                               nullptr,
+                               nullptr});
 
   atb::Status execute_plan(const atb_speed::Model::Node& node,
                            const std::string& op_name,
-                           aclrtEvent* event,
-                           std::atomic<bool>* event_flag);
+                           std::vector<aclrtEvent*> event,
+                           std::vector<std::atomic<bool>*> event_flag);
 
   virtual void run_task(std::string taskName,
                         std::function<int()> task) const override;

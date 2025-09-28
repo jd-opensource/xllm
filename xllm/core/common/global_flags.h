@@ -163,6 +163,8 @@ DECLARE_string(store_metadata_connstring);
 
 DECLARE_bool(enable_multi_stream_parallel);
 
+DECLARE_int32(default_micro_batch_num);
+
 DECLARE_bool(enable_profile_step_time);
 
 DECLARE_bool(enable_profile_token_budget);

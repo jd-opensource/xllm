@@ -78,6 +78,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
     FLAGS_eplb_update_threshold = options.eplb_update_threshold().value();
   }
 #endif
+  FLAGS_enable_multi_stream_parallel =
+      options.enable_multi_stream_parallel() && (options.nnodes() > 1);
 
   // construct engine
   const auto devices =

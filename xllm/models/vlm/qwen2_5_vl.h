@@ -700,12 +700,12 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
+  torch::Tensor forward(const std::vector<torch::Tensor>& tokens,
+                        const std::vector<torch::Tensor>& positions,
                         std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+                        const std::vector<ModelInputParams>& input_params) {
     torch::NoGradGuard no_grad;
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params[0].mm_data;
 
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
@@ -721,9 +721,9 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Qwen2_5_VLImageInputs{pixel_values, image_grid_thw};
 
-    auto inputs_embeds =
-        get_input_embeddings(tokens, image_inputs, video_inputs, input_params);
-    input_params.input_embedding = inputs_embeds;
+    auto inputs_embeds = get_input_embeddings(
+        tokens[0], image_inputs, video_inputs, input_params[0]);
+    input_params[0].input_embedding = inputs_embeds;
 
     auto emb = language_model_(tokens, positions, kv_caches, input_params);
 
@@ -750,11 +750,11 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
   void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
 
-  layer::WordEmbedding get_word_embedding() {
+  std::vector<layer::WordEmbedding> get_word_embedding() {
     return language_model_->get_word_embedding();
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
+  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     language_model_->set_word_embedding(word_embedding);
   }
 

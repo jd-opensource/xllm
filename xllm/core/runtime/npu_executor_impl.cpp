@@ -34,10 +34,11 @@ ForwardInput NpuExecutorImpl::prepare_inputs(Batch& batch) {
 // tokens: [num_tokens]
 // positions: [num_tokens] token pos in the sequence
 // returns: [num_tokens, hidden_size]
-torch::Tensor NpuExecutorImpl::run(const torch::Tensor& tokens,
-                                   const torch::Tensor& positions,
-                                   std::vector<KVCache>& kv_caches,
-                                   const ModelInputParams& params) {
+torch::Tensor NpuExecutorImpl::run(
+    const std::vector<torch::Tensor>& tokens,
+    const std::vector<torch::Tensor>& positions,
+    std::vector<KVCache>& kv_caches,
+    const std::vector<ModelInputParams>& params) {
   return model_->forward(tokens, positions, kv_caches, params);
 }
 

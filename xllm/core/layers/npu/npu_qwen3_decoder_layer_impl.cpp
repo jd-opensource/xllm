@@ -20,14 +20,11 @@ limitations under the License.
 
 #include <map>
 
+#include "common/global_flags.h"
+
 // #include "attn_mask.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
-
-DECLARE_string(communication_backend);
-DECLARE_bool(enable_chunked_prefill);
-DECLARE_bool(enable_prefix_cache);
-DECLARE_int32(block_size);
 
 namespace xllm {
 namespace layer {
@@ -186,7 +183,7 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   // NOTE: Currently, single-process startup requires setting enableLcoc to
   // false, which leads to performance degradation. param.enableLcoc = false;
   // //isPrefill
-  param.enableLcoc = isPrefill;
+  param.enableLcoc = FLAGS_enable_multi_stream_parallel ? isPrefill : false;
   param.rmsnormQKNorm = true;
   param.isPrefill = isPrefill;
   param.isBF16 = args.dtype() == "bfloat16";
@@ -289,6 +286,10 @@ NpuQwen3DecoderLayerImpl::NpuQwen3DecoderLayerImpl(const ModelContext& context)
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     at_weight_tensors_[i] = torch::zeros({1}).to(options);
   }
+  int_tensor_placeholder_ = torch::ones({1}).to(torch::kInt32).to(device_);
+  slot_tensor_placeholder_ = torch::full({1}, 0).to(torch::kInt32).to(device_);
+  block_tables_placeholder_ =
+      torch::zeros({1, 1}).to(torch::kInt32).to(device_);
 }
 
 void NpuQwen3DecoderLayerImpl::verify_loaded_weights() const {
@@ -442,6 +443,8 @@ int64_t NpuQwen3DecoderLayerImpl::init_attn_mask() {
 int64_t NpuQwen3DecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::qwen::QwenLayerParam& param) {
+  bool multi_stream_parallel_enabled =
+      param.isPrefill && FLAGS_enable_multi_stream_parallel;
   atb::Operation* operation = nullptr;
   atb_speed::qwen::QwenDecoderLayer decoder_layer(param);
   decoder_layer.BuildGraph(&operation);
@@ -455,7 +458,7 @@ int64_t NpuQwen3DecoderLayerImpl::init_node(
     return -1;
   }
   node.inTensors.resize(node.operation->GetInputNum());
-  node.outTensors.resize(1);
+  node.outTensors.resize(multi_stream_parallel_enabled ? 2 : 1);
   size_t inTensorId = 1;
 
   for (size_t weightTensorId = 0; weightTensorId < WEIGHT_COUNT_PER_LAYER;
@@ -465,24 +468,25 @@ int64_t NpuQwen3DecoderLayerImpl::init_node(
 
   node.variantPack.inTensors.reserve(node.inTensors.size());
   node.variantPack.inTensors.resize(node.inTensors.size());
-  node.variantPack.outTensors.reserve(1);
-  node.variantPack.outTensors.resize(1);
+  node.variantPack.outTensors.reserve(multi_stream_parallel_enabled ? 2 : 1);
+  node.variantPack.outTensors.resize(multi_stream_parallel_enabled ? 2 : 1);
 
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
-                                                torch::Tensor& cos_pos,
-                                                torch::Tensor& sin_pos,
-                                                torch::Tensor& attn_mask,
-                                                KVCache& kv_cache,
-                                                ModelInputParams& input_params,
-                                                aclrtEvent* event,
-                                                std::atomic<bool>* event_flag,
-                                                int node_id) {
+torch::Tensor NpuQwen3DecoderLayerImpl::forward(
+    std::vector<torch::Tensor>& x,
+    std::vector<torch::Tensor>& cos_pos,
+    std::vector<torch::Tensor>& sin_pos,
+    std::vector<torch::Tensor>& attn_mask,
+    KVCache& kv_cache,
+    std::vector<ModelInputParams>& input_params,
+    std::vector<aclrtEvent*> event,
+    std::vector<std::atomic<bool>*> event_flag,
+    int node_id) {
   atb::Status st;
-  if (input_params.prefill_indices.second !=
-      input_params.q_seq_lens.size(0) - 1) {
+  if (input_params[0].prefill_indices.second !=
+      input_params[0].q_seq_lens.size(0) - 1) {
     // if (input_params.empty_kv_cache) {
     // mstxRangeId id = mstxRangeStartA("prefill build variant", nullptr);
     build_node_variant_pack(prefill_node_,
@@ -498,11 +502,13 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute prefill layer fail, error code: " << st;
   } else {
+    std::vector<at::Tensor> decode_attn_masks = {this->decode_attn_mask_,
+                                                 this->decode_attn_mask_};
     build_node_variant_pack(decode_node_,
                             x,
                             cos_pos,
                             sin_pos,
-                            decode_attn_mask_,
+                            decode_attn_masks,
                             kv_cache,
                             input_params,
                             false);
@@ -516,45 +522,119 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
 
 void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
-    torch::Tensor& x,
-    torch::Tensor& cos_pos,
-    torch::Tensor& sin_pos,
-    at::Tensor& attn_mask,
+    std::vector<torch::Tensor>& x,
+    std::vector<torch::Tensor>& cos_pos,
+    std::vector<torch::Tensor>& sin_pos,
+    std::vector<at::Tensor>& attn_mask,
     KVCache& kv_cache,
-    ModelInputParams& input_params,
+    std::vector<ModelInputParams>& input_params,
     bool is_prefill) {
-  internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
+  internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x[0]);
   // std::cout<<"node.variantPack.inTensors.size:"<<node.variantPack.inTensors.size()<<std::endl;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
-      atb_speed::Utils::AtTensor2Tensor(cos_pos);
+      atb_speed::Utils::AtTensor2Tensor(cos_pos[0]);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
-      atb_speed::Utils::AtTensor2Tensor(sin_pos);
+      atb_speed::Utils::AtTensor2Tensor(sin_pos[0]);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
-      atb_speed::Utils::AtTensor2Tensor(attn_mask);
+      atb_speed::Utils::AtTensor2Tensor(attn_mask[0]);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 4) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_k_cache());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 5) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+      atb_speed::Utils::AtTensor2Tensor(input_params[0].kv_seq_lens);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
-      input_params.kv_seq_lens_vec.data();
+      input_params[0].kv_seq_lens_vec.data();
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) = placeholder_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7).hostData =
       placeholder_vec_.data();
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8) = placeholder_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
+      atb_speed::Utils::AtTensor2Tensor(input_params[0].block_tables);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
-  if (is_prefill &&
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
-        input_params.q_seq_lens_vec.data();
+      atb_speed::Utils::AtTensor2Tensor(input_params[0].new_cache_slots);
+  if (!FLAGS_enable_multi_stream_parallel) {
+    if (is_prefill &&
+        (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
+          atb_speed::Utils::AtTensor2Tensor(input_params[0].q_seq_lens);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
+          input_params[0].q_seq_lens_vec.data();
+    }
   }
+
+  if (is_prefill && FLAGS_enable_multi_stream_parallel) {
+    internal_tensors_auxiliary = atb_speed::Utils::AtTensor2Tensor(x[1]);
+    auto offset = 11;
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + offset) =
+        internal_tensors_auxiliary;
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1 + offset) =
+        atb_speed::Utils::AtTensor2Tensor(cos_pos[1]);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2 + offset) =
+        atb_speed::Utils::AtTensor2Tensor(sin_pos[1]);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3 + offset) =
+        atb_speed::Utils::AtTensor2Tensor(attn_mask[1]);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 4 + offset) =
+        atb_speed::Utils::AtTensor2Tensor(kv_cache.get_k_cache());
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 5 + offset) =
+        atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
+
+    if (!input_params[1].block_tables.defined() ||
+        input_params[1].block_tables.storage().data() == nullptr) {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6 + offset) =
+          atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6 + offset)
+          .hostData = const_cast<int32_t*>(placeholder_vec_.data());
+    } else {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6 + offset) =
+          atb_speed::Utils::AtTensor2Tensor(input_params[1].kv_seq_lens);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6 + offset)
+          .hostData = input_params[1].kv_seq_lens_vec.data();
+    }
+
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7 + offset) =
+        placeholder_;
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7 + offset)
+        .hostData = placeholder_vec_.data();
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8 + offset) =
+        placeholder_;
+
+    if (!input_params[1].block_tables.defined() ||
+        input_params[1].block_tables.storage().data() == nullptr) {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9 + offset) =
+          atb_speed::Utils::AtTensor2Tensor(block_tables_placeholder_);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10 + offset) =
+          atb_speed::Utils::AtTensor2Tensor(slot_tensor_placeholder_);
+    } else {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9 + offset) =
+          atb_speed::Utils::AtTensor2Tensor(input_params[1].block_tables);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10 + offset) =
+          atb_speed::Utils::AtTensor2Tensor(input_params[1].new_cache_slots);
+    }
+
+    if (is_prefill &&
+        (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 22) =
+          atb_speed::Utils::AtTensor2Tensor(input_params[0].q_seq_lens);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 22).hostData =
+          input_params[0].q_seq_lens_vec.data();
+
+      if (!input_params[1].block_tables.defined() ||
+          input_params[1].block_tables.storage().data() == nullptr) {
+        node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 23) =
+            atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
+        node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 23).hostData =
+            const_cast<int32_t*>(placeholder_vec_.data());
+      } else {
+        node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 23) =
+            atb_speed::Utils::AtTensor2Tensor(input_params[1].q_seq_lens);
+        node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 23).hostData =
+            input_params[1].q_seq_lens_vec.data();
+      }
+    }
+  }
+
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     CHECK_THROW(node.inTensors.at(i) == nullptr,
                 model_name_ << "inTensor " << i << "is NULL");
@@ -565,6 +645,9 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
   }
 
   node.variantPack.outTensors.at(0) = internal_tensors_;
+  if (is_prefill && FLAGS_enable_multi_stream_parallel) {
+    node.variantPack.outTensors.at(1) = internal_tensors_auxiliary;
+  }
 }
 
 }  // namespace layer

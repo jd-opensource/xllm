@@ -46,12 +46,9 @@ void* AtbBuffer::get_buffer(uint64_t buffer_size) {
     return at_tensor_.data_ptr();
   }
 
-  if (aclrtSynchronizeDevice() != 0) {
-    return nullptr;
-  }
+  aclrtSynchronizeStream(
+      c10_npu::getCurrentNPUStream(device_.index()).stream());
 
-  int device_id = device_.index();
-  torch::npu::synchronize(device_id);
   at_tensor_.reset();
   at_tensor_ = create_attensor(buffer_size);
   buffer_size_ = uint64_t(at_tensor_.numel());

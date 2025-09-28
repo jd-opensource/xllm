@@ -125,11 +125,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
 
   // temporarily use [0], will be adapted in next pr
   // call model executor forward to get hidden states
-  auto hidden_states =
-      model_executor_->forward(flatten_tokens_micro_batches[0],
-                               flatten_positions_micro_batches[0],
-                               kv_caches_,
-                               input_params_micro_batches[0]);
+  auto hidden_states = model_executor_->forward(flatten_tokens_micro_batches,
+                                                flatten_positions_micro_batches,
+                                                kv_caches_,
+                                                input_params_micro_batches);
 
   torch::Tensor logits;
   if (concated_sampling_params.selected_token_idxes.defined()) {

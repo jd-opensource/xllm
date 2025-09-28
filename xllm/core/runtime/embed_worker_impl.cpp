@@ -76,7 +76,7 @@ std::optional<ForwardOutput> EmbedWorkerImpl::step(
 
   // call model executor forward to get hidden states
   auto hidden_states = model_executor_->forward(
-      flatten_tokens, flatten_positions, kv_caches_, params);
+      {flatten_tokens}, {flatten_positions}, kv_caches_, {params});
 
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
