@@ -1197,7 +1197,8 @@ TORCH_MODULE(AdaLayerNormContinuous);
 
 class FeedForwardImpl : public torch::nn::Module {
  public:
-  FeedForwardImpl(const ModelContext& context) {
+  FeedForwardImpl(const ModelContext& context)
+      : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
     auto num_attention_heads = model_args.dit_num_attention_heads();
     auto attention_head_dim = model_args.dit_attention_head_dim();
