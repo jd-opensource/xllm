@@ -29,14 +29,13 @@ class AtbBuffer {
 
  private:
   torch::Tensor create_attensor(uint64_t bufferSize) const;
-  at::Tensor create_attensor_from_tensor_desc(
-      const atb::TensorDesc& tensorDesc) const;
 
  private:
-  void* buffer_ = nullptr;
   uint64_t buffer_size_ = 0;
   torch::Tensor at_tensor_;
   at::Device device_;
+
+  at::TensorOptions options_;
 };
 
 }  // namespace xllm
