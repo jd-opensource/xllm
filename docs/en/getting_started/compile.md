@@ -7,16 +7,16 @@ docker pull quay.io/jd_xllm/xllm-ai:0.6.0-dev-hb-rc2-x86
 ```
 Then create the corresponding container:
 ```bash
-sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /mnt/cfs/9n-das-admin/llm_models:/mnt/cfs/9n-das-admin/llm_models -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/ quay.io/jd_xllm/xllm-ai:0.6.0-dev-hb-rc2-x86
+sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /mnt/cfs/9n-das-admin/llm_models:/mnt/cfs/9n-das-admin/llm_models -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/ xllm/xllm-ai:0.6.0-dev-hb-rc2-x86
 ```
 
 ### Docker images
 
 | Device    |    Arch     |   Images      |
 |:---------:|:-----------:|:-------------:|
-| A2        |     x86     | xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts | 
-| A2        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hb-rc2-py3.11-oe24.03-lts-aarch64 |
-| A3        |     arm     | xllm/xllm-ai:xllm-0.6.0-dev-hc-rc2-py3.11-oe24.03-lts-aarch64 |
+| A2        |     x86     | xllm/xllm-ai:0.6.0-dev-hb-rc2-x86 | 
+| A2        |     arm     | xllm/xllm-ai:0.6.0-dev-hb-rc2-arm |
+| A3        |     arm     | xllm/xllm-ai:0.6.0-dev-hc-rc2-arm |
 
 If you can't download it, you can use the following source instead：
 
