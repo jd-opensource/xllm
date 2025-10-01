@@ -172,15 +172,6 @@ inline torch::Tensor get_1d_rotary_pos_embed(
 }
 
 class FluxPosEmbedImpl : public torch::nn::Module {
- private:
-  int64_t theta_;
-  std::vector<int64_t> axes_dim_;
-  torch::Tensor freqs_cos_cache_;
-  torch::Tensor freqs_sin_cache_;
-  int64_t max_seq_len_ = -1;
-  int64_t cached_image_height_ = -1;
-  int64_t cached_image_width_ = -1;
-
  public:
   FluxPosEmbedImpl(int64_t theta, std::vector<int64_t> axes_dim) {
     theta_ = theta;
@@ -235,38 +226,26 @@ class FluxPosEmbedImpl : public torch::nn::Module {
 
     return {freqs_cos, freqs_sin};
   }
+
+ private:
+  int64_t theta_;
+  std::vector<int64_t> axes_dim_;
+  torch::Tensor freqs_cos_cache_;
+  torch::Tensor freqs_sin_cache_;
+  int64_t max_seq_len_ = -1;
+  int64_t cached_image_height_ = -1;
+  int64_t cached_image_width_ = -1;
 };
+
 TORCH_MODULE(FluxPosEmbed);
 
 struct FluxPipelineOutput {
   std::vector<torch::Tensor> images;
 };
-class FluxPipelineImpl : public torch::nn::Module {
- private:
-  FlowMatchEulerDiscreteScheduler scheduler_{nullptr};
-  VAE vae_{nullptr};
-  VAEImageProcessor vae_image_processor_{nullptr};
-  FluxDiTModel transformer_{nullptr};
-  T5EncoderModel t5_{nullptr};
-  CLIPTextModel clip_text_model_{nullptr};
-  int vae_scale_factor_;
-  float vae_scaling_factor_;
-  float vae_shift_factor_;
-  int tokenizer_max_length_;
-  int default_sample_size_;
-  float _guidance_scale = 1.0f;
-  std::optional<torch::Tensor> _current_timestep;
-  int _num_timesteps = 0;
-  bool _interrupt = false;
-  torch::Device _execution_device = torch::kCPU;
-  torch::ScalarType _execution_dtype = torch::kFloat32;
-  torch::TensorOptions options_;
-  FluxPosEmbed pos_embed_{nullptr};
-  std::unique_ptr<Tokenizer> tokenizer_;
-  std::unique_ptr<Tokenizer> tokenizer_2_;
 
+class FluxPipelineImpl : public torch::nn::Module {
  public:
-  FluxPipelineImpl(const DiTModelContext& context)
+  explicit FluxPipelineImpl(const DiTModelContext& context)
       : options_(context.get_tensor_options()) {
     const auto& model_args = context.get_model_args("vae");
     vae_scale_factor_ = 1 << (model_args.vae_block_out_channels().size() - 1);
@@ -309,6 +288,7 @@ class FluxPipelineImpl : public torch::nn::Module {
     register_module("clip_text_model", clip_text_model_);
     LOG(INFO) << "CLIP text model registered.";
   }
+
   void check_inputs(
       std::optional<torch::optional<std::vector<std::string>>> prompt,
       std::optional<torch::optional<std::vector<std::string>>> prompt_2,
@@ -426,6 +406,7 @@ class FluxPipelineImpl : public torch::nn::Module {
 
     return unpacked;
   }
+
   std::pair<torch::Tensor, torch::Tensor> prepare_latents(
       int64_t batch_size,
       int64_t num_channels_latents,
@@ -452,6 +433,7 @@ class FluxPipelineImpl : public torch::nn::Module {
         batch_size, adjusted_height / 2, adjusted_width / 2);
     return {packed_latents, latent_image_ids};
   }
+
   DiTForwardOutput forward(const DiTForwardInput& input) {
     const auto& generation_params = input.generation_params;
 
@@ -593,6 +575,7 @@ class FluxPipelineImpl : public torch::nn::Module {
         prompt_embeds.view({batch_size * num_images_per_prompt, seq_len, -1});
     return prompt_embeds;
   }
+
   std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> encode_prompt(
       std::optional<std::vector<std::string>> prompt,
       std::optional<std::vector<std::string>> prompt_2,
@@ -637,6 +620,7 @@ class FluxPipelineImpl : public torch::nn::Module {
                                : torch::Tensor(),
                            text_ids);
   }
+
   FluxPipelineOutput forward_(
       std::optional<std::vector<std::string>> prompt = std::nullopt,
       std::optional<std::vector<std::string>> prompt_2 = std::nullopt,
@@ -742,7 +726,7 @@ class FluxPipelineImpl : public torch::nn::Module {
         scheduler_, num_inference_steps, device, std::nullopt, new_sigmas, mu);
     int64_t num_warmup_steps =
         std::max(static_cast<int64_t>(timesteps.numel()) -
-                     num_inference_steps_actual * scheduler_->order,
+                     num_inference_steps_actual * scheduler_->order(),
                  static_cast<int64_t>(0LL));
     _num_timesteps = timesteps.numel();
     // prepare guidance
@@ -843,7 +827,32 @@ class FluxPipelineImpl : public torch::nn::Module {
     tokenizer_ = tokenizer_loader->tokenizer();
     tokenizer_2_ = tokenizer_2_loader->tokenizer();
   }
+
+ private:
+  FlowMatchEulerDiscreteScheduler scheduler_{nullptr};
+  VAE vae_{nullptr};
+  VAEImageProcessor vae_image_processor_{nullptr};
+  FluxDiTModel transformer_{nullptr};
+  T5EncoderModel t5_{nullptr};
+  CLIPTextModel clip_text_model_{nullptr};
+  int vae_scale_factor_;
+  float vae_scaling_factor_;
+  float vae_shift_factor_;
+  int tokenizer_max_length_;
+  int default_sample_size_;
+  float _guidance_scale = 1.0f;
+  std::optional<torch::Tensor> _current_timestep;
+  int _num_timesteps = 0;
+  bool _interrupt = false;
+  torch::Device _execution_device = torch::kCPU;
+  torch::ScalarType _execution_dtype = torch::kFloat32;
+  torch::TensorOptions options_;
+  FluxPosEmbed pos_embed_{nullptr};
+  std::unique_ptr<Tokenizer> tokenizer_;
+  std::unique_ptr<Tokenizer> tokenizer_2_;
 };
+
 TORCH_MODULE(FluxPipeline);
+
 REGISTER_DIT_MODEL(flux, FluxPipeline);
 }  // namespace xllm

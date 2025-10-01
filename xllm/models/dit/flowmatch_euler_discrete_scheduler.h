@@ -16,150 +16,28 @@
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
+
 namespace xllm {
+
 struct FlowMatchEulerDiscreteSchedulerOutput {
   torch::Tensor prev_sample;
   explicit FlowMatchEulerDiscreteSchedulerOutput(torch::Tensor sample)
       : prev_sample(std::move(sample)) {}
 };
+
 class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
- private:
-  // Configuration parameters (member variables of the original config
-  // structure)
-  int num_train_timesteps_;
-  float shift_;
-  bool use_dynamic_shifting_;
-  std::optional<float> base_shift_;
-  std::optional<float> max_shift_;
-  std::optional<int> base_image_seq_len_;
-  std::optional<int> max_image_seq_len_;
-  bool invert_sigmas_;
-  std::optional<float> shift_terminal_;
-  bool use_karras_sigmas_;
-  bool use_exponential_sigmas_;
-  bool use_beta_sigmas_;
-  std::string time_shift_type_;
-  bool stochastic_sampling_;
-
-  // State variables
-  torch::Tensor timesteps_;
-  torch::Tensor sigmas_;
-  float sigma_min_;
-  float sigma_max_;
-  std::optional<int> step_index_;
-  std::optional<int> begin_index_;
-
-  // private tool function
-  torch::Tensor convert_to_karras(const torch::Tensor& in_sigmas,
-                                  int num_inference_steps) {
-    float sigma_min = sigma_min_;
-    float sigma_max = sigma_max_;
-    if (in_sigmas.numel() > 0) {
-      sigma_min = in_sigmas[-1].item<float>();
-      sigma_max = in_sigmas[0].item<float>();
-    }
-
-    const float rho = 7.0f;
-    std::vector<float> ramp(num_inference_steps);
-    for (int i = 0; i < num_inference_steps; ++i) {
-      ramp[i] = static_cast<float>(i) / (num_inference_steps - 1);
-    }
-    torch::Tensor ramp_tensor =
-        torch::from_blob(ramp.data(), {num_inference_steps}, torch::kFloat32);
-
-    float min_inv_rho = std::pow(sigma_min, 1.0f / rho);
-    float max_inv_rho = std::pow(sigma_max, 1.0f / rho);
-    return torch::pow(max_inv_rho + ramp_tensor * (min_inv_rho - max_inv_rho),
-                      rho);
-  }
-
-  torch::Tensor convert_to_exponential(const torch::Tensor& in_sigmas,
-                                       int num_inference_steps) {
-    float sigma_min = sigma_min_;
-    float sigma_max = sigma_max_;
-    if (in_sigmas.numel() > 0) {
-      sigma_min = in_sigmas[-1].item<float>();
-      sigma_max = in_sigmas[0].item<float>();
-    }
-
-    std::vector<float> exp_sigmas(num_inference_steps);
-    float log_sigma_max = std::log(sigma_max);
-    float log_sigma_min = std::log(sigma_min);
-    for (int i = 0; i < num_inference_steps; ++i) {
-      float t = static_cast<float>(i) / (num_inference_steps - 1);
-      exp_sigmas[i] =
-          std::exp(log_sigma_max + t * (log_sigma_min - log_sigma_max));
-    }
-    return torch::from_blob(
-               exp_sigmas.data(), {num_inference_steps}, torch::kFloat32)
-        .clone();
-  }
-
-  torch::Tensor convert_to_beta(const torch::Tensor& in_sigmas,
-                                int num_inference_steps,
-                                float alpha = 0.6f,
-                                float beta = 0.6f) {
-    // NOTE: Actual usage requires the `beta distribution` implementation from
-    // scipy, this is just for illustration.
-    throw std::runtime_error(
-        "Beta sigmas implementation requires scipy integration");
-  }
-
-  torch::Tensor time_shift_exponential(float mu,
-                                       float sigma,
-                                       const torch::Tensor& t) {
-    auto exp_mu = std::exp(mu);
-    return exp_mu / (exp_mu + torch::pow(1.0f / t - 1.0f, sigma));
-  }
-
-  torch::Tensor time_shift_linear(float mu,
-                                  float sigma,
-                                  const torch::Tensor& t) {
-    return mu / (mu + torch::pow(1.0f / t - 1.0f, sigma));
-  }
-
-  void init_step_index(const torch::Tensor& timestep) {
-    if (!begin_index_.has_value()) {
-      torch::Tensor ts = timestep.to(timesteps_.device());
-      step_index_ = index_for_timestep(ts);
-    } else {
-      step_index_ = begin_index_.value();
-    }
-  }
-
-  int index_for_timestep(const torch::Tensor& timestep,
-                         const torch::Tensor& schedule_timesteps = {}) {
-    torch::Tensor sched =
-        schedule_timesteps.defined() ? schedule_timesteps : timesteps_;
-    torch::Tensor indices = (sched == timestep).nonzero();
-
-    int pos = indices.size(0) > 1 ? 1 : 0;
-    return indices.index({pos, 0}).item<int>();
-  }
-
  public:
-  int64_t order = 1;  // default value is 1
-  ModelArgs args;
-  int base_image_seq_len() { return base_image_seq_len_.value(); }
-  int max_image_seq_len() { return max_image_seq_len_.value(); }
-  float base_shift() { return base_shift_.value(); }
-  float max_shift() { return max_shift_.value(); }
-  FlowMatchEulerDiscreteSchedulerImpl(const ModelContext& context)
-      : args(context.get_model_args()) {
-    num_train_timesteps_ = args.scheduler_num_train_timesteps();
-    shift_ = args.scheduler_shift();
-    use_dynamic_shifting_ = args.scheduler_use_dynamic_shifting();
-    base_shift_ = args.scheduler_base_shift();
-    max_shift_ = args.scheduler_max_shift(),
-    base_image_seq_len_ = args.scheduler_base_image_seq_len();
-    max_image_seq_len_ = args.scheduler_max_image_seq_len();
-    invert_sigmas_ = false;
+  explicit FlowMatchEulerDiscreteSchedulerImpl(const ModelContext& context)
+      : args_(context.get_model_args()) {
+    num_train_timesteps_ = args_.scheduler_num_train_timesteps();
+    shift_ = args_.scheduler_shift();
+    use_dynamic_shifting_ = args_.scheduler_use_dynamic_shifting();
+    base_shift_ = args_.scheduler_base_shift();
+    max_shift_ = args_.scheduler_max_shift(),
+    base_image_seq_len_ = args_.scheduler_base_image_seq_len();
+    max_image_seq_len_ = args_.scheduler_max_image_seq_len();
     shift_terminal_ = std::nullopt;
-    use_karras_sigmas_ = false;
-    use_exponential_sigmas_ = false;
-    use_beta_sigmas_ = false;
     time_shift_type_ = "exponential";
-    stochastic_sampling_ = false;
     std::vector<float> timesteps_vec(num_train_timesteps_);
     for (int i = 0; i < num_train_timesteps_; ++i) {
       timesteps_vec[i] = num_train_timesteps_ - i;
@@ -177,9 +55,15 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     step_index_ = std::nullopt;
     begin_index_ = std::nullopt;
   }
-  void set_begin_index(int begin_index) { begin_index_ = begin_index; }
 
+  void set_begin_index(int begin_index) { begin_index_ = begin_index; }
   void set_shift(float shift) { shift_ = shift; }
+  int base_image_seq_len() { return base_image_seq_len_.value(); }
+  int max_image_seq_len() { return max_image_seq_len_.value(); }
+  float base_shift() { return base_shift_.value(); }
+  float max_shift() { return max_shift_.value(); }
+  int64_t order() { return order_; }
+
   torch::Tensor scale_noise(
       const torch::Tensor& sample,
       const torch::Tensor& timestep,
@@ -191,7 +75,8 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     std::vector<int> step_indices;
     if (!begin_index_.has_value()) {
       for (int i = 0; i < ts.size(0); ++i) {
-        step_indices.push_back(index_for_timestep(ts[i], schedule_timesteps));
+        step_indices.emplace_back(
+            index_for_timestep(ts[i], schedule_timesteps));
       }
     } else if (step_index_.has_value()) {
       step_indices = std::vector<int>(ts.size(0), step_index_.value());
@@ -210,6 +95,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
         noise.has_value() ? noise.value() : torch::randn_like(sample);
     return sigma * noise_tensor + (1.0f - sigma) * sample;
   }
+
   torch::Tensor time_shift(float mu, float sigma, const torch::Tensor& t) {
     if (time_shift_type_ == "exponential") {
       return time_shift_exponential(mu, sigma, t);
@@ -220,13 +106,14 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
 
   torch::Tensor stretch_shift_to_terminal(const torch::Tensor& t) {
     if (!shift_terminal_.has_value()) {
-      throw std::runtime_error("shift_terminal is not set");
+      LOG(FATAL) << "shift_terminal is not set";
     }
     torch::Tensor one_minus_z = 1.0f - t;
     float scale_factor = one_minus_z.index({-1}).item<float>() /
                          (1.0f - shift_terminal_.value());
     return 1.0f - (one_minus_z / scale_factor);
   }
+
   void set_timesteps(
       int num_inference_steps,
       const torch::Device& device = torch::kCPU,
@@ -234,13 +121,11 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
       const std::optional<float>& mu = std::nullopt,
       const std::optional<std::vector<float>>& timesteps = std::nullopt) {
     if (use_dynamic_shifting_ && !mu.has_value()) {
-      throw std::invalid_argument(
-          "mu must be provided when use_dynamic_shifting is true");
+      LOG(FATAL) << "mu must be provided when use_dynamic_shifting is true";
     }
     if (sigmas.has_value() && timesteps.has_value() &&
         sigmas->size() != timesteps->size()) {
-      throw std::invalid_argument(
-          "sigmas and timesteps must have the same length");
+      LOG(FATAL) << "sigmas and timesteps must have the same length";
     }
 
     int num_steps = num_inference_steps;
@@ -318,6 +203,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     step_index_ = std::nullopt;
     begin_index_ = std::nullopt;
   }
+
   FlowMatchEulerDiscreteSchedulerOutput step(
       const torch::Tensor& model_output,
       const torch::Tensor& timestep,
@@ -378,11 +264,13 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     }
     return FlowMatchEulerDiscreteSchedulerOutput(prev_sample);
   }
+
   std::optional<int> step_index() const { return step_index_; }
   std::optional<int> begin_index() const { return begin_index_; }
   const torch::Tensor& timesteps() const { return timesteps_; }
   const torch::Tensor& sigmas() const { return sigmas_; }
   int size() const { return num_train_timesteps_; }
+
   torch::Tensor forward(const torch::Tensor& tokens,
                         const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
@@ -425,8 +313,127 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
 
     return output.prev_sample;
   }
+
+ private:
+  // private tool function
+  torch::Tensor convert_to_karras(const torch::Tensor& in_sigmas,
+                                  int num_inference_steps) {
+    float sigma_min = sigma_min_;
+    float sigma_max = sigma_max_;
+    if (in_sigmas.numel() > 0) {
+      sigma_min = in_sigmas[-1].item<float>();
+      sigma_max = in_sigmas[0].item<float>();
+    }
+
+    const float rho = 7.0f;
+    std::vector<float> ramp(num_inference_steps);
+    for (int i = 0; i < num_inference_steps; ++i) {
+      ramp[i] = static_cast<float>(i) / (num_inference_steps - 1);
+    }
+    torch::Tensor ramp_tensor =
+        torch::from_blob(ramp.data(), {num_inference_steps}, torch::kFloat32);
+
+    float min_inv_rho = std::pow(sigma_min, 1.0f / rho);
+    float max_inv_rho = std::pow(sigma_max, 1.0f / rho);
+    return torch::pow(max_inv_rho + ramp_tensor * (min_inv_rho - max_inv_rho),
+                      rho);
+  }
+
+  torch::Tensor convert_to_exponential(const torch::Tensor& in_sigmas,
+                                       int num_inference_steps) {
+    float sigma_min = sigma_min_;
+    float sigma_max = sigma_max_;
+    if (in_sigmas.numel() > 0) {
+      sigma_min = in_sigmas[-1].item<float>();
+      sigma_max = in_sigmas[0].item<float>();
+    }
+
+    std::vector<float> exp_sigmas(num_inference_steps);
+    float log_sigma_max = std::log(sigma_max);
+    float log_sigma_min = std::log(sigma_min);
+    for (int i = 0; i < num_inference_steps; ++i) {
+      float t = static_cast<float>(i) / (num_inference_steps - 1);
+      exp_sigmas[i] =
+          std::exp(log_sigma_max + t * (log_sigma_min - log_sigma_max));
+    }
+    return torch::from_blob(
+               exp_sigmas.data(), {num_inference_steps}, torch::kFloat32)
+        .clone();
+  }
+
+  torch::Tensor convert_to_beta(const torch::Tensor& in_sigmas,
+                                int num_inference_steps,
+                                float alpha = 0.6f,
+                                float beta = 0.6f) {
+    // NOTE: Actual usage requires the `beta distribution` implementation from
+    // scipy, this is just for illustration.
+    LOG(FATAL) << "Beta sigmas implementation requires scipy integration";
+  }
+
+  torch::Tensor time_shift_exponential(float mu,
+                                       float sigma,
+                                       const torch::Tensor& t) {
+    auto exp_mu = std::exp(mu);
+    return exp_mu / (exp_mu + torch::pow(1.0f / t - 1.0f, sigma));
+  }
+
+  torch::Tensor time_shift_linear(float mu,
+                                  float sigma,
+                                  const torch::Tensor& t) {
+    return mu / (mu + torch::pow(1.0f / t - 1.0f, sigma));
+  }
+
+  void init_step_index(const torch::Tensor& timestep) {
+    if (!begin_index_.has_value()) {
+      torch::Tensor ts = timestep.to(timesteps_.device());
+      step_index_ = index_for_timestep(ts);
+    } else {
+      step_index_ = begin_index_.value();
+    }
+  }
+
+  int index_for_timestep(const torch::Tensor& timestep,
+                         const torch::Tensor& schedule_timesteps = {}) {
+    torch::Tensor sched =
+        schedule_timesteps.defined() ? schedule_timesteps : timesteps_;
+    torch::Tensor indices = (sched == timestep).nonzero();
+
+    int pos = indices.size(0) > 1 ? 1 : 0;
+    return indices.index({pos, 0}).item<int>();
+  }
+
+ private:
+  // Configuration parameters (member variables of the original config
+  // structure)
+  int num_train_timesteps_;
+  float shift_;
+  bool use_dynamic_shifting_;
+  std::optional<float> base_shift_;
+  std::optional<float> max_shift_;
+  std::optional<int> base_image_seq_len_;
+  std::optional<int> max_image_seq_len_;
+  std::optional<float> shift_terminal_;
+  bool invert_sigmas_ = false;
+  bool use_karras_sigmas_ = false;
+  bool use_exponential_sigmas_ = false;
+  bool use_beta_sigmas_ = false;
+  bool stochastic_sampling_ = false;
+  std::string time_shift_type_;
+
+  // State variables
+  torch::Tensor timesteps_;
+  torch::Tensor sigmas_;
+  float sigma_min_;
+  float sigma_max_;
+  std::optional<int> step_index_;
+  std::optional<int> begin_index_;
+
+  int64_t order_ = 1;  // default value is 1
+  ModelArgs args_;
 };
+
 TORCH_MODULE(FlowMatchEulerDiscreteScheduler);
+
 REGISTER_MODEL_ARGS(FlowMatchEulerDiscreteScheduler, [&] {
   LOAD_ARG_OR(scheduler_num_train_timesteps, "num_train_timesteps", 1000);
   LOAD_ARG_OR(scheduler_shift, "shift", 1);
