@@ -481,8 +481,10 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
 
   std::random_device rd;
   std::mt19937_64 gen(rd());
-  std::uniform_int_distribution<int32_t> dis(
-      0, vocab_size - 2);  // reduce one to prevent out of boundary
+
+  // If req_state does not initialize the stopchecker, default eos_token_id = 0,
+  // need to skip it
+  std::uniform_int_distribution<int32_t> dis(1, vocab_size - 2);
 
   std::vector<int32_t> token_ids(token_length);
   std::generate(token_ids.begin(), token_ids.end(), [&]() {
