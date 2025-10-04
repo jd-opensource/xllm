@@ -13,36 +13,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-#include "dit_cache_impl.h"
+#include "dit_cache.h"
 
 namespace xllm {
 
-class DiTCache {
- public:
-  DiTCache() = default;
-  ~DiTCache() = default;
-
-  DiTCache(const DiTCache&) = delete;
-  DiTCache& operator=(const DiTCache&) = delete;
-  DiTCache(DiTCache&&) = delete;
-  DiTCache& operator=(DiTCache&&) = delete;
-
-  static DiTCache& get_instance() {
-    static DiTCache ditcache;
-    return ditcache;
+bool DiTCache::init(const DiTCacheConfig& cfg) {
+  active_cache_ = create_dit_cache(cfg);
+  if (!active_cache_) {
+    return false;
   }
+  active_cache_->init(cfg);
+  return true;
+}
 
-  bool init(const DiTCacheConfig& cfg);
+bool DiTCache::on_before_block(const CacheBlockIn& blockin) {
+  return active_cache_->on_before_block(blockin);
+}
 
-  bool on_before_block(const CacheBlockIn& blockin);
-  CacheBlockOut on_after_block(const CacheBlockIn& blockin);
+CacheBlockOut DiTCache::on_after_block(const CacheBlockIn& blockin) {
+  return active_cache_->on_after_block(blockin);
+}
 
-  bool on_before_step(const CacheStepIn& stepin);
-  CacheStepOut on_after_step(const CacheStepIn& stepin);
+bool DiTCache::on_before_step(const CacheStepIn& stepin) {
+  return active_cache_->on_before_step(stepin);
+}
 
- private:
-  std::unique_ptr<DitCacheImpl> active_cache_;
-};
+CacheStepOut DiTCache::on_after_step(const CacheStepIn& stepin) {
+  return active_cache_->on_after_step(stepin);
+}
 
 }  // namespace xllm

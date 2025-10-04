@@ -18,31 +18,23 @@ limitations under the License.
 
 namespace xllm {
 
-class DiTCache {
+class DiTNonCache : public DitCacheImpl {
  public:
-  DiTCache() = default;
-  ~DiTCache() = default;
+  DiTNonCache() = default;
+  ~DiTNonCache() override = default;
 
-  DiTCache(const DiTCache&) = delete;
-  DiTCache& operator=(const DiTCache&) = delete;
-  DiTCache(DiTCache&&) = delete;
-  DiTCache& operator=(DiTCache&&) = delete;
+  DiTNonCache(const DiTNonCache&) = delete;
+  DiTNonCache& operator=(const DiTNonCache&) = delete;
+  DiTNonCache(DiTNonCache&&) = default;
+  DiTNonCache& operator=(DiTNonCache&&) = default;
 
-  static DiTCache& get_instance() {
-    static DiTCache ditcache;
-    return ditcache;
-  }
+  void init(const DiTCacheConfig& cfg) override;
 
-  bool init(const DiTCacheConfig& cfg);
+  bool on_before_block(const CacheBlockIn& blockin) override;
+  CacheBlockOut on_after_block(const CacheBlockIn& blockin) override;
 
-  bool on_before_block(const CacheBlockIn& blockin);
-  CacheBlockOut on_after_block(const CacheBlockIn& blockin);
-
-  bool on_before_step(const CacheStepIn& stepin);
-  CacheStepOut on_after_step(const CacheStepIn& stepin);
-
- private:
-  std::unique_ptr<DitCacheImpl> active_cache_;
+  bool on_before_step(const CacheStepIn& stepin) override;
+  CacheStepOut on_after_step(const CacheStepIn& stepin) override;
 };
 
 }  // namespace xllm

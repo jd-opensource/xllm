@@ -5,15 +5,21 @@ cc_library(
  NAME
   dit_cache
  HDRS
-  dit_cache_impl.h
-  dit_cache_data.h
+  dit_cache_type.h
   dit_cache_config.h
+  dit_cache_impl.h
   dit_cache.h
+  dit_non_cache.h
   fbcache.h
-  fbcachewithtaylor.h
+  fbcache_taylorseer.h
   taylorseer.h
  SRCS
   dit_cache_impl.cpp
+  dit_cache.cpp
+  dit_non_cache.cpp
+  fbcache.cpp
+  fbcache_taylorseer.cpp
+  taylorseer.cpp
  DEPS
   torch
   glog::glog

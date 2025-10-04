@@ -1,15 +1,32 @@
-#pragma once
-#include <torch/torch.h>
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
-#include <cmath>
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#pragma once
+#include <string>
+#include <unordered_map>
 
 #include "dit_cache_config.h"
-#include "dit_cache_data.h"
+#include "dit_cache_type.h"
 
 namespace xllm {
 
+using TensorMap = std::unordered_map<std::string, torch::Tensor>;
+
 class DitCacheImpl {
  public:
+  DitCacheImpl() = default;
   virtual ~DitCacheImpl() = default;
 
   virtual void init(const DiTCacheConfig& cfg) = 0;
@@ -21,47 +38,16 @@ class DitCacheImpl {
   virtual CacheStepOut on_after_step(const CacheStepIn& stepin) = 0;
 
  protected:
-  int num_inference_steps = 25;
-  int warmup_steps = 0;
-  int current_step = 0;
+  int64_t num_inference_steps_;
+  int64_t warmup_steps_;
+  int64_t current_step_;
   TensorMap buffers;
 
-  bool is_in_warmup() { return current_step <= warmup_steps; }
-
-  static bool contains_key(const TensorMap& m, const std::string& k) {
-    return m.find(k) != m.end();
-  }
-
   static torch::Tensor get_tensor_or_empty(const TensorMap& m,
-                                           const std::string& k) {
-    auto it = m.find(k);
-    if (it != m.end()) return it->second;
-    return torch::Tensor();
-  }
-
-  bool is_similar(const torch::Tensor& t1,
-                  const torch::Tensor& t2,
-                  float threshold) {
-    if (!t1.defined() || !t2.defined()) return false;
-    if (threshold <= 0.0f) return torch::allclose(t1, t2);
-
-    if (t1.sizes() != t2.sizes()) return false;
-
-    auto diff = (t1 - t2).abs();
-    auto mean_diff_tensor = diff.mean();
-    auto mean_t1_tensor = t1.abs().mean();
-
-    double mean_diff_val = mean_diff_tensor.cpu().item<double>();
-    double mean_t1_val = mean_t1_tensor.cpu().item<double>();
-
-    if (mean_t1_val == 0.0) {
-      const double eps = 1e-6;
-      return mean_diff_val < eps;
-    }
-
-    double rel = mean_diff_val / mean_t1_val;
-    return rel < static_cast<double>(threshold);
-  }
+                                           const std::string& k);
+  static bool is_similar(const torch::Tensor& lhs,
+                         const torch::Tensor& rhs,
+                         float threshold);
 };
 
 std::unique_ptr<DitCacheImpl> create_dit_cache(const DiTCacheConfig& cfg);

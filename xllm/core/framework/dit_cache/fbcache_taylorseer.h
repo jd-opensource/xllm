@@ -15,19 +15,22 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/torch.h>
+
 #include "dit_cache_impl.h"
+#include "taylorseer.h"
 
 namespace xllm {
 
-class FBCache : public DitCacheImpl {
+class FBCacheTaylorSeer : public DitCacheImpl {
  public:
-  FBCache() = default;
-  ~FBCache() override = default;
+  FBCacheTaylorSeer() = default;
+  ~FBCacheTaylorSeer() override = default;
 
-  FBCache(const FBCache&) = delete;
-  FBCache& operator=(const FBCache&) = delete;
-  FBCache(FBCache&&) = default;
-  FBCache& operator=(FBCache&&) = default;
+  FBCacheTaylorSeer(const FBCacheTaylorSeer&) = delete;
+  FBCacheTaylorSeer& operator=(const FBCacheTaylorSeer&) = delete;
+  FBCacheTaylorSeer(FBCacheTaylorSeer&&) = default;
+  FBCacheTaylorSeer& operator=(FBCacheTaylorSeer&&) = default;
 
   void init(const DiTCacheConfig& cfg) override;
 
@@ -45,6 +48,7 @@ class FBCache : public DitCacheImpl {
   bool can_use_cache(const torch::Tensor& first_hidden_states_residual);
 
  private:
+  std::unique_ptr<TaylorSeer> taylorseer;
   float residual_diff_threshold_;
   bool use_cache_;
 };

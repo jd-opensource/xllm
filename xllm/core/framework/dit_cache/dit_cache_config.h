@@ -1,35 +1,72 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
 #pragma once
 
 namespace xllm {
 
 enum class PolicyType {
-  NONE = 0,
-  FBCACHE,
-  TAYLORSEER,
-  FBCACHE_WITH_TAYLORSEER
+  None,
+  FBCache,
+  TaylorSeer,
+  FBCacheTaylorSeer,
+};
+
+struct DiTBaseCacheOptions {
+  // the number of inference steps.
+  int num_inference_steps = 25;
+
+  // the number of warmup steps.
+  int warmup_steps = 0;
+};
+
+struct FBCacheOptions : public DiTBaseCacheOptions {
+  // the residual difference threshold for cache reuse.
+  float residual_diff_threshold = 0.09f;
+};
+
+struct TaylorSeerOptions : public DiTBaseCacheOptions {
+  // the number of derivatives to use in TaylorSeer.
+  int n_derivatives = 3;
+
+  // the interval steps to skip for derivative calculation.
+  int skip_interval_steps = 3;
+};
+
+struct FBCacheTaylorSeerOptions : public DiTBaseCacheOptions {
+  // the residual difference threshold for cache reuse.
+  float residual_diff_threshold = 0.09f;
+
+  // the number of derivatives to use in TaylorSeer.
+  int n_derivatives = 3;
 };
 
 struct DiTCacheConfig {
-  struct DiTCacheOptions {
-    int num_inference_steps = 25;
-    int warmup_steps = 0;
-  } ditcache;
+  DiTCacheConfig() = default;
 
-  struct FBCacheOptions : public DiTCacheOptions {
-    float residual_diff_threshold = 0.09;
-  } fbcache;
+  // the selected cache policy.
+  PolicyType selected_policy = PolicyType::None;
 
-  struct TaylorSeerOptions : public DiTCacheOptions {
-    int n_derivatives = 3;
-    int skip_interval_steps = 3;
-  } taylorseer;
+  // the configuration for FBCache policy.
+  FBCacheOptions fbcache;
 
-  struct FBCacheWithTaylorSeerOptions : public DiTCacheOptions {
-    float residual_diff_threshold = 0.09;
-    int n_derivatives = 3;
-  } fbcachewithtaylor;
+  // the configuration for TaylorSeer policy.
+  TaylorSeerOptions taylorseer;
 
-  PolicyType selected_policy = PolicyType::NONE;
+  // the configuration for combined FBCache with TaylorSeer policy.
+  FBCacheTaylorSeerOptions fbcachetaylorseer;
 };
 
 }  // namespace xllm
