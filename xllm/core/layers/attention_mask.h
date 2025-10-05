@@ -40,6 +40,11 @@ class AttentionMask : public torch::nn::Module {
                               torch::Dtype dtype,
                               torch::Device device);
 
+  torch::Tensor gen_append_mask(int32_t q_len,
+                                int32_t kv_len,
+                                torch::Dtype dtype,
+                                torch::Device device);
+
  private:
   void update_attn_cache(torch::Dtype dtype,
                          torch::Device device,

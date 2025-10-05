@@ -67,9 +67,24 @@ torch::Tensor AttentionMask::gen_free_mask(int32_t q_len,
   return mask_free;
 }
 
-void AttentionMask::update_attn_cache(torch::Dtype dtype,
-                                      torch::Device device,
-                                      int64_t seqlen) {
+torch::Tensor AttentionMaskImpl::gen_append_mask(int32_t q_len,
+                                                 int32_t kv_len,
+                                                 torch::Dtype dtype,
+                                                 torch::Device device) {
+  int diagonal = kv_len - q_len;
+  auto options = torch::TensorOptions().dtype(torch::kBool).device(device);
+  auto bias = torch::tril(torch::ones({q_len, kv_len}, options), diagonal);
+  bias = ~bias;
+
+  auto mask_options = torch::TensorOptions().dtype(dtype).device(device);
+  auto mask = torch::zeros({q_len, kv_len}, mask_options)
+                  .masked_fill(bias, mask_value_);
+  return mask;
+}
+
+void AttentionMaskImpl::update_attn_cache(torch::Dtype dtype,
+                                          torch::Device device,
+                                          int64_t seqlen) {
   if (seqlen > seq_len_cached_ || atten_mask_cache_.dtype() != dtype) {
     seq_len_cached_ = seqlen;
 

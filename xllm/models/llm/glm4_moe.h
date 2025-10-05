@@ -86,14 +86,12 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     num_speculative_tokens_ = model_args.num_speculative_tokens();
     embed_tokens_ = register_module("embed_tokens", layer::WordEmbedding(context));
 
-    atb_pos_emb_ = layer::PosEmbedding(context);
-    cos_sin_ =
-       get_concat_rotary_embedding(64,
-                                          model_args.max_position_embeddings(),
-                                          model_args.rope_theta(),
-                                          options);
+    atb_pos_emb_ = AtbRotaryEmbedding(context);
+    cos_sin_ = get_concat_rotary_embedding(64,
+                                           model_args.max_position_embeddings(),
+                                           model_args.rope_theta(),
+                                           options);
 
-    max_seq_len_ = model_args.max_position_embeddings();
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
@@ -143,11 +141,20 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     cos_pos = cos_pos.view(at::IntArrayRef{-1, 2, cos_pos.size(-1) / 2});
     sin_pos = sin_pos.view(at::IntArrayRef{-1, 2, sin_pos.size(-1) / 2});
     torch::Tensor attn_mask;
-    if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
-      attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
+    if (FLAGS_enable_chunked_prefill) {
+      int max_kv_seq = torch::max(input_params.kv_seq_lens).item<int>();
+      int max_q_seq = torch::max(input_params.q_seq_lens).item<int>();
+      attn_mask = attn_mask_.gen_append_mask(max_q_seq,
+                                             max_kv_seq,
+                                             cos_pos.dtype().toScalarType(),
+                                             cos_pos.device());
     } else {
-      attn_mask = attn_mask_.gen_free_mask(
-          num_speculative_tokens_ + 1, dtype_, device_);
+      if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
+        attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
+      } else {
+        attn_mask = attn_mask_.gen_free_mask(
+            num_speculative_tokens_ + 1, dtype_, device_);
+      }
     }
 
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -331,7 +338,9 @@ REGISTER_MODEL_ARGS(glm4_moe, [&] {
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
   LOAD_ARG_OR(vocab_size, "vocab_size", 151552);
   LOAD_ARG_OR(first_k_dense_replace, "first_k_dense_replace", 1);
-  
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),args->eos_token_id_vec().end()));
+
+  SET_ARG(stop_token_ids,
+          std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
+                                      args->eos_token_id_vec().end()));
 });
 }  // namespace xllm
