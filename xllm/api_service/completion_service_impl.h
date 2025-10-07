@@ -38,6 +38,7 @@ class CompletionServiceImpl final : public APIServiceImpl<CompletionCall> {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CompletionServiceImpl);
+  LLMMaster* master_ = nullptr;
 };
 
 }  // namespace xllm

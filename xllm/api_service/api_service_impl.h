@@ -26,9 +26,8 @@ namespace xllm {
 template <typename T>
 class APIServiceImpl {
  public:
-  APIServiceImpl(LLMMaster* master, const std::vector<std::string>& models)
-      : master_(master), models_(models.begin(), models.end()) {
-    CHECK(master != nullptr);
+  APIServiceImpl(const std::vector<std::string>& models)
+      : models_(models.begin(), models.end()) {
     CHECK(!models_.empty());
   }
   virtual ~APIServiceImpl() = default;
@@ -41,7 +40,6 @@ class APIServiceImpl {
   virtual void process_async_impl(std::shared_ptr<T> call) = 0;
 
  protected:
-  LLMMaster* master_;
   absl::flat_hash_set<std::string> models_;
 };
 

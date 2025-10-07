@@ -71,7 +71,9 @@ bool send_result_to_client_brpc(std::shared_ptr<EmbeddingCall> call,
 EmbeddingServiceImpl::EmbeddingServiceImpl(
     LLMMaster* master,
     const std::vector<std::string>& models)
-    : APIServiceImpl(master, models) {}
+    : APIServiceImpl(models), master_(master) {
+  CHECK(master_ != nullptr);
+}
 
 // embedding_async for brpc
 void EmbeddingServiceImpl::process_async_impl(

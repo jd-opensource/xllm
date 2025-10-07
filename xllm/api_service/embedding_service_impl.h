@@ -37,6 +37,7 @@ class EmbeddingServiceImpl final : public APIServiceImpl<EmbeddingCall> {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(EmbeddingServiceImpl);
+  LLMMaster* master_ = nullptr;
 };
 
 }  // namespace xllm

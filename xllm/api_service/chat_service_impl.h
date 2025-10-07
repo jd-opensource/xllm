@@ -36,6 +36,7 @@ class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
  private:
   DISALLOW_COPY_AND_ASSIGN(ChatServiceImpl);
 
+  LLMMaster* master_ = nullptr;
   const std::string parser_format_;
 };
 
@@ -43,19 +44,17 @@ class VLMMaster;
 using MMChatCall = StreamCall<proto::MMChatRequest, proto::ChatResponse>;
 
 // a class to handle mm chat completion requests
-class MMChatServiceImpl final {
+class MMChatServiceImpl : public APIServiceImpl<MMChatCall> {
  public:
   MMChatServiceImpl(VLMMaster* master, const std::vector<std::string>& models);
-  MMChatServiceImpl() {}
 
   // brpc call_data needs to use shared_ptr
-  void process_async(std::shared_ptr<MMChatCall> call);
+  void process_async_impl(std::shared_ptr<MMChatCall> call);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MMChatServiceImpl);
 
-  VLMMaster* master_;
-  absl::flat_hash_set<std::string> models_;
+  VLMMaster* master_ = nullptr;
 };
 
 }  // namespace xllm

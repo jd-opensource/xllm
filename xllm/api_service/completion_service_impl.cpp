@@ -155,7 +155,9 @@ bool send_result_to_client_brpc(std::shared_ptr<CompletionCall> call,
 CompletionServiceImpl::CompletionServiceImpl(
     LLMMaster* master,
     const std::vector<std::string>& models)
-    : APIServiceImpl(master, models) {}
+    : APIServiceImpl(models), master_(master) {
+  CHECK(master_ != nullptr);
+}
 
 // complete_async for brpc
 void CompletionServiceImpl::process_async_impl(

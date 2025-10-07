@@ -64,13 +64,12 @@ bool send_result_to_client_brpc(std::shared_ptr<ImageGenerationCall> call,
 ImageGenerationServiceImpl::ImageGenerationServiceImpl(
     DiTMaster* master,
     const std::vector<std::string>& models)
-    : master_{master}, models_{models.begin(), models.end()} {
-  CHECK(master != nullptr);
-  CHECK(!models_.empty());
+    : APIServiceImpl(models), master_{master} {
+  CHECK(master_ != nullptr);
 }
 
 // image_generation_async for brpc
-void ImageGenerationServiceImpl::process_async(
+void ImageGenerationServiceImpl::process_async_impl(
     std::shared_ptr<ImageGenerationCall> call) {
   const auto& rpc_request = call->request();
   // check if model is supported

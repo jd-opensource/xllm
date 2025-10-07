@@ -492,8 +492,11 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
 
 ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
                                  const std::vector<std::string>& models)
-    : APIServiceImpl(master, models),
-      parser_format_(master->options().tool_call_parser().value_or("")) {}
+    : APIServiceImpl(models),
+      master_(master),
+      parser_format_(master_->options().tool_call_parser().value_or("")) {
+  CHECK(master_ != nullptr);
+}
 
 // chat_async for brpc
 void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
@@ -603,12 +606,11 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
 
 MMChatServiceImpl::MMChatServiceImpl(VLMMaster* master,
                                      const std::vector<std::string>& models)
-    : master_(master), models_(models.begin(), models.end()) {
+    : APIServiceImpl(models), master_(master) {
   CHECK(master != nullptr);
-  CHECK(!models_.empty());
 }
 
-void MMChatServiceImpl::process_async(std::shared_ptr<MMChatCall> call) {
+void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
   const auto& rpc_request = call->request();
   const auto& req_messages = rpc_request.messages();
   const auto& model = rpc_request.model();
