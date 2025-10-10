@@ -968,6 +968,10 @@ void ContinuousScheduler::update_token_latency_metrics(
     std::vector<Sequence*>& sequences) {
   const auto now = absl::Now();
   for (Sequence* sequence : sequences) {
+    if (sequence->is_prefill_stage()) {
+      // skip chunked prefill stage
+      continue;
+    }
     int64_t tbt_milliseconds = sequence->tbt(now);
     if (sequence->is_first_token()) {
       HISTOGRAM_OBSERVE(time_to_first_token_latency_milliseconds,
