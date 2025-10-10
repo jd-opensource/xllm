@@ -194,11 +194,10 @@ python setup.py bdist_wheel
 
 ## 6. 社区支持
 如果你在xLLM的开发或使用过程中遇到任何问题，欢迎在项目的Issue区域提交可复现的步骤或日志片段。
-如果您有企业内部Slack，请直接联系xLLM Core团队。另外，我们建立了一个微信群，可以在[这里](https://qr.link/JZaROS)找到我们的群聊二维码图片或访问以下活码。欢迎沟通和联系我们:
+如果您有企业内部Slack，请直接联系xLLM Core团队。另外，我们建立了官方微信群，可以访问以下二维码加入。欢迎沟通和联系我们:
 
 <div align="center">
-  <img src="docs/assets/wechat_qrcode1.png" alt="qrcode1" width="30%" />
-  <img src="docs/assets/wechat_qrcode2.png" alt="qrcode2" width="30%" />
+  <img src="docs/assets/wechat_qrcode.jpg" alt="qrcode3" width="50%" />
 </div>
 
 ---

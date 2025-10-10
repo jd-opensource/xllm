@@ -193,14 +193,11 @@ If you have problems about development, please check our document: **[Document](
 ---
 
 ## 6. Community & Support
-If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack. Moreover, we have established a WeChat user group. You can find our group chat QR code image [here](https://qr.link/JZaROS) or visit the following live QR code. Welcome to contact us!
+If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack. In addition, we have established official WeChat groups. You can access the following QR code to join. Welcome to contact us!
 
 <div align="center">
-  <img src="docs/assets/wechat_qrcode1.png" alt="qrcode1" width="30%" />
-  <img src="docs/assets/wechat_qrcode2.png" alt="qrcode2" width="30%" />
+  <img src="docs/assets/wechat_qrcode.jpg" alt="qrcode3" width="50%" />
 </div>
-
----
 
 ## 7. Acknowledgment
 
