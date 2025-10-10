@@ -130,14 +130,7 @@ class WorkerService : public proto::DistributeWorker {
 
   ThreadPool threadpool_{5};
 
-  // a walkaround to avoid compilation conflict involved by
-  // c10_npu::NPUStream related files.
-#if defined(USE_NPU)
-  struct NPUStreamHelper;
-  std::unique_ptr<NPUStreamHelper> npu_stream_helper_;
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu stream helper
-#endif
+  std::unique_ptr<StreamHelper> stream_helper_;
 };
 
 }  // namespace xllm

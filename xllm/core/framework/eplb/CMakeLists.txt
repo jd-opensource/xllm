@@ -25,12 +25,12 @@ cc_library(
     shared_memory_manager.cpp
     expert_buffer_manager.cpp
   DEPS
-    torch_npu
     llm_engine
     :request
     :common
     glog::glog
     torch
+    :platform
 )
 
 set(TEST_SRCS

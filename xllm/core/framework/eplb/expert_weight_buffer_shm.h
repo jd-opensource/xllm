@@ -59,14 +59,6 @@ class ExpertBufferShm {
                   const std::string& tensor_name,
                   const torch::Tensor& tensor);
 
-  /**
-   * @brief Retrieve a tensor from expert's layer memory region
-   *
-   * @param layer_id Source layer identifier
-   * @param tensor_name Name of the tensor to retrieve
-   * @return torch::Tensor A copy of the requested tensor
-   * @throws std::runtime_error if tensor not found
-   */
   torch::Tensor get_tensor(int32_t layer_id, const std::string& tensor_name);
 
  private:

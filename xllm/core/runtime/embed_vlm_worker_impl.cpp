@@ -40,6 +40,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "options.h"
+#include "platform/stream_helper.h"
 #include "util/timer.h"
 
 namespace xllm {
@@ -64,11 +65,7 @@ bool EmbedVLMWorkerImpl::init_model(ModelContext& context) {
 std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
     const BatchedForwardInputs& inputs) {
   torch::DeviceGuard device_guard(device_);
-#if defined(USE_NPU)
-  torch::npu::synchronize();
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
-#endif
+  synchronize_stream(device_.index());
 
   Timer timer;
 
@@ -84,11 +81,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   auto hidden_states = model_executor_->forward(
       {flatten_tokens}, {flatten_positions}, kv_caches_, {params});
 
-#if defined(USE_NPU)
-  torch::npu::synchronize();
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
-#endif
+  synchronize_stream(device_.index());
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

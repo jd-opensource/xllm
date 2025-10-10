@@ -398,7 +398,6 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
       const std::vector<torch::Tensor>& positions,
       std::vector<KVCache>& kv_caches,
       const std::vector<ModelInputParams>& input_params) {
-    // torch::npu::synchronize(device_id);
     return model_(tokens, positions, kv_caches, input_params);
   }
 

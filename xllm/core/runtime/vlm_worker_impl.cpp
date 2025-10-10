@@ -39,6 +39,7 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
+#include "platform/stream_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
 
@@ -98,11 +99,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(
         model_->logits(hidden_states, sampling_params.selected_token_idxes);
   }
 
-#if defined(USE_NPU)
-  torch::npu::synchronize();
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
-#endif
+  synchronize_stream(device_.index());
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

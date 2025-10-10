@@ -43,6 +43,7 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
+#include "platform/stream_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
 
@@ -149,12 +150,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
       !options_.enable_speculative_decode()) {
-#if defined(USE_NPU)
-    aclrtSynchronizeStream(
-        c10_npu::getCurrentNPUStream(device_.index()).stream());
-#elif defined(USE_MLU)
-    // TODO(mlu): implement mlu synchronize stream
-#endif
+    synchronize_stream(device_.index());
     // in p-d disaggregation scene, all micro batches should be in same
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
     // just use micro inputs.micro_inputs[0] here
@@ -205,12 +201,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
     output.max_top_logprobs = concated_sampling_params.max_top_logprobs;
   }
 
-#if defined(USE_NPU)
-  aclrtSynchronizeStream(
-      c10_npu::getCurrentNPUStream(device_.index()).stream());
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
-#endif
+  synchronize_stream(device_.index());
 
   if (options_.instance_role() == InstanceRole::PREFILL &&
       options_.kv_cache_transfer_mode() == "PUSH" &&

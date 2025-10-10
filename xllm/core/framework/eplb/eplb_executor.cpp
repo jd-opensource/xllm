@@ -15,15 +15,6 @@ limitations under the License.
 
 #include "eplb_executor.h"
 
-#include <c10/core/Device.h>
-#include <c10/core/TensorOptions.h>
-#include <glog/logging.h>
-#if defined(USE_NPU)
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#include <torch_npu/csrc/core/npu/NPUFunctions.h>
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
-#endif
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -34,17 +25,10 @@ limitations under the License.
 #include "runtime/forward_params.h"
 
 namespace xllm {
-#if defined(USE_NPU)
-struct EplbExecutor::EplbStream {
-  c10_npu::NPUStream eplb_stream;
-  EplbStream() : eplb_stream(c10_npu::getNPUStreamFromPool()) {}
-};
-#endif
+
 EplbExecutor::EplbExecutor(CausalLM* model)
     : model_(model), eplb_worker_(&EplbExecutor::eplb_worker_loop, this) {
-#if defined(USE_NPU)
-  eplb_stream_ = std::make_unique<EplbStream>();
-#endif
+  eplb_stream_helper_ = std::make_unique<StreamHelper>();
 }
 
 EplbExecutor::~EplbExecutor() {
@@ -106,9 +90,9 @@ void EplbExecutor::eplb_worker_loop() {
     }
     auto prepare_start = std::chrono::high_resolution_clock::now();
 
-    c10::StreamGuard streamGuard(eplb_stream_->eplb_stream.unwrap());
+    c10::StreamGuard streamGuard = eplb_stream_helper_->set_stream_guard();
     model_->prepare_expert_weight(task.layer_id, task.expert_ids);
-    aclrtSynchronizeStream(eplb_stream_->eplb_stream.stream());
+    eplb_stream_helper_->synchronize_stream();
     auto prepare_end = std::chrono::high_resolution_clock::now();
     auto prepare_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(prepare_end -

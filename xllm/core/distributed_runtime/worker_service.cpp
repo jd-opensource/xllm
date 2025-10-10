@@ -22,7 +22,7 @@ limitations under the License.
 
 #include <boost/algorithm/string.hpp>
 #include <vector>
-
+// TODO: remove useless headers
 #if defined(USE_NPU)
 #include <c10/core/Device.h>
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
@@ -58,24 +58,15 @@ void init_npu_context(const torch::Device& device) {
 #endif
 }  // namespace
 
-#if defined(USE_NPU)
-struct WorkerService::NPUStreamHelper {
-  c10_npu::NPUStream D2H_memcpy_stream;
-  NPUStreamHelper() : D2H_memcpy_stream(c10_npu::getNPUStreamFromPool()) {}
-};
-#elif defined(USE_MLU)
-// TODO(mlu): implement mlu stream helper
-#endif
-
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
     : options_(options), device_(device), initialized_(false) {
 #if defined(USE_NPU)
   init_npu_context(device);
-  npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
 #elif defined(USE_MLU)
   // TODO(mlu): implement mlu init context
 #endif
+  stream_helper_ = std::make_unique<StreamHelper>();
 }
 
 WorkerService::WorkerService(runtime::Options options,
@@ -87,10 +78,10 @@ WorkerService::WorkerService(runtime::Options options,
       initialized_(true) {
 #if defined(USE_NPU)
   init_npu_context(device);
-  npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
 #elif defined(USE_MLU)
   // TODO(mlu): implement mlu init context
 #endif
+  stream_helper_ = std::make_unique<StreamHelper>();
 }
 
 WorkerService::~WorkerService() = default;
@@ -412,12 +403,7 @@ void WorkerService::ExecuteModel(
         prepared_layer_id = forward_outputs.value().prepared_layer_id;
 
         {
-#if defined(USE_NPU)
-          c10::StreamGuard streamGuard(
-              npu_stream_helper_->D2H_memcpy_stream.unwrap());
-#elif defined(USE_MLU)
-          // TODO(mlu): implement mlu synchronize stream
-#endif
+          c10::StreamGuard streamGuard = stream_helper_->set_stream_guard();
           // only driver worker (rank=0) need to fill this
           // [num_seq, ..., embed_dim] FloatTensor
           embeddings =
@@ -436,12 +422,7 @@ void WorkerService::ExecuteModel(
             top_logprobs =
                 safe_to(sample_output.top_logprobs, torch::kCPU, true);
           }
-#if defined(USE_NPU)
-          aclrtSynchronizeStream(
-              npu_stream_helper_->D2H_memcpy_stream.stream());
-#elif defined(USE_MLU)
-          // TODO(mlu): implement mlu synchronize stream
-#endif
+          stream_helper_->synchronize_stream();
         }
       }
     } else {
@@ -498,12 +479,7 @@ void WorkerService::GetLastStepResult(
           const auto& expert_load_data = safe_to(
               forward_outputs.value().expert_load_data, torch::kCPU, true);
           int32_t prepared_layer_id = forward_outputs.value().prepared_layer_id;
-#if defined(USE_NPU)
-          c10::StreamGuard streamGuard(
-              npu_stream_helper_->D2H_memcpy_stream.unwrap());
-#elif defined(USE_MLU)
-      // TODO(mlu): implement mlu synchronize stream
-#endif
+          c10::StreamGuard streamGuard = stream_helper_->set_stream_guard();
           // [num_seq, ..., embed_dim]
           auto embeddings =
               safe_to(sample_output.embeddings, torch::kCPU, true);
@@ -522,12 +498,7 @@ void WorkerService::GetLastStepResult(
             // [num_seq, topk]
             const auto& top_logprobs =
                 safe_to(sample_output.top_logprobs, torch::kCPU, true);
-#if defined(USE_NPU)
-            aclrtSynchronizeStream(
-                npu_stream_helper_->D2H_memcpy_stream.stream());
-#elif defined(USE_MLU)
-        // TODO(mlu): implement mlu synchronize stream
-#endif
+            stream_helper_->synchronize_stream();
 
             forward_output_to_proto(next_tokens,
                                     logprobs,

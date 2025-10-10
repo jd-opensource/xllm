@@ -53,15 +53,6 @@ limitations under the License.
 
 namespace xllm {
 
-#if defined(USE_NPU)
-struct WorkerImpl::NPUStreamHelper {
-  c10_npu::NPUStream H2D_memcpy_stream;
-  NPUStreamHelper() : H2D_memcpy_stream(c10_npu::getNPUStreamFromPool()) {}
-};
-#elif defined(USE_MLU)
-// TODO(mlu): implement mlu stream helper
-#endif
-
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
@@ -88,8 +79,8 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   }
   std::string device_name = "npu:" + std::to_string(currentDevId);
   torch_npu::init_npu(device_name);
-  npu_stream_helper_ = std::make_unique<NPUStreamHelper>();
-  extra_stream_helper_ = std::make_unique<NPUStreamHelper>();
+  stream_helper_ = std::make_unique<StreamHelper>();
+  extra_stream_helper_ = std::make_unique<StreamHelper>();
   general_threadpool_.schedule(
       [this]() mutable { c10_npu::SetDevice(device_.index()); });
 
@@ -396,8 +387,7 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
 void WorkerImpl::prepare_work_before_execute(
     const BatchedForwardInputs& inputs,
     BatchedForwardInputs& processed_inputs) {
-#if defined(USE_NPU)
-  c10::StreamGuard streamGuard(npu_stream_helper_->H2D_memcpy_stream.unwrap());
+  c10::StreamGuard streamGuard = stream_helper_->set_stream_guard();
 
   for (auto i = 0; i < inputs.micro_inputs.size(); ++i) {
     ForwardInput fwd_inputs_on_device;
@@ -482,20 +472,17 @@ void WorkerImpl::prepare_work_before_execute(
   }
   processed_inputs.concated_sampling_params =
       inputs.concated_sampling_params.to(device_, dtype_);
-  aclrtSynchronizeStream(npu_stream_helper_->H2D_memcpy_stream.stream());
-#endif
+  stream_helper_->synchronize_stream();
 }
 
 folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
     ModelInputParams& input_params) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-#if defined(USE_NPU)
   general_threadpool_.schedule([this,
                                 input_params = input_params,
                                 promise = std::move(promise)]() mutable {
-    c10::StreamGuard streamGuard(
-        extra_stream_helper_->H2D_memcpy_stream.unwrap());
+    c10::StreamGuard streamGuard = extra_stream_helper_->set_stream_guard();
     if (input_params.async_copy_out_blocks.size() > 0) {
       const int64_t num_layers = context_.get_model_args().n_layers();
       for (int layer_id = 0; layer_id < num_layers; layer_id++) {
@@ -514,14 +501,9 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
 
       offload_kv_blocks_to_store(input_params.async_copy_out_blocks);
     }
-    auto ret = aclrtSynchronizeStream(
-        extra_stream_helper_->H2D_memcpy_stream.stream());
+    auto ret = extra_stream_helper_->synchronize_stream_return_status();
     promise.setValue(ret == 0);
   });
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu device set
-  promise.setValue(false);
-#endif
 
   return future;
 }

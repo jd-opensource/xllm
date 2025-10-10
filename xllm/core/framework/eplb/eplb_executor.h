@@ -15,14 +15,13 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
-
 #include <cstdint>
 #include <memory>
 
 #include "common/macros.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
+#include "platform/stream_helper.h"
 #include "runtime/forward_params.h"
 
 namespace xllm {
@@ -65,8 +64,7 @@ class EplbExecutor final {
 
   mutable std::mutex ready_mutex_;
   int32_t ready_layer_id_ = -1;
-  struct EplbStream;
-  std::unique_ptr<EplbStream> eplb_stream_;
+  std::unique_ptr<StreamHelper> eplb_stream_helper_;
 };
 
 }  // namespace xllm

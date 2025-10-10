@@ -38,6 +38,7 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
+#include "platform/stream_helper.h"
 #include "util/timer.h"
 
 namespace xllm {
@@ -106,12 +107,7 @@ std::optional<ForwardOutput> EmbedWorkerImpl::step(
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
   }
-#if defined(USE_NPU)
-  aclrtSynchronizeStream(
-      c10_npu::getCurrentNPUStream(device_.index()).stream());
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu synchronize stream
-#endif
+  synchronize_stream(device_.index());
   return output;
 }
 

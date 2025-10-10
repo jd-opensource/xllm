@@ -45,6 +45,7 @@ cc_library(
     absl::strings
     glog::glog
     proto::xllm_proto
+    :platform
 )
 
 cc_library(

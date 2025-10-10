@@ -38,6 +38,7 @@ limitations under the License.
 #include "framework/xtensor/xtensor.h"
 #include "memory"
 #include "options.h"
+#include "platform/stream_helper.h"
 #include "util/threadpool.h"
 
 namespace xllm {
@@ -243,13 +244,8 @@ class WorkerImpl {
 
   std::shared_ptr<KVCacheStore> kv_cache_store_;
 
-  // a walkaround to avoid compilation conflict involved by
-  // c10_npu::NPUStream related files.
-#if defined(USE_NPU)
-  struct NPUStreamHelper;
-  std::unique_ptr<NPUStreamHelper> npu_stream_helper_;
-  std::unique_ptr<NPUStreamHelper> extra_stream_helper_;
-#endif
+  std::unique_ptr<StreamHelper> stream_helper_;
+  std::unique_ptr<StreamHelper> extra_stream_helper_;
 
   bool is_spec_draft_ = false;
 
