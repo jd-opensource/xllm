@@ -307,6 +307,8 @@ void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
     */
     InterruptionBus::get_instance().publish(false);
     ContinuousScheduler::step(timeout);
+    step_status_ = StepStatus::IDLE;  // Reset status to idle to maintain
+                                      // consistency with actual state
     prefill_send_first_generation();
     prefill_send_multi_generations();
   } catch (const ForwardInterruptedException& e) {
@@ -1048,8 +1050,9 @@ void PDOOCScheduler::dispatch_requests() {
     // WIP Interrupt ongoing offline prefill requests when online requests come
     if (!requests.empty()) {
       if (step_status_ == StepStatus::OFFLINE_PREFILL) {
-        InterruptionBus::get_instance().publish(true);
-        DVLOG << "Sent an interruption signal";
+        // InterruptionBus::get_instance().publish(true);
+        // DVLOG << "Sent an interruption signal";
+        DVLOG << "Interruption disabled";
       }
     }
   }
