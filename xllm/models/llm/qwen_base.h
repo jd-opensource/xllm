@@ -24,6 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "core/common/interruption_bus.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
@@ -175,6 +176,8 @@ class QWenModelImplBase : public torch::nn::Module {
   // mode type: qwen2, qwen3 .etc
   QWenModelImplBase(const std::string& model_type, const ModelArgs& args)
       : model_type_(model_type) {
+    InterruptionBus::get_instance().subscribe(
+        [this](bool interrupted) { this->interrupted_ = interrupted; });
     mrope_section_ = args.rope_scaling_mrope_section();
   }
 
@@ -293,6 +296,11 @@ class QWenModelImplBase : public torch::nn::Module {
       }
       auto& layer = layers_[i];
 
+      if (interrupted_) {
+        VLOG(1) << "Forward interrupted at layer: " << i;
+        return torch::Tensor();
+      }
+
       layer(hs,
             cos_poss,
             sin_poss,
@@ -374,6 +382,7 @@ class QWenModelImplBase : public torch::nn::Module {
 
  private:
   std::string model_type_;
+  bool interrupted_ = false;
 };
 
 template <typename QWenModelType>

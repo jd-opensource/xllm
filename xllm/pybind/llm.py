@@ -37,6 +37,7 @@ class LLM:
         xservice_addr: str = '',
         instance_name: str = '',
         enable_disagg_pd: bool = False,
+        enable_pd_ooc: bool = False,
         enable_schedule_overlap: bool = False,
         kv_cache_transfer_mode: str = 'PUSH',
         **kwargs,
@@ -82,6 +83,7 @@ class LLM:
         options.xservice_addr = xservice_addr
         options.instance_name = instance_name
         options.enable_disagg_pd = enable_disagg_pd
+        options.enable_pd_ooc = enable_pd_ooc
         options.enable_schedule_overlap = enable_schedule_overlap
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
         self.master = LLMMaster(options)

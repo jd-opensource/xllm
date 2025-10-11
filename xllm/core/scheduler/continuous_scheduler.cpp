@@ -382,7 +382,10 @@ void ContinuousScheduler::handle_decode_requests(
       }
       // no budget left
       double seq_estimate_latency = 0;
-      if (options_.enable_latency_aware_schedule()) {
+      if (options_.enable_latency_aware_schedule()
+          // force not enabled on prefill node (only offline req decode here)
+          && !(options_.instance_role().has_value() &&
+               options_.instance_role().value() == InstanceRole::PREFILL)) {
         seq_estimate_latency =
             profile_manager_->predict_step_time(sequence.get(), false);
         if (estimate_latency + allocated_estimate_latency +
@@ -617,6 +620,10 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   while (request_queue_.read(request)) {
     CHECK(request);
 
+    // if (request->offline()) {
+    //   DVLOG << "Read an offline request from request_queue_";
+    // }
+
     // expand sequences to the target number if prefix cache is disabled.
     if (!enable_prefix_cache_) {
       // expand sequences to the target number
@@ -626,8 +633,12 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
       if (request->offline()) {
         waiting_priority_queue_offline_.push(request);
+        // DVLOG << "Put an offline request into
+        // waiting_priority_queue_offline_";
       } else {
         waiting_priority_queue_.push(request);
+        // DVLOG << "Put an online request into
+        // waiting_priority_queue_offline_";
       }
     } else {
       // request from prefill instance in disagge pd mode.
@@ -669,8 +680,10 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
         handle_running_requests(*it);
         if ((*it)->offline()) {
           running_queue_offline_->push(*it, last_step_prefill_);
+          // DVLOG << "Put an offline request into running_queue_offline_";
         } else {
           running_queue_->push(*it, last_step_prefill_);
+          // DVLOG << "Put an online request into running_queue_";
         }
       }
     } else {
@@ -693,13 +706,17 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
         handle_running_requests(*it);
         if ((*it)->offline()) {
           running_queue_offline_->push(*it, last_step_prefill_);
+          // DVLOG << "Pushed an offline request into running_queue_offline_";
         } else {
           running_queue_->push(*it, last_step_prefill_);
+          // DVLOG << "Pushed an online request into running_queue_";
         }
       }
     }
   } else {
-    // directly push running requests to the priority queue
+    // DVLOG << "Using unknown priority_strategy: " <<
+    // options_.priority_strategy(); directly push running requests to the
+    // priority queue
     for (auto it = running_requests_.begin(); it != running_requests_.end();
          ++it) {
       if (*it == nullptr) {
@@ -708,8 +725,10 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
       handle_running_requests(*it);
       if ((*it)->offline()) {
         running_queue_offline_->push(*it);
+        // DVLOG << "Pushed an offline request into running_queue_offline_";
       } else {
         running_queue_->push(*it);
+        // DVLOG << "Pushed an online request into running_queue_";
       }
     }
   }
@@ -890,6 +909,7 @@ void ContinuousScheduler::prepare_cache_async(
 void ContinuousScheduler::step(const absl::Duration& timeout) {
   if (!options_.enable_schedule_overlap()) {
     // get a new batch of requests
+    _debug_last_batch_lengths.clear();
     std::vector<Batch> batch = schedule_request(timeout);
     bool all_empty =
         std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
@@ -898,7 +918,30 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
     if (all_empty) {
       return;
     }
+
+    for (size_t i = 0; i < batch.size(); i++) {
+      for (size_t j = 0; j < batch[i].size(); j++) {
+        _debug_last_batch_lengths.push_back(batch[i][j]->num_tokens());
+      }
+    }
+    auto start = std::chrono::high_resolution_clock::now();
     engine_->step(batch);
+    auto end = std::chrono::high_resolution_clock::now();
+    double duration_ms =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+            .count() /
+        1000.0;
+    std::stringstream ss;
+    ss << "bs=" << _debug_last_batch_lengths.size() << " - [";
+    for (size_t i = 0; i < _debug_last_batch_lengths.size(); ++i) {
+      ss << _debug_last_batch_lengths[i];
+      if (i != _debug_last_batch_lengths.size() - 1) ss << ", ";
+    }
+    ss << "]";
+
+    LOG(INFO) << "PERF - " << ss.str() << " - " << std::fixed
+              << std::setprecision(3) << duration_ms << " ms";
+
     kv_cache_manager_->reset_copy_content();
     // process request output in batch
     process_batch_output(false);

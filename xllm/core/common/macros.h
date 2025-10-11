@@ -62,4 +62,6 @@ namespace xllm {
 
 #define CALLBACK_WITH_ERROR(CODE, MSG) callback(Status{CODE, MSG});
 
+#define DVLOG VLOG(1) << "[DEBUG] "
+
 }  // namespace xllm
