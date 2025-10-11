@@ -1021,7 +1021,7 @@ void PDOOCScheduler::prefill_send_first_generation() {
         remote_requests_map_[request->request_id()] = request;
         remote_requests_output_thread_map_[request->request_id()] =
             next_thread_idx;
-        next_thread_idx = (++next_thread_idx) % kOutputTheadNum_;
+        next_thread_idx = (++next_thread_idx) % kOutputThreadNum_;
         requests.emplace_back(request);
 
         running_requests_[i] = nullptr;
@@ -1194,7 +1194,7 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
     received_request_map_[request->request_id()] = request;
     received_request_output_thread_map_[request->request_id()] =
         next_thread_idx;
-    next_thread_idx = (++next_thread_idx) % kOutputTheadNum_;
+    next_thread_idx = (++next_thread_idx) % kOutputThreadNum_;
   }
 
   {
@@ -1204,7 +1204,7 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
     if (remote_prefill_thread_map_.find(stub) ==
         remote_prefill_thread_map_.end()) {
       remote_prefill_thread_map_[stub] = next_prefill_thread_idx;
-      next_prefill_thread_idx = (++next_prefill_thread_idx) % kOutputTheadNum_;
+      next_prefill_thread_idx = (++next_prefill_thread_idx) % kOutputThreadNum_;
     }
   }
 
@@ -1934,7 +1934,7 @@ void PDOOCScheduler::prefill_send_multi_generations() {
         remote_requests_map_[request->request_id()] = request;
         remote_requests_output_thread_map_[request->request_id()] =
             next_thread_idx;
-        next_thread_idx = (++next_thread_idx) % kOutputTheadNum_;
+        next_thread_idx = (++next_thread_idx) % kOutputThreadNum_;
       }
     }
 

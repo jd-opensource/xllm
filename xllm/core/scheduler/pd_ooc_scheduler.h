@@ -199,9 +199,9 @@ class PDOOCScheduler : public ContinuousScheduler {
   ThreadPool prefill_threadpool_;
 
   // use threadpool to handle all RequestOuputs queue
-  static constexpr size_t kOutputTheadNum_ = 128;  // magic num
+  static constexpr size_t kOutputThreadNum_ = 128;  // magic num
   size_t next_thread_idx = 0;
-  ThreadPool output_threadpools_[kOutputTheadNum_];
+  ThreadPool output_threadpools_[kOutputThreadNum_];
   // keep the thread to handle request output
   // A request will be handled in the same thread to guarantee the token's
   // order.
