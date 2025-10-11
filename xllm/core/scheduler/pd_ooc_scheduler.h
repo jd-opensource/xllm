@@ -122,26 +122,18 @@ class PDOOCScheduler : public ContinuousScheduler {
 
   std::vector<Batch> prepare_batch() override;
 
- protected:
   void handle_decode_requests(
-      size_t& latency_budget,
-      size_t& estimate_latency,
+      double& latency_budget,
+      double& estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       size_t& num_offline_decode_preempt_offline_requests,
       size_t& num_online_decode_preempt_online_requests,
       size_t& num_online_decode_preempt_offline_requests,
-      std::unique_ptr<DecodePriorityQueue>& running_queue) override;
+      std::unique_ptr<DecodePriorityQueue>& running_queue);
 
  private:
   void handle_prefill_interruption();
-  // Pre-execute prefill requests of different lengths at startup and obtain the
-  // corresponding TTFT for calculating the estimated TTFT of requests.
-  void profile_ttft();
-
-  // Generate a prefill request of token_length and execute inference, finally
-  // returning the inference time.
-  int64_t run_prefill_request(int32_t token_length, int32_t vocab_size);
 
   // check remote instance info, if not exist, get from master service
   bool check_remote_instance_info(const std::string& instance_name);

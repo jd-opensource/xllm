@@ -149,72 +149,6 @@ PDOOCScheduler::~PDOOCScheduler() {
   }
 }
 
-void PDOOCScheduler::profile_ttft() {
-  // get the maximum prefill token length
-  auto& model_args = engine_->model_args();
-  int32_t max_context_len = model_args.max_position_embeddings();
-  if (!options_.enable_chunked_prefill()) {
-    max_context_len =
-        std::min(max_context_len, options_.max_tokens_per_batch());
-  }
-  int32_t vocab_size = model_args.vocab_size();
-
-  // warm up
-  run_prefill_request(max_context_len, vocab_size);
-
-  // get TTFT starting from max_context_len, dividing the token length by 2 in
-  // each loop iteration
-  for (int32_t token_length = max_context_len; token_length > 1;
-       token_length >>= 1) {
-    int64_t latency = run_prefill_request(token_length, vocab_size);
-    instance_info_.ttft_profiling_data.emplace_back(
-        std::make_pair(token_length, latency));
-  }
-}
-
-int64_t PDOOCScheduler::run_prefill_request(int32_t token_length,
-                                            int32_t vocab_size) {
-  // generate random token ids and request
-  std::random_device rd;
-  std::mt19937_64 gen(rd());
-  // generate token id within the range [0, vocab_size - 1]
-  std::uniform_int_distribution<int32_t> dis(0, vocab_size - 1);
-  std::vector<int32_t> token_ids(token_length);
-  std::generate(token_ids.begin(), token_ids.end(), [&]() { return dis(gen); });
-
-  // generate request
-  RequestState req_state(token_ids);
-  Request request(/*request_id=*/"",
-                  /*x_request_id=*/"",
-                  /*x_request_time=*/"",
-                  req_state);
-
-  // allocate blocks
-  if (!block_manager_pool_->allocate(request.sequences()[0].get())) {
-    LOG(FATAL) << "Profiling TTFT failed! Not enough blocks, token length : "
-               << token_length;
-  }
-
-  // build batch
-  // WIP Build batches
-  auto batches = BatchFactory::get_instance(options_.dp_size())
-                     ->create_batches(
-                         {request.sequences()[0].get()},
-                         {token_length},
-                         block_manager_pool_->get_copy_in_cache_block_infos(),
-                         block_manager_pool_->get_copy_out_cache_block_infos());
-
-  absl::Time start_time = absl::Now();
-  engine_->step(batches);
-  if (options_.enable_schedule_overlap()) {
-    engine_->update_last_step_result(batches);
-  }
-  const int64_t latency = absl::ToInt64Milliseconds(absl::Now() - start_time);
-  block_manager_pool_->deallocate(&request);
-
-  return latency;
-}
-
 // TODO: maybe we should consider update info case even if info already exists
 // in local.
 bool PDOOCScheduler::check_remote_instance_info(
@@ -380,7 +314,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
       // DVLOG << "Found a finished request in running_requests_";
-      block_manager_pool_->deallocate(request.get());
+      kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // finished request is set to nullptr
@@ -467,8 +401,8 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   // different ttft. TO IMPROVE: use min remaining time (i.e. slo -
   // elapsed_time) of the reuquest in current decode queue to replace current
   // latency_budget.
-  size_t latency_budget = options_.max_global_ttft_ms();
-  size_t estimate_latency = 0;
+  double latency_budget = options_.max_global_ttft_ms();
+  double estimate_latency = 0;
   // remaining budget for the current batch
   size_t remaining_token_budget = options_.max_tokens_per_batch();
   size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
@@ -544,12 +478,13 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  auto batches = BatchFactory::get_instance(options_.dp_size())
-                     ->create_batches(
-                         running_sequences_,
-                         running_sequences_budgets_,
-                         block_manager_pool_->get_copy_in_cache_block_infos(),
-                         block_manager_pool_->get_copy_out_cache_block_infos());
+  auto batches =
+      BatchFactory::get_instance(options_.dp_size())
+          ->create_batches(running_requests_,
+                           running_sequences_,
+                           running_sequences_budgets_,
+                           kv_cache_manager_->get_copy_in_cache_block_infos(),
+                           kv_cache_manager_->get_copy_out_cache_block_infos());
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process
@@ -575,11 +510,11 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   GAUGE_SET(num_running_sequences, running_sequences_.size());
 
   GAUGE_SET(kv_cache_utilization_perc,
-            block_manager_pool_->kv_cache_utilization());
+            kv_cache_manager_->kv_cache_utilization());
   GAUGE_SET(num_blocks_in_prefix_cache,
-            util::min(block_manager_pool_->num_blocks_in_prefix_cache()));
-  GAUGE_SET(num_free_blocks, util::max(block_manager_pool_->num_free_blocks()));
-  GAUGE_SET(num_used_blocks, util::min(block_manager_pool_->num_used_blocks()));
+            util::min(kv_cache_manager_->num_blocks_in_prefix_cache()));
+  GAUGE_SET(num_free_blocks, util::max(kv_cache_manager_->num_free_blocks()));
+  GAUGE_SET(num_used_blocks, util::min(kv_cache_manager_->num_used_blocks()));
   if (!batches[0].empty()) {
     DVLOG << "Built a batch";
   }
@@ -601,7 +536,7 @@ void PDOOCScheduler::handle_prefill_interruption() {
   // Preempt offline requests and move them back to waiting queue
   for (auto& request : offline_requests_to_preempt) {
     // Deallocate KV cache blocks
-    block_manager_pool_->deallocate(request.get());
+    kv_cache_manager_->deallocate(request.get());
 
     // Mark request as preempted
     request->set_preempted();
@@ -644,8 +579,8 @@ void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
 // copy+modify from ContinuousScheduler::handle_decode_requests
 // 由于父类写法限制，需要依赖手工维护 _decode_step_global_batch_req_lens
 void PDOOCScheduler::handle_decode_requests(
-    size_t& latency_budget,
-    size_t& estimate_latency,
+    double& latency_budget,
+    double& estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
     size_t& num_offline_decode_preempt_offline_requests,
@@ -690,7 +625,7 @@ void PDOOCScheduler::handle_decode_requests(
     bool has_enough_blocks = true;
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
-    size_t allocated_estimate_batch_latency = 0;
+    double allocated_estimate_batch_latency = 0;
     if (request->offline()) {
       ++num_offline;
     }
@@ -748,13 +683,13 @@ void PDOOCScheduler::handle_decode_requests(
       size_t updated_num_tokens =
           sequence->num_tokens() + options_.num_speculative_tokens();
       // no blocks left
-      if (!block_manager_pool_->allocate(sequence.get(), updated_num_tokens)) {
+      if (!kv_cache_manager_->allocate(sequence.get(), updated_num_tokens)) {
         has_enough_blocks = false;
         break;
       }
 
       if (sequence->if_cache_block_for_prefill()) {
-        block_manager_pool_->cache(sequence.get());
+        kv_cache_manager_->cache(sequence.get());
       }
 
       // update the allocated tokens for the sequence
@@ -816,7 +751,7 @@ void PDOOCScheduler::handle_decode_requests(
       std::shared_ptr<Request> request_to_preempt =
           running_queue_offline_->back();
       ++num_online_decode_preempt_offline_requests;
-      block_manager_pool_->deallocate(request_to_preempt.get());
+      kv_cache_manager_->deallocate(request_to_preempt.get());
       running_queue_offline_->pop_back();
       // add preemptable request to waiting priority queue
       request_to_preempt->set_preempted();
@@ -826,7 +761,7 @@ void PDOOCScheduler::handle_decode_requests(
       std::shared_ptr<Request> request_to_preempt = running_queue->back();
       if (request_to_preempt.get() != request.get()) {
         // TO IMPROVE: kv cache offload to cpu
-        block_manager_pool_->deallocate(request_to_preempt.get());
+        kv_cache_manager_->deallocate(request_to_preempt.get());
         running_queue->pop_back();
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
@@ -901,8 +836,8 @@ void PDOOCScheduler::decode_send_pull_signal() {
     pull_signal.set_source_instance_name(xservice_client_->get_instance_name());
 
     google::protobuf::uint64 preferred_len = 0;
-    auto available_tokens = block_manager_pool_->num_free_blocks()[0] *
-                            block_manager_pool_->options().block_size();
+    auto available_tokens = kv_cache_manager_->num_free_blocks()[0] *
+                            kv_cache_manager_->block_size();
     pull_signal.set_max_total_len(available_tokens);
 
     preferred_len = llm_flops_.decode_preferred_req_len(
@@ -1180,13 +1115,13 @@ void PDOOCScheduler::prefill_send_first_generation() {
           std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
           req_to_channel_map_.erase(request->request_id());
         }
-        block_manager_pool_->deallocate(request.get());
+        kv_cache_manager_->deallocate(request.get());
       } else {
         // release the memory for other requests.
         // TODO: FIXME
         // Here, we should decide whether to recycle the allocated blocks
         // according to whether all the blocks have been transmitted or not.
-        block_manager_pool_->deallocate(request.get());
+        kv_cache_manager_->deallocate(request.get());
       }
     }
   });
@@ -1245,7 +1180,7 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
   if (!stub) {
     LOG(ERROR) << "Failed to create rpc channel for prefill instance: "
                << prefill_instance_name;
-    block_manager_pool_->deallocate(request.get());
+    kv_cache_manager_->deallocate(request.get());
     return false;
   }
 
@@ -1732,7 +1667,7 @@ std::vector<Block> PDOOCScheduler::allocate_raw_blocks(int token_num,
                                                        int32_t& dp_rank) {
   // When the KV Cache usage reaches the threshold, prefill requests will no
   // longer be scheduled to avoid frequent preemption.
-  if (block_manager_pool_->kv_cache_utilization() <
+  if (kv_cache_manager_->kv_cache_utilization() <
       FLAGS_prefill_scheduling_memory_usage_threshold) {
     return allocate_blocks_for(token_num, dp_rank);
   } else {
@@ -1763,7 +1698,7 @@ void PDOOCScheduler::update_token_latency_metrics(
 // TODO Need parameters tuning
 bool PDOOCScheduler::check_able_to_pull() {
   // Estimated usage of current requests: half of current used blocks.
-  return block_manager_pool_->kv_cache_utilization() < 0.9 &&
+  return kv_cache_manager_->kv_cache_utilization() < 0.9 &&
          _decode_last_step_latency <
              options_.max_global_tpot_ms() / 1000.0 * 0.9;
 }
@@ -2086,10 +2021,10 @@ void PDOOCScheduler::prefill_send_multi_generations() {
           std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
           req_to_channel_map_.erase(request->request_id());
         }
-        block_manager_pool_->deallocate(request.get());
+        kv_cache_manager_->deallocate(request.get());
       } else {
         // release the memory for other requests.
-        block_manager_pool_->deallocate(request.get());
+        kv_cache_manager_->deallocate(request.get());
       }
     }
   });
