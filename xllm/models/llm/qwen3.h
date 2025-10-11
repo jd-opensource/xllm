@@ -16,29 +16,22 @@ limitations under the License.
 #pragma once
 
 #include "core/layers/qwen3_decoder_layer.h"
-#include "qwen_base.h"
+#include "llm_model_base.h"
 
 namespace xllm {
 
 class QWen3DecoderLayerImpl
-    : public QWenDecoderLayerImplBase<layer::Qwen3DecoderLayer> {
+    : public LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer> {
  public:
   QWen3DecoderLayerImpl(const ModelContext& context)
-      : QWenDecoderLayerImplBase<layer::Qwen3DecoderLayer>(context) {}
+      : LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer>(context) {}
 };
 TORCH_MODULE(QWen3DecoderLayer);
 
-torch::Tensor get_qwen3_rotary_embedding(int64_t dim,
-                                         int64_t seq_len,
-                                         double rope_theta,
-                                         const torch::TensorOptions& options) {
-  return get_qwen_concat_rotary_embedding(dim, seq_len, rope_theta, options);
-}
-
-class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
+class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
  public:
   QWen3ModelImpl(const ModelContext& context)
-      : QWenModelImplBase<QWen3DecoderLayer>("qwen3",
+      : LlmModelImplBase<QWen3DecoderLayer>("qwen3",
                                              context.get_model_args()) {
     // register submodules
     auto model_args = context.get_model_args();
@@ -51,7 +44,7 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
       embed_tokens_.push_back(layer::WordEmbedding(context));
       atb_pos_embeds_.push_back(layer::PosEmbedding(context));
     }
-    cos_sin_ = get_qwen3_rotary_embedding(128,
+    cos_sin_ = get_concat_rotary_embedding(128,
                                           model_args.max_position_embeddings(),
                                           model_args.rope_theta(),
                                           options);
@@ -73,10 +66,10 @@ class QWen3ModelImpl : public QWenModelImplBase<QWen3DecoderLayer> {
 };
 TORCH_MODULE(QWen3Model);
 
-class QWen3ForCausalLMImpl : public QWenForCausalLMImplBase<QWen3Model> {
+class QWen3ForCausalLMImpl : public LlmForCausalLMImplBase<QWen3Model> {
  public:
   QWen3ForCausalLMImpl(const ModelContext& context)
-      : QWenForCausalLMImplBase<QWen3Model>(context) {}
+      : LlmForCausalLMImplBase<QWen3Model>(context) {}
 };
 TORCH_MODULE(QWen3ForCausalLM);
 

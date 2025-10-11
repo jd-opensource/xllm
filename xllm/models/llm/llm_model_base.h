@@ -37,40 +37,7 @@ limitations under the License.
 
 namespace xllm {
 
-std::tuple<torch::Tensor, torch::Tensor> get_qwen_rotary_embedding(
-    int64_t dim,
-    int64_t seq_len,
-    double rope_theta,
-    const torch::TensorOptions& options) {
-  // auto inv_freq = 1.0 / torch::pow(10000, torch::arange(0, dim, 2, options) /
-  // dim);
-  auto options_new =
-      torch::device(options.device()).dtype(at::ScalarType::Double);
-  auto inv_freq =
-      1.0 / torch::pow(rope_theta, torch::arange(0, dim, 2, options_new) / dim)
-                .to(at::ScalarType::Float);
-  auto seq_idx = torch::arange(seq_len, options_new);
-
-  auto freqs = torch::ger(seq_idx, inv_freq).to(torch::kFloat32);
-  auto emb = torch::cat({freqs, freqs}, -1);
-  auto rope_cos = torch::cos(emb);
-  auto rope_sin = torch::sin(emb);
-
-  auto dtype = options.dtype();
-  if (dtype == torch::kFloat16 || dtype == torch::kBFloat16 ||
-      dtype == torch::kInt8) {
-    if (dtype == torch::kBFloat16) {
-      rope_cos = rope_cos.to(torch::kBFloat16);
-      rope_sin = rope_sin.to(torch::kBFloat16);
-    } else {
-      rope_cos = rope_cos.to(torch::kFloat16);
-      rope_sin = rope_sin.to(torch::kFloat16);
-    }
-  }
-  return std::make_tuple(rope_cos, rope_sin);
-}
-
-torch::Tensor get_qwen_concat_rotary_embedding(
+torch::Tensor get_concat_rotary_embedding(
     int64_t dim,
     int64_t seq_len,
     double rope_theta,
@@ -103,9 +70,9 @@ torch::Tensor get_qwen_concat_rotary_embedding(
 }
 
 template <typename DecoderType>
-class QWenDecoderLayerImplBase : public torch::nn::Module {
+class LlmDecoderLayerImplBase : public torch::nn::Module {
  public:
-  QWenDecoderLayerImplBase(const ModelContext& context) {
+  LlmDecoderLayerImplBase(const ModelContext& context) {
     // register submodules
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
 #if defined(USE_NPU)
@@ -170,11 +137,10 @@ class QWenDecoderLayerImplBase : public torch::nn::Module {
 };
 
 template <typename DecoderLayerType>
-class QWenModelImplBase : public torch::nn::Module {
+class LlmModelImplBase : public torch::nn::Module {
  public:
   // mode type: qwen2, qwen3 .etc
-  QWenModelImplBase(const std::string& model_type, const ModelArgs& args)
-      : model_type_(model_type) {
+  LlmModelImplBase(const std::string& model_type, const ModelArgs& args) {
     mrope_section_ = args.rope_scaling_mrope_section();
   }
 
@@ -251,7 +217,7 @@ class QWenModelImplBase : public torch::nn::Module {
                            : 128;
         attn_mask = attn_mask_.get_attn_mask(
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
-      } else if (model_type_ == "qwen3") {
+      } else {
         torch::Tensor max_of_seq = torch::max(input_params[i].kv_seq_lens);
         max_seq_len_ = FLAGS_enable_chunked_prefill
                            ? std::max(max_of_seq.item<int>(), max_seq_len_)
@@ -376,13 +342,13 @@ class QWenModelImplBase : public torch::nn::Module {
   std::string model_type_;
 };
 
-template <typename QWenModelType>
-class QWenForCausalLMImplBase : public torch::nn::Module {
+template <typename LlmModelType>
+class LlmForCausalLMImplBase : public torch::nn::Module {
  public:
-  QWenForCausalLMImplBase(const ModelContext& context) {
+  LlmForCausalLMImplBase(const ModelContext& context) {
     tie_word_embeddings = context.get_model_args().tie_word_embeddings();
     // register submodules
-    model_ = register_module("model", QWenModelType(context));
+    model_ = register_module("model", LlmModelType(context));
     lm_head_ = register_module("lm_head", layer::LmHead(context));
   }
 
@@ -455,7 +421,7 @@ class QWenForCausalLMImplBase : public torch::nn::Module {
 
  protected:
   // parameter members, must be registered
-  QWenModelType model_{nullptr};
+  LlmModelType model_{nullptr};
   int device_id = 0;
   bool tie_word_embeddings{false};
   // test

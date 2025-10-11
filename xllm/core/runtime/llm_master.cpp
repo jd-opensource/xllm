@@ -304,6 +304,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     }
   }
 
+  // local_prompt_tokens = {151331, 151333, 151336,    198, 109377, 151337};
+  // LOG(INFO)<<local_prompt_tokens;
   COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
 
   int32_t max_context_len = model_args_.max_position_embeddings();

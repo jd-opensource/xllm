@@ -21,7 +21,7 @@ limitations under the License.
 
 #include <nlohmann/json.hpp>
 
-#include "atb_base.h"
+#include "npu_base_layer.h"
 #include "framework/model/model_args.h"
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/parallel_state.h"
@@ -29,9 +29,10 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "xllm_kernels/models/glm/layer/moe_decoder_layer.h"
 
-namespace xllm::hf {
+namespace xllm {
+namespace layer {
 
-class Glm4MoeDecoderImpl : public torch::nn::Module, public ATBBase {
+class Glm4MoeDecoderImpl : public NpuBaseLayer {
  public:
   explicit Glm4MoeDecoderImpl(const ModelContext& context,
                                const int32_t layer_id);
@@ -53,8 +54,9 @@ class Glm4MoeDecoderImpl : public torch::nn::Module, public ATBBase {
                         KVCache& kv_cache,
                         const ModelInputParams& input_params,
                         torch::Tensor& expert_array,
-                        aclrtEvent* event = nullptr,
-                        std::atomic<bool>* event_flag = nullptr,
+                        std::vector<aclrtEvent*> event = {nullptr, nullptr},
+                        std::vector<std::atomic<bool>*> event_flag = {nullptr,
+                                                                      nullptr},
                         int node_id = 0);
 
  private:
@@ -68,33 +70,33 @@ class Glm4MoeDecoderImpl : public torch::nn::Module, public ATBBase {
 
   void initialize_weight_tensors(const torch::TensorOptions& options);
 
-  void param_from_args(atb_speed::moe::MoeDecoderLayerParam& param,
+  void param_from_args(atb_speed::moe::MoeLayerParam& param,
                        const ModelArgs& args,
                        const ParallelArgs& parallel_args,
                        bool is_prefill);
 
   void resize_experts_weights(int num_of_device_experts);
 
-  void initialize_basic_parameters(atb_speed::moe::MoeDecoderLayerParam& param,
+  void initialize_basic_parameters(atb_speed::moe::MoeLayerParam& param,
                                    const ModelArgs& args,
                                    const ParallelArgs& parallel_args,
                                    bool is_prefill);
 
   void initialize_attention_parameters(
-      atb_speed::moe::MoeDecoderLayerParam& param,
+      atb_speed::moe::MoeLayerParam& param,
       const ModelArgs& args,
       const ParallelArgs& parallel_args);
 
-  void initialize_mlp_parameters(atb_speed::moe::MoeDecoderLayerParam& param,
+  void initialize_mlp_parameters(atb_speed::moe::MoeLayerParam& param,
                                  const ModelArgs& args,
                                  const ParallelArgs& parallel_args);
 
   void initialize_parallel_parameters(
-      atb_speed::moe::MoeDecoderLayerParam& param,
+      atb_speed::moe::MoeLayerParam& param,
       const ParallelArgs& parallel_args);
 
   void initialize_quantization_parameters(
-      atb_speed::moe::MoeDecoderLayerParam& param);
+      atb_speed::moe::MoeLayerParam& param);
 
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,
@@ -161,7 +163,7 @@ class Glm4MoeDecoderImpl : public torch::nn::Module, public ATBBase {
   int64_t init_layer();
 
   int64_t init_node(atb_speed::Model::Node& node,
-                    atb_speed::moe::MoeDecoderLayerParam& param);
+                    atb_speed::moe::MoeLayerParam& param);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                torch::Tensor& x,
@@ -186,6 +188,7 @@ class Glm4MoeDecoderImpl : public torch::nn::Module, public ATBBase {
   int32_t start_expert_id_;
   int32_t end_expert_id_;
   int32_t ep_rank_;
+  int32_t n_kv_heads_;
 
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
@@ -193,8 +196,8 @@ class Glm4MoeDecoderImpl : public torch::nn::Module, public ATBBase {
   int32_t dp_local_tp_rank_;
 
   int32_t num_speculative_tokens_ = 0;
-  atb_speed::moe::MoeDecoderLayerParam prefill_param_;
-  atb_speed::moe::MoeDecoderLayerParam decode_param_;
+  atb_speed::moe::MoeLayerParam prefill_param_;
+  atb_speed::moe::MoeLayerParam decode_param_;
 
   atb_speed::Model::Node prefill_node_;
   atb_speed::Model::Node decode_node_;
@@ -239,4 +242,5 @@ std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,
                                           int32_t dp_size,
                                           int32_t rank,
                                           at::Device device);
-}  // namespace xllm::hf
+}  // namespace layer
+}  // namespace xllm
