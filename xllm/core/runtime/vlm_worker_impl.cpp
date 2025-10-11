@@ -99,7 +99,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(
         model_->logits(hidden_states, sampling_params.selected_token_idxes);
   }
 
-  synchronize_stream(device_.index());
+  auto ret = StreamHelper::synchronize_stream(device_.index());
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

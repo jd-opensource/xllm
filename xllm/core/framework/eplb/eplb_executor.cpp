@@ -92,7 +92,7 @@ void EplbExecutor::eplb_worker_loop() {
 
     c10::StreamGuard streamGuard = eplb_stream_helper_->set_stream_guard();
     model_->prepare_expert_weight(task.layer_id, task.expert_ids);
-    eplb_stream_helper_->synchronize_stream();
+    auto ret = eplb_stream_helper_->synchronize_stream();
     auto prepare_end = std::chrono::high_resolution_clock::now();
     auto prepare_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(prepare_end -

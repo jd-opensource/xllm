@@ -150,7 +150,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
       !options_.enable_speculative_decode()) {
-    synchronize_stream(device_.index());
+    auto ret = StreamHelper::synchronize_stream(device_.index());
     // in p-d disaggregation scene, all micro batches should be in same
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
     // just use micro inputs.micro_inputs[0] here
@@ -201,7 +201,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
     output.max_top_logprobs = concated_sampling_params.max_top_logprobs;
   }
 
-  synchronize_stream(device_.index());
+  auto ret = StreamHelper::synchronize_stream(device_.index());
 
   if (options_.instance_role() == InstanceRole::PREFILL &&
       options_.kv_cache_transfer_mode() == "PUSH" &&

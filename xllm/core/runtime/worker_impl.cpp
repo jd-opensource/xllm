@@ -79,14 +79,14 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   }
   std::string device_name = "npu:" + std::to_string(currentDevId);
   torch_npu::init_npu(device_name);
-  stream_helper_ = std::make_unique<StreamHelper>();
-  extra_stream_helper_ = std::make_unique<StreamHelper>();
   general_threadpool_.schedule(
       [this]() mutable { c10_npu::SetDevice(device_.index()); });
 
 #elif defined(USE_MLU)
   // TODO(mlu): implement mlu init context
 #endif
+  stream_helper_ = std::make_unique<StreamHelper>();
+  extra_stream_helper_ = std::make_unique<StreamHelper>();
   sampler_ = std::make_unique<Sampler>();
 }
 
@@ -472,7 +472,7 @@ void WorkerImpl::prepare_work_before_execute(
   }
   processed_inputs.concated_sampling_params =
       inputs.concated_sampling_params.to(device_, dtype_);
-  stream_helper_->synchronize_stream();
+  auto ret = stream_helper_->synchronize_stream();
 }
 
 folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
@@ -501,7 +501,7 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
 
       offload_kv_blocks_to_store(input_params.async_copy_out_blocks);
     }
-    auto ret = extra_stream_helper_->synchronize_stream_return_status();
+    auto ret = extra_stream_helper_->synchronize_stream();
     promise.setValue(ret == 0);
   });
 

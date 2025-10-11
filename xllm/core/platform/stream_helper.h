@@ -14,8 +14,6 @@
 
 namespace xllm {
 
-void synchronize_stream(int32_t device_id);
-
 class StreamHelper {
  public:
   StreamHelper();
@@ -26,9 +24,10 @@ class StreamHelper {
   StreamHelper(StreamHelper&&) = default;
   StreamHelper& operator=(StreamHelper&&) = default;
 
-  void synchronize_stream();
-  int synchronize_stream_return_status();
+  int synchronize_stream();
   c10::StreamGuard set_stream_guard();
+
+  static int synchronize_stream(int32_t device_id);
 
  private:
 #if defined(USE_NPU)

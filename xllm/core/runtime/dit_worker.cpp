@@ -108,7 +108,7 @@ std::optional<DiTForwardOutput> DiTWorker::step(const DiTForwardInput& inputs) {
 
   auto output = dit_model_executor_->forward(inputs.to(device_, dtype_));
 
-  synchronize_stream(device_.index());
+  auto ret = StreamHelper::synchronize_stream(device_.index());
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   return output;
