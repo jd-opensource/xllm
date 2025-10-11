@@ -360,6 +360,12 @@ bool HFModelLoader::load_image_preprocessor_args(
           image_prerocess_data["norm_std"].get<std::vector<double>>();
     }
 
+    args_.mm_image_shortest_edge() =
+        image_preprocess_reader.value_or<int>("size.shortest_edge", 0);
+
+    args_.mm_image_longest_edge() =
+        image_preprocess_reader.value_or<int>("size.longest_edge", 0);
+
     args_.mm_image_min_pixels() =
         image_preprocess_reader.value_or<int>("min_pixels", 0);
 

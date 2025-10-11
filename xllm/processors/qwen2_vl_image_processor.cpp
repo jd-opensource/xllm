@@ -139,8 +139,10 @@ bool Qwen2VLImageProcessor::process_image(
     auto size = smart_resize(resized_height,
                              resized_width,
                              patch_size_ * merge_size_,
-                             size_["shortest_edge"],
-                             size_["longest_edge"]);
+                             min_pixels_,
+                             max_pixels_);
+    // size_["shortest_edge"],
+    // size_["longest_edge"]);
     if (!size) {
       return false;
     }

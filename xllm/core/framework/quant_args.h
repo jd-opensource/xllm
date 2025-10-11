@@ -27,7 +27,7 @@ struct QuantArgs {
   PROPERTY(std::string, quant_method);
 
   PROPERTY(std::string, quantize_type);
-  PROPERTY(std::string, torch_dtype);
+  PROPERTY(std::string, torch_dtype) = "bfloat16";
   // quantization bits
   PROPERTY(int64_t, bits) = 0;
 

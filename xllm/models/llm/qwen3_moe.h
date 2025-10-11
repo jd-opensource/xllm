@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
+
 #include <boost/algorithm/string.hpp>
 
 #if defined(USE_NPU)
@@ -67,7 +69,45 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
   }
 #endif
   void load_state_dict(const StateDict& state_dict) {
-    decoder_layer_->load_state_dict(state_dict);
+    auto experts_state_dict = state_dict.get_dict_with_prefix("mlp.experts.");
+    auto fused_gate_up = experts_state_dict.get_tensor("gate_up_proj");
+    auto fused_down = experts_state_dict.get_tensor("down_proj");
+
+    bool is_fused = fused_gate_up.defined() && fused_down.defined();
+
+    if (is_fused) {
+      torch::Tensor expert_gate_up = fused_gate_up;
+      torch::Tensor expert_down = fused_down;
+
+      const int num_experts = expert_gate_up.size(0);
+
+      auto chunks = expert_gate_up.chunk(2, /*dim=*/-1);
+      auto expert_gate = chunks[0].contiguous();
+      auto expert_up = chunks[1].contiguous();
+
+      std::unordered_map<std::string, torch::Tensor> out_state_dict;
+      for (const auto& [name, tensor] : state_dict) {
+        if (name.find("self_attn.") == 0 || name.find("mlp.gate.") == 0 ||
+            name.find("input_layernorm.") == 0 ||
+            name.find("post_attention_layernorm.") == 0) {
+          out_state_dict.emplace(name, tensor);
+        }
+      }
+
+      for (int i = 0; i < num_experts; ++i) {
+        auto gate_i = expert_gate[i].transpose(0, 1);
+        auto up_i = expert_up[i].transpose(0, 1);
+        auto down_i = expert_down[i].transpose(0, 1);
+
+        const std::string base = "mlp.experts." + std::to_string(i) + ".";
+        out_state_dict.emplace(base + "gate_proj.weight", gate_i);
+        out_state_dict.emplace(base + "up_proj.weight", up_i);
+        out_state_dict.emplace(base + "down_proj.weight", down_i);
+      }
+      decoder_layer_->load_state_dict(StateDict(std::move(out_state_dict)));
+    } else {
+      decoder_layer_->load_state_dict(state_dict);
+    }
   }
 
 #if defined(USE_NPU)
@@ -98,7 +138,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
-
+    mrope_section_ = model_args.rope_scaling_mrope_section();
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
     // register submodules
@@ -152,6 +192,16 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
   }
 
+  torch::Tensor deepstack_process(torch::Tensor hidden_states,
+                                  torch::Tensor visual_pos_masks,
+                                  torch::Tensor visual_embeds) {
+    visual_pos_masks = visual_pos_masks.to(hidden_states.device());
+    auto selected = hidden_states.index({visual_pos_masks});
+    auto local_this = selected + visual_embeds;
+    hidden_states.index_put_({visual_pos_masks}, local_this);
+    return hidden_states;
+  }
+
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   torch::Tensor forward(torch::Tensor tokens,
@@ -165,9 +215,17 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         positions = torch::tensor({0}).to(torch::kInt32).to(device_);
       }
     }
-
-    auto h = embed_tokens_(tokens, 0);
-    int64_t input_length = tokens.size(0);
+    auto inputs_embeds = input_params.input_embedding;
+    // test
+    torch::Tensor h;
+    if (inputs_embeds.defined()) {
+      h = inputs_embeds;
+    } else {
+      h = embed_tokens_(tokens, 0);
+    }
+    LOG(INFO) << "qwen3 moe model forward, h: " << h.sizes() << " "
+              << num_experts_per_tok_;
+    int64_t input_length = h.size(0);
     torch::Tensor expert_array = torch::arange(
         0,
         input_length * num_experts_per_tok_,
@@ -176,6 +234,37 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
+    LOG(INFO) << "qwen3 moe model forward, input_length: " << input_length;
+    LOG(INFO) << "positions: " << positions.sizes();
+    LOG(INFO) << "cos_pos: " << cos_pos.sizes();
+    LOG(INFO) << "sin_pos: " << sin_pos.sizes();
+    if (positions.dim() == 2) {  // mrope
+      auto apply = [this](torch::Tensor x) {
+        // auto sections = mrope_section_;
+        auto freqs_t = x[0].clone();
+        for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
+          int64_t offset = dim_idx;  // H -> offset=1, W -> offset=2
+          int64_t section_len = mrope_section_[dim_idx];
+          int64_t length = section_len * 3;
+
+          // indices: [offset, offset+3, offset+6, ..., < length]
+          auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
+          auto idx_second_half = torch::arange(offset, length, 3, torch::kLong);
+          auto idx_tensor =
+              torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
+          // freqs_t[..., idx] = freqs[dim_idx][..., idx]
+          auto src = x[dim_idx].index_select(-1, idx_tensor);
+          freqs_t.index_copy_(-1, idx_tensor, src);
+        }
+        return freqs_t;
+      };
+      cos_pos = apply(cos_pos.reshape(
+          {positions.sizes().front(), -1, cos_pos.sizes().back()}));
+      sin_pos = apply(sin_pos.reshape(
+          {positions.sizes().front(), -1, sin_pos.sizes().back()}));
+      LOG(INFO) << "cos_pos: " << cos_pos.sizes();
+      LOG(INFO) << "sin_pos: " << sin_pos.sizes();
+    }
 
     torch::Tensor attn_mask;
     if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
@@ -184,13 +273,16 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       attn_mask = attn_mask_.gen_free_mask(
           num_speculative_tokens_ + 1, dtype_, device_);
     }
-
+    auto deep_stacks = input_params.deep_stacks;
+    int deep_stack_size = deep_stacks.size();
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
       if (input_params.layer_synchronizer != nullptr) {
         event = input_params.layer_synchronizer->get_event(i);
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
+      } else {
+        LOG(INFO) << "layer_synchronizer is nullptr";
       }
       auto& layer = layers_[i];
       layer(h,
@@ -202,6 +294,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
             expert_array,
             event,
             event_flag);
+      // if (deep_stack_size && i < deep_stack_size) {
+      //   h = deepstack_process(h, input_params.visual_pos_masks,
+      //   deep_stacks[i]);
+      // }
     }
     return norm_(h, 0);
 #elif defined(USE_MLU)
@@ -255,6 +351,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     embed_tokens_ = word_embedding[0];
   }
+  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
+    return embed_tokens_(input_ids, 0);
+  }
 
  private:
   torch::nn::ModuleList blocks_{nullptr};
@@ -276,6 +375,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};
 #endif
+  std::vector<int64_t> mrope_section_;
 };
 TORCH_MODULE(Qwen3MoeModel);
 
@@ -324,15 +424,20 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
 #endif
   }
 
-  void load_model(std::unique_ptr<ModelLoader> loader) {
+  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
+    return model_->get_input_embeddings(input_ids);
+  }
+
+  void load_model(std::unique_ptr<ModelLoader> loader,
+                  std::string prefix = "model." /*llm model weight prefix*/) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(state_dict->get_dict_with_prefix("model."));
+      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
       lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
     }
 
 #if defined(USE_NPU)
     // verify
-    model_->verify_loaded_weights("model.");
+    model_->verify_loaded_weights(prefix);
     lm_head_->verify_loaded_weights("lm_head.");
 
     model_->merge_loaded_weights();
