@@ -42,11 +42,9 @@ limitations under the License.
 
 namespace xllm {
 
+// ✅
 PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
-    : ContinuousScheduler(engine, options),
-      waiting_priority_queue_(create_comparator(options.priority_strategy())),
-      waiting_priority_queue_offline_(
-          create_comparator(options.priority_strategy())),
+    : DisaggPDScheduler(engine, options),
       llm_flops_(engine->model_args().n_layers(),
                  engine->model_args().vocab_size(),
                  engine->model_args().hidden_size(),
@@ -57,7 +55,8 @@ PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
                      : 1,
                  engine->model_args().dtype() == "int8" ? 1 : 2,  // FIXME
                  options_.nnodes() / options_.dp_size()) {
-  VLOG(1) << "Creating a PD OOC Scheduler";
+  CHECK(options_.enable_pd_ooc());
+  DVLOG << "Creating a PD OOC Scheduler";
 
   // PerfModel::PerfModel(double flop_s_gemm,
   // double flop_s_attn,
@@ -135,6 +134,7 @@ PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
   // profile_ttft();
 }
 
+// ✅
 PDOOCScheduler::~PDOOCScheduler() {
   if (rpc_server_thread_ && rpc_server_thread_->joinable()) {
     rpc_server_thread_->join();
@@ -149,28 +149,7 @@ PDOOCScheduler::~PDOOCScheduler() {
   }
 }
 
-// TODO: maybe we should consider update info case even if info already exists
-// in local.
-bool PDOOCScheduler::check_remote_instance_info(
-    const std::string& instance_name) {
-  if (remote_instances_info_.find(instance_name) !=
-      remote_instances_info_.end()) {
-    return true;
-  }
-
-  InstanceInfo instance_info =
-      xservice_client_->get_instance_info(instance_name);
-  if (instance_info.name.empty()) {
-    LOG(ERROR)
-        << "Failed to get instance info from master server, instance name: "
-        << instance_name;
-    return false;
-  }
-
-  remote_instances_info_[instance_name] = instance_info;
-  return true;
-}
-
+// 🟡
 proto::PDOOCService_Stub* PDOOCScheduler::create_rpc_channel(
     const std::string& instance_name) {
   std::lock_guard<std::mutex> lock(instance_channel_map_mutex_);
@@ -208,6 +187,7 @@ proto::PDOOCService_Stub* PDOOCScheduler::create_rpc_channel(
   return it->second;
 }
 
+// 🟡
 void PDOOCScheduler::start_rpc_server() {
   std::unique_ptr<PDOOCService> service =
       std::make_unique<PDOOCService>(this, engine_);
@@ -220,6 +200,7 @@ void PDOOCScheduler::start_rpc_server() {
   }
 }
 
+// ✅
 void PDOOCScheduler::step(const absl::Duration& timeout) {
   if (options_.instance_role() == InstanceRole::PREFILL) {
     prefill_step(timeout);
@@ -228,6 +209,7 @@ void PDOOCScheduler::step(const absl::Duration& timeout) {
   }
 }
 
+// ✅
 void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
   try {
     prepare_offline_dispatch_queue();
@@ -251,6 +233,7 @@ void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
   }
 }
 
+// ✅
 std::vector<Batch> PDOOCScheduler::prepare_batch() {
   Timer timer;
   // propogate new requests to waiting_priority_queue_
@@ -413,7 +396,6 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   size_t num_online_decode_preempt_offline_requests = 0;
   // TO IMPROVE?: handle online decode request before prefill offline request
   bool previous_idle = (step_status_ == StepStatus::IDLE);
-  CHECK(options_.enable_pd_ooc());
   handle_prefill_requests(latency_budget,
                           estimate_latency,
                           remaining_token_budget,
@@ -521,6 +503,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   return batches;
 }
 
+// ✅
 void PDOOCScheduler::handle_prefill_interruption() {
   std::vector<std::shared_ptr<Request>> offline_requests_to_preempt;
 
@@ -556,6 +539,7 @@ void PDOOCScheduler::handle_prefill_interruption() {
             << offline_requests_to_preempt.size() << " offline requests";
 }
 
+// ✅
 void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
   _decode_step_global_batch_req_lens.clear();
   ContinuousScheduler::step(timeout);
@@ -576,6 +560,7 @@ void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
   _last_decode_step_global_batch_req_lens = _decode_step_global_batch_req_lens;
 }
 
+// ✅
 // copy+modify from ContinuousScheduler::handle_decode_requests
 // 由于父类写法限制，需要依赖手工维护 _decode_step_global_batch_req_lens
 void PDOOCScheduler::handle_decode_requests(
@@ -796,6 +781,7 @@ void PDOOCScheduler::handle_decode_requests(
   }
 }
 
+// ✅
 void PDOOCScheduler::decode_send_pull_signal() {
   while (true) {
     // Wait until step thread triggers
@@ -853,6 +839,12 @@ void PDOOCScheduler::decode_send_pull_signal() {
 
     // Pend until next trigger
     if (cntl.Failed() || !resp.ok()) {
+      DVLOG << "SendPullSignal failed";
+      if (cntl.Failed()) {
+        DVLOG << "cntl.Failed";
+      } else {
+        DVLOG << "!resp.ok()";
+      }
       waiting_pull_finished_.store(false);
     } else {
       waiting_pull_finished_.store(true);
@@ -862,6 +854,7 @@ void PDOOCScheduler::decode_send_pull_signal() {
   }
 }
 
+// ❌
 bool PDOOCScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
@@ -879,6 +872,7 @@ bool PDOOCScheduler::add_request(std::shared_ptr<Request>& request) {
   }
 }
 
+// ✅
 // prefill send new request to remote instance
 void PDOOCScheduler::dispatch_requests() {
   while (true) {
@@ -993,6 +987,7 @@ void PDOOCScheduler::dispatch_requests() {
   }
 }
 
+// ✅ skip offline requests
 void PDOOCScheduler::prefill_send_first_generation() {
   if (running_sequences_.size() == 0) {
     return;
@@ -1008,7 +1003,7 @@ void PDOOCScheduler::prefill_send_first_generation() {
         continue;
       }
       if (request->offline()) {
-        // DVLOG << "Found an offline request in running_requests_. Skip";
+        // Do not send offline running requests to D initiatively
         continue;
       }
       // Check if the request is a recently completed prefill request
@@ -1020,8 +1015,8 @@ void PDOOCScheduler::prefill_send_first_generation() {
         }
         remote_requests_map_[request->request_id()] = request;
         remote_requests_output_thread_map_[request->request_id()] =
-            next_thread_idx;
-        next_thread_idx = (++next_thread_idx) % kOutputThreadNum_;
+            next_thread_idx_;
+        next_thread_idx_ = (++next_thread_idx_) % kOutputThreadNum_;
         requests.emplace_back(request);
 
         running_requests_[i] = nullptr;
@@ -1127,6 +1122,7 @@ void PDOOCScheduler::prefill_send_first_generation() {
   });
 }
 
+// ❌
 bool PDOOCScheduler::prefill_recv_generation(const RequestOutput& output) {
   std::shared_ptr<Request> request = nullptr;
   int request_thread_idx = -1;
@@ -1170,6 +1166,7 @@ bool PDOOCScheduler::prefill_recv_generation(const RequestOutput& output) {
   return true;
 }
 
+// ✅ Additional operations on offline requests
 // request is received from prefill
 bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
                                      const std::string& prefill_instance_name) {
@@ -1193,8 +1190,8 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
     }
     received_request_map_[request->request_id()] = request;
     received_request_output_thread_map_[request->request_id()] =
-        next_thread_idx;
-    next_thread_idx = (++next_thread_idx) % kOutputThreadNum_;
+        next_thread_idx_;
+    next_thread_idx_ = (++next_thread_idx_) % kOutputThreadNum_;
   }
 
   {
@@ -1203,8 +1200,9 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
     // allocate response thread to prefill instance stub.
     if (remote_prefill_thread_map_.find(stub) ==
         remote_prefill_thread_map_.end()) {
-      remote_prefill_thread_map_[stub] = next_prefill_thread_idx;
-      next_prefill_thread_idx = (++next_prefill_thread_idx) % kOutputThreadNum_;
+      remote_prefill_thread_map_[stub] = next_prefill_thread_idx_;
+      next_prefill_thread_idx_ =
+          (++next_prefill_thread_idx_) % kOutputThreadNum_;
     }
   }
 
@@ -1215,6 +1213,7 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
   return true;
 }
 
+// ❌
 bool PDOOCScheduler::decode_recv_first_generation(
     const std::string& req_id,
     int64_t token_id,
@@ -1292,6 +1291,7 @@ bool PDOOCScheduler::decode_recv_first_generation(
   return true;
 }
 
+// ✅
 bool PDOOCScheduler::decode_recv_multi_generations(
     const std::string& req_id,
     const std::vector<proto::RemoteToken>& migration_tokens,
@@ -1373,6 +1373,7 @@ bool PDOOCScheduler::decode_recv_multi_generations(
   return true;
 }
 
+// 🟡
 bool PDOOCScheduler::decode_send_stream_generation(
     const RequestOutput& output) {
   int request_thread_idx = -1;
@@ -1488,6 +1489,7 @@ bool PDOOCScheduler::decode_send_stream_generation(
   return true;
 }
 
+// 🟡
 std::vector<bool> PDOOCScheduler::decode_send_stream_generations(
     const std::vector<RequestOutput>& outputs) {
   std::vector<bool> send_status;
@@ -1663,38 +1665,7 @@ std::vector<bool> PDOOCScheduler::decode_send_stream_generations(
   return send_status;
 }
 
-std::vector<Block> PDOOCScheduler::allocate_raw_blocks(int token_num,
-                                                       int32_t& dp_rank) {
-  // When the KV Cache usage reaches the threshold, prefill requests will no
-  // longer be scheduled to avoid frequent preemption.
-  if (kv_cache_manager_->kv_cache_utilization() <
-      FLAGS_prefill_scheduling_memory_usage_threshold) {
-    return allocate_blocks_for(token_num, dp_rank);
-  } else {
-    return {};
-  }
-}
-
-void PDOOCScheduler::update_token_latency_metrics(
-    std::vector<Sequence*>& sequences) {
-  std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
-
-  const auto now = absl::Now();
-  for (Sequence* sequence : sequences) {
-    int64_t tbt_milliseconds = sequence->tbt(now);
-    if (sequence->is_first_token()) {
-      HISTOGRAM_OBSERVE(time_to_first_token_latency_milliseconds,
-                        tbt_milliseconds);
-      sequence->set_time_to_first_token_latency_seconds(
-          static_cast<double>(tbt_milliseconds) / 1000);
-      recent_ttft_.emplace_back(tbt_milliseconds);
-    } else {
-      HISTOGRAM_OBSERVE(inter_token_latency_milliseconds, tbt_milliseconds);
-      recent_tbt_.emplace_back(tbt_milliseconds);
-    }
-  }
-}
-
+// ✅
 // TODO Need parameters tuning
 bool PDOOCScheduler::check_able_to_pull() {
   // Estimated usage of current requests: half of current used blocks.
@@ -1714,6 +1685,7 @@ bool PDOOCScheduler::write_pull_signal(const proto::PullSignal& pull_signal) {
   }
 }
 
+// ✅
 void PDOOCScheduler::prepare_offline_dispatch_queue() {
   // Read pull signals from pull_signals_ queue
   proto::PullSignal pull_signal;
@@ -1774,6 +1746,7 @@ void PDOOCScheduler::prepare_offline_dispatch_queue() {
   }
 }
 
+// ✅
 void PDOOCScheduler::dispatch_offline_requests() {
   while (true) {
     const auto timeout = std::chrono::milliseconds(100);
@@ -1855,13 +1828,7 @@ void PDOOCScheduler::dispatch_offline_requests() {
   }
 }
 
-void PDOOCScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
-                                         std::vector<int64_t>& tbt) {
-  std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
-  ttft = std::move(recent_ttft_);
-  tbt = std::move(recent_tbt_);
-}
-
+// ✅
 std::string PDOOCScheduler::select_decode_instance() {
   // get allocated decode instance list from Master
   while (decode_inst_names_.empty()) {
@@ -1933,8 +1900,8 @@ void PDOOCScheduler::prefill_send_multi_generations() {
         }
         remote_requests_map_[request->request_id()] = request;
         remote_requests_output_thread_map_[request->request_id()] =
-            next_thread_idx;
-        next_thread_idx = (++next_thread_idx) % kOutputThreadNum_;
+            next_thread_idx_;
+        next_thread_idx_ = (++next_thread_idx_) % kOutputThreadNum_;
       }
     }
 
@@ -2030,6 +1997,7 @@ void PDOOCScheduler::prefill_send_multi_generations() {
   });
 }
 
+// ❌ Should be moved to superclass
 void PDOOCScheduler::build_disagg_requests(
     const std::vector<std::shared_ptr<Request>>& requests,
     proto::DisaggRequests& reqs) {

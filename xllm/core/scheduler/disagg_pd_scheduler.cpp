@@ -25,6 +25,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/macros.h"
 #include "disagg_pd.pb.h"
+#include "disagg_pd_scheduler.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
@@ -39,6 +40,10 @@ namespace xllm {
 
 DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
     : ContinuousScheduler(engine, options) {
+  if (options_.enable_pd_ooc()) {
+    return;  // Use PDOOCScheduler's constructor instead
+  }
+
   if (!options_.instance_role().has_value()) {
     LOG(FATAL) << "Instance type is not set in disagg pd mode.";
   }
@@ -78,11 +83,15 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
 
   // profile ttft and update instance info
   if (options_.instance_role().value() != InstanceRole::DECODE) {
-    profile_ttft();
+    // profile_ttft();
   }
 }
 
 DisaggPDScheduler::~DisaggPDScheduler() {
+  if (options_.enable_pd_ooc()) {
+    return;  // Resource has been released in subclass
+  }
+
   if (rpc_server_thread_ && rpc_server_thread_->joinable()) {
     rpc_server_thread_->join();
   }

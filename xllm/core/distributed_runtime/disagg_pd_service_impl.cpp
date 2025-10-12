@@ -26,7 +26,7 @@ namespace xllm {
 
 DisaggPDServiceImpl::DisaggPDServiceImpl(DisaggPDScheduler* scheduler,
                                          Engine* engine)
-    : DisaggPDServiceImplInterface(), scheduler_(scheduler), engine_(engine) {}
+    : scheduler_(scheduler), engine_(engine) {}
 
 std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
     const proto::DisaggRequest& req) {
