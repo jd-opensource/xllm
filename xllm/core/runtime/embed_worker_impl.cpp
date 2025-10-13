@@ -100,7 +100,7 @@ std::optional<ForwardOutput> EmbedWorkerImpl::step(
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
   }
-  auto ret = device_.synchronize_stream();
+  auto ret = device_.synchronize_default_stream();
   return output;
 }
 

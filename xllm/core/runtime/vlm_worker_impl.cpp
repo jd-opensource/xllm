@@ -77,7 +77,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(
         model_->logits(hidden_states, sampling_params.selected_token_idxes);
   }
 
-  auto ret = device_.synchronize_stream();
+  auto ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

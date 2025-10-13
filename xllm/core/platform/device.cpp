@@ -1,12 +1,5 @@
 #include "device.h"
 
-#if defined(USE_NPU)
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
-#elif defined(USE_MLU)
-// TODO(mlu): include mlu header
-#endif
-
 namespace xllm {
 
 Device::Device(torch::Device device) : device_(device) {}
@@ -74,11 +67,16 @@ int64_t Device::total_memory() { return get_device_mem().total_memory; }
 
 int64_t Device::free_memory() { return get_device_mem().free_memory; }
 
-int Device::synchronize_stream() {
+int Device::synchronize_default_stream() {
 #if defined(USE_NPU)
   return aclrtSynchronizeStream(c10_npu::getCurrentNPUStream(index()).stream());
 #elif defined(USE_MLU)
   // TODO(mlu): implement mlu synchronize stream
 #endif
 }
+
+std::unique_ptr<Stream> Device::get_stream_from_pool() {
+  return std::make_unique<Stream>();
+}
+
 }  // namespace xllm

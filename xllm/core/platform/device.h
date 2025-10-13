@@ -3,6 +3,9 @@
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <memory>
+
+#include "stream.h"
 
 namespace xllm {
 
@@ -25,7 +28,8 @@ class Device {
   int64_t total_memory();
   int64_t free_memory();
 
-  int synchronize_stream();
+  int synchronize_default_stream();
+  std::unique_ptr<Stream> get_stream_from_pool();
 
  private:
   struct DeviceMem {

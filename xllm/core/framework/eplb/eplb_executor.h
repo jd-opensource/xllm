@@ -21,7 +21,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
-#include "platform/stream_helper.h"
+#include "platform/device.h"
 #include "runtime/forward_params.h"
 
 namespace xllm {
@@ -29,7 +29,7 @@ namespace xllm {
 class EplbExecutor final {
  public:
   using Callback = std::function<void(int32_t)>;
-  EplbExecutor(CausalLM* model);
+  EplbExecutor(CausalLM* model, const torch::Device& device);
 
   virtual ~EplbExecutor();
 
@@ -64,7 +64,8 @@ class EplbExecutor final {
 
   mutable std::mutex ready_mutex_;
   int32_t ready_layer_id_ = -1;
-  std::unique_ptr<StreamHelper> eplb_stream_helper_;
+  Device device_;
+  std::unique_ptr<Stream> stream_;
 };
 
 }  // namespace xllm

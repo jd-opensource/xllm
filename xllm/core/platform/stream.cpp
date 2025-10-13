@@ -1,14 +1,14 @@
-#include "stream_helper.h"
+#include "stream.h"
 
 namespace xllm {
 
 #if defined(USE_NPU)
-StreamHelper::StreamHelper() : stream_(c10_npu::getNPUStreamFromPool()) {}
+Stream::Stream() : stream_(c10_npu::getNPUStreamFromPool()) {}
 #elif defined(USE_MLU)
 // TODO(mlu): implement mlu create stream
 #endif
 
-int StreamHelper::synchronize_stream() {
+int Stream::synchronize_stream() const {
 #if defined(USE_NPU)
   return aclrtSynchronizeStream(stream_.stream());
 #elif defined(USE_MLU)
@@ -16,7 +16,7 @@ int StreamHelper::synchronize_stream() {
 #endif
 }
 
-c10::StreamGuard StreamHelper::set_stream_guard() {
+c10::StreamGuard Stream::set_stream_guard() const {
   return c10::StreamGuard(stream_.unwrap());
 }
 

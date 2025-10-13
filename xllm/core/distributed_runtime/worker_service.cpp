@@ -39,8 +39,7 @@ WorkerService::WorkerService(runtime::Options options,
     : options_(options), device_(device), initialized_(false) {
   device_.set_device();
   device_.init_device_context();
-
-  stream_helper_ = std::make_unique<StreamHelper>();
+  stream_ = device_.get_stream_from_pool();
 }
 
 WorkerService::WorkerService(runtime::Options options,
@@ -52,8 +51,7 @@ WorkerService::WorkerService(runtime::Options options,
       initialized_(true) {
   device_.set_device();
   device_.init_device_context();
-
-  stream_helper_ = std::make_unique<StreamHelper>();
+  stream_ = device_.get_stream_from_pool();
 }
 
 WorkerService::~WorkerService() = default;
@@ -371,7 +369,7 @@ void WorkerService::ExecuteModel(
         prepared_layer_id = forward_outputs.value().prepared_layer_id;
 
         {
-          c10::StreamGuard streamGuard = stream_helper_->set_stream_guard();
+          c10::StreamGuard streamGuard = stream_->set_stream_guard();
           // only driver worker (rank=0) need to fill this
           // [num_seq, ..., embed_dim] FloatTensor
           embeddings =
@@ -390,7 +388,7 @@ void WorkerService::ExecuteModel(
             top_logprobs =
                 safe_to(sample_output.top_logprobs, torch::kCPU, true);
           }
-          auto ret = stream_helper_->synchronize_stream();
+          auto ret = stream_->synchronize_stream();
         }
       }
     } else {
@@ -443,7 +441,7 @@ void WorkerService::GetLastStepResult(
           const auto& expert_load_data = safe_to(
               forward_outputs.value().expert_load_data, torch::kCPU, true);
           int32_t prepared_layer_id = forward_outputs.value().prepared_layer_id;
-          c10::StreamGuard streamGuard = stream_helper_->set_stream_guard();
+          c10::StreamGuard streamGuard = stream_->set_stream_guard();
           // [num_seq, ..., embed_dim]
           auto embeddings =
               safe_to(sample_output.embeddings, torch::kCPU, true);
@@ -462,7 +460,7 @@ void WorkerService::GetLastStepResult(
             // [num_seq, topk]
             const auto& top_logprobs =
                 safe_to(sample_output.top_logprobs, torch::kCPU, true);
-            auto ret = stream_helper_->synchronize_stream();
+            auto ret = stream_->synchronize_stream();
 
             forward_output_to_proto(next_tokens,
                                     logprobs,

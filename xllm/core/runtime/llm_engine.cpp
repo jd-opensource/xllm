@@ -20,9 +20,6 @@ limitations under the License.
 #include <absl/time/clock.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#if defined(USE_NPU)
-#include <hccl/hccl.h>
-#endif
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>

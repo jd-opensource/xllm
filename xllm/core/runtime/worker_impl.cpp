@@ -66,8 +66,8 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   device_.init_device_context();
   general_threadpool_.schedule([this]() mutable { device_.set_device(); });
 
-  stream_helper_ = std::make_unique<StreamHelper>();
-  extra_stream_helper_ = std::make_unique<StreamHelper>();
+  prepare_stream_ = device_.get_stream_from_pool();
+  copy_out_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
 }
 
@@ -365,7 +365,7 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
 void WorkerImpl::prepare_work_before_execute(
     const BatchedForwardInputs& inputs,
     BatchedForwardInputs& processed_inputs) {
-  c10::StreamGuard streamGuard = stream_helper_->set_stream_guard();
+  c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
 
   for (auto i = 0; i < inputs.micro_inputs.size(); ++i) {
     ForwardInput fwd_inputs_on_device;
@@ -450,7 +450,7 @@ void WorkerImpl::prepare_work_before_execute(
   }
   processed_inputs.concated_sampling_params =
       inputs.concated_sampling_params.to(device_, dtype_);
-  auto ret = stream_helper_->synchronize_stream();
+  auto ret = prepare_stream_->synchronize_stream();
 }
 
 folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
@@ -460,7 +460,7 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
   general_threadpool_.schedule([this,
                                 input_params = input_params,
                                 promise = std::move(promise)]() mutable {
-    c10::StreamGuard streamGuard = extra_stream_helper_->set_stream_guard();
+    c10::StreamGuard streamGuard = copy_out_stream_->set_stream_guard();
     if (input_params.async_copy_out_blocks.size() > 0) {
       const int64_t num_layers = context_.get_model_args().n_layers();
       for (int layer_id = 0; layer_id < num_layers; layer_id++) {
@@ -479,7 +479,7 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
 
       offload_kv_blocks_to_store(input_params.async_copy_out_blocks);
     }
-    auto ret = extra_stream_helper_->synchronize_stream();
+    auto ret = copy_out_stream_->synchronize_stream();
     promise.setValue(ret == 0);
   });
 

@@ -57,7 +57,7 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
       model_.get(), context.get_model_args(), device_, options_);
 
   if (FLAGS_enable_eplb) {
-    eplb_executor_ = std::make_unique<EplbExecutor>(model_.get());
+    eplb_executor_ = std::make_unique<EplbExecutor>(model_.get(), device_);
   }
   return true;
 }
@@ -127,7 +127,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
       !options_.enable_speculative_decode()) {
-    auto ret = device_.synchronize_stream();
+    auto ret = device_.synchronize_default_stream();
     // in p-d disaggregation scene, all micro batches should be in same
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
     // just use micro inputs.micro_inputs[0] here
@@ -178,7 +178,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
     output.max_top_logprobs = concated_sampling_params.max_top_logprobs;
   }
 
-  auto ret = device_.synchronize_stream();
+  auto ret = device_.synchronize_default_stream();
 
   if (options_.instance_role() == InstanceRole::PREFILL &&
       options_.kv_cache_transfer_mode() == "PUSH" &&

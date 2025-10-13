@@ -33,7 +33,6 @@ limitations under the License.
 #include "framework/dit_cache/dit_cache.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
-#include "platform/stream_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -86,7 +85,7 @@ std::optional<DiTForwardOutput> DiTWorker::step(const DiTForwardInput& inputs) {
 
   auto output = dit_model_executor_->forward(inputs.to(device_, dtype_));
 
-  auto ret = device_.synchronize_stream();
+  auto ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   return output;

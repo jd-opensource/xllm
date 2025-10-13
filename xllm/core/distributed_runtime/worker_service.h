@@ -126,12 +126,11 @@ class WorkerService : public proto::DistributeWorker {
   bool initialized_;
 
   Device device_;
+  std::unique_ptr<Stream> stream_;
 
   std::unique_ptr<Worker> worker_;
 
   ThreadPool threadpool_{5};
-
-  std::unique_ptr<StreamHelper> stream_helper_;
 };
 
 }  // namespace xllm

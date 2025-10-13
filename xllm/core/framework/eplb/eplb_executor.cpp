@@ -26,9 +26,11 @@ limitations under the License.
 
 namespace xllm {
 
-EplbExecutor::EplbExecutor(CausalLM* model)
-    : model_(model), eplb_worker_(&EplbExecutor::eplb_worker_loop, this) {
-  eplb_stream_helper_ = std::make_unique<StreamHelper>();
+EplbExecutor::EplbExecutor(CausalLM* model, const torch::Device& device)
+    : model_(model),
+      device_(device),
+      eplb_worker_(&EplbExecutor::eplb_worker_loop, this) {
+  stream_ = device_.get_stream_from_pool();
 }
 
 EplbExecutor::~EplbExecutor() {
@@ -90,9 +92,9 @@ void EplbExecutor::eplb_worker_loop() {
     }
     auto prepare_start = std::chrono::high_resolution_clock::now();
 
-    c10::StreamGuard streamGuard = eplb_stream_helper_->set_stream_guard();
+    c10::StreamGuard streamGuard = stream_->set_stream_guard();
     model_->prepare_expert_weight(task.layer_id, task.expert_ids);
-    auto ret = eplb_stream_helper_->synchronize_stream();
+    auto ret = stream_->synchronize_stream();
     auto prepare_end = std::chrono::high_resolution_clock::now();
     auto prepare_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(prepare_end -

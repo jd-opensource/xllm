@@ -4,10 +4,10 @@ cc_library(
   NAME 
     platform
   HDRS
-    stream_helper.h
+    stream.h
     device.h
   SRCS
-    stream_helper.cpp
+    stream.cpp
     device.cpp
   DEPS
     torch

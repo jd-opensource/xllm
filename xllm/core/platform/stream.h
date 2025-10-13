@@ -14,18 +14,18 @@
 
 namespace xllm {
 
-class StreamHelper {
+class Stream {
  public:
-  StreamHelper();
-  ~StreamHelper() = default;
+  Stream();
+  ~Stream() = default;
 
-  StreamHelper(const StreamHelper&) = delete;
-  StreamHelper& operator=(const StreamHelper&) = delete;
-  StreamHelper(StreamHelper&&) = default;
-  StreamHelper& operator=(StreamHelper&&) = default;
+  Stream(const Stream&) = delete;
+  Stream& operator=(const Stream&) = delete;
+  Stream(Stream&&) = default;
+  Stream& operator=(Stream&&) = default;
 
-  int synchronize_stream();
-  c10::StreamGuard set_stream_guard();
+  int synchronize_stream() const;
+  c10::StreamGuard set_stream_guard() const;
 
  private:
 #if defined(USE_NPU)

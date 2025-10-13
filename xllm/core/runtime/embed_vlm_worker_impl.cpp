@@ -56,7 +56,7 @@ bool EmbedVLMWorkerImpl::init_model(ModelContext& context) {
 std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
     const BatchedForwardInputs& inputs) {
   torch::DeviceGuard device_guard(device_);
-  auto ret = device_.synchronize_stream();
+  auto ret = device_.synchronize_default_stream();
 
   Timer timer;
 
@@ -72,7 +72,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   auto hidden_states = model_executor_->forward(
       {flatten_tokens}, {flatten_positions}, kv_caches_, {params});
 
-  ret = device_.synchronize_stream();
+  ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

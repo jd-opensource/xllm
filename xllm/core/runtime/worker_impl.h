@@ -38,7 +38,6 @@ limitations under the License.
 #include "framework/xtensor/xtensor.h"
 #include "options.h"
 #include "platform/device.h"
-#include "platform/stream_helper.h"
 #include "util/threadpool.h"
 
 namespace xllm {
@@ -209,6 +208,9 @@ class WorkerImpl {
   // device to run the model on
   Device device_;
 
+  std::unique_ptr<Stream> prepare_stream_;
+  std::unique_ptr<Stream> copy_out_stream_;
+
   // parallel args of current instance
   ParallelArgs parallel_args_;
 
@@ -243,9 +245,6 @@ class WorkerImpl {
 #endif
 
   std::shared_ptr<KVCacheStore> kv_cache_store_;
-
-  std::unique_ptr<StreamHelper> stream_helper_;
-  std::unique_ptr<StreamHelper> extra_stream_helper_;
 
   bool is_spec_draft_ = false;
 
