@@ -36,8 +36,8 @@ limitations under the License.
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/xtensor.h"
-#include "memory"
 #include "options.h"
+#include "platform/device.h"
 #include "platform/stream_helper.h"
 #include "util/threadpool.h"
 
@@ -160,7 +160,7 @@ class WorkerImpl {
 
   virtual folly::SemiFuture<folly::Unit> process_group_test_async();
 
-  const torch::Device& device() const { return device_; }
+  const torch::Device& device() const { return device_.unwrap(); }
 
   torch::ScalarType dtype() const { return dtype_; }
 
@@ -207,7 +207,7 @@ class WorkerImpl {
   torch::ScalarType dtype_;
 
   // device to run the model on
-  torch::Device device_;
+  Device device_;
 
   // parallel args of current instance
   ParallelArgs parallel_args_;

@@ -5,7 +5,6 @@ cc_library(
   NAME 
     common
   HDRS
-    device_memory.h
     etcd_client.h
     global_flags.h
     instance_name.h
@@ -18,7 +17,6 @@ cc_library(
     types.h
     device_monitor.h
   SRCS
-    device_memory.cpp
     etcd_client.cpp
     global_flags.cpp
     layer_synchronizer.cpp

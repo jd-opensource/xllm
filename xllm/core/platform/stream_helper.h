@@ -27,8 +27,6 @@ class StreamHelper {
   int synchronize_stream();
   c10::StreamGuard set_stream_guard();
 
-  static int synchronize_stream(int32_t device_id);
-
  private:
 #if defined(USE_NPU)
   c10_npu::NPUStream stream_;

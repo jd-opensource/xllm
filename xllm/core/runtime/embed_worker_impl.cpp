@@ -15,19 +15,13 @@ limitations under the License.
 
 #include "embed_worker_impl.h"
 
-#include <c10/core/Device.h>
+// #include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
-#if defined(USE_NPU)
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
 
-#include "pytorch/adapter/utils/utils.h"
-#endif
 #include <memory>
 #include <optional>
 #include <utility>
@@ -38,7 +32,6 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
-#include "platform/stream_helper.h"
 #include "util/timer.h"
 
 namespace xllm {
@@ -107,7 +100,7 @@ std::optional<ForwardOutput> EmbedWorkerImpl::step(
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
   }
-  auto ret = StreamHelper::synchronize_stream(device_.index());
+  auto ret = device_.synchronize_stream();
   return output;
 }
 

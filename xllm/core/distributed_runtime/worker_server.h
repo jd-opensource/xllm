@@ -40,7 +40,7 @@ class WorkerServer {
                const std::string& master_node_addr,
                std::atomic<bool>& done,
                const ParallelArgs& parallel_args,
-               const torch::Device& device,
+               const torch::Device& d,
                const runtime::Options& options,
                WorkerType worker_type);
 
@@ -52,7 +52,7 @@ class WorkerServer {
   void create_server(const runtime::Options& options,
                      std::atomic<bool>& done,
                      const std::string& master_node_addr,
-                     const torch::Device& device,
+                     const torch::Device& d,
                      int world_sizse,
                      int global_rank,
                      int32_t dp_size,

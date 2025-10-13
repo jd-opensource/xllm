@@ -15,19 +15,11 @@ limitations under the License.
 
 #include "embed_vlm_worker_impl.h"
 
-#include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
-#if defined(USE_NPU)
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
-
-#include "pytorch/adapter/utils/utils.h"
-#endif
 
 #include <memory>
 #include <optional>
@@ -40,7 +32,6 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "options.h"
-#include "platform/stream_helper.h"
 #include "util/timer.h"
 
 namespace xllm {
@@ -65,7 +56,7 @@ bool EmbedVLMWorkerImpl::init_model(ModelContext& context) {
 std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
     const BatchedForwardInputs& inputs) {
   torch::DeviceGuard device_guard(device_);
-  auto ret = StreamHelper::synchronize_stream(device_.index());
+  auto ret = device_.synchronize_stream();
 
   Timer timer;
 
@@ -81,7 +72,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   auto hidden_states = model_executor_->forward(
       {flatten_tokens}, {flatten_positions}, kv_caches_, {params});
 
-  ret = StreamHelper::synchronize_stream(device_.index());
+  ret = device_.synchronize_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

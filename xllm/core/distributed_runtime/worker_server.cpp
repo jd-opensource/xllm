@@ -51,21 +51,14 @@ namespace xllm {
 void WorkerServer::create_server(const runtime::Options& options,
                                  std::atomic<bool>& done,
                                  const std::string& master_node_addr,
-                                 const torch::Device& device,
+                                 const torch::Device& d,
                                  int world_size,
                                  int global_rank,
                                  int32_t dp_size,
                                  int local_rank,
                                  int32_t ep_size) {
-  int device_id = device.index();
-#if defined(USE_NPU)
-  int ret = aclrtSetDevice(device_id);
-  if (ret != 0) {
-    LOG(ERROR) << "ACL set device id: " << device_id << " failed, ret:" << ret;
-  }
-#elif defined(USE_MLU)
-// TODO(mlu): implement mlu device set
-#endif
+  Device device(d);
+  device.set_device();
 
   auto worker_global_rank = global_rank;
   // TODO: FIXME Later
@@ -176,7 +169,7 @@ WorkerServer::WorkerServer(int local_worker_idx,
                            const std::string& master_node_addr,
                            std::atomic<bool>& done,
                            const ParallelArgs& parallel_args,
-                           const torch::Device& device,
+                           const torch::Device& d,
                            const runtime::Options& options,
                            WorkerType worker_type) {
   if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM) {
@@ -186,7 +179,7 @@ WorkerServer::WorkerServer(int local_worker_idx,
                                                    std::cref(options),
                                                    std::ref(done),
                                                    std::cref(master_node_addr),
-                                                   std::cref(device),
+                                                   std::cref(d),
                                                    parallel_args.world_size(),
                                                    parallel_args.rank(),
                                                    parallel_args.dp_size(),

@@ -15,20 +15,12 @@ limitations under the License.
 
 #include "vlm_worker_impl.h"
 
-#include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
-#if defined(USE_NPU)
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#include <torch_npu/csrc/core/npu/NPUFunctions.h>
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
 
-#include "pytorch/adapter/utils/utils.h"
-#endif
 #include <memory>
 #include <optional>
 #include <utility>
@@ -39,7 +31,6 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
-#include "platform/stream_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
 
@@ -53,16 +44,7 @@ VLMWorkerImpl::VLMWorkerImpl(const ParallelArgs& parallel_args,
 bool VLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
-  int currentDevId = device_.index();
-#if defined(USE_NPU)
-  int ret = aclrtSetDevice(currentDevId);
-  if (ret != 0) {
-    LOG(ERROR) << "ACL set device id:" << currentDevId
-               << " failed, ret:" << ret;
-  }
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu set device
-#endif
+  device_.set_device();
 
   // initialize model
   context.set_image_embedding_mode(false);
@@ -75,11 +57,7 @@ bool VLMWorkerImpl::init_model(ModelContext& context) {
 
 std::optional<ForwardOutput> VLMWorkerImpl::step(
     const BatchedForwardInputs& inputs) {
-#if defined(USE_NPU)
-  c10_npu::SetDevice(device_.index());
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu set device
-#endif
+  device_.set_device();
   Timer timer;
   // TODO guojinrong, to adapt multi stream parallel later
   // all tensors should be on the same device as model
@@ -99,7 +77,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(
         model_->logits(hidden_states, sampling_params.selected_token_idxes);
   }
 
-  auto ret = StreamHelper::synchronize_stream(device_.index());
+  auto ret = device_.synchronize_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {

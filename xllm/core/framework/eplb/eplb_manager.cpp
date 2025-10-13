@@ -27,7 +27,6 @@ limitations under the License.
 #include <thread>
 #include <vector>
 
-#include "common/device_memory.h"
 #include "common/global_flags.h"
 
 namespace xllm {

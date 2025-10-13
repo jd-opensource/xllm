@@ -23,6 +23,7 @@ limitations under the License.
 #include "dit_executor.h"
 #include "framework/dit_model_context.h"
 #include "options.h"
+#include "platform/device.h"
 #include "util/threadpool.h"
 
 namespace xllm {
@@ -54,7 +55,7 @@ class DiTWorker {
 
   std::unique_ptr<DiTExecutor> dit_model_executor_;
 
-  torch::Device device_;
+  Device device_;
 
   torch::ScalarType dtype_;
 

@@ -19,35 +19,24 @@ limitations under the License.
 #include <absl/strings/numbers.h>
 #include <absl/strings/str_split.h>
 #include <glog/logging.h>
-#include <torch/torch.h>
-#include <torch/types.h>
 
-#if defined(USE_NPU)
-#include <c10/core/StorageImpl.h>
-#include <torch/csrc/Device.h>
-#include <torch/extension.h>
-#include <torch_npu/csrc/core/npu/NPUFunctions.h>
-#include <torch_npu/torch_npu.h>
-#elif defined(USE_MLU)
-// TODO(mlu): include mlu device name utils
-#endif
+#include "platform/device.h"
 
 namespace xllm {
 
-#if defined(USE_NPU)
 std::vector<torch::Device> DeviceNameUtils::parse_devices(
     const std::string& device_str) {
   std::vector<torch::Device> devices;
   if (device_str == "auto" || device_str.empty()) {
-    // use all available npus if any
-    const auto num_npus = c10_npu::device_count();
-    if (num_npus == 0) {
-      LOG(INFO) << "no npus found, using cpu.";
+    // use all available devices if any
+    const auto num_devices = Device::device_count();
+    if (num_devices == 0) {
+      LOG(INFO) << "no devices found, using cpu.";
       return {torch::kCPU};
     }
-    devices.reserve(num_npus);
-    for (int i = 0; i < num_npus; ++i) {
-      std::string device_name = "npu:" + std::to_string(i);
+    devices.reserve(num_devices);
+    for (int i = 0; i < num_devices; ++i) {
+      std::string device_name = Device::type() + ":" + std::to_string(i);
       devices.emplace_back(torch::Device(device_name));
     }
     return devices;
@@ -60,7 +49,8 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
   for (const auto& device_str : device_strs) {
     std::vector<std::string> parts = absl::StrSplit(device_str, ':');
     CHECK(parts.size() == 2) << "Invalid device string format: " << device_str;
-    CHECK(parts[0] == "npu") << "Unsupported device type: " << parts[0];
+    CHECK(parts[0] == Device::type())
+        << "Unsupported device type: " << parts[0];
 
     int device_index;
     CHECK(absl::SimpleAtoi(parts[1], &device_index))
@@ -74,8 +64,5 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
       << "All devices must be of the same type. Got: " << device_str;
   return devices;
 }
-#elif defined(USE_MLU)
-// TODO(mlu): implement mlu device name utils
-#endif
 
 }  // namespace xllm

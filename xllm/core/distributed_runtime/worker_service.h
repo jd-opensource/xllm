@@ -124,7 +124,8 @@ class WorkerService : public proto::DistributeWorker {
   runtime::Options options_;
 
   bool initialized_;
-  torch::Device device_;
+
+  Device device_;
 
   std::unique_ptr<Worker> worker_;
 

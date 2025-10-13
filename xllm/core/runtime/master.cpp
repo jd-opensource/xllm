@@ -84,7 +84,6 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
   // construct engine
   const auto devices =
       DeviceNameUtils::parse_devices(options_.devices().value_or("auto"));
-  CHECK_GT(devices.size(), 0) << "At least one device is required";
   LOG(INFO) << "Creating engine with devices: "
             << DeviceNameUtils::to_string(devices);
 

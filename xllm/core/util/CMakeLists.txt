@@ -48,6 +48,7 @@ cc_library(
     Boost::serialization
     absl::synchronization
     ${Python_LIBRARIES}
+    :platform
 )
 target_link_libraries(util PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 add_dependencies(util brpc-static)

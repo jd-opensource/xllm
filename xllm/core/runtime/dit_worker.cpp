@@ -15,25 +15,16 @@ limitations under the License.
 
 #include "dit_worker.h"
 
-#include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
-#if defined(USE_NPU)
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#include <torch_npu/csrc/core/npu/NPUFunctions.h>
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
 
-#include "pytorch/adapter/utils/utils.h"
-#endif
 #include <memory>
 #include <optional>
 #include <utility>
 
-#include "common/device_memory.h"
 #include "common/device_monitor.h"
 #include "common/metrics.h"
 #include "common/types.h"
@@ -55,16 +46,7 @@ DiTWorker::DiTWorker(const ParallelArgs& parallel_args,
 
 bool DiTWorker::init_model(const std::string& model_weights_path) {
   CHECK(dit_model_ == nullptr) << "Model is already initialized.";
-  int currentDevId = device_.index();
-#if defined(USE_NPU)
-  int ret = aclrtSetDevice(currentDevId);
-  if (ret != 0) {
-    LOG(ERROR) << "ACL set device id:" << currentDevId
-               << " failed, ret:" << ret;
-  }
-#elif defined(USE_MLU)
-// TODO(mlu): implement mlu set device
-#endif
+  device_.set_device();
 
   auto loader = std::make_unique<DiTModelLoader>(model_weights_path);
   dtype_ = util::parse_dtype(loader->get_torch_dtype(), device_);
@@ -99,16 +81,12 @@ bool DiTWorker::init_model(const std::string& model_weights_path) {
 }
 
 std::optional<DiTForwardOutput> DiTWorker::step(const DiTForwardInput& inputs) {
-#if defined(USE_NPU)
-  c10_npu::SetDevice(device_.index());
-#elif defined(USE_MLU)
-// TODO(mlu): implement mlu set device
-#endif
+  device_.set_device();
   Timer timer;
 
   auto output = dit_model_executor_->forward(inputs.to(device_, dtype_));
 
-  auto ret = StreamHelper::synchronize_stream(device_.index());
+  auto ret = device_.synchronize_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   return output;

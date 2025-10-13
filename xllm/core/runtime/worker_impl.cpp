@@ -15,27 +15,19 @@ limitations under the License.
 
 #include "worker_impl.h"
 
-#include <c10/core/Device.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 #if defined(USE_NPU)
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#include <torch_npu/csrc/core/npu/NPUFunctions.h>
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
-
 #include "kernels/npu/xllm_ops/replace_token.h"
-#include "pytorch/adapter/utils/utils.h"
 #endif
 
 #include <memory>
 #include <optional>
 #include <utility>
 
-#include "common/device_memory.h"
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -70,21 +62,10 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   dp_driver_ =
       parallel_args.dp_size() > 1 && parallel_args.rank() % tp_size == 0;
 
-#if defined(USE_NPU)
-  int currentDevId = device.index();
-  int ret = aclrtSetDevice(currentDevId);
-  if (ret != 0) {
-    LOG(ERROR) << "ACL set device id:" << currentDevId
-               << " failed, ret:" << ret;
-  }
-  std::string device_name = "npu:" + std::to_string(currentDevId);
-  torch_npu::init_npu(device_name);
-  general_threadpool_.schedule(
-      [this]() mutable { c10_npu::SetDevice(device_.index()); });
+  device_.set_device();
+  device_.init_device_context();
+  general_threadpool_.schedule([this]() mutable { device_.set_device(); });
 
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu init context
-#endif
   stream_helper_ = std::make_unique<StreamHelper>();
   extra_stream_helper_ = std::make_unique<StreamHelper>();
   sampler_ = std::make_unique<Sampler>();
@@ -203,6 +184,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
+  int32_t device_id = device_.index();
   if (FLAGS_kv_cache_transfer_type == "LlmDataDist") {
     kv_cache_transfer_ =
         std::make_shared<LlmDataDistTransfer>(options_.device_ip().value(),
@@ -213,14 +195,13 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
     const int64_t num_layers = context_.get_model_args().n_layers();
     kv_caches_.reserve(num_layers);
 
-    int32_t device_id = device_.index();
     uint64_t buf_pool_size = kv_cache_size + MBUF_SIZE;
     kv_cache_transfer_->initialize(device_id, buf_pool_size);
     kv_cache_transfer_->allocate_kv_cache(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
   } else {
     kv_cache_transfer_ = std::make_unique<HcclKVCacheTransfer>(
-        device_.index(), options_.transfer_listen_port());
+        device_id, options_.transfer_listen_port());
 
     allocate_kv_cache(kv_cache_shape);
     kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
@@ -306,30 +287,27 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   size_t torch_cache = 0;
   size_t torch_largest_block = 0;
+  int32_t device_id = device_.index();
 #if defined(USE_NPU)
   c10_npu::NPUCachingAllocator::emptyCache();
-  c10_npu::NPUCachingAllocator::FreeDeviceCachedMemory(device_.index());
+  c10_npu::NPUCachingAllocator::FreeDeviceCachedMemory(device_id);
   // aclrtSynchronizeDevice();
   // get torch's cache memory size since torch_npu's emptyCache is useless
   c10_npu::NPUCachingAllocator::cacheInfo(
-      device_.index(), &torch_cache, &torch_largest_block);
+      device_id, &torch_cache, &torch_largest_block);
 #elif defined(USE_MLU)
   // TODO(mlu): implement mlu estimate kv cache capacity
 #endif
-  const auto available_memory = DeviceMemory::available_memory(device_);
-  const auto total_memory = DeviceMemory::total_memory(device_);
-  DeviceMonitor::get_instance().set_total_memory(device_.index(), total_memory);
+  const auto available_memory = device_.free_memory();
+  const auto total_memory = device_.total_memory();
+  DeviceMonitor::get_instance().set_total_memory(device_id, total_memory);
   DeviceMonitor::get_instance().set_weight_memory(
-      device_.index(), total_memory - available_memory - torch_cache);
+      device_id, total_memory - available_memory - torch_cache);
   return {available_memory + torch_cache, total_memory};
 }
 
 void WorkerImpl::process_group_test() {
-#if defined(USE_NPU)
-  c10_npu::SetDevice(device_.index());
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu process group test
-#endif
+  device_.set_device();
 
   // create random tensors
   const auto options = torch::dtype(torch::kHalf).device(device_);

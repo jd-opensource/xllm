@@ -15,20 +15,11 @@ limitations under the License.
 
 #include "llm_worker_impl.h"
 
-#include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
-#if defined(USE_NPU)
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#include <torch_npu/csrc/core/npu/NPUFunctions.h>
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
-
-#include "pytorch/adapter/utils/utils.h"
-#endif
 
 #include <memory>
 #include <optional>
@@ -43,7 +34,6 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
-#include "platform/stream_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
 
@@ -56,16 +46,7 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
 
 bool LLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
-#if defined(USE_NPU)
-  int currentDevId = device_.index();
-  int ret = aclrtSetDevice(currentDevId);
-  if (ret != 0) {
-    LOG(ERROR) << "ACL set device id:" << currentDevId
-               << " failed, ret:" << ret;
-  }
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu init device
-#endif
+  device_.set_device();
 
   // Try to create a causal LM model
   model_ = create_llm_model(context);
@@ -83,11 +64,7 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
 
 std::optional<ForwardOutput> LLMWorkerImpl::step(
     const BatchedForwardInputs& inputs) {
-#if defined(USE_NPU)
-  c10_npu::SetDevice(device_.index());
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu set device
-#endif
+  device_.set_device();
   Timer timer;
   std::vector<torch::Tensor> flatten_tokens_micro_batches;
   std::vector<torch::Tensor> flatten_positions_micro_batches;
@@ -150,7 +127,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
       !options_.enable_speculative_decode()) {
-    auto ret = StreamHelper::synchronize_stream(device_.index());
+    auto ret = device_.synchronize_stream();
     // in p-d disaggregation scene, all micro batches should be in same
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
     // just use micro inputs.micro_inputs[0] here
@@ -201,7 +178,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
     output.max_top_logprobs = concated_sampling_params.max_top_logprobs;
   }
 
-  auto ret = StreamHelper::synchronize_stream(device_.index());
+  auto ret = device_.synchronize_stream();
 
   if (options_.instance_role() == InstanceRole::PREFILL &&
       options_.kv_cache_transfer_mode() == "PUSH" &&

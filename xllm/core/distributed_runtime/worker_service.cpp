@@ -22,14 +22,6 @@ limitations under the License.
 
 #include <boost/algorithm/string.hpp>
 #include <vector>
-// TODO: remove useless headers
-#if defined(USE_NPU)
-#include <c10/core/Device.h>
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#include <torch_npu/csrc/core/npu/NPUFunctions.h>
-#include <torch_npu/csrc/framework/OpCommand.h>
-#include <torch_npu/torch_npu.h>
-#endif
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -42,30 +34,12 @@ limitations under the License.
 
 namespace xllm {
 
-namespace {
-#if defined(USE_NPU)
-void init_npu_context(const torch::Device& device) {
-  int device_id = device.index();
-  int ret = aclrtSetDevice(device_id);
-  if (ret != 0) {
-    LOG(ERROR) << "ACL set device id: " << device_id << " failed, ret:" << ret;
-  }
-  std::string device_name = "npu:" + std::to_string(device_id);
-  torch_npu::init_npu(device_name);
-}
-#elif defined(USE_MLU)
-// TODO(mlu): implement mlu init context
-#endif
-}  // namespace
-
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
     : options_(options), device_(device), initialized_(false) {
-#if defined(USE_NPU)
-  init_npu_context(device);
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu init context
-#endif
+  device_.set_device();
+  device_.init_device_context();
+
   stream_helper_ = std::make_unique<StreamHelper>();
 }
 
@@ -76,11 +50,9 @@ WorkerService::WorkerService(runtime::Options options,
       device_(device),
       worker_(std::move(worker)),
       initialized_(true) {
-#if defined(USE_NPU)
-  init_npu_context(device);
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu init context
-#endif
+  device_.set_device();
+  device_.init_device_context();
+
   stream_helper_ = std::make_unique<StreamHelper>();
 }
 
@@ -353,11 +325,7 @@ void WorkerService::ExecuteModel(
                         pb_forward_output,
                         done]() mutable {
     brpc::ClosureGuard done_guard(done);
-#if defined(USE_NPU)
-    c10_npu::SetDevice(device_.index());
-#elif defined(USE_MLU)
-    // TODO(mlu): implement mlu execute model
-#endif
+    device_.set_device();
     Timer timer;
 
     // convert proto::BatchedForwardInputs to BatchedForwardInputs
@@ -465,11 +433,7 @@ void WorkerService::GetLastStepResult(
     ::google::protobuf::Closure* done) {
   threadpool_.schedule(
       [this, controller, req, pb_forward_output, done]() mutable {
-#if defined(USE_NPU)
-        c10_npu::SetDevice(device_.index());
-#elif defined(USE_MLU)
-  // TODO(mlu): implement mlu set device
-#endif
+        device_.set_device();
         brpc::ClosureGuard done_guard(done);
 
         auto future = worker_->get_last_step_result_async();
