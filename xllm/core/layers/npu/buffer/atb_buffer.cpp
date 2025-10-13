@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "xllm_kernels/core/include/atb_speed/utils/statistic.h"
 #include "xllm_kernels/pytorch/adapter/utils/utils.h"
+
 namespace xllm {
 
 constexpr uint64_t KB_1 = 1024;
@@ -66,7 +67,7 @@ void* AtbBuffer::get_buffer(uint64_t buffer_size) {
 
 torch::Tensor AtbBuffer::create_attensor(uint64_t buffer_size) const {
   at::Tensor newTensor = at_npu::native::empty_with_format(
-      at::IntArrayRef({KB_1, buffer_size / KB_1 + int(1), DIM_NUM_2}),
+      at::IntArrayRef({KB_1, buffer_size / KB_1 + int(1)}),
       options_,
       ACL_FORMAT_ND);
 
