@@ -48,8 +48,6 @@ class PDOOCScheduler : public DisaggPDScheduler {
 
   void step(const absl::Duration& timeout) override;
 
-  bool add_request(std::shared_ptr<Request>& request) override;
-
   // prefill-1: for prefill send new request to decode
   void dispatch_requests() override;
   // prefill-2: for prefill send first token to decode
@@ -57,26 +55,13 @@ class PDOOCScheduler : public DisaggPDScheduler {
   // prefill-2b: for prefill send multiple tokens to decode
   void prefill_send_multi_generations();
   // prefill-3: for prefill receive stream generation from decode
-  bool prefill_recv_generation(const RequestOutput& output) override;
+  // bool prefill_recv_generation(const RequestOutput& output) override;
 
   // decode-1: for decode recveive new request from prefill
   bool decode_schedule(std::shared_ptr<Request>& request,
                        const std::string& prefill_instance_name) override;
   // decode-2: for decode receive first token from prefill
-  bool decode_recv_first_generation(const std::string& req_id,
-                                    int64_t token_id,
-                                    bool has_logprob,
-                                    float logprob,
-                                    std::vector<int64_t> top_tokens,
-                                    std::vector<float> top_logprobs,
-                                    const std::string& kv_cache_transfer_mode,
-                                    std::vector<uint64_t> src_cluster_ids,
-                                    std::vector<std::string> src_addrs,
-                                    std::vector<int64_t> src_k_cache_ids,
-                                    std::vector<int64_t> src_v_cache_ids,
-                                    std::vector<uint64_t> src_block_ids,
-                                    int32_t src_dp_size,
-                                    int32_t src_dp_rank) override;
+  // bool decode_recv_first_generation(...);
 
   // decode-2b: for decode receive multiple tokens from prefill
   bool decode_recv_multi_generations(
@@ -92,9 +77,9 @@ class PDOOCScheduler : public DisaggPDScheduler {
       int32_t src_dp_rank);
 
   // decode-3: decode send response to prefill
-  bool decode_send_stream_generation(const RequestOutput& output) override;
-  std::vector<bool> decode_send_stream_generations(
-      const std::vector<RequestOutput>& outputs) override;
+  // bool decode_send_stream_generation(const RequestOutput& output) override;
+  // std::vector<bool> decode_send_stream_generations(
+  //     const std::vector<RequestOutput>& outputs) override;
 
   void prefill_step(const absl::Duration& timeout);
 
@@ -125,11 +110,6 @@ class PDOOCScheduler : public DisaggPDScheduler {
  private:
   void handle_prefill_interruption();
 
-  // create rpc channel to remote instance,
-  // we can get remote instance info from master service.
-  proto::DisaggPDService_Stub* create_rpc_channel(
-      const std::string& instance_name);
-
   void start_rpc_server() override;
 
   // Build DisaggRequests proto from Request objects
@@ -142,16 +122,6 @@ class PDOOCScheduler : public DisaggPDScheduler {
 
   // Select a prefill instance for pulling requests
   std::string select_prefill_instance();
-
-  // Override members from DisaggPDScheduler to use DisaggPDService_Stub
-  // request_id -> brpc channel using DisaggPDService_Stub
-  std::unordered_map<std::string, proto::DisaggPDService_Stub*>
-      req_to_channel_map_;
-  std::unordered_map<std::string, proto::DisaggPDService_Stub*>
-      instance_channel_map_;
-  // for decode batch response, map prefill stub to thread index
-  std::unordered_map<proto::DisaggPDService_Stub*, size_t>
-      remote_prefill_thread_map_;
 
   StepStatus step_status_ = StepStatus::IDLE;
 

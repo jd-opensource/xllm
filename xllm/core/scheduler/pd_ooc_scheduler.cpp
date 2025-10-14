@@ -42,7 +42,6 @@ limitations under the License.
 
 namespace xllm {
 
-// ✅
 PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
     : DisaggPDScheduler(engine, options),
       llm_flops_(engine->model_args().n_layers(),
@@ -134,7 +133,6 @@ PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
   // profile_ttft();
 }
 
-// ✅
 PDOOCScheduler::~PDOOCScheduler() {
   if (rpc_server_thread_ && rpc_server_thread_->joinable()) {
     rpc_server_thread_->join();
@@ -149,46 +147,6 @@ PDOOCScheduler::~PDOOCScheduler() {
   }
 }
 
-// 🟡
-proto::DisaggPDService_Stub* PDOOCScheduler::create_rpc_channel(
-    const std::string& instance_name) {
-  std::lock_guard<std::mutex> lock(instance_channel_map_mutex_);
-  auto it = instance_channel_map_.find(instance_name);
-  if (it == instance_channel_map_.end()) {
-    LOG(WARNING) << "Failed to find channel to instance: " << instance_name
-                 << ", try to create channel now.";
-    // check prefill instance info
-    if (!check_remote_instance_info(instance_name)) {
-      LOG(ERROR) << "Check remote instance info failed, instance name: "
-                 << instance_name;
-      return nullptr;
-    }
-    // create channel to prefill instance
-    brpc::Channel* channel = new brpc::Channel();
-    brpc::ChannelOptions options;
-    options.timeout_ms = FLAGS_timeout_ms;
-    options.max_retry = 3;
-    std::string load_balancer = "";
-    if (channel->Init(remote_instances_info_[instance_name].rpc_address.c_str(),
-                      load_balancer.c_str(),
-                      &options) != 0) {
-      LOG(ERROR) << "Fail to initialize channel for "
-                 << remote_instances_info_[instance_name].rpc_address;
-      remote_instances_info_.erase(instance_name);
-      delete channel;
-      return nullptr;
-    }
-    // req_to_channel_map_[request.request_id] = channel;
-    proto::DisaggPDService_Stub* stub =
-        new proto::DisaggPDService_Stub(channel);
-    instance_channel_map_[instance_name] = stub;
-    return stub;
-  }
-
-  return it->second;
-}
-
-// 🟡
 void PDOOCScheduler::start_rpc_server() {
   std::unique_ptr<PDOOCService> service =
       std::make_unique<PDOOCService>(this, engine_);
@@ -201,7 +159,6 @@ void PDOOCScheduler::start_rpc_server() {
   }
 }
 
-// ✅
 void PDOOCScheduler::step(const absl::Duration& timeout) {
   if (options_.instance_role() == InstanceRole::PREFILL) {
     prefill_step(timeout);
@@ -210,7 +167,6 @@ void PDOOCScheduler::step(const absl::Duration& timeout) {
   }
 }
 
-// ✅
 void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
   try {
     prepare_offline_dispatch_queue();
@@ -234,7 +190,6 @@ void PDOOCScheduler::prefill_step(const absl::Duration& timeout) {
   }
 }
 
-// ✅
 std::vector<Batch> PDOOCScheduler::prepare_batch() {
   Timer timer;
   // propogate new requests to waiting_priority_queue_
@@ -504,7 +459,6 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   return batches;
 }
 
-// ✅
 void PDOOCScheduler::handle_prefill_interruption() {
   std::vector<std::shared_ptr<Request>> offline_requests_to_preempt;
 
@@ -540,7 +494,6 @@ void PDOOCScheduler::handle_prefill_interruption() {
             << offline_requests_to_preempt.size() << " offline requests";
 }
 
-// ✅
 void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
   _decode_step_global_batch_req_lens.clear();
   ContinuousScheduler::step(timeout);
@@ -561,7 +514,6 @@ void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
   _last_decode_step_global_batch_req_lens = _decode_step_global_batch_req_lens;
 }
 
-// ✅
 // copy+modify from ContinuousScheduler::handle_decode_requests
 // 由于父类写法限制，需要依赖手工维护 _decode_step_global_batch_req_lens
 void PDOOCScheduler::handle_decode_requests(
@@ -782,7 +734,6 @@ void PDOOCScheduler::handle_decode_requests(
   }
 }
 
-// ✅
 void PDOOCScheduler::decode_send_pull_signal() {
   while (true) {
     // Wait until step thread triggers
@@ -855,25 +806,6 @@ void PDOOCScheduler::decode_send_pull_signal() {
   }
 }
 
-// ❌
-bool PDOOCScheduler::add_request(std::shared_ptr<Request>& request) {
-  CHECK(request != nullptr);
-  CHECK(!request->sequences().empty());
-
-  if (request->offline()) {
-    // offline request, push to offline queue
-    prefill_request_queue_offline_.enqueue(request);
-    DVLOG << "Received an offline request: " << request->request_id();
-    return true;
-  } else {
-    // push and wait
-    prefill_request_queue_.enqueue(request);
-    DVLOG << "Received an online request: " << request->request_id();
-    return true;
-  }
-}
-
-// ✅
 // prefill send new request to remote instance
 void PDOOCScheduler::dispatch_requests() {
   while (true) {
@@ -988,7 +920,6 @@ void PDOOCScheduler::dispatch_requests() {
   }
 }
 
-// ✅ skip offline requests
 void PDOOCScheduler::prefill_send_first_generation() {
   if (running_sequences_.size() == 0) {
     return;
@@ -1123,51 +1054,6 @@ void PDOOCScheduler::prefill_send_first_generation() {
   });
 }
 
-// ❌
-bool PDOOCScheduler::prefill_recv_generation(const RequestOutput& output) {
-  std::shared_ptr<Request> request = nullptr;
-  int request_thread_idx = -1;
-  {
-    std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
-    auto it = remote_requests_map_.find(output.request_id);
-    if (it == remote_requests_map_.end()) {
-      LOG(ERROR) << "Failed to find request, request id: " << output.request_id;
-      return false;
-    }
-    request = it->second;
-
-    auto it2 = remote_requests_output_thread_map_.find(output.request_id);
-    if (it2 == remote_requests_output_thread_map_.end()) {
-      LOG(ERROR) << "Failed to find request thread, request id: "
-                 << output.request_id;
-      return false;
-    }
-    request_thread_idx = it2->second;
-  }
-
-  output_threadpools_[request_thread_idx].schedule(
-      [this, request, output = std::move(output)]() mutable {
-        if (!request->state().output_func(output) || output.finished) {
-          // cancel the request if on_stream returns false
-          if (!output.finished) {
-            request->set_cancel();
-          }
-          {
-            std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
-            remote_requests_map_.erase(output.request_id);
-            remote_requests_output_thread_map_.erase(output.request_id);
-          }
-          {
-            std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
-            req_to_channel_map_.erase(output.request_id);
-          }
-        }
-      });
-
-  return true;
-}
-
-// ✅ Additional operations on offline requests
 // request is received from prefill
 bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
                                      const std::string& prefill_instance_name) {
@@ -1214,85 +1100,6 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
   return true;
 }
 
-// ❌
-bool PDOOCScheduler::decode_recv_first_generation(
-    const std::string& req_id,
-    int64_t token_id,
-    bool has_logprob,
-    float logprob,
-    std::vector<int64_t> top_tokens,
-    std::vector<float> top_logprobs,
-    const std::string& kv_cache_transfer_mode,
-    std::vector<uint64_t> src_cluster_ids,
-    std::vector<std::string> src_addrs,
-    std::vector<int64_t> src_k_cache_ids,
-    std::vector<int64_t> src_v_cache_ids,
-    std::vector<uint64_t> src_block_ids,
-    int32_t src_dp_size,
-    int32_t src_dp_rank) {
-  // push to request_queue_, and will be executed by engine.
-  std::shared_ptr<Request> request = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(received_request_map_mutex_);
-    auto it = received_request_map_.find(req_id);
-    if (it == received_request_map_.end()) {
-      LOG(ERROR) << "Failed to find request, request id: " << req_id;
-      return false;
-    }
-    request = it->second;
-    received_request_map_.erase(it);
-  }
-
-  Token first_token(token_id);
-  if (has_logprob) {
-    first_token.logprob = logprob;
-    if (!top_tokens.empty() && !top_logprobs.empty()) {
-      // NOTE: slice vector here, to avoid copy
-      // so we need keep the vector `top_tokens` and `top_logprobs` lifetime
-      first_token.top_tokens = top_tokens;
-      first_token.top_logprobs = top_logprobs;
-    }
-  }
-  // Enable checking whether to skip the prefill token
-  if (request->state().stream) {
-    request->sequences()[0]->enable_checking_prefill_token();
-  }
-
-  // TODO: we only support one sequence for currently.
-  if (enable_schedule_overlap()) {
-    Token fake_token(-1);
-    request->sequences()[0]->append_token(fake_token);
-    request->sequences()[0]->update_last_step_token(first_token);
-  } else {
-    request->sequences()[0]->append_token(first_token);
-  }
-
-  // pull kv cache
-  if (kv_cache_transfer_mode == "PULL") {
-    const auto blocks = request->sequences()[0]->kv_state().kv_blocks();
-    std::vector<uint64_t> dst_block_ids;
-    dst_block_ids.reserve(blocks.size());
-    for (const auto& block : blocks) {
-      dst_block_ids.push_back(block.id());
-    }
-
-    int32_t dst_dp_rank = request->sequences()[0]->dp_rank();
-    engine_->pull_kv_blocks(src_dp_size,
-                            src_dp_rank,
-                            src_cluster_ids,
-                            src_addrs,
-                            src_k_cache_ids,
-                            src_v_cache_ids,
-                            src_block_ids,
-                            dst_dp_rank,
-                            dst_block_ids);
-  }
-
-  request_queue_.write(request);
-  return true;
-}
-
-// ✅
 bool PDOOCScheduler::decode_recv_multi_generations(
     const std::string& req_id,
     const std::vector<proto::RemoteToken>& migration_tokens,
@@ -1374,299 +1181,6 @@ bool PDOOCScheduler::decode_recv_multi_generations(
   return true;
 }
 
-// 🟡
-bool PDOOCScheduler::decode_send_stream_generation(
-    const RequestOutput& output) {
-  int request_thread_idx = -1;
-  {
-    std::lock_guard<std::mutex> lock(received_request_map_mutex_);
-    auto it = received_request_output_thread_map_.find(output.request_id);
-    if (it == received_request_output_thread_map_.end()) {
-      LOG(ERROR) << "Failed to find request thread, request id: "
-                 << output.request_id;
-      return false;
-    }
-    request_thread_idx = it->second;
-  }
-
-  proto::DisaggPDService_Stub* stub = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
-    stub = req_to_channel_map_[output.request_id];
-  }
-  if (!stub) {
-    LOG(ERROR) << "Can not connect to remote prefill server.";
-    return false;
-  }
-
-  output_threadpools_[request_thread_idx].schedule([this,
-                                                    stub,
-                                                    output = std::move(
-                                                        output)]() mutable {
-    // build proto::DisaggStreamGeneration
-    proto::DisaggStreamGeneration req;
-    req.set_req_id(output.request_id);
-    req.set_service_req_id(output.service_request_id);
-    if (output.status.has_value()) {
-      auto gen_status = req.mutable_gen_status();
-      gen_status->set_status_code(
-          static_cast<int32_t>(output.status.value().code()));
-      gen_status->set_status_msg(output.status.value().message());
-    }
-    req.set_finished(output.finished);
-    if (output.usage.has_value()) {
-      proto::OutputUsage* proto_usage = req.mutable_usage();
-      proto_usage->set_num_prompt_tokens(
-          output.usage.value().num_prompt_tokens);
-      proto_usage->set_num_generated_tokens(
-          output.usage.value().num_generated_tokens);
-      proto_usage->set_num_total_tokens(output.usage.value().num_total_tokens);
-    }
-    req.mutable_outputs()->Reserve(output.outputs.size());
-    for (auto& seq_output : output.outputs) {
-      // proto::SequenceOutput proto_seq_out;
-      auto proto_seq_out = req.mutable_outputs()->Add();
-      proto_seq_out->set_index(seq_output.index);
-      proto_seq_out->set_text(seq_output.text);
-      if (seq_output.finish_reason.has_value()) {
-        proto_seq_out->set_finish_reason(seq_output.finish_reason.value());
-      } else {
-        proto_seq_out->set_finish_reason("");
-      }
-      ADD_VECTOR_TO_PROTO(proto_seq_out->mutable_token_ids(),
-                          seq_output.token_ids);
-      if (seq_output.logprobs.has_value()) {
-        size_t logprobs_size = seq_output.logprobs.value().size();
-        proto_seq_out->mutable_logprobs()->Reserve(logprobs_size);
-        for (size_t i = 0; i < logprobs_size; ++i) {
-          // proto::LogProb logprob;
-          auto logprob = proto_seq_out->mutable_logprobs()->Add();
-          proto::LogProbData* log_prob_data = logprob->mutable_log_prob_data();
-          log_prob_data->set_token(seq_output.logprobs.value()[i].token);
-          log_prob_data->set_token_id(seq_output.logprobs.value()[i].token_id);
-          log_prob_data->set_logprob(seq_output.logprobs.value()[i].logprob);
-          log_prob_data->set_finished_token(
-              seq_output.logprobs.value()[i].finished_token);
-          if (seq_output.logprobs.value()[i].top_logprobs.has_value()) {
-            size_t top_logprobs_size =
-                seq_output.logprobs.value()[i].top_logprobs.value().size();
-            for (size_t j = 0; j < top_logprobs_size; ++j) {
-              proto::LogProbData* top_log_prob_data =
-                  logprob->mutable_top_logprobs()->Add();
-              top_log_prob_data->set_token(
-                  seq_output.logprobs.value()[i].top_logprobs.value()[j].token);
-              top_log_prob_data->set_token_id(seq_output.logprobs.value()[i]
-                                                  .top_logprobs.value()[j]
-                                                  .token_id);
-              top_log_prob_data->set_logprob(seq_output.logprobs.value()[i]
-                                                 .top_logprobs.value()[j]
-                                                 .logprob);
-              top_log_prob_data->set_finished_token(
-                  seq_output.logprobs.value()[i]
-                      .top_logprobs.value()[j]
-                      .finished_token);
-            }
-          }
-          //*proto_seq_out.mutable_logprobs()->Add() = logprob;
-        }
-      }
-      //*req.mutable_outputs()->Add() = proto_seq_out;
-    }
-
-    // Sync
-    proto::Status resp;
-    brpc::Controller cntl;
-    stub->Generation(&cntl, &req, &resp, nullptr);
-    // TODO: error handler
-
-    // TODO: handle resp status
-
-    if (output.finished) {
-      std::lock_guard<std::mutex> lock(received_request_map_mutex_);
-      received_request_output_thread_map_.erase(output.request_id);
-    }
-  });
-
-  return true;
-}
-
-// 🟡
-std::vector<bool> PDOOCScheduler::decode_send_stream_generations(
-    const std::vector<RequestOutput>& outputs) {
-  std::vector<bool> send_status;
-  send_status.resize(outputs.size(), true);
-
-  // 1. response to xllm service to avoid the redirect cost.
-  if (options_.enable_decode_response_to_service()) {
-    output_threadpools_[0].schedule(
-        [this, outputs = std::move(outputs)]() mutable {
-          xservice_client_->generations(outputs);
-          // TODO: error handler
-          // TODO: handle resp status
-          {
-            std::lock_guard<std::mutex> lock(received_request_map_mutex_);
-            for (auto& output : outputs) {
-              if (output.finished) {
-                received_request_output_thread_map_.erase(output.request_id);
-              }
-            }
-          }
-        });
-    return send_status;
-  }
-
-  // 2. response to prefill instance
-  // find all prefill stubs
-  // record the indexes for each prefill stub
-  std::unordered_map<proto::DisaggPDService_Stub*, std::vector<RequestOutput>>
-      per_outputs;
-  std::unordered_map<proto::DisaggPDService_Stub*, std::vector<int>>
-      per_outputs_idx;
-  {
-    std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      auto it = req_to_channel_map_.find(outputs[i].request_id);
-      if (it == req_to_channel_map_.end()) {
-        LOG(ERROR) << "Can not connect to remote prefill server, request is "
-                   << outputs[i].request_id;
-        send_status[i] = false;
-        continue;
-      }
-      proto::DisaggPDService_Stub* req_stub = it->second;
-      if (per_outputs.find(req_stub) == per_outputs.end()) {
-        std::vector<RequestOutput> o;
-        o.emplace_back(outputs[i]);
-        per_outputs[req_stub] = std::move(o);
-        per_outputs_idx[req_stub] = {i};
-      } else {
-        per_outputs[req_stub].emplace_back(std::move(outputs[i]));
-        per_outputs_idx[req_stub].emplace_back(i);
-      }
-    }
-  }
-
-  // create proto and send outputs to prefill
-  for (auto& o : per_outputs) {
-    int request_thread_idx = -1;
-    {
-      std::lock_guard<std::mutex> lock(received_request_map_mutex_);
-      auto it = remote_prefill_thread_map_.find(o.first);
-      if (it == remote_prefill_thread_map_.end()) {
-        LOG(ERROR) << "Failed to find prefill stub thread, stub: " << o.first;
-        for (auto idx : per_outputs_idx[o.first]) {
-          send_status[idx] = false;
-        }
-        continue;
-      }
-
-      request_thread_idx = it->second;
-    }
-
-    output_threadpools_[request_thread_idx].schedule([this,
-                                                      stub = o.first,
-                                                      outputs = std::move(
-                                                          o.second)]() mutable {
-      proto::DisaggStreamGenerations gens;
-      for (auto& output : outputs) {
-        // build proto::DisaggStreamGeneration
-        proto::DisaggStreamGeneration* req = gens.mutable_gens()->Add();
-        req->set_req_id(output.request_id);
-        req->set_service_req_id(output.service_request_id);
-        if (output.status.has_value()) {
-          auto gen_status = req->mutable_gen_status();
-          gen_status->set_status_code(
-              static_cast<int32_t>(output.status.value().code()));
-          gen_status->set_status_msg(output.status.value().message());
-        }
-        req->set_finished(output.finished);
-        if (output.usage.has_value()) {
-          proto::OutputUsage* proto_usage = req->mutable_usage();
-          proto_usage->set_num_prompt_tokens(
-              output.usage.value().num_prompt_tokens);
-          proto_usage->set_num_generated_tokens(
-              output.usage.value().num_generated_tokens);
-          proto_usage->set_num_total_tokens(
-              output.usage.value().num_total_tokens);
-        }
-        req->mutable_outputs()->Reserve(output.outputs.size());
-        for (auto& seq_output : output.outputs) {
-          // proto::SequenceOutput proto_seq_out;
-          auto proto_seq_out = req->mutable_outputs()->Add();
-          proto_seq_out->set_index(seq_output.index);
-          proto_seq_out->set_text(seq_output.text);
-          if (seq_output.finish_reason.has_value()) {
-            proto_seq_out->set_finish_reason(seq_output.finish_reason.value());
-          } else {
-            proto_seq_out->set_finish_reason("");
-          }
-          ADD_VECTOR_TO_PROTO(proto_seq_out->mutable_token_ids(),
-                              seq_output.token_ids);
-          if (seq_output.logprobs.has_value()) {
-            size_t logprobs_size = seq_output.logprobs.value().size();
-            proto_seq_out->mutable_logprobs()->Reserve(logprobs_size);
-            for (size_t i = 0; i < logprobs_size; ++i) {
-              // proto::LogProb logprob;
-              auto logprob = proto_seq_out->mutable_logprobs()->Add();
-              proto::LogProbData* log_prob_data =
-                  logprob->mutable_log_prob_data();
-              log_prob_data->set_token(seq_output.logprobs.value()[i].token);
-              log_prob_data->set_token_id(
-                  seq_output.logprobs.value()[i].token_id);
-              log_prob_data->set_logprob(
-                  seq_output.logprobs.value()[i].logprob);
-              log_prob_data->set_finished_token(
-                  seq_output.logprobs.value()[i].finished_token);
-              if (seq_output.logprobs.value()[i].top_logprobs.has_value()) {
-                size_t top_logprobs_size =
-                    seq_output.logprobs.value()[i].top_logprobs.value().size();
-                for (size_t j = 0; j < top_logprobs_size; ++j) {
-                  proto::LogProbData* top_log_prob_data =
-                      logprob->mutable_top_logprobs()->Add();
-                  top_log_prob_data->set_token(seq_output.logprobs.value()[i]
-                                                   .top_logprobs.value()[j]
-                                                   .token);
-                  top_log_prob_data->set_token_id(seq_output.logprobs.value()[i]
-                                                      .top_logprobs.value()[j]
-                                                      .token_id);
-                  top_log_prob_data->set_logprob(seq_output.logprobs.value()[i]
-                                                     .top_logprobs.value()[j]
-                                                     .logprob);
-                  top_log_prob_data->set_finished_token(
-                      seq_output.logprobs.value()[i]
-                          .top_logprobs.value()[j]
-                          .finished_token);
-                }
-              }
-              //*proto_seq_out.mutable_logprobs()->Add() = logprob;
-            }
-          }
-          //*req.mutable_outputs()->Add() = proto_seq_out;
-        }
-      }
-
-      // Sync
-      proto::StatusSet resp;
-      brpc::Controller cntl;
-      stub->Generations(&cntl, &gens, &resp, nullptr);
-      // TODO: error handler
-
-      // TODO: handle resp status
-
-      {
-        std::lock_guard<std::mutex> lock(received_request_map_mutex_);
-        for (auto& output : outputs) {
-          if (output.finished) {
-            received_request_output_thread_map_.erase(output.request_id);
-          }
-        }
-      }
-    });
-  }
-
-  return send_status;
-}
-
-// ✅
 // TODO Need parameters tuning
 bool PDOOCScheduler::check_able_to_pull() {
   // Estimated usage of current requests: half of current used blocks.
@@ -1686,7 +1200,6 @@ bool PDOOCScheduler::write_pull_signal(const proto::PullSignal& pull_signal) {
   }
 }
 
-// ✅
 void PDOOCScheduler::prepare_offline_dispatch_queue() {
   // Read pull signals from pull_signals_ queue
   proto::PullSignal pull_signal;
@@ -1747,7 +1260,6 @@ void PDOOCScheduler::prepare_offline_dispatch_queue() {
   }
 }
 
-// ✅
 void PDOOCScheduler::dispatch_offline_requests() {
   while (true) {
     const auto timeout = std::chrono::milliseconds(100);
@@ -1829,7 +1341,6 @@ void PDOOCScheduler::dispatch_offline_requests() {
   }
 }
 
-// ✅
 std::string PDOOCScheduler::select_decode_instance() {
   // get allocated decode instance list from Master
   while (decode_inst_names_.empty()) {
@@ -1998,7 +1509,6 @@ void PDOOCScheduler::prefill_send_multi_generations() {
   });
 }
 
-// ❌ Should be moved to superclass
 void PDOOCScheduler::build_disagg_requests(
     const std::vector<std::shared_ptr<Request>>& requests,
     proto::DisaggRequests& reqs) {
