@@ -33,6 +33,7 @@ class DenseMLPImpl : public torch::nn::Module {
                int intermediate_size,
                bool is_gated,
                bool has_bias,
+               const std::string& hidden_act,
                const QuantArgs& quant_args,
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
@@ -47,6 +48,8 @@ class DenseMLPImpl : public torch::nn::Module {
   ParallelArgs parallel_args_;
   ColumnParallelLinear gate_up_proj_{nullptr};
   RowParallelLinear down_proj_{nullptr};
+  bool is_per_token_smoothquant_;
+  std::string hidden_act_;
 };
 TORCH_MODULE(DenseMLP);
 

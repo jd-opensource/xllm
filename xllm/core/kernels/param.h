@@ -170,5 +170,41 @@ struct FusedMoEParams {
   int shared_expert_num = 0;
   std::string parallel_mode = "ep";
 };
+
+// Per token smooth quantize parameters
+struct ScaledQuantizeParams {
+  torch::Tensor x;
+  torch::Tensor smooth;
+  std::optional<torch::Tensor> zero = std::nullopt;
+  std::optional<torch::Tensor> token_count = std::nullopt;
+  std::optional<torch::Tensor> gather_index = std::nullopt;
+  std::optional<torch::Tensor> gather_index_start_position = std::nullopt;
+  std::optional<torch::Tensor> output = std::nullopt;
+  std::optional<torch::Tensor> output_scale = std::nullopt;
+  std::string act_mode = "none";
+  double active_coef = 1.0;
+  bool is_gated = false;
+  torch::ScalarType quant_type = torch::kChar;
+};
+
+// Scaled matmul parameters
+struct ScaledMatmulParams {
+  torch::Tensor a;
+  torch::Tensor b;
+  std::optional<torch::Tensor> a_scale = std::nullopt;
+  torch::Tensor b_scale;
+  torch::ScalarType output_dtype;
+  std::optional<torch::Tensor> bias = std::nullopt;
+  std::optional<torch::Tensor> c = std::nullopt;
+  std::string act_mode = "none";
+  int64_t quant_bit_size = 8;
+  double alpha = 1.0;
+  double beta = 1.0;
+  bool use_hp_active = false;
+  int64_t a_quant_bit_size = -1;
+  std::optional<torch::Tensor> a_calib = std::nullopt;
+  std::optional<torch::Tensor> b_calib = std::nullopt;
+  std::optional<torch::Tensor> output = std::nullopt;
+};
 }  // namespace kernel
 }  // namespace xllm

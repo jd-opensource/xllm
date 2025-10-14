@@ -31,11 +31,15 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
     int64_t out_features,
     bool bias,
     bool gather_output,
+    const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
-    const torch::TensorOptions& options)
+    const torch::TensorOptions& options,
+    const FusedLinearExtraArgs& linear_extra_args)
     : gather_output_(gather_output),
+      quant_args_(quant_args),
       parallel_args_(parallel_args),
-      device_(options.device()) {
+      device_(options.device()),
+      linear_extra_args_(linear_extra_args) {
   rank_ = parallel_args_.tp_group_->rank();
   world_size_ = parallel_args_.tp_group_->world_size();
   CHECK(out_features % world_size_ == 0)
@@ -44,10 +48,29 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
   const int64_t out_features_per_partition = out_features / world_size_;
   // Note: torch.nn.functional.linear performs XA^T + b and as a result
   // we allocate the transpose.
-  weight_ = register_parameter(
-      "weight",
-      torch::empty({out_features_per_partition, in_features}, options),
-      /*requires_grad=*/false);
+  if (quant_args_.quant_method() == "smoothquant") {
+    qweight_ = register_parameter(
+        "qweight",
+        torch::empty({out_features_per_partition, in_features},
+                     options.dtype(torch::kInt8)),
+        /*requires_grad=*/false);
+    per_channel_scale_ =
+        register_parameter("per_channel_scale",
+                           torch::empty({out_features_per_partition},
+                                        options.dtype(torch::kFloat32)),
+                           /*requires_grad=*/false);
+    smooth_ = register_parameter(
+        "smooth",
+        torch::empty({in_features}, options.dtype(torch::kFloat32)),
+        /*requires_grad=*/false);
+    // output dtype for scaled_matmul
+    output_dtype_ = c10::typeMetaToScalarType(options.dtype());
+  } else {
+    weight_ = register_parameter(
+        "weight",
+        torch::empty({out_features_per_partition, in_features}, options),
+        /*requires_grad=*/false);
+  }
 
   if (bias) {
     bias_ =
@@ -59,14 +82,63 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
 
 torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
   input = input.to(device_);
-  auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
-                                              : std::nullopt;
-  xllm::kernel::MatmulParams matmul_params;
-  matmul_params.a = input;
-  matmul_params.b = weight_;
-  matmul_params.bias = bias;
+  auto bias = (bias_.defined() && rank_ == 0) ? c10::optional<at::Tensor>(bias_)
+                                              : c10::nullopt;
 
-  auto output = xllm::kernel::matmul(matmul_params);
+  torch::Tensor output;
+
+  if (quant_args_.quant_method() == "smoothquant") {
+    torch::Tensor quantized_input;
+    torch::Tensor input_scale;
+
+    // Quantize input tensor with int8 in 'dynamic_per_token' mode using
+    // scaled_quantize
+    xllm::kernel::ScaledQuantizeParams quantize_params;
+    quantize_params.x = input;
+    quantize_params.smooth = smooth_;
+    quantize_params.zero = c10::nullopt;
+    quantize_params.token_count = c10::nullopt;
+    quantize_params.gather_index = c10::nullopt;
+    quantize_params.gather_index_start_position = c10::nullopt;
+    quantize_params.output = c10::nullopt;
+    quantize_params.output_scale = c10::nullopt;
+    quantize_params.act_mode = linear_extra_args_.act_mode;
+    quantize_params.active_coef = 1.0;
+    quantize_params.is_gated = linear_extra_args_.is_gated;
+
+    std::tie(quantized_input, input_scale) =
+        xllm::kernel::scaled_quantize(quantize_params);
+
+    // For SmoothQuant, use scaled_matmul with quantization parameters
+    // for now, we only support w8a8 quantization
+    xllm::kernel::ScaledMatmulParams matmul_params;
+    matmul_params.a = quantized_input;
+    matmul_params.b = qweight_;
+    matmul_params.a_scale = input_scale;
+    matmul_params.b_scale = per_channel_scale_;
+    matmul_params.output_dtype = output_dtype_;
+    matmul_params.bias = bias;
+    matmul_params.c = std::nullopt;
+    matmul_params.act_mode = "none";
+    matmul_params.quant_bit_size = 8;
+    matmul_params.alpha = 1.0;
+    matmul_params.beta = 0.0;
+    matmul_params.use_hp_active = false;
+    matmul_params.a_quant_bit_size = 8;
+    matmul_params.a_calib = c10::nullopt;
+    matmul_params.b_calib = c10::nullopt;
+    matmul_params.output = c10::nullopt;
+
+    output = xllm::kernel::scaled_matmul(matmul_params);
+  } else {
+    // For unquantized case, use regular matmul
+    xllm::kernel::MatmulParams matmul_params;
+    matmul_params.a = input;
+    matmul_params.b = weight_;
+    matmul_params.bias = bias;
+    output = xllm::kernel::matmul(matmul_params);
+  }
+
   if (world_size_ > 1 && gather_output_) {
     output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
   }
@@ -78,11 +150,19 @@ void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   const auto rank = rank_;
   const auto world_size = world_size_;
 
-  // load sharded weights on dim 0
-  LOAD_SHARDED_WEIGHT(weight, 0);
+  // load and merge the weights on dim 0
+  // If quant_args_ indicates SmoothQuant, load qweight; otherwise, load
+  // normal weight
+  if (quant_args_.quant_method() == "smoothquant") {
+    LOAD_SHARDED_WEIGHT(qweight, 0);
+    LOAD_SHARDED_WEIGHT(per_channel_scale, 0);
+    // for input, there is one smooth value
+    LOAD_WEIGHT(smooth);
+  } else {
+    LOAD_SHARDED_WEIGHT(weight, 0);
+  }
 
   if (bias_.defined()) {
-    // load sharded bias on dim 0
     LOAD_SHARDED_WEIGHT(bias, 0);
   }
 }
@@ -95,10 +175,30 @@ void ColumnParallelLinearImpl::load_state_dict(
   const auto world_size = world_size_;
 
   // load and merge the weights on dim 0
-  LOAD_FUSED_WEIGHT(weight, 0);
+  // If quant_args_ indicates SmoothQuant, load qweight
+  if (quant_args_.quant_method() == "smoothquant") {
+    // Find the first available "smooth" tensor in prefixes (e.g.,
+    // "gate.smooth", "up_proj.smooth", etc.)
+    for (const auto& prefix : prefixes) {
+      auto smooth_tensor_candidate = state_dict.get_tensor(prefix + "smooth");
+      if (smooth_tensor_candidate.defined()) {
+        // Copy the found smooth tensor to the module parameter
+        CHECK_EQ(smooth_.sizes(), smooth_tensor_candidate.sizes())
+            << "smooth weight size mismatch for " << state_dict.prefix()
+            << "smooth";
+        smooth_.copy_(smooth_tensor_candidate);
+        smooth_is_loaded_ = true;
+        break;
+      }
+    }
+
+    LOAD_FUSED_WEIGHT(qweight, 0);
+    LOAD_FUSED_WEIGHT(per_channel_scale, 0);
+  } else {
+    LOAD_FUSED_WEIGHT(weight, 0);
+  }
 
   if (bias_.defined()) {
-    // load and merge the bias on dim 0
     LOAD_FUSED_WEIGHT(bias, 0);
   }
 }
@@ -211,11 +311,15 @@ RowParallelLinearImpl::RowParallelLinearImpl(
     bool bias,
     bool input_is_parallelized,
     bool if_reduce_results,
+    const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
-    const torch::TensorOptions& options)
+    const torch::TensorOptions& options,
+    const FusedLinearExtraArgs& linear_extra_args)
     : input_is_parallelized_(input_is_parallelized),
       if_reduce_results_(if_reduce_results),
-      parallel_args_(parallel_args) {
+      quant_args_(quant_args),
+      parallel_args_(parallel_args),
+      linear_extra_args_(linear_extra_args) {
   rank_ = parallel_args_.tp_group_->rank();
   world_size_ = parallel_args_.tp_group_->world_size();
   CHECK(in_features % world_size_ == 0)
@@ -223,10 +327,28 @@ RowParallelLinearImpl::RowParallelLinearImpl(
       << world_size_;
   const int64_t in_features_per_partition = in_features / world_size_;
   // Allocate the transpose since linear performs XA^T.
-  weight_ = register_parameter(
-      "weight",
-      torch::empty({out_features, in_features_per_partition}, options),
-      /*requires_grad=*/false);
+  if (quant_args_.quant_method() == "smoothquant") {
+    qweight_ = register_parameter(
+        "qweight",
+        torch::empty({out_features, in_features_per_partition},
+                     options.dtype(torch::kInt8)),
+        /*requires_grad=*/false);
+    per_channel_scale_ = register_parameter(
+        "per_channel_scale",
+        torch::empty({out_features}, options.dtype(torch::kFloat32)),
+        /*requires_grad=*/false);
+    smooth_ = register_parameter("smooth",
+                                 torch::empty({in_features_per_partition},
+                                              options.dtype(torch::kFloat32)),
+                                 /*requires_grad=*/false);
+    // Output dtype for scaled_matmul
+    output_dtype_ = c10::typeMetaToScalarType(options.dtype());
+  } else {
+    weight_ = register_parameter(
+        "weight",
+        torch::empty({out_features, in_features_per_partition}, options),
+        /*requires_grad=*/false);
+  }
 
   if (bias) {
     bias_ = register_parameter("bias",
@@ -236,19 +358,62 @@ RowParallelLinearImpl::RowParallelLinearImpl(
 }
 
 torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
-  namespace F = torch::nn::functional;
   if (!input_is_parallelized_) {
     input = xllm::parallel_state::scatter(input, parallel_args_.tp_group_);
   }
 
-  auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
-                                              : std::nullopt;
-  xllm::kernel::MatmulParams matmul_params;
-  matmul_params.a = input;
-  matmul_params.b = weight_;
-  matmul_params.bias = bias;
+  auto bias = (bias_.defined() && rank_ == 0) ? c10::optional<at::Tensor>(bias_)
+                                              : c10::nullopt;
+  torch::Tensor output;
+  if (quant_args_.quant_method() == "smoothquant") {
+    torch::Tensor quantized_input;
+    torch::Tensor input_scale;
 
-  auto output = xllm::kernel::matmul(matmul_params);
+    // Call scaled_quantize: quantizes input tensor with int8 in
+    // 'dynamic_per_token' mode
+    xllm::kernel::ScaledQuantizeParams quantize_params;
+    quantize_params.x = input;
+    quantize_params.smooth = smooth_;
+    quantize_params.zero = c10::nullopt;
+    quantize_params.token_count = c10::nullopt;
+    quantize_params.gather_index = c10::nullopt;
+    quantize_params.gather_index_start_position = c10::nullopt;
+    quantize_params.output = c10::nullopt;
+    quantize_params.output_scale = c10::nullopt;
+    quantize_params.act_mode = linear_extra_args_.act_mode;
+    quantize_params.active_coef = 1.0;
+    quantize_params.is_gated = linear_extra_args_.is_gated;
+
+    std::tie(quantized_input, input_scale) =
+        xllm::kernel::scaled_quantize(quantize_params);
+
+    // for now, we only support w8a8 quantization
+    xllm::kernel::ScaledMatmulParams matmul_params;
+    matmul_params.a = quantized_input;
+    matmul_params.b = qweight_;
+    matmul_params.a_scale = input_scale;
+    matmul_params.b_scale = per_channel_scale_;
+    matmul_params.output_dtype = output_dtype_;
+    matmul_params.bias = bias;
+    matmul_params.c = std::nullopt;
+    matmul_params.act_mode = "none";
+    matmul_params.quant_bit_size = 8;
+    matmul_params.alpha = 1.0;
+    matmul_params.beta = 0.0;
+    matmul_params.use_hp_active = false;
+    matmul_params.a_quant_bit_size = 8;
+    matmul_params.a_calib = c10::nullopt;
+    matmul_params.b_calib = c10::nullopt;
+    matmul_params.output = c10::nullopt;
+
+    output = xllm::kernel::scaled_matmul(matmul_params);
+  } else {
+    xllm::kernel::MatmulParams matmul_params;
+    matmul_params.a = input;
+    matmul_params.b = weight_;
+    matmul_params.bias = bias;
+    output = xllm::kernel::matmul(matmul_params);
+  }
   if (if_reduce_results_ && world_size_ > 1) {
     output = xllm::parallel_state::reduce(output, parallel_args_.tp_group_);
   }
@@ -260,8 +425,15 @@ void RowParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   const auto rank = rank_;
   const auto world_size = world_size_;
 
-  // load sharded weights on dim 1
-  LOAD_SHARDED_WEIGHT(weight, 1);
+  // If quant_args_ indicates SmoothQuant, load qweight; otherwise, load
+  // normal weight.
+  if (quant_args_.quant_method() == "smoothquant") {
+    LOAD_SHARDED_WEIGHT(qweight, 1);
+    LOAD_WEIGHT(per_channel_scale);
+    LOAD_SHARDED_WEIGHT(smooth, 0);
+  } else {
+    LOAD_SHARDED_WEIGHT(weight, 1);
+  }
 
   if (bias_.defined()) {
     LOAD_WEIGHT(bias);

@@ -154,4 +154,37 @@ torch::Tensor fused_moe(
     int shared_expert_num,
     const std::string& parallel_mode);
 
+std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
+    const torch::Tensor& x,
+    const torch::Tensor& smooth,
+    const std::optional<torch::Tensor>& zero = std::nullopt,
+    const std::optional<torch::Tensor>& token_count = std::nullopt,
+    const std::optional<torch::Tensor>& gather_index = std::nullopt,
+    const std::optional<torch::Tensor>& gather_index_start_position =
+        std::nullopt,
+    const std::optional<torch::Tensor>& output = std::nullopt,
+    const std::optional<torch::Tensor>& output_scale = std::nullopt,
+    const std::string& act_mode = "none",
+    double active_coef = 1.0,
+    bool is_gated = false,
+    at::ScalarType quant_type = at::kChar);
+
+torch::Tensor scaled_matmul(
+    const torch::Tensor& a,
+    const torch::Tensor& b,
+    const std::optional<torch::Tensor>& a_scale,
+    const torch::Tensor& b_scale,
+    c10::ScalarType output_dtype,
+    const std::optional<torch::Tensor>& bias = std::nullopt,
+    const std::optional<torch::Tensor>& c = std::nullopt,
+    const std::string& act_mode = "none",
+    int64_t quant_bit_size = 8,
+    double alpha = 1.0,
+    double beta = 1.0,
+    bool use_hp_active = false,
+    int64_t a_quant_bit_size = -1,
+    const std::optional<torch::Tensor>& a_calib = std::nullopt,
+    const std::optional<torch::Tensor>& b_calib = std::nullopt,
+    const std::optional<torch::Tensor>& output = std::nullopt);
+
 }  // namespace xllm::kernel::mlu

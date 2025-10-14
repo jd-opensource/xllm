@@ -183,5 +183,48 @@ torch::Tensor fused_moe(FusedMoEParams& params) {
   throw std::runtime_error("fused_moe not implemented");
 #endif
 }
+
+std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
+    ScaledQuantizeParams& params) {
+#if defined(USE_MLU)
+  return mlu::scaled_quantize(params.x,
+                              params.smooth,
+                              params.zero,
+                              params.token_count,
+                              params.gather_index,
+                              params.gather_index_start_position,
+                              params.output,
+                              params.output_scale,
+                              params.act_mode,
+                              params.active_coef,
+                              params.is_gated,
+                              params.quant_type);
+#else
+  throw std::runtime_error("scaled_quantize not implemented");
+#endif
+}
+
+torch::Tensor scaled_matmul(ScaledMatmulParams& params) {
+#if defined(USE_MLU)
+  return mlu::scaled_matmul(params.a,
+                            params.b,
+                            params.a_scale,
+                            params.b_scale,
+                            params.output_dtype,
+                            params.bias,
+                            params.c,
+                            params.act_mode,
+                            params.quant_bit_size,
+                            params.alpha,
+                            params.beta,
+                            params.use_hp_active,
+                            params.a_quant_bit_size,
+                            params.a_calib,
+                            params.b_calib,
+                            params.output);
+#else
+  throw std::runtime_error("scaled_matmul not implemented");
+#endif
+}
 }  // namespace kernel
 }  // namespace xllm
