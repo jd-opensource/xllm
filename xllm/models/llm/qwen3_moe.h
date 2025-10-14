@@ -123,7 +123,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 #elif defined(USE_MLU)
     norm_ = register_module(
         "norm",
-        layer::FusedRMSNorm(
+        layer::RmsNorm(
             model_args.hidden_size(), model_args.rms_norm_eps(), options));
     embed_tokens_ =
         register_module("embed_tokens",
@@ -266,13 +266,11 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   at::Device device_;
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
+  layer::RmsNorm norm_{nullptr};
 #if defined(USE_NPU)
   layer::AttentionMask attn_mask_;
-  layer::RmsNorm norm_{nullptr};
   torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};
-#elif defined(USE_MLU)
-  layer::FusedRMSNorm norm_{nullptr};
 #endif
 };
 TORCH_MODULE(Qwen3MoeModel);

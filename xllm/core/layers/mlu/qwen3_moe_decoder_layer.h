@@ -27,7 +27,7 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "fuse_norm.h"
+#include "layers/rms_norm.h"
 #include "qwen3_attention.h"
 #include "qwen3_mlp.h"
 #include "qwen3_moe_mlp.h"
@@ -53,8 +53,8 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module {
   Qwen3Attention attention_;
   Qwen3MLP mlp_{nullptr};
   Qwen3MoeMLP moe_mlp_{nullptr};
-  FusedRMSNorm input_norm_{nullptr};
-  FusedRMSNorm post_norm_{nullptr};
+  RmsNorm input_norm_{nullptr};
+  RmsNorm post_norm_{nullptr};
 };
 
 }  // namespace layer

@@ -32,13 +32,11 @@ Qwen3DecoderImpl::Qwen3DecoderImpl(const ModelContext& context) {
   // Initialize norm layers
   input_norm_ = register_module(
       "input_layernorm",
-      FusedRMSNorm(
-          model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   post_norm_ = register_module(
       "post_attention_layernorm",
-      FusedRMSNorm(
-          model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   // Initialize mlp
   mlp_ = register_module(

@@ -61,7 +61,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 #elif defined(USE_MLU)
     norm_ = register_module(
         "norm",
-        layer::FusedRMSNorm(
+        layer::RmsNorm(
             model_args.hidden_size(), model_args.rms_norm_eps(), options));
     embed_tokens_ =
         register_module("embed_tokens",

@@ -72,10 +72,10 @@ Qwen3Attention::Qwen3Attention(const ModelArgs& args,
 
   // 3. RMSNorm
   q_norm_ = register_module(
-      "q_norm", FusedRMSNorm(args.head_dim(), args.rms_norm_eps(), options));
+      "q_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
 
   k_norm_ = register_module(
-      "k_norm", FusedRMSNorm(args.head_dim(), args.rms_norm_eps(), options));
+      "k_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
 
   // 4. Rotary embedding
   float sm_scale = scaling_;

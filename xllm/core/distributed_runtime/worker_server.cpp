@@ -44,8 +44,6 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
 #include "xllm_kernels/models/base/param/mapping.h"
-#elif defined(USE_MLU)
-#include <torch_mlu/csrc/framework/core/MLUStream.h>
 #endif
 
 namespace xllm {

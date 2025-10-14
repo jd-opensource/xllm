@@ -23,8 +23,8 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "fuse_norm.h"
 #include "layers/linear.h"
+#include "layers/rms_norm.h"
 #include "rotary_embedding.h"
 
 namespace xllm {
@@ -57,8 +57,8 @@ class Qwen3Attention : public torch::nn::Module {
 
   QKVParallelLinear qkv_proj_{nullptr};
   RowParallelLinear o_proj_{nullptr};
-  FusedRMSNorm q_norm_{nullptr};
-  FusedRMSNorm k_norm_{nullptr};
+  RmsNorm q_norm_{nullptr};
+  RmsNorm k_norm_{nullptr};
   Attention attn_;
 
   std::shared_ptr<RotaryEmbedding> rotary_emb_;

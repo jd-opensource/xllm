@@ -29,17 +29,17 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#if defined(USE_NPU)
 #include "core/layers/attention_mask.h"
 #include "core/layers/block_copy.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/pos_embedding.h"
 #include "core/layers/rms_norm.h"
 #include "models/model_registry.h"
+#if defined(USE_NPU)
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #elif defined(USE_MLU)
+#include "core/layers/linear.h"
 #include "core/layers/mlu/attention.h"
-#include "core/layers/mlu/fuse_norm.h"
 #endif
 #include "models/model_registry.h"
 
@@ -385,15 +385,14 @@ class LlmModelImplBase : public torch::nn::Module {
   // test
   //  ParallelEmbedding embed_tokens_{nullptr};
   std::vector<layer::WordEmbedding> embed_tokens_;
-  layer::RmsNorm norm_{nullptr};
 #endif
 
 #if defined(USE_MLU)
   std::vector<int64_t> mrope_section_;
-  layer::FusedRMSNorm norm_{nullptr};
   layer::WordEmbedding embed_tokens_{nullptr};
 #endif
 
+  layer::RmsNorm norm_{nullptr};
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
   std::vector<DecoderLayerType> layers_;

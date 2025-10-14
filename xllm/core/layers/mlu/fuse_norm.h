@@ -37,7 +37,6 @@ class FusedRMSNormImpl : public torch::nn::Module {
   int64_t norm_dim_;
   double eps_;
 };
-TORCH_MODULE(FusedRMSNorm);
 
 }  // namespace layer
 }  // namespace xllm
