@@ -107,10 +107,13 @@ torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
   if (shape.empty()) {
     throw std::invalid_argument("Shape cannot be empty.");
   }
-  torch::manual_seed(seed);
+  at::Generator gen = at::detail::createCPUGenerator();
+  gen = gen.clone();
+  gen.set_current_seed(seed);
   torch::Tensor latents;
   try {
-    latents = torch::randn(shape, options.device(torch::kCPU)).to(options);
+    latents = torch::randn(shape, gen, options.device(torch::kCPU));
+    latents = latents.to(options);
 
   } catch (const std::exception& e) {
     LOG(ERROR) << "Error generating random tensor: " << e.what();
