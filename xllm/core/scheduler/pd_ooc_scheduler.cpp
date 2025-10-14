@@ -201,10 +201,6 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   while (request_queue_.read(request)) {
     CHECK(request);
 
-    // if (request->offline()) {
-    //   DVLOG << "Read an offline request from request_queue_";
-    // }
-
     // expand sequences to the target number if prefix cache is disabled.
     if (!enable_prefix_cache_) {
       // expand sequences to the target number
@@ -220,16 +216,11 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
               << ", linear_saturation_bs_: " << linear_saturation_bs_;
         if (current_offline_decode_bs < linear_saturation_bs_) {
           waiting_priority_queue_offline_.push(request);
-          // DVLOG << "Put an offline request into
-          // waiting_priority_queue_offline_";
         } else {
           deferred_reqs.emplace_back(request);
-          // DVLOG << "Deferred an offline request";
         }
       } else {
         waiting_priority_queue_.push(request);
-        // DVLOG << "Put an online request into
-        // waiting_priority_queue_";
       }
     } else {
       // request from prefill instance in disagge pd mode.
@@ -252,7 +243,6 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
-      // DVLOG << "Found a finished request in running_requests_";
       kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
@@ -277,10 +267,8 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
         handle_running_requests(*it);
         if ((*it)->offline()) {
           running_queue_offline_->push(*it, last_step_prefill_);
-          // DVLOG << "Put an offline request into running_queue_offline_";
         } else {
           running_queue_->push(*it, last_step_prefill_);
-          // DVLOG << "Put an online request into running_queue_";
         }
       }
     } else {
@@ -303,17 +291,12 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
         handle_running_requests(*it);
         if ((*it)->offline()) {
           running_queue_offline_->push(*it, last_step_prefill_);
-          // DVLOG << "Pushed an offline request into running_queue_offline_";
         } else {
           running_queue_->push(*it, last_step_prefill_);
-          // DVLOG << "Pushed an online request into running_queue_";
         }
       }
     }
   } else {
-    // DVLOG << "Using unknown priority_strategy: " <<
-    // options_.priority_strategy(); directly push running requests to the
-    // priority queue
     for (auto it = running_requests_.begin(); it != running_requests_.end();
          ++it) {
       if (*it == nullptr) {
@@ -322,10 +305,8 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
       handle_running_requests(*it);
       if ((*it)->offline()) {
         running_queue_offline_->push(*it);
-        // DVLOG << "Pushed an offline request into running_queue_offline_";
       } else {
         running_queue_->push(*it);
-        // DVLOG << "Pushed an online request into running_queue_";
       }
     }
   }
@@ -453,9 +434,6 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
             util::min(kv_cache_manager_->num_blocks_in_prefix_cache()));
   GAUGE_SET(num_free_blocks, util::max(kv_cache_manager_->num_free_blocks()));
   GAUGE_SET(num_used_blocks, util::min(kv_cache_manager_->num_used_blocks()));
-  if (!batches[0].empty()) {
-    DVLOG << "Built a batch";
-  }
   return batches;
 }
 
@@ -737,7 +715,6 @@ void PDOOCScheduler::handle_decode_requests(
 void PDOOCScheduler::decode_send_pull_signal() {
   while (true) {
     // Wait until step thread triggers
-    // DVLOG << "Waiting for trigger";
     std::unique_lock<std::mutex> lock(decode_send_pull_signal_mtx_);
     decode_send_pull_signal_cv_.wait(
         lock, [this] { return !decode_send_pull_signal_pending_.load(); });
@@ -830,8 +807,6 @@ void PDOOCScheduler::dispatch_requests() {
       // Handle offline requests locally. No need to dispatch them to decoding
       // instances.
       request_queue_.write(request);
-      // DVLOG << "Wrote an offline request to request_queue_: "
-      //      << request->request_id();
       continue;
     }
 
@@ -913,7 +888,6 @@ void PDOOCScheduler::dispatch_requests() {
     if (!requests.empty()) {
       if (step_status_ == StepStatus::OFFLINE_PREFILL) {
         // InterruptionBus::get_instance().publish(true);
-        // DVLOG << "Sent an interruption signal";
         DVLOG << "Interruption disabled";
       }
     }
@@ -1205,9 +1179,6 @@ void PDOOCScheduler::prepare_offline_dispatch_queue() {
   proto::PullSignal pull_signal;
   std::deque<proto::PullSignal> unused_signals;
   while (pull_signals_.try_dequeue(pull_signal)) {
-    // DVLOG << "Processing a pull signal from: " <<
-    // pull_signal.source_instance_name();
-
     auto preferred_len = pull_signal.preferred_req_len();
     auto max_len = pull_signal.max_total_len();
 
