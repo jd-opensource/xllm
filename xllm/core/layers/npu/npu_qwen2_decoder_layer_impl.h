@@ -165,7 +165,7 @@ class NpuQwen2DecoderLayerImpl : public NpuBaseLayer {
 
   int device_id_;
   int32_t layer_id_;
-  
+
   std::vector<std::shared_ptr<at::Tensor>> prefill_tensor_storage_;
   std::vector<std::shared_ptr<at::Tensor>> decode_tensor_storage_;
   std::vector<std::shared_ptr<std::vector<int>>> prefill_vector_storage_;

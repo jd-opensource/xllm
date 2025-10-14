@@ -35,8 +35,7 @@ TORCH_MODULE(QWen2DecoderLayer);
 class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
  public:
   QWen2ModelImpl(const ModelContext& context)
-      : LlmModelImplBase<QWen2DecoderLayer>("qwen2",
-                                             context.get_model_args()) {
+      : LlmModelImplBase<QWen2DecoderLayer>("qwen2", context.get_model_args()) {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();

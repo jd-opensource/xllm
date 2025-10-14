@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "npu_glm4_moe_decoder_layer.h"
+
 #include "common/global_flags.h"
 
 DECLARE_string(rank_tablefile);
@@ -129,7 +130,7 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
 
     {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
 
-    //mlp or shared expert
+    // mlp or shared expert
     {"mlp.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
 
     {"mlp.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
@@ -189,7 +190,7 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
     {"post_attention_layernorm.bias", IN_POST_ATTN_NORM_NEW_BIAS},
 
-    //mlp 
+    // mlp
     {"mlp.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
     {"mlp.gate_proj.weight_offset", IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
     {"mlp.gate_proj.weight_scale", IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
@@ -202,18 +203,24 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"mlp.down_proj.weight_offset", IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
     {"mlp.down_proj.weight_scale", IN_MLP_DOWN_SCALE_SHARED_EXPERT},
 
-    //shared expert
+    // shared expert
     {"mlp.shared_experts.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight_offset",IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight_scale",IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
+    {"mlp.shared_experts.gate_proj.weight_offset",
+     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
+    {"mlp.shared_experts.gate_proj.weight_scale",
+     IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
 
     {"mlp.shared_experts.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight_offset",IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight_scale",IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
+    {"mlp.shared_experts.up_proj.weight_offset",
+     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
+    {"mlp.shared_experts.up_proj.weight_scale",
+     IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
 
     {"mlp.shared_experts.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight_offset",IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight_scale",IN_MLP_DOWN_SCALE_SHARED_EXPERT},
+    {"mlp.shared_experts.down_proj.weight_offset",
+     IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
+    {"mlp.shared_experts.down_proj.weight_scale",
+     IN_MLP_DOWN_SCALE_SHARED_EXPERT},
 
     // MoE Gate
     {"mlp.gate.weight", BLOCK_SPARSE_MOE_GATE_WEIGHT},
@@ -236,8 +243,7 @@ static const std::unordered_map<std::string, std::vector<int>>
         {"input_layernorm.weight",
          {IN_INPUT_NORM_WEIGHT, IN_INPUT_NORM_NEW_WEIGHT}},
         {"post_attention_layernorm.weight",
-         {IN_POST_ATTN_NORM_WEIGHT,
-          IN_POST_ATTN_NORM_NEW_WEIGHT}},
+         {IN_POST_ATTN_NORM_WEIGHT, IN_POST_ATTN_NORM_NEW_WEIGHT}},
 };
 
 static const std::map<int, int> WEIGHT_SHARD = {
@@ -253,7 +259,6 @@ static const std::map<int, int> WEIGHT_SHARD = {
     {IN_MLP_GATEUP_WEIGHT, 0},
     {IN_MLP_DOWN_WEIGHT, 1},
 };
-
 
 static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
     {IN_QKV_WEIGHT_0, 0},
@@ -277,7 +282,7 @@ static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
 };
 
 Glm4MoeDecoderImpl::Glm4MoeDecoderImpl(const ModelContext& context,
-                                         const int32_t layer_id)
+                                       const int32_t layer_id)
     : NpuBaseLayer(context),
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
@@ -286,7 +291,7 @@ Glm4MoeDecoderImpl::Glm4MoeDecoderImpl(const ModelContext& context,
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
-      
+
   num_experts_ = model_args.num_experts();
   ep_size_ = parallel_args.ep_size();
   ep_local_tp_size_ = parallel_args.world_size() / ep_size_;
@@ -301,12 +306,12 @@ Glm4MoeDecoderImpl::Glm4MoeDecoderImpl(const ModelContext& context,
   dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
   CHECK_EQ(parallel_args.world_size(), dp_size_ * dp_local_tp_size_);
   dp_local_tp_rank_ = parallel_args.rank() % dp_local_tp_size_;
-  
+
   n_kv_heads_ = static_cast<int32_t>(model_args.n_kv_heads().value());
 
   param_from_args(prefill_param_, model_args, parallel_args, true);
   param_from_args(decode_param_, model_args, parallel_args, false);
-  
+
   initialize_tensors(options);
 }
 
@@ -333,11 +338,10 @@ void Glm4MoeDecoderImpl::initialize_tensors(
   initialize_weight_tensors(options);
 }
 
-void Glm4MoeDecoderImpl::param_from_args(
-    atb_speed::moe::MoeLayerParam& param,
-    const ModelArgs& args,
-    const ParallelArgs& parallel_args,
-    bool is_prefill) {
+void Glm4MoeDecoderImpl::param_from_args(atb_speed::moe::MoeLayerParam& param,
+                                         const ModelArgs& args,
+                                         const ParallelArgs& parallel_args,
+                                         bool is_prefill) {
   initialize_basic_parameters(param, args, parallel_args, is_prefill);
   initialize_attention_parameters(param, args, parallel_args);
   initialize_mlp_parameters(param, args, parallel_args);
@@ -380,7 +384,6 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
     bool is_prefill) {
-
   param.isFA = false;
   param.isPrefill = is_prefill;
   param.isBF16 = args.dtype() == "bfloat16";
@@ -401,7 +404,7 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
   // param.rankTableFile = FLAGS_rank_tablefile;
 
   param.layerId = layer_id_;
-  param.numHiddenLayers =  args.n_layers();
+  param.numHiddenLayers = args.n_layers();
   if (quantize_type_.empty()) {
     param.enableGMMSwigluQuant = false;
   } else {
@@ -415,11 +418,12 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
   param.useQKNorm = true;
   param.hiddenSizePerAttentionHead = args.head_dim();
   std::optional<long int> optionalValue = args.n_kv_heads();
-  param.numKeyValueHeadsPerRank =std::max(1, static_cast<int>(optionalValue.value()) / parallel_args.world_size());  
-    
+  param.numKeyValueHeadsPerRank = std::max(
+      1, static_cast<int>(optionalValue.value()) / parallel_args.world_size());
+
   param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
 
-  param.linearTransposeType = {1, -1, -1, 1, -1, -1,-1};
+  param.linearTransposeType = {1, -1, -1, 1, -1, -1, -1};
   // param.worldSize = parallel_args.world_size();
 }
 
@@ -455,7 +459,7 @@ void Glm4MoeDecoderImpl::initialize_mlp_parameters(
   param.enableDispatchCombineV2 = true;
   // param.deviceExpert.resize(args.n_routed_experts());
   std::iota(
-    param.deviceExpert.begin(), param.deviceExpert.end(), start_expert_id_);
+      param.deviceExpert.begin(), param.deviceExpert.end(), start_expert_id_);
   // param.maskStartIdx = 0;
   param.routingMethod = "noAuxTc";
 
@@ -471,7 +475,12 @@ void Glm4MoeDecoderImpl::initialize_parallel_parameters(
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = dp_local_tp_size_;
   param.mapping = parallel_args.mapping();
-  param.tensorParallelInfo = {parallel_args.rank(),parallel_args.world_size(), FLAGS_communication_backend, FLAGS_rank_tablefile, nullptr, ""};
+  param.tensorParallelInfo = {parallel_args.rank(),
+                              parallel_args.world_size(),
+                              FLAGS_communication_backend,
+                              FLAGS_rank_tablefile,
+                              nullptr,
+                              ""};
 
   param.PrintParam();
   param.maxDecodeDpTokenSize = 0;  // TODO
@@ -483,11 +492,11 @@ void Glm4MoeDecoderImpl::initialize_quantization_parameters(
     param.packQuantType = {static_cast<int>(PackType::ALL_FP),
                            static_cast<int>(PackType::ALL_FP)};
     param.linearQuantType = {static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::FP),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INVALID)};
+                             static_cast<int>(LinearType::INVALID),
+                             static_cast<int>(LinearType::INVALID),
+                             static_cast<int>(LinearType::FP),
+                             static_cast<int>(LinearType::INVALID),
+                             static_cast<int>(LinearType::INVALID)};
     param.mlpLinearQuantType = {static_cast<int>(LinearType::FP),
                                 static_cast<int>(LinearType::INVALID),
                                 static_cast<int>(LinearType::FP),
@@ -508,11 +517,11 @@ void Glm4MoeDecoderImpl::initialize_quantization_parameters(
     param.packQuantType = {static_cast<int>(PackType::ALL_W8A8_DYNAMIC_ANTI),
                            static_cast<int>(PackType::ALL_W8A8_DYNAMIC_ANTI)};
     param.linearQuantType = {static_cast<int>(LinearType::INT),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INT),
-                                 static_cast<int>(LinearType::INVALID),
-                                 static_cast<int>(LinearType::INVALID)};
+                             static_cast<int>(LinearType::INVALID),
+                             static_cast<int>(LinearType::INVALID),
+                             static_cast<int>(LinearType::INT),
+                             static_cast<int>(LinearType::INVALID),
+                             static_cast<int>(LinearType::INVALID)};
     param.mlpLinearQuantType = {static_cast<int>(LinearType::INVALID),
                                 static_cast<int>(LinearType::INVALID),
                                 static_cast<int>(LinearType::INVALID),
@@ -559,8 +568,8 @@ int Glm4MoeDecoderImpl::get_mapped_index(
 }
 
 void Glm4MoeDecoderImpl::process_expert_weights(const StateDict& state_dict,
-                                                 const std::string& name,
-                                                 const torch::Tensor& tensor) {
+                                                const std::string& name,
+                                                const torch::Tensor& tensor) {
   int expert_index = extract_expert_index(name);
   if (expert_index < start_expert_id_ || expert_index > end_expert_id_) {
     return;
@@ -607,18 +616,17 @@ void Glm4MoeDecoderImpl::process_shared_expert_weights(
   }
 
   const bool is_sharded = shard_map.count(index);
-  tmp_tensor = is_sharded ? get_sharded_tensor(
-                                state_dict, name, shard_map.at(index))
-                                .to(device_)
-                          : tensor.to(device_);
-  
+  tmp_tensor = is_sharded
+                   ? get_sharded_tensor(state_dict, name, shard_map.at(index))
+                         .to(device_)
+                   : tensor.to(device_);
+
   if (absl::StrContains(name, "down_proj")) {
     at_weight_tensors_[index] = tmp_tensor;
   } else {
     shared_experts_weights_[name] = tmp_tensor;
   }
 }
-
 
 void Glm4MoeDecoderImpl::process_mlp_common_weights(
     const StateDict& state_dict,
@@ -651,8 +659,8 @@ void Glm4MoeDecoderImpl::process_mlp_common_weights(
 }
 
 void Glm4MoeDecoderImpl::process_general_weights(const StateDict& state_dict,
-                                                  const std::string& name,
-                                                  const torch::Tensor& tensor) {
+                                                 const std::string& name,
+                                                 const torch::Tensor& tensor) {
   const auto& weight_mapping = (quantize_type_.compare("w8a8_dynamic") == 0)
                                    ? WEIGHT_MAPPING_W8A8
                                    : WEIGHT_MAPPING;
@@ -669,26 +677,24 @@ void Glm4MoeDecoderImpl::process_general_weights(const StateDict& state_dict,
   torch::Tensor tmp_tensor;
   int32_t tp_rank = dp_local_tp_rank_;
   int32_t tp_size = dp_local_tp_size_;
-  if(index==IN_QKV_WEIGHT_1 || index == IN_QKV_WEIGHT_2 || index == IN_QKV_BIAS_1 || index == IN_QKV_BIAS_2){
-    if(n_kv_heads_ < dp_local_tp_size_){
+  if (index == IN_QKV_WEIGHT_1 || index == IN_QKV_WEIGHT_2 ||
+      index == IN_QKV_BIAS_1 || index == IN_QKV_BIAS_2) {
+    if (n_kv_heads_ < dp_local_tp_size_) {
       int32_t repeat_times = (dp_local_tp_size_ / n_kv_heads_);
       tp_rank = tp_rank / repeat_times;
       tp_size = n_kv_heads_;
     }
   }
   if (is_sharded) {
-    tmp_tensor = get_sharded_tensor(state_dict,
-                                    name,
-                                    shard_map.at(index),
-                                    tp_rank,
-                                    tp_size)
+    tmp_tensor = get_sharded_tensor(
+                     state_dict, name, shard_map.at(index), tp_rank, tp_size)
                      .to(device_);
   } else {
     tmp_tensor = tensor.to(device_);
   }
-  if(index == BLOCK_SPARSE_MOE_GATE_BIAS){
-    auto min_val = tmp_tensor.min(); 
-    tmp_tensor = tmp_tensor - min_val;    
+  if (index == BLOCK_SPARSE_MOE_GATE_BIAS) {
+    auto min_val = tmp_tensor.min();
+    tmp_tensor = tmp_tensor - min_val;
   }
   correct_tensor_dtype(tmp_tensor, name);
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
@@ -765,11 +771,12 @@ void Glm4MoeDecoderImpl::verify_loaded_weights(
     const std::string& prefix) const {
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     if (name == "down_proj.weight" || name == "gate_proj.weight" ||
-        name == "up_proj.weight" || name == "mlp.gate.weight"|| name == "mlp.gate.e_score_correction_bias") {
+        name == "up_proj.weight" || name == "mlp.gate.weight" ||
+        name == "mlp.gate.e_score_correction_bias") {
       continue;
     }
     CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({0}))
-        << layer_id_<<"-weight is not loaded for " << name;
+        << layer_id_ << "-weight is not loaded for " << name;
   }
 }
 
@@ -790,16 +797,16 @@ void Glm4MoeDecoderImpl::merge_loaded_weights() {
       torch::zeros({1}, torch::kFloat16).to(device_);
 
   at_weight_tensors_[IN_QKV_BIAS_0] =
-  torch::cat({at_weight_tensors_[IN_QKV_BIAS_0],
-              at_weight_tensors_[IN_QKV_BIAS_1],
-              at_weight_tensors_[IN_QKV_BIAS_2]},
-              0)
-      .contiguous();
+      torch::cat({at_weight_tensors_[IN_QKV_BIAS_0],
+                  at_weight_tensors_[IN_QKV_BIAS_1],
+                  at_weight_tensors_[IN_QKV_BIAS_2]},
+                 0)
+          .contiguous();
   at_weight_tensors_[IN_QKV_BIAS_1] =
       torch::zeros({1}, torch::kFloat16).to(device_);
   at_weight_tensors_[IN_QKV_BIAS_2] =
       torch::zeros({1}, torch::kFloat16).to(device_);
-  
+
   // if(layer_id_ >= prefill_param_.firstKDenseReplace){
   //     at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT] =
   //     at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT].transpose(0, 1);
@@ -853,9 +860,9 @@ void Glm4MoeDecoderImpl::merge_loaded_weights() {
         at_weight_tensors_[IN_QKV_DENSE_SCALE].contiguous().view(-1);
   }
 
-
-  // auto min_val = at_weight_tensors_[BLOCK_SPARSE_MOE_GATE_BIAS].min(); 
-  // at_weight_tensors_[BLOCK_SPARSE_MOE_GATE_BIAS] = at_weight_tensors_[BLOCK_SPARSE_MOE_GATE_BIAS] - min_val;    
+  // auto min_val = at_weight_tensors_[BLOCK_SPARSE_MOE_GATE_BIAS].min();
+  // at_weight_tensors_[BLOCK_SPARSE_MOE_GATE_BIAS] =
+  // at_weight_tensors_[BLOCK_SPARSE_MOE_GATE_BIAS] - min_val;
   // at_weight_tensors_[BLOCK_SPARSE_MOE_GATE_WEIGHT] =
   //       torch::roll(at_weight_tensors_[BLOCK_SPARSE_MOE_GATE_WEIGHT],
   //                   {-1 * ep_rank_ * num_experts_per_partition_},
@@ -929,7 +936,6 @@ void Glm4MoeDecoderImpl::merge_shared_experts_weights() {
     }
   }
 }
-
 
 void Glm4MoeDecoderImpl::merge_experts_weights() {
   try {
@@ -1022,11 +1028,11 @@ int64_t Glm4MoeDecoderImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t Glm4MoeDecoderImpl::init_node(
-    atb_speed::Model::Node& node,
-    atb_speed::moe::MoeLayerParam& param) {
+int64_t Glm4MoeDecoderImpl::init_node(atb_speed::Model::Node& node,
+                                      atb_speed::moe::MoeLayerParam& param) {
   atb::Operation* operation = nullptr;
-  atb_speed::glm::MoeDecoderLayer<atb::infer::RmsNormParam> decoder_layer(param);
+  atb_speed::glm::MoeDecoderLayer<atb::infer::RmsNormParam> decoder_layer(
+      param);
   decoder_layer.BuildGraph(&operation);
   node.operation.reset(operation);
   if (node.operation == nullptr) {
@@ -1054,18 +1060,19 @@ int64_t Glm4MoeDecoderImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor Glm4MoeDecoderImpl::forward(torch::Tensor& x,
-                                           torch::Tensor& cos_pos,
-                                           torch::Tensor& sin_pos,
-                                           torch::Tensor& attn_mask,
-                                           KVCache& kv_cache,
-                                           const ModelInputParams& input_params,
-                                           torch::Tensor& expert_array,
-                                           std::vector<aclrtEvent*> event,
-                                           std::vector<std::atomic<bool>*> event_flag,
-                                           int node_id) {
+torch::Tensor Glm4MoeDecoderImpl::forward(
+    torch::Tensor& x,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    torch::Tensor& attn_mask,
+    KVCache& kv_cache,
+    const ModelInputParams& input_params,
+    torch::Tensor& expert_array,
+    std::vector<aclrtEvent*> event,
+    std::vector<std::atomic<bool>*> event_flag,
+    int node_id) {
   atb::Status st;
-   if (input_params.decode_seq_range.second !=
+  if (input_params.decode_seq_range.second !=
       input_params.q_seq_lens.size(0) - 1) {
     build_node_variant_pack(prefill_node_,
                             x,
@@ -1123,9 +1130,9 @@ void Glm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+      atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
-        const_cast<int32_t*>(input_params.kv_seq_lens_vec.data());
+      const_cast<int32_t*>(input_params.kv_seq_lens_vec.data());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7).hostData =
@@ -1145,11 +1152,11 @@ void Glm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(one_hot_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
       atb_speed::Utils::AtTensor2Tensor(zero_hot_);
-  
+
   int32_t input_idx = WEIGHT_COUNT_PER_LAYER + 15;
-  
+
   if (is_prefill &&
-    (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
     node.variantPack.inTensors.at(input_idx) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
     node.variantPack.inTensors.at(input_idx).hostData =
@@ -1173,12 +1180,11 @@ void Glm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(at_start_expert_id_);
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(at_in_device_expert_count_);
-      
-  node.variantPack.inTensors.at(input_idx++) =
-      atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
-  node.variantPack.inTensors.at(input_idx++) =
-      atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
+  node.variantPack.inTensors.at(input_idx++) =
+      atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
+  node.variantPack.inTensors.at(input_idx++) =
+      atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     CHECK_THROW(node.inTensors.at(i) == nullptr,
@@ -1190,7 +1196,7 @@ void Glm4MoeDecoderImpl::build_node_variant_pack(
 }
 
 Glm4MoeDecoder::Glm4MoeDecoder(const ModelContext& context,
-                                 const int32_t layer_id)
+                               const int32_t layer_id)
     : ModuleHolder(create_glm4_moe_decoder_layer(context, layer_id)) {}
 
 std::shared_ptr<Glm4MoeDecoderImpl> create_glm4_moe_decoder_layer(

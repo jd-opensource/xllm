@@ -37,11 +37,10 @@ limitations under the License.
 
 namespace xllm {
 
-torch::Tensor get_concat_rotary_embedding(
-    int64_t dim,
-    int64_t seq_len,
-    double rope_theta,
-    const torch::TensorOptions& options) {
+torch::Tensor get_concat_rotary_embedding(int64_t dim,
+                                          int64_t seq_len,
+                                          double rope_theta,
+                                          const torch::TensorOptions& options) {
   auto options_new =
       torch::device(options.device()).dtype(at::ScalarType::Double);
   auto inv_freq =

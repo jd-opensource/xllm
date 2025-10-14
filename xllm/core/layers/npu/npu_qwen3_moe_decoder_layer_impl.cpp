@@ -663,11 +663,11 @@ void NpuQwen3MoeDecoderLayerImpl::merge_loaded_weights() {
       torch::zeros({1}, torch::kFloat16).to(device_);
 
   at_weight_tensors_[IN_QKV_BIAS_0] =
-    torch::cat({at_weight_tensors_[IN_QKV_BIAS_0],
-                at_weight_tensors_[IN_QKV_BIAS_1],
-                at_weight_tensors_[IN_QKV_BIAS_2]},
-                0)
-        .contiguous();
+      torch::cat({at_weight_tensors_[IN_QKV_BIAS_0],
+                  at_weight_tensors_[IN_QKV_BIAS_1],
+                  at_weight_tensors_[IN_QKV_BIAS_2]},
+                 0)
+          .contiguous();
   at_weight_tensors_[IN_QKV_BIAS_1] =
       torch::zeros({1}, torch::kFloat16).to(device_);
   at_weight_tensors_[IN_QKV_BIAS_2] =

@@ -84,9 +84,10 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
-    embed_tokens_ = register_module("embed_tokens", layer::WordEmbedding(context));
+    embed_tokens_ =
+        register_module("embed_tokens", layer::WordEmbedding(context));
 
-    atb_pos_emb_ = AtbRotaryEmbedding(context);
+    atb_pos_emb_ = layer::PosEmbedding(context);
     cos_sin_ = get_concat_rotary_embedding(64,
                                            model_args.max_position_embeddings(),
                                            model_args.rope_theta(),
@@ -127,7 +128,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
         positions = torch::tensor({0}).to(torch::kInt32).to(device_);
       }
     }
-    
+
     auto h = embed_tokens_(tokens, 0);
     int64_t input_length = tokens.size(0);
     torch::Tensor expert_array = torch::arange(
@@ -162,10 +163,9 @@ class Glm4MoeModelImpl : public torch::nn::Module {
       std::vector<std::atomic<bool>*> event_flags(1, nullptr);
       if (input_params.layer_synchronizer != nullptr) {
         events[0] = input_params.layer_synchronizer->get_event(i);
-        event_flags[0] =
-            input_params.layer_synchronizer->get_event_flag(i);
+        event_flags[0] = input_params.layer_synchronizer->get_event_flag(i);
       }
-      
+
       auto& layer = layers_[i];
       layer(h,
             cos_pos,
@@ -216,7 +216,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
   void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     embed_tokens_ = word_embedding[0];
   }
-  
+
  private:
   torch::nn::ModuleList blocks_{nullptr};
   std::vector<Glm4MoeDecoderLayer> layers_;

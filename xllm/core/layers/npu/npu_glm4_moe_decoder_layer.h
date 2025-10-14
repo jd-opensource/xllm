@@ -21,12 +21,12 @@ limitations under the License.
 
 #include <nlohmann/json.hpp>
 
-#include "npu_base_layer.h"
 #include "framework/model/model_args.h"
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/parallel_state.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
+#include "npu_base_layer.h"
 #include "xllm_kernels/models/glm/layer/moe_decoder_layer.h"
 
 namespace xllm {
@@ -35,7 +35,7 @@ namespace layer {
 class Glm4MoeDecoderImpl : public NpuBaseLayer {
  public:
   explicit Glm4MoeDecoderImpl(const ModelContext& context,
-                               const int32_t layer_id);
+                              const int32_t layer_id);
 
   ~Glm4MoeDecoderImpl() {};
 
@@ -82,21 +82,18 @@ class Glm4MoeDecoderImpl : public NpuBaseLayer {
                                    const ParallelArgs& parallel_args,
                                    bool is_prefill);
 
-  void initialize_attention_parameters(
-      atb_speed::moe::MoeLayerParam& param,
-      const ModelArgs& args,
-      const ParallelArgs& parallel_args);
+  void initialize_attention_parameters(atb_speed::moe::MoeLayerParam& param,
+                                       const ModelArgs& args,
+                                       const ParallelArgs& parallel_args);
 
   void initialize_mlp_parameters(atb_speed::moe::MoeLayerParam& param,
                                  const ModelArgs& args,
                                  const ParallelArgs& parallel_args);
 
-  void initialize_parallel_parameters(
-      atb_speed::moe::MoeLayerParam& param,
-      const ParallelArgs& parallel_args);
+  void initialize_parallel_parameters(atb_speed::moe::MoeLayerParam& param,
+                                      const ParallelArgs& parallel_args);
 
-  void initialize_quantization_parameters(
-      atb_speed::moe::MoeLayerParam& param);
+  void initialize_quantization_parameters(atb_speed::moe::MoeLayerParam& param);
 
   torch::Tensor get_sharded_tensor(const StateDict& state_dict,
                                    const std::string& name,

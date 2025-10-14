@@ -31,8 +31,7 @@ TORCH_MODULE(QWen3DecoderLayer);
 class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
  public:
   QWen3ModelImpl(const ModelContext& context)
-      : LlmModelImplBase<QWen3DecoderLayer>("qwen3",
-                                             context.get_model_args()) {
+      : LlmModelImplBase<QWen3DecoderLayer>("qwen3", context.get_model_args()) {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
@@ -45,9 +44,9 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       atb_pos_embeds_.push_back(layer::PosEmbedding(context));
     }
     cos_sin_ = get_concat_rotary_embedding(128,
-                                          model_args.max_position_embeddings(),
-                                          model_args.rope_theta(),
-                                          options);
+                                           model_args.max_position_embeddings(),
+                                           model_args.rope_theta(),
+                                           options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     // encode_attn_mask_ =
     //   layer::AttentionMask(options.device(),
