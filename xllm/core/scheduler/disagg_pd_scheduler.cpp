@@ -100,17 +100,15 @@ void DisaggPDScheduler::profile_ttft() {
     max_context_len =
         std::min(max_context_len, options_.max_tokens_per_batch());
   }
-  int32_t vocab_size = model_args.vocab_size();
 
   // warm up
-  profile_manager_->run_request(max_context_len, 0, vocab_size);
+  profile_manager_->run_request(max_context_len, 0);
 
   // get TTFT starting from max_context_len, dividing the token length by 2 in
   // each loop iteration
   for (int32_t token_length = max_context_len; token_length > 1;
        token_length >>= 1) {
-    int64_t latency =
-        profile_manager_->run_request(token_length, 0, vocab_size);
+    int64_t latency = profile_manager_->run_request(token_length, 0);
     instance_info_.ttft_profiling_data.emplace_back(
         std::make_pair(token_length, latency));
   }
