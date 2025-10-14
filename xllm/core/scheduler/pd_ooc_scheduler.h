@@ -37,6 +37,9 @@ limitations under the License.
 
 namespace xllm {
 
+// Show the type of requests handled by current step.
+// Status DECODE means both online and offline decoding requests.
+// Status IDLE means current step is not handling any request.
 enum class StepStatus { ONLINE_PREFILL, OFFLINE_PREFILL, DECODE, IDLE };
 
 // Online-offline co-location scheduler in Disaggregated PD mode

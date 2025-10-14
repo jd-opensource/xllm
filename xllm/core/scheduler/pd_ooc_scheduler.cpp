@@ -1396,28 +1396,15 @@ void PDOOCScheduler::prefill_send_multi_generations() {
       auto multi_req = multi_reqs.mutable_multi_gens()->Add();
       multi_req->set_req_id(request->request_id());
 
-      // Get all generated tokens from the sequence
+      // Get all generated token IDs from the sequence
       auto* sequence = request->sequences()[0].get();
-      auto generated_tokens = sequence->get_generated_tokens();
-      // auto generated_tokens =
-      // request->sequences()[0]->get_generated_tokens();
+      auto generated_token_ids = sequence->get_generated_tokens();
 
-      // Add all generated tokens to migration_tokens
-      for (const auto& token : generated_tokens) {
+      // Add all generated token IDs to migration_tokens
+      for (const auto token_id : generated_token_ids) {
         auto remote_token = multi_req->mutable_tokens()->Add();
-        remote_token->set_token_id(token.id);
-        remote_token->set_has_logprob(token.logprob.has_value());
-        if (token.logprob.has_value()) {
-          remote_token->set_logprob(token.logprob.value());
-        }
-        if (!token.top_tokens.empty() && !token.top_logprobs.empty()) {
-          for (auto top_token : token.top_tokens) {
-            remote_token->mutable_top_tokens()->Add(top_token);
-          }
-          for (auto top_logprob : token.top_logprobs) {
-            remote_token->mutable_top_logprobs()->Add(top_logprob);
-          }
-        }
+        remote_token->set_token_id(token_id);
+        remote_token->set_has_logprob(false);
       }
 
       multi_req->set_kv_cache_transfer_mode(options_.kv_cache_transfer_mode());
