@@ -346,10 +346,16 @@ void AsyncResponseProcessor::process_stream_requests(
 
 // for batch generate, wait all response done.
 void AsyncResponseProcessor::wait_completion() {
-  while (!response_threadpool_.empty()) {
-    // NOTE: FIXME
-    sleep(1);
+  size_t thread_num = response_threadpool_.size();
+  // Add a task to each thread, and when all tasks are completed, it indicates
+  // that all previously scheduled tasks in the thread pool have finished
+  // executing.
+  BlockingCounter counter(thread_num);
+  for (size_t i = 0; i < thread_num; ++i) {
+    auto runnable = [&counter]() mutable { counter.decrement_count(); };
+    response_threadpool_.schedule_with_tid(std::move(runnable), i);
   }
+  counter.wait();
 }
 
 }  // namespace xllm
