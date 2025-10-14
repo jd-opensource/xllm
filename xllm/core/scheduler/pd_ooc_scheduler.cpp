@@ -150,7 +150,7 @@ PDOOCScheduler::~PDOOCScheduler() {
 }
 
 // 🟡
-proto::PDOOCService_Stub* PDOOCScheduler::create_rpc_channel(
+proto::DisaggPDService_Stub* PDOOCScheduler::create_rpc_channel(
     const std::string& instance_name) {
   std::lock_guard<std::mutex> lock(instance_channel_map_mutex_);
   auto it = instance_channel_map_.find(instance_name);
@@ -179,7 +179,8 @@ proto::PDOOCService_Stub* PDOOCScheduler::create_rpc_channel(
       return nullptr;
     }
     // req_to_channel_map_[request.request_id] = channel;
-    proto::PDOOCService_Stub* stub = new proto::PDOOCService_Stub(channel);
+    proto::DisaggPDService_Stub* stub =
+        new proto::DisaggPDService_Stub(channel);
     instance_channel_map_[instance_name] = stub;
     return stub;
   }
@@ -807,7 +808,7 @@ void PDOOCScheduler::decode_send_pull_signal() {
     DVLOG << "Selected prefill instance: " << selected_prefill_instance;
 
     // Build a stub
-    proto::PDOOCService_Stub* stub =
+    proto::DisaggPDService_Stub* stub =
         create_rpc_channel(selected_prefill_instance);
     if (!stub) {
       LOG(ERROR) << "Failed to create RPC channel to prefill instance: "
@@ -906,7 +907,7 @@ void PDOOCScheduler::dispatch_requests() {
     std::vector<std::shared_ptr<Request>> requests;
     requests.emplace_back(request);
     std::string selected_instance = "";
-    proto::PDOOCService_Stub* stub = nullptr;
+    proto::DisaggPDService_Stub* stub = nullptr;
     if (!request->state().decode_address.empty() && requests.size() == 1) {
       selected_instance = request->state().decode_address;
       stub = create_rpc_channel(request->state().decode_address);
@@ -1084,7 +1085,7 @@ void PDOOCScheduler::prefill_send_first_generation() {
       //*gens.mutable_gens()->Add() = gen;
 
       // send first gens to remote instance
-      proto::PDOOCService_Stub* stub = nullptr;
+      proto::DisaggPDService_Stub* stub = nullptr;
       {
         std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
         // now we only support one request once.
@@ -1173,7 +1174,7 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
-  proto::PDOOCService_Stub* stub = create_rpc_channel(prefill_instance_name);
+  proto::DisaggPDService_Stub* stub = create_rpc_channel(prefill_instance_name);
   if (!stub) {
     LOG(ERROR) << "Failed to create rpc channel for prefill instance: "
                << prefill_instance_name;
@@ -1388,7 +1389,7 @@ bool PDOOCScheduler::decode_send_stream_generation(
     request_thread_idx = it->second;
   }
 
-  proto::PDOOCService_Stub* stub = nullptr;
+  proto::DisaggPDService_Stub* stub = nullptr;
   {
     std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
     stub = req_to_channel_map_[output.request_id];
@@ -1517,9 +1518,9 @@ std::vector<bool> PDOOCScheduler::decode_send_stream_generations(
   // 2. response to prefill instance
   // find all prefill stubs
   // record the indexes for each prefill stub
-  std::unordered_map<proto::PDOOCService_Stub*, std::vector<RequestOutput>>
+  std::unordered_map<proto::DisaggPDService_Stub*, std::vector<RequestOutput>>
       per_outputs;
-  std::unordered_map<proto::PDOOCService_Stub*, std::vector<int>>
+  std::unordered_map<proto::DisaggPDService_Stub*, std::vector<int>>
       per_outputs_idx;
   {
     std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
@@ -1531,7 +1532,7 @@ std::vector<bool> PDOOCScheduler::decode_send_stream_generations(
         send_status[i] = false;
         continue;
       }
-      proto::PDOOCService_Stub* req_stub = it->second;
+      proto::DisaggPDService_Stub* req_stub = it->second;
       if (per_outputs.find(req_stub) == per_outputs.end()) {
         std::vector<RequestOutput> o;
         o.emplace_back(outputs[i]);
@@ -1768,7 +1769,7 @@ void PDOOCScheduler::dispatch_offline_requests() {
     }
 
     // Create a RPC stub with the target decoding instance
-    proto::PDOOCService_Stub* stub = create_rpc_channel(target_instance);
+    proto::DisaggPDService_Stub* stub = create_rpc_channel(target_instance);
     if (!stub) {
       LOG(ERROR) << "Failed to create RPC channel to target instance: "
                  << target_instance;
@@ -1962,7 +1963,7 @@ void PDOOCScheduler::prefill_send_multi_generations() {
       }
 
       // send multi generations to remote instance
-      proto::PDOOCService_Stub* stub = create_rpc_channel(target_instance);
+      proto::DisaggPDService_Stub* stub = create_rpc_channel(target_instance);
       if (!stub) {
         LOG(ERROR) << "Failed to create RPC channel to target instance: "
                    << target_instance;

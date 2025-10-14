@@ -203,13 +203,6 @@ service DisaggPDService {
   rpc Generations(DisaggStreamGenerations) returns (StatusSet) {}
   rpc AddNewRequests(DisaggRequests) returns (DisaggResponses) {}
   rpc FirstGeneration(DisaggGenerations) returns (Status) {}
-}
-
-service PDOOCService {
-  rpc Generation(DisaggStreamGeneration) returns (Status) {}
-  rpc Generations(DisaggStreamGenerations) returns (StatusSet) {}
-  rpc AddNewRequests(DisaggRequests) returns (DisaggResponses) {}
-  rpc FirstGeneration(DisaggGenerations) returns (Status) {}
   rpc MultiGenerations(MultiGenerationsRequests) returns (Status) {}
   rpc SendPullSignal(PullSignal) returns (Status) {}
 }

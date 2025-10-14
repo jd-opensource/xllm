@@ -24,6 +24,7 @@ namespace xllm {
 class DisaggPDService : public proto::DisaggPDService {
  public:
   explicit DisaggPDService(DisaggPDScheduler* scheduler, Engine* engine);
+  explicit DisaggPDService() {}
   virtual ~DisaggPDService() = default;
 
   // for prefill recv decode response
@@ -50,9 +51,22 @@ class DisaggPDService : public proto::DisaggPDService {
                        proto::Status* response,
                        ::google::protobuf::Closure* done) override;
 
+  // for decode recv multiple tokens from prefill
+  virtual void MultiGenerations(::google::protobuf::RpcController* controller,
+                                const proto::MultiGenerationsRequests* request,
+                                proto::Status* response,
+                                ::google::protobuf::Closure* done) override;
+
+  virtual void SendPullSignal(::google::protobuf::RpcController* controller,
+                              const proto::PullSignal* request,
+                              proto::Status* response,
+                              ::google::protobuf::Closure* done) override;
+
+ protected:
+  std::unique_ptr<DisaggPDServiceImpl> disagg_pd_service_impl_;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(DisaggPDService);
-  std::unique_ptr<DisaggPDServiceImpl> disagg_pd_service_impl_;
 };
 
 }  // namespace xllm

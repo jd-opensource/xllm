@@ -127,7 +127,7 @@ class PDOOCScheduler : public DisaggPDScheduler {
 
   // create rpc channel to remote instance,
   // we can get remote instance info from master service.
-  proto::PDOOCService_Stub* create_rpc_channel(
+  proto::DisaggPDService_Stub* create_rpc_channel(
       const std::string& instance_name);
 
   void start_rpc_server() override;
@@ -143,14 +143,14 @@ class PDOOCScheduler : public DisaggPDScheduler {
   // Select a prefill instance for pulling requests
   std::string select_prefill_instance();
 
-  // Override members from DisaggPDScheduler to use PDOOCService_Stub
-  // request_id -> brpc channel using PDOOCService_Stub
-  std::unordered_map<std::string, proto::PDOOCService_Stub*>
+  // Override members from DisaggPDScheduler to use DisaggPDService_Stub
+  // request_id -> brpc channel using DisaggPDService_Stub
+  std::unordered_map<std::string, proto::DisaggPDService_Stub*>
       req_to_channel_map_;
-  std::unordered_map<std::string, proto::PDOOCService_Stub*>
+  std::unordered_map<std::string, proto::DisaggPDService_Stub*>
       instance_channel_map_;
   // for decode batch response, map prefill stub to thread index
-  std::unordered_map<proto::PDOOCService_Stub*, size_t>
+  std::unordered_map<proto::DisaggPDService_Stub*, size_t>
       remote_prefill_thread_map_;
 
   StepStatus step_status_ = StepStatus::IDLE;
