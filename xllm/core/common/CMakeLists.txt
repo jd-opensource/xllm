@@ -8,7 +8,6 @@ cc_library(
     etcd_client.h
     global_flags.h
     instance_name.h
-    layer_synchronizer.h
     macros.h
     metrics.h
     $<$<BOOL:${USE_NPU}>:mspti_helper.h>
@@ -19,7 +18,6 @@ cc_library(
   SRCS
     etcd_client.cpp
     global_flags.cpp
-    layer_synchronizer.cpp
     metrics.cpp
     $<$<BOOL:${USE_NPU}>:mspti_helper.cpp>
     options.cpp

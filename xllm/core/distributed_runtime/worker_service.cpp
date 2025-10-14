@@ -388,7 +388,7 @@ void WorkerService::ExecuteModel(
             top_logprobs =
                 safe_to(sample_output.top_logprobs, torch::kCPU, true);
           }
-          auto ret = stream_->synchronize_stream();
+          auto ret = stream_->synchronize();
         }
       }
     } else {
@@ -460,7 +460,7 @@ void WorkerService::GetLastStepResult(
             // [num_seq, topk]
             const auto& top_logprobs =
                 safe_to(sample_output.top_logprobs, torch::kCPU, true);
-            auto ret = stream_->synchronize_stream();
+            auto ret = stream_->synchronize();
 
             forward_output_to_proto(next_tokens,
                                     logprobs,

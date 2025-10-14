@@ -14,3 +14,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ascendcl>
 )
+
+if(USE_NPU)
+  add_subdirectory(npu)
+endif()

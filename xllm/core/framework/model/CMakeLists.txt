@@ -18,6 +18,7 @@ if(USE_NPU)
   # Modify dependencies for npu
   list(APPEND BASE_DEPS torch_npu)
   list(APPEND BASE_DEPS :npu_layers)
+  list(APPEND BASE_DEPS :platform_npu)
 endif()
 
 # Define the library

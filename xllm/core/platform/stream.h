@@ -24,7 +24,7 @@ class Stream {
   Stream(Stream&&) = default;
   Stream& operator=(Stream&&) = default;
 
-  int synchronize_stream() const;
+  int synchronize() const;
   c10::StreamGuard set_stream_guard() const;
 
  private:

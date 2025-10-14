@@ -450,7 +450,7 @@ void WorkerImpl::prepare_work_before_execute(
   }
   processed_inputs.concated_sampling_params =
       inputs.concated_sampling_params.to(device_, dtype_);
-  auto ret = prepare_stream_->synchronize_stream();
+  auto ret = prepare_stream_->synchronize();
 }
 
 folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
@@ -479,7 +479,7 @@ folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
 
       offload_kv_blocks_to_store(input_params.async_copy_out_blocks);
     }
-    auto ret = copy_out_stream_->synchronize_stream();
+    auto ret = copy_out_stream_->synchronize();
     promise.setValue(ret == 0);
   });
 

@@ -13,13 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "common/layer_synchronizer.h"
+#include "npu_layer_synchronizer.h"
 
 #include <glog/logging.h>
 
 namespace xllm {
 
-#if defined(USE_NPU)
 NPULayerSynchronizerImpl::NPULayerSynchronizerImpl(const int64_t num_layers)
     : events_(num_layers, nullptr), event_record_flags_(num_layers) {
   uint32_t flags = ACL_EVENT_SYNC;
@@ -53,6 +52,5 @@ bool NPULayerSynchronizerImpl::synchronize_layer(const int64_t layer_index) {
   }
   return true;
 }
-#endif
 
 }  // namespace xllm

@@ -19,7 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #if defined(USE_NPU)
-#include "common/layer_synchronizer.h"
+#include "platform/npu/npu_layer_synchronizer.h"
 #endif
 #include "framework/request/mm_data.h"
 #include "npu_dp_ep_padding.h"

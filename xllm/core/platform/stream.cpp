@@ -8,7 +8,7 @@ Stream::Stream() : stream_(c10_npu::getNPUStreamFromPool()) {}
 // TODO(mlu): implement mlu create stream
 #endif
 
-int Stream::synchronize_stream() const {
+int Stream::synchronize() const {
 #if defined(USE_NPU)
   return aclrtSynchronizeStream(stream_.stream());
 #elif defined(USE_MLU)
