@@ -97,7 +97,7 @@ class BlockManagerImpl : public BlockManager {
   std::atomic<size_t> num_used_blocks_{0};
 
   // free block count
-  size_t num_free_blocks_ = 0;
+  std::atomic<size_t> num_free_blocks_{0};
 
   // block size
   size_t block_size_ = 0;

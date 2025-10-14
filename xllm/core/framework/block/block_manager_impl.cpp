@@ -31,7 +31,7 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
 
   size_t total_blocks = options_.num_blocks();
   block_size_ = options_.block_size();
-  num_free_blocks_ = total_blocks;
+  num_free_blocks_.store(total_blocks, std::memory_order_relaxed);
   free_blocks_.reserve(total_blocks);
   for (int32_t i = 0; i < total_blocks; ++i) {
     // push smaller block ids to the back of the vector
@@ -52,7 +52,9 @@ std::vector<Block> BlockManagerImpl::allocate(size_t num_blocks) {
   std::vector<Block> blocks;
   blocks.reserve(num_blocks);
   for (uint32_t i = 0; i < num_blocks; ++i) {
-    const int32_t block_id = free_blocks_[--num_free_blocks_];
+    size_t prev_count =
+        num_free_blocks_.fetch_sub(1, std::memory_order_relaxed);
+    const int32_t block_id = free_blocks_[prev_count - 1];
     blocks.emplace_back(block_id, this);
   }
 
@@ -164,7 +166,8 @@ void BlockManagerImpl::get_merged_kvcache_event(KvCacheEvent* event) const {
 // allocate a block id
 Block BlockManagerImpl::allocate() {
   CHECK(num_free_blocks_ > 0) << "No more blocks available";
-  const int32_t block_id = free_blocks_[--num_free_blocks_];
+  size_t prev_count = num_free_blocks_.fetch_sub(1, std::memory_order_relaxed);
+  const int32_t block_id = free_blocks_[prev_count - 1];
   return {block_id, this};
 }
 
@@ -172,8 +175,10 @@ Block BlockManagerImpl::allocate() {
 void BlockManagerImpl::free(int32_t block_id) {
   // do nothing for reserved block 0
   if (block_id != 0) {
-    CHECK(num_free_blocks_ < free_blocks_.size());
-    free_blocks_[num_free_blocks_++] = block_id;
+    size_t prev_count =
+        num_free_blocks_.fetch_add(1, std::memory_order_relaxed);
+    CHECK(prev_count < free_blocks_.size());
+    free_blocks_[prev_count] = block_id;
   }
 }
 
