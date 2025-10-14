@@ -52,9 +52,10 @@ class Worker {
   bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
+#if defined(USE_NPU)
   bool allocate_continuous_kv_cache(
       const std::vector<XTensor::Options>& options);
-
+#endif
   void get_device_info(std::string& device_ip, uint16_t& port);
 
   void get_cache_info(uint64_t& cluster_id,
@@ -90,8 +91,10 @@ class Worker {
   folly::SemiFuture<bool> allocate_kv_cache_async(
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
+#if defined(USE_NPU)
   folly::SemiFuture<bool> allocate_continuous_kv_cache_async(
       const std::vector<XTensor::Options>& options);
+#endif
 
   // initialize kv cache with kv cache transfer. async call
   virtual folly::SemiFuture<bool> allocate_kv_cache_with_transfer_async(

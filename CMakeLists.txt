@@ -332,7 +332,24 @@ endif()
 
 if(USE_MLU)
   add_definitions(-DUSE_MLU)
-# TODO(mlu): set mlu environment variables
+  set(CMAKE_VERBOSE_MAKEFILE ON)
+  include_directories(
+      $ENV{PYTHON_INCLUDE_PATH}
+      $ENV{PYTORCH_INSTALL_PATH}/include
+      $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
+      $ENV{PYTORCH_MLU_INSTALL_PATH}
+      $ENV{PYTORCH_MLU_INSTALL_PATH}/../
+      $ENV{PYTORCH_MLU_INSTALL_PATH}/csrc
+      $ENV{NEUWARE_HOME}/include
+  )
+
+  link_directories(
+    $ENV{PYTHON_LIB_PATH}
+    $ENV{PYTORCH_INSTALL_PATH}/lib
+    $ENV{PYTORCH_MLU_INSTALL_PATH}/csrc/lib
+    $ENV{PYTORCH_MLU_INSTALL_PATH}
+    $ENV{NEUWARE_HOME}/lib64
+  )
 endif()
 
 # check if USE_CXX11_ABI is set correctly

@@ -10,6 +10,9 @@
 #if defined(USE_NPU)
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
+#elif defined(USE_MLU)
+#include <c10/core/StreamGuard.h>
+#include <torch_mlu/csrc/framework/core/MLUStream.h>
 #endif
 
 namespace xllm {
@@ -31,7 +34,7 @@ class Stream {
 #if defined(USE_NPU)
   c10_npu::NPUStream stream_;
 #elif defined(USE_MLU)
-// TODO(mlu): implement mlu stream
+  torch_mlu::MLUStream stream_;
 #endif
 };
 

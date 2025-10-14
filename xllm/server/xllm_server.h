@@ -19,7 +19,9 @@ limitations under the License.
 #include "core/distributed_runtime/collective_service.h"
 #include "core/distributed_runtime/disagg_pd_service.h"
 #include "core/distributed_runtime/worker_service.h"
+#if defined(USE_NPU)
 #include "core/framework/xtensor/xtensor_manager_service.h"
+#endif
 
 namespace xllm {
 
@@ -33,8 +35,10 @@ class XllmServer final {
   bool start(std::shared_ptr<CollectiveService> service,
              const std::string& addr);
   bool start(std::shared_ptr<WorkerService> service, const std::string& addr);
+#if defined(USE_NPU)
   bool start(std::shared_ptr<XTensorManagerService> service,
              const std::string& addr);
+#endif
 
   void run();
   void stop();

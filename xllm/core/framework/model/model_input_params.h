@@ -158,7 +158,6 @@ struct ModelInputParams {
   // embedding ids of each sequence
   std::vector<int32_t> embedding_ids;
 
-#if defined(USE_NPU)
   // copy in / copy out
   std::vector<CacheBlockInfo> async_copy_out_blocks;
   std::vector<CacheBlockInfo> copy_out_blocks;
@@ -170,6 +169,7 @@ struct ModelInputParams {
   torch::Tensor dst_block_indices;
   torch::Tensor cum_sum;
 
+#if defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #endif
 

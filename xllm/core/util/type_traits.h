@@ -38,10 +38,14 @@ struct remove_optional<std::optional<value_type>> {
 template <typename value_type>
 using remove_optional_t = typename remove_optional<value_type>::type;
 
-#if defined(USE_NPU)
 using VirPtr = void*;
+
+#if defined(USE_NPU)
 using PhyMemHandle = aclrtDrvMemHandle;
 using VmmResult = aclError;
+#elif defined(USE_MLU)
+using PhyMemHandle = void*;
+using VmmResult = int;
 #endif
 
 constexpr int VmmSuccess = 0;

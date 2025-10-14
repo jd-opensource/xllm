@@ -92,6 +92,7 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
         phy_page_pool_->allocate(k_num_additional_pages);
     multi_layer_k_xtensor->append_phy_pages(seq_id, new_k_phy_page_ids);
 
+#if defined(USE_NPU)
     std::vector<uint32_t> k_phy_page_ids =
         multi_layer_k_xtensor->get_phy_page_ids(seq_id);
     for (int64_t layer_idx = 0; layer_idx < options_.num_layers();
@@ -100,6 +101,7 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
       phy_page_pool_->batch_map(
           k_vit_ptr, k_phy_page_ids, k_num_additional_pages, layer_idx);
     }
+#endif
 
     num_used_pages_per_layer_ += k_num_additional_pages;
   }
@@ -110,6 +112,7 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
         phy_page_pool_->allocate(v_num_additional_pages);
     multi_layer_v_xtensor->append_phy_pages(seq_id, new_v_phy_page_ids);
 
+#if defined(USE_NPU)
     std::vector<uint32_t> v_phy_page_ids =
         multi_layer_v_xtensor->get_phy_page_ids(seq_id);
     for (int64_t layer_idx = 0; layer_idx < options_.num_layers();
@@ -118,6 +121,7 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
       phy_page_pool_->batch_map(
           v_vit_ptr, v_phy_page_ids, v_num_additional_pages, layer_idx);
     }
+#endif
 
     num_used_pages_per_layer_ += v_num_additional_pages;
   }

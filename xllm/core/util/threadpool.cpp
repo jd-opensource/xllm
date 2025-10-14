@@ -17,8 +17,6 @@ limitations under the License.
 
 #include <thread>
 
-#include "concurrent_queue.h"
-
 namespace xllm {
 ThreadPool::ThreadPool(size_t num_threads) : queues_(num_threads) {
   for (size_t i = 0; i < num_threads; ++i) {

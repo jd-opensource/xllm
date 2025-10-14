@@ -6,6 +6,7 @@ if(USE_NPU)
   include_directories(
     ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
   )
+  add_subdirectory(xtensor)
 endif()
 add_subdirectory(batch)
 add_subdirectory(block)
@@ -18,11 +19,10 @@ add_subdirectory(sampling)
 add_subdirectory(state_dict)
 add_subdirectory(tokenizer)
 add_subdirectory(eplb)
-add_subdirectory(xtensor)
 add_subdirectory(dit_cache)
 
 cc_library(
-  NAME 
+  NAME
     parallel_state
   HDRS
     mapping_npu.h
@@ -33,30 +33,33 @@ cc_library(
   DEPS
     :common
     torch
-    hccl
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
+    $<$<BOOL:${USE_NPU}>:hccl>
     glog::glog
 )
 
 
-cc_test(
-  NAME 
-    mapping_npu_test
-  SRCS
-    mapping_npu_test.cpp
-  DEPS
-    parallel_state
-    absl::synchronization
-    absl::time
-    GTest::gtest_main
-    xllm_kernels
-    ascendcl
-    atb
-    c_sec
-    spdlog::spdlog
-)
+if(USE_NPU)
+  cc_test(
+    NAME
+      mapping_npu_test
+    SRCS
+      mapping_npu_test.cpp
+    DEPS
+      parallel_state
+      absl::synchronization
+      absl::time
+      GTest::gtest_main
+      xllm_kernels
+      ascendcl
+      atb
+      c_sec
+      spdlog::spdlog
+  )
+endif()
 
 cc_library(
-  NAME 
+  NAME
     model_loader
   HDRS
     hf_model_loader.h
@@ -78,7 +81,7 @@ cc_library(
 )
 
 cc_library(
-  NAME 
+  NAME
     model_context
   HDRS
     model_context.h

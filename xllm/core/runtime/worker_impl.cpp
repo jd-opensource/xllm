@@ -22,6 +22,8 @@ limitations under the License.
 #include <torch/torch.h>
 #if defined(USE_NPU)
 #include "kernels/npu/xllm_ops/replace_token.h"
+#elif defined(USE_MLU)
+#include <torch_mlu/csrc/framework/core/caching_allocator.h>
 #endif
 
 #include <memory>
@@ -37,7 +39,9 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
+#if defined(USE_NPU)
 #include "framework/xtensor/multi_layer_xtensor_transfer.h"
+#endif
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
@@ -132,6 +136,7 @@ bool WorkerImpl::allocate_host_kv_cache(
   }
 
   if (options_.enable_kvcache_store()) {
+#if defined(USE_NPU)
     StoreConfig config;
     config.protocol = options_.store_protocol();
     config.metadata_connstring = options_.store_metadata_connstring();
@@ -139,12 +144,14 @@ bool WorkerImpl::allocate_host_kv_cache(
     config.tp_rank = options_.node_rank() % options_.dp_size();
 
     kv_cache_store_ = std::make_shared<KVCacheStore>(config, &host_kv_caches_);
+#endif
   }
 
   status_ = Status::READY;
   return true;
 }
 
+#if defined(USE_NPU)
 bool WorkerImpl::allocate_continuous_kv_cache(
     const std::vector<XTensor::Options>& options) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
@@ -176,6 +183,7 @@ bool WorkerImpl::allocate_continuous_kv_cache(
   status_ = Status::READY;
   return true;
 }
+#endif
 
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     uint64_t kv_cache_size,
@@ -296,7 +304,7 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
   c10_npu::NPUCachingAllocator::cacheInfo(
       device_id, &torch_cache, &torch_largest_block);
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu estimate kv cache capacity
+  torch_mlu::MLUCachingAllocator::emptyCache();
 #endif
   const auto available_memory = device_.free_memory();
   const auto total_memory = device_.total_memory();
@@ -371,6 +379,7 @@ void WorkerImpl::prepare_work_before_execute(
     ForwardInput fwd_inputs_on_device;
     fwd_inputs_on_device = inputs.micro_inputs[i].to(device_, dtype_);
     auto& input_params = fwd_inputs_on_device.input_params;
+#if defined(USE_NPU)
     if (input_params.copy_out_blocks.size() > 0 ||
         input_params.copy_in_blocks.size() > 0) {
       const int64_t num_layers = context_.get_model_args().n_layers();
@@ -422,7 +431,6 @@ void WorkerImpl::prepare_work_before_execute(
         }
       }
     }
-
     if (!context_.get_parallel_args().mapping_data().empty()) {
       torch::Tensor token_size_per_dp_group =
           torch::tensor(fwd_inputs_on_device.input_params.dp_global_token_nums,
@@ -446,6 +454,7 @@ void WorkerImpl::prepare_work_before_execute(
         fwd_inputs_on_device.input_params.expert_load_data = expert_load_data_;
       }
     }
+#endif
     processed_inputs.micro_inputs.push_back(std::move(fwd_inputs_on_device));
   }
   processed_inputs.concated_sampling_params =
@@ -661,6 +670,7 @@ folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_async(
   return future;
 }
 
+#if defined(USE_NPU)
 folly::SemiFuture<bool> WorkerImpl::allocate_continuous_kv_cache_async(
     const std::vector<XTensor::Options>& options) {
   folly::Promise<bool> promise;
@@ -671,6 +681,7 @@ folly::SemiFuture<bool> WorkerImpl::allocate_continuous_kv_cache_async(
   });
   return future;
 }
+#endif
 
 folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
     uint64_t src_cluster_id,
@@ -692,6 +703,7 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 
 folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
     const std::vector<CacheBlockInfo>& cache_block_info) {
+#if defined(USE_NPU)
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
   general_threadpool_.schedule(
@@ -703,18 +715,24 @@ folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
         promise.setValue(this->kv_cache_store_->batch_get(cache_block_info));
       });
   return future;
+#endif
+  return false;
 }
 
 uint32_t WorkerImpl::offload_kv_blocks_to_store(
     const std::vector<CacheBlockInfo>& cache_block_info) {
+#if defined(USE_NPU)
   if (kv_cache_store_ == nullptr) {
     return 0;
   }
   return kv_cache_store_->batch_put(cache_block_info);
+#endif
+  return 0;
 }
 
 folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_to_store_async(
     const std::vector<CacheBlockInfo>& cache_block_info) {
+#if defined(USE_NPU)
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
   general_threadpool_.schedule(
@@ -726,6 +744,8 @@ folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_to_store_async(
         promise.setValue(this->kv_cache_store_->batch_put(cache_block_info));
       });
   return future;
+#endif
+  return false;
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(

@@ -29,11 +29,14 @@ limitations under the License.
 
 #include "hccl/hccl.h"
 #include "xllm_kernels/models/base/param/mapping.h"
+#elif defined(USE_MLU)
+#include <torch_mlu/csrc/framework/distributed/process_group_cncl.hpp>
 #endif
 
 namespace xllm {
 
 class ParallelArgs;
+class ProcessGroup;
 namespace parallel_state {
 
 std::optional<ParallelArgs> get_dp_attn_parallel_args(
@@ -45,9 +48,17 @@ torch::Tensor reduce(torch::Tensor input, const ParallelArgs& parallel_args);
 
 torch::Tensor scatter(torch::Tensor input, const ParallelArgs& parallel_args);
 
+#if defined(USE_MLU)
+torch::Tensor gather(torch::Tensor input, ProcessGroup* process_group);
+
+torch::Tensor reduce(torch::Tensor input, ProcessGroup* process_group);
+
+torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group);
+#endif
 }  // namespace parallel_state
 
 class ProcessGroup;
+
 struct ParallelArgs {
   ParallelArgs(int32_t rank, int32_t world_size, ProcessGroup* process_group)
       : rank_(rank), world_size_(world_size), process_group_(process_group) {}
@@ -131,6 +142,10 @@ struct ParallelArgs {
 
   // atb hccl dispatchAndCombineHcclComm
   PROPERTY(HcclComm, dispatchAndCombineHcclComm);
+#elif defined(USE_MLU)
+  ProcessGroup* tp_group_ = nullptr;
+  ProcessGroup* moe_ep_group_ = nullptr;
+  ProcessGroup* moe_tp_group_ = nullptr;
 #endif
 };
 
@@ -141,9 +156,9 @@ class ProcessGroup {
 
   virtual ~ProcessGroup() = default;
 
-  int rank() const { return rank_; }
+  virtual int rank() { return rank_; }
 
-  int world_size() const { return world_size_; }
+  virtual int world_size() { return world_size_; }
 
   const torch::Device& device() const { return device_; }
 
@@ -191,6 +206,39 @@ class ProcessGroupHCCL : public ProcessGroup {
  private:
   HcclComm comm_ = nullptr;
 };
+#elif defined(USE_MLU)
+
+class ProcessGroupCncl : public ProcessGroup {
+ public:
+  // Constructor.
+  ProcessGroupCncl(int rank,
+                   int world_size,
+                   int rank_size,
+                   int port,
+                   const std::string& host,
+                   const std::string& group_name,
+                   const torch::Device& device);
+
+  int rank() override { return rank_; }
+
+  int world_size() override { return world_size_; }
+
+  // Destructor.
+  ~ProcessGroupCncl() override;
+
+  void allreduce(torch::Tensor& input) override;
+
+  void allgather(torch::Tensor input,
+                 std::vector<torch::Tensor>& outputs) override;
+
+ private:
+  std::shared_ptr<torch_mlu::ProcessGroupCNCL> cncl_pg_ = nullptr;
+  // rank of current process.
+  int rank_ = 0;
+
+  // number of processes.
+  int world_size_ = 0;
+};
 #endif
 
 class CollectiveCommunicator {
@@ -201,6 +249,11 @@ class CollectiveCommunicator {
                          int ep_size);
   ~CollectiveCommunicator() = default;
 
+#if defined(USE_MLU)
+  void create_process_groups_cncl(const std::string& master_addr,
+                                  const torch::Device& device);
+#endif
+
   // init communicator and return parallel args.
   const ParallelArgs* parallel_args();
 
@@ -208,6 +261,9 @@ class CollectiveCommunicator {
   std::unique_ptr<ParallelArgs> parallel_args_;
   std::unique_ptr<ProcessGroup> process_group_;
   std::unique_ptr<ProcessGroup> dp_local_process_group_;
+#if defined(USE_MLU)
+  std::unique_ptr<ProcessGroup> tp_group_;
+#endif
 };
 
 }  // namespace xllm

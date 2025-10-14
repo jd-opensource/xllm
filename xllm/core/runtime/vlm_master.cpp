@@ -36,6 +36,8 @@ limitations under the License.
 #include "server/xllm_server_registry.h"
 #if defined(USE_NPU)
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
+#elif defined(USE_MLU)
+#include <torch_mlu/csrc/framework/core/caching_allocator.h>
 #endif
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/request/mm_input_helper.h"
@@ -127,7 +129,7 @@ VLMMaster::~VLMMaster() {
 #if defined(USE_NPU)
   c10_npu::NPUCachingAllocator::emptyCache();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu empty cache
+  torch_mlu::MLUCachingAllocator::emptyCache();
 #endif
 }
 

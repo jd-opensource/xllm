@@ -1,0 +1,86 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#pragma once
+
+#include <torch/torch.h>
+
+#include "framework/model/model_args.h"
+#include "framework/parallel_state.h"
+#include "framework/quant_args.h"
+#include "framework/state_dict/state_dict.h"
+#include "framework/state_dict/utils.h"
+namespace xllm {
+namespace layer {
+
+class FusedMoEImpl : public torch::nn::Module {
+ public:
+  FusedMoEImpl() = default;
+  FusedMoEImpl(int num_experts,
+               int top_k,
+               int hidden_size,
+               int intermediate_size,
+               bool is_gated,
+               bool has_bias,
+               bool skip_bias_add,
+               int renormalize,
+               const std::string& hidden_act,
+               const std::string& scoring_func,
+               const QuantArgs& quant_args,
+               const ParallelArgs& parallel_args,
+               const torch::TensorOptions& options);
+
+  torch::Tensor forward(const torch::Tensor& hidden_states,
+                        const torch::Tensor& router_logits,
+                        c10::optional<torch::Tensor> residual);
+
+  void load_state_dict(const StateDict& state_dict);
+
+ private:
+  int num_experts_;
+  int topk_;
+  int hidden_size_;
+  int intermediate_size_;
+  bool is_gated_;
+  bool has_bias_;
+  bool skip_bias_add_;
+  int renormalize_;
+  std::string hidden_act_;
+  std::string scoring_func_;
+
+  int ep_rank_;
+  int ep_local_tp_rank_;
+  int ep_local_tp_size_;
+  int num_experts_per_rank_;
+  int start_expert_id_;
+
+  ParallelArgs parallel_args_;
+  torch::TensorOptions options_;
+  ProcessGroup* tp_pg_;
+
+  DEFINE_FUSED_WEIGHT(w13);
+  DEFINE_FUSED_WEIGHT(w1);
+  DEFINE_FUSED_WEIGHT(w3);
+  DEFINE_FUSED_WEIGHT(w2);
+
+  void pack_params();
+  torch::Tensor map_param_data(const std::vector<torch::Tensor>& param_list);
+  void load_w13(const StateDict& state_dict, int idx, bool is_gated);
+  void load_w2(const StateDict& state_dict, int idx);
+};
+TORCH_MODULE(FusedMoE);
+
+}  // namespace layer
+}  // namespace xllm

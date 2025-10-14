@@ -44,6 +44,8 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
 #include "xllm_kernels/models/base/param/mapping.h"
+#elif defined(USE_MLU)
+#include <torch_mlu/csrc/framework/core/MLUStream.h>
 #endif
 
 namespace xllm {
@@ -91,6 +93,9 @@ void WorkerServer::create_server(const runtime::Options& options,
 
   CollectiveCommunicator comm(worker_global_rank, world_size, dp_size, ep_size);
   const ParallelArgs* parallel_args = comm.parallel_args();
+#if defined(USE_MLU)
+  comm.create_process_groups_cncl(master_node_addr, device);
+#endif
 
   WorkerType worker_type =
       (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;

@@ -72,6 +72,7 @@ const QuantArgs& DiTModelContext::get_quant_args(
   }
 }
 
+#if defined(USE_NPU)
 ModelContext DiTModelContext::get_model_context(
     const std::string& component) const {
   return ModelContext(parallel_args_,
@@ -80,5 +81,6 @@ ModelContext DiTModelContext::get_model_context(
                       tensor_options_,
                       context_);
 }
+#endif
 
 }  // namespace xllm

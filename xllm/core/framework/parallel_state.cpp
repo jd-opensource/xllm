@@ -25,6 +25,8 @@ limitations under the License.
 #include "hccl/hccl.h"
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
+#elif defined(USE_MLU)
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #endif
 #pragma GCC diagnostic pop
 #include <gflags/gflags.h>
@@ -94,12 +96,47 @@ HcclDataType to_hccl_data_type(const torch::Tensor& input) {
       TORCH_CHECK(false, "Unconvertible HCCL type ", type);
   }
 }
-#endif
 void check_input(torch::Tensor input) {
   CHECK(is_npu(input)) << "input should be npu tensor";
   CHECK(input.is_contiguous()) << "input should be contiguous";
   CHECK(!input.is_sparse()) << "input have to be npu dense tensor";
 }
+
+#elif defined(USE_MLU)
+std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
+                                                     int global_rank,
+                                                     int split_size) {
+  int target_group_index = global_rank / split_size;
+  uint64_t start_rank = target_group_index * split_size;
+  uint64_t end_rank = start_rank + split_size;
+  std::vector<uint64_t> group_rank;
+  int index = global_rank - start_rank;
+  for (uint64_t rank = start_rank; rank < end_rank; rank++) {
+    group_rank.push_back(rank);
+  }
+  return {index, group_rank};
+}
+
+void get_tcp_url(const std::string& url, std::string& host, int& port) {
+  if (url == "") {
+    host = "127.0.0.1";
+    port = c10d::TCPStoreOptions::kDefaultPort;
+  } else {
+    auto pos = url.find("://");
+    std::string address = url;
+    if (pos != std::string::npos) {
+      address = url.substr(pos + 3);
+    }
+    auto colon_pos = address.find(':');
+    if (colon_pos == std::string::npos) {
+      throw std::runtime_error("Invalid TCP address format");
+    }
+
+    host = address.substr(0, colon_pos);
+    port = std::stoi(address.substr(colon_pos + 1)) + 1;
+  }
+}
+#endif
 }  // namespace
 
 namespace parallel_state {
@@ -140,7 +177,9 @@ torch::Tensor gather(torch::Tensor input, const ParallelArgs& parallel_args) {
     tensors[i] = torch::empty_like(input);
   }
   // blocking call
-  // process_group->allgather(input, tensors);
+#if defined(USE_MLU)
+  parallel_args.process_group_->allgather(input, tensors);
+#endif
   return torch::cat(tensors, /*dim=*/-1).contiguous();
 }
 
@@ -151,7 +190,9 @@ torch::Tensor reduce(torch::Tensor input, const ParallelArgs& parallel_args) {
     return input;
   }
   // auto* process_group = parallel_args.process_group();
-  // process_group->allreduce(input);
+#if defined(USE_MLU)
+  parallel_args.process_group_->allreduce(input);
+#endif
   return input;
 }
 
@@ -173,6 +214,54 @@ torch::Tensor scatter(torch::Tensor input, const ParallelArgs& parallel_args) {
   const auto rank = parallel_args.rank();
   return tensor_list[rank];
 }
+
+#if defined(USE_MLU)
+torch::Tensor gather(torch::Tensor input, ProcessGroup* process_group) {
+  const auto world_size = process_group->world_size();
+  if (world_size == 1) {
+    // bypass if only have one mlu
+    return input;
+  }
+
+  const auto rank = process_group->rank();
+  std::vector<torch::Tensor> tensors(world_size);
+  for (int64_t i = 0; i < world_size; ++i) {
+    tensors[i] = torch::empty_like(input);
+  }
+  // blocking call
+  process_group->allgather(input, tensors);
+  return torch::cat(tensors, /*dim=*/-1).contiguous();
+}
+
+torch::Tensor reduce(torch::Tensor input, ProcessGroup* process_group) {
+  const auto world_size = process_group->world_size();
+  if (world_size == 1) {
+    // bypass if only have one mlu
+    return input;
+  }
+  process_group->allreduce(input);
+  return input;
+}
+
+torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group) {
+  const auto world_size = process_group->world_size();
+  if (world_size == 1) {
+    // bypass if only have one mlu
+    return input;
+  }
+
+  // get the size for last dimension
+  const auto last_dim_size = input.size(-1);
+  CHECK(last_dim_size % world_size == 0)
+      << "last_dim_size " << last_dim_size
+      << " cannot be divided by world_size " << world_size;
+
+  // torch::split does not create contiguous tensors by default.
+  const auto tensor_list = input.split(last_dim_size / world_size, /*dim=*/-1);
+  const auto rank = process_group->rank();
+  return tensor_list[rank];
+}
+#endif
 
 }  // namespace parallel_state
 
@@ -200,7 +289,6 @@ std::vector<std::unique_ptr<ProcessGroup>> ProcessGroup::create_process_groups(
   return process_groups;
 }
 #elif defined(USE_MLU)
-// TODO(mlu): implement create_process_groups for mlu
 std::vector<std::unique_ptr<ProcessGroup>> ProcessGroup::create_process_groups(
     const std::vector<torch::Device>& devices) {
   return {};
@@ -258,6 +346,80 @@ void ProcessGroupHCCL::allgather(torch::Tensor input,
   //   outputs[i].copy_(flattened_output[i], /*non_blocking=*/true);
   // }
 }
+#elif defined(USE_MLU)
+
+ProcessGroupCncl::ProcessGroupCncl(int rank,
+                                   int world_size,
+                                   int rank_size,
+                                   int port,
+                                   const std::string& host,
+                                   const std::string& group_name,
+                                   const torch::Device& device)
+    : ProcessGroup(rank, rank_size, device),
+      world_size_(rank_size),
+      rank_(rank) {
+  c10::intrusive_ptr<torch_mlu::ProcessGroupCNCL::Options> cncl_pg_options =
+      torch_mlu::ProcessGroupCNCL::Options::create();
+  cncl_pg_options->group_name = group_name;
+  if (world_size != rank_size) {
+    auto [local_rank, group_ranks] =
+        get_group_rank(world_size, rank, rank_size);
+    cncl_pg_options->global_ranks_in_group = group_ranks;
+    rank_ = local_rank;
+  }
+
+  c10d::TCPStoreOptions tcp_options;
+  tcp_options.isServer = (rank_ == 0);
+  tcp_options.port = port;
+
+  c10::intrusive_ptr<c10d::Store> store =
+      c10::make_intrusive<c10d::TCPStore>(host, tcp_options);
+  cncl_pg_ = std::make_unique<torch_mlu::ProcessGroupCNCL>(
+      store, rank, world_size, cncl_pg_options);
+}
+
+// Destructor.
+ProcessGroupCncl::~ProcessGroupCncl() { cncl_pg_->shutdown(); }
+
+void ProcessGroupCncl::allreduce(torch::Tensor& input) {
+  std::vector<torch::Tensor> input_tensors = {input};
+  cncl_pg_->allreduce(input_tensors)->wait();
+}
+
+void ProcessGroupCncl::allgather(torch::Tensor input,
+                                 std::vector<torch::Tensor>& outputs) {
+  std::vector<torch::Tensor> input_tensors = {input};
+  std::vector<std::vector<torch::Tensor>> output_tensors = {outputs};
+  cncl_pg_->allgather(output_tensors, input_tensors)->wait();
+}
+
+void CollectiveCommunicator::create_process_groups_cncl(
+    const std::string& master_addr,
+    const torch::Device& device) {
+  std::string host;
+  int port;
+  get_tcp_url(master_addr, host, port);
+
+  std::vector<std::unique_ptr<ProcessGroup>> process_groups;
+  int global_rank = parallel_args_->rank();
+  int world_size = parallel_args_->world_size();
+  int dp_size = parallel_args_->dp_size();
+  process_group_ = std::make_unique<ProcessGroupCncl>(
+      global_rank, world_size, world_size, port, host, "world_group", device);
+  int tp_size = world_size / dp_size;
+  CHECK_EQ(tp_size * dp_size, world_size);
+  int port_offset = global_rank / tp_size + 1;
+  tp_group_ = std::make_unique<ProcessGroupCncl>(global_rank,
+                                                 world_size,
+                                                 tp_size,
+                                                 port + port_offset,
+                                                 host,
+                                                 "tp_group",
+                                                 device);
+  parallel_args_->process_group_ = process_group_.get();
+  parallel_args_->tp_group_ = tp_group_.get();
+}
+
 #endif
 
 CollectiveCommunicator::CollectiveCommunicator(int global_rank,

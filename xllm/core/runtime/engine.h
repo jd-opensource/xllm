@@ -22,7 +22,9 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
+#if defined(USE_NPU)
 #include "framework/xtensor/xtensor_manager_pool.h"
+#endif
 #include "options.h"
 
 namespace xllm {
@@ -49,6 +51,7 @@ class Engine {
     return p;
   }
 
+#if defined(USE_NPU)
   virtual XTensorManagerPool* xtensor_manager_pool() const {
     auto p = reinterpret_cast<XTensorManagerPool*>(kv_cache_manager_.get());
     if (!p) {
@@ -56,6 +59,7 @@ class Engine {
     }
     return p;
   }
+#endif
 
   // return the model args
   virtual const ModelArgs& model_args() const { return args_; }

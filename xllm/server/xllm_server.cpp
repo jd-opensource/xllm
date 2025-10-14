@@ -135,6 +135,7 @@ bool XllmServer::start(std::shared_ptr<WorkerService> service,
   return true;
 }
 
+#if defined(USE_NPU)
 bool XllmServer::start(std::shared_ptr<XTensorManagerService> service,
                        const std::string& addr) {
   server_ = std::make_unique<brpc::Server>();
@@ -162,6 +163,7 @@ bool XllmServer::start(std::shared_ptr<XTensorManagerService> service,
 
   return true;
 }
+#endif
 
 bool XllmServer::create_server(google::protobuf::Service* service,
                                const std::string& addr,

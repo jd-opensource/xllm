@@ -58,6 +58,31 @@ void apply_temperatures(torch::Tensor& logits,
   logits.div_(unsqueezed_temperatures);
 }
 
+void apply_top_k_top_p_torch_impl(torch::Tensor& logits,
+                                  const torch::Tensor& top_k,
+                                  const torch::Tensor& top_p) {
+  const int64_t vocab = logits.size(-1);
+  const float inf = -std::numeric_limits<float>::infinity();
+
+  auto [sorted, idx] = logits.sort(-1, /*descending=*/true);
+
+  // top-k
+  auto k = top_k.unsqueeze(-1).clamp(1, vocab).to(torch::kLong);
+  auto k_mask = torch::arange(vocab, logits.device()).expand_as(sorted) >= k;
+  sorted.masked_fill_(k_mask, inf);
+
+  // top-p
+  auto p = top_p.unsqueeze(-1);
+  auto probs = sorted.softmax(-1);
+  auto cum = probs.cumsum(-1);
+  auto p_mask = cum > p;
+  // at least one
+  p_mask.index_put_({torch::indexing::Ellipsis, 0}, false);
+  sorted.masked_fill_(p_mask, inf);
+
+  logits.scatter_(-1, idx, sorted);
+}
+
 void apply_top_k_top_p(torch::Tensor& logits,
                        const torch::Tensor& top_k,
                        const torch::Tensor& top_p) {
@@ -70,6 +95,8 @@ void apply_top_k_top_p(torch::Tensor& logits,
             top_k <= 0, torch::tensor(max_value).to(top_k.device()), top_k)
             .to(torch::kInt32);
     xllm_ops::top_k_top_p(logits, processed_top_k, top_p);
+#elif defined(USE_MLU)
+    apply_top_k_top_p_torch_impl(logits, top_k, top_p);
 #endif
   } else {
     auto [sorted_logits, logits_idx] =

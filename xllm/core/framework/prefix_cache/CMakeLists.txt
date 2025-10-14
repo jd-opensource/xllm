@@ -41,7 +41,7 @@ cc_test(
     GTest::gtest_main
 )
 
-target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto ascendcl Folly::folly)
+target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto $<$<BOOL:${USE_NPU}>:ascendcl> Folly::folly)
 add_dependencies(prefix_test brpc-static)
 
 cc_binary(

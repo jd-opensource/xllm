@@ -38,6 +38,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
+#elif defined(USE_MLU)
+#include <torch_mlu/csrc/framework/core/caching_allocator.h>
 #endif
 
 namespace xllm {
@@ -78,7 +80,7 @@ DiTMaster::~DiTMaster() {
 #if defined(USE_NPU)
   c10_npu::NPUCachingAllocator::emptyCache();
 #elif defined(USE_MLU)
-  // TODO(mlu): implement mlu empty cache
+  torch_mlu::MLUCachingAllocator::emptyCache();
 #endif
 }
 

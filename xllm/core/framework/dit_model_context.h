@@ -42,7 +42,9 @@ class DiTModelContext {
 
   const QuantArgs& get_quant_args(const std::string& component) const;
 
+#if defined(USE_NPU)
   ModelContext get_model_context(const std::string& component) const;
+#endif
 
   const ParallelArgs& get_parallel_args() const { return parallel_args_; }
 
@@ -52,7 +54,9 @@ class DiTModelContext {
 
   const std::string& model_type() const { return model_type_; }
 
+#if defined(USE_NPU)
   const atb::Context* get_atb_context() const { return context_; }
+#endif
 
  private:
   std::unordered_map<std::string, ModelArgs> model_args_;

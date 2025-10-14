@@ -105,6 +105,7 @@ bool RemoteWorker::allocate_kv_cache(
   return true;
 }
 
+#if defined(USE_NPU)
 bool RemoteWorker::allocate_continuous_kv_cache(
     const std::vector<XTensor::Options>& options) {
   proto::XTensorOptionsVec xtensor_options_vec;
@@ -134,6 +135,7 @@ bool RemoteWorker::allocate_continuous_kv_cache(
   }
   return true;
 }
+#endif
 
 void RemoteWorker::get_device_info(std::string& device_ip, uint16_t& port) {
   proto::Empty req;
@@ -414,6 +416,7 @@ folly::SemiFuture<bool> RemoteWorker::allocate_kv_cache_async(
   return future;
 }
 
+#if defined(USE_NPU)
 folly::SemiFuture<bool> RemoteWorker::allocate_continuous_kv_cache_async(
     const std::vector<XTensor::Options>& options) {
   folly::Promise<bool> promise;
@@ -449,6 +452,7 @@ folly::SemiFuture<bool> RemoteWorker::allocate_continuous_kv_cache_async(
   });
   return future;
 }
+#endif
 
 folly::SemiFuture<bool> RemoteWorker::allocate_kv_cache_with_transfer_async(
     const uint64_t kv_cache_size,

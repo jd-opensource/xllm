@@ -36,25 +36,27 @@ cc_library(
     absl::synchronization
 )
 
-cc_test(
-  NAME
-    chunked_prefill_scheduler_test
-    continuous_scheduler_test
-  SRCS
-    chunked_prefill_scheduler_test.cpp
-    continuous_scheduler_test.cpp
-  DEPS
-    :scheduler
-    GTest::gtest_main
-)
-target_link_libraries(chunked_prefill_scheduler_test
-                      PUBLIC
-                      brpc
-                      OpenSSL::SSL
-                      OpenSSL::Crypto
-                      Python::Python
-                      $<$<BOOL:${USE_NPU}>:ascendcl>
-                      $<$<BOOL:${USE_NPU}>:hccl>
-                      $<$<BOOL:${USE_NPU}>:c_sec>
-                      $<$<BOOL:${USE_NPU}>:nnopbase>)
+if(USE_NPU)
+  cc_test(
+    NAME
+      chunked_prefill_scheduler_test
+      continuous_scheduler_test
+    SRCS
+      chunked_prefill_scheduler_test.cpp
+      continuous_scheduler_test.cpp
+    DEPS
+      :scheduler
+      GTest::gtest_main
+  )
+  target_link_libraries(chunked_prefill_scheduler_test
+                        PUBLIC
+                        brpc
+                        OpenSSL::SSL
+                        OpenSSL::Crypto
+                        Python::Python
+                        $<$<BOOL:${USE_NPU}>:ascendcl>
+                        $<$<BOOL:${USE_NPU}>:hccl>
+                        $<$<BOOL:${USE_NPU}>:c_sec>
+                        $<$<BOOL:${USE_NPU}>:nnopbase>)
+endif()
 

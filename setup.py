@@ -106,6 +106,14 @@ def get_torch_root_path():
     except ImportError:
         return None
 
+def get_torch_mlu_root_path():
+    try:
+        import torch_mlu
+        import os
+        return os.path.dirname(os.path.abspath(torch_mlu.__file__))
+    except ImportError:
+        return None
+
 
 def set_npu_envs():
     PYTORCH_NPU_INSTALL_PATH = os.getenv("PYTORCH_NPU_INSTALL_PATH")
@@ -196,11 +204,13 @@ def set_npu_envs():
     os.environ["LCCL_DETERMINISTIC"] = "0"
     os.environ["LCCL_PARALLEL"] = "0"
 
-# TODO(mlu): set mlu environment variables
+
 def set_mlu_envs():
     os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
     os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
     os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
+    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
+    os.environ["PYTORCH_MLU_INSTALL_PATH"] = get_torch_mlu_root_path()
 
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:

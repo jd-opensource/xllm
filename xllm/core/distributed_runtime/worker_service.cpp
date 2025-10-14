@@ -148,6 +148,7 @@ void WorkerService::AllocateContinuousKVCache(
     const proto::XTensorOptionsVec* request,
     proto::Status* response,
     ::google::protobuf::Closure* done) {
+#if defined(USE_NPU)
   threadpool_.schedule([this, controller, request, response, done]() mutable {
     brpc::ClosureGuard done_guard(done);
     XTensor::Options key_options;
@@ -171,6 +172,7 @@ void WorkerService::AllocateContinuousKVCache(
     bool status = std::move(future).get();
     response->set_ok(status);
   });
+#endif
   return;
 }
 

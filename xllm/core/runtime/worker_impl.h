@@ -35,7 +35,9 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
+#if defined(USE_NPU)
 #include "framework/xtensor/xtensor.h"
+#endif
 #include "options.h"
 #include "platform/device.h"
 #include "util/threadpool.h"
@@ -80,10 +82,10 @@ class WorkerImpl {
   virtual bool allocate_kv_cache_with_transfer(
       std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
-#endif
 
   virtual bool allocate_continuous_kv_cache(
       const std::vector<XTensor::Options>& options);
+#endif
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -132,8 +134,10 @@ class WorkerImpl {
       uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
+#if defined(USE_NPU)
   virtual folly::SemiFuture<bool> allocate_continuous_kv_cache_async(
       const std::vector<XTensor::Options>& options);
+#endif
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       uint64_t src_cluster_id,
@@ -242,9 +246,9 @@ class WorkerImpl {
 
 #if defined(USE_NPU)
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
-#endif
 
   std::shared_ptr<KVCacheStore> kv_cache_store_;
+#endif
 
   bool is_spec_draft_ = false;
 

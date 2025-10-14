@@ -21,28 +21,38 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "framework/model/model_input_params.h"
+#if defined(USE_NPU)
 #include "framework/xtensor/xtensor.h"
+#endif
 
 namespace xllm {
 class KVCache final {
  public:
   KVCache() = default;
   KVCache(torch::Tensor key_cache, torch::Tensor value_cache);
+#if defined(USE_NPU)
   KVCache(std::shared_ptr<XTensor> key_xtensor,
           std::shared_ptr<XTensor> value_xtensor);
+#endif
   ~KVCache() = default;
 
   // TODO: pass in kv_shape and options instead
   torch::Tensor get_k_cache() const;
   torch::Tensor get_v_cache() const;
 
+#if defined(USE_NPU)
   std::shared_ptr<XTensor> get_k_xtensor() const;
   std::shared_ptr<XTensor> get_v_xtensor() const;
+#endif
 
   bool empty() const {
+#if defined(USE_NPU)
     return FLAGS_enable_continuous_kvcache
                ? (key_xtensor_ == nullptr || value_xtensor_ == nullptr)
                : (!key_cache_.defined() || !value_cache_.defined());
+#elif defined(USE_MLU)
+    return (!key_cache_.defined() || !value_cache_.defined());
+#endif
   }
 
   void swap_blocks(torch::Tensor& src_tensor, torch::Tensor& dst_tensor);
@@ -52,8 +62,10 @@ class KVCache final {
   torch::Tensor value_cache_;
 
   // for continuous kvcache
+#if defined(USE_NPU)
   std::shared_ptr<XTensor> key_xtensor_;
   std::shared_ptr<XTensor> value_xtensor_;
+#endif
 };
 
 }  // namespace xllm

@@ -31,6 +31,7 @@ cc_library(
     proto::xllm_proto
     absl::flat_hash_set
     :parallel_state
+    :collective_service
 )
 
 cc_library(

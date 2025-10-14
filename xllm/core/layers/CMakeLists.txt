@@ -8,7 +8,7 @@ if(USE_NPU)
 endif()
 
 cc_library(
-  NAME 
+  NAME
     rotary_embedding
   HDRS
     rotary_embedding.h
@@ -25,7 +25,7 @@ cc_library(
 )
 
 cc_library(
-  NAME 
+  NAME
     base_layer
   HDRS
     attention_mask.h
@@ -44,7 +44,7 @@ cc_library(
 )
 
 cc_library(
-  NAME 
+  NAME
     layers
   HDRS
     column_parallel_linear.h
@@ -61,9 +61,11 @@ cc_library(
     word_embedding.h
     lm_head.h
     block_copy.h
+    linear.h
   SRCS
     multi_head_attention.cpp
   DEPS
+    :parallel_state
     :state_dict
     :kv_cache
     :prefix_cache
@@ -77,4 +79,7 @@ cc_library(
 
 if(USE_NPU)
   add_subdirectory(npu)
+endif()
+if(USE_MLU)
+  add_subdirectory(mlu)
 endif()

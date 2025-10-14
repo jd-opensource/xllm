@@ -1,0 +1,44 @@
+include(cc_library)
+include(cc_test)
+
+
+cc_library(
+  NAME
+    mlu_layers 
+  HDRS
+    qwen3_attention.h
+    attention.h
+    fuse_norm.h
+    rotary_embedding.h
+    fused_moe.h
+    qwen3_mlp.h
+    qwen3_moe_mlp.h
+    qwen3_decoder_layer.h
+    qwen3_moe_decoder_layer.h
+    linear_impl.h
+    mlu_word_embedding_impl.h
+  SRCS
+    qwen3_attention.cpp
+    attention.cpp
+    fuse_norm.cpp
+    rotary_embedding.cpp
+    fused_moe.cpp
+    qwen3_mlp.cpp
+    qwen3_moe_mlp.cpp
+    qwen3_decoder_layer.cpp
+    qwen3_moe_decoder_layer.cpp
+    linear_impl.cpp
+  DEPS
+    "-Wl,--whole-archive"
+    "-Wl,--no-whole-archive"
+    :kv_cache
+    :prefix_cache
+    :block
+    :parallel_state
+    :state_dict
+    :model
+    :xllm_mlu_ops
+    glog::glog
+    gflags::gflags
+    torch
+)

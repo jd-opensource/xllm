@@ -1,7 +1,7 @@
 include(cc_library)
 
 cc_library(
-  NAME 
+  NAME
     platform
   HDRS
     stream.h
@@ -13,6 +13,8 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ascendcl>
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
+    $<$<BOOL:${USE_MLU}>:cnrt>
 )
 
 if(USE_NPU)

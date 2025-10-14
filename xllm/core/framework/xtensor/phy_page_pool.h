@@ -44,12 +44,14 @@ class PhyPagePool final {
   // get back a list of pages to phy_page_pool
   void deallocate(std::vector<uint32_t>& page_ids);
 
+#if defined(USE_NPU)
   void map(VirPtr vir_ptr, PhyMemHandle phy_handle) const;
   void map(VirPtr vir_ptr, uint32_t page_id, int64_t layer_idx) const;
   void batch_map(VirPtr vir_ptr,
                  std::vector<uint32_t>& page_ids,
                  uint32_t num_new_pages,
                  int64_t layer_idx) const;
+#endif
 
   // get num of total physical pages for key and value for all layers
   size_t get_num_total_phy_pages_per_layer() const {

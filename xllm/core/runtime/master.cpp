@@ -46,8 +46,7 @@ limitations under the License.
 
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #else
-// TODO(mlu): include mlu caching allocator
-// #include "c10/cuda/CUDACachingAllocator.h"
+#include <torch_mlu/csrc/framework/core/caching_allocator.h>
 #endif
 
 namespace xllm {
