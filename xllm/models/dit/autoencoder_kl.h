@@ -26,75 +26,27 @@
 
 namespace xllm {
 class VAEImageProcessorImpl : public torch::nn::Module {
- private:
-  int vae_scale_factor_ = 8;
-  int vae_latent_channels_ = 4;
-  bool do_resize_ = true;
-  bool do_normalize_ = true;
-  bool do_binarize_ = false;
-  bool do_convert_rgb_ = false;
-  bool do_convert_grayscale_ = false;
-  std::string resample_ = "lanczos";
-  int reducing_gap_ = -1;  // not used
  public:
   VAEImageProcessorImpl(bool do_resize = true,
                         int vae_scale_factor = 8,
-                        int vae_latent_channels = 4,
-                        std::string resample = "lanczos",
-                        int reducing_gap = -1,
                         bool do_normalize = true,
                         bool do_binarize = false,
                         bool do_convert_rgb = false,
                         bool do_convert_grayscale = false)
       : do_resize_(do_resize),
         vae_scale_factor_(vae_scale_factor),
-        vae_latent_channels_(vae_latent_channels),
-        resample_(resample),
-        reducing_gap_(reducing_gap),
         do_normalize_(do_normalize),
         do_binarize_(do_binarize),
         do_convert_rgb_(do_convert_rgb),
         do_convert_grayscale_(do_convert_grayscale) {}
+
   std::pair<int64_t, int64_t> adjust_dimensions(int64_t height,
                                                 int64_t width) const {
     height = height - (height % vae_scale_factor_);
     width = width - (width % vae_scale_factor_);
     return {height, width};
   }
-  torch::Tensor normalize(const torch::Tensor& tensor) const {
-    return 2.0 * tensor - 1.0;
-  }
-  torch::Tensor denormalize(const torch::Tensor& tensor) const {
-    return (tensor * 0.5 + 0.5).clamp(0.0, 1.0);
-  }
-  torch::Tensor resize(const torch::Tensor& image,
-                       int64_t target_height,
-                       int64_t target_width) const {
-    return torch::nn::functional::interpolate(
-        image,
-        torch::nn::functional::InterpolateFuncOptions()
-            .size(std::vector<int64_t>{target_height, target_width})
-            .align_corners(false));
-  }
-  std::pair<int64_t, int64_t> get_default_height_width(
-      const torch::Tensor& image,
-      std::optional<int64_t> height = std::nullopt,
-      std::optional<int64_t> width = std::nullopt) const {
-    int64_t h, w;
-    if (image.dim() == 3) {
-      h = image.size(1);
-      w = image.size(2);
-    } else if (image.dim() == 4) {
-      h = image.size(2);
-      w = image.size(3);
-    } else {
-      throw std::invalid_argument("Invalid image tensor dimensions");
-    }
 
-    int64_t target_h = height.value_or(h);
-    int64_t target_w = width.value_or(w);
-    return adjust_dimensions(target_h, target_w);
-  }
   torch::Tensor preprocess(
       const torch::Tensor& image,
       std::optional<int64_t> height = std::nullopt,
@@ -154,6 +106,7 @@ class VAEImageProcessorImpl : public torch::nn::Module {
 
     return processed;
   }
+
   torch::Tensor postprocess(
       const torch::Tensor& tensor,
       const std::string& output_type = "pt",
@@ -175,6 +128,53 @@ class VAEImageProcessorImpl : public torch::nn::Module {
     }
     return processed;
   }
+
+ private:
+  std::pair<int64_t, int64_t> get_default_height_width(
+      const torch::Tensor& image,
+      std::optional<int64_t> height = std::nullopt,
+      std::optional<int64_t> width = std::nullopt) const {
+    int64_t h, w;
+    if (image.dim() == 3) {
+      h = image.size(1);
+      w = image.size(2);
+    } else if (image.dim() == 4) {
+      h = image.size(2);
+      w = image.size(3);
+    } else {
+      throw std::invalid_argument("Invalid image tensor dimensions");
+    }
+
+    int64_t target_h = height.value_or(h);
+    int64_t target_w = width.value_or(w);
+    return adjust_dimensions(target_h, target_w);
+  }
+
+  torch::Tensor normalize(const torch::Tensor& tensor) const {
+    return 2.0 * tensor - 1.0;
+  }
+
+  torch::Tensor denormalize(const torch::Tensor& tensor) const {
+    return (tensor * 0.5 + 0.5).clamp(0.0, 1.0);
+  }
+
+  torch::Tensor resize(const torch::Tensor& image,
+                       int64_t target_height,
+                       int64_t target_width) const {
+    return torch::nn::functional::interpolate(
+        image,
+        torch::nn::functional::InterpolateFuncOptions()
+            .size(std::vector<int64_t>{target_height, target_width})
+            .align_corners(false));
+  }
+
+ private:
+  int vae_scale_factor_ = 8;
+  bool do_resize_ = true;
+  bool do_normalize_ = true;
+  bool do_binarize_ = false;
+  bool do_convert_rgb_ = false;
+  bool do_convert_grayscale_ = false;
 };
 TORCH_MODULE(VAEImageProcessor);
 
@@ -208,6 +208,7 @@ class SpatialNormImpl : public torch::nn::Module {
     torch::Tensor new_f = norm_f * conv_y(zq) + conv_b(zq);
     return new_f;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     // norm_layer
     const auto norm_layer_state_weight =
@@ -285,6 +286,7 @@ class AttentionImpl : public torch::nn::Module {
     to_v_ = register_module("to_v", DiTLinear(query_dim, inner_dim, true));
     to_out_ = register_module("to_out", DiTLinear(inner_dim, query_dim, true));
   }
+
   torch::Tensor forward(torch::Tensor hidden_states, torch::Tensor temb) {
     torch::Tensor residual = hidden_states;
     int64_t input_ndim = hidden_states.dim();
@@ -345,6 +347,7 @@ class AttentionImpl : public torch::nn::Module {
     hidden_states = hidden_states / rescale_output_factor_;
     return hidden_states;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     // to_q_
     const auto to_q_state_bias = state_dict.get_tensor("to_q.bias");
@@ -452,59 +455,29 @@ class Downsample2DImpl : public torch::nn::Module {
                    bool use_conv = false,
                    std::optional<int64_t> out_channels = std::nullopt,
                    int64_t padding = 1,
-                   const std::string& name = "conv",
-                   int64_t kernel_size = 3,
-                   const std::optional<std::string>& norm_type = std::nullopt,
-                   std::optional<float> eps = std::nullopt,
-                   std::optional<bool> elementwise_affine = std::nullopt,
-                   bool bias = true)
+                   const std::string& name = "conv")
       : channels_(channels),
         out_channels_(out_channels.value_or(channels)),
         use_conv_(use_conv),
         padding_(padding),
         stride_(2),
         name_(name),
-        kernel_size_(kernel_size) {
-    float eps_val = eps.has_value() ? eps.value() : 1e-5f;
-    bool affine_val =
-        elementwise_affine.has_value() ? elementwise_affine.value() : true;
-
-    // if (norm_type.has_value()) {
-    //     const std::string& norm = norm_type.value();
-    //     if (norm == "ln_norm") {
-    //         norm_ = register_module(
-    //             "norm",
-    //             LayerNorm(
-    //                 channels_,
-    //                 eps_val,
-    //                 affine_val
-    //             )
-    //         );
-    //     } else if (norm == "rms_norm") {
-    //         norm_ = register_module(
-    //             "norm",
-    //             RMSNorm(
-    //                 channels_,
-    //                 eps_val
-    //             )
-    //         );
-    //     } else {
-    //         throw std::invalid_argument("Unknown norm_type: " + norm);
-    //     }
-    // }
-
+        kernel_size_(3) {
+    float eps_val = 1e-5f;
+    bool affine_val = true;
     conv_ = register_module(
         "conv",
         torch::nn::Conv2d(
             torch::nn::Conv2dOptions(channels_, out_channels_, kernel_size_)
                 .stride(stride_)
                 .padding(padding_)
-                .bias(bias)));
+                .bias(true)));
 
     if (name == "conv") {
       register_module("Conv2d_0", conv_);
     }
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const std::vector<torch::Tensor>& args = {}) {
     // check input channels
@@ -515,13 +488,6 @@ class Downsample2DImpl : public torch::nn::Module {
                 hidden_states.size(1));
 
     torch::Tensor x = hidden_states;
-    // if (norm_) {
-    //     // according to Python's permute(0,2,3,1) -> norm -> permute(0,3,1,2)
-    //     x = x.permute({0, 2, 3, 1});  // (B, C, H, W) -> (B, H, W, C)
-    //     x = norm_.forward(x);
-    //     x = x.permute({0, 3, 1, 2});  // (B, H, W, C) -> (B, C, H, W)
-    // }
-
     if (use_conv_ && padding_ == 0) {
       x = torch::nn::functional::pad(
           x,
@@ -538,6 +504,7 @@ class Downsample2DImpl : public torch::nn::Module {
     x = conv_(x);
     return x;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     const auto conv_state_dict = state_dict.get_tensor("conv.weight");
     if (conv_state_dict.defined()) {
@@ -563,12 +530,10 @@ class Downsample2DImpl : public torch::nn::Module {
   int64_t stride_;
   std::string name_;
   int64_t kernel_size_;
-
-  // torch::nn::AnyModule norm_;
   torch::nn::Conv2d conv_{nullptr};
 };
-
 TORCH_MODULE(Downsample2D);
+
 class Upsample2DImpl : public torch::nn::Module {
  public:
   Upsample2DImpl(int64_t channels,
@@ -578,7 +543,6 @@ class Upsample2DImpl : public torch::nn::Module {
                  std::string name = "conv",
                  int64_t kernel_size = 3,
                  int64_t padding = 1,
-                 const std::optional<std::string>& norm_type = std::nullopt,
                  double eps = 1e-5,
                  bool elementwise_affine = true,
                  bool bias = true,
@@ -609,6 +573,7 @@ class Upsample2DImpl : public torch::nn::Module {
                                                 .bias(bias)));
     }
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const std::vector<int64_t>& output_size = {}) {
     TORCH_CHECK(hidden_states.size(1) == channels_,
@@ -621,11 +586,6 @@ class Upsample2DImpl : public torch::nn::Module {
     if (use_conv_transpose_) {
       return conv_transpose_(x);
     }
-
-    // torch::Dtype dtype = x.dtype();
-    // if (dtype == torch::kBFloat16 && is_torch_version_less("2.1")) {
-    //     x = x.to(torch::kFloat32);
-    // }
 
     if (x.size(0) >= 64) {
       x = x.contiguous();
@@ -644,16 +604,13 @@ class Upsample2DImpl : public torch::nn::Module {
       x = torch::nn::functional::interpolate(x, opts);
     }
 
-    // if (dtype == torch::kBFloat16 && is_torch_version_less("2.1")) {
-    //     x = x.to(dtype);
-    // }
-
     if (use_conv_) {
       x = conv_(x);
     }
 
     return x;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     if (use_conv_transpose_) {
       // conv_transpose_
@@ -842,6 +799,7 @@ class ResnetBlock2DImpl : public torch::nn::Module {
 
     return output_tensor;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     // conv1_
     const auto conv1_weight = state_dict.get_tensor("conv1.weight");
@@ -972,11 +930,7 @@ class ResnetBlock2DImpl : public torch::nn::Module {
   Downsample2D downsample_module_{nullptr};
 };
 TORCH_MODULE(ResnetBlock2D);
-/**
- * Base class for all downsampling blocks in UNet architecture.
- * Defines a common interface and shared components for all downsampling blocks.
- * Each derived class must implement the forward() method.
- */
+
 class UNetMidBlock2DImpl : public torch::nn::Module {
  public:
   UNetMidBlock2DImpl(int64_t in_channels,
@@ -1065,6 +1019,7 @@ class UNetMidBlock2DImpl : public torch::nn::Module {
           ));
     }
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& temb = torch::Tensor()) {
     torch::Tensor current_hidden =
@@ -1132,6 +1087,7 @@ class BaseDownEncoderBlockImpl : public torch::nn::Module {
   torch::nn::ModuleList downsamplers_{nullptr};  // List of downsamplers
 };
 TORCH_MODULE(BaseDownEncoderBlock);
+
 class BaseUpDecoderBlockImpl : public torch::nn::Module {
  public:
   /**
@@ -1213,6 +1169,7 @@ class DownEncoderBlock2DImpl : public BaseDownEncoderBlockImpl {
                                             "op"));
     }
   }
+
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& temb = torch::Tensor(),
                         const std::vector<torch::Tensor>& args = {}) {
@@ -1236,6 +1193,7 @@ class DownEncoderBlock2DImpl : public BaseDownEncoderBlockImpl {
     }
     return current_hidden;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     for (size_t i = 0; i < resnets_->size(); ++i) {
       resnets_[i]->as<ResnetBlock2D>()->load_state_dict(
@@ -1253,7 +1211,6 @@ class DownEncoderBlock2DImpl : public BaseDownEncoderBlockImpl {
   torch::nn::ModuleList resnets_{nullptr};
   torch::nn::ModuleList downsamplers_{nullptr};
 };
-
 TORCH_MODULE(DownEncoderBlock2D);
 
 class UpBlock2DImpl : public BaseUpDecoderBlockImpl {
@@ -1306,13 +1263,13 @@ class UpBlock2DImpl : public BaseUpDecoderBlockImpl {
                                         "conv",
                                         3,
                                         1,
-                                        std::nullopt,
                                         1e-5,
                                         true,
                                         true,
                                         true));
     }
   }
+
   torch::Tensor forward(
       const torch::Tensor& hidden_states,
       const torch::Tensor& temb = torch::Tensor(),
@@ -1345,6 +1302,7 @@ class UpBlock2DImpl : public BaseUpDecoderBlockImpl {
 
     return current_hidden;
   }
+
   void load_state_dict(const StateDict& state_dict) {
     for (size_t i = 0; i < resnets_->size(); ++i) {
       resnets_[i]->as<ResnetBlock2D>()->load_state_dict(
@@ -1368,7 +1326,6 @@ class UpDecoderBlock2DImpl : public BaseUpDecoderBlockImpl {
  public:
   UpDecoderBlock2DImpl(int64_t in_channels,
                        int64_t out_channels,
-                       std::optional<int64_t> resolution_idx = std::nullopt,
                        float dropout = 0.0f,
                        int64_t num_layers = 1,
                        float resnet_eps = 1e-6f,
@@ -1414,14 +1371,11 @@ class UpDecoderBlock2DImpl : public BaseUpDecoderBlockImpl {
                                         "conv",
                                         3,
                                         1,
-                                        std::nullopt,
                                         1e-5,
                                         true,
                                         true,
                                         true));
     }
-
-    resolution_idx_ = resolution_idx;
   }
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
@@ -1463,7 +1417,6 @@ class UpDecoderBlock2DImpl : public BaseUpDecoderBlockImpl {
   torch::nn::ModuleList resnets_{nullptr};
   torch::nn::ModuleList upsamplers_{nullptr};
   bool add_upsample_ = false;
-  std::optional<int64_t> resolution_idx_;
 };
 TORCH_MODULE(UpDecoderBlock2D);
 
@@ -1477,9 +1430,7 @@ inline std::shared_ptr<BaseDownEncoderBlockImpl> get_down_block(
     float resnet_eps,
     const std::string& resnet_act_fn,
     int transformer_layers_per_block = 1,
-    std::optional<int> num_attention_heads = std::nullopt,
     std::optional<int> resnet_groups = std::nullopt,
-    std::optional<int> cross_attention_dim = std::nullopt,
     std::optional<int> downsample_padding = std::nullopt,
     bool dual_cross_attention = false,
     bool use_linear_projection = false,
@@ -1489,18 +1440,8 @@ inline std::shared_ptr<BaseDownEncoderBlockImpl> get_down_block(
     const std::string& attention_type = "default",
     bool resnet_skip_time_act = false,
     float resnet_out_scale_factor = 1.0f,
-    std::optional<std::string> cross_attention_norm = std::nullopt,
     std::optional<int> attention_head_dim = std::nullopt,
-    std::optional<std::string> downsample_type = std::nullopt,
     float dropout = 0.0f) {
-  if (!attention_head_dim.has_value()) {
-    std::cerr
-        << "Warning: It is recommended to provide `attention_head_dim` when "
-           "calling `get_down_block`. Defaulting `attention_head_dim` to "
-        << num_attention_heads.value_or(0) << "." << std::endl;
-    attention_head_dim = num_attention_heads;
-  }
-
   std::string processed_block_type = down_block_type;
   if (processed_block_type.size() >= 7 &&
       processed_block_type.substr(0, 7) == "UNetRes") {
@@ -1543,11 +1484,8 @@ inline std::shared_ptr<BaseUpDecoderBlockImpl> get_up_block(
     bool add_upsample,
     float resnet_eps,
     const std::string& resnet_act_fn,
-    std::optional<int> resolution_idx = std::nullopt,
     int transformer_layers_per_block = 1,
-    std::optional<int> num_attention_heads = std::nullopt,
     std::optional<int> resnet_groups = std::nullopt,
-    std::optional<int> cross_attention_dim = std::nullopt,
     bool dual_cross_attention = false,
     bool use_linear_projection = false,
     bool only_cross_attention = false,
@@ -1556,19 +1494,8 @@ inline std::shared_ptr<BaseUpDecoderBlockImpl> get_up_block(
     const std::string& attention_type = "default",
     bool resnet_skip_time_act = false,
     float resnet_out_scale_factor = 1.0f,
-    std::optional<std::string> cross_attention_norm = std::nullopt,
     std::optional<int> attention_head_dim = std::nullopt,
-    std::optional<std::string> upsample_type = std::nullopt,
     float dropout = 0.0f) {
-  // Handle default for attention_head_dim
-  if (!attention_head_dim.has_value()) {
-    std::cerr
-        << "Warning: It is recommended to provide `attention_head_dim` when "
-           "calling `get_up_block`. Defaulting `attention_head_dim` to "
-        << num_attention_heads.value_or(0) << "." << std::endl;
-    attention_head_dim = num_attention_heads;
-  }
-
   // Process up_block_type: remove "UNetRes" prefix if present
   std::string processed_block_type = up_block_type;
   if (processed_block_type.size() >= 7 &&
@@ -1581,9 +1508,6 @@ inline std::shared_ptr<BaseUpDecoderBlockImpl> get_up_block(
     return std::make_shared<UpDecoderBlock2DImpl>(
         static_cast<int64_t>(in_channels),
         static_cast<int64_t>(out_channels),
-        resolution_idx.has_value()
-            ? std::optional<int64_t>(resolution_idx.value())
-            : std::nullopt,
         static_cast<float>(dropout),
         static_cast<int64_t>(num_layers),
         static_cast<float>(resnet_eps),
@@ -1598,6 +1522,7 @@ inline std::shared_ptr<BaseUpDecoderBlockImpl> get_up_block(
     throw std::invalid_argument(processed_block_type + " does not exist.");
   }
 }
+
 // Diagonal Gaussian distribution for VAE latent space
 // This class is used to represent the distribution of the latent space in VAE
 // models. It provides methods for sampling, calculating KL divergence, and
@@ -1678,6 +1603,7 @@ struct AutoencoderKLOutput {
   explicit AutoencoderKLOutput(DiagonalGaussianDistribution latent_dist)
       : latent_dist(std::move(latent_dist)) {}
 };
+
 struct DecoderOutput {
   torch::Tensor sample;
   torch::Tensor commit_loss;
@@ -1701,7 +1627,6 @@ class VAEEncoderImpl : public torch::nn::Module {
                 .padding(1)
                 .bias(true)));
     // downblocks
-    // TODO
     int32_t output_channels = args.vae_block_out_channels()[0];
     for (size_t i = 0; i < args.vae_down_block_types().size(); i++) {
       int32_t input_channels = output_channels;
@@ -1717,9 +1642,7 @@ class VAEEncoderImpl : public torch::nn::Module {
                          1e-6,
                          args.vae_act_fn(),
                          1,
-                         std::nullopt,
                          args.vae_norm_num_groups(),
-                         std::nullopt,  // cross_attention_dim
                          0,
                          false,            // dual_cross_attention
                          false,            // use_linear_projection
@@ -1729,15 +1652,12 @@ class VAEEncoderImpl : public torch::nn::Module {
                          "default",        // attention_type
                          false,            // resnet_skip_time_act
                          1.0f,             // resnet_out_scale_factor
-                         std::nullopt,     // cross_attention_norm
                          output_channels,  // attention_head_dim
-                         std::nullopt,     // downsample_type
                          0.0f              // dropout
           );
       down_blocks_->push_back(down_block);
     }
     // mid blocks
-    // TODO
     mid_block_ =
         register_module("mid_block",
                         UNetMidBlock2D(args.vae_block_out_channels().back(),
@@ -1768,6 +1688,7 @@ class VAEEncoderImpl : public torch::nn::Module {
                 .padding(1)
                 .bias(true)));
   }
+
   torch::Tensor forward(const torch::Tensor& images) {
     auto sample = conv_in_(images);
     for (size_t i = 0; i < down_blocks_->size(); ++i) {
@@ -1843,6 +1764,7 @@ class VAEEncoderImpl : public torch::nn::Module {
   UNetMidBlock2D mid_block_{nullptr};
 };
 TORCH_MODULE(VAEEncoder);
+
 // VAE standart decoder implementation
 //  This class is used to decode the latent representations into images.
 class VAEDecoderImpl : public torch::nn::Module {
@@ -1860,7 +1782,6 @@ class VAEDecoderImpl : public torch::nn::Module {
                 .padding(1)
                 .bias(true)));
     // mid blocks
-    // TODO
     mid_block_ =
         register_module("mid_block",
                         UNetMidBlock2D(args.vae_block_out_channels().back(),
@@ -1896,11 +1817,8 @@ class VAEDecoderImpl : public torch::nn::Module {
                                    !is_final_block,
                                    1e-6,
                                    args.vae_act_fn(),
-                                   std::nullopt,  // resolution_idx
                                    1,  // transformer_layers_per_block
-                                   std::nullopt,  // num_attention_heads
                                    args.vae_norm_num_groups(),  // resnet_groups
-                                   std::nullopt,    // cross_attention_dim
                                    false,           // dual_cross_attention
                                    false,           // use_linear_projection
                                    false,           // only_cross_attention
@@ -1909,9 +1827,7 @@ class VAEDecoderImpl : public torch::nn::Module {
                                    "default",       // attention_type
                                    false,           // resnet_skip_time_act
                                    1.0f,            // resnet_out_scale_factor
-                                   std::nullopt,    // cross_attention_norm
                                    output_channel,  // attention_head_dim
-                                   std::nullopt,    // upsample_type
                                    0.0f             // dropout
       );
       up_blocks_->push_back(
@@ -2016,10 +1932,7 @@ TORCH_MODULE(VAEDecoder);
 // VAE implementation, including encoder and decoder
 class VAEImpl : public torch::nn::Module {
  public:
-  VAEImpl(const ModelContext& context,
-          torch::Device device,
-          torch::ScalarType dtype)
-      : args_(context.get_model_args()), device_(device), dtype_(dtype) {
+  VAEImpl(const ModelContext& context) : args_(context.get_model_args()) {
     encoder_ = register_module("encoder", VAEEncoder(context));
     decoder_ = register_module("decoder", VAEDecoder(context));
     if (args_.vae_use_quant_conv()) {
@@ -2035,42 +1948,18 @@ class VAEImpl : public torch::nn::Module {
           torch::nn::Conv2d(torch::nn::Conv2dOptions(
               args_.vae_latent_channels(), args_.vae_latent_channels(), 1)));
     }
-    encoder_->to(dtype_);
-    decoder_->to(dtype_);
+
+    auto dtype = context.get_tensor_options().dtype().toScalarType();
+    encoder_->to(dtype);
+    decoder_->to(dtype);
     if (args_.vae_use_quant_conv()) {
-      quant_conv_->to(dtype_);
+      quant_conv_->to(dtype);
     }
     if (args_.vae_use_post_quant_conv()) {
-      post_quant_conv_->to(dtype_);
+      post_quant_conv_->to(dtype);
     }
-    // tile_sample_min_size_ = args.sample_size();
-    // tile_latent_min_size_ = int32_t(tile_sample_min_size_ / (2 ^
-    // (args.block_out_channels().size() - 1)));
   }
-  // Enable tiled VAE decoding. When this option is enabled, the VAE will split
-  // the input tensor into tiles to
-  //     compute decoding and encoding in several steps. This is useful for
-  //     saving a large amount of memory and to allow processing larger images.
-  void enable_slicing(bool enable) { use_slicing_ = enable; }
-  void disable_slicing() { use_slicing_ = false; }
-  // Disable tiled VAE decoding. If `enable_tiling` was previously enabled, this
-  // method will go back to computing
-  //     decoding in one step.
-  //  void enable_tiling(bool enable) {
-  //      use_tiling_ = enable;
-  //  }
-  //  void disable_tiling() {
-  //      use_tiling_ = false;
-  //  }
 
-  // Encode a batch of images into latent representations.
-  torch::Tensor encode_(const torch::Tensor& images) {
-    auto enc = encoder_(images);
-    if (args_.vae_use_quant_conv()) {
-      enc = quant_conv_(enc);
-    }
-    return enc;
-  }
   AutoencoderKLOutput encode(const torch::Tensor& images) {
     torch::Tensor hidden_states;
     if (use_slicing_) {
@@ -2086,17 +1975,6 @@ class VAEImpl : public torch::nn::Module {
     return AutoencoderKLOutput(posterior);
   }
 
-  // Decode a batch of latent representations into images.
-  DecoderOutput decode_(const torch::Tensor& latents) {
-    torch::Tensor processed_latents = latents;
-
-    if (args_.vae_use_post_quant_conv()) {
-      processed_latents = post_quant_conv_(processed_latents);
-    }
-
-    auto dec = decoder_(processed_latents);
-    return DecoderOutput(dec);
-  }
   DecoderOutput decode(
       const torch::Tensor& latents,
       const std::optional<torch::Generator>& generator = std::nullopt) {
@@ -2112,35 +1990,6 @@ class VAEImpl : public torch::nn::Module {
     }
     return DecoderOutput(images);
   }
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    int64_t seed = 42;
-    int batch_size = 1;
-    int num_channels_latents = 16;
-    int height = 180;
-    int width = 180;
-    torch::manual_seed(seed);
-    torch::Tensor sample =
-        torch::randn({batch_size, num_channels_latents, height, width},
-                     torch::dtype(torch::kFloat32).device(device_));
-    DecoderOutput output = decode_(sample);
-    auto image_processor = VAEImageProcessor(true, 16);
-    auto image = image_processor->postprocess(output.sample);
-    return torch::Tensor();
-  }
-  DecoderOutput forward_(torch::Tensor sample, bool sample_posterior = false) {
-    torch::Tensor x = sample;
-    DiagonalGaussianDistribution posterior = encode(x).latent_dist;
-    if (sample_posterior) {
-      x = posterior.sample();
-    } else {
-      x = posterior.mode();
-    }
-    return decode(x);
-  }
-  // TODO: Implement the forward method
 
   void load_model(std::unique_ptr<DiTFolderLoader> loader) {
     for (const auto& state_dict : loader->get_state_dicts()) {
@@ -2179,6 +2028,26 @@ class VAEImpl : public torch::nn::Module {
   }
 
  private:
+  DecoderOutput decode_(const torch::Tensor& latents) {
+    torch::Tensor processed_latents = latents;
+
+    if (args_.vae_use_post_quant_conv()) {
+      processed_latents = post_quant_conv_(processed_latents);
+    }
+
+    auto dec = decoder_(processed_latents);
+    return DecoderOutput(dec);
+  }
+
+  torch::Tensor encode_(const torch::Tensor& images) {
+    auto enc = encoder_(images);
+    if (args_.vae_use_quant_conv()) {
+      enc = quant_conv_(enc);
+    }
+    return enc;
+  }
+
+ private:
   bool is_quant_conv_loaded{false};
   bool is_post_quant_conv_loaded{false};
   VAEEncoder encoder_{nullptr};
@@ -2187,12 +2056,10 @@ class VAEImpl : public torch::nn::Module {
   torch::nn::Conv2d post_quant_conv_{nullptr};
   bool use_post_quant_conv_{false};
   bool use_slicing_{false};
-  // WordEmbedding embedding_{nullptr};
   ModelArgs args_;
-  torch::Device device_;
-  torch::ScalarType dtype_;
 };
 TORCH_MODULE(VAE);
+
 // register the VAE model with the model registry
 REGISTER_MODEL_ARGS(AutoencoderKL, [&] {
   LOAD_ARG_OR(vae_in_channels, "in_channels", 3);
