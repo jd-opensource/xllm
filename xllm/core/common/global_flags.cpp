@@ -194,6 +194,14 @@ DEFINE_bool(enable_profile_kv_blocks,
             true,
             "true if generate kv cache for profile");
 
+DEFINE_bool(disable_ttft_profiling,
+            false,
+            "Whether to disable TTFT profiling.");
+
+DEFINE_bool(enable_forward_interruption,
+            false,
+            "Whether to enable forward interruption.");
+
 DEFINE_int32(max_global_ttft_ms,
              std::numeric_limits<int32_t>::max(),
              "all requests use single global ttft");
