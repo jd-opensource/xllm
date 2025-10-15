@@ -32,10 +32,6 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "runtime/dit_engine.h"
 #include "scheduler/scheduler_factory.h"
-#include "server/xllm_server_registry.h"
-#if defined(USE_NPU)
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
-#endif
 #include "util/device_name_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
