@@ -20,11 +20,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-RotaryEmbedding::RotaryEmbedding(int rotary_dim,
-                                 int max_position_embeddings,
-                                 int rope_theta,
-                                 bool interleaved,
-                                 const torch::TensorOptions& options)
+RotaryEmbeddingImpl::RotaryEmbeddingImpl(int rotary_dim,
+                                         int max_position_embeddings,
+                                         int rope_theta,
+                                         bool interleaved,
+                                         const torch::TensorOptions& options)
     : rotary_dim_(rotary_dim),
       max_position_embeddings_(max_position_embeddings),
       rope_theta_(rope_theta),
@@ -63,16 +63,16 @@ RotaryEmbedding::RotaryEmbedding(int rotary_dim,
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
 }
 
-void RotaryEmbedding::forward(torch::Tensor& x,
-                              const torch::Tensor& positions,
-                              const torch::Tensor& cu_query_lens,
-                              int max_query_len,
-                              bool is_prompt) {
+void RotaryEmbeddingImpl::forward(torch::Tensor& x,
+                                  const torch::Tensor& positions,
+                                  const torch::Tensor& cu_query_lens,
+                                  int max_query_len,
+                                  bool is_prompt) {
   bool discrete;
-  c10::optional<torch::Tensor> position_ids;
+  std::optional<torch::Tensor> position_ids;
   if (is_prompt) {
     discrete = false;
-    position_ids = c10::nullopt;
+    position_ids = std::nullopt;
   } else {
     discrete = true;
     position_ids = positions;
@@ -88,23 +88,6 @@ void RotaryEmbedding::forward(torch::Tensor& x,
                                discrete,
                                false /* dynamic_ntk */,
                                max_query_len);
-}
-
-// create right instance based on params
-std::shared_ptr<RotaryEmbedding> create_rotary_embedding(
-    const xllm::ModelArgs& args,
-    int64_t rotary_dim,
-    bool interleaved,
-    float sm_scale,
-    const torch::TensorOptions& options) {
-  const float attn_scale =
-      args.attn_scalar().value_or(static_cast<float>(args.head_dim()));
-  sm_scale = 1.0f / std::sqrt(attn_scale);
-  return std::make_shared<RotaryEmbedding>(rotary_dim,
-                                           args.max_position_embeddings(),
-                                           args.rope_theta(),
-                                           interleaved,
-                                           options);
 }
 
 }  // namespace layer

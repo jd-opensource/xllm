@@ -17,6 +17,9 @@ limitations under the License.
 
 #include <boost/algorithm/string.hpp>
 
+#if defined(USE_NPU)
+#include "core/framework/model/npu_dp_ep_padding.h"
+#endif
 #include "core/framework/model_context.h"
 #include "core/layers/qwen3_moe_decoder_layer.h"
 #include "llm_model_base.h"
@@ -261,14 +264,15 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   int32_t rank_;
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
+  nlohmann::json mapping_data_;
   int32_t num_experts_per_tok_;
   int32_t num_speculative_tokens_ = 0;
   at::Device device_;
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
+  layer::AttentionMask attn_mask_;
   layer::RmsNorm norm_{nullptr};
 #if defined(USE_NPU)
-  layer::AttentionMask attn_mask_;
   torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};
 #endif

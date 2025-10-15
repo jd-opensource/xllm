@@ -13,8 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "torch_mlu/csrc/aten/cnnl/cnnlHandle.h"
-#include "torch_mlu/csrc/framework/core/mlu_guard.h"
 #include "torch_mlu_ops.h"
 #include "torch_ops_api.h"
 
@@ -115,12 +113,12 @@ torch::Tensor fused_moe(const torch::Tensor& hidden_states,
                              std::nullopt,  // c: None
                              std::nullopt,  // alpha: None
                              std::nullopt,  // beta: None
-                             c10::nullopt,
-                             c10::nullopt,
-                             c10::nullopt,
-                             c10::nullopt,
-                             c10::nullopt,
-                             c10::nullopt,
+                             std::nullopt,
+                             std::nullopt,
+                             std::nullopt,
+                             std::nullopt,
+                             std::nullopt,
+                             std::nullopt,
                              tokens,
                              false,
                              true);
@@ -150,12 +148,12 @@ torch::Tensor fused_moe(const torch::Tensor& hidden_states,
                              std::nullopt,  // c: None
                              std::nullopt,  // alpha: None
                              std::nullopt,  // beta: None
-                             c10::nullopt,
-                             c10::nullopt,
-                             c10::nullopt,
-                             c10::nullopt,
-                             c10::nullopt,
-                             c10::nullopt,
+                             std::nullopt,
+                             std::nullopt,
+                             std::nullopt,
+                             std::nullopt,
+                             std::nullopt,
+                             std::nullopt,
                              tokens,
                              false,
                              true);

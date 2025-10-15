@@ -35,7 +35,7 @@ class ParallelLinearImpl : public torch::nn::Module {
 
   virtual torch::Tensor forward(
       torch::Tensor input,
-      c10::optional<torch::Tensor> residual = c10::nullopt) = 0;
+      std::optional<torch::Tensor> residual = std::nullopt) = 0;
 
   virtual void load_state_dict(const StateDict& state_dict) = 0;
 
@@ -61,7 +61,7 @@ class ColumnParallelLinearImpl : public ParallelLinearImpl {
                            const torch::TensorOptions& options);
 
   torch::Tensor forward(torch::Tensor input,
-                        c10::optional<torch::Tensor> residual) override;
+                        std::optional<torch::Tensor> residual) override;
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) override;
@@ -114,7 +114,7 @@ class QKVParallelLinearImpl : public ParallelLinearImpl {
                         const torch::TensorOptions& options);
 
   torch::Tensor forward(torch::Tensor input,
-                        c10::optional<torch::Tensor> residual) override;
+                        std::optional<torch::Tensor> residual) override;
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) override;
@@ -178,7 +178,7 @@ class RowParallelLinearImpl : public ParallelLinearImpl {
                         const torch::TensorOptions& options);
 
   torch::Tensor forward(torch::Tensor input,
-                        c10::optional<torch::Tensor> residual) override;
+                        std::optional<torch::Tensor> residual) override;
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) override;
@@ -227,7 +227,7 @@ class ReplicatedLinearImpl : public ParallelLinearImpl {
                        const torch::TensorOptions& options);
 
   torch::Tensor forward(torch::Tensor input,
-                        c10::optional<torch::Tensor> residual) override;
+                        std::optional<torch::Tensor> residual) override;
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) override;

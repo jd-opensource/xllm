@@ -48,25 +48,25 @@ AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
   return attn_metadata;
 }
 
-Attention::Attention(int num_heads,
-                     int head_size,
-                     float scale,
-                     int num_kv_heads,
-                     int sliding_window)
+AttentionImpl::AttentionImpl(int num_heads,
+                             int head_size,
+                             float scale,
+                             int num_kv_heads,
+                             int sliding_window)
     : num_heads_(num_heads),
       head_size_(head_size),
       scale_(scale),
       num_kv_heads_(num_kv_heads),
       sliding_window_(sliding_window - 1) {}
 
-std::tuple<torch::Tensor, c10::optional<torch::Tensor>> Attention::forward(
+std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     const AttentionMetadata& attn_metadata,
     torch::Tensor& query,
     torch::Tensor& key,
     torch::Tensor& value,
     KVCache& kv_cache) {
   auto output = torch::empty_like(query);
-  auto output_lse = c10::nullopt;
+  auto output_lse = std::nullopt;
 
   query = query.view({-1, num_heads_, head_size_});
   key = key.view({-1, num_kv_heads_, head_size_});
@@ -91,13 +91,13 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> Attention::forward(
                                     output_lse,
                                     attn_metadata.query_start_loc,
                                     attn_metadata.seq_start_loc,
-                                    c10::nullopt /* alibi_slope */,
-                                    c10::nullopt /* attn_bias */,
-                                    c10::nullopt /* q_quant_scale */,
-                                    c10::nullopt /* k_quant_scale */,
-                                    c10::nullopt /* v_quant_scale */,
-                                    c10::nullopt /* out_quant_scale */,
-                                    c10::nullopt /* block_tables */,
+                                    std::nullopt /* alibi_slope */,
+                                    std::nullopt /* attn_bias */,
+                                    std::nullopt /* q_quant_scale */,
+                                    std::nullopt /* k_quant_scale */,
+                                    std::nullopt /* v_quant_scale */,
+                                    std::nullopt /* out_quant_scale */,
+                                    std::nullopt /* block_tables */,
                                     attn_metadata.max_query_len,
                                     attn_metadata.max_seq_len,
                                     scale_,
@@ -114,12 +114,12 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> Attention::forward(
                                     output_lse,
                                     attn_metadata.query_start_loc,
                                     attn_metadata.seq_start_loc,
-                                    c10::nullopt /* alibi_slope */,
-                                    c10::nullopt /* attn_bias */,
-                                    c10::nullopt /* q_quant_scale */,
-                                    c10::nullopt /* k_quant_scale */,
-                                    c10::nullopt /* v_quant_scale */,
-                                    c10::nullopt /* out_quant_scale */,
+                                    std::nullopt /* alibi_slope */,
+                                    std::nullopt /* attn_bias */,
+                                    std::nullopt /* q_quant_scale */,
+                                    std::nullopt /* k_quant_scale */,
+                                    std::nullopt /* v_quant_scale */,
+                                    std::nullopt /* out_quant_scale */,
                                     attn_metadata.block_table,
                                     attn_metadata.max_query_len,
                                     attn_metadata.max_seq_len,
@@ -140,12 +140,12 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> Attention::forward(
         attn_metadata.seq_lens,
         v_cache,
         output_lse,
-        c10::nullopt /* q_quant_scale */,
-        c10::nullopt /* k_cache_quant_scale */,
-        c10::nullopt /* v_cache_quant_scale */,
-        c10::nullopt /* out_quant_scale */,
-        c10::nullopt /* alibi_slope */,
-        c10::nullopt /* mask */,
+        std::nullopt /* q_quant_scale */,
+        std::nullopt /* k_cache_quant_scale */,
+        std::nullopt /* v_cache_quant_scale */,
+        std::nullopt /* out_quant_scale */,
+        std::nullopt /* alibi_slope */,
+        std::nullopt /* mask */,
         attn_metadata.compute_dtype,
         attn_metadata.max_seq_len,
         sliding_window_,

@@ -25,7 +25,6 @@ cc_library(
     shared_memory_manager.cpp
     expert_buffer_manager.cpp
   DEPS
-    $<$<BOOL:${USE_NPU}>:llm_engine>
     :request
     :common
     glog::glog

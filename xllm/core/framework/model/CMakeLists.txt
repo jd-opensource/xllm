@@ -21,6 +21,12 @@ if(USE_NPU)
   list(APPEND BASE_DEPS :platform_npu)
 endif()
 
+if(USE_MLU)
+  # Modify dependencies for mlu
+  list(APPEND BASE_DEPS torch_mlu)
+  list(APPEND BASE_DEPS :mlu_layers)
+endif()
+
 # Define the library
 cc_library(
   NAME 

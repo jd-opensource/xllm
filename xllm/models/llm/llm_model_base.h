@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/framework/model_context.h"
 #include "core/layers/attention_mask.h"
 #include "core/layers/block_copy.h"
+#include "core/layers/linear.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/pos_embedding.h"
 #include "core/layers/rms_norm.h"
@@ -38,10 +39,8 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #elif defined(USE_MLU)
-#include "core/layers/linear.h"
 #include "core/layers/mlu/attention.h"
 #endif
-#include "models/model_registry.h"
 
 namespace xllm {
 
@@ -167,7 +166,7 @@ class LlmModelImplBase : public torch::nn::Module {
 #if defined(USE_NPU)
     return embed_tokens_[0](input_ids, 0);
 #elif defined(USE_MLU)
-    return embed_tokens_(input_ids);
+    return embed_tokens_[0](input_ids);
 #endif
   }
 
@@ -205,7 +204,7 @@ class LlmModelImplBase : public torch::nn::Module {
 #if defined(USE_NPU)
         h = embed_tokens_[i](tokens[i], 0);
 #elif defined(USE_MLU)
-        h = embed_tokens_(tokens[i]);
+        h = embed_tokens_[i](tokens[i]);
 #endif
       }
       hs.push_back(std::move(h));
@@ -320,15 +319,10 @@ class LlmModelImplBase : public torch::nn::Module {
 
   // load the weight from the checkpoint
   virtual void load_state_dict(const StateDict& state_dict) {
-#if defined(USE_NPU)
     for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
       embed_tokens_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("embed_tokens."));
     }
-#elif defined(USE_MLU)
-    embed_tokens_->load_state_dict(
-        state_dict.get_dict_with_prefix("embed_tokens."));
-#endif
     // call each layer's load_state_dict function
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
@@ -358,6 +352,7 @@ class LlmModelImplBase : public torch::nn::Module {
     }
     norm_->merge_loaded_weights();
   }
+#endif
 
   virtual std::vector<layer::WordEmbedding> get_word_embedding() {
     return embed_tokens_;
@@ -369,7 +364,6 @@ class LlmModelImplBase : public torch::nn::Module {
       embed_tokens_[i] = word_embedding[i];
     }
   }
-#endif
 
  protected:
 #if defined(USE_NPU)
@@ -380,17 +374,12 @@ class LlmModelImplBase : public torch::nn::Module {
   int device_id = 0;
   layer::AttentionMask attn_mask_;
   std::vector<layer::PosEmbedding> atb_pos_embeds_;
+#endif
 
   std::vector<int64_t> mrope_section_;
   // test
   //  ParallelEmbedding embed_tokens_{nullptr};
   std::vector<layer::WordEmbedding> embed_tokens_;
-#endif
-
-#if defined(USE_MLU)
-  std::vector<int64_t> mrope_section_;
-  layer::WordEmbedding embed_tokens_{nullptr};
-#endif
 
   layer::RmsNorm norm_{nullptr};
   torch::nn::ModuleList blocks_{nullptr};

@@ -13,8 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "torch_mlu/csrc/aten/cnnl/cnnlHandle.h"
-#include "torch_mlu/csrc/framework/core/mlu_guard.h"
 #include "torch_mlu_ops.h"
 #include "torch_ops_api.h"
 
@@ -22,18 +20,18 @@ namespace xllm::mlu {
 
 at::Tensor matmul(const at::Tensor& a,
                   const at::Tensor& b,
-                  const c10::optional<at::Tensor>& bias,
-                  const c10::optional<at::Tensor>& c,
+                  const std::optional<at::Tensor>& bias,
+                  const std::optional<at::Tensor>& c,
                   double alpha,
                   double beta) {
   return tmo::torch_api::matmul(a,
                                 b,
                                 bias,
                                 c,
-                                c10::nullopt,
-                                c10::nullopt,
-                                c10::nullopt,
-                                c10::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
                                 "none",
                                 alpha,
                                 beta,

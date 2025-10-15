@@ -46,17 +46,17 @@ struct AttentionMetadata {
   bool is_chunked_prefill;
 };
 
-class Attention : public torch::nn::Module {
+class AttentionImpl : public torch::nn::Module {
  public:
-  Attention() = default;
+  AttentionImpl() = default;
 
-  Attention(int num_heads,
-            int head_size,
-            float scale,
-            int num_kv_heads,
-            int sliding_window);
+  AttentionImpl(int num_heads,
+                int head_size,
+                float scale,
+                int num_kv_heads,
+                int sliding_window);
 
-  std::tuple<torch::Tensor, c10::optional<torch::Tensor>> forward(
+  std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
       const AttentionMetadata& attn_metadata,
       torch::Tensor& query,
       torch::Tensor& key,
@@ -70,6 +70,7 @@ class Attention : public torch::nn::Module {
   int num_kv_heads_;
   int sliding_window_;
 };
+TORCH_MODULE(Attention);
 
 }  // namespace layer
 }  // namespace xllm

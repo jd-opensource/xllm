@@ -53,7 +53,7 @@ Qwen3MLPImpl::Qwen3MLPImpl(const ModelArgs& args,
 torch::Tensor Qwen3MLPImpl::forward(const torch::Tensor& hidden_states,
                                     const torch::Tensor& residual) {
   // input shape: [num_tokens, hidden_size]
-  auto gate_up = gate_up_proj_->forward(hidden_states, c10::nullopt);
+  auto gate_up = gate_up_proj_->forward(hidden_states, std::nullopt);
 
   int64_t batch_size = gate_up.sizes()[0];
   auto output = torch::empty(
@@ -62,8 +62,8 @@ torch::Tensor Qwen3MLPImpl::forward(const torch::Tensor& hidden_states,
 
   tmo::torch_api::active(gate_up,
                          output,
-                         c10::nullopt /* bias */,
-                         c10::nullopt /* cusum_token_count */,
+                         std::nullopt /* bias */,
+                         std::nullopt /* cusum_token_count */,
                          xllm::mlu::kActModeSilu,
                          is_gated_,
                          0 /* start_expert_id */,

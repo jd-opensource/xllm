@@ -48,6 +48,6 @@ if(USE_NPU)
       GTest::gtest_main
   )
 
-  target_link_libraries(block_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto Folly::folly)
+  target_link_libraries(block_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto ascendcl Folly::folly)
   add_dependencies(block_test brpc-static)
 endif()

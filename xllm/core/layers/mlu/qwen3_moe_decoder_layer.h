@@ -50,7 +50,7 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module {
                         const ModelInputParams& input_params);
 
  private:
-  Qwen3Attention attention_;
+  Qwen3Attention attention_{nullptr};
   Qwen3MLP mlp_{nullptr};
   Qwen3MoeMLP moe_mlp_{nullptr};
   RmsNorm input_norm_{nullptr};

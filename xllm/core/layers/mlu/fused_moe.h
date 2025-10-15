@@ -44,7 +44,7 @@ class FusedMoEImpl : public torch::nn::Module {
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& router_logits,
-                        c10::optional<torch::Tensor> residual);
+                        std::optional<torch::Tensor> residual);
 
   void load_state_dict(const StateDict& state_dict);
 

@@ -12,7 +12,6 @@ cc_library(
   DEPS
     :api_service
     :request
-    :xtensor
     absl::strings
     glog::glog
     proto::xllm_proto

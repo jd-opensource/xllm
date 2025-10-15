@@ -36,11 +36,6 @@ limitations under the License.
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
-#if defined(USE_NPU)
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
-#elif defined(USE_MLU)
-#include <torch_mlu/csrc/framework/core/caching_allocator.h>
-#endif
 #include "util/device_name_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
@@ -117,13 +112,6 @@ LLMMaster::~LLMMaster() {
   if (loop_thread_.joinable()) {
     loop_thread_.join();
   }
-
-  // torch::cuda::empty_cache();
-#if defined(USE_NPU)
-  c10_npu::NPUCachingAllocator::emptyCache();
-#elif defined(USE_MLU)
-  torch_mlu::MLUCachingAllocator::emptyCache();
-#endif
 }
 
 void LLMMaster::handle_batch_request(std::vector<std::string> prompts,

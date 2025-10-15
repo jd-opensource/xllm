@@ -42,19 +42,12 @@ namespace parallel_state {
 std::optional<ParallelArgs> get_dp_attn_parallel_args(
     const ParallelArgs& parallel_args);
 
-torch::Tensor gather(torch::Tensor input, const ParallelArgs& parallel_args);
-
-torch::Tensor reduce(torch::Tensor input, const ParallelArgs& parallel_args);
-
-torch::Tensor scatter(torch::Tensor input, const ParallelArgs& parallel_args);
-
-#if defined(USE_MLU)
 torch::Tensor gather(torch::Tensor input, ProcessGroup* process_group);
 
 torch::Tensor reduce(torch::Tensor input, ProcessGroup* process_group);
 
 torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group);
-#endif
+
 }  // namespace parallel_state
 
 class ProcessGroup;

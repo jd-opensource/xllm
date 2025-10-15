@@ -36,7 +36,7 @@ class Qwen3MoeMLPImpl : public torch::nn::Module {
                   const torch::TensorOptions& options);
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
-                        c10::optional<torch::Tensor> residual);
+                        std::optional<torch::Tensor> residual);
 
   void load_state_dict(const StateDict& state_dict);
 

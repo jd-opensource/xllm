@@ -40,13 +40,9 @@ class KVCache final {
   std::shared_ptr<XTensor> get_v_xtensor() const;
 
   bool empty() const {
-#if defined(USE_NPU)
     return FLAGS_enable_continuous_kvcache
                ? (key_xtensor_ == nullptr || value_xtensor_ == nullptr)
                : (!key_cache_.defined() || !value_cache_.defined());
-#elif defined(USE_MLU)
-    return (!key_cache_.defined() || !value_cache_.defined());
-#endif
   }
 
   void swap_blocks(torch::Tensor& src_tensor, torch::Tensor& dst_tensor);

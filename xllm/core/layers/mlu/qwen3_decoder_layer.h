@@ -50,13 +50,10 @@ class Qwen3DecoderImpl : public torch::nn::Module {
                         const ModelInputParams& input_params);
 
  private:
-  Qwen3Attention attention_;
+  Qwen3Attention attention_{nullptr};
   Qwen3MLP mlp_{nullptr};
   RmsNorm input_norm_{nullptr};
   RmsNorm post_norm_{nullptr};
-
-  c10::ScalarType dtype_;
-  int rank_id_;
 };
 
 }  // namespace layer

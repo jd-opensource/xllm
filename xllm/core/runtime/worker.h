@@ -54,6 +54,7 @@ class Worker {
 
   bool allocate_continuous_kv_cache(
       const std::vector<XTensor::Options>& options);
+
   void get_device_info(std::string& device_ip, uint16_t& port);
 
   void get_cache_info(uint64_t& cluster_id,

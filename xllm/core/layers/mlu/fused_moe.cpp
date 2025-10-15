@@ -70,7 +70,7 @@ FusedMoEImpl::FusedMoEImpl(int num_experts,
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
                                     const torch::Tensor& router_logits,
-                                    c10::optional<torch::Tensor> residual) {
+                                    std::optional<torch::Tensor> residual) {
   std::optional<torch::Tensor> residual_ = std::nullopt;
   if (residual.has_value() && ep_local_tp_rank_ == 0) {
     residual_ = residual;

@@ -30,8 +30,8 @@ static const std::string kActModeSwish = "swish";
 
 at::Tensor matmul(const at::Tensor& a,
                   const at::Tensor& b,
-                  const c10::optional<at::Tensor>& bias,
-                  const c10::optional<at::Tensor>& c,
+                  const std::optional<at::Tensor>& bias,
+                  const std::optional<at::Tensor>& c,
                   double alpha,
                   double beta);
 

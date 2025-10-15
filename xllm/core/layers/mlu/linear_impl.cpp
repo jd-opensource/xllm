@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "linear_impl.h"
 
-#include <c10/core/TensorImpl.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 
@@ -59,12 +58,12 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
 
 torch::Tensor ColumnParallelLinearImpl::forward(
     torch::Tensor input,
-    c10::optional<torch::Tensor> residual) {
+    std::optional<torch::Tensor> residual) {
   namespace F = torch::nn::functional;
   input = input.to(device_);
   auto beta = (residual.has_value() && rank_ == 0) ? 1.0 : 0.0;
-  auto bias = (bias_.defined() && rank_ == 0) ? c10::optional<at::Tensor>(bias_)
-                                              : c10::nullopt;
+  auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
+                                              : std::nullopt;
   auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
   if (world_size_ > 1 && gather_output_) {
     output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
@@ -145,13 +144,13 @@ QKVParallelLinearImpl::QKVParallelLinearImpl(
 
 torch::Tensor QKVParallelLinearImpl::forward(
     torch::Tensor input,
-    c10::optional<torch::Tensor> residual) {
+    std::optional<torch::Tensor> residual) {
   namespace F = torch::nn::functional;
   input = input.to(device_);
   auto beta = (residual.has_value() && rank_ == 0) ? 1.0 : 0.0;
   auto bias = (qkv_bias_.defined() && rank_ == 0)
-                  ? c10::optional<at::Tensor>(qkv_bias_)
-                  : c10::nullopt;
+                  ? std::optional<at::Tensor>(qkv_bias_)
+                  : std::nullopt;
   auto output =
       xllm::mlu::matmul(input, qkv_weight_, bias, residual, 1.0, beta);
   if (world_size_ > 1 && gather_output_) {
@@ -236,15 +235,15 @@ RowParallelLinearImpl::RowParallelLinearImpl(
 
 torch::Tensor RowParallelLinearImpl::forward(
     torch::Tensor input,
-    c10::optional<torch::Tensor> residual) {
+    std::optional<torch::Tensor> residual) {
   namespace F = torch::nn::functional;
   if (!input_is_parallelized_) {
     input = xllm::parallel_state::scatter(input, parallel_args_.tp_group_);
   }
 
   auto beta = (residual.has_value() && rank_ == 0) ? 1.0 : 0.0;
-  auto bias = (bias_.defined() && rank_ == 0) ? c10::optional<at::Tensor>(bias_)
-                                              : c10::nullopt;
+  auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
+                                              : std::nullopt;
   auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
 
   if (if_reduce_results_ && world_size_ > 1) {
@@ -287,10 +286,10 @@ ReplicatedLinearImpl::ReplicatedLinearImpl(
 
 torch::Tensor ReplicatedLinearImpl::forward(
     torch::Tensor input,
-    c10::optional<torch::Tensor> residual) {
+    std::optional<torch::Tensor> residual) {
   namespace F = torch::nn::functional;
   auto beta = residual.has_value() ? 1.0 : 0.0;
-  auto bias = bias_.defined() ? c10::optional<at::Tensor>(bias_) : c10::nullopt;
+  auto bias = bias_.defined() ? std::optional<at::Tensor>(bias_) : std::nullopt;
   auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
   return output;
 }

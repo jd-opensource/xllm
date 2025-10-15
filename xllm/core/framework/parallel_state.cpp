@@ -163,63 +163,12 @@ std::optional<ParallelArgs> get_dp_attn_parallel_args(
                       parallel_args.dp_size());
 }
 
-torch::Tensor gather(torch::Tensor input, const ParallelArgs& parallel_args) {
-  const auto world_size = parallel_args.world_size();
-  if (world_size == 1) {
-    // bypass if only have one gpu
-    return input;
-  }
-
-  const auto rank = parallel_args.rank();
-  // auto* process_group = parallel_args.process_group();
-  std::vector<torch::Tensor> tensors(world_size);
-  for (int64_t i = 0; i < world_size; ++i) {
-    tensors[i] = torch::empty_like(input);
-  }
-  // blocking call
-#if defined(USE_MLU)
-  parallel_args.process_group_->allgather(input, tensors);
-#endif
-  return torch::cat(tensors, /*dim=*/-1).contiguous();
-}
-
-torch::Tensor reduce(torch::Tensor input, const ParallelArgs& parallel_args) {
-  const auto world_size = parallel_args.world_size();
-  if (world_size == 1) {
-    // bypass if only have one gpu
-    return input;
-  }
-  // auto* process_group = parallel_args.process_group();
-#if defined(USE_MLU)
-  parallel_args.process_group_->allreduce(input);
-#endif
-  return input;
-}
-
-torch::Tensor scatter(torch::Tensor input, const ParallelArgs& parallel_args) {
-  const auto world_size = parallel_args.world_size();
-  if (world_size == 1) {
-    // bypass if only have one gpu
-    return input;
-  }
-
-  // get the size for last dimension
-  const auto last_dim_size = input.size(-1);
-  CHECK(last_dim_size % world_size == 0)
-      << "last_dim_size " << last_dim_size << " not divisible by world_size "
-      << world_size;
-
-  // torch::split does not create contiguous tensors by default.
-  const auto tensor_list = input.split(last_dim_size / world_size, /*dim=*/-1);
-  const auto rank = parallel_args.rank();
-  return tensor_list[rank];
-}
-
-#if defined(USE_MLU)
 torch::Tensor gather(torch::Tensor input, ProcessGroup* process_group) {
+  if (!process_group) {
+    return input;
+  }
   const auto world_size = process_group->world_size();
   if (world_size == 1) {
-    // bypass if only have one mlu
     return input;
   }
 
@@ -234,9 +183,11 @@ torch::Tensor gather(torch::Tensor input, ProcessGroup* process_group) {
 }
 
 torch::Tensor reduce(torch::Tensor input, ProcessGroup* process_group) {
+  if (!process_group) {
+    return input;
+  }
   const auto world_size = process_group->world_size();
   if (world_size == 1) {
-    // bypass if only have one mlu
     return input;
   }
   process_group->allreduce(input);
@@ -244,9 +195,11 @@ torch::Tensor reduce(torch::Tensor input, ProcessGroup* process_group) {
 }
 
 torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group) {
+  if (!process_group) {
+    return input;
+  }
   const auto world_size = process_group->world_size();
   if (world_size == 1) {
-    // bypass if only have one mlu
     return input;
   }
 
@@ -261,7 +214,6 @@ torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group) {
   const auto rank = process_group->rank();
   return tensor_list[rank];
 }
-#endif
 
 }  // namespace parallel_state
 
@@ -481,7 +433,6 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
                                                   dispatchAndCombinecommDomain,
                                                   dispatchAndCombineHcclComm);
 #elif defined(USE_MLU)
-  // TODO: create process groups for mlu here
   parallel_args_ = std::make_unique<ParallelArgs>(
       global_rank, world_size, dp_size, nullptr, ep_size);
 #endif

@@ -25,13 +25,13 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class RotaryEmbedding : public torch::nn::Module {
+class RotaryEmbeddingImpl : public torch::nn::Module {
  public:
-  RotaryEmbedding(int rotary_dim,
-                  int max_position_embeddings,
-                  int rope_theta,
-                  bool interleaved,
-                  const torch::TensorOptions& options);
+  RotaryEmbeddingImpl(int rotary_dim,
+                      int max_position_embeddings,
+                      int rope_theta,
+                      bool interleaved,
+                      const torch::TensorOptions& options);
 
   void forward(torch::Tensor& x,
                const torch::Tensor& positions,
@@ -50,13 +50,7 @@ class RotaryEmbedding : public torch::nn::Module {
   torch::Tensor cos_;
   torch::Tensor cos_sin_cache_;
 };
-
-std::shared_ptr<RotaryEmbedding> create_rotary_embedding(
-    const xllm::ModelArgs& model_args,
-    int64_t rotary_dim,
-    bool interleaved,
-    float sm_scale,
-    const torch::TensorOptions& options);
+TORCH_MODULE(RotaryEmbedding);
 
 }  // namespace layer
 }  // namespace xllm

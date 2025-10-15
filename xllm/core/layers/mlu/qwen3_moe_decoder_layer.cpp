@@ -28,7 +28,9 @@ Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
   const auto& options = context.get_tensor_options();
 
   // Initialize attention layers
-  attention_ = Qwen3Attention(model_args, quant_args, parallel_args, options);
+  attention_ = register_module(
+      "self_attn",
+      Qwen3Attention(model_args, quant_args, parallel_args, options));
 
   // Initialize norm layers
   input_norm_ = register_module(
@@ -54,7 +56,7 @@ Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
 }
 
 void Qwen3MoeDecoderImpl::load_state_dict(const StateDict& state_dict) {
-  attention_.load_state_dict(state_dict.get_dict_with_prefix("self_attn."));
+  attention_->load_state_dict(state_dict.get_dict_with_prefix("self_attn."));
   input_norm_->load_state_dict(
       state_dict.get_dict_with_prefix("input_layernorm."));
   post_norm_->load_state_dict(
@@ -77,7 +79,7 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(
   x = input_norm_(x);
 
   // Attention
-  x = attention_.forward(positions, x, residual, attn_metadata, kv_cache);
+  x = attention_->forward(positions, x, residual, attn_metadata, kv_cache);
 
   // Post-attention norm
   residual = x;

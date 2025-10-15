@@ -17,9 +17,6 @@ cc_library(
   SRCS
     ${MLU_SOURCE_FILES}
   DEPS
-    cnnl
-    cnnl_extra
-    cnrt
     torch
     cnclep
     torch_mlu_ops

@@ -22,10 +22,10 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen3Attention::Qwen3Attention(const ModelArgs& args,
-                               const QuantArgs& quant_args,
-                               const ParallelArgs& parallel_args,
-                               const torch::TensorOptions& options) {
+Qwen3AttentionImpl::Qwen3AttentionImpl(const ModelArgs& args,
+                                       const QuantArgs& quant_args,
+                                       const ParallelArgs& parallel_args,
+                                       const torch::TensorOptions& options) {
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   const int64_t total_num_heads = args.n_heads();
   const int64_t total_num_kv_heads = args.n_kv_heads().value_or(args.n_heads());
@@ -78,26 +78,30 @@ Qwen3Attention::Qwen3Attention(const ModelArgs& args,
       "k_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
 
   // 4. Rotary embedding
-  float sm_scale = scaling_;
-  bool interleaved = false;
-  rotary_emb_ = create_rotary_embedding(args,
-                                        /*rotary_dim=*/head_dim_,
-                                        interleaved,
-                                        sm_scale,
-                                        options);
+  rotary_emb_ = register_module("rope",
+                                RotaryEmbedding(/*rotary_dim=*/head_dim_,
+                                                args.max_position_embeddings(),
+                                                args.rope_theta(),
+                                                /*interleaved=*/false,
+                                                options));
 
   // 5. Attention
-  attn_ = Attention(
-      num_heads_, head_dim_, scaling_, num_kv_heads_, args.sliding_window());
+  attn_ = register_module("attn",
+                          Attention(num_heads_,
+                                    head_dim_,
+                                    scaling_,
+                                    num_kv_heads_,
+                                    args.sliding_window()));
 }
 
-torch::Tensor Qwen3Attention::forward(const torch::Tensor& positions,
-                                      const torch::Tensor& hidden_states,
-                                      const torch::Tensor& residual,
-                                      const AttentionMetadata& attn_metadata,
-                                      KVCache& kv_cache) {
+torch::Tensor Qwen3AttentionImpl::forward(
+    const torch::Tensor& positions,
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& residual,
+    const AttentionMetadata& attn_metadata,
+    KVCache& kv_cache) {
   // 1. qkv projection
-  auto qkv = qkv_proj_->forward(hidden_states, c10::nullopt);
+  auto qkv = qkv_proj_->forward(hidden_states, std::nullopt);
 
   auto q = qkv.slice(/*dim=*/-1, 0, q_size_);
   auto k = qkv.slice(/*dim=*/-1, q_size_, q_size_ + kv_size_);
@@ -129,13 +133,13 @@ torch::Tensor Qwen3Attention::forward(const torch::Tensor& positions,
   k = qk_vec[1];
 
   // 5. store k/v cache and do attention
-  auto out = std::get<0>(attn_.forward(attn_metadata, q, k, v, kv_cache));
+  auto out = std::get<0>(attn_->forward(attn_metadata, q, k, v, kv_cache));
 
   // 6. output projection
   return o_proj_->forward(out, residual);
 }
 
-void Qwen3Attention::load_state_dict(const StateDict& state_dict) {
+void Qwen3AttentionImpl::load_state_dict(const StateDict& state_dict) {
   qkv_proj_->load_state_dict(state_dict);
   o_proj_->load_state_dict(state_dict.get_dict_with_prefix("o_proj."));
   if (auto w = state_dict.get_tensor("q_norm.weight"); w.defined()) {

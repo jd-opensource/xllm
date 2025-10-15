@@ -49,8 +49,8 @@ Qwen3MoeMLPImpl::Qwen3MoeMLPImpl(const ModelArgs& args,
 }
 
 torch::Tensor Qwen3MoeMLPImpl::forward(const torch::Tensor& hidden_states,
-                                       c10::optional<torch::Tensor> residual) {
-  auto router_logits = gate_(hidden_states, c10::nullopt);
+                                       std::optional<torch::Tensor> residual) {
+  auto router_logits = gate_(hidden_states, std::nullopt);
   return expert_(hidden_states, router_logits, residual);
 }
 

@@ -43,10 +43,6 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include <pybind11/pybind11.h>
-
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
-#else
-#include <torch_mlu/csrc/framework/core/caching_allocator.h>
 #endif
 
 namespace xllm {
