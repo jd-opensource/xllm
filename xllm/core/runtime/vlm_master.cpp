@@ -78,7 +78,7 @@ VLMMaster::VLMMaster(const Options& options)
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
       .enable_decode_response_to_service(enable_decode_response_to_service)
-      .enable_ttft_profiling(options_.enable_ttft_profiling())
+      .disable_ttft_profiling(options_.disable_ttft_profiling())
       .enable_forward_interruption(options_.enable_forward_interruption())
       // TODO: support later for VLM.
       .enable_schedule_overlap(false);

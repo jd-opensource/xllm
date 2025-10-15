@@ -74,7 +74,8 @@ PYBIND11_MODULE(xllm_export, m) {
                      &Options::kv_cache_transfer_mode_)
       .def_readwrite("device_ip", &Options::device_ip_)
       .def_readwrite("transfer_listen_port", &Options::transfer_listen_port_)
-      .def_readwrite("enable_ttft_profiling", &Options::enable_ttft_profiling_)
+      .def_readwrite("disable_ttft_profiling",
+                     &Options::disable_ttft_profiling_)
       .def_readwrite("enable_forward_interruption",
                      &Options::enable_forward_interruption_);
 

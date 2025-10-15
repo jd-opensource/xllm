@@ -57,7 +57,7 @@ std::string Options::to_string() const {
      << ", store_metadata_connstring: " << store_metadata_connstring()
      << ", enable_multi_stream_parallel: " << enable_multi_stream_parallel()
      << ", enable_continuous_kvcache: " << enable_continuous_kvcache()
-     << ", enable_ttft_profiling: " << enable_ttft_profiling()
+     << ", disable_ttft_profiling: " << disable_ttft_profiling()
      << ", enable_forward_interruption: " << enable_forward_interruption();
   ss << "]";
   return ss.str();
