@@ -11,7 +11,7 @@
 namespace xllm {
 namespace perf_model {
 
-// 枚举类型定义
+// Enumeration type definitions
 enum class OpType {
   PREFILL_GEMM = 1,
   PREFILL_ATTENTION = 2,
@@ -19,15 +19,15 @@ enum class OpType {
   DECODE_ATTENTION = 4
 };
 
-// 前向声明
+// Forward declarations
 class PerfModel;
 class Resource;
 
-// 全局函数声明
+// Global function declarations
 void set_perf_model(std::shared_ptr<PerfModel> model);
 std::shared_ptr<PerfModel> get_perf_model();
 
-// Resource 类定义
+// Resource class definition
 class Resource {
  public:
   int64_t flops = 0;
@@ -47,7 +47,7 @@ class Resource {
   friend std::ostream& operator<<(std::ostream& os, const Resource& res);
 };
 
-// PerfModel 类定义
+// PerfModel class definition
 class PerfModel {
  public:
   double flop_s_gemm;
@@ -70,7 +70,7 @@ class PerfModel {
                               OpType op_type = OpType::PREFILL_GEMM) const;
 };
 
-// LinearOpFlops 类定义
+// LinearOpFlops class definition
 class LinearOpFlops {
  public:
   int64_t input_dim;
@@ -83,7 +83,7 @@ class LinearOpFlops {
   int64_t _saturation_bs() const;
 };
 
-// MHA_OpFlops 类定义
+// MHA_OpFlops class definition
 class MHA_OpFlops {
  public:
   int64_t hidden_dim;
@@ -96,7 +96,7 @@ class MHA_OpFlops {
   Resource operator()(int64_t q_len, int64_t kv_len, bool is_decode) const;
 };
 
-// AllReduceOpFlops 类定义
+// AllReduceOpFlops class definition
 class AllReduceOpFlops {
  public:
   int64_t dtype_byte;
@@ -106,7 +106,7 @@ class AllReduceOpFlops {
   Resource operator()(int64_t data_size) const;
 };
 
-// MLP_Flops 类定义
+// MLP_Flops class definition
 class MLP_Flops {
  public:
   int64_t hidden_dim;
@@ -127,7 +127,7 @@ class MLP_Flops {
   int64_t size() const;
 };
 
-// AttentionFlops 类定义
+// AttentionFlops class definition
 class AttentionFlops {
  public:
   int64_t hidden_dim;
@@ -150,7 +150,7 @@ class AttentionFlops {
   int64_t size() const;
 };
 
-// TransformerLayerFlops 类定义
+// TransformerLayerFlops class definition
 class TransformerLayerFlops {
  public:
   int64_t hidden_dim;
@@ -170,7 +170,7 @@ class TransformerLayerFlops {
   int64_t size() const;
 };
 
-// LLMFlops 类定义
+// LLMFlops class definition
 class LLMFlops {
  public:
   int64_t num_layers;

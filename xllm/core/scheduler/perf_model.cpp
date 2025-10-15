@@ -10,17 +10,17 @@
 namespace xllm {
 namespace perf_model {
 
-// 全局变量
+// Global variables
 std::shared_ptr<PerfModel> _CURRENT_PERF_MODEL = nullptr;
 
-// 全局函数实现
+// Global function implementations
 void set_perf_model(std::shared_ptr<PerfModel> model) {
   _CURRENT_PERF_MODEL = model;
 }
 
 std::shared_ptr<PerfModel> get_perf_model() { return _CURRENT_PERF_MODEL; }
 
-// Resource 类实现
+// Resource class implementation
 Resource::Resource(int64_t flops,
                    int64_t memory,
                    int64_t network,
@@ -52,7 +52,7 @@ std::ostream& operator<<(std::ostream& os, const Resource& res) {
   return os;
 }
 
-// PerfModel 类实现
+// PerfModel class implementation
 PerfModel::PerfModel(double flop_s_gemm,
                      double flop_s_attn,
                      double memory_bw_byte_s_gemm,
@@ -102,7 +102,7 @@ void PerfModel::apply_latency_roofline(Resource& resource,
   resource.latency = std::max({latency_flops, memory_latency, network_latency});
 }
 
-// LinearOpFlops 类实现
+// LinearOpFlops class implementation
 LinearOpFlops::LinearOpFlops(int64_t input_dim,
                              int64_t output_dim,
                              int64_t dtype_byte)
@@ -147,7 +147,7 @@ int64_t LinearOpFlops::_saturation_bs() const {
   return i;
 }
 
-// MHA_OpFlops 类实现
+// MHA_OpFlops class implementation
 MHA_OpFlops::MHA_OpFlops(int64_t hidden_dim,
                          int64_t dtype_byte,
                          int64_t q_per_kv_head)
@@ -172,7 +172,7 @@ Resource MHA_OpFlops::operator()(int64_t q_len,
   return r;
 }
 
-// AllReduceOpFlops 类实现
+// AllReduceOpFlops class implementation
 AllReduceOpFlops::AllReduceOpFlops(int64_t dtype_byte, int64_t tp)
     : dtype_byte(dtype_byte), tp(tp) {}
 
@@ -186,7 +186,7 @@ Resource AllReduceOpFlops::operator()(int64_t data_size) const {
   return r;
 }
 
-// MLP_Flops 类实现
+// MLP_Flops class implementation
 MLP_Flops::MLP_Flops(int64_t hidden_dim,
                      int64_t intermediate_dim,
                      int64_t dtype_byte,
@@ -220,7 +220,7 @@ int64_t MLP_Flops::size() const {
   return up.size() + gate.size() + down.size();
 }
 
-// AttentionFlops 类实现
+// AttentionFlops class implementation
 AttentionFlops::AttentionFlops(int64_t hidden_dim,
                                int64_t dtype_byte,
                                int64_t q_per_kv_head,
@@ -263,7 +263,7 @@ Resource AttentionFlops::operator()(const std::vector<int>& q_lens,
 
 int64_t AttentionFlops::size() const { return qkv_proj.size() + o_proj.size(); }
 
-// TransformerLayerFlops 类实现
+// TransformerLayerFlops class implementation
 TransformerLayerFlops::TransformerLayerFlops(int64_t hidden_dim,
                                              int64_t intermediate_dim,
                                              int64_t q_per_kv_head,
@@ -297,7 +297,7 @@ int64_t TransformerLayerFlops::size() const {
   return attention.size() + mlp.size();
 }
 
-// LLMFlops 类实现
+// LLMFlops class implementation
 LLMFlops::LLMFlops(int64_t num_layers,
                    int64_t vocab_size,
                    int64_t hidden_dim,
