@@ -2,6 +2,7 @@
 #if defined(USE_MLU)
 #include <torch_mlu/csrc/framework/core/caching_allocator.h>
 #include <torch_mlu/csrc/framework/core/device.h>
+#include <torch_mlu/csrc/framework/core/device_utils.h>
 #endif
 
 namespace xllm {
@@ -15,6 +16,7 @@ void Device::set_device() const {
   auto ret = c10_npu::SetDevice(index());
 #elif defined(USE_MLU)
   int ret = 0;
+  torch_mlu::setDevice(index());
 #endif
 
   if (ret != 0) {
