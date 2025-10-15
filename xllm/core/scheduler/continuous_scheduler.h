@@ -111,6 +111,8 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(bool, enable_profile_kv_blocks) = true;
     // true if enable ttft profiling
     PROPERTY(bool, enable_ttft_profiling) = false;
+    // true if enable forward interruption
+    PROPERTY(bool, enable_forward_interruption) = false;
     // all requests use single global ttft
     PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
     // all requests use single global tpot

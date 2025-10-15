@@ -95,6 +95,7 @@ LLMMaster::LLMMaster(const Options& options)
       .profile_max_prompt_length(options_.profile_max_prompt_length())
       .enable_profile_kv_blocks(options_.enable_profile_kv_blocks())
       .enable_ttft_profiling(options_.enable_ttft_profiling())
+      .enable_forward_interruption(options_.enable_forward_interruption())
       .max_global_ttft_ms(options_.max_global_ttft_ms())
       .max_global_tpot_ms(options_.max_global_tpot_ms());
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);

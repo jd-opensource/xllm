@@ -636,7 +636,7 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
        worker_rank += dp_local_tp_size_) {
     auto result = results[worker_rank].value();
     if (result.has_value()) {
-      if (result.value().outputs.empty()) { 
+      if (result.value().outputs.empty()) {
         // Receiving an empty tensor means forward has been interrupted
         throw ForwardInterruptedException();
       }

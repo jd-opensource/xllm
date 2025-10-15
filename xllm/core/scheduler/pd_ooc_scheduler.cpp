@@ -881,9 +881,11 @@ void PDOOCScheduler::dispatch_requests() {
     }
     // WIP Interrupt ongoing offline prefill requests when online requests come
     if (!requests.empty()) {
-      if (step_status_ == StepStatus::OFFLINE_PREFILL) {
-        // InterruptionBus::get_instance().publish(true);
-        DVLOG << "Interruption disabled";
+      if (options_.enable_forward_interruption() &&
+          step_status_ == StepStatus::OFFLINE_PREFILL) {
+        InterruptionBus::get_instance().publish(true);
+        // DVLOG << "Sent an interruption signal";
+        // DVLOG << "Interruption disabled";
       }
     }
   }
