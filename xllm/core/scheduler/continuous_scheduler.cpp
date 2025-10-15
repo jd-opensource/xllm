@@ -896,7 +896,7 @@ void ContinuousScheduler::prepare_cache_async(
 void ContinuousScheduler::step(const absl::Duration& timeout) {
   if (!options_.enable_schedule_overlap()) {
     // get a new batch of requests
-    _debug_last_batch_lengths.clear();
+    debug_last_batch_lengths_.clear();
     std::vector<Batch> batch = schedule_request(timeout);
     bool all_empty =
         std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
@@ -908,9 +908,10 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
 
     for (size_t i = 0; i < batch.size(); i++) {
       for (size_t j = 0; j < batch[i].size(); j++) {
-        _debug_last_batch_lengths.push_back(batch[i][j]->num_tokens());
+        debug_last_batch_lengths_.push_back(batch[i][j]->num_tokens());
       }
     }
+
     auto start = std::chrono::high_resolution_clock::now();
     engine_->step(batch);
     auto end = std::chrono::high_resolution_clock::now();
@@ -918,16 +919,16 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
         std::chrono::duration_cast<std::chrono::microseconds>(end - start)
             .count() /
         1000.0;
+
     std::stringstream ss;
-    ss << "bs=" << _debug_last_batch_lengths.size() << " - [";
-    for (size_t i = 0; i < _debug_last_batch_lengths.size(); ++i) {
-      ss << _debug_last_batch_lengths[i];
-      if (i != _debug_last_batch_lengths.size() - 1) ss << ", ";
+    ss << "bs=" << debug_last_batch_lengths_.size() << " - [";
+    for (size_t i = 0; i < debug_last_batch_lengths_.size(); ++i) {
+      ss << debug_last_batch_lengths_[i];
+      if (i != debug_last_batch_lengths_.size() - 1) ss << ", ";
     }
     ss << "]";
-
-    LOG(INFO) << "PERF - " << ss.str() << " - " << std::fixed
-              << std::setprecision(3) << duration_ms << " ms";
+    VLOG(1) << "PERF - " << ss.str() << " - " << std::fixed
+            << std::setprecision(3) << duration_ms << " ms";
 
     kv_cache_manager_->reset_copy_content();
     // process request output in batch

@@ -108,7 +108,7 @@ class PDOOCScheduler : public DisaggPDScheduler {
       size_t& num_offline_decode_preempt_offline_requests,
       size_t& num_online_decode_preempt_online_requests,
       size_t& num_online_decode_preempt_offline_requests,
-      std::unique_ptr<DecodePriorityQueue>& running_queue);
+      std::unique_ptr<DecodePriorityQueue>& running_queue) override;
 
  private:
   void handle_prefill_interruption();
@@ -154,9 +154,9 @@ class PDOOCScheduler : public DisaggPDScheduler {
 
   perf_model::LLMFlops llm_flops_;
   int linear_saturation_bs_;
-  vector<int> _decode_step_global_batch_req_lens;
-  double _decode_last_step_latency = 0;
-  vector<int> _last_decode_step_global_batch_req_lens;
+  vector<int> decode_step_global_batch_req_lens_;
+  double decode_last_step_latency_ = 0;
+  vector<int> last_decode_step_global_batch_req_lens_;
 };
 
 }  // namespace xllm

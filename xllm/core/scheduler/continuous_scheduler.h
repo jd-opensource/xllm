@@ -171,7 +171,7 @@ class ContinuousScheduler : public Scheduler {
 
   const InstanceInfo& get_instance_info() { return instance_info_; }
 
-  std::vector<int> _debug_last_batch_lengths;
+  std::vector<int> debug_last_batch_lengths_;
 
  protected:
   // allocate actual token_num slots.
@@ -242,7 +242,7 @@ class ContinuousScheduler : public Scheduler {
 
   InstanceInfo instance_info_;
 
-  void handle_prefill_requests(
+  virtual void handle_prefill_requests(
       double& latency_budget,
       double& estimate_latency,
       size_t& remaining_token_budget,
@@ -250,7 +250,7 @@ class ContinuousScheduler : public Scheduler {
       RequestPriorityQueue& waiting_priority_queue,
       size_t& num_online_prefill_preempt_offline_requests,
       std::vector<std::shared_ptr<Request>>& finished_requests);
-  void handle_decode_requests(
+  virtual void handle_decode_requests(
       double& latency_budget,
       double& estimate_latency,
       size_t& remaining_token_budget,

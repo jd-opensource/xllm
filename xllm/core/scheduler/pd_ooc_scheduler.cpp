@@ -473,12 +473,12 @@ void PDOOCScheduler::handle_prefill_interruption() {
 }
 
 void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
-  _decode_step_global_batch_req_lens.clear();
+  decode_step_global_batch_req_lens_.clear();
   ContinuousScheduler::step(timeout);
   // DEBUG ONLY
-  if (_debug_last_batch_lengths.size()) {
+  if (debug_last_batch_lengths_.size()) {
     LOG(INFO) << " - PERF_MODEL_DEBUG: "
-              << llm_flops_.decode(_debug_last_batch_lengths).latency * 1000
+              << llm_flops_.decode(debug_last_batch_lengths_).latency * 1000
               << " ms";
   }
 
@@ -489,11 +489,12 @@ void PDOOCScheduler::decode_step(const absl::Duration& timeout) {
     decode_send_pull_signal_pending_.store(false);
     decode_send_pull_signal_cv_.notify_all();
   }
-  _last_decode_step_global_batch_req_lens = _decode_step_global_batch_req_lens;
+  last_decode_step_global_batch_req_lens_ = decode_step_global_batch_req_lens_;
 }
 
 // copy+modify from ContinuousScheduler::handle_decode_requests
-// 由于父类写法限制，需要依赖手工维护 _decode_step_global_batch_req_lens
+// Due to limitations in superclass' implementation, manual maintenance of
+// decode_step_global_batch_req_lens_ is required
 void PDOOCScheduler::handle_decode_requests(
     double& latency_budget,
     double& estimate_latency,
@@ -553,21 +554,18 @@ void PDOOCScheduler::handle_decode_requests(
       }
       // no budget left
 
-      // NOTE: 我们这里不用原逻辑递减latency做判断，而是对整个batch做预测
-      _decode_step_global_batch_req_lens.push_back(
+      decode_step_global_batch_req_lens_.push_back(
           sequence.get()->num_tokens());
-      // LOG(INFO) << "_decode_step_global_batch_req_lens.size(): "
-      //           << _decode_step_global_batch_req_lens.size();
-      if (_decode_step_global_batch_req_lens.size() % CHECK_INTERVAL == 0 ||
+      if (decode_step_global_batch_req_lens_.size() % CHECK_INTERVAL == 0 ||
           !new_batch_latency) {
         new_batch_latency =
-            llm_flops_.decode(_decode_step_global_batch_req_lens).latency;
-        _decode_last_step_latency = new_batch_latency;
+            llm_flops_.decode(decode_step_global_batch_req_lens_).latency;
+        decode_last_step_latency_ = new_batch_latency;
 
         if (new_batch_latency > DECODE_SLO * 0.98) {
           LOG(INFO) << "DEBUG - Estimated decode latency for request "
                     << request->request_id() << " with "
-                    << _decode_step_global_batch_req_lens.size() << " reqs ("
+                    << decode_step_global_batch_req_lens_.size() << " reqs ("
                     << num_offline << " offline): " << new_batch_latency << "s";
           LOG(INFO)
               << "DEBUG - Estimated decode latency is close to or exceeds "
@@ -756,7 +754,7 @@ void PDOOCScheduler::decode_send_pull_signal() {
     pull_signal.set_max_total_len(available_tokens);
 
     preferred_len = llm_flops_.decode_preferred_req_len(
-        _last_decode_step_global_batch_req_lens,
+        last_decode_step_global_batch_req_lens_,
         linear_saturation_bs_,
         options_.max_global_tpot_ms(),
         available_tokens);
@@ -1159,7 +1157,7 @@ bool PDOOCScheduler::decode_recv_multi_generations(
 bool PDOOCScheduler::check_able_to_pull() {
   // Estimated usage of current requests: half of current used blocks.
   return kv_cache_manager_->kv_cache_utilization() < 0.9 &&
-         _decode_last_step_latency <
+         decode_last_step_latency_ <
              options_.max_global_tpot_ms() / 1000.0 * 0.9;
 }
 

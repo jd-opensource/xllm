@@ -543,12 +543,12 @@ if __name__ == "__main__":
                 sys.exit(1)
             sys.argv.pop(idx)
             sys.argv.pop(idx)
-    
-    if '--skip_test' in sys.argv:
-        BUILD_TEST_FILE = False
-    if '--skip_export' in sys.argv:
-        BUILD_EXPORT = False
 
+    if "SKIP_TEST" in os.environ:
+        BUILD_TEST_FILE = False
+    if "SKIP_EXPORT" in os.environ:
+        BUILD_EXPORT = False
+    
     version = get_version()
 
     # check and install git pre-commit
