@@ -26,23 +26,25 @@ cc_library(
 )
 
 
-cc_test(
-  NAME
-    prefix_test
-  SRCS
-    prefix_cache_test.cpp
-  DEPS
-    :flags
-    :kv_cache
-    :prefix_cache
-    :block
-    absl::random_random
-    Boost::serialization
-    GTest::gtest_main
-)
+if(USE_NPU)
+  cc_test(
+    NAME
+      prefix_test
+    SRCS
+      prefix_cache_test.cpp
+    DEPS
+      :flags
+      :kv_cache
+      :prefix_cache
+      :block
+      absl::random_random
+      Boost::serialization
+      GTest::gtest_main
+  )
 
-target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto $<$<BOOL:${USE_NPU}>:ascendcl> Folly::folly)
-add_dependencies(prefix_test brpc-static)
+  target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto $<$<BOOL:${USE_NPU}>:ascendcl> Folly::folly)
+  add_dependencies(prefix_test brpc-static)
+endif()
 
 cc_binary(
   NAME

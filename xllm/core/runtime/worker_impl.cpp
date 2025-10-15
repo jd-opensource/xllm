@@ -39,9 +39,7 @@ limitations under the License.
 #include "framework/parallel_state.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
-#if defined(USE_NPU)
 #include "framework/xtensor/multi_layer_xtensor_transfer.h"
-#endif
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
@@ -136,7 +134,6 @@ bool WorkerImpl::allocate_host_kv_cache(
   }
 
   if (options_.enable_kvcache_store()) {
-#if defined(USE_NPU)
     StoreConfig config;
     config.protocol = options_.store_protocol();
     config.metadata_connstring = options_.store_metadata_connstring();
@@ -144,14 +141,12 @@ bool WorkerImpl::allocate_host_kv_cache(
     config.tp_rank = options_.node_rank() % options_.dp_size();
 
     kv_cache_store_ = std::make_shared<KVCacheStore>(config, &host_kv_caches_);
-#endif
   }
 
   status_ = Status::READY;
   return true;
 }
 
-#if defined(USE_NPU)
 bool WorkerImpl::allocate_continuous_kv_cache(
     const std::vector<XTensor::Options>& options) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
@@ -183,7 +178,6 @@ bool WorkerImpl::allocate_continuous_kv_cache(
   status_ = Status::READY;
   return true;
 }
-#endif
 
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     uint64_t kv_cache_size,
@@ -670,7 +664,6 @@ folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_async(
   return future;
 }
 
-#if defined(USE_NPU)
 folly::SemiFuture<bool> WorkerImpl::allocate_continuous_kv_cache_async(
     const std::vector<XTensor::Options>& options) {
   folly::Promise<bool> promise;
@@ -681,7 +674,6 @@ folly::SemiFuture<bool> WorkerImpl::allocate_continuous_kv_cache_async(
   });
   return future;
 }
-#endif
 
 folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
     uint64_t src_cluster_id,
@@ -703,7 +695,6 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 
 folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
     const std::vector<CacheBlockInfo>& cache_block_info) {
-#if defined(USE_NPU)
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
   general_threadpool_.schedule(
@@ -715,24 +706,18 @@ folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
         promise.setValue(this->kv_cache_store_->batch_get(cache_block_info));
       });
   return future;
-#endif
-  return false;
 }
 
 uint32_t WorkerImpl::offload_kv_blocks_to_store(
     const std::vector<CacheBlockInfo>& cache_block_info) {
-#if defined(USE_NPU)
   if (kv_cache_store_ == nullptr) {
     return 0;
   }
   return kv_cache_store_->batch_put(cache_block_info);
-#endif
-  return 0;
 }
 
 folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_to_store_async(
     const std::vector<CacheBlockInfo>& cache_block_info) {
-#if defined(USE_NPU)
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
   general_threadpool_.schedule(
@@ -744,8 +729,6 @@ folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_to_store_async(
         promise.setValue(this->kv_cache_store_->batch_put(cache_block_info));
       });
   return future;
-#endif
-  return false;
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(

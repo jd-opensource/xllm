@@ -35,4 +35,7 @@ class NPULayerSynchronizerImpl {
   std::vector<aclrtEvent> events_;
   std::vector<std::atomic<bool>> event_record_flags_;
 };
+#elif defined(USE_MLU)
+class NPULayerSynchronizerImpl;
+#endif
 }  // namespace xllm

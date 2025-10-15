@@ -28,24 +28,26 @@ cc_library(
     torch
 )
 
-set(TEST_SRCS
-  block_manager_test.cpp
-)
+if(USE_NPU)
+  set(TEST_SRCS
+    block_manager_test.cpp
+  )
 
-cc_test(
-  NAME
-    block_test
-  SRCS
-    ${TEST_SRCS}
-  DEPS
-    :block
-    :flags
-    :kv_cache
-    :prefix_cache
-    absl::random_random
-    Boost::serialization
-    GTest::gtest_main
-)
+  cc_test(
+    NAME
+      block_test
+    SRCS
+      ${TEST_SRCS}
+    DEPS
+      :block
+      :flags
+      :kv_cache
+      :prefix_cache
+      absl::random_random
+      Boost::serialization
+      GTest::gtest_main
+  )
 
-target_link_libraries(block_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto Folly::folly)
-add_dependencies(block_test brpc-static)
+  target_link_libraries(block_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto Folly::folly)
+  add_dependencies(block_test brpc-static)
+endif()

@@ -44,11 +44,9 @@ class SpeculativeEngine : public Engine {
     return engine_->block_manager_pool();
   }
 
-#if defined(USE_NPU)
   XTensorManagerPool* xtensor_manager_pool() const override {
     return engine_->xtensor_manager_pool();
   }
-#endif
 
   const ModelArgs& model_args() const override { return model_args_; }
 

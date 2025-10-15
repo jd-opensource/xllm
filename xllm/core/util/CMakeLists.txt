@@ -45,7 +45,6 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ms_tools_ext>
-    $<$<BOOL:${USE_MLU}>:cndrv>
     Boost::serialization
     absl::synchronization
     ${Python_LIBRARIES}

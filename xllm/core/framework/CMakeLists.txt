@@ -6,7 +6,6 @@ if(USE_NPU)
   include_directories(
     ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
   )
-  add_subdirectory(xtensor)
 endif()
 add_subdirectory(batch)
 add_subdirectory(block)
@@ -19,6 +18,7 @@ add_subdirectory(sampling)
 add_subdirectory(state_dict)
 add_subdirectory(tokenizer)
 add_subdirectory(eplb)
+add_subdirectory(xtensor)
 add_subdirectory(dit_cache)
 
 cc_library(

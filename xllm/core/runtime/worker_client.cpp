@@ -42,12 +42,10 @@ bool WorkerClient::allocate_kv_cache(
   return worker_->allocate_kv_cache(kv_cache_shape);
 }
 
-#if defined(USE_NPU)
 bool WorkerClient::allocate_continuous_kv_cache(
     const std::vector<XTensor::Options>& options) {
   return worker_->allocate_continuous_kv_cache(options);
 }
-#endif
 
 void WorkerClient::get_device_info(std::string& device_ip, uint16_t& port) {
   worker_->get_device_info(device_ip, port);
@@ -135,12 +133,10 @@ folly::SemiFuture<bool> WorkerClient::allocate_kv_cache_async(
   return worker_->allocate_kv_cache_async(kv_cache_shape);
 }
 
-#if defined(USE_NPU)
 folly::SemiFuture<bool> WorkerClient::allocate_continuous_kv_cache_async(
     const std::vector<XTensor::Options>& options) {
   return worker_->allocate_continuous_kv_cache_async(options);
 }
-#endif
 
 folly::SemiFuture<bool> WorkerClient::allocate_kv_cache_with_transfer_async(
     const uint64_t kv_cache_size,

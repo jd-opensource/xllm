@@ -80,13 +80,14 @@ void PhyPagePool::deallocate(uint32_t page_id) {
   free_phy_page_ids_[num_free_phy_pages_per_layer_++] = page_id;
 }
 
-#if defined(USE_NPU)
 // map one virtual pointer to one physical page
 void PhyPagePool::map(VirPtr vir_ptr, PhyMemHandle phy_handle) const {
   VmmResult status;
+#if defined(USE_NPU)
   status = aclrtMapMem(vir_ptr, FLAGS_granularity_size, 0, phy_handle, 0);
   CHECK_EQ(status, VmmSuccess)
       << "Failed to map virtual address to physical address";
+#endif
 }
 
 void PhyPagePool::map(VirPtr vir_ptr,
@@ -114,5 +115,4 @@ void PhyPagePool::batch_map(VirPtr vir_ptr,
         reinterpret_cast<VirPtr>((char*)temp_vir_ptr + FLAGS_granularity_size);
   }
 }
-#endif
 }  // namespace xllm

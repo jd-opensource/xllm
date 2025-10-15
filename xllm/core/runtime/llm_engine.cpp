@@ -32,9 +32,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state.h"
-#if defined(USE_NPU)
 #include "framework/xtensor/multi_layer_xtensor_transfer.h"
-#endif
 #include "llm_worker_impl.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
@@ -352,7 +350,6 @@ bool LLMEngine::allocate_continuous_kv_cache(
             << ", blocks: " << kv_cache_cap.n_blocks
             << ", slot_size: " << kv_cache_cap.slot_size;
 
-#if defined(USE_NPU)
   std::vector<XTensor::Options> xtensor_options_vec;
   xtensor_options_vec.reserve(2);
   // int64_t head_dim = head_dim_;
@@ -411,7 +408,6 @@ bool LLMEngine::allocate_continuous_kv_cache(
       .cache_size_per_token(cache_size_per_token);
   kv_cache_manager_ = std::make_unique<XTensorManagerPool>(
       xtensor_manager_options, options_.dp_size());
-#endif
   return true;
 }
 
