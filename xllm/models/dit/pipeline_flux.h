@@ -46,57 +46,26 @@ float calculate_shift(int64_t image_seq_len,
 
 std::pair<torch::Tensor, int64_t> retrieve_timesteps(
     FlowMatchEulerDiscreteScheduler scheduler,
-    std::optional<int64_t> num_inference_steps = std::nullopt,
-    std::optional<torch::Device> device = std::nullopt,
-    std::optional<std::vector<int64_t>> timesteps = std::nullopt,
+    int64_t num_inference_steps = 0,
+    torch::Device device = torch::kCPU,
     std::optional<std::vector<float>> sigmas = std::nullopt,
     std::optional<float> mu = std::nullopt) {
-  if (timesteps.has_value() && sigmas.has_value()) {
-    throw std::invalid_argument(
-        "Only one of `timesteps` or `sigmas` can be provided. Please choose "
-        "one.");
-  }
   torch::Tensor scheduler_timesteps;
   int64_t steps;
-  if (timesteps.has_value()) {
-    std::vector<float> timesteps_float;
-    timesteps_float.reserve(timesteps->size());
-    for (int64_t val : *timesteps) {
-      timesteps_float.push_back(static_cast<float>(val));
-    }
-    steps = timesteps->size();
-    scheduler->set_timesteps(static_cast<int>(steps),
-                             device.has_value() ? *device : torch::kCPU,
-                             std::nullopt,
-                             mu,
-                             timesteps_float);
-
-    scheduler_timesteps = scheduler->timesteps();
-  } else if (sigmas.has_value()) {
+  if (sigmas.has_value()) {
     steps = sigmas->size();
-    scheduler->set_timesteps(static_cast<int>(steps),
-                             device.has_value() ? *device : torch::kCPU,
-                             *sigmas,
-                             mu,
-                             std::nullopt);
+    scheduler->set_timesteps(
+        static_cast<int>(steps), device, *sigmas, mu, std::nullopt);
 
     scheduler_timesteps = scheduler->timesteps();
   } else {
-    if (!num_inference_steps.has_value()) {
-      throw std::invalid_argument(
-          "Either `num_inference_steps`, `timesteps` or `sigmas` must be "
-          "provided.");
-    }
-    steps = *num_inference_steps;
-    scheduler->set_timesteps(static_cast<int>(steps),
-                             device.has_value() ? *device : torch::kCPU,
-                             std::nullopt,
-                             mu,
-                             std::nullopt);
+    steps = num_inference_steps;
+    scheduler->set_timesteps(
+        static_cast<int>(steps), device, std::nullopt, mu, std::nullopt);
     scheduler_timesteps = scheduler->timesteps();
   }
-  if (device.has_value() && scheduler_timesteps.device() != *device) {
-    scheduler_timesteps = scheduler_timesteps.to(*device);
+  if (scheduler_timesteps.device() != device) {
+    scheduler_timesteps = scheduler_timesteps.to(device);
   }
   return {scheduler_timesteps, steps};
 }
@@ -239,7 +208,6 @@ class FluxPosEmbedImpl : public torch::nn::Module {
   int64_t cached_image_height_ = -1;
   int64_t cached_image_width_ = -1;
 };
-
 TORCH_MODULE(FluxPosEmbed);
 
 struct FluxPipelineOutput {
@@ -253,17 +221,16 @@ class FluxPipelineImpl : public torch::nn::Module {
     const auto& model_args = context.get_model_args("vae");
     vae_scale_factor_ = 1 << (model_args.vae_block_out_channels().size() - 1);
     _execution_device = options_.device();
-    _execution_dtype = torch::kBFloat16;
+    _execution_dtype = options_.dtype().toScalarType();
 
     vae_shift_factor_ = model_args.vae_shift_factor();
     vae_scaling_factor_ = model_args.vae_scale_factor();
     default_sample_size_ = 128;
     tokenizer_max_length_ = 77;  // TODO: get from config file
     LOG(INFO) << "Initializing Flux pipeline...";
-    vae_image_processor_ = VAEImageProcessor(
-        true, vae_scale_factor_, 4, "lanczos", -1, true, false, false, false);
-    vae_ = VAE(
-        context.get_model_context("vae"), _execution_device, _execution_dtype);
+    vae_image_processor_ =
+        VAEImageProcessor(true, vae_scale_factor_, true, false, false, false);
+    vae_ = VAE(context.get_model_context("vae"));
     LOG(INFO) << "VAE initialized.";
     pos_embed_ = register_module(
         "pos_embed",
@@ -290,151 +257,6 @@ class FluxPipelineImpl : public torch::nn::Module {
     LOG(INFO) << "Scheduler registered.";
     register_module("clip_text_model", clip_text_model_);
     LOG(INFO) << "CLIP text model registered.";
-  }
-
-  void check_inputs(
-      std::optional<torch::optional<std::vector<std::string>>> prompt,
-      std::optional<torch::optional<std::vector<std::string>>> prompt_2,
-      int64_t height,
-      int64_t width,
-      std::optional<torch::optional<std::vector<std::string>>> negative_prompt,
-      std::optional<torch::optional<std::vector<std::string>>>
-          negative_prompt_2,
-      std::optional<torch::Tensor> prompt_embeds,
-      std::optional<torch::Tensor> negative_prompt_embeds,
-      std::optional<torch::Tensor> pooled_prompt_embeds,
-      std::optional<torch::Tensor> pooled_negative_prompt_embeds,
-      std::optional<int64_t> max_sequence_length) {
-    const int64_t divisor = vae_scale_factor_ * 2;
-    if (height % divisor != 0 || width % divisor != 0) {
-      LOG(WARNING) << "`height` and `width` have to be divisible by " << divisor
-                   << " but are " << height << " and " << width
-                   << ". Dimensions will be resized accordingly";
-    }
-
-    if (prompt.has_value() && prompt_embeds.has_value()) {
-      throw std::invalid_argument(
-          "Cannot forward both `prompt` and `prompt_embeds`. Please make sure "
-          "to only forward one of the two.");
-    }
-    if (prompt_2.has_value() && prompt_embeds.has_value()) {
-      throw std::invalid_argument(
-          "Cannot forward both `prompt_2` and `prompt_embeds`. Please make "
-          "sure to only forward one of the two.");
-    }
-    if (!prompt.has_value() && !prompt_embeds.has_value()) {
-      throw std::invalid_argument(
-          "Provide either `prompt` or `prompt_embeds`. Cannot leave both "
-          "undefined.");
-    }
-
-    if (negative_prompt.has_value() && negative_prompt_embeds.has_value()) {
-      throw std::invalid_argument(
-          "Cannot forward both `negative_prompt` and `negative_prompt_embeds`. "
-          "Please make sure to only forward one of the two.");
-    }
-    if (negative_prompt_2.has_value() && negative_prompt_embeds.has_value()) {
-      throw std::invalid_argument(
-          "Cannot forward both `negative_prompt_2` and "
-          "`negative_prompt_embeds`. Please make sure to only forward one of "
-          "the two.");
-    }
-
-    if (prompt_embeds.has_value() && !pooled_prompt_embeds.has_value()) {
-      throw std::invalid_argument(
-          "If `prompt_embeds` are provided, `pooled_prompt_embeds` also have "
-          "to be passed. "
-          "Make sure to generate `pooled_prompt_embeds` from the same text "
-          "encoder that was used for `prompt_embeds`.");
-    }
-
-    if (negative_prompt_embeds.has_value() &&
-        !pooled_negative_prompt_embeds.has_value()) {
-      throw std::invalid_argument(
-          "If `negative_prompt_embeds` are provided, "
-          "`pooled_negative_prompt_embeds` also have to be passed. "
-          "Make sure to generate `pooled_negative_prompt_embeds` from the same "
-          "text encoder that was used for `negative_prompt_embeds`.");
-    }
-
-    if (max_sequence_length.has_value() && max_sequence_length.value() > 512) {
-      throw std::invalid_argument(
-          "`max_sequence_length` cannot be greater than 512 but is " +
-          std::to_string(max_sequence_length.value()));
-    }
-  }
-
-  torch::Tensor _prepare_latent_image_ids(int64_t batch_size,
-                                          int64_t height,
-                                          int64_t width) {
-    torch::Tensor latent_image_ids = torch::zeros({height, width, 3}, options_);
-    torch::Tensor height_range = torch::arange(height, options_).unsqueeze(1);
-    latent_image_ids.select(2, 1) += height_range;
-    torch::Tensor width_range = torch::arange(width, options_).unsqueeze(0);
-    latent_image_ids.select(2, 2) += width_range;
-    latent_image_ids = latent_image_ids.view({height * width, 3});
-    return latent_image_ids;
-  }
-  torch::Tensor _pack_latents(const torch::Tensor& latents,
-                              int64_t batch_size,
-                              int64_t num_channels_latents,
-                              int64_t height,
-                              int64_t width) {
-    torch::Tensor packed = latents.view(
-        {batch_size, num_channels_latents, height / 2, 2, width / 2, 2});
-    packed = packed.permute({0, 2, 4, 1, 3, 5});
-    packed = packed.reshape(
-        {batch_size, (height / 2) * (width / 2), num_channels_latents * 4});
-
-    return packed;
-  }
-  torch::Tensor _unpack_latents(const torch::Tensor& latents,
-                                int64_t height,
-                                int64_t width,
-                                int64_t vae_scale_factor) {
-    int64_t batch_size = latents.size(0);
-    int64_t num_patches = latents.size(1);
-    int64_t channels = latents.size(2);
-    int64_t adjusted_height = 2 * (height / (vae_scale_factor * 2));
-    int64_t adjusted_width = 2 * (width / (vae_scale_factor * 2));
-    torch::Tensor unpacked = latents.view({batch_size,
-                                           adjusted_height / 2,
-                                           adjusted_width / 2,
-                                           channels / 4,
-                                           2,
-                                           2});
-    unpacked = unpacked.permute({0, 3, 1, 4, 2, 5});
-    unpacked = unpacked.reshape(
-        {batch_size, channels / (2 * 2), adjusted_height, adjusted_width});
-
-    return unpacked;
-  }
-
-  std::pair<torch::Tensor, torch::Tensor> prepare_latents(
-      int64_t batch_size,
-      int64_t num_channels_latents,
-      int64_t height,
-      int64_t width,
-      int64_t seed,
-      std::optional<torch::Tensor> latents = std::nullopt) {
-    int64_t adjusted_height = 2 * (height / (vae_scale_factor_ * 2));
-    int64_t adjusted_width = 2 * (width / (vae_scale_factor_ * 2));
-    std::vector<int64_t> shape = {
-        batch_size, num_channels_latents, adjusted_height, adjusted_width};
-    if (latents.has_value()) {
-      torch::Tensor latent_image_ids = _prepare_latent_image_ids(
-          batch_size, adjusted_height / 2, adjusted_width / 2);
-      return {latents.value(), latent_image_ids};
-    }
-    torch::Tensor latents_tensor = randn_tensor(shape, seed, options_);
-    torch::Tensor packed_latents = _pack_latents(latents_tensor,
-                                                 batch_size,
-                                                 num_channels_latents,
-                                                 adjusted_height,
-                                                 adjusted_width);
-    torch::Tensor latent_image_ids = _prepare_latent_image_ids(
-        batch_size, adjusted_height / 2, adjusted_width / 2);
-    return {packed_latents, latent_image_ids};
   }
 
   DiTForwardOutput forward(const DiTForwardInput& input) {
@@ -480,7 +302,6 @@ class FluxPipelineImpl : public torch::nn::Module {
         std::make_optional(generation_params.height),  // height
         std::make_optional(generation_params.width),   // width
         generation_params.num_inference_steps,         // num_inference_steps
-        std::nullopt,                                  // sigmas
         generation_params.guidance_scale,              // guidance_scale
         generation_params.num_images_per_prompt,       // num_images_per_prompt
         seed,                                          // seed
@@ -499,12 +320,110 @@ class FluxPipelineImpl : public torch::nn::Module {
     return out;
   }
 
-  torch::Tensor _get_clip_prompt_embeds(
-      std::vector<std::string>& prompt,
-      std::optional<torch::Device> device = std::nullopt,
-      int64_t num_images_per_prompt = 1) {
-    torch::Device used_device =
-        device.has_value() ? device.value() : _execution_device;
+  void load_model(std::unique_ptr<DiTModelLoader> loader) {
+    LOG(INFO) << "FluxPipeline loading model from" << loader->model_root_path();
+    // transformer_.to(options_);
+    std::string model_path = loader->model_root_path();
+    auto transformer_loader = loader->take_component_loader("transformer");
+    auto vae_loader = loader->take_component_loader("vae");
+    auto t5_loader = loader->take_component_loader("text_encoder_2");
+    auto clip_loader = loader->take_component_loader("text_encoder");
+    auto tokenizer_loader = loader->take_component_loader("tokenizer");
+    auto tokenizer_2_loader = loader->take_component_loader("tokenizer_2");
+    LOG(INFO)
+        << "Flux model components loaded, start to load weights to sub models";
+    transformer_->load_model(std::move(transformer_loader));
+    transformer_->to(_execution_device);
+    vae_->load_model(std::move(vae_loader));
+    vae_->to(_execution_device);
+    t5_->load_model(std::move(t5_loader));
+    t5_->to(_execution_device);
+    clip_text_model_->load_model(std::move(clip_loader));
+    clip_text_model_->to(_execution_device);
+    tokenizer_ = tokenizer_loader->tokenizer();
+    tokenizer_2_ = tokenizer_2_loader->tokenizer();
+  }
+
+ private:
+  std::pair<torch::Tensor, torch::Tensor> prepare_latents(
+      int64_t batch_size,
+      int64_t num_channels_latents,
+      int64_t height,
+      int64_t width,
+      int64_t seed,
+      std::optional<torch::Tensor> latents = std::nullopt) {
+    int64_t adjusted_height = 2 * (height / (vae_scale_factor_ * 2));
+    int64_t adjusted_width = 2 * (width / (vae_scale_factor_ * 2));
+    std::vector<int64_t> shape = {
+        batch_size, num_channels_latents, adjusted_height, adjusted_width};
+    if (latents.has_value()) {
+      torch::Tensor latent_image_ids = _prepare_latent_image_ids(
+          batch_size, adjusted_height / 2, adjusted_width / 2);
+      return {latents.value(), latent_image_ids};
+    }
+    torch::Tensor latents_tensor = randn_tensor(shape, seed, options_);
+    torch::Tensor packed_latents = _pack_latents(latents_tensor,
+                                                 batch_size,
+                                                 num_channels_latents,
+                                                 adjusted_height,
+                                                 adjusted_width);
+    torch::Tensor latent_image_ids = _prepare_latent_image_ids(
+        batch_size, adjusted_height / 2, adjusted_width / 2);
+    return {packed_latents, latent_image_ids};
+  }
+
+  torch::Tensor _prepare_latent_image_ids(int64_t batch_size,
+                                          int64_t height,
+                                          int64_t width) {
+    torch::Tensor latent_image_ids = torch::zeros({height, width, 3}, options_);
+    torch::Tensor height_range = torch::arange(height, options_).unsqueeze(1);
+    latent_image_ids.select(2, 1) += height_range;
+    torch::Tensor width_range = torch::arange(width, options_).unsqueeze(0);
+    latent_image_ids.select(2, 2) += width_range;
+    latent_image_ids = latent_image_ids.view({height * width, 3});
+    return latent_image_ids;
+  }
+
+  torch::Tensor _pack_latents(const torch::Tensor& latents,
+                              int64_t batch_size,
+                              int64_t num_channels_latents,
+                              int64_t height,
+                              int64_t width) {
+    torch::Tensor packed = latents.view(
+        {batch_size, num_channels_latents, height / 2, 2, width / 2, 2});
+    packed = packed.permute({0, 2, 4, 1, 3, 5});
+    packed = packed.reshape(
+        {batch_size, (height / 2) * (width / 2), num_channels_latents * 4});
+
+    return packed;
+  }
+
+  torch::Tensor _unpack_latents(const torch::Tensor& latents,
+                                int64_t height,
+                                int64_t width,
+                                int64_t vae_scale_factor) {
+    int64_t batch_size = latents.size(0);
+    int64_t num_patches = latents.size(1);
+    int64_t channels = latents.size(2);
+    int64_t adjusted_height = 2 * (height / (vae_scale_factor * 2));
+    int64_t adjusted_width = 2 * (width / (vae_scale_factor * 2));
+    torch::Tensor unpacked = latents.view({batch_size,
+                                           adjusted_height / 2,
+                                           adjusted_width / 2,
+                                           channels / 4,
+                                           2,
+                                           2});
+    unpacked = unpacked.permute({0, 3, 1, 4, 2, 5});
+    unpacked = unpacked.reshape(
+        {batch_size, channels / (2 * 2), adjusted_height, adjusted_width});
+
+    return unpacked;
+  }
+
+  torch::Tensor _get_clip_prompt_embeds(std::vector<std::string>& prompt,
+                                        torch::Device device = torch::kCPU,
+                                        int64_t num_images_per_prompt = 1) {
+    torch::Device used_device = device;
     std::vector<std::string> prompt_list = prompt;
     int64_t batch_size = prompt_list.size();
     TORCH_CHECK(batch_size > 0, "Prompt list cannot be empty");
@@ -537,16 +456,12 @@ class FluxPipelineImpl : public torch::nn::Module {
     return prompt_embeds;
   }
 
-  torch::Tensor _get_t5_prompt_embeds(
-      std::vector<std::string>& prompt,
-      int64_t num_images_per_prompt = 1,
-      int64_t max_sequence_length = 512,
-      std::optional<torch::Device> device = std::nullopt,
-      std::optional<torch::Dtype> dtype = std::nullopt) {
-    torch::Device used_device =
-        device.has_value() ? device.value() : _execution_device;
-    torch::Dtype used_dtype =
-        dtype.has_value() ? dtype.value() : _execution_dtype;
+  torch::Tensor _get_t5_prompt_embeds(std::vector<std::string>& prompt,
+                                      int64_t num_images_per_prompt = 1,
+                                      int64_t max_sequence_length = 512,
+                                      torch::Device device = torch::kCPU) {
+    torch::Device used_device = device;
+    torch::Dtype used_dtype = _execution_dtype;
     std::vector<std::string> prompt_list = prompt;
     int64_t batch_size = prompt_list.size();
     TORCH_CHECK(batch_size > 0, "Prompt list cannot be empty");
@@ -584,11 +499,10 @@ class FluxPipelineImpl : public torch::nn::Module {
       std::optional<std::vector<std::string>> prompt_2,
       std::optional<torch::Tensor> prompt_embeds,
       std::optional<torch::Tensor> pooled_prompt_embeds,
-      std::optional<torch::Device> device,
+      torch::Device device,
       int64_t num_images_per_prompt = 1,
       int64_t max_sequence_length = 512) {
-    torch::Device used_device =
-        device.has_value() ? device.value() : _execution_device;
+    torch::Device used_device = device;
     std::vector<std::string> prompt_list;
     if (prompt.has_value()) {
       prompt_list = prompt.value();
@@ -609,8 +523,7 @@ class FluxPipelineImpl : public torch::nn::Module {
       prompt_embeds = _get_t5_prompt_embeds(prompt_2_list,
                                             num_images_per_prompt,
                                             max_sequence_length,
-                                            used_device,
-                                            std::nullopt);
+                                            used_device);
     }
     torch::Dtype dtype = _execution_dtype;
     torch::Tensor text_ids =
@@ -633,7 +546,6 @@ class FluxPipelineImpl : public torch::nn::Module {
       std::optional<int64_t> height = std::nullopt,
       std::optional<int64_t> width = std::nullopt,
       int64_t num_inference_steps = 28,
-      std::optional<std::vector<float>> sigmas = std::nullopt,
       float guidance_scale = 3.5f,
       int64_t num_images_per_prompt = 1,
       std::optional<int64_t> seed = std::nullopt,
@@ -651,14 +563,6 @@ class FluxPipelineImpl : public torch::nn::Module {
     int64_t actual_width = width.has_value()
                                ? width.value()
                                : default_sample_size_ * vae_scale_factor_;
-    // check inputs
-    //   check_inputs(
-    //       prompt, prompt_2, actual_height, actual_width,
-    //       negative_prompt, negative_prompt_2,
-    //       prompt_embeds, negative_prompt_embeds,
-    //       pooled_prompt_embeds, negative_pooled_prompt_embeds,
-    //       max_sequence_length
-    //   );
     _guidance_scale = guidance_scale;
     _current_timestep = std::nullopt;
     _interrupt = false;
@@ -710,15 +614,12 @@ class FluxPipelineImpl : public torch::nn::Module {
                         latents);
     // prepare timestep
     std::vector<float> new_sigmas;
-    if (!sigmas.has_value()) {
-      for (int64_t i = 0; i < num_inference_steps; ++i) {
-        new_sigmas.push_back(1.0f - static_cast<float>(i) /
-                                        (num_inference_steps - 1) *
-                                        (1.0f - 1.0f / num_inference_steps));
-      }
-    } else {
-      new_sigmas = sigmas.value();
+    for (int64_t i = 0; i < num_inference_steps; ++i) {
+      new_sigmas.push_back(1.0f - static_cast<float>(i) /
+                                      (num_inference_steps - 1) *
+                                      (1.0f - 1.0f / num_inference_steps));
     }
+
     int64_t image_seq_len = prepared_latents.size(1);
     float mu = calculate_shift(image_seq_len,
                                scheduler_->base_image_seq_len(),
@@ -726,7 +627,7 @@ class FluxPipelineImpl : public torch::nn::Module {
                                scheduler_->base_shift(),
                                scheduler_->max_shift());
     auto [timesteps, num_inference_steps_actual] = retrieve_timesteps(
-        scheduler_, num_inference_steps, device, std::nullopt, new_sigmas, mu);
+        scheduler_, num_inference_steps, device, new_sigmas, mu);
     int64_t num_warmup_steps =
         std::max(static_cast<int64_t>(timesteps.numel()) -
                      num_inference_steps_actual * scheduler_->order(),
@@ -807,30 +708,6 @@ class FluxPipelineImpl : public torch::nn::Module {
     return FluxPipelineOutput{{image}};
   }
 
-  void load_model(std::unique_ptr<DiTModelLoader> loader) {
-    LOG(INFO) << "FluxPipeline loading model from" << loader->model_root_path();
-    // transformer_.to(options_);
-    std::string model_path = loader->model_root_path();
-    auto transformer_loader = loader->take_component_loader("transformer");
-    auto vae_loader = loader->take_component_loader("vae");
-    auto t5_loader = loader->take_component_loader("text_encoder_2");
-    auto clip_loader = loader->take_component_loader("text_encoder");
-    auto tokenizer_loader = loader->take_component_loader("tokenizer");
-    auto tokenizer_2_loader = loader->take_component_loader("tokenizer_2");
-    LOG(INFO)
-        << "Flux model components loaded, start to load weights to sub models";
-    transformer_->load_model(std::move(transformer_loader));
-    transformer_->to(_execution_device);
-    vae_->load_model(std::move(vae_loader));
-    vae_->to(_execution_device);
-    t5_->load_model(std::move(t5_loader));
-    t5_->to(_execution_device);
-    clip_text_model_->load_model(std::move(clip_loader));
-    clip_text_model_->to(_execution_device);
-    tokenizer_ = tokenizer_loader->tokenizer();
-    tokenizer_2_ = tokenizer_2_loader->tokenizer();
-  }
-
  private:
   FlowMatchEulerDiscreteScheduler scheduler_{nullptr};
   VAE vae_{nullptr};
@@ -854,7 +731,6 @@ class FluxPipelineImpl : public torch::nn::Module {
   std::unique_ptr<Tokenizer> tokenizer_;
   std::unique_ptr<Tokenizer> tokenizer_2_;
 };
-
 TORCH_MODULE(FluxPipeline);
 
 REGISTER_DIT_MODEL(flux, FluxPipeline);
