@@ -128,9 +128,6 @@ PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
                          instance_info_.k_cache_ids,
                          instance_info_.v_cache_ids);
   instance_info_.dp_size = options.dp_size();
-
-  // profile ttft and update instance info
-  // profile_ttft();
 }
 
 PDOOCScheduler::~PDOOCScheduler() {

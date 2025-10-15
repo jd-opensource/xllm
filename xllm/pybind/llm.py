@@ -41,6 +41,7 @@ class LLM:
         enable_pd_ooc: bool = False,
         enable_schedule_overlap: bool = False,
         kv_cache_transfer_mode: str = 'PUSH',
+        enable_ttft_profiling: bool = False,
         **kwargs,
     ) -> None:
 
@@ -86,6 +87,7 @@ class LLM:
         options.enable_schedule_overlap = False
         options.enable_pd_ooc = enable_pd_ooc
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
+        options.enable_ttft_profiling = enable_ttft_profiling
         self.master = LLMMaster(options)
 
     def finish(self):
