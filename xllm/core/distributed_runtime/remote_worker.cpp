@@ -35,10 +35,18 @@ limitations under the License.
 #include "util/hash_util.h"
 
 namespace xllm {
-RemoteWorker::RemoteWorker(int32_t global_rank,
-                           const std::string& server_address,
-                           const torch::Device& d)
-    : global_rank_(global_rank), device_(d) {
+RemoteWorker::RemoteWorker(
+    int32_t global_rank,
+    const std::string& server_address,
+    const torch::Device& d,
+    bool is_local_rank,
+    std::shared_ptr<ForwardSharedMemoryManager> input_shm_manager,
+    std::shared_ptr<ForwardSharedMemoryManager> output_shm_manager)
+    : global_rank_(global_rank),
+      device_(d),
+      is_local_rank_(is_local_rank),
+      input_shm_manager_(input_shm_manager),
+      output_shm_manager_(output_shm_manager) {
   // Initialize brpc channel
   options_.connection_type = "pooled";
   options_.timeout_ms = -1;
@@ -301,26 +309,44 @@ folly::SemiFuture<std::optional<RawForwardOutput>> RemoteWorker::step_async(
     const std::vector<RawForwardInput>& inputs) {
   folly::Promise<std::optional<RawForwardOutput>> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule(
-      [this, inputs = inputs, promise = std::move(promise)]() mutable {
-        // 1. convert to proto::BatchedForwardInputs
-        proto::BatchedForwardInputs pb_batched_fwd_inputs;
-        std::vector<proto::ForwardInput> batched_fwd_inputs_vec;
-        batched_fwd_inputs_vec.reserve(inputs.size());
-        for (auto i = 0; i < inputs.size(); ++i) {
-          proto::ForwardInput pb_fwd_input;
-          forward_input_to_proto(inputs[i], &pb_fwd_input);
-          batched_fwd_inputs_vec.push_back(std::move(pb_fwd_input));
+  threadpool_.schedule([this,
+                        inputs = inputs,
+                        promise = std::move(promise)]() mutable {
+    if (is_local_rank_ && FLAGS_enable_shm) {
+      // write to shared memory, then wait output.
+      RawForwardOutput raw_output;
+      if (input_shm_manager_) {
+        int use_shm_ret = input_shm_manager_->raw_input_write(inputs);
+        if (use_shm_ret < 0) {
+          // fallback
+          FLAGS_enable_shm = false;
+          LOG(ERROR)
+              << "RemoteWorker SharedMemoryManager write failed, fallback to "
+                 "brpc.";
+          return;
         }
-        ADD_VECTOR_TO_PROTO(pb_batched_fwd_inputs.mutable_micro_inputs(),
-                            batched_fwd_inputs_vec);
-
-        // 2. call ExecuteModel with callback
-        auto done = new ExecuteModelClosure();
-        done->promise = std::move(promise);
-        stub_->ExecuteModel(
-            &done->cntl, &pb_batched_fwd_inputs, &done->pb_output, done);
-      });
+      }
+      output_shm_manager_->raw_output_read(raw_output);
+      promise.setValue(raw_output);
+      return;
+    }
+    // convert to proto::BatchedForwardInputs
+    proto::BatchedForwardInputs pb_batched_fwd_inputs;
+    std::vector<proto::ForwardInput> batched_fwd_inputs_vec;
+    batched_fwd_inputs_vec.reserve(inputs.size());
+    for (auto i = 0; i < inputs.size(); ++i) {
+      proto::ForwardInput pb_fwd_input;
+      forward_input_to_proto(inputs[i], &pb_fwd_input);
+      batched_fwd_inputs_vec.push_back(std::move(pb_fwd_input));
+    }
+    ADD_VECTOR_TO_PROTO(pb_batched_fwd_inputs.mutable_micro_inputs(),
+                        batched_fwd_inputs_vec);
+    // call ExecuteModel with callback
+    auto done = new ExecuteModelClosure();
+    done->promise = std::move(promise);
+    stub_->ExecuteModel(
+        &done->cntl, &pb_batched_fwd_inputs, &done->pb_output, done);
+  });
 
   return future;
 }

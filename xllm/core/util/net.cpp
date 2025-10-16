@@ -97,6 +97,28 @@ uint64_t convert_ip_port_to_uint64(const std::string& ip, uint16_t port) {
   uint32_t ip_network = ip_addr.s_addr;
   return (static_cast<uint64_t>(ip_network) << 32) | port;
 }
+// input example: 127.0.0.1:18889
+std::string extract_ip(const std::string& input) {
+  std::istringstream stream(input);
+  std::string ip;
+
+  std::getline(stream, ip, ':');
+  if (ip == "127.0.0.1") {
+    ip = get_local_ip_addr();
+  }
+  return ip;
+}
+
+std::string extract_port(const std::string& input) {
+  std::istringstream stream(input);
+  std::string ip;
+  std::string port;
+
+  std::getline(stream, ip, ':');
+  std::getline(stream, port, ':');
+
+  return port;
+}
 
 void parse_host_port_from_addr(const std::string& addr,
                                std::string& host,

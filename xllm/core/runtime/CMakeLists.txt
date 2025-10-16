@@ -30,6 +30,7 @@ cc_library(
     xservice_client.h
     speculative_engine.h
     speculative_worker_impl.h
+    forward_shared_memory_manager.h
   SRCS
     executor.cpp
     base_executor_impl.cpp
@@ -50,6 +51,7 @@ cc_library(
     params_utils.cpp
     speculative_engine.cpp
     speculative_worker_impl.cpp
+    forward_shared_memory_manager.cpp
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>

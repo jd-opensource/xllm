@@ -21,8 +21,10 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/parallel_state/process_group.h"
+#include "runtime/forward_shared_memory_manager.h"
 #include "runtime/llm_worker_impl.h"
 #include "server/xllm_server_registry.h"
+#include "util/net.h"
 
 namespace xllm {
 
@@ -93,6 +95,8 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
 void DistManager::setup_multi_node_workers(
     const runtime::Options& options,
     const std::string& master_node_addr) {
+  bool is_creator;
+  string name;
   const auto& devices = options.devices();
 
   // Process/Thread Worker Mode, we use it in multi-nodes serving.
@@ -120,11 +124,14 @@ void DistManager::setup_multi_node_workers(
   const int32_t base_rank = options.node_rank() * each_node_ranks;
   const int32_t dp_size = options.dp_size();
   const int32_t ep_size = options.ep_size();
+  const int32_t dp_local_tp_size = world_size / dp_size;
+
   LOG(INFO) << "Multi-node serving world_size = " << world_size
             << ", each_node_ranks = " << each_node_ranks
             << ", current node rank = " << options.node_rank()
             << ", nnodes = " << options.nnodes() << ", dp_size = " << dp_size
-            << ", ep_size = " << ep_size;
+            << ", ep_size = " << ep_size << ", tp_size = " << dp_local_tp_size;
+
   CHECK_EQ((world_size % dp_size), 0)
       << "Global world size must be divisible by dp size in multi-node serving "
          "mode.";
@@ -140,16 +147,41 @@ void DistManager::setup_multi_node_workers(
     // Node1: 0, 1, 2, 3
     // Node2: 0+4, 1+4, 2+4, 3+4
     const int32_t rank = static_cast<int32_t>(i) + base_rank;
-
     ParallelArgs parallel_args(rank, world_size, dp_size, nullptr, ep_size);
-    servers_.emplace_back(std::make_unique<WorkerServer>(i,
-                                                         master_node_addr,
-                                                         // done,
-                                                         dones[i],
-                                                         parallel_args,
-                                                         devices[i],
-                                                         worker_server_options,
-                                                         worker_type));
+    if (FLAGS_is_local && FLAGS_enable_shm) {
+      int32_t dp_group = rank / dp_local_tp_size;
+      name = ForwardSharedMemoryManager::create_unique_name(
+          dp_group, FORWARD_RAW_INPUT_TYPE, rank);
+      auto input_shm_manager = std::make_shared<ForwardSharedMemoryManager>(
+          name, PB_INPUT_SHM_SIZE, is_creator, FORWARD_RAW_INPUT_TYPE);
+      LOG(INFO) << "Create input shared memory manager with name: " << name;
+      name = ForwardSharedMemoryManager::create_unique_name(
+          dp_group, FORWARD_RAW_OUTPUT_TYPE, rank);
+      auto output_shm_manager = std::make_shared<ForwardSharedMemoryManager>(
+          name, PB_OUTPUT_SHM_SIZE, is_creator, FORWARD_RAW_OUTPUT_TYPE);
+      LOG(INFO) << "Create output shared memory manager with name: " << name;
+      servers_.emplace_back(
+          std::make_unique<WorkerServer>(i,
+                                         master_node_addr,
+                                         // done,
+                                         dones[i],
+                                         parallel_args,
+                                         devices[i],
+                                         worker_server_options,
+                                         worker_type,
+                                         input_shm_manager,
+                                         output_shm_manager));
+    } else {
+      servers_.emplace_back(
+          std::make_unique<WorkerServer>(i,
+                                         master_node_addr,
+                                         // done,
+                                         dones[i],
+                                         parallel_args,
+                                         devices[i],
+                                         worker_server_options,
+                                         worker_type));
+    }
   }
 
   // Master node need to wait all workers done
@@ -175,14 +207,57 @@ void DistManager::setup_multi_node_workers(
 
     // check if all workers connected
     // and then create worker clients
+    std::unordered_map<int32_t, std::shared_ptr<ForwardSharedMemoryManager>>
+        input_shm_map;
     for (size_t r = 0; r < world_size; ++r) {
       if (worker_addrs_map.find(r) == worker_addrs_map.end()) {
         LOG(FATAL) << "Not all worker connect to engine server. Miss rank is "
                    << r;
         return;
       }
-      worker_clients_.emplace_back(std::make_unique<RemoteWorker>(
-          r, worker_addrs_map[r], devices[r % each_node_ranks]));
+      std::shared_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr;
+      std::shared_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr;
+
+      if (net::extract_ip(FLAGS_master_node_addr) ==
+          net::extract_ip(worker_addrs_map[r])) {
+        local_rank_map_[r] = true;
+        // create shared memory manager for local rank
+        if (FLAGS_enable_shm) {
+          bool is_driver = false;
+          int32_t dp_group = r / dp_local_tp_size;
+          if (r % dp_local_tp_size == 0) {
+            is_driver = true;
+          }
+          if (is_driver) {
+            if (input_shm_map.find(dp_group) != input_shm_map.end()) {
+              input_shm_manager = input_shm_map[dp_group];
+            } else {
+              name = ForwardSharedMemoryManager::create_unique_name(
+                  dp_group, FORWARD_RAW_INPUT_TYPE, r);
+              input_shm_manager = std::make_shared<ForwardSharedMemoryManager>(
+                  name, PB_INPUT_SHM_SIZE, is_creator, FORWARD_RAW_INPUT_TYPE);
+              LOG(INFO) << "Create input shared memory manager with name: "
+                        << name;
+              input_shm_map[dp_group] = input_shm_manager;
+            }
+          }
+          name = ForwardSharedMemoryManager::create_unique_name(
+              dp_group, FORWARD_RAW_OUTPUT_TYPE, r);
+          output_shm_manager = std::make_shared<ForwardSharedMemoryManager>(
+              name, PB_OUTPUT_SHM_SIZE, is_creator, FORWARD_RAW_OUTPUT_TYPE);
+          LOG(INFO) << "Create output shared memory manager with name: "
+                    << name;
+        }
+      } else {
+        local_rank_map_[r] = false;
+      }
+      worker_clients_.emplace_back(
+          std::make_unique<RemoteWorker>(r,
+                                         worker_addrs_map[r],
+                                         devices[r % each_node_ranks],
+                                         local_rank_map_[r],
+                                         input_shm_manager,
+                                         output_shm_manager));
     }
   }
 

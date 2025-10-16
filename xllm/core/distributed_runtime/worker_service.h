@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <string>
 
+#include "runtime/forward_shared_memory_manager.h"
 #include "runtime/worker.h"
 #include "worker.pb.h"
 
@@ -32,6 +33,10 @@ class WorkerService : public proto::DistributeWorker {
   virtual ~WorkerService();
 
   void set_worker(std::unique_ptr<Worker> worker);
+
+  void create_polling_shm_thread(
+      std::shared_ptr<ForwardSharedMemoryManager> input_shm_manager,
+      std::shared_ptr<ForwardSharedMemoryManager> output_shm_manager);
 
   // service functions
   void Hello(::google::protobuf::RpcController* controller,
@@ -117,6 +122,14 @@ class WorkerService : public proto::DistributeWorker {
                                  ::google::protobuf::Closure* done) override;
 
  private:
+  void process_model_input(BatchedForwardInputs& batched_fwd_inputs,
+                           torch::Tensor& next_tokens,
+                           torch::Tensor& logprobs,
+                           torch::Tensor& top_tokens,
+                           torch::Tensor& top_logprobs,
+                           torch::Tensor& embeddings,
+                           torch::Tensor& expert_load_data,
+                           int32_t& prepared_layer_id);
   DISALLOW_COPY_AND_ASSIGN(WorkerService);
 
  private:
@@ -125,10 +138,14 @@ class WorkerService : public proto::DistributeWorker {
 
   bool initialized_;
 
+  bool is_local_rank_;
+
   Device device_;
   std::unique_ptr<Stream> stream_;
 
   std::unique_ptr<Worker> worker_;
+
+  std::unique_ptr<std::thread> polling_thread_;
 
   ThreadPool threadpool_{5};
 };

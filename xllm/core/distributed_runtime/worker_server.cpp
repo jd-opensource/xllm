@@ -48,15 +48,18 @@ limitations under the License.
 
 namespace xllm {
 
-void WorkerServer::create_server(const runtime::Options& options,
-                                 std::atomic<bool>& done,
-                                 const std::string& master_node_addr,
-                                 const torch::Device& d,
-                                 int world_size,
-                                 int global_rank,
-                                 int32_t dp_size,
-                                 int local_rank,
-                                 int32_t ep_size) {
+void WorkerServer::create_server(
+    const runtime::Options& options,
+    std::atomic<bool>& done,
+    const std::string& master_node_addr,
+    const torch::Device& d,
+    int world_size,
+    int global_rank,
+    int32_t dp_size,
+    int local_rank,
+    int32_t ep_size,
+    std::shared_ptr<ForwardSharedMemoryManager> input_shm_manager,
+    std::shared_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   Device device(d);
   device.set_device();
 
@@ -103,19 +106,27 @@ void WorkerServer::create_server(const runtime::Options& options,
   std::unique_ptr<Worker> worker =
       std::make_unique<Worker>(*parallel_args, device, options, worker_type);
   worker_service->set_worker(std::move(worker));
+  if (FLAGS_enable_shm && input_shm_manager && output_shm_manager) {
+    worker_service->create_polling_shm_thread(input_shm_manager,
+                                              output_shm_manager);
+  }
+
   done.store(true);
 
   // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
   worker_server->run();
 }
 
-WorkerServer::WorkerServer(int local_worker_idx,
-                           const std::string& master_node_addr,
-                           std::atomic<bool>& done,
-                           const ParallelArgs& parallel_args,
-                           const torch::Device& d,
-                           const runtime::Options& options,
-                           WorkerType worker_type) {
+WorkerServer::WorkerServer(
+    int local_worker_idx,
+    const std::string& master_node_addr,
+    std::atomic<bool>& done,
+    const ParallelArgs& parallel_args,
+    const torch::Device& d,
+    const runtime::Options& options,
+    WorkerType worker_type,
+    std::shared_ptr<ForwardSharedMemoryManager> input_shm_manager,
+    std::shared_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM) {
     // TODO: Use Process or thread.
     worker_thread_ = std::make_unique<std::thread>(&WorkerServer::create_server,
@@ -128,7 +139,9 @@ WorkerServer::WorkerServer(int local_worker_idx,
                                                    parallel_args.rank(),
                                                    parallel_args.dp_size(),
                                                    local_worker_idx,
-                                                   parallel_args.ep_size());
+                                                   parallel_args.ep_size(),
+                                                   input_shm_manager,
+                                                   output_shm_manager);
   } else {
     // TODO: support other model type later.
     LOG(ERROR) << "Unsupported model type: " << worker_type;

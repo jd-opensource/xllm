@@ -91,6 +91,16 @@ int run() {
     FLAGS_host = net::get_local_ip_addr();
   }
 
+  if (FLAGS_host != "" &&
+      net::extract_ip(FLAGS_master_node_addr) == FLAGS_host) {
+    FLAGS_is_local = true;
+  } else {
+    FLAGS_is_local = false;
+  }
+
+  LOG(INFO) << "Set worker role to "
+            << (FLAGS_is_local ? "local worker" : "master/remote worker");
+
   if (FLAGS_backend == "vlm") {
     FLAGS_enable_prefix_cache = false;
     FLAGS_enable_chunked_prefill = false;

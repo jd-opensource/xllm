@@ -275,6 +275,13 @@ DEFINE_int32(sleep_time_second,
              3,
              "The sleep time for worker try to connect to server next time.");
 
+DEFINE_bool(is_local,
+            false,
+            "whether the worker and master are on the same machine.");
+
+DEFINE_bool(enable_shm,
+            true,
+            "Whether to enable shared memory for executing model.");
 // --- function call config ---
 
 DEFINE_string(tool_call_parser,

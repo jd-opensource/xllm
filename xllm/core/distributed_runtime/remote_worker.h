@@ -28,17 +28,21 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "runtime/executor.h"
 #include "runtime/forward_params.h"
+#include "runtime/forward_shared_memory_manager.h"
 #include "runtime/worker_client.h"
 #include "util/threadpool.h"
 #include "worker.pb.h"
-
 namespace xllm {
 
 class RemoteWorker : public WorkerClient {
  public:
-  explicit RemoteWorker(int32_t global_rank,
-                        const std::string& server_address,
-                        const torch::Device& d);
+  explicit RemoteWorker(
+      int32_t global_rank,
+      const std::string& server_address,
+      const torch::Device& d,
+      bool is_local_rank = false,
+      std::shared_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr,
+      std::shared_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr);
   virtual ~RemoteWorker() = default;
 
   bool wait_for_server_ready(const std::string& server_address);
@@ -134,7 +138,9 @@ class RemoteWorker : public WorkerClient {
 
  private:
   int32_t global_rank_;
-
+  bool is_local_rank_;
+  std::shared_ptr<ForwardSharedMemoryManager> input_shm_manager_;
+  std::shared_ptr<ForwardSharedMemoryManager> output_shm_manager_;
   // brpc connection resource
   brpc::Channel channel_;
   brpc::ChannelOptions options_;

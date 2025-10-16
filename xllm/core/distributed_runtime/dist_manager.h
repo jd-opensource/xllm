@@ -20,8 +20,8 @@ limitations under the License.
 #include "distributed_runtime/worker_server.h"
 #include "distributed_runtime/worker_service.h"
 #include "framework/parallel_state/process_group.h"
+#include "runtime/forward_shared_memory_manager.h"
 #include "runtime/options.h"
-
 namespace xllm {
 class DistManager {
  public:
@@ -57,5 +57,6 @@ class DistManager {
   std::vector<std::unique_ptr<Worker>> workers_;
   // For distributed serving
   std::vector<std::unique_ptr<WorkerServer>> servers_;
+  std::unordered_map<int32_t, bool> local_rank_map_;
 };
 }  // namespace xllm

@@ -28,5 +28,7 @@ void parse_host_port_from_addr(const std::string& addr,
                                std::string& host,
                                int& port);
 
+std::string extract_ip(const std::string& input);
+std::string extract_port(const std::string& input);
 }  // namespace net
 }  // namespace xllm

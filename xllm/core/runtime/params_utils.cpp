@@ -328,6 +328,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->eplb_info().expert_ids().begin(),
                            pb_forward_input->eplb_info().expert_ids().end());
   eplb_info.update_layer_id = pb_forward_input->eplb_info().update_layer_id();
+
   COUNTER_ADD(proto_latency_seconds_proto2i, timer.elapsed_seconds());
 }
 
@@ -533,6 +534,7 @@ void proto_to_forward_output(const proto::ForwardOutput& pb_output,
     }
     raw_forward_output.outputs.emplace_back(s);
   }
+
   COUNTER_ADD(proto_latency_seconds_proto2o, timer.elapsed_seconds());
 }
 
@@ -672,6 +674,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
                           expert_load_data_flattened_slice);
     }
   }
+
   COUNTER_ADD(proto_latency_seconds_o2proto, timer.elapsed_seconds());
   return;
 }
