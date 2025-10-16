@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "kernels/mlu/torch_ops_api.h"
+#include "kernels/mlu/mlu_ops_api.h"
 namespace xllm {
 namespace layer {
 
@@ -76,23 +76,22 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
     residual_ = residual;
   }
   pack_params();
-  auto final_hidden_states = xllm::mlu::fused_moe(hidden_states,
-                                                  router_logits,
-                                                  w13_,
-                                                  w2_,
-                                                  std::nullopt,
-                                                  std::nullopt,
-                                                  residual_,
-                                                  std::nullopt,
-                                                  std::nullopt,
-                                                  std::nullopt,
-                                                  std::nullopt,
-                                                  topk_,
-                                                  renormalize_,
-                                                  is_gated_,
-                                                  hidden_act_,
-                                                  scoring_func_,
-                                                  start_expert_id_);
+
+  FusedMoEParams fused_moe_params;
+  fused_moe_params.hidden_states = hidden_states;
+  fused_moe_params.gating_output = router_logits;
+  fused_moe_params.w1 = w13_;
+  fused_moe_params.w2 = w2_;
+  fused_moe_params.residual = residual_;
+  fused_moe_params.topk = topk_;
+  fused_moe_params.renormalize = renormalize_;
+  fused_moe_params.gated = is_gated_;
+  fused_moe_params.act_mode = hidden_act_;
+  fused_moe_params.scoring_func = scoring_func_;
+  fused_moe_params.start_expert_id = start_expert_id_;
+
+  auto final_hidden_states = xllm::kernel::fused_moe(fused_moe_params);
+
   if (tp_pg_->world_size() > 1) {
     final_hidden_states = parallel_state::reduce(final_hidden_states, tp_pg_);
   }

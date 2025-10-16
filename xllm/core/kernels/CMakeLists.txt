@@ -1,12 +1,28 @@
 include(cc_library)
 
 if(USE_NPU)
-  include_directories(
-    ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
-  )
   add_subdirectory(npu)
 endif()
 
 if(USE_MLU)
   add_subdirectory(mlu)
 endif()
+
+if(USE_CUDA)
+  add_subdirectory(cuda)
+endif()
+
+cc_library(
+  NAME
+    kernels
+  HDRS
+    param.h
+    torch_ops_api.h
+  SRCS
+    torch_ops_api.cpp
+  DEPS
+    torch
+    $<$<BOOL:${USE_NPU}>:npu_kernels>
+    $<$<BOOL:${USE_MLU}>:mlu_kernels>
+    $<$<BOOL:${USE_CUDA}>:cuda_kernels>
+)

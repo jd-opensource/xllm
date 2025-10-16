@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "kernels/mlu/torch_ops_api.h"
+#include "kernels/torch_ops_api.h"
 
 namespace xllm {
 namespace layer {
