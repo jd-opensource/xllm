@@ -56,7 +56,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
-#elif defined(USE_MLU)
+#else
     norm_ = register_module(
         "norm",
         layer::RmsNorm(
@@ -119,7 +119,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       } else {
 #if defined(USE_NPU)
         h = embed_tokens_[i](tokens[i], 0);
-#elif defined(USE_MLU)
+#else
         h = embed_tokens_[i](tokens[i]);
 #endif
       }
@@ -225,7 +225,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     }
     auto cancated_h = torch::cat(hs, 0);
     return norm_(cancated_h, 0);
-#elif defined(USE_MLU)
+#else
     bool is_prefill = input_params[0].q_max_seq_len > 1;
     auto attn_metadata =
         layer::AttentionMetadata::build(input_params[0], is_prefill);

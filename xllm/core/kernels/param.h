@@ -21,8 +21,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-namespace xllm {
-namespace kernel {
+namespace xllm::kernel {
 
 // Note: add default values for optional parameters in the struct definition
 
@@ -242,5 +241,4 @@ struct MaskedIndexerSelectPagedKVParams {
   int64_t quant_block_size;
 };
 
-}  // namespace kernel
-}  // namespace xllm
+}  // namespace xllm::kernel

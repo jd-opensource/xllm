@@ -312,7 +312,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
   } else {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_CUDA)
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
     kv_cache_shape.emplace_back(std::vector<int64_t>{

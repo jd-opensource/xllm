@@ -34,7 +34,9 @@ class ProcessGroupNccl : public ProcessGroup {
       : ProcessGroup(device) {
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> pg_options =
         c10d::ProcessGroupNCCL::Options::create();
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 7
     pg_options->group_name = group_name;
+#endif
     int rank = global_rank;
     if (world_size != rank_size) {
       auto [local_rank, group_ranks] =
@@ -46,12 +48,6 @@ class ProcessGroupNccl : public ProcessGroup {
     auto store = create_tcp_store(host, port, rank);
     pg_ = std::make_unique<c10d::ProcessGroupNCCL>(
         store, rank, rank_size, pg_options);
-  }
-
-  ~ProcessGroupNccl() override {
-    if (pg_) {
-      pg_->shutdown();
-    }
   }
 };
 

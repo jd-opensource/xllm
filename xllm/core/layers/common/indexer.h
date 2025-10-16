@@ -28,7 +28,7 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
-#include "layers/linear.h"
+#include "linear.h"
 #include "rotary_embedding.h"
 
 namespace xllm {

@@ -64,6 +64,16 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->q_seq_lens().begin(),
                            pb_forward_input->q_seq_lens().end());
   // aprint<int32_t>(q_seq_lens, "q_seq_lens", global_rank_);
+  // for flashinfer
+  std::vector<int32_t> paged_kv_indptr =
+      std::vector<int32_t>(pb_forward_input->paged_kv_indptr().begin(),
+                           pb_forward_input->paged_kv_indptr().end());
+  std::vector<int32_t> paged_kv_indices =
+      std::vector<int32_t>(pb_forward_input->paged_kv_indices().begin(),
+                           pb_forward_input->paged_kv_indices().end());
+  std::vector<int32_t> paged_kv_last_page_len =
+      std::vector<int32_t>(pb_forward_input->paged_kv_last_page_len().begin(),
+                           pb_forward_input->paged_kv_last_page_len().end());
   std::vector<std::vector<int32_t>> block_tables_vec;
   for (size_t i = 0; i < pb_forward_input->block_tables_vec().size(); ++i) {
     block_tables_vec.emplace_back(std::vector<int32_t>(
@@ -212,6 +222,12 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.q_seq_lens = torch::tensor(q_seq_lens, tensor_options);
   input_params.kv_seq_lens_vec = std::move(seq_lens);
   input_params.q_seq_lens_vec = std::move(q_seq_lens);
+
+  input_params.paged_kv_indptr = torch::tensor(paged_kv_indptr, tensor_options);
+  input_params.paged_kv_indices =
+      torch::tensor(paged_kv_indices, tensor_options);
+  input_params.paged_kv_last_page_len =
+      torch::tensor(paged_kv_last_page_len, tensor_options);
 
   input_params.new_cache_slots =
       torch::tensor(new_token_slot_ids, tensor_options);
@@ -396,6 +412,13 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_seq_lens(), inputs.seq_lens);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_q_seq_lens(),
                       inputs.q_seq_lens);
+  // for flashinfer
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_paged_kv_indptr(),
+                      inputs.paged_kv_indptr);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_paged_kv_indices(),
+                      inputs.paged_kv_indices);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_paged_kv_last_page_len(),
+                      inputs.paged_kv_last_page_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_new_token_slot_ids(),
                       inputs.new_token_slot_ids);
   pb_forward_input->mutable_block_tables_vec()->Reserve(

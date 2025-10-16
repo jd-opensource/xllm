@@ -19,6 +19,7 @@ cc_library(
     $<$<BOOL:${USE_MLU}>:cnrt>
     $<$<BOOL:${USE_MLU}>:cndrv>
     $<$<BOOL:${USE_CUDA}>:cuda>
+    $<$<BOOL:${USE_CUDA}>:cudart>
 )
 
 if(USE_NPU)

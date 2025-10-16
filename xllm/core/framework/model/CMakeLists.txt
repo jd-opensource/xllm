@@ -42,6 +42,7 @@ cc_library(
 )
 target_link_libraries(model PRIVATE :kv_cache)
 
+if(USE_NPU)
 cc_test(
     NAME 
       npu_dp_ep_padding_test
@@ -63,3 +64,4 @@ target_link_libraries(npu_dp_ep_padding_test
                  $<$<BOOL:${USE_NPU}>:hccl>
                  $<$<BOOL:${USE_NPU}>:c_sec>
                  $<$<BOOL:${USE_NPU}>:nnopbase>)
+endif()

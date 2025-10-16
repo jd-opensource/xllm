@@ -15,49 +15,36 @@ limitations under the License.
 
 #pragma once
 
-#include <c10/core/Device.h>
 #include <torch/torch.h>
 
 #include <cstdint>
-#include <memory>
 
-#include "stream.h"
+#include "core/common/macros.h"
 
 namespace xllm {
-
-class Device {
+namespace layer {
+class FlashinferWorkspace {
  public:
-  explicit Device(torch::Device device);
-  ~Device() = default;
-  operator torch::Device() const;
-
-  void set_device() const;
-
-  const torch::Device& unwrap() const;
-  int32_t index() const;
-
-  void init_device_context() const;
-
-  static int device_count();
-  static std::string type_str();
-  static torch::DeviceType type_torch();
-
-  int64_t total_memory();
-  int64_t free_memory();
-
-  int synchronize_default_stream();
-  std::unique_ptr<Stream> get_stream_from_pool();
-
- private:
-  struct DeviceMem {
-    int64_t total_memory;
-    int64_t free_memory;
+  static FlashinferWorkspace& get_instance() {
+    static FlashinferWorkspace instance;
+    return instance;
   };
 
-  DeviceMem get_device_mem() const;
+  void initialize(const torch::Device& device);
+
+  torch::Tensor get_float_workspace_buffer();
+  torch::Tensor get_int_workspace_buffer();
+  torch::Tensor get_page_locked_int_workspace_buffer();
 
  private:
-  torch::Device device_;
+  FlashinferWorkspace() = default;
+  ~FlashinferWorkspace() = default;
+  DISALLOW_COPY_AND_ASSIGN(FlashinferWorkspace);
+
+  torch::Tensor float_workspace_buffer_;
+  torch::Tensor int_workspace_buffer_;
+  torch::Tensor page_locked_int_workspace_buffer_;
 };
 
+}  // namespace layer
 }  // namespace xllm

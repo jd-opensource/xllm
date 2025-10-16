@@ -27,13 +27,16 @@ bool get_bool_env(const std::string& key, bool defaultValue);
 // parsed.
 int get_int_env(const std::string& key, int defaultValue);
 
+std::string get_string_env(const std::string& name);
+
 // Get the timeout in seconds for process group test operations.
-// This timeout is used when waiting for process group initialization tests to
-// complete in multi-device/multi-node scenarios. The default value is 4
+// This timeout is used when waiting for process group initialization tests
+// to complete in multi-device/multi-node scenarios. The default value is 4
 // seconds, but can be overridden by setting the
 // XLLM_PROCESS_GROUP_ASYNC_TIMEOUT_SECONDS environment variable. This is
-// particularly useful in multi-node multi-device communication scenarios where
-// network latency may cause the default 4-second timeout to be insufficient.
+// particularly useful in multi-node multi-device communication scenarios
+// where network latency may cause the default 4-second timeout to be
+// insufficient.
 int get_process_group_test_timeout_seconds();
 
 }  // namespace util

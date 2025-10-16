@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "env_var.h"
 
+#include <glog/logging.h>
+
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -50,6 +52,14 @@ int get_int_env(const std::string& key, int defaultValue) {
     return defaultValue;
   }
   return static_cast<int>(result);
+}
+
+std::string get_string_env(const std::string& name) {
+  const char* val = std::getenv(name.c_str());
+  if (val == nullptr) {
+    LOG(FATAL) << "Environment variable " << name.c_str() << " is not set";
+  }
+  return std::string(val);
 }
 
 int get_process_group_test_timeout_seconds() {

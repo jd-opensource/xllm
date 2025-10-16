@@ -24,6 +24,8 @@ limitations under the License.
 #include "kernels/npu/xllm_ops/replace_token.h"
 #elif defined(USE_MLU)
 #include <torch_mlu/csrc/framework/core/caching_allocator.h>
+#elif defined(USE_CUDA)
+#include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
 #include <memory>
@@ -94,6 +96,11 @@ bool WorkerImpl::allocate_kv_cache(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
         2);
 #elif defined(USE_MLU)
+    key_cache =
+        torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
+    value_cache =
+        torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+#elif defined(USE_CUDA)
     key_cache =
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
     value_cache =
@@ -301,6 +308,8 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
       device_id, &torch_cache, &torch_largest_block);
 #elif defined(USE_MLU)
   torch_mlu::MLUCachingAllocator::emptyCache();
+#elif defined(USE_CUDA)
+  c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
   const auto available_memory = device_.free_memory();
   const auto total_memory = device_.total_memory();
@@ -352,16 +361,16 @@ void WorkerImpl::update_last_step_output(
 
 ForwardInput WorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
-#if defined(USE_A3) || defined(USE_MLU)
+#if defined(USE_A2)
+  xllm_ops::replace_token(inputs.token_ids,
+                          last_step_output_.sample_output.next_tokens);
+#else
   auto& flatten_tokens = inputs.token_ids;
   auto neg_mask = (flatten_tokens < 0);
   auto clamped_neg_indices = torch::clamp(-flatten_tokens, 0);
   auto replacement = last_step_output_.sample_output.next_tokens.index(
       {clamped_neg_indices - 1});
   inputs.token_ids = torch::where(neg_mask, replacement, flatten_tokens);
-#else
-  xllm_ops::replace_token(inputs.token_ids,
-                          last_step_output_.sample_output.next_tokens);
 #endif
   return inputs;
 }

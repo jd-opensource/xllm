@@ -276,6 +276,7 @@ DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 DEFINE_bool(enable_shm,
             false,
             "Whether to enable shared memory for executing model.");
+
 // --- function call config ---
 
 DEFINE_string(tool_call_parser,
@@ -353,6 +354,7 @@ DEFINE_int32(micro_batch_num,
              "Default use two micro batches for multi-stream parallel.");
 
 // --- dit config ---
+
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
 // --- continuous kv cache config ---
@@ -377,18 +379,30 @@ DEFINE_int64(buffer_size_per_seq,
              "Buffer size per sequence in bytes, default 0.");
 
 // --- beam search config ---
+
 DEFINE_bool(enable_beam_search_kernel,
             false,
             "Whether to enable beam search kernel.");
 
 // --- reasoning parser config ---
+
 DEFINE_string(reasoning_parser,
               "",
               "Specify the reasoning parser for handling reasoning "
               "interactions(e.g. glm45, qwen3, deepseek-r1).");
 
 // --- qwen3 reranker config ---
+
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
+
+// --- flashinfer config ---
+
+DEFINE_int32(flashinfer_workspace_buffer_size,
+             128 * 1024 * 1024,
+             "The user reserved workspace buffer used to store intermediate "
+             "attention results in split-k algorithm for flashinfer.");
+
+// --- prefetch weight config ---
 
 DEFINE_bool(
     enable_prefetch_weight,

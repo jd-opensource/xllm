@@ -86,7 +86,7 @@ class BatchInputBuilder {
 #if defined(USE_NPU)
     std::vector<int32_t> seq_lens;
     std::vector<int32_t> q_seq_lens;
-#elif defined(USE_MLU)
+#elif defined(USE_MLU) || defined(USE_CUDA)
     std::vector<int32_t> seq_lens = {0};    // cu_seq_lens
     std::vector<int32_t> q_seq_lens = {0};  // q_cu_seq_len
 #endif
@@ -107,6 +107,11 @@ class BatchInputBuilder {
     // for continuous kvcache
     std::vector<int64_t> new_cache_slot_offsets;  //[n_tokens]
     std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
+
+    // for flashinfer
+    std::vector<int32_t> paged_kv_indptr = {0};
+    std::vector<int32_t> paged_kv_indices;
+    std::vector<int32_t> paged_kv_last_page_len;
   };
 
   // Helper methods for sequence processing

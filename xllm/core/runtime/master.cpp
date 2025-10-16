@@ -41,10 +41,6 @@ limitations under the License.
 #include "util/scope_guard.h"
 #include "util/timer.h"
 
-#if defined(USE_NPU)
-#include <pybind11/pybind11.h>
-#endif
-
 namespace brpc {
 DECLARE_bool(graceful_quit_on_sigterm);
 DECLARE_bool(graceful_quit_on_sighup);

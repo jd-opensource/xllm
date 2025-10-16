@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "tests_utils.h"
 
+#include "core/platform/device.h"
+
 namespace xllm {
 namespace layer {
 namespace test {
@@ -118,7 +120,7 @@ QuantArgs CreateDefaultQuantArgs() {
 torch::TensorOptions CreateDefaultTensorOptions() {
   return torch::TensorOptions()
       .dtype(torch::kBFloat16)
-      .device(c10::DeviceType::PrivateUse1, 0)
+      .device(Device::type_torch(), 0)
       .requires_grad(false);
 }
 
@@ -126,7 +128,7 @@ ParallelArgs CreateDefaultParallelArgs(
     std::unique_ptr<xllm::ProcessGroup>& mock_process_group) {
   // Create mock ProcessGroup for MLU testing
   mock_process_group = std::make_unique<MockProcessGroup>(
-      torch::Device(c10::DeviceType::PrivateUse1, 0));
+      torch::Device(Device::type_torch(), 0));
 
   // Initialize ParallelArgs with mock ProcessGroup
   ParallelArgs parallel_args(0, 1, mock_process_group.get());

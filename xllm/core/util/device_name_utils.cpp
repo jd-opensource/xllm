@@ -36,7 +36,7 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
     }
     devices.reserve(num_devices);
     for (int i = 0; i < num_devices; ++i) {
-      std::string device_name = Device::type() + ":" + std::to_string(i);
+      std::string device_name = Device::type_str() + ":" + std::to_string(i);
       devices.emplace_back(torch::Device(device_name));
     }
     return devices;
@@ -49,14 +49,14 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
   for (const auto& device_str : device_strs) {
     std::vector<std::string> parts = absl::StrSplit(device_str, ':');
     CHECK(parts.size() == 2) << "Invalid device string format: " << device_str;
-    CHECK(parts[0] == Device::type())
+    CHECK(parts[0] == Device::type_str())
         << "Unsupported device type: " << parts[0];
 
     int device_index;
     CHECK(absl::SimpleAtoi(parts[1], &device_index))
         << "Invalid device index: " << parts[1];
 
-    devices.emplace_back(c10::DeviceType::PrivateUse1, device_index);
+    devices.emplace_back(Device::type_torch(), device_index);
     device_types.insert(devices.back().type());
   }
   CHECK(!devices.empty()) << "No devices specified.";

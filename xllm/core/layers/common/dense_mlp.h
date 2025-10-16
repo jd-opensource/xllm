@@ -21,7 +21,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "layers/linear.h"
+#include "linear.h"
 
 namespace xllm {
 namespace layer {

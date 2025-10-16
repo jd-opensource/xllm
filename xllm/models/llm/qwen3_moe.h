@@ -59,7 +59,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                           event,
                           event_flag);
   }
-#elif defined(USE_MLU)
+#else
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& positions,
                         const layer::AttentionMetadata& attn_metadata,
@@ -163,7 +163,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
                                       /*mask_value=*/mask_value);
     norm_ = register_module("norm", layer::RmsNorm(context));
     mapping_data_ = parallel_args.mapping_data();
-#elif defined(USE_MLU)
+#else
     norm_ = register_module(
         "norm",
         layer::RmsNorm(
@@ -288,7 +288,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
     }
     return norm_(h, 0);
-#elif defined(USE_MLU)
+#else
     ModelInputParams modified_input_params = input_params;
     layer::update_dummy_run_input(dp_rank_, positions, modified_input_params);
     bool is_prefill = modified_input_params.q_max_seq_len > 1;
@@ -382,7 +382,7 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
     model_ = register_module("model", Qwen3MoeModel(context));
 #if defined(USE_NPU)
     lm_head_ = register_module("lm_head", layer::LmHead(context));
-#elif defined(USE_MLU)
+#else
     // lm_head_ is default to no quantization
     lm_head_ =
         register_module("lm_head",
@@ -413,7 +413,7 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
                        const torch::Tensor& seleted_idxes) {
 #if defined(USE_NPU)
     return lm_head_(hidden_states, seleted_idxes, 0);
-#elif defined(USE_MLU)
+#else
     // select tokens if provided
     auto h = hidden_states;
     if (seleted_idxes.defined()) {

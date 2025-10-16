@@ -123,9 +123,11 @@ class MockBackend : public c10d::Backend {
 
   int getSize() const { return world_size_; }
 
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 7
   void shutdown() override {
     // Mock implementation - do nothing
   }
+#endif
 
  private:
   int rank_;

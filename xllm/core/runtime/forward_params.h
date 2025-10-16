@@ -180,6 +180,10 @@ struct RawForwardInput {
   std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
   // beam search kernel input
   std::vector<float> acc_logprob_vec;
+  // for flashinfer
+  std::vector<int32_t> paged_kv_indptr;         //[n_seq + 1]
+  std::vector<int32_t> paged_kv_indices;        //[num_used_pages]
+  std::vector<int32_t> paged_kv_last_page_len;  //[n_seq]
 };
 
 struct RawSampleOutput {

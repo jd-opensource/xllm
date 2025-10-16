@@ -97,6 +97,11 @@ struct ModelInputParams {
     // Copy graph_buffer to device
     params.graph_buffer = safe_to(graph_buffer, device, true);
 
+    // params for flashinfer
+    params.paged_kv_indptr = safe_to(paged_kv_indptr, device);
+    params.paged_kv_indices = safe_to(paged_kv_indices, device);
+    params.paged_kv_last_page_len = safe_to(paged_kv_last_page_len, device);
+
     return params;
   }
 
@@ -201,6 +206,21 @@ struct ModelInputParams {
   // Graph execution buffer for temporary tensor storage
   // Used by ACL Graph Executor to avoid repeated memory allocation
   torch::Tensor graph_buffer;
+
+  // the indptr of the paged kv-cache
+  // used in flashinfer
+  // IntTensor: [n_seq + 1]
+  torch::Tensor paged_kv_indptr;
+
+  // the page indices of the paged kv cache
+  // used in flashinfer
+  torch::Tensor paged_kv_indices;
+
+  // the number of entries in the last page of each request in
+  // the paged kv cache
+  // used in flashinfer
+  // IntTensor: [n_seq]
+  torch::Tensor paged_kv_last_page_len;
 };
 
 }  // namespace xllm

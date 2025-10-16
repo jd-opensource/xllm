@@ -47,12 +47,6 @@ class ProcessGroupCncl : public ProcessGroup {
     pg_ = std::make_unique<torch_mlu::ProcessGroupCNCL>(
         store, rank, rank_size, pg_options);
   }
-
-  ~ProcessGroupCncl() override {
-    if (pg_) {
-      pg_->shutdown();
-    }
-  }
 };
 
 std::unique_ptr<xllm::ProcessGroup> create_process_group(

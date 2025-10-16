@@ -62,7 +62,6 @@ cc_library(
     word_embedding.h
     lm_head.h
     block_copy.h
-    linear.h
   SRCS
     multi_head_attention.cpp
   DEPS

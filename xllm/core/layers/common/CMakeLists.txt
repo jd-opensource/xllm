@@ -6,6 +6,7 @@ cc_library(
   NAME
     common_layers
   HDRS
+    flashinfer_workspace.h
     qwen3_attention.h
     attention.h
     fuse_norm.h
@@ -15,10 +16,12 @@ cc_library(
     qwen3_decoder_layer.h
     qwen3_moe_decoder_layer.h
     linear_impl.h
+    linear.h
     word_embedding_impl.h
     layer_utils.h
     indexer.h
   SRCS
+    flashinfer_workspace.cpp
     qwen3_attention.cpp
     attention.cpp
     fuse_norm.cpp
@@ -43,6 +46,7 @@ cc_library(
     glog::glog
     gflags::gflags
     torch
+    :platform
 )
 
 # Add test for DenseMLP
