@@ -378,3 +378,9 @@ DEFINE_int64(cache_size_per_token,
 DEFINE_int64(buffer_size_per_seq,
              0,
              "Buffer size per sequence in bytes, default 0.");
+
+// --- flashinfer config ---
+DEFINE_int32(workspace_buffer_size,
+             512 * 1024 * 1024,
+             "The user reserved workspace buffer used to store intermediate "
+             "attention results in split-k algorithm.");

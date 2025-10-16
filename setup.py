@@ -212,7 +212,13 @@ def set_mlu_envs():
     os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
     os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
     os.environ["PYTORCH_MLU_INSTALL_PATH"] = get_torch_mlu_root_path()
-
+    
+def set_cuda_envs():
+    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
+    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
+    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
+    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
+    
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
         super().__init__(name, sources=[])
@@ -223,7 +229,7 @@ class CMakeExtension(Extension):
 class ExtBuild(build_ext):
     user_options = build_ext.user_options + [
         ("base-dir=", None, "base directory of xLLM project"),
-        ("device=", None, "target device type (a3 or a2 or mlu)"),
+        ("device=", None, "target device type (a3 or a2 or mlu or cuda)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("install-xllm-kernels=", None, "install xllm_kernels RPM package (true/false)"),
     ]
@@ -302,8 +308,14 @@ class ExtBuild(build_ext):
             cmake_args += ["-DUSE_MLU=ON"]
             # set mlu environment variables
             set_mlu_envs()
+        elif self.device == "cuda":
+            cuda_architectures = "80;89;90"
+            cmake_args += ["-DUSE_CUDA=ON", 
+                           f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}"]
+            # set cuda environment variables
+            set_cuda_envs()
         else:
-            raise ValueError("Please set --device to a2 or a3 or mlu.")
+            raise ValueError("Please set --device to a2 or a3 or mlu or cuda.")
 
 
         # Adding CMake arguments set as environment variable
@@ -353,7 +365,7 @@ class ExtBuild(build_ext):
 
 class BuildDistWheel(bdist_wheel):
     user_options = bdist_wheel.user_options + [
-        ("device=", None, "target device type (a3 or a2 or mlu)"),
+        ("device=", None, "target device type (a3 or a2 or mlu or cuda)"),
         ("arch=", None, "target arch type (x86 or arm)"),
     ]
 
@@ -530,7 +542,7 @@ if __name__ == "__main__":
         idx = sys.argv.index('--device')
         if idx + 1 < len(sys.argv):
             device = sys.argv[idx+1].lower()
-            if device not in ('a2', 'a3', 'mlu'):
+            if device not in ('a2', 'a3', 'mlu', 'cuda'):
                 print("Error: --device must be a2 or a3 or mlu (case-insensitive)")
                 sys.exit(1)
             # Remove the arguments so setup() doesn't see them

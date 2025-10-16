@@ -92,7 +92,7 @@ bool WorkerImpl::allocate_kv_cache(
     value_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
         2);
-#elif defined(USE_MLU)
+#elif defined(USE_MLU) || defined(USE_CUDA)
     key_cache =
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
     value_cache =
@@ -300,6 +300,8 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
       device_id, &torch_cache, &torch_largest_block);
 #elif defined(USE_MLU)
   torch_mlu::MLUCachingAllocator::emptyCache();
+#elif defined(USE_CUDA)
+  c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
   const auto available_memory = device_.free_memory();
   const auto total_memory = device_.total_memory();

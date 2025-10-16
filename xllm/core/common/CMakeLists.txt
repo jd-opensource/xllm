@@ -15,6 +15,7 @@ cc_library(
     rate_limiter.h
     types.h
     device_monitor.h
+    flashinfer_workspace.h
   SRCS
     etcd_client.cpp
     global_flags.cpp
@@ -23,6 +24,7 @@ cc_library(
     options.cpp
     rate_limiter.cpp
     device_monitor.cpp
+    flashinfer_workspace.cpp
   DEPS
     util
     absl::random_random

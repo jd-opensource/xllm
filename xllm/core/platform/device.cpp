@@ -64,6 +64,8 @@ const std::string Device::type() {
   return "npu";
 #elif defined(USE_MLU)
   return "mlu";
+#elif defined(USE_CUDA)
+  return "cuda";
 #endif
 }
 

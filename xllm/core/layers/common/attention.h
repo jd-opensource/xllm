@@ -44,6 +44,13 @@ struct AttentionMetadata {
   std::string compute_dtype;
   bool is_prefill;
   bool is_chunked_prefill;
+
+  // for flashinfer
+  torch::Tensor paged_kv_indptr;
+  torch::Tensor paged_kv_indices;
+  torch::Tensor paged_kv_last_page_len;
+  torch::Tensor q_cu_seq_lens;
+  torch::Tensor kv_cu_seq_lens;
 };
 
 class AttentionImpl : public torch::nn::Module {

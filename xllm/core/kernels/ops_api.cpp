@@ -15,6 +15,17 @@ limitations under the License.
 
 #include "ops_api.h"
 
+namespace {
+#if defined(USE_CUDA)
+bool support_pdl() {
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, 0);
+  return prop.major >= 9;
+}
+#endif
+
+}  // namespace
+
 namespace xllm {
 namespace kernel {
 
@@ -30,6 +41,14 @@ void apply_rotary(RotaryParams& params) {
                     params.discrete,
                     params.dynamic_ntk,
                     params.max_query_len);
+#elif defined(USE_CUDA)
+  cuda::apply_rope_pos_ids_cos_sin_cache(params.q,
+                                         params.k,
+                                         params.q,
+                                         params.k,
+                                         params.cos_sin,
+                                         params.position_ids,
+                                         params.interleaved);
 #else
   throw std::runtime_error("apply_rotary not implemented");
 #endif
@@ -45,6 +64,9 @@ void active(ActivationParams& params) {
               params.is_gated,
               params.start_expert_id,
               params.expert_size);
+#elif defined(USE_CUDA)
+  cuda::act_and_mul(
+      params.output, params.input, params.act_mode, support_pdl());
 #else
   throw std::runtime_error("active not implemented");
 #endif
@@ -58,6 +80,12 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
                            params.v_cache,
                            params.slot_mapping,
                            params.direction);
+#elif defined(USE_CUDA)
+  cuda::reshape_paged_cache(params.slot_mapping,
+                            params.key,
+                            params.value,
+                            params.k_cache,
+                            params.v_cache);
 #else
   throw std::runtime_error("reshape_paged_cache not implemented");
 #endif
@@ -87,6 +115,20 @@ void batch_prefill(AttentionParams& params) {
                      params.window_size_right,
                      params.compute_dtype,
                      params.return_lse);
+#elif defined(USE_CUDA)
+  cuda::batch_prefill(params.float_workspace_buffer,
+                      params.int_workspace_buffer,
+                      params.page_locked_int_workspace_buffer,
+                      params.query,
+                      params.key,
+                      params.value,
+                      params.q_cu_seq_lens,
+                      params.kv_cu_seq_lens,
+                      params.window_size_left,
+                      params.output,
+                      params.output_lse,
+                      params.enable_cuda_graph,
+                      support_pdl());
 #else
   throw std::runtime_error("batch_prefill not implemented");
 #endif
@@ -114,6 +156,22 @@ void batch_decode(AttentionParams& params) {
                     params.scale,
                     params.return_lse,
                     params.kv_cache_quant_bit_size);
+#elif defined(USE_CUDA)
+  cuda::batch_decode(params.float_workspace_buffer,
+                     params.int_workspace_buffer,
+                     params.page_locked_int_workspace_buffer,
+                     params.query,
+                     params.k_cache,
+                     params.v_cache,
+                     params.q_cu_seq_lens,
+                     params.paged_kv_indptr,
+                     params.paged_kv_indices,
+                     params.paged_kv_last_page_len,
+                     params.window_size_left,
+                     params.output,
+                     params.output_lse,
+                     params.enable_cuda_graph,
+                     support_pdl());
 #else
   throw std::runtime_error("batch_decode not implemented");
 #endif
@@ -136,6 +194,9 @@ void fused_layernorm(FusedLayerNormParams& params) {
                        params.store_output_before_norm,
                        params.store_output_after_norm,
                        params.dynamic_quant);
+#elif defined(USE_CUDA)
+  cuda::rmsnorm(
+      params.output, params.input, params.weight, params.eps, support_pdl());
 #else
   throw std::runtime_error("fused_layernorm not implemented");
 #endif
@@ -145,6 +206,8 @@ torch::Tensor matmul(MatmulParams& params) {
 #if defined(USE_MLU)
   return mlu::matmul(
       params.a, params.b, params.bias, params.c, params.alpha, params.beta);
+#elif defined(USE_CUDA)
+  return cuda::matmul(params.a, params.b, params.bias);
 #else
   throw std::runtime_error("matmul not implemented");
 #endif
@@ -179,6 +242,8 @@ torch::Tensor fused_moe(FusedMoEParams& params) {
                         params.world_size,
                         params.shared_expert_num,
                         params.parallel_mode);
+#elif defined(USE_CUDA)
+  throw std::runtime_error("fused_moe for cudanot implemented");
 #else
   throw std::runtime_error("fused_moe not implemented");
 #endif
