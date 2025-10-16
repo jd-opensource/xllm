@@ -32,7 +32,6 @@ limitations under the License.
 #include "core/framework/model_context.h"
 #include "core/layers/attention_mask.h"
 #include "core/layers/block_copy.h"
-#include "core/layers/linear.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/pos_embedding.h"
 #include "core/layers/rms_norm.h"

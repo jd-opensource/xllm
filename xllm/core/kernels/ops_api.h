@@ -19,6 +19,8 @@ limitations under the License.
 
 #if defined(USE_MLU)
 #include "mlu/mlu_ops_api.h"
+#elif defined(USE_CUDA)
+#include "cuda/cuda_ops_api.h"
 #endif
 
 namespace xllm {
@@ -39,6 +41,5 @@ void fused_layernorm(FusedLayerNormParams& params);
 torch::Tensor matmul(MatmulParams& params);
 
 torch::Tensor fused_moe(FusedMoEParams& params);
-
 }  // namespace kernel
 }  // namespace xllm

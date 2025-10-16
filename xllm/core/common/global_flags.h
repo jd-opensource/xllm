@@ -198,3 +198,5 @@ DECLARE_int64(granularity_size);
 DECLARE_int64(cache_size_per_token);
 
 DECLARE_int64(buffer_size_per_seq);
+
+DECLARE_int32(workspace_buffer_size);

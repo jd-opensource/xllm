@@ -101,7 +101,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
-if(USE_NPU)
+if(USE_NPU OR USE_CUDA)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=0")
   add_definitions(-D_GLIBCXX_USE_CXX11_ABI=0)
 elseif(USE_MLU)
@@ -349,6 +349,22 @@ if(USE_MLU)
     $ENV{PYTORCH_MLU_INSTALL_PATH}/csrc/lib
     $ENV{PYTORCH_MLU_INSTALL_PATH}
     $ENV{NEUWARE_HOME}/lib64
+  )
+endif()
+
+if(USE_CUDA)
+  add_definitions(-DUSE_CUDA)
+  set(CMAKE_VERBOSE_MAKEFILE ON)
+  include_directories(
+      $ENV{PYTHON_INCLUDE_PATH}
+      $ENV{PYTORCH_INSTALL_PATH}/include
+      $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
+  )
+
+  link_directories(
+    $ENV{PYTHON_LIB_PATH}
+    $ENV{PYTORCH_INSTALL_PATH}/lib
+    $ENV{CUDA_TOOLKIT_ROOT_DIR}/lib64
   )
 endif()
 

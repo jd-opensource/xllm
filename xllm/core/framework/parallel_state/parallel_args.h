@@ -111,7 +111,7 @@ struct ParallelArgs {
 
   // atb hccl dispatchAndCombineHcclComm
   PROPERTY(HcclComm, dispatchAndCombineHcclComm);
-#elif defined(USE_MLU)
+#elif defined(USE_MLU) || defined(USE_CUDA)
   ProcessGroup* tp_group_ = nullptr;
   ProcessGroup* moe_ep_group_ = nullptr;
   ProcessGroup* moe_tp_group_ = nullptr;

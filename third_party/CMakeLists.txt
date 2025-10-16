@@ -20,3 +20,41 @@ target_include_directories(mooncake_store PUBLIC
 )
 
 target_link_libraries(mooncake_store PUBLIC transfer_engine cachelib_memory_allocator)
+
+
+if(USE_CUDA)
+  cc_library(
+    NAME 
+      cutlass
+    INCLUDES
+      cutlass/include
+      cutlass/tools/util/include
+    DEPS 
+      torch # TODO: depends on CUDA instead of torch
+  )
+  cc_library(
+    NAME 
+      dlpack
+    INCLUDES
+      dlpack/include
+  )
+  cc_library(
+    NAME 
+      tvm_ffi
+    INCLUDES
+      tvm_ffi/include
+    DEPS
+      dlpack
+  )
+  cc_library(
+    NAME 
+      flashinfer
+    INCLUDES
+      flashinfer/include
+      flashinfer/csrc
+    DEPS
+      cutlass
+      tvm_ffi
+      dlpack
+  )
+endif()
