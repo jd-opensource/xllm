@@ -67,13 +67,11 @@ class CausalLM : public torch::nn::Module {
 
   virtual const torch::TensorOptions& options() const = 0;
 
-#if defined(USE_NPU)
   virtual layer::LmHead get_lm_head() = 0;
   virtual void set_lm_head(layer::LmHead& head) = 0;
   virtual std::vector<layer::WordEmbedding> get_word_embedding() = 0;
   virtual void set_word_embedding(
       std::vector<layer::WordEmbedding>& embedding) = 0;
-#endif
 };
 
 template <typename Model>
@@ -108,7 +106,6 @@ class CausalLMImpl : public CausalLM {
     return model_->update_expert_weight(layer_id);
   }
 
-#if defined(USE_NPU)
   layer::LmHead get_lm_head() override { return model_->get_lm_head(); };
 
   void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); };
@@ -121,7 +118,6 @@ class CausalLMImpl : public CausalLM {
       std::vector<layer::WordEmbedding>& embedding) override {
     model_->set_word_embedding(embedding);
   };
-#endif
 
   torch::Device device() const override { return options_.device(); }
 

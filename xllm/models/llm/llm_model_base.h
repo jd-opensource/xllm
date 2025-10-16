@@ -301,7 +301,6 @@ class LlmModelImplBase : public torch::nn::Module {
     auto cancated_h = torch::cat(hs, 0);
     return norm_(cancated_h, 0);
 #elif defined(USE_MLU)
-    // FIXME(mlu): temp method to distinguish prefill and decode
     bool is_prefill = input_params[0].q_max_seq_len > 1;
     auto attn_metadata =
         layer::AttentionMetadata::build(input_params[0], is_prefill);
@@ -380,8 +379,8 @@ class LlmModelImplBase : public torch::nn::Module {
   // test
   //  ParallelEmbedding embed_tokens_{nullptr};
   std::vector<layer::WordEmbedding> embed_tokens_;
-
   layer::RmsNorm norm_{nullptr};
+
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
   std::vector<DecoderLayerType> layers_;
@@ -401,14 +400,14 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
 #if defined(USE_NPU)
     lm_head_ = register_module("lm_head", layer::LmHead(context));
 #elif defined(USE_MLU)
-    lm_head_ = register_module(
-        "lm_head",
-        layer::ColumnParallelLinear(context.get_model_args().hidden_size(),
-                                    context.get_model_args().vocab_size(),
-                                    /*bias=*/false,
-                                    /*gather_output=*/true,
-                                    context.get_parallel_args(),
-                                    context.get_tensor_options()));
+    lm_head_ =
+        register_module("lm_head",
+                        layer::LmHead(context.get_model_args().hidden_size(),
+                                      context.get_model_args().vocab_size(),
+                                      /*bias=*/false,
+                                      /*gather_output=*/true,
+                                      context.get_parallel_args(),
+                                      context.get_tensor_options()));
 #endif
   }
 
@@ -475,7 +474,6 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-#if defined(USE_NPU)
   virtual layer::LmHead get_lm_head() { return lm_head_; }
 
   virtual void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
@@ -488,7 +486,6 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
       std::vector<layer::WordEmbedding>& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
-#endif
 
  protected:
   // parameter members, must be registered
@@ -496,11 +493,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   int device_id = 0;
   bool tie_word_embeddings{false};
   // test
-#if defined(USE_NPU)
   layer::LmHead lm_head_{nullptr};
-#elif defined(USE_MLU)
-  layer::ColumnParallelLinear lm_head_{nullptr};
-#endif
 };
 
 }  // namespace xllm

@@ -65,7 +65,6 @@ class CausalVLMImpl : public CausalVLM {
 
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-#if defined(USE_NPU)
   layer::LmHead get_lm_head() override { return model_->get_lm_head(); };
 
   void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); };
@@ -78,7 +77,6 @@ class CausalVLMImpl : public CausalVLM {
       std::vector<layer::WordEmbedding>& embedding) override {
     model_->set_word_embedding(embedding);
   };
-#endif
 
   torch::Device device() const override { return options_.device(); }
 

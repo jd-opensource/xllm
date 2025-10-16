@@ -109,16 +109,16 @@ torch::Tensor fused_moe(const torch::Tensor& hidden_states,
                              w1,
                              token_count_slice,
                              gemm1_out,
-                             std::nullopt,  // expand_idx: None
-                             std::nullopt,  // c: None
-                             std::nullopt,  // alpha: None
-                             std::nullopt,  // beta: None
-                             std::nullopt,
-                             std::nullopt,
-                             std::nullopt,
-                             std::nullopt,
-                             std::nullopt,
-                             std::nullopt,
+                             std::nullopt,  // expand_idx
+                             std::nullopt,  // c
+                             std::nullopt,  // alpha
+                             std::nullopt,  // beta
+                             std::nullopt,  // a_scale
+                             std::nullopt,  // b_scale
+                             std::nullopt,  // bias
+                             std::nullopt,  // a_calibration
+                             std::nullopt,  // b_calibration
+                             std::nullopt,  // quant_flag
                              tokens,
                              false,
                              true);
@@ -144,16 +144,16 @@ torch::Tensor fused_moe(const torch::Tensor& hidden_states,
                              w2,
                              token_count_slice,
                              gemm2_out,     // d
-                             std::nullopt,  // expand_idx: None
-                             std::nullopt,  // c: None
-                             std::nullopt,  // alpha: None
-                             std::nullopt,  // beta: None
-                             std::nullopt,
-                             std::nullopt,
-                             std::nullopt,
-                             std::nullopt,
-                             std::nullopt,
-                             std::nullopt,
+                             std::nullopt,  // expand_idx
+                             std::nullopt,  // c
+                             std::nullopt,  // alpha
+                             std::nullopt,  // beta
+                             std::nullopt,  // a_scale
+                             std::nullopt,  // b_scale
+                             std::nullopt,  // bias
+                             std::nullopt,  // a_calibration
+                             std::nullopt,  // b_calibration
+                             std::nullopt,  // quant_flag
                              tokens,
                              false,
                              true);

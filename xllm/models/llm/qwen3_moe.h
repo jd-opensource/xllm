@@ -246,6 +246,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
     norm_->merge_loaded_weights();
   }
+#endif
 
   std::vector<layer::WordEmbedding> get_word_embedding() {
     return {embed_tokens_};
@@ -254,7 +255,6 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     embed_tokens_ = word_embedding[0];
   }
-#endif
 
  private:
   torch::nn::ModuleList blocks_{nullptr};
@@ -286,14 +286,14 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
 #if defined(USE_NPU)
     lm_head_ = register_module("lm_head", layer::LmHead(context));
 #elif defined(USE_MLU)
-    lm_head_ = register_module(
-        "lm_head",
-        layer::ColumnParallelLinear(context.get_model_args().hidden_size(),
-                                    context.get_model_args().vocab_size(),
-                                    /*bias=*/false,
-                                    /*gather_output=*/true,
-                                    context.get_parallel_args(),
-                                    context.get_tensor_options()));
+    lm_head_ =
+        register_module("lm_head",
+                        layer::LmHead(context.get_model_args().hidden_size(),
+                                      context.get_model_args().vocab_size(),
+                                      /*bias=*/false,
+                                      /*gather_output=*/true,
+                                      context.get_parallel_args(),
+                                      context.get_tensor_options()));
 #endif
   }
 
@@ -346,7 +346,6 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-#if defined(USE_NPU)
   layer::LmHead get_lm_head() { return lm_head_; }
 
   void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
@@ -358,15 +357,10 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
   void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
-#endif
 
  private:
   Qwen3MoeModel model_{nullptr};
-#if defined(USE_NPU)
   layer::LmHead lm_head_{nullptr};
-#elif defined(USE_MLU)
-  layer::ColumnParallelLinear lm_head_{nullptr};
-#endif
 };
 TORCH_MODULE(Qwen3MoeForCausalLM);
 
