@@ -17,13 +17,16 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "comm_channel.h"
 #include "distributed_runtime/collective_service.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/parallel_state/process_group.h"
+#include "runtime/forward_shared_memory_manager.h"
 #include "runtime/llm_worker_impl.h"
 #include "server/xllm_server_registry.h"
-
+#include "shm_channel.h"
+#include "util/net.h"
 namespace xllm {
 
 DistManager::DistManager(const runtime::Options& options) {
@@ -90,6 +93,53 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
   }
 }
 
+namespace {
+std::unique_ptr<CommChannel> create_channel(const std::string& worker_addrs,
+                                            int r,
+                                            int dp_local_tp_size) {
+  std::unique_ptr<CommChannel> channel;
+
+  if (net::extract_ip(FLAGS_master_node_addr) ==
+          net::extract_ip(worker_addrs) &&
+      FLAGS_enable_shm) {
+    // create shared memory manager for local rank
+    bool is_driver = false;
+    int dp_group = r / dp_local_tp_size;
+    if (r % dp_local_tp_size == 0) {
+      is_driver = true;
+    }
+    channel = std::make_unique<ShmChannel>(dp_group, r, is_driver);
+  } else {
+    channel = std::make_unique<CommChannel>();
+  }
+
+  channel->init_brpc(worker_addrs);
+
+  return channel;
+}
+
+void prepare_shm(
+    int dp_local_tp_size,
+    int rank,
+    std::unique_ptr<ForwardSharedMemoryManager>& input_shm_manager,
+    std::unique_ptr<ForwardSharedMemoryManager>& output_shm_manager) {
+  bool is_creator;
+  int32_t dp_group = rank / dp_local_tp_size;
+
+  string name = ForwardSharedMemoryManager::create_unique_name(
+      dp_group, FORWARD_RAW_INPUT_TYPE, rank);
+  input_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
+      name, PB_INPUT_SHM_SIZE, is_creator, FORWARD_RAW_INPUT_TYPE);
+  LOG(INFO) << "Create input shared memory manager with name: " << name;
+
+  name = ForwardSharedMemoryManager::create_unique_name(
+      dp_group, FORWARD_RAW_OUTPUT_TYPE, rank);
+  output_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
+      name, PB_OUTPUT_SHM_SIZE, is_creator, FORWARD_RAW_OUTPUT_TYPE);
+  LOG(INFO) << "Create output shared memory manager with name: " << name;
+}
+}  // namespace
+
 void DistManager::setup_multi_node_workers(
     const runtime::Options& options,
     const std::string& master_node_addr) {
@@ -98,11 +148,11 @@ void DistManager::setup_multi_node_workers(
   // Process/Thread Worker Mode, we use it in multi-nodes serving.
 
   // Here, we assume that all node use same index devices. That is, if we set
-  // device='1,2,3,4' and nnodes=2, then both machine nodes will use the devices
-  // '1,2,3,4'. Therefore, the total world size is 2 * 4 = 8. This means that
-  // each of the two nodes will utilize four devices (specifically devices 1, 2,
-  // 3, and 4), resulting in a total of 8 devices being used across the entire
-  // distributed setup.
+  // device='1,2,3,4' and nnodes=2, then both machine nodes will use the
+  // devices '1,2,3,4'. Therefore, the total world size is 2 * 4 = 8. This
+  // means that each of the two nodes will utilize four devices (specifically
+  // devices 1, 2, 3, and 4), resulting in a total of 8 devices being used
+  // across the entire distributed setup.
 
   // To maintain interface consistency, we have implemented a new WorkerImpl
   // class. In this class, we create processes, initialize NCCL ProcessGroup,
@@ -120,13 +170,17 @@ void DistManager::setup_multi_node_workers(
   const int32_t base_rank = options.node_rank() * each_node_ranks;
   const int32_t dp_size = options.dp_size();
   const int32_t ep_size = options.ep_size();
+  const int32_t dp_local_tp_size = world_size / dp_size;
+
   LOG(INFO) << "Multi-node serving world_size = " << world_size
             << ", each_node_ranks = " << each_node_ranks
             << ", current node rank = " << options.node_rank()
             << ", nnodes = " << options.nnodes() << ", dp_size = " << dp_size
-            << ", ep_size = " << ep_size;
+            << ", ep_size = " << ep_size << ", tp_size = " << dp_local_tp_size;
+
   CHECK_EQ((world_size % dp_size), 0)
-      << "Global world size must be divisible by dp size in multi-node serving "
+      << "Global world size must be divisible by dp size in multi-node "
+         "serving "
          "mode.";
 
   runtime::Options worker_server_options = options;
@@ -134,6 +188,7 @@ void DistManager::setup_multi_node_workers(
 
   WorkerType worker_type =
       (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
+
   // create local workers
   for (size_t i = 0; i < devices.size(); ++i) {
     // worldsize = 8
@@ -145,15 +200,25 @@ void DistManager::setup_multi_node_workers(
     // when start a offline inference task with multi-gpu/npu/mpu/...
     bool use_spawn_worker = options.enable_offline_inference() && i > 0;
     ParallelArgs parallel_args(rank, world_size, dp_size, nullptr, ep_size);
-    servers_.emplace_back(std::make_unique<WorkerServer>(i,
-                                                         master_node_addr,
-                                                         // done,
-                                                         dones[i],
-                                                         parallel_args,
-                                                         devices[i],
-                                                         worker_server_options,
-                                                         worker_type,
-                                                         use_spawn_worker));
+
+    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr;
+    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr;
+    if (options.is_local() && FLAGS_enable_shm) {
+      prepare_shm(
+          dp_local_tp_size, rank, input_shm_manager, output_shm_manager);
+    }
+    servers_.emplace_back(
+        std::make_unique<WorkerServer>(i,
+                                       master_node_addr,
+                                       // done,
+                                       dones[i],
+                                       parallel_args,
+                                       devices[i],
+                                       worker_server_options,
+                                       worker_type,
+                                       use_spawn_worker,
+                                       std::move(input_shm_manager),
+                                       std::move(output_shm_manager)));
   }
 
   // Master node need to wait all workers done
@@ -185,8 +250,12 @@ void DistManager::setup_multi_node_workers(
                    << r;
         return;
       }
-      worker_clients_.emplace_back(std::make_unique<RemoteWorker>(
-          r, worker_addrs_map[r], devices[r % each_node_ranks]));
+      auto channel = create_channel(worker_addrs_map[r], r, dp_local_tp_size);
+      worker_clients_.emplace_back(
+          std::make_unique<RemoteWorker>(r,
+                                         worker_addrs_map[r],
+                                         devices[r % each_node_ranks],
+                                         std::move(channel)));
     }
   }
 

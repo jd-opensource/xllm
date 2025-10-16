@@ -19,6 +19,7 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <torch/torch.h>
 
+#include "comm_channel.h"
 #include "common/macros.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
@@ -28,6 +29,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "runtime/executor.h"
 #include "runtime/forward_params.h"
+#include "runtime/forward_shared_memory_manager.h"
 #include "runtime/worker_client.h"
 #include "util/threadpool.h"
 #include "worker.pb.h"
@@ -38,7 +40,8 @@ class RemoteWorker : public WorkerClient {
  public:
   explicit RemoteWorker(int32_t global_rank,
                         const std::string& server_address,
-                        const torch::Device& d);
+                        const torch::Device& d,
+                        std::unique_ptr<CommChannel> channel);
   virtual ~RemoteWorker() = default;
 
   bool wait_for_server_ready(const std::string& server_address);
@@ -134,44 +137,12 @@ class RemoteWorker : public WorkerClient {
 
  private:
   int32_t global_rank_;
-
-  // brpc connection resource
-  brpc::Channel channel_;
-  brpc::ChannelOptions options_;
-  std::unique_ptr<proto::DistributeWorker_Stub> stub_;
-
+  // connection resource
+  std::unique_ptr<CommChannel> channel_;
   ThreadPool threadpool_;
   // general working thread
   // do some overlap work with model execute
   ThreadPool general_threadpool_{5};
   const torch::Device device_;
 };
-
-class InitModelClosure : public google::protobuf::Closure {
- public:
-  void Run();
-
-  proto::Status response;
-  brpc::Controller cntl;
-  folly::Promise<bool> promise;
-};
-
-class ExecuteModelClosure : public google::protobuf::Closure {
- public:
-  void Run();
-
-  proto::ForwardOutput pb_output;
-  brpc::Controller cntl;
-  folly::Promise<std::optional<RawForwardOutput>> promise;
-};
-
-class LoadKVCacheFromStoreClosure : public google::protobuf::Closure {
- public:
-  void Run();
-
-  proto::StoreResponse response;
-  brpc::Controller cntl;
-  folly::Promise<uint32_t> promise;
-};
-
 }  // namespace xllm

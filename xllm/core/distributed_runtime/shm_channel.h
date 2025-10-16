@@ -14,21 +14,25 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-
-#include <string>
-#include <vector>
+#include "comm_channel.h"
+#include "runtime/forward_shared_memory_manager.h"
 
 namespace xllm {
-namespace net {
 
-std::string get_local_ip_addr();
-int get_local_free_port();
-uint64_t convert_ip_port_to_uint64(const std::string& ip, uint16_t port);
-void parse_host_port_from_addr(const std::string& addr,
-                               std::string& host,
-                               int& port);
+class ShmChannel : public CommChannel {
+ public:
+  explicit ShmChannel(int dp_group, int rank, bool is_driver);
+  ~ShmChannel() = default;
 
-std::string extract_ip(const std::string& input);
-std::string extract_port(const std::string& input);
-}  // namespace net
+  void execute_model_async(
+      const std::vector<RawForwardInput>& inputs,
+      folly::Promise<std::optional<RawForwardOutput>>& promise) override;
+
+ private:
+  bool execute_model_with_shm(const std::vector<RawForwardInput>& inputs,
+                              RawForwardOutput& raw_output);
+  std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager_ = nullptr;
+  std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager_ = nullptr;
+};
+
 }  // namespace xllm

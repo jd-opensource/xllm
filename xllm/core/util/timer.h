@@ -27,8 +27,10 @@ class Timer final {
   // reset the timer
   void reset();
 
-  // get the elapsed time in seconds
+  // get the elapsed time.
   double elapsed_seconds() const;
+  double elapsed_milliseconds() const;
+  double elapsed_microseconds() const;
 
  private:
   // the start time of the timer

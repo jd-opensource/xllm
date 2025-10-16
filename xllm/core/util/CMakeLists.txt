@@ -27,6 +27,7 @@ cc_library(
     type_traits.h
     utils.h
     uuid.h
+    shared_memory_manager.h
   SRCS
     device_name_utils.cpp
     env_var.cpp
@@ -37,6 +38,7 @@ cc_library(
     timer.cpp
     utils.cpp
     uuid.cpp
+    shared_memory_manager.cpp
   DEPS
     torch
     brpc

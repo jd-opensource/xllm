@@ -15,7 +15,13 @@ limitations under the License.
 
 #include "shared_memory_manager.h"
 
+#include <glog/logging.h>
+#include <sys/file.h>
+#include <unistd.h>
+
+#include <algorithm>
 #include <csignal>
+#include <cstring>
 
 namespace xllm {
 std::vector<std::string> SharedMemoryManager::pending_cleanups;
@@ -61,6 +67,9 @@ SharedMemoryManager::SharedMemoryManager(const std::string& name,
     close(fd_);
     LOG(FATAL) << "mmap failed: " << strerror(errno);
   }
+
+  // Initialize memory to zero.
+  std::memset(addr_, 0, size_);
 }
 
 SharedMemoryManager::~SharedMemoryManager() {
@@ -95,20 +104,4 @@ void SharedMemoryManager::cleanup_handler(int sig) {
   exit(sig);
 }
 
-void* SharedMemoryManager::allocate(int64_t size, int64_t alignment) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  // Calculate aligned size and check bounds
-  int64_t aligned_size = (size + alignment - 1) & ~(alignment - 1);
-  if (current_offset_ + aligned_size > size_) {
-    LOG(FATAL) << "Shared memory overflow, size_ = " << size_
-               << ", aligned_size = " << aligned_size
-               << ", current_offset_ = " << current_offset_;
-  }
-
-  // Return current offset and advance
-  void* ptr = static_cast<char*>(addr_) + current_offset_;
-  current_offset_ += aligned_size;
-  return ptr;
-}
 }  // namespace xllm

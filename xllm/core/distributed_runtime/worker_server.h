@@ -28,6 +28,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "runtime/executor.h"
 #include "runtime/forward_params.h"
+#include "runtime/forward_shared_memory_manager.h"
 #include "runtime/options.h"
 #include "runtime/worker_impl.h"
 #include "worker.pb.h"
@@ -36,26 +37,32 @@ namespace xllm {
 
 class WorkerServer {
  public:
-  WorkerServer(int local_worker_idx,
-               const std::string& master_node_addr,
-               std::atomic<bool>& done,
-               const ParallelArgs& parallel_args,
-               const torch::Device& d,
-               const runtime::Options& options,
-               WorkerType worker_type,
-               bool use_spawn_worker = false);
+  WorkerServer(
+      int local_worker_idx,
+      const std::string& master_node_addr,
+      std::atomic<bool>& done,
+      const ParallelArgs& parallel_args,
+      const torch::Device& d,
+      const runtime::Options& options,
+      WorkerType worker_type,
+      bool use_spawn_worker = false,
+      std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr,
+      std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr);
 
   virtual ~WorkerServer();
 
-  void create_server(const runtime::Options& options,
-                     std::atomic<bool>& done,
-                     const std::string& master_node_addr,
-                     const torch::Device& d,
-                     int world_sizse,
-                     int global_rank,
-                     int32_t dp_size,
-                     int local_rank,
-                     int32_t ep_size);
+  void create_server(
+      const runtime::Options& options,
+      std::atomic<bool>& done,
+      const std::string& master_node_addr,
+      const torch::Device& d,
+      int world_sizse,
+      int global_rank,
+      int32_t dp_size,
+      int local_rank,
+      int32_t ep_size,
+      std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
+      std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WorkerServer);
@@ -66,6 +73,10 @@ class WorkerServer {
                            const ParallelArgs& parallel_args,
                            const torch::Device& d,
                            const runtime::Options& options);
+
+  void create_shared_memory_polling(
+      std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
+      std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager);
 
   bool sync_master_node(const std::string& master_node_addr,
                         proto::AddressInfo& addr_info,

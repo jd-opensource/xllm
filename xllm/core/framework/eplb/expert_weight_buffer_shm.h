@@ -24,7 +24,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
-#include "shared_memory_manager.h"
+#include "util/shared_memory_manager.h"
 
 namespace xllm {
 

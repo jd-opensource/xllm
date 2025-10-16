@@ -27,7 +27,6 @@ limitations under the License.
 #include "common/types.h"
 #include "framework/request/request_params.h"
 #include "runtime/engine.h"
-
 namespace xllm {
 
 class Master {
@@ -63,7 +62,6 @@ class Master {
  protected:
   Options options_;
   std::unique_ptr<Engine> engine_;
-
   RateLimiter rate_limiter_;
 };
 

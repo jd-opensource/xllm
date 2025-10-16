@@ -51,15 +51,18 @@ extern char** environ;
 
 namespace xllm {
 
-void WorkerServer::create_server(const runtime::Options& options,
-                                 std::atomic<bool>& done,
-                                 const std::string& master_node_addr,
-                                 const torch::Device& d,
-                                 int world_size,
-                                 int global_rank,
-                                 int32_t dp_size,
-                                 int local_rank,
-                                 int32_t ep_size) {
+void WorkerServer::create_server(
+    const runtime::Options& options,
+    std::atomic<bool>& done,
+    const std::string& master_node_addr,
+    const torch::Device& d,
+    int world_size,
+    int global_rank,
+    int32_t dp_size,
+    int local_rank,
+    int32_t ep_size,
+    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
+    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();
@@ -107,6 +110,11 @@ void WorkerServer::create_server(const runtime::Options& options,
   std::unique_ptr<Worker> worker =
       std::make_unique<Worker>(*parallel_args, device, options, worker_type);
   worker_service->set_worker(std::move(worker));
+  if (FLAGS_enable_shm && input_shm_manager && output_shm_manager) {
+    worker_service->create_polling_shm_thread(std::move(input_shm_manager),
+                                              std::move(output_shm_manager));
+  }
+
   done.store(true);
 
   // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
@@ -160,14 +168,17 @@ void WorkerServer::create_spawn_server(int local_rank,
   done.store(true);
 }
 
-WorkerServer::WorkerServer(int local_worker_idx,
-                           const std::string& master_node_addr,
-                           std::atomic<bool>& done,
-                           const ParallelArgs& parallel_args,
-                           const torch::Device& d,
-                           const runtime::Options& options,
-                           WorkerType worker_type,
-                           bool use_spawn_worker) {
+WorkerServer::WorkerServer(
+    int local_worker_idx,
+    const std::string& master_node_addr,
+    std::atomic<bool>& done,
+    const ParallelArgs& parallel_args,
+    const torch::Device& d,
+    const runtime::Options& options,
+    WorkerType worker_type,
+    bool use_spawn_worker,
+    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
+    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM) {
     if (use_spawn_worker) {
       // start worker in a spawn process(for offline inference worker.)
@@ -177,17 +188,20 @@ WorkerServer::WorkerServer(int local_worker_idx,
     }
 
     // start worker in a thread.
-    worker_thread_ = std::make_unique<std::thread>(&WorkerServer::create_server,
-                                                   this,
-                                                   std::cref(options),
-                                                   std::ref(done),
-                                                   std::cref(master_node_addr),
-                                                   std::cref(d),
-                                                   parallel_args.world_size(),
-                                                   parallel_args.rank(),
-                                                   parallel_args.dp_size(),
-                                                   local_worker_idx,
-                                                   parallel_args.ep_size());
+    worker_thread_ =
+        std::make_unique<std::thread>(&WorkerServer::create_server,
+                                      this,
+                                      std::cref(options),
+                                      std::ref(done),
+                                      std::cref(master_node_addr),
+                                      std::cref(d),
+                                      parallel_args.world_size(),
+                                      parallel_args.rank(),
+                                      parallel_args.dp_size(),
+                                      local_worker_idx,
+                                      parallel_args.ep_size(),
+                                      std::move(input_shm_manager),
+                                      std::move(output_shm_manager));
   } else {
     // TODO: support other model type later.
     LOG(ERROR) << "Unsupported model type: " << worker_type;

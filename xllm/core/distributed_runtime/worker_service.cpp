@@ -61,6 +61,177 @@ void WorkerService::set_worker(std::unique_ptr<Worker> worker) {
   initialized_ = true;
 }
 
+void WorkerService::step(BatchedForwardInputs& batched_fwd_inputs,
+                         torch::Tensor& next_tokens,
+                         torch::Tensor& logprobs,
+                         torch::Tensor& top_tokens,
+                         torch::Tensor& top_logprobs,
+                         torch::Tensor& embeddings,
+                         torch::Tensor& expert_load_data,
+                         int32_t& prepared_layer_id,
+                         torch::Tensor& src_seq_idxes,
+                         torch::Tensor& out_tokens,
+                         torch::Tensor& out_logprobs) {
+  device_.set_device();
+  // execute model
+  auto future = worker_->step_async(batched_fwd_inputs);
+
+  if (!options_.enable_schedule_overlap()) {
+    auto forward_outputs = std::move(future).get();
+    // convert ForwardOutput to proto::ForwardOutput which contain Tokens.
+    if (forward_outputs) {
+      DCHECK(forward_outputs.has_value()) << "Failed to execute model";
+      const auto& sample_output = forward_outputs.value().sample_output;
+      const auto& beam_search_output =
+          forward_outputs.value().beam_search_output;
+      expert_load_data =
+          safe_to(forward_outputs.value().expert_load_data, torch::kCPU, true);
+      prepared_layer_id = forward_outputs.value().prepared_layer_id;
+
+      {
+        c10::StreamGuard streamGuard = stream_->set_stream_guard();
+        // only driver worker (rank=0) need to fill this
+        // [num_seq, ..., embed_dim] FloatTensor
+        embeddings = safe_to(sample_output.embeddings,
+                             torch::dtype(torch::kFloat32).device(torch::kCPU),
+                             true);
+
+        // [num_seq]
+        next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
+        if (next_tokens.defined()) {
+          // [num_seq]
+          logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
+
+          if (!beam_search_output.src_seq_idxes.defined()) {
+            // beam search kernel will provide final tokens/logprobs in beam
+            // search output, so keep top_tokens/top_logprobs undefined to
+            // avoid returning them.
+            // [num_seq, topk]
+            top_tokens = safe_to(sample_output.top_tokens, torch::kCPU, true);
+            // [num_seq, topk]
+            top_logprobs =
+                safe_to(sample_output.top_logprobs, torch::kCPU, true);
+          }
+        }
+
+        // beam search output
+        // [num_seq]
+        src_seq_idxes =
+            safe_to(beam_search_output.src_seq_idxes, torch::kCPU, true);
+        if (src_seq_idxes.defined()) {
+          // [num_seq]
+          out_tokens =
+              safe_to(beam_search_output.out_tokens, torch::kCPU, true);
+          // [num_seq]
+          out_logprobs =
+              safe_to(beam_search_output.out_logprobs,
+                      torch::dtype(torch::kFloat32).device(torch::kCPU),
+                      true);
+        }
+        auto ret = stream_->synchronize();
+      }
+    }
+  } else {
+    if (worker_->is_driver()) {
+      // construct fake output tensor
+      auto options =
+          torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
+      auto total_prefill_seq_len = 0;
+      auto total_num_sequences = 0;
+      for (auto& input : batched_fwd_inputs.micro_inputs) {
+        total_num_sequences += input.input_params.num_sequences;
+        total_prefill_seq_len += input.input_params.prefill_seq_len;
+      }
+      next_tokens =
+          torch::arange(-1,
+                        -1 * (total_num_sequences - total_prefill_seq_len + 1),
+                        -1,
+                        options);
+      std::move(future).deferValue([](auto&&) {});
+    }
+    expert_load_data = torch::zeros({1, 1}).to(torch::kInt64).contiguous();
+  }
+}
+
+void WorkerService::create_polling_shm_thread(
+    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
+    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
+  polling_thread_ = std::make_unique<std::thread>(
+      [this,
+       input_shm_manager = std::move(input_shm_manager),
+       output_shm_manager = std::move(output_shm_manager)]() mutable {
+        Timer timer;
+        while (true) {
+          BatchedForwardInputs batched_fwd_inputs;
+          std::vector<ForwardInput> inputs;
+          input_shm_manager->raw_input_read(inputs);
+          timer.reset();
+          // model output variables
+          torch::Tensor next_tokens;
+          torch::Tensor logprobs;
+          torch::Tensor top_tokens;
+          torch::Tensor top_logprobs;
+          torch::Tensor embeddings;
+          torch::Tensor expert_load_data;
+          int32_t prepared_layer_id = -1;
+
+          // beam search kernel output
+          torch::Tensor src_seq_idxes;
+          torch::Tensor out_tokens;
+          torch::Tensor out_logprobs;
+
+          auto micro_batches_num = inputs.size();
+          batched_fwd_inputs.micro_inputs = std::move(inputs);
+          batched_fwd_inputs.concated_sampling_params =
+              batched_fwd_inputs.micro_inputs[0].sampling_params;
+          for (auto i = 1; i < micro_batches_num; ++i) {
+            batched_fwd_inputs.concated_sampling_params.concat(
+                batched_fwd_inputs.micro_inputs[i].sampling_params);
+          }
+
+          // concat acc_logprob here for beam search together
+          if (micro_batches_num > 1) {
+            std::vector<torch::Tensor> acc_logprob_vec;
+            acc_logprob_vec.reserve(micro_batches_num);
+            for (auto i = 0; i < micro_batches_num; ++i) {
+              acc_logprob_vec.push_back(
+                  batched_fwd_inputs.micro_inputs[i].acc_logprob);
+            }
+            batched_fwd_inputs.acc_logprob =
+                torch::cat(acc_logprob_vec, /*dim=*/-1);
+          } else {
+            batched_fwd_inputs.acc_logprob =
+                batched_fwd_inputs.micro_inputs[0].acc_logprob;
+          }
+
+          step(batched_fwd_inputs,
+               next_tokens,
+               logprobs,
+               top_tokens,
+               top_logprobs,
+               embeddings,
+               expert_load_data,
+               prepared_layer_id,
+               src_seq_idxes,
+               out_tokens,
+               out_logprobs);
+
+          output_shm_manager->raw_output_write(next_tokens,
+                                               logprobs,
+                                               top_tokens,
+                                               top_logprobs,
+                                               embeddings,
+                                               expert_load_data,
+                                               prepared_layer_id,
+                                               src_seq_idxes,
+                                               out_tokens,
+                                               out_logprobs);
+          COUNTER_ADD(worker_service_latency_seconds, timer.elapsed_seconds());
+        }
+      });
+  return;
+}
+
 void WorkerService::Hello(::google::protobuf::RpcController* controller,
                           const proto::Status* request,
                           proto::Status* response,
@@ -323,9 +494,7 @@ void WorkerService::ExecuteModel(
                         pb_forward_output,
                         done]() mutable {
     brpc::ClosureGuard done_guard(done);
-    device_.set_device();
     Timer timer;
-
     // convert proto::BatchedForwardInputs to BatchedForwardInputs
     auto micro_batches_num = pb_batched_fwd_inputs->micro_inputs().size();
     BatchedForwardInputs batched_fwd_inputs;
@@ -338,7 +507,7 @@ void WorkerService::ExecuteModel(
       batched_fwd_inputs.micro_inputs.push_back(std::move(forward_input));
     }
 
-    // concat sampling parameters here for executing sample together
+    // concat sampling parameters
     batched_fwd_inputs.concated_sampling_params =
         batched_fwd_inputs.micro_inputs[0].sampling_params;
     for (auto i = 1; i < micro_batches_num; ++i) {
@@ -373,86 +542,18 @@ void WorkerService::ExecuteModel(
     torch::Tensor out_tokens;
     torch::Tensor out_logprobs;
 
-    // execute model
-    auto future = worker_->step_async(batched_fwd_inputs);
-
-    if (!options_.enable_schedule_overlap()) {
-      auto forward_outputs = std::move(future).get();
-      // convert ForwardOutput to proto::ForwardOutput which contain Tokens.
-      if (forward_outputs) {
-        DCHECK(forward_outputs.has_value()) << "Failed to execute model";
-        const auto& sample_output = forward_outputs.value().sample_output;
-        const auto& beam_search_output =
-            forward_outputs.value().beam_search_output;
-        expert_load_data = safe_to(
-            forward_outputs.value().expert_load_data, torch::kCPU, true);
-        prepared_layer_id = forward_outputs.value().prepared_layer_id;
-
-        {
-          c10::StreamGuard streamGuard = stream_->set_stream_guard();
-          // only driver worker (rank=0) need to fill this
-          // [num_seq, ..., embed_dim] FloatTensor
-          embeddings =
-              safe_to(sample_output.embeddings,
-                      torch::dtype(torch::kFloat32).device(torch::kCPU),
-                      true);
-
-          // [num_seq]
-          next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
-          if (next_tokens.defined()) {
-            // [num_seq]
-            logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
-
-            if (!beam_search_output.src_seq_idxes.defined()) {
-              // beam search kernel will provide final tokens/logprobs in beam
-              // search output, so keep top_tokens/top_logprobs undefined to
-              // avoid returning them.
-              // [num_seq, topk]
-              top_tokens = safe_to(sample_output.top_tokens, torch::kCPU, true);
-              // [num_seq, topk]
-              top_logprobs =
-                  safe_to(sample_output.top_logprobs, torch::kCPU, true);
-            }
-          }
-
-          // beam search output
-          // [num_seq]
-          src_seq_idxes =
-              safe_to(beam_search_output.src_seq_idxes, torch::kCPU, true);
-          if (src_seq_idxes.defined()) {
-            // [num_seq]
-            out_tokens =
-                safe_to(beam_search_output.out_tokens, torch::kCPU, true);
-            // [num_seq]
-            out_logprobs =
-                safe_to(beam_search_output.out_logprobs,
-                        torch::dtype(torch::kFloat32).device(torch::kCPU),
-                        true);
-          }
-          auto ret = stream_->synchronize();
-        }
-      }
-    } else {
-      if (worker_->is_driver()) {
-        // construct fake output tensor
-        auto options =
-            torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-        auto total_prefill_seq_len = 0;
-        auto total_num_sequences = 0;
-        for (auto& input : batched_fwd_inputs.micro_inputs) {
-          total_num_sequences += input.input_params.num_sequences;
-          total_prefill_seq_len += input.input_params.prefill_seq_len;
-        }
-        next_tokens = torch::arange(
-            -1,
-            -1 * (total_num_sequences - total_prefill_seq_len + 1),
-            -1,
-            options);
-        std::move(future).deferValue([](auto&&) {});
-      }
-      expert_load_data = torch::zeros({1, 1}).to(torch::kInt64).contiguous();
-    }
-
+    step(batched_fwd_inputs,
+         next_tokens,
+         logprobs,
+         top_tokens,
+         top_logprobs,
+         embeddings,
+         expert_load_data,
+         prepared_layer_id,
+         src_seq_idxes,
+         out_tokens,
+         out_logprobs);
+    // convert to proto output
     forward_output_to_proto(next_tokens,
                             logprobs,
                             top_tokens,

@@ -175,6 +175,9 @@ class Options {
   PROPERTY(bool, enable_offline_inference) = false;
   // for offline inference: the path to spawn worker binary
   PROPERTY(std::string, spawn_worker_path) = "";
+
+  // whether the worker and master are on the same machine.
+  PROPERTY(bool, is_local) = false;
 };
 
 }  // namespace xllm

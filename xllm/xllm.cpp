@@ -91,6 +91,17 @@ int run() {
     FLAGS_host = net::get_local_ip_addr();
   }
 
+  bool is_local = false;
+  if (FLAGS_host != "" &&
+      net::extract_ip(FLAGS_master_node_addr) == FLAGS_host) {
+    is_local = true;
+  } else {
+    is_local = false;
+  }
+
+  LOG(INFO) << "set worker role to "
+            << (is_local ? "local worker" : "remote worker");
+
   if (FLAGS_backend == "vlm") {
     FLAGS_enable_prefix_cache = false;
     FLAGS_enable_chunked_prefill = false;
@@ -169,7 +180,8 @@ int run() {
       .max_global_ttft_ms(FLAGS_max_global_ttft_ms)
       .max_global_tpot_ms(FLAGS_max_global_tpot_ms)
       .max_requests_per_batch(FLAGS_max_requests_per_batch)
-      .enable_continuous_kvcache(FLAGS_enable_continuous_kvcache);
+      .enable_continuous_kvcache(FLAGS_enable_continuous_kvcache)
+      .is_local(is_local);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 

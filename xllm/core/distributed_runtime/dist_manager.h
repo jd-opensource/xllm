@@ -20,8 +20,8 @@ limitations under the License.
 #include "distributed_runtime/worker_server.h"
 #include "distributed_runtime/worker_service.h"
 #include "framework/parallel_state/process_group.h"
+#include "runtime/forward_shared_memory_manager.h"
 #include "runtime/options.h"
-
 namespace xllm {
 class DistManager {
  public:

@@ -20,6 +20,8 @@ cc_library(
     remote_worker.h
     worker_server.h
     worker_service.h
+    comm_channel.h
+    shm_channel.h
   SRCS
     disagg_pd_service.cpp
     disagg_pd_service_impl.cpp
@@ -29,6 +31,8 @@ cc_library(
     remote_worker.cpp
     worker_server.cpp
     worker_service.cpp
+    comm_channel.cpp
+    shm_channel.cpp
   DEPS
     :api_service
     :runtime
