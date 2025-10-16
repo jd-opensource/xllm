@@ -18,6 +18,9 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "distributed_runtime/collective_service.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/parallel_state/parallel_state.h"
+#include "framework/parallel_state/process_group.h"
 #include "runtime/llm_worker_impl.h"
 #include "server/xllm_server_registry.h"
 
@@ -43,7 +46,7 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
   // initialize process groups if there are multiple devices
   if (devices.size() > 1) {
     // create a process group for each device if there are multiple gpus
-    process_groups_ = ProcessGroup::create_process_groups(devices);
+    process_groups_ = parallel_state::create_npu_process_groups(devices);
   }
 
   const int32_t dp_local_tp_size = devices.size() / options.dp_size();
@@ -60,7 +63,7 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
                 dp_local_group_device_end_idx,
                 std::back_inserter(dp_local_group_devices));
       dp_local_process_groups_.emplace_back(
-          ProcessGroup::create_process_groups(dp_local_group_devices));
+          parallel_state::create_npu_process_groups(dp_local_group_devices));
     }
   }
 

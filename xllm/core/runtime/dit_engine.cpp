@@ -20,6 +20,8 @@ limitations under the License.
 #include <sys/sysinfo.h>
 
 #include "core/common/metrics.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "util/timer.h"
 #include "worker.h"
 
@@ -36,7 +38,7 @@ DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {
   }
   if (devices.size() > 1) {
     // create a process group for each device if there are multiple gpus
-    process_groups_ = ProcessGroup::create_process_groups(devices);
+    process_groups_ = parallel_state::create_npu_process_groups(devices);
   }
   const int32_t world_size = static_cast<int32_t>(devices.size());
 

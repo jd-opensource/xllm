@@ -19,7 +19,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "common/global_flags.h"
-#include "framework/mapping_npu.h"
+#include "framework/parallel_state/mapping_npu.h"
 
 namespace xllm {
 

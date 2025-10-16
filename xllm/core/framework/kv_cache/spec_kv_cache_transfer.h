@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "embedding_allocator.h"
+#include "framework/parallel_state/parallel_args.h"
 #include "llm_data_dist_transfer.h"
 
 namespace xllm {

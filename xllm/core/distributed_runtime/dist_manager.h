@@ -19,6 +19,7 @@ limitations under the License.
 #include "distributed_runtime/remote_worker.h"
 #include "distributed_runtime/worker_server.h"
 #include "distributed_runtime/worker_service.h"
+#include "framework/parallel_state/process_group.h"
 #include "runtime/options.h"
 
 namespace xllm {

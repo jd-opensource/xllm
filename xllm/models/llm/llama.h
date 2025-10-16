@@ -26,7 +26,6 @@ limitations under the License.
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/framework/parallel_state.h"
 #include "core/layers/attention_mask.h"
 #include "core/layers/llama_decoder_layer.h"
 #include "core/layers/lm_head.h"

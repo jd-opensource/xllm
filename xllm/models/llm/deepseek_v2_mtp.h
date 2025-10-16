@@ -25,7 +25,6 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
-#include "core/framework/parallel_state.h"
 #include "core/layers/attention_mask.h"
 #include "core/layers/column_parallel_linear.h"
 #include "core/layers/deepseek_v2_decoder_layer.h"

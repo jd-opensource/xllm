@@ -22,7 +22,6 @@ limitations under the License.
 
 #include "causal_lm.h"
 #include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/parallel_state.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "model_args.h"

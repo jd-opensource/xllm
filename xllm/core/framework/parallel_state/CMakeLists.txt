@@ -1,0 +1,46 @@
+include(cc_library)
+include(cc_test)
+
+cc_library(
+  NAME
+    parallel_state
+  HDRS
+    mapping_npu.h
+    parallel_args.h
+    parallel_state.h
+    process_group.h
+    $<$<BOOL:${USE_NPU}>:npu_process_group.h>
+    $<$<BOOL:${USE_MLU}>:mlu_process_group.h>
+    collective_communicator.h
+  SRCS
+    mapping_npu.cpp
+    parallel_state.cpp
+    $<$<BOOL:${USE_NPU}>:npu_process_group.cpp>
+    $<$<BOOL:${USE_MLU}>:mlu_process_group.cpp>
+    collective_communicator.cpp
+  DEPS
+    :common
+    torch
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
+    $<$<BOOL:${USE_NPU}>:hccl>
+    glog::glog
+)
+
+if(USE_NPU)
+  cc_test(
+    NAME
+      mapping_npu_test
+    SRCS
+      mapping_npu_test.cpp
+    DEPS
+      parallel_state
+      absl::synchronization
+      absl::time
+      GTest::gtest_main
+      xllm_kernels
+      ascendcl
+      atb
+      c_sec
+      spdlog::spdlog
+  )
+endif()

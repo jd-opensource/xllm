@@ -25,6 +25,7 @@ limitations under the License.
 #define ENV_enable_dp_partition_up false
 
 namespace xllm {
+
 MappingNPU::MappingNPU(const std::string rank_table_file,
                        const int32_t world_size,
                        const int32_t rank,

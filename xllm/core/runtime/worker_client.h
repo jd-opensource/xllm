@@ -23,7 +23,6 @@ limitations under the License.
 #include "framework/model/embedding_lm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
-#include "framework/parallel_state.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/executor.h"

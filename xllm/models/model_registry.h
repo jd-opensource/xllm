@@ -26,7 +26,6 @@ limitations under the License.
 #include "core/framework/model/dit_model.h"
 #include "core/framework/model/embedding_lm.h"
 #include "core/framework/model_context.h"
-#include "core/framework/parallel_state.h"
 #include "core/framework/tokenizer/tokenizer_args.h"
 #include "core/util/json_reader.h"
 #include "core/util/type_traits.h"  // IWYU pragma: keep

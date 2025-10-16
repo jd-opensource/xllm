@@ -20,7 +20,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
-#include "framework/mapping_npu.h"
+#include "framework/parallel_state/mapping_npu.h"
 #include "util/json_reader.h"
 
 namespace xllm {

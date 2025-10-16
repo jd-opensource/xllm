@@ -31,7 +31,6 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
 #include "util/threadpool.h"

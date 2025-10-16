@@ -33,7 +33,6 @@ limitations under the License.
 #include "atb_speed/utils/model_factory.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
-#include "core/framework/parallel_state.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"

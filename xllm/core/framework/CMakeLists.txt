@@ -12,6 +12,7 @@ add_subdirectory(block)
 add_subdirectory(chat_template)
 add_subdirectory(kv_cache)
 add_subdirectory(model)
+add_subdirectory(parallel_state)
 add_subdirectory(prefix_cache)
 add_subdirectory(request)
 add_subdirectory(sampling)
@@ -21,42 +22,6 @@ add_subdirectory(eplb)
 add_subdirectory(xtensor)
 add_subdirectory(dit_cache)
 
-cc_library(
-  NAME
-    parallel_state
-  HDRS
-    mapping_npu.h
-    parallel_state.h
-  SRCS
-    mapping_npu.cpp
-    parallel_state.cpp
-  DEPS
-    :common
-    torch
-    $<$<BOOL:${USE_MLU}>:torch_mlu>
-    $<$<BOOL:${USE_NPU}>:hccl>
-    glog::glog
-)
-
-
-if(USE_NPU)
-  cc_test(
-    NAME
-      mapping_npu_test
-    SRCS
-      mapping_npu_test.cpp
-    DEPS
-      parallel_state
-      absl::synchronization
-      absl::time
-      GTest::gtest_main
-      xllm_kernels
-      ascendcl
-      atb
-      c_sec
-      spdlog::spdlog
-  )
-endif()
 
 cc_library(
   NAME

@@ -30,7 +30,6 @@ limitations under the License.
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/params_utils.h"
 #include "util/hash_util.h"

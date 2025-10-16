@@ -15,8 +15,6 @@ limitations under the License.
 
 #include "layers/npu/npu_column_parallel_linear_impl.h"
 
-#include "framework/parallel_state.h"
-
 namespace xllm {
 namespace layer {
 

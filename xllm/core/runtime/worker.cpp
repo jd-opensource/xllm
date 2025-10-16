@@ -28,7 +28,6 @@ limitations under the License.
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "framework/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/embed_vlm_worker_impl.h"
 #include "runtime/embed_worker_impl.h"

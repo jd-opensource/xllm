@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "dit_executor.h"
 #include "framework/dit_model_context.h"
+#include "framework/parallel_state/parallel_args.h"
 #include "options.h"
 #include "platform/device.h"
 #include "util/threadpool.h"

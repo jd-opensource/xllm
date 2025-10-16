@@ -33,6 +33,8 @@ limitations under the License.
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
 #include "framework/model/model_input_params.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/xtensor.h"

@@ -26,7 +26,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
-#include "framework/parallel_state.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "util/pretty_print.h"
 #include "util/utils.h"
 #include "worker.h"
@@ -47,7 +47,7 @@ VLMEngine::VLMEngine(const runtime::Options& options) : options_(options) {
   // initialize process groups if there are multiple devices
   if (devices.size() > 1) {
     // create a process group for each device if there are multiple gpus
-    process_groups_ = ProcessGroup::create_process_groups(devices);
+    process_groups_ = parallel_state::create_npu_process_groups(devices);
   }
 
   WorkerType worker_type =

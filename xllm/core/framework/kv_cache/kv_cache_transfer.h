@@ -18,11 +18,11 @@ limitations under the License.
 #include <folly/futures/Future.h>
 
 #include "common/types.h"
-#include "core/framework/parallel_state.h"
 #include "kv_cache.h"
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
+#include "framework/parallel_state/parallel_args.h"
 #include "util/threadpool.h"
 
 namespace xllm {
