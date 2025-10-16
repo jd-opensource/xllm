@@ -93,6 +93,7 @@ struct ModelInputParams {
 
     // Copy graph_buffer to device
     params.graph_buffer = safe_to(graph_buffer, device, true);
+
     return params;
   }
 

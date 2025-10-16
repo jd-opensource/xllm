@@ -16,7 +16,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <sys/resource.h>
 
-#include "core/kernels/split.h"
+#include "kernels/npu/split.h"
 
 namespace xllm::kernel {
 

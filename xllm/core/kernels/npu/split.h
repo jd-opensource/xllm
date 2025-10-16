@@ -14,19 +14,22 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#if defined(USE_NPU)
-#include "npu/npu_rope_impl.h"
-#endif
+#include "impl/npu_split_impl.h"
 
 namespace xllm::kernel {
-#if defined(USE_NPU)
-class Rope : public torch::nn::ModuleHolder<NpuRopeImpl> {
+class Split : public torch::nn::ModuleHolder<NpuSplitImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuRopeImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuRopeImpl;
+  using torch::nn::ModuleHolder<NpuSplitImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuSplitImpl;
 
-  Rope(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuRopeImpl>(context)) {}
+  Split(const ModelContext& context,
+        int32_t splitDim = 2,
+        int32_t splitNum = 3,
+        atb::SVector<int32_t> splitSizes = {})
+      : ModuleHolder(std::make_shared<NpuSplitImpl>(context,
+                                                    splitDim,
+                                                    splitNum,
+                                                    splitSizes)) {}
 };
-#endif
+
 }  // namespace xllm::kernel

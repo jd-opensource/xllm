@@ -343,7 +343,7 @@ DEFINE_string(store_metadata_connstring,
               "",
               "The address of the kv cache store metadata service.");
 
-// --- for computation communication parallel ---
+// --- computation communication parallel config ---
 
 DEFINE_bool(
     enable_multi_stream_parallel,
@@ -355,7 +355,7 @@ DEFINE_int32(default_micro_batch_num,
              2,
              "Default use two micro batches for multi-stream parallel.");
 
-// --- for dit ---
+// --- dit config ---
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
 // --- continuous kv cache config ---

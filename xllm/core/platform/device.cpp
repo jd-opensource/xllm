@@ -27,10 +27,10 @@ Device::Device(torch::Device device) : device_(device) {}
 Device::operator torch::Device() const { return unwrap(); }
 
 void Device::set_device() const {
-#if defined(USE_NPU)
-  auto ret = c10_npu::SetDevice(index());
-#elif defined(USE_MLU)
   int ret = 0;
+#if defined(USE_NPU)
+  ret = c10_npu::SetDevice(index());
+#elif defined(USE_MLU)
   torch_mlu::setDevice(index());
 #endif
 

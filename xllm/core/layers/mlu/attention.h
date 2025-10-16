@@ -36,7 +36,7 @@ struct AttentionMetadata {
 
   torch::Tensor query_start_loc;
   torch::Tensor seq_start_loc;
-  torch::Tensor seq_lens;
+  torch::Tensor kv_seq_lens;
   torch::Tensor block_table;
   torch::Tensor slot_mapping;
   int max_query_len;

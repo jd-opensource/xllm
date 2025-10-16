@@ -15,7 +15,7 @@ limitations under the License.
 
 #include "attention.h"
 
-#include "kernels/mlu/torch_ops_api.h"
+#include "kernels/ops_api.h"
 
 DECLARE_bool(enable_chunked_prefill);
 namespace xllm {
@@ -42,7 +42,7 @@ AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
   attn_metadata.is_prefill = is_prefill && !attn_metadata.is_chunked_prefill;
   if (!attn_metadata.is_prefill) {
     attn_metadata.block_table = params.block_tables;
-    attn_metadata.seq_lens = torch::diff(params.kv_seq_lens);
+    attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
   }
 
   return attn_metadata;
@@ -76,83 +76,54 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   torch::Tensor k_cache = kv_cache.get_k_cache();
   torch::Tensor v_cache = kv_cache.get_v_cache();
 
-  tmo::torch_api::reshape_paged_cache(key,
-                                      value,
-                                      k_cache,
-                                      v_cache,
-                                      attn_metadata.slot_mapping,
-                                      false /* direction */);
+  xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
+  reshape_paged_cache_params.key = key;
+  reshape_paged_cache_params.value = value;
+  reshape_paged_cache_params.k_cache = k_cache;
+  reshape_paged_cache_params.v_cache = v_cache;
+  reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
+  xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+
+  xllm::kernel::AttentionParams attention_params;
+  attention_params.query = query;
+  attention_params.output = output;
+  attention_params.output_lse = output_lse;
+  attention_params.max_seq_len = attn_metadata.max_seq_len;
+  attention_params.window_size_left = sliding_window_;
+  attention_params.scale = scale_;
+  attention_params.compute_dtype = attn_metadata.compute_dtype;
 
   if (attn_metadata.is_prefill) {
-    tmo::torch_api::flash_attention(query,
-                                    key,
-                                    value,
-                                    output,
-                                    output_lse,
-                                    attn_metadata.query_start_loc,
-                                    attn_metadata.seq_start_loc,
-                                    std::nullopt /* alibi_slope */,
-                                    std::nullopt /* attn_bias */,
-                                    std::nullopt /* q_quant_scale */,
-                                    std::nullopt /* k_quant_scale */,
-                                    std::nullopt /* v_quant_scale */,
-                                    std::nullopt /* out_quant_scale */,
-                                    std::nullopt /* block_tables */,
-                                    attn_metadata.max_query_len,
-                                    attn_metadata.max_seq_len,
-                                    scale_,
-                                    true /* is_causal */,
-                                    sliding_window_,
-                                    -1,
-                                    attn_metadata.compute_dtype,
-                                    false /* return_lse */);
+    attention_params.key = key;
+    attention_params.value = value;
+    attention_params.query_start_loc = attn_metadata.query_start_loc;
+    attention_params.seq_start_loc = attn_metadata.seq_start_loc;
+    attention_params.max_query_len = attn_metadata.max_query_len;
+
+    xllm::kernel::batch_prefill(attention_params);
   } else if (attn_metadata.is_chunked_prefill) {
-    tmo::torch_api::flash_attention(query,
-                                    k_cache,
-                                    v_cache,
-                                    output,
-                                    output_lse,
-                                    attn_metadata.query_start_loc,
-                                    attn_metadata.seq_start_loc,
-                                    std::nullopt /* alibi_slope */,
-                                    std::nullopt /* attn_bias */,
-                                    std::nullopt /* q_quant_scale */,
-                                    std::nullopt /* k_quant_scale */,
-                                    std::nullopt /* v_quant_scale */,
-                                    std::nullopt /* out_quant_scale */,
-                                    attn_metadata.block_table,
-                                    attn_metadata.max_query_len,
-                                    attn_metadata.max_seq_len,
-                                    scale_,
-                                    true /* is_causal */,
-                                    sliding_window_,
-                                    -1,
-                                    attn_metadata.compute_dtype,
-                                    false /* return_lse */);
+    attention_params.key = k_cache;
+    attention_params.value = v_cache;
+    attention_params.query_start_loc = attn_metadata.query_start_loc;
+    attention_params.seq_start_loc = attn_metadata.seq_start_loc;
+    attention_params.max_query_len = attn_metadata.max_query_len;
+    attention_params.block_table = attn_metadata.block_table;
+
+    xllm::kernel::batch_prefill(attention_params);
   } else {
     query = query.view({-1, 1, num_heads_, head_size_});
     output = output.view({-1, 1, num_heads_, head_size_});
-    tmo::torch_api::single_query_cached_kv_attn(
-        query,
-        k_cache,
-        output,
-        attn_metadata.block_table,
-        attn_metadata.seq_lens,
-        v_cache,
-        output_lse,
-        std::nullopt /* q_quant_scale */,
-        std::nullopt /* k_cache_quant_scale */,
-        std::nullopt /* v_cache_quant_scale */,
-        std::nullopt /* out_quant_scale */,
-        std::nullopt /* alibi_slope */,
-        std::nullopt /* mask */,
-        attn_metadata.compute_dtype,
-        attn_metadata.max_seq_len,
-        sliding_window_,
-        -1 /* always -1 for window size right */,
-        scale_,
-        false /* return_lse */,
-        -1 /* kv_cache_quant_bit_size */);
+
+    attention_params.query = query;
+    attention_params.output = output;
+    attention_params.k_cache = k_cache;
+    attention_params.v_cache = v_cache;
+
+    // for mlu
+    attention_params.block_table = attn_metadata.block_table;
+    attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
+
+    xllm::kernel::batch_decode(attention_params);
   }
 
   output = output.view({-1, num_heads_ * head_size_});

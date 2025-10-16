@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "kernels/mlu/torch_ops_api.h"
+#include "kernels/ops_api.h"
 
 namespace xllm {
 namespace layer {
@@ -61,14 +61,13 @@ torch::Tensor DenseMLPImpl::forward(const torch::Tensor& hidden_states) {
       {batch_size, intermediate_size_ / parallel_args_.tp_group_->world_size()},
       gate_up.options());
 
-  tmo::torch_api::active(gate_up,
-                         output,
-                         std::nullopt /* bias */,
-                         std::nullopt /* cusum_token_count */,
-                         xllm::mlu::kActModeSilu,
-                         is_gated_,
-                         0 /* start_expert_id */,
-                         0 /* expert_size */);
+  xllm::kernel::ActivationParams activation_params;
+  activation_params.input = gate_up;
+  activation_params.output = output;
+  activation_params.act_mode = xllm::kernel::mlu::kActModeSilu;
+  activation_params.is_gated = is_gated_;
+
+  xllm::kernel::active(activation_params);
 
   return down_proj_->forward(output);
 }

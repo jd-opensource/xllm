@@ -189,7 +189,6 @@ DECLARE_int32(max_global_ttft_ms);
 
 DECLARE_int32(max_global_tpot_ms);
 
-// dit
 DECLARE_int32(max_requests_per_batch);
 
 DECLARE_bool(enable_continuous_kvcache);

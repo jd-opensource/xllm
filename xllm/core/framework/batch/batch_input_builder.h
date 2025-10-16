@@ -128,7 +128,6 @@ class BatchInputBuilder {
       uint32_t q_seq_len,
       BuilderState* state_ptr = nullptr,
       std::unordered_set<int32_t>* write_block_ids_ptr = nullptr);
-
   void setup_continuous_kv_cache_info(Sequence* sequence,
                                       uint32_t n_kv_cache_tokens,
                                       uint32_t seq_len,

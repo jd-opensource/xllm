@@ -13,17 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "mlu_ops_api.h"
 #include "torch_mlu_ops.h"
-#include "torch_ops_api.h"
 
-namespace xllm::mlu {
+namespace xllm::kernel::mlu {
 
-at::Tensor matmul(const at::Tensor& a,
-                  const at::Tensor& b,
-                  const std::optional<at::Tensor>& bias,
-                  const std::optional<at::Tensor>& c,
-                  double alpha,
-                  double beta) {
+torch::Tensor matmul(const torch::Tensor& a,
+                     const torch::Tensor& b,
+                     const std::optional<torch::Tensor>& bias,
+                     const std::optional<torch::Tensor>& c,
+                     double alpha,
+                     double beta) {
   return tmo::torch_api::matmul(a,
                                 b,
                                 bias,
@@ -43,4 +43,4 @@ at::Tensor matmul(const at::Tensor& a,
                                 true);
 }
 
-}  // namespace xllm::mlu
+}  // namespace xllm::kernel::mlu

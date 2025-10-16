@@ -15,7 +15,7 @@ limitations under the License.
 
 #include "rotary_embedding.h"
 
-#include "kernels/mlu/torch_ops_api.h"
+#include "kernels/ops_api.h"
 
 namespace xllm {
 namespace layer {
@@ -78,25 +78,20 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& q,
     discrete = true;
     position_ids = positions;
   }
-  const int64_t T = q.size(0);
-  q = q.view({T, -1});
-  k = k.view({T, -1});
-  auto qk = torch::cat({q, k}, /*dim=*/-1);
-  qk = qk.view({T, -1, rotary_dim_});
-  tmo::torch_api::apply_rotary(qk,
-                               qk /* output */,
-                               sin_,
-                               cos_,
-                               position_ids,
-                               cu_query_lens,
-                               interleaved_,
-                               discrete,
-                               false /* dynamic_ntk */,
-                               max_query_len);
-  qk = qk.view({-1, q.size(-1) + k.size(-1)});
-  auto qk_vec = qk.split({q.size(-1), k.size(-1)}, /*dim=*/-1);
-  q = qk_vec[0];
-  k = qk_vec[1];
+
+  xllm::kernel::RotaryParams rotary_params;
+  rotary_params.q = q;
+  rotary_params.k = k;
+  rotary_params.sin = sin_;
+  rotary_params.cos = cos_;
+  rotary_params.cos_sin = cos_sin_cache_;
+  rotary_params.position_ids = position_ids;
+  rotary_params.cu_query_lens = cu_query_lens;
+  rotary_params.interleaved = interleaved_;
+  rotary_params.discrete = discrete;
+  rotary_params.max_query_len = max_query_len;
+
+  xllm::kernel::apply_rotary(rotary_params);
 }
 
 }  // namespace layer

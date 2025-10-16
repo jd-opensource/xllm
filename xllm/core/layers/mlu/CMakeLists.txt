@@ -35,7 +35,7 @@ cc_library(
     :parallel_state
     :state_dict
     :model
-    :xllm_mlu_ops
+    :kernels
     glog::glog
     gflags::gflags
     torch

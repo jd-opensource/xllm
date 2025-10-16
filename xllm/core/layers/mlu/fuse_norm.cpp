@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "kernels/mlu/torch_ops_api.h"
+#include "kernels/ops_api.h"
 
 namespace xllm {
 namespace layer {
@@ -39,22 +39,14 @@ torch::Tensor FusedRMSNormImpl::forward(torch::Tensor& input) {
   input = input.reshape({-1, norm_dim_});
   auto output = torch::empty_like(input);
 
-  tmo::torch_api::fused_layernorm(input,
-                                  output,
-                                  std::nullopt /*residual*/,
-                                  weight_,
-                                  std::nullopt /*beta*/,
-                                  std::nullopt /*bias*/,
-                                  std::nullopt /*quant_scale*/,
-                                  std::nullopt /*residual_out*/,
-                                  std::nullopt /*smooth_quant_scale*/,
-                                  std::nullopt /*normed_out*/,
-                                  kRmsNormMode,
-                                  eps_,
-                                  false /*store_output_before_norm*/,
-                                  false /*store_output_after_norm*/,
-                                  false /*dynamic_quant*/
-  );
+  xllm::kernel::FusedLayerNormParams fused_layernorm_params;
+  fused_layernorm_params.input = input;
+  fused_layernorm_params.output = output;
+  fused_layernorm_params.weight = weight_;
+  fused_layernorm_params.mode = kRmsNormMode;
+  fused_layernorm_params.eps = eps_;
+
+  xllm::kernel::fused_layernorm(fused_layernorm_params);
 
   output = output.view(org_shape);
   return output;

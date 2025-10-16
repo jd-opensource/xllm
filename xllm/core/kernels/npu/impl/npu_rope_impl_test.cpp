@@ -16,7 +16,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <sys/resource.h>
 
-#include "core/kernels/rope.h"
+#include "kernels/npu/rope.h"
 
 namespace xllm::kernel {
 
