@@ -17,11 +17,14 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "layer_utils.h"
+
 namespace xllm {
 namespace layer {
 
 Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
-                                         int32_t layer_id) {
+                                         int32_t layer_id)
+    : parallel_args_(context.get_parallel_args()) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
@@ -109,7 +112,7 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(
 
   // MLP forward
   if (moe_mlp_) {
-    x = moe_mlp_(x);
+    x = moe_mlp_(x, input_params);
   } else {
     x = mlp_(x);
   }

@@ -21,6 +21,7 @@ limitations under the License.
 #include "core/framework/model/npu_dp_ep_padding.h"
 #endif
 #include "core/framework/model_context.h"
+#include "core/layers/common/layer_utils.h"
 #include "core/layers/qwen3_moe_decoder_layer.h"
 #include "llm_model_base.h"
 
@@ -158,14 +159,13 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
-#if defined(USE_NPU)
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
         positions = torch::tensor({0}).to(torch::kInt32).to(device_);
       }
     }
-
+#if defined(USE_NPU)
     auto h = embed_tokens_(tokens, 0);
     int64_t input_length = tokens.size(0);
     torch::Tensor expert_array = torch::arange(
@@ -205,13 +205,16 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
     return norm_(h, 0);
 #elif defined(USE_MLU)
-    bool is_prefill = input_params.q_max_seq_len > 1;
+    ModelInputParams modified_input_params = input_params;
+    layer::update_dummy_run_input(dp_rank_, positions, modified_input_params);
+    bool is_prefill = modified_input_params.q_max_seq_len > 1;
     auto attn_metadata =
-        layer::AttentionMetadata::build(input_params, is_prefill);
+        layer::AttentionMetadata::build(modified_input_params, is_prefill);
     torch::Tensor h = embed_tokens_(tokens);
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer(h, positions, attn_metadata, kv_caches[i], input_params);
+      h = layer(
+          h, positions, attn_metadata, kv_caches[i], modified_input_params);
     }
     return norm_(h);
 #endif

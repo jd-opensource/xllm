@@ -206,5 +206,16 @@ struct ScaledMatmulParams {
   std::optional<torch::Tensor> b_calib = std::nullopt;
   std::optional<torch::Tensor> output = std::nullopt;
 };
+
+struct TopKPParams {
+  torch::Tensor logits;
+  torch::Tensor temperatures;
+  torch::Tensor top_k;
+  torch::Tensor top_p;
+};
+
+struct RandomSampleParams {
+  torch::Tensor logits;
+};
 }  // namespace kernel
 }  // namespace xllm

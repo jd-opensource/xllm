@@ -36,13 +36,13 @@ namespace test {
 class MockProcessGroup : public xllm::ProcessGroup {
  public:
   MockProcessGroup(int rank, int world_size, const torch::Device& device)
-      : xllm::ProcessGroup(rank, world_size, device) {}
+      : xllm::ProcessGroup(device) {}
 
   void allreduce(torch::Tensor& input) override {
     // Mock implementation - do nothing for testing
   }
 
-  void allgather(torch::Tensor input,
+  void allgather(const torch::Tensor& input,
                  std::vector<torch::Tensor>& outputs) override {
     // Mock implementation - just copy input to outputs
     outputs.resize(this->world_size());

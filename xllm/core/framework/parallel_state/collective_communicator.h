@@ -42,6 +42,8 @@ class CollectiveCommunicator {
   std::unique_ptr<ProcessGroup> process_group_;
   std::unique_ptr<ProcessGroup> dp_local_process_group_;
   std::unique_ptr<ProcessGroup> tp_group_;
+  std::unique_ptr<ProcessGroup> moe_tp_group_;
+  std::unique_ptr<ProcessGroup> moe_ep_group_;
 };
 
 }  // namespace xllm

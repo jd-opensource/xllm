@@ -25,19 +25,24 @@ namespace parallel_state {
 std::optional<ParallelArgs> get_dp_attn_parallel_args(
     const ParallelArgs& parallel_args);
 
-torch::Tensor gather(torch::Tensor input, ProcessGroup* process_group);
+torch::Tensor gather(const torch::Tensor& input,
+                     ProcessGroup* process_group,
+                     int dim = -1);
 
-torch::Tensor reduce(torch::Tensor input, ProcessGroup* process_group);
+torch::Tensor gather(const torch::Tensor& input,
+                     ProcessGroup* process_group,
+                     const std::vector<int32_t>& token_num_list);
 
-torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group);
+torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group);
+
+torch::Tensor scatter(torch::Tensor input,
+                      ProcessGroup* process_group,
+                      int dim = -1);
 
 // Create a process group where each process has a single device
 // devices: list of devices to create process groups on.
 std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(
     const std::vector<torch::Device>& devices);
 
-std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
-                                                     int global_rank,
-                                                     int split_size);
 }  // namespace parallel_state
 }  // namespace xllm

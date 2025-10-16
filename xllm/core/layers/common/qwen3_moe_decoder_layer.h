@@ -55,6 +55,8 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module {
   FusedMoE moe_mlp_{nullptr};
   RmsNorm input_norm_{nullptr};
   RmsNorm post_norm_{nullptr};
+
+  ParallelArgs parallel_args_;
 };
 
 }  // namespace layer

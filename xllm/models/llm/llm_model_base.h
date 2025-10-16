@@ -32,7 +32,6 @@ limitations under the License.
 #include "core/framework/model_context.h"
 #include "core/layers/attention_mask.h"
 #include "core/layers/block_copy.h"
-#include "core/layers/linear.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/pos_embedding.h"
 #include "core/layers/rms_norm.h"
@@ -313,11 +312,11 @@ class LlmModelImplBase : public torch::nn::Module {
     auto attn_metadata =
         layer::AttentionMetadata::build(input_params[0], is_prefill);
 
-    torch::Tensor h = torch::cat(hs, 0);
-    torch::Tensor pos = torch::cat(positions, 0);
+    torch::Tensor h;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer(h, pos, attn_metadata, kv_caches[i], input_params[0]);
+      h = layer(
+          hs[0], positions[0], attn_metadata, kv_caches[i], input_params[0]);
     }
     return norm_(h);
 #endif

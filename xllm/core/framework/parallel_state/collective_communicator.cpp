@@ -22,8 +22,6 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
 #include "xllm_kernels/models/base/param/mapping.h"
 #elif defined(USE_MLU)
-#include <torch_mlu/csrc/framework/distributed/process_group_cncl.hpp>
-
 #include "mlu_process_group.h"
 #elif defined(USE_CUDA)
 #include "cuda_process_group.h"
@@ -33,25 +31,20 @@ limitations under the License.
 #include "util/net.h"
 
 namespace {
+#if defined(USE_NPU)
 std::unique_ptr<xllm::ProcessGroup> create_process_group(
     int rank,
     int world_size,
     int rank_size,
     int port,
+    bool trans,
     const std::string& host,
     const std::string& group_name,
     const torch::Device& device) {
-#if defined(USE_MLU)
-  return std::make_unique<xllm::ProcessGroupCncl>(
-      rank, world_size, rank_size, port, host, group_name, device);
-#elif defined(USE_CUDA)
-  return std::make_unique<xllm::ProcessGroupNccl>(
-      rank, world_size, rank_size, port, host, group_name, device);
-#else
   LOG(FATAL) << "Unsupported device type";
   return nullptr;
-#endif
 }
+#endif
 }  // namespace
 
 namespace xllm {
@@ -130,24 +123,69 @@ void CollectiveCommunicator::create_process_groups(
   int global_rank = parallel_args_->rank();
   int world_size = parallel_args_->world_size();
   int dp_size = parallel_args_->dp_size();
-
-  process_group_ = create_process_group(
-      global_rank, world_size, world_size, ++port, host, "world_group", device);
+  int ep_size = parallel_args_->ep_size();
+  process_group_ = create_process_group(global_rank,
+                                        world_size,
+                                        world_size,
+                                        ++port,
+                                        false,
+                                        host,
+                                        "world_group",
+                                        device);
+  parallel_args_->process_group_ = process_group_.get();
 
   int tp_size = world_size / dp_size;
   CHECK_EQ(tp_size * dp_size, world_size);
   int port_offset = global_rank / tp_size + 1;
-
   tp_group_ = create_process_group(global_rank,
                                    world_size,
                                    tp_size,
                                    port + port_offset,
+                                   false,
                                    host,
                                    "tp_group",
                                    device);
-
-  parallel_args_->process_group_ = process_group_.get();
   parallel_args_->tp_group_ = tp_group_.get();
+  port += dp_size;
+
+  if (dp_size > 1) {
+    port_offset = global_rank % tp_size + 1;
+    dp_local_process_group_ = create_process_group(global_rank,
+                                                   world_size,
+                                                   dp_size,
+                                                   port + port_offset,
+                                                   true,
+                                                   host,
+                                                   "dp_group",
+                                                   device);
+    parallel_args_->dp_local_process_group_ = dp_local_process_group_.get();
+    port += tp_size;
+  }
+
+  if (ep_size > 1) {
+    int moe_tp_size = world_size / ep_size;
+    port_offset = global_rank / moe_tp_size + 1;
+    moe_tp_group_ = create_process_group(global_rank,
+                                         world_size,
+                                         moe_tp_size,
+                                         port + port_offset,
+                                         false,
+                                         host,
+                                         "moe_tp_group",
+                                         device);
+    parallel_args_->moe_tp_group_ = moe_tp_group_.get();
+    port += ep_size;
+    port_offset = global_rank % moe_tp_size + 1;
+    moe_ep_group_ = create_process_group(global_rank,
+                                         world_size,
+                                         ep_size,
+                                         port + port_offset,
+                                         true,
+                                         host,
+                                         "moe_ep_group",
+                                         device);
+    parallel_args_->moe_ep_group_ = moe_ep_group_.get();
+  }
 }
 
 const ParallelArgs* CollectiveCommunicator::parallel_args() {

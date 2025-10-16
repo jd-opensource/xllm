@@ -316,9 +316,9 @@ void WorkerImpl::process_group_test() {
   const auto options = torch::dtype(torch::kHalf).device(device_);
   torch::Tensor tensor = torch::randn({10, 10}, options);
   // call allreduce
-  parallel_state::reduce(tensor, context_.get_parallel_args().process_group_);
+  parallel_state::reduce(tensor, parallel_args_.process_group_);
   // call allgather
-  parallel_state::gather(tensor, context_.get_parallel_args().process_group_);
+  parallel_state::gather(tensor, parallel_args_.process_group_);
 }
 
 ForwardInput WorkerImpl::prepare_inputs(Batch& batch) {

@@ -42,15 +42,8 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
         logits, params.unique_token_ids, params.repetition_penalties);
   }
 
-  // apply temperatures
-  if (params.temperatures.defined()) {
-    apply_temperatures(logits, params.temperatures);
-  }
-
-  // apply top-k and top-p
-  if (params.top_k.defined() || params.top_p.defined()) {
-    apply_top_k_top_p(logits, params.top_k, params.top_p);
-  }
+  // apply temperatures, top-k and top-p
+  apply_top_k_top_p(logits, params.temperatures, params.top_k, params.top_p);
 
   torch::Tensor sample_logits = logits;
   if (params.selected_token_idxes.numel() != params.sample_idxes.numel()) {
@@ -105,6 +98,11 @@ torch::Tensor Sampler::greedy_sample(const torch::Tensor& probs) {
 }
 
 torch::Tensor Sampler::random_sample(const torch::Tensor& probs) {
+#if defined(USE_MLU)
+  xllm::kernel::RandomSampleParams params;
+  params.logits = probs;
+  return xllm::kernel::random_sample(params);
+#endif
   if (probs.dim() == 3) {
     auto batch_size = probs.size(0);
     auto seq_len = probs.size(1);

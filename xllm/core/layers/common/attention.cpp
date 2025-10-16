@@ -67,6 +67,10 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     KVCache& kv_cache) {
   auto output = torch::empty_like(query);
   auto output_lse = std::nullopt;
+  if (attn_metadata.max_seq_len == 0) {
+    output = output.view({-1, num_heads_ * head_size_});
+    return std::make_tuple(output, output_lse);
+  }
 
   query = query.view({-1, num_heads_, head_size_});
   key = key.view({-1, num_kv_heads_, head_size_});

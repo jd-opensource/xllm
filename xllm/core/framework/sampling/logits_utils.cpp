@@ -84,8 +84,27 @@ void apply_top_k_top_p_torch_impl(torch::Tensor& logits,
 }
 
 void apply_top_k_top_p(torch::Tensor& logits,
+                       const torch::Tensor& temperatures,
                        const torch::Tensor& top_k,
                        const torch::Tensor& top_p) {
+  if (temperatures.defined()) {
+    apply_temperatures(logits, temperatures);
+  }
+  if (!top_k.defined() && !top_p.defined()) {
+    return;
+  }
+
+#if defined(USE_MLU)
+  if (top_k.defined() || top_p.defined()) {
+    xllm::kernel::TopKPParams params;
+    params.logits = logits;
+    params.top_k = top_k;
+    params.top_p = top_p;
+    logits = xllm::kernel::apply_top_k_top_p(params);
+    return;
+  }
+#endif
+
   if (top_k.defined() && top_p.defined()) {
 #if defined(USE_NPU)
     auto max_value = std::numeric_limits<int64_t>::max();
