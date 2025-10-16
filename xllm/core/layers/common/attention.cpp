@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "attention.h"
 
+#include "common/flashinfer_workspace.h"
 #include "kernels/ops_api.h"
 
 DECLARE_bool(enable_chunked_prefill);
@@ -36,6 +37,13 @@ AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
   attn_metadata.max_seq_len = params.kv_max_seq_len;
   attn_metadata.slot_mapping = params.new_cache_slots;
   attn_metadata.compute_dtype = compute_dtype;
+
+  // for flashinfer
+  attn_metadata.paged_kv_indptr = params.paged_kv_indptr;
+  attn_metadata.paged_kv_indices = params.paged_kv_indices;
+  attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
+  attn_metadata.q_cu_seq_lens = params.q_seq_lens;
+  attn_metadata.kv_cu_seq_lens = params.kv_seq_lens;  // cumulative kv seqlens
 
   bool is_start_loc_match = (params.q_seq_lens_vec == params.kv_seq_lens_vec);
   attn_metadata.is_chunked_prefill = is_prefill && !is_start_loc_match;
@@ -96,6 +104,16 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   attention_params.window_size_left = sliding_window_;
   attention_params.scale = scale_;
   attention_params.compute_dtype = attn_metadata.compute_dtype;
+  // for flashinfer
+  attention_params.float_workspace_buffer =
+      FlashinferWorkspace::get_instance().get_float_workspace_buffer();
+  attention_params.int_workspace_buffer =
+      FlashinferWorkspace::get_instance().get_int_workspace_buffer();
+  attention_params.page_locked_int_workspace_buffer =
+      FlashinferWorkspace::get_instance()
+          .get_page_locked_int_workspace_buffer();
+  attention_params.kv_cu_seq_lens = attn_metadata.kv_cu_seq_lens;
+  attention_params.q_cu_seq_lens = attn_metadata.q_cu_seq_lens;
 
   if (attn_metadata.is_prefill) {
     attention_params.key = key;
@@ -126,6 +144,12 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     // for mlu
     attention_params.block_table = attn_metadata.block_table;
     attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
+
+    // for flashinfer
+    attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;
+    attention_params.paged_kv_indices = attn_metadata.paged_kv_indices;
+    attention_params.paged_kv_last_page_len =
+        attn_metadata.paged_kv_last_page_len;
 
     xllm::kernel::batch_decode(attention_params);
   }

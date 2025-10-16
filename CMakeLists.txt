@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.26)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+set(CMAKE_CUDA_COMPILER "/usr/local/cuda/bin/nvcc")
 
 option(USE_NPU "Enable NPU support" OFF)
 option(USE_MLU "Enable MLU support" OFF)
+option(USE_CUDA "Enable CUDA support" OFF)
 
 if(DEVICE_ARCH STREQUAL "ARM")
     set(CMAKE_SYSTEM_PROCESSOR aarch64)
@@ -101,7 +103,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
-if(USE_NPU)
+if(USE_NPU OR USE_CUDA)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=0")
   add_definitions(-D_GLIBCXX_USE_CXX11_ABI=0)
 elseif(USE_MLU)
@@ -178,6 +180,32 @@ if (DEFINED ENV{DEPENDENCES_ROOT})
   message(STATUS "Using DEPENDENCES_ROOT: $ENV{DEPENDENCES_ROOT}")
 endif()
 
+# set architecture for CUDA
+if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND USE_CUDA)
+  set(CMAKE_CUDA_ARCHITECTURES 80)
+endif()
+
+# Build TORCH_CUDA_ARCH_LIST
+if(USE_CUDA)
+  # Build TORCH_CUDA_ARCH_LIST
+  set(TORCH_CUDA_ARCH_LIST "")
+  foreach(CUDA_ARCH IN LISTS CMAKE_CUDA_ARCHITECTURES)
+    if(CUDA_ARCH MATCHES "^([0-9])([0-9])a$")
+      set(TORCH_ARCH "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}a")
+    elseif(CUDA_ARCH MATCHES "^([0-9])([0-9])*$")
+      set(TORCH_ARCH "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
+    elseif(CUDA_ARCH STREQUAL "native")
+      set(TORCH_ARCH "Auto")
+    else()
+      message(FATAL_ERROR "${CUDA_ARCH} is not supported")
+    endif()
+    list(APPEND TORCH_CUDA_ARCH_LIST ${TORCH_ARCH})
+  endforeach()
+
+  message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
+  message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
+endif()
+
 # configure vcpkg
 # have to set CMAKE_TOOLCHAIN_FILE before first project call.
 # if (DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -217,7 +245,12 @@ endif()
 set(CPPREST_EXCLUDE_WEBSOCKETS ON CACHE BOOL "Exclude websockets functionality." FORCE)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-format-truncation")
 
-project("xllm" LANGUAGES C CXX)
+if(USE_CUDA)
+  project("xllm" LANGUAGES C CXX CUDA)
+  find_package(CUDAToolkit REQUIRED)
+else()
+  project("xllm" LANGUAGES C CXX)
+endif()
 
 # find_package(CUDAToolkit REQUIRED)
 
@@ -349,6 +382,43 @@ if(USE_MLU)
     $ENV{PYTORCH_MLU_INSTALL_PATH}/csrc/lib
     $ENV{PYTORCH_MLU_INSTALL_PATH}
     $ENV{NEUWARE_HOME}/lib64
+  )
+endif()
+
+if(USE_CUDA)
+  add_definitions(-DUSE_CUDA)
+  add_compile_definitions(TORCH_CUDA=1)
+  set(CMAKE_VERBOSE_MAKEFILE ON)
+  include_directories(
+      $ENV{PYTHON_INCLUDE_PATH}
+      $ENV{PYTORCH_INSTALL_PATH}/include
+      $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
+  )
+
+  link_directories(
+    $ENV{PYTHON_LIB_PATH}
+    $ENV{PYTORCH_INSTALL_PATH}/lib
+    $ENV{CUDA_TOOLKIT_ROOT_DIR}/lib64
+  )
+
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -O3)
+  # The following definitions must be undefined since half-precision operation is required.
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
+        -U__CUDA_NO_HALF_OPERATORS__
+        -U__CUDA_NO_HALF_CONVERSIONS__
+        -U__CUDA_NO_HALF2_OPERATORS__
+        -U__CUDA_NO_BFLOAT16_CONVERSIONS__)
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} --use_fast_math -Xfatbin -compress-all)
+  message(STATUS "CUDA_NVCC_FLAGS: ${CUDA_NVCC_FLAGS}")
+
+  # find_package(NCCL REQUIRED)
+
+  # find cudnn
+  execute_process(COMMAND python -c "import nvidia.cudnn; print(nvidia.cudnn.__file__)" OUTPUT_VARIABLE CUDNN_PYTHON_PATH)
+  get_filename_component(CUDNN_ROOT_DIR "${CUDNN_PYTHON_PATH}" DIRECTORY)
+  link_directories(
+      ${CUDNN_ROOT_DIR}/lib64
+      ${CUDNN_ROOT_DIR}/lib
   )
 endif()
 

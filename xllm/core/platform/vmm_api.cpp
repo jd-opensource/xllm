@@ -98,7 +98,7 @@ void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
 #elif defined(USE_MLU)
   ret = cnMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
 #elif defined(USE_CUDA)
-  ret = cuMemAddressReserve(&vir_ptr, aligned_size, 0, nullptr, 0);
+  ret = cuMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
 #endif
   CHECK_EQ(ret, 0) << "Failed to create virtual memory handle";
 }

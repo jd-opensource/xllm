@@ -28,3 +28,18 @@
 [submodule "third_party/Mooncake"]
 	path = third_party/Mooncake
 	url = https://gitcode.com/xLLM-AI/Mooncake.git
+[submodule "third_party/flashinfer"]
+	path = third_party/flashinfer
+	url = https://gitcode.com/xLLM-AI/flashinfer.git
+[submodule "third_party/cutlass"]
+	path = third_party/cutlass
+	url = https://gitcode.com/xLLM-AI/cutlass.git
+[submodule "third_party/tvm-ffi"]
+	path = third_party/tvm-ffi
+	url = https://gitcode.com/xLLM-AI/tvm-ffi.git
+[submodule "third_party/dlpack"]
+	path = third_party/dlpack
+	url = https://gitcode.com/xLLM-AI/dlpack.git
+[submodule "third_party/libbacktrace"]
+	path = third_party/libbacktrace
+	url = https://gitcode.com/xLLM-AI/libbacktrace.git

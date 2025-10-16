@@ -17,12 +17,12 @@ limitations under the License.
 
 #include "param.h"
 
-#if defined(USE_MLU)
-#include "mlu/mlu_ops_api.h"
-#endif
+namespace xllm::kernel {
 
-namespace xllm {
-namespace kernel {
+static const std::string kActModeSilu = "silu";
+static const std::string kActModeGelu = "gelu";
+static const std::string kActModeQuickGelu = "quick_gelu";
+static const std::string kActModeSwish = "swish";
 
 void apply_rotary(RotaryParams& params);
 
@@ -49,5 +49,4 @@ torch::Tensor apply_top_k_top_p(TopKPParams& params);
 
 torch::Tensor random_sample(RandomSampleParams& params);
 
-}  // namespace kernel
-}  // namespace xllm
+}  // namespace xllm::kernel

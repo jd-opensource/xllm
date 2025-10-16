@@ -13,25 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "stream.h"
+#include "cuda_ops_api.h"
 
-namespace xllm {
+namespace xllm::kernel::cuda {
 
-#if defined(USE_NPU)
-Stream::Stream() : stream_(c10_npu::getNPUStreamFromPool()) {}
-#elif defined(USE_MLU)
-Stream::Stream() : stream_(torch_mlu::getStreamFromPool()) {}
-#elif defined(USE_CUDA)
-Stream::Stream() : stream_(c10::cuda::getStreamFromPool()) {}
-#endif
+void act_and_mul(torch::Tensor& out,
+                 torch::Tensor& input,
+                 const std::string& act_mode) {
+  if (act_mode != "silu" && act_mode != "gelu" && act_mode != "gelu_tanh") {
+    throw std::runtime_error("Unsupported act mode: " + act_mode +
+                             ", only support silu, gelu, gelu_tanh");
+  }
 
-int Stream::synchronize() const {
-  stream_.unwrap().synchronize();
-  return 0;
+  std::string uri = act_mode + "_and_mul";
+  get_module(uri)->GetFunction(uri).value()(
+      to_ffi_tensor(out), to_ffi_tensor(input), support_pdl());
 }
-
-c10::StreamGuard Stream::set_stream_guard() const {
-  return c10::StreamGuard(stream_.unwrap());
-}
-
-}  // namespace xllm
+}  // namespace xllm::kernel::cuda
