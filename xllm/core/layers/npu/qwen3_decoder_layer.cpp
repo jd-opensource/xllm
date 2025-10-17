@@ -217,7 +217,7 @@ void Qwen3DecoderImpl::param_from_args(atb_speed::qwen::QwenLayerParam& param,
   initialize_quantization_parameters(param);
 
   if (isPrefill) {
-    param.enableAclnnRmsNorm = true;
+    param.enableAclnnRmsNorm = quantize_type_.empty();
     // for prefix cache without chunked prefill.
     if (FLAGS_enable_prefix_cache && !FLAGS_enable_chunked_prefill &&
         FLAGS_block_size != 128) {

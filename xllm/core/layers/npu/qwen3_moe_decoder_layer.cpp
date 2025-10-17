@@ -352,7 +352,7 @@ void Qwen3MoeDecoderImpl::initialize_basic_parameters(
   param.worldSize = parallel_args.world_size();
 
   if (is_prefill) {
-    param.enableAclnnRmsNorm = true;
+    param.enableAclnnRmsNorm = quantize_type_.empty();
   }
 }
 
