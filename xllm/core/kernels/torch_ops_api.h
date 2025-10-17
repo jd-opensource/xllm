@@ -29,8 +29,8 @@ namespace kernel {
 void apply_rotary(const RotaryParams& params);
 void active(const ActivationParams& params);
 void reshape_paged_cache(const ReshapePagedCacheParams& params);
-void prefill_attention(const PrefillAttentionParams& params);
-void decode_attention(const DecodeAttentionParams& params);
+void prefill_attention(const AttentionParams& params);
+void decode_attention(const AttentionParams& params);
 void fused_layernorm(const FusedLayerNormParams& params);
 torch::Tensor matmul(const MatmulParams& params);
 torch::Tensor fused_moe(const FusedMoEParams& params);

@@ -84,49 +84,44 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
   xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
 
-  if (!attn_metadata.is_prefill) {
+  AttentionParams attention_params;
+  attention_params.query = query;
+  attention_params.output = output;
+  attention_params.output_lse = output_lse;
+  attention_params.max_seq_len = attn_metadata.max_seq_len;
+  attention_params.window_size_left = sliding_window_;
+  attention_params.scale = scale_;
+  attention_params.compute_dtype = attn_metadata.compute_dtype;
+
+  if (attn_metadata.is_prefill) {
+    attention_params.key = key;
+    attention_params.value = value;
+    attention_params.query_start_loc = attn_metadata.query_start_loc;
+    attention_params.seq_start_loc = attn_metadata.seq_start_loc;
+    attention_params.max_query_len = attn_metadata.max_query_len;
+
+    xllm::kernel::prefill_attention(attention_params);
+  } else if (attn_metadata.is_chunked_prefill) {
+    attention_params.key = k_cache;
+    attention_params.value = v_cache;
+    attention_params.query_start_loc = attn_metadata.query_start_loc;
+    attention_params.seq_start_loc = attn_metadata.seq_start_loc;
+    attention_params.max_query_len = attn_metadata.max_query_len;
+    attention_params.block_table = attn_metadata.block_table;
+
+    xllm::kernel::prefill_attention(attention_params);
+  } else {
     query = query.view({-1, 1, num_heads_, head_size_});
     output = output.view({-1, 1, num_heads_, head_size_});
 
-    DecodeAttentionParams decode_attention_params;
-    decode_attention_params.query = query;
-    decode_attention_params.k_cache = k_cache;
-    decode_attention_params.output = output;
-    decode_attention_params.block_table = attn_metadata.block_table;
-    decode_attention_params.seq_lens = attn_metadata.seq_lens;
-    decode_attention_params.v_cache = v_cache;
-    decode_attention_params.output_lse = output_lse;
-    decode_attention_params.compute_dtype = attn_metadata.compute_dtype;
-    decode_attention_params.max_seq_len = attn_metadata.max_seq_len;
-    decode_attention_params.window_size_left = sliding_window_;
-    decode_attention_params.scale = scale_;
+    attention_params.query = query;
+    attention_params.output = output;
+    attention_params.k_cache = k_cache;
+    attention_params.v_cache = v_cache;
+    attention_params.block_table = attn_metadata.block_table;
+    attention_params.seq_lens = attn_metadata.seq_lens;
 
-    xllm::kernel::decode_attention(decode_attention_params);
-  } else {
-    PrefillAttentionParams prefill_attention_params;
-    prefill_attention_params.query = query;
-    prefill_attention_params.key = key;
-    prefill_attention_params.value = value;
-    prefill_attention_params.output = output;
-    prefill_attention_params.output_lse = output_lse;
-    prefill_attention_params.query_start_loc = attn_metadata.query_start_loc;
-    prefill_attention_params.seq_start_loc = attn_metadata.seq_start_loc;
-    prefill_attention_params.max_query_len = attn_metadata.max_query_len;
-    prefill_attention_params.max_seq_len = attn_metadata.max_seq_len;
-    prefill_attention_params.scale = scale_;
-    prefill_attention_params.window_size_left = sliding_window_;
-    prefill_attention_params.compute_dtype = attn_metadata.compute_dtype;
-
-    if (!attn_metadata.is_chunked_prefill) {
-      prefill_attention_params.key = key;
-      prefill_attention_params.value = value;
-    } else {
-      prefill_attention_params.key = k_cache;
-      prefill_attention_params.value = v_cache;
-      prefill_attention_params.block_tables = attn_metadata.block_table;
-    }
-
-    xllm::kernel::prefill_attention(prefill_attention_params);
+    xllm::kernel::decode_attention(attention_params);
   }
 
   output = output.view({-1, num_heads_ * head_size_});
