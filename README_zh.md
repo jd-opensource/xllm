@@ -17,22 +17,25 @@ limitations under the License. -->
 <div align="center">
 <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">
     
-[![Document](https://img.shields.io/badge/Document-black?logo=html5&labelColor=grey&color=red)](https://xllm.readthedocs.io/zh-cn/latest/) [![Docker](https://img.shields.io/badge/Docker-black?logo=docker&labelColor=grey&color=%231E90FF)](https://hub.docker.com/r/xllm/xllm-ai) [![License](https://img.shields.io/badge/license-Apache%202.0-brightgreen?labelColor=grey)](https://opensource.org/licenses/Apache-2.0) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jd-opensource/xllm) 
+[![Document](https://img.shields.io/badge/Document-black?logo=html5&labelColor=grey&color=red)](https://xllm.readthedocs.io/zh-cn/latest/) [![Docker](https://img.shields.io/badge/Docker-black?logo=docker&labelColor=grey&color=%231E90FF)](https://hub.docker.com/r/xllm/xllm-ai) [![License](https://img.shields.io/badge/license-Apache%202.0-brightgreen?labelColor=grey)](https://opensource.org/licenses/Apache-2.0) [![report](https://img.shields.io/badge/Technical%20Report-red?logo=arxiv&logoColor=%23B31B1B&labelColor=%23F0EBEB&color=%23D42626)](https://arxiv.org/abs/2510.14686) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jd-opensource/xllm) 
     
 </div>
 
 ---------------------
 <p align="center">
-| <a href="https://xllm.readthedocs.io/zh-cn/latest/"><b>Documentation</b></a> | 
+| <a href="https://xllm.readthedocs.io/zh-cn/latest/"><b>Documentation</b></a> |  <a href="https://arxiv.org/abs/2510.14686"><b>Technical Report</b></a> |
 </p>
 
+### 📢 新闻
+
+- 我们最近在 arXiv 上发布了我们的 [xLLM 技术报告](https://arxiv.org/abs/2510.14686)，提供了全面的技术蓝图和实施见解。
 
 ## 1. 简介
 
 **xLLM** 是一个高效的开源大模型推理框架，专为**国产芯片**优化设计，提供企业级的服务部署，使得性能更高、成本更低。该框架采用**服务-引擎分离的推理架构**，通过服务层的在离线请求弹性调度、动态PD分离、EPD混合机制及高可用容错设计，结合引擎层的多流并行计算、图融合优化、投机推理、动态负载均衡及全局KV缓存管理，实现推理效率突破性提升。xLLM整体架构和功能如下图所示：
 
 <div align="center">
-<img src="docs/assets/xllm_arch.png" alt="xllm_arch" style="width:80%; height:auto;">
+<img src="docs/assets/xllm_arch.png" alt="xllm_arch" style="width:90%; height:auto;">
 </div>
 
 **xLLM** 已支持主流大模型（如 *DeepSeek-V3.1*，*Qwen2/3*等）在国产芯片上的高效部署，助力企业实现高性能、低成本的 AI 大模型应用落地。xLLM已全面落地京东零售核心业务，涵盖智能客服、风控、供应链优化、广告推荐等多种场景。
