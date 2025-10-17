@@ -10,7 +10,7 @@ file(GLOB_RECURSE MLU_SOURCE_FILES
 
 cc_library(
   NAME
-    xllm_mlu_ops
+    mlu_kernels
   HDRS
     ${MLU_HEADER_FILES}
   SRCS

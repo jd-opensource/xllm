@@ -76,6 +76,10 @@ struct AttentionParams {
   int window_size_right = -1;
   float scale;
   bool return_lse = false;
+  // for flashinfer
+  std::optional<torch::Tensor> paged_kv_indptr;
+  std::optional<torch::Tensor> paged_kv_indices;
+  std::optional<torch::Tensor> paged_kv_last_page_len;
 
   // prefill parameters
   std::optional<torch::Tensor> key;

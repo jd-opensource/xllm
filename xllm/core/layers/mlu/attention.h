@@ -34,16 +34,21 @@ struct AttentionMetadata {
                                  const std::string& compute_dtype,
                                  bool is_prefill);
 
-  torch::Tensor query_start_loc;
-  torch::Tensor seq_start_loc;
-  torch::Tensor seq_lens;
-  torch::Tensor block_table;
-  torch::Tensor slot_mapping;
+  std::optional<torch::Tensor> query_start_loc;
+  std::optional<torch::Tensor> seq_start_loc;
+  std::optional<torch::Tensor> seq_lens;
+  std::optional<torch::Tensor> block_table;
+  std::optional<torch::Tensor> slot_mapping;
   int max_query_len;
   int max_seq_len;
   std::string compute_dtype;
   bool is_prefill;
   bool is_chunked_prefill;
+
+  // for flashinfer
+  std::optional<torch::Tensor> paged_kv_indptr;
+  std::optional<torch::Tensor> paged_kv_indices;
+  std::optional<torch::Tensor> paged_kv_last_page_len;
 };
 
 class AttentionImpl : public torch::nn::Module {

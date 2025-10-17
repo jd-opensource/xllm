@@ -118,8 +118,16 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     attention_params.output = output;
     attention_params.k_cache = k_cache;
     attention_params.v_cache = v_cache;
-    attention_params.block_table = attn_metadata.block_table;
     attention_params.seq_lens = attn_metadata.seq_lens;
+
+    // for mlu
+    attention_params.block_table = attn_metadata.block_table;
+
+    // for cuda
+    attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;
+    attention_params.paged_kv_indices = attn_metadata.paged_kv_indices;
+    attention_params.paged_kv_last_page_len =
+        attn_metadata.paged_kv_last_page_len;
 
     xllm::kernel::decode_attention(attention_params);
   }
