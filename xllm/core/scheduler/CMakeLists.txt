@@ -17,6 +17,7 @@ cc_library(
     dit_scheduler.h
     scheduler_factory.h
     decode_priority_queue.h
+    pure_chunked_scheduler.h
   SRCS
     chunked_prefill_scheduler.cpp
     zero_eviction_scheduler.cpp
@@ -25,6 +26,7 @@ cc_library(
     async_response_processor.cpp
     dit_scheduler.cpp
     scheduler_factory.cpp
+    pure_chunked_scheduler.cpp
   DEPS
     :batch
     :request

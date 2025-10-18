@@ -305,7 +305,6 @@ void BatchInputBuilder::process_single_sequence(
   if (sequence->is_prefill_stage()) {
     state.prefill_seq_len++;
   }
-  state.embedding_ids.push_back(sequence->get_embedding_id());
 }
 
 void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
@@ -345,6 +344,16 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
 
     handle_sampling_parameters(
         sequence, j, seq_len, adjusted_token_to_count_map, state_ptr);
+  }
+
+  // Add extra token id
+  if (n_tokens == seq_len) {
+    // last chunk of prefill and decode
+    // add -1 as extra token id
+    state_.extra_token_ids.push_back(-1);
+    state_.embedding_ids.push_back(sequence->get_embedding_id());
+  } else {
+    state_.extra_token_ids.push_back(token_ids[seq_len]);
   }
 }
 
@@ -599,7 +608,6 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.unique_token_lens_vec =
       std::move(state_.unique_token_lens_vec);
   raw_forward_input.empty_kv_cache = state_.empty_kv_cache;
-  // raw_forward_input.global_empty_kv_cache = ;
   raw_forward_input.max_seq_len = state_.max_seq_len;
   raw_forward_input.q_max_seq_len = state_.q_max_seq_len;
   raw_forward_input.seq_lens = std::move(state_.seq_lens);
@@ -612,6 +620,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.prefill_seq_len = state_.prefill_seq_len;
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
+  raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
 
   if (FLAGS_enable_continuous_kvcache) {
     raw_forward_input.new_cache_slot_offsets =

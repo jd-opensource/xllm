@@ -58,6 +58,8 @@ class SequencesGroup {
 
   int32_t dp_rank() { return sequences_[0]->dp_rank(); }
 
+  bool is_prefill_stage() const { return sequences_[0]->is_prefill_stage(); }
+
  private:
   void add();
 
