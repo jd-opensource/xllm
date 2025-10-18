@@ -173,7 +173,8 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
     return step_empty(inputs);
   }
 
-  if (inputs.micro_inputs[0].input_params.global_empty_kv_cache == true) {
+  // TODO: support data parallel case
+  if (inputs.micro_inputs[0].input_params.q_seq_lens_vec[0] > 1) {
     return step_prefill(inputs);
   } else {
     return step_decode(inputs);
@@ -182,7 +183,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step_empty(
     const BatchedForwardInputs& inputs) {
-  if (inputs.micro_inputs[0].input_params.global_empty_kv_cache == true) {
+  if (inputs.micro_inputs[0].input_params.q_seq_lens_vec[0] > 1) {
     auto output = impl_->step(inputs);
     auto draft_output = draft_impl_->step(inputs);
     return output;
@@ -232,9 +233,14 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
           MMType::EMBEDDING,
           {{"embedding", embeddings.narrow(0, token_start_idx, token_offset)}});
     }
-    auto& token_ids = prefill_inputs.micro_inputs[i].token_ids;
-    auto mask = (token_ids == -1);
-    token_ids.masked_scatter_(mask, next_tokens.narrow(0, start_idx, offset));
+    if (next_tokens.defined()) {
+      auto& token_ids = prefill_inputs.micro_inputs[i].token_ids;
+      auto mask = (token_ids == -1);
+      // TODO:  support multi stream parallel case
+      // token_ids.masked_scatter_(mask, next_tokens.narrow(0, start_idx,
+      // offset));
+      token_ids.masked_scatter_(mask, next_tokens);
+    }
     start_idx += offset;
     token_start_idx += token_offset;
   }
@@ -255,16 +261,18 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
         inputs.micro_inputs[i].input_params.embedding_ids.end());
   }
 
-  embeddings = embeddings.index_select(
-      /*dim=*/0, inputs.concated_sampling_params.selected_token_idxes);
-  CHECK_EQ(embeddings.size(0), output.sample_output.next_tokens.size(0));
-  embedding_allocator_->write(concated_embedding_ids, embeddings);
+  if (inputs.concated_sampling_params.selected_token_idxes.defined()) {
+    embeddings = embeddings.index_select(
+        /*dim=*/0, inputs.concated_sampling_params.selected_token_idxes);
+    CHECK_EQ(embeddings.size(0), output.sample_output.next_tokens.size(0));
+    embedding_allocator_->write(concated_embedding_ids, embeddings);
 #if defined(USE_NPU)
-  if (kv_cache_transfer_) {
-    kv_cache_transfer_->copy_blocks(concated_embedding_ids,
-                                    /*h2d*/ true);
-  }
+    if (kv_cache_transfer_) {
+      kv_cache_transfer_->copy_blocks(concated_embedding_ids,
+                                      /*h2d*/ true);
+    }
 #endif
+  }
   output.sample_output.embeddings = torch::Tensor();
 
 #if defined(USE_NPU)
@@ -293,6 +301,7 @@ void SpeculativeWorkerImpl::prepare_prefill_inputs(
     ForwardInput prefill_input;
     prefill_input = input.to(device_, dtype_);
     auto& input_params = prefill_input.input_params;
+    auto& extra_token_ids = input_params.extra_token_ids;
 
     torch::Tensor token_ids = safe_to(input.token_ids, torch::kCPU);
     Slice<int32_t> tokens_ids_slice = {token_ids.data_ptr<int32_t>(),
@@ -310,7 +319,7 @@ void SpeculativeWorkerImpl::prepare_prefill_inputs(
       new_token_ids.insert(new_token_ids.end(),
                            tokens_ids_slice_i.begin(),
                            tokens_ids_slice_i.end());
-      new_token_ids.emplace_back(-1);
+      new_token_ids.emplace_back(extra_token_ids[i]);
     }
     prefill_input.token_ids =
         torch::tensor(new_token_ids, prefill_input.positions.options());
@@ -411,7 +420,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
   COUNTER_ADD(speculative_execution_latency_seconds_validation,
               timer.elapsed_seconds());
 
-  for (auto i = 1; i < inputs.micro_inputs.size(); ++i) {
+  for (auto i = 0; i < inputs.micro_inputs.size(); ++i) {
     auto& input = inputs.micro_inputs[i];
     // write the right cache and clear embeddings
     embedding_allocator_->write_validate(input.input_params.embedding_ids,
@@ -482,6 +491,7 @@ void SpeculativeWorkerImpl::prepare_draft_inputs(
       new_token_slot_ids.emplace_back(new_token_slot_id);
     }
 
+    input_params.kv_max_seq_len = input_params.kv_max_seq_len + offset;
     input_params.kv_seq_lens_vec = kv_seq_lens_vec;
     input_params.kv_seq_lens = torch::tensor(kv_seq_lens_vec, int_options);
     input_params.new_cache_slots =
@@ -604,6 +614,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
       input_params.block_tables =
           create_2d_tensor(block_tables_vec, torch::kInt).to(device_);
+      input_params.decode_seq_range.second = input_params.num_sequences - 1;
     }
 
     // update the sampling_params
@@ -814,7 +825,7 @@ void SpeculativeWorkerImpl::update_sampling_params(
 void SpeculativeWorkerImpl::prepare_work_before_execute(
     const BatchedForwardInputs& inputs,
     BatchedForwardInputs& processed_inputs) {
-  if (inputs.micro_inputs[0].input_params.empty_kv_cache) {
+  if (inputs.micro_inputs[0].input_params.q_seq_lens_vec[0] > 1) {
     WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
   } else {
     if (enable_schedule_overlap()) {

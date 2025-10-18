@@ -109,6 +109,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> embedding_ids =
       std::vector<int32_t>(pb_forward_input->embedding_ids().begin(),
                            pb_forward_input->embedding_ids().end());
+  std::vector<int32_t> extra_token_ids =
+      std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
+                           pb_forward_input->extra_token_ids().end());
 
   std::vector<CacheBlockInfo> async_copy_out_blocks;
   for (size_t i = 0; i < pb_forward_input->async_copy_out_blocks().size();
@@ -213,6 +216,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
 
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.embedding_ids = std::move(embedding_ids);
+  input_params.extra_token_ids = std::move(extra_token_ids);
 
   input_params.async_copy_out_blocks = std::move(async_copy_out_blocks);
   input_params.copy_out_blocks = std::move(copy_out_blocks);
@@ -440,10 +444,13 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     ADD_VECTOR_TO_PROTO(embeds.mutable_vals(), t);
     *pb_forward_input->mutable_embeds()->Add() = embeds;
   }
-  COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());
+
   pb_forward_input->set_prefill_seq_len(inputs.prefill_seq_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),
+                      inputs.extra_token_ids);
+
   pb_forward_input->mutable_async_copy_out_blocks()->Reserve(
       inputs.async_copy_out_blocks.size());
   for (auto t : inputs.async_copy_out_blocks) {

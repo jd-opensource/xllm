@@ -96,8 +96,8 @@ class SpeculativeEngine : public Engine {
   bool allocate_kv_cache();
 
   int64_t calculate_kv_cache(int64_t cache_size_in_bytes,
-                             int64_t target_slot_size,
-                             int64_t draft_slot_size) const;
+                             int64_t target_size,
+                             int64_t draft_size) const;
 
   // dtype
   torch::ScalarType dtype_;

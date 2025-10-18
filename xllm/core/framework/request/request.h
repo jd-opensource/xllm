@@ -92,6 +92,8 @@ class Request : public RequestBase {
     return state_.sampling_param.beam_width > 1;
   }
 
+  bool is_prefill_stage() const { return sequences_group_->is_prefill_stage(); }
+
  private:
   RequestState state_;
   // list of sequences to generate completions for the prompt

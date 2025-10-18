@@ -99,6 +99,7 @@ class BatchInputBuilder {
     std::vector<int32_t> embedding_ids;
     uint32_t prefill_seq_len = 0;
     std::vector<TransferKVInfo> transfer_kv_infos;
+    std::vector<int32_t> extra_token_ids;
 
     // for continuous kvcache
     std::vector<int64_t> new_cache_slot_offsets;  //[n_tokens]

@@ -136,9 +136,10 @@ bool SpeculativeEngine::allocate_kv_cache() {
   // check if llm and ssm are using same device
   if (share_device_) {
     // on the same device, use the smaller kv cache size
-    n_blocks = calculate_kv_cache(kv_cache_size,
-                                  target_kv_cache_cap.slot_size,
-                                  draft_kv_cache_cap.slot_size);
+    n_blocks = calculate_kv_cache(
+        kv_cache_size,
+        target_kv_cache_cap.n_layers * target_kv_cache_cap.slot_size,
+        draft_kv_cache_cap.n_layers * draft_kv_cache_cap.slot_size);
   } else {
     // on different devices, use the smaller number of blocks
     n_blocks =
@@ -160,16 +161,13 @@ ForwardOutput SpeculativeEngine::step(std::vector<Batch>& batches) {
 }
 
 int64_t SpeculativeEngine::calculate_kv_cache(int64_t cache_size_in_bytes,
-                                              int64_t target_slot_size,
-                                              int64_t draft_slot_size) const {
+                                              int64_t target_size,
+                                              int64_t draft_size) const {
   CHECK_GT(cache_size_in_bytes, 0) << "no memory for kv cache";
   const int32_t block_size = options_.block_size();
 
   // compute the number of blocks
-  const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
-  const int64_t block_size_in_bytes =
-      block_size * (target_slot_size + draft_slot_size) +
-      model_args_.hidden_size() * dtype_size;
+  const int64_t block_size_in_bytes = block_size * (target_size + draft_size);
   return cache_size_in_bytes / block_size_in_bytes;
 }
 
