@@ -15,7 +15,7 @@ limitations under the License.
 
 #include "rotary_embedding.h"
 
-#include "kernels/mlu/torch_ops_api.h"
+#include "kernels/torch_ops_api.h"
 
 namespace xllm {
 namespace layer {
@@ -78,16 +78,18 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& x,
     position_ids = positions;
   }
 
-  tmo::torch_api::apply_rotary(x,
-                               x /* output */,
-                               sin_,
-                               cos_,
-                               position_ids,
-                               cu_query_lens,
-                               interleaved_,
-                               discrete,
-                               false /* dynamic_ntk */,
-                               max_query_len);
+  RotaryParams rotary_params;
+  rotary_params.input = x;
+  rotary_params.output = x;
+  rotary_params.sin = sin_;
+  rotary_params.cos = cos_;
+  rotary_params.position_ids = position_ids;
+  rotary_params.cu_query_lens = cu_query_lens;
+  rotary_params.interleaved = interleaved_;
+  rotary_params.discrete = discrete;
+  rotary_params.max_query_len = max_query_len;
+
+  xllm::kernel::apply_rotary(rotary_params);
 }
 
 }  // namespace layer

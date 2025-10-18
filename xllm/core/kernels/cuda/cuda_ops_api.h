@@ -14,19 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#if defined(USE_NPU)
-#include "npu/npu_rope_impl.h"
-#endif
 
-namespace xllm::kernel {
-#if defined(USE_NPU)
-class Rope : public torch::nn::ModuleHolder<NpuRopeImpl> {
- public:
-  using torch::nn::ModuleHolder<NpuRopeImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuRopeImpl;
+#include <torch/torch.h>
 
-  Rope(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuRopeImpl>(context)) {}
-};
-#endif
-}  // namespace xllm::kernel
+namespace xllm::cuda {}  // namespace xllm::cuda

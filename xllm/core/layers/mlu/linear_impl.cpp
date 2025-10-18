@@ -19,7 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "framework/parallel_state.h"
-#include "kernels/mlu/torch_ops_api.h"
+#include "kernels/mlu/mlu_ops_api.h"
 
 namespace xllm {
 namespace layer {
@@ -64,7 +64,15 @@ torch::Tensor ColumnParallelLinearImpl::forward(
   auto beta = (residual.has_value() && rank_ == 0) ? 1.0 : 0.0;
   auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
                                               : std::nullopt;
-  auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
+  MatmulParams matmul_params;
+  matmul_params.a = input;
+  matmul_params.b = weight_;
+  matmul_params.bias = bias;
+  matmul_params.residual = residual;
+  matmul_params.alpha = 1.0;
+  matmul_params.beta = beta;
+
+  auto output = xllm::kernel::matmul(matmul_params);
   if (world_size_ > 1 && gather_output_) {
     output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
   }
@@ -151,8 +159,14 @@ torch::Tensor QKVParallelLinearImpl::forward(
   auto bias = (qkv_bias_.defined() && rank_ == 0)
                   ? std::optional<at::Tensor>(qkv_bias_)
                   : std::nullopt;
-  auto output =
-      xllm::mlu::matmul(input, qkv_weight_, bias, residual, 1.0, beta);
+  MatmulParams matmul_params;
+  matmul_params.a = input;
+  matmul_params.b = qkv_weight_;
+  matmul_params.bias = bias;
+  matmul_params.residual = residual;
+  matmul_params.alpha = 1.0;
+  matmul_params.beta = beta;
+  auto output = xllm::kernel::matmul(matmul_params);
   if (world_size_ > 1 && gather_output_) {
     output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
   }
@@ -244,8 +258,15 @@ torch::Tensor RowParallelLinearImpl::forward(
   auto beta = (residual.has_value() && rank_ == 0) ? 1.0 : 0.0;
   auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
                                               : std::nullopt;
-  auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
+  MatmulParams matmul_params;
+  matmul_params.a = input;
+  matmul_params.b = weight_;
+  matmul_params.bias = bias;
+  matmul_params.residual = residual;
+  matmul_params.alpha = 1.0;
+  matmul_params.beta = beta;
 
+  auto output = xllm::kernel::matmul(matmul_params);
   if (if_reduce_results_ && world_size_ > 1) {
     output = xllm::parallel_state::reduce(output, parallel_args_.tp_group_);
   }
@@ -290,7 +311,15 @@ torch::Tensor ReplicatedLinearImpl::forward(
   namespace F = torch::nn::functional;
   auto beta = residual.has_value() ? 1.0 : 0.0;
   auto bias = bias_.defined() ? std::optional<at::Tensor>(bias_) : std::nullopt;
-  auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
+  MatmulParams matmul_params;
+  matmul_params.a = input;
+  matmul_params.b = weight_;
+  matmul_params.bias = bias;
+  matmul_params.residual = residual;
+  matmul_params.alpha = 1.0;
+  matmul_params.beta = beta;
+
+  auto output = xllm::kernel::matmul(matmul_params);
   return output;
 }
 

@@ -14,13 +14,10 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#if defined(USE_NPU)
-#include "npu/npu_linear_impl.h"
-#endif
+#include "impl/npu_linear_impl.h"
 
 namespace xllm::kernel {
 
-#if defined(USE_NPU)
 class Linear : public torch::nn::ModuleHolder<NpuLinearImpl> {
  public:
   using torch::nn::ModuleHolder<NpuLinearImpl>::ModuleHolder;
@@ -29,6 +26,5 @@ class Linear : public torch::nn::ModuleHolder<NpuLinearImpl> {
   Linear(const ModelContext& context)
       : ModuleHolder(std::make_shared<NpuLinearImpl>(context)) {}
 };
-#endif
 
 }  // namespace xllm::kernel

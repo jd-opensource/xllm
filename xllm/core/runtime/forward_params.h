@@ -169,6 +169,10 @@ struct RawForwardInput {
   // for continuous kvcache
   std::vector<int64_t> new_cache_slot_offsets;  //[n_tokens]
   std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
+  // for flashinfer
+  std::vector<int32_t> paged_kv_indptr;         //[n_seq + 1]
+  std::vector<int32_t> paged_kv_indices;        //[num_used_pages]
+  std::vector<int32_t> paged_kv_last_page_len;  //[n_seq]
 };
 
 struct RawSampleOutput {

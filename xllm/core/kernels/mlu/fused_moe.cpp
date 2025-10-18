@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "mlu_ops_api.h"
 #include "torch_mlu_ops.h"
-#include "torch_ops_api.h"
 
 namespace {
 torch::Tensor create_group_gemm_output(const torch::Tensor& a,
@@ -28,6 +28,7 @@ torch::Tensor create_group_gemm_output(const torch::Tensor& a,
 }  // namespace
 
 namespace xllm::mlu {
+
 torch::Tensor fused_moe(const torch::Tensor& hidden_states,
                         const torch::Tensor& gating_output,
                         const torch::Tensor& w1,

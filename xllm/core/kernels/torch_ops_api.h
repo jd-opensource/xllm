@@ -14,23 +14,25 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#if defined(USE_NPU)
-#include "npu/npu_rms_norm_impl.h"
+
+#include "param.h"
+
+#if defined(USE_MLU)
+#include "mlu/mlu_ops_api.h"
+#elif defined(USE_CUDA)
+#include "cuda/cuda_ops_api.h"
 #endif
 
 namespace xllm {
 namespace kernel {
 
-#if defined(USE_NPU)
-class RmsNorm : public torch::nn::ModuleHolder<NpuRmsNormImpl> {
- public:
-  using torch::nn::ModuleHolder<NpuRmsNormImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuRmsNormImpl;
-
-  RmsNorm(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuRmsNormImpl>(context)) {}
-};
-#endif
-
+void apply_rotary(const RotaryParams& params);
+void active(const ActivationParams& params);
+void reshape_paged_cache(const ReshapePagedCacheParams& params);
+void prefill_attention(const AttentionParams& params);
+void decode_attention(const AttentionParams& params);
+void fused_layernorm(const FusedLayerNormParams& params);
+torch::Tensor matmul(const MatmulParams& params);
+torch::Tensor fused_moe(const FusedMoEParams& params);
 }  // namespace kernel
 }  // namespace xllm

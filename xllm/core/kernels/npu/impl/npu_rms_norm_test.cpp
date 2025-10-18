@@ -16,7 +16,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <sys/resource.h>
 
-#include "core/kernels/rms_norm.h"
+#include "kernels/npu/rms_norm.h"
 
 namespace xllm::kernel {
 

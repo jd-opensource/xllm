@@ -16,10 +16,10 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <sys/resource.h>
 
-#include "core/kernels/linear.h"
-#include "core/kernels/rms_norm.h"
-#include "core/kernels/rope.h"
-#include "core/kernels/split.h"
+#include "kernels/npu/linear.h"
+#include "kernels/npu/rms_norm.h"
+#include "kernels/npu/rope.h"
+#include "kernels/npu/split.h"
 
 namespace xllm::kernel {
 

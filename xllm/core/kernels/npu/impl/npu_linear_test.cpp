@@ -16,7 +16,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <sys/resource.h>
 
-#include "core/kernels/linear.h"
+#include "kernels/npu/linear.h"
 
 namespace xllm::kernel {
 

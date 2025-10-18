@@ -18,12 +18,12 @@ limitations under the License.
 
 namespace xllm::mlu {
 
-at::Tensor matmul(const at::Tensor& a,
-                  const at::Tensor& b,
-                  const std::optional<at::Tensor>& bias,
-                  const std::optional<at::Tensor>& c,
-                  double alpha,
-                  double beta) {
+torch::Tensor matmul(const torch::Tensor& a,
+                     const torch::Tensor& b,
+                     const std::optional<torch::Tensor>& bias,
+                     const std::optional<torch::Tensor>& c,
+                     double alpha,
+                     double beta) {
   return tmo::torch_api::matmul(a,
                                 b,
                                 bias,
