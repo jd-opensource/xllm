@@ -108,6 +108,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
                                                 flatten_positions_micro_batches,
                                                 kv_caches_,
                                                 input_params_micro_batches);
+  if (!hidden_states.defined()) {
+    return std::nullopt;
+  }
 
   torch::Tensor logits;
   if (concated_sampling_params.selected_token_idxes.defined()) {

@@ -194,6 +194,14 @@ DEFINE_bool(enable_profile_kv_blocks,
             true,
             "true if generate kv cache for profile");
 
+DEFINE_bool(disable_ttft_profiling,
+            false,
+            "Whether to disable TTFT profiling.");
+
+DEFINE_bool(enable_forward_interruption,
+            false,
+            "Whether to enable forward interruption.");
+
 DEFINE_int32(max_global_ttft_ms,
              std::numeric_limits<int32_t>::max(),
              "all requests use single global ttft");
@@ -233,6 +241,11 @@ DEFINE_string(xservice_addr, "", "XService server address.");
 DEFINE_bool(enable_disagg_pd,
             false,
             "Whether to enable disaggregated prefill and decode execution.");
+
+DEFINE_bool(
+    enable_pd_ooc,
+    false,
+    "Whether to enable online-offline co-location in disaggregated PD mode.");
 
 DEFINE_int32(disagg_pd_port, 7777, "Port for brpc disagg pd server.");
 

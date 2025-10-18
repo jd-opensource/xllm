@@ -447,4 +447,13 @@ void Sequence::generate_output_tokens_logprobs(
       tokens_);
 }
 
+Slice<int32_t> Sequence::get_generated_tokens() const {
+  // Return a slice of generated token IDs (excluding prompt tokens)
+  if (num_tokens_ > num_prompt_tokens_) {
+    return {tokens_.data() + num_prompt_tokens_,
+            num_tokens_ - num_prompt_tokens_};
+  }
+  return {tokens_.data(), 0};
+}
+
 }  // namespace xllm

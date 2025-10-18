@@ -18,6 +18,7 @@ from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.command.build_ext import build_ext
 
 BUILD_TEST_FILE = True
+BUILD_EXPORT = True
 
 # get cpu architecture
 def get_cpu_arch():
@@ -340,9 +341,10 @@ class ExtBuild(build_ext):
             os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"),
         )
 
-        # build export module
-        build_args = base_build_args + ["--target export_module"]
-        subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
+        if BUILD_EXPORT:
+            # build export module
+            build_args = base_build_args + ["--target export_module"]
+            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
         if BUILD_TEST_FILE:
             # build tests target
@@ -552,6 +554,11 @@ if __name__ == "__main__":
             sys.argv.pop(idx)
             sys.argv.pop(idx)
 
+    if "SKIP_TEST" in os.environ:
+        BUILD_TEST_FILE = False
+    if "SKIP_EXPORT" in os.environ:
+        BUILD_EXPORT = False
+    
     version = get_version()
 
     # check and install git pre-commit

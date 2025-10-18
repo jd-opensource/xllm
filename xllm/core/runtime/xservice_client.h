@@ -56,6 +56,7 @@ class XServiceClient {
   void heartbeat();
   InstanceInfo get_instance_info(const std::string& instance_name);
   std::vector<std::string> get_static_decode_list();
+  std::vector<std::string> get_static_prefill_list();
   ServiceConfig get_config();
 
   // response generation tokens to xllm service

@@ -46,6 +46,7 @@ std::string Options::to_string() const {
      << ", nnodes: " << nnodes() << ", node_rank: " << node_rank()
      << ", enable_schedule_overlap: " << enable_schedule_overlap()
      << ", enable_disagg_pd: " << enable_disagg_pd()
+     << ", enable_pd_ooc: " << enable_pd_ooc()
      << ", kv_cache_transfer_mode: " << kv_cache_transfer_mode()
      << ", etcd_addr: " << etcd_addr().value_or("null")
      << ", enable_service_routing: " << enable_service_routing()
@@ -55,7 +56,9 @@ std::string Options::to_string() const {
      << ", store_master_server_entry: " << store_master_server_entry()
      << ", store_metadata_connstring: " << store_metadata_connstring()
      << ", enable_multi_stream_parallel: " << enable_multi_stream_parallel()
-     << ", enable_continuous_kvcache: " << enable_continuous_kvcache();
+     << ", enable_continuous_kvcache: " << enable_continuous_kvcache()
+     << ", disable_ttft_profiling: " << disable_ttft_profiling()
+     << ", enable_forward_interruption: " << enable_forward_interruption();
   ss << "]";
   return ss.str();
 }

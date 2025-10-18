@@ -95,6 +95,8 @@ DECLARE_string(master_node_addr);
 
 DECLARE_bool(enable_disagg_pd);
 
+DECLARE_bool(enable_pd_ooc);
+
 DECLARE_int32(nnodes);
 
 DECLARE_int32(node_rank);
@@ -178,6 +180,10 @@ DECLARE_bool(enable_latency_aware_schedule);
 DECLARE_int32(profile_max_prompt_length);
 
 DECLARE_bool(enable_profile_kv_blocks);
+
+DECLARE_bool(disable_ttft_profiling);
+
+DECLARE_bool(enable_forward_interruption);
 
 DECLARE_int32(max_global_ttft_ms);
 

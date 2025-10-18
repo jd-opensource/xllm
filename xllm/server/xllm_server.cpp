@@ -89,6 +89,24 @@ bool XllmServer::start(std::unique_ptr<DisaggPDService> service) {
   return true;
 }
 
+bool XllmServer::start(std::unique_ptr<PDOOCService> service) {
+  std::string addr("");
+  if (!FLAGS_host.empty()) {
+    addr = FLAGS_host + ":" + std::to_string(FLAGS_disagg_pd_port);
+  }
+  if (!create_server((google::protobuf::Service*)(service.get()),
+                     addr,
+                     FLAGS_disagg_pd_port,
+                     "PD OOC")) {
+    return false;
+  }
+
+  has_initialized_ = true;
+  // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
+  server_->RunUntilAskedToQuit();
+  return true;
+}
+
 bool XllmServer::start(std::shared_ptr<CollectiveService> service,
                        const std::string& addr) {
   if (!create_server((google::protobuf::Service*)(service.get()),

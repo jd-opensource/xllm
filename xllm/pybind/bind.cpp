@@ -66,13 +66,18 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("xservice_addr", &Options::xservice_addr_)
       .def_readwrite("instance_name", &Options::instance_name_)
       .def_readwrite("enable_disagg_pd", &Options::enable_disagg_pd_)
+      .def_readwrite("enable_pd_ooc", &Options::enable_pd_ooc_)
       .def_readwrite("enable_schedule_overlap",
                      &Options::enable_schedule_overlap_)
       .def_readwrite("instance_role", &Options::instance_role_)
       .def_readwrite("kv_cache_transfer_mode",
                      &Options::kv_cache_transfer_mode_)
       .def_readwrite("device_ip", &Options::device_ip_)
-      .def_readwrite("transfer_listen_port", &Options::transfer_listen_port_);
+      .def_readwrite("transfer_listen_port", &Options::transfer_listen_port_)
+      .def_readwrite("disable_ttft_profiling",
+                     &Options::disable_ttft_profiling_)
+      .def_readwrite("enable_forward_interruption",
+                     &Options::enable_forward_interruption_);
 
   // 2. export LLMMaster
   py::class_<LLMMaster>(m, "LLMMaster")
