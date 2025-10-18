@@ -1,4 +1,19 @@
 
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
 #pragma once
 
 #include <atb/atb_infer.h>
@@ -52,7 +67,7 @@ class CLIPVLInputProcessor : public InputProcessor {
   };
 
  public:
-  CLIPVLInputProcessor(const ModelArgs& args) {
+  explicit CLIPVLInputProcessor(const ModelArgs& args) {
     merge_size_ = args.mm_image_merge_size();
   }
   void process(std::string& prompt, const MMData& mm_data) override {
@@ -136,23 +151,22 @@ class CLIPVLInputProcessor : public InputProcessor {
 
 class CLIPTextEmbeddingImpl : public torch::nn::Module {
  public:
-  CLIPTextEmbeddingImpl(const ModelContext& context) {
+  explicit CLIPTextEmbeddingImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     token_embedding_ = register_module(
         "token_embedding",
         torch::nn::Embedding(torch::nn::EmbeddingOptions(
-            model_args.clip_vocab_size(), model_args.clip_hidden_size())));
+            model_args.vocab_size(), model_args.mm_hidden_size())));
     token_embedding_->weight.set_data(token_embedding_->weight.to(options));
     position_embedding_ = register_parameter(
         "position_embedding",
-        torch::randn({model_args.clip_max_position_embeddings(),
-                      model_args.clip_hidden_size()},
-                     options));
+        torch::randn(
+            {model_args.max_position_embeddings(), model_args.mm_hidden_size()},
+            options));
     position_ids_ = register_buffer(
         "position_ids",
-        torch::arange(
-            0, model_args.clip_max_position_embeddings(), torch::kLong)
+        torch::arange(0, model_args.max_position_embeddings(), torch::kLong)
             .unsqueeze(0));
   }
 
@@ -172,21 +186,14 @@ class CLIPTextEmbeddingImpl : public torch::nn::Module {
   }
 
   void load_state_dict(const StateDict& state_dict) {
-    auto tok_emb = state_dict.get_tensor("token_embedding.weight");
-    if (tok_emb.defined()) {
-      DCHECK_EQ(token_embedding_->weight.sizes(), tok_emb.sizes())
-          << "patch_embedding weight size mismatch for " << name();
-      token_embedding_->weight.data().copy_(tok_emb);
-      is_token_embedding_loaded = true;
-    }
-
-    auto pos = state_dict.get_tensor("position_embedding.weight");
-    if (pos.defined()) {
-      CHECK_EQ(pos.sizes(), position_embedding_.sizes())
-          << "position_embedding weight size mismatch for " << name();
-      position_embedding_.data().copy_(pos);
-      is_position_embedding_loaded = true;
-    }
+    weight::load_weight(state_dict,
+                        "token_embedding.weight",
+                        token_embedding_->weight,
+                        is_token_embedding_loaded);
+    weight::load_weight(state_dict,
+                        "position_embedding.weight",
+                        position_embedding_,
+                        is_position_embedding_loaded);
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
@@ -197,34 +204,32 @@ class CLIPTextEmbeddingImpl : public torch::nn::Module {
   }
 
  private:
-  bool is_position_embedding_loaded{false};
-  bool is_token_embedding_loaded{false};
+  bool is_position_embedding_loaded = false;
+  bool is_token_embedding_loaded = false;
   torch::Tensor position_ids_;
-  torch::nn::Embedding token_embedding_{nullptr};
-  torch::Tensor position_embedding_{nullptr};
+  torch::nn::Embedding token_embedding_ = nullptr;
+  torch::Tensor position_embedding_;
 };
 TORCH_MODULE(CLIPTextEmbedding);
 
 class CLIPMLPImpl : public torch::nn::Module {
  public:
-  CLIPMLPImpl(const ModelContext& context) {
+  explicit CLIPMLPImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     act_ = register_module("act", torch::nn::Functional(quick_gelu));
 
     fc1_ = register_module("fc1",
-                           DiTLinear(model_args.clip_hidden_size(),
-                                     model_args.clip_intermediate_size(),
+                           DiTLinear(model_args.mm_hidden_size(),
+                                     model_args.mm_intermediate_size(),
                                      true));
     fc2_ = register_module("fc2",
-                           DiTLinear(model_args.clip_intermediate_size(),
-                                     model_args.clip_hidden_size(),
+                           DiTLinear(model_args.mm_intermediate_size(),
+                                     model_args.mm_hidden_size(),
                                      true));
 
-    fc1_->weight.set_data(fc1_->weight.to(options));
-    fc2_->weight.set_data(fc2_->weight.to(options));
-    fc1_->bias.set_data(fc1_->bias.to(options));
-    fc2_->bias.set_data(fc2_->bias.to(options));
+    fc1_->to(options);
+    fc2_->to(options);
   }
 
   torch::Tensor forward(const torch::Tensor& hidden_states) {
@@ -232,37 +237,12 @@ class CLIPMLPImpl : public torch::nn::Module {
   }
 
   void load_state_dict(const StateDict& state_dict) {
-    const auto fc1_weight = state_dict.get_tensor("fc1.weight");
-    if (fc1_weight.defined()) {
-      DCHECK_EQ(fc1_weight.sizes(), fc1_->weight.sizes())
-          << "fc1 weight size mismatch";
-      fc1_->weight.data().copy_(fc1_weight);
-      fc1_weight_loaded_ = true;
-    }
-
-    const auto fc1_bias = state_dict.get_tensor("fc1.bias");
-    if (fc1_bias.defined()) {
-      DCHECK_EQ(fc1_bias.sizes(), fc1_->bias.sizes())
-          << "fc1 bias size mismatch";
-      fc1_->bias.data().copy_(fc1_bias);
-      fc1_bias_loaded_ = true;
-    }
-
-    const auto fc2_weight = state_dict.get_tensor("fc2.weight");
-    if (fc2_weight.defined()) {
-      DCHECK_EQ(fc2_weight.sizes(), fc2_->weight.sizes())
-          << "fc2 weight size mismatch";
-      fc2_->weight.data().copy_(fc2_weight);
-      fc2_weight_loaded_ = true;
-    }
-
-    const auto fc2_bias = state_dict.get_tensor("fc2.bias");
-    if (fc2_bias.defined()) {
-      DCHECK_EQ(fc2_bias.sizes(), fc2_->bias.sizes())
-          << "fc2 bias size mismatch";
-      fc2_->bias.data().copy_(fc2_bias);
-      fc2_bias_loaded_ = true;
-    }
+    fc1_->load_state_dict(state_dict.get_dict_with_prefix("fc1."));
+    fc1_weight_loaded_ = true;
+    fc1_bias_loaded_ = true;
+    fc2_->load_state_dict(state_dict.get_dict_with_prefix("fc2."));
+    fc2_weight_loaded_ = true;
+    fc2_bias_loaded_ = true;
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
@@ -277,58 +257,52 @@ class CLIPMLPImpl : public torch::nn::Module {
   }
 
  private:
-  torch::nn::Functional act_{nullptr};
-  DiTLinear fc1_{nullptr};
-  DiTLinear fc2_{nullptr};
-  bool fc1_weight_loaded_{false};
-  bool fc1_bias_loaded_{false};
-  bool fc2_weight_loaded_{false};
-  bool fc2_bias_loaded_{false};
+  torch::nn::Functional act_ = nullptr;
+  DiTLinear fc1_ = nullptr;
+  DiTLinear fc2_ = nullptr;
+  bool fc1_weight_loaded_ = false;
+  bool fc1_bias_loaded_ = false;
+  bool fc2_weight_loaded_ = false;
+  bool fc2_bias_loaded_ = false;
 };
 TORCH_MODULE(CLIPMLP);
 
 // TODO: Optimize CLIPAttention
 class CLIPAttentionImpl : public torch::nn::Module {
  public:
-  CLIPAttentionImpl(const ModelContext& context) {
+  explicit CLIPAttentionImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    CHECK(model_args.clip_hidden_size() %
-              model_args.clip_num_attention_heads() ==
+    CHECK(model_args.mm_hidden_size() % model_args.mm_num_attention_heads() ==
           0);
-    head_dim_ = model_args.clip_head_dim();
-    embed_dim_ = model_args.clip_hidden_size();
-    num_heads_ = model_args.clip_num_attention_heads();
+    head_dim_ = model_args.mm_head_dim();
+    embed_dim_ = model_args.mm_hidden_size();
+    num_heads_ = model_args.mm_num_attention_heads();
     const int64_t n_local_heads = num_heads_;
 
-    qkv_sizes_ = {n_local_heads * model_args.clip_head_dim(),
-                  n_local_heads * model_args.clip_head_dim(),
-                  n_local_heads * model_args.clip_head_dim()};
+    qkv_sizes_ = {n_local_heads * model_args.mm_head_dim(),
+                  n_local_heads * model_args.mm_head_dim(),
+                  n_local_heads * model_args.mm_head_dim()};
 
-    scale_ = 1.0f / std::sqrt(static_cast<float>(model_args.clip_head_dim()));
+    scale_ = 1.0f / std::sqrt(static_cast<float>(model_args.mm_head_dim()));
     q_proj_ = register_module(
         "q_proj",
-        DiTLinear(model_args.clip_hidden_size(), num_heads_ * head_dim_, true));
+        DiTLinear(model_args.mm_hidden_size(), num_heads_ * head_dim_, true));
     k_proj_ = register_module(
         "k_proj",
-        DiTLinear(model_args.clip_hidden_size(), num_heads_ * head_dim_, true));
+        DiTLinear(model_args.mm_hidden_size(), num_heads_ * head_dim_, true));
     v_proj_ = register_module(
         "v_proj",
-        DiTLinear(model_args.clip_hidden_size(), num_heads_ * head_dim_, true));
-    o_proj_ = register_module("o_proj",
-                              DiTLinear(model_args.clip_hidden_size(),
-                                        model_args.clip_hidden_size(),
-                                        true));
+        DiTLinear(model_args.mm_hidden_size(), num_heads_ * head_dim_, true));
+    o_proj_ = register_module(
+        "o_proj",
+        DiTLinear(
+            model_args.mm_hidden_size(), model_args.mm_hidden_size(), true));
 
-    q_proj_->weight.set_data(q_proj_->weight.to(options));
-    k_proj_->weight.set_data(k_proj_->weight.to(options));
-    v_proj_->weight.set_data(v_proj_->weight.to(options));
-    o_proj_->weight.set_data(o_proj_->weight.to(options));
-
-    q_proj_->bias.set_data(q_proj_->bias.to(options));
-    k_proj_->bias.set_data(k_proj_->bias.to(options));
-    v_proj_->bias.set_data(v_proj_->bias.to(options));
-    o_proj_->bias.set_data(o_proj_->bias.to(options));
+    q_proj_->to(options);
+    k_proj_->to(options);
+    v_proj_->to(options);
+    o_proj_->to(options);
   }
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
@@ -366,69 +340,18 @@ class CLIPAttentionImpl : public torch::nn::Module {
   }
 
   void load_state_dict(const StateDict& state_dict) {
-    const auto q_proj_weight = state_dict.get_tensor("q_proj.weight");
-    if (q_proj_weight.defined()) {
-      DCHECK_EQ(q_proj_weight.sizes(), q_proj_->weight.sizes())
-          << "q_proj weight size mismatch";
-      q_proj_->weight.data().copy_(q_proj_weight);
-      q_proj_weight_loaded_ = true;
-    }
-
-    const auto q_proj_bias = state_dict.get_tensor("q_proj.bias");
-    if (q_proj_bias.defined()) {
-      DCHECK_EQ(q_proj_bias.sizes(), q_proj_->bias.sizes())
-          << "q_proj bias size mismatch";
-      q_proj_->bias.data().copy_(q_proj_bias);
-      q_proj_bias_loaded_ = true;
-    }
-
-    const auto k_proj_weight = state_dict.get_tensor("k_proj.weight");
-    if (k_proj_weight.defined()) {
-      DCHECK_EQ(k_proj_weight.sizes(), k_proj_->weight.sizes())
-          << "k_proj weight size mismatch";
-      k_proj_->weight.data().copy_(k_proj_weight);
-      k_proj_weight_loaded_ = true;
-    }
-
-    const auto k_proj_bias = state_dict.get_tensor("k_proj.bias");
-    if (k_proj_bias.defined()) {
-      DCHECK_EQ(k_proj_bias.sizes(), k_proj_->bias.sizes())
-          << "k_proj bias size mismatch";
-      k_proj_->bias.data().copy_(k_proj_bias);
-      k_proj_bias_loaded_ = true;
-    }
-
-    const auto v_proj_weight = state_dict.get_tensor("v_proj.weight");
-    if (v_proj_weight.defined()) {
-      DCHECK_EQ(v_proj_weight.sizes(), v_proj_->weight.sizes())
-          << "v_proj weight size mismatch";
-      v_proj_->weight.data().copy_(v_proj_weight);
-      v_proj_weight_loaded_ = true;
-    }
-
-    const auto v_proj_bias = state_dict.get_tensor("v_proj.bias");
-    if (v_proj_bias.defined()) {
-      DCHECK_EQ(v_proj_bias.sizes(), v_proj_->bias.sizes())
-          << "v_proj bias size mismatch";
-      v_proj_->bias.data().copy_(v_proj_bias);
-      v_proj_bias_loaded_ = true;
-    }
-
-    const auto o_proj_weight = state_dict.get_tensor("out_proj.weight");
-    if (o_proj_weight.defined()) {
-      DCHECK_EQ(o_proj_weight.sizes(), o_proj_->weight.sizes())
-          << "o_proj weight size mismatch";
-      o_proj_->weight.data().copy_(o_proj_weight);
-      o_proj_weight_loaded_ = true;
-    }
-
-    const auto o_proj_bias = state_dict.get_tensor("out_proj.bias");
-    if (o_proj_bias.defined()) {
-      DCHECK_EQ(o_proj_bias.sizes(), o_proj_->bias.sizes())
-          << "o_proj bias size mismatch";
-      o_proj_->bias.data().copy_(o_proj_bias);
-      o_proj_bias_loaded_ = true;
-    }
+    q_proj_->load_state_dict(state_dict.get_dict_with_prefix("q_proj."));
+    q_proj_weight_loaded_ = true;
+    q_proj_bias_loaded_ = true;
+    k_proj_->load_state_dict(state_dict.get_dict_with_prefix("k_proj."));
+    k_proj_weight_loaded_ = true;
+    k_proj_bias_loaded_ = true;
+    v_proj_->load_state_dict(state_dict.get_dict_with_prefix("v_proj."));
+    v_proj_weight_loaded_ = true;
+    v_proj_bias_loaded_ = true;
+    o_proj_->load_state_dict(state_dict.get_dict_with_prefix("out_proj."));
+    o_proj_weight_loaded_ = true;
+    o_proj_bias_loaded_ = true;
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
@@ -464,40 +387,40 @@ class CLIPAttentionImpl : public torch::nn::Module {
   float scale_;
   std::vector<int64_t> qkv_sizes_;
 
-  DiTLinear o_proj_{nullptr};
-  DiTLinear q_proj_{nullptr};
-  DiTLinear k_proj_{nullptr};
-  DiTLinear v_proj_{nullptr};
+  DiTLinear o_proj_ = nullptr;
+  DiTLinear q_proj_ = nullptr;
+  DiTLinear k_proj_ = nullptr;
+  DiTLinear v_proj_ = nullptr;
 
-  bool q_proj_weight_loaded_{false};
-  bool q_proj_bias_loaded_{false};
-  bool k_proj_weight_loaded_{false};
-  bool k_proj_bias_loaded_{false};
-  bool v_proj_weight_loaded_{false};
-  bool v_proj_bias_loaded_{false};
-  bool o_proj_weight_loaded_{false};
-  bool o_proj_bias_loaded_{false};
+  bool q_proj_weight_loaded_ = false;
+  bool q_proj_bias_loaded_ = false;
+  bool k_proj_weight_loaded_ = false;
+  bool k_proj_bias_loaded_ = false;
+  bool v_proj_weight_loaded_ = false;
+  bool v_proj_bias_loaded_ = false;
+  bool o_proj_weight_loaded_ = false;
+  bool o_proj_bias_loaded_ = false;
 };
 TORCH_MODULE(CLIPAttention);
 
 class CLIPEncoderLayerImpl : public torch::nn::Module {
  public:
-  CLIPEncoderLayerImpl(const ModelContext& context) {
+  explicit CLIPEncoderLayerImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     self_attn_ = register_module("self_attn", CLIPAttention(context));
     layer_norm1_ = register_module(
         "layer_norm1",
         torch::nn::LayerNorm(
-            torch::nn::LayerNormOptions({model_args.clip_hidden_size()})
+            torch::nn::LayerNormOptions({model_args.mm_hidden_size()})
                 .elementwise_affine(true)
-                .eps(model_args.clip_layer_norm_eps())));
+                .eps(model_args.mm_layer_norm_eps())));
     layer_norm2_ = register_module(
         "layer_norm2",
         torch::nn::LayerNorm(
-            torch::nn::LayerNormOptions({model_args.clip_hidden_size()})
+            torch::nn::LayerNormOptions({model_args.mm_hidden_size()})
                 .elementwise_affine(true)
-                .eps(model_args.clip_layer_norm_eps())));
+                .eps(model_args.mm_layer_norm_eps())));
     layer_norm1_->weight.set_data(layer_norm1_->weight.to(options));
     layer_norm1_->bias.set_data(layer_norm1_->bias.to(options));
     layer_norm2_->weight.set_data(layer_norm2_->weight.to(options));
@@ -520,40 +443,22 @@ class CLIPEncoderLayerImpl : public torch::nn::Module {
 
   void load_state_dict(const StateDict& state_dict) {
     self_attn_->load_state_dict(state_dict.get_dict_with_prefix("self_attn."));
-
-    const auto& layer_norm1_weight =
-        state_dict.get_tensor("layer_norm1.weight");
-    if (layer_norm1_weight.defined()) {
-      DCHECK_EQ(layer_norm1_weight.sizes(), layer_norm1_->weight.sizes())
-          << "layer_norm1 weight size mismatch";
-      layer_norm1_->weight.data().copy_(layer_norm1_weight);
-      layer_norm1_weight_loaded_ = true;
-    }
-
-    const auto layer_norm1_bias = state_dict.get_tensor("layer_norm1.bias");
-    if (layer_norm1_bias.defined()) {
-      DCHECK_EQ(layer_norm1_bias.sizes(), layer_norm1_->bias.sizes())
-          << "layer_norm1 bias size mismatch";
-      layer_norm1_->bias.data().copy_(layer_norm1_bias);
-      layer_norm1_bias_loaded_ = true;
-    }
-
-    const auto layer_norm2_weight = state_dict.get_tensor("layer_norm2.weight");
-    if (layer_norm2_weight.defined()) {
-      DCHECK_EQ(layer_norm2_weight.sizes(), layer_norm2_->weight.sizes())
-          << "layer_norm2 weight size mismatch";
-      layer_norm2_->weight.data().copy_(layer_norm2_weight);
-      layer_norm2_weight_loaded_ = true;
-    }
-
-    const auto layer_norm2_bias = state_dict.get_tensor("layer_norm2.bias");
-    if (layer_norm2_bias.defined()) {
-      DCHECK_EQ(layer_norm2_bias.sizes(), layer_norm2_->bias.sizes())
-          << "layer_norm2 bias size mismatch";
-      layer_norm2_->bias.data().copy_(layer_norm2_bias);
-      layer_norm2_bias_loaded_ = true;
-    }
-
+    weight::load_weight(state_dict,
+                        "layer_norm1.weight",
+                        layer_norm1_->weight,
+                        layer_norm1_weight_loaded_);
+    weight::load_weight(state_dict,
+                        "layer_norm1.bias",
+                        layer_norm1_->bias,
+                        layer_norm1_bias_loaded_);
+    weight::load_weight(state_dict,
+                        "layer_norm2.weight",
+                        layer_norm2_->weight,
+                        layer_norm2_weight_loaded_);
+    weight::load_weight(state_dict,
+                        "layer_norm2.bias",
+                        layer_norm2_->bias,
+                        layer_norm2_bias_loaded_);
     mlp_->load_state_dict(state_dict.get_dict_with_prefix("mlp."));
   }
 
@@ -571,26 +476,26 @@ class CLIPEncoderLayerImpl : public torch::nn::Module {
   }
 
  private:
-  bool layer_norm1_weight_loaded_{false};
-  bool layer_norm1_bias_loaded_{false};
-  bool layer_norm2_weight_loaded_{false};
-  bool layer_norm2_bias_loaded_{false};
+  bool layer_norm1_weight_loaded_ = false;
+  bool layer_norm1_bias_loaded_ = false;
+  bool layer_norm2_weight_loaded_ = false;
+  bool layer_norm2_bias_loaded_ = false;
 
-  torch::nn::LayerNorm layer_norm1_{nullptr};
-  torch::nn::LayerNorm layer_norm2_{nullptr};
-  CLIPAttention self_attn_{nullptr};
-  CLIPMLP mlp_{nullptr};
+  torch::nn::LayerNorm layer_norm1_ = nullptr;
+  torch::nn::LayerNorm layer_norm2_ = nullptr;
+  CLIPAttention self_attn_ = nullptr;
+  CLIPMLP mlp_ = nullptr;
 };
 TORCH_MODULE(CLIPEncoderLayer);
 
 class CLIPEncoderImpl : public torch::nn::Module {
  public:
-  CLIPEncoderImpl(const ModelContext& context) {
+  explicit CLIPEncoderImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.clip_num_hidden_layers());
-    for (int32_t i = 0; i < model_args.clip_num_hidden_layers(); i++) {
+    layers_.reserve(model_args.mm_num_hidden_layers());
+    for (int32_t i = 0; i < model_args.mm_num_hidden_layers(); i++) {
       auto block = CLIPEncoderLayer(context);
       layers_.push_back(block);
       blocks_->push_back(block);
@@ -641,32 +546,32 @@ class CLIPEncoderImpl : public torch::nn::Module {
   }
 
  private:
-  torch::nn::ModuleList blocks_{nullptr};
-  std::vector<CLIPEncoderLayer> layers_;
+  torch::nn::ModuleList blocks_ = nullptr;
+  std::vector<CLIPEncoderLayer> layers_ = {};
 };
 TORCH_MODULE(CLIPEncoder);
 
 class CLIPTextTransformerImpl : public torch::nn::Module {
  public:
-  CLIPTextTransformerImpl(const ModelContext& context) {
+  explicit CLIPTextTransformerImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     embeddings_ = register_module("embeddings", CLIPTextEmbedding(context));
     final_layer_norm_ = register_module(
         "final_layer_norm",
         torch::nn::LayerNorm(
-            torch::nn::LayerNormOptions({model_args.clip_hidden_size()})
+            torch::nn::LayerNormOptions({model_args.mm_hidden_size()})
                 .elementwise_affine(true)
-                .eps(model_args.clip_layer_norm_eps())));
+                .eps(model_args.mm_layer_norm_eps())));
     final_layer_norm_->weight.set_data(final_layer_norm_->weight.to(options));
     final_layer_norm_->bias.set_data(final_layer_norm_->bias.to(options));
     encoder_ = register_module("encoder", CLIPEncoder(context));
-    eos_token_id = model_args.clip_eos_token_id();
+    eos_token_id = model_args.eos_token_id();
   }
 
   torch::Tensor forward(const torch::Tensor& input_ids) {
     if (!input_ids.defined()) {
-      throw std::runtime_error("You have to specify input_ids");
+      LOG(FATAL) << "input_ids is undefined.";
     }
     auto input_shape = input_ids.sizes();
     auto reshaped_input_ids = input_ids.view({-1, input_shape.back()});
@@ -685,25 +590,14 @@ class CLIPTextTransformerImpl : public torch::nn::Module {
     embeddings_->load_state_dict(
         state_dict.get_dict_with_prefix("embeddings."));
     encoder_->load_state_dict(state_dict.get_dict_with_prefix("encoder."));
-
-    const auto final_layer_norm_weight =
-        state_dict.get_tensor("final_layer_norm.weight");
-    if (final_layer_norm_weight.defined()) {
-      DCHECK_EQ(final_layer_norm_weight.sizes(),
-                final_layer_norm_->weight.sizes())
-          << "final_layer_norm weight size mismatch";
-      final_layer_norm_->weight.data().copy_(final_layer_norm_weight);
-      final_layer_norm_weight_loaded_ = true;
-    }
-
-    const auto final_layer_norm_bias =
-        state_dict.get_tensor("final_layer_norm.bias");
-    if (final_layer_norm_bias.defined()) {
-      DCHECK_EQ(final_layer_norm_bias.sizes(), final_layer_norm_->bias.sizes())
-          << "final_layer_norm bias size mismatch";
-      final_layer_norm_->bias.data().copy_(final_layer_norm_bias);
-      final_layer_norm_bias_loaded_ = true;
-    }
+    weight::load_weight(state_dict,
+                        "final_layer_norm.weight",
+                        final_layer_norm_->weight,
+                        final_layer_norm_weight_loaded_);
+    weight::load_weight(state_dict,
+                        "final_layer_norm.bias",
+                        final_layer_norm_->bias,
+                        final_layer_norm_bias_loaded_);
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
@@ -717,20 +611,20 @@ class CLIPTextTransformerImpl : public torch::nn::Module {
 
  private:
   int64_t eos_token_id;
-  bool final_layer_norm_weight_loaded_{false};
-  bool final_layer_norm_bias_loaded_{false};
-  CLIPTextEmbedding embeddings_{nullptr};
-  CLIPEncoder encoder_{nullptr};
-  torch::nn::LayerNorm final_layer_norm_{nullptr};
+  bool final_layer_norm_weight_loaded_ = false;
+  bool final_layer_norm_bias_loaded_ = false;
+  CLIPTextEmbedding embeddings_ = nullptr;
+  CLIPEncoder encoder_ = nullptr;
+  torch::nn::LayerNorm final_layer_norm_ = nullptr;
 };
 TORCH_MODULE(CLIPTextTransformer);
 
 class CLIPTextModelImpl : public torch::nn::Module {
  public:
-  CLIPTextModelImpl(const ModelContext& context) {
+  explicit CLIPTextModelImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    eos_token_id = model_args.clip_eos_token_id();
+    eos_token_id = model_args.eos_token_id();
     transformer_ = register_module("transformer", CLIPTextTransformer(context));
   }
 
@@ -777,26 +671,22 @@ class CLIPTextModelImpl : public torch::nn::Module {
 
  private:
   int64_t eos_token_id;
-  CLIPTextTransformer transformer_{nullptr};
+  CLIPTextTransformer transformer_ = nullptr;
 };
 TORCH_MODULE(CLIPTextModel);
 
 REGISTER_MODEL_ARGS(CLIPTextModel, [&] {
   LOAD_ARG_OR(dtype, "torch_dtype", "bfloat16");
-  LOAD_ARG_OR(clip_vocab_size, "vocab_size", 49408);
-  LOAD_ARG_OR(clip_hidden_size, "hidden_size", 768);
-  LOAD_ARG_OR(clip_intermediate_size, "intermediate_size", 3072);
-  LOAD_ARG_OR(clip_projection_dim, "projection_dim", 768);
-  LOAD_ARG_OR(clip_num_hidden_layers, "num_hidden_layers", 12);
-  LOAD_ARG_OR(clip_num_attention_heads, "num_attention_heads", 12);
-  LOAD_ARG_OR(clip_max_position_embeddings, "max_position_embeddings", 77);
-  LOAD_ARG_OR(clip_hidden_act, "hidden_act", "quick_gelu");
-  LOAD_ARG_OR(clip_layer_norm_eps, "layer_norm_eps", 1e-5f);
-  LOAD_ARG_OR(clip_initializer_range, "initializer_range", 0.02f);
-  LOAD_ARG_OR(clip_initializer_factor, "initializer_factor", 1.0f);
-  LOAD_ARG_OR(clip_pad_token_id, "pad_token_id", 1);
-  LOAD_ARG_OR(clip_bos_token_id, "bos_token_id", 0);
-  LOAD_ARG_OR(clip_eos_token_id, "eos_token_id", 2);
-  LOAD_ARG_OR(clip_head_dim, "head_dim", 64);
+  LOAD_ARG_OR(vocab_size, "vocab_size", 49408);
+  LOAD_ARG_OR(mm_hidden_size, "hidden_size", 768);
+  LOAD_ARG_OR(mm_intermediate_size, "intermediate_size", 3072);
+  LOAD_ARG_OR(mm_projection_dim, "projection_dim", 768);
+  LOAD_ARG_OR(mm_num_hidden_layers, "num_hidden_layers", 12);
+  LOAD_ARG_OR(mm_num_attention_heads, "num_attention_heads", 12);
+  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 77);
+  LOAD_ARG_OR(mm_hidden_act, "hidden_act", "quick_gelu");
+  LOAD_ARG_OR(mm_layer_norm_eps, "layer_norm_eps", 1e-5f);
+  LOAD_ARG_OR(eos_token_id, "eos_token_id", 2);
+  LOAD_ARG_OR(mm_head_dim, "head_dim", 64);
 });
 }  // namespace xllm

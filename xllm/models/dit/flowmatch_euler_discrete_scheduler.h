@@ -1,3 +1,18 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
 #pragma once
 #include <torch/torch.h>
 
@@ -14,28 +29,19 @@
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
-#include "processors/input_processor.h"
-#include "processors/pywarpper_image_processor.h"
 
 namespace xllm {
-
-struct FlowMatchEulerDiscreteSchedulerOutput {
-  torch::Tensor prev_sample;
-  explicit FlowMatchEulerDiscreteSchedulerOutput(torch::Tensor sample)
-      : prev_sample(std::move(sample)) {}
-};
-
 class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
  public:
   explicit FlowMatchEulerDiscreteSchedulerImpl(const ModelContext& context)
       : args_(context.get_model_args()) {
-    num_train_timesteps_ = args_.scheduler_num_train_timesteps();
-    shift_ = args_.scheduler_shift();
-    use_dynamic_shifting_ = args_.scheduler_use_dynamic_shifting();
-    base_shift_ = args_.scheduler_base_shift();
-    max_shift_ = args_.scheduler_max_shift(),
-    base_image_seq_len_ = args_.scheduler_base_image_seq_len();
-    max_image_seq_len_ = args_.scheduler_max_image_seq_len();
+    num_train_timesteps_ = args_.num_train_timesteps();
+    shift_ = args_.shift();
+    use_dynamic_shifting_ = args_.use_dynamic_shifting();
+    base_shift_ = args_.base_shift();
+    max_shift_ = args_.max_shift(),
+    base_image_seq_len_ = args_.base_image_seq_len();
+    max_image_seq_len_ = args_.max_image_seq_len();
     shift_terminal_ = std::nullopt;
     time_shift_type_ = "exponential";
     std::vector<float> timesteps_vec(num_train_timesteps_);
@@ -177,8 +183,6 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
       sigmas_tensor = convert_to_karras(sigmas_tensor, num_steps);
     } else if (use_exponential_sigmas_) {
       sigmas_tensor = convert_to_exponential(sigmas_tensor, num_steps);
-    } else if (use_beta_sigmas_) {
-      sigmas_tensor = convert_to_beta(sigmas_tensor, num_steps);
     }
 
     sigmas_tensor = sigmas_tensor.to(device).to(torch::kFloat32);
@@ -204,7 +208,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     begin_index_ = std::nullopt;
   }
 
-  FlowMatchEulerDiscreteSchedulerOutput step(
+  torch::Tensor step(
       const torch::Tensor& model_output,
       const torch::Tensor& timestep,
       const torch::Tensor& sample,
@@ -262,7 +266,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
     if (!per_token_timesteps.has_value()) {
       prev_sample = prev_sample.to(model_output.dtype());
     }
-    return FlowMatchEulerDiscreteSchedulerOutput(prev_sample);
+    return prev_sample;
   }
 
   std::optional<int> step_index() const { return step_index_; }
@@ -271,51 +275,7 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   const torch::Tensor& sigmas() const { return sigmas_; }
   int size() const { return num_train_timesteps_; }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    // 1. Test params (can be passed in via input_params, or hard-coded for
-    // debugging purposes.)
-    const int num_inference_steps = 50;
-    const float mu = 0.5f;              // Dynamic offset parameter
-    const bool use_stochastic = false;  // Test the deterministic mode first.
-
-    // 2. config the scheduler
-    this->set_timesteps(
-        num_inference_steps, tokens.device(), /*sigmas=*/std::nullopt, mu);
-    this->set_begin_index(0);
-
-    // 3. Generate test inputs (with fixed random seed to ensure
-    // reproducibility)
-    torch::manual_seed(42);  // Fixed random seed for reproducibility
-    torch::Tensor sample = torch::randn(
-        {1, 3, 32, 32}, torch::dtype(torch::kFloat32));  // Mock sample
-    torch::Tensor model_output =
-        torch::randn_like(sample);                  // Mock model output
-    torch::Tensor timestep = this->timesteps()[0];  // Initial timestep
-    model_output =
-        model_output.to(timestep.device())
-            .to(torch::kFloat32);  // Ensure same device and dtype as sample
-    sample =
-        sample.to(timestep.device())
-            .to(torch::kFloat32);  // Ensure same device and dtype as timestep
-    // 4. Execute one step of the scheduler calculation
-    auto output = this->step(model_output,
-                             timestep,
-                             sample,
-                             0.0f,
-                             0.0f,
-                             std::numeric_limits<float>::infinity(),
-                             1.0f,
-                             /*generator=*/std::nullopt,
-                             /*per_token_timesteps=*/std::nullopt);
-
-    return output.prev_sample;
-  }
-
  private:
-  // private tool function
   torch::Tensor convert_to_karras(const torch::Tensor& in_sigmas,
                                   int num_inference_steps) {
     float sigma_min = sigma_min_;
@@ -361,15 +321,6 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
         .clone();
   }
 
-  torch::Tensor convert_to_beta(const torch::Tensor& in_sigmas,
-                                int num_inference_steps,
-                                float alpha = 0.6f,
-                                float beta = 0.6f) {
-    // NOTE: Actual usage requires the `beta distribution` implementation from
-    // scipy, this is just for illustration.
-    LOG(FATAL) << "Beta sigmas implementation requires scipy integration";
-  }
-
   torch::Tensor time_shift_exponential(float mu,
                                        float sigma,
                                        const torch::Tensor& t) {
@@ -403,8 +354,6 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   }
 
  private:
-  // Configuration parameters (member variables of the original config
-  // structure)
   int num_train_timesteps_;
   float shift_;
   bool use_dynamic_shifting_;
@@ -416,7 +365,6 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
   bool invert_sigmas_ = false;
   bool use_karras_sigmas_ = false;
   bool use_exponential_sigmas_ = false;
-  bool use_beta_sigmas_ = false;
   bool stochastic_sampling_ = false;
   std::string time_shift_type_;
 
@@ -435,12 +383,12 @@ class FlowMatchEulerDiscreteSchedulerImpl : public torch::nn::Module {
 TORCH_MODULE(FlowMatchEulerDiscreteScheduler);
 
 REGISTER_MODEL_ARGS(FlowMatchEulerDiscreteScheduler, [&] {
-  LOAD_ARG_OR(scheduler_num_train_timesteps, "num_train_timesteps", 1000);
-  LOAD_ARG_OR(scheduler_shift, "shift", 1);
-  LOAD_ARG_OR(scheduler_use_dynamic_shifting, "use_dynamic_shifting", true);
-  LOAD_ARG_OR(scheduler_base_shift, "base_shift", 0.5f);
-  LOAD_ARG_OR(scheduler_max_shift, "max_shift", 1.15f);
-  LOAD_ARG_OR(scheduler_base_image_seq_len, "base_image_seq_len", 256);
-  LOAD_ARG_OR(scheduler_max_image_seq_len, "max_image_seq_len", 4096);
+  LOAD_ARG_OR(num_train_timesteps, "num_train_timesteps", 1000);
+  LOAD_ARG_OR(shift, "shift", 1);
+  LOAD_ARG_OR(use_dynamic_shifting, "use_dynamic_shifting", true);
+  LOAD_ARG_OR(base_shift, "base_shift", 0.5f);
+  LOAD_ARG_OR(max_shift, "max_shift", 1.15f);
+  LOAD_ARG_OR(base_image_seq_len, "base_image_seq_len", 256);
+  LOAD_ARG_OR(max_image_seq_len, "max_image_seq_len", 4096);
 });
 }  // namespace xllm

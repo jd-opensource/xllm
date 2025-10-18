@@ -24,6 +24,7 @@ void load_weight(const StateDict& state_dict,
                  const std::string& name,
                  torch::Tensor& weight,
                  bool& weight_is_loaded) {
+  torch::NoGradGuard no_grad;
   const auto tensor = state_dict.get_tensor(name);
   if (tensor.defined()) {
     CHECK(!weight_is_loaded)
