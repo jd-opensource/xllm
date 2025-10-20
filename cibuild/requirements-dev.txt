@@ -1,5 +1,0 @@
--r requirements.txt
-setuptools
-wheel
-pytest
-jinja2

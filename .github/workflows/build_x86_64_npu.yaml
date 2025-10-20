@@ -1,0 +1,54 @@
+name: xLLM Build x86_64 NPU
+
+on: 
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+      - 'cibuild/**'
+      - 'cmake/**'
+      - 'docs/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - '*.md'
+      - '*.txt'
+      - '*.yml'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - '.github/**'
+      - 'cibuild/**'
+      - 'cmake/**'
+      - 'docs/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - '*.md'
+      - '*.txt'
+      - '*.yml'
+
+env:
+  JOBNAME: xllm-x86_64-npu-cibuild-${{ github.run_id }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+    runs-on: [self-hosted]
+    steps:
+    - name: Checkout Code
+      timeout-minutes: 5
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Build
+      if: ${{ success() }}
+      timeout-minutes: 60
+      run: |
+        chmod +x ./cibuild/build_npu.sh
+        bash cibuild/build_npu.sh 'pip install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple; python setup.py build; python setup.py test'

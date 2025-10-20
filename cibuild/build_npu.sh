@@ -23,7 +23,7 @@ RUN_OPTS=(
   -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi
   -v /usr/local/sbin/:/usr/local/sbin/
   -v /export/home:/export/home
-  -v /export/home/vcpkg-cache:/root/.cache/vcpkg
+  -v /export/home/npu_vcpkg_cache:/root/.cache/vcpkg # cached vcpkg installed dir
   -w /export/home
 )
 

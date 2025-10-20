@@ -1,4 +1,4 @@
-name: xLLM Build x86_64
+name: xLLM Build x86_64 MLU
 
 on: 
   workflow_dispatch:
@@ -29,8 +29,7 @@ on:
       - '*.yml'
 
 env:
-  IMAGE: 9d0b6f5a80f6
-  JOBNAME: xllm-x86_64-cibuild-${{ github.run_id }}
+  JOBNAME: xllm-x86_64-mlu-cibuild-${{ github.run_id }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -51,5 +50,5 @@ jobs:
       if: ${{ success() }}
       timeout-minutes: 60
       run: |
-        chmod +x ./cibuild/build.sh
-        bash cibuild/build.sh 'pip install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple; VCPKG_INSTALLED_DIR=/export/home/vcpkg_installed python setup.py build; VCPKG_INSTALLED_DIR=/export/home/vcpkg_installed python setup.py test'
+        chmod +x ./cibuild/build_mlu.sh
+        bash cibuild/build_mlu.sh 'pip install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple; VCPKG_ROOT=/export/home/mlu_vcpkg_src python setup.py build --device mlu'

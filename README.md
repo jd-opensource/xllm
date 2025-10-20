@@ -86,12 +86,15 @@ limitations under the License. -->
 │   │   ├── framework/             # code for execution orchestration
 │   │   ├── kernels/               # adaption for npu kernels adaption
 │   │   ├── layers/                # model layers impl
+│   │   ├── platform/              # adaption for various platform
 │   │   ├── runtime/               # code for worker and executor
 │   │   ├── scheduler/             # code for batch and pd scheduler
 │   │   └── util/
+│   ├── function_call              # code for tool call parser
 │   ├── models/                    # models impl
 │   ├── processors/                # code for vlm pre-processing
 │   ├── proto/                     # communication protocol
+│   ├── pybind/                    # code for python bind
 |   └── server/                    # xLLM server
 ├── examples/                      # examples of calling xLLM
 ├── tools/                         # code for npu time generations
@@ -147,12 +150,6 @@ The compilation depends on [vcpkg](https://github.com/microsoft/vcpkg). The Dock
 git clone https://gitcode.com/xLLM-AI/vcpkg.git
 cd vcpkg && git checkout ffc42e97c866ce9692f5c441394832b86548422c
 export VCPKG_ROOT=/your/path/to/vcpkg
-```
-Install python dependencies:
-```bash
-cd xllm
-pip install -r cibuild/requirements-dev.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
-pip install --upgrade setuptools wheel
 ```
 
 #### Compilation
