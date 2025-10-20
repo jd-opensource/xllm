@@ -177,18 +177,19 @@ message ForwardInput {
   repeated Embeddings embeds = 23;
   uint32 prefill_seq_len = 24;
   repeated int32 embedding_ids = 25;
-  EplbInfo eplb_info =26;
-  repeated CacheBlockInfo async_copy_out_blocks = 27;
-  repeated CacheBlockInfo copy_out_blocks = 28;
-  repeated CacheBlockInfo copy_in_blocks = 29;
-  repeated CacheBlockInfo swap_blocks = 30;
+  repeated int32 extra_token_ids = 26;
+  EplbInfo eplb_info =27;
+  repeated CacheBlockInfo async_copy_out_blocks = 28;
+  repeated CacheBlockInfo copy_out_blocks = 29;
+  repeated CacheBlockInfo copy_in_blocks = 30;
+  repeated CacheBlockInfo swap_blocks = 31;
   // block copy kernel
-  repeated int32 src_block_indices = 31;
-  repeated int32 dst_block_indices = 32;
-  repeated int32 cum_sum = 33;
+  repeated int32 src_block_indices = 32;
+  repeated int32 dst_block_indices = 33;
+  repeated int32 cum_sum = 34;
   // for continuous kvcache
-  repeated int64 new_cache_slot_offsets = 34;
-  repeated int64 kv_cache_start_offsets = 35;
+  repeated int64 new_cache_slot_offsets = 35;
+  repeated int64 kv_cache_start_offsets = 36;
 }
 
  message BatchedForwardInputs {

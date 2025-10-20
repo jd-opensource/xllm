@@ -70,7 +70,8 @@ struct ModelInputParams {
     params.mm_data = MMData::to(mm_data, device);
     params.dp_global_token_nums = dp_global_token_nums;
     params.prefill_seq_len = prefill_seq_len;
-    params.embedding_ids = embedding_ids;
+    params.embedding_ids = std::move(embedding_ids);
+    params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
 #if defined(USE_NPU)
     params.layer_synchronizer = layer_synchronizer;
@@ -157,6 +158,10 @@ struct ModelInputParams {
 
   // embedding ids of each sequence
   std::vector<int32_t> embedding_ids;
+
+  // chunked prefill case of speculative decoding
+  // extra token ids for each sequence, and -1 for last chunk
+  std::vector<int32_t> extra_token_ids;
 
   // copy in / copy out
   std::vector<CacheBlockInfo> async_copy_out_blocks;

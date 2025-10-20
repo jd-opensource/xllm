@@ -248,6 +248,7 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   }
   kv_cache_cap.slot_size = slot_size;
+  kv_cache_cap.n_layers = args_.n_layers();
 
   if (!FLAGS_enable_continuous_kvcache) {
     // compute kv cache n_blocks
@@ -271,9 +272,10 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
 
 bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   LOG(INFO) << "kv cache capacity: "
-            << "bytes: " << kv_cache_cap.cache_size_in_bytes
+            << readable_size(kv_cache_cap.cache_size_in_bytes)
             << ", blocks: " << kv_cache_cap.n_blocks
-            << ", slot_size: " << kv_cache_cap.slot_size;
+            << ", slot_size: " << kv_cache_cap.slot_size
+            << ", n_layers: " << kv_cache_cap.n_layers;
 
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no memory for kv cache";
   const int32_t block_size = options_.block_size();

@@ -230,6 +230,9 @@ void BatchInputBuilder::process_sequences_multithreaded(uint32_t start_idx,
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
+    state_.extra_token_ids.insert(state_.extra_token_ids.end(),
+                                  state.extra_token_ids.begin(),
+                                  state.extra_token_ids.end());
     state_.transfer_kv_infos.insert(state_.transfer_kv_infos.end(),
                                     state.transfer_kv_infos.begin(),
                                     state.transfer_kv_infos.end());
@@ -305,7 +308,6 @@ void BatchInputBuilder::process_single_sequence(
   if (sequence->is_prefill_stage()) {
     state.prefill_seq_len++;
   }
-  state.embedding_ids.push_back(sequence->get_embedding_id());
 }
 
 void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
@@ -345,6 +347,16 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
 
     handle_sampling_parameters(
         sequence, j, seq_len, adjusted_token_to_count_map, state_ptr);
+  }
+
+  // Add extra token id
+  if (n_tokens == seq_len) {
+    // last chunk of prefill and decode
+    // add -1 as extra token id
+    state_.extra_token_ids.push_back(-1);
+    state_.embedding_ids.push_back(sequence->get_embedding_id());
+  } else {
+    state_.extra_token_ids.push_back(token_ids[seq_len]);
   }
 }
 
@@ -612,6 +624,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.prefill_seq_len = state_.prefill_seq_len;
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
+  raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
 
   if (FLAGS_enable_continuous_kvcache) {
     raw_forward_input.new_cache_slot_offsets =
