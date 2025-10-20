@@ -33,10 +33,14 @@ class FusedMoEImpl : public torch::nn::Module {
   FusedMoEImpl() = default;
   FusedMoEImpl(int num_experts,
                int top_k,
+               int num_expert_group,
+               int topk_group,
+               double route_scale,
                int hidden_size,
                int intermediate_size,
                int n_shared_experts,
                bool is_gated,
+               bool has_score_bias,
                bool has_bias,
                bool skip_bias_add,
                int renormalize,
@@ -58,15 +62,20 @@ class FusedMoEImpl : public torch::nn::Module {
  private:
   int num_experts_;
   int topk_;
+  int num_expert_group_;
+  int topk_group_;
+  double route_scale_;
   int hidden_size_;
   int intermediate_size_;
   int n_shared_experts_;
   bool is_gated_;
+  bool has_score_bias_;
   bool has_bias_;
   bool skip_bias_add_;
   int renormalize_;
   std::string hidden_act_;
   std::string scoring_func_;
+  bool is_smoothquant_;
 
   int num_experts_per_rank_;
   int start_expert_id_;
@@ -74,6 +83,7 @@ class FusedMoEImpl : public torch::nn::Module {
   ReplicatedLinear gate_{nullptr};
   DenseMLP shared_experts_{nullptr};
 
+  QuantArgs quant_args_;
   ParallelArgs parallel_args_;
   torch::TensorOptions options_;
   ProcessGroup* tp_pg_;
@@ -83,6 +93,12 @@ class FusedMoEImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(w3);
   DEFINE_FUSED_WEIGHT(w2);
   DEFINE_WEIGHT(e_score_correction_bias);
+  DEFINE_FUSED_WEIGHT(w13_scale);
+  DEFINE_FUSED_WEIGHT(w1_scale);
+  DEFINE_FUSED_WEIGHT(w3_scale);
+  DEFINE_FUSED_WEIGHT(w2_scale);
+  DEFINE_FUSED_WEIGHT(input_smooth);
+  DEFINE_FUSED_WEIGHT(act_smooth);
 
   void pack_params();
   torch::Tensor map_param_data(const std::vector<torch::Tensor>& param_list);
