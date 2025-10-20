@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "mlu_process_group.h"
 
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
+
 namespace {
 
 std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,

@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <torch_mlu/csrc/framework/distributed/process_group_cncl.hpp>
+
 #include "process_group.h"
 
 namespace xllm {

@@ -20,7 +20,8 @@ limitations under the License.
 
 #include <cstdint>
 
-#include "framework/parallel_state.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 
 namespace xllm {

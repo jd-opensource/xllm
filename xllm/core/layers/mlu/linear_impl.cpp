@@ -18,7 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
-#include "framework/parallel_state.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "kernels/mlu/torch_ops_api.h"
 
 namespace xllm {
