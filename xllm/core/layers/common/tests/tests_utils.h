@@ -32,11 +32,115 @@ namespace xllm {
 namespace layer {
 namespace test {
 
+// Mock Backend for testing - minimal implementation for tp=1 tests
+class MockBackend : public c10d::Backend {
+ public:
+  MockBackend(int rank, int world_size)
+      : c10d::Backend(rank, world_size), rank_(rank), world_size_(world_size) {}
+
+  c10::intrusive_ptr<c10d::Work> allreduce(
+      std::vector<at::Tensor>& tensors,
+      const c10d::AllreduceOptions& opts = c10d::AllreduceOptions()) override {
+    // Mock implementation - return a completed work
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
+    // Mock implementation - return a completed work
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> barrier(
+      const c10d::BarrierOptions& opts = c10d::BarrierOptions()) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> broadcast(
+      std::vector<at::Tensor>& tensors,
+      const c10d::BroadcastOptions& opts = c10d::BroadcastOptions()) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const c10d::ReduceOptions& opts = c10d::ReduceOptions()) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> allgather_coalesced(
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
+      const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> reduce_scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const c10d::ReduceScatterOptions& opts =
+          c10d::ReduceScatterOptions()) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const c10d::AllToAllOptions& opts = c10d::AllToAllOptions()) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const c10d::AllToAllOptions& opts = c10d::AllToAllOptions()) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> send(std::vector<at::Tensor>& tensors,
+                                      int dstRank,
+                                      int tag) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> recv(std::vector<at::Tensor>& tensors,
+                                      int srcRank,
+                                      int tag) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  c10::intrusive_ptr<c10d::Work> recvAnysource(std::vector<at::Tensor>& tensors,
+                                               int tag) override {
+    return c10::make_intrusive<c10d::Work>();
+  }
+
+  int getRank() const { return rank_; }
+
+  int getSize() const { return world_size_; }
+
+  void shutdown() override {
+    // Mock implementation - do nothing
+  }
+
+ private:
+  int rank_;
+  int world_size_;
+};
+
 // Mock ProcessGroup for testing
 class MockProcessGroup : public xllm::ProcessGroup {
  public:
-  MockProcessGroup(int rank, int world_size, const torch::Device& device)
-      : xllm::ProcessGroup(device) {}
+  MockProcessGroup(const torch::Device& device,
+                   int rank = 0,
+                   int world_size = 1)
+      : xllm::ProcessGroup(device) {
+    // Initialize pg_ with a mock backend for testing
+    pg_ = std::make_unique<MockBackend>(rank, world_size);
+  }
 
   void allreduce(torch::Tensor& input) override {
     // Mock implementation - do nothing for testing

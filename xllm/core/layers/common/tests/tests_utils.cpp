@@ -30,19 +30,21 @@ torch::Tensor CreateFullTensor(const std::vector<int64_t>& shape,
   return torch::full(shape, value, options);
 }
 
+// Supports both 2D and 3D input shapes
 torch::Tensor CreateCustomInput(const std::vector<int64_t>& shape,
                                 const std::vector<float>& values,
                                 const torch::TensorOptions& options) {
-  CHECK_EQ(values.size(), shape[0] * shape[1])
-      << "Values size must match tensor size";
+  // Only support 2D or 3D
+  CHECK(shape.size() == 2 || shape.size() == 3) << "Shape must be 2D or 3D";
+  int64_t numel = 1;
+  for (auto d : shape) numel *= d;
+  CHECK_EQ(values.size(), numel) << "Values size must match tensor size";
 
-  // Create tensor from values directly
-  auto tensor = torch::from_blob(const_cast<float*>(values.data()),
-                                 {shape[0], shape[1]},
-                                 torch::kFloat)
-                    .clone()
-                    .to(options);
-
+  // Create tensor from values directly with given shape
+  auto tensor =
+      torch::from_blob(const_cast<float*>(values.data()), shape, torch::kFloat)
+          .clone()
+          .to(options);
   return tensor;
 }
 
@@ -78,15 +80,20 @@ void VerifyPrecision(const torch::Tensor& actual_output,
   ASSERT_FALSE(expected_values.empty())
       << "Expected output not set. Call SetExpectedOutput() first.";
 
-  const int64_t batch_size = actual_output.size(0);
-  const int64_t hidden_size = actual_output.size(1);
+  // Support both 2D and 3D outputs
+  std::vector<int64_t> output_shape(actual_output.sizes().begin(),
+                                    actual_output.sizes().end());
+  int64_t numel = actual_output.numel();
 
-  ASSERT_EQ(expected_values.size(), batch_size * hidden_size)
-      << "Expected output size mismatch";
+  ASSERT_TRUE(output_shape.size() == 2 || output_shape.size() == 3)
+      << "Output tensor must be 2D or 3D";
+  ASSERT_EQ(expected_values.size(), numel)
+      << "Expected output size mismatch: expected " << expected_values.size()
+      << ", actual tensor numel " << numel;
 
-  // Create expected tensor from values
-  auto expected_tensor = CreateCustomInput(
-      {batch_size, hidden_size}, expected_values, actual_output.options());
+  // Create expected tensor from values and shape
+  auto expected_tensor =
+      CreateCustomInput(output_shape, expected_values, actual_output.options());
 
   LOG(INFO) << "Verifying precision with rtol=" << rtol << ", atol=" << atol;
   VerifyTensorClose(actual_output, expected_tensor, rtol, atol);
@@ -119,10 +126,10 @@ ParallelArgs CreateDefaultParallelArgs(
     std::unique_ptr<xllm::ProcessGroup>& mock_process_group) {
   // Create mock ProcessGroup for MLU testing
   mock_process_group = std::make_unique<MockProcessGroup>(
-      0, 1, torch::Device(c10::DeviceType::PrivateUse1, 0));
+      torch::Device(c10::DeviceType::PrivateUse1, 0));
 
   // Initialize ParallelArgs with mock ProcessGroup
-  ParallelArgs parallel_args(0, 1, 1, mock_process_group.get());
+  ParallelArgs parallel_args(0, 1, mock_process_group.get());
 
   // Set tp_group_ for MLU environment
   parallel_args.tp_group_ = mock_process_group.get();
