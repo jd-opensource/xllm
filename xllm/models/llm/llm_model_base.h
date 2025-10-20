@@ -238,36 +238,37 @@ class LlmModelImplBase : public torch::nn::Module {
 
       torch::Tensor attn_mask;
       if (model_type_ == "qwen2") {
-        torch::Tensor max_of_seq = torch::max(input_params[i].kv_seq_lens);
-        max_seq_len_ = FLAGS_enable_chunked_prefill
-                           ? std::max(max_of_seq.item<int>(), max_seq_len_)
-                           : 128;
+        max_seq_len_ =
+            FLAGS_enable_chunked_prefill
+                ? std::max(input_params[i].kv_max_seq_len, max_seq_len_)
+                : 128;
         attn_mask = attn_mask_.get_attn_mask(
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
       } else {
-        torch::Tensor max_of_seq = torch::max(input_params[i].kv_seq_lens);
-        max_seq_len_ = FLAGS_enable_chunked_prefill
-                           ? std::max(max_of_seq.item<int>(), max_seq_len_)
-                           : 128;
-        attn_mask = attn_mask_.get_attn_mask(
-            max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
-
+        max_seq_len_ =
+            FLAGS_enable_chunked_prefill
+                ? std::max(input_params[i].kv_max_seq_len, max_seq_len_)
+                : 128;
         if (FLAGS_enable_chunked_prefill) {
-          int batch_size = input_params[i].q_seq_lens_vec.size();
-          if (batch_size > 0) {
+          int num_sequences = input_params[i].num_sequences;
+          if (num_sequences > 0) {
             std::vector<torch::Tensor> req_mask_vec;
-            req_mask_vec.reserve(batch_size);
+            req_mask_vec.reserve(num_sequences);
 
-            for (int j = 0; j < batch_size; j++) {
-              int start = input_params[i].kv_seq_lens_vec[j] -
-                          input_params[i].q_seq_lens_vec[j];
-              int end = input_params[i].kv_seq_lens_vec[j];
-
-              auto req_mask_slice = attn_mask.slice(0, start, end);
-              req_mask_vec.emplace_back(req_mask_slice);
+            for (int j = 0; j < num_sequences; j++) {
+              auto mask =
+                  attn_mask_.gen_append_mask(input_params[i].q_seq_lens_vec[j],
+                                             input_params[i].kv_seq_lens_vec[j],
+                                             max_seq_len_,
+                                             cos_pos.dtype().toScalarType(),
+                                             cos_pos.device());
+              req_mask_vec.emplace_back(mask);
             }
             attn_mask = torch::cat(req_mask_vec, 0);
           }
+        } else {
+          attn_mask = attn_mask_.get_attn_mask(
+              max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
         }
       }
       cos_poss.push_back(std::move(cos_pos));

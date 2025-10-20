@@ -93,7 +93,8 @@ class Glm4MoeModelImpl : public torch::nn::Module {
                                            model_args.rope_theta(),
                                            options);
 
-    int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    // int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
@@ -143,12 +144,23 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     sin_pos = sin_pos.view(at::IntArrayRef{-1, 2, sin_pos.size(-1) / 2});
     torch::Tensor attn_mask;
     if (FLAGS_enable_chunked_prefill) {
-      int max_kv_seq = torch::max(input_params.kv_seq_lens).item<int>();
-      int max_q_seq = torch::max(input_params.q_seq_lens).item<int>();
-      attn_mask = attn_mask_.gen_append_mask(max_q_seq,
-                                             max_kv_seq,
-                                             cos_pos.dtype().toScalarType(),
-                                             cos_pos.device());
+      int max_kv_seq = input_params.kv_max_seq_len;
+      int num_sequences = input_params.num_sequences;
+      if (num_sequences > 0) {
+        std::vector<torch::Tensor> req_mask_vec;
+        req_mask_vec.reserve(num_sequences);
+
+        for (int j = 0; j < num_sequences; j++) {
+          auto mask =
+              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
+                                         input_params.kv_seq_lens_vec[j],
+                                         max_kv_seq,
+                                         cos_pos.dtype().toScalarType(),
+                                         cos_pos.device());
+          req_mask_vec.emplace_back(mask);
+        }
+        attn_mask = torch::cat(req_mask_vec, 0);
+      }
     } else {
       if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
         attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
