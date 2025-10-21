@@ -20,6 +20,7 @@ limitations under the License.
 #include <functional>
 
 #include "attention.h"
+#include "dense_mlp.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -29,7 +30,6 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "layers/rms_norm.h"
 #include "qwen3_attention.h"
-#include "qwen3_mlp.h"
 
 namespace xllm {
 namespace layer {
@@ -44,14 +44,13 @@ class Qwen3DecoderImpl : public torch::nn::Module {
 
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& positions,
-                        torch::Tensor& residual,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params);
 
  private:
   Qwen3Attention attention_{nullptr};
-  Qwen3MLP mlp_{nullptr};
+  DenseMLP mlp_{nullptr};
   RmsNorm input_norm_{nullptr};
   RmsNorm post_norm_{nullptr};
 };

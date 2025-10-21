@@ -63,7 +63,8 @@ RotaryEmbeddingImpl::RotaryEmbeddingImpl(int rotary_dim,
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
 }
 
-void RotaryEmbeddingImpl::forward(torch::Tensor& x,
+void RotaryEmbeddingImpl::forward(torch::Tensor& q,
+                                  torch::Tensor& k,
                                   const torch::Tensor& positions,
                                   const torch::Tensor& cu_query_lens,
                                   int max_query_len,
@@ -77,9 +78,13 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& x,
     discrete = true;
     position_ids = positions;
   }
-
-  tmo::torch_api::apply_rotary(x,
-                               x /* output */,
+  const int64_t T = q.size(0);
+  q = q.view({T, -1});
+  k = k.view({T, -1});
+  auto qk = torch::cat({q, k}, /*dim=*/-1);
+  qk = qk.view({T, -1, rotary_dim_});
+  tmo::torch_api::apply_rotary(qk,
+                               qk /* output */,
                                sin_,
                                cos_,
                                position_ids,
@@ -88,6 +93,10 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& x,
                                discrete,
                                false /* dynamic_ntk */,
                                max_query_len);
+  qk = qk.view({-1, q.size(-1) + k.size(-1)});
+  auto qk_vec = qk.split({q.size(-1), k.size(-1)}, /*dim=*/-1);
+  q = qk_vec[0];
+  k = qk_vec[1];
 }
 
 }  // namespace layer

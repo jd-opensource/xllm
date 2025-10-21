@@ -40,7 +40,6 @@ class Qwen3AttentionImpl : public torch::nn::Module {
 
   torch::Tensor forward(const torch::Tensor& positions,
                         const torch::Tensor& hidden_states,
-                        const torch::Tensor& residual,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache);
 

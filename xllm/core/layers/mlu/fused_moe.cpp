@@ -26,12 +26,14 @@ FusedMoEImpl::FusedMoEImpl(int num_experts,
                            int top_k,
                            int hidden_size,
                            int intermediate_size,
+                           int n_shared_experts,
                            bool is_gated,
                            bool has_bias,
                            bool skip_bias_add,
                            int renormalize,
                            const std::string& hidden_act,
                            const std::string& scoring_func,
+                           const std::string& topk_method,
                            const QuantArgs& quant_args,
                            const ParallelArgs& parallel_args,
                            const torch::TensorOptions& options)
@@ -39,6 +41,7 @@ FusedMoEImpl::FusedMoEImpl(int num_experts,
       topk_(top_k),
       hidden_size_(hidden_size),
       intermediate_size_(intermediate_size),
+      n_shared_experts_(n_shared_experts),
       is_gated_(is_gated),
       has_bias_(has_bias),
       skip_bias_add_(skip_bias_add),
@@ -67,27 +70,50 @@ FusedMoEImpl::FusedMoEImpl(int num_experts,
   w1_list_.resize(num_experts_per_rank_);
   w3_list_.resize(num_experts_per_rank_);
   w2_list_.resize(num_experts_per_rank_);
+
+  if (topk_method == "noaux_tc") {
+    e_score_correction_bias_ =
+        register_parameter("e_score_correction_bias",
+                           torch::empty({num_experts_}, options),
+                           /*requires_grad=*/false);
+  }
+
+  gate_ = register_module(
+      "gate_proj",
+      ReplicatedLinear(hidden_size_, num_experts_, false, quant_args, options));
+  if (n_shared_experts_ > 0) {
+    shared_experts_ =
+        register_module("shared_experts",
+                        DenseMLP(hidden_size_,
+                                 intermediate_size_ * n_shared_experts_,
+                                 is_gated_,
+                                 false,
+                                 quant_args,
+                                 parallel_args,
+                                 options));
+  }
 }
 
-torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
-                                    const torch::Tensor& router_logits,
-                                    std::optional<torch::Tensor> residual) {
-  std::optional<torch::Tensor> residual_ = std::nullopt;
-  if (residual.has_value() && ep_local_tp_rank_ == 0) {
-    residual_ = residual;
+torch::Tensor FusedMoEImpl::forward_expert(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& router_logits,
+    const std::optional<torch::Tensor>& shared_output) {
+  std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
+  if (e_score_correction_bias_.defined()) {
+    e_score_correction_bias = e_score_correction_bias_;
   }
-  pack_params();
   auto final_hidden_states = xllm::mlu::fused_moe(hidden_states,
                                                   router_logits,
                                                   w13_,
                                                   w2_,
                                                   std::nullopt,
                                                   std::nullopt,
-                                                  residual_,
+                                                  shared_output,
                                                   std::nullopt,
                                                   std::nullopt,
                                                   std::nullopt,
                                                   std::nullopt,
+                                                  e_score_correction_bias,
                                                   topk_,
                                                   renormalize_,
                                                   is_gated_,
@@ -98,6 +124,16 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
     final_hidden_states = parallel_state::reduce(final_hidden_states, tp_pg_);
   }
   return final_hidden_states;
+}
+
+torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states) {
+  pack_params();
+  std::optional<torch::Tensor> shared_output = std::nullopt;
+  if (n_shared_experts_ > 0) {
+    shared_output = shared_experts_(hidden_states);
+  }
+  auto router_logits = gate_(hidden_states);
+  return forward_expert(hidden_states, router_logits, shared_output);
 }
 
 void FusedMoEImpl::pack_params() {
@@ -122,11 +158,8 @@ torch::Tensor FusedMoEImpl::map_param_data(
 
   std::vector<torch::Tensor> flattened_params;
   for (const auto& param : param_list) {
-    if (!param.defined()) {
-      LOG(ERROR)
-          << "Parameter(w13/w2) is not defined, please check the state dict.";
-      assert(false);
-    }
+    CHECK(param.defined())
+        << "Parameter(w13/w2) is not defined, please check the state dict.";
     flattened_params.push_back(param.data().view(-1));
   }
   auto packed_param = torch::cat(flattened_params);
@@ -179,10 +212,14 @@ void FusedMoEImpl::load_w2(const StateDict& state_dict, int idx) {
   }
 }
 
-void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
-  if (state_dict.size() == 0) {
-    return;
+void FusedMoEImpl::load_e_score_correction_bias(const StateDict& state_dict) {
+  if (e_score_correction_bias_.defined() &&
+      !e_score_correction_bias_is_loaded_) {
+    LOAD_WEIGHT(e_score_correction_bias);
   }
+}
+
+void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   for (int idx = 0; idx < num_experts_per_rank_; idx++) {
     auto expert_state_dict =
         state_dict.get_dict_with_prefix(std::to_string(start_expert_id_ + idx));
@@ -190,6 +227,19 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
     load_w13(expert_state_dict.get_dict_with_prefix(".up_proj."), idx, false);
     load_w2(expert_state_dict.get_dict_with_prefix(".down_proj."), idx);
   }
+}
+
+void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
+  if (state_dict.size() == 0) {
+    return;
+  }
+  if (n_shared_experts_ > 0) {
+    shared_experts_->load_state_dict(
+        state_dict.get_dict_with_prefix("shared_experts."));
+  }
+  gate_->load_state_dict(state_dict.get_dict_with_prefix("gate."));
+  load_e_score_correction_bias(state_dict.get_dict_with_prefix("gate."));
+  load_experts(state_dict.get_dict_with_prefix("experts."));
 }
 
 }  // namespace layer

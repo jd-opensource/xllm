@@ -47,6 +47,7 @@ torch::Tensor fused_moe(
     const std::optional<torch::Tensor>& act_smooth,
     const std::optional<torch::Tensor>& w1_scale,
     const std::optional<torch::Tensor>& w2_scale,
+    const std::optional<torch::Tensor>& e_score_correction_bias,
     int topk,
     bool renormalize,
     bool gated,

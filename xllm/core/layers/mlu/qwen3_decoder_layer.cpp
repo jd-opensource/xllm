@@ -41,8 +41,14 @@ Qwen3DecoderImpl::Qwen3DecoderImpl(const ModelContext& context) {
       RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   // Initialize mlp
-  mlp_ = register_module(
-      "mlp", Qwen3MLP(model_args, quant_args, parallel_args, options));
+  mlp_ = register_module("mlp",
+                         DenseMLP(model_args.hidden_size(),
+                                  model_args.intermediate_size(),
+                                  true,
+                                  false,
+                                  quant_args,
+                                  parallel_args,
+                                  options));
 }
 
 void Qwen3DecoderImpl::load_state_dict(const StateDict& state_dict) {
@@ -56,23 +62,24 @@ void Qwen3DecoderImpl::load_state_dict(const StateDict& state_dict) {
 
 torch::Tensor Qwen3DecoderImpl::forward(torch::Tensor& x,
                                         torch::Tensor& positions,
-                                        torch::Tensor& residual,
                                         const AttentionMetadata& attn_metadata,
                                         KVCache& kv_cache,
                                         const ModelInputParams& input_params) {
   // Pre-attention norm
-  residual = x;
+  auto residual = x;
   x = input_norm_->forward(x);
 
   // Attention
-  x = attention_->forward(positions, x, residual, attn_metadata, kv_cache);
+  x = attention_->forward(positions, x, attn_metadata, kv_cache);
+  x = x + residual;
 
   // Post-attention norm
   residual = x;
   x = post_norm_->forward(x);
 
   // MLP forward
-  x = mlp_->forward(x, residual);
+  x = mlp_->forward(x);
+  x = x + residual;
 
   return x;
 }

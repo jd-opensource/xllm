@@ -97,11 +97,10 @@ Qwen3AttentionImpl::Qwen3AttentionImpl(const ModelArgs& args,
 torch::Tensor Qwen3AttentionImpl::forward(
     const torch::Tensor& positions,
     const torch::Tensor& hidden_states,
-    const torch::Tensor& residual,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache) {
   // 1. qkv projection
-  auto qkv = qkv_proj_->forward(hidden_states, std::nullopt);
+  auto qkv = qkv_proj_->forward(hidden_states);
 
   auto q = qkv.slice(/*dim=*/-1, 0, q_size_);
   auto k = qkv.slice(/*dim=*/-1, q_size_, q_size_ + kv_size_);
@@ -110,33 +109,26 @@ torch::Tensor Qwen3AttentionImpl::forward(
   const int64_t T = q.size(0);
 
   // 2. q-norm
-  q = q.view({T, num_heads_, head_dim_});
   q = q_norm_->forward(q);
-  q = q.view({T, q_size_});
 
   // 3. k-norm
-  k = k.view({T, num_kv_heads_, head_dim_});
   k = k_norm_->forward(k);
-  k = k.view({T, kv_size_});
 
   // 4. rope
-  auto qk = torch::cat({q, k}, /*dim=*/-1);
-  qk = qk.view({-1, num_heads_ + num_kv_heads_, head_dim_});
-  rotary_emb_->forward(qk,
+  rotary_emb_->forward(q,
+                       k,
                        positions,
                        attn_metadata.query_start_loc,
                        attn_metadata.max_query_len,
                        attn_metadata.is_prefill);
-  qk = qk.view({-1, q_size_ + kv_size_});
-  auto qk_vec = qk.split({q_size_, kv_size_}, /*dim=*/-1);
-  q = qk_vec[0];
-  k = qk_vec[1];
+  q = q.view({T, q_size_});
+  k = k.view({T, kv_size_});
 
   // 5. store k/v cache and do attention
   auto out = std::get<0>(attn_->forward(attn_metadata, q, k, v, kv_cache));
 
   // 6. output projection
-  return o_proj_->forward(out, residual);
+  return o_proj_->forward(out);
 }
 
 void Qwen3AttentionImpl::load_state_dict(const StateDict& state_dict) {

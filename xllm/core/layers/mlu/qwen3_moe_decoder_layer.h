@@ -20,6 +20,7 @@ limitations under the License.
 #include <functional>
 
 #include "attention.h"
+#include "dense_mlp.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -27,10 +28,9 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
+#include "fused_moe.h"
 #include "layers/rms_norm.h"
 #include "qwen3_attention.h"
-#include "qwen3_mlp.h"
-#include "qwen3_moe_mlp.h"
 
 namespace xllm {
 namespace layer {
@@ -51,8 +51,8 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module {
 
  private:
   Qwen3Attention attention_{nullptr};
-  Qwen3MLP mlp_{nullptr};
-  Qwen3MoeMLP moe_mlp_{nullptr};
+  DenseMLP mlp_{nullptr};
+  FusedMoE moe_mlp_{nullptr};
   RmsNorm input_norm_{nullptr};
   RmsNorm post_norm_{nullptr};
 };

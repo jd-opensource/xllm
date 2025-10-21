@@ -21,31 +21,34 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "fused_moe.h"
 #include "layers/linear.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3MoeMLPImpl : public torch::nn::Module {
+class DenseMLPImpl : public torch::nn::Module {
  public:
-  Qwen3MoeMLPImpl() = default;
-  Qwen3MoeMLPImpl(const ModelArgs& args,
-                  const QuantArgs& quant_args,
-                  const ParallelArgs& parallel_args,
-                  const torch::TensorOptions& options);
+  DenseMLPImpl() = default;
+  DenseMLPImpl(int hidden_size,
+               int intermediate_size,
+               bool is_gated,
+               bool has_bias,
+               const QuantArgs& quant_args,
+               const ParallelArgs& parallel_args,
+               const torch::TensorOptions& options);
 
-  torch::Tensor forward(const torch::Tensor& hidden_states,
-                        std::optional<torch::Tensor> residual);
+  torch::Tensor forward(const torch::Tensor& hidden_states);
 
   void load_state_dict(const StateDict& state_dict);
 
  private:
-  ReplicatedLinear gate_{nullptr};
-  FusedMoE expert_{nullptr};
+  bool is_gated_;
+  int64_t intermediate_size_;
+  ParallelArgs parallel_args_;
+  ColumnParallelLinear gate_up_proj_{nullptr};
+  RowParallelLinear down_proj_{nullptr};
 };
-
-TORCH_MODULE(Qwen3MoeMLP);
+TORCH_MODULE(DenseMLP);
 
 }  // namespace layer
 }  // namespace xllm

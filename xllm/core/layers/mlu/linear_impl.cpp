@@ -57,15 +57,11 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
   }
 }
 
-torch::Tensor ColumnParallelLinearImpl::forward(
-    torch::Tensor input,
-    std::optional<torch::Tensor> residual) {
-  namespace F = torch::nn::functional;
+torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
   input = input.to(device_);
-  auto beta = (residual.has_value() && rank_ == 0) ? 1.0 : 0.0;
   auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
                                               : std::nullopt;
-  auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
+  auto output = xllm::mlu::matmul(input, weight_, bias, std::nullopt, 1.0, 0.0);
   if (world_size_ > 1 && gather_output_) {
     output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
   }
@@ -143,17 +139,13 @@ QKVParallelLinearImpl::QKVParallelLinearImpl(
   }
 }
 
-torch::Tensor QKVParallelLinearImpl::forward(
-    torch::Tensor input,
-    std::optional<torch::Tensor> residual) {
-  namespace F = torch::nn::functional;
+torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
   input = input.to(device_);
-  auto beta = (residual.has_value() && rank_ == 0) ? 1.0 : 0.0;
   auto bias = (qkv_bias_.defined() && rank_ == 0)
                   ? std::optional<at::Tensor>(qkv_bias_)
                   : std::nullopt;
   auto output =
-      xllm::mlu::matmul(input, qkv_weight_, bias, residual, 1.0, beta);
+      xllm::mlu::matmul(input, qkv_weight_, bias, std::nullopt, 1.0, 0.0);
   if (world_size_ > 1 && gather_output_) {
     output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
   }
@@ -234,18 +226,15 @@ RowParallelLinearImpl::RowParallelLinearImpl(
   }
 }
 
-torch::Tensor RowParallelLinearImpl::forward(
-    torch::Tensor input,
-    std::optional<torch::Tensor> residual) {
+torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
   namespace F = torch::nn::functional;
   if (!input_is_parallelized_) {
     input = xllm::parallel_state::scatter(input, parallel_args_.tp_group_);
   }
 
-  auto beta = (residual.has_value() && rank_ == 0) ? 1.0 : 0.0;
   auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
                                               : std::nullopt;
-  auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
+  auto output = xllm::mlu::matmul(input, weight_, bias, std::nullopt, 1.0, 0.0);
 
   if (if_reduce_results_ && world_size_ > 1) {
     output = xllm::parallel_state::reduce(output, parallel_args_.tp_group_);
@@ -285,13 +274,10 @@ ReplicatedLinearImpl::ReplicatedLinearImpl(
   }
 }
 
-torch::Tensor ReplicatedLinearImpl::forward(
-    torch::Tensor input,
-    std::optional<torch::Tensor> residual) {
+torch::Tensor ReplicatedLinearImpl::forward(torch::Tensor input) {
   namespace F = torch::nn::functional;
-  auto beta = residual.has_value() ? 1.0 : 0.0;
   auto bias = bias_.defined() ? std::optional<at::Tensor>(bias_) : std::nullopt;
-  auto output = xllm::mlu::matmul(input, weight_, bias, residual, 1.0, beta);
+  auto output = xllm::mlu::matmul(input, weight_, bias, std::nullopt, 1.0, 0.0);
   return output;
 }
 

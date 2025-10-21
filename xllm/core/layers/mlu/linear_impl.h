@@ -33,9 +33,7 @@ class ParallelLinearImpl : public torch::nn::Module {
  public:
   ~ParallelLinearImpl() override = default;
 
-  virtual torch::Tensor forward(
-      torch::Tensor input,
-      std::optional<torch::Tensor> residual = std::nullopt) = 0;
+  virtual torch::Tensor forward(torch::Tensor input) = 0;
 
   virtual void load_state_dict(const StateDict& state_dict) = 0;
 
@@ -60,8 +58,7 @@ class ColumnParallelLinearImpl : public ParallelLinearImpl {
                            const ParallelArgs& parallel_args,
                            const torch::TensorOptions& options);
 
-  torch::Tensor forward(torch::Tensor input,
-                        std::optional<torch::Tensor> residual) override;
+  torch::Tensor forward(torch::Tensor input) override;
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) override;
@@ -113,8 +110,7 @@ class QKVParallelLinearImpl : public ParallelLinearImpl {
                         const ParallelArgs& parallel_args,
                         const torch::TensorOptions& options);
 
-  torch::Tensor forward(torch::Tensor input,
-                        std::optional<torch::Tensor> residual) override;
+  torch::Tensor forward(torch::Tensor input) override;
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) override;
@@ -177,8 +173,7 @@ class RowParallelLinearImpl : public ParallelLinearImpl {
                         const ParallelArgs& parallel_args,
                         const torch::TensorOptions& options);
 
-  torch::Tensor forward(torch::Tensor input,
-                        std::optional<torch::Tensor> residual) override;
+  torch::Tensor forward(torch::Tensor input) override;
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) override;
@@ -226,8 +221,7 @@ class ReplicatedLinearImpl : public ParallelLinearImpl {
                        const QuantArgs& quant_args,
                        const torch::TensorOptions& options);
 
-  torch::Tensor forward(torch::Tensor input,
-                        std::optional<torch::Tensor> residual) override;
+  torch::Tensor forward(torch::Tensor input) override;
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) override;

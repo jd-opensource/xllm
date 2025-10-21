@@ -11,8 +11,7 @@ cc_library(
     fuse_norm.h
     rotary_embedding.h
     fused_moe.h
-    qwen3_mlp.h
-    qwen3_moe_mlp.h
+    dense_mlp.h
     qwen3_decoder_layer.h
     qwen3_moe_decoder_layer.h
     linear_impl.h
@@ -23,8 +22,7 @@ cc_library(
     fuse_norm.cpp
     rotary_embedding.cpp
     fused_moe.cpp
-    qwen3_mlp.cpp
-    qwen3_moe_mlp.cpp
+    dense_mlp.cpp
     qwen3_decoder_layer.cpp
     qwen3_moe_decoder_layer.cpp
     linear_impl.cpp

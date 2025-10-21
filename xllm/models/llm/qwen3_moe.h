@@ -320,7 +320,7 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
     if (seleted_idxes.defined()) {
       h = h.index_select(/*dim=*/0, seleted_idxes);
     }
-    return lm_head_(h, c10::nullopt);
+    return lm_head_(h);
 #endif
   }
 

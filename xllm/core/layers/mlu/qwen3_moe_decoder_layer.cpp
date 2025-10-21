@@ -47,11 +47,31 @@ Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
        0) &&
       model_args.num_experts() > 0 &&
       (layer_id + 1) % model_args.decoder_sparse_step() == 0) {
-    moe_mlp_ = register_module(
-        "mlp", Qwen3MoeMLP(model_args, quant_args, parallel_args, options));
+    moe_mlp_ = register_module("mlp",
+                               FusedMoE(model_args.num_experts(),
+                                        model_args.num_experts_per_tok(),
+                                        model_args.hidden_size(),
+                                        model_args.moe_intermediate_size(),
+                                        0,
+                                        true,
+                                        false,
+                                        false,
+                                        model_args.norm_topk_prob(),
+                                        model_args.hidden_act(),
+                                        "softmax",
+                                        "",
+                                        quant_args,
+                                        parallel_args,
+                                        options));
   } else {
-    mlp_ = register_module(
-        "mlp", Qwen3MLP(model_args, quant_args, parallel_args, options));
+    mlp_ = register_module("mlp",
+                           DenseMLP(model_args.hidden_size(),
+                                    model_args.intermediate_size(),
+                                    true,
+                                    false,
+                                    quant_args,
+                                    parallel_args,
+                                    options));
   }
 }
 
@@ -79,7 +99,8 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(
   x = input_norm_(x);
 
   // Attention
-  x = attention_->forward(positions, x, residual, attn_metadata, kv_cache);
+  x = attention_->forward(positions, x, attn_metadata, kv_cache);
+  x = x + residual;
 
   // Post-attention norm
   residual = x;
@@ -87,10 +108,11 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(
 
   // MLP forward
   if (moe_mlp_) {
-    x = moe_mlp_(x, residual);
+    x = moe_mlp_(x);
   } else {
-    x = mlp_(x, residual);
+    x = mlp_(x);
   }
+  x = x + residual;
 
   return x;
 }

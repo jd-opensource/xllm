@@ -132,12 +132,10 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 #elif defined(USE_MLU)
   virtual torch::Tensor forward(torch::Tensor& x,
                                 torch::Tensor& positions,
-                                torch::Tensor& residual,
                                 const layer::AttentionMetadata& attn_metadata,
                                 KVCache& kv_cache,
                                 const ModelInputParams& input_params) {
-    return decoder_layer_(
-        x, positions, residual, attn_metadata, kv_cache, input_params);
+    return decoder_layer_(x, positions, attn_metadata, kv_cache, input_params);
   }
 #endif
 
@@ -307,10 +305,9 @@ class LlmModelImplBase : public torch::nn::Module {
 
     torch::Tensor h = torch::cat(hs, 0);
     torch::Tensor pos = torch::cat(positions, 0);
-    torch::Tensor residual;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer(h, pos, residual, attn_metadata, kv_caches[i], input_params[0]);
+      h = layer(h, pos, attn_metadata, kv_caches[i], input_params[0]);
     }
     return norm_(h);
 #endif
@@ -440,7 +437,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     if (seleted_idxes.defined()) {
       h = h.index_select(/*dim=*/0, seleted_idxes);
     }
-    return lm_head_(h, c10::nullopt);
+    return lm_head_(h);
 #endif
   }
 

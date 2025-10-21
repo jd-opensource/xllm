@@ -33,7 +33,8 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
                       bool interleaved,
                       const torch::TensorOptions& options);
 
-  void forward(torch::Tensor& x,
+  void forward(torch::Tensor& q,
+               torch::Tensor& k,
                const torch::Tensor& positions,
                const torch::Tensor& cu_query_lens,
                int max_query_len,

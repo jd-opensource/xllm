@@ -17,11 +17,13 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include "dense_mlp.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
+#include "layers/linear.h"
 namespace xllm {
 namespace layer {
 
@@ -32,20 +34,23 @@ class FusedMoEImpl : public torch::nn::Module {
                int top_k,
                int hidden_size,
                int intermediate_size,
+               int n_shared_experts,
                bool is_gated,
                bool has_bias,
                bool skip_bias_add,
                int renormalize,
                const std::string& hidden_act,
                const std::string& scoring_func,
+               const std::string& topk_method,
                const QuantArgs& quant_args,
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
 
-  torch::Tensor forward(const torch::Tensor& hidden_states,
-                        const torch::Tensor& router_logits,
-                        std::optional<torch::Tensor> residual);
-
+  torch::Tensor forward_expert(
+      const torch::Tensor& hidden_states,
+      const torch::Tensor& router_logits,
+      const std::optional<torch::Tensor>& shared_output);
+  torch::Tensor forward(const torch::Tensor& hidden_states);
   void load_state_dict(const StateDict& state_dict);
 
  private:
@@ -53,6 +58,7 @@ class FusedMoEImpl : public torch::nn::Module {
   int topk_;
   int hidden_size_;
   int intermediate_size_;
+  int n_shared_experts_;
   bool is_gated_;
   bool has_bias_;
   bool skip_bias_add_;
@@ -66,6 +72,9 @@ class FusedMoEImpl : public torch::nn::Module {
   int num_experts_per_rank_;
   int start_expert_id_;
 
+  ReplicatedLinear gate_{nullptr};
+  DenseMLP shared_experts_{nullptr};
+
   ParallelArgs parallel_args_;
   torch::TensorOptions options_;
   ProcessGroup* tp_pg_;
@@ -74,11 +83,14 @@ class FusedMoEImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(w1);
   DEFINE_FUSED_WEIGHT(w3);
   DEFINE_FUSED_WEIGHT(w2);
+  DEFINE_WEIGHT(e_score_correction_bias);
 
   void pack_params();
   torch::Tensor map_param_data(const std::vector<torch::Tensor>& param_list);
   void load_w13(const StateDict& state_dict, int idx, bool is_gated);
   void load_w2(const StateDict& state_dict, int idx);
+  void load_e_score_correction_bias(const StateDict& state_dict);
+  void load_experts(const StateDict& state_dict);
 };
 TORCH_MODULE(FusedMoE);
 

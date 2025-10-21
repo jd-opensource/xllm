@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "qwen3_mlp.h"
+#include "dense_mlp.h"
 
 #include <glog/logging.h>
 
@@ -22,38 +22,39 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen3MLPImpl::Qwen3MLPImpl(const ModelArgs& args,
+DenseMLPImpl::DenseMLPImpl(int hidden_size,
+                           int intermediate_size,
+                           bool is_gated,
+                           bool has_bias,
                            const QuantArgs& quant_args,
                            const ParallelArgs& parallel_args,
                            const torch::TensorOptions& options)
-    : is_gated_(true),
-      intermediate_size_(args.intermediate_size()),
+    : is_gated_(is_gated),
+      intermediate_size_(intermediate_size),
       parallel_args_(parallel_args) {
   // 1. gate + up
-  gate_up_proj_ =
-      register_module("gate_up_proj",
-                      ColumnParallelLinear(args.hidden_size(),
-                                           args.intermediate_size() * 2,
-                                           /*bias=*/false,
-                                           /*gather_output=*/false,
-                                           parallel_args,
-                                           options));
+  gate_up_proj_ = register_module("gate_up_proj",
+                                  ColumnParallelLinear(hidden_size,
+                                                       intermediate_size_ * 2,
+                                                       /*bias=*/has_bias,
+                                                       /*gather_output=*/false,
+                                                       parallel_args,
+                                                       options));
 
   // 2. down
   down_proj_ = register_module("down_proj",
-                               RowParallelLinear(args.intermediate_size(),
-                                                 args.hidden_size(),
-                                                 /*bias=*/false,
+                               RowParallelLinear(intermediate_size_,
+                                                 hidden_size,
+                                                 /*bias=*/has_bias,
                                                  /*input_is_parallelized=*/true,
                                                  /*if_reduce_results=*/true,
                                                  parallel_args,
                                                  options));
 }
 
-torch::Tensor Qwen3MLPImpl::forward(const torch::Tensor& hidden_states,
-                                    const torch::Tensor& residual) {
+torch::Tensor DenseMLPImpl::forward(const torch::Tensor& hidden_states) {
   // input shape: [num_tokens, hidden_size]
-  auto gate_up = gate_up_proj_->forward(hidden_states, std::nullopt);
+  auto gate_up = gate_up_proj_->forward(hidden_states);
 
   int64_t batch_size = gate_up.sizes()[0];
   auto output = torch::empty(
@@ -69,10 +70,10 @@ torch::Tensor Qwen3MLPImpl::forward(const torch::Tensor& hidden_states,
                          0 /* start_expert_id */,
                          0 /* expert_size */);
 
-  return down_proj_->forward(output, residual);
+  return down_proj_->forward(output);
 }
 
-void Qwen3MLPImpl::load_state_dict(const StateDict& state_dict) {
+void DenseMLPImpl::load_state_dict(const StateDict& state_dict) {
   gate_up_proj_->load_state_dict(state_dict, {"gate_proj.", "up_proj."});
   down_proj_->load_state_dict(state_dict.get_dict_with_prefix("down_proj."));
 }
