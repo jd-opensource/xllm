@@ -6,7 +6,7 @@ function error() {
   exit 1
 }
 
-IMAGE="quay.io/jd_xllm/xllm-ai:0.6.0-dev-hb-rc2-x86"
+IMAGE="quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-x86"
 
 RUN_OPTS=(
   --rm
@@ -24,6 +24,7 @@ RUN_OPTS=(
   -v /usr/local/sbin/:/usr/local/sbin/
   -v /export/home:/export/home
   -v /export/home/npu_vcpkg_cache:/root/.cache/vcpkg # cached vcpkg installed dir
+  -v /etc/hccn.conf:/etc/hccn.conf
   -w /export/home
 )
 

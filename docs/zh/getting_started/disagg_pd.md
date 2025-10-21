@@ -59,7 +59,6 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
            --enable_disagg_pd=true \
            --instance_role=PREFILL \
            --etcd_addr=127.0.0.1:12389 \
-           --device_ip=xx.xx.xx.xx \ # 替换为实际的Device IP
            --transfer_listen_port=26000 \
            --disagg_pd_port=7777 \
            --node_rank=0 \
@@ -76,7 +75,6 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
            --enable_disagg_pd=true \
            --instance_role=DECODE \
            --etcd_addr=127.0.0.1:12389 \
-           --device_ip=xx.xx.xx.xx \ # 替换为实际的Device IP
            --transfer_listen_port=26100 \
            --disagg_pd_port=7787 \
            --node_rank=0 \
@@ -84,10 +82,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
     ```
 需要注意：
 
-- PD分离在指定NPU Device的时候，需要对应的`device_ip`，这个每张卡是不一样的，具体的可以在非容器环境下的物理机器上执行下面命令看到,其呈现的`address_{i}=`后面的值就是对应`NPU {i}`的`device_ip`。
-```bash
-sudo cat /etc/hccn.conf | grep address
-```
+- PD分离需要读取`/etc/hccn.conf`文件，确保将物理机上的该文件映射到了容器中
 - `etcd_addr`需与`xllm_service`的`etcd_addr`相同
 
 测试命令和上面类似，注意`curl http://localhost:{PORT}/v1/chat/completions ...`的`PORT`选择为启动xLLM service的`http_server_port`。

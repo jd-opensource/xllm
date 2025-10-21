@@ -48,7 +48,6 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
                --enable_disagg_pd=true \
                --instance_role=PREFILL \
                --etcd_addr="127.0.0.1:12389" \
-               --device_ip=xx.xx.xx.xx \ # Replace with actual Device IP 
                --transfer_listen_port=26000 \
                --disagg_pd_port=7777 \
                --node_rank=0 \
@@ -64,8 +63,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
                --enable_chunked_prefill=false \
                --enable_disagg_pd=true \
                --instance_role=DECODE \
-               --etcd_addr="127.0.0.1:12389" \
-               --device_ip=xx.xx.xx.xx \  # Replace with actual Device IP  
+               --etcd_addr="127.0.0.1:12389" \  
                --transfer_listen_port=26100 \
                --disagg_pd_port=7787 \
                --node_rank=0 \
@@ -73,7 +71,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
         ```
     Important notes:
     
-    - For PD disaggregation when specifying NPU Device, the corresponding `device_ip` is required. This is different for each device. You can see this by executing the following command on the physical machine outside the container environment. The value after `address_{i}=` displayed is the `device_ip` corresponding to `NPU {i}`.
+    - PD disaggregation requires reading the `/etc/hccn.conf` file. Make sure this file on the physical machine is mapped into the container.
 
     - `etcd_addr` must match the `etcd_addr` of `xllm_service`
 

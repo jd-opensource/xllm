@@ -16,13 +16,6 @@ xLLM PD分离功能主要通过以下三个模块实现：
 - **xLLM**: 参见[安装编译](../getting_started/compile.md)
 - **xLLM Service**: 参见[PD分离部署](../getting_started/PD_disagg.md)
 
-#### 获取环境信息
-部署xLLM PD分离需要获取机器的Device IP以创建相关通信资源，可以在当前AI Server执行指令`cat /etc/hccn.conf | grep address`获取Device IP，例如：
-```
-address_0=xx.xx.xx.xx
-address_1=xx.xx.xx.xx
-```
-address_xx即为Device IP。
 ### 启动PD分离服务
 1. 启动etcd
 ```
@@ -46,7 +39,6 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
                --enable_disagg_pd=true \
                --instance_role=PREFILL \
                --etcd_addr=127.0.0.1:12389 \
-               --device_ip=xx.xx.xx.xx \ # 替换为实际的Device IP
                --transfer_listen_port=26000 \
                --disagg_pd_port=7777 \
                --node_rank=0 \
@@ -63,7 +55,6 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
                --enable_disagg_pd=true \
                --instance_role=DECODE \
                --etcd_addr=127.0.0.1:12389 \
-               --device_ip=xx.xx.xx.xx \ # 替换为实际的Device IP
                --transfer_listen_port=26100 \
                --disagg_pd_port=7787 \
                --node_rank=0 \
@@ -71,7 +62,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
         ```
     需要注意：
     
-    - PD分离在指定NPU Device的时候，需要对应的Device IP，这个每张卡是不一样的
+    - PD分离需要读取`/etc/hccn.conf`文件，确保将物理机上的该文件映射到了容器中
   
     - `etcd_addr`需与`xllm_service`的`etcd_addr`相同
 
