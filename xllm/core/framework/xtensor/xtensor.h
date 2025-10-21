@@ -19,7 +19,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
-#include "util/type_traits.h"
+#include "platform/vmm_api.h"
 
 namespace xllm {
 // for all sequences
@@ -45,14 +45,13 @@ class XTensor final {
   ~XTensor();
 
   VirPtr get_base_ptr() const {
-    CHECK(base_ptr_ != nullptr) << "Base pointer is not initialized";
+    CHECK(base_ptr_) << "Base pointer is not initialized";
     return base_ptr_;
   }
 
   VirPtr get_vir_ptr(int32_t seq_id) const {
-    CHECK(base_ptr_ != nullptr) << "Base pointer is not initialized";
-    return reinterpret_cast<VirPtr>((char*)base_ptr_ +
-                                    seq_id * buffer_size_per_seq_);
+    CHECK(base_ptr_) << "Base pointer is not initialized";
+    return reinterpret_cast<VirPtr>(base_ptr_ + seq_id * buffer_size_per_seq_);
   }
 
   const Options& options() const { return options_; }
@@ -68,6 +67,6 @@ class XTensor final {
   int64_t buffer_size_per_seq_;
   int64_t cache_size_per_token_;
   // the start virtual pointer of the xtensor
-  VirPtr base_ptr_ = nullptr;
+  VirPtr base_ptr_;
 };
 }  // namespace xllm

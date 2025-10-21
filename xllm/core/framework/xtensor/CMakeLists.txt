@@ -36,4 +36,5 @@ cc_library(
     glog::glog
     proto::xllm_proto
     :collective_service
+    :platform
 )

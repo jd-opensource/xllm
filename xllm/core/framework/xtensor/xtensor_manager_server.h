@@ -32,7 +32,7 @@ class XTensorManagerServer {
   XTensorManagerServer(int local_xtensor_manager_idx,
                        const std::string& master_node_addr,
                        std::atomic<bool>& done,
-                       const torch::Device& device,
+                       const torch::Device& d,
                        const xtensor::Options& options);
   virtual ~XTensorManagerServer();
 

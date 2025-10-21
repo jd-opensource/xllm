@@ -27,22 +27,17 @@ namespace xllm {
 void XTensorManagerServer::create_server(const xtensor::Options& options,
                                          std::atomic<bool>& done,
                                          const std::string& master_node_addr,
-                                         const torch::Device& device,
+                                         const torch::Device& d,
                                          int world_size,
                                          int global_rank,
                                          int32_t dp_size,
                                          int local_rank) {
-  int device_id = device.index();
-#if defined(USE_NPU)
-  int ret = aclrtSetDevice(device_id);
-  if (ret != 0) {
-    LOG(ERROR) << "ACL set device id: " << device_id << " failed, ret:" << ret;
-  }
-#endif
+  Device device(d);
+  device.set_device();
 
   auto xtensor_manager_global_rank = global_rank;
   auto xtensor_manager_service = std::make_shared<XTensorManagerService>(
-      xtensor_manager_global_rank, world_size, device);
+      xtensor_manager_global_rank, world_size, d);
 
   auto addr = net::get_local_ip_addr();
   auto xtensor_manager_server = ServerRegistry::get_instance().register_server(
@@ -67,7 +62,7 @@ void XTensorManagerServer::create_server(const xtensor::Options& options,
   sync_master_node(master_node_addr, addr_info, uids);
 
   std::unique_ptr<XTensorManager> xtensor_manager =
-      std::make_unique<XTensorManager>(options, device);
+      std::make_unique<XTensorManager>(options, d);
   xtensor_manager_service->set_xtensor_manager(std::move(xtensor_manager));
 
   done.store(true);

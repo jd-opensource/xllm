@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 #include <torch/torch.h>
 
-#include "util/type_traits.h"
+#include "platform/vmm_api.h"
 
 namespace xllm {
 class PhyPage {
@@ -25,8 +25,6 @@ class PhyPage {
 
   ~PhyPage();
 
-  bool is_valid() const { return status_ == VmmSuccess && phy_handle_ != 0; }
-
   const torch::Device& device() const { return device_; }
 
   PhyMemHandle get_phy_handle() const { return phy_handle_; }
@@ -34,6 +32,5 @@ class PhyPage {
  private:
   torch::Device device_;
   PhyMemHandle phy_handle_;
-  VmmResult status_ = VmmSuccess;
 };
 }  // namespace xllm

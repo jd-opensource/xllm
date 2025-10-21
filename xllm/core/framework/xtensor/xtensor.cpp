@@ -15,9 +15,6 @@ limitations under the License.
 
 #include "xtensor.h"
 
-#if defined(USE_NPU)
-#include "acl/acl.h"
-#endif
 #include "common/global_flags.h"
 
 namespace xllm {
@@ -45,19 +42,9 @@ XTensor::XTensor(int64_t buffer_size) : buffer_size_(buffer_size) {
   reserve_base_ptr();
 }
 
-XTensor::~XTensor() {
-#if defined(USE_NPU)
-  VmmResult status = aclrtReleaseMemAddress(base_ptr_);
-  CHECK_EQ(status, VmmSuccess) << "Failed to free virtual memory for xtensor";
-#endif
-}
+XTensor::~XTensor() { vmm::release_vir_ptr(base_ptr_, buffer_size_); }
 
 void XTensor::reserve_base_ptr() {
-#if defined(USE_NPU)
-  VmmResult status =
-      aclrtReserveMemAddress(&base_ptr_, buffer_size_, 0, nullptr, 0);
-  CHECK_EQ(status, VmmSuccess)
-      << "Failed to reserve virtual memory for xtensor";
-#endif
+  vmm::create_vir_ptr(base_ptr_, buffer_size_);
 }
 }  // namespace xllm

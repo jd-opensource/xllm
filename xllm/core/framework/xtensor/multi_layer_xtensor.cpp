@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "multi_layer_xtensor.h"
 
+#include "common/global_flags.h"
 namespace xllm {
 
 MultiLayerXTensor::MultiLayerXTensor(
@@ -40,13 +41,11 @@ void MultiLayerXTensor::append_phy_pages(
 }
 
 void MultiLayerXTensor::free(int32_t seq_id) {
+  size_t aligned_size =
+      get_num_pages_per_layer(seq_id) * FLAGS_granularity_size;
   for (size_t layer_idx = 0; layer_idx < num_layers_; layer_idx++) {
     VirPtr vir_ptr = get_vir_ptr(seq_id, layer_idx);
-#if defined(USE_NPU)
-    VmmResult status = aclrtUnmapMem(vir_ptr);
-    CHECK_EQ(status, VmmSuccess) << "Failed to unmap virtual memory for layer "
-                                 << layer_idx << " of sequence " << seq_id;
-#endif
+    vmm::unmap(vir_ptr, aligned_size);
   }
   deallocate_seq_id(seq_id);
 }

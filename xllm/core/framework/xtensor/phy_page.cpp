@@ -15,43 +15,13 @@ limitations under the License.
 
 #include "phy_page.h"
 
-#include <glog/logging.h>
-
-#include "common/global_flags.h"
-
 namespace xllm {
 PhyPage::PhyPage(torch::Device device) : device_(device) {
-  int device_id = device_.index();
+  int32_t device_id = device_.index();
 
-#if defined(USE_NPU)
-  aclrtPhysicalMemProp prop = {};
-  prop.handleType = ACL_MEM_HANDLE_TYPE_NONE;
-  prop.allocationType = ACL_MEM_ALLOCATION_TYPE_PINNED;
-  prop.memAttr = ACL_HBM_MEM_HUGE;  // 2MB
-  prop.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
-  prop.location.id = device_id;
-  prop.reserve = 0;
-
-  // get the recommended granularity size
-  size_t granularity_size = 0;
-  status_ = aclrtMemGetAllocationGranularity(
-      &prop, ACL_RT_MEM_ALLOC_GRANULARITY_RECOMMENDED, &granularity_size);
-  CHECK_EQ(status_, VmmSuccess) << "Failed to get allocation granularity";
-  LOG(INFO) << "Granularity size for physical page: " << granularity_size
-            << "Bytes";
-  FLAGS_granularity_size = granularity_size;
-
-  status_ = aclrtMallocPhysical(&phy_handle_, granularity_size, &prop, 0);
-  CHECK_EQ(status_, VmmSuccess) << "Failed to allocate physical memory";
-#endif
+  // create a physical memory handle for the device
+  vmm::create_phy_mem_handle(phy_handle_, device_id);
 }
 
-PhyPage::~PhyPage() {
-  if (status_ == VmmSuccess) {
-#if defined(USE_NPU)
-    status_ = aclrtFreePhysical(phy_handle_);
-    CHECK_EQ(status_, VmmSuccess) << "Failed to free physical memory";
-#endif
-  }
-}
+PhyPage::~PhyPage() { vmm::release_phy_mem_handle(phy_handle_); }
 }  // namespace xllm

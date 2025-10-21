@@ -82,12 +82,7 @@ void PhyPagePool::deallocate(uint32_t page_id) {
 
 // map one virtual pointer to one physical page
 void PhyPagePool::map(VirPtr vir_ptr, PhyMemHandle phy_handle) const {
-  VmmResult status;
-#if defined(USE_NPU)
-  status = aclrtMapMem(vir_ptr, FLAGS_granularity_size, 0, phy_handle, 0);
-  CHECK_EQ(status, VmmSuccess)
-      << "Failed to map virtual address to physical address";
-#endif
+  vmm::map(vir_ptr, phy_handle);
 }
 
 void PhyPagePool::map(VirPtr vir_ptr,

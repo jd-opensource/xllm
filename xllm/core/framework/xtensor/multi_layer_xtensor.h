@@ -53,9 +53,9 @@ class MultiLayerXTensor final {
   std::vector<std::shared_ptr<XTensor>> xtensors_;  // [num_layers]
 
   // page_id for all sequence
-  // for one sequence, page_id is same for all layers
-  std::vector<std::vector<uint32_t>>
-      phy_page_ids_vec_;  // [max_seqs_per_batch, num_pages_for_seq]
+  // for each sequence, page_id is same for all layers
+  // [max_seqs_per_batch, num_pages_for_seq_per_layer]
+  std::vector<std::vector<uint32_t>> phy_page_ids_vec_;
 
   int32_t num_free_seq_ids_ = 0;
   std::vector<int32_t> free_seq_ids_;
