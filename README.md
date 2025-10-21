@@ -237,3 +237,15 @@ Thanks to all the following [developers](https://github.com/jd-opensource/xllm/g
 
 #### xLLM is provided by JD.com 
 #### Thanks for your Contributions!
+
+## 9. Citation
+
+If you think this repository is helpful to you, welcome to cite us:
+```
+@article{liu2025xllm,
+  title={xLLM Technical Report},
+  author={Liu, Tongxuan and Peng, Tao and Yang, Peijun and Zhao, Xiaoyang and Lu, Xiusheng and Huang, Weizhe and Liu, Zirui and Chen, Xiaoyu and Liang, Zhiwei and Xiong, Jun and others},
+  journal={arXiv preprint arXiv:2510.14686},
+  year={2025}
+}
+```

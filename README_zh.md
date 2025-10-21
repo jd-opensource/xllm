@@ -238,3 +238,15 @@ python setup.py bdist_wheel
 
 #### xLLM 由 JD.com 提供 
 #### 感谢您对xLLM的关心与贡献!
+
+## 9. 引用
+
+如果你觉得这个仓库对你有帮助，欢迎引用我们：
+```
+@article{liu2025xllm,
+  title={xLLM Technical Report},
+  author={Liu, Tongxuan and Peng, Tao and Yang, Peijun and Zhao, Xiaoyang and Lu, Xiusheng and Huang, Weizhe and Liu, Zirui and Chen, Xiaoyu and Liang, Zhiwei and Xiong, Jun and others},
+  journal={arXiv preprint arXiv:2510.14686},
+  year={2025}
+}
+```
