@@ -20,6 +20,7 @@ limitations under the License.
 #include "scheduler/disagg_pd_scheduler.h"
 #include "scheduler/dit_scheduler.h"
 #include "scheduler/pd_ooc_scheduler.h"
+#include "scheduler/prefill_only_scheduler.h"
 #include "scheduler/zero_eviction_scheduler.h"
 
 namespace xllm {
@@ -36,7 +37,11 @@ std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
   }
 
   if (options.enable_chunked_prefill()) {
-    return std::make_unique<ChunkedPrefillScheduler>(engine, options);
+    if (options.num_speculative_tokens() > 0) {
+      return std::make_unique<PrefillOnlyScheduler>(engine, options);
+    } else {
+      return std::make_unique<ChunkedPrefillScheduler>(engine, options);
+    }
   }
 
   if (FLAGS_use_zero_evict) {
