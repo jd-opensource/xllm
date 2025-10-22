@@ -720,7 +720,6 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Qwen2_5_VLImageInputs{pixel_values, image_grid_thw};
-
     auto inputs_embeds = get_input_embeddings(
         tokens[0], image_inputs, video_inputs, input_params[0]);
     input_params[0].input_embedding = inputs_embeds;

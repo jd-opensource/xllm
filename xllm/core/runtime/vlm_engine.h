@@ -21,20 +21,24 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
+#include "core/distributed_runtime/dist_manager.h"
 #include "engine.h"
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
+#include "util/threadpool.h"
 #include "worker.h"
+#include "worker_client.h"
 
 namespace xllm {
 
 class VLMEngine : public Engine {
  public:
   // create an engine with the given devices
-  VLMEngine(const runtime::Options& options);
+  VLMEngine(const runtime::Options& options,
+            std::shared_ptr<DistManager> dist_manager = nullptr);
 
   virtual ~VLMEngine() = default;
 
@@ -53,6 +57,9 @@ class VLMEngine : public Engine {
   bool init_model();
   Engine::KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
+  std::vector<std::vector<RawForwardInput>> prepare_inputs(
+      std::vector<Batch>& batch);
+  void setup_workers(const runtime::Options& options);
   void process_group_test();
 
  private:
@@ -69,7 +76,18 @@ class VLMEngine : public Engine {
   std::vector<std::unique_ptr<ProcessGroup>> process_groups_;
 
   // a list of workers, with each worker handling a partial of model
-  std::vector<std::unique_ptr<Worker>> workers_;
+  std::vector<std::shared_ptr<WorkerClient>> worker_clients_;
+
+  // common frequently used args
+  uint32_t dp_size_;
+  uint32_t worker_clients_num_;
+  uint32_t dp_local_tp_size_;
+
+  bool layer_forward_interrupted_ = false;
+
+  std::shared_ptr<DistManager> dist_manager_ = nullptr;
+
+  std::unique_ptr<ThreadPool> threadpool_ = nullptr;
 
   // config for kv cache
   int64_t n_local_kv_heads_ = 0;

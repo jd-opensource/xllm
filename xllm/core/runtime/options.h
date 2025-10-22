@@ -35,6 +35,9 @@ struct Options {
 
   PROPERTY(std::optional<std::string>, draft_model_path);
 
+  // model backend
+  PROPERTY(std::string, backend);
+
   // devices for execute model
   PROPERTY(std::vector<torch::Device>, devices);
 

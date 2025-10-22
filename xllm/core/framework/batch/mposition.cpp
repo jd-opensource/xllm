@@ -17,7 +17,6 @@ limitations under the License.
 
 #include "framework/model/model_args.h"
 #include "framework/request/sequence.h"
-
 namespace xllm {
 
 torch::Tensor MPositionHelper::get_positions() {
@@ -36,7 +35,6 @@ torch::Tensor MPositionHelper::get_positions() {
     torch::Tensor second_per_grid_ts;
     if (auto res = mm_data.get<torch::Tensor>("second_per_grid_ts"))
       second_per_grid_ts = res.value();
-
     auto res =
         get_positions_p(image_grid_thw, video_grid_thw, second_per_grid_ts);
     seq_.set_mrope_position_delta(std::get<1>(res));

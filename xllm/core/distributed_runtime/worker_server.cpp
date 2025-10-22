@@ -36,6 +36,7 @@ limitations under the License.
 #include "framework/parallel_state/collective_communicator.h"
 #include "framework/parallel_state/mapping_npu.h"
 #include "framework/state_dict/state_dict.h"
+#include "runtime/forward_params.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
 #include "util/net.h"
@@ -65,6 +66,7 @@ void WorkerServer::create_server(
     int32_t dp_size,
     int local_rank,
     int32_t ep_size,
+    WorkerType worker_type,
     std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
     std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   Device device(d);
@@ -106,11 +108,6 @@ void WorkerServer::create_server(
   comm.create_process_groups(master_node_addr, device);
 #endif
 
-  WorkerType worker_type =
-      (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
-  CHECK(worker_type == WorkerType::LLM || worker_type == WorkerType::ELM)
-      << "Multi Node only support LLM and ELM Now, but get task type = "
-      << options.task_type();
   std::unique_ptr<Worker> worker =
       std::make_unique<Worker>(*parallel_args, device, options, worker_type);
   worker_service->set_worker(std::move(worker));
@@ -213,8 +210,8 @@ WorkerServer::WorkerServer(int local_worker_idx,
                            const runtime::Options& options,
                            WorkerType worker_type,
                            bool use_spawn_worker) {
-  if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM) {
-    // TODO: Refactor these code later.
+  if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM ||
+      worker_type == WorkerType::VLM || worker_type == WorkerType::EVLM) {
     if (use_spawn_worker) {
       // start worker in a spawn process(for offline inference worker.)
       create_spawn_server(
@@ -243,6 +240,7 @@ WorkerServer::WorkerServer(int local_worker_idx,
                                         parallel_args.dp_size(),
                                         local_worker_idx,
                                         parallel_args.ep_size(),
+                                        worker_type,
                                         std::move(input_shm_manager),
                                         std::move(output_shm_manager));
     }
