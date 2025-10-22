@@ -353,10 +353,10 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   if (n_tokens == seq_len) {
     // last chunk of prefill and decode
     // add -1 as extra token id
-    state_.extra_token_ids.push_back(-1);
-    state_.embedding_ids.push_back(sequence->get_embedding_id());
+    state.extra_token_ids.push_back(-1);
+    state.embedding_ids.push_back(sequence->get_embedding_id());
   } else {
-    state_.extra_token_ids.push_back(token_ids[seq_len]);
+    state.extra_token_ids.push_back(token_ids[seq_len]);
   }
 }
 
