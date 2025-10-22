@@ -107,20 +107,29 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
 void DisaggPDServiceImpl::decode_recv_new_requests(
     const proto::DisaggRequests* request,
     proto::DisaggResponses* response) {
-  // link prefill cluster
-  std::vector<uint64_t> cluster_ids(
-      request->cluster_infos().cluster_ids().begin(),
-      request->cluster_infos().cluster_ids().end());
-  std::vector<std::string> addrs(request->cluster_infos().addrs().begin(),
-                                 request->cluster_infos().addrs().end());
-  std::vector<std::string> device_ips(
-      request->cluster_infos().device_ips().begin(),
-      request->cluster_infos().device_ips().end());
-  std::vector<uint16_t> ports(request->cluster_infos().ports().begin(),
-                              request->cluster_infos().ports().end());
-  int32_t dp_size = request->cluster_infos().dp_size();
-  if (!engine_->link_cluster(cluster_ids, addrs, device_ips, ports, dp_size)) {
-    return;
+  // link prefill instance
+  if (!scheduler_->is_instance_linked(request->prefill_name())) {
+    std::vector<uint64_t> cluster_ids(
+        request->cluster_infos().cluster_ids().begin(),
+        request->cluster_infos().cluster_ids().end());
+    std::vector<std::string> addrs(request->cluster_infos().addrs().begin(),
+                                   request->cluster_infos().addrs().end());
+    std::vector<std::string> device_ips(
+        request->cluster_infos().device_ips().begin(),
+        request->cluster_infos().device_ips().end());
+    std::vector<uint16_t> ports(request->cluster_infos().ports().begin(),
+                                request->cluster_infos().ports().end());
+    int32_t dp_size = request->cluster_infos().dp_size();
+    if (!scheduler_->link_instance(request->prefill_name(),
+                                   cluster_ids,
+                                   addrs,
+                                   device_ips,
+                                   ports,
+                                   dp_size)) {
+      LOG(ERROR) << "Link instance failed, instance name : "
+                 << request->prefill_name();
+      return;
+    }
   }
 
   for (auto& req : request->reqs()) {

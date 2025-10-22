@@ -385,7 +385,13 @@ void DisaggPDScheduler::dispatch_requests() {
 
     // check reqs which can not dispatch to D instance,
     // and push back to prefill_request_queue_
-    CHECK_EQ(requests.size(), resps.resps().size());
+    CHECK_EQ(requests.size(), resps.resps().size())
+        << "selected_instance : " << selected_instance;
+    // insert instance name to linked_instance_
+    {
+      std::lock_guard<std::mutex> lock(linked_instances_mutex_);
+      linked_instance_.emplace(selected_instance);
+    }
     for (size_t i = 0; i < requests.size(); ++i) {
       if (resps.resps()[i].status_code() != 200) {
         // push back to prefill_request_queue_
@@ -1051,6 +1057,27 @@ void DisaggPDScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
   std::lock_guard<std::mutex> lock(latency_metrics_mutex_);
   ttft = std::move(recent_ttft_);
   tbt = std::move(recent_tbt_);
+}
+
+bool DisaggPDScheduler::is_instance_linked(const std::string& instance_name) {
+  std::lock_guard<std::mutex> lock(linked_instances_mutex_);
+  return linked_instance_.count(instance_name) > 0;
+}
+
+bool DisaggPDScheduler::link_instance(
+    const std::string& instance_name,
+    const std::vector<uint64_t>& cluster_ids,
+    const std::vector<std::string>& addrs,
+    const std::vector<std::string>& device_ips,
+    const std::vector<uint16_t>& ports,
+    const int32_t dp_size) {
+  std::lock_guard<std::mutex> lock(linked_instances_mutex_);
+  if (!engine_->link_cluster(cluster_ids, addrs, device_ips, ports, dp_size)) {
+    LOG(ERROR) << "Link cluster failed!";
+    return false;
+  }
+  linked_instance_.emplace(instance_name);
+  return true;
 }
 
 }  // namespace xllm

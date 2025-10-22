@@ -87,6 +87,15 @@ class DisaggPDScheduler : public ContinuousScheduler {
   void get_latency_metrics(std::vector<int64_t>& ttft,
                            std::vector<int64_t>& tbt);
 
+  bool is_instance_linked(const std::string& instance_name);
+
+  bool link_instance(const std::string& instance_name,
+                     const std::vector<uint64_t>& cluster_ids,
+                     const std::vector<std::string>& addrs,
+                     const std::vector<std::string>& device_ips,
+                     const std::vector<uint16_t>& ports,
+                     const int32_t dp_size);
+
  protected:
   // Pre-execute prefill requests of different lengths at startup and obtain the
   // corresponding TTFT for calculating the estimated TTFT of requests.
@@ -186,6 +195,10 @@ class DisaggPDScheduler : public ContinuousScheduler {
   std::vector<int64_t> recent_ttft_;
   std::vector<int64_t> recent_tbt_;
   std::mutex latency_metrics_mutex_;
+
+  // Lock for multi-threaded read-write linked instances
+  std::mutex linked_instances_mutex_;
+  std::set<std::string> linked_instance_;
 };
 
 }  // namespace xllm
