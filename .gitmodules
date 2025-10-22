@@ -27,4 +27,4 @@
 	url = https://gitcode.com/xLLM-AI/spdlog.git
 [submodule "third_party/Mooncake"]
 	path = third_party/Mooncake
-	url = https://github.com/kvcache-ai/Mooncake.git
+	url = https://gitcode.com/xLLM-AI/Mooncake.git
