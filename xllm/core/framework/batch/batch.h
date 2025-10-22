@@ -77,6 +77,7 @@ class Batch {
   // Convert Batch to pb type, which will be pass to remote worker.
   RawForwardInput prepare_forward_input(uint32_t start_idx,
                                         uint32_t end_idx,
+                                        const ModelArgs* args = nullptr,
                                         ThreadPool* thread_pool = nullptr);
 
   // process output

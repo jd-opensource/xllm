@@ -109,11 +109,18 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .enable_disagg_pd(options_.enable_disagg_pd())
         .enable_service_routing(options_.enable_service_routing())
         .enable_cache_upload(options_.enable_cache_upload())
-        .enable_schedule_overlap(options_.enable_schedule_overlap())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
-        .is_local(options_.is_local());
+        .is_local(options_.is_local())
+        .enable_schedule_overlap(options_.enable_schedule_overlap())
+        .master_node_addr(options.master_node_addr())
+        .nnodes(options.nnodes())
+        .node_rank(options.node_rank())
+        .dp_size(options.dp_size())
+        .ep_size(options.ep_size())
+        .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .task_type(options_.task_type());
 
     auto engine = std::make_unique<VLMEngine>(eng_options);
     engine_ = std::move(engine);

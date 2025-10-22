@@ -101,10 +101,14 @@ void WorkerServer::create_server(
 #if defined(USE_MLU) || defined(USE_CUDA)
   comm.create_process_groups(master_node_addr, device);
 #endif
-
-  WorkerType worker_type =
-      (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
-  CHECK(worker_type == WorkerType::LLM || worker_type == WorkerType::ELM)
+  WorkerType worker_type("LLM");
+  if (FLAGS_backend == "llm")
+    worker_type =
+        (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
+  else
+    worker_type = WorkerType::VLM;
+  CHECK(worker_type == WorkerType::LLM || worker_type == WorkerType::ELM ||
+        worker_type == WorkerType::VLM)
       << "Multi Node only support LLM and ELM Now, but get task type = "
       << options.task_type();
   std::unique_ptr<Worker> worker =
@@ -178,6 +182,7 @@ void WorkerServer::create_spawn_server(int local_rank,
 void WorkerServer::prepare_shm(
     const ParallelArgs& parallel_args,
     const runtime::Options& options,
+<<<<<<< HEAD
     std::unique_ptr<ForwardSharedMemoryManager>& input_shm_manager,
     std::unique_ptr<ForwardSharedMemoryManager>& output_shm_manager) {
   if (options.is_local() && options.enable_shm()) {
@@ -211,6 +216,14 @@ WorkerServer::WorkerServer(int local_worker_idx,
                            bool use_spawn_worker) {
   if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM) {
     // TODO: Refactor these code later.
+=======
+    WorkerType worker_type,
+    bool use_spawn_worker,
+    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
+    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
+  if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM ||
+      worker_type == WorkerType::VLM) {
+>>>>>>> 553be7c (feat: support multi-process.)
     if (use_spawn_worker) {
       // start worker in a spawn process(for offline inference worker.)
       create_spawn_server(

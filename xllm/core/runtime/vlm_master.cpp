@@ -132,7 +132,6 @@ void VLMMaster::handle_request(const std::vector<Message>& messages,
   if (!mm_inputs.empty() && !image_processor_->process(mm_inputs, mm_data)) {
     LOG(ERROR) << " image processor process failed";
   }
-
   this->handle_request(messages, mm_data, sp, callback);
 }
 
@@ -311,7 +310,6 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
     return nullptr;
   }
   Timer timer;
-
   input_processor_->process(prompt, mm_data);
 
   std::vector<int> prompt_tokens;
@@ -427,6 +425,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(
     const RequestParams& sp,
     OutputCallback callback) {
   Timer timer;
+
   auto prompt = chat_template_->apply(messages);
   if (!prompt.has_value()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
