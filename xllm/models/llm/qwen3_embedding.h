@@ -3,14 +3,15 @@
 #include <memory>
 
 #include "core/framework/model/embedding_lm.h"
+#include "models/llm/embedding_model_base.h"
 #include "qwen3.h"
 
 namespace xllm {
 
-class QWen3ForEmbeddingImpl : public LlmForCausalLMImplBase<QWen3Model> {
+class QWen3ForEmbeddingImpl : public LlmForEmbeddingImplBase<QWen3Model> {
  public:
   QWen3ForEmbeddingImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<QWen3Model>(context),
+      : LlmForEmbeddingImplBase<QWen3Model>(context),
         options_(context.get_tensor_options()) {}
 
   torch::Tensor pooler(const torch::Tensor& hidden_states,
@@ -31,10 +32,6 @@ class QWen3ForEmbeddingImpl : public LlmForCausalLMImplBase<QWen3Model> {
   torch::TensorOptions options_;
 };
 TORCH_MODULE(QWen3ForEmbedding);
-
-}  // namespace xllm
-
-namespace xllm {
 
 template <>
 class EmbeddingLMImpl<xllm::QWen3ForEmbedding> : public EmbeddingLM {
@@ -93,39 +90,7 @@ class EmbeddingLMImpl<xllm::QWen3ForEmbedding> : public EmbeddingLM {
   torch::TensorOptions options_;
 };
 
-}  // namespace xllm
-
-namespace xllm {
-
 REGISTER_EMBEDDING_MODEL_WITH_VARNAME(qwen3_embedding,
                                       qwen3,
                                       QWen3ForEmbedding);
-REGISTER_MODEL_ARGS_WITH_VARNAME(qwen3_embedding, qwen3, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "qwen3");
-  LOAD_ARG_OR(dtype, "torch_dtype", "");
-  LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
-  LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
-  LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
-  LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
-  LOAD_ARG(n_kv_heads, "num_key_value_heads");
-  LOAD_ARG_OR(intermediate_size, "intermediate_size", 18944);
-  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 32768);
-  LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-6);
-  LOAD_ARG_OR(eos_token_id, "eos_token_id", 151643);
-  LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
-
-  // For embedding models, we typically don't tie word embeddings
-  LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
-
-  LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
-  LOAD_ARG_OR(sliding_window, "sliding_window", 4096);
-  LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
-
-  LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
-  });
-
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
-});
-
 }  // namespace xllm
