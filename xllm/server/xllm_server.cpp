@@ -40,6 +40,7 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
                           "v1/embeddings => EmbeddingsHttp,"
                           "v1/models => ModelsHttp,"
                           "v1/image/generation => ImageGenerationHttp,"
+                          "v1/rerank => RerankHttp,"
                           "get_cache_info => GetCacheInfo,"
                           "link_cluster => LinkCluster,"
                           "unlink_cluster => UnlinkCluster,"

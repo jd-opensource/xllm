@@ -31,6 +31,7 @@ limitations under the License.
 #include "multimodal.pb.h"
 #include "request.h"
 #include "request_output.h"
+#include "rerank.pb.h"
 
 namespace xllm {
 
@@ -46,6 +47,9 @@ struct RequestParams {
                 const std::string& x_rid,
                 const std::string& x_rtime);
   RequestParams(const proto::EmbeddingRequest& request,
+                const std::string& x_rid,
+                const std::string& x_rtime);
+  RequestParams(const proto::RerankRequest& request,
                 const std::string& x_rid,
                 const std::string& x_rtime);
 

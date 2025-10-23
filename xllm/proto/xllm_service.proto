@@ -9,6 +9,7 @@ import "completion.proto";
 import "chat.proto";
 import "embedding.proto";
 import "image_generation.proto";
+import "rerank.proto";
 import "models.proto";
 
 message HttpRequest {
@@ -52,6 +53,9 @@ service XllmAPIService {
 
   rpc ImageGeneration(ImageGenerationRequest) returns (ImageGenerationResponse);
   rpc ImageGenerationHttp(HttpRequest) returns (HttpResponse);
+
+  rpc Rerank (RerankRequest) returns (RerankResponse);
+  rpc RerankHttp (HttpRequest) returns (HttpResponse);
   
   rpc Models (ModelListRequest) returns (ModelListResponse);
   rpc ModelsHttp (HttpRequest) returns (HttpResponse);

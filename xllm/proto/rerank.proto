@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package xllm.proto;
+
+import "common.proto";
+
+message RerankRequest {
+  string model = 1;
+  string query = 2;
+  repeated string documents = 3;
+  optional int32 top_n = 4;
+  optional int32 truncate_prompt_tokens = 5;
+
+  optional string user = 6;
+
+  optional string service_request_id = 7;
+}
+
+message RerankDocument {
+  string text = 1;
+}
+
+message RerankResult {
+  int32 index = 1;
+
+  RerankDocument document = 2;
+
+  float relevance_score = 3;
+}
+
+message RerankResponse {
+  string id = 1;
+
+  string model = 2;
+
+  Usage usage = 3;
+
+  repeated RerankResult results = 4;
+}
+

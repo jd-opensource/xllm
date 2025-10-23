@@ -39,6 +39,11 @@ std::string generate_chat_request_id() {
          short_uuid.random();
 }
 
+std::string generate_rerank_request_id() {
+  return "rerankcmpl-" + InstanceName::name()->get_name_hash() + "-" +
+         short_uuid.random();
+}
+
 }  // namespace
 
 RequestParams::RequestParams(const proto::CompletionRequest& request,
@@ -322,6 +327,20 @@ RequestParams::RequestParams(const proto::EmbeddingRequest& request,
                              const std::string& x_rid,
                              const std::string& x_rtime) {
   request_id = generate_embedding_request_id();
+  if (request.has_service_request_id()) {
+    service_request_id = request.service_request_id();
+  }
+  x_request_id = x_rid;
+  x_request_time = x_rtime;
+  is_embeddings = true;
+  max_tokens = 1;
+  streaming = false;
+}
+
+RequestParams::RequestParams(const proto::RerankRequest& request,
+                             const std::string& x_rid,
+                             const std::string& x_rtime) {
+  request_id = generate_rerank_request_id();
   if (request.has_service_request_id()) {
     service_request_id = request.service_request_id();
   }

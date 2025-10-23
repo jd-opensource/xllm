@@ -11,6 +11,7 @@ cc_library(
     chat_service_impl.h
     embedding_service_impl.h
     image_generation_service_impl.h
+    rerank_service_impl.h
     non_stream_call.h
     service_impl_factory.h
     stream_call.h
@@ -23,6 +24,7 @@ cc_library(
     embedding_service_impl.cpp
     image_generation_service_impl.cpp
     models_service_impl.cpp
+    rerank_service_impl.cpp
   DEPS
     :master
     :chat_template
@@ -32,5 +34,7 @@ cc_library(
     absl::flat_hash_set
     absl::random_random
     :function_call
+    torch
+    $<$<BOOL:${USE_NPU}>:torch_npu>
 )
 

@@ -10,6 +10,7 @@ proto_library(
     chat.proto
     multimodal.proto
     embedding.proto
+    rerank.proto
     models.proto
     worker.proto
     disagg_pd.proto

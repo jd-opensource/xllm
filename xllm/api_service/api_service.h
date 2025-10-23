@@ -20,6 +20,7 @@ limitations under the License.
 #include "embedding_service_impl.h"
 #include "image_generation_service_impl.h"
 #include "models_service_impl.h"
+#include "rerank_service_impl.h"
 #include "xllm_service.pb.h"
 
 namespace xllm {
@@ -70,6 +71,17 @@ class APIService : public proto::XllmAPIService {
                            const proto::HttpRequest* request,
                            proto::HttpResponse* response,
                            ::google::protobuf::Closure* done) override;
+
+  void Rerank(::google::protobuf::RpcController* controller,
+              const proto::RerankRequest* request,
+              proto::RerankResponse* response,
+              ::google::protobuf::Closure* done) override;
+
+  void RerankHttp(::google::protobuf::RpcController* controller,
+                  const proto::HttpRequest* request,
+                  proto::HttpResponse* response,
+                  ::google::protobuf::Closure* done) override;
+
   void Models(::google::protobuf::RpcController* controller,
               const proto::ModelListRequest* request,
               proto::ModelListResponse* response,
@@ -109,6 +121,7 @@ class APIService : public proto::XllmAPIService {
   std::unique_ptr<EmbeddingServiceImpl> embedding_service_impl_;
   std::unique_ptr<ModelsServiceImpl> models_service_impl_;
   std::unique_ptr<ImageGenerationServiceImpl> image_generation_service_impl_;
+  std::unique_ptr<RerankServiceImpl> rerank_service_impl_;
 };
 
 }  // namespace xllm

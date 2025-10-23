@@ -51,6 +51,9 @@ APIService::APIService(Master* master,
     embedding_service_impl_ =
         ServiceImplFactory<EmbeddingServiceImpl>::create_service_impl(
             llm_master, model_names);
+    rerank_service_impl_ =
+        ServiceImplFactory<RerankServiceImpl>::create_service_impl(llm_master,
+                                                                   model_names);
   } else if (FLAGS_backend == "vlm") {
     auto vlm_master = dynamic_cast<VLMMaster*>(master);
     mm_chat_service_impl_ =
@@ -258,6 +261,47 @@ void APIService::ImageGenerationHttp(
       std::make_shared<ImageGenerationCall>(
           ctrl, done_guard.release(), req_pb, resp_pb);
   image_generation_service_impl_->process_async(call);
+}
+
+void APIService::Rerank(::google::protobuf::RpcController* controller,
+                        const proto::RerankRequest* request,
+                        proto::RerankResponse* response,
+                        ::google::protobuf::Closure* done) {
+  // TODO with xllm-service
+}
+
+void APIService::RerankHttp(::google::protobuf::RpcController* controller,
+                            const proto::HttpRequest* request,
+                            proto::HttpResponse* response,
+                            ::google::protobuf::Closure* done) {
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto arena = response->GetArena();
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::RerankRequest>(arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::RerankResponse>(arena);
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  std::string attachment = std::move(ctrl->request_attachment().to_string());
+  std::string error;
+  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+
+  std::shared_ptr<Call> call =
+      std::make_shared<RerankCall>(ctrl, done_guard.release(), req_pb, resp_pb);
+  rerank_service_impl_->process_async(call);
 }
 
 void APIService::Models(::google::protobuf::RpcController* controller,
