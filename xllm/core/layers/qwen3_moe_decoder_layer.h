@@ -17,8 +17,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_qwen3_moe_decoder_layer_impl.h"
-#elif defined(USE_MLU)
-#include "mlu/qwen3_moe_decoder_layer.h"
+#else
+#include "common/qwen3_moe_decoder_layer.h"
 #endif
 
 namespace xllm {
@@ -35,7 +35,7 @@ class Qwen3MoeDecoderLayer
       : Qwen3MoeDecoderLayer(
             std::make_shared<NpuQwen3MoeDecoderLayerImpl>(context, layer_id)) {}
 };
-#elif defined(USE_MLU)
+#else
 class Qwen3MoeDecoderLayer
     : public torch::nn::ModuleHolder<Qwen3MoeDecoderImpl> {
  public:

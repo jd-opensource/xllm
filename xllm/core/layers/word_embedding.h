@@ -17,8 +17,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_word_embedding_impl.h"
-#elif defined(USE_MLU)
-#include "mlu/mlu_word_embedding_impl.h"
+#else
+#include "common/word_embedding_impl.h"
 #endif
 
 namespace xllm {
@@ -33,20 +33,20 @@ class WordEmbedding : public torch::nn::ModuleHolder<NpuWordEmbeddingImpl> {
       : ModuleHolder(std::make_shared<NpuWordEmbeddingImpl>(context)) {}
 };
 
-#elif defined(USE_MLU)
+#else
 
-class WordEmbedding : public torch::nn::ModuleHolder<MluWordEmbeddingImpl> {
+class WordEmbedding : public torch::nn::ModuleHolder<WordEmbeddingImpl> {
  public:
-  using torch::nn::ModuleHolder<MluWordEmbeddingImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = MluWordEmbeddingImpl;
+  using torch::nn::ModuleHolder<WordEmbeddingImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = WordEmbeddingImpl;
   WordEmbedding(int64_t num_embeddings,
                 int64_t embedding_dim,
                 const ParallelArgs& parallel_args,
                 const torch::TensorOptions& options)
-      : ModuleHolder(std::make_shared<MluWordEmbeddingImpl>(num_embeddings,
-                                                            embedding_dim,
-                                                            parallel_args,
-                                                            options)) {}
+      : ModuleHolder(std::make_shared<WordEmbeddingImpl>(num_embeddings,
+                                                         embedding_dim,
+                                                         parallel_args,
+                                                         options)) {}
 };
 
 #endif

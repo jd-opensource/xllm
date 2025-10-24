@@ -16,19 +16,14 @@ limitations under the License.
 
 #include "rotary_embedding.h"
 
-#include <c10/core/ScalarType.h>
 #include <glog/logging.h>
-#include <torch/torch.h>
-#if defined(USE_NPU)
-#include <torch_npu/torch_npu.h>
-#endif
 
 #include <boost/algorithm/string.hpp>
 #include <cmath>
 #include <memory>
 
-#include "common/global_flags.h"
-#include "util/slice.h"
+#include "core/common/global_flags.h"
+#include "core/util/slice.h"
 
 namespace xllm {
 

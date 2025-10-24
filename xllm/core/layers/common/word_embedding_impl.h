@@ -28,12 +28,12 @@ namespace xllm {
 namespace layer {
 
 // Embedding parallelized in the embedding dimension.
-class MluWordEmbeddingImpl : public torch::nn::Module {
+class WordEmbeddingImpl : public torch::nn::Module {
  public:
-  MluWordEmbeddingImpl(int64_t num_embeddings,
-                       int64_t embedding_dim,
-                       const ParallelArgs& parallel_args,
-                       const torch::TensorOptions& options)
+  WordEmbeddingImpl(int64_t num_embeddings,
+                    int64_t embedding_dim,
+                    const ParallelArgs& parallel_args,
+                    const torch::TensorOptions& options)
       : parallel_args_(parallel_args) {
     rank_ = parallel_args_.tp_group_->rank();
     world_size_ = parallel_args_.tp_group_->world_size();

@@ -4,7 +4,7 @@ include(cc_test)
 
 cc_library(
   NAME
-    mlu_layers 
+    common_layers 
   HDRS
     qwen3_attention.h
     attention.h
@@ -15,7 +15,7 @@ cc_library(
     qwen3_decoder_layer.h
     qwen3_moe_decoder_layer.h
     linear_impl.h
-    mlu_word_embedding_impl.h
+    word_embedding_impl.h
   SRCS
     qwen3_attention.cpp
     attention.cpp

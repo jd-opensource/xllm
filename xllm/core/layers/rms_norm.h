@@ -16,8 +16,8 @@ limitations under the License.
 #pragma once
 #if defined(USE_NPU)
 #include "npu/npu_rms_norm_impl.h"
-#elif defined(USE_MLU)
-#include "mlu/fuse_norm.h"
+#else
+#include "common/fuse_norm.h"
 #endif
 
 namespace xllm {
@@ -32,7 +32,7 @@ class RmsNorm : public torch::nn::ModuleHolder<NpuRmsNormImpl> {
   RmsNorm(const ModelContext& context)
       : ModuleHolder(std::make_shared<NpuRmsNormImpl>(context)) {}
 };
-#elif defined(USE_MLU)
+#else
 class RmsNorm : public torch::nn::ModuleHolder<FusedRMSNormImpl> {
  public:
   using torch::nn::ModuleHolder<FusedRMSNormImpl>::ModuleHolder;

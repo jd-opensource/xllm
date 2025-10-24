@@ -19,7 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #if defined(USE_MLU)
-#include "mlu/linear_impl.h"
+#include "common/linear_impl.h"
 #endif
 
 namespace xllm {

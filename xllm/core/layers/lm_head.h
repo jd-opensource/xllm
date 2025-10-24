@@ -17,8 +17,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_lm_head_impl.h"
-#elif defined(USE_MLU)
-#include "mlu/linear_impl.h"
+#else
+#include "common/linear_impl.h"
 #endif
 
 namespace xllm {
@@ -33,7 +33,7 @@ class LmHead : public torch::nn::ModuleHolder<NpuLmHeadImpl> {
   LmHead(const ModelContext& context)
       : ModuleHolder(std::make_shared<NpuLmHeadImpl>(context)) {}
 };
-#elif defined(USE_MLU)
+#else
 class LmHead : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
  public:
   using torch::nn::ModuleHolder<ColumnParallelLinearImpl>::ModuleHolder;

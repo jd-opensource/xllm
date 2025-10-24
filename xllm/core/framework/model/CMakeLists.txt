@@ -15,17 +15,12 @@ set(BASE_DEPS
 )
 
 if(USE_NPU)
-  # Modify dependencies for npu
-  list(APPEND BASE_DEPS torch_npu)
   list(APPEND BASE_DEPS :npu_layers)
   list(APPEND BASE_DEPS :platform_npu)
+else()
+  list(APPEND BASE_DEPS :common_layers)
 endif()
 
-if(USE_MLU)
-  # Modify dependencies for mlu
-  list(APPEND BASE_DEPS torch_mlu)
-  list(APPEND BASE_DEPS :mlu_layers)
-endif()
 
 # Define the library
 cc_library(
