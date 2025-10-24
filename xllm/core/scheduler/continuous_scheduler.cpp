@@ -254,11 +254,11 @@ void ContinuousScheduler::handle_prefill_requests(
               std::shared_ptr<Request> request_to_preempt =
                   running_queue_offline_->back();
               ++num_online_prefill_preempt_offline_requests;
+              request_to_preempt->set_preempted();
               kv_cache_manager_->deallocate(request_to_preempt.get());
               running_queue_offline_->pop_back();
               // add preemptable request to waiting priority queue
               // TO IMPROVE?: not process this offline request in current batch
-              request_to_preempt->set_preempted();
               waiting_priority_queue_offline_.push(request_to_preempt);
             }
             if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
@@ -475,20 +475,20 @@ void ContinuousScheduler::handle_decode_requests(
       std::shared_ptr<Request> request_to_preempt =
           running_queue_offline_->back();
       ++num_online_decode_preempt_offline_requests;
+      request_to_preempt->set_preempted();
       kv_cache_manager_->deallocate(request_to_preempt.get());
       running_queue_offline_->pop_back();
       // add preemptable request to waiting priority queue
-      request_to_preempt->set_preempted();
       waiting_priority_queue_offline_.push(request_to_preempt);
       continue;
     } else if (running_queue->size() > 1) {
       std::shared_ptr<Request> request_to_preempt = running_queue->back();
       if (request_to_preempt.get() != request.get()) {
         // TO IMPROVE: kv cache offload to cpu
+        request_to_preempt->set_preempted();
         kv_cache_manager_->deallocate(request_to_preempt.get());
         running_queue->pop_back();
         // add preemptable request to waiting priority queue
-        request_to_preempt->set_preempted();
         if (request_to_preempt->offline()) {
           ++num_offline_decode_preempt_offline_requests;
           waiting_priority_queue_offline_.push(request_to_preempt);
@@ -795,13 +795,44 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
           ->create_batches(running_requests_,
                            running_sequences_,
                            running_sequences_budgets_,
-                           kv_cache_manager_->get_copy_in_cache_block_infos(),
-                           kv_cache_manager_->get_copy_out_cache_block_infos(),
-                           kv_cache_manager_->get_swap_cache_block_infos());
+                           kv_cache_manager_->get_swap_block_transfer_infos());
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process
     COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
+
+    auto* load_block_transfer_infos =
+        kv_cache_manager_->get_load_block_transfer_infos();
+
+    for (int i = 0; i < batches.size(); i++) {
+      if (!load_block_transfer_infos->at(i).empty()) {
+        batches[i].set_batch_id();
+        engine_->transfer_kv_blocks(
+            i,
+            batches[i].batch_id(),
+            std::move(load_block_transfer_infos->at(i)));
+      }
+    }
+  }
+
+  auto* offload_block_transfer_infos =
+      kv_cache_manager_->get_offload_block_transfer_infos();
+
+  bool is_all_dp_copy_info_empty = true;
+  std::vector<std::vector<folly::SemiFuture<uint32_t>>> futures;
+  futures.resize(offload_block_transfer_infos->size());
+
+  for (int i = 0; i < futures.size(); i++) {
+    if (!offload_block_transfer_infos->at(i).empty()) {
+      futures[i] = std::move(engine_->transfer_kv_blocks(
+          i, std::move(offload_block_transfer_infos->at(i))));
+
+      is_all_dp_copy_info_empty = false;
+    }
+  }
+
+  if (!is_all_dp_copy_info_empty) {
+    kv_cache_manager_->set_offload_callback(futures);
   }
 
   GAUGE_SET(num_pending_requests,
@@ -878,17 +909,20 @@ void ContinuousScheduler::prepare_cache_async(
         kv_cache_manager_->pre_allocate(prefill_sequence.get());
     if (num_additional_blocks > 0) {
       const auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
-      std::vector<CacheBlockInfo> contents;
-      contents.reserve(num_additional_blocks);
+      std::vector<BlockTransferInfo> block_transfer_infos;
+      block_transfer_infos.reserve(num_additional_blocks);
       for (int i = host_blocks.size() - num_additional_blocks;
            i < host_blocks.size();
            i++) {
-        contents.emplace_back(
-            -1, host_blocks[i].id(), host_blocks[i].get_immutable_hash_value());
+        block_transfer_infos.emplace_back(
+            BlockTransferInfo(-1,
+                              host_blocks[i].id(),
+                              host_blocks[i].get_immutable_hash_value(),
+                              TransferType::G2H));
       }
 
-      auto futures = engine_->load_kv_blocks_from_store_async(
-          prefill_sequence->dp_rank(), std::move(contents));
+      auto futures = engine_->transfer_kv_blocks(
+          prefill_sequence->dp_rank(), std::move(block_transfer_infos));
       prefill_sequence->set_async_result(std::move(futures));
     }
   }
@@ -915,7 +949,7 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
       step_with_pd_ooc(batch);
     }
 
-    kv_cache_manager_->reset_copy_content();
+    kv_cache_manager_->reset_transfer_infos();
     // process request output in batch
     process_batch_output(false);
   } else {
@@ -941,7 +975,7 @@ void ContinuousScheduler::step_with_schedule_overlap(
 
   if (!cur_batch_all_empty) {
     engine_->step(batch);
-    kv_cache_manager_->reset_copy_content();
+    kv_cache_manager_->reset_transfer_infos();
   }
 
   // producer-consumer mode, make sure only one step is scheduled in advance
@@ -972,7 +1006,7 @@ void ContinuousScheduler::generate() {
 
     // run inference for the batch
     engine_->step(batch);
-    kv_cache_manager_->reset_copy_content();
+    kv_cache_manager_->reset_transfer_infos();
 
     // process request output in batch
     process_batch_output(false);

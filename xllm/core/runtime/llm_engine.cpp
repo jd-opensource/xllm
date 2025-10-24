@@ -493,19 +493,28 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
   return true;
 }
 
-std::vector<folly::SemiFuture<uint32_t>>
-LLMEngine::load_kv_blocks_from_store_async(
+std::vector<folly::SemiFuture<uint32_t>> LLMEngine::transfer_kv_blocks(
     const uint32_t dp_rank,
-    const std::vector<CacheBlockInfo>& cache_block_info) {
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
   std::vector<folly::SemiFuture<uint32_t>> futures;
-
   futures.reserve(dp_local_tp_size_);
+
   for (auto tp_rank = 0; tp_rank < dp_local_tp_size_; ++tp_rank) {
-    futures.emplace_back(
-        worker_clients_[tp_rank + dp_local_tp_size_ * dp_rank]
-            ->load_kv_blocks_from_store_async(cache_block_info));
+    futures.emplace_back(worker_clients_[tp_rank + dp_local_tp_size_ * dp_rank]
+                             ->transfer_kv_blocks(block_transfer_info));
   }
+
   return std::move(futures);
+}
+
+void LLMEngine::transfer_kv_blocks(
+    const uint32_t dp_rank,
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  for (auto tp_rank = 0; tp_rank < dp_local_tp_size_; ++tp_rank) {
+    worker_clients_[tp_rank + dp_local_tp_size_ * dp_rank]->transfer_kv_blocks(
+        batch_id, block_transfer_info);
+  }
 }
 
 void LLMEngine::get_device_info(std::vector<std::string>& device_ips,

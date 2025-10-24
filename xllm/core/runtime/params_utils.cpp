@@ -126,36 +126,10 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
 
-  std::vector<CacheBlockInfo> async_copy_out_blocks;
-  for (size_t i = 0; i < pb_forward_input->async_copy_out_blocks().size();
-       ++i) {
-    async_copy_out_blocks.emplace_back(
-        pb_forward_input->async_copy_out_blocks()[i].device_block_id(),
-        pb_forward_input->async_copy_out_blocks()[i].host_block_id(),
-        reinterpret_cast<const uint8_t*>(
-            pb_forward_input->async_copy_out_blocks()[i].hash_key().data()));
-  }
-  std::vector<CacheBlockInfo> copy_out_blocks;
-  for (size_t i = 0; i < pb_forward_input->copy_out_blocks().size(); ++i) {
-    copy_out_blocks.emplace_back(
-        pb_forward_input->copy_out_blocks()[i].device_block_id(),
-        pb_forward_input->copy_out_blocks()[i].host_block_id(),
-        reinterpret_cast<const uint8_t*>(
-            pb_forward_input->copy_out_blocks()[i].hash_key().data()));
-  }
-  std::vector<CacheBlockInfo> copy_in_blocks;
-  for (size_t i = 0; i < pb_forward_input->copy_in_blocks().size(); ++i) {
-    copy_in_blocks.emplace_back(
-        pb_forward_input->copy_in_blocks()[i].device_block_id(),
-        pb_forward_input->copy_in_blocks()[i].host_block_id(),
-        reinterpret_cast<const uint8_t*>(
-            pb_forward_input->copy_in_blocks()[i].hash_key().data()));
-  }
-  std::vector<CacheBlockInfo> swap_blocks;
+  std::vector<BlockTransferInfo> swap_blocks;
   for (size_t i = 0; i < pb_forward_input->swap_blocks().size(); ++i) {
-    swap_blocks.emplace_back(
-        pb_forward_input->swap_blocks()[i].device_block_id(),
-        pb_forward_input->swap_blocks()[i].host_block_id());
+    swap_blocks.emplace_back(pb_forward_input->swap_blocks()[i].src_block_id(),
+                             pb_forward_input->swap_blocks()[i].dst_block_id());
   }
   // block copy kernel
   std::vector<int32_t> src_block_indices =
@@ -241,9 +215,6 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.embedding_ids = std::move(embedding_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
 
-  input_params.async_copy_out_blocks = std::move(async_copy_out_blocks);
-  input_params.copy_out_blocks = std::move(copy_out_blocks);
-  input_params.copy_in_blocks = std::move(copy_in_blocks);
   input_params.swap_blocks = std::move(swap_blocks);
   // block copy kernel
   input_params.src_block_indices =
@@ -251,6 +222,8 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.dst_block_indices =
       torch::tensor(dst_block_indices, tensor_options);
   input_params.cum_sum = torch::tensor(cum_sum, tensor_options);
+
+  input_params.batch_id = pb_forward_input->batch_id();
 
   if (pb_forward_input->embeds().size() > 0) {
     const int32_t rows = pb_forward_input->embeds().size();
@@ -484,41 +457,14 @@ void forward_input_to_proto(const RawForwardInput& inputs,
                       inputs.embedding_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),
                       inputs.extra_token_ids);
-  pb_forward_input->mutable_async_copy_out_blocks()->Reserve(
-      inputs.async_copy_out_blocks.size());
-  for (auto t : inputs.async_copy_out_blocks) {
-    proto::CacheBlockInfo cache_block_info;
-    cache_block_info.set_device_block_id(t.device_block_id);
-    cache_block_info.set_host_block_id(t.host_block_id);
-    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
-    *pb_forward_input->mutable_async_copy_out_blocks()->Add() =
-        cache_block_info;
-  }
-  pb_forward_input->mutable_copy_out_blocks()->Reserve(
-      inputs.copy_out_blocks.size());
-  for (auto t : inputs.copy_out_blocks) {
-    proto::CacheBlockInfo cache_block_info;
-    cache_block_info.set_device_block_id(t.device_block_id);
-    cache_block_info.set_host_block_id(t.host_block_id);
-    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
-    *pb_forward_input->mutable_copy_out_blocks()->Add() = cache_block_info;
-  }
-  pb_forward_input->mutable_copy_in_blocks()->Reserve(
-      inputs.copy_in_blocks.size());
-  for (auto t : inputs.copy_in_blocks) {
-    proto::CacheBlockInfo cache_block_info;
-    cache_block_info.set_device_block_id(t.device_block_id);
-    cache_block_info.set_host_block_id(t.host_block_id);
-    cache_block_info.set_hash_key(t.hash_key, MURMUR_HASH3_VALUE_LEN);
-    *pb_forward_input->mutable_copy_in_blocks()->Add() = cache_block_info;
-  }
   pb_forward_input->mutable_swap_blocks()->Reserve(inputs.swap_blocks.size());
   for (auto t : inputs.swap_blocks) {
-    proto::CacheBlockInfo cache_block_info;
-    cache_block_info.set_device_block_id(t.device_block_id);
-    cache_block_info.set_host_block_id(t.host_block_id);
-    *pb_forward_input->mutable_swap_blocks()->Add() = cache_block_info;
+    proto::BlockTransferInfo block_transfer_info;
+    block_transfer_info.set_src_block_id(t.src_block_id);
+    block_transfer_info.set_dst_block_id(t.dst_block_id);
+    *pb_forward_input->mutable_swap_blocks()->Add() = block_transfer_info;
   }
+  pb_forward_input->set_batch_id(inputs.batch_id);
 
   // block copy kernel
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_src_block_indices(),
@@ -764,36 +710,55 @@ Token build_token(int64_t index,
   return token;
 }
 
-void proto_to_cache_block_info(
-    const proto::CacheBlockInfos& cache_block_info_pb,
-    std::vector<CacheBlockInfo>& cache_block_info) {
-  cache_block_info.reserve(cache_block_info_pb.contents_size());
+void proto_to_block_transfer_info(
+    const proto::BlockTransferInfos& pb_block_transfer_info,
+    uint64_t& batch_id,
+    std::vector<BlockTransferInfo>& block_transfer_info) {
+  block_transfer_info.reserve(pb_block_transfer_info.transfer_infos_size());
 
-  for (int i = 0; i < cache_block_info_pb.contents_size(); ++i) {
-    cache_block_info.emplace_back(
-        cache_block_info_pb.contents(i).device_block_id(),
-        cache_block_info_pb.contents(i).host_block_id(),
+  for (int i = 0; i < pb_block_transfer_info.transfer_infos_size(); ++i) {
+    block_transfer_info.emplace_back(
+        pb_block_transfer_info.transfer_infos(i).src_block_id(),
+        pb_block_transfer_info.transfer_infos(i).dst_block_id(),
         reinterpret_cast<const uint8_t*>(
-            cache_block_info_pb.contents(i).hash_key().data()));
+            pb_block_transfer_info.transfer_infos(i).hash_key().data()),
+        pb_block_transfer_info.transfer_infos(i).hash_key().size(),
+        TransferType(pb_block_transfer_info.transfer_type()));
   }
+
+  batch_id = pb_block_transfer_info.batch_id();
 }
 
-bool cache_block_info_to_proto(
-    const std::vector<CacheBlockInfo>& cache_block_info,
-    proto::CacheBlockInfos* cache_block_info_pb) {
-  cache_block_info_pb->mutable_contents()->Reserve(cache_block_info.size());
-  for (const CacheBlockInfo block_info : cache_block_info) {
-    proto::CacheBlockInfo pb_cache;
-    pb_cache.set_device_block_id(block_info.device_block_id);
-    pb_cache.set_host_block_id(block_info.host_block_id);
-    if (block_info.hash_key != nullptr) {
-      pb_cache.set_hash_key(block_info.hash_key, MURMUR_HASH3_VALUE_LEN);
-    } else {
-      LOG(ERROR) << "convert to CacheBlockInfos fail, hash key is nullptr!";
+bool block_transfer_info_to_proto(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    proto::BlockTransferInfos* pb_block_transfer_info) {
+  pb_block_transfer_info->mutable_transfer_infos()->Reserve(
+      block_transfer_info.size());
+  auto transfer_type = block_transfer_info[0].transfer_type;
+  for (const BlockTransferInfo info : block_transfer_info) {
+    if (info.hash_key == nullptr) {
+      LOG(ERROR) << "Convert to BlockTransferInfos fail, hash key is nullptr!";
       return false;
     }
-    *cache_block_info_pb->mutable_contents()->Add() = pb_cache;
+
+    if (transfer_type != info.transfer_type) {
+      LOG(ERROR) << "Convert to BlockTransferInfos fail, TransferType must be "
+                    "same, but got "
+                 << uint8_t(transfer_type) << " and "
+                 << uint8_t(info.transfer_type);
+      return false;
+    }
+
+    proto::BlockTransferInfo pb_cache;
+    pb_cache.set_src_block_id(info.src_block_id);
+    pb_cache.set_dst_block_id(info.dst_block_id);
+    pb_cache.set_hash_key(info.hash_key, MURMUR_HASH3_VALUE_LEN);
+
+    *pb_block_transfer_info->mutable_transfer_infos()->Add() = pb_cache;
   }
+  pb_block_transfer_info->set_batch_id(batch_id);
+  pb_block_transfer_info->set_transfer_type(proto::TransferType(transfer_type));
 
   return true;
 }

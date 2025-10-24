@@ -37,30 +37,13 @@ limitations under the License.
 
 namespace xllm {
 
-void split_copy_out_blocks(RawForwardInput& raw_forward_input,
-                           std::unordered_set<int32_t>& write_block_ids) {
-  std::vector<CacheBlockInfo> async_copy_out_blocks;
-  std::vector<CacheBlockInfo> sync_copy_out_blocks;
-  for (CacheBlockInfo& content : raw_forward_input.copy_out_blocks) {
-    if (write_block_ids.find(content.device_block_id) !=
-        write_block_ids.end()) {
-      sync_copy_out_blocks.emplace_back(std::move(content));
-    } else {
-      async_copy_out_blocks.emplace_back(std::move(content));
-    }
-  }
-  raw_forward_input.copy_out_blocks = std::move(sync_copy_out_blocks);
-  raw_forward_input.async_copy_out_blocks = std::move(async_copy_out_blocks);
-}
-
 BatchInputBuilder::BatchInputBuilder(
     const std::vector<Sequence*>& sequences,
     const std::vector<uint32_t>& allowed_max_tokens,
     const std::vector<torch::Tensor>& input_embeddings_vec,
     const std::vector<MMData>& mm_data_vec,
-    const std::vector<CacheBlockInfo>* copy_in_cache_block_infos,
-    const std::vector<CacheBlockInfo>* copy_out_cache_block_infos,
-    std::vector<CacheBlockInfo>* swap_cache_block_infos,
+    std::vector<BlockTransferInfo>* swap_block_transfer_infos,
+    const uint64_t batch_id,
     const ModelArgs* args,
     ThreadPool* thread_pool)
     : sequences_(sequences),
@@ -70,9 +53,8 @@ BatchInputBuilder::BatchInputBuilder(
       args_(args),
       thread_pool_(thread_pool),
       num_sequences_(static_cast<int32_t>(sequences.size())),
-      copy_in_cache_block_infos_(copy_in_cache_block_infos),
-      copy_out_cache_block_infos_(copy_out_cache_block_infos),
-      swap_cache_block_infos_(swap_cache_block_infos) {
+      swap_block_transfer_infos_(swap_block_transfer_infos),
+      batch_id_(batch_id) {
   // Reserve space for better performance
   state_.flatten_tokens_vec.reserve(1000);
   state_.flatten_positions_vec.reserve(1000);
@@ -602,11 +584,11 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
   }
 
-  if (swap_cache_block_infos_ != nullptr &&
-      swap_cache_block_infos_->size() > 0) {
+  if (swap_block_transfer_infos_ != nullptr &&
+      swap_block_transfer_infos_->size() > 0) {
     input_params.swap_blocks.insert(input_params.swap_blocks.end(),
-                                    swap_cache_block_infos_->begin(),
-                                    swap_cache_block_infos_->end());
+                                    swap_block_transfer_infos_->begin(),
+                                    swap_block_transfer_infos_->end());
   }
 
   if (FLAGS_enable_continuous_kvcache) {
@@ -696,54 +678,40 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   }
   raw_forward_input.mm_data = MMData::batch(mm_data_vec_);
 
-  if (copy_out_cache_block_infos_ != nullptr &&
-      copy_out_cache_block_infos_->size() > 0) {
-    raw_forward_input.copy_out_blocks.insert(
-        raw_forward_input.copy_out_blocks.end(),
-        copy_out_cache_block_infos_->begin(),
-        copy_out_cache_block_infos_->end());
-  }
-  if (copy_in_cache_block_infos_ != nullptr &&
-      copy_in_cache_block_infos_->size() > 0) {
-    raw_forward_input.copy_in_blocks.insert(
-        raw_forward_input.copy_in_blocks.end(),
-        copy_in_cache_block_infos_->begin(),
-        copy_in_cache_block_infos_->end());
-  }
-  split_copy_out_blocks(raw_forward_input, write_block_ids_);
   process_swap_block_infos(raw_forward_input);
+  raw_forward_input.batch_id = batch_id_;
 
   return raw_forward_input;
 }
 
 void BatchInputBuilder::process_swap_block_infos(
     RawForwardInput& raw_forward_input) {
-  if (swap_cache_block_infos_ == nullptr ||
-      swap_cache_block_infos_->size() == 0) {
+  if (swap_block_transfer_infos_ == nullptr ||
+      swap_block_transfer_infos_->size() == 0) {
     return;
   }
 
   if (FLAGS_enable_block_copy_kernel) {
-    auto& swap_blocks = *swap_cache_block_infos_;
+    auto& swap_blocks = *swap_block_transfer_infos_;
     std::sort(swap_blocks.begin(),
               swap_blocks.end(),
-              [](const CacheBlockInfo& a, const CacheBlockInfo& b) {
-                return a.device_block_id < b.device_block_id;
+              [](const BlockTransferInfo& a, const BlockTransferInfo& b) {
+                return a.src_block_id < b.src_block_id;
               });
     if (swap_blocks.size() > 0) {
       std::vector<int32_t> src_indices, dst_indices, cum_sum;
-      int32_t current_src = swap_blocks[0].device_block_id;
+      int32_t current_src = swap_blocks[0].src_block_id;
       src_indices.reserve(swap_blocks.size());
       dst_indices.reserve(swap_blocks.size());
 
-      src_indices.push_back(swap_blocks[0].device_block_id);
-      dst_indices.push_back(swap_blocks[0].host_block_id);
+      src_indices.push_back(swap_blocks[0].src_block_id);
+      dst_indices.push_back(swap_blocks[0].dst_block_id);
       for (size_t i = 1; i < swap_blocks.size(); i++) {
-        dst_indices.push_back(swap_blocks[i].host_block_id);
-        if (swap_blocks[i].device_block_id != current_src) {
-          src_indices.push_back(swap_blocks[i].device_block_id);
+        dst_indices.push_back(swap_blocks[i].dst_block_id);
+        if (swap_blocks[i].src_block_id != current_src) {
+          src_indices.push_back(swap_blocks[i].src_block_id);
           cum_sum.push_back(i);
-          current_src = swap_blocks[i].device_block_id;
+          current_src = swap_blocks[i].src_block_id;
         }
       }
       cum_sum.push_back(swap_blocks.size());
@@ -755,8 +723,8 @@ void BatchInputBuilder::process_swap_block_infos(
     }
   } else {
     raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
-                                         swap_cache_block_infos_->begin(),
-                                         swap_cache_block_infos_->end());
+                                         swap_block_transfer_infos_->begin(),
+                                         swap_block_transfer_infos_->end());
   }
 }
 }  // namespace xllm

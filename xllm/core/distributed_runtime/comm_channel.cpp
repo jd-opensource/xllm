@@ -306,21 +306,33 @@ bool CommChannel::allocate_kv_cache_with_transfer(
   return true;
 }
 
-bool CommChannel::load_kv_blocks_from_store_async(
-    const std::vector<CacheBlockInfo>& cache_block_info,
+void CommChannel::transfer_kv_blocks(
+    const std::vector<BlockTransferInfo>& block_transfer_info,
     folly::Promise<uint32_t>& promise) {
-  proto::CacheBlockInfos pb_cache_block_info;
-  if (!cache_block_info_to_proto(cache_block_info, &pb_cache_block_info)) {
+  proto::BlockTransferInfos pb_block_transfer_info;
+  if (!block_transfer_info_to_proto(
+          0x0, block_transfer_info, &pb_block_transfer_info)) {
     promise.setValue(0);
-    return false;
+    return;
   }
 
-  auto done = new LoadKVCacheFromStoreClosure();
+  auto done = new TransferBlocksClosure();
   done->promise = std::move(promise);
-  stub_->LoadKVCacheFromStore(
-      &done->cntl, &pb_cache_block_info, &done->response, done);
+  stub_->TransferBlocks(
+      &done->cntl, &pb_block_transfer_info, &done->response, done);
+}
 
-  return true;
+void CommChannel::transfer_kv_blocks(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  proto::BlockTransferInfos pb_block_transfer_info;
+  if (!block_transfer_info_to_proto(
+          batch_id, block_transfer_info, &pb_block_transfer_info)) {
+    return;
+  }
+  brpc::Controller cntl;
+  proto::TransferStatus response;
+  stub_->TransferBlocks(&cntl, &pb_block_transfer_info, &response, nullptr);
 }
 
 bool CommChannel::get_last_step_result_async(
@@ -397,18 +409,6 @@ bool CommChannel::execute_model_with_brpc(
   return true;
 }
 
-void LoadKVCacheFromStoreClosure::Run() {
-  std::unique_ptr<LoadKVCacheFromStoreClosure> self_guard(this);
-
-  bool success = !cntl.Failed();
-  if (!success) {
-    promise.setValue(0);
-  } else {
-    promise.setValue(response.success_cnt());
-  }
-  return;
-}
-
 void ExecuteModelClosure::Run() {
   std::unique_ptr<ExecuteModelClosure> self_guard(this);
 
@@ -437,4 +437,17 @@ void InitModelClosure::Run() {
 
   return;
 }
+
+void TransferBlocksClosure::Run() {
+  std::unique_ptr<TransferBlocksClosure> self_guard(this);
+
+  bool success = !cntl.Failed();
+  if (!success) {
+    promise.setValue(0);
+  } else {
+    promise.setValue(response.success_cnt());
+  }
+  return;
+}
+
 }  // namespace xllm

@@ -16,6 +16,8 @@ limitations under the License.
 
 #pragma once
 
+#include <absl/time/clock.h>
+#include <absl/time/time.h>
 #include <torch/torch.h>
 
 #include <limits>
@@ -48,20 +50,18 @@ class Batch {
     sequence_groups_.push_back(sequence_group);
   }
 
-  void set_copy_in_cache_block_infos(
-      std::vector<CacheBlockInfo>* copy_in_cache_block_infos) {
-    copy_in_cache_block_infos_ = copy_in_cache_block_infos;
+  void set_swap_block_transfer_infos(
+      std::vector<BlockTransferInfo>* swap_block_transfer_infos) {
+    swap_block_transfer_infos_ = swap_block_transfer_infos;
   }
 
-  void set_copy_out_cache_block_infos(
-      std::vector<CacheBlockInfo>* copy_out_cache_block_infos) {
-    copy_out_cache_block_infos_ = copy_out_cache_block_infos;
+  void set_batch_id() {
+    if (batch_id_ == 0x0) {
+      batch_id_ = absl::ToUnixMicros(absl::Now());
+    }
   }
 
-  void set_swap_cache_block_infos(
-      std::vector<CacheBlockInfo>* swap_cache_block_infos) {
-    swap_cache_block_infos_ = swap_cache_block_infos;
-  }
+  uint64_t batch_id() const { return batch_id_; }
 
   // get the number of sequences in the batch
   size_t size() const { return sequences_.size(); }
@@ -124,9 +124,7 @@ class Batch {
 
   std::vector<Sequence*> sequences_;
   std::vector<SequencesGroup*> sequence_groups_;
-  std::vector<CacheBlockInfo>* copy_in_cache_block_infos_ = nullptr;
-  std::vector<CacheBlockInfo>* copy_out_cache_block_infos_ = nullptr;
-  std::vector<CacheBlockInfo>* swap_cache_block_infos_ = nullptr;
+  std::vector<BlockTransferInfo>* swap_block_transfer_infos_ = nullptr;
 
   // max number of tokens to process for each sequence
   // default to max value
@@ -139,6 +137,8 @@ class Batch {
 
   // all sequences in this batch are in prefill stage
   bool all_seqs_in_prefill_ = false;
+
+  uint64_t batch_id_ = 0x0;
 };
 
 }  // namespace xllm

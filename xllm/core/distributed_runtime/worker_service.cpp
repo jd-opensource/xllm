@@ -416,18 +416,21 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
   return;
 }
 
-void WorkerService::LoadKVCacheFromStore(
+void WorkerService::TransferBlocks(
     ::google::protobuf::RpcController* controller,
-    const ::xllm::proto::CacheBlockInfos* req,
-    ::xllm::proto::StoreResponse* resp,
+    const ::xllm::proto::BlockTransferInfos* req,
+    ::xllm::proto::TransferStatus* resp,
     ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
-  std::vector<CacheBlockInfo> dst_blocks;
-  proto_to_cache_block_info(*req, dst_blocks);
+  std::vector<BlockTransferInfo> block_transfer_info;
+  uint64_t batch_id;
+  proto_to_block_transfer_info(*req, batch_id, block_transfer_info);
 
-  auto future = worker_->load_kv_blocks_from_store_async(dst_blocks);
-
-  resp->set_success_cnt(std::move(future).get());
+  if (batch_id == 0x0) {
+    resp->set_success_cnt(worker_->transfer_kv_blocks(block_transfer_info));
+  } else {
+    worker_->transfer_kv_blocks(batch_id, std::move(block_transfer_info));
+  }
   return;
 }
 

@@ -282,16 +282,28 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
   return future;
 }
 
-folly::SemiFuture<uint32_t> RemoteWorker::load_kv_blocks_from_store_async(
-    const std::vector<CacheBlockInfo> cache_block_info) {
+folly::SemiFuture<uint32_t> RemoteWorker::transfer_kv_blocks(
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
-  general_threadpool_.schedule([this,
-                                cache_block_info = std::move(cache_block_info),
-                                promise = std::move(promise)]() mutable {
-    channel_->load_kv_blocks_from_store_async(cache_block_info, promise);
-  });
+  general_threadpool_.schedule(
+      [this,
+       block_transfer_info = std::move(block_transfer_info),
+       promise = std::move(promise)]() mutable {
+        channel_->transfer_kv_blocks(block_transfer_info, promise);
+      });
   return future;
+}
+
+void RemoteWorker::transfer_kv_blocks(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  general_threadpool_.schedule(
+      [this,
+       batch_id = batch_id,
+       block_transfer_info = std::move(block_transfer_info)]() mutable {
+        channel_->transfer_kv_blocks(batch_id, block_transfer_info);
+      });
 }
 
 const torch::Device& RemoteWorker::device() const {

@@ -8,6 +8,7 @@
 #include "common/macros.h"
 #include "framework/model/model_input_params.h"
 #include "kv_cache.h"
+#include "util/slice.h"
 
 namespace xllm {
 
@@ -22,17 +23,47 @@ struct StoreConfig {
 
 class KVCacheStore {
  public:
-  KVCacheStore(const StoreConfig& config,
-               std::vector<xllm::KVCache>* host_kv_caches);
   ~KVCacheStore();
 
-  uint64_t batch_put(const std::vector<CacheBlockInfo>& cache_block_info);
+  bool init(const StoreConfig& config,
+            std::vector<xllm::KVCache>* host_kv_caches);
 
-  uint64_t batch_get(const std::vector<CacheBlockInfo>& cache_block_info);
+  uint32_t batch_put(
+      const std::vector<BlockTransferInfo>& block_transfer_info) {
+    return batch_put({block_transfer_info});
+  }
 
-  uint64_t batch_remove(const std::vector<CacheBlockInfo>& cache_block_info);
+  uint32_t batch_get(
+      const std::vector<BlockTransferInfo>& block_transfer_info) {
+    return batch_get({block_transfer_info});
+  }
+
+  uint32_t batch_remove(
+      const std::vector<BlockTransferInfo>& block_transfer_info) {
+    return batch_remove({block_transfer_info});
+  }
+
+  uint32_t batch_put(Slice<BlockTransferInfo>& block_transfer_info);
+
+  uint32_t batch_get(Slice<BlockTransferInfo>& block_transfer_info);
+
+  uint32_t batch_remove(Slice<BlockTransferInfo>& block_transfer_info);
+
+  uint32_t batch_exist(std::vector<std::string>&& keys);
+
+  static KVCacheStore& get_instance() {
+    static KVCacheStore kvcache_store;
+    return kvcache_store;
+  }
 
  private:
+  KVCacheStore() = default;
+  KVCacheStore(const KVCacheStore&) = delete;
+  KVCacheStore& operator=(const KVCacheStore&) = delete;
+
+ private:
+  bool is_initialized_ = false;
+
   StoreConfig config_;
   mooncake::ReplicateConfig rep_config_;
 

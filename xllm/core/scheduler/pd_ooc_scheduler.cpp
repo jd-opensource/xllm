@@ -367,13 +367,10 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(running_requests_,
-                           running_sequences_,
-                           running_sequences_budgets_,
-                           kv_cache_manager_->get_copy_in_cache_block_infos(),
-                           kv_cache_manager_->get_copy_out_cache_block_infos());
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(running_requests_,
+                                      running_sequences_,
+                                      running_sequences_budgets_);
 
   if (!batches[0].empty()) {
     // only update the scheduling latency when there are requests to process

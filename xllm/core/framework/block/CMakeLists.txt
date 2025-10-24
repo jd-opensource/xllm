@@ -26,6 +26,7 @@ cc_library(
     SMHasherSupport
     torch
 )
+target_link_libraries(block PRIVATE Folly::folly)
 
 if(USE_NPU)
   set(TEST_SRCS
