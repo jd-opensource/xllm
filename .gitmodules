@@ -28,3 +28,9 @@
 [submodule "third_party/Mooncake"]
 	path = third_party/Mooncake
 	url = https://gitcode.com/xLLM-AI/Mooncake.git
+[submodule "third_party/flashinfer"]
+	path = third_party/flashinfer
+	url = https://gitcode.com/xLLM-AI/flashinfer.git
+[submodule "third_party/cutlass"]
+	path = third_party/cutlass
+	url = https://gitcode.com/xLLM-AI/cutlass.git

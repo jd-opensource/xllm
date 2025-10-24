@@ -26,6 +26,7 @@ limitations under the License.
 #include <utility>
 
 #include "common/device_monitor.h"
+#include "common/flashinfer_workspace.h"
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/global_flags.h"
@@ -41,7 +42,10 @@ namespace xllm {
 LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
-    : WorkerImpl(parallel_args, device, options) {}
+    : WorkerImpl(parallel_args, device, options) {
+  // initialize flashinfer workspace
+  FlashinferWorkspace::get_instance().initialize(device_);
+}
 
 bool LLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
