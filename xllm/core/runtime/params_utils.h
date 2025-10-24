@@ -52,12 +52,14 @@ Token build_token(int64_t index,
                   torch::Tensor top_tokens,
                   torch::Tensor top_logprobs);
 
-void proto_to_cache_block_info(
-    const proto::CacheBlockInfos& cache_block_info_pb,
-    std::vector<CacheBlockInfo>& cache_block_info);
+void proto_to_block_transfer_info(
+    const proto::BlockTransferInfos& pb_block_transfer_info,
+    uint64_t& batch_id,
+    std::vector<BlockTransferInfo>& block_transfer_info);
 
-bool cache_block_info_to_proto(
-    const std::vector<CacheBlockInfo>& cache_block_info,
-    proto::CacheBlockInfos* cache_block_info_pb);
+bool block_transfer_info_to_proto(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    proto::BlockTransferInfos* pb_block_transfer_info);
 
 }  // namespace xllm

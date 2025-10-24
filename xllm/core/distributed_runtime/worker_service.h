@@ -80,11 +80,10 @@ class WorkerService : public proto::DistributeWorker {
                    proto::Status* resp,
                    ::google::protobuf::Closure* done) override;
 
-  virtual void LoadKVCacheFromStore(
-      ::google::protobuf::RpcController* controller,
-      const ::xllm::proto::CacheBlockInfos* req,
-      ::xllm::proto::StoreResponse* resp,
-      ::google::protobuf::Closure* done) override;
+  virtual void TransferBlocks(::google::protobuf::RpcController* controller,
+                              const ::xllm::proto::BlockTransferInfos* req,
+                              ::xllm::proto::TransferStatus* resp,
+                              ::google::protobuf::Closure* done) override;
 
   void GetDeviceInfo(::google::protobuf::RpcController* controller,
                      const proto::Empty* req,

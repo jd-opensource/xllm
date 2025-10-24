@@ -16,6 +16,8 @@ limitations under the License.
 
 #include "block_manager_impl.h"
 
+#include <unordered_set>
+
 #include "framework/prefix_cache/prefix_cache_factory.h"
 namespace xllm {
 
@@ -67,8 +69,23 @@ void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
   if (options_.enable_prefix_cache()) {
     for (const auto& block : blocks) {
       // the block is not shared by other sequence
-      if (block.ref_count() <= 2) {
-        num_used_blocks_.fetch_sub(1, std::memory_order_relaxed);
+      if (block.is_valid() && block.ref_count() <= 2) {
+        if (num_used_blocks_ > 0) {
+          num_used_blocks_.fetch_sub(1, std::memory_order_relaxed);
+        } else {
+          LOG(ERROR) << "num_used_blocks_==0 cannot fetch_sub for id:"
+                     << block.id()
+                     << ", total block size: " << num_total_blocks();
+          std::unordered_set<int32_t> block_id_set;
+          block_id_set.insert(block.id());
+          std::string error_msg = "Block already released: ";
+          for (auto& id : free_blocks_) {
+            if (block_id_set.count(id) != 0) {
+              error_msg.append(std::to_string(id)).append(" ");
+            }
+          }
+          LOG(ERROR) << error_msg;
+        }
       }
     }
   } else {

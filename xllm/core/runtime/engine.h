@@ -81,11 +81,17 @@ class Engine {
     LOG(FATAL) << " pull_kv_blocks is notimplemented!";
   };
 
-  virtual std::vector<folly::SemiFuture<uint32_t>>
-  load_kv_blocks_from_store_async(
+  virtual std::vector<folly::SemiFuture<uint32_t>> transfer_kv_blocks(
       const uint32_t dp_rank,
-      const std::vector<CacheBlockInfo>& cache_block_info) {
-    LOG(FATAL) << " load_kv_blocks_from_store is not implemented!";
+      const std::vector<BlockTransferInfo>& block_transfer_info) {
+    LOG(FATAL) << " transfer_kv_blocks is not implemented!";
+  };
+
+  virtual void transfer_kv_blocks(
+      const uint32_t dp_rank,
+      const uint64_t batch_id,
+      const std::vector<BlockTransferInfo>& block_transfer_info) {
+    LOG(FATAL) << " transfer_kv_blocks is not implemented!";
   };
 
   virtual void get_device_info(std::vector<std::string>& device_ips,

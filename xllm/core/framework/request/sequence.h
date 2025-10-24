@@ -192,6 +192,9 @@ class Sequence final {
   void close() { closed_ = true; }
   bool is_closed() const { return closed_; }
 
+  void preempted() { preempted_ = true; }
+  bool is_preempted() const { return preempted_; }
+
   // time between two tokens
   int64_t tbt(const absl::Time& now);
   // set sequence ttft
@@ -334,6 +337,9 @@ class Sequence final {
 
   // is the sequence closed.
   bool closed_ = false;
+
+  // is the sequence preempted.
+  bool preempted_ = false;
 
   // dp_rank
   int32_t dp_rank_ = -1;

@@ -546,10 +546,8 @@ double ProfileManager::run_request(int32_t token_length,
     sequences_budget.emplace_back(token_length - prefix_length);
   }
   // build batch
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(
-              requests, sequences, sequences_budget, nullptr, nullptr);
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(requests, sequences, sequences_budget);
 
   absl::Time start_time = absl::Now();
   engine_->step(batches);
@@ -588,8 +586,7 @@ double ProfileManager::run_request(
   // build batch
   auto batches =
       BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(
-              requests, sequences, sequences_budget, nullptr, nullptr);
+          ->create_batches(requests, sequences, sequences_budget, nullptr);
 
   absl::Time start_time = absl::Now();
   engine_->step(batches);

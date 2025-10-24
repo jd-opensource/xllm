@@ -26,24 +26,52 @@ limitations under the License.
 #include "util/tensor_helper.h"
 
 namespace xllm {
-struct CacheBlockInfo {
-  int32_t device_block_id = 0;
-  int32_t host_block_id = 0;
+
+enum class TransferType : uint8_t { G2H = 0, H2D = 1, D2G = 2 };
+
+struct BlockTransferInfo {
+  int32_t src_block_id = -1;
+  int32_t dst_block_id = -1;
   uint8_t* hash_key = nullptr;
+  TransferType transfer_type;
+  uint32_t hash_key_len = -1;
 
-  CacheBlockInfo() {}
-
-  CacheBlockInfo(int32_t device_block_id, int32_t host_block_id) {
-    this->device_block_id = device_block_id;
-    this->host_block_id = host_block_id;
+  BlockTransferInfo(int32_t src_block_id, int32_t dst_block_id) {
+    this->src_block_id = src_block_id;
+    this->dst_block_id = dst_block_id;
   }
 
-  CacheBlockInfo(int32_t device_block_id,
-                 int32_t host_block_id,
-                 const uint8_t* hash_key) {
-    this->device_block_id = device_block_id;
-    this->host_block_id = host_block_id;
+  BlockTransferInfo(int32_t src_block_id,
+                    int32_t dst_block_id,
+                    const uint8_t* hash_key,
+                    TransferType transfer_type) {
+    this->src_block_id = src_block_id;
+    this->dst_block_id = dst_block_id;
     this->hash_key = const_cast<uint8_t*>(hash_key);
+    this->transfer_type = transfer_type;
+  }
+
+  BlockTransferInfo(int32_t src_block_id,
+                    int32_t dst_block_id,
+                    const uint8_t* hash_key,
+                    uint32_t hash_key_len,
+                    TransferType transfer_type) {
+    this->src_block_id = src_block_id;
+    this->dst_block_id = dst_block_id;
+    this->hash_key = new uint8_t[hash_key_len];
+    memcpy(this->hash_key, hash_key, hash_key_len);
+    this->transfer_type = transfer_type;
+  }
+
+  ~BlockTransferInfo() {
+    if (hash_key_len != -1 && hash_key != nullptr) {
+      delete[] hash_key;
+    }
+  }
+
+  std::string to_string() const {
+    return std::to_string(src_block_id) + "->" + std::to_string(dst_block_id) +
+           ", " + std::to_string(uint32_t(transfer_type));
   }
 };
 
@@ -78,9 +106,6 @@ struct ModelInputParams {
 #endif
     params.expert_load_data = expert_load_data;
 
-    params.async_copy_out_blocks = std::move(async_copy_out_blocks);
-    params.copy_out_blocks = std::move(copy_out_blocks);
-    params.copy_in_blocks = std::move(copy_in_blocks);
     params.swap_blocks = std::move(swap_blocks);
 
     params.src_block_indices = safe_to(src_block_indices, device, true);
@@ -164,11 +189,8 @@ struct ModelInputParams {
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
 
-  // copy in / copy out
-  std::vector<CacheBlockInfo> async_copy_out_blocks;
-  std::vector<CacheBlockInfo> copy_out_blocks;
-  std::vector<CacheBlockInfo> copy_in_blocks;
-  std::vector<CacheBlockInfo> swap_blocks;
+  // swap
+  std::vector<BlockTransferInfo> swap_blocks;
 
   // block copy kernel
   torch::Tensor src_block_indices;
@@ -193,6 +215,8 @@ struct ModelInputParams {
   // Graph execution buffer for temporary tensor storage
   // Used by ACL Graph Executor to avoid repeated memory allocation
   torch::Tensor graph_buffer;
+
+  uint64_t batch_id;
 };
 
 }  // namespace xllm

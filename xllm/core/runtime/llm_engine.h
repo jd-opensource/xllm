@@ -71,9 +71,14 @@ class LLMEngine : public Engine {
                       const int32_t dst_dp_rank,
                       const std::vector<uint64_t>& dst_blocks) override;
 
-  std::vector<folly::SemiFuture<uint32_t>> load_kv_blocks_from_store_async(
+  std::vector<folly::SemiFuture<uint32_t>> transfer_kv_blocks(
       const uint32_t dp_rank,
-      const std::vector<CacheBlockInfo>& cache_block_info) override;
+      const std::vector<BlockTransferInfo>& block_transfer_info) override;
+
+  void transfer_kv_blocks(
+      const uint32_t dp_rank,
+      const uint64_t batch_id,
+      const std::vector<BlockTransferInfo>& block_transfer_info) override;
 
   void get_device_info(std::vector<std::string>& device_ips,
                        std::vector<uint16_t>& ports) override;

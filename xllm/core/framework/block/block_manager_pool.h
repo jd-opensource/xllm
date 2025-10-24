@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <queue>
 #include <vector>
 
 #include "block_manager.h"
@@ -57,13 +58,15 @@ class BlockManagerPool final : public KVCacheManager {
   void allocate_shared(Sequence* sequence) override;
   void cache(Sequence* sequence) override;
 
-  std::vector<std::vector<CacheBlockInfo>>* get_copy_in_cache_block_infos()
+  std::vector<std::vector<BlockTransferInfo>>* get_swap_block_transfer_infos()
       override;
-  std::vector<std::vector<CacheBlockInfo>>* get_copy_out_cache_block_infos()
+  std::vector<std::vector<BlockTransferInfo>>*
+  get_offload_block_transfer_infos() override;
+  std::vector<std::vector<BlockTransferInfo>>* get_load_block_transfer_infos()
       override;
-  std::vector<std::vector<CacheBlockInfo>>* get_swap_cache_block_infos()
-      override;
-  void reset_copy_content() override;
+  void set_offload_callback(
+      std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) override;
+  void reset_transfer_infos() override;
 
   void get_merged_kvcache_event(KvCacheEvent* event) const;
   float get_gpu_cache_usage_perc() const;
@@ -94,11 +97,12 @@ class BlockManagerPool final : public KVCacheManager {
   // the options for the block manager
   Options options_;
 
-  // CacheBlockInfo per step
-  std::vector<std::vector<CacheBlockInfo>> copy_in_cache_block_infos_;
-  std::vector<std::vector<CacheBlockInfo>> copy_out_cache_block_infos_;
-  std::vector<std::vector<CacheBlockInfo>> swap_cache_block_infos_;
-  std::vector<std::vector<Block>> evict_host_blocks_;
+  // BlockTransferInfo per step
+  std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
+  std::vector<std::vector<BlockTransferInfo>> load_block_transfer_infos_;
+  std::vector<std::vector<BlockTransferInfo>> offload_block_transfer_infos_;
+  std::vector<std::vector<Block>> released_host_blocks_;
+  std::vector<std::vector<Block>> released_device_blocks_;
 };
 
 }  // namespace xllm

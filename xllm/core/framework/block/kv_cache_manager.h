@@ -42,13 +42,19 @@ class KVCacheManager {
   virtual void allocate_shared(Sequence* sequence) = 0;
   virtual void cache(Sequence* sequence) = 0;
 
-  virtual std::vector<std::vector<CacheBlockInfo>>*
-  get_copy_in_cache_block_infos() = 0;
-  virtual std::vector<std::vector<CacheBlockInfo>>*
-  get_copy_out_cache_block_infos() = 0;
-  virtual std::vector<std::vector<CacheBlockInfo>>*
-  get_swap_cache_block_infos() = 0;
-  virtual void reset_copy_content() = 0;
+  virtual std::vector<std::vector<BlockTransferInfo>>*
+  get_swap_block_transfer_infos() = 0;
+
+  virtual std::vector<std::vector<BlockTransferInfo>>*
+  get_offload_block_transfer_infos() = 0;
+
+  virtual std::vector<std::vector<BlockTransferInfo>>*
+  get_load_block_transfer_infos() = 0;
+
+  virtual void set_offload_callback(
+      std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) = 0;
+
+  virtual void reset_transfer_infos() = 0;
 
   virtual uint32_t num_blocks() const = 0;
   virtual int32_t block_size() const = 0;

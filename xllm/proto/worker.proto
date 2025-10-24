@@ -57,17 +57,25 @@ message PullKVCacheRequest {
   repeated uint64 dst_blocks = 5;
 }
 
-message CacheBlockInfo {
-  int32 device_block_id = 1;
-  int32 host_block_id = 2;
+enum TransferType {
+  G2H = 0;
+  H2D = 1;
+  D2G = 2;
+}
+
+message BlockTransferInfo {
+  int32 src_block_id = 1;
+  int32 dst_block_id = 2;
   bytes hash_key = 3;
 }
 
-message CacheBlockInfos {
-  repeated CacheBlockInfo contents = 1;
+message BlockTransferInfos {
+  uint64 batch_id = 1;
+  TransferType transfer_type = 2;
+  repeated BlockTransferInfo transfer_infos = 3;
 }
 
-message StoreResponse {
+message TransferStatus {
  uint32 success_cnt = 1;
 }
 
@@ -180,10 +188,7 @@ message ForwardInput {
   repeated int32 embedding_ids = 25;
   repeated int32 extra_token_ids = 26;
   EplbInfo eplb_info =27;
-  repeated CacheBlockInfo async_copy_out_blocks = 28;
-  repeated CacheBlockInfo copy_out_blocks = 29;
-  repeated CacheBlockInfo copy_in_blocks = 30;
-  repeated CacheBlockInfo swap_blocks = 31;
+  repeated BlockTransferInfo swap_blocks = 28;
   // block copy kernel
   repeated int32 src_block_indices = 32;
   repeated int32 dst_block_indices = 33;
@@ -193,6 +198,7 @@ message ForwardInput {
   repeated int64 kv_cache_start_offsets = 36;
   // beam search kernel
   repeated float acc_logprob_vec = 37;
+  uint64 batch_id = 38;
 }
 
  message BatchedForwardInputs {
@@ -250,5 +256,5 @@ service DistributeWorker {
   rpc ExecuteModel (BatchedForwardInputs) returns (ForwardOutput);
   rpc GetLastStepResult (Empty) returns (ForwardOutput);
   rpc GetActiveActivationMemory (Empty) returns (ActivationMemory);
-  rpc LoadKVCacheFromStore(CacheBlockInfos) returns (StoreResponse) {}
+  rpc TransferBlocks(BlockTransferInfos) returns (TransferStatus) {}
 }

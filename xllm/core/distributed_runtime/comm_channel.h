@@ -91,6 +91,14 @@ class CommChannel {
       const std::vector<CacheBlockInfo>& cache_block_info,
       folly::Promise<uint32_t>& promise);
 
+  virtual void transfer_kv_blocks(
+      const std::vector<BlockTransferInfo>& block_transfer_info,
+      folly::Promise<uint32_t>& promise);
+
+  virtual void transfer_kv_blocks(
+      const uint64_t batch_id,
+      const std::vector<BlockTransferInfo>& block_transfer_info);
+
   virtual bool get_last_step_result_async(
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
@@ -128,11 +136,11 @@ class ExecuteModelClosure : public google::protobuf::Closure {
   folly::Promise<std::optional<RawForwardOutput>> promise;
 };
 
-class LoadKVCacheFromStoreClosure : public google::protobuf::Closure {
+class TransferBlocksClosure : public google::protobuf::Closure {
  public:
   void Run();
 
-  proto::StoreResponse response;
+  proto::TransferStatus response;
   brpc::Controller cntl;
   folly::Promise<uint32_t> promise;
 };

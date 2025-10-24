@@ -31,14 +31,8 @@ class BatchFactory {
       const std::vector<std::shared_ptr<Request>>& running_requests,
       const std::vector<Sequence*>& running_sequences,
       const std::vector<size_t>& running_sequences_budgets,
-      // for global kv cache copy block from host to device
-      std::vector<std::vector<CacheBlockInfo>>* copy_in_cache_block_infos =
-          nullptr,
-      // for global kv cache copy block from device to host
-      std::vector<std::vector<CacheBlockInfo>>* copy_out_cache_block_infos =
-          nullptr,
       // for beam-search
-      std::vector<std::vector<CacheBlockInfo>>* swap_cache_block_infos =
+      std::vector<std::vector<BlockTransferInfo>>* swap_block_transfer_infos =
           nullptr);
 
  private:
