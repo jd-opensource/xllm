@@ -25,10 +25,34 @@ limitations under the License.
 #include <torch_mlu/csrc/framework/distributed/process_group_cncl.hpp>
 
 #include "mlu_process_group.h"
+#elif defined(USE_CUDA)
+#include "cuda_process_group.h"
 #endif
 #include "common/global_flags.h"
 #include "parallel_args.h"
 #include "util/net.h"
+
+namespace {
+std::unique_ptr<xllm::ProcessGroup> create_process_group(
+    int rank,
+    int world_size,
+    int rank_size,
+    int port,
+    const std::string& host,
+    const std::string& group_name,
+    const torch::Device& device) {
+#if defined(USE_MLU)
+  return std::make_unique<xllm::ProcessGroupCncl>(
+      rank, world_size, rank_size, port, host, group_name, device);
+#elif defined(USE_CUDA)
+  return std::make_unique<xllm::ProcessGroupNccl>(
+      rank, world_size, rank_size, port, host, group_name, device);
+#else
+  LOG(FATAL) << "Unsupported device type";
+  return nullptr;
+#endif
+}
+}  // namespace
 
 namespace xllm {
 
@@ -90,40 +114,41 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
                                                   mapping,
                                                   dispatchAndCombinecommDomain,
                                                   dispatchAndCombineHcclComm);
-#elif defined(USE_MLU)
+#else
   parallel_args_ = std::make_unique<ParallelArgs>(
       global_rank, world_size, dp_size, nullptr, ep_size);
 #endif
 }
 
-#if defined(USE_MLU)
-void CollectiveCommunicator::create_process_groups_cncl(
+void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
   std::string host;
   int port;
   net::parse_host_port_from_addr(master_addr, host, port);
 
-  std::vector<std::unique_ptr<ProcessGroup>> process_groups;
   int global_rank = parallel_args_->rank();
   int world_size = parallel_args_->world_size();
   int dp_size = parallel_args_->dp_size();
-  process_group_ = std::make_unique<ProcessGroupCncl>(
+
+  process_group_ = create_process_group(
       global_rank, world_size, world_size, ++port, host, "world_group", device);
+
   int tp_size = world_size / dp_size;
   CHECK_EQ(tp_size * dp_size, world_size);
   int port_offset = global_rank / tp_size + 1;
-  tp_group_ = std::make_unique<ProcessGroupCncl>(global_rank,
-                                                 world_size,
-                                                 tp_size,
-                                                 port + port_offset,
-                                                 host,
-                                                 "tp_group",
-                                                 device);
+
+  tp_group_ = create_process_group(global_rank,
+                                   world_size,
+                                   tp_size,
+                                   port + port_offset,
+                                   host,
+                                   "tp_group",
+                                   device);
+
   parallel_args_->process_group_ = process_group_.get();
   parallel_args_->tp_group_ = tp_group_.get();
 }
-#endif
 
 const ParallelArgs* CollectiveCommunicator::parallel_args() {
   // TODO: init communicator

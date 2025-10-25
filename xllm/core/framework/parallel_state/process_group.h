@@ -41,13 +41,13 @@ class ProcessGroup {
                          std::vector<torch::Tensor>& outputs) = 0;
 
  private:
-  // rank of current process.
+  // rank of current process
   int rank_ = 0;
 
-  // number of processes.
+  // number of processes
   int world_size_ = 0;
 
-  // device of current process.
+  // device of current process
   torch::Device device_;
 };
 

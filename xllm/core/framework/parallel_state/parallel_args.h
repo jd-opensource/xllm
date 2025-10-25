@@ -111,11 +111,10 @@ struct ParallelArgs {
 
   // atb hccl dispatchAndCombineHcclComm
   PROPERTY(HcclComm, dispatchAndCombineHcclComm);
-#elif defined(USE_MLU)
+#endif
   ProcessGroup* tp_group_ = nullptr;
   ProcessGroup* moe_ep_group_ = nullptr;
   ProcessGroup* moe_tp_group_ = nullptr;
-#endif
 };
 
 }  // namespace xllm

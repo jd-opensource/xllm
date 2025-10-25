@@ -31,10 +31,8 @@ class CollectiveCommunicator {
                          int ep_size);
   ~CollectiveCommunicator() = default;
 
-#if defined(USE_MLU)
-  void create_process_groups_cncl(const std::string& master_addr,
-                                  const torch::Device& device);
-#endif
+  void create_process_groups(const std::string& master_addr,
+                             const torch::Device& device);
 
   // init communicator and return parallel args.
   const ParallelArgs* parallel_args();
@@ -43,9 +41,7 @@ class CollectiveCommunicator {
   std::unique_ptr<ParallelArgs> parallel_args_;
   std::unique_ptr<ProcessGroup> process_group_;
   std::unique_ptr<ProcessGroup> dp_local_process_group_;
-#if defined(USE_MLU)
   std::unique_ptr<ProcessGroup> tp_group_;
-#endif
 };
 
 }  // namespace xllm

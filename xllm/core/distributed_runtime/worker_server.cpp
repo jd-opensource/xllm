@@ -95,8 +95,8 @@ void WorkerServer::create_server(const runtime::Options& options,
 
   CollectiveCommunicator comm(worker_global_rank, world_size, dp_size, ep_size);
   const ParallelArgs* parallel_args = comm.parallel_args();
-#if defined(USE_MLU)
-  comm.create_process_groups_cncl(master_node_addr, device);
+#if defined(USE_MLU) || defined(USE_CUDA)
+  comm.create_process_groups(master_node_addr, device);
 #endif
 
   WorkerType worker_type =

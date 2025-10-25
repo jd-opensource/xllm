@@ -125,5 +125,19 @@ std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(
 #endif
 }
 
+std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
+                                                     int global_rank,
+                                                     int split_size) {
+  int target_group_index = global_rank / split_size;
+  uint64_t start_rank = target_group_index * split_size;
+  uint64_t end_rank = start_rank + split_size;
+  std::vector<uint64_t> group_rank;
+  int index = global_rank - start_rank;
+  for (uint64_t rank = start_rank; rank < end_rank; rank++) {
+    group_rank.push_back(rank);
+  }
+  return {index, group_rank};
+}
+
 }  // namespace parallel_state
 }  // namespace xllm

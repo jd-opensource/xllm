@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mlu_process_group.h"
+#include "cuda_process_group.h"
 
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 
@@ -21,7 +21,7 @@ limitations under the License.
 
 namespace xllm {
 
-ProcessGroupCncl::ProcessGroupCncl(int rank,
+ProcessGroupNccl::ProcessGroupNccl(int rank,
                                    int world_size,
                                    int rank_size,
                                    int port,
@@ -31,13 +31,14 @@ ProcessGroupCncl::ProcessGroupCncl(int rank,
     : ProcessGroup(rank, rank_size, device),
       world_size_(rank_size),
       rank_(rank) {
-  c10::intrusive_ptr<torch_mlu::ProcessGroupCNCL::Options> cncl_pg_options =
-      torch_mlu::ProcessGroupCNCL::Options::create();
-  cncl_pg_options->group_name = group_name;
+  c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> nccl_pg_options =
+      c10d::ProcessGroupNCCL::Options::create();
+  nccl_pg_options->is_high_priority_stream = false;
+
   if (world_size != rank_size) {
     auto [local_rank, group_ranks] =
         parallel_state::get_group_rank(world_size, rank, rank_size);
-    cncl_pg_options->global_ranks_in_group = group_ranks;
+    nccl_pg_options->global_ranks_in_group = group_ranks;
     rank_ = local_rank;
   }
 
@@ -47,21 +48,22 @@ ProcessGroupCncl::ProcessGroupCncl(int rank,
 
   c10::intrusive_ptr<c10d::Store> store =
       c10::make_intrusive<c10d::TCPStore>(host, tcp_options);
-  cncl_pg_ = std::make_unique<torch_mlu::ProcessGroupCNCL>(
-      store, rank, world_size, cncl_pg_options);
+  nccl_pg_ = std::make_unique<c10d::ProcessGroupNCCL>(
+      store, rank_, rank_size, nccl_pg_options);
 }
 
-ProcessGroupCncl::~ProcessGroupCncl() { cncl_pg_->shutdown(); }
+ProcessGroupNccl::~ProcessGroupNccl() { nccl_pg_->shutdown(); }
 
-void ProcessGroupCncl::allreduce(torch::Tensor& input) {
+void ProcessGroupNccl::allreduce(torch::Tensor& input) {
   std::vector<torch::Tensor> input_tensors = {input};
-  cncl_pg_->allreduce(input_tensors)->wait();
+  nccl_pg_->allreduce(input_tensors)->wait();
 }
 
-void ProcessGroupCncl::allgather(torch::Tensor input,
+void ProcessGroupNccl::allgather(torch::Tensor input,
                                  std::vector<torch::Tensor>& outputs) {
   std::vector<torch::Tensor> input_tensors = {input};
   std::vector<std::vector<torch::Tensor>> output_tensors = {outputs};
-  cncl_pg_->allgather(output_tensors, input_tensors)->wait();
+  nccl_pg_->allgather(output_tensors, input_tensors)->wait();
 }
+
 }  // namespace xllm

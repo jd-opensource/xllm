@@ -15,15 +15,15 @@ limitations under the License.
 
 #pragma once
 
-#include <torch_mlu/csrc/framework/distributed/process_group_cncl.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 
 #include "process_group.h"
 
 namespace xllm {
 
-class ProcessGroupCncl : public ProcessGroup {
+class ProcessGroupNccl : public ProcessGroup {
  public:
-  ProcessGroupCncl(int rank,
+  ProcessGroupNccl(int rank,
                    int world_size,
                    int rank_size,
                    int port,
@@ -31,7 +31,7 @@ class ProcessGroupCncl : public ProcessGroup {
                    const std::string& group_name,
                    const torch::Device& device);
 
-  ~ProcessGroupCncl() override;
+  ~ProcessGroupNccl() override;
 
   void allreduce(torch::Tensor& input) override;
 
@@ -45,8 +45,8 @@ class ProcessGroupCncl : public ProcessGroup {
   // number of processes
   int world_size_ = 0;
 
-  // cncl process group
-  std::unique_ptr<torch_mlu::ProcessGroupCNCL> cncl_pg_;
+  // nccl process group
+  std::unique_ptr<c10d::ProcessGroupNCCL> nccl_pg_;
 };
 
 }  // namespace xllm

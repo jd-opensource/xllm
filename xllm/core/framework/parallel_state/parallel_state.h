@@ -35,5 +35,9 @@ torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group);
 // devices: list of devices to create process groups on.
 std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(
     const std::vector<torch::Device>& devices);
+
+std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
+                                                     int global_rank,
+                                                     int split_size);
 }  // namespace parallel_state
 }  // namespace xllm
