@@ -15,33 +15,38 @@ limitations under the License.
 
 #pragma once
 
-#include <memory>
-#include <string>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 
-#include "parallel_args.h"
 #include "process_group.h"
 
 namespace xllm {
 
-class CollectiveCommunicator {
+class ProcessGroupNccl : public ProcessGroup {
  public:
-  CollectiveCommunicator(int global_rank,
-                         int world_size,
-                         int dp_size,
-                         int ep_size);
-  ~CollectiveCommunicator() = default;
+  ProcessGroupNccl(int rank,
+                   int world_size,
+                   int rank_size,
+                   int port,
+                   const std::string& host,
+                   const std::string& group_name,
+                   const torch::Device& device);
 
-  void create_process_groups(const std::string& master_addr,
-                             const torch::Device& device);
+  ~ProcessGroupNccl() override;
 
-  // init communicator and return parallel args.
-  const ParallelArgs* parallel_args();
+  void allreduce(torch::Tensor& input) override;
+
+  void allgather(torch::Tensor input,
+                 std::vector<torch::Tensor>& outputs) override;
 
  private:
-  std::unique_ptr<ParallelArgs> parallel_args_;
-  std::unique_ptr<ProcessGroup> process_group_;
-  std::unique_ptr<ProcessGroup> dp_local_process_group_;
-  std::unique_ptr<ProcessGroup> tp_group_;
+  // rank of current process
+  int rank_ = 0;
+
+  // number of processes
+  int world_size_ = 0;
+
+  // nccl process group
+  std::shared_ptr<c10d::ProcessGroupNCCL> nccl_pg_ = nullptr;
 };
 
 }  // namespace xllm

@@ -11,12 +11,14 @@ cc_library(
     process_group.h
     $<$<BOOL:${USE_NPU}>:npu_process_group.h>
     $<$<BOOL:${USE_MLU}>:mlu_process_group.h>
+    $<$<BOOL:${USE_CUDA}>:cuda_process_group.h>
     collective_communicator.h
   SRCS
     mapping_npu.cpp
     parallel_state.cpp
     $<$<BOOL:${USE_NPU}>:npu_process_group.cpp>
     $<$<BOOL:${USE_MLU}>:mlu_process_group.cpp>
+    $<$<BOOL:${USE_CUDA}>:cuda_process_group.cpp>
     collective_communicator.cpp
   DEPS
     :common
