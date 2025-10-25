@@ -23,7 +23,6 @@ namespace xllm {
 
 class ProcessGroupCncl : public ProcessGroup {
  public:
-  // Constructor.
   ProcessGroupCncl(int rank,
                    int world_size,
                    int rank_size,
@@ -32,11 +31,6 @@ class ProcessGroupCncl : public ProcessGroup {
                    const std::string& group_name,
                    const torch::Device& device);
 
-  int rank() override { return rank_; }
-
-  int world_size() override { return world_size_; }
-
-  // Destructor.
   ~ProcessGroupCncl() override;
 
   void allreduce(torch::Tensor& input) override;
@@ -45,12 +39,14 @@ class ProcessGroupCncl : public ProcessGroup {
                  std::vector<torch::Tensor>& outputs) override;
 
  private:
-  std::shared_ptr<torch_mlu::ProcessGroupCNCL> cncl_pg_ = nullptr;
-  // rank of current process.
+  // rank of current process
   int rank_ = 0;
 
-  // number of processes.
+  // number of processes
   int world_size_ = 0;
+
+  // cncl process group
+  std::shared_ptr<torch_mlu::ProcessGroupCNCL> cncl_pg_ = nullptr;
 };
 
 }  // namespace xllm
