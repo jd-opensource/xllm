@@ -142,19 +142,20 @@ bool WorkerImpl::allocate_host_kv_cache(
 
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(host_kv_caches_.empty()) << "KV caches are already initialized.";
+  CHECK(device_kv_cache_shape[0][0] == device_kv_cache_shape[1][0]);
 
   std::vector<std::vector<int64_t>> host_kv_cache_shape = device_kv_cache_shape;
-  for (auto& shape : host_kv_cache_shape) {
-    if (!shape.empty()) {
-      shape[0] *= options_.host_blocks_factor();
-    }
-  }
-
-  // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
-  host_kv_caches_.reserve(num_layers);
-  for (int64_t i = 0; i < num_layers; ++i) {
-    torch::Tensor key_cache, value_cache, index_cache;
+  int64_t host_bolck_size =
+      device_kv_cache_shape[0][0] * options_.host_blocks_factor();
+  host_kv_cache_shape[0][0] = num_layers;
+  host_kv_cache_shape[1][0] = num_layers;
+
+  // create a KVCache shape: block_size * [layers, token, head, dim]
+  host_kv_caches_.reserve(host_bolck_size);
+
+  for (int64_t i = 0; i < host_bolck_size; ++i) {
+    torch::Tensor key_cache, value_cache;
     key_cache = torch::empty(host_kv_cache_shape[0],
                              torch::dtype(dtype_).device(torch::kCPU))
                     .pin_memory();
@@ -163,8 +164,7 @@ bool WorkerImpl::allocate_host_kv_cache(
                       .pin_memory();
     host_kv_caches_.emplace_back(key_cache, value_cache);
   }
-  LOG(INFO) << "Initializing host k cache size: " << host_kv_cache_shape[0][0];
-  LOG(INFO) << "Initializing host v cache size: " << host_kv_cache_shape[1][0];
+  LOG(INFO) << "Initializing host kv block size: " << host_bolck_size;
 
   int32_t device_id = device_.index();
   h2d_attrs_.dstLoc.id = device_id;
@@ -701,22 +701,8 @@ uint32_t WorkerImpl::transfer_kv_blocks(
 
   switch (block_transfer_info[0].transfer_type) {
     case TransferType::G2H: {
-      folly::Promise<uint32_t> promise;
-      auto future = promise.getSemiFuture();
-
-      batchget_threadpool_.schedule(
-          [this, &block_transfer_info, promise = std::move(promise)]() mutable {
-            promise.setValue(
-                KVCacheStore::get_instance().batch_get(block_transfer_info));
-          });
-
-      try {
-        auto timeout = std::chrono::seconds(KVSTORE_TIMEOUT);
-        return std::move(future).wait(timeout);
-      } catch (const folly::FutureTimeout& e) {
-        LOG(WARNING) << "BatchGet operation timed out";
-        return 0;
-      }
+      Slice<BlockTransferInfo> info_slice{block_transfer_info};
+      return load_from_store(info_slice);
     }
     case TransferType::D2G:
       return offload_kv_blocks(block_transfer_info);
@@ -806,23 +792,7 @@ uint32_t WorkerImpl::offload_kv_blocks(
                                promise = std::move(promise),
                                slice = std::move(slice)]() mutable {
       bool ret = d2h_batch_copy(slice);
-      uint32_t success_cnt = 0;
-
-      folly::Promise<uint32_t> store_promise;
-      auto future = store_promise.getSemiFuture();
-
-      batchput_threadpool_.schedule(
-          [this, &slice, promise = std::move(store_promise)]() mutable {
-            promise.setValue(KVCacheStore::get_instance().batch_put(slice));
-          });
-
-      try {
-        auto timeout = std::chrono::seconds(KVSTORE_TIMEOUT);
-        success_cnt = std::move(future).wait(timeout);
-      } catch (const folly::FutureTimeout& e) {
-        LOG(WARNING) << "BatchPut operation timed out";
-      }
-
+      auto success_cnt = offload_to_store(slice);
       if (success_cnt != slice.size()) {
         LOG(WARNING) << "KVCacheStore not all put success: " << success_cnt
                      << "/" << slice.size();
@@ -908,6 +878,7 @@ bool WorkerImpl::d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
 #if defined(USE_NPU)
   CHECK(copy_stream_.count(std::this_thread::get_id()) != 0)
       << "WorkerImpl::d2h_batch_copy can only be called in copy_threadpool_.";
+
   const int64_t num_layers = context_.get_model_args().n_layers();
   uint32_t num_batches = block_transfer_info.size() * num_layers * 2;
   void** srcs = new void*[num_batches];
@@ -917,26 +888,25 @@ bool WorkerImpl::d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
   size_t attrs_indexes[1] = {0};
   size_t fail_index;
   uint32_t curr_index = 0;
-  for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-    auto src_k_cache = kv_caches_.at(layer_id).get_k_cache();
-    auto dst_k_cache = host_kv_caches_.at(layer_id).get_k_cache();
-    auto src_v_cache = kv_caches_.at(layer_id).get_v_cache();
-    auto dst_v_cache = host_kv_caches_.at(layer_id).get_v_cache();
 
-    for (int idx = 0; idx < block_transfer_info.size(); idx++) {
-      srcs[curr_index] =
-          src_k_cache[block_transfer_info[idx].src_block_id].data_ptr();
-      dsts[curr_index] =
-          dst_k_cache[block_transfer_info[idx].dst_block_id].data_ptr();
+  for (const auto& info : block_transfer_info) {
+    auto dst_k_cache = host_kv_caches_.at(info.dst_block_id).get_k_cache();
+    auto dst_v_cache = host_kv_caches_.at(info.dst_block_id).get_v_cache();
 
+    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+      auto src_k_cache = kv_caches_.at(layer_id).get_k_cache();
+      auto src_v_cache = kv_caches_.at(layer_id).get_v_cache();
+
+      srcs[curr_index] = src_k_cache[info.src_block_id].data_ptr();
+      dsts[curr_index] = dst_k_cache[layer_id].data_ptr();
       copy_size[curr_index] = key_cache_size_per_layer_;
+
       curr_index++;
 
-      srcs[curr_index] =
-          src_v_cache[block_transfer_info[idx].src_block_id].data_ptr();
-      dsts[curr_index] =
-          dst_v_cache[block_transfer_info[idx].dst_block_id].data_ptr();
+      srcs[curr_index] = src_v_cache[info.src_block_id].data_ptr();
+      dsts[curr_index] = dst_v_cache[layer_id].data_ptr();
       copy_size[curr_index] = value_cache_size_per_layer_;
+
       curr_index++;
     }
   }
@@ -974,6 +944,7 @@ bool WorkerImpl::h2d_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
 #if defined(USE_NPU)
   CHECK(copy_stream_.count(std::this_thread::get_id()) != 0)
       << "WorkerImpl::h2d_batch_copy can only be called in copy_threadpool_.";
+
   const int64_t num_layers = context_.get_model_args().n_layers();
   uint32_t num_batches = block_transfer_info.size() * num_layers * 2;
   void** srcs = new void*[num_batches];
@@ -984,24 +955,21 @@ bool WorkerImpl::h2d_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
   size_t fail_index;
   uint32_t curr_index = 0;
 
-  for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-    auto src_k_cache = host_kv_caches_.at(layer_id).get_k_cache();
-    auto dst_k_cache = kv_caches_.at(layer_id).get_k_cache();
-    auto src_v_cache = host_kv_caches_.at(layer_id).get_v_cache();
-    auto dst_v_cache = kv_caches_.at(layer_id).get_v_cache();
+  for (const auto& info : block_transfer_info) {
+    auto src_k_cache = host_kv_caches_.at(info.src_block_id).get_k_cache();
+    auto src_v_cache = host_kv_caches_.at(info.src_block_id).get_v_cache();
 
-    for (int idx = 0; idx < block_transfer_info.size(); idx++) {
-      srcs[curr_index] =
-          src_k_cache[block_transfer_info[idx].src_block_id].data_ptr();
-      dsts[curr_index] =
-          dst_k_cache[block_transfer_info[idx].dst_block_id].data_ptr();
+    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+      auto dst_k_cache = kv_caches_.at(layer_id).get_k_cache();
+      auto dst_v_cache = kv_caches_.at(layer_id).get_v_cache();
+
+      srcs[curr_index] = src_k_cache[layer_id].data_ptr();
+      dsts[curr_index] = dst_k_cache[info.dst_block_id].data_ptr();
       copy_size[curr_index] = key_cache_size_per_layer_;
       curr_index++;
 
-      srcs[curr_index] =
-          src_v_cache[block_transfer_info[idx].src_block_id].data_ptr();
-      dsts[curr_index] =
-          dst_v_cache[block_transfer_info[idx].dst_block_id].data_ptr();
+      srcs[curr_index] = src_v_cache[layer_id].data_ptr();
+      dsts[curr_index] = dst_v_cache[info.dst_block_id].data_ptr();
       copy_size[curr_index] = value_cache_size_per_layer_;
       curr_index++;
     }
@@ -1033,6 +1001,66 @@ bool WorkerImpl::h2d_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
   return true;
 #endif
   return false;
+}
+
+uint32_t WorkerImpl::offload_to_store(
+    Slice<BlockTransferInfo>& block_transfer_info) {
+  if (!options_.enable_kvcache_store()) {
+    return block_transfer_info.size();
+  }
+
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+
+  batchput_threadpool_.schedule(
+      [this, &block_transfer_info, promise = std::move(promise)]() mutable {
+        promise.setValue(
+            KVCacheStore::get_instance().batch_put(block_transfer_info));
+      });
+
+  auto timeout = std::chrono::seconds(KVSTORE_TIMEOUT);
+  return std::move(future)
+      .via(folly::getGlobalCPUExecutor())
+      .within(timeout)
+      .thenTry([](folly::Try<uint32_t>&& t) -> uint32_t {
+        if (t.hasValue()) {
+          return t.value();
+        } else {
+          LOG(WARNING) << "BatchPut operation timed out";
+          return 0u;
+        }
+      })
+      .get();
+}
+
+uint32_t WorkerImpl::load_from_store(
+    Slice<BlockTransferInfo>& block_transfer_info) {
+  if (!options_.enable_kvcache_store()) {
+    return 0;
+  }
+
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+
+  batchget_threadpool_.schedule(
+      [this, &block_transfer_info, promise = std::move(promise)]() mutable {
+        promise.setValue(
+            KVCacheStore::get_instance().batch_get(block_transfer_info));
+      });
+
+  auto timeout = std::chrono::seconds(KVSTORE_TIMEOUT);
+  return std::move(future)
+      .via(folly::getGlobalCPUExecutor())
+      .within(timeout)
+      .thenTry([](folly::Try<uint32_t>&& t) -> uint32_t {
+        if (t.hasValue()) {
+          return t.value();
+        } else {
+          LOG(WARNING) << "BatchGet operation timed out";
+          return 0u;
+        }
+      })
+      .get();
 }
 
 }  // namespace xllm
