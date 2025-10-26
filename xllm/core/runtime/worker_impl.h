@@ -187,8 +187,12 @@ class WorkerImpl {
       const std::vector<BlockTransferInfo>& block_transfer_info);
   uint32_t load_kv_blocks(
       const std::vector<BlockTransferInfo>& block_transfer_info);
+
   bool d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info);
   bool h2d_batch_copy(Slice<BlockTransferInfo>& block_transfer_info);
+
+  uint32_t offload_to_store(Slice<BlockTransferInfo>& block_transfer_info);
+  uint32_t load_from_store(Slice<BlockTransferInfo>& block_transfer_info);
 
  protected:
   // runtime options

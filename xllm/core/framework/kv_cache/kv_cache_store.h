@@ -69,8 +69,8 @@ class KVCacheStore {
 
   std::vector<xllm::KVCache>* host_kv_caches_;
 
-  uint64_t key_cache_size_per_layer_;
-  uint64_t value_cache_size_per_layer_;
+  uint64_t k_cache_size_per_block_;
+  uint64_t v_cache_size_per_block_;
 
   std::shared_ptr<mooncake::Client> client_ptr_;
 };

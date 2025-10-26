@@ -239,10 +239,10 @@ class Sequence final {
 
   void sync_result() {
     if (futures_.has_value()) {
-      auto success_cnt = host_kv_state_.num_kv_blocks();
+      uint32_t success_cnt = host_kv_state_.num_kv_blocks();
       for (auto& future : futures_.value()) {
         if (future.isReady()) {
-          success_cnt = std::min(success_cnt, size_t(future.value()));
+          success_cnt = std::min(success_cnt, future.value());
         } else {
           return;
         }

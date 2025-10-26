@@ -43,29 +43,24 @@ bool KVCacheStore::init(const StoreConfig& config,
   }
   client_ptr_ = client_opt.value();
 
-  auto key_tensor_one_layer = host_kv_caches_->at(0).get_k_cache();
-  auto value_tensor_one_layer = host_kv_caches_->at(0).get_v_cache();
+  auto k_tensor_one_block = host_kv_caches_->at(0).get_k_cache();
+  auto v_tensor_one_block = host_kv_caches_->at(0).get_v_cache();
 
-  key_cache_size_per_layer_ =
-      key_tensor_one_layer[0].numel() * key_tensor_one_layer[0].element_size();
-  value_cache_size_per_layer_ = value_tensor_one_layer[0].numel() *
-                                value_tensor_one_layer[0].element_size();
+  k_cache_size_per_block_ =
+      k_tensor_one_block.numel() * k_tensor_one_block.element_size();
+  v_cache_size_per_block_ =
+      v_tensor_one_block.numel() * v_tensor_one_block.element_size();
 
-  auto key_cache_host_size =
-      key_tensor_one_layer.numel() * key_tensor_one_layer.element_size();
-  auto value_cache_host_size =
-      value_tensor_one_layer.numel() * value_tensor_one_layer.element_size();
-
-  LOG(INFO) << "key_cache_size_per_layer: " << key_cache_size_per_layer_;
-  LOG(INFO) << "value_cache_size_per_layer: " << value_cache_size_per_layer_;
+  LOG(INFO) << "k_cache_size_per_block: " << k_cache_size_per_block_;
+  LOG(INFO) << "v_cache_size_per_block: " << v_cache_size_per_block_;
 
   if (config_.protocol == "rdma") {
-    for (int layer = 0; layer < host_kv_caches_->size(); layer++) {
+    for (int block = 0; block < host_kv_caches_->size(); block++) {
       void* key_cache = static_cast<char*>(
-          host_kv_caches_->at(layer).get_k_cache().data_ptr());
+          host_kv_caches_->at(block).get_k_cache().data_ptr());
 
       auto register_k_result = client_ptr_->RegisterLocalMemory(
-          key_cache, key_cache_host_size, "cpu:0", false, false);
+          key_cache, k_cache_size_per_block_, "cpu:0", false, false);
 
       if (!register_k_result.has_value()) {
         LOG(ERROR) << "Failed to register local memory for key cache: "
@@ -74,10 +69,10 @@ bool KVCacheStore::init(const StoreConfig& config,
       }
 
       void* value_cache = static_cast<char*>(
-          host_kv_caches_->at(layer).get_v_cache().data_ptr());
+          host_kv_caches_->at(block).get_v_cache().data_ptr());
 
       auto register_v_result = client_ptr_->RegisterLocalMemory(
-          value_cache, value_cache_host_size, "cpu:0", false, false);
+          value_cache, v_cache_size_per_block_, "cpu:0", false, false);
 
       if (!register_v_result.has_value()) {
         LOG(ERROR) << "Failed to register local memory for value cache: "
@@ -119,23 +114,14 @@ uint32_t KVCacheStore::batch_put(
 
     str_keys.emplace_back(str_key);
 
-    std::vector<mooncake::Slice> slice;
-    slice.reserve(host_kv_caches_->size() * 2);
-    for (int layer = 0; layer < host_kv_caches_->size(); layer++) {
-      void* key_cache =
-          static_cast<char*>(
-              host_kv_caches_->at(layer).get_k_cache().data_ptr()) +
-          block_info.dst_block_id * key_cache_size_per_layer_;
-      slice.emplace_back(mooncake::Slice{key_cache, key_cache_size_per_layer_});
+    void* k_cache =
+        host_kv_caches_->at(block_info.dst_block_id).get_k_cache().data_ptr();
+    void* v_cache =
+        host_kv_caches_->at(block_info.dst_block_id).get_k_cache().data_ptr();
 
-      void* value_cache =
-          static_cast<char*>(
-              host_kv_caches_->at(layer).get_v_cache().data_ptr()) +
-          block_info.dst_block_id * value_cache_size_per_layer_;
-      slice.emplace_back(
-          mooncake::Slice{value_cache, value_cache_size_per_layer_});
-    }
-    slices.emplace_back(std::move(slice));
+    slices.emplace_back(std::vector<mooncake::Slice>{
+        mooncake::Slice{k_cache, k_cache_size_per_block_},
+        mooncake::Slice{v_cache, v_cache_size_per_block_}});
   }
 
   if (str_keys.size() == 0) {
@@ -177,24 +163,16 @@ uint32_t KVCacheStore::batch_get(
 
     str_keys.emplace_back(str_key);
 
-    slices.insert(std::make_pair(str_key, std::vector<mooncake::Slice>()));
+    void* k_cache =
+        host_kv_caches_->at(block_info.dst_block_id).get_k_cache().data_ptr();
+    void* v_cache =
+        host_kv_caches_->at(block_info.dst_block_id).get_k_cache().data_ptr();
 
-    slices[str_key].reserve(host_kv_caches_->size() * 2);
-    for (int layer = 0; layer < host_kv_caches_->size(); layer++) {
-      void* key_cache =
-          static_cast<char*>(
-              host_kv_caches_->at(layer).get_k_cache().data_ptr()) +
-          block_info.dst_block_id * key_cache_size_per_layer_;
-      slices[str_key].emplace_back(
-          mooncake::Slice{key_cache, key_cache_size_per_layer_});
-
-      void* value_cache =
-          static_cast<char*>(
-              host_kv_caches_->at(layer).get_v_cache().data_ptr()) +
-          block_info.dst_block_id * value_cache_size_per_layer_;
-      slices[str_key].emplace_back(
-          mooncake::Slice{value_cache, value_cache_size_per_layer_});
-    }
+    slices.insert(
+        std::make_pair(str_key,
+                       std::vector<mooncake::Slice>{
+                           mooncake::Slice{k_cache, k_cache_size_per_block_},
+                           mooncake::Slice{v_cache, v_cache_size_per_block_}}));
   }
 
   if (str_keys.size() == 0) {
