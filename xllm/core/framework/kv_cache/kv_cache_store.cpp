@@ -16,30 +16,30 @@ bool KVCacheStore::init(const StoreConfig& config,
   CHECK(!is_initialized_) << "KVCacheStore is initialized.";
   config_ = config;
   host_kv_caches_ = host_kv_caches;
+  std::optional<std::string> device_names = std::nullopt;
   if (config_.protocol == "rdma") {
-    if (getenv("DEVICE_NAME")) {
-      auto name = getenv("DEVICE_NAME");
-      LOG(INFO) << "device name: " << name;
-      args_ = mooncake::rdma_args(name);
+    if (getenv("DEVICE_NAMES")) {
+      device_names = getenv("DEVICE_NAMES");
+      LOG(INFO) << "device_names: " << device_names.value();
     } else {
       LOG(WARNING) << "env DEVICE_NAME not exist, set protocol as tcp";
       config_.protocol = "tcp";
-      args_ = nullptr;
     }
   }
 
   auto client_opt = mooncake::Client::Create(config_.localhost_name,
                                              config_.metadata_connstring,
                                              config_.protocol,
-                                             args_,
+                                             device_names,
                                              config_.master_server_entry);
 
   rep_config_.replica_num = config_.replica_num;
   // rep_config_.preferred_segment = config_.localhost_name;
 
   if (!client_opt.has_value()) {
-    LOG(FATAL) << "mooncake::Client::Create fail!";
-    return false;
+    LOG(FATAL) << "mooncake::Client::Create fail! Failed to create client with "
+                  "host_name: "
+               << config_.localhost_name;
   }
   client_ptr_ = client_opt.value();
 

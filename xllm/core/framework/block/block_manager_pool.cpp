@@ -247,7 +247,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
     for (int i = hbm_cache_token_num / options_.block_size();
          i < host_cache_token_num / options_.block_size();
          i++) {
-      load_block_transfer_infos_[dp_rank].push_back(
+      load_block_transfer_infos_[dp_rank].emplace_back(
           BlockTransferInfo(host_blocks[i].id(),
                             hbm_blocks[i].id(),
                             host_blocks[i].get_immutable_hash_value(),

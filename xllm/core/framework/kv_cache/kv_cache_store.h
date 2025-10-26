@@ -67,8 +67,6 @@ class KVCacheStore {
   StoreConfig config_;
   mooncake::ReplicateConfig rep_config_;
 
-  void** args_ = nullptr;
-
   std::vector<xllm::KVCache>* host_kv_caches_;
 
   uint64_t key_cache_size_per_layer_;
