@@ -16,9 +16,11 @@ limitations under the License.
 
 #include "dit_request_params.h"
 
+#include "butil/base64.h"
 #include "core/common/instance_name.h"
 #include "core/common/macros.h"
 #include "core/util/uuid.h"
+#include "mm_codec.h"
 #include "request.h"
 
 namespace xllm {
@@ -241,6 +243,31 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   }
   if (input.has_latent()) {
     input_params.latent = proto_to_torch(input.latent());
+  }
+  if (input.has_masked_image_latent()) {
+    input_params.masked_image_latent =
+        proto_to_torch(input.masked_image_latent());
+  }
+
+  OpenCVImageDecoder decoder;
+  if (input.has_image()) {
+    std::string raw_bytes;
+    if (!butil::Base64Decode(input.image(), &raw_bytes)) {
+      LOG(ERROR) << "Base64 image decode failed";
+    }
+    if (!decoder.decode(raw_bytes, input_params.image)) {
+      LOG(ERROR) << "Image decode failed.";
+    }
+  }
+
+  if (input.has_mask_image()) {
+    std::string raw_bytes;
+    if (!butil::Base64Decode(input.mask_image(), &raw_bytes)) {
+      LOG(ERROR) << "Base64 mask_image decode failed";
+    }
+    if (!decoder.decode(raw_bytes, input_params.mask_image)) {
+      LOG(ERROR) << "Mask_image decode failed.";
+    }
   }
 
   // generation params

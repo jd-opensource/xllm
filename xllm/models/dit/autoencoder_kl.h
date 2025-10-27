@@ -34,15 +34,43 @@ limitations under the License.
 #include "framework/model_context.h"
 #include "models/model_registry.h"
 // VAE model compatible with huggingface weights
-//  ref to:
-//  https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/autoencoders/autoencoder_kl.py
+// ref to:
+// https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/autoencoders/autoencoder_kl.py
 
 namespace xllm {
+
+torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
+                           int64_t seed,
+                           torch::TensorOptions& options) {
+  if (shape.empty()) {
+    LOG(FATAL) << "Shape must not be empty.";
+  }
+  at::Generator gen = at::detail::createCPUGenerator();
+  gen = gen.clone();
+  gen.set_current_seed(seed);
+  torch::Tensor latents;
+  latents = torch::randn(
+      shape, gen, options.device(torch::kCPU).dtype(torch::kFloat32));
+  latents = latents.to(options);
+  return latents;
+}
+
 class VAEImageProcessorImpl : public torch::nn::Module {
  public:
-  explicit VAEImageProcessorImpl(ModelContext context) {
+  explicit VAEImageProcessorImpl(ModelContext context,
+                                 bool do_resize = true,
+                                 bool do_normalize = true,
+                                 bool do_binarize = false,
+                                 bool do_convert_rgb = false,
+                                 bool do_convert_grayscale = false) {
     const auto& model_args = context.get_model_args();
-    scale_factor_ = 1 << (model_args.block_out_channels().size() - 1);
+    scale_factor_ = 1 << model_args.block_out_channels().size();
+    latent_channels_ = 4;
+    do_resize_ = do_resize;
+    do_normalize_ = do_normalize;
+    do_binarize_ = do_binarize;
+    do_convert_rgb_ = do_convert_rgb;
+    do_convert_grayscale_ = do_convert_grayscale;
   }
 
   std::pair<int64_t, int64_t> adjust_dimensions(int64_t height,
@@ -84,16 +112,9 @@ class VAEImageProcessorImpl : public torch::nn::Module {
                                      torch::indexing::Slice(x1, x2)});
       }
     }
-    if (do_convert_grayscale_ && processed.size(1) == 3) {
-      std::vector<float> weights = {0.299f, 0.587f, 0.114f};
-      torch::Tensor weight_tensor =
-          torch::tensor(weights, torch::kFloat32).view({1, 3, 1, 1});
-      if (processed.dim() == 3) {
-        weight_tensor = weight_tensor.squeeze(0);
-      }
-      processed = torch::sum(processed * weight_tensor, 1, true);
-    } else if (do_convert_rgb_ && processed.size(1) == 1) {
-      processed = torch::cat({processed, processed, processed}, 1);
+    int channel = processed.size(1);
+    if (channel == latent_channels_) {
+      return image;
     }
 
     auto [target_h, target_w] =
@@ -108,7 +129,7 @@ class VAEImageProcessorImpl : public torch::nn::Module {
     if (do_binarize_) {
       processed = (processed >= 0.5f).to(torch::kFloat32);
     }
-
+    processed = processed.to(image.dtype());
     return processed;
   }
 
@@ -170,11 +191,12 @@ class VAEImageProcessorImpl : public torch::nn::Module {
         image,
         torch::nn::functional::InterpolateFuncOptions()
             .size(std::vector<int64_t>{target_height, target_width})
-            .align_corners(false));
+            .mode(torch::kNearest));
   }
 
  private:
   int scale_factor_ = 8;
+  int latent_channels_ = 4;
   bool do_resize_ = true;
   bool do_normalize_ = true;
   bool do_binarize_ = false;
@@ -836,6 +858,78 @@ class UpDecoderBlock2DImpl : public torch::nn::Module {
 };
 TORCH_MODULE(UpDecoderBlock2D);
 
+class DiagonalGaussianDistribution {
+ public:
+  DiagonalGaussianDistribution(torch::Tensor parameters,
+                               bool deterministic = false)
+      : parameters_(std::move(parameters)), deterministic_(deterministic) {
+    auto chunks = parameters_.chunk(2, 1);
+    mean_ = chunks[0];
+    logvar_ = chunks[1];
+
+    logvar_ = torch::clamp(logvar_, -30.0f, 20.0f);
+
+    std_ = torch::exp(0.5f * logvar_);
+    var_ = torch::exp(logvar_);
+
+    if (deterministic_) {
+      std_.fill_(0.0f);
+      var_.fill_(0.0f);
+    }
+  }
+
+  torch::Tensor sample(int64_t seed) const {
+    torch::TensorOptions options = mean_.options();
+    std::vector<int64_t> shape(mean_.sizes().begin(), mean_.sizes().end());
+    return mean_ + std_ * randn_tensor(shape, seed, options);
+  }
+
+  torch::Tensor kl(const std::optional<DiagonalGaussianDistribution>& other =
+                       std::nullopt) const {
+    if (deterministic_) {
+      return torch::tensor(0.0f, mean_.options());
+    }
+
+    if (!other.has_value()) {
+      return 0.5f * torch::sum(torch::pow(mean_, 2) + var_ - 1.0f - logvar_,
+                               {1, 2, 3});
+    } else {
+      const auto& other_dist = other.value();
+      return 0.5f * torch::sum(torch::pow(mean_ - other_dist.mean_, 2) /
+                                       other_dist.var_ +
+                                   var_ / other_dist.var_ - 1.0f - logvar_ +
+                                   other_dist.logvar_,
+                               {1, 2, 3});
+    }
+  }
+
+  torch::Tensor nll(const torch::Tensor& sample,
+                    const std::vector<int64_t>& dims = {1, 2, 3}) const {
+    if (deterministic_) {
+      return torch::tensor(0.0f, mean_.options());
+    }
+    const float logtwopi = std::log(2.0f * M_PI);
+    return 0.5f *
+           torch::sum(logtwopi + logvar_ + torch::pow(sample - mean_, 2) / var_,
+                      dims);
+  }
+
+  torch::Tensor mode() const { return mean_; }
+
+  const torch::Tensor& mean() const { return mean_; }
+  const torch::Tensor& std() const { return std_; }
+  const torch::Tensor& var() const { return var_; }
+  const torch::Tensor& logvar() const { return logvar_; }
+
+ private:
+  torch::Tensor parameters_;
+  torch::Tensor mean_;
+  torch::Tensor logvar_;
+  torch::Tensor std_;
+  torch::Tensor var_;
+  bool deterministic_;
+};
+
 // VAE standard encoder implementation
 // This class is used to encode images into latent representations.
 class VAEEncoderImpl : public torch::nn::Module {
@@ -1129,12 +1223,13 @@ class VAEImpl : public torch::nn::Module {
     }
   }
 
-  torch::Tensor encode(const torch::Tensor& images) {
+  torch::Tensor encode(const torch::Tensor& images, int64_t seed) {
     auto enc = encoder_(images);
     if (args_.use_quant_conv()) {
       enc = quant_conv_(enc);
     }
-    return enc;
+    auto posterior = DiagonalGaussianDistribution(enc);
+    return posterior.sample(seed);
   }
 
   torch::Tensor decode(const torch::Tensor& latents) {

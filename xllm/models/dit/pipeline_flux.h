@@ -14,224 +14,32 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include <acl/acl.h>
-#include <torch/torch.h>
-
-#include <algorithm>
-#include <cmath>
-#include <iostream>
-#include <memory>
-#include <nlohmann/json.hpp>
-#include <optional>
-#include <regex>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <unordered_set>
-#include <vector>
-
-#include "autoencoder_kl.h"
-#include "clip_text_model.h"
-#include "core/framework/dit_model_loader.h"
-#include "core/framework/model/model_input_params.h"
-#include "core/framework/model_context.h"
-#include "core/framework/request/dit_request_state.h"
-#include "core/framework/state_dict/state_dict.h"
-#include "core/framework/state_dict/utils.h"
 #include "core/layers/pos_embedding.h"
-#include "core/layers/rms_norm.h"
 #include "core/layers/rotary_embedding.h"
 #include "dit.h"
-#include "flowmatch_euler_discrete_scheduler.h"
-#include "framework/model_context.h"
-#include "models/model_registry.h"
-#include "t5_encoder.h"
+#include "pipeline_flux_base.h"
+// pipeline_flux compatible with huggingface weights
+// ref to:
+// https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/flux/pipeline_flux.py
+
 namespace xllm {
 
-float calculate_shift(int64_t image_seq_len,
-                      int64_t base_seq_len = 256,
-                      int64_t max_seq_len = 4096,
-                      float base_shift = 0.5f,
-                      float max_shift = 1.15f) {
-  float m =
-      (max_shift - base_shift) / static_cast<float>(max_seq_len - base_seq_len);
-  float b = base_shift - m * static_cast<float>(base_seq_len);
-  float mu = static_cast<float>(image_seq_len) * m + b;
-  return mu;
-}
-
-std::pair<torch::Tensor, int64_t> retrieve_timesteps(
-    FlowMatchEulerDiscreteScheduler scheduler,
-    int64_t num_inference_steps = 0,
-    torch::Device device = torch::kCPU,
-    std::optional<std::vector<float>> sigmas = std::nullopt,
-    std::optional<float> mu = std::nullopt) {
-  torch::Tensor scheduler_timesteps;
-  int64_t steps;
-  if (sigmas.has_value()) {
-    steps = sigmas->size();
-    scheduler->set_timesteps(
-        static_cast<int>(steps), device, *sigmas, mu, std::nullopt);
-
-    scheduler_timesteps = scheduler->timesteps();
-  } else {
-    steps = num_inference_steps;
-    scheduler->set_timesteps(
-        static_cast<int>(steps), device, std::nullopt, mu, std::nullopt);
-    scheduler_timesteps = scheduler->timesteps();
-  }
-  if (scheduler_timesteps.device() != device) {
-    scheduler_timesteps = scheduler_timesteps.to(device);
-  }
-  return {scheduler_timesteps, steps};
-}
-
-torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
-                           int64_t seed,
-                           torch::TensorOptions& options) {
-  if (shape.empty()) {
-    LOG(FATAL) << "Shape must not be empty.";
-  }
-  at::Generator gen = at::detail::createCPUGenerator();
-  gen = gen.clone();
-  gen.set_current_seed(seed);
-  torch::Tensor latents;
-  latents = torch::randn(shape, gen, options.device(torch::kCPU));
-  latents = latents.to(options);
-  return latents;
-}
-
-inline torch::Tensor get_1d_rotary_pos_embed(
-    int64_t dim,
-    const torch::Tensor& pos,
-    float theta = 10000.0,
-    bool use_real = false,
-    float linear_factor = 1.0,
-    float ntk_factor = 1.0,
-    bool repeat_interleave_real = true,
-    torch::Dtype freqs_dtype = torch::kFloat32) {
-  TORCH_CHECK(dim % 2 == 0, "Dimension must be even");
-
-  torch::Tensor pos_tensor = pos;
-  if (pos.dim() == 0) {
-    pos_tensor = torch::arange(pos.item<int64_t>(), pos.options());
-  }
-
-  theta = theta * ntk_factor;
-
-  auto freqs =
-      1.0 /
-      (torch::pow(
-           theta,
-           torch::arange(
-               0, dim, 2, torch::dtype(freqs_dtype).device(pos.device())) /
-               dim) *
-       linear_factor);  // [D/2]
-
-  auto tensors = {pos_tensor, freqs};
-
-  auto freqs_outer = torch::einsum("s,d->sd", tensors);  // [S, D/2]
-#if defined(USE_NPU)
-  freqs_outer = freqs_outer.to(torch::kFloat32);
-#endif
-  if (use_real && repeat_interleave_real) {
-    auto cos_vals = torch::cos(freqs_outer);  // [S, D/2]
-    auto sin_vals = torch::sin(freqs_outer);  // [S, D/2]
-
-    auto freqs_cos = cos_vals.transpose(-1, -2)
-                         .repeat_interleave(2, -2)
-                         .transpose(-1, -2)
-                         .to(torch::kFloat32);  // [S, D]
-
-    auto freqs_sin = sin_vals.transpose(-1, -2)
-                         .repeat_interleave(2, -2)
-                         .transpose(-1, -2)
-                         .to(torch::kFloat32);  // [S, D]
-    return torch::cat({freqs_cos.unsqueeze(0), freqs_sin.unsqueeze(0)},
-                      0);  // [2, S, D]
-  }
-}
-
-class FluxPosEmbedImpl : public torch::nn::Module {
+class FluxPipelineImpl : public FluxPipelineBaseImpl {
  public:
-  FluxPosEmbedImpl(int64_t theta, std::vector<int64_t> axes_dim) {
-    theta_ = theta;
-    axes_dim_ = axes_dim;
-  }
-
-  std::pair<torch::Tensor, torch::Tensor> forward_cache(
-      const torch::Tensor& txt_ids,
-      const torch::Tensor& img_ids,
-      int64_t height = -1,
-      int64_t width = -1) {
-    auto seq_len = txt_ids.size(0);
-
-    // recompute the cache if height or width changes
-    if (height != cached_image_height_ || width != cached_image_width_ ||
-        seq_len != max_seq_len_) {
-      torch::Tensor ids = torch::cat({txt_ids, img_ids}, 0);
-      cached_image_height_ = height;
-      cached_image_width_ = width;
-      max_seq_len_ = seq_len;
-      auto [cos, sin] = forward(ids);
-      freqs_cos_cache_ = std::move(cos);
-      freqs_sin_cache_ = std::move(sin);
-    }
-    return {freqs_cos_cache_, freqs_sin_cache_};
-  }
-
-  std::pair<torch::Tensor, torch::Tensor> forward(const torch::Tensor& ids) {
-    int64_t n_axes = ids.size(-1);
-    std::vector<torch::Tensor> cos_out, sin_out;
-    auto pos = ids.to(torch::kFloat32);
-    torch::Dtype freqs_dtype = torch::kFloat64;
-    for (int64_t i = 0; i < n_axes; ++i) {
-      auto pos_slice = pos.select(-1, i);
-      auto result = get_1d_rotary_pos_embed(axes_dim_[i],
-                                            pos_slice,
-                                            theta_,
-                                            true,  // repeat_interleave_real
-                                            1,
-                                            1,
-                                            true,  // use_real
-                                            freqs_dtype);
-      auto cos = result[0];
-      auto sin = result[1];
-      cos_out.push_back(cos);
-      sin_out.push_back(sin);
-    }
-
-    auto freqs_cos = torch::cat(cos_out, -1);
-    auto freqs_sin = torch::cat(sin_out, -1);
-    return {freqs_cos, freqs_sin};
-  }
-
- private:
-  int64_t theta_;
-  std::vector<int64_t> axes_dim_;
-  torch::Tensor freqs_cos_cache_;
-  torch::Tensor freqs_sin_cache_;
-  int64_t max_seq_len_ = -1;
-  int64_t cached_image_height_ = -1;
-  int64_t cached_image_width_ = -1;
-};
-TORCH_MODULE(FluxPosEmbed);
-
-class FluxPipelineImpl : public torch::nn::Module {
- public:
-  explicit FluxPipelineImpl(const DiTModelContext& context)
-      : options_(context.get_tensor_options()) {
+  FluxPipelineImpl(const DiTModelContext& context) {
     const auto& model_args = context.get_model_args("vae");
+    options_ = context.get_tensor_options();
     vae_scale_factor_ = 1 << (model_args.block_out_channels().size() - 1);
-    execution_device_ = options_.device();
-    execution_dtype_ = options_.dtype().toScalarType();
+    device_ = options_.device();
+    dtype_ = options_.dtype().toScalarType();
 
     vae_shift_factor_ = model_args.shift_factor();
     vae_scaling_factor_ = model_args.scale_factor();
     default_sample_size_ = 128;
     tokenizer_max_length_ = 77;  // TODO: get from config file
     LOG(INFO) << "Initializing Flux pipeline...";
-    vae_image_processor_ = VAEImageProcessor(context.get_model_context("vae"));
+    vae_image_processor_ = VAEImageProcessor(
+        context.get_model_context("vae"), true, true, false, false, false);
     vae_ = VAE(context.get_model_context("vae"));
     LOG(INFO) << "VAE initialized.";
     pos_embed_ = register_module(
@@ -323,7 +131,6 @@ class FluxPipelineImpl : public torch::nn::Module {
 
   void load_model(std::unique_ptr<DiTModelLoader> loader) {
     LOG(INFO) << "FluxPipeline loading model from" << loader->model_root_path();
-    // transformer_.to(options_);
     std::string model_path = loader->model_root_path();
     auto transformer_loader = loader->take_component_loader("transformer");
     auto vae_loader = loader->take_component_loader("vae");
@@ -334,13 +141,13 @@ class FluxPipelineImpl : public torch::nn::Module {
     LOG(INFO)
         << "Flux model components loaded, start to load weights to sub models";
     transformer_->load_model(std::move(transformer_loader));
-    transformer_->to(execution_device_);
+    transformer_->to(device_);
     vae_->load_model(std::move(vae_loader));
-    vae_->to(execution_device_);
+    vae_->to(device_);
     t5_->load_model(std::move(t5_loader));
-    t5_->to(execution_device_);
+    t5_->to(device_);
     clip_text_model_->load_model(std::move(clip_loader));
-    clip_text_model_->to(execution_device_);
+    clip_text_model_->to(device_);
     tokenizer_ = tokenizer_loader->tokenizer();
     tokenizer_2_ = tokenizer_2_loader->tokenizer();
   }
@@ -358,172 +165,19 @@ class FluxPipelineImpl : public torch::nn::Module {
     std::vector<int64_t> shape = {
         batch_size, num_channels_latents, adjusted_height, adjusted_width};
     if (latents.has_value()) {
-      torch::Tensor latent_image_ids = _prepare_latent_image_ids(
+      torch::Tensor latent_image_ids = prepare_latent_image_ids(
           batch_size, adjusted_height / 2, adjusted_width / 2);
       return {latents.value(), latent_image_ids};
     }
     torch::Tensor latents_tensor = randn_tensor(shape, seed, options_);
-    torch::Tensor packed_latents = _pack_latents(latents_tensor,
-                                                 batch_size,
-                                                 num_channels_latents,
-                                                 adjusted_height,
-                                                 adjusted_width);
-    torch::Tensor latent_image_ids = _prepare_latent_image_ids(
+    torch::Tensor packed_latents = pack_latents(latents_tensor,
+                                                batch_size,
+                                                num_channels_latents,
+                                                adjusted_height,
+                                                adjusted_width);
+    torch::Tensor latent_image_ids = prepare_latent_image_ids(
         batch_size, adjusted_height / 2, adjusted_width / 2);
     return {packed_latents, latent_image_ids};
-  }
-
-  torch::Tensor _prepare_latent_image_ids(int64_t batch_size,
-                                          int64_t height,
-                                          int64_t width) {
-    torch::Tensor latent_image_ids = torch::zeros({height, width, 3}, options_);
-    torch::Tensor height_range = torch::arange(height, options_).unsqueeze(1);
-    latent_image_ids.select(2, 1) += height_range;
-    torch::Tensor width_range = torch::arange(width, options_).unsqueeze(0);
-    latent_image_ids.select(2, 2) += width_range;
-    latent_image_ids = latent_image_ids.view({height * width, 3});
-    return latent_image_ids;
-  }
-
-  torch::Tensor _pack_latents(const torch::Tensor& latents,
-                              int64_t batch_size,
-                              int64_t num_channels_latents,
-                              int64_t height,
-                              int64_t width) {
-    torch::Tensor packed = latents.view(
-        {batch_size, num_channels_latents, height / 2, 2, width / 2, 2});
-    packed = packed.permute({0, 2, 4, 1, 3, 5});
-    packed = packed.reshape(
-        {batch_size, (height / 2) * (width / 2), num_channels_latents * 4});
-
-    return packed;
-  }
-
-  torch::Tensor _unpack_latents(const torch::Tensor& latents,
-                                int64_t height,
-                                int64_t width,
-                                int64_t vae_scale_factor) {
-    int64_t batch_size = latents.size(0);
-    int64_t num_patches = latents.size(1);
-    int64_t channels = latents.size(2);
-    int64_t adjusted_height = 2 * (height / (vae_scale_factor * 2));
-    int64_t adjusted_width = 2 * (width / (vae_scale_factor * 2));
-    torch::Tensor unpacked = latents.view({batch_size,
-                                           adjusted_height / 2,
-                                           adjusted_width / 2,
-                                           channels / 4,
-                                           2,
-                                           2});
-    unpacked = unpacked.permute({0, 3, 1, 4, 2, 5});
-    unpacked = unpacked.reshape(
-        {batch_size, channels / (2 * 2), adjusted_height, adjusted_width});
-
-    return unpacked;
-  }
-
-  torch::Tensor _get_clip_prompt_embeds(std::vector<std::string>& prompt,
-                                        int64_t num_images_per_prompt = 1) {
-    std::vector<std::string> processed_prompt = prompt;
-    int64_t batch_size = processed_prompt.size();
-    TORCH_CHECK(batch_size > 0, "Prompt list cannot be empty");
-
-    std::vector<std::vector<int32_t>> text_input_ids;
-    text_input_ids.reserve(batch_size);
-    CHECK(tokenizer_->batch_encode(processed_prompt, &text_input_ids));
-    for (auto& ids : text_input_ids) {
-      LOG(INFO) << "CLIP Original IDs size: " << ids;
-      ids.resize(tokenizer_max_length_, 49407);
-      ids.back() = 49407;
-    }
-    std::vector<int32_t> text_input_ids_flat;
-    text_input_ids_flat.reserve(batch_size * tokenizer_max_length_);
-    for (const auto& ids : text_input_ids) {
-      text_input_ids_flat.insert(
-          text_input_ids_flat.end(), ids.begin(), ids.end());
-    }
-    auto input_ids =
-        torch::tensor(text_input_ids_flat, torch::dtype(torch::kLong))
-            .view({batch_size, tokenizer_max_length_})
-            .to(execution_device_);
-    auto encoder_output = clip_text_model_->forward(input_ids);
-    torch::Tensor prompt_embeds = encoder_output;
-    prompt_embeds = prompt_embeds.to(execution_device_).to(execution_dtype_);
-    prompt_embeds = prompt_embeds.repeat({1, num_images_per_prompt});
-    prompt_embeds =
-        prompt_embeds.view({batch_size * num_images_per_prompt, -1});
-    return prompt_embeds;
-  }
-
-  torch::Tensor _get_t5_prompt_embeds(std::vector<std::string>& prompt,
-                                      int64_t num_images_per_prompt = 1,
-                                      int64_t max_sequence_length = 512) {
-    std::vector<std::string> processed_prompt = prompt;
-    int64_t batch_size = processed_prompt.size();
-    TORCH_CHECK(batch_size > 0, "Prompt list cannot be empty");
-
-    std::vector<std::vector<int32_t>> text_input_ids;
-    text_input_ids.reserve(batch_size);
-    CHECK(tokenizer_2_->batch_encode(processed_prompt, &text_input_ids));
-    for (auto& ids : text_input_ids) {
-      LOG(INFO) << "T5 Original IDs size: " << ids;
-      ids.resize(max_sequence_length, 0);
-    }
-
-    std::vector<int32_t> text_input_ids_flat;
-    text_input_ids_flat.reserve(batch_size * max_sequence_length);
-    for (const auto& ids : text_input_ids) {
-      text_input_ids_flat.insert(
-          text_input_ids_flat.end(), ids.begin(), ids.end());
-    }
-    auto input_ids =
-        torch::tensor(text_input_ids_flat, torch::dtype(torch::kLong))
-            .view({batch_size, max_sequence_length})
-            .to(execution_device_);
-    torch::Tensor prompt_embeds = t5_->forward(input_ids);
-    prompt_embeds = prompt_embeds.to(execution_dtype_).to(execution_device_);
-    int64_t seq_len = prompt_embeds.size(1);
-    prompt_embeds = prompt_embeds.repeat({1, num_images_per_prompt, 1});
-    prompt_embeds =
-        prompt_embeds.view({batch_size * num_images_per_prompt, seq_len, -1});
-    return prompt_embeds;
-  }
-
-  std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> encode_prompt(
-      std::optional<std::vector<std::string>> prompt,
-      std::optional<std::vector<std::string>> prompt_2,
-      std::optional<torch::Tensor> prompt_embeds,
-      std::optional<torch::Tensor> pooled_prompt_embeds,
-      int64_t num_images_per_prompt = 1,
-      int64_t max_sequence_length = 512) {
-    std::vector<std::string> prompt_list;
-    if (prompt.has_value()) {
-      prompt_list = prompt.value();
-    }
-    if (prompt_list.empty()) {
-      prompt_list = {""};
-    }
-    if (!prompt_embeds.has_value()) {
-      std::vector<std::string> prompt_2_list;
-      if (prompt_2.has_value()) {
-        prompt_2_list = prompt_2.value();
-      }
-      if (prompt_2_list.empty()) {
-        prompt_2_list = prompt_list;
-      }
-      pooled_prompt_embeds =
-          _get_clip_prompt_embeds(prompt_list, num_images_per_prompt);
-      prompt_embeds = _get_t5_prompt_embeds(
-          prompt_2_list, num_images_per_prompt, max_sequence_length);
-    }
-    torch::Tensor text_ids =
-        torch::zeros({prompt_embeds.value().size(1), 3},
-                     torch::device(execution_device_).dtype(execution_dtype_));
-
-    return std::make_tuple(prompt_embeds.value(),
-                           pooled_prompt_embeds.has_value()
-                               ? pooled_prompt_embeds.value()
-                               : torch::Tensor(),
-                           text_ids);
   }
 
   std::vector<torch::Tensor> forward_(
@@ -609,7 +263,7 @@ class FluxPipelineImpl : public torch::nn::Module {
                                scheduler_->base_shift(),
                                scheduler_->max_shift());
     auto [timesteps, num_inference_steps_actual] = retrieve_timesteps(
-        scheduler_, num_inference_steps, execution_device_, new_sigmas, mu);
+        scheduler_, num_inference_steps, device_, new_sigmas, mu);
     int64_t num_warmup_steps =
         std::max(static_cast<int64_t>(timesteps.numel()) -
                      num_inference_steps_actual * scheduler_->order(),
@@ -618,7 +272,7 @@ class FluxPipelineImpl : public torch::nn::Module {
     torch::Tensor guidance;
     if (transformer_->guidance_embeds()) {
       torch::TensorOptions options =
-          torch::dtype(torch::kFloat32).device(execution_device_);
+          torch::dtype(torch::kFloat32).device(device_);
 
       guidance = torch::full(at::IntArrayRef({1}), guidance_scale, options);
       guidance = guidance.expand({prepared_latents.size(0)});
@@ -672,11 +326,11 @@ class FluxPipelineImpl : public torch::nn::Module {
     }
     torch::Tensor image;
     // Unpack latents
-    torch::Tensor unpacked_latents = _unpack_latents(
+    torch::Tensor unpacked_latents = unpack_latents(
         prepared_latents, actual_height, actual_width, vae_scale_factor_);
     unpacked_latents =
         (unpacked_latents / vae_scaling_factor_) + vae_shift_factor_;
-    unpacked_latents = unpacked_latents.to(execution_dtype_);
+    unpacked_latents = unpacked_latents.to(dtype_);
     image = vae_->decode(unpacked_latents);
     image = vae_image_processor_->postprocess(image, "pil");
     return std::vector<torch::Tensor>{{image}};
@@ -687,19 +341,10 @@ class FluxPipelineImpl : public torch::nn::Module {
   VAE vae_{nullptr};
   VAEImageProcessor vae_image_processor_{nullptr};
   FluxDiTModel transformer_{nullptr};
-  T5EncoderModel t5_{nullptr};
-  CLIPTextModel clip_text_model_{nullptr};
-  int vae_scale_factor_;
   float vae_scaling_factor_;
   float vae_shift_factor_;
-  int tokenizer_max_length_;
   int default_sample_size_;
-  torch::Device execution_device_ = torch::kCPU;
-  torch::ScalarType execution_dtype_ = torch::kFloat32;
-  torch::TensorOptions options_;
   FluxPosEmbed pos_embed_{nullptr};
-  std::unique_ptr<Tokenizer> tokenizer_;
-  std::unique_ptr<Tokenizer> tokenizer_2_;
 };
 TORCH_MODULE(FluxPipeline);
 

@@ -11,6 +11,7 @@ cc_library(
     incremental_decoder.h
     mm_data.h
     mm_input_helper.h
+    mm_codec.h
     request_base.h
     request.h
     dit_request.h
@@ -31,6 +32,7 @@ cc_library(
     incremental_decoder.cpp
     mm_data.cpp
     mm_input_helper.cpp
+    mm_codec.cpp
     request.cpp
     dit_request.cpp
     request_output.cpp

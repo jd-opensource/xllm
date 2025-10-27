@@ -51,6 +51,18 @@ struct DiTForwardInput {
     if (latents.defined()) {
       input.latents = latents.to(device, dtype);
     }
+
+    if (masked_image_latents.defined()) {
+      input.masked_image_latents = masked_image_latents.to(device, dtype);
+    }
+
+    if (images.defined()) {
+      input.images = images.to(device, dtype);
+    }
+
+    if (mask_images.defined()) {
+      input.mask_images = mask_images.to(device, dtype);
+    }
     return input;
   }
 
@@ -67,6 +79,12 @@ struct DiTForwardInput {
 
   // Secondary negative prompt to exclude additional unwanted features
   std::vector<std::string> negative_prompts_2;
+
+  torch::Tensor images;
+
+  torch::Tensor mask_images;
+
+  torch::Tensor masked_image_latents;
 
   torch::Tensor prompt_embeds;
 

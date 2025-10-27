@@ -40,7 +40,8 @@ struct DiTGenerationParams {
            guidance_scale == other.guidance_scale &&
            num_images_per_prompt == other.num_images_per_prompt &&
            seed == other.seed &&
-           max_sequence_length == other.max_sequence_length;
+           max_sequence_length == other.max_sequence_length &&
+           strength == other.strength;
   }
 
   bool operator!=(const DiTGenerationParams& other) const {
@@ -62,6 +63,8 @@ struct DiTGenerationParams {
   int64_t seed = 0;
 
   int32_t max_sequence_length = 512;
+
+  float strength = 1.0;
 };
 
 struct DiTInputParams {
@@ -86,6 +89,12 @@ struct DiTInputParams {
   torch::Tensor negative_pooled_prompt_embed;
 
   torch::Tensor latent;
+
+  torch::Tensor image;
+
+  torch::Tensor mask_image;
+
+  torch::Tensor masked_image_latent;
 };
 
 struct DiTRequestState {

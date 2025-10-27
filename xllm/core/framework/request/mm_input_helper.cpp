@@ -23,28 +23,9 @@ limitations under the License.
 #include <opencv2/opencv.hpp>
 
 #include "butil/base64.h"
+#include "mm_codec.h"
 
 namespace xllm {
-
-class OpenCVImageDecoder {
- public:
-  bool decode(const std::string& raw_data, torch::Tensor& t) {
-    cv::Mat buffer(1, raw_data.size(), CV_8UC1, (void*)raw_data.data());
-    cv::Mat image = cv::imdecode(buffer, cv::IMREAD_COLOR);
-    if (image.empty()) {
-      LOG(INFO) << " opencv image decode failed";
-      return false;
-    }
-
-    cv::cvtColor(image, image, cv::COLOR_BGR2RGB);  // RGB
-
-    torch::Tensor tensor = torch::from_blob(
-        image.data, {image.rows, image.cols, 3}, torch::kUInt8);
-
-    t = tensor.permute({2, 0, 1}).clone();  // [C, H, W]
-    return true;
-  }
-};
 
 class FileDownloadHelper {
  public:

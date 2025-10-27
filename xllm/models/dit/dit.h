@@ -1216,7 +1216,8 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
     auto num_layers = model_args.num_layers();
     auto num_single_layers = model_args.num_single_layers();
     auto patch_size = model_args.mm_patch_size();
-    out_channels_ = model_args.in_channels();
+    in_channels_ = model_args.in_channels();
+    out_channels_ = model_args.out_channels();
     guidance_embeds_ = model_args.guidance_embeds();
 
     // Initialize the transformer model components here
@@ -1235,7 +1236,7 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
     context_embedder_ = register_module(
         "context_embedder", DiTLinear(joint_attention_dim, inner_dim));
     x_embedder_ =
-        register_module("x_embedder", DiTLinear(out_channels_, inner_dim));
+        register_module("x_embedder", DiTLinear(in_channels_, inner_dim));
     context_embedder_->to(options_);
     x_embedder_->to(options_);
     // mm-dit block
@@ -1450,6 +1451,7 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
   AdaLayerNormContinuous norm_out_{nullptr};
   DiTLinear proj_out_{nullptr};
   bool guidance_embeds_;
+  int64_t in_channels_;
   int64_t out_channels_;
   torch::TensorOptions options_;
 };
@@ -1500,6 +1502,7 @@ REGISTER_MODEL_ARGS(FluxTransformer2DModel, [&] {
   LOAD_ARG_OR(dtype, "dtype", "bfloat16");
   LOAD_ARG_OR(mm_patch_size, "patch_size", 1);
   LOAD_ARG_OR(in_channels, "in_channels", 64);
+  LOAD_ARG_OR(out_channels, "out_channels", 64);
   LOAD_ARG_OR(num_layers, "num_layers", 19);
   LOAD_ARG_OR(num_single_layers, "num_single_layers", 38);
   LOAD_ARG_OR(head_dim, "attention_head_dim", 128);
