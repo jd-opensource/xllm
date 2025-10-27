@@ -128,16 +128,14 @@ uint32_t KVCacheStore::batch_put(
     return block_transfer_info.size();
   }
 
-  uint64_t success_cnt = str_keys.size();
+  uint64_t success_cnt = block_transfer_info.size() - str_keys.size();
   auto results = client_ptr_->BatchPut(str_keys, slices, rep_config_);
 
   for (int i = 0; i < str_keys.size(); i++) {
     if (!results[i].has_value()) {
-      success_cnt = i;
-      // LOG(ERROR) << "success_cnt: " << success_cnt
-      //            << ", failed to BatchPut: " << toString(results[i].error());
       break;
     }
+    success_cnt++;
   }
   return success_cnt;
 }
@@ -179,15 +177,13 @@ uint32_t KVCacheStore::batch_get(
     return 0;
   }
 
-  uint64_t success_cnt = str_keys.size();
+  uint64_t success_cnt = 0;
   auto results = client_ptr_->BatchGet(str_keys, slices);
   for (int i = 0; i < str_keys.size(); i++) {
     if (!results[i].has_value()) {
-      success_cnt = i;
-      // LOG(ERROR) << "success_cnt: " << success_cnt
-      //            << ", failed to BatchGet: " << toString(results[i].error());
       break;
     }
+    success_cnt++;
   }
   return success_cnt;
 }

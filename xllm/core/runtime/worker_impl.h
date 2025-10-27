@@ -185,11 +185,10 @@ class WorkerImpl {
 
   uint32_t offload_kv_blocks(
       const std::vector<BlockTransferInfo>& block_transfer_info);
-  uint32_t load_kv_blocks(
-      const std::vector<BlockTransferInfo>& block_transfer_info);
 
   bool d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info);
-  bool h2d_batch_copy(Slice<BlockTransferInfo>& block_transfer_info);
+  bool h2d_batch_copy(const uint64_t batch_id,
+                      Slice<BlockTransferInfo>& block_transfer_info);
 
   uint32_t offload_to_store(Slice<BlockTransferInfo>& block_transfer_info);
   uint32_t load_from_store(Slice<BlockTransferInfo>& block_transfer_info);
@@ -209,12 +208,15 @@ class WorkerImpl {
   ThreadPool threadpool_;
 
   // working thread for data copy
-  ThreadPool copy_threadpool_{5};
+  ThreadPool h2d_threadpool_{2};
+  ThreadPool d2h_threadpool_{5};
   ThreadPool batchget_threadpool_{5};
-  ThreadPool batchput_threadpool_{5};
+  ThreadPool batchput_threadpool_{2};
   // copy streams
-  // only can be used in copy_threadpool_
-  std::unordered_map<std::thread::id, std::unique_ptr<Stream>> copy_stream_;
+  // only can be used in h2d_threadpool_
+  std::unordered_map<std::thread::id, std::unique_ptr<Stream>> h2d_stream_;
+  // only can be used in d2h_threadpool_
+  std::unordered_map<std::thread::id, std::unique_ptr<Stream>> d2h_stream_;
 
   // dtype of the model
   torch::ScalarType dtype_;
@@ -269,10 +271,8 @@ class WorkerImpl {
   torch::Tensor expert_load_data_;
 
   mutable std::mutex mutex_;
-  std::unordered_map<
-      uint64_t,
-      std::pair<uint32_t, std::optional<folly::SemiFuture<uint32_t>>>>
-      load_blocks_results_;
+  std::unordered_map<uint64_t, std::shared_ptr<NPULayerSynchronizerImpl>>
+      layer_wise_load_synchronizer_;
 };
 
 }  // namespace xllm

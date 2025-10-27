@@ -153,6 +153,12 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
         events[0] = input_params.layer_synchronizer->get_event(i);
         event_flags[0] = input_params.layer_synchronizer->get_event_flag(i);
       }
+      if (input_params.layer_wise_load_synchronizer != nullptr) {
+        if (!input_params.layer_wise_load_synchronizer->synchronize_layer(i)) {
+          return torch::Tensor();
+        }
+      }
+
       auto& layer = layers_[i];
       layer(h,
             cos_pos,

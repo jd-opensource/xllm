@@ -110,8 +110,8 @@ int Device::synchronize_default_stream() {
   return 0;
 }
 
-std::unique_ptr<Stream> Device::get_stream_from_pool() {
-  return std::make_unique<Stream>();
+std::unique_ptr<Stream> Device::get_stream_from_pool(const int32_t timeout) {
+  return std::make_unique<Stream>(timeout);
 }
 
 }  // namespace xllm

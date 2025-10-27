@@ -285,6 +285,12 @@ class LlmModelImplBase : public torch::nn::Module {
           event_flags[j] =
               input_params[j].layer_synchronizer->get_event_flag(i);
         }
+        if (input_params[j].layer_wise_load_synchronizer != nullptr) {
+          if (!input_params[j].layer_wise_load_synchronizer->synchronize_layer(
+                  i)) {
+            return torch::Tensor();
+          }
+        }
       }
       auto& layer = layers_[i];
 

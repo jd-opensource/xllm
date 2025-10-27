@@ -273,6 +273,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         event = input_params.layer_synchronizer->get_event(i);
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
       }
+      if (input_params.layer_wise_load_synchronizer != nullptr) {
+        if (!input_params.layer_wise_load_synchronizer->synchronize_layer(i)) {
+          return torch::Tensor();
+        }
+      }
+
       auto& layer = layers_[i];
       layer(h,
             cos_pos,

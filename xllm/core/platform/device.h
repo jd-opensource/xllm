@@ -46,7 +46,7 @@ class Device {
   int64_t free_memory();
 
   int synchronize_default_stream();
-  std::unique_ptr<Stream> get_stream_from_pool();
+  std::unique_ptr<Stream> get_stream_from_pool(const int32_t timeout = -1);
 
  private:
   struct DeviceMem {

@@ -18,17 +18,20 @@ limitations under the License.
 namespace xllm {
 
 #if defined(USE_NPU)
-Stream::Stream() : stream_(c10_npu::getNPUStreamFromPool()) {}
+Stream::Stream(const int32_t timeout)
+    : stream_(c10_npu::getNPUStreamFromPool()), timeout_(timeout) {}
 #elif defined(USE_MLU)
-Stream::Stream() : stream_(torch_mlu::getStreamFromPool()) {}
+Stream::Stream(const int32_t timeout)
+    : stream_(torch_mlu::getStreamFromPool()), timeout_(timeout) {}
 #elif defined(USE_CUDA)
-Stream::Stream() : stream_(c10::cuda::getStreamFromPool()) {}
+Stream::Stream(const int32_t timeout)
+    : stream_(c10::cuda::getStreamFromPool()), timeout_(timeout) {}
 #endif
 
 int Stream::synchronize() const {
 #if defined(USE_NPU)
-  return aclrtSynchronizeStream(stream_.stream());
-#else
+  return aclrtSynchronizeStreamWithTimeout(stream_.stream(), timeout_);
+#elif defined(USE_MLU)
   stream_.unwrap().synchronize();
   return 0;
 #endif

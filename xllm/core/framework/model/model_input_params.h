@@ -127,6 +127,8 @@ struct ModelInputParams {
     params.paged_kv_indices = safe_to(paged_kv_indices, device);
     params.paged_kv_last_page_len = safe_to(paged_kv_last_page_len, device);
 
+    params.batch_id = batch_id;
+
     return params;
   }
 
@@ -212,6 +214,8 @@ struct ModelInputParams {
 
 #if defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
+  std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
+      nullptr;
 #endif
 
   DpEpPaddingData dp_ep_padding_data;
