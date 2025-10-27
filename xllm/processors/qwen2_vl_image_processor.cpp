@@ -25,11 +25,6 @@ std::optional<Size> smart_resize(int height,
                                  int factor = 28,
                                  int min_pixels = 56 * 56,
                                  int max_pixels = 14 * 14 * 4 * 1280) {
-  if (height < factor || width < factor) {
-    LOG(ERROR) << "Height or width must be larger than factor";
-    return std::nullopt;
-  }
-
   if (static_cast<double>(std::max(height, width)) / std::min(height, width) >
       200) {
     LOG(ERROR) << "Absolute aspect ratio must be smaller than 200";
