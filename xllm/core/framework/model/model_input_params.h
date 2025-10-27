@@ -119,6 +119,8 @@ struct ModelInputParams {
     // Copy graph_buffer to device
     params.graph_buffer = safe_to(graph_buffer, device, true);
 
+    params.batch_id = batch_id;
+
     return params;
   }
 
@@ -199,6 +201,8 @@ struct ModelInputParams {
 
 #if defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
+  std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
+      nullptr;
 #endif
 
   DpEpPaddingData dp_ep_padding_data;
