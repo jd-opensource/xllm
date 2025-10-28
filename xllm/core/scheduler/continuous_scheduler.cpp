@@ -1019,8 +1019,13 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
   for (auto request : to_be_processed_requests) {
     // ignore cancelled/finished requests when enable_schedule_overlap.
     if (options_.enable_schedule_overlap() && request->state().stream) {
-      if (!request->finished() && !request->cancelled()) {
+      // skip cancelled request
+      if (request->cancelled()) {
+        continue;
+      }
+      if (!request->finished()) {
         stream_requests.emplace_back(request);
+        continue;
       }
       // handle token when last token not be handled.
       if (request->finished() && !request->last_token_handled()) {
