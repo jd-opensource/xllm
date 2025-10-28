@@ -166,12 +166,16 @@ torch::Tensor fused_moe(
       /*b_scale=*/w1_scale.has_value() ? std::make_optional(w1_scale.value())
                                        : std::nullopt,
       /*bias=*/std::nullopt,
+      /*a_calibration=*/std::nullopt,
+      /*b_calibration=*/std::nullopt,
       /*quant_flag=*/w1_quant_flag.has_value() ? w1_quant_flag : std::nullopt,
       /*b_offset=*/std::nullopt,
       /*tile_config=*/std::nullopt,
       /*max_dim=*/tokens,
       /*trans_a=*/false,
-      /*trans_b=*/true);
+      /*trans_b=*/true,
+      /*a_quant_bit=*/is_smoothquant ? 8 : -1
+    );
 
   // prepare the parameters for the second group gemm
   torch::Tensor act_out;
@@ -231,13 +235,16 @@ torch::Tensor fused_moe(
       w2_scale.has_value() ? std::make_optional(w2_scale.value())
                            : std::nullopt,  // b_scale
       /*bias=*/std::nullopt,
+      /*a_calibration=*/std::nullopt,
+      /*b_calibration=*/std::nullopt,
       w2_quant_flag.has_value() ? w2_quant_flag : std::nullopt,  // quant_flag
       /*b_offset=*/std::nullopt,
       /*tile_config=*/std::nullopt,
-      tokens,  // max_dim
+      /*max_dim=*/tokens,
       /*trans_a=*/false,
-      /*trans_b=*/true);
-
+      /*trans_b=*/true,
+      /*a_quant_bit=*/is_smoothquant ? 8 : -1
+  );
   auto output = torch::empty({reduce_weight.size(0), gemm2_out.size(1)},
                              gemm2_out.options());
   tmo::torch_api::moe_combine_result(gemm2_out,

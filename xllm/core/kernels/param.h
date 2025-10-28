@@ -56,9 +56,9 @@ struct ActivationParams {
 // Reshape paged cache parameters
 struct ReshapePagedCacheParams {
   torch::Tensor key;
-  torch::Tensor value;
+  std::optional<torch::Tensor> value;
   torch::Tensor k_cache;
-  torch::Tensor v_cache;
+  std::optional<torch::Tensor> v_cache;
   torch::Tensor slot_mapping;
   bool direction = false;
 };
@@ -220,5 +220,27 @@ struct TopKPParams {
 struct RandomSampleParams {
   torch::Tensor logits;
 };
+
+// Masked indexer select paged kv parameters
+struct MaskedIndexerSelectPagedKVParams {
+  bool is_prefill;
+  torch::Tensor query;
+  torch::Tensor cu_seq_q_lens;
+  torch::Tensor cu_seq_k_lens;
+  torch::Tensor q_scale;
+  torch::Tensor weights;
+  double softmax_scale;
+  torch::Tensor k_cache;
+  torch::Tensor k_context_lens;
+  torch::Tensor k_cache_block_table;
+  torch::Tensor k_scale_cache;
+  int64_t index_topk;
+  torch::Tensor kv_cache_block_table;
+  int64_t kv_cache_block_size;
+  torch::Tensor new_block_table;
+  torch::Tensor new_context_lens;
+  int64_t quant_block_size;
+};
+
 }  // namespace kernel
 }  // namespace xllm

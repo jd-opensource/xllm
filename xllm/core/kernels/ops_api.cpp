@@ -246,5 +246,30 @@ torch::Tensor random_sample(RandomSampleParams& params) {
   throw std::runtime_error("random_sample not implemented");
 #endif
 }
+
+void masked_indexer_select_paged_kv(MaskedIndexerSelectPagedKVParams& params) {
+#if defined(USE_MLU)
+  mlu::masked_indexer_select_paged_kv(params.is_prefill,
+                                      params.query,
+                                      params.cu_seq_q_lens,
+                                      params.cu_seq_k_lens,
+                                      params.q_scale,
+                                      params.weights,
+                                      params.softmax_scale,
+                                      params.k_cache,
+                                      params.k_context_lens,
+                                      params.k_cache_block_table,
+                                      params.k_scale_cache,
+                                      params.index_topk,
+                                      params.kv_cache_block_table,
+                                      params.kv_cache_block_size,
+                                      params.new_block_table,
+                                      params.new_context_lens,
+                                      params.quant_block_size);
+#else
+  throw std::runtime_error("masked_indexer_select_paged_kv not implemented");
+#endif
+}
+
 }  // namespace kernel
 }  // namespace xllm

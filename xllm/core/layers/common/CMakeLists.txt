@@ -17,6 +17,7 @@ cc_library(
     linear_impl.h
     word_embedding_impl.h
     layer_utils.h
+    indexer.h
   SRCS
     qwen3_attention.cpp
     attention.cpp
@@ -28,6 +29,7 @@ cc_library(
     qwen3_moe_decoder_layer.cpp
     linear_impl.cpp
     layer_utils.cpp
+    indexer.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"
@@ -66,6 +68,23 @@ cc_test(
     fused_moe_test
   SRCS
     tests/fused_moe_tests.cpp
+    tests/tests_utils.cpp
+  DEPS
+    :common_layers
+    :parallel_state
+    :model
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+
+# Add test for Indexer
+cc_test(
+  NAME
+    indexer_test
+  SRCS
+    tests/indexer_tests.cpp
     tests/tests_utils.cpp
   DEPS
     :common_layers

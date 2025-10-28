@@ -18,9 +18,9 @@ limitations under the License.
 namespace xllm::kernel::mlu {
 
 void reshape_paged_cache(torch::Tensor& key,
-                         torch::Tensor& value,
+                         const std::optional<torch::Tensor>& value,
                          torch::Tensor& k_cache,
-                         torch::Tensor& v_cache,
+                         const std::optional<torch::Tensor>& v_cache,
                          const torch::Tensor& slot_mapping,
                          bool direction) {
   tmo::torch_api::reshape_paged_cache(
@@ -113,6 +113,42 @@ void batch_decode(const torch::Tensor& query,
                                               scale,
                                               return_lse,
                                               kv_cache_quant_bit_size);
+}
+
+void masked_indexer_select_paged_kv(const bool is_prefill,
+                                    const at::Tensor& query,
+                                    const at::Tensor& cu_seq_q_lens,
+                                    const at::Tensor& cu_seq_k_lens,
+                                    const at::Tensor& q_scale,
+                                    const at::Tensor& weights,
+                                    const double softmax_scale,
+                                    const at::Tensor& k_cache,
+                                    const at::Tensor& k_context_lens,
+                                    const at::Tensor& k_cache_block_table,
+                                    const at::Tensor& k_scale_cache,
+                                    const int64_t index_topk,
+                                    const at::Tensor& kv_cache_block_table,
+                                    const int64_t kv_cache_block_size,
+                                    const at::Tensor& new_block_table,
+                                    const at::Tensor& new_context_lens,
+                                    const int64_t quant_block_size) {
+  tmo::torch_api::masked_indexer_select_paged_kv(is_prefill,
+                                                 query,
+                                                 cu_seq_q_lens,
+                                                 cu_seq_k_lens,
+                                                 q_scale,
+                                                 weights,
+                                                 softmax_scale,
+                                                 k_cache,
+                                                 k_context_lens,
+                                                 k_cache_block_table,
+                                                 k_scale_cache,
+                                                 index_topk,
+                                                 kv_cache_block_table,
+                                                 kv_cache_block_size,
+                                                 new_block_table,
+                                                 new_context_lens,
+                                                 quant_block_size);
 }
 
 }  // namespace xllm::kernel::mlu

@@ -52,9 +52,9 @@ void active(const torch::Tensor& input,
             int expert_size);
 
 void reshape_paged_cache(torch::Tensor& key,
-                         torch::Tensor& value,
+                         const std::optional<torch::Tensor>& value,
                          torch::Tensor& k_cache,
-                         torch::Tensor& v_cache,
+                         const std::optional<torch::Tensor>& v_cache,
                          const torch::Tensor& slot_mapping,
                          bool direction);
 
@@ -101,6 +101,24 @@ void batch_decode(const torch::Tensor& query,
                   float scale,
                   bool return_lse,
                   int kv_cache_quant_bit_size);
+
+void masked_indexer_select_paged_kv(const bool is_prefill,
+                                    const at::Tensor& query,
+                                    const at::Tensor& cu_seq_q_lens,
+                                    const at::Tensor& cu_seq_k_lens,
+                                    const at::Tensor& q_scale,
+                                    const at::Tensor& weights,
+                                    const double softmax_scale,
+                                    const at::Tensor& k_cache,
+                                    const at::Tensor& k_context_lens,
+                                    const at::Tensor& k_cache_block_table,
+                                    const at::Tensor& k_scale_cache,
+                                    const int64_t index_topk,
+                                    const at::Tensor& kv_cache_block_table,
+                                    const int64_t kv_cache_block_size,
+                                    const at::Tensor& new_block_table,
+                                    const at::Tensor& new_context_lens,
+                                    const int64_t quant_block_size);
 
 void fused_layernorm(const torch::Tensor& input,
                      torch::Tensor& output,
