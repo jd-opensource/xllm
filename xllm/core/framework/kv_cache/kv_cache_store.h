@@ -15,8 +15,8 @@ namespace xllm {
 struct StoreConfig {
   std::string localhost_name = "127.0.0.1";
   std::string protocol = "tcp";
-  std::string metadata_connstring = "";
-  std::string master_server_entry = "";
+  std::string metadata_server = "";
+  std::string master_server_address = "";
   int replica_num = 1;
   uint32_t tp_rank = 0;
 };

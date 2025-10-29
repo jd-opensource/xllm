@@ -336,13 +336,17 @@ DEFINE_string(store_protocol,
               "tcp",
               "KV cache store protocol(e.g. tcp, rdma).");
 
-DEFINE_string(store_master_server_entry,
+DEFINE_string(store_master_server_address,
               "",
               "The address information of the store master service.");
 
-DEFINE_string(store_metadata_connstring,
+DEFINE_string(store_metadata_server,
               "",
               "The address of the kv cache store metadata service.");
+
+DEFINE_string(store_local_hostname,
+              "",
+              "The local host name of the kv cache store client.");
 
 // --- computation communication parallel config ---
 

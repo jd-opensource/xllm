@@ -233,26 +233,12 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
-  void set_async_result(std::vector<folly::SemiFuture<uint32_t>>&& futures) {
-    futures_ = std::move(futures);
+  const std::atomic<bool>& get_termination_flag() { return termination_flag_; }
+  std::vector<std::shared_ptr<std::atomic<uint32_t>>>* get_prefetch_results() {
+    return &prefetch_results_;
   }
 
-  void sync_result() {
-    if (futures_.has_value()) {
-      uint32_t success_cnt = host_kv_state_.num_kv_blocks();
-      for (auto& future : futures_.value()) {
-        if (future.isReady()) {
-          success_cnt = std::min(success_cnt, future.value());
-        } else {
-          return;
-        }
-      }
-      if (success_cnt > 0) {
-        host_kv_state_.incr_kv_cache_tokens_num(
-            success_cnt * host_kv_state_.kv_blocks()[0].size());
-      }
-    }
-  }
+  void update_prefetch_result();
 
   void reset();
 
@@ -361,7 +347,8 @@ class Sequence final {
   std::queue<bool> is_pre_scheduled_step_prefill_;
 
   // kvcache store copy async result
-  std::optional<std::vector<folly::SemiFuture<uint32_t>>> futures_;
+  std::atomic<bool> termination_flag_{false};
+  std::vector<std::shared_ptr<std::atomic<uint32_t>>> prefetch_results_;
 };
 
 }  // namespace xllm

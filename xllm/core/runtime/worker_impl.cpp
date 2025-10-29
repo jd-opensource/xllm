@@ -191,10 +191,13 @@ bool WorkerImpl::allocate_host_kv_cache(
 
   if (options_.enable_kvcache_store()) {
     StoreConfig config;
+    config.localhost_name = options_.store_local_hostname();
     config.protocol = options_.store_protocol();
-    config.metadata_connstring = options_.store_metadata_connstring();
-    config.master_server_entry = options_.store_master_server_entry();
-    config.tp_rank = options_.node_rank() % options_.dp_size();
+    config.metadata_server = options_.store_metadata_server();
+    config.master_server_address = options_.store_master_server_address();
+    config.tp_rank = options_.dp_size() > 1
+                         ? options_.node_rank() % options_.dp_size()
+                         : options_.node_rank();
 
     if (!KVCacheStore::get_instance().init(config, &host_kv_caches_)) {
       LOG(ERROR) << "Init KVCacheStore fail!";
@@ -704,10 +707,6 @@ uint32_t WorkerImpl::transfer_kv_blocks(
   CHECK(!block_transfer_info.empty());
 
   switch (block_transfer_info[0].transfer_type) {
-    case TransferType::G2H: {
-      Slice<BlockTransferInfo> info_slice{block_transfer_info};
-      return load_from_store(info_slice);
-    }
     case TransferType::D2G:
       return offload_kv_blocks(block_transfer_info);
     default:
@@ -1010,7 +1009,7 @@ uint32_t WorkerImpl::offload_to_store(
       .get();
 }
 
-uint32_t WorkerImpl::load_from_store(
+uint32_t WorkerImpl::prefetch_from_storage(
     Slice<BlockTransferInfo>& block_transfer_info) {
   if (!options_.enable_kvcache_store()) {
     return 0;

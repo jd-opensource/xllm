@@ -146,9 +146,11 @@ class Options {
 
   PROPERTY(std::string, store_protocol) = "tcp";
 
-  PROPERTY(std::string, store_master_server_entry) = "";
+  PROPERTY(std::string, store_master_server_address) = "";
 
-  PROPERTY(std::string, store_metadata_connstring) = "";
+  PROPERTY(std::string, store_metadata_server) = "";
+
+  PROPERTY(std::string, store_local_hostname) = "";
 
   PROPERTY(bool, enable_multi_stream_parallel) = false;
 

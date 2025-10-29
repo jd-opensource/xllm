@@ -95,7 +95,7 @@ bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
-  prepare_cache_async(request);
+  prefetch_from_storage(request);
 
   if (request_queue_.write(request)) {
     return true;
@@ -223,7 +223,7 @@ void ContinuousScheduler::handle_prefill_requests(
         continue;
       }
 
-      prefill_sequence->sync_result();
+      prefill_sequence->update_prefetch_result();
       // FIXME: use actual num_tokens to handle
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache
@@ -898,10 +898,12 @@ std::vector<Batch> ContinuousScheduler::schedule_request(
   return batch;
 }
 
-void ContinuousScheduler::prepare_cache_async(
+void ContinuousScheduler::prefetch_from_storage(
     std::shared_ptr<Request>& request) {
   if (request->sequences()[0]->kv_state().num_kv_blocks() != 0 ||
       request->sequences()[0]->host_kv_state().num_kv_blocks() != 0) {
+    LOG(ERROR)
+        << "prefetch_from_storage can only be called before prepare batch!";
     return;
   }
   for (auto& prefill_sequence : request->sequences()) {
@@ -921,9 +923,10 @@ void ContinuousScheduler::prepare_cache_async(
                               TransferType::G2H));
       }
 
-      auto futures = engine_->transfer_kv_blocks(
-          prefill_sequence->dp_rank(), std::move(block_transfer_infos));
-      prefill_sequence->set_async_result(std::move(futures));
+      engine_->prefetch_from_storage(prefill_sequence->dp_rank(),
+                                     prefill_sequence->get_termination_flag(),
+                                     std::move(block_transfer_infos),
+                                     prefill_sequence->get_prefetch_results());
     }
   }
 }

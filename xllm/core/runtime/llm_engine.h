@@ -80,6 +80,13 @@ class LLMEngine : public Engine {
       const uint64_t batch_id,
       const std::vector<BlockTransferInfo>& block_transfer_info) override;
 
+  void prefetch_from_storage(
+      const uint32_t dp_rank,
+      const std::atomic<bool>& flag,
+      const std::vector<BlockTransferInfo>& block_transfer_info,
+      std::vector<std::shared_ptr<std::atomic<uint32_t>>>* prefetch_results)
+      override;
+
   void get_device_info(std::vector<std::string>& device_ips,
                        std::vector<uint16_t>& ports) override;
 

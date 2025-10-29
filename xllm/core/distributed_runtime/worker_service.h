@@ -80,10 +80,15 @@ class WorkerService : public proto::DistributeWorker {
                    proto::Status* resp,
                    ::google::protobuf::Closure* done) override;
 
-  virtual void TransferBlocks(::google::protobuf::RpcController* controller,
-                              const ::xllm::proto::BlockTransferInfos* req,
-                              ::xllm::proto::TransferStatus* resp,
-                              ::google::protobuf::Closure* done) override;
+  void TransferBlocks(::google::protobuf::RpcController* controller,
+                      const proto::BlockTransferInfos* req,
+                      proto::TransferStatus* resp,
+                      ::google::protobuf::Closure* done) override;
+
+  void PrefetchFromStorage(google::protobuf::RpcController* controller,
+                           const proto::BlockTransferInfos* req,
+                           proto::Status* resp,
+                           google::protobuf::Closure* done) override;
 
   void GetDeviceInfo(::google::protobuf::RpcController* controller,
                      const proto::Empty* req,
@@ -149,6 +154,9 @@ class WorkerService : public proto::DistributeWorker {
   std::unique_ptr<std::thread> polling_thread_;
 
   std::unique_ptr<ThreadPool> threadpool_;
+  ThreadPool copy_threadpool_{5};
+
+  uint32_t stream_copy_batch_size_ = 2;
 };
 
 }  // namespace xllm

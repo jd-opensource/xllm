@@ -35,6 +35,7 @@ limitations under the License.
 #include "util/hash_util.h"
 
 namespace xllm {
+
 RemoteWorker::RemoteWorker(int32_t global_rank,
                            const std::string& server_address,
                            const torch::Device& d,
@@ -286,7 +287,7 @@ folly::SemiFuture<uint32_t> RemoteWorker::transfer_kv_blocks(
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   folly::Promise<uint32_t> promise;
   auto future = promise.getSemiFuture();
-  general_threadpool_.schedule(
+  copy_threadpool_.schedule(
       [this,
        block_transfer_info = std::move(block_transfer_info),
        promise = std::move(promise)]() mutable {
@@ -298,11 +299,24 @@ folly::SemiFuture<uint32_t> RemoteWorker::transfer_kv_blocks(
 void RemoteWorker::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
-  general_threadpool_.schedule(
+  copy_threadpool_.schedule(
       [this,
        batch_id = batch_id,
        block_transfer_info = std::move(block_transfer_info)]() mutable {
         channel_->transfer_kv_blocks(batch_id, block_transfer_info);
+      });
+}
+
+void RemoteWorker::prefetch_from_storage(
+    const std::atomic<bool>& flag,
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    std::shared_ptr<std::atomic<uint32_t>>& success_cnt) {
+  copy_threadpool_.schedule(
+      [this,
+       flag = &flag,
+       block_transfer_info = std::move(block_transfer_info),
+       success_cnt = success_cnt]() mutable {
+        channel_->prefetch_from_storage(flag, block_transfer_info, success_cnt);
       });
 }
 

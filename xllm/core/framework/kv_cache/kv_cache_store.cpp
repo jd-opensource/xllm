@@ -28,10 +28,10 @@ bool KVCacheStore::init(const StoreConfig& config,
   }
 
   auto client_opt = mooncake::Client::Create(config_.localhost_name,
-                                             config_.metadata_connstring,
+                                             config_.metadata_server,
                                              config_.protocol,
                                              device_names,
-                                             config_.master_server_entry);
+                                             config_.master_server_address);
 
   rep_config_.replica_num = config_.replica_num;
   // rep_config_.preferred_segment = config_.localhost_name;

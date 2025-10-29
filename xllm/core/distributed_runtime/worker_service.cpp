@@ -418,19 +418,126 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
 
 void WorkerService::TransferBlocks(
     ::google::protobuf::RpcController* controller,
-    const ::xllm::proto::BlockTransferInfos* req,
-    ::xllm::proto::TransferStatus* resp,
+    const proto::BlockTransferInfos* req,
+    proto::TransferStatus* resp,
     ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
   std::vector<BlockTransferInfo> block_transfer_info;
-  uint64_t batch_id;
-  proto_to_block_transfer_info(*req, batch_id, block_transfer_info);
+  uint64_t batch_id = proto_to_block_transfer_info(*req, block_transfer_info);
 
   if (batch_id == 0x0) {
     resp->set_success_cnt(worker_->transfer_kv_blocks(block_transfer_info));
   } else {
     worker_->transfer_kv_blocks(batch_id, std::move(block_transfer_info));
   }
+  return;
+}
+
+class ServerStreamHandler : public brpc::StreamInputHandler {
+ private:
+  std::promise<void> close_promise_;
+  std::atomic<bool> promise_set_{false};
+
+ public:
+  ~ServerStreamHandler() {
+    if (!promise_set_.exchange(true)) {
+      try {
+        close_promise_.set_value();
+      } catch (const std::exception& e) {
+        LOG(WARNING) << "Exception in destructor: " << e.what();
+      }
+    }
+  }
+
+  std::future<void> get_close_future() { return close_promise_.get_future(); }
+
+  int on_received_messages(brpc::StreamId id,
+                           butil::IOBuf* const messages[],
+                           size_t size) override {
+    LOG(WARNING) << "ServerStreamHandler::on_received_messages not implement.";
+    return 0;
+  }
+
+  void on_closed(brpc::StreamId id) override {
+    if (!promise_set_.exchange(true)) {
+      close_promise_.set_value();
+    }
+  }
+
+  void on_idle_timeout(brpc::StreamId id) override {
+    if (!promise_set_.exchange(true)) {
+      LOG(WARNING) << "Stream idle timeout: " << id;
+      close_promise_.set_value();
+    }
+  }
+};
+
+void WorkerService::PrefetchFromStorage(
+    google::protobuf::RpcController* controller,
+    const proto::BlockTransferInfos* req,
+    proto::Status* resp,
+    google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  brpc::Controller* cntl = static_cast<brpc::Controller*>(controller);
+
+  auto stream_handler = std::make_unique<ServerStreamHandler>();
+  auto stream_id = std::make_unique<brpc::StreamId>();
+  brpc::StreamOptions stream_options;
+  stream_options.handler = stream_handler.get();
+  if (brpc::StreamAccept(stream_id.get(), *cntl, &stream_options) != 0) {
+    resp->set_ok(false);
+    LOG(ERROR) << "Failed to accept stream!";
+    return;
+  }
+
+  std::vector<BlockTransferInfo> block_transfer_info;
+  proto_to_block_transfer_info(*req, block_transfer_info);
+
+  copy_threadpool_.schedule(
+      [this,
+       block_transfer_info = std::move(block_transfer_info),
+       stream_id = std::move(stream_id),
+       stream_handler = std::move(stream_handler)]() mutable {
+        Slice<BlockTransferInfo> transfer_slice{block_transfer_info};
+        auto close_future = stream_handler->get_close_future();
+        bool is_completed = false;
+
+        for (size_t i = 0; i < transfer_slice.size();
+             i += stream_copy_batch_size_) {
+          auto current_slice = transfer_slice.slice(
+              i, std::min(i + stream_copy_batch_size_, transfer_slice.size()));
+
+          auto success_cnt = worker_->prefetch_from_storage(current_slice);
+
+          if (success_cnt != current_slice.size() ||
+              i + stream_copy_batch_size_ >= transfer_slice.size()) {
+            is_completed = true;
+          }
+
+          butil::IOBuf buf;
+          buf.append(std::to_string(success_cnt));
+          if (brpc::StreamWrite(*stream_id.get(), buf) != 0) {
+            brpc::StreamClose(*stream_id.get());
+            is_completed = false;
+            break;
+          }
+
+          if (is_completed) {
+            if (success_cnt != 0) {
+              butil::IOBuf buf_end;
+              buf_end.append("0");
+              brpc::StreamWrite(*stream_id.get(), buf_end);
+            }
+            break;
+          }
+        }
+        if (is_completed) {
+          close_future.wait();
+        }
+        brpc::StreamClose(*stream_id.get());
+      });
+
+  resp->set_ok(true);
   return;
 }
 

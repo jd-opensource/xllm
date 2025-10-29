@@ -124,6 +124,11 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
   return insert(token_ids, blocks, &insert_keys);
 }
 
+size_t PrefixCache::insert(const std::vector<Block>& blocks) {
+  std::vector<Murmur3Key> insert_keys;
+  return insert(blocks, &insert_keys);
+}
+
 size_t PrefixCache::evict(size_t n_blocks) {
   std::vector<Murmur3Key> evict_keys;
   return evict(n_blocks, &evict_keys);
@@ -190,6 +195,49 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
   }
 
   return n_tokens;
+}
+
+size_t PrefixCache::insert(const std::vector<Block>& blocks,
+                           std::vector<Murmur3Key>* insert_keys) {
+  const int64_t now = absl::ToUnixMicros(absl::Now());
+  DNodeList node_list;
+  Murmur3Key token_hash_key;
+
+  insert_keys->reserve(blocks.size());
+  for (size_t i = 0; i < blocks.size(); i++) {
+    if (!blocks[i].is_valid()) {
+      continue;
+    }
+    token_hash_key.set(blocks[i].get_immutable_hash_value());
+
+    auto iter = cached_blocks_.find(token_hash_key);
+    if (iter != cached_blocks_.end()) {
+      iter->second->last_access_time = now;
+
+      lru_lst_.remove_node(iter->second);
+      node_list.push_front(iter->second);
+    } else {
+      Node* new_node = new Node();
+
+      new_node->block = blocks[i];
+      new_node->last_access_time = now;
+
+      node_list.push_front(new_node);
+
+      cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
+
+      num_blocks_++;
+
+      insert_keys->emplace_back(token_hash_key.data);
+    }
+  }
+
+  while (!node_list.is_empty()) {
+    Node* node = node_list.pop_front();
+    lru_lst_.push_back(node);
+  }
+
+  return blocks.size() * block_size_;
 }
 
 size_t PrefixCache::evict(size_t n_blocks,

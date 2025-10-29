@@ -112,6 +112,9 @@ class Worker {
       const uint64_t batch_id,
       const std::vector<BlockTransferInfo>& block_transfer_info);
 
+  virtual uint32_t prefetch_from_storage(
+      Slice<BlockTransferInfo>& block_transfer_info);
+
   // Run the model on the given input. async call
   // the future returns a successfull status with no meaningful value
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(

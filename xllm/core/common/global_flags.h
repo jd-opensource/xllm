@@ -161,9 +161,11 @@ DECLARE_bool(enable_kvcache_store);
 
 DECLARE_string(store_protocol);
 
-DECLARE_string(store_master_server_entry);
+DECLARE_string(store_master_server_address);
 
-DECLARE_string(store_metadata_connstring);
+DECLARE_string(store_metadata_server);
+
+DECLARE_string(store_local_hostname);
 
 DECLARE_bool(enable_multi_stream_parallel);
 

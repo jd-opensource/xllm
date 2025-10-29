@@ -102,7 +102,7 @@ void PrefillOnlyScheduler::handle_prefill_requests(
         continue;
       }
 
-      prefill_sequence->sync_result();
+      prefill_sequence->update_prefetch_result();
       // FIXME: use actual num_tokens to handle
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache
@@ -291,7 +291,7 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
         continue;
       }
 
-      prefill_sequence->sync_result();
+      prefill_sequence->update_prefetch_result();
       // FIXME: use actual num_tokens to handle
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache

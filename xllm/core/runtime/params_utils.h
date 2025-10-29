@@ -52,9 +52,8 @@ Token build_token(int64_t index,
                   torch::Tensor top_tokens,
                   torch::Tensor top_logprobs);
 
-void proto_to_block_transfer_info(
+uint64_t proto_to_block_transfer_info(
     const proto::BlockTransferInfos& pb_block_transfer_info,
-    uint64_t& batch_id,
     std::vector<BlockTransferInfo>& block_transfer_info);
 
 bool block_transfer_info_to_proto(

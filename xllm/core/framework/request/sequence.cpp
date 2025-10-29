@@ -457,4 +457,21 @@ Slice<int32_t> Sequence::get_generated_tokens() const {
   return {tokens_.data(), 0};
 }
 
+void Sequence::update_prefetch_result() {
+  if (prefetch_results_.empty()) {
+    return;
+  }
+
+  termination_flag_.store(true, std::memory_order_release);
+  uint32_t success_cnt = host_kv_state_.kv_blocks().size();
+  for (auto& cnt : prefetch_results_) {
+    success_cnt = std::min(success_cnt, cnt->load());
+  }
+  if (success_cnt > 0) {
+    host_kv_state_.incr_kv_cache_tokens_num(
+        success_cnt * host_kv_state_.kv_blocks()[0].size());
+  }
+  prefetch_results_.clear();
+}
+
 }  // namespace xllm

@@ -517,6 +517,20 @@ void LLMEngine::transfer_kv_blocks(
   }
 }
 
+void LLMEngine::prefetch_from_storage(
+    const uint32_t dp_rank,
+    const std::atomic<bool>& flag,
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    std::vector<std::shared_ptr<std::atomic<uint32_t>>>* prefetch_results) {
+  prefetch_results->resize(dp_local_tp_size_,
+                           std::make_shared<std::atomic<uint32_t>>(0));
+  for (auto tp_rank = 0; tp_rank < dp_local_tp_size_; ++tp_rank) {
+    worker_clients_[tp_rank + dp_local_tp_size_ * dp_rank]
+        ->prefetch_from_storage(
+            flag, block_transfer_info, prefetch_results->at(tp_rank));
+  }
+}
+
 void LLMEngine::get_device_info(std::vector<std::string>& device_ips,
                                 std::vector<uint16_t>& ports) {
   if (worker_device_ips_.size() != worker_clients_num_ ||

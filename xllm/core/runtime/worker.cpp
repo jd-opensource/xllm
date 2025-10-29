@@ -177,6 +177,11 @@ void Worker::transfer_kv_blocks(
   impl_->transfer_kv_blocks(batch_id, std::move(block_transfer_info));
 }
 
+uint32_t Worker::prefetch_from_storage(
+    Slice<BlockTransferInfo>& block_transfer_info) {
+  return impl_->prefetch_from_storage(block_transfer_info);
+}
+
 const torch::Device& Worker::device() const { return impl_->device(); }
 
 folly::SemiFuture<std::optional<ForwardOutput>>

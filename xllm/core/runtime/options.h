@@ -148,11 +148,15 @@ struct Options {
 
   // The address information of the Master (IP:Port for default mode and
   // etcd://IP:Port;IP:Port;...;IP:Port for high availability mode)
-  PROPERTY(std::string, store_master_server_entry) = "";
+  PROPERTY(std::string, store_master_server_address) = "";
 
   // the address of the metadata service (e.g., etcd/Redis) required for
   // Transfer Engine initialization
-  PROPERTY(std::string, store_metadata_connstring) = "";
+  PROPERTY(std::string, store_metadata_server) = "";
+
+  //  the IP:Port of the local machine or an accessible domain name (default
+  //  value used if port is not included)
+  PROPERTY(std::string, store_local_hostname) = "";
 
   // dit
   // max requests per batch

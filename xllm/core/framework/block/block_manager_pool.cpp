@@ -118,9 +118,7 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
   cache(sequence);
   if (!host_block_managers_.empty()) {
-    cache_host(sequence);
-    host_block_managers_[dp_rank]->deallocate(
-        sequence->host_kv_state().kv_blocks());
+    record_offload_blocks(sequence);
   }
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
   // release the blocks after prefix cache insertion
@@ -167,6 +165,7 @@ void BlockManagerPool::set_offload_callback(
               LOG(FATAL) << "Offload copy fail! Exception caught: " << e.what();
             }
           }
+          host_block_mgr_ptr->cache(host_blocks);
           host_block_mgr_ptr->deallocate({host_blocks});
           device_block_mgr_ptr->deallocate({device_blocks});
           return 0;
@@ -361,45 +360,53 @@ void BlockManagerPool::allocate_host_shared(Sequence* sequence) {
   }
 }
 
-void BlockManagerPool::cache_host(Sequence* sequence) {
+void BlockManagerPool::record_offload_blocks(Sequence* sequence) {
   DCHECK(sequence != nullptr);
-
-  int32_t dp_rank = get_dp_rank(sequence);
-  size_t needed_block_num = (sequence->num_tokens() / options_.block_size() -
-                             sequence->host_kv_state().num_kv_blocks());
-
-  if (sequence->kv_state().kv_blocks().size() == 0 ||
-      sequence->host_kv_state().kv_blocks().size() >=
-          sequence->kv_state().kv_blocks().size()) {
-    return;
-  }
-
-  if (needed_block_num > 0) {
-    sequence->host_kv_state().add_kv_blocks(
-        host_block_managers_[dp_rank]->allocate(needed_block_num));
-  }
 
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
   auto* host_blocks = sequence->host_kv_state().mutable_kv_blocks();
 
-  host_block_managers_[dp_rank]->cache(sequence->tokens(), *host_blocks);
+  if (blocks->size() == 0 || host_blocks->size() >= blocks->size()) {
+    return;
+  }
 
   int cached_block_num =
       sequence->host_kv_state().kv_cache_tokens_num() / options_.block_size();
 
+  int32_t dp_rank = get_dp_rank(sequence);
+
+  if (host_blocks->size() > 0) {
+    host_block_managers_[dp_rank]->cache(sequence->tokens(), *host_blocks);
+  }
+
+  size_t needed_block_num =
+      sequence->num_tokens() / options_.block_size() - host_blocks->size();
+
+  if (needed_block_num == 0) {
+    return;
+  }
+
+  sequence->host_kv_state().add_kv_blocks(
+      host_block_managers_[dp_rank]->allocate(needed_block_num));
+
   for (int i = cached_block_num; i < host_blocks->size(); i++) {
-    if (blocks->at(i).ref_count() != 2 || host_blocks->at(i).ref_count() != 2) {
+    if (blocks->at(i).ref_count() != 2) {
       continue;
     }
 
-    released_device_blocks_[dp_rank].emplace_back(std::move(blocks->at(i)));
+    host_blocks->at(i).set_hash_value(blocks->at(i).get_immutable_hash_value());
     released_host_blocks_[dp_rank].emplace_back(std::move(host_blocks->at(i)));
+    released_device_blocks_[dp_rank].emplace_back(std::move(blocks->at(i)));
     offload_block_transfer_infos_[dp_rank].emplace_back(BlockTransferInfo(
         released_device_blocks_[dp_rank].back().id(),
         released_host_blocks_[dp_rank].back().id(),
-        released_device_blocks_[dp_rank].back().get_immutable_hash_value(),
+        released_host_blocks_[dp_rank].back().get_immutable_hash_value(),
         TransferType::D2G));
   }
+  host_block_managers_[dp_rank]->cache(
+      *sequence->host_kv_state().mutable_kv_blocks());
+  host_block_managers_[dp_rank]->deallocate(
+      sequence->host_kv_state().kv_blocks());
 }
 
 void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {

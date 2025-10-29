@@ -45,9 +45,8 @@ constexpr size_t sampling_param_fixed_size() {
          + type_size<int32_t>;     // beam_width
 }
 
-constexpr size_t cache_block_info_fixed_size() {
-  return type_size<int32_t> * 2 +
-         16;  // device_block_id + host_block_id + hash_key
+constexpr size_t swap_block_info_fixed_size() {
+  return type_size<int32_t> * 2;  // src_block_id + dst_block_id
 }
 
 INLINE size_t get_string_size(const std::string& str) {
@@ -147,11 +146,8 @@ INLINE size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
     total += get_transfer_kv_info_size(t);
   }
 
-  const size_t cache_block_size =
-      input.async_copy_out_blocks.size() + input.copy_out_blocks.size() +
-      input.copy_in_blocks.size() + input.swap_blocks.size();
-  total += type_size<uint64_t> * 4 +
-           cache_block_size * cache_block_info_fixed_size();
+  total += type_size<uint64_t> +
+           input.swap_blocks.size() * swap_block_info_fixed_size();
 
   total += type_size<bool> * 2  // empty_kv_cache + global_empty_kv_cache
            + type_size<uint32_t> *
@@ -308,30 +304,14 @@ INLINE void write_eplb_info(char*& buffer, const EplbInfo& info) {
   write_data(buffer, info.update_layer_id);
 }
 
-INLINE void write_cache_block_info(char*& buffer, const CacheBlockInfo& info) {
-  *reinterpret_cast<int32_t*>(buffer) = info.device_block_id;
-  *reinterpret_cast<int32_t*>(buffer + 4) = info.host_block_id;
-  if (info.hash_key) {
-    std::memcpy(buffer + 8, info.hash_key, 16);
-  } else {
-    std::memset(buffer + 8, 0, 16);
-  }
-  buffer += cache_block_info_fixed_size();
-}
-
-INLINE void write_cache_blocks(char*& buffer,
-                               const std::vector<CacheBlockInfo>& blocks) {
+INLINE void write_swap_blocks(char*& buffer,
+                              const std::vector<BlockTransferInfo>& blocks) {
   write_data(buffer, (uint64_t)blocks.size());
-  if constexpr (sizeof(CacheBlockInfo) == cache_block_info_fixed_size()) {
-    if (!blocks.empty()) {
-      std::memcpy(
-          buffer, blocks.data(), blocks.size() * cache_block_info_fixed_size());
-      buffer += blocks.size() * cache_block_info_fixed_size();
-    }
-  } else {
-    for (const auto& b : blocks) {
-      write_cache_block_info(buffer, b);
-    }
+
+  for (const auto& b : blocks) {
+    *reinterpret_cast<int32_t*>(buffer) = b.src_block_id;
+    *reinterpret_cast<int32_t*>(buffer + 4) = b.src_block_id;
+    buffer += swap_block_info_fixed_size();
   }
 }
 
@@ -503,22 +483,14 @@ INLINE void read_eplb_info(const char*& buffer, EplbInfo& info) {
   read_data(buffer, info.update_layer_id);
 }
 
-INLINE void read_cache_block_info(const char*& buffer, CacheBlockInfo& info) {
-  info.device_block_id = *reinterpret_cast<const int32_t*>(buffer);
-  info.host_block_id = *reinterpret_cast<const int32_t*>(buffer + 4);
-  // notice: a temporary pointer in the buffer is stored here
-  info.hash_key =
-      const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(buffer + 8));
-  buffer += 8 + 16;
-}
-
-INLINE void read_cache_blocks(const char*& buffer,
-                              std::vector<CacheBlockInfo>& blocks) {
+INLINE void read_swap_blocks(const char*& buffer,
+                             std::vector<BlockTransferInfo>& blocks) {
   uint64_t size;
   read_data(buffer, size);
-  blocks.resize(size);
-  for (auto& block : blocks) {
-    read_cache_block_info(buffer, block);
+  blocks.reserve(size);
+  for (int i = 0; i < size; i++) {
+    blocks.emplace_back(*reinterpret_cast<const int32_t*>(buffer),
+                        *reinterpret_cast<const int32_t*>(buffer + 4));
   }
 }
 
@@ -592,10 +564,8 @@ INLINE void deserialize_raw_forward_input(
     read_transfer_kv_info(buffer, transfer);
   }
 
-  read_cache_blocks(buffer, input.async_copy_out_blocks);
-  read_cache_blocks(buffer, input.copy_out_blocks);
-  read_cache_blocks(buffer, input.copy_in_blocks);
-  read_cache_blocks(buffer, input.swap_blocks);
+  read_swap_blocks(buffer, input.swap_blocks);
+  read_data(buffer, input.batch_id);
 
   read_data(buffer, input.empty_kv_cache);
   read_data(buffer, input.global_empty_kv_cache);
@@ -646,10 +616,8 @@ INLINE void serialize_raw_forward_input(const RawForwardInput& input,
     write_transfer_kv_info(buffer, t);
   }
 
-  write_cache_blocks(buffer, input.async_copy_out_blocks);
-  write_cache_blocks(buffer, input.copy_out_blocks);
-  write_cache_blocks(buffer, input.copy_in_blocks);
-  write_cache_blocks(buffer, input.swap_blocks);
+  write_swap_blocks(buffer, input.swap_blocks);
+  write_data(buffer, input.batch_id);
 
   write_data(buffer, input.empty_kv_cache);
   write_data(buffer, input.global_empty_kv_cache);
@@ -883,11 +851,8 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   input_params.cum_sum =
       torch::tensor(std::move(raw_input.cum_sum), tensor_options);
 
-  input_params.async_copy_out_blocks =
-      std::move(raw_input.async_copy_out_blocks);
-  input_params.copy_out_blocks = std::move(raw_input.copy_out_blocks);
-  input_params.copy_in_blocks = std::move(raw_input.copy_in_blocks);
   input_params.swap_blocks = std::move(raw_input.swap_blocks);
+  input_params.batch_id = std::move(raw_input.batch_id);
   input_params.extra_token_ids = std::move(raw_input.extra_token_ids);
 
   input_params.new_cache_slot_offsets = torch::tensor(
