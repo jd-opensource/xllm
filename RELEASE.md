@@ -1,3 +1,14 @@
+# Release xllm 0.6.1
+
+## **Major Features and Improvements**
+
+### Bugfix
+
+- Skip cancelled requests when processing stream output.
+- Resolve segmentation fault during qwen3 quantized inference.
+- Fix the alignment of monitoring metrics format for Prometheus.
+- Clear outdated tensors to save memory when loading model weights.
+
 # Release xllm 0.6.0
 
 ## **Major Features and Improvements**
