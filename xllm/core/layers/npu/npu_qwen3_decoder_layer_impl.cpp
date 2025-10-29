@@ -89,11 +89,15 @@ enum DecoderLayerTensorId : int {
   IN_MLP_CPROJ_SCALE = 48,     // scale
   IN_MLP_CPROJ_COMPRESS_IDX = 49,
 
-  Q_NORM_WEIGHT = 50,
-  K_NORM_WEIGHT = 51,
+  IN_QKV_SCALE_FILL = 50,
+  IN_QKV_OFFSET_FILL = 51,
+  IN_MLP_SCALE_FILL = 52,
+  IN_MLP_OFFSET_FILL = 53,
+  Q_NORM_WEIGHT = 54,
+  K_NORM_WEIGHT = 55,
 };
 
-const uint64_t WEIGHT_COUNT_PER_LAYER = 52;
+const uint64_t WEIGHT_COUNT_PER_LAYER = 56;
 
 static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
@@ -207,11 +211,16 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   param.useQKNorm = true;
 
   param.numHiddenLayers = args.n_layers();
-
+  param.enableIntraLayerAddNorm = true;
+  param.enableInterLayerAddNorm = false;
+  param.enablePreFetchWeight = FLAGS_enable_prefetch_weight;
   initialize_quantization_parameters(param);
 
   if (isPrefill) {
-    param.enableAclnnRmsNorm = quantize_type_.empty();
+    param.enableAclnnRmsNorm =
+        param.enableIntraLayerAddNorm && quantize_type_.empty()
+            ? false
+            : quantize_type_.empty();
     // for prefix cache without chunked prefill.
     if (FLAGS_enable_prefix_cache && !FLAGS_enable_chunked_prefill &&
         FLAGS_block_size != 128) {
@@ -381,6 +390,38 @@ void NpuQwen3DecoderLayerImpl::merge_loaded_weights() {
   for (auto idx :
        {IN_MLP_W1_WEIGHT, IN_K_WEIGHT, IN_V_WEIGHT, IN_K_BIAS, IN_V_BIAS}) {
     at_weight_tensors_[idx] = at_placeholder_;
+  }
+
+  if (prefill_param_.enableIntraLayerAddNorm ||
+      prefill_param_.enableInterLayerAddNorm) {
+    if (quantize_type_.compare("w8a8") == 0) {
+      // 量化逻辑
+      torch::ScalarType weight_fill_dtype = torch::kBFloat16;
+      int64_t weight_attn_shape = at_weight_tensors_[IN_Q_WEIGHT].size(-1);
+      int64_t weight_mlp_shape = at_weight_tensors_[IN_MLP_W2_WEIGHT].size(-1);
+      at_weight_tensors_[IN_QKV_SCALE_FILL] = at_weight_tensors_[IN_Q_SCALE]
+                                                  .repeat(weight_attn_shape)
+                                                  .to(weight_fill_dtype);
+      at_weight_tensors_[IN_MLP_SCALE_FILL] =
+          at_weight_tensors_[IN_MLP_W2_SCALE]
+              .repeat(weight_mlp_shape)
+              .to(weight_fill_dtype);
+      at_weight_tensors_[IN_QKV_OFFSET_FILL] = at_weight_tensors_[IN_Q_OFFSET]
+                                                   .repeat(weight_attn_shape)
+                                                   .to(weight_fill_dtype);
+      at_weight_tensors_[IN_MLP_OFFSET_FILL] =
+          at_weight_tensors_[IN_MLP_W2_OFFSET]
+              .repeat(weight_mlp_shape)
+              .to(weight_fill_dtype);
+    } else {
+      // 浮点逻辑
+      for (auto idx : {IN_QKV_SCALE_FILL,
+                       IN_QKV_OFFSET_FILL,
+                       IN_MLP_SCALE_FILL,
+                       IN_MLP_OFFSET_FILL}) {
+        at_weight_tensors_[idx] = at_placeholder_;
+      }
+    }
   }
 
   c10_npu::NPUCachingAllocator::emptyCache();
