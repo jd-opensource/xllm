@@ -455,22 +455,20 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader,
-                  std::string prefix = "" /*llm model weight prefix*/) {
+                  std::string prefix = "model." /*llm model weight prefix*/) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(
-          state_dict->get_dict_with_prefix(prefix + "model."));
+      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
       if (tie_word_embeddings) {
         lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix(prefix + "model.embed_tokens."));
+            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
       } else {
-        lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix(prefix + "lm_head."));
+        lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
       }
     }
 #if defined(USE_NPU)
     // verify
-    model_->verify_loaded_weights(prefix + "model.");
-    lm_head_->verify_loaded_weights(prefix + "lm_head.");
+    model_->verify_loaded_weights(prefix);
+    lm_head_->verify_loaded_weights("lm_head.");
 
     model_->merge_loaded_weights();
     // test

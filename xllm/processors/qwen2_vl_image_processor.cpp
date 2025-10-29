@@ -63,10 +63,13 @@ std::optional<Size> smart_resize(int height,
 Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
   image_mean_ = args.mm_image_normalize_mean();
   image_std_ = args.mm_image_normalize_std();
-
-  min_pixels_ = args.mm_image_min_pixels();
-  max_pixels_ = args.mm_image_max_pixels();
-
+  if (args.mm_image_max_pixels() && args.mm_image_min_pixels()) {
+    min_pixels_ = args.mm_image_min_pixels();
+    max_pixels_ = args.mm_image_max_pixels();
+  } else if (args.mm_image_shortest_edge() && args.mm_image_longest_edge()) {
+    min_pixels_ = args.mm_image_shortest_edge();
+    max_pixels_ = args.mm_image_longest_edge();
+  }
   patch_size_ = args.mm_image_patch_size();
   temporal_patch_size_ = args.mm_image_temporal_patch_size();
 
@@ -139,8 +142,10 @@ bool Qwen2VLImageProcessor::process_image(
     auto size = smart_resize(resized_height,
                              resized_width,
                              patch_size_ * merge_size_,
-                             size_["shortest_edge"],
-                             size_["longest_edge"]);
+                             min_pixels_,
+                             max_pixels_);
+    // size_["shortest_edge"],
+    // size_["longest_edge"]);
     if (!size) {
       return false;
     }
