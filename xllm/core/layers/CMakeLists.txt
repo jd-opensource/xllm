@@ -53,6 +53,7 @@ cc_library(
     multi_head_attention.h
     qwen2_decoder_layer.h
     qwen2dot5_vision_decode_layer.h
+    qwen3_vision_encode_layer.h
     qwen3_decoder_layer.h
     qwen3_moe_decoder_layer.h
     rms_norm.h

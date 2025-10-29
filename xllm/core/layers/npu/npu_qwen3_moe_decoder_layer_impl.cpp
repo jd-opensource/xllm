@@ -376,7 +376,7 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
   param.hasSharedExpert = (args.n_shared_experts() > 0);
-  param.hasSharedExpertGate = true;
+  param.hasSharedExpertGate = false;
   param.processLogits = "normalization";
   param.numOfSelectedExperts = {args.num_experts_per_tok()};
 
@@ -492,7 +492,6 @@ void NpuQwen3MoeDecoderLayerImpl::process_expert_weights(
   const int local_index = expert_index % num_experts_per_partition_;
   const bool is_sharded = shard_map.count(index);
 
-  std::lock_guard<std::mutex> lock(experts_mutex_);
   torch::Tensor tmp_tensor = is_sharded
                                  ? get_sharded_tensor(state_dict,
                                                       name,
@@ -516,8 +515,6 @@ void NpuQwen3MoeDecoderLayerImpl::process_mlp_common_weights(
                               : WEIGHT_SHARD;
   const int index = get_mapped_index(name, weight_mapping);
   const bool is_sharded = shard_map.count(index);
-
-  std::lock_guard<std::mutex> lock(shared_experts_mutex_);
 
   torch::Tensor tmp_tensor = is_sharded
                                  ? get_sharded_tensor(state_dict,
@@ -650,7 +647,6 @@ void NpuQwen3MoeDecoderLayerImpl::verify_loaded_weights(
 
 void NpuQwen3MoeDecoderLayerImpl::merge_loaded_weights() {
   merge_experts_weights();
-
   at_weight_tensors_[IN_QKV_WEIGHT_0] =
       torch::cat({at_weight_tensors_[IN_QKV_WEIGHT_0],
                   at_weight_tensors_[IN_QKV_WEIGHT_1],
