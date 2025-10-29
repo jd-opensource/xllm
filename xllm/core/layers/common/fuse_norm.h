@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "framework/state_dict/state_dict.h"
+#include "framework/state_dict/utils.h"
 
 namespace xllm {
 namespace layer {
@@ -33,7 +34,7 @@ class FusedRMSNormImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict);
 
  private:
-  torch::Tensor weight_;
+  DEFINE_WEIGHT(weight);
   int64_t norm_dim_;
   double eps_;
 };

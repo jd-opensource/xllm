@@ -142,7 +142,7 @@ class RemoteWorker : public WorkerClient {
   ThreadPool threadpool_;
   // general working thread
   // do some overlap work with model execute
-  ThreadPool general_threadpool_{5};
+  ThreadPool general_threadpool_{4};
   const torch::Device device_;
 };
 }  // namespace xllm

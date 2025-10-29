@@ -72,13 +72,14 @@ class WordEmbeddingImpl : public torch::nn::Module {
       CHECK_EQ(weight_.sizes(), weight.sizes())
           << "weight size mismatch for " << name();
       weight_.copy_(weight);
-      is_loaded_ = true;
+      weight_is_loaded_ = true;
     }
   }
 
   // whether the weight is loaded
   void verify_loaded_weights(const std::string& prefix) const {
-    CHECK(is_loaded_) << "weight is not loaded for " << prefix + "weight";
+    CHECK(weight_is_loaded_)
+        << "weight is not loaded for " << prefix + "weight";
   }
 
   void pretty_print(std::ostream& stream) const override {
@@ -94,11 +95,9 @@ class WordEmbeddingImpl : public torch::nn::Module {
 
   // world size
   PROPERTY(int32_t, world_size) = 0;
-  // parameter members, must be registered
-  torch::Tensor weight_{nullptr};
 
-  // whether the weight is loaded
-  bool is_loaded_ = false;
+  // parameter members, must be registered
+  DEFINE_WEIGHT(weight);
 
   // parallel args
   ParallelArgs parallel_args_;

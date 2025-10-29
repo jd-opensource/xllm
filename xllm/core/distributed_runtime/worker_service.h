@@ -149,7 +149,7 @@ class WorkerService : public proto::DistributeWorker {
 
   std::unique_ptr<std::thread> polling_thread_;
 
-  ThreadPool threadpool_{5};
+  ThreadPool threadpool_{4};
 };
 
 }  // namespace xllm

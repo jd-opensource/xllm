@@ -70,7 +70,7 @@ class XTensorManagerService : public proto::DistributeXTensorManager {
   int32_t global_rank_;
   int32_t world_size_;
   torch::Device device_;
-  ThreadPool threadpool_{5};
+  ThreadPool threadpool_{4};
   std::unique_ptr<XTensorManager> xtensor_manager_;
 };
 

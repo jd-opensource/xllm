@@ -71,37 +71,37 @@ void MultiheadAttentionImpl::load_state_dict(const StateDict& state_dict) {
   const auto in_proj_weight = state_dict.get_tensor("in_proj_weight");
   if (in_proj_weight.defined()) {
     in_proj_weight_ = in_proj_weight.to(options_);
-    is_in_proj_weight_loaded_ = true;
+    in_proj_weight_is_loaded_ = true;
   }
 
   const auto in_proj_bias = state_dict.get_tensor("in_proj_bias");
   if (in_proj_bias.defined()) {
     in_proj_bias_ = in_proj_bias.to(options_);
-    is_in_proj_bias_loaded_ = true;
+    in_proj_bias_is_loaded_ = true;
   }
 
   const auto out_proj_weight = state_dict.get_tensor("out_proj.weight");
   if (out_proj_weight.defined()) {
     out_proj_weight_ = out_proj_weight.to(options_);
-    is_out_proj_weight_loaded_ = true;
+    out_proj_weight_is_loaded_ = true;
   }
 
   const auto out_proj_bias = state_dict.get_tensor("out_proj.bias");
   if (out_proj_bias.defined()) {
     out_proj_bias_ = out_proj_bias.to(options_);
-    is_out_proj_bias_loaded_ = true;
+    out_proj_bias_is_loaded_ = true;
   }
 }
 
 void MultiheadAttentionImpl::verify_loaded_weights(
     const std::string& prefix) const {
-  CHECK(is_in_proj_weight_loaded_)
+  CHECK(in_proj_weight_is_loaded_)
       << "in_proj_weight is not loaded for " << prefix + "in_proj_weight";
-  CHECK(is_in_proj_bias_loaded_)
+  CHECK(in_proj_bias_is_loaded_)
       << "in_proj_bias is not loaded for " << prefix + "in_proj_bias";
-  CHECK(is_out_proj_weight_loaded_)
+  CHECK(out_proj_weight_is_loaded_)
       << "out_proj.weight is not loaded for " << prefix + "out_proj.weight";
-  CHECK(is_out_proj_bias_loaded_)
+  CHECK(out_proj_bias_is_loaded_)
       << "out_proj.bias is not loaded for " << prefix + "out_proj.bias";
 }
 
