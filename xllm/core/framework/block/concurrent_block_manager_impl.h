@@ -38,6 +38,7 @@ class ConcurrentBlockManagerImpl : public BlockManagerImpl {
   // cache the blocks
   void cache(const Slice<int32_t>& token_ids,
              std::vector<Block>& blocks) override;
+  void cache(const std::vector<Block>& blocks) override;
 
   // get the number of blocks in the prefix cache
   size_t num_blocks_in_prefix_cache() const override;

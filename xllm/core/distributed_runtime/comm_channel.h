@@ -87,10 +87,6 @@ class CommChannel {
       const uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
-  virtual bool load_kv_blocks_from_store_async(
-      const std::vector<CacheBlockInfo>& cache_block_info,
-      folly::Promise<uint32_t>& promise);
-
   virtual void transfer_kv_blocks(
       const std::vector<BlockTransferInfo>& block_transfer_info,
       folly::Promise<uint32_t>& promise);
@@ -98,6 +94,11 @@ class CommChannel {
   virtual void transfer_kv_blocks(
       const uint64_t batch_id,
       const std::vector<BlockTransferInfo>& block_transfer_info);
+
+  virtual void prefetch_from_storage(
+      const std::atomic<bool>& flag,
+      const std::vector<BlockTransferInfo>& block_transfer_info,
+      std::shared_ptr<std::atomic<uint32_t>>& success_cnt);
 
   virtual bool get_last_step_result_async(
       folly::Promise<std::optional<RawForwardOutput>>& promise);

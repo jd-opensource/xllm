@@ -38,6 +38,11 @@ struct Murmur3Key {
                         reinterpret_cast<const char*>(other.data),
                         MURMUR_HASH3_VALUE_LEN);
   }
+
+  void set(const uint8_t* const input_data) {
+    std::memcpy(data, input_data, MURMUR_HASH3_VALUE_LEN);
+  }
+
   std::string debug_string() {
     std::string rt;
     for (int i = 0; i < MURMUR_HASH3_VALUE_LEN; i++) {

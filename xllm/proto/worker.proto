@@ -257,4 +257,5 @@ service DistributeWorker {
   rpc GetLastStepResult (Empty) returns (ForwardOutput);
   rpc GetActiveActivationMemory (Empty) returns (ActivationMemory);
   rpc TransferBlocks(BlockTransferInfos) returns (TransferStatus) {}
+  rpc PrefetchFromStorage(BlockTransferInfos) returns (Status) {}
 }

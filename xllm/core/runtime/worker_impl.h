@@ -180,6 +180,9 @@ class WorkerImpl {
 
   Status get_status() const { return status_; }
 
+  virtual uint32_t prefetch_from_storage(
+      Slice<BlockTransferInfo>& block_transfer_info);
+
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
 
@@ -191,7 +194,6 @@ class WorkerImpl {
                       Slice<BlockTransferInfo>& block_transfer_info);
 
   uint32_t offload_to_store(Slice<BlockTransferInfo>& block_transfer_info);
-  uint32_t load_from_store(Slice<BlockTransferInfo>& block_transfer_info);
 
  protected:
   // runtime options

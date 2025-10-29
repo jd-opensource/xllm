@@ -70,8 +70,12 @@ struct BlockTransferInfo {
   }
 
   std::string to_string() const {
+    std::string rt = ", has_key:";
+    for (int i = 0; i < 16; i++) {
+      rt += std::to_string(int64_t(*(hash_key + i))) + " ";
+    }
     return std::to_string(src_block_id) + "->" + std::to_string(dst_block_id) +
-           ", " + std::to_string(uint32_t(transfer_type));
+           ", " + std::to_string(uint32_t(transfer_type)) + rt;
   }
 };
 

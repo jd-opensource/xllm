@@ -687,9 +687,8 @@ Token build_token(int64_t index,
   return token;
 }
 
-void proto_to_block_transfer_info(
+uint64_t proto_to_block_transfer_info(
     const proto::BlockTransferInfos& pb_block_transfer_info,
-    uint64_t& batch_id,
     std::vector<BlockTransferInfo>& block_transfer_info) {
   block_transfer_info.reserve(pb_block_transfer_info.transfer_infos_size());
 
@@ -703,7 +702,7 @@ void proto_to_block_transfer_info(
         TransferType(pb_block_transfer_info.transfer_type()));
   }
 
-  batch_id = pb_block_transfer_info.batch_id();
+  return pb_block_transfer_info.batch_id();
 }
 
 bool block_transfer_info_to_proto(

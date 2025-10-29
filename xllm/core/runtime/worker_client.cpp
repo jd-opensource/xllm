@@ -161,9 +161,16 @@ folly::SemiFuture<bool> WorkerClient::pull_kv_blocks_async(
 
 folly::SemiFuture<uint32_t> WorkerClient::transfer_kv_blocks(
     const std::vector<BlockTransferInfo>& block_transfer_info) {
-  LOG(FATAL) << "Worker Method transfer_kv_blocks with return "
+  LOG(FATAL) << "WorkerClient Method transfer_kv_blocks with return "
                 "folly::SemiFuture<uint32_t> is "
                 "UnImplemented.";
+}
+
+void WorkerClient::prefetch_from_storage(
+    const std::atomic<bool>& flag,
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    std::shared_ptr<std::atomic<uint32_t>>& success_cnt) {
+  LOG(FATAL) << "WorkerClient Method prefetch_from_storage is UnImplemented.";
 }
 
 void WorkerClient::transfer_kv_blocks(

@@ -158,6 +158,14 @@ void BlockManagerImpl::cache(const Slice<int32_t>& token_ids,
   }
 }
 
+void BlockManagerImpl::cache(const std::vector<Block>& blocks) {
+  if (options_.enable_prefix_cache()) {
+    AUTO_COUNTER(prefix_cache_latency_seconds_insert);
+    // Add the kv cache to the prefix cache
+    prefix_cache_->insert(blocks);
+  }
+}
+
 void BlockManagerImpl::get_merged_kvcache_event(KvCacheEvent* event) const {
   auto events = prefix_cache_->get_upload_kvcache_events();
   if (events != nullptr) {

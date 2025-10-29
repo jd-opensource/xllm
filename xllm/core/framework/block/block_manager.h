@@ -62,6 +62,7 @@ class BlockManager {
 
   virtual void cache(const Slice<int32_t>& token_ids,
                      std::vector<Block>& blocks) = 0;
+  virtual void cache(const std::vector<Block>& blocks) = 0;
 
   // get merged all dp rank KVCacheEvent
   virtual void get_merged_kvcache_event(KvCacheEvent* event) const = 0;

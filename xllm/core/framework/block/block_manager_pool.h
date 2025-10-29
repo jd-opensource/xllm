@@ -86,7 +86,7 @@ class BlockManagerPool final : public KVCacheManager {
   int32_t get_dp_rank(Sequence* sequence) const;
 
   void allocate_host_shared(Sequence* sequence);
-  void cache_host(Sequence* sequence);
+  void record_offload_blocks(Sequence* sequence);
 
   void process_beam_search(Sequence* sequence, bool need_swap = false);
 

@@ -117,6 +117,11 @@ class RemoteWorker : public WorkerClient {
       const uint64_t batch_id,
       const std::vector<BlockTransferInfo>& block_transfer_info) override;
 
+  virtual void prefetch_from_storage(
+      const std::atomic<bool>& flag,
+      const std::vector<BlockTransferInfo>& block_transfer_info,
+      std::shared_ptr<std::atomic<uint32_t>>& success_cnt) override;
+
   // Run the model and return the output.
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const ForwardInput& inputs) override;
@@ -144,9 +149,8 @@ class RemoteWorker : public WorkerClient {
   // connection resource
   std::unique_ptr<CommChannel> channel_;
   ThreadPool threadpool_;
-  // general working thread
-  // do some overlap work with model execute
-  ThreadPool general_threadpool_{4};
+  // copy working thread
+  ThreadPool copy_threadpool_{4};
   const torch::Device device_;
 };
 }  // namespace xllm
