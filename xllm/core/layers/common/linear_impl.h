@@ -26,6 +26,18 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+// extra args for fused linear operation
+struct FusedLinearExtraArgs {
+  // parameters for fusing smooth quant activation mode and is_gated
+  std::string act_mode;
+  bool is_gated;
+
+  // default constructor
+  FusedLinearExtraArgs(const std::string& act_mode_ = "none",
+                       bool is_gated_ = false)
+      : act_mode(act_mode_), is_gated(is_gated_) {}
+};
+
 // an interface for parallel linear layer.
 // all linear classes should inherit from this class and implement the forward
 // function.
@@ -51,12 +63,15 @@ class ParallelLinearImpl : public torch::nn::Module {
 // its second dimension as A = [A_1, ..., A_p].
 class ColumnParallelLinearImpl : public ParallelLinearImpl {
  public:
-  ColumnParallelLinearImpl(int64_t in_features,
-                           int64_t out_features,
-                           bool bias,
-                           bool gather_output,
-                           const ParallelArgs& parallel_args,
-                           const torch::TensorOptions& options);
+  ColumnParallelLinearImpl(
+      int64_t in_features,
+      int64_t out_features,
+      bool bias,
+      bool gather_output,
+      const QuantArgs& quant_args,
+      const ParallelArgs& parallel_args,
+      const torch::TensorOptions& options,
+      const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs());
 
   torch::Tensor forward(torch::Tensor input) override;
 
@@ -87,6 +102,9 @@ class ColumnParallelLinearImpl : public ParallelLinearImpl {
   // we allocate the transpose since linear performs XA^T.
   // A^T: [out_features_per_partition, in_features]
   DEFINE_FUSED_WEIGHT(weight);
+  DEFINE_FUSED_WEIGHT(qweight);
+  DEFINE_FUSED_WEIGHT(per_channel_scale);
+  DEFINE_WEIGHT(smooth);
   DEFINE_FUSED_WEIGHT(bias);
 
   int rank_;
@@ -96,6 +114,11 @@ class ColumnParallelLinearImpl : public ParallelLinearImpl {
   at::Device device_;
   // parallel args
   ParallelArgs parallel_args_;
+
+  // quantization args
+  QuantArgs quant_args_;
+  at::ScalarType output_dtype_;
+  FusedLinearExtraArgs linear_extra_args_;
 };
 
 class QKVParallelLinearImpl : public ParallelLinearImpl {
@@ -165,13 +188,16 @@ class QKVParallelLinearImpl : public ParallelLinearImpl {
 //                -   -
 class RowParallelLinearImpl : public ParallelLinearImpl {
  public:
-  RowParallelLinearImpl(int64_t in_features,
-                        int64_t out_features,
-                        bool bias,
-                        bool input_is_parallelized,
-                        bool if_reduce_results,
-                        const ParallelArgs& parallel_args,
-                        const torch::TensorOptions& options);
+  RowParallelLinearImpl(
+      int64_t in_features,
+      int64_t out_features,
+      bool bias,
+      bool input_is_parallelized,
+      bool if_reduce_results,
+      const QuantArgs& quant_args,
+      const ParallelArgs& parallel_args,
+      const torch::TensorOptions& options,
+      const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs());
 
   torch::Tensor forward(torch::Tensor input) override;
 
@@ -198,6 +224,9 @@ class RowParallelLinearImpl : public ParallelLinearImpl {
   // we allocate the transpose since linear performs XA^T.
   // A^T: [out_features, in_features_per_partition]
   DEFINE_WEIGHT(weight);
+  DEFINE_WEIGHT(qweight);
+  DEFINE_WEIGHT(per_channel_scale);
+  DEFINE_WEIGHT(smooth);
   DEFINE_WEIGHT(bias);
 
   // whether the input is already parallelized
@@ -211,6 +240,11 @@ class RowParallelLinearImpl : public ParallelLinearImpl {
 
   int rank_;
   int world_size_;
+
+  // quantization args
+  QuantArgs quant_args_;
+  at::ScalarType output_dtype_;
+  FusedLinearExtraArgs linear_extra_args_;
 };
 
 class ReplicatedLinearImpl : public ParallelLinearImpl {

@@ -32,18 +32,24 @@ class ColumnParallelLinear
   using torch::nn::ModuleHolder<ColumnParallelLinearImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = ColumnParallelLinearImpl;
 
-  ColumnParallelLinear(int64_t in_features,
-                       int64_t out_features,
-                       bool bias,
-                       bool gather_output,
-                       const ParallelArgs& parallel_args,
-                       const torch::TensorOptions& options)
-      : ModuleHolder(std::make_shared<ColumnParallelLinearImpl>(in_features,
-                                                                out_features,
-                                                                bias,
-                                                                gather_output,
-                                                                parallel_args,
-                                                                options)) {}
+  ColumnParallelLinear(
+      int64_t in_features,
+      int64_t out_features,
+      bool bias,
+      bool gather_output,
+      const QuantArgs& quant_args,
+      const ParallelArgs& parallel_args,
+      const torch::TensorOptions& options,
+      const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs())
+      : ModuleHolder(
+            std::make_shared<ColumnParallelLinearImpl>(in_features,
+                                                       out_features,
+                                                       bias,
+                                                       gather_output,
+                                                       quant_args,
+                                                       parallel_args,
+                                                       options,
+                                                       linear_extra_args)) {}
 };
 
 class QKVParallelLinear
@@ -79,21 +85,26 @@ class RowParallelLinear
   using torch::nn::ModuleHolder<RowParallelLinearImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = RowParallelLinearImpl;
 
-  RowParallelLinear(int64_t in_features,
-                    int64_t out_features,
-                    bool bias,
-                    bool input_is_parallelized,
-                    bool if_reduce_results,
-                    const ParallelArgs& parallel_args,
-                    const torch::TensorOptions& options)
+  RowParallelLinear(
+      int64_t in_features,
+      int64_t out_features,
+      bool bias,
+      bool input_is_parallelized,
+      bool if_reduce_results,
+      const QuantArgs& quant_args,
+      const ParallelArgs& parallel_args,
+      const torch::TensorOptions& options,
+      const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs())
       : ModuleHolder(
             std::make_shared<RowParallelLinearImpl>(in_features,
                                                     out_features,
                                                     bias,
                                                     input_is_parallelized,
                                                     if_reduce_results,
+                                                    quant_args,
                                                     parallel_args,
-                                                    options)) {}
+                                                    options,
+                                                    linear_extra_args)) {}
 };
 
 class ReplicatedLinear : public torch::nn::ModuleHolder<ReplicatedLinearImpl> {

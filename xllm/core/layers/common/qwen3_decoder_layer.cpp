@@ -46,6 +46,7 @@ Qwen3DecoderImpl::Qwen3DecoderImpl(const ModelContext& context) {
                                   model_args.intermediate_size(),
                                   true,
                                   false,
+                                  model_args.hidden_act(),
                                   quant_args,
                                   parallel_args,
                                   options));

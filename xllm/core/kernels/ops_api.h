@@ -40,5 +40,10 @@ torch::Tensor matmul(MatmulParams& params);
 
 torch::Tensor fused_moe(FusedMoEParams& params);
 
+std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
+    ScaledQuantizeParams& params);
+
+torch::Tensor scaled_matmul(ScaledMatmulParams& params);
+
 }  // namespace kernel
 }  // namespace xllm

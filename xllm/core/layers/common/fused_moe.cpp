@@ -89,6 +89,7 @@ FusedMoEImpl::FusedMoEImpl(int num_experts,
                                  intermediate_size_ * n_shared_experts_,
                                  is_gated_,
                                  false,
+                                 hidden_act_,
                                  quant_args,
                                  parallel_args,
                                  options));

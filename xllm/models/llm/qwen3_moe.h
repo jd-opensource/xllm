@@ -286,12 +286,14 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
 #if defined(USE_NPU)
     lm_head_ = register_module("lm_head", layer::LmHead(context));
 #elif defined(USE_MLU)
+    // lm_head_ is default to no quantization
     lm_head_ =
         register_module("lm_head",
                         layer::LmHead(context.get_model_args().hidden_size(),
                                       context.get_model_args().vocab_size(),
                                       /*bias=*/false,
                                       /*gather_output=*/true,
+                                      QuantArgs{},
                                       context.get_parallel_args(),
                                       context.get_tensor_options()));
 #endif

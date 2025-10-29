@@ -40,3 +40,20 @@ cc_library(
     gflags::gflags
     torch
 )
+
+# Add test for DenseMLP
+cc_test(
+  NAME
+    dense_mlp_test
+  SRCS
+    tests/dense_mlp_tests.cpp
+    tests/tests_utils.cpp
+  DEPS
+    :common_layers
+    :parallel_state
+    :model
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)

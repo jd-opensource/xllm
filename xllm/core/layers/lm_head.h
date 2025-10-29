@@ -43,12 +43,14 @@ class LmHead : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
          int64_t out_features,
          bool bias,
          bool gather_output,
+         const QuantArgs& quant_args,
          const ParallelArgs& parallel_args,
          const torch::TensorOptions& options)
       : ModuleHolder(std::make_shared<ColumnParallelLinearImpl>(in_features,
                                                                 out_features,
                                                                 bias,
                                                                 gather_output,
+                                                                quant_args,
                                                                 parallel_args,
                                                                 options)) {}
 };
