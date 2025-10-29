@@ -405,3 +405,17 @@ DEFINE_string(reasoning_parser,
 
 // --- qwen3 reranker config ---
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
+
+DEFINE_bool(enable_sparse_valid_path_filter,
+            false,
+            "Enable sparse tensor optimization for ValidPathFilter to reduce "
+            "memory usage. When enabled, stores only false indices instead of "
+            "full boolean tensors.");
+
+DEFINE_bool(enable_convert_tokens_to_item,
+            false,
+            "Enable token ids conversion to item id when request return.");
+
+DEFINE_bool(enable_convert_item_to_tokens,
+            false,
+            "Enable item id conversion to token ids when request arrive.");
