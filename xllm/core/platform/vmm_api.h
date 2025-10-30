@@ -39,22 +39,22 @@ using PhyMemHandle = CUmemGenericAllocationHandle;
 namespace vmm {
 
 // create a physical memory handle for a specific device
-void create_phy_mem_handle(PhyMemHandle phy_mem_handle, int32_t device_id);
+void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id);
 
 // create a virtual memory pointer with a specific aligned size
-void create_vir_ptr(VirPtr vir_ptr, size_t aligned_size);
+void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size);
 
 // release a physical memory handle
-void release_phy_mem_handle(PhyMemHandle phy_mem_handle);
+void release_phy_mem_handle(PhyMemHandle& phy_mem_handle);
 
 // release a virtual memory pointer with a specific aligned size
-void release_vir_ptr(VirPtr vir_ptr, size_t aligned_size);
+void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size);
 
 // map a virtual memory pointer to a physical memory handle
-void map(VirPtr vir_ptr, PhyMemHandle phy_mem_handle);
+void map(VirPtr& vir_ptr, PhyMemHandle& phy_mem_handle);
 
 // unmap a virtual memory pointer with a specific aligned size
-void unmap(VirPtr vir_ptr, size_t aligned_size);
+void unmap(VirPtr& vir_ptr, size_t aligned_size);
 
 }  // namespace vmm
 }  // namespace xllm
