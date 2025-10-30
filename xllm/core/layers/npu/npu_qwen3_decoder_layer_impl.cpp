@@ -395,7 +395,7 @@ void NpuQwen3DecoderLayerImpl::merge_loaded_weights() {
   if (prefill_param_.enableIntraLayerAddNorm ||
       prefill_param_.enableInterLayerAddNorm) {
     if (quantize_type_.compare("w8a8") == 0) {
-      // 量化逻辑
+      // quantize
       torch::ScalarType weight_fill_dtype = torch::kBFloat16;
       int64_t weight_attn_shape = at_weight_tensors_[IN_Q_WEIGHT].size(-1);
       int64_t weight_mlp_shape = at_weight_tensors_[IN_MLP_W2_WEIGHT].size(-1);
@@ -414,7 +414,7 @@ void NpuQwen3DecoderLayerImpl::merge_loaded_weights() {
               .repeat(weight_mlp_shape)
               .to(weight_fill_dtype);
     } else {
-      // 浮点逻辑
+      // bfloat16 or float16
       for (auto idx : {IN_QKV_SCALE_FILL,
                        IN_QKV_OFFSET_FILL,
                        IN_MLP_SCALE_FILL,
