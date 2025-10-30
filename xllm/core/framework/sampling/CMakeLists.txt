@@ -19,6 +19,7 @@ cc_library(
   DEPS
     glog::glog
     torch
+    :kernels
     $<$<BOOL:${USE_NPU}>:xllm_ops>
 )
 

@@ -17,38 +17,50 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
 namespace xllm {
+std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
+                                                     int global_rank,
+                                                     int split_size,
+                                                     bool trans);
+
+c10::intrusive_ptr<c10d::Store> create_tcp_store(const std::string& host,
+                                                 int port,
+                                                 int rank);
 
 class ProcessGroup {
  public:
-  ProcessGroup(int rank, int world_size, const torch::Device& device)
-      : rank_(rank), world_size_(world_size), device_(device) {}
+  ProcessGroup(const torch::Device& device) : device_(device) {}
 
   virtual ~ProcessGroup() = default;
 
-  virtual int rank() { return rank_; }
+  int rank() const {
+    CHECK(pg_ != nullptr) << "Process group is not initialized.";
+    return pg_->getRank();
+  }
 
-  virtual int world_size() { return world_size_; }
+  int world_size() const {
+    CHECK(pg_ != nullptr) << "Process group is not initialized.";
+    return pg_->getSize();
+  }
 
   const torch::Device& device() const { return device_; }
 
   // allreduce: reduce the input tensor across all processes, and all processes
   // get the result.
-  virtual void allreduce(torch::Tensor& input) = 0;
+  virtual void allreduce(torch::Tensor& input);
 
   // allgather: gather tensors from all processes and concatenate them.
-  virtual void allgather(torch::Tensor input,
-                         std::vector<torch::Tensor>& outputs) = 0;
+  virtual void allgather(const torch::Tensor& input,
+                         std::vector<torch::Tensor>& outputs);
 
  private:
-  // rank of current process
-  int rank_ = 0;
-
-  // number of processes
-  int world_size_ = 0;
-
   // device of current process
   torch::Device device_;
+
+ protected:
+  std::unique_ptr<c10d::Backend> pg_{nullptr};
 };
 
 }  // namespace xllm

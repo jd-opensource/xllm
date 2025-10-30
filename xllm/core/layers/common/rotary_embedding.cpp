@@ -90,8 +90,10 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& q,
   rotary_params.interleaved = interleaved_;
   rotary_params.discrete = discrete;
   rotary_params.max_query_len = max_query_len;
-
   xllm::kernel::apply_rotary(rotary_params);
+
+  q = rotary_params.q;
+  k = rotary_params.k;
 }
 
 }  // namespace layer

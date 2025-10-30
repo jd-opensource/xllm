@@ -226,5 +226,22 @@ torch::Tensor scaled_matmul(ScaledMatmulParams& params) {
   throw std::runtime_error("scaled_matmul not implemented");
 #endif
 }
+
+torch::Tensor apply_top_k_top_p(TopKPParams& params) {
+#if defined(USE_MLU)
+  return mlu::apply_top_k_top_p(
+      params.logits, params.temperatures, params.top_k, params.top_p);
+#else
+  throw std::runtime_error("apply_top_k_top_p not implemented");
+#endif
+}
+
+torch::Tensor random_sample(RandomSampleParams& params) {
+#if defined(USE_MLU)
+  return mlu::random_sample(params.logits);
+#else
+  throw std::runtime_error("random_sample not implemented");
+#endif
+}
 }  // namespace kernel
 }  // namespace xllm

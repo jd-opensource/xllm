@@ -187,4 +187,11 @@ torch::Tensor scaled_matmul(
     const std::optional<torch::Tensor>& b_calib = std::nullopt,
     const std::optional<torch::Tensor>& output = std::nullopt);
 
+torch::Tensor apply_top_k_top_p(const torch::Tensor& logits,
+                                const torch::Tensor& temperature_list,
+                                const torch::Tensor& topk_list,
+                                const torch::Tensor& topp_list);
+
+torch::Tensor random_sample(const torch::Tensor& probs);
+
 }  // namespace xllm::kernel::mlu

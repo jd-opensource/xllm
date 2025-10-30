@@ -14,30 +14,18 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-
-#include "hccl/hccl.h"
-#include "process_group.h"
+#include "framework/model/model_input_params.h"
+#include "framework/parallel_state/parallel_args.h"
 
 namespace xllm {
+namespace layer {
 
-class ProcessGroupHCCL : public ProcessGroup {
- public:
-  // Constructor.
-  ProcessGroupHCCL(int rank,
-                   int world_size,
-                   const torch::Device& device,
-                   HcclComm comm);
+bool is_dummy_run(const ModelInputParams& input_params,
+                  const ParallelArgs& parallel_args);
 
-  // Destructor.
-  ~ProcessGroupHCCL() override;
+void update_dummy_run_input(int dp_rank,
+                            torch::Tensor& positions,
+                            ModelInputParams& input_params);
 
-  void allreduce(torch::Tensor& input) override;
-
-  void allgather(const torch::Tensor& input,
-                 std::vector<torch::Tensor>& outputs) override;
-
- private:
-  HcclComm comm_ = nullptr;
-};
-
+}  // namespace layer
 }  // namespace xllm

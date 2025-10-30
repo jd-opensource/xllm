@@ -17,10 +17,13 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "layer_utils.h"
+
 namespace xllm {
 namespace layer {
 
-Qwen3DecoderImpl::Qwen3DecoderImpl(const ModelContext& context) {
+Qwen3DecoderImpl::Qwen3DecoderImpl(const ModelContext& context)
+    : parallel_args_(context.get_parallel_args()) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
@@ -66,6 +69,10 @@ torch::Tensor Qwen3DecoderImpl::forward(torch::Tensor& x,
                                         const AttentionMetadata& attn_metadata,
                                         KVCache& kv_cache,
                                         const ModelInputParams& input_params) {
+  bool is_dummy = is_dummy_run(input_params, parallel_args_);
+  if (is_dummy) {
+    return x;
+  }
   // Pre-attention norm
   auto residual = x;
   x = input_norm_->forward(x);

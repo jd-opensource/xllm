@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #include "mlu_ops_api.h"
-#include "torch_mlu_ops.h"
 
 namespace xllm::kernel::mlu {
 

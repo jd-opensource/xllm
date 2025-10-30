@@ -23,30 +23,49 @@ namespace xllm {
 
 class ProcessGroupCncl : public ProcessGroup {
  public:
-  ProcessGroupCncl(int rank,
+  ProcessGroupCncl(int global_rank,
                    int world_size,
                    int rank_size,
                    int port,
+                   bool trans,
                    const std::string& host,
                    const std::string& group_name,
-                   const torch::Device& device);
+                   const torch::Device& device)
+      : ProcessGroup(device) {
+    c10::intrusive_ptr<torch_mlu::ProcessGroupCNCL::Options> pg_options =
+        torch_mlu::ProcessGroupCNCL::Options::create();
+    pg_options->group_name = group_name;
+    int rank = global_rank;
+    if (world_size != rank_size) {
+      auto [local_rank, group_ranks] =
+          get_group_rank(world_size, global_rank, rank_size, trans);
+      pg_options->global_ranks_in_group = group_ranks;
+      rank = local_rank;
+    }
 
-  ~ProcessGroupCncl() override;
+    auto store = create_tcp_store(host, port, rank);
+    pg_ = std::make_unique<torch_mlu::ProcessGroupCNCL>(
+        store, rank, rank_size, pg_options);
+  }
 
-  void allreduce(torch::Tensor& input) override;
-
-  void allgather(torch::Tensor input,
-                 std::vector<torch::Tensor>& outputs) override;
-
- private:
-  // rank of current process
-  int rank_ = 0;
-
-  // number of processes
-  int world_size_ = 0;
-
-  // cncl process group
-  std::unique_ptr<torch_mlu::ProcessGroupCNCL> cncl_pg_;
+  ~ProcessGroupCncl() override {
+    if (pg_) {
+      pg_->shutdown();
+    }
+  }
 };
+
+std::unique_ptr<xllm::ProcessGroup> create_process_group(
+    int rank,
+    int world_size,
+    int rank_size,
+    int port,
+    bool trans,
+    const std::string& host,
+    const std::string& group_name,
+    const torch::Device& device) {
+  return std::make_unique<ProcessGroupCncl>(
+      rank, world_size, rank_size, port, trans, host, group_name, device);
+}
 
 }  // namespace xllm

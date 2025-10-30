@@ -16,9 +16,8 @@ cc_library(
   SRCS
     mapping_npu.cpp
     parallel_state.cpp
+    process_group.cpp
     $<$<BOOL:${USE_NPU}>:npu_process_group.cpp>
-    $<$<BOOL:${USE_MLU}>:mlu_process_group.cpp>
-    $<$<BOOL:${USE_CUDA}>:cuda_process_group.cpp>
     collective_communicator.cpp
   DEPS
     :common

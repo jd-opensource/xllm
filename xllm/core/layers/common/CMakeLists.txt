@@ -4,7 +4,7 @@ include(cc_test)
 
 cc_library(
   NAME
-    common_layers 
+    common_layers
   HDRS
     qwen3_attention.h
     attention.h
@@ -16,6 +16,7 @@ cc_library(
     qwen3_moe_decoder_layer.h
     linear_impl.h
     word_embedding_impl.h
+    layer_utils.h
   SRCS
     qwen3_attention.cpp
     attention.cpp
@@ -26,6 +27,7 @@ cc_library(
     qwen3_decoder_layer.cpp
     qwen3_moe_decoder_layer.cpp
     linear_impl.cpp
+    layer_utils.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"

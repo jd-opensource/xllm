@@ -53,6 +53,8 @@ class Qwen3DecoderImpl : public torch::nn::Module {
   DenseMLP mlp_{nullptr};
   RmsNorm input_norm_{nullptr};
   RmsNorm post_norm_{nullptr};
+
+  ParallelArgs parallel_args_;
 };
 
 }  // namespace layer

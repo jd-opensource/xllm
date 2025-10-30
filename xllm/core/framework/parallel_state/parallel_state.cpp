@@ -15,10 +15,36 @@ limitations under the License.
 
 #include "parallel_state.h"
 
+#include "core/util/utils.h"
+
 #if defined(USE_NPU)
 #include "hccl/hccl.h"
 #include "npu_process_group.h"
 #endif
+
+namespace {
+
+torch::Tensor remove_paddings_after_all_gather(
+    const torch::Tensor& input,
+    int64_t padding_to_token_num,
+    const std::vector<int>& token_num_list) {
+  std::vector<torch::Tensor> group_tensors;
+  int64_t offset = 0;
+  for (const auto& token_num : token_num_list) {
+    if (token_num != 0) {
+      auto tensor_slice = input.slice(0, offset, offset + token_num);
+      group_tensors.push_back(tensor_slice);
+    }
+    offset += padding_to_token_num;
+  }
+  if (group_tensors.size() == 1) {
+    return group_tensors[0];
+  }
+
+  return torch::cat(group_tensors).contiguous();
+}
+
+}  // namespace
 
 namespace xllm {
 namespace parallel_state {
@@ -45,7 +71,9 @@ std::optional<ParallelArgs> get_dp_attn_parallel_args(
                       parallel_args.dp_size());
 }
 
-torch::Tensor gather(torch::Tensor input, ProcessGroup* process_group) {
+torch::Tensor gather(const torch::Tensor& input,
+                     ProcessGroup* process_group,
+                     int dim) {
   if (!process_group) {
     return input;
   }
@@ -61,10 +89,49 @@ torch::Tensor gather(torch::Tensor input, ProcessGroup* process_group) {
   }
   // blocking call
   process_group->allgather(input, tensors);
-  return torch::cat(tensors, /*dim=*/-1).contiguous();
+  return torch::cat(tensors, /*dim=*/dim).contiguous();
 }
 
-torch::Tensor reduce(torch::Tensor input, ProcessGroup* process_group) {
+torch::Tensor gather(const torch::Tensor& input,
+                     ProcessGroup* process_group,
+                     const std::vector<int32_t>& token_num_list) {
+  if (!process_group) {
+    return input;
+  }
+  const auto world_size = process_group->world_size();
+  const auto rank = process_group->rank();
+  if (world_size == 1) {
+    return input;
+  }
+  CHECK_EQ(token_num_list.size(), world_size)
+      << "token_num_list size " << token_num_list.size()
+      << " does not match world_size " << world_size;
+
+  const bool num_tokens_equal =
+      std::all_of(token_num_list.begin(),
+                  token_num_list.end(),
+                  [first_token_num = token_num_list[0]](int64_t num) {
+                    return num == first_token_num;
+                  });
+  if (num_tokens_equal) {
+    return gather(input, process_group, 0);
+  }
+
+  int32_t max_num_tokens = xllm::util::max(token_num_list);
+  int32_t num_padding = max_num_tokens - token_num_list[rank];
+  auto padded_input = input;
+  if (num_padding > 0) {
+    std::vector<int64_t> pad = {0, 0, 0, num_padding};
+    padded_input = torch::nn::functional::pad(
+        input, torch::nn::functional::PadFuncOptions(pad));
+  }
+
+  auto gathered_input = gather(padded_input, process_group, 0);
+  return remove_paddings_after_all_gather(
+      gathered_input, max_num_tokens, token_num_list);
+}
+
+torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group) {
   if (!process_group) {
     return input;
   }
@@ -76,7 +143,9 @@ torch::Tensor reduce(torch::Tensor input, ProcessGroup* process_group) {
   return input;
 }
 
-torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group) {
+torch::Tensor scatter(torch::Tensor input,
+                      ProcessGroup* process_group,
+                      int dim) {
   if (!process_group) {
     return input;
   }
@@ -86,13 +155,13 @@ torch::Tensor scatter(torch::Tensor input, ProcessGroup* process_group) {
   }
 
   // get the size for last dimension
-  const auto last_dim_size = input.size(-1);
-  CHECK(last_dim_size % world_size == 0)
-      << "last_dim_size " << last_dim_size
-      << " cannot be divided by world_size " << world_size;
+  const auto dim_size = input.size(dim);
+  CHECK(dim_size % world_size == 0)
+      << "dim_size " << dim_size << " cannot be divided by world_size "
+      << world_size;
 
   // torch::split does not create contiguous tensors by default.
-  const auto tensor_list = input.split(last_dim_size / world_size, /*dim=*/-1);
+  const auto tensor_list = input.split(dim_size / world_size, dim);
   const auto rank = process_group->rank();
   return tensor_list[rank];
 }
@@ -123,20 +192,6 @@ std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(
 #else
   LOG(FATAL) << "non-NPU device is not supported";
 #endif
-}
-
-std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
-                                                     int global_rank,
-                                                     int split_size) {
-  int target_group_index = global_rank / split_size;
-  uint64_t start_rank = target_group_index * split_size;
-  uint64_t end_rank = start_rank + split_size;
-  std::vector<uint64_t> group_rank;
-  int index = global_rank - start_rank;
-  for (uint64_t rank = start_rank; rank < end_rank; rank++) {
-    group_rank.push_back(rank);
-  }
-  return {index, group_rank};
 }
 
 }  // namespace parallel_state

@@ -52,20 +52,15 @@ FusedMoEImpl::FusedMoEImpl(int num_experts,
       parallel_args_(parallel_args),
       options_(options) {
   int ep_size = parallel_args.ep_size();
-  if (parallel_args.moe_tp_group_) {
-    ep_local_tp_size_ = parallel_args.moe_tp_group_->world_size();
-    ep_local_tp_rank_ = parallel_args.moe_tp_group_->rank();
-    ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
+  int ep_rank = 0;
+  tp_pg_ = parallel_args.tp_group_;
+  if (ep_size > 1) {
+    ep_rank = parallel_args.moe_ep_group_->rank();
     tp_pg_ = parallel_args.moe_tp_group_;
-  } else {
-    ep_local_tp_size_ = parallel_args.tp_group_->world_size();
-    ep_local_tp_rank_ = parallel_args.tp_group_->rank();
-    ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
-    tp_pg_ = parallel_args.tp_group_;
   }
 
   num_experts_per_rank_ = num_experts_ / ep_size;
-  start_expert_id_ = ep_rank_ * num_experts_per_rank_;
+  start_expert_id_ = ep_rank * num_experts_per_rank_;
 
   w13_list_.resize(num_experts_per_rank_);
   w1_list_.resize(num_experts_per_rank_);
@@ -111,6 +106,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
   fused_moe_params.gating_output = router_logits;
   fused_moe_params.w1 = w13_;
   fused_moe_params.w2 = w2_;
+  fused_moe_params.residual = shared_output;
   fused_moe_params.e_score_correction_bias = e_score_correction_bias;
   fused_moe_params.topk = topk_;
   fused_moe_params.renormalize = renormalize_;
@@ -124,17 +120,41 @@ torch::Tensor FusedMoEImpl::forward_expert(
   if (tp_pg_->world_size() > 1) {
     final_hidden_states = parallel_state::reduce(final_hidden_states, tp_pg_);
   }
+  if (parallel_args_.ep_size() > 1) {
+    final_hidden_states = parallel_state::reduce(final_hidden_states,
+                                                 parallel_args_.moe_ep_group_);
+  }
   return final_hidden_states;
 }
 
-torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states) {
+torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
+                                    const ModelInputParams& input_params) {
+  auto input = hidden_states;
+  bool need_slice = false;
+  if (parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1) {
+    input = parallel_state::gather(input,
+                                   parallel_args_.dp_local_process_group_,
+                                   input_params.dp_global_token_nums);
+    need_slice = true;
+  }
+
   pack_params();
   std::optional<torch::Tensor> shared_output = std::nullopt;
   if (n_shared_experts_ > 0) {
-    shared_output = shared_experts_(hidden_states);
+    shared_output = shared_experts_(input);
   }
-  auto router_logits = gate_(hidden_states);
-  return forward_expert(hidden_states, router_logits, shared_output);
+  auto router_logits = gate_(input);
+  auto output = forward_expert(input, router_logits, shared_output);
+
+  if (need_slice) {
+    const auto& dp_tokens = input_params.dp_global_token_nums;
+    const int dp_rank = parallel_args_.dp_local_process_group_->rank();
+    auto start =
+        std::accumulate(dp_tokens.begin(), dp_tokens.begin() + dp_rank, 0);
+    auto end = start + dp_tokens[dp_rank];
+    output = output.slice(0, start, end);
+  }
+  return output;
 }
 
 void FusedMoEImpl::pack_params() {
@@ -176,11 +196,11 @@ void FusedMoEImpl::load_w13(const StateDict& state_dict,
   if (w13_list_[idx].defined() || state_dict.size() == 0) {
     return;
   }
-  const auto rank = ep_local_tp_rank_;
-  const auto world_size = ep_local_tp_size_;
+  const auto rank = tp_pg_->rank();
+  const auto world_size = tp_pg_->world_size();
   DEFINE_WEIGHT(weight);
-  weight_ = torch::empty({intermediate_size_ / ep_local_tp_size_, hidden_size_},
-                         options_);
+  weight_ =
+      torch::empty({intermediate_size_ / world_size, hidden_size_}, options_);
   LOAD_SHARDED_WEIGHT(weight, 0);
   if (!weight_is_loaded_) {
     return;
@@ -202,11 +222,11 @@ void FusedMoEImpl::load_w2(const StateDict& state_dict, int idx) {
   if (w2_list_[idx].defined() || state_dict.size() == 0) {
     return;
   }
-  const auto rank = ep_local_tp_rank_;
-  const auto world_size = ep_local_tp_size_;
+  const auto rank = tp_pg_->rank();
+  const auto world_size = tp_pg_->world_size();
   DEFINE_WEIGHT(weight);
-  weight_ = torch::empty({hidden_size_, intermediate_size_ / ep_local_tp_size_},
-                         options_);
+  weight_ =
+      torch::empty({hidden_size_, intermediate_size_ / world_size}, options_);
   LOAD_SHARDED_WEIGHT(weight, 1);
   if (weight_is_loaded_) {
     w2_list_[idx] = weight_;

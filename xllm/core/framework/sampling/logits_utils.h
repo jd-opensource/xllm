@@ -22,6 +22,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "kernels/npu/xllm_ops/top_k_top_p.h"
 #endif
+#include "kernels/ops_api.h"
 
 namespace xllm {
 
@@ -40,6 +41,7 @@ void apply_temperatures(torch::Tensor& logits,
                         const torch::Tensor& temperatures);
 
 void apply_top_k_top_p(torch::Tensor& logits,
+                       const torch::Tensor& temperatures,
                        const torch::Tensor& top_k,
                        const torch::Tensor& top_p);
 

@@ -87,7 +87,7 @@ ProcessGroupHCCL::ProcessGroupHCCL(int rank,
                                    int world_size,
                                    const torch::Device& device,
                                    HcclComm comm)
-    : ProcessGroup(rank, world_size, device), comm_(comm) {}
+    : ProcessGroup(device), comm_(comm) {}
 // Destructor.
 ProcessGroupHCCL::~ProcessGroupHCCL() { HCCLCHECK(HcclCommDestroy(comm_)); }
 
@@ -109,7 +109,7 @@ void ProcessGroupHCCL::allreduce(torch::Tensor& input) {
   //     /*comm=*/comm_,
   //     /*stream=*/stream));
 }
-void ProcessGroupHCCL::allgather(torch::Tensor input,
+void ProcessGroupHCCL::allgather(const torch::Tensor& input,
                                  std::vector<torch::Tensor>& outputs) {
   check_input(input);
   // CHECK(outputs.size() == world_size())

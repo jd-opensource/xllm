@@ -45,5 +45,9 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
 
 torch::Tensor scaled_matmul(ScaledMatmulParams& params);
 
+torch::Tensor apply_top_k_top_p(TopKPParams& params);
+
+torch::Tensor random_sample(RandomSampleParams& params);
+
 }  // namespace kernel
 }  // namespace xllm

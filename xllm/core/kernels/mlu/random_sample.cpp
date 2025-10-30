@@ -13,31 +13,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
+#include "mlu_ops_api.h"
 
-#include "hccl/hccl.h"
-#include "process_group.h"
+namespace xllm::kernel::mlu {
 
-namespace xllm {
+torch::Tensor random_sample(const torch::Tensor& probs) {
+  torch::Tensor flat_probs;
+  if (probs.dim() == 3) {
+    flat_probs = probs.reshape({-1, probs.size(2)});
+  } else {
+    flat_probs = probs;
+  }
+  auto output =
+      torch::empty({flat_probs.size(0), 1},
+                   torch::dtype(torch::kInt64).device(probs.device()));
+  tmo::torch_api::random_sample(flat_probs, output, true, torch::Generator());
+  if (probs.dim() == 3) {
+    return output.reshape({probs.size(0), probs.size(1)});
+  }
+  return output.flatten();
+}
 
-class ProcessGroupHCCL : public ProcessGroup {
- public:
-  // Constructor.
-  ProcessGroupHCCL(int rank,
-                   int world_size,
-                   const torch::Device& device,
-                   HcclComm comm);
-
-  // Destructor.
-  ~ProcessGroupHCCL() override;
-
-  void allreduce(torch::Tensor& input) override;
-
-  void allgather(const torch::Tensor& input,
-                 std::vector<torch::Tensor>& outputs) override;
-
- private:
-  HcclComm comm_ = nullptr;
-};
-
-}  // namespace xllm
+}  // namespace xllm::kernel::mlu

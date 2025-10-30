@@ -109,7 +109,7 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(
 
   // MLP forward
   if (moe_mlp_) {
-    x = moe_mlp_(x);
+    x = moe_mlp_(x, input_params);
   } else {
     x = mlp_(x);
   }
