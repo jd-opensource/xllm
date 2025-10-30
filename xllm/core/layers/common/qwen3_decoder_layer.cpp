@@ -69,8 +69,8 @@ torch::Tensor Qwen3DecoderImpl::forward(torch::Tensor& x,
                                         const AttentionMetadata& attn_metadata,
                                         KVCache& kv_cache,
                                         const ModelInputParams& input_params) {
-  bool is_dummy_run = layer::is_dummy_run(input_params, parallel_args_);
-  if (is_dummy_run) {
+  bool is_dummy = is_dummy_run(input_params, parallel_args_);
+  if (is_dummy) {
     return x;
   }
   // Pre-attention norm
