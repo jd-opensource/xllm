@@ -160,6 +160,7 @@ struct Options {
 
   // start with offline inference, default is false
   PROPERTY(bool, enable_offline_inference) = false;
+
   // the path to spawn worker binary
   PROPERTY(std::string, spawn_worker_path) = "";
 

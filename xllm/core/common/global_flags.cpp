@@ -381,5 +381,11 @@ DEFINE_bool(enable_beam_search_kernel,
             false,
             "Whether to enable beam search kernel.");
 
-// --- qwen3 reranker config
+// --- reasoning parser config ---
+DEFINE_string(reasoning_parser,
+              "",
+              "Specify the reasoning parser for handling reasoning "
+              "interactions(e.g. glm45, qwen3, deepseek-r1).");
+
+// --- qwen3 reranker config ---
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");

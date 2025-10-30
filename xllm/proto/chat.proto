@@ -13,13 +13,16 @@ message ChatMessage {
   // the content of the message. null for assistant messages with function calls.
   optional string content = 2;
 
+  // the content of the reasoning message.
+  optional string reasoning_content = 3;
+
   // the name of the messages author. only used for function calls.
   // string name = 3;
 
   // TODO: add function call support
   // FunctionCall function_call = 4;
-  repeated ToolCall tool_calls = 3;
-  optional string tool_call_id = 4;
+  repeated ToolCall tool_calls = 4;
+  optional string tool_call_id = 5;
 }
 
 

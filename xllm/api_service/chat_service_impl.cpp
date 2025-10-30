@@ -28,6 +28,7 @@ limitations under the License.
 #include <string>
 #include <unordered_set>
 
+#include "api_service/stream_output_parser.h"
 #include "core/common/instance_name.h"
 #include "core/common/types.h"
 #include "core/framework/request/mm_input_helper.h"
@@ -36,7 +37,6 @@ limitations under the License.
 #include "core/runtime/vlm_master.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
-#include "function_call/function_call.h"
 
 namespace xllm {
 namespace {
@@ -124,43 +124,6 @@ void set_logprobs(proto::ChatChoice* choice,
   }
 }
 
-struct StreamingState {
-  std::vector<function_call::JsonTool> tools;
-  std::string parser_format;
-
-  std::vector<std::unique_ptr<function_call::FunctionCallParser>> parsers;
-  std::vector<bool> has_tool_calls;
-
-  StreamingState(const std::vector<function_call::JsonTool>& tools,
-                 const std::string& parser_format)
-      : tools(tools), parser_format(parser_format) {
-    if (!tools.empty() && !parser_format.empty()) {
-      parsers.resize(1);
-      has_tool_calls.resize(1, false);
-      parsers[0] = std::make_unique<function_call::FunctionCallParser>(
-          tools, parser_format);
-    }
-  }
-
-  function_call::FunctionCallParser* get_parser_for_sequence(size_t index) {
-    if (tools.empty() || parser_format.empty()) {
-      return nullptr;
-    }
-
-    if (index >= parsers.size()) {
-      parsers.resize(index + 1);
-      has_tool_calls.resize(index + 1, false);
-    }
-
-    if (!parsers[index]) {
-      parsers[index] = std::make_unique<function_call::FunctionCallParser>(
-          tools, parser_format);
-    }
-
-    return parsers[index].get();
-  }
-};
-
 template <typename ChatCall>
 bool send_tool_call_chunk(std::shared_ptr<ChatCall> call,
                           size_t index,
@@ -223,14 +186,36 @@ bool send_normal_text_chunk(std::shared_ptr<ChatCall> call,
 }
 
 template <typename ChatCall>
+bool send_reasoning_text_chunk(std::shared_ptr<ChatCall> call,
+                               size_t index,
+                               const std::string& content,
+                               const std::string& request_id,
+                               int64_t created_time,
+                               const std::string& model) {
+  auto& response = call->response();
+  response.Clear();
+  response.set_object("chat.completion.chunk");
+  response.set_id(request_id);
+  response.set_created(created_time);
+  response.set_model(model);
+
+  auto* choice = response.add_choices();
+  choice->set_index(index);
+  auto* delta = choice->mutable_delta();
+  delta->set_reasoning_content(content);
+
+  return call->write(response);
+}
+
+template <typename ChatCall>
 bool process_tool_call_stream(std::shared_ptr<ChatCall> call,
-                              std::shared_ptr<StreamingState> streaming_state,
+                              std::shared_ptr<StreamOutputParser> stream_parser,
                               size_t index,
                               const std::string& delta,
                               const std::string& request_id,
                               int64_t created_time,
                               const std::string& model) {
-  auto* parser = streaming_state->get_parser_for_sequence(index);
+  auto* parser = stream_parser->get_tool_call_parser(index);
   if (!parser) {
     return true;
   }
@@ -249,10 +234,7 @@ bool process_tool_call_stream(std::shared_ptr<ChatCall> call,
   }
 
   for (const auto& call_item : parse_result.calls) {
-    if (index >= streaming_state->has_tool_calls.size()) {
-      streaming_state->has_tool_calls.resize(index + 1, false);
-    }
-    streaming_state->has_tool_calls[index] = true;
+    stream_parser->set_has_tool_call(index, true);
 
     std::string tool_call_id;
     std::string function_name;
@@ -281,12 +263,12 @@ bool process_tool_call_stream(std::shared_ptr<ChatCall> call,
 template <typename ChatCall>
 bool check_for_unstreamed_tool_args(
     std::shared_ptr<ChatCall> call,
-    std::shared_ptr<StreamingState> streaming_state,
+    std::shared_ptr<StreamOutputParser> stream_parser,
     size_t index,
     const std::string& request_id,
     int64_t created_time,
     const std::string& model) {
-  auto* parser = streaming_state->get_parser_for_sequence(index);
+  auto* parser = stream_parser->get_tool_call_parser(index);
   if (!parser) {
     return true;
   }
@@ -330,6 +312,26 @@ bool check_for_unstreamed_tool_args(
   return true;
 }
 
+bool get_enable_thinking_from_request(nlohmann::json& chat_template_kwargs,
+                                      std::string reasoning_parser_format) {
+  if (chat_template_kwargs.empty()) {
+    return false;
+  }
+  auto get_thinking = [&](const std::string& thinking_key) -> bool {
+    if (chat_template_kwargs.contains(thinking_key)) {
+      if (chat_template_kwargs[thinking_key].is_boolean()) {
+        return chat_template_kwargs[thinking_key];
+      }
+    }
+    return false;
+  };
+  // qwen3 and glm45 use enable_thinking and deepseek-v3 uses thinking
+  bool enable_thinking =
+      get_thinking("enable_thinking") || get_thinking("thinking");
+
+  return enable_thinking;
+}
+
 template <typename ChatCall>
 bool send_delta_to_client_brpc(
     std::shared_ptr<ChatCall> call,
@@ -339,12 +341,16 @@ bool send_delta_to_client_brpc(
     int64_t created_time,
     const std::string& model,
     const RequestOutput& output,
-    std::shared_ptr<StreamingState> streaming_state = nullptr) {
+    std::shared_ptr<StreamOutputParser> stream_parser = nullptr) {
   auto& response = call->response();
 
+  if (output.outputs.size() > 0) {
+    stream_parser->check_resize_for_index(output.outputs.size() - 1);
+  }
   // send delta to client
   for (const auto& seq_output : output.outputs) {
     const auto& index = seq_output.index;
+    std::string cur_text = seq_output.text;
 
     if (first_message_sent->find(index) == first_message_sent->end()) {
       response.Clear();
@@ -363,12 +369,34 @@ bool send_delta_to_client_brpc(
       }
     }
 
-    if (!seq_output.text.empty()) {
-      if (streaming_state && streaming_state->get_parser_for_sequence(index)) {
+    // Handle reasoning text
+    if (!cur_text.empty()) {
+      if (stream_parser->is_reasoning()) {
+        auto parser = stream_parser->get_reasoning_parser(index);
+        auto result = parser->parse_stream_chunk(cur_text);
+        if (result.normal_text.has_value()) {
+          cur_text = result.normal_text.value();
+        } else {
+          cur_text = "";
+        }
+        if (result.reasoning_text.has_value()) {
+          send_reasoning_text_chunk(call,
+                                    index,
+                                    result.reasoning_text.value(),
+                                    request_id,
+                                    created_time,
+                                    model);
+        }
+      }
+    }
+
+    if (!cur_text.empty()) {
+      // Handle tool call text
+      if (stream_parser->is_tool_call()) {
         if (!process_tool_call_stream(call,
-                                      streaming_state,
+                                      stream_parser,
                                       index,
-                                      seq_output.text,
+                                      cur_text,
                                       request_id,
                                       created_time,
                                       model)) {
@@ -384,7 +412,7 @@ bool send_delta_to_client_brpc(
         choice->set_index(index);
         set_logprobs(choice, seq_output.logprobs);
         auto* message = choice->mutable_delta();
-        message->set_content(seq_output.text);
+        message->set_content(cur_text);
         if (!call->write(response)) {
           return false;
         }
@@ -394,14 +422,9 @@ bool send_delta_to_client_brpc(
     // Handle finish reason
     if (seq_output.finish_reason.has_value()) {
       // Check for unstreamed tool args before sending finish reason
-      if (streaming_state && index < streaming_state->has_tool_calls.size() &&
-          streaming_state->has_tool_calls[index]) {
-        if (!check_for_unstreamed_tool_args(call,
-                                            streaming_state,
-                                            index,
-                                            request_id,
-                                            created_time,
-                                            model)) {
+      if (stream_parser->get_has_tool_call(index)) {
+        if (!check_for_unstreamed_tool_args(
+                call, stream_parser, index, request_id, created_time, model)) {
           return false;
         }
       }
@@ -415,8 +438,7 @@ bool send_delta_to_client_brpc(
       choice->set_index(index);
       choice->mutable_delta();
 
-      if (streaming_state && index < streaming_state->has_tool_calls.size() &&
-          streaming_state->has_tool_calls[index] &&
+      if (stream_parser->get_has_tool_call(index) &&
           seq_output.finish_reason.value() == "stop") {
         choice->set_finish_reason("tool_calls");
       } else {
@@ -460,7 +482,9 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
                                 int64_t created_time,
                                 const std::string& model,
                                 const RequestOutput& req_output,
-                                const std::string& parser_format = "",
+                                const std::string& tool_call_parser_format = "",
+                                const std::string& reasoning_parser_format = "",
+                                bool is_force_reasoning = false,
                                 const std::vector<xllm::JsonTool>& tools = {}) {
   auto& response = call->response();
   response.set_object("chat.completion");
@@ -476,18 +500,29 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
     auto* message = choice->mutable_message();
     message->set_role("assistant");
 
-    auto set_output_and_finish_reason = [&]() {
-      message->set_content(output.text);
-      if (output.finish_reason.has_value()) {
-        choice->set_finish_reason(output.finish_reason.value());
+    // handle reasoning output
+    std::string cur_text = output.text;
+    if (!reasoning_parser_format.empty()) {
+      auto reasoning_parser = std::make_unique<ReasoningParser>(
+          reasoning_parser_format, false, is_force_reasoning);
+      auto result = reasoning_parser->parse_non_stream(cur_text);
+      if (result.normal_text.has_value()) {
+        cur_text = result.normal_text.value();
+      } else {
+        cur_text = "";
       }
-    };
+      if (result.reasoning_text.has_value()) {
+        message->set_reasoning_content(result.reasoning_text.value());
+      }
+    }
 
-    if (!tools.empty() && !parser_format.empty()) {
+    // handle tool call output
+    if (!tools.empty() && !tool_call_parser_format.empty() &&
+        !cur_text.empty()) {
       auto* arena = response.GetArena();
-      auto result = process_tool_calls(output.text,
+      auto result = process_tool_calls(cur_text,
                                        tools,
-                                       parser_format,
+                                       tool_call_parser_format,
                                        output.finish_reason.value_or(""),
                                        arena);
 
@@ -502,7 +537,10 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
         choice->mutable_finish_reason()->swap(result.finish_reason);
       }
     } else {
-      set_output_and_finish_reason();
+      message->set_content(cur_text);
+      if (output.finish_reason.has_value()) {
+        choice->set_finish_reason(output.finish_reason.value());
+      }
     }
   }
 
@@ -525,7 +563,10 @@ ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
                                  const std::vector<std::string>& models)
     : APIServiceImpl(models),
       master_(master),
-      parser_format_(master_->options().tool_call_parser().value_or("")) {
+      tool_call_parser_format_(
+          master_->options().tool_call_parser().value_or("")),
+      reasoning_parser_format_(
+          master_->options().reasoning_parser().value_or("")) {
   CHECK(master_ != nullptr);
 }
 
@@ -570,13 +611,17 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     request_params.decode_address = rpc_request.routing().decode_name();
   }
 
-  const bool has_tool_support =
-      !request_params.tools.empty() && !parser_format_.empty();
+  is_force_reasoning_ = get_enable_thinking_from_request(
+      request_params.chat_template_kwargs, reasoning_parser_format_);
 
-  std::shared_ptr<StreamingState> streaming_state;
-  if (request_params.streaming && has_tool_support) {
-    streaming_state =
-        std::make_shared<StreamingState>(request_params.tools, parser_format_);
+  std::shared_ptr<StreamOutputParser> stream_parser;
+  if (request_params.streaming) {
+    stream_parser =
+        std::make_shared<StreamOutputParser>(request_params.tools,
+                                             tool_call_parser_format_,
+                                             reasoning_parser_format_,
+                                             is_force_reasoning_);
+    CHECK(stream_parser != nullptr) << "create StreamOutputParser failed!";
   }
 
   master_->handle_request(
@@ -593,10 +638,11 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
        request_id = request_params.request_id,
        created_time = absl::ToUnixSeconds(absl::Now()),
        json_tools = request_params.tools,
-       parser_format = parser_format_,
-       streaming_state = streaming_state,
-       has_tool_support =
-           has_tool_support](const RequestOutput& req_output) mutable -> bool {
+       tool_call_parser_format = tool_call_parser_format_,
+       reasoning_parser_format = reasoning_parser_format_,
+       is_force_reasoning = is_force_reasoning_,
+       stream_parser =
+           stream_parser](const RequestOutput& req_output) mutable -> bool {
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
           if (!status.ok()) {
@@ -622,14 +668,16 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
                                            created_time,
                                            model,
                                            req_output,
-                                           streaming_state);
+                                           stream_parser);
         } else {
           return send_result_to_client_brpc(call,
                                             request_id,
                                             created_time,
                                             model,
                                             req_output,
-                                            parser_format,
+                                            tool_call_parser_format,
+                                            reasoning_parser_format,
+                                            is_force_reasoning,
                                             json_tools);
         }
       });

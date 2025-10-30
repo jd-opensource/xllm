@@ -129,6 +129,8 @@ class Options {
 
   PROPERTY(std::optional<std::string>, tool_call_parser);
 
+  PROPERTY(std::optional<std::string>, reasoning_parser);
+
   PROPERTY(std::string, priority_strategy) = "FCFS";
 
   PROPERTY(bool, enable_online_preempt_offline) = true;
