@@ -260,7 +260,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
         inputs.micro_inputs[i].input_params.embedding_ids.end());
   }
 
-  if (!inputs.concated_sampling_params.selected_token_idxes.defined()) {
+  if (inputs.concated_sampling_params.selected_token_idxes.defined()) {
     embeddings = embeddings.index_select(
         /*dim=*/0, inputs.concated_sampling_params.selected_token_idxes);
     CHECK_EQ(embeddings.size(0), output.sample_output.next_tokens.size(0));
