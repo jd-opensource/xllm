@@ -48,24 +48,56 @@ AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
   bool is_start_loc_match = (params.q_seq_lens_vec == params.kv_seq_lens_vec);
   attn_metadata.is_chunked_prefill = is_prefill && !is_start_loc_match;
   attn_metadata.is_prefill = is_prefill && !attn_metadata.is_chunked_prefill;
-  if (!attn_metadata.is_prefill) {
+  if (!attn_metadata.is_prefill || FLAGS_enable_mla) {
     attn_metadata.block_table = params.block_tables;
     attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
   }
 
+  attn_metadata.is_dummy = (params.q_max_seq_len == 0);
+
   return attn_metadata;
 }
 
-AttentionImpl::AttentionImpl(int num_heads,
-                             int head_size,
+AttentionImpl::AttentionImpl(int64_t num_heads,
+                             int64_t head_size,
                              float scale,
-                             int num_kv_heads,
-                             int sliding_window)
+                             int64_t num_kv_heads,
+                             int64_t sliding_window)
     : num_heads_(num_heads),
       head_size_(head_size),
-      scale_(scale),
       num_kv_heads_(num_kv_heads),
-      sliding_window_(sliding_window - 1) {}
+      v_head_dim_(head_size),
+      sliding_window_(sliding_window),
+      scale_(scale),
+      use_fused_mla_qkv_(false),
+      enable_lighting_indexer_(false),
+      enable_mla_(false) {
+  if (sliding_window_ > -1) {
+    sliding_window_ = sliding_window_ - 1;
+  }
+}
+
+AttentionImpl::AttentionImpl(int64_t num_heads,
+                             int64_t head_size,
+                             int64_t num_kv_heads,
+                             int64_t v_head_dim,
+                             int64_t sliding_window,
+                             float scale,
+                             bool use_fused_mla_qkv,
+                             bool enable_lighting_indexer)
+    : num_heads_(num_heads),
+      head_size_(head_size),
+      num_kv_heads_(num_kv_heads),
+      v_head_dim_(v_head_dim),
+      sliding_window_(sliding_window),
+      use_fused_mla_qkv_(use_fused_mla_qkv),
+      scale_(scale),
+      enable_lighting_indexer_(enable_lighting_indexer),
+      enable_mla_(FLAGS_enable_mla) {
+  if (sliding_window_ > -1) {
+    sliding_window_ = sliding_window_ - 1;
+  }
+}
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     const AttentionMetadata& attn_metadata,
@@ -73,33 +105,62 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     torch::Tensor& key,
     torch::Tensor& value,
     KVCache& kv_cache) {
-  auto output = torch::empty_like(query);
-  auto output_lse = std::nullopt;
-  if (attn_metadata.max_seq_len == 0) {
-    output = output.view({-1, num_heads_ * head_size_});
+  std::optional<torch::Tensor> output_lse = std::nullopt;
+  torch::Tensor output;
+  if (enable_mla_) {
+    output = torch::empty({query.size(0), num_heads_ * v_head_dim_},
+                          query.options());
+  } else {
+    output = torch::empty_like(query);
+  }
+  if (attn_metadata.is_dummy) {
     return std::make_tuple(output, output_lse);
   }
 
-  query = query.view({-1, num_heads_, head_size_});
-  key = key.view({-1, num_kv_heads_, head_size_});
-  value = value.view({-1, num_kv_heads_, head_size_});
-  output = output.view({-1, num_heads_, head_size_});
-
+  bool only_prefill =
+      attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
+  int64_t num_kv_heads = (enable_mla_ && !only_prefill) ? 1 : num_kv_heads_;
   torch::Tensor k_cache = kv_cache.get_k_cache();
-  torch::Tensor v_cache = kv_cache.get_v_cache();
+  std::optional<torch::Tensor> v_cache;
+  std::optional<torch::Tensor> v;
+  if (!enable_mla_) {
+    v = value.view({-1, num_kv_heads, head_size_});
+    v_cache = kv_cache.get_v_cache();
+  }
 
-  xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
-  reshape_paged_cache_params.key = key;
-  reshape_paged_cache_params.value = value;
-  reshape_paged_cache_params.k_cache = k_cache;
-  reshape_paged_cache_params.v_cache = v_cache;
-  reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
-  xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+  bool skip_process_cache = enable_mla_ && (only_prefill || use_fused_mla_qkv_);
+  if (!skip_process_cache) {
+    xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
+    reshape_paged_cache_params.key = key.view({-1, num_kv_heads, head_size_});
+    reshape_paged_cache_params.value = v;
+    reshape_paged_cache_params.k_cache = k_cache;
+    reshape_paged_cache_params.v_cache = v_cache;
+    reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
+    xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+  }
 
+  if (enable_lighting_indexer_ || !only_prefill) {
+    decoder_forward(query, output, k_cache, v_cache, attn_metadata);
+  } else {
+    prefill_forward(query, key, value, output, k_cache, v_cache, attn_metadata);
+  }
+
+  int64_t head_size = enable_mla_ ? v_head_dim_ : head_size_;
+  output = output.view({-1, num_heads_ * head_size});
+  return {output, output_lse};
+}
+
+void AttentionImpl::prefill_forward(torch::Tensor& query,
+                                    torch::Tensor& key,
+                                    torch::Tensor& value,
+                                    torch::Tensor& output,
+                                    const torch::Tensor& k_cache,
+                                    const std::optional<torch::Tensor>& v_cache,
+                                    const AttentionMetadata& attn_metadata) {
+  int64_t head_size = enable_mla_ ? v_head_dim_ : head_size_;
   xllm::kernel::AttentionParams attention_params;
-  attention_params.query = query;
-  attention_params.output = output;
-  attention_params.output_lse = output_lse;
+  attention_params.query = query.view({-1, num_heads_, head_size_});
+  attention_params.output = output.view({-1, num_heads_, head_size});
   attention_params.max_seq_len = attn_metadata.max_seq_len;
   attention_params.window_size_left = sliding_window_;
   attention_params.scale = scale_;
@@ -115,50 +176,47 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   attention_params.kv_cu_seq_lens = attn_metadata.kv_cu_seq_lens;
   attention_params.q_cu_seq_lens = attn_metadata.q_cu_seq_lens;
 
+  attention_params.query_start_loc = attn_metadata.query_start_loc;
+  attention_params.seq_start_loc = attn_metadata.seq_start_loc;
+  attention_params.max_query_len = attn_metadata.max_query_len;
+
   if (attn_metadata.is_prefill) {
-    attention_params.key = key;
-    attention_params.value = value;
-    attention_params.query_start_loc = attn_metadata.query_start_loc;
-    attention_params.seq_start_loc = attn_metadata.seq_start_loc;
-    attention_params.max_query_len = attn_metadata.max_query_len;
+    attention_params.key = key.view({-1, num_kv_heads_, head_size_});
+    attention_params.value = value.view({-1, num_kv_heads_, head_size_});
+    attention_params.block_table = std::nullopt;
 
     // for flashinfer
     attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;
-
-    xllm::kernel::batch_prefill(attention_params);
   } else if (attn_metadata.is_chunked_prefill) {
     attention_params.key = k_cache;
-    attention_params.value = v_cache;
-    attention_params.query_start_loc = attn_metadata.query_start_loc;
-    attention_params.seq_start_loc = attn_metadata.seq_start_loc;
-    attention_params.max_query_len = attn_metadata.max_query_len;
+    attention_params.value = v_cache.value();
     attention_params.block_table = attn_metadata.block_table;
-
-    xllm::kernel::batch_prefill(attention_params);
-  } else {
-    query = query.view({-1, 1, num_heads_, head_size_});
-    output = output.view({-1, 1, num_heads_, head_size_});
-
-    attention_params.query = query;
-    attention_params.output = output;
-    attention_params.k_cache = k_cache;
-    attention_params.v_cache = v_cache;
-
-    // for mlu
-    attention_params.block_table = attn_metadata.block_table;
-    attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
-
-    // for flashinfer
-    attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;
-    attention_params.paged_kv_indices = attn_metadata.paged_kv_indices;
-    attention_params.paged_kv_last_page_len =
-        attn_metadata.paged_kv_last_page_len;
-
-    xllm::kernel::batch_decode(attention_params);
   }
+  xllm::kernel::batch_prefill(attention_params);
+}
 
-  output = output.view({-1, num_heads_ * head_size_});
-  return {output, output_lse};
+void AttentionImpl::decoder_forward(torch::Tensor& query,
+                                    torch::Tensor& output,
+                                    const torch::Tensor& k_cache,
+                                    const std::optional<torch::Tensor>& v_cache,
+                                    const AttentionMetadata& attn_metadata) {
+  int64_t head_size = enable_mla_ ? v_head_dim_ : head_size_;
+  xllm::kernel::AttentionParams attention_params;
+  attention_params.query = query.view({-1, 1, num_heads_, head_size_});
+  attention_params.output = output.view({-1, 1, num_heads_, head_size});
+  attention_params.output_lse = std::nullopt;
+  attention_params.max_seq_len = attn_metadata.max_seq_len;
+  attention_params.window_size_left = sliding_window_;
+  attention_params.scale = scale_;
+  attention_params.compute_dtype = attn_metadata.compute_dtype;
+  attention_params.k_cache = k_cache;
+  attention_params.v_cache = v_cache;
+
+  // for mlu
+  attention_params.block_table = attn_metadata.block_table;
+  attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
+
+  xllm::kernel::batch_decode(attention_params);
 }
 
 }  // namespace layer

@@ -110,9 +110,7 @@ IndexerImpl::IndexerImpl(int dim,
                          int qk_rope_head_dim,
                          int index_topk,
                          int q_lora_rank,
-                         int max_position_embeddings,
-                         double rope_theta,
-                         bool rope_interleaved,
+                         DeepseekScalingRotaryEmbedding& rotary_emb,
                          const QuantArgs& quant_args,
                          const ParallelArgs& parallel_args,
                          const torch::TensorOptions& options)
@@ -122,6 +120,7 @@ IndexerImpl::IndexerImpl(int dim,
       rope_head_dim_(qk_rope_head_dim),
       index_topk_(index_topk),
       q_lora_rank_(q_lora_rank),
+      rotary_emb_(rotary_emb),
       softmax_scale_(std::pow(head_dim_, -0.5) * std::pow(n_heads_, -0.5)) {
   // Note: The current Indexer implementation does not yet support quantization
   // or parallelization strategies. These features are planned for future
@@ -156,16 +155,6 @@ IndexerImpl::IndexerImpl(int dim,
                                .elementwise_affine(true)));
   // set the device of k_norm_ to the same as the options
   k_norm_->to(options.device());
-
-  // Register rotary embedding
-  rotary_emb_ =
-      register_module("rope",
-                      RotaryEmbedding(
-                          /*rotary_dim=*/rope_head_dim_,
-                          /*max_position_embeddings=*/max_position_embeddings,
-                          /*rope_theta=*/rope_theta,
-                          /*interleaved=*/rope_interleaved,
-                          options));
 
   // Create hadamard matrix
   int head_dim_padded = std::pow(2, std::ceil(std::log2(head_dim_)));
@@ -223,7 +212,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
                        positions,
                        attn_metadata.query_start_loc,
                        attn_metadata.max_query_len,
-                       is_prefill);
+                       attn_metadata.is_prefill);
   k_pe = k_pe_unsqueezed.squeeze(1);
 
   // Reconstruct q and k

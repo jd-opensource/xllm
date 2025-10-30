@@ -121,6 +121,7 @@ class Engine {
     int64_t n_pages = 0;  // for continuous kvcache
     int64_t cache_size_in_bytes = 0;
     int64_t slot_size = 0;
+    int64_t index_slot_size = 0;
     int64_t n_layers = 0;
   };
 

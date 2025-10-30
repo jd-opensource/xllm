@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 if(USE_NPU)
   include_directories(

@@ -1,12 +1,11 @@
 include(cc_library)
-include(cc_test)
-
 
 cc_library(
   NAME
     common_layers
   HDRS
     flashinfer_workspace.h
+    deepseek_v2_attention.h
     qwen3_attention.h
     attention.h
     fuse_norm.h
@@ -22,6 +21,7 @@ cc_library(
     indexer.h
   SRCS
     flashinfer_workspace.cpp
+    deepseek_v2_attention.cpp
     qwen3_attention.cpp
     attention.cpp
     fuse_norm.cpp
@@ -49,53 +49,4 @@ cc_library(
     :platform
 )
 
-# Add test for DenseMLP
-cc_test(
-  NAME
-    dense_mlp_test
-  SRCS
-    tests/dense_mlp_tests.cpp
-    tests/tests_utils.cpp
-  DEPS
-    :common_layers
-    :parallel_state
-    :model
-    :state_dict
-    glog::glog
-    torch
-    GTest::gtest_main
-)
-
-# Add test for FusedMoE
-cc_test(
-  NAME
-    fused_moe_test
-  SRCS
-    tests/fused_moe_tests.cpp
-    tests/tests_utils.cpp
-  DEPS
-    :common_layers
-    :parallel_state
-    :model
-    :state_dict
-    glog::glog
-    torch
-    GTest::gtest_main
-)
-
-# Add test for Indexer
-cc_test(
-  NAME
-    indexer_test
-  SRCS
-    tests/indexer_tests.cpp
-    tests/tests_utils.cpp
-  DEPS
-    :common_layers
-    :parallel_state
-    :model
-    :state_dict
-    glog::glog
-    torch
-    GTest::gtest_main
-)
+add_subdirectory(tests)

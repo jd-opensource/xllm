@@ -27,6 +27,8 @@ limitations under the License.
 namespace xllm {
 namespace rotary {
 
+float yarn_get_mscale(float scale, float mscale);
+
 torch::Tensor apply_deepseek_yarn_rope_scaling(float factor,
                                                int64_t extrapolation_factor,
                                                int64_t beta_fast,
@@ -34,7 +36,23 @@ torch::Tensor apply_deepseek_yarn_rope_scaling(float factor,
                                                int64_t rotary_dim,
                                                float theta,
                                                int64_t old_context_len);
-
+torch::Tensor compute_inv_freq(int64_t rotary_dim,
+                               float rope_theta,
+                               const torch::TensorOptions& options);
+torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
+                                    int64_t max_position_embeddings,
+                                    bool interleaved,
+                                    float scaling_factor,
+                                    float attn_factor,
+                                    float mscale,
+                                    float mscale_all_dim,
+                                    torch::Tensor inv_freq,
+                                    const torch::TensorOptions& options);
+torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
+                                    int64_t max_position_embeddings,
+                                    bool interleaved,
+                                    torch::Tensor inv_freq,
+                                    const torch::TensorOptions& options);
 }  // namespace rotary
 
 class RotaryEmbedding : public torch::nn::Module {

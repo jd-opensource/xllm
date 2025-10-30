@@ -97,6 +97,8 @@ class ColumnParallelLinearImpl : public ParallelLinearImpl {
   // return the weight (for testing)
   torch::Tensor weight() const { return weight_; }
 
+  bool is_weight_loaded() const { return weight_is_loaded_; }
+
  private:
   // parameter members, must be registered
   // we allocate the transpose since linear performs XA^T.

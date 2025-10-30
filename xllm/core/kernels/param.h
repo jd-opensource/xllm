@@ -253,7 +253,7 @@ struct AttentionParams {
   // block_size, head_dim]. Must be contiguous. If kv_cache_quant_bit_size=4,
   // shape is [num_blocks, num_kv_heads, v_cache_len, head_dim] where
   // v_cache_len = PAD_UP_DIV(block_size, 2).
-  torch::Tensor v_cache;
+  std::optional<torch::Tensor> v_cache;
   // KV sequence lengths tensor. Shape: [batch]. Type: int32. Must be
   // contiguous. Represents the current context length for each sequence in the
   // batch.

@@ -29,10 +29,13 @@ void apply_rotary(torch::Tensor& q,
                   int max_query_len) {
   const int64_t rotary_dim = sin.size(-1);
   const int64_t T = q.size(0);
-  q = q.view({T, -1});
-  k = k.view({T, -1});
-  auto qk = torch::cat({q, k}, /*dim=*/-1);
-  qk = qk.view({T, -1, rotary_dim});
+  torch::Tensor qk = q;
+  if (k.defined()) {
+    q = q.view({T, -1});
+    k = k.view({T, -1});
+    qk = torch::cat({q, k}, /*dim=*/-1);
+    qk = qk.view({T, -1, rotary_dim});
+  }
   tmo::torch_api::apply_rotary(qk,
                                qk /* output */,
                                sin,
@@ -43,10 +46,14 @@ void apply_rotary(torch::Tensor& q,
                                discrete,
                                false /* dynamic_ntk */,
                                max_query_len);
-  qk = qk.view({-1, q.size(-1) + k.size(-1)});
-  auto qk_vec = qk.split({q.size(-1), k.size(-1)}, /*dim=*/-1);
-  q = qk_vec[0];
-  k = qk_vec[1];
+  if (k.defined()) {
+    qk = qk.view({-1, q.size(-1) + k.size(-1)});
+    auto qk_vec = qk.split({q.size(-1), k.size(-1)}, /*dim=*/-1);
+    q = qk_vec[0];
+    k = qk_vec[1];
+  } else {
+    q = qk;
+  }
 }
 
 }  // namespace xllm::kernel::mlu

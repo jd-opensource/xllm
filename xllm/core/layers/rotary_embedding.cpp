@@ -100,13 +100,6 @@ inline torch::Tensor yarn_linear_ramp_mask(float low, float high, int64_t dim) {
   return ramp_func;
 }
 
-inline float yarn_get_mscale(float scale, float mscale) {
-  if (scale <= 0.0) {
-    return 1.0;
-  }
-  return 0.1 * mscale * std::log(scale) + 1.0;
-}
-
 std::tuple<torch::Tensor, torch::Tensor> apply_rotary_pos_emb(
     const torch::Tensor& q,
     const torch::Tensor& k,
@@ -122,6 +115,13 @@ std::tuple<torch::Tensor, torch::Tensor> apply_rotary_pos_emb(
 }  // namespace
 
 namespace rotary {
+
+float yarn_get_mscale(float scale, float mscale) {
+  if (scale <= 0.0) {
+    return 1.0;
+  }
+  return 0.1 * mscale * std::log(scale) + 1.0;
+}
 
 torch::Tensor apply_deepseek_yarn_rope_scaling(float factor,
                                                int64_t extrapolation_factor,
@@ -147,6 +147,62 @@ torch::Tensor apply_deepseek_yarn_rope_scaling(float factor,
   return inv_freq;
 }
 
+torch::Tensor compute_inv_freq(int64_t rotary_dim,
+                               float rope_theta,
+                               const torch::TensorOptions& options) {
+  const auto slice = torch::arange(0, rotary_dim, 2, torch::kFloat32);
+  torch::Tensor inv_freq =
+      1.0 / torch::pow(rope_theta, slice / static_cast<double>(rotary_dim));
+  return inv_freq;
+}
+
+torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
+                                    int64_t max_position_embeddings,
+                                    bool interleaved,
+                                    float scaling_factor,
+                                    float attn_factor,
+                                    float mscale,
+                                    float mscale_all_dim,
+                                    torch::Tensor inv_freq,
+                                    const torch::TensorOptions& options) {
+  float mscale_ = static_cast<float>(
+      yarn_get_mscale(scaling_factor, mscale) /
+      yarn_get_mscale(scaling_factor, mscale_all_dim) * attn_factor);
+  // [max_position_embeddings]
+  auto t = torch::arange(max_position_embeddings * scaling_factor);
+  // [max_position_embeddings, rotary_dim/2]
+  const auto freqs = torch::einsum("i,j->ij", {t, inv_freq});
+  // Create cos and sin embeddings.
+  torch::Tensor emd;
+  if (interleaved) {
+    // [a, b, c, d] => [a, a, b, b, c, c, d, d]
+    emd = freqs.repeat_interleave(/*repeats=*/2, /*dim=*/-1);
+  } else {
+    // [a, b, c, d] => [a, b, c, d, a, b, c, d]
+    emd = torch::cat({freqs, freqs}, /*dim=*/-1);
+  }
+  const auto cos_sin =
+      torch::cat({emd.cos() * mscale_, emd.sin() * mscale_}, /*dim=*/-1)
+          .to(options);
+  return cos_sin;
+}
+
+torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
+                                    int64_t max_position_embeddings,
+                                    bool interleaved,
+                                    torch::Tensor inv_freq,
+                                    const torch::TensorOptions& options) {
+  return compute_cos_sin_cache(rotary_dim,
+                               max_position_embeddings,
+                               interleaved,
+                               1.0f,
+                               1.0f,
+                               1.0f,
+                               1.0f,
+                               inv_freq,
+                               options);
+}
+
 }  // namespace rotary
 
 // create right instance based on params
@@ -161,8 +217,8 @@ std::shared_ptr<RotaryEmbedding> create_rotary_embedding(
     const float attn_scale = args.attn_scalar().value_or(
         static_cast<float>(args.qk_nope_head_dim() + args.qk_rope_head_dim()));
     sm_scale = 1.0f / std::sqrt(attn_scale);
-    float mscale = yarn_get_mscale(args.rope_scaling_factor(),
-                                   args.rope_scaling_mscale_all_dim());
+    float mscale = rotary::yarn_get_mscale(args.rope_scaling_factor(),
+                                           args.rope_scaling_mscale_all_dim());
     sm_scale = sm_scale * mscale * mscale;
     return std::make_shared<RotaryEmbeddingDeepseekYarn>(
         args.rope_scaling_factor(),
@@ -202,21 +258,8 @@ RotaryEmbeddingGeneric::RotaryEmbeddingGeneric(
     bool interleaved,
     const torch::TensorOptions& options)
     : rotary_dim_(rotary_dim), interleaved_(interleaved) {
-  // [max_position_embeddings]
-  auto t = torch::arange(0, max_position_embeddings, 1, torch::kFloat32);
-  // [max_position_embeddings, rotary_dim/2]
-  const auto freqs = torch::einsum("i,j->ij", {t, inv_freq});
-  // Create cos and sin embeddings.
-  torch::Tensor emd;
-  if (interleaved) {
-    // [a, b, c, d] => [a, a, b, b, c, c, d, d]
-    emd = freqs.repeat_interleave(/*repeats=*/2, /*dim=*/-1);
-  } else {
-    // [a, b, c, d] => [a, b, c, d, a, b, c, d]
-    emd = torch::cat({freqs, freqs}, /*dim=*/-1);
-  }
-
-  const auto cos_sin = torch::cat({emd.cos(), emd.sin()}, /*dim=*/-1);
+  const auto cos_sin = rotary::compute_cos_sin_cache(
+      rotary_dim, max_position_embeddings, interleaved, inv_freq, options);
   cos_sin_cache_ = register_buffer("cos_sin_cache", cos_sin.to(options));
 }
 
@@ -253,25 +296,16 @@ RotaryEmbeddingDeepseekYarn::RotaryEmbeddingDeepseekYarn(
     torch::Tensor inv_freq,
     const torch::TensorOptions& options)
     : rotary_dim_(rotary_dim), interleaved_(interleaved) {
-  float mscale_ = static_cast<float>(
-      yarn_get_mscale(scaling_factor, mscale) /
-      yarn_get_mscale(scaling_factor, mscale_all_dim) * attn_factor);
-  // [max_position_embeddings]
-  auto t = torch::arange(max_position_embeddings * scaling_factor);
-  // [max_position_embeddings, rotary_dim/2]
-  const auto freqs = torch::einsum("i,j->ij", {t, inv_freq});
-  // Create cos and sin embeddings.
-  torch::Tensor emd;
-  if (interleaved) {
-    // [a, b, c, d] => [a, a, b, b, c, c, d, d]
-    emd = freqs.repeat_interleave(/*repeats=*/2, /*dim=*/-1);
-  } else {
-    // [a, b, c, d] => [a, b, c, d, a, b, c, d]
-    emd = torch::cat({freqs, freqs}, /*dim=*/-1);
-  }
-  const auto cos_sin =
-      torch::cat({emd.cos() * mscale_, emd.sin() * mscale_}, /*dim=*/-1);
-  cos_sin_cache_ = register_buffer("cos_sin_cache", cos_sin.to(options));
+  const auto cos_sin = rotary::compute_cos_sin_cache(rotary_dim,
+                                                     max_position_embeddings,
+                                                     interleaved,
+                                                     scaling_factor,
+                                                     attn_factor,
+                                                     mscale,
+                                                     mscale_all_dim,
+                                                     inv_freq,
+                                                     options);
+  cos_sin_cache_ = register_buffer("cos_sin_cache", cos_sin);
 }
 
 // inplace rotary positional embedding

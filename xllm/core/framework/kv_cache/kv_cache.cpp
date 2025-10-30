@@ -20,12 +20,20 @@ namespace xllm {
 KVCache::KVCache(torch::Tensor key_cache, torch::Tensor value_cache)
     : key_cache_(std::move(key_cache)), value_cache_(std::move(value_cache)) {}
 
+KVCache::KVCache(torch::Tensor key_cache,
+                 torch::Tensor value_cache,
+                 torch::Tensor index_cache)
+    : key_cache_(std::move(key_cache)),
+      value_cache_(std::move(value_cache)),
+      index_cache_(std::move(index_cache)) {}
+
 KVCache::KVCache(std::shared_ptr<XTensor> key_xtensor,
                  std::shared_ptr<XTensor> value_xtensor)
     : key_xtensor_(key_xtensor), value_xtensor_(value_xtensor) {}
 
 torch::Tensor KVCache::get_k_cache() const { return key_cache_; }
 torch::Tensor KVCache::get_v_cache() const { return value_cache_; }
+torch::Tensor KVCache::get_index_cache() const { return index_cache_; }
 
 void KVCache::swap_blocks(torch::Tensor& src_tensor,
                           torch::Tensor& dst_tensor) {

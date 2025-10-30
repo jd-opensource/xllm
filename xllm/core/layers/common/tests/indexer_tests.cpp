@@ -32,6 +32,44 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+class MockDeepseekScalingRotaryEmbedding
+    : public DeepseekScalingRotaryEmbedding {
+ public:
+  MockDeepseekScalingRotaryEmbedding(int64_t rotary_dim,
+                                     int64_t max_position_embeddings,
+                                     int64_t rope_theta,
+                                     bool interleaved,
+                                     const torch::TensorOptions& options)
+      : DeepseekScalingRotaryEmbedding(rotary_dim,
+                                       rotary_dim,
+                                       max_position_embeddings,
+                                       max_position_embeddings,
+                                       rope_theta,
+                                       interleaved,
+                                       /*scaling_factor=*/2.5,
+                                       /*extrapolation_factor=*/1.,
+                                       /*attn_factor=*/40,
+                                       /*beta_fast=*/32,
+                                       /*beta_slow=*/1,
+                                       /*mscale=*/1.,
+                                       /*mscale_all_dim=*/1.,
+                                       options) {
+    mock_rope_ = RotaryEmbedding(
+        rotary_dim, max_position_embeddings, rope_theta, interleaved, options);
+  }
+  void forward(torch::Tensor& q,
+               torch::Tensor& k,
+               const torch::Tensor& positions,
+               const torch::Tensor& cu_query_lens,
+               int64_t max_query_len,
+               bool is_prompt) {
+    return mock_rope_(q, k, positions, cu_query_lens, max_query_len, is_prompt);
+  }
+
+ private:
+  RotaryEmbedding mock_rope_{nullptr};
+};
+
 class IndexerTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -102,30 +140,6 @@ class IndexerTest : public ::testing::Test {
     return weight_dict;
   }
 
-  // Helper function to create Indexer with custom dimensions
-  Indexer CreateIndexer(int64_t dim,
-                        int64_t index_n_heads,
-                        int64_t index_head_dim,
-                        int64_t qk_rope_head_dim,
-                        int64_t index_topk,
-                        int64_t q_lora_rank,
-                        int64_t max_position_embeddings = 32768,
-                        double rope_theta = 10000.0,
-                        bool rope_interleaved = false) {
-    return Indexer(IndexerImpl(dim,
-                               index_n_heads,
-                               index_head_dim,
-                               qk_rope_head_dim,
-                               index_topk,
-                               q_lora_rank,
-                               max_position_embeddings,
-                               rope_theta,
-                               rope_interleaved,
-                               quant_args_,
-                               parallel_args_,
-                               options_));
-  }
-
   // Helper function to populate AttentionMetadata for testing
   void PopulateAttentionMetadata(AttentionMetadata& metadata,
                                  int64_t batch_size,
@@ -160,9 +174,9 @@ class IndexerTest : public ::testing::Test {
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 
     // Fill each batch with consecutive numbers
-    for (int b = 0; b < batch_size; ++b) {
-      int start_val = b * max_query_len + 1;
-      int end_val = start_val + max_query_len;
+    for (int64_t b = 0; b < batch_size; ++b) {
+      int64_t start_val = b * max_query_len + 1;
+      int64_t end_val = start_val + max_query_len;
       // Generate sequence [start_val, ..., end_val-1]
       auto seq = torch::arange(start_val,
                                end_val,
@@ -248,15 +262,20 @@ class IndexerTest : public ::testing::Test {
     // Create non-quantized quant_args for bfloat16 mode
     QuantArgs bfloat16_quant_args;  // Empty means no quantization
 
+    std::unique_ptr<DeepseekScalingRotaryEmbedding> rotary_emb =
+        std::make_unique<MockDeepseekScalingRotaryEmbedding>(
+            qk_rope_head_dim,
+            max_position_embeddings,
+            rope_theta,
+            rope_interleaved,
+            options_);
     auto indexer = Indexer(IndexerImpl(dim,
                                        index_n_heads,
                                        index_head_dim,
                                        qk_rope_head_dim,
                                        index_topk,
                                        q_lora_rank,
-                                       max_position_embeddings,
-                                       rope_theta,
-                                       rope_interleaved,
+                                       *rotary_emb,
                                        bfloat16_quant_args,
                                        parallel_args_,
                                        options_));

@@ -264,18 +264,25 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   // compute kv cache slot size
   const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
   int64_t slot_size = 0;
+  int64_t index_slot_size = 0;
   if (FLAGS_enable_mla) {
     slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
   } else {
     slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   }
+  if (args_.index_n_heads() > 0) {
+    int index_n_head = 1;
+    index_slot_size = dtype_size * index_n_head * args_.index_head_dim();
+  }
   kv_cache_cap.slot_size = slot_size;
+  kv_cache_cap.index_slot_size = index_slot_size;
   kv_cache_cap.n_layers = args_.n_layers();
 
   if (!FLAGS_enable_continuous_kvcache) {
     // compute kv cache n_blocks
     const int32_t block_size = options_.block_size();
-    const int64_t block_size_in_bytes = block_size * slot_size;
+    const int64_t block_size_in_bytes =
+        block_size * (slot_size + index_slot_size);
     kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
                             (args_.n_layers() * block_size_in_bytes);
     CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
@@ -302,6 +309,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
 
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no memory for kv cache";
   const int32_t block_size = options_.block_size();
+  bool enable_lighting_indexer = args_.index_n_heads() > 1;
 
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
@@ -312,21 +320,31 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
   } else {
-#if defined(USE_NPU) || defined(USE_CUDA)
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
-#elif defined(USE_MLU)
-    kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, n_local_kv_heads_, block_size, head_dim_});
-    kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, n_local_kv_heads_, block_size, head_dim_});
-#endif
   }
+  if (enable_lighting_indexer) {
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, 1, args_.index_head_dim()});
+  }
+#if defined(USE_MLU)
+  for (auto& shape : kv_cache_shape) {
+    std::swap(shape[1], shape[2]);
+  }
+  if (FLAGS_enable_mla) {
+    kv_cache_shape[0][3] = args_.kv_lora_rank() + args_.qk_rope_head_dim();
+    kv_cache_shape[1] = std::vector<int64_t>{};
+  }
+#endif
 
   LOG(INFO) << "Initializing k cache with shape: [" << kv_cache_shape[0] << "]";
   LOG(INFO) << "Initializing v cache with shape: [" << kv_cache_shape[1] << "]";
+  if (enable_lighting_indexer) {
+    LOG(INFO) << "Initializing indexer cache with shape: [" << kv_cache_shape[2]
+              << "]";
+  }
 
   // initialize block manager
   BlockManagerPool::Options options;

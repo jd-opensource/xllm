@@ -21,15 +21,16 @@ limitations under the License.
 #include <memory>
 
 #include "framework/model/model_args.h"
+#include "layers/rotary_embedding.h"
 
 namespace xllm {
 namespace layer {
 
 class RotaryEmbeddingImpl : public torch::nn::Module {
  public:
-  RotaryEmbeddingImpl(int rotary_dim,
-                      int max_position_embeddings,
-                      int rope_theta,
+  RotaryEmbeddingImpl(int64_t rotary_dim,
+                      int64_t max_position_embeddings,
+                      int64_t rope_theta,
                       bool interleaved,
                       const torch::TensorOptions& options);
 
@@ -37,21 +38,55 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
                torch::Tensor& k,
                const torch::Tensor& positions,
                const torch::Tensor& cu_query_lens,
-               int max_query_len,
+               int64_t max_query_len,
                bool is_prompt);
 
   torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
 
  private:
-  int rotary_dim_;
-  int max_position_embeddings_;
-  int rope_theta_;
   bool interleaved_;
   torch::Tensor sin_;
   torch::Tensor cos_;
   torch::Tensor cos_sin_cache_;
 };
 TORCH_MODULE(RotaryEmbedding);
+
+class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
+ public:
+  DeepseekScalingRotaryEmbeddingImpl(
+      int64_t head_size,
+      int64_t rotary_dim,
+      int64_t max_position_embeddings,
+      int64_t rope_scaling_original_max_position_embeddings,
+      int64_t rope_theta,
+      bool interleaved,
+      float scaling_factor,
+      float extrapolation_factor,
+      float attn_factor,
+      float beta_fast,
+      float beta_slow,
+      float mscale,
+      float mscale_all_dim,
+      const torch::TensorOptions& options);
+
+  void forward(torch::Tensor& q,
+               torch::Tensor& k,
+               const torch::Tensor& positions,
+               const torch::Tensor& cu_query_lens,
+               int64_t max_query_len,
+               bool is_prompt);
+
+  torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
+
+ private:
+  int64_t head_size_;
+  int64_t rotary_dim_;
+  bool interleaved_;
+  torch::Tensor sin_;
+  torch::Tensor cos_;
+  torch::Tensor cos_sin_cache_;
+};
+TORCH_MODULE(DeepseekScalingRotaryEmbedding);
 
 }  // namespace layer
 }  // namespace xllm

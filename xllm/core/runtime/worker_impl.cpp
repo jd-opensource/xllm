@@ -85,9 +85,11 @@ bool WorkerImpl::allocate_kv_cache(
 
   // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
+  const bool enable_lighting_indexer =
+      context_.get_model_args().index_n_heads() > 0;
   kv_caches_.reserve(num_layers);
   for (int64_t i = 0; i < num_layers; ++i) {
-    torch::Tensor key_cache, value_cache;
+    torch::Tensor key_cache, value_cache, index_cache;
 #if defined(USE_NPU)
     key_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_)),
@@ -95,18 +97,19 @@ bool WorkerImpl::allocate_kv_cache(
     value_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
         2);
-#elif defined(USE_MLU)
+#else
     key_cache =
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
-    value_cache =
-        torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
-#elif defined(USE_CUDA)
-    key_cache =
-        torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
-    value_cache =
-        torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+    if (!kv_cache_shape[1].empty()) {
+      value_cache =
+          torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+    }
+    if (enable_lighting_indexer) {
+      index_cache =
+          torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
+    }
 #endif
-    kv_caches_.emplace_back(key_cache, value_cache);
+    kv_caches_.emplace_back(key_cache, value_cache, index_cache);
   }
 
   allocate_host_kv_cache(kv_cache_shape);
@@ -124,21 +127,30 @@ bool WorkerImpl::allocate_host_kv_cache(
   CHECK(host_kv_caches_.empty()) << "KV caches are already initialized.";
 
   std::vector<std::vector<int64_t>> host_kv_cache_shape = device_kv_cache_shape;
-  host_kv_cache_shape[0][0] =
-      device_kv_cache_shape[0][0] * options_.host_blocks_factor();
-  host_kv_cache_shape[1][0] =
-      device_kv_cache_shape[1][0] * options_.host_blocks_factor();
+  for (auto& shape : host_kv_cache_shape) {
+    if (!shape.empty()) {
+      shape[0] *= options_.host_blocks_factor();
+    }
+  }
 
   // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
+  const bool enable_lighting_indexer =
+      context_.get_model_args().index_n_heads() > 0;
   kv_caches_.reserve(num_layers);
   for (int64_t i = 0; i < num_layers; ++i) {
-    torch::Tensor key_cache, value_cache;
+    torch::Tensor key_cache, value_cache, index_cache;
     key_cache = torch::empty(host_kv_cache_shape[0],
                              torch::dtype(dtype_).device(torch::kCPU));
-    value_cache = torch::empty(host_kv_cache_shape[1],
-                               torch::dtype(dtype_).device(torch::kCPU));
-    host_kv_caches_.emplace_back(key_cache, value_cache);
+    if (!host_kv_cache_shape[1].empty()) {
+      value_cache = torch::empty(host_kv_cache_shape[1],
+                                 torch::dtype(dtype_).device(torch::kCPU));
+    }
+    if (enable_lighting_indexer) {
+      index_cache = torch::empty(host_kv_cache_shape[2],
+                                 torch::dtype(dtype_).device(torch::kCPU));
+    }
+    host_kv_caches_.emplace_back(key_cache, value_cache, index_cache);
   }
 
   if (options_.enable_kvcache_store()) {

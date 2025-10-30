@@ -35,9 +35,15 @@ FusedRMSNormImpl::FusedRMSNormImpl(int64_t dim,
 }
 
 torch::Tensor FusedRMSNormImpl::forward(torch::Tensor& input) {
-  auto org_shape = input.sizes().vec();
-  input = input.reshape({-1, norm_dim_});
   auto output = torch::empty_like(input);
+  return forward_output(input, output);
+}
+
+torch::Tensor FusedRMSNormImpl::forward_output(torch::Tensor& input,
+                                               torch::Tensor& output) {
+  auto org_shape = output.sizes().vec();
+  input = input.reshape({-1, norm_dim_});
+  output = output.reshape({-1, norm_dim_});
 
   xllm::kernel::FusedLayerNormParams fused_layernorm_params;
   fused_layernorm_params.input = input;

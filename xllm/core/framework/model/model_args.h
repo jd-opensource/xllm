@@ -123,6 +123,11 @@ struct ModelArgs {
   PROPERTY(int32_t, q_lora_rank) = 0;
   PROPERTY(int32_t, kv_lora_rank) = 0;
 
+  // deepseek v3.2 indexer
+  PROPERTY(int32_t, index_head_dim) = 0;
+  PROPERTY(int32_t, index_n_heads) = 0;
+  PROPERTY(int32_t, index_topk) = 0;
+
   PROPERTY(int32_t, vision_start_token_id) = 0;
   PROPERTY(int32_t, vision_end_token_id) = 0;
   PROPERTY(int32_t, vision_token_id) = 0;
