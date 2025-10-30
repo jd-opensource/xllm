@@ -22,7 +22,7 @@ limitations under the License.
 namespace xllm {
 namespace vmm {
 
-void create_phy_mem_handle(PhyMemHandle phy_mem_handle, int32_t device_id) {
+void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
   int ret = 0;
   // actually, granularity size for physical page is 2MB by default for cuda
   // and npu, but 32MB for mlu
@@ -91,7 +91,7 @@ void create_phy_mem_handle(PhyMemHandle phy_mem_handle, int32_t device_id) {
             << "Bytes";
 }
 
-void create_vir_ptr(VirPtr vir_ptr, size_t aligned_size) {
+void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   int ret = 0;
 #if defined(USE_NPU)
   ret = aclrtReserveMemAddress(&vir_ptr, aligned_size, 0, nullptr, 0);
@@ -103,7 +103,7 @@ void create_vir_ptr(VirPtr vir_ptr, size_t aligned_size) {
   CHECK_EQ(ret, 0) << "Failed to create virtual memory handle";
 }
 
-void release_phy_mem_handle(PhyMemHandle phy_mem_handle) {
+void release_phy_mem_handle(PhyMemHandle& phy_mem_handle) {
   int ret = 0;
 #if defined(USE_NPU)
   ret = aclrtFreePhysical(phy_mem_handle);
@@ -115,7 +115,7 @@ void release_phy_mem_handle(PhyMemHandle phy_mem_handle) {
   CHECK_EQ(ret, 0) << "Failed to release physical memory handle";
 }
 
-void release_vir_ptr(VirPtr vir_ptr, size_t aligned_size) {
+void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   int ret = 0;
 #if defined(USE_NPU)
   ret = aclrtReleaseMemAddress(vir_ptr);
@@ -127,7 +127,7 @@ void release_vir_ptr(VirPtr vir_ptr, size_t aligned_size) {
   CHECK_EQ(ret, 0) << "Failed to release virtual memory handle";
 }
 
-void map(VirPtr vir_ptr, PhyMemHandle phy_mem_handle) {
+void map(VirPtr& vir_ptr, PhyMemHandle& phy_mem_handle) {
   int ret = 0;
 #if defined(USE_NPU)
   ret = aclrtMapMem(vir_ptr, FLAGS_granularity_size, 0, phy_mem_handle, 0);
@@ -139,7 +139,7 @@ void map(VirPtr vir_ptr, PhyMemHandle phy_mem_handle) {
   CHECK_EQ(ret, 0) << "Failed to map virtual memory to physical memory";
 }
 
-void unmap(VirPtr vir_ptr, size_t aligned_size) {
+void unmap(VirPtr& vir_ptr, size_t aligned_size) {
   int ret = 0;
 #if defined(USE_NPU)
   ret = aclrtUnmapMem(vir_ptr);
