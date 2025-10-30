@@ -73,7 +73,7 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
       layers_.push_back(block);
       blocks_->push_back(block);
     }
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       pos_embs_.push_back(create_rotary_embedding(model_args,
                                                   model_args.rotary_dim(),
                                                   inv_freq,
@@ -183,7 +183,7 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       eh_projs_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("eh_proj."));
     }
@@ -198,7 +198,7 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       eh_projs_[i]->verify_loaded_weights(prefix + "eh_proj.");
     }
     enorm_->verify_loaded_weights(prefix + "enorm.");
@@ -210,7 +210,7 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       eh_projs_[i]->merge_loaded_weights();
     }
     enorm_->merge_loaded_weights();

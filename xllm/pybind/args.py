@@ -16,7 +16,7 @@ class ArgumentParser:
         self.parser.add_argument('--max_seqs_per_batch', type=int, default=256, help='Max number of sequences per batch.')
         self.parser.add_argument('--max_tokens_per_chunk_for_prefill', type=int, default=512, help='Max number of tokens per chunk for request in prefill stage.')
         self.parser.add_argument('--num_speculative_tokens', type=int, default=0, help='Number of speculative tokens.')
-        self.parser.add_argument('--num_handling_threads', type=int, default=4, help='Number of handling threads.')
+        self.parser.add_argument('--num_request_handling_threads', type=int, default=4, help='Number of handling threads.')
         self.parser.add_argument('--communication_backend', type=str, default='lccl', help='npu communication backend.')
         self.parser.add_argument('--rank_tablefile', type=str, default='', help='atb hccl rank table file')
         self.parser.add_argument('--expert_parallel_degree', type=int, default=0, help='ep degree')

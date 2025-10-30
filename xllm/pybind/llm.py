@@ -22,7 +22,7 @@ class LLM:
         max_seqs_per_batch: int = 256,
         max_tokens_per_chunk_for_prefill: int = -1,
         num_speculative_tokens: int = 0,
-        num_handling_threads: int = 4,
+        num_request_handling_threads: int = 4,
         communication_backend: str = 'lccl',
         rank_tablefile: str = '',
         expert_parallel_degree: int = 0,
@@ -66,7 +66,7 @@ class LLM:
         options.max_seqs_per_batch = max_seqs_per_batch
         options.max_tokens_per_chunk_for_prefill = max_tokens_per_chunk_for_prefill
         options.num_speculative_tokens = num_speculative_tokens
-        options.num_handling_threads = num_handling_threads
+        options.num_request_handling_threads = num_request_handling_threads
         options.communication_backend = communication_backend
         options.rank_tablefile = rank_tablefile
         options.expert_parallel_degree = expert_parallel_degree

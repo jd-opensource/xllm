@@ -33,7 +33,7 @@ std::string Options::to_string() const {
      << ", max_tokens_per_chunk_for_prefill: "
      << max_tokens_per_chunk_for_prefill()
      << ", num_speculative_tokens: " << num_speculative_tokens()
-     << ", num_handling_threads: " << num_handling_threads()
+     << ", num_request_handling_threads: " << num_request_handling_threads()
      << ", communication_backend: " << communication_backend().value_or("null")
      << ", rank_tablefile: " << rank_tablefile().value_or("null")
      << ", expert_parallel_degree: " << expert_parallel_degree().value_or(0)

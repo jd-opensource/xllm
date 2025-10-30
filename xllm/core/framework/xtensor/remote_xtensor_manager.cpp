@@ -56,12 +56,12 @@ bool RemoteXTensorManager::wait_for_server_ready(
   // Retry until server initialize ready
   int try_count = 0;
   brpc::Controller cntl;
-  while (try_count < FLAGS_max_connect_count) {
+  const int sleep_time_second = 3;
+  while (try_count < FLAGS_max_reconnect_count) {
     cntl.Reset();
     stub_->Hello(&cntl, &req, &resp, nullptr);
     if (cntl.Failed() || !resp.ok()) {
-      std::this_thread::sleep_for(
-          std::chrono::seconds(FLAGS_sleep_time_second));
+      std::this_thread::sleep_for(std::chrono::seconds(sleep_time_second));
     } else {
       LOG(INFO) << "RemoteXTensorManager Hello connected, server_address: "
                 << server_address << ", global_rank_: " << global_rank_;
@@ -71,7 +71,7 @@ bool RemoteXTensorManager::wait_for_server_ready(
     try_count++;
   }
 
-  if (try_count >= FLAGS_max_connect_count) {
+  if (try_count >= FLAGS_max_reconnect_count) {
     LOG(ERROR) << "RemoteXTensorManager Hello method failed, global_rank_ is "
                << global_rank_ << ", error: " << cntl.ErrorText();
     return false;

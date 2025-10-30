@@ -324,7 +324,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
   // load the weight from the checkpoint
   virtual void load_state_dict(const StateDict& state_dict) {
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("embed_tokens."));
     }
@@ -338,7 +338,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
 #if defined(USE_NPU)
   virtual void verify_loaded_weights(const std::string& prefix) const {
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_[i]->verify_loaded_weights(prefix + "embed_tokens.");
     }
     for (int i = 0; i < layers_.size(); i++) {
@@ -349,7 +349,7 @@ class LlmModelImplBase : public torch::nn::Module {
   }
 
   virtual void merge_loaded_weights() {
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_[i]->merge_loaded_weights();
     }
     for (int i = 0; i < layers_.size(); i++) {
@@ -365,7 +365,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
   virtual void set_word_embedding(
       std::vector<layer::WordEmbedding>& word_embedding) {
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_[i] = word_embedding[i];
     }
   }

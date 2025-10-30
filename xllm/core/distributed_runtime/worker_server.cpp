@@ -250,15 +250,15 @@ bool WorkerServer::sync_master_node(const std::string& master_node_addr,
   // Retry until master node ready
   int try_count = 0;
   brpc::Controller cntl;
-  while (try_count < FLAGS_max_connect_count) {
+  const int sleep_time_second = 3;
+  while (try_count < FLAGS_max_reconnect_count) {
     cntl.Reset();
     stub.Sync(&cntl, &addr_info, &uids, NULL);
     if (cntl.Failed()) {
       LOG(WARNING) << "Worker#" << addr_info.global_rank()
                    << " try connect to engine server error, try again."
                    << " Error message: " << cntl.ErrorText();
-      std::this_thread::sleep_for(
-          std::chrono::seconds(FLAGS_sleep_time_second));
+      std::this_thread::sleep_for(std::chrono::seconds(sleep_time_second));
     } else {
       LOG(INFO) << "Worker#" << addr_info.global_rank() << " connect to "
                 << master_node_addr << " success.";
@@ -267,7 +267,7 @@ bool WorkerServer::sync_master_node(const std::string& master_node_addr,
     try_count++;
   }
 
-  if (try_count >= FLAGS_max_connect_count) {
+  if (try_count >= FLAGS_max_reconnect_count) {
     LOG(ERROR) << "Worker#" << addr_info.global_rank() << " connect to "
                << master_node_addr << " failed."
                << " Error message: " << cntl.ErrorText();

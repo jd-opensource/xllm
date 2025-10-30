@@ -59,8 +59,9 @@ DiTMaster::DiTMaster(const Options& options)
   scheduler_ = create_dit_scheduler(engine_.get(), scheduler_options);
   LOG(INFO) << "created dit scheduler in DiTMaster.";
 
-  threadpool_ = std::make_unique<ThreadPool>(options.num_handling_threads());
-  LOG(INFO) << "ThreadPool with " << options.num_handling_threads()
+  threadpool_ =
+      std::make_unique<ThreadPool>(options.num_request_handling_threads());
+  LOG(INFO) << "ThreadPool with " << options.num_request_handling_threads()
             << " threads created in DiTMaster.";
 }
 

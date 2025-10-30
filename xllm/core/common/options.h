@@ -73,7 +73,7 @@ class Options {
   PROPERTY(int32_t, num_speculative_tokens) = 0;
 
   // thread num to handle requests
-  PROPERTY(size_t, num_handling_threads) = 4;
+  PROPERTY(size_t, num_request_handling_threads) = 4;
 
   PROPERTY(std::optional<bool>, enable_eplb);
 

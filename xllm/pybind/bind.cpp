@@ -49,7 +49,8 @@ PYBIND11_MODULE(xllm_export, m) {
                      &Options::max_tokens_per_chunk_for_prefill_)
       .def_readwrite("num_speculative_tokens",
                      &Options::num_speculative_tokens_)
-      .def_readwrite("num_handling_threads", &Options::num_handling_threads_)
+      .def_readwrite("num_request_handling_threads",
+                     &Options::num_request_handling_threads_)
       .def_readwrite("communication_backend", &Options::communication_backend_)
       .def_readwrite("rank_tablefile", &Options::rank_tablefile_)
       .def_readwrite("expert_parallel_degree",

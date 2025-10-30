@@ -50,17 +50,15 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
   }
 
   brpc::ServerOptions options;
-  options.idle_timeout_sec = FLAGS_idle_timeout_s;
+  options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
   options.num_threads = FLAGS_num_threads;
-  options.max_concurrency = FLAGS_max_concurrency;
   if (server_->Start(FLAGS_port, &options) != 0) {
     LOG(ERROR) << "Failed to start server on port " << FLAGS_port;
     return false;
   }
   LOG(INFO) << "Brpc Server started on port " << FLAGS_port
-            << ", idle_timeout_sec: " << FLAGS_idle_timeout_s
-            << ", num_threads: " << FLAGS_num_threads
-            << ", max_concurrency: " << FLAGS_max_concurrency;
+            << ", idle_timeout_s: " << FLAGS_rpc_idle_timeout_s
+            << ", num_threads: " << FLAGS_num_threads;
 
   listen_address_ =
       std::string(butil::endpoint2str(server_->listen_address()).c_str());
@@ -136,9 +134,8 @@ bool XllmServer::start(std::shared_ptr<WorkerService> service,
   }
 
   brpc::ServerOptions options;
-  options.idle_timeout_sec = FLAGS_idle_timeout_s;
+  options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
   options.num_threads = FLAGS_num_threads;
-  options.max_concurrency = FLAGS_max_concurrency;
   listen_address_ = addr;
   if (server_->Start(addr.c_str(), &options) != 0) {
     LOG(ERROR) << "Failed to start distribute server on address: " << addr;
@@ -147,9 +144,8 @@ bool XllmServer::start(std::shared_ptr<WorkerService> service,
   listen_port_ = server_->listen_address().port;
   LOG(INFO) << "DistributeWorker started on address "
             << server_->listen_address()
-            << ", idle_timeout_sec: " << FLAGS_idle_timeout_s
-            << ", num_threads: " << FLAGS_num_threads
-            << ", max_concurrency: " << FLAGS_max_concurrency;
+            << ", idle_timeout_sec: " << FLAGS_rpc_idle_timeout_s
+            << ", num_threads: " << FLAGS_num_threads;
 
   return true;
 }
@@ -164,9 +160,8 @@ bool XllmServer::start(std::shared_ptr<XTensorManagerService> service,
   }
 
   brpc::ServerOptions options;
-  options.idle_timeout_sec = FLAGS_idle_timeout_s;
+  options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
   options.num_threads = FLAGS_num_threads;
-  options.max_concurrency = FLAGS_max_concurrency;
   listen_address_ = addr;
   if (server_->Start(addr.c_str(), &options) != 0) {
     LOG(ERROR) << "Failed to start distribute server on address: " << addr;
@@ -175,9 +170,8 @@ bool XllmServer::start(std::shared_ptr<XTensorManagerService> service,
   listen_port_ = server_->listen_address().port;
   LOG(INFO) << "DistributeXTensorManager started on address "
             << server_->listen_address()
-            << ", idle_timeout_sec: " << FLAGS_idle_timeout_s
-            << ", num_threads: " << FLAGS_num_threads
-            << ", max_concurrency: " << FLAGS_max_concurrency;
+            << ", idle_timeout_sec: " << FLAGS_rpc_idle_timeout_s
+            << ", num_threads: " << FLAGS_num_threads;
 
   return true;
 }
@@ -193,9 +187,8 @@ bool XllmServer::create_server(google::protobuf::Service* service,
   }
 
   brpc::ServerOptions options;
-  options.idle_timeout_sec = FLAGS_idle_timeout_s;
+  options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
   options.num_threads = FLAGS_num_threads;
-  options.max_concurrency = FLAGS_max_concurrency;
   butil::EndPoint endpoint;
   if (!addr.empty()) {
     listen_address_ = addr;
@@ -217,9 +210,8 @@ bool XllmServer::create_server(google::protobuf::Service* service,
     return false;
   }
   LOG(INFO) << server_name << " server started on address " << endpoint
-            << ", idle_timeout_sec: " << FLAGS_idle_timeout_s
-            << ", num_threads: " << FLAGS_num_threads
-            << ", max_concurrency: " << FLAGS_max_concurrency;
+            << ", idle_timeout_sec: " << FLAGS_rpc_idle_timeout_s
+            << ", num_threads: " << FLAGS_num_threads;
 
   return true;
 }

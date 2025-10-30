@@ -70,7 +70,7 @@ xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
 | `max_concurrent_requests` | int32 | 0 | 任意大于0的整数 | 限流用，限制实例中正在处理的总请求数 |  |
 | `model_id` | string | "" | ip:port | 模型名称，非路径 |  |
-| `num_handling_threads` | int32 | 4 | 任意大于0的整数 | 处理输入请求的线程池大小 |  |
+| `num_request_handling_threads` | int32 | 4 | 任意大于0的整数 | 处理输入请求的线程池大小 |  |
 | `num_response_handling_threads` | int32 | 4 | 任意大于0的整数 | 处理输出的线程池大小 |  |
 | `prefill_scheduling_memory_usage_threshold` | double | 0.95 | 0-1之间的值 | 当kv cache使用量达到该阈值时，暂停prefill请求的调度 |  |
 | `num_response_handling_threads` | int32 | 4 | 任意大于0的整数 | 处理输出的线程池大小 |  |

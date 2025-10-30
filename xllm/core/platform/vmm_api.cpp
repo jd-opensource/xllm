@@ -86,7 +86,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
   ret = cuMemSetAccess(phy_mem_handle, granularity_size, &accessDesc, 1);
 #endif
   CHECK_EQ(ret, 0) << "Failed to create physical memory handle";
-  FLAGS_granularity_size = granularity_size;
+  FLAGS_phy_page_granularity_size = granularity_size;
   LOG(INFO) << "Granularity size for physical page: " << granularity_size
             << "Bytes";
 }
@@ -130,11 +130,14 @@ void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
 void map(VirPtr& vir_ptr, PhyMemHandle& phy_mem_handle) {
   int ret = 0;
 #if defined(USE_NPU)
-  ret = aclrtMapMem(vir_ptr, FLAGS_granularity_size, 0, phy_mem_handle, 0);
+  ret = aclrtMapMem(
+      vir_ptr, FLAGS_phy_page_granularity_size, 0, phy_mem_handle, 0);
 #elif defined(USE_MLU)
-  ret = cnMemMap(vir_ptr, FLAGS_granularity_size, 0, phy_mem_handle, 0);
+  ret =
+      cnMemMap(vir_ptr, FLAGS_phy_page_granularity_size, 0, phy_mem_handle, 0);
 #elif defined(USE_CUDA)
-  ret = cuMemMap(vir_ptr, FLAGS_granularity_size, 0, phy_mem_handle, 0);
+  ret =
+      cuMemMap(vir_ptr, FLAGS_phy_page_granularity_size, 0, phy_mem_handle, 0);
 #endif
   CHECK_EQ(ret, 0) << "Failed to map virtual memory to physical memory";
 }

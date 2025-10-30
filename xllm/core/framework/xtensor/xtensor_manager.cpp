@@ -63,14 +63,14 @@ bool XTensorManager::allocate(int32_t& seq_id, size_t num_tokens) {
       multi_layer_kv_xtensor_.second->get_num_pages_per_layer(seq_id);
   const int64_t cache_size_per_token = options_.cache_size_per_token();
 
-  const size_t k_num_pages_needed =
-      (num_tokens * cache_size_per_token + FLAGS_granularity_size - 1) /
-      FLAGS_granularity_size;
+  const size_t k_num_pages_needed = (num_tokens * cache_size_per_token +
+                                     FLAGS_phy_page_granularity_size - 1) /
+                                    FLAGS_phy_page_granularity_size;
   size_t v_num_pages_needed = k_num_pages_needed;
   if (FLAGS_enable_mla) {
-    v_num_pages_needed =
-        (num_tokens * cache_size_per_token / 8 + FLAGS_granularity_size - 1) /
-        FLAGS_granularity_size;
+    v_num_pages_needed = (num_tokens * cache_size_per_token / 8 +
+                          FLAGS_phy_page_granularity_size - 1) /
+                         FLAGS_phy_page_granularity_size;
   }
 
   if ((k_num_pages_needed <= k_num_pages) &&

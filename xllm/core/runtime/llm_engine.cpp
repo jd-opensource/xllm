@@ -266,7 +266,8 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
                             (args_.n_layers() * block_size_in_bytes);
     CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
   } else {
-    int32_t n_pages = kv_cache_cap.cache_size_in_bytes / FLAGS_granularity_size;
+    int32_t n_pages =
+        kv_cache_cap.cache_size_in_bytes / FLAGS_phy_page_granularity_size;
     if (FLAGS_enable_mla) {
       n_pages -= n_pages % (args_.n_layers());
     } else {

@@ -112,7 +112,8 @@ VLMMaster::VLMMaster(const Options& options)
 
   // construct tokenizer and handling threads
   tokenizer_ = engine_->tokenizer()->clone();
-  threadpool_ = std::make_unique<ThreadPool>(options_.num_handling_threads());
+  threadpool_ =
+      std::make_unique<ThreadPool>(options_.num_request_handling_threads());
 }
 
 VLMMaster::~VLMMaster() {

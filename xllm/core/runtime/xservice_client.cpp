@@ -65,7 +65,7 @@ bool XServiceClient::init(const std::string& etcd_addr,
     instance_name_ = instance_name;
     chan_options_.protocol = "http";
     chan_options_.max_retry = 3;
-    chan_options_.timeout_ms = FLAGS_timeout_ms;
+    chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
 
     etcd_client_ = std::make_unique<EtcdClient>(etcd_addr);
 
@@ -112,7 +112,7 @@ bool XServiceClient::init(const std::string& etcd_addr,
 
     chan_options_.protocol = "http";
     chan_options_.max_retry = 3;
-    chan_options_.timeout_ms = FLAGS_timeout_ms;
+    chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
 
     xservice_channel_ = std::make_unique<brpc::Channel>();
     if (xservice_channel_->Init(xservice_addr_.c_str(), "", &chan_options_) !=

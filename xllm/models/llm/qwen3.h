@@ -40,7 +40,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     layers_.reserve(model_args.n_layers());
 #if defined(USE_NPU)
     norm_ = register_module("norm", layer::RmsNorm(context));
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_.push_back(layer::WordEmbedding(context));
       atb_pos_embeds_.push_back(layer::PosEmbedding(context));
     }
@@ -61,7 +61,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         "norm",
         layer::RmsNorm(
             model_args.hidden_size(), model_args.rms_norm_eps(), options));
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_.push_back(layer::WordEmbedding(model_args.vocab_size(),
                                                    model_args.hidden_size(),
                                                    context.get_parallel_args(),

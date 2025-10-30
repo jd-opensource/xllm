@@ -26,7 +26,7 @@ XTensor::XTensor(const Options& options, torch::ScalarType dtype)
   buffer_size_per_seq_ = cache_size_per_token_ * options_.max_context_len();
 
   // align up to granularity size
-  int64_t granularity_size = FLAGS_granularity_size;
+  int64_t granularity_size = FLAGS_phy_page_granularity_size;
   buffer_size_per_seq_ = (buffer_size_per_seq_ + granularity_size - 1) /
                          granularity_size * granularity_size;
   FLAGS_buffer_size_per_seq = buffer_size_per_seq_;

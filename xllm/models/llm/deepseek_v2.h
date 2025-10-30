@@ -118,7 +118,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
         model_args.rope_theta(),
         model_args.rope_scaling_original_max_position_embeddings());
     float sm_scale = 1.0f;
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_.push_back(layer::WordEmbedding(context));
       pos_embs_.push_back(create_rotary_embedding(model_args,
                                                   model_args.rotary_dim(),
@@ -222,7 +222,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) {
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("embed_tokens."));
     }
@@ -235,7 +235,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_[i]->verify_loaded_weights(prefix + "embed_tokens.");
     }
     for (int i = 0; i < layers_.size(); i++) {
@@ -246,7 +246,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   }
 
   void merge_loaded_weights() {
-    for (auto i = 0; i < FLAGS_default_micro_batch_num; i++) {
+    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_[i]->merge_loaded_weights();
     }
     for (int i = 0; i < layers_.size(); i++) {

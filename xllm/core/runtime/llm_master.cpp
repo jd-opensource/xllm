@@ -107,7 +107,8 @@ LLMMaster::LLMMaster(const Options& options)
       std::make_unique<JinjaChatTemplate>(engine_->tokenizer_args());
 
   tokenizer_ = engine_->tokenizer()->clone();
-  threadpool_ = std::make_unique<ThreadPool>(options_.num_handling_threads());
+  threadpool_ =
+      std::make_unique<ThreadPool>(options_.num_request_handling_threads());
 }
 
 LLMMaster::~LLMMaster() {

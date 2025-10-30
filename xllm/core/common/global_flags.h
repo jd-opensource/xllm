@@ -25,11 +25,9 @@ DECLARE_int32(port);
 
 DECLARE_int32(disagg_pd_port);
 
-DECLARE_int32(idle_timeout_s);
+DECLARE_int32(rpc_idle_timeout_s);
 
 DECLARE_int32(num_threads);
-
-DECLARE_int32(max_concurrency);
 
 DECLARE_string(model_id);
 
@@ -67,7 +65,7 @@ DECLARE_int32(max_tokens_per_chunk_for_prefill);
 
 DECLARE_int32(num_speculative_tokens);
 
-DECLARE_int32(num_handling_threads);
+DECLARE_int32(num_request_handling_threads);
 
 DECLARE_int32(num_response_handling_threads);
 
@@ -87,7 +85,7 @@ DECLARE_bool(enable_mla);
 
 DECLARE_bool(enable_acl_graph);
 
-DECLARE_int32(max_tokens_per_seq);
+DECLARE_int32(max_seq_len_for_graph_mode);
 
 DECLARE_bool(enable_chunked_prefill);
 
@@ -125,9 +123,7 @@ DECLARE_double(prefill_scheduling_memory_usage_threshold);
 
 DECLARE_int32(expert_parallel_degree);
 
-DECLARE_int32(max_connect_count);
-
-DECLARE_int32(sleep_time_second);
+DECLARE_int32(max_reconnect_count);
 
 DECLARE_bool(enable_atb_comm_multiprocess);
 
@@ -145,7 +141,7 @@ DECLARE_double(heart_beat_interval);
 
 DECLARE_int32(etcd_ttl);
 
-DECLARE_int32(timeout_ms);
+DECLARE_int32(rpc_channel_timeout_ms);
 
 DECLARE_int32(chunked_match_frequency);
 
@@ -169,7 +165,7 @@ DECLARE_string(store_metadata_connstring);
 
 DECLARE_bool(enable_multi_stream_parallel);
 
-DECLARE_int32(default_micro_batch_num);
+DECLARE_int32(micro_batch_num);
 
 DECLARE_bool(enable_profile_step_time);
 
@@ -193,7 +189,7 @@ DECLARE_int32(max_requests_per_batch);
 
 DECLARE_bool(enable_continuous_kvcache);
 
-DECLARE_int64(granularity_size);
+DECLARE_int64(phy_page_granularity_size);
 
 DECLARE_int64(cache_size_per_token);
 

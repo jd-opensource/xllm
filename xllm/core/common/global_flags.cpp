@@ -27,16 +27,21 @@ DEFINE_string(host, "", "Host name for brpc server.");
 
 DEFINE_int32(port, 8010, "Port for brpc server.");
 
-DEFINE_int32(idle_timeout_s,
+DEFINE_int32(
+    rpc_idle_timeout_s,
+    -1,
+    "Connection will be closed if there is no read/write operations "
+    "during the last `rpc_idle_timeout_s`. -1 means wait indefinitely.");
+
+DEFINE_int32(rpc_channel_timeout_ms,
              -1,
-             "Connection will be closed if there is no read/write operations "
-             "during the last `idle_timeout_s`. -1 means wait indefinitely.");
+             "Max duration of bRPC Channel. -1 means wait indefinitely.");
+
+DEFINE_int32(max_reconnect_count,
+             40,
+             "The max count for worker try to connect to server.");
 
 DEFINE_int32(num_threads, 32, "Number of threads to process requests.");
-
-DEFINE_int32(max_concurrency,
-             0,
-             "Limit number of requests processed in parallel.");
 
 DEFINE_int32(
     max_concurrent_requests,
@@ -74,11 +79,13 @@ DEFINE_bool(enable_mla,
             false,
             "Whether to enable multi-head latent attention.");
 
+// --- graph mode execution config ---
+
 DEFINE_bool(enable_acl_graph,
             false,
             "Whether to enable ACL graph execution for decode phase.");
 
-DEFINE_int32(max_tokens_per_seq,
+DEFINE_int32(max_seq_len_for_graph_mode,
              20480,
              "Maximum number of tokens per sequence for ACL graph execution.");
 
@@ -91,11 +98,13 @@ DEFINE_int32(limit_image_per_prompt,
 
 // --- threading config ---
 
-DEFINE_int32(num_handling_threads, 4, "Number of handling threads.");
+DEFINE_int32(num_request_handling_threads,
+             4,
+             "Number of threads for handling input requests.");
 
 DEFINE_int32(num_response_handling_threads,
              4,
-             "Number of response handling threads.");
+             "Number of threads for handling responses.");
 
 // --- kvcache config ---
 
@@ -141,9 +150,10 @@ DEFINE_bool(use_zero_evict,
             false,
             "Use ZeroEvictionScheduler but ContinuousScheduler.");
 
-DEFINE_int32(max_decode_token_per_sequence,
-             256,
-             "Max decode token per sequence.");
+DEFINE_int32(
+    max_decode_token_per_sequence,
+    256,
+    "Max decode token per sequence which used for ZeroEvictionScheduler.");
 
 // --- parallel config ---
 
@@ -168,9 +178,9 @@ DEFINE_int64(eplb_update_interval, 1000, "EPLB update rate.");
 
 DEFINE_double(eplb_update_threshold, 0.8, "EPLB update threshold.");
 
-DEFINE_string(rank_tablefile, "", "ATB HCCL rank table file.");
-
 DEFINE_int32(expert_parallel_degree, 0, "Expert parallel degree.");
+
+DEFINE_string(rank_tablefile, "", "ATB HCCL rank table file.");
 
 // --- profile config ---
 
@@ -261,19 +271,7 @@ DEFINE_string(kv_cache_transfer_mode,
               "PUSH",
               "The mode of kv cache transfer(e.g. PUSH, PULL).");
 
-DEFINE_string(device_ip, "", "The device ip.");
-
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
-
-// --- worker server config ---
-
-DEFINE_int32(max_connect_count,
-             40,
-             "The max count for worker try to connect to server.");
-
-DEFINE_int32(sleep_time_second,
-             3,
-             "The sleep time for worker try to connect to server next time.");
 
 DEFINE_bool(enable_shm,
             true,
@@ -310,10 +308,6 @@ DEFINE_bool(enable_service_routing,
 DEFINE_double(heart_beat_interval, 0.5, "Heart beat interval.");
 
 DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
-
-DEFINE_int32(timeout_ms,
-             -1,
-             "Max duration of bRPC Channel. -1 means wait indefinitely.");
 
 // --- priority strategy config ---
 
@@ -354,7 +348,7 @@ DEFINE_bool(
     "Whether to enable computation communication parallel by two streams "
     "and two micro batches in prefill stage.");
 
-DEFINE_int32(default_micro_batch_num,
+DEFINE_int32(micro_batch_num,
              2,
              "Default use two micro batches for multi-stream parallel.");
 
@@ -368,7 +362,7 @@ DEFINE_bool(enable_continuous_kvcache,
             "Whether to enable continuous kv cache.");
 
 DEFINE_int64(
-    granularity_size,
+    phy_page_granularity_size,
     2 * 1024 * 1024,
     "Granularity size for one physical page in bytes, default 2MB, when enable "
     "continuous kv cache.");

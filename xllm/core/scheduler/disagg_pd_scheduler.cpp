@@ -173,7 +173,7 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
     // create channel to prefill instance
     brpc::Channel* channel = new brpc::Channel();
     brpc::ChannelOptions options;
-    options.timeout_ms = FLAGS_timeout_ms;
+    options.timeout_ms = FLAGS_rpc_channel_timeout_ms;
     options.max_retry = 3;
     std::string load_balancer = "";
     if (channel->Init(remote_instances_info_[instance_name].rpc_address.c_str(),
