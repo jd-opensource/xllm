@@ -95,9 +95,11 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
       google::protobuf::Arena::CreateMessage<proto::CompletionResponse>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
-  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
     LOG(ERROR) << "parse json to proto failed: " << error;
@@ -127,16 +129,14 @@ void ChatCompletionsImpl(std::unique_ptr<Service>& service,
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
 
-  std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
-
-  google::protobuf::util::JsonParseOptions options;
-  options.ignore_unknown_fields = true;
-  auto json_status =
-      google::protobuf::util::JsonStringToMessage(attachment, req_pb, options);
-  if (!json_status.ok()) {
-    ctrl->SetFailed(json_status.ToString());
-    LOG(ERROR) << "parse json to proto failed: " << json_status.ToString();
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << buf.to_string();
     return;
   }
 
@@ -201,9 +201,11 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
       google::protobuf::Arena::CreateMessage<proto::EmbeddingResponse>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
-  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
     LOG(ERROR) << "parse json to proto failed: " << error;
@@ -248,10 +250,13 @@ void APIService::ImageGenerationHttp(
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<proto::ImageGenerationResponse>(
           arena);
+
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
-  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
     LOG(ERROR) << "parse json to proto failed: " << error;
@@ -290,9 +295,11 @@ void APIService::RerankHttp(::google::protobuf::RpcController* controller,
       google::protobuf::Arena::CreateMessage<proto::RerankResponse>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
-  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
     LOG(ERROR) << "parse json to proto failed: " << error;
@@ -398,9 +405,11 @@ void APIService::LinkCluster(::google::protobuf::RpcController* controller,
       google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
-  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
     LOG(ERROR) << "parse json to proto failed: " << error;
@@ -452,9 +461,11 @@ void APIService::UnlinkCluster(::google::protobuf::RpcController* controller,
       google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string attachment = std::move(ctrl->request_attachment().to_string());
   std::string error;
-  auto st = json2pb::JsonToProtoMessage(attachment, req_pb, &error);
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
     LOG(ERROR) << "parse json to proto failed: " << error;
