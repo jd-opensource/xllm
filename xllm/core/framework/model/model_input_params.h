@@ -67,6 +67,9 @@ struct ModelInputParams {
 
     params.input_embedding = safe_to(input_embedding, device);
 
+    params.deep_stacks = deep_stacks;
+    params.visual_pos_masks = visual_pos_masks;
+
     params.mm_data = MMData::to(mm_data, device);
     params.dp_global_token_nums = dp_global_token_nums;
     params.prefill_seq_len = prefill_seq_len;
@@ -148,6 +151,11 @@ struct ModelInputParams {
 
   // multimodal
   MMData mm_data;
+
+  // deep_stack for Qwen3-VL
+  mutable std::vector<torch::Tensor> deep_stacks;
+  // visual pos mask for Qwen3-VL
+  mutable torch::Tensor visual_pos_masks;
 
   // num tokens of all workers，mainly used for dp case
   std::vector<int32_t> dp_global_token_nums;
