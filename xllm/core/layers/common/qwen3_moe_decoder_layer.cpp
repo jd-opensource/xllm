@@ -17,14 +17,11 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "layer_utils.h"
-
 namespace xllm {
 namespace layer {
 
 Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
-                                         int32_t layer_id)
-    : parallel_args_(context.get_parallel_args()) {
+                                         int32_t layer_id) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();

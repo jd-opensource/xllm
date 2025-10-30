@@ -21,9 +21,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "kernels/npu/xllm_ops/top_k_top_p.h"
-#elif defined(USE_MLU)
-#include "kernels/ops_api.h"
 #endif
+#include "kernels/ops_api.h"
 
 namespace xllm {
 
