@@ -157,6 +157,7 @@ int run() {
       .etcd_addr(FLAGS_etcd_addr)
       .enable_service_routing(FLAGS_enable_service_routing)
       .tool_call_parser(FLAGS_tool_call_parser)
+      .reasoning_parser(FLAGS_reasoning_parser)
       .priority_strategy(FLAGS_priority_strategy)
       .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline)
       .enable_cache_upload(FLAGS_enable_prefix_cache &&

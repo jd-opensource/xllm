@@ -17,6 +17,7 @@ cc_library(
     service_impl_factory.h
     stream_call.h
     models_service_impl.h
+    stream_output_parser.h
   SRCS
     api_service.cpp
     call.cpp
@@ -26,6 +27,7 @@ cc_library(
     image_generation_service_impl.cpp
     models_service_impl.cpp
     rerank_service_impl.cpp
+    stream_output_parser.cpp
     qwen3_rerank_service_impl.cpp
   DEPS
     :master
@@ -36,6 +38,7 @@ cc_library(
     absl::flat_hash_set
     absl::random_random
     :function_call
+    :reasoning
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )

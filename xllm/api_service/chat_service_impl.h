@@ -37,7 +37,9 @@ class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
   DISALLOW_COPY_AND_ASSIGN(ChatServiceImpl);
 
   LLMMaster* master_ = nullptr;
-  const std::string parser_format_;
+  const std::string tool_call_parser_format_;
+  const std::string reasoning_parser_format_;
+  bool is_force_reasoning_ = false;
 };
 
 class VLMMaster;
