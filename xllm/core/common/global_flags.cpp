@@ -386,3 +386,7 @@ DEFINE_int64(buffer_size_per_seq,
 DEFINE_bool(enable_beam_search_kernel,
             false,
             "Whether to enable beam search kernel.");
+
+DEFINE_bool(enable_prefetch_weight,
+            false,
+            "Whether to enable prefetch weight.");
