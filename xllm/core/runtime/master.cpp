@@ -41,10 +41,6 @@ limitations under the License.
 #include "util/scope_guard.h"
 #include "util/timer.h"
 
-#if defined(USE_NPU)
-#include <pybind11/pybind11.h>
-#endif
-
 namespace xllm {
 
 Master::Master(const Options& options, EngineType type) : options_(options) {

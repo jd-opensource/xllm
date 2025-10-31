@@ -43,3 +43,6 @@ cc_library(
   DEPS
     ${BASE_DEPS}
 )
+
+find_library(TORCH_PYTHON_LIBRARY torch_python PATH "${TORCH_INSTALL_PREFIX}/lib")
+target_link_libraries(processors PRIVATE ${TORCH_LIBRARIES} ${TORCH_PYTHON_LIBRARY})

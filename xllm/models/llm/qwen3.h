@@ -56,7 +56,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
-#elif defined(USE_MLU)
+#else
     norm_ = register_module(
         "norm",
         layer::RmsNorm(

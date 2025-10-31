@@ -21,13 +21,17 @@ limitations under the License.
 #endif
 // clang-format on
 
+#include <c10/core/Stream.h>
+#include <c10/core/StreamGuard.h>
+
 #include <cstdint>
 #if defined(USE_NPU)
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
 #elif defined(USE_MLU)
-#include <c10/core/StreamGuard.h>
 #include <torch_mlu/csrc/framework/core/MLUStream.h>
+#elif defined(USE_CUDA)
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 namespace xllm {
@@ -50,6 +54,8 @@ class Stream {
   c10_npu::NPUStream stream_;
 #elif defined(USE_MLU)
   torch_mlu::MLUStream stream_;
+#elif defined(USE_CUDA)
+  c10::cuda::CUDAStream stream_;
 #endif
 };
 

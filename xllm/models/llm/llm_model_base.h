@@ -125,11 +125,9 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
   }
   virtual void merge_loaded_weights() {
     decoder_layer_->merge_loaded_weights();
-#if defined(USE_NPU)
     block_copy_->merge_loaded_weights();
-#endif
   }
-#elif defined(USE_MLU)
+#else
   virtual torch::Tensor forward(torch::Tensor& x,
                                 torch::Tensor& positions,
                                 const layer::AttentionMetadata& attn_metadata,
@@ -166,7 +164,7 @@ class LlmModelImplBase : public torch::nn::Module {
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
 #if defined(USE_NPU)
     return embed_tokens_[0](input_ids, 0);
-#elif defined(USE_MLU)
+#else
     return embed_tokens_[0](input_ids);
 #endif
   }
@@ -204,7 +202,7 @@ class LlmModelImplBase : public torch::nn::Module {
       } else {
 #if defined(USE_NPU)
         h = embed_tokens_[i](tokens[i], 0);
-#elif defined(USE_MLU)
+#else
         h = embed_tokens_[i](tokens[i]);
 #endif
       }
@@ -307,7 +305,7 @@ class LlmModelImplBase : public torch::nn::Module {
     }
     auto cancated_h = torch::cat(hs, 0);
     return norm_(cancated_h, 0);
-#elif defined(USE_MLU)
+#else
     bool is_prefill = input_params[0].q_max_seq_len > 1;
     auto attn_metadata =
         layer::AttentionMetadata::build(input_params[0], is_prefill);
@@ -407,7 +405,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
 
 #if defined(USE_NPU)
     lm_head_ = register_module("lm_head", layer::LmHead(context));
-#elif defined(USE_MLU)
+#else
     // lm_head_ is default to no quantization
     lm_head_ =
         register_module("lm_head",
@@ -446,7 +444,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     // test
 #if defined(USE_NPU)
     return lm_head_(hidden_states, seleted_idxes, 0);
-#elif defined(USE_MLU)
+#else
     if (seleted_idxes.defined()) {
       h = h.index_select(/*dim=*/0, seleted_idxes);
     }

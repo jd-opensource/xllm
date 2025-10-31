@@ -13,25 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "stream.h"
+#include "cuda_ops_api.h"
 
-namespace xllm {
+namespace xllm::kernel::cuda {
 
-#if defined(USE_NPU)
-Stream::Stream() : stream_(c10_npu::getNPUStreamFromPool()) {}
-#elif defined(USE_MLU)
-Stream::Stream() : stream_(torch_mlu::getStreamFromPool()) {}
-#elif defined(USE_CUDA)
-Stream::Stream() : stream_(c10::cuda::getStreamFromPool()) {}
-#endif
-
-int Stream::synchronize() const {
-  stream_.unwrap().synchronize();
-  return 0;
+void rmsnorm(torch::Tensor& output,
+             torch::Tensor& input,
+             torch::Tensor& weight,
+             double eps) {
+  get_module("norm")->GetFunction("rmsnorm").value()(to_ffi_tensor(output),
+                                                     to_ffi_tensor(input),
+                                                     to_ffi_tensor(weight),
+                                                     eps,
+                                                     support_pdl());
 }
 
-c10::StreamGuard Stream::set_stream_guard() const {
-  return c10::StreamGuard(stream_.unwrap());
-}
-
-}  // namespace xllm
+}  // namespace xllm::kernel::cuda

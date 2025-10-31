@@ -152,7 +152,7 @@ TEST(BatchTest, Basic) {
 
 #if defined(USE_NPU)
   const std::vector<int32_t> q_seq_lens = {9, 1, 1, 4};
-#elif defined(USE_MLU)
+#else
   const std::vector<int32_t> q_seq_lens = {0, 9, 10, 11, 15};
 #endif
   EXPECT_TRUE(equal(input_params.q_seq_lens, q_seq_lens));
@@ -160,7 +160,7 @@ TEST(BatchTest, Basic) {
 //  seq4's kv_seq_len = q_len + num_cached_tokens (q_len<=max_allowed_tokens)
 #if defined(USE_NPU)
   const std::vector<int32_t> kv_seq_lens = {9, 8, 16, 8};
-#elif defined(USE_MLU)
+#else
   const std::vector<int32_t> kv_seq_lens = {0, 9, 17, 33, 41};
 #endif
   EXPECT_TRUE(equal(input_params.kv_seq_lens, kv_seq_lens));

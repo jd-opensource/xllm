@@ -216,7 +216,7 @@ void BatchInputBuilder::process_sequences_multithreaded(uint32_t start_idx,
     state_.q_seq_lens.insert(state_.q_seq_lens.end(),
                              state.q_seq_lens.begin(),
                              state.q_seq_lens.end());
-#elif defined(USE_MLU)
+#elif defined(USE_MLU) || defined(USE_CUDA)
     int32_t seq_len_offset = state_.seq_lens.back();
     // skip the first element which is 0
     for (size_t i = 1; i < state.seq_lens.size(); ++i) {
@@ -288,7 +288,7 @@ void BatchInputBuilder::process_single_sequence(
 #if defined(USE_NPU)
   state.seq_lens.push_back(seq_len);
   state.q_seq_lens.push_back(q_seq_len);
-#elif defined(USE_MLU)
+#elif defined(USE_MLU) || defined(USE_CUDA)
   state.seq_lens.push_back(state.seq_lens.back() + seq_len);
   state.q_seq_lens.push_back(state.q_seq_lens.back() + q_seq_len);
 #endif
@@ -448,7 +448,12 @@ void BatchInputBuilder::setup_kv_cache_info(
     block_size = block.size();
     block_ids.push_back(block.id());
     u_block_ids.emplace_back(block.id());
+    state.paged_kv_indices.push_back(block.id());
   }
+  state.paged_kv_indptr.push_back(state.paged_kv_indptr.back() + blocks.size());
+  int32_t last_page_len =
+      (seq_len % block_size == 0) ? block_size : seq_len % block_size;
+  state.paged_kv_last_page_len.push_back(last_page_len);
 
   int32_t kv_cache_block_idx = n_kv_cache_tokens / block_size;
   for (auto iter = block_ids.begin() + kv_cache_block_idx;
@@ -517,12 +522,15 @@ void BatchInputBuilder::padding_decode_batch_size(
 #if defined(USE_NPU)
         state_.seq_lens.push_back(num_decoding_tokens);
         state_.q_seq_lens.push_back(num_decoding_tokens);
-#elif defined(USE_MLU)
+#elif defined(USE_MLU) || defined(USE_CUDA)
         state_.seq_lens.push_back(state_.seq_lens.back() + num_decoding_tokens);
         state_.q_seq_lens.push_back(state_.q_seq_lens.back() +
                                     num_decoding_tokens);
 #endif
         state_.block_tables_vec.emplace_back();
+        state_.paged_kv_indices.push_back(0);
+        state_.paged_kv_indptr.push_back(state_.paged_kv_indptr.back() + 1);
+        state_.paged_kv_last_page_len.push_back(1);
       }
     }
   }
@@ -559,6 +567,14 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
       torch::tensor(state_.new_token_slot_ids, torch::kInt);
   input_params.decode_seq_range =
       util::find_ones_indices(input_params.q_seq_lens_vec);
+
+  // for flashinfer
+  input_params.paged_kv_indptr =
+      torch::tensor(state_.paged_kv_indptr, torch::kInt);
+  input_params.paged_kv_indices =
+      torch::tensor(state_.paged_kv_indices, torch::kInt);
+  input_params.paged_kv_last_page_len =
+      torch::tensor(state_.paged_kv_last_page_len, torch::kInt);
 
   // Setup multimodal data
   input_params.mm_data = MMData::batch(mm_data_vec_);
@@ -633,6 +649,12 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   // raw_forward_input.dp_global_token_nums = ;
   raw_forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);
   raw_forward_input.prefill_seq_len = state_.prefill_seq_len;
+
+  // for flashinfer
+  raw_forward_input.paged_kv_indptr = std::move(state_.paged_kv_indptr);
+  raw_forward_input.paged_kv_indices = std::move(state_.paged_kv_indices);
+  raw_forward_input.paged_kv_last_page_len =
+      std::move(state_.paged_kv_last_page_len);
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);

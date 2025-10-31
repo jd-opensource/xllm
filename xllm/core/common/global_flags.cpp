@@ -389,3 +389,9 @@ DEFINE_bool(enable_beam_search_kernel,
 
 // --- qwen3 reranker config
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
+
+// --- flashinfer config ---
+DEFINE_int32(workspace_buffer_size,
+             512 * 1024 * 1024,
+             "The user reserved workspace buffer used to store intermediate "
+             "attention results in split-k algorithm.");

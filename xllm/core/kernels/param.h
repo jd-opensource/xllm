@@ -21,8 +21,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-namespace xllm {
-namespace kernel {
+namespace xllm::kernel {
 
 // Note: add default values for optional parameters in the struct definition
 
@@ -217,5 +216,4 @@ struct TopKPParams {
 struct RandomSampleParams {
   torch::Tensor logits;
 };
-}  // namespace kernel
-}  // namespace xllm
+}  // namespace xllm::kernel

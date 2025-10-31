@@ -26,11 +26,6 @@ limitations under the License.
 
 namespace xllm::kernel::mlu {
 
-static const std::string kActModeSilu = "silu";
-static const std::string kActModeGelu = "gelu";
-static const std::string kActModeQuickGelu = "quick_gelu";
-static const std::string kActModeSwish = "swish";
-
 void apply_rotary(torch::Tensor& q,
                   torch::Tensor& k,
                   const torch::Tensor& sin,

@@ -15,9 +15,12 @@ limitations under the License.
 
 #include "device.h"
 #if defined(USE_MLU)
-#include <torch_mlu/csrc/framework/core/caching_allocator.h>
+#include <cn_api.h>
 #include <torch_mlu/csrc/framework/core/device.h>
 #include <torch_mlu/csrc/framework/core/device_utils.h>
+#elif defined(USE_CUDA)
+#include <c10/cuda/CUDAStream.h>
+#include <cuda.h>
 #endif
 
 namespace xllm {
@@ -27,16 +30,13 @@ Device::Device(torch::Device device) : device_(device) {}
 Device::operator torch::Device() const { return unwrap(); }
 
 void Device::set_device() const {
-  int ret = 0;
 #if defined(USE_NPU)
-  ret = c10_npu::SetDevice(index());
+  c10_npu::set_device(index());
 #elif defined(USE_MLU)
   torch_mlu::setDevice(index());
+#elif defined(USE_CUDA)
+  c10::cuda::set_device(index());
 #endif
-
-  if (ret != 0) {
-    LOG(ERROR) << "set device id: " << index() << " failed, ret:" << ret;
-  }
 }
 
 const torch::Device& Device::unwrap() const { return device_; }
@@ -56,6 +56,8 @@ int Device::device_count() {
   return c10_npu::device_count();
 #elif defined(USE_MLU)
   return torch_mlu::device_count();
+#elif defined(USE_CUDA)
+  return c10::cuda::device_count();
 #endif
 }
 
@@ -64,6 +66,8 @@ const std::string Device::type() {
   return "npu";
 #elif defined(USE_MLU)
   return "mlu";
+#elif defined(USE_CUDA)
+  return "cuda";
 #endif
 }
 
@@ -75,8 +79,9 @@ Device::DeviceMem Device::get_device_mem() const {
 #if defined(USE_NPU)
   aclrtGetMemInfo(ACL_HBM_MEM, &free_memory, &total_memory);
 #elif defined(USE_MLU)
-  std::tie(free_memory, total_memory) =
-      torch_mlu::MLUCachingAllocator::MemGetInfo(index());
+  cnrtMemGetInfo(&free_memory, &total_memory);
+#elif defined(USE_CUDA)
+  cudaMemGetInfo(&free_memory, &total_memory);
 #endif
   device_mem.total_memory = static_cast<int64_t>(total_memory);
   device_mem.free_memory = static_cast<int64_t>(free_memory);
@@ -89,11 +94,13 @@ int64_t Device::free_memory() { return get_device_mem().free_memory; }
 
 int Device::synchronize_default_stream() {
 #if defined(USE_NPU)
-  return aclrtSynchronizeStream(c10_npu::getCurrentNPUStream(index()).stream());
+  c10_npu::getCurrentNPUStream(index()).synchronize();
 #elif defined(USE_MLU)
   torch_mlu::getCurrentMLUStream(index()).synchronize();
-  return 0;
+#elif defined(USE_CUDA)
+  c10::cuda::getCurrentCUDAStream().synchronize();
 #endif
+  return 0;
 }
 
 std::unique_ptr<Stream> Device::get_stream_from_pool() {

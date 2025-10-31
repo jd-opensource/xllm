@@ -18,14 +18,11 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
-#if defined(USE_MLU)
-#include "common/linear_impl.h"
-#endif
+#include "linear_impl.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_MLU)
 class ColumnParallelLinear
     : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
  public:
@@ -123,7 +120,6 @@ class ReplicatedLinear : public torch::nn::ModuleHolder<ReplicatedLinearImpl> {
                                                             quant_args,
                                                             options)) {}
 };
-#endif
 
 }  // namespace layer
 }  // namespace xllm
