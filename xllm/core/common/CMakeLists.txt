@@ -15,6 +15,7 @@ cc_library(
     rate_limiter.h
     types.h
     device_monitor.h
+    version_singleton.h
   SRCS
     etcd_client.cpp
     global_flags.cpp

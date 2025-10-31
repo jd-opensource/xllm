@@ -202,3 +202,9 @@ DECLARE_int64(buffer_size_per_seq);
 DECLARE_bool(enable_beam_search_kernel);
 
 DECLARE_bool(enable_shm);
+
+DECLARE_bool(enable_sparse_valid_path_filter);
+
+DECLARE_bool(enable_convert_tokens_to_item);
+
+DECLARE_bool(enable_convert_item_to_tokens);

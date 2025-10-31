@@ -25,7 +25,10 @@ limitations under the License.
 #include <filesystem>
 #include <vector>
 
+#include "core/common/version_singleton.h"
+#include "core/framework/state_dict/rec_content_dict.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
+#include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/sentencepiece_tokenizer.h"
 #include "core/framework/tokenizer/tiktoken_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer_factory.h"
@@ -50,6 +53,13 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
       << "Failed to find model weights files in " << model_weights_path;
   // sort the model weights files by name
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
+
+  if (FLAGS_enable_sparse_valid_path_filter ||
+      FLAGS_enable_convert_tokens_to_item ||
+      FLAGS_enable_convert_item_to_tokens) {
+    CHECK(load_rec_content(model_weights_path))
+        << "Failed to load rec content from " << model_weights_path;
+  }
 }
 
 std::unique_ptr<Tokenizer> HFModelLoader::tokenizer() const {
@@ -68,6 +78,28 @@ std::vector<std::unique_ptr<StateDict>>& HFModelLoader::get_state_dicts() {
     }
   }
   return state_dicts_;
+}
+
+bool HFModelLoader::load_rec_content(const std::string& model_weights_path) {
+  if (!args_.content_file().empty()) {
+    std::filesystem::path path = model_weights_path;
+    std::string model_version = path.filename();
+    std::string content_full_path = path.append(args_.content_file()).string();
+
+    LOG(INFO) << "model_version:" << model_version;
+    LOG(INFO) << "content_full_path:" << content_full_path;
+
+    CHECK(nullptr !=
+          VersionSingleton<RecContentDict>::GetInstance(model_version))
+        << "Failed to get content dict instance";
+    CHECK(VersionSingleton<RecContentDict>::GetInstance(model_version)
+              ->initialize(content_full_path))
+        << "Failed to initialize content dict from " << content_full_path;
+  } else {
+    LOG(INFO) << "model content file is not set";
+  }
+
+  return true;
 }
 
 bool HFModelLoader::load_args(const std::string& model_weights_path) {
