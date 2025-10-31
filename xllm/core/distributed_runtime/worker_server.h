@@ -37,17 +37,14 @@ namespace xllm {
 
 class WorkerServer {
  public:
-  WorkerServer(
-      int local_worker_idx,
-      const std::string& master_node_addr,
-      std::atomic<bool>& done,
-      const ParallelArgs& parallel_args,
-      const torch::Device& d,
-      const runtime::Options& options,
-      WorkerType worker_type,
-      bool use_spawn_worker = false,
-      std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr,
-      std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr);
+  WorkerServer(int local_worker_idx,
+               const std::string& master_node_addr,
+               std::atomic<bool>& done,
+               const ParallelArgs& parallel_args,
+               const torch::Device& d,
+               const runtime::Options& options,
+               WorkerType worker_type,
+               bool use_spawn_worker = false);
 
   virtual ~WorkerServer();
 
@@ -81,6 +78,12 @@ class WorkerServer {
   bool sync_master_node(const std::string& master_node_addr,
                         proto::AddressInfo& addr_info,
                         proto::CommUniqueIdList& uids);
+
+  void prepare_shm(
+      const ParallelArgs& parallel_args,
+      const runtime::Options& options,
+      std::unique_ptr<ForwardSharedMemoryManager>& input_shm_manager,
+      std::unique_ptr<ForwardSharedMemoryManager>& output_shm_manager);
 
  private:
   std::unique_ptr<std::thread> worker_thread_;
