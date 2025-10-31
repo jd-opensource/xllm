@@ -39,10 +39,6 @@ inline size_t round_down(size_t n, size_t multiple) {
   return (n / multiple) * multiple;
 }
 
-void murmur_hash3(const uint8_t* pre_hash_value,
-                  const Slice<int32_t>& token_ids,
-                  uint8_t* hash_value);
-
 class PrefixCache {
  public:
   PrefixCache(const PrefixCache&) = delete;

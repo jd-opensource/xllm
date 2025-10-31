@@ -204,3 +204,5 @@ DECLARE_string(reasoning_parser);
 DECLARE_bool(enable_shm);
 
 DECLARE_bool(enable_prefetch_weight);
+
+DECLARE_bool(enable_rec_prefill_only);

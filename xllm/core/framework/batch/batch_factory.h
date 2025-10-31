@@ -41,6 +41,20 @@ class BatchFactory {
       std::vector<std::vector<CacheBlockInfo>>* swap_cache_block_infos =
           nullptr);
 
+  std::vector<Batch> create_rec_batches(
+      const std::vector<std::shared_ptr<Request>>& running_requests,
+      const std::vector<Sequence*>& running_sequences,
+      const std::vector<size_t>& running_sequences_budgets,
+      // for global kv cache copy block from host to device
+      std::vector<std::vector<CacheBlockInfo>>* copy_in_cache_block_infos =
+          nullptr,
+      // for global kv cache copy block from device to host
+      std::vector<std::vector<CacheBlockInfo>>* copy_out_cache_block_infos =
+          nullptr,
+      // for beam-search
+      std::vector<std::vector<CacheBlockInfo>>* swap_cache_block_infos =
+          nullptr);
+
  private:
   BatchFactory(int32_t dp_size) : dp_size_(dp_size) {}
   ~BatchFactory() = default;

@@ -66,6 +66,9 @@ struct SequenceOutput {
   // the token ids of the generated text.
   std::vector<int32_t> token_ids;
 
+  // item_id for rec.
+  std::optional<int64_t> item_ids;
+
   // the reason the sequence finished.
   std::optional<std::string> finish_reason;
 

@@ -18,10 +18,15 @@ limitations under the License.
 #include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/dit_scheduler.h"
+#include "scheduler/fixsteps_scheduler.h"
 
 namespace xllm {
 
 std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
+    Engine* engine,
+    ContinuousScheduler::Options options);
+
+std::unique_ptr<FixStepsScheduler> create_fixsteps_scheduler(
     Engine* engine,
     ContinuousScheduler::Options options);
 

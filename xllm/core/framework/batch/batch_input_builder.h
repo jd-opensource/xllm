@@ -137,6 +137,7 @@ class BatchInputBuilder {
                                       uint32_t q_seq_len,
                                       BuilderState* state_ptr = nullptr);
 
+ protected:
   // Input data
   const std::vector<Sequence*>& sequences_;
   const std::vector<uint32_t>& allowed_max_tokens_;

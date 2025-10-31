@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/runtime/dit_master.h"
 #include "core/runtime/llm_master.h"
+#include "core/runtime/rec_master.h"
 #include "core/runtime/vlm_master.h"
 #include "core/util/closure_guard.h"
 #include "embedding.pb.h"
@@ -68,6 +69,9 @@ APIService::APIService(Master* master,
     image_generation_service_impl_ =
         std::make_unique<ImageGenerationServiceImpl>(
             dynamic_cast<DiTMaster*>(master), model_names);
+  } else if (FLAGS_backend == "rec") {
+    rec_completion_service_impl_ = std::make_unique<RecCompletionServiceImpl>(
+        dynamic_cast<RecMaster*>(master), model_names);
   }
   models_service_impl_ =
       ServiceImplFactory<ModelsServiceImpl>::create_service_impl(
@@ -78,8 +82,62 @@ void APIService::Completions(::google::protobuf::RpcController* controller,
                              const proto::CompletionRequest* request,
                              proto::CompletionResponse* response,
                              ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  if (FLAGS_backend == "llm") {
+    CHECK(completion_service_impl_) << " completion service is invalid.";
+    std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
+        ctrl,
+        done_guard.release(),
+        const_cast<proto::CompletionRequest*>(request),
+        response);
+    completion_service_impl_->process_async(call);
+  } else if (FLAGS_backend == "rec") {
+    CHECK(rec_completion_service_impl_)
+        << " rec completion service is invalid.";
+    std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
+        ctrl,
+        done_guard.release(),
+        const_cast<proto::CompletionRequest*>(request),
+        response);
+    rec_completion_service_impl_->process_async(call);
+  }
 }
+
+namespace {
+template <typename Call, typename Service>
+void CommonCompletionsImpl(std::unique_ptr<Service>& service,
+                           xllm::ClosureGuard& guard,
+                           ::google::protobuf::Arena* arena,
+                           brpc::Controller* ctrl) {
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<typename Call::ReqType>(arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<typename Call::ResType>(arena);
+
+  std::string error;
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << buf.to_string();
+    return;
+  }
+
+  auto call = std::make_shared<Call>(ctrl, guard.release(), req_pb, resp_pb);
+  service->process_async(call);
+}
+}  // namespace
 
 void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
                                  const proto::HttpRequest* request,
@@ -95,26 +153,18 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
   }
 
   auto arena = response->GetArena();
-  auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::CompletionRequest>(arena);
-  auto resp_pb =
-      google::protobuf::Arena::CreateMessage<proto::CompletionResponse>(arena);
-
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  std::string error;
-  json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
-  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
-    LOG(ERROR) << "parse json to proto failed: " << error;
-    return;
-  }
 
-  std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
-      ctrl, done_guard.release(), req_pb, resp_pb);
-  completion_service_impl_->process_async(call);
+  if (FLAGS_backend == "llm") {
+    CHECK(completion_service_impl_) << " completion service is invalid.";
+    CommonCompletionsImpl<CompletionCall, CompletionServiceImpl>(
+        completion_service_impl_, done_guard, arena, ctrl);
+  } else if (FLAGS_backend == "rec") {
+    CHECK(rec_completion_service_impl_)
+        << " rec completion service is invalid.";
+    CommonCompletionsImpl<CompletionCall, RecCompletionServiceImpl>(
+        rec_completion_service_impl_, done_guard, arena, ctrl);
+  }
 }
 
 void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
@@ -123,34 +173,6 @@ void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
                                  ::google::protobuf::Closure* done) {
   // TODO with xllm-service
 }
-
-namespace {
-template <typename ChatCall, typename Service>
-void ChatCompletionsImpl(std::unique_ptr<Service>& service,
-                         xllm::ClosureGuard& guard,
-                         ::google::protobuf::Arena* arena,
-                         brpc::Controller* ctrl) {
-  auto req_pb =
-      google::protobuf::Arena::CreateMessage<typename ChatCall::ReqType>(arena);
-  auto resp_pb =
-      google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
-
-  std::string error;
-  json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
-  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
-  if (!st) {
-    ctrl->SetFailed(error);
-    LOG(ERROR) << "parse json to proto failed: " << buf.to_string();
-    return;
-  }
-
-  auto call = std::make_shared<ChatCall>(
-      ctrl, guard.release(), req_pb, resp_pb, arena != nullptr /*use_arena*/);
-  service->process_async(call);
-}
-}  // namespace
 
 void APIService::ChatCompletionsHttp(
     ::google::protobuf::RpcController* controller,
@@ -171,12 +193,11 @@ void APIService::ChatCompletionsHttp(
   if (FLAGS_backend == "llm") {
     auto arena = response->GetArena();
     CHECK(chat_service_impl_) << " chat service is invalid.";
-    ChatCompletionsImpl<ChatCall, ChatServiceImpl>(
+    CommonCompletionsImpl<ChatCall, ChatServiceImpl>(
         chat_service_impl_, done_guard, arena, ctrl);
   } else if (FLAGS_backend == "vlm") {
     CHECK(mm_chat_service_impl_) << " mm chat service is invalid.";
-    // TODO: fix me - temporarily using heap allocation instead of arena
-    ChatCompletionsImpl<MMChatCall, MMChatServiceImpl>(
+    CommonCompletionsImpl<MMChatCall, MMChatServiceImpl>(
         mm_chat_service_impl_, done_guard, nullptr, ctrl);
   }
 }

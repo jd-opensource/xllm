@@ -21,6 +21,7 @@ limitations under the License.
 #include <iostream>
 
 #include "models.h"
+#include "rec/onerec.h"
 
 namespace {
 

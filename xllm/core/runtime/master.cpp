@@ -34,6 +34,8 @@ limitations under the License.
 #include "runtime/dit_master.h"
 #include "runtime/llm_engine.h"
 #include "runtime/llm_master.h"
+#include "runtime/rec_engine.h"
+#include "runtime/rec_master.h"
 #include "runtime/speculative_engine.h"
 #include "runtime/vlm_engine.h"
 #include "runtime/vlm_master.h"
@@ -210,6 +212,39 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
       eng_options.device_ip(options_.device_ip().value());
     }
     engine_ = std::make_unique<LLMEngine>(eng_options);
+  } else if (type == EngineType::REC) {
+    runtime::Options eng_options;
+    eng_options.model_path(options_.model_path())
+        .devices(devices)
+        .block_size(options_.block_size())
+        .max_cache_size(options_.max_cache_size())
+        .max_memory_utilization(options_.max_memory_utilization())
+        .enable_prefix_cache(options_.enable_prefix_cache())
+        .task_type(options_.task_type())
+        .enable_mla(options_.enable_mla())
+        .master_node_addr(options_.master_node_addr())
+        .nnodes(options_.nnodes())
+        .node_rank(options_.node_rank())
+        .dp_size(options_.dp_size())
+        .ep_size(options_.ep_size())
+        .enable_chunked_prefill(options_.enable_chunked_prefill())
+        .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .max_tokens_per_chunk_for_prefill(
+            options_.max_tokens_per_chunk_for_prefill())
+        .instance_role(options_.instance_role())
+        .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
+        .transfer_listen_port(options_.transfer_listen_port())
+        .enable_disagg_pd(options_.enable_disagg_pd())
+        .enable_service_routing(options_.enable_service_routing())
+        .enable_schedule_overlap(options_.enable_schedule_overlap())
+        .enable_cache_upload(options_.enable_cache_upload())
+        .host_blocks_factor(options_.host_blocks_factor())
+        .enable_kvcache_store(options_.enable_kvcache_store())
+        .store_protocol(options_.store_protocol())
+        .store_master_server_entry(options_.store_master_server_entry())
+        .store_metadata_connstring(options_.store_metadata_connstring())
+        .enable_continuous_kvcache(options_.enable_continuous_kvcache());
+    engine_ = std::make_unique<RecEngine>(eng_options);
   } else {
     LOG(WARNING) << "Not supported llm engine type: "
                  << static_cast<size_t>(type);
@@ -225,6 +260,8 @@ std::unique_ptr<Master> create_master(const std::string& backend,
   } else if (backend == "dit") {
     LOG(INFO) << "creating dit master";
     return std::make_unique<DiTMaster>(options);
+  } else if (backend == "rec") {
+    return std::make_unique<RecMaster>(options);
   } else {
     LOG(FATAL) << "Failed to create master, backend is" << backend;
     return nullptr;

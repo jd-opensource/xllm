@@ -174,7 +174,7 @@ void SequencesGroup::process_beam_search() {
   if (!check_beam_search()) {
     return;
   }
-
+  Timer timer;
   size_t beam_width = sequence_params_.sampling_param->beam_width;
   size_t seq_size = sequences_.size();
   size_t topk = sequence_params_.sampling_param->top_logprobs;
@@ -290,6 +290,14 @@ void SequencesGroup::process_beam_search() {
 
   CHECK_EQ(sequences_.size(), beam_width);
   update_for_sequence(0, beam_width);
+  HISTOGRAM_OBSERVE(expand_beam_latency_microseconds,
+                    timer.elapsed_microseconds());
+}
+
+void SequencesGroup::finish() {
+  for (auto& sequence : sequences_) {
+    sequence->finish();
+  }
 }
 
 }  // namespace xllm

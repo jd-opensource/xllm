@@ -21,6 +21,8 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
+#include "slice.h"
+
 namespace xllm {
 
 constexpr uint32_t MURMUR_HASH3_VALUE_LEN = 16;
@@ -61,5 +63,9 @@ struct FixedStringKeyEqual {
                         sizeof(left.data)) == 0;
   }
 };
+
+void murmur_hash3(const uint8_t* pre_hash_value,
+                  const Slice<int32_t>& token_ids,
+                  uint8_t* hash_value);
 
 }  // namespace xllm
