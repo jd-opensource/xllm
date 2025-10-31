@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "core/util/uuid.h"
 #include "deepseekv3_detector.h"
+#include "glm45_detector.h"
 #include "kimik2_detector.h"
 #include "qwen25_detector.h"
 namespace xllm {
@@ -31,12 +32,12 @@ const std::unordered_map<std::string, std::string>
         {"qwen3", "qwen25"},
         {"kimi_k2", "kimi_k2"},
         {"deepseekv3", "deepseekv3"},
+        {"glm45", "glm45"},
         // TODO
         // {"llama3", "llama3"},
         // {"mistral", "mistral"},
         // {"pythonic", "pythonic"},
         // {"qwen3_coder", "qwen3_coder"},
-        // {"glm45", "glm45"},
         // {"step3", "step3"},
 };
 
@@ -94,6 +95,10 @@ std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
 
   if (it->second == "deepseekv3") {
     return std::make_unique<DeepSeekV3Detector>();
+  }
+
+  if (it->second == "glm45") {
+    return std::make_unique<Glm45Detector>();
   }
 
   // if (tool_call_parser == "llama3") {

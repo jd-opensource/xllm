@@ -283,7 +283,7 @@ DEFINE_bool(enable_shm,
 DEFINE_string(tool_call_parser,
               "",
               "Specify the parser for handling tool-call interactions(e.g. "
-              "qwen25, qwen3, kimi_k2, deepseekv3).");
+              "qwen25, qwen3, kimi_k2, deepseekv3, glm45).");
 
 // --- speculative config ---
 

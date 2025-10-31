@@ -19,6 +19,7 @@ limitations under the License.
 #include "core_types.h"
 #include "deepseekv3_detector.h"
 #include "function_call_parser.h"
+#include "glm45_detector.h"
 #include "kimik2_detector.h"
 #include "qwen25_detector.h"
 
