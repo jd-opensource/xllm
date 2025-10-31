@@ -168,17 +168,38 @@ void WorkerServer::create_spawn_server(int local_rank,
   done.store(true);
 }
 
-WorkerServer::WorkerServer(
-    int local_worker_idx,
-    const std::string& master_node_addr,
-    std::atomic<bool>& done,
+void WorkerServer::prepare_shm(
     const ParallelArgs& parallel_args,
-    const torch::Device& d,
     const runtime::Options& options,
-    WorkerType worker_type,
-    bool use_spawn_worker,
-    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
-    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
+    std::unique_ptr<ForwardSharedMemoryManager>& input_shm_manager,
+    std::unique_ptr<ForwardSharedMemoryManager>& output_shm_manager) {
+  if (options.is_local() && FLAGS_enable_shm) {
+    bool is_creator;
+    int dp_local_tp_size = parallel_args.world_size() / parallel_args.dp_size();
+    int dp_group = parallel_args.rank() / dp_local_tp_size;
+
+    string name = ForwardSharedMemoryManager::create_unique_name(
+        dp_group, FORWARD_RAW_INPUT_TYPE, parallel_args.rank());
+    input_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
+        name, PB_INPUT_SHM_SIZE, is_creator, FORWARD_RAW_INPUT_TYPE);
+    LOG(INFO) << "Create input shared memory manager with name: " << name;
+
+    name = ForwardSharedMemoryManager::create_unique_name(
+        dp_group, FORWARD_RAW_OUTPUT_TYPE, parallel_args.rank());
+    output_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
+        name, PB_OUTPUT_SHM_SIZE, is_creator, FORWARD_RAW_OUTPUT_TYPE);
+    LOG(INFO) << "Create output shared memory manager with name: " << name;
+  }
+}
+
+WorkerServer::WorkerServer(int local_worker_idx,
+                           const std::string& master_node_addr,
+                           std::atomic<bool>& done,
+                           const ParallelArgs& parallel_args,
+                           const torch::Device& d,
+                           const runtime::Options& options,
+                           WorkerType worker_type,
+                           bool use_spawn_worker) {
   if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM) {
     if (use_spawn_worker) {
       // start worker in a spawn process(for offline inference worker.)
@@ -187,6 +208,9 @@ WorkerServer::WorkerServer(
       return;
     }
 
+    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr;
+    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr;
+    prepare_shm(parallel_args, options, input_shm_manager, output_shm_manager);
     // start worker in a thread.
     worker_thread_ =
         std::make_unique<std::thread>(&WorkerServer::create_server,

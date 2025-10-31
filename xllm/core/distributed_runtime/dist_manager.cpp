@@ -117,27 +117,6 @@ std::unique_ptr<CommChannel> create_channel(const std::string& worker_addrs,
 
   return channel;
 }
-
-void prepare_shm(
-    int dp_local_tp_size,
-    int rank,
-    std::unique_ptr<ForwardSharedMemoryManager>& input_shm_manager,
-    std::unique_ptr<ForwardSharedMemoryManager>& output_shm_manager) {
-  bool is_creator;
-  int32_t dp_group = rank / dp_local_tp_size;
-
-  string name = ForwardSharedMemoryManager::create_unique_name(
-      dp_group, FORWARD_RAW_INPUT_TYPE, rank);
-  input_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
-      name, PB_INPUT_SHM_SIZE, is_creator, FORWARD_RAW_INPUT_TYPE);
-  LOG(INFO) << "Create input shared memory manager with name: " << name;
-
-  name = ForwardSharedMemoryManager::create_unique_name(
-      dp_group, FORWARD_RAW_OUTPUT_TYPE, rank);
-  output_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
-      name, PB_OUTPUT_SHM_SIZE, is_creator, FORWARD_RAW_OUTPUT_TYPE);
-  LOG(INFO) << "Create output shared memory manager with name: " << name;
-}
 }  // namespace
 
 void DistManager::setup_multi_node_workers(
@@ -201,24 +180,15 @@ void DistManager::setup_multi_node_workers(
     bool use_spawn_worker = options.enable_offline_inference() && i > 0;
     ParallelArgs parallel_args(rank, world_size, dp_size, nullptr, ep_size);
 
-    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr;
-    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr;
-    if (options.is_local() && FLAGS_enable_shm) {
-      prepare_shm(
-          dp_local_tp_size, rank, input_shm_manager, output_shm_manager);
-    }
-    servers_.emplace_back(
-        std::make_unique<WorkerServer>(i,
-                                       master_node_addr,
-                                       // done,
-                                       dones[i],
-                                       parallel_args,
-                                       devices[i],
-                                       worker_server_options,
-                                       worker_type,
-                                       use_spawn_worker,
-                                       std::move(input_shm_manager),
-                                       std::move(output_shm_manager)));
+    servers_.emplace_back(std::make_unique<WorkerServer>(i,
+                                                         master_node_addr,
+                                                         // done,
+                                                         dones[i],
+                                                         parallel_args,
+                                                         devices[i],
+                                                         worker_server_options,
+                                                         worker_type,
+                                                         use_spawn_worker));
   }
 
   // Master node need to wait all workers done
