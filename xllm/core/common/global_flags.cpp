@@ -386,3 +386,6 @@ DEFINE_int64(buffer_size_per_seq,
 DEFINE_bool(enable_beam_search_kernel,
             false,
             "Whether to enable beam search kernel.");
+
+// --- qwen3 reranker config
+DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
