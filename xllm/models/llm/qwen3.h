@@ -94,6 +94,7 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
   LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
+  LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
   LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
   LOAD_ARG(n_kv_heads, "num_key_value_heads");
