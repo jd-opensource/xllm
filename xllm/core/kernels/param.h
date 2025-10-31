@@ -159,13 +159,16 @@ struct FusedMoEParams {
   bool gated;
   std::string act_mode;
   std::string scoring_func = "softmax";
+  int num_expert_group = -1;
+  int topk_group = 0;
+  double route_scale = 1.0;
   int start_expert_id = 0;
   int block_n = 0;
   bool avg_moe = false;
   std::optional<torch::Tensor> class_reduce_weight;
   std::optional<torch::Tensor> class_expert_id;
-  std::optional<std::vector<bool>> w1_quant_flag;
-  std::optional<std::vector<bool>> w2_quant_flag;
+  std::optional<torch::List<int64_t>> w1_quant_flag;
+  std::optional<torch::List<int64_t>> w2_quant_flag;
   int world_size = 0;
   int shared_expert_num = 0;
   std::string parallel_mode = "ep";

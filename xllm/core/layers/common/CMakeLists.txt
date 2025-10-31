@@ -59,3 +59,20 @@ cc_test(
     torch
     GTest::gtest_main
 )
+
+# Add test for FusedMoE
+cc_test(
+  NAME
+    fused_moe_test
+  SRCS
+    tests/fused_moe_tests.cpp
+    tests/tests_utils.cpp
+  DEPS
+    :common_layers
+    :parallel_state
+    :model
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)

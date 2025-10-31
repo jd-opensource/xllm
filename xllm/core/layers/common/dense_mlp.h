@@ -48,7 +48,7 @@ class DenseMLPImpl : public torch::nn::Module {
   ParallelArgs parallel_args_;
   ColumnParallelLinear gate_up_proj_{nullptr};
   RowParallelLinear down_proj_{nullptr};
-  bool is_per_token_smoothquant_;
+  bool is_smoothquant_;
   std::string hidden_act_;
 };
 TORCH_MODULE(DenseMLP);

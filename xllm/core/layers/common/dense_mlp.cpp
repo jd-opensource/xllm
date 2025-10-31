@@ -35,9 +35,9 @@ DenseMLPImpl::DenseMLPImpl(int hidden_size,
       parallel_args_(parallel_args),
       hidden_act_(hidden_act) {
   // Check if using w8a8 smoothquant quantization
-  is_per_token_smoothquant_ = quant_args.quant_method() == "smoothquant";
+  is_smoothquant_ = quant_args.quant_method() == "smoothquant";
 
-  if (is_per_token_smoothquant_) {
+  if (is_smoothquant_) {
     // Safety check: only w8a8 smoothquant is supported
     if (quant_args.bits() != 8 || !quant_args.activation_dynamic()) {
       LOG(FATAL)
@@ -50,7 +50,7 @@ DenseMLPImpl::DenseMLPImpl(int hidden_size,
   // Determine extra args based on quantization mode
   FusedLinearExtraArgs gate_up_proj_extra_args("none", false);
   FusedLinearExtraArgs down_proj_extra_args("none", false);
-  if (is_per_token_smoothquant_) {
+  if (is_smoothquant_) {
     // For per-token smoothquant, use specific args
     down_proj_extra_args = FusedLinearExtraArgs(hidden_act_, is_gated_);
   }
@@ -84,7 +84,7 @@ torch::Tensor DenseMLPImpl::forward(const torch::Tensor& hidden_states) {
   // input shape: [num_tokens, hidden_size]
   auto gate_up = gate_up_proj_->forward(hidden_states);
 
-  if (is_per_token_smoothquant_) {
+  if (is_smoothquant_) {
     // For w8a8 quantization, the active operation is fused with the down_proj
     return down_proj_->forward(gate_up);
   } else {
