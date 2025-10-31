@@ -19,6 +19,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include "common/global_flags.h"
 #include "logits_utils.h"
 #include "sampling_params.h"
 
@@ -75,6 +76,18 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
   output.next_tokens = samples;
 
   if (params.logprobs) {
+    if (FLAGS_enable_qwen3_reranker) {
+      int32_t false_id = 2152;  // "no"
+      int32_t true_id = 9693;   // "yes"
+      auto indices =
+          torch::tensor({false_id, true_id}, torch::kLong).to(samples.device());
+      sample_logits = sample_logits.index_select(/*dim=*/1, indices);
+      auto logprobs = torch::log_softmax(
+          sample_logits, /*dim=*/1, /*dtype=*/torch::kFloat32);
+      logprobs = logprobs.index({torch::indexing::Slice(), 1});
+      output.logprobs = logprobs.view({-1}).exp();
+      return output;
+    }
     // log_softmax is equivalent to log(softmax) but more numerically stable
     const auto logprobs = torch::log_softmax(
         sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);

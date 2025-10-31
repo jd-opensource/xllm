@@ -16,6 +16,7 @@ limitations under the License.
 
 #include "request_params.h"
 
+#include "core/common/global_flags.h"
 #include "core/common/instance_name.h"
 #include "core/util/uuid.h"
 #include "request.h"
@@ -346,9 +347,13 @@ RequestParams::RequestParams(const proto::RerankRequest& request,
   }
   x_request_id = x_rid;
   x_request_time = x_rtime;
-  is_embeddings = true;
   max_tokens = 1;
   streaming = false;
+  if (FLAGS_enable_qwen3_reranker) {
+    logprobs = true;
+  } else {
+    is_embeddings = true;
+  }
 }
 
 bool RequestParams::verify_params(OutputCallback callback) const {

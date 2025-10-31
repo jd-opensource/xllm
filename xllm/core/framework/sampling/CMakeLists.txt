@@ -17,6 +17,7 @@ cc_library(
     sampler.cpp
     beam_searcher.cpp
   DEPS
+    :common
     glog::glog
     torch
     :kernels

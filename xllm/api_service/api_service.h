@@ -20,6 +20,7 @@ limitations under the License.
 #include "embedding_service_impl.h"
 #include "image_generation_service_impl.h"
 #include "models_service_impl.h"
+#include "qwen3_rerank_service_impl.h"
 #include "rerank_service_impl.h"
 #include "xllm_service.pb.h"
 

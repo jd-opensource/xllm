@@ -51,9 +51,15 @@ APIService::APIService(Master* master,
     embedding_service_impl_ =
         ServiceImplFactory<EmbeddingServiceImpl>::create_service_impl(
             llm_master, model_names);
-    rerank_service_impl_ =
-        ServiceImplFactory<RerankServiceImpl>::create_service_impl(llm_master,
-                                                                   model_names);
+    if (FLAGS_enable_qwen3_reranker) {
+      rerank_service_impl_ =
+          ServiceImplFactory<Qwen3RerankServiceImpl>::create_service_impl(
+              llm_master, model_names);
+    } else {
+      rerank_service_impl_ =
+          ServiceImplFactory<RerankServiceImpl>::create_service_impl(
+              llm_master, model_names);
+    }
   } else if (FLAGS_backend == "vlm") {
     auto vlm_master = dynamic_cast<VLMMaster*>(master);
     mm_chat_service_impl_ =

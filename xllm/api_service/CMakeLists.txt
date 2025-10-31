@@ -12,6 +12,7 @@ cc_library(
     embedding_service_impl.h
     image_generation_service_impl.h
     rerank_service_impl.h
+    qwen3_rerank_service_impl.h
     non_stream_call.h
     service_impl_factory.h
     stream_call.h
@@ -25,6 +26,7 @@ cc_library(
     image_generation_service_impl.cpp
     models_service_impl.cpp
     rerank_service_impl.cpp
+    qwen3_rerank_service_impl.cpp
   DEPS
     :master
     :chat_template

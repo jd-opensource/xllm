@@ -25,15 +25,34 @@ namespace xllm {
 
 using RerankCall = NonStreamCall<proto::RerankRequest, proto::RerankResponse>;
 
+struct RerankRequestOutput {
+  int32_t index = 0;
+  std::string document = "";
+  float score = 0.0f;
+
+  RerankRequestOutput(int32_t index, std::string document, float score)
+      : index(index), document(std::move(document)), score(score) {}
+};
+
 // a class to handle completion requests
-class RerankServiceImpl final : public APIServiceImpl<RerankCall> {
+class RerankServiceImpl : public APIServiceImpl<RerankCall> {
  public:
   RerankServiceImpl(LLMMaster* master, const std::vector<std::string>& models);
 
   // brpc call_data needs to use shared_ptr
   void process_async_impl(std::shared_ptr<RerankCall> call);
 
- private:
+ protected:
+  bool send_result_to_client_brpc(
+      std::shared_ptr<RerankCall> call,
+      const std::string& request_id,
+      int64_t created_time,
+      const std::string& model,
+      int32_t top_n,
+      std::vector<RerankRequestOutput>& rerank_outputs,
+      const std::vector<RequestOutput>& req_outputs);
+
+ protected:
   DISALLOW_COPY_AND_ASSIGN(RerankServiceImpl);
   LLMMaster* master_ = nullptr;
 };

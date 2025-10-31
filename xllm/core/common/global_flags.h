@@ -201,6 +201,8 @@ DECLARE_int64(buffer_size_per_seq);
 
 DECLARE_bool(enable_beam_search_kernel);
 
+DECLARE_bool(enable_qwen3_reranker);
+
 DECLARE_bool(enable_shm);
 
 DECLARE_bool(enable_sparse_valid_path_filter);

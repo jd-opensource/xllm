@@ -400,3 +400,6 @@ DEFINE_bool(enable_convert_tokens_to_item,
 DEFINE_bool(enable_convert_item_to_tokens,
             false,
             "Enable item id conversion to token ids when request arrive.");
+
+// --- qwen3 reranker config
+DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
