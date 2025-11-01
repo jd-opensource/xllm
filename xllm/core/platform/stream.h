@@ -34,7 +34,7 @@ namespace xllm {
 
 class Stream {
  public:
-  Stream();
+  Stream(const int32_t timeout = -1);
   ~Stream() = default;
 
   Stream(const Stream&) = delete;
@@ -44,6 +44,11 @@ class Stream {
 
   int synchronize() const;
   c10::StreamGuard set_stream_guard() const;
+#if defined(USE_NPU)
+  c10_npu::NPUStream* get_stream() { return &stream_; }
+#elif defined(USE_MLU)
+  torch_mlu::MLUStream* get_stream() { return &stream_; }
+#endif
 
  private:
 #if defined(USE_NPU)
@@ -51,6 +56,7 @@ class Stream {
 #elif defined(USE_MLU)
   torch_mlu::MLUStream stream_;
 #endif
+  const int32_t timeout_;
 };
 
 }  // namespace xllm

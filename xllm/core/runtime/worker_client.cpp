@@ -159,9 +159,24 @@ folly::SemiFuture<bool> WorkerClient::pull_kv_blocks_async(
                                        dst_blocks);
 }
 
-folly::SemiFuture<uint32_t> WorkerClient::load_kv_blocks_from_store_async(
-    const std::vector<CacheBlockInfo> cache_block_info) {
-  return worker_->load_kv_blocks_from_store_async(cache_block_info);
+folly::SemiFuture<uint32_t> WorkerClient::transfer_kv_blocks(
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  LOG(FATAL) << "WorkerClient Method transfer_kv_blocks with return "
+                "folly::SemiFuture<uint32_t> is "
+                "UnImplemented.";
+}
+
+void WorkerClient::prefetch_from_storage(
+    const std::atomic<bool>& flag,
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    std::shared_ptr<std::atomic<uint32_t>>& success_cnt) {
+  LOG(FATAL) << "WorkerClient Method prefetch_from_storage is UnImplemented.";
+}
+
+void WorkerClient::transfer_kv_blocks(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  worker_->transfer_kv_blocks(batch_id, block_transfer_info);
 }
 
 const torch::Device& WorkerClient::device() const { return worker_->device(); }

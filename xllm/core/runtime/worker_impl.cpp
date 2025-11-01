@@ -30,6 +30,7 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
+#include "acl/acl.h"
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -45,9 +46,14 @@ limitations under the License.
 #include "util/timer.h"
 #include "util/utils.h"
 
+#define USE_ASYNC true
+
 namespace xllm {
 
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
+constexpr uint32_t BATCH_COPY_MAX_SIZE = 4096;
+constexpr uint32_t TIMEOUT_S = 60;      // second
+constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
@@ -66,10 +72,26 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 
   device_.set_device();
   device_.init_device_context();
-  general_threadpool_.schedule([this]() mutable { device_.set_device(); });
+  for (int i = 0; i < h2d_threadpool_.size(); i++) {
+    h2d_threadpool_.schedule_with_tid(
+        [this]() mutable {
+          device_.set_device();
+          h2d_stream_[std::this_thread::get_id()] =
+              device_.get_stream_from_pool(TIMEOUT_MS);
+        },
+        i);
+  }
+  for (int i = 0; i < d2h_threadpool_.size(); i++) {
+    d2h_threadpool_.schedule_with_tid(
+        [this]() mutable {
+          device_.set_device();
+          d2h_stream_[std::this_thread::get_id()] =
+              device_.get_stream_from_pool(TIMEOUT_MS);
+        },
+        i);
+  }
 
   prepare_stream_ = device_.get_stream_from_pool();
-  copy_out_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
 }
 
@@ -101,6 +123,11 @@ bool WorkerImpl::allocate_kv_cache(
     kv_caches_.emplace_back(key_cache, value_cache);
   }
 
+  key_cache_size_per_layer_ = kv_caches_[0].get_k_cache()[0].numel() *
+                              kv_caches_[0].get_k_cache()[0].element_size();
+  value_cache_size_per_layer_ = kv_caches_[0].get_v_cache()[0].numel() *
+                                kv_caches_[0].get_v_cache()[0].element_size();
+
   allocate_host_kv_cache(kv_cache_shape);
   status_ = Status::READY;
   return true;
@@ -114,33 +141,57 @@ bool WorkerImpl::allocate_host_kv_cache(
 
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(host_kv_caches_.empty()) << "KV caches are already initialized.";
+  CHECK(device_kv_cache_shape[0][0] == device_kv_cache_shape[1][0]);
 
   std::vector<std::vector<int64_t>> host_kv_cache_shape = device_kv_cache_shape;
-  host_kv_cache_shape[0][0] =
-      device_kv_cache_shape[0][0] * options_.host_blocks_factor();
-  host_kv_cache_shape[1][0] =
-      device_kv_cache_shape[1][0] * options_.host_blocks_factor();
-
-  // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
-  kv_caches_.reserve(num_layers);
-  for (int64_t i = 0; i < num_layers; ++i) {
+  int64_t host_bolck_size =
+      device_kv_cache_shape[0][0] * options_.host_blocks_factor();
+  host_kv_cache_shape[0][0] = num_layers;
+  host_kv_cache_shape[1][0] = num_layers;
+
+  // create a KVCache shape: block_size * [layers, token, head, dim]
+  host_kv_caches_.reserve(host_bolck_size);
+
+  for (int64_t i = 0; i < host_bolck_size; ++i) {
     torch::Tensor key_cache, value_cache;
     key_cache = torch::empty(host_kv_cache_shape[0],
-                             torch::dtype(dtype_).device(torch::kCPU));
+                             torch::dtype(dtype_).device(torch::kCPU))
+                    .pin_memory();
     value_cache = torch::empty(host_kv_cache_shape[1],
-                               torch::dtype(dtype_).device(torch::kCPU));
+                               torch::dtype(dtype_).device(torch::kCPU))
+                      .pin_memory();
     host_kv_caches_.emplace_back(key_cache, value_cache);
   }
+  LOG(INFO) << "Initializing host kv block size: " << host_bolck_size;
+
+  int32_t device_id = device_.index();
+  h2d_attrs_.dstLoc.id = device_id;
+  h2d_attrs_.dstLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_DEVICE;
+  h2d_attrs_.srcLoc.id = device_id;
+  h2d_attrs_.srcLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_HOST;
+  memset(h2d_attrs_.rsv, 0, 16);
+
+  d2h_attrs_.dstLoc.id = device_id;
+  d2h_attrs_.dstLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_HOST;
+  d2h_attrs_.srcLoc.id = device_id;
+  d2h_attrs_.srcLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_DEVICE;
+  memset(d2h_attrs_.rsv, 0, 16);
 
   if (options_.enable_kvcache_store()) {
     StoreConfig config;
+    config.localhost_name = options_.store_local_hostname();
     config.protocol = options_.store_protocol();
-    config.metadata_connstring = options_.store_metadata_connstring();
-    config.master_server_entry = options_.store_master_server_entry();
-    config.tp_rank = options_.node_rank() % options_.dp_size();
+    config.metadata_server = options_.store_metadata_server();
+    config.master_server_address = options_.store_master_server_address();
+    config.tp_rank = options_.dp_size() > 1
+                         ? options_.node_rank() % options_.dp_size()
+                         : options_.node_rank();
 
-    kv_cache_store_ = std::make_shared<KVCacheStore>(config, &host_kv_caches_);
+    if (!KVCacheStore::get_instance().init(config, &host_kv_caches_)) {
+      LOG(ERROR) << "Init KVCacheStore fail!";
+      return false;
+    }
   }
 
   status_ = Status::READY;
@@ -375,31 +426,9 @@ void WorkerImpl::prepare_work_before_execute(
     fwd_inputs_on_device = inputs.micro_inputs[i].to(device_, dtype_);
     auto& input_params = fwd_inputs_on_device.input_params;
 #if defined(USE_NPU)
-    if (input_params.copy_out_blocks.size() > 0 ||
-        input_params.copy_in_blocks.size() > 0) {
-      const int64_t num_layers = context_.get_model_args().n_layers();
-      for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-        auto key_cache = kv_caches_[layer_id].get_k_cache();
-        auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
-        auto value_cache = kv_caches_[layer_id].get_v_cache();
-        auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
-
-        for (auto block_info : input_params.copy_out_blocks) {
-          host_k_cache[block_info.host_block_id].copy_(
-              key_cache[block_info.device_block_id]);
-          host_v_cache[block_info.host_block_id].copy_(
-              value_cache[block_info.device_block_id]);
-        }
-        for (auto block_info : input_params.copy_in_blocks) {
-          key_cache[block_info.device_block_id].copy_(
-              host_k_cache[block_info.host_block_id]);
-          value_cache[block_info.device_block_id].copy_(
-              host_v_cache[block_info.host_block_id]);
-        }
-      }
-
-      offload_kv_blocks_to_store_async(
-          inputs.micro_inputs[i].input_params.copy_out_blocks);
+    if (input_params.swap_blocks.size() > 0 &&
+        !FLAGS_enable_block_copy_kernel) {
+      auto& swap_blocks = input_params.swap_blocks;
 
       if (input_params.swap_blocks.size() > 0 &&
           !FLAGS_enable_block_copy_kernel) {
@@ -411,8 +440,8 @@ void WorkerImpl::prepare_work_before_execute(
         dst_indices.reserve(swap_blocks.size());
 
         for (const auto& block : swap_blocks) {
-          src_indices.push_back(block.device_block_id);
-          dst_indices.push_back(block.host_block_id);
+          src_indices.push_back(block.src_block_id);
+          dst_indices.push_back(block.dst_block_id);
         }
 
         // batch select keys and values
@@ -461,39 +490,6 @@ void WorkerImpl::prepare_work_before_execute(
   auto ret = prepare_stream_->synchronize();
 }
 
-folly::SemiFuture<bool> WorkerImpl::copy_out_blocks_async(
-    ModelInputParams& input_params) {
-  folly::Promise<bool> promise;
-  auto future = promise.getSemiFuture();
-  general_threadpool_.schedule([this,
-                                input_params = input_params,
-                                promise = std::move(promise)]() mutable {
-    c10::StreamGuard streamGuard = copy_out_stream_->set_stream_guard();
-    if (input_params.async_copy_out_blocks.size() > 0) {
-      const int64_t num_layers = context_.get_model_args().n_layers();
-      for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-        auto key_cache = kv_caches_[layer_id].get_k_cache();
-        auto host_k_cache = host_kv_caches_[layer_id].get_k_cache();
-        auto value_cache = kv_caches_[layer_id].get_v_cache();
-        auto host_v_cache = host_kv_caches_[layer_id].get_v_cache();
-
-        for (auto block_info : input_params.async_copy_out_blocks) {
-          host_k_cache[block_info.host_block_id].copy_(
-              key_cache[block_info.device_block_id]);
-          host_v_cache[block_info.host_block_id].copy_(
-              value_cache[block_info.device_block_id]);
-        }
-      }
-
-      offload_kv_blocks_to_store(input_params.async_copy_out_blocks);
-    }
-    auto ret = copy_out_stream_->synchronize();
-    promise.setValue(ret == 0);
-  });
-
-  return future;
-}
-
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
     const BatchedForwardInputs& inputs) {
   BatchedForwardInputs batched_inputs_on_device;
@@ -506,19 +502,19 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   threadpool_.schedule([this,
                         inputs = std::move(batched_inputs_on_device),
                         promise = std::move(promise)]() mutable {
-    // run the model on the given input in working thread
-    std::vector<folly::SemiFuture<bool>> copy_futures;
     for (auto& input : inputs.micro_inputs) {
-      copy_futures.push_back(
-          std::move(copy_out_blocks_async(input.input_params)));
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (layer_wise_load_synchronizer_.count(input.input_params.batch_id) !=
+            0) {
+          input.input_params.layer_wise_load_synchronizer =
+              layer_wise_load_synchronizer_[input.input_params.batch_id];
+        }
+      }
     }
+    // run the model on the given input in working thread
     if (!enable_schedule_overlap()) {
       const auto output = this->step(inputs);
-      std::for_each(copy_futures.begin(),
-                    copy_futures.end(),
-                    [](folly::SemiFuture<bool>& copy_future) {
-                      std::move(copy_future).get();
-                    });
       promise.setValue(output);
     } else {
       for (auto i = 0; i < inputs.micro_inputs.size(); ++i) {
@@ -551,11 +547,6 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
           last_step_output_valid_ = false;
         }
       }
-      std::for_each(copy_futures.begin(),
-                    copy_futures.end(),
-                    [](folly::SemiFuture<bool>& copy_future) {
-                      std::move(copy_future).get();
-                    });
       promise.setValue(output);
     }
   });
@@ -698,42 +689,40 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
   return false;
 }
 
-folly::SemiFuture<uint32_t> WorkerImpl::load_kv_blocks_from_store_async(
-    const std::vector<CacheBlockInfo>& cache_block_info) {
-  folly::Promise<uint32_t> promise;
-  auto future = promise.getSemiFuture();
-  general_threadpool_.schedule(
-      [this, &cache_block_info, promise = std::move(promise)]() mutable {
-        if (this->kv_cache_store_ == nullptr) {
-          promise.setValue(0);
-          return;
-        }
-        promise.setValue(this->kv_cache_store_->batch_get(cache_block_info));
-      });
-  return future;
-}
+uint32_t WorkerImpl::transfer_kv_blocks(
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  CHECK(!block_transfer_info.empty());
 
-uint32_t WorkerImpl::offload_kv_blocks_to_store(
-    const std::vector<CacheBlockInfo>& cache_block_info) {
-  if (kv_cache_store_ == nullptr) {
-    return 0;
+  switch (block_transfer_info[0].transfer_type) {
+    case TransferType::D2G:
+      return offload_kv_blocks(block_transfer_info);
+    default:
+      LOG(ERROR) << "Unsupport copy type: "
+                 << uint32_t(block_transfer_info[0].transfer_type);
+      return 0;
   }
-  return kv_cache_store_->batch_put(cache_block_info);
 }
 
-folly::SemiFuture<uint32_t> WorkerImpl::offload_kv_blocks_to_store_async(
-    const std::vector<CacheBlockInfo>& cache_block_info) {
-  folly::Promise<uint32_t> promise;
-  auto future = promise.getSemiFuture();
-  general_threadpool_.schedule(
-      [this, &cache_block_info, promise = std::move(promise)]() mutable {
-        if (this->kv_cache_store_ == nullptr) {
-          promise.setValue(0);
-          return;
+void WorkerImpl::transfer_kv_blocks(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  CHECK(!block_transfer_info.empty());
+  h2d_threadpool_.schedule(
+      [this,
+       batch_id = batch_id,
+       block_transfer_info = std::move(block_transfer_info)]() mutable {
+        switch (block_transfer_info[0].transfer_type) {
+          case TransferType::H2D: {
+            Slice<BlockTransferInfo> info_slice{block_transfer_info};
+            h2d_batch_copy(batch_id, info_slice);
+            break;
+          }
+          default:
+            LOG(ERROR) << "Unsupport copy type: "
+                       << uint32_t(block_transfer_info[0].transfer_type);
+            break;
         }
-        promise.setValue(this->kv_cache_store_->batch_put(cache_block_info));
       });
-  return future;
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(
@@ -756,6 +745,284 @@ int64_t WorkerImpl::get_active_activation_memory() {
   return DeviceMonitor::get_instance()
       .get_device_stats(device_.index())
       .active_activation_memory;
+}
+
+uint32_t WorkerImpl::offload_kv_blocks(
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  if (block_transfer_info.empty()) {
+    return 0;
+  }
+
+  const int64_t num_layers = context_.get_model_args().n_layers();
+  uint32_t max_blocks_per_batch = BATCH_COPY_MAX_SIZE / (2 * num_layers);
+  uint32_t total_slice =
+      block_transfer_info.size() / max_blocks_per_batch +
+      uint32_t(block_transfer_info.size() % max_blocks_per_batch != 0);
+
+  Slice transfer_info_slice(block_transfer_info);
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(total_slice);
+
+  for (size_t i = 0; i < block_transfer_info.size();
+       i += max_blocks_per_batch) {
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    auto slice = transfer_info_slice.slice(
+        i, std::min(i + max_blocks_per_batch, block_transfer_info.size()));
+
+    d2h_threadpool_.schedule([this,
+                              promise = std::move(promise),
+                              slice = std::move(slice)]() mutable {
+      bool ret = d2h_batch_copy(slice);
+      auto success_cnt = offload_to_store(slice);
+      if (success_cnt != slice.size()) {
+        LOG(WARNING) << "KVCacheStore not all put success: " << success_cnt
+                     << "/" << slice.size();
+      }
+      promise.setValue(ret);
+    });
+
+    futures.emplace_back(std::move(future));
+  }
+
+  if (!futures.empty()) {
+    try {
+      // TODO(kangmeng): add timeout
+      auto all_results = folly::collect(futures).get();
+      if (!std::all_of(all_results.begin(), all_results.end(), [](bool result) {
+            return result;
+          })) {
+        LOG(FATAL) << "Not all D2H copy returned true";
+      }
+    } catch (const std::exception& e) {
+      LOG(FATAL) << "Future execution failed: " << e.what();
+    }
+  }
+
+  return block_transfer_info.size();
+}
+
+bool WorkerImpl::d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
+#if defined(USE_NPU)
+  CHECK(d2h_stream_.count(std::this_thread::get_id()) != 0)
+      << "WorkerImpl::d2h_batch_copy can only be called in d2h_threadpool_.";
+
+  const int64_t num_layers = context_.get_model_args().n_layers();
+  uint32_t num_batches = block_transfer_info.size() * num_layers * 2;
+  void** srcs = new void*[num_batches];
+  void** dsts = new void*[num_batches];
+  size_t* copy_size = new size_t[num_batches];
+  aclrtMemcpyBatchAttr attrs[1] = {d2h_attrs_};
+  size_t attrs_indexes[1] = {0};
+  size_t fail_index;
+  uint32_t curr_index = 0;
+
+  for (const auto& info : block_transfer_info) {
+    auto dst_k_cache = host_kv_caches_.at(info.dst_block_id).get_k_cache();
+    auto dst_v_cache = host_kv_caches_.at(info.dst_block_id).get_v_cache();
+
+    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+      auto src_k_cache = kv_caches_.at(layer_id).get_k_cache();
+      auto src_v_cache = kv_caches_.at(layer_id).get_v_cache();
+
+      srcs[curr_index] = src_k_cache[info.src_block_id].data_ptr();
+      dsts[curr_index] = dst_k_cache[layer_id].data_ptr();
+      copy_size[curr_index] = key_cache_size_per_layer_;
+
+      curr_index++;
+
+      srcs[curr_index] = src_v_cache[info.src_block_id].data_ptr();
+      dsts[curr_index] = dst_v_cache[layer_id].data_ptr();
+      copy_size[curr_index] = value_cache_size_per_layer_;
+
+      curr_index++;
+    }
+  }
+
+  c10::StreamGuard streamGuard =
+      d2h_stream_[std::this_thread::get_id()]->set_stream_guard();
+
+  // TODO(kangmeng): change to async API
+  aclError ret = aclrtMemcpyBatch(dsts,
+                                  copy_size,
+                                  srcs,
+                                  copy_size,
+                                  num_batches,
+                                  attrs,
+                                  attrs_indexes,
+                                  1,
+                                  &fail_index);
+  if (ret != 0 || fail_index != SIZE_MAX) {
+    LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
+               << ", fail_index:" << fail_index;
+    return false;
+  }
+
+  if (d2h_stream_[std::this_thread::get_id()]->synchronize() != 0) {
+    LOG(ERROR) << "d2h_batch_copy timeout!";
+    return false;
+  }
+
+  delete[] dsts;
+  delete[] srcs;
+  delete[] copy_size;
+
+#endif
+  return true;
+}
+
+bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
+                                Slice<BlockTransferInfo>& block_transfer_info) {
+#if defined(USE_NPU)
+  CHECK(h2d_stream_.count(std::this_thread::get_id()) != 0)
+      << "WorkerImpl::h2d_batch_copy can only be called in h2d_threadpool_.";
+  CHECK(block_transfer_info.size() < BATCH_COPY_MAX_SIZE / 2)
+      << "h2d_batch_copy support copy blocks less than "
+      << BATCH_COPY_MAX_SIZE / 2 << ", but got " << block_transfer_info.size();
+
+  if (block_transfer_info.empty()) {
+    return true;
+  }
+
+  const int64_t num_layers = context_.get_model_args().n_layers();
+  uint32_t num_batches = block_transfer_info.size() * 2;
+
+  auto synchronizer = std::make_shared<NPULayerSynchronizerImpl>(num_layers);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (layer_wise_load_synchronizer_.count(batch_id) != 0) {
+      LOG(FATAL) << "Batch id already exists!";
+    }
+    layer_wise_load_synchronizer_[batch_id] = synchronizer;
+  }
+
+  void** srcs = new void*[num_batches];
+  void** dsts = new void*[num_batches];
+  size_t* copy_size = new size_t[num_batches];
+  aclrtMemcpyBatchAttr attrs[1] = {h2d_attrs_};
+  size_t attrs_indexes[1] = {0};
+
+  c10::StreamGuard streamGuard =
+      h2d_stream_[std::this_thread::get_id()]->set_stream_guard();
+  auto stream = h2d_stream_[std::this_thread::get_id()]->get_stream()->stream();
+  aclError ret = 0;
+
+  for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+    auto dst_k_cache = kv_caches_.at(layer_id).get_k_cache();
+    auto dst_v_cache = kv_caches_.at(layer_id).get_v_cache();
+    size_t fail_index = 0;
+    uint32_t curr_index = 0;
+    auto* event = synchronizer->get_event(layer_id);
+    auto* event_flag = synchronizer->get_event_flag(layer_id);
+
+    for (const auto& info : block_transfer_info) {
+      auto src_k_cache = host_kv_caches_.at(info.src_block_id).get_k_cache();
+      auto src_v_cache = host_kv_caches_.at(info.src_block_id).get_v_cache();
+
+      srcs[curr_index] = src_k_cache[layer_id].data_ptr();
+      dsts[curr_index] = dst_k_cache[info.dst_block_id].data_ptr();
+      copy_size[curr_index] = key_cache_size_per_layer_;
+      curr_index++;
+
+      srcs[curr_index] = src_v_cache[layer_id].data_ptr();
+      dsts[curr_index] = dst_v_cache[info.dst_block_id].data_ptr();
+      copy_size[curr_index] = value_cache_size_per_layer_;
+      curr_index++;
+    }
+
+    // TODO(kangmeng): change to async API
+    ret = aclrtMemcpyBatch(dsts,
+                           copy_size,
+                           srcs,
+                           copy_size,
+                           num_batches,
+                           attrs,
+                           attrs_indexes,
+                           1,
+                           &fail_index);
+
+    if (ret != 0 || fail_index != SIZE_MAX) {
+      LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
+                 << ", fail_index:" << fail_index;
+    } else {
+      ret = aclrtRecordEvent(*event, stream);
+      if (ret != 0) {
+        LOG(ERROR) << "aclrtRecordEvent error: " << ret;
+      }
+    }
+    event_flag->store(true, std::memory_order_release);
+    if (ret != 0) break;
+  }
+
+  if (h2d_stream_[std::this_thread::get_id()]->synchronize() != 0) {
+    LOG(ERROR) << "h2d_batch_copy timeout!";
+    return false;
+  }
+
+  delete[] dsts;
+  delete[] srcs;
+  delete[] copy_size;
+
+#endif
+  return true;
+}
+
+uint32_t WorkerImpl::offload_to_store(
+    Slice<BlockTransferInfo>& block_transfer_info) {
+  if (!options_.enable_kvcache_store()) {
+    return block_transfer_info.size();
+  }
+
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+
+  batchput_threadpool_.schedule(
+      [this, &block_transfer_info, promise = std::move(promise)]() mutable {
+        promise.setValue(
+            KVCacheStore::get_instance().batch_put(block_transfer_info));
+      });
+
+  return std::move(future)
+      .via(folly::getGlobalCPUExecutor())
+      .within(std::chrono::seconds(TIMEOUT_S))
+      .thenTry([](folly::Try<uint32_t>&& t) -> uint32_t {
+        if (t.hasValue()) {
+          return t.value();
+        } else {
+          LOG(WARNING) << "BatchPut operation timed out";
+          return 0u;
+        }
+      })
+      .get();
+}
+
+uint32_t WorkerImpl::prefetch_from_storage(
+    Slice<BlockTransferInfo>& block_transfer_info) {
+  if (!options_.enable_kvcache_store()) {
+    return 0;
+  }
+
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+
+  batchget_threadpool_.schedule(
+      [this, &block_transfer_info, promise = std::move(promise)]() mutable {
+        promise.setValue(
+            KVCacheStore::get_instance().batch_get(block_transfer_info));
+      });
+
+  return std::move(future)
+      .via(folly::getGlobalCPUExecutor())
+      .within(std::chrono::seconds(TIMEOUT_S))
+      .thenTry([](folly::Try<uint32_t>&& t) -> uint32_t {
+        if (t.hasValue()) {
+          return t.value();
+        } else {
+          LOG(WARNING) << "BatchGet operation timed out";
+          return 0u;
+        }
+      })
+      .get();
 }
 
 }  // namespace xllm

@@ -43,6 +43,11 @@ void ConcurrentBlockManagerImpl::cache(const Slice<int32_t>& token_ids,
   BlockManagerImpl::cache(token_ids, blocks);
 }
 
+void ConcurrentBlockManagerImpl::cache(const std::vector<Block>& blocks) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  BlockManagerImpl::cache(blocks);
+}
+
 size_t ConcurrentBlockManagerImpl::num_blocks_in_prefix_cache() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return BlockManagerImpl::num_blocks_in_prefix_cache();

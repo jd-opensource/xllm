@@ -73,7 +73,12 @@ class Request : public RequestBase {
 
   size_t total_num_blocks();
 
-  void set_preempted() { state_.preempted = true; }
+  void set_preempted() {
+    state_.preempted = true;
+    for (auto& seq : sequences_group_->sequences()) {
+      seq->preempted();
+    }
+  }
 
   bool preempted() const { return state_.preempted; }
 

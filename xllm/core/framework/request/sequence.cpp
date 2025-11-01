@@ -383,6 +383,7 @@ void Sequence::reset() {
   kv_state_.reset();
   host_kv_state_.reset();
   volatile_num_prompt_tokens_ = num_tokens_;
+  preempted_ = false;
 }
 
 void Sequence::add_shared_kv_blocks(std::vector<Block>&& blocks) {

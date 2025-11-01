@@ -55,26 +55,34 @@ class XTensorManagerPool final : public KVCacheManager {
     LOG(FATAL) << "allocate_shared is not implemented for page manager pool";
   }
 
-  std::vector<std::vector<CacheBlockInfo>>* get_copy_in_cache_block_infos()
+  std::vector<std::vector<BlockTransferInfo>>*
+  get_offload_block_transfer_infos() override {
+    LOG(FATAL)
+        << "get_offload_block_transfer_infos is not implemented for page "
+           "manager pool";
+  }
+
+  std::vector<std::vector<BlockTransferInfo>>* get_load_block_transfer_infos()
       override {
-    LOG(FATAL) << "get_copy_in_cache_block_infos is not implemented for page "
+    LOG(FATAL) << "get_load_block_transfer_infos is not implemented for page "
                   "manager pool";
   }
 
-  std::vector<std::vector<CacheBlockInfo>>* get_copy_out_cache_block_infos()
+  std::vector<std::vector<BlockTransferInfo>>* get_swap_block_transfer_infos()
       override {
-    LOG(FATAL) << "get_copy_out_cache_block_infos is not implemented for page "
+    LOG(FATAL) << "get_swap_block_transfer_infos is not implemented for page "
                   "manager pool";
   }
 
-  std::vector<std::vector<CacheBlockInfo>>* get_swap_cache_block_infos()
-      override {
-    LOG(FATAL) << "get_swap_cache_block_infos is not implemented for page "
+  void set_offload_callback(
+      std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) override {
+    LOG(FATAL) << "set_offload_callback is not implemented for page "
                   "manager pool";
   }
 
-  void reset_copy_content() override {
-    LOG(FATAL) << "reset_copy_content is not implemented for page manager pool";
+  void reset_transfer_infos() override {
+    LOG(FATAL)
+        << "reset_transfer_infos is not implemented for page manager pool";
   }
 
   uint32_t num_blocks() const override {

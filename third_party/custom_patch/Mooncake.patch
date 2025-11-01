@@ -26,7 +26,7 @@ index 8483085..9d263dd 100644
  add_subdirectory(benchmarks)
 \ No newline at end of file
 diff --git a/mooncake-store/include/offset_allocator/offset_allocator.hpp b/mooncake-store/include/offset_allocator/offset_allocator.hpp
-index fde978b..ac54f8c 100644
+index b6d55c8..2d80158 100644
 --- a/mooncake-store/include/offset_allocator/offset_allocator.hpp
 +++ b/mooncake-store/include/offset_allocator/offset_allocator.hpp
 @@ -6,7 +6,7 @@
@@ -38,32 +38,16 @@ index fde978b..ac54f8c 100644
  
  namespace mooncake::offset_allocator {
  typedef unsigned char uint8;
-diff --git a/mooncake-store/include/storage_backend.h b/mooncake-store/include/storage_backend.h
-index a30f0c6..3bfeffb 100644
---- a/mooncake-store/include/storage_backend.h
-+++ b/mooncake-store/include/storage_backend.h
-@@ -4,8 +4,8 @@
- #include <vector>
- #include <mutex>
- #include <fstream>
--#include <types.h>
--#include <file_interface.h>
-+#include "types.h"
-+#include "file_interface.h"
- #include <filesystem>
- #include <thread>
- #include <chrono>
 diff --git a/mooncake-store/include/types.h b/mooncake-store/include/types.h
-index d2830a3..39c3b27 100644
+index 077926b..b36862b 100644
 --- a/mooncake-store/include/types.h
 +++ b/mooncake-store/include/types.h
-@@ -10,8 +10,11 @@
- #include <variant>
+@@ -8,7 +8,10 @@
+ #include <unordered_map>
  #include <vector>
  
 -#include "Slab.h"
 +#include "cachelib_memory_allocator/Slab.h"
- #include "allocator.h"
 +namespace iguana {
 +using std::contiguous_iterator;
 +}
@@ -71,7 +55,7 @@ index d2830a3..39c3b27 100644
  #include "ylt/struct_json/json_writer.h"
  
 diff --git a/mooncake-store/src/ha_helper.cpp b/mooncake-store/src/ha_helper.cpp
-index c1f4ded..e4b982b 100644
+index 796838a..8e72b80 100644
 --- a/mooncake-store/src/ha_helper.cpp
 +++ b/mooncake-store/src/ha_helper.cpp
 @@ -1,3 +1,6 @@
@@ -81,7 +65,7 @@ index c1f4ded..e4b982b 100644
  #include "ha_helper.h"
  #include "etcd_helper.h"
  #include "rpc_service.h"
-@@ -169,4 +172,6 @@ MasterServiceSupervisor::~MasterServiceSupervisor() {
+@@ -174,4 +177,6 @@ MasterServiceSupervisor::~MasterServiceSupervisor() {
      }
  }
  
@@ -113,7 +97,7 @@ index f515671..7a019b6 100644
 +#pragma GCC pop_options
 \ No newline at end of file
 diff --git a/mooncake-store/src/utils.cpp b/mooncake-store/src/utils.cpp
-index b775851..736d61d 100644
+index 9678f57..f41eb10 100644
 --- a/mooncake-store/src/utils.cpp
 +++ b/mooncake-store/src/utils.cpp
 @@ -1,6 +1,6 @@

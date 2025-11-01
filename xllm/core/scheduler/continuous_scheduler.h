@@ -264,7 +264,7 @@ class ContinuousScheduler : public Scheduler {
       size_t& num_online_decode_preempt_offline_requests,
       std::unique_ptr<DecodePriorityQueue>& running_queue);
 
-  virtual void prepare_cache_async(std::shared_ptr<Request>& request);
+  virtual void prefetch_from_storage(std::shared_ptr<Request>& request);
 
   void handle_abnormal_request(
       std::unique_ptr<DecodePriorityQueue>& running_queue,

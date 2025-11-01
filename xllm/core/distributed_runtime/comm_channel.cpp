@@ -18,6 +18,8 @@ limitations under the License.
 #include <brpc/controller.h>
 #include <glog/logging.h>
 
+#include <future>
+
 namespace xllm {
 
 bool CommChannel::init_brpc(const std::string& server_address) {
@@ -306,21 +308,121 @@ bool CommChannel::allocate_kv_cache_with_transfer(
   return true;
 }
 
-bool CommChannel::load_kv_blocks_from_store_async(
-    const std::vector<CacheBlockInfo>& cache_block_info,
+void CommChannel::transfer_kv_blocks(
+    const std::vector<BlockTransferInfo>& block_transfer_info,
     folly::Promise<uint32_t>& promise) {
-  proto::CacheBlockInfos pb_cache_block_info;
-  if (!cache_block_info_to_proto(cache_block_info, &pb_cache_block_info)) {
+  proto::BlockTransferInfos pb_block_transfer_info;
+  if (!block_transfer_info_to_proto(
+          0x0, block_transfer_info, &pb_block_transfer_info)) {
     promise.setValue(0);
-    return false;
+    return;
   }
 
-  auto done = new LoadKVCacheFromStoreClosure();
+  auto done = new TransferBlocksClosure();
   done->promise = std::move(promise);
-  stub_->LoadKVCacheFromStore(
-      &done->cntl, &pb_cache_block_info, &done->response, done);
+  stub_->TransferBlocks(
+      &done->cntl, &pb_block_transfer_info, &done->response, done);
+}
 
-  return true;
+void CommChannel::transfer_kv_blocks(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  proto::BlockTransferInfos pb_block_transfer_info;
+  if (!block_transfer_info_to_proto(
+          batch_id, block_transfer_info, &pb_block_transfer_info)) {
+    return;
+  }
+  brpc::Controller cntl;
+  proto::TransferStatus response;
+  stub_->TransferBlocks(&cntl, &pb_block_transfer_info, &response, nullptr);
+}
+
+class ClientStreamReceiver : public brpc::StreamInputHandler {
+ private:
+  const std::atomic<bool>& termination_flag_;
+  std::shared_ptr<std::atomic<uint32_t>> success_cnt_;
+  std::promise<void> close_promise_;
+  std::atomic<bool> promise_set_{false};
+
+ public:
+  ClientStreamReceiver(const std::atomic<bool>& termination_flag,
+                       std::shared_ptr<std::atomic<uint32_t>>& success_cnt)
+      : termination_flag_(termination_flag), success_cnt_(success_cnt) {}
+
+  ~ClientStreamReceiver() {
+    if (!promise_set_.exchange(true)) {
+      try {
+        close_promise_.set_value();
+      } catch (const std::exception& e) {
+        LOG(WARNING) << "Exception in destructor: " << e.what();
+      }
+    }
+  }
+
+  std::future<void> get_close_future() { return close_promise_.get_future(); }
+
+  int on_received_messages(brpc::StreamId id,
+                           butil::IOBuf* const messages[],
+                           size_t size) override {
+    for (size_t i = 0; i < size; ++i) {
+      std::string msg_str = messages[i]->to_string();
+      int32_t success_cnt = std::stoi(msg_str);
+
+      if (success_cnt > 0 &&
+          !termination_flag_.load(std::memory_order_acquire)) {
+        success_cnt_->fetch_add(success_cnt, std::memory_order_relaxed);
+      } else {
+        brpc::StreamClose(id);
+        if (!promise_set_.exchange(true)) {
+          close_promise_.set_value();
+        }
+        break;
+      }
+    }
+    return 0;
+  }
+
+  virtual void on_idle_timeout(brpc::StreamId id) override {
+    if (!promise_set_.exchange(true)) {
+      close_promise_.set_value();
+    }
+  }
+
+  virtual void on_closed(brpc::StreamId id) override {
+    if (!promise_set_.exchange(true)) {
+      close_promise_.set_value();
+    }
+  }
+};
+
+void CommChannel::prefetch_from_storage(
+    const std::atomic<bool>& flag,
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    std::shared_ptr<std::atomic<uint32_t>>& success_cnt) {
+  proto::BlockTransferInfos pb_block_transfer_info;
+  if (!block_transfer_info_to_proto(
+          0x0, block_transfer_info, &pb_block_transfer_info)) {
+    return;
+  }
+  ClientStreamReceiver receiver(flag, success_cnt);
+  brpc::Controller cntl;
+  brpc::StreamOptions stream_options;
+  brpc::StreamId stream_id;
+  proto::Status response;
+  stream_options.handler = &receiver;
+  if (brpc::StreamCreate(&stream_id, cntl, &stream_options) != 0) {
+    LOG(ERROR) << "Failed to create stream";
+    return;
+  }
+
+  stub_->PrefetchFromStorage(
+      &cntl, &pb_block_transfer_info, &response, nullptr);
+
+  if (cntl.Failed()) {
+    LOG(ERROR) << "Fail to connect stream, " << cntl.ErrorText();
+  }
+
+  receiver.get_close_future().wait();
 }
 
 bool CommChannel::get_last_step_result_async(
@@ -397,18 +499,6 @@ bool CommChannel::execute_model_with_brpc(
   return true;
 }
 
-void LoadKVCacheFromStoreClosure::Run() {
-  std::unique_ptr<LoadKVCacheFromStoreClosure> self_guard(this);
-
-  bool success = !cntl.Failed();
-  if (!success) {
-    promise.setValue(0);
-  } else {
-    promise.setValue(response.success_cnt());
-  }
-  return;
-}
-
 void ExecuteModelClosure::Run() {
   std::unique_ptr<ExecuteModelClosure> self_guard(this);
 
@@ -437,4 +527,17 @@ void InitModelClosure::Run() {
 
   return;
 }
+
+void TransferBlocksClosure::Run() {
+  std::unique_ptr<TransferBlocksClosure> self_guard(this);
+
+  bool success = !cntl.Failed();
+  if (!success) {
+    promise.setValue(0);
+  } else {
+    promise.setValue(response.success_cnt());
+  }
+  return;
+}
+
 }  // namespace xllm
