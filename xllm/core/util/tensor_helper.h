@@ -50,6 +50,58 @@ inline torch::Tensor create_2d_tensor(const std::vector<std::vector<T> >& vec,
   return tensor;
 };
 
+// 为空的2D vector提供特殊优化版本
+template <typename T>
+inline torch::Tensor create_2d_tensor_optimized(
+    const std::vector<std::vector<T> >& vec,
+    torch::ScalarType dtype) {
+  if (vec.empty()) {
+    return {};
+  }
+
+  const size_t n_rows = vec.size();
+  const size_t n_cols = vec.empty() ? 0 : vec[0].size();
+
+  // 对于全零矩阵的特殊优化
+  bool all_zero = true;
+  for (const auto& row : vec) {
+    for (const auto& val : row) {
+      if (val != T(0)) {
+        all_zero = false;
+        break;
+      }
+    }
+    if (!all_zero) break;
+  }
+
+  if (all_zero) {
+    // 直接创建零tensor，更高效
+    return torch::zeros(
+        {static_cast<int64_t>(n_rows), static_cast<int64_t>(n_cols)},
+        torch::TensorOptions()
+            .dtype(dtype)
+            .device(torch::kCPU)
+            .pinned_memory(true));
+  }
+
+  // 否则使用优化的内存复制方式
+  auto tensor =
+      torch::empty({static_cast<int64_t>(n_rows), static_cast<int64_t>(n_cols)},
+                   torch::TensorOptions()
+                       .dtype(dtype)
+                       .device(torch::kCPU)
+                       .pinned_memory(true));
+
+  // 优化：使用批量内存复制替代逐行torch::tensor创建
+  T* tensor_data = tensor.data_ptr<T>();
+  for (int64_t i = 0; i < n_rows; ++i) {
+    CHECK_EQ(vec[i].size(), n_cols);
+    // 直接复制内存，避免创建临时tensor
+    std::memcpy(tensor_data + i * n_cols, vec[i].data(), n_cols * sizeof(T));
+  }
+  return tensor;
+};
+
 inline torch::Tensor safe_to(const torch::Tensor& t,
                              const torch::TensorOptions& options,
                              bool non_blocking = false) {

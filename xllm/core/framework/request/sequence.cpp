@@ -34,6 +34,15 @@ limitations under the License.
 
 namespace xllm {
 
+// Number of decoder BOS tokens to add for rec models
+static constexpr size_t kDecoderBosTokenCount = 1;
+static constexpr size_t kDecoderMaxTokenCount = 4;
+
+// rec model specific: static constants for embedding names
+const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";
+const std::string Sequence::DECODER_CONTEXT_EMBEDDING_NAME =
+    "decoder_context_embedding";
+
 Sequence::Sequence(size_t index,
                    const std::vector<int32_t>& prompt_token_ids,
                    torch::Tensor input_embedding,
@@ -44,25 +53,70 @@ Sequence::Sequence(size_t index,
       mm_data_(mm_data),
       latest_generate_time_(absl::Now()),
       sequence_params_(seq_params),
-      decoder_(std::move(decoder)) {
-  CHECK(!prompt_token_ids.empty()) << "empty prompt token ids";
-  auto capacity = sequence_params_.seq_capacity;
-  CHECK_GT(capacity, prompt_token_ids.size()) << "capacity too small";
+      decoder_(std::move(decoder)),
+      is_rec_model_(seq_params.is_rec_model) {
+  // rec model specific: handle encoder tokens and decoder embeddings
+  if (is_rec_model_) {
+    // For rec model, treat prompt_token_ids as encoder_tokens
+    if (prompt_token_ids.size() > 0) {
+      encoder_tokens_.resize(prompt_token_ids.size());
+      for (size_t i = 0; i < prompt_token_ids.size(); ++i) {
+        encoder_tokens_[i] = prompt_token_ids[i];
+      }
+      num_encoder_tokens_ = prompt_token_ids.size();
+    } else {
+      // If no prompt tokens, check for encoder sparse embedding in mm_data
+      auto encoder_sparse_embedding =
+          mm_data_.get<torch::Tensor>(ENCODER_SPARSE_EMBEDDING_NAME);
+      CHECK(encoder_sparse_embedding.has_value())
+          << "encoder sparse embedding not found in mm_data";
+      num_encoder_tokens_ = encoder_sparse_embedding.value().size(0);
+    }
 
-  num_prompt_tokens_ = prompt_token_ids.size();
-  volatile_num_prompt_tokens_ = num_prompt_tokens_;
-  tokens_.resize(capacity);
+    // Check if decoder context embedding exists in mm_data
+    auto decoder_context_embedding =
+        mm_data_.get<torch::Tensor>(DECODER_CONTEXT_EMBEDDING_NAME);
+    auto capacity = kDecoderMaxTokenCount;
+    if (decoder_context_embedding.has_value()) {
+      // Use context embedding replacing bos + prompt
+      num_prompt_tokens_ = 0;
+      num_decoder_embeddings_ = decoder_context_embedding.value().size(0);
+      capacity = num_decoder_embeddings_ + capacity - kDecoderBosTokenCount;
+    } else {
+      // Only BOS token for decoder
+      num_prompt_tokens_ = kDecoderBosTokenCount;  // kDecoderBosTokenCount
+    }
+    tokens_.resize(capacity);
+    for (size_t i = 0; i < num_prompt_tokens_; ++i) {
+      tokens_[num_tokens_++] = sequence_params_.bos_token_id;
+      token_to_count_map_[sequence_params_.bos_token_id]++;
+    }
 
-  // init logprob state
-  logprob_state_ = std::make_unique<LogprobState>(num_prompt_tokens_, capacity);
+    volatile_num_prompt_tokens_ = num_prompt_tokens_;
+    input_embedding_ = input_embedding;
+    cur_generated_token_idx_ = num_prompt_tokens_;
+    // init logprob state
+    logprob_state_ =
+        std::make_unique<LogprobState>(num_prompt_tokens_, capacity);
+  } else {
+    CHECK(!prompt_token_ids.empty()) << "empty prompt token ids";
+    auto capacity = sequence_params_.seq_capacity;
+    CHECK_GT(capacity, prompt_token_ids.size()) << "capacity too small";
+    num_prompt_tokens_ = prompt_token_ids.size();
+    tokens_.resize(capacity);
+    // add the prompt tokens
+    for (const auto token_id : prompt_token_ids) {
+      tokens_[num_tokens_++] = token_id;
+      token_to_count_map_[token_id]++;
+    }
 
-  // add the prompt tokens
-  for (const auto token_id : prompt_token_ids) {
-    tokens_[num_tokens_++] = token_id;
-    token_to_count_map_[token_id]++;
+    volatile_num_prompt_tokens_ = num_prompt_tokens_;
+    input_embedding_ = input_embedding;
+    cur_generated_token_idx_ = num_prompt_tokens_;
+    // init logprob state
+    logprob_state_ =
+        std::make_unique<LogprobState>(num_prompt_tokens_, capacity);
   }
-  input_embedding_ = input_embedding;
-  cur_generated_token_idx_ = num_prompt_tokens_;
 }
 
 Sequence::Sequence(const Sequence& other)
@@ -84,6 +138,10 @@ Sequence::Sequence(const Sequence& other)
       num_tokens_(other.num_tokens_),
       token_to_count_map_(other.token_to_count_map_),
       num_prompt_tokens_(other.num_prompt_tokens_),
+      num_encoder_tokens_(other.num_encoder_tokens_),
+      num_decoder_embeddings_(other.num_decoder_embeddings_),
+      encoder_tokens_(other.encoder_tokens_),
+      is_rec_model_(other.is_rec_model_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
       embedding_id_(other.embedding_id_),
       finished_(other.finished_),
@@ -248,6 +306,15 @@ std::optional<SequenceOutput> Sequence::generate_streaming_output(
   CHECK_LE(size, num_tokens_);
   AUTO_COUNTER(detokenization_latency_seconds_stream);
   const auto ids = Slice<int32_t>(tokens_, size);
+
+  // For rec model, return token_ids directly without decode
+  if (is_rec_model()) {
+    const size_t start = num_prompt_tokens_;
+    SequenceOutput output;
+    output.index = index_;
+    output.token_ids = ids.slice(start, size);
+    return output;
+  }
 
   // record the start index of token ids
   const size_t start = decoder_.output_offset();
@@ -454,6 +521,14 @@ Slice<int32_t> Sequence::get_generated_tokens() const {
             num_tokens_ - num_prompt_tokens_};
   }
   return {tokens_.data(), 0};
+}
+
+void Sequence::finish() {
+  finished_ = true;
+  finish_status_invalidated_ = false;
+  if (finish_reason_ == FinishReason::NONE) {
+    finish_reason_ = FinishReason::STOP;
+  }
 }
 
 }  // namespace xllm

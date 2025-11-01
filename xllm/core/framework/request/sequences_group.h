@@ -24,6 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "common.pb.h"
+#include "common/metrics.h"
 #include "core/framework/sampling/sampling_params.h"
 #include "mm_data.h"
 #include "sequence.h"
@@ -55,10 +56,16 @@ class SequencesGroup {
   }
 
   std::vector<std::unique_ptr<Sequence>>& sequences() { return sequences_; }
+  const std::vector<std::unique_ptr<Sequence>>& sequences() const {
+    return sequences_;
+  }
 
   int32_t dp_rank() { return sequences_[0]->dp_rank(); }
 
   bool is_prefill_stage() const { return sequences_[0]->is_prefill_stage(); }
+
+  // finish all sequences in the group
+  void finish();
 
  private:
   void add();

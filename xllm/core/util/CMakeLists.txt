@@ -31,6 +31,7 @@ cc_library(
   SRCS
     device_name_utils.cpp
     env_var.cpp
+    hash_util.cpp
     json_reader.cpp
     net.cpp
     pretty_print.cpp
@@ -50,7 +51,9 @@ cc_library(
     Boost::serialization
     absl::synchronization
     ${Python_LIBRARIES}
+    proto::xllm_proto
     :platform
+    SMHasherSupport
 )
 target_link_libraries(util PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 add_dependencies(util brpc-static)
@@ -70,8 +73,3 @@ cc_test(
 )
 target_link_libraries(util_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto)
 add_dependencies(util_test brpc-static)
-
-
-
-
-

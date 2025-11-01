@@ -26,8 +26,10 @@ limitations under the License.
 
 #include "common/instance_name.h"
 #include "completion.pb.h"
+#include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
 #include "core/runtime/llm_master.h"
+#include "core/runtime/rec_master.h"
 #include "core/util/utils.h"
 
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -126,6 +128,7 @@ bool send_result_to_client_brpc(std::shared_ptr<CompletionCall> call,
   response.set_created(created_time);
   response.set_model(model);
 
+  // add choices into response
   response.mutable_choices()->Reserve(req_output.outputs.size());
   for (const auto& output : req_output.outputs) {
     auto* choice = response.add_choices();
@@ -137,6 +140,7 @@ bool send_result_to_client_brpc(std::shared_ptr<CompletionCall> call,
     }
   }
 
+  // add usage statistics
   if (req_output.usage.has_value()) {
     const auto& usage = req_output.usage.value();
     auto* proto_usage = response.mutable_usage();
@@ -147,35 +151,68 @@ bool send_result_to_client_brpc(std::shared_ptr<CompletionCall> call,
     proto_usage->set_total_tokens(static_cast<int32_t>(usage.num_total_tokens));
   }
 
+  if (FLAGS_backend == "rec") {
+    auto output_tensor = response.mutable_output_tensors()->Add();
+    output_tensor->set_name("omnirec_result");
+    // TODO: replace true with flags after converter merge
+    if (true) {
+      output_tensor->set_datatype(proto::DataType::INT64);
+      output_tensor->mutable_shape()->Add(req_output.outputs.size());
+      output_tensor->mutable_shape()->Add(1);  // Single item per output
+
+      auto context = output_tensor->mutable_contents();
+      for (int i = 0; i < req_output.outputs.size(); ++i) {
+        if (req_output.outputs[i].item_ids.has_value()) {
+          context->mutable_int64_contents()->Add(
+              req_output.outputs[i].item_ids.value());
+        }
+      }
+    } else {
+      output_tensor->set_datatype(proto::DataType::INT32);
+
+      output_tensor->mutable_shape()->Add(req_output.outputs.size());
+      output_tensor->mutable_shape()->Add(
+          req_output.outputs[0].token_ids.size());
+
+      auto context = output_tensor->mutable_contents();
+      for (int i = 0; i < req_output.outputs.size(); ++i) {
+        // LOG(INFO) << req_output.outputs[i].token_ids;
+        context->mutable_int_contents()->Add(
+            req_output.outputs[i].token_ids.begin(),
+            req_output.outputs[i].token_ids.end());
+      }
+    }
+  }
+
   return call->write_and_finish(response);
 }
 
-}  // namespace
-
-CompletionServiceImpl::CompletionServiceImpl(
-    LLMMaster* master,
-    const std::vector<std::string>& models)
-    : APIServiceImpl(models), master_(master) {
-  CHECK(master_ != nullptr);
-}
-
-// complete_async for brpc
-void CompletionServiceImpl::process_async_impl(
-    std::shared_ptr<CompletionCall> call) {
+// Type alias for the return type of process_completion_request_params
+using ProcessCompletionResult =
+    std::optional<std::tuple<RequestParams,
+                             std::optional<std::vector<int>>,
+                             bool,
+                             std::string>>;
+// Common function to process request parameters and validation
+ProcessCompletionResult process_completion_request_params(
+    std::shared_ptr<CompletionCall> call,
+    const absl::flat_hash_set<std::string>& models,
+    xllm::RateLimiter* rate_limiter) {
   const auto& rpc_request = call->request();
+
   // check if model is supported
   const auto& model = rpc_request.model();
-  if (unlikely(!models_.contains(model))) {
+  if (unlikely(!models.contains(model))) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
-    return;
+    return std::nullopt;
   }
 
   // Check if the request is being rate-limited.
-  if (unlikely(master_->get_rate_limiter()->is_limited())) {
+  if (unlikely(rate_limiter->is_limited())) {
     call->finish_with_error(
         StatusCode::RESOURCE_EXHAUSTED,
         "The number of concurrent requests has reached the limit.");
-    return;
+    return std::nullopt;
   }
 
   RequestParams request_params(
@@ -195,44 +232,127 @@ void CompletionServiceImpl::process_async_impl(
 
     request_params.decode_address = rpc_request.routing().decode_name();
   }
+
+  return std::make_tuple(std::move(request_params),
+                         std::move(prompt_tokens),
+                         include_usage,
+                         model);
+}
+
+// Common callback function for handling request output
+auto request_callback(std::shared_ptr<CompletionCall> call,
+                      const std::string& model,
+                      Master* master,
+                      bool stream,
+                      bool include_usage,
+                      const std::string& request_id,
+                      int64_t created_time) {
+  return [call, model, master, stream, include_usage, request_id, created_time](
+             const RequestOutput& req_output) -> bool {
+    if (req_output.status.has_value()) {
+      const auto& status = req_output.status.value();
+      if (!status.ok()) {
+        // Reduce the number of concurrent requests when a request is
+        // finished with error.
+        master->get_rate_limiter()->decrease_one_request();
+
+        return call->finish_with_error(status.code(), status.message());
+      }
+    }
+
+    // Reduce the number of concurrent requests when a request is finished
+    // or canceled.
+    if (req_output.finished || req_output.cancelled) {
+      master->get_rate_limiter()->decrease_one_request();
+    }
+
+    if (stream) {
+      return send_delta_to_client_brpc(
+          call, include_usage, request_id, created_time, model, req_output);
+    }
+    return send_result_to_client_brpc(
+        call, request_id, created_time, model, req_output);
+  };
+}
+
+}  // namespace
+
+CompletionServiceImpl::CompletionServiceImpl(
+    LLMMaster* master,
+    const std::vector<std::string>& models)
+    : APIServiceImpl(models), master_(master) {
+  CHECK(master_ != nullptr);
+}
+
+// complete_async for brpc
+void CompletionServiceImpl::process_async_impl(
+    std::shared_ptr<CompletionCall> call) {
+  auto result = process_completion_request_params(
+      call, models_, master_->get_rate_limiter());
+  if (!result.has_value()) {
+    return;  // Error already handled in process_completion_request_params
+  }
+
+  auto [request_params, prompt_tokens, include_usage, model] =
+      std::move(result.value());
   // schedule the request
-  master_->handle_request(
-      std::move(rpc_request.prompt()),
-      std::move(prompt_tokens),
-      std::move(request_params),
-      call.get(),
-      [call,
-       model,
-       master = master_,
-       stream = request_params.streaming,
-       include_usage = include_usage,
-       request_id = request_params.request_id,
-       created_time = absl::ToUnixSeconds(absl::Now())](
-          const RequestOutput& req_output) -> bool {
-        if (req_output.status.has_value()) {
-          const auto& status = req_output.status.value();
-          if (!status.ok()) {
-            // Reduce the number of concurrent requests when a request is
-            // finished with error.
-            master->get_rate_limiter()->decrease_one_request();
+  master_->handle_request(std::move(call->request().prompt()),
+                          std::move(prompt_tokens),
+                          std::move(request_params),
+                          call.get(),
+                          request_callback(call,
+                                           model,
+                                           master_,
+                                           request_params.streaming,
+                                           include_usage,
+                                           request_params.request_id,
+                                           absl::ToUnixSeconds(absl::Now())));
+}
 
-            return call->finish_with_error(status.code(), status.message());
-          }
-        }
+RecCompletionServiceImpl::RecCompletionServiceImpl(
+    RecMaster* master,
+    const std::vector<std::string>& models)
+    : APIServiceImpl(models), master_(master) {
+  CHECK(master_ != nullptr);
+}
 
-        // Reduce the number of concurrent requests when a request is finished
-        // or canceled.
-        if (req_output.finished || req_output.cancelled) {
-          master->get_rate_limiter()->decrease_one_request();
-        }
+void RecCompletionServiceImpl::process_async_impl(
+    std::shared_ptr<CompletionCall> call) {
+  auto result = process_completion_request_params(
+      call, models_, master_->get_rate_limiter());
+  if (!result.has_value()) {
+    return;  // Error already handled in process_completion_request_params
+  }
 
-        if (stream) {
-          return send_delta_to_client_brpc(
-              call, include_usage, request_id, created_time, model, req_output);
-        }
-        return send_result_to_client_brpc(
-            call, request_id, created_time, model, req_output);
-      });
+  auto [request_params, prompt_tokens, include_usage, model] =
+      std::move(result.value());
+  const auto& rpc_request = call->request();
+  std::optional<MMData> mm_data = std::nullopt;
+  if (rpc_request.input_tensors_size()) {
+    // HISTOGRAM_OBSERVE(rec_input_first_dim,
+    //                  rpc_request.input_tensors(0).shape(0));
+
+    MMDict mm_dict;
+    for (int i = 0; i < rpc_request.input_tensors_size(); ++i) {
+      const auto& tensor = rpc_request.input_tensors(i);
+      mm_dict[tensor.name()] =
+          xllm::util::convert_rec_tensor_to_torch(tensor).to(torch::kBFloat16);
+    }
+    mm_data = std::move(MMData(MMType::EMBEDDING, mm_dict));
+  }
+
+  // schedule the request
+  master_->handle_request(std::move(rpc_request.prompt()),
+                          std::move(prompt_tokens),
+                          std::move(mm_data),
+                          std::move(request_params),
+                          request_callback(call,
+                                           model,
+                                           master_,
+                                           request_params.streaming,
+                                           include_usage,
+                                           request_params.request_id,
+                                           absl::ToUnixSeconds(absl::Now())));
 }
 
 }  // namespace xllm

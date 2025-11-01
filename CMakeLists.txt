@@ -28,7 +28,7 @@ if(USE_NPU)
     if(DEVICE_TYPE STREQUAL "USE_A3")
         message("downloading a3 arm xllm kernels")
         file(DOWNLOAD 
-            "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.6.0/xllm_kernels-1.3.1-Linux.a3.arm.rpm"
+            "https://9n-online-service.s3-internal.cn-north-1.jdcloud-oss.com/9n-xllm-atb/xllm_kernels-1.3.0-Linux.rpm"
             "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
         )
     else()  

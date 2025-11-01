@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "prefix_cache.h"
 
-#include <MurmurHash3.h>
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
 #include <string.h>
@@ -25,35 +24,9 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "util/hash_util.h"
 
 namespace xllm {
-
-void murmur_hash3(const uint8_t* pre_hash_value,
-                  const Slice<int32_t>& token_ids,
-                  uint8_t* hash_value) {
-  if (pre_hash_value == nullptr) {
-    MurmurHash3_x64_128(reinterpret_cast<const void*>(token_ids.data()),
-                        sizeof(int32_t) * token_ids.size(),
-                        FLAGS_murmur_hash3_seed,
-                        hash_value);
-  } else {
-    uint8_t key[1024];
-
-    int32_t data_len =
-        sizeof(int32_t) * token_ids.size() + MURMUR_HASH3_VALUE_LEN;
-    CHECK_GT(sizeof(key), data_len) << "key size is too small";
-
-    memcpy(key, pre_hash_value, MURMUR_HASH3_VALUE_LEN);
-    memcpy(key + MURMUR_HASH3_VALUE_LEN,
-           reinterpret_cast<const void*>(token_ids.data()),
-           sizeof(int32_t) * token_ids.size());
-
-    MurmurHash3_x64_128(reinterpret_cast<const void*>(key),
-                        data_len,
-                        FLAGS_murmur_hash3_seed,
-                        hash_value);
-  }
-}
 
 std::vector<Block> PrefixCache::match(
     const Slice<int32_t>& token_ids,

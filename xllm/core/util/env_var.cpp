@@ -20,6 +20,9 @@ limitations under the License.
 namespace xllm {
 namespace util {
 
+// Environment variable keys
+const std::string EXTRA_THREAD_NUM = "EXTRA_THREAD_NUM";
+
 bool get_bool_env(const std::string& key, bool defaultValue) {
   const char* val = std::getenv(key.c_str());
   if (val == nullptr) {
@@ -28,6 +31,18 @@ bool get_bool_env(const std::string& key, bool defaultValue) {
   std::string strVal(val);
   return (strVal == "1" || strVal == "true" || strVal == "TRUE" ||
           strVal == "True");
+}
+
+int get_int_env(const std::string& key, int defaultValue) {
+  const char* val = std::getenv(key.c_str());
+  if (val == nullptr) {
+    return defaultValue;
+  }
+  try {
+    return std::stoi(val);
+  } catch (const std::exception&) {
+    return defaultValue;
+  }
 }
 
 }  // namespace util

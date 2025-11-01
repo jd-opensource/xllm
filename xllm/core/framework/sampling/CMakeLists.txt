@@ -10,17 +10,20 @@ cc_library(
     rejection_sampler.h
     sampler.h
     beam_searcher.h
+    valid_path_filter.h
   SRCS
     sampling_params.cpp
     logits_utils.cpp
     rejection_sampler.cpp
     sampler.cpp
     beam_searcher.cpp
+    valid_path_filter.cpp
   DEPS
     :common
     glog::glog
     torch
     :kernels
+    :util
     $<$<BOOL:${USE_NPU}>:xllm_ops>
 )
 
@@ -31,12 +34,14 @@ cc_test(
     rejection_sampler_test.cpp
     rejection_sampler.cpp
     sampling_params_test.cpp
+    valid_path_filter_test.cpp
   DEPS
     absl::strings
     GTest::gtest_main
     :flags
     :sampler
     glog::glog
+    torch
 )
 target_link_libraries(sampler_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
 target_link_libraries(sampler_test

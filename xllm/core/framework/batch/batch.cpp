@@ -29,6 +29,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
+#include "rec_batch_input_builder.h"
 #include "runtime/params_utils.h"
 #include "util/slice.h"
 #include "util/tensor_helper.h"
@@ -69,6 +70,10 @@ void Batch::add(const std::vector<Sequence*>& sequences) {
 ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                                           uint32_t min_decoding_batch_size,
                                           const ModelArgs& args) {
+  if (FLAGS_backend == "rec") {
+    return prepare_rec_forward_input(
+        num_decoding_tokens, min_decoding_batch_size, args);
+  }
   BatchInputBuilder builder(sequences_,
                             allowed_max_tokens_,
                             input_embeddings_vec_,
@@ -79,6 +84,41 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                             &args);
   return builder.build_forward_input(num_decoding_tokens,
                                      min_decoding_batch_size);
+}
+
+ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
+                                              uint32_t min_decoding_batch_size,
+                                              const ModelArgs& args,
+                                              ThreadPool* thread_pool) {
+  // Convert SequencesGroup* to std::unique_ptr<SequencesGroup> for
+  // compatibility
+  std::vector<std::unique_ptr<SequencesGroup>> sequence_groups_ptrs;
+  for (auto* group : sequence_groups_) {
+    // Note: This is a temporary workaround. In production, we should avoid this
+    // conversion and modify the interface to work with raw pointers directly.
+    sequence_groups_ptrs.emplace_back(std::unique_ptr<SequencesGroup>(group));
+  }
+
+  RecBatchInputBuilder builder(
+      sequence_groups_ptrs,
+      allowed_max_tokens_,
+      input_embeddings_vec_,
+      mm_data_vec_,
+      copy_in_cache_block_infos_,
+      copy_out_cache_block_infos_,
+      swap_cache_block_infos_,
+      &args,
+      thread_pool);  // Temporarily not using thread pool
+
+  auto result = builder.build_rec_forward_input(num_decoding_tokens,
+                                                min_decoding_batch_size);
+
+  // Release the unique_ptrs without deleting the objects
+  for (auto& ptr : sequence_groups_ptrs) {
+    ptr.release();
+  }
+
+  return result;
 }
 
 RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
@@ -336,6 +376,13 @@ void Batch::process_beam_search_output(const RawForwardOutput& raw_output,
        sequence_group_id < sequence_groups_.size();
        sequence_group_id++) {
     update_for_sequence_group(sequence_group_id);
+  }
+}
+
+void Batch::finish() {
+  // Finish all sequence groups
+  for (auto* sequence_group : sequence_groups_) {
+    sequence_group->finish();
   }
 }
 }  // namespace xllm

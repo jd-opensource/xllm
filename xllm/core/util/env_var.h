@@ -20,7 +20,12 @@ limitations under the License.
 namespace xllm {
 namespace util {
 
+// Environment variable keys
+extern const std::string EXTRA_THREAD_NUM;
+
 bool get_bool_env(const std::string& key, bool defaultValue);
+
+int get_int_env(const std::string& key, int defaultValue);
 
 }  // namespace util
 }  // namespace xllm
