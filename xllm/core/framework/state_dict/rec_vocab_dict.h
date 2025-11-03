@@ -12,14 +12,14 @@
 #include "util/slice.h"
 
 namespace xllm {
-// a content dictionary in generative recommendation scenarios, used for mapping
+// a vocab dictionary in generative recommendation scenarios, used for mapping
 // token IDs and item IDs, currently updated with the model version, and
 // real-time updates are not supported.
-class RecContentDict final {
+class RecVocabDict final {
  public:
-  RecContentDict() = default;
+  RecVocabDict() = default;
 
-  ~RecContentDict() {
+  ~RecVocabDict() {
     initialized_ = false;
     item_to_tokens_map_.clear();
     tokens_to_items_map_.clear();
@@ -27,12 +27,12 @@ class RecContentDict final {
   }
 
   /**
-   * @brief initialize instance, parse content file
-   * @param content_file content file, need full path
+   * @brief initialize instance, parse vocab file
+   * @param vocab_file vocab file, need full path
    * @return true represents successful initialization, false represents failed
    * initialization
    */
-  bool initialize(const std::string& content_file);
+  bool initialize(const std::string& vocab_file);
 
   /**
    * @brief get the corresponding item ID list through a token ID triplet
@@ -55,7 +55,7 @@ class RecContentDict final {
 
   /**
    * @brief get all next token id list through the prefix token id list, for
-   * example, in the content file, there are these token id triplets, 1-2-3,
+   * example, in the vocab file, there are these token id triplets, 1-2-3,
    * 1-2-4, 7-8-9, if prefix the token id is [1], then the next token id list
    * is [2], if the prefix token id is [1,2], then the next token id list is
    * [3,4]

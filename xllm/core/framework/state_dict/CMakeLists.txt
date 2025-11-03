@@ -11,11 +11,11 @@ cc_library(
   HDRS
     state_dict.h
     utils.h
-    rec_content_dict.h
+    rec_vocab_dict.h
   SRCS
     state_dict.cpp
     utils.cpp
-    rec_content_dict.cpp
+    rec_vocab_dict.cpp
   DEPS
     rust_safetensors
     torch

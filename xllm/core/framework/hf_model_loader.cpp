@@ -26,7 +26,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/version_singleton.h"
-#include "core/framework/state_dict/rec_content_dict.h"
+#include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
 #include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/sentencepiece_tokenizer.h"
@@ -54,10 +54,9 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
   // sort the model weights files by name
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
 
-  if (FLAGS_enable_sparse_valid_path_filter ||
-      FLAGS_enable_convert_tokens_to_item ||
-      FLAGS_enable_convert_item_to_tokens) {
-    CHECK(load_rec_content(model_weights_path))
+  //@todo: 'false' will be replaced with generative recommendation judgment
+  if (false) {
+    CHECK(load_rec_vocab(model_weights_path))
         << "Failed to load rec content from " << model_weights_path;
   }
 }
@@ -80,23 +79,23 @@ std::vector<std::unique_ptr<StateDict>>& HFModelLoader::get_state_dicts() {
   return state_dicts_;
 }
 
-bool HFModelLoader::load_rec_content(const std::string& model_weights_path) {
-  if (!args_.content_file().empty()) {
+bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
+  if (!tokenizer_args_.vocab_file().empty()) {
     std::filesystem::path path = model_weights_path;
     std::string model_version = path.filename();
-    std::string content_full_path = path.append(args_.content_file()).string();
+    std::string vocab_full_path =
+        path.append(tokenizer_args_.vocab_file()).string();
 
     LOG(INFO) << "model_version:" << model_version;
-    LOG(INFO) << "content_full_path:" << content_full_path;
+    LOG(INFO) << "vocab_full_path:" << vocab_full_path;
 
-    CHECK(nullptr !=
-          VersionSingleton<RecContentDict>::GetInstance(model_version))
-        << "Failed to get content dict instance";
-    CHECK(VersionSingleton<RecContentDict>::GetInstance(model_version)
-              ->initialize(content_full_path))
-        << "Failed to initialize content dict from " << content_full_path;
+    CHECK(nullptr != VersionSingleton<RecVocabDict>::GetInstance(model_version))
+        << "Failed to get vocab dict instance";
+    CHECK(VersionSingleton<RecVocabDict>::GetInstance(model_version)
+              ->initialize(vocab_full_path))
+        << "Failed to initialize vocab dict from " << vocab_full_path;
   } else {
-    LOG(INFO) << "model content file is not set";
+    LOG(INFO) << "vocab file is not set";
   }
 
   return true;

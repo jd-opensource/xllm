@@ -349,7 +349,6 @@ struct ModelArgs {
   PROPERTY(bool, is_gated_act) = true;
   PROPERTY(int64_t, relative_attention_num_buckets) = 0;
   PROPERTY(int64_t, relative_attention_max_distance) = 0;
-  PROPERTY(std::string, content_file) = "";
 
   // scheduler related args
   PROPERTY(int64_t, num_train_timesteps) = 0;
@@ -535,7 +534,6 @@ inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
      << args.relative_attention_num_buckets();
   os << ", relative_attention_max_distance: "
      << args.relative_attention_max_distance();
-  os << ", content_file: " << args.content_file();
   os << ", num_train_timesteps: " << args.num_train_timesteps();
   os << ", shift: " << args.shift();
   os << ", use_dynamic_shifting: " << args.use_dynamic_shifting();

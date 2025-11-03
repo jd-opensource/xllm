@@ -1,4 +1,4 @@
-#include "rec_content_dict.h"
+#include "rec_vocab_dict.h"
 
 #include <algorithm>
 #include <array>
@@ -10,24 +10,24 @@
 
 namespace xllm {
 
-bool RecContentDict::initialize(const std::string& content_file) {
+bool RecVocabDict::initialize(const std::string& vocab_file) {
   if (initialized_) {
     return true;
   }
 
   Timer timer;
 
-  if (content_file.empty()) {
-    LOG(ERROR) << "content data file is empty, file: " << content_file;
+  if (vocab_file.empty()) {
+    LOG(ERROR) << "content data file is empty, file: " << vocab_file;
     return false;
   }
-  if (!std::filesystem::exists(content_file)) {
-    LOG(ERROR) << "fail to find content data file: " << content_file;
+  if (!std::filesystem::exists(vocab_file)) {
+    LOG(ERROR) << "fail to find content data file: " << vocab_file;
     return false;
   }
-  std::ifstream ifs(content_file.data(), std::ios::binary | std::ios::ate);
+  std::ifstream ifs(vocab_file.data(), std::ios::binary | std::ios::ate);
   if (!ifs.is_open()) {
-    LOG(ERROR) << "fail to load content data file: " << content_file;
+    LOG(ERROR) << "fail to load content data file: " << vocab_file;
     return false;
   }
 
@@ -51,7 +51,7 @@ bool RecContentDict::initialize(const std::string& content_file) {
 
   while (ifs.read(reinterpret_cast<char*>(&item_id), itemid_size) &&
          ifs.read(reinterpret_cast<char*>(tokens.data()), tokens_size)) {
-    if (FLAGS_enable_sparse_valid_path_filter) {
+    if (FLAGS_enable_constrained_decoding) {
       for (int i = 0; i < tokens.size(); i++) {
         std::vector<int32_t> prefix_tokens;
 
@@ -63,17 +63,13 @@ bool RecContentDict::initialize(const std::string& content_file) {
       }
     }
 
-    if (FLAGS_enable_convert_item_to_tokens) {
-      item_to_tokens_map_[item_id] = tokens;
-    }
+    item_to_tokens_map_[item_id] = tokens;
 
-    if (FLAGS_enable_convert_tokens_to_item) {
-      tokens_to_items_map_[tokens].emplace_back(item_id);
-    }
+    tokens_to_items_map_[tokens].emplace_back(item_id);
   }
 
   if (ifs.gcount() != 0 && ifs.gcount() != line_size) {
-    LOG(ERROR) << "possibly containing incomplete lines : " << content_file;
+    LOG(ERROR) << "possibly containing incomplete lines : " << vocab_file;
     item_to_tokens_map_.clear();
     tokens_to_items_map_.clear();
     prefix_tokens_to_next_tokens_map_.clear();
@@ -92,8 +88,8 @@ bool RecContentDict::initialize(const std::string& content_file) {
   return true;
 }
 
-bool RecContentDict::get_items_by_tokens(const RecTokenTriple& rec_token_triple,
-                                         std::vector<int64_t>* item_ids) const {
+bool RecVocabDict::get_items_by_tokens(const RecTokenTriple& rec_token_triple,
+                                       std::vector<int64_t>* item_ids) const {
   CHECK_EQ(initialized_, true);
   CHECK_NE(item_ids, nullptr);
 
@@ -108,8 +104,8 @@ bool RecContentDict::get_items_by_tokens(const RecTokenTriple& rec_token_triple,
   return true;
 }
 
-bool RecContentDict::get_tokens_by_item(int64_t item_id,
-                                        std::vector<int32_t>* token_ids) const {
+bool RecVocabDict::get_tokens_by_item(int64_t item_id,
+                                      std::vector<int32_t>* token_ids) const {
   CHECK_EQ(initialized_, true);
   CHECK_NE(token_ids, nullptr);
 
@@ -124,7 +120,7 @@ bool RecContentDict::get_tokens_by_item(int64_t item_id,
   return true;
 }
 
-const std::set<int32_t>& RecContentDict::get_next_tokens_by_prefix_tokens(
+const std::set<int32_t>& RecVocabDict::get_next_tokens_by_prefix_tokens(
     const Slice<int32_t>& prefix_token_ids) const {
   CHECK_EQ(initialized_, true);
   CHECK_LT(prefix_token_ids.size(), REC_TOKEN_SIZE);

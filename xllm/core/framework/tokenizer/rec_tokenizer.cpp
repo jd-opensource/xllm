@@ -3,7 +3,7 @@
 #include <filesystem>
 
 #include "common/version_singleton.h"
-#include "state_dict/rec_content_dict.h"
+#include "state_dict/rec_vocab_dict.h"
 
 namespace xllm {
 RecTokenizer::RecTokenizer(const std::string_view& dir_path,
@@ -15,7 +15,7 @@ RecTokenizer::RecTokenizer(const std::string_view& dir_path,
 
 bool RecTokenizer::encode(int64_t item_id,
                           std::vector<int32_t>* token_ids) const {
-  if (!VersionSingleton<RecContentDict>::GetInstance(model_version_)
+  if (!VersionSingleton<RecVocabDict>::GetInstance(model_version_)
            ->get_tokens_by_item(item_id, token_ids)) {
     return false;
   }
@@ -31,7 +31,7 @@ bool RecTokenizer::decode(const Slice<int32_t>& token_ids,
   RecTokenTriple rec_token_triple;
   std::copy(token_ids.begin(), token_ids.end(), rec_token_triple.begin());
 
-  if (!VersionSingleton<RecContentDict>::GetInstance(model_version_)
+  if (!VersionSingleton<RecVocabDict>::GetInstance(model_version_)
            ->get_items_by_tokens(rec_token_triple, item_ids)) {
     return false;
   }
