@@ -287,4 +287,8 @@ struct MMChatMessage {
   std::vector<MMInputData> content;
 };
 
+inline constexpr int REC_TOKEN_SIZE = 3;
+
+using RecTokenTriple = std::array<int32_t, REC_TOKEN_SIZE>;
+
 }  // namespace xllm

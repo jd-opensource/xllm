@@ -389,3 +389,9 @@ DEFINE_string(reasoning_parser,
 
 // --- qwen3 reranker config ---
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
+
+DEFINE_bool(enable_constrained_decoding,
+            false,
+            "Whether to enable constrained decoding, which is used to ensure "
+            "that the output meets specific format or structural requirements "
+            "through pre-defined rules.");
