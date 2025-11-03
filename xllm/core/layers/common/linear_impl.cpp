@@ -82,8 +82,8 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
 
 torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
   input = input.to(device_);
-  auto bias = (bias_.defined() && rank_ == 0) ? c10::optional<at::Tensor>(bias_)
-                                              : c10::nullopt;
+  auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
+                                              : std::nullopt;
 
   torch::Tensor output;
 
@@ -96,12 +96,12 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
     xllm::kernel::ScaledQuantizeParams quantize_params;
     quantize_params.x = input;
     quantize_params.smooth = smooth_;
-    quantize_params.zero = c10::nullopt;
-    quantize_params.token_count = c10::nullopt;
-    quantize_params.gather_index = c10::nullopt;
-    quantize_params.gather_index_start_position = c10::nullopt;
-    quantize_params.output = c10::nullopt;
-    quantize_params.output_scale = c10::nullopt;
+    quantize_params.zero = std::nullopt;
+    quantize_params.token_count = std::nullopt;
+    quantize_params.gather_index = std::nullopt;
+    quantize_params.gather_index_start_position = std::nullopt;
+    quantize_params.output = std::nullopt;
+    quantize_params.output_scale = std::nullopt;
     quantize_params.act_mode = linear_extra_args_.act_mode;
     quantize_params.active_coef = 1.0;
     quantize_params.is_gated = linear_extra_args_.is_gated;
@@ -125,9 +125,9 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
     matmul_params.beta = 0.0;
     matmul_params.use_hp_active = false;
     matmul_params.a_quant_bit_size = 8;
-    matmul_params.a_calib = c10::nullopt;
-    matmul_params.b_calib = c10::nullopt;
-    matmul_params.output = c10::nullopt;
+    matmul_params.a_calib = std::nullopt;
+    matmul_params.b_calib = std::nullopt;
+    matmul_params.output = std::nullopt;
 
     output = xllm::kernel::scaled_matmul(matmul_params);
   } else {
@@ -362,8 +362,8 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     input = xllm::parallel_state::scatter(input, parallel_args_.tp_group_);
   }
 
-  auto bias = (bias_.defined() && rank_ == 0) ? c10::optional<at::Tensor>(bias_)
-                                              : c10::nullopt;
+  auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
+                                              : std::nullopt;
   torch::Tensor output;
   if (quant_args_.quant_method() == "smoothquant") {
     torch::Tensor quantized_input;
@@ -374,12 +374,12 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     xllm::kernel::ScaledQuantizeParams quantize_params;
     quantize_params.x = input;
     quantize_params.smooth = smooth_;
-    quantize_params.zero = c10::nullopt;
-    quantize_params.token_count = c10::nullopt;
-    quantize_params.gather_index = c10::nullopt;
-    quantize_params.gather_index_start_position = c10::nullopt;
-    quantize_params.output = c10::nullopt;
-    quantize_params.output_scale = c10::nullopt;
+    quantize_params.zero = std::nullopt;
+    quantize_params.token_count = std::nullopt;
+    quantize_params.gather_index = std::nullopt;
+    quantize_params.gather_index_start_position = std::nullopt;
+    quantize_params.output = std::nullopt;
+    quantize_params.output_scale = std::nullopt;
     quantize_params.act_mode = linear_extra_args_.act_mode;
     quantize_params.active_coef = 1.0;
     quantize_params.is_gated = linear_extra_args_.is_gated;
@@ -402,9 +402,9 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     matmul_params.beta = 0.0;
     matmul_params.use_hp_active = false;
     matmul_params.a_quant_bit_size = 8;
-    matmul_params.a_calib = c10::nullopt;
-    matmul_params.b_calib = c10::nullopt;
-    matmul_params.output = c10::nullopt;
+    matmul_params.a_calib = std::nullopt;
+    matmul_params.b_calib = std::nullopt;
+    matmul_params.output = std::nullopt;
 
     output = xllm::kernel::scaled_matmul(matmul_params);
   } else {
