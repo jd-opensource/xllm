@@ -108,6 +108,7 @@ class LLMEngine : public Engine {
       const Engine::KVCacheCapacity& kv_cache_cap);
   std::vector<std::vector<RawForwardInput>> prepare_inputs(
       std::vector<Batch>& batch);
+  void process_group_test();
 
  protected:
   // options

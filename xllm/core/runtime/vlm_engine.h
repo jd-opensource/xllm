@@ -53,6 +53,7 @@ class VLMEngine : public Engine {
   bool init_model();
   Engine::KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
+  void process_group_test();
 
  private:
   // options

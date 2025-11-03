@@ -89,6 +89,14 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   // create ThreadPool for link cluster
   link_threadpool_ = std::make_unique<ThreadPool>(worker_clients_num_);
 
+  process_group_test();
+
+  // init thread pool
+  threadpool_ = std::make_unique<ThreadPool>(16);
+}
+
+void LLMEngine::process_group_test() {
+#if !defined(USE_NPU)
   // In multi-node serving mode, only driver engine
   // create worker_clients_.
   if (worker_clients_num_ > 1) {
@@ -101,9 +109,7 @@ LLMEngine::LLMEngine(const runtime::Options& options,
     // wait up to 4 seconds for all futures to complete
     folly::collectAll(futures).within(std::chrono::seconds(4)).get();
   }
-
-  // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(16);
+#endif
 }
 
 bool LLMEngine::init() {

@@ -61,6 +61,11 @@ VLMEngine::VLMEngine(const runtime::Options& options) : options_(options) {
         parallel_args, devices[i], options_, worker_type));
   }
 
+  process_group_test();
+}
+
+void VLMEngine::process_group_test() {
+#if !defined(USE_NPU)
   if (workers_.size() > 1) {
     // test process group
     std::vector<folly::SemiFuture<folly::Unit>> futures;
@@ -71,6 +76,7 @@ VLMEngine::VLMEngine(const runtime::Options& options) : options_(options) {
     // wait up to 4 seconds for all futures to complete
     folly::collectAll(futures).within(std::chrono::seconds(4)).get();
   }
+#endif
 }
 
 bool VLMEngine::init() {
