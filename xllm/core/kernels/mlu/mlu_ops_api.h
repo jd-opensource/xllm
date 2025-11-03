@@ -170,14 +170,14 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
     const std::string& act_mode = "none",
     double active_coef = 1.0,
     bool is_gated = false,
-    at::ScalarType quant_type = at::kChar);
+    torch::ScalarType quant_type = torch::kChar);
 
 torch::Tensor scaled_matmul(
     const torch::Tensor& a,
     const torch::Tensor& b,
     const std::optional<torch::Tensor>& a_scale,
     const torch::Tensor& b_scale,
-    c10::ScalarType output_dtype,
+    torch::ScalarType output_dtype,
     const std::optional<torch::Tensor>& bias = std::nullopt,
     const std::optional<torch::Tensor>& c = std::nullopt,
     const std::string& act_mode = "none",

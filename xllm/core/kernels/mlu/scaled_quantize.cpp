@@ -19,13 +19,13 @@ namespace xllm::kernel::mlu {
 std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
     const torch::Tensor& x,
     const torch::Tensor& smooth,
-    const std::optional<torch::Tensor>& zero /* = c10::nullopt */,
-    const std::optional<torch::Tensor>& token_count /* = c10::nullopt */,
-    const std::optional<torch::Tensor>& gather_index /* = c10::nullopt */,
+    const std::optional<torch::Tensor>& zero /* = std::nullopt */,
+    const std::optional<torch::Tensor>& token_count /* = std::nullopt */,
+    const std::optional<torch::Tensor>& gather_index /* = std::nullopt */,
     const std::optional<torch::Tensor>&
-        gather_index_start_position /* = c10::nullopt */,
-    const std::optional<torch::Tensor>& output /* = c10::nullopt */,
-    const std::optional<torch::Tensor>& output_scale /* = c10::nullopt */,
+        gather_index_start_position /* = std::nullopt */,
+    const std::optional<torch::Tensor>& output /* = std::nullopt */,
+    const std::optional<torch::Tensor>& output_scale /* = std::nullopt */,
     const std::string& act_mode /* = "none" */,
     double active_coef /* = 1.0 */,
     bool is_gated /* = false */,
@@ -73,19 +73,20 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
   }
 
   // Call underlying MLU kernel
-  tmo::torch_api::scaled_quantize(x,
-                                  result_output,
-                                  result_output_scale,
-                                  smooth,
-                                  zero,
-                                  token_count,
-                                  gather_index,
-                                  gather_index_start_position,
-                                  /*scale_upper_bound*/ c10::nullopt,
-                                  std::string("dynamic_per_token"),
-                                  act_mode,
-                                  active_coef,
-                                  gated);
+  tmo::torch_api::scaled_quantize(
+      x,
+      result_output,
+      result_output_scale,
+      smooth,
+      zero,
+      token_count,
+      gather_index,
+      gather_index_start_position,
+      /*scale_upper_bound*/ std::nullopt,
+      /*quant_algo=*/std::string("dynamic_per_token"),
+      act_mode,
+      active_coef,
+      gated);
 
   return std::make_tuple(result_output, result_output_scale);
 }

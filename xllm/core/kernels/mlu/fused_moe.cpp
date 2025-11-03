@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <glog/logging.h>
+
 #include "mlu_ops_api.h"
 
 namespace {
@@ -20,7 +22,7 @@ torch::Tensor create_group_gemm_output(
     const torch::Tensor& a,
     const torch::Tensor& b,
     const torch::Tensor& group_list,
-    c10::ScalarType dtype = c10::ScalarType::BFloat16) {
+    torch::ScalarType dtype = torch::ScalarType::BFloat16) {
   torch::TensorOptions target_options = a.options().dtype(dtype);
   if (b.dim() != 2) {
     return torch::empty({a.size(0), b.size(1)}, target_options);
@@ -77,9 +79,9 @@ torch::Tensor fused_moe(
   // check smooth quant variables
   bool all_present = input_smooth && act_smooth && w1_scale && w2_scale;
   bool all_none = !input_smooth && !act_smooth && !w1_scale && !w2_scale;
-  TORCH_CHECK(all_none || all_present,
-              "input_smooth, act_smooth, w1_scale and w2_scale must be present "
-              "or absent at the same time.");
+  CHECK(all_none || all_present)
+      << "input_smooth, act_smooth, w1_scale and w2_scale must be present or "
+         "absent at the same time.";
   bool is_smoothquant = all_present;
   int64_t expert_num = gating_output_2d.size(-1);
   int64_t expert_size = w1.size(0);
@@ -97,8 +99,8 @@ torch::Tensor fused_moe(
                                   num_expert_group,
                                   topk_group,
                                   renormalize,
-                                  std::nullopt,  // mask
-                                  "topk_logit",  // normed_by
+                                  /*mask=*/std::nullopt,
+                                  /*normed_by=*/"topk_logit",
                                   scoring_func,
                                   route_scale,
                                   e_score_correction_bias,
@@ -123,21 +125,19 @@ torch::Tensor fused_moe(
     // w8a8 path: quantize input hidden states directly (fused with
     // moe_expand_input)
     std::tie(expand_hidden_states, input_scale) =
-        xllm::kernel::mlu::scaled_quantize(
-            hidden_states_2d,  // Use original hidden_states_2d instead of
-                               // expand_hidden_states
-            input_smooth.value(),
-            std::nullopt,  // zero
-            token_count_slice,
-            expand_idx,
-            gather_index_start_position,
-            std::nullopt,  // output
-            std::nullopt,  // output_scale
-            "none",        // act_mode
-            1.0,           // active_coef
-            false,         // is_gated
-            torch::kChar   // quant_type
-        );
+        scaled_quantize(hidden_states_2d,  // Use original hidden_states_2d
+                                           // instead of expand_hidden_states
+                        input_smooth.value(),
+                        /*zero=*/std::nullopt,
+                        token_count_slice,
+                        expand_idx,
+                        gather_index_start_position,
+                        /*output=*/std::nullopt,
+                        /*output_scale=*/std::nullopt,
+                        /*act_mode=*/"none",
+                        /*active_coef=*/1.0,
+                        /*is_gated=*/false,
+                        /*quant_type=*/torch::kChar);
   } else {
     // bf16/fp32 path: expand input hidden states
     expand_hidden_states = tmo::torch_api::moe_expand_input(hidden_states_2d,
@@ -153,26 +153,25 @@ torch::Tensor fused_moe(
   // Unified group_gemm call using input_scale/w1_scale/quant_flag only if
   // present
   tmo::torch_api::group_gemm(
-      expand_hidden_states,  // a
-      w1,                    // b
-      token_count_slice,     // m_list
-      gemm1_out,             // d
-      std::nullopt,          // gather_idx
-      std::nullopt,          // c
-      std::nullopt,          // alpha
-      std::nullopt,          // beta
-      input_scale.defined() ? std::make_optional(input_scale)
-                            : std::nullopt,  // a_scale
-      w1_scale.has_value() ? std::make_optional(w1_scale.value())
-                           : std::nullopt,                       // b_scale
-      std::nullopt,                                              // bias
-      w1_quant_flag.has_value() ? w1_quant_flag : std::nullopt,  // quant_flag
-      std::nullopt,                                              // b_offset
-      std::nullopt,                                              // tile_config
-      tokens,                                                    // max_dim
-      false,                                                     // trans_a
-      true                                                       // trans_b
-  );
+      expand_hidden_states,
+      w1,
+      token_count_slice,
+      gemm1_out,
+      /*gather_idx=*/std::nullopt,
+      /*c=*/std::nullopt,
+      /*alpha=*/std::nullopt,
+      /*beta=*/std::nullopt,
+      /*a_scale=*/input_scale.defined() ? std::make_optional(input_scale)
+                                        : std::nullopt,
+      /*b_scale=*/w1_scale.has_value() ? std::make_optional(w1_scale.value())
+                                       : std::nullopt,
+      /*bias=*/std::nullopt,
+      /*quant_flag=*/w1_quant_flag.has_value() ? w1_quant_flag : std::nullopt,
+      /*b_offset=*/std::nullopt,
+      /*tile_config=*/std::nullopt,
+      /*max_dim=*/tokens,
+      /*trans_a=*/false,
+      /*trans_b=*/true);
 
   // prepare the parameters for the second group gemm
   torch::Tensor act_out;
@@ -186,20 +185,18 @@ torch::Tensor fused_moe(
     // Quantize gemm1_out directly (fused with active operation) using reused
     // tensors
     auto [quantized_activation, activation_scale] =
-        xllm::kernel::mlu::scaled_quantize(
-            gemm1_out,
-            act_smooth.value(),
-            std::nullopt,  // zero
-            token_count_slice,
-            std::nullopt,   // gather_index
-            std::nullopt,   // gather_index_start_position
-            act_out,        // output - reuse from quantized_input
-            act_out_scale,  // output_scale - reuse from input_scale
-            act_mode,       // act_mode
-            1.0,            // active_coef
-            gated,          // is_gated
-            torch::kChar    // quant_type
-        );
+        scaled_quantize(gemm1_out,
+                        act_smooth.value(),
+                        /*zero=*/std::nullopt,
+                        /*token_count=*/token_count_slice,
+                        /*gather_index=*/std::nullopt,
+                        /*gather_index_start_position=*/std::nullopt,
+                        act_out,        // output - reuse from quantized_input
+                        act_out_scale,  // output_scale - reuse from input_scale
+                        /*act_mode=*/act_mode,
+                        /*active_coef=*/1.0,
+                        /*is_gated=*/gated,
+                        /*quant_type=*/torch::kChar);
     act_out = quantized_activation;
     act_out_scale = activation_scale;
   } else {
@@ -221,26 +218,25 @@ torch::Tensor fused_moe(
   // Unified group_gemm call, now only checks the existance of
   // input_scale/w1_scale for smoothquant
   tmo::torch_api::group_gemm(
-      act_out,            // a
-      w2,                 // b
-      token_count_slice,  // m_list
-      gemm2_out,          // d
-      std::nullopt,       // gather_idx
-      std::nullopt,       // c
-      std::nullopt,       // alpha
-      std::nullopt,       // beta
+      act_out,
+      w2,
+      token_count_slice,
+      gemm2_out,
+      /*gather_idx=*/std::nullopt,
+      /*c=*/std::nullopt,
+      /*alpha=*/std::nullopt,
+      /*beta=*/std::nullopt,
       act_out_scale.defined() ? std::make_optional(act_out_scale)
                               : std::nullopt,  // a_scale
       w2_scale.has_value() ? std::make_optional(w2_scale.value())
-                           : std::nullopt,                       // b_scale
-      std::nullopt,                                              // bias
+                           : std::nullopt,  // b_scale
+      /*bias=*/std::nullopt,
       w2_quant_flag.has_value() ? w2_quant_flag : std::nullopt,  // quant_flag
-      std::nullopt,                                              // b_offset
-      std::nullopt,                                              // tile_config
-      tokens,                                                    // max_dim
-      false,                                                     // trans_a
-      true                                                       // trans_b
-  );
+      /*b_offset=*/std::nullopt,
+      /*tile_config=*/std::nullopt,
+      tokens,  // max_dim
+      /*trans_a=*/false,
+      /*trans_b=*/true);
 
   auto output = torch::empty({reduce_weight.size(0), gemm2_out.size(1)},
                              gemm2_out.options());

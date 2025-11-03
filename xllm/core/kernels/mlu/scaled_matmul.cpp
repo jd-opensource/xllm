@@ -22,18 +22,18 @@ torch::Tensor scaled_matmul(
     const torch::Tensor& b,
     const std::optional<torch::Tensor>& a_scale,
     const torch::Tensor& b_scale,
-    c10::ScalarType output_dtype,
-    const std::optional<torch::Tensor>& bias /* = c10::nullopt */,
-    const std::optional<torch::Tensor>& c /* = c10::nullopt */,
+    torch::ScalarType output_dtype,
+    const std::optional<torch::Tensor>& bias /* = std::nullopt */,
+    const std::optional<torch::Tensor>& c /* = std::nullopt */,
     const std::string& act_mode /* = "none" */,
     int64_t quant_bit_size /* = 8 */,
     double alpha /* = 1.0 */,
     double beta /* = 1.0 */,
     bool use_hp_active /* = false */,
     int64_t a_quant_bit_size /* = -1 */,
-    const std::optional<torch::Tensor>& a_calib /* = c10::nullopt */,
-    const std::optional<torch::Tensor>& b_calib /* = c10::nullopt */,
-    const std::optional<torch::Tensor>& output /* = c10::nullopt */
+    const std::optional<torch::Tensor>& a_calib /* = std::nullopt */,
+    const std::optional<torch::Tensor>& b_calib /* = std::nullopt */,
+    const std::optional<torch::Tensor>& output /* = std::nullopt */
 ) {
   // Check: only support w8a8 quantization for now.
   TORCH_CHECK(quant_bit_size == 8 && a_quant_bit_size == 8,
@@ -58,7 +58,7 @@ torch::Tensor scaled_matmul(
       b_quant_layout = "quantize_group_wise";
     }
   }
-  std::optional<torch::Tensor> gemm_output_scale = c10::nullopt;
+  std::optional<torch::Tensor> gemm_output_scale = std::nullopt;
 
   at::ScalarType torch_half = at::ScalarType::Half;
   at::ScalarType torch_bfloat16 = at::ScalarType::BFloat16;
@@ -83,17 +83,17 @@ torch::Tensor scaled_matmul(
                                 a,
                                 b,
                                 a_scale,
-                                c10::nullopt,  // a_zero
+                                /*a_zero=*/std::nullopt,
                                 a_calib,
                                 b_scale,
-                                c10::nullopt,  // b_zero
+                                /*b_zero=*/std::nullopt,
                                 b_calib,
                                 bias,
                                 c,
-                                c10::nullopt,  // c_scale
-                                c10::nullopt,  // c_zero
+                                /*c_scale=*/std::nullopt,
+                                /*c_zero=*/std::nullopt,
                                 gemm_output_scale,
-                                c10::nullopt,  // gemm_output_zero
+                                /*gemm_output_zero=*/std::nullopt,
                                 quant_algo,
                                 a_quant_layout,
                                 b_quant_layout,
@@ -101,12 +101,11 @@ torch::Tensor scaled_matmul(
                                 quant_bit_size,
                                 act_mode,
                                 use_hp_active,
-                                1.0,  // act_coef
+                                /*act_coef=*/1.0,
                                 alpha,
                                 beta,
-                                false,  // trans_a
-                                true    // trans_b
-  );
+                                /*trans_a=*/false,
+                                /*trans_b=*/true);
   return output_tensor;
 }
 
