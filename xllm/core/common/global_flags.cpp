@@ -274,7 +274,7 @@ DEFINE_string(kv_cache_transfer_mode,
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 
 DEFINE_bool(enable_shm,
-            true,
+            false,
             "Whether to enable shared memory for executing model.");
 // --- function call config ---
 

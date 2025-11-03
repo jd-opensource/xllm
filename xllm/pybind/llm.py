@@ -43,6 +43,7 @@ class LLM:
         kv_cache_transfer_mode: str = 'PUSH',
         disable_ttft_profiling: bool = False,
         enable_forward_interruption: bool = False,
+        enable_shm: bool = False,
         **kwargs,
     ) -> None:
 
@@ -93,6 +94,7 @@ class LLM:
         options.enable_forward_interruption = enable_forward_interruption
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+        options.enable_shm = enable_shm
         self.master = LLMMaster(options)
 
     def finish(self):

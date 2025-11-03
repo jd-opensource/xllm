@@ -38,14 +38,16 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      int world_size,
                                      int device_idx,
                                      int num_decoding_tokens,
-                                     int block_size) {
+                                     int block_size,
+                                     bool enable_shm) {
   // TODO: pass whole xllm::runtime::Options here from main process.
   xllm::runtime::Options runner_options;
   runner_options.block_size(block_size)
       .num_decoding_tokens(num_decoding_tokens)
       .enable_schedule_overlap(false)
       .enable_offline_inference(true)
-      .master_node_addr(master_node_addr);
+      .master_node_addr(master_node_addr)
+      .enable_shm(enable_shm);
   FLAGS_enable_schedule_overlap = false;
   FLAGS_master_node_addr = master_node_addr;
   FLAGS_block_size = block_size;

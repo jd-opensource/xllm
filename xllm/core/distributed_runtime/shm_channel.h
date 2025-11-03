@@ -16,12 +16,16 @@ limitations under the License.
 #pragma once
 #include "comm_channel.h"
 #include "runtime/forward_shared_memory_manager.h"
+#include "runtime/options.h"
 
 namespace xllm {
 
 class ShmChannel : public CommChannel {
  public:
-  explicit ShmChannel(int dp_group, int rank, bool is_driver);
+  explicit ShmChannel(int dp_group,
+                      int rank,
+                      bool is_driver,
+                      const runtime::Options& options);
   ~ShmChannel() = default;
 
   void execute_model_async(
@@ -31,6 +35,8 @@ class ShmChannel : public CommChannel {
  private:
   bool execute_model_with_shm(const std::vector<RawForwardInput>& inputs,
                               RawForwardOutput& raw_output);
+
+  bool enable_shm_ = false;
   std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager_ = nullptr;
   std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager_ = nullptr;
 };

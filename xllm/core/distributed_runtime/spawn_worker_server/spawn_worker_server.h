@@ -27,7 +27,8 @@ class SpawnWorkerServer final {
                              int world_size,
                              int device_idx,
                              int num_decoding_tokens,
-                             int block_size);
+                             int block_size,
+                             bool enable_shm);
 
   ~SpawnWorkerServer() = default;
 

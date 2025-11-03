@@ -28,10 +28,11 @@ limitations under the License.
 // @device_idx
 // @num_decoding_tokens
 // @block_size
+// @enable_shm
 int main(int argc, char* argv[]) {
-  if (argc < 7) {
+  if (argc < 8) {
     LOG(ERROR)
-        << "Spwan worker process receive wrong args. Need 7 args, receive "
+        << "Spwan worker process receive wrong args. Need 8 args, receive "
         << argc;
     return 1;
   }
@@ -50,6 +51,7 @@ int main(int argc, char* argv[]) {
   int device_idx = atoi(argv[5]);
   int num_decoding_tokens = atoi(argv[6]);
   int block_size = atoi(argv[7]);
+  int enable_shm = atoi(argv[8]);
 
   LOG(INFO) << "Spwan worker: "
             << "master_node_addr = " << master_node_addr
@@ -57,7 +59,8 @@ int main(int argc, char* argv[]) {
             << ", world_size = " << world_size
             << ", device_idx = " << device_idx
             << ", num_decoding_tokens = " << num_decoding_tokens
-            << ", block_size = " << block_size << "\n";
+            << ", block_size = " << block_size
+            << ", enable_shm = " << (enable_shm > 0) << "\n";
 
   xllm::SpawnWorkerServer worker(master_node_addr,
                                  local_rank,
@@ -65,7 +68,8 @@ int main(int argc, char* argv[]) {
                                  world_size,
                                  device_idx,
                                  num_decoding_tokens,
-                                 block_size);
+                                 block_size,
+                                 enable_shm > 0);
 
   worker.run();
 

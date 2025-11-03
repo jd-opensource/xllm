@@ -178,6 +178,10 @@ class Options {
   // for offline inference: the path to spawn worker binary
   PROPERTY(std::string, spawn_worker_path) = "";
 
+  // use shared memory for inter-process communication in the single-machine
+  // multi-GPU scenario.
+  PROPERTY(bool, enable_shm) = false;
+
   // whether the worker and master are on the same machine.
   PROPERTY(bool, is_local) = false;
 };

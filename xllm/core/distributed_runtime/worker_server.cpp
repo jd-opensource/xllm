@@ -110,7 +110,7 @@ void WorkerServer::create_server(
   std::unique_ptr<Worker> worker =
       std::make_unique<Worker>(*parallel_args, device, options, worker_type);
   worker_service->set_worker(std::move(worker));
-  if (FLAGS_enable_shm && input_shm_manager && output_shm_manager) {
+  if (options.enable_shm() && input_shm_manager && output_shm_manager) {
     worker_service->create_polling_shm_thread(std::move(input_shm_manager),
                                               std::move(output_shm_manager));
   }
@@ -127,29 +127,32 @@ void WorkerServer::create_spawn_server(int local_rank,
                                        const ParallelArgs& parallel_args,
                                        const torch::Device& d,
                                        const runtime::Options& options) {
-  auto local_rank_str0 = std::to_string(local_rank);
-  const char* local_rank_str = local_rank_str0.c_str();
-  auto global_rank_str0 = std::to_string(parallel_args.rank());
-  const char* global_rank_str = global_rank_str0.c_str();
-  auto world_size_str0 = std::to_string(parallel_args.world_size());
-  const char* world_size_str = world_size_str0.c_str();
-  auto device_idx_str0 = std::to_string(d.index());
-  const char* device_idx_str = device_idx_str0.c_str();
-  auto num_decoding_tokens_str0 = std::to_string(options.num_decoding_tokens());
-  const char* num_decoding_tokens_str = num_decoding_tokens_str0.c_str();
-  auto block_size_str0 = std::to_string(options.block_size());
-  const char* block_size_str = block_size_str0.c_str();
+  auto local_rank_str = std::to_string(local_rank);
+  const char* local_rank_ptr = local_rank_str.c_str();
+  auto global_rank_str = std::to_string(parallel_args.rank());
+  const char* global_rank_ptr = global_rank_str.c_str();
+  auto world_size_str = std::to_string(parallel_args.world_size());
+  const char* world_size_ptr = world_size_str.c_str();
+  auto device_idx_str = std::to_string(d.index());
+  const char* device_idx_ptr = device_idx_str.c_str();
+  auto num_decoding_tokens_str = std::to_string(options.num_decoding_tokens());
+  const char* num_decoding_tokens_ptr = num_decoding_tokens_str.c_str();
+  auto block_size_str = std::to_string(options.block_size());
+  const char* block_size_ptr = block_size_str.c_str();
+  auto enable_shm_str = std::to_string(options.enable_shm());
+  const char* enable_shm_ptr = enable_shm_str.c_str();
   std::string spawn_worker_bin_path =
       options.spawn_worker_path() + "/spawn_worker";
   LOG(INFO) << "Spawn worker path: " << spawn_worker_bin_path;
   const char* argv[] = {spawn_worker_bin_path.c_str(),
                         master_node_addr.c_str(),
-                        local_rank_str,
-                        global_rank_str,
-                        world_size_str,
-                        device_idx_str,
-                        num_decoding_tokens_str,
-                        block_size_str,
+                        local_rank_ptr,
+                        global_rank_ptr,
+                        world_size_ptr,
+                        device_idx_ptr,
+                        num_decoding_tokens_ptr,
+                        block_size_ptr,
+                        enable_shm_ptr,
                         nullptr};
   pid_t pid;
   posix_spawn_file_actions_init(&file_actions_);
@@ -173,7 +176,7 @@ void WorkerServer::prepare_shm(
     const runtime::Options& options,
     std::unique_ptr<ForwardSharedMemoryManager>& input_shm_manager,
     std::unique_ptr<ForwardSharedMemoryManager>& output_shm_manager) {
-  if (options.is_local() && FLAGS_enable_shm) {
+  if (options.is_local() && options.enable_shm()) {
     bool is_creator;
     int dp_local_tp_size = parallel_args.world_size() / parallel_args.dp_size();
     int dp_group = parallel_args.rank() / dp_local_tp_size;

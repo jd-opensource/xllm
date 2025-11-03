@@ -39,6 +39,7 @@ class ArgumentParser:
         self.parser.add_argument('--enable_multi_stream_parallel', action='store_true', help='Whether to enable computation communication overlap.')
         self.parser.add_argument('--disable_ttft_profiling', action='store_true', help='Whether to disable TTFT profiling.')
         self.parser.add_argument('--enable_forward_interruption', action='store_true', help='Whether to enable forward interruption.')
+        self.parser.add_argument('--enable_shm', action='store_true', help='Use shared memory for inter-process communication in the single-machine multi-GPU scenario.')
 
     def parse_args(self):
         return self.parser.parse_args()

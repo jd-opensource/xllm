@@ -19,7 +19,11 @@ limitations under the License.
 
 namespace xllm {
 
-ShmChannel::ShmChannel(int dp_group, int rank, bool is_driver) {
+ShmChannel::ShmChannel(int dp_group,
+                       int rank,
+                       bool is_driver,
+                       const runtime::Options& options)
+    : enable_shm_(options.enable_shm()) {
   bool is_creator;
 
   if (is_driver) {
@@ -45,7 +49,7 @@ bool ShmChannel::execute_model_with_shm(
     int use_shm_ret = input_shm_manager_->raw_input_write(inputs);
     if (use_shm_ret < 0) {
       // fallback
-      FLAGS_enable_shm = false;
+      enable_shm_ = false;
       LOG(ERROR)
           << "RemoteWorker SharedMemoryManager write failed, fallback to brpc.";
       return false;
@@ -58,7 +62,7 @@ bool ShmChannel::execute_model_with_shm(
 void ShmChannel::execute_model_async(
     const std::vector<RawForwardInput>& inputs,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
-  if (FLAGS_enable_shm) {
+  if (enable_shm_) {
     // write to shared memory, then wait output.
     RawForwardOutput raw_output;
     bool shm_success = execute_model_with_shm(inputs, raw_output);

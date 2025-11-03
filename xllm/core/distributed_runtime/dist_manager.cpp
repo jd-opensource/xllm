@@ -96,19 +96,20 @@ void DistManager::setup_single_node_workers(const runtime::Options& options) {
 namespace {
 std::unique_ptr<CommChannel> create_channel(const std::string& worker_addrs,
                                             int r,
-                                            int dp_local_tp_size) {
+                                            int dp_local_tp_size,
+                                            const runtime::Options& options) {
   std::unique_ptr<CommChannel> channel;
 
   if (net::extract_ip(FLAGS_master_node_addr) ==
           net::extract_ip(worker_addrs) &&
-      FLAGS_enable_shm) {
+      options.enable_shm()) {
     // create shared memory manager for local rank
     bool is_driver = false;
     int dp_group = r / dp_local_tp_size;
     if (r % dp_local_tp_size == 0) {
       is_driver = true;
     }
-    channel = std::make_unique<ShmChannel>(dp_group, r, is_driver);
+    channel = std::make_unique<ShmChannel>(dp_group, r, is_driver, options);
   } else {
     channel = std::make_unique<CommChannel>();
   }
@@ -220,7 +221,8 @@ void DistManager::setup_multi_node_workers(
                    << r;
         return;
       }
-      auto channel = create_channel(worker_addrs_map[r], r, dp_local_tp_size);
+      auto channel =
+          create_channel(worker_addrs_map[r], r, dp_local_tp_size, options);
       worker_clients_.emplace_back(
           std::make_unique<RemoteWorker>(r,
                                          worker_addrs_map[r],

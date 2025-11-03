@@ -81,7 +81,8 @@ PYBIND11_MODULE(xllm_export, m) {
                      &Options::enable_forward_interruption_)
       .def_readwrite("enable_offline_inference",
                      &Options::enable_offline_inference_)
-      .def_readwrite("spawn_worker_path", &Options::spawn_worker_path_);
+      .def_readwrite("spawn_worker_path", &Options::spawn_worker_path_)
+      .def_readwrite("enable_shm", &Options::enable_shm_);
 
   // 2. export LLMMaster
   py::class_<LLMMaster>(m, "LLMMaster")
