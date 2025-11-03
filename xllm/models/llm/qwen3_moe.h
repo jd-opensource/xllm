@@ -272,8 +272,6 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       if (input_params.layer_synchronizer != nullptr) {
         event = input_params.layer_synchronizer->get_event(i);
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
-      } else {
-        LOG(INFO) << "layer_synchronizer is nullptr";
       }
       auto& layer = layers_[i];
       layer(h,
