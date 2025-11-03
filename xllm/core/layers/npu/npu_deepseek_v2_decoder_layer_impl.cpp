@@ -1520,8 +1520,8 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
     int node_id) {
   atb::Status st;
   // all micro batches are in same prefill/decode stage,
-  //  so, to judge empty_kv_cache, use input_params[0] here
-  if (input_params[0].global_empty_kv_cache) {
+  // deepseek dont support chunked prefill, so only check is_prefill.
+  if (input_params[0].batch_forward_type.is_prefill()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,

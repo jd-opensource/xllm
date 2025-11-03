@@ -146,6 +146,14 @@ message BlockPair {
   int32 host_block_id = 2;
 }
 
+enum BatchForwardType {
+  PREFILL = 0;
+  CHUNKED_PREFILL = 1;
+  DECODE = 2;
+  MIXED = 3;
+  IDLE = 4;
+}
+
 message ForwardInput {
   // flatten the token ids and positions
   repeated int32 flatten_tokens_vec = 1;
@@ -160,11 +168,11 @@ message ForwardInput {
   repeated UniqueTokenIds unique_token_ids_vec = 6;
   repeated UniqueTokenCounts unique_token_counts_vec = 7;
   repeated int32 unique_token_lens_vec = 8;
-  bool empty_kv_cache = 9;
+  int32 batch_forward_type = 9;
   uint32 max_seq_len = 10;
   uint32 q_max_seq_len = 11;
-  repeated int32  seq_lens = 12;
-  repeated int32  q_seq_lens = 13;
+  repeated int32 seq_lens = 12;
+  repeated int32 q_seq_lens = 13;
   repeated int32 paged_kv_indptr = 14;
   repeated int32 paged_kv_indices = 15;
   repeated int32 paged_kv_last_page_len = 16;
@@ -173,26 +181,25 @@ message ForwardInput {
   repeated BlockTables block_tables_vec = 18;
   int32 num_sequences = 19;
   repeated int32 dp_global_token_nums = 20;
-  bool global_empty_kv_cache = 21;
-  repeated TransferKVInfo transfer_kv_infos = 22;
-  repeated Embeddings embeds = 23;
-  uint32 prefill_seq_len = 24;
-  repeated int32 embedding_ids = 25;
-  repeated int32 extra_token_ids = 26;
-  EplbInfo eplb_info =27;
-  repeated CacheBlockInfo async_copy_out_blocks = 28;
-  repeated CacheBlockInfo copy_out_blocks = 29;
-  repeated CacheBlockInfo copy_in_blocks = 30;
-  repeated CacheBlockInfo swap_blocks = 31;
+  repeated TransferKVInfo transfer_kv_infos = 21;
+  repeated Embeddings embeds = 22;
+  uint32 prefill_seq_len = 23;
+  repeated int32 embedding_ids = 24;
+  repeated int32 extra_token_ids = 25;
+  EplbInfo eplb_info = 26;
+  repeated CacheBlockInfo async_copy_out_blocks = 27;
+  repeated CacheBlockInfo copy_out_blocks = 28;
+  repeated CacheBlockInfo copy_in_blocks = 29;
+  repeated CacheBlockInfo swap_blocks = 30;
   // block copy kernel
-  repeated int32 src_block_indices = 32;
-  repeated int32 dst_block_indices = 33;
-  repeated int32 cum_sum = 34;
+  repeated int32 src_block_indices = 31;
+  repeated int32 dst_block_indices = 32;
+  repeated int32 cum_sum = 33;
   // for continuous kvcache
-  repeated int64 new_cache_slot_offsets = 35;
-  repeated int64 kv_cache_start_offsets = 36;
+  repeated int64 new_cache_slot_offsets = 34;
+  repeated int64 kv_cache_start_offsets = 35;
   // beam search kernel
-  repeated float acc_logprob_vec = 37;
+  repeated float acc_logprob_vec = 36;
 }
 
  message BatchedForwardInputs {

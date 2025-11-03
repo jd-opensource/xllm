@@ -168,12 +168,12 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
     const BatchedForwardInputs& inputs) {
   // all micro batches in multi stream parallel share the same
   // prefill/decode stage, use inputs[0] here
-  if (inputs.micro_inputs[0].token_ids.numel() == 0) {
+  if (inputs.micro_inputs[0].input_params.batch_forward_type.is_idle()) {
     return step_empty(inputs);
   }
 
   // TODO: support data parallel case
-  if (inputs.micro_inputs[0].input_params.q_seq_lens_vec[0] > 1) {
+  if (!inputs.micro_inputs[0].input_params.batch_forward_type.is_decode()) {
     return step_prefill(inputs);
   } else {
     return step_decode(inputs);
@@ -182,7 +182,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step_empty(
     const BatchedForwardInputs& inputs) {
-  if (inputs.micro_inputs[0].input_params.q_seq_lens_vec[0] > 1) {
+  if (!inputs.micro_inputs[0].input_params.batch_forward_type.is_decode()) {
     auto output = impl_->step(inputs);
     auto draft_output = draft_impl_->step(inputs);
     return output;
@@ -614,7 +614,6 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       input_params.block_tables =
           create_2d_tensor(block_tables_vec, torch::kInt).to(device_);
     }
-    input_params.decode_seq_range.second = input_params.num_sequences - 1;
 
     // update the sampling_params
     update_sampling_params(
@@ -824,7 +823,7 @@ void SpeculativeWorkerImpl::update_sampling_params(
 void SpeculativeWorkerImpl::prepare_work_before_execute(
     const BatchedForwardInputs& inputs,
     BatchedForwardInputs& processed_inputs) {
-  if (inputs.micro_inputs[0].input_params.q_seq_lens_vec[0] > 1) {
+  if (!inputs.micro_inputs[0].input_params.batch_forward_type.is_decode()) {
     WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
   } else {
     if (enable_schedule_overlap()) {

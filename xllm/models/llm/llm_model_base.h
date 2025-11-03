@@ -191,7 +191,7 @@ class LlmModelImplBase : public torch::nn::Module {
         const_cast<std::vector<ModelInputParams>&>(input_params);
 
     for (auto i = 0; i < micro_batch_num; ++i) {
-      if (tokens[i].numel() == 0) {
+      if (input_params[0].batch_forward_type.is_idle()) {
         tokens[i] = torch::tensor({1}).to(torch::kInt32).to(tokens[0].device());
         positions[i] =
             torch::tensor({0}).to(torch::kInt32).to(tokens[0].device());

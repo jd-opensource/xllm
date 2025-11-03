@@ -144,7 +144,7 @@ INLINE size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   total += type_size<uint64_t> * 4 +
            cache_block_size * cache_block_info_fixed_size();
 
-  total += type_size<bool> * 2  // empty_kv_cache + global_empty_kv_cache
+  total += type_size<int32_t>  // batch_forward_type
            + type_size<uint32_t> *
                  3  // max_seq_len + q_max_seq_len + prefill_seq_len
            + type_size<int32_t>  // num_sequences
@@ -462,8 +462,9 @@ INLINE void deserialize_raw_forward_input(
   read_cache_blocks(buffer, input.copy_in_blocks);
   read_cache_blocks(buffer, input.swap_blocks);
 
-  read_data(buffer, input.empty_kv_cache);
-  read_data(buffer, input.global_empty_kv_cache);
+  int32_t batch_forward_type;
+  read_data(buffer, batch_forward_type);
+  input.batch_forward_type = BatchForwardType(batch_forward_type);
   read_data(buffer, input.max_seq_len);
   read_data(buffer, input.q_max_seq_len);
   read_data(buffer, input.num_sequences);
@@ -514,10 +515,8 @@ INLINE void serialize_raw_forward_input(const RawForwardInput& input,
   write_cache_blocks(buffer, input.copy_in_blocks);
   write_cache_blocks(buffer, input.swap_blocks);
 
-  *reinterpret_cast<bool*>(buffer) = input.empty_kv_cache;
-  buffer += 1;
-  *reinterpret_cast<bool*>(buffer) = input.global_empty_kv_cache;
-  buffer += 1;
+  *reinterpret_cast<int32_t*>(buffer) = input.batch_forward_type.value();
+  buffer += 4;
   *reinterpret_cast<uint32_t*>(buffer) = input.max_seq_len;
   buffer += 4;
   *reinterpret_cast<uint32_t*>(buffer) = input.q_max_seq_len;
@@ -707,15 +706,8 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   forward_input.positions =
       torch::tensor(std::move(raw_input.flatten_positions_vec), tensor_options);
 
-  std::pair<int, int> decode_seq_range{0, 0};
-#if defined(USE_NPU)
-  if (raw_input.q_seq_lens.size() >= 1) {
-    decode_seq_range = util::find_ones_indices(raw_input.q_seq_lens);
-  }
-#endif
   auto& input_params = forward_input.input_params;
-  input_params.empty_kv_cache = raw_input.empty_kv_cache;
-  input_params.global_empty_kv_cache = raw_input.global_empty_kv_cache;
+  input_params.batch_forward_type = raw_input.batch_forward_type;
   input_params.num_sequences = raw_input.num_sequences;
   input_params.kv_max_seq_len = raw_input.max_seq_len;
   input_params.q_max_seq_len = raw_input.q_max_seq_len;
@@ -732,7 +724,6 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
 
   input_params.new_cache_slots =
       torch::tensor(std::move(raw_input.new_token_slot_ids), tensor_options);
-  input_params.decode_seq_range = decode_seq_range;
   util::pad_2d_vector(raw_input.block_tables_vec, 0);
   input_params.block_tables =
       create_2d_tensor(std::move(raw_input.block_tables_vec), torch::kInt);

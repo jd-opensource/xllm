@@ -178,7 +178,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
 
     torch::Tensor attn_mask;
-    if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
+    if (num_speculative_tokens_ == 0 ||
+        input_params.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
     } else {
       attn_mask = attn_mask_.gen_free_mask(

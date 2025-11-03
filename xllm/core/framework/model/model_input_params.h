@@ -21,6 +21,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
+#include "framework/model/batch_forward_type.h"
 #include "framework/request/mm_data.h"
 #include "npu_dp_ep_padding.h"
 #include "util/tensor_helper.h"
@@ -50,8 +51,7 @@ struct CacheBlockInfo {
 struct ModelInputParams {
   ModelInputParams to(const torch::Device& device) const {
     ModelInputParams params;
-    params.empty_kv_cache = empty_kv_cache;
-    params.global_empty_kv_cache = global_empty_kv_cache;
+    params.batch_forward_type = batch_forward_type;
     params.num_sequences = num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
     params.q_max_seq_len = q_max_seq_len;
@@ -63,7 +63,6 @@ struct ModelInputParams {
     params.block_tables = safe_to(block_tables, device, true);
     params.kv_seq_lens_vec = kv_seq_lens_vec;
     params.q_seq_lens_vec = q_seq_lens_vec;
-    params.decode_seq_range = decode_seq_range;
 
     params.input_embedding = safe_to(input_embedding, device);
 
@@ -98,15 +97,13 @@ struct ModelInputParams {
   }
 
   void print() const {
-    LOG(INFO) << "ModelInputParams: empty_kv_cache is " << empty_kv_cache
-              << " , global_empty_kv_cache is " << global_empty_kv_cache
-              << " , num_sequences is " << num_sequences
-              << " , kv_max_seq_len is " << kv_max_seq_len
+    LOG(INFO) << "ModelInputParams: batch_forward_type is "
+              << batch_forward_type.to_string() << " , num_sequences is "
+              << num_sequences << " , kv_max_seq_len is " << kv_max_seq_len
               << " , q_max_seq_len is " << q_max_seq_len
               << " , prefill_seq_len is " << prefill_seq_len;
     LOG(INFO) << "ModelInputParams: kv_seq_lens_vec is " << kv_seq_lens_vec;
     LOG(INFO) << "ModelInputParams: q_seq_lens_vec is " << q_seq_lens_vec;
-    LOG(INFO) << "ModelInputParams: decode_seq_range is " << decode_seq_range;
     print_tensor(kv_seq_lens, "ModelInputParams: kv_seq_lens", 4);
     print_tensor(q_seq_lens, "ModelInputParams: q_seq_lens", 4);
     print_tensor(new_cache_slots, "ModelInputParams: new_cache_slots", 4);
@@ -114,8 +111,8 @@ struct ModelInputParams {
     LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
               << dp_global_token_nums;
   }
-  // whether the kv-cache is empty for all sequences.
-  bool empty_kv_cache = true;
+  // forward type of the batch, used by worker/kernel.
+  BatchForwardType batch_forward_type;
 
   // total number of sequences in the batch
   int32_t num_sequences = 0;
@@ -124,15 +121,7 @@ struct ModelInputParams {
   torch::Tensor kv_seq_lens;
   std::vector<int> kv_seq_lens_vec;
   std::vector<int> q_seq_lens_vec;
-  // Range of decode sequence indices in the batch [start, end].
-  // Decode sequences are identified by q_seq_lens == 1,
-  // prefill sequences by  q_seq_lens > 1 .
-  // Used to determine whether to use prefill_node_ or
-  // decode_node_ in NPU layers
-  // Values: {-1, -1} if no decode requests (all prefill),
-  //         {0, batch_size-1} if all decode requests,
-  //         {start_idx, end_idx} if mixed prefill/decode requests
-  std::pair<int, int> decode_seq_range;
+
   // max length for qkv.
   int32_t kv_max_seq_len = 0;
   int32_t q_max_seq_len = 0;
@@ -151,8 +140,6 @@ struct ModelInputParams {
 
   // num tokens of all workers，mainly used for dp case
   std::vector<int32_t> dp_global_token_nums;
-  // whether the kv-cache is empty for all sequences,mainly used for dp case
-  bool global_empty_kv_cache = true;
 
   // num of prefill sequence in chunked prefill case
   uint32_t prefill_seq_len = 0;
