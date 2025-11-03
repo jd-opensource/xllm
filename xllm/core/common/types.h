@@ -199,7 +199,9 @@ struct InstanceInfo {
   std::vector<int64_t> v_cache_ids;
   int32_t dp_size;
   // ttft profiling data
-  std::vector<std::pair<int32_t, int64_t>> ttft_profiling_data;
+  std::vector<std::pair<int32_t, double>> ttft_profiling_data;
+  // tpot profiling data
+  std::vector<std::tuple<int32_t, int32_t, double>> tpot_profiling_data;
 
   nlohmann::json serialize_to_json() const {
     nlohmann::json json_val;
@@ -223,6 +225,7 @@ struct InstanceInfo {
     json_val["v_cache_ids"] = v_cache_ids;
     json_val["dp_size"] = dp_size;
     json_val["ttft_profiling_data"] = ttft_profiling_data;
+    json_val["tpot_profiling_data"] = tpot_profiling_data;
     return json_val;
   }
 };

@@ -604,4 +604,69 @@ double ProfileManager::run_request(
   return latency;
 }
 
+// Generate a batch of decode requests and execute it, then return the step
+// latency.
+double ProfileManager::profile_decode_step_time(int32_t token_length,
+                                                int32_t batch_size,
+                                                int32_t min_context_len,
+                                                int32_t max_context_len) {
+  double total_latency = 0;
+  for (int32_t i = 0; i < profile_count_per_step_; ++i) {
+    std::vector<int32_t> token_length_vec;
+    std::vector<int32_t> prefix_length_vec;
+    generate_random_decode_batch(batch_size * token_length,
+                                 batch_size,
+                                 min_context_len,
+                                 max_context_len,
+                                 token_length_vec,
+                                 prefix_length_vec);
+    double latency = run_request(token_length_vec, prefix_length_vec);
+    total_latency += latency;
+  }
+  return total_latency / profile_count_per_step_;
+}
+
+// Generate a batch of random decode requests with an average length of
+// token_length.
+void ProfileManager::generate_random_decode_batch(
+    int32_t total_length,
+    int32_t batch_size,
+    int32_t min_context_len,
+    int32_t max_context_len,
+    std::vector<int32_t>& token_length_vec,
+    std::vector<int32_t>& prefix_length_vec) {
+  CHECK(total_length >= batch_size * min_context_len);
+
+  token_length_vec.resize(batch_size, min_context_len);
+  prefix_length_vec.resize(batch_size, min_context_len - 1);
+  int remain = total_length - batch_size * min_context_len;
+
+  std::random_device rd;
+  std::mt19937_64 gen(rd());
+
+  for (int i = 0; i < batch_size; ++i) {
+    if (remain == 0) break;
+
+    int max = remain > (max_context_len - min_context_len)
+                  ? (max_context_len - min_context_len)
+                  : remain;
+
+    std::uniform_int_distribution<int> dis(0, max);
+    int add = dis(gen);
+    token_length_vec[i] += add;
+    prefix_length_vec[i] += add;
+    remain -= add;
+  }
+
+  int idx = 0;
+  while (remain > 0) {
+    if (token_length_vec[idx % batch_size] < max_context_len) {
+      token_length_vec[idx % batch_size] += 1;
+      prefix_length_vec[idx % batch_size] += 1;
+      --remain;
+    }
+    ++idx;
+  }
+}
+
 }  // namespace xllm

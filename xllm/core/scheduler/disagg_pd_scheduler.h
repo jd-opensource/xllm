@@ -101,6 +101,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // corresponding TTFT for calculating the estimated TTFT of requests.
   void profile_ttft();
 
+  void profile_tpot();
+
   // check remote instance info, if not exist, get from master service
   bool check_remote_instance_info(const std::string& instance_name);
 

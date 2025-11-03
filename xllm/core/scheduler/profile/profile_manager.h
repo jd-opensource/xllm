@@ -79,6 +79,13 @@ class ProfileManager {
   double run_request(const std::vector<int32_t>& token_length_vec,
                      const std::vector<int32_t>& prefix_length_vec);
 
+  // Generate a batch of decode requests and execute it, then return the step
+  // latency.
+  double profile_decode_step_time(int32_t token_length,
+                                  int32_t batch_size,
+                                  int32_t min_context_len,
+                                  int32_t max_context_len);
+
   void train_prefill_time_predictor(
       std::vector<std::tuple<int32_t, int32_t, double>> time_profiling_data);
 
@@ -118,6 +125,15 @@ class ProfileManager {
   int32_t binary_search_max_tokens(int32_t tpot_slo_ms,
                                    int32_t lower_bound,
                                    int32_t upper_bound);
+
+  // Generate a batch of random decode requests with an average length of
+  // token_length.
+  void generate_random_decode_batch(int32_t total_length,
+                                    int32_t batch_size,
+                                    int32_t min_context_len,
+                                    int32_t max_context_len,
+                                    std::vector<int32_t>& token_length_vec,
+                                    std::vector<int32_t>& prefix_length_vec);
 
   std::unique_ptr<TimePredictor> prefill_time_predictor_;
   std::unique_ptr<TimePredictor> decode_time_predictor_;
