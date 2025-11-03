@@ -458,3 +458,9 @@ DEFINE_int64(dit_cache_skip_interval_steps,
 DEFINE_double(dit_cache_residual_diff_threshold,
               0.09f,
               "The residual difference threshold for cache reuse.");
+
+DEFINE_bool(enable_constrained_decoding,
+            false,
+            "Whether to enable constrained decoding, which is used to ensure "
+            "that the output meets specific format or structural requirements "
+            "through pre-defined rules.");
