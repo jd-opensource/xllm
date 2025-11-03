@@ -27,11 +27,15 @@ StreamOutputParser::StreamOutputParser(
       reasoning_parser_format_(reasoning_parser_format),
       force_reasoning_(force_reasoning) {
   sequence_parsers_.resize(1);
-  sequence_parsers_[0].tool_call_parser =
-      std::make_unique<function_call::FunctionCallParser>(
-          tools_, tool_call_parser_format_);
-  sequence_parsers_[0].reasoning_parser_ = std::make_unique<ReasoningParser>(
-      reasoning_parser_format_, true, force_reasoning_);
+  if (is_tool_call()) {
+    sequence_parsers_[0].tool_call_parser =
+        std::make_unique<function_call::FunctionCallParser>(
+            tools_, tool_call_parser_format_);
+  }
+  if (is_reasoning()) {
+    sequence_parsers_[0].reasoning_parser_ = std::make_unique<ReasoningParser>(
+        reasoning_parser_format_, true, force_reasoning_);
+  }
 }
 
 bool StreamOutputParser::is_tool_call() {
