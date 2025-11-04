@@ -6,7 +6,7 @@ function error() {
   exit 1
 }
 
-IMAGE="cambricon-base/pytorch:v25.06.0-torch2.7.1-torchmlu1.27.2-ubuntu22.04-py310_xllm251016"
+IMAGE="cambricon-base/pytorch:v25.06.0-torch2.7.1-torchmlu1.27.2-ubuntu22.04-py310_xllm251104"
 
 RUN_OPTS=(
   --rm
