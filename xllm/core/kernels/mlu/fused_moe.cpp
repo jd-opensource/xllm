@@ -174,8 +174,7 @@ torch::Tensor fused_moe(
       /*max_dim=*/tokens,
       /*trans_a=*/false,
       /*trans_b=*/true,
-      /*a_quant_bit=*/is_smoothquant ? 8 : -1
-    );
+      /*a_quant_bit=*/is_smoothquant ? 8 : -1);
 
   // prepare the parameters for the second group gemm
   torch::Tensor act_out;
@@ -243,8 +242,8 @@ torch::Tensor fused_moe(
       /*max_dim=*/tokens,
       /*trans_a=*/false,
       /*trans_b=*/true,
-      /*a_quant_bit=*/is_smoothquant ? 8 : -1
-  );
+      /*a_quant_bit=*/is_smoothquant ? 8 : -1);
+
   auto output = torch::empty({reduce_weight.size(0), gemm2_out.size(1)},
                              gemm2_out.options());
   tmo::torch_api::moe_combine_result(gemm2_out,
