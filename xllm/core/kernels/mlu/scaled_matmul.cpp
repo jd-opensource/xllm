@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "glog/logging.h"
 #include "mlu_ops_api.h"
 
 namespace xllm::kernel::mlu {
@@ -36,14 +37,12 @@ torch::Tensor scaled_matmul(
     const std::optional<torch::Tensor>& output /* = std::nullopt */
 ) {
   // Check: only support w8a8 quantization for now.
-  TORCH_CHECK(quant_bit_size == 8 && a_quant_bit_size == 8,
-              "scaled_matmul only supports w8a8 quantization (quant_bit_size "
-              "== 8, a_quant_bit_size == 8) for now. "
-              "Got quant_bit_size = ",
-              quant_bit_size,
-              ", a_quant_bit_size = ",
-              a_quant_bit_size,
-              ".");
+  CHECK(quant_bit_size == 8 && a_quant_bit_size == 8)
+      << "scaled_matmul only supports w8a8 quantization (quant_bit_size "
+         "scaled_matmul only supports w8a8 quantization (quant_bit_size "
+         "== 8, a_quant_bit_size == 8) for now. "
+         "Got quant_bit_size = "
+      << quant_bit_size << ", a_quant_bit_size = " << a_quant_bit_size;
 
   // Only support smooth_quant algorithm for now
   std::string quant_algo = "smooth_quant";
@@ -63,10 +62,8 @@ torch::Tensor scaled_matmul(
   at::ScalarType torch_half = at::ScalarType::Half;
   at::ScalarType torch_bfloat16 = at::ScalarType::BFloat16;
 
-  TORCH_CHECK(output_dtype == torch_half || output_dtype == torch_bfloat16,
-              "output dtype must be half or bfloat16, but got: ",
-              output_dtype,
-              ".");
+  CHECK(output_dtype == torch_half || output_dtype == torch_bfloat16)
+      << "output dtype must be half or bfloat16, but got: " << output_dtype;
 
   // Select output tensor
   torch::Tensor output_tensor;

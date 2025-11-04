@@ -12,6 +12,7 @@ set(BASE_DEPS
   :chat_template
   glog::glog
   torch
+  torch_python
 )
 
 if(USE_NPU)

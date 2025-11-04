@@ -39,15 +39,15 @@ class MockBackend : public c10d::Backend {
       : c10d::Backend(rank, world_size), rank_(rank), world_size_(world_size) {}
 
   c10::intrusive_ptr<c10d::Work> allreduce(
-      std::vector<at::Tensor>& tensors,
+      std::vector<torch::Tensor>& tensors,
       const c10d::AllreduceOptions& opts = c10d::AllreduceOptions()) override {
     // Mock implementation - return a completed work
     return c10::make_intrusive<c10d::Work>();
   }
 
   c10::intrusive_ptr<c10d::Work> allgather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
+      std::vector<std::vector<torch::Tensor>>& outputTensors,
+      std::vector<torch::Tensor>& inputTensors,
       const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
     // Mock implementation - return a completed work
     return c10::make_intrusive<c10d::Work>();
@@ -59,35 +59,35 @@ class MockBackend : public c10d::Backend {
   }
 
   c10::intrusive_ptr<c10d::Work> broadcast(
-      std::vector<at::Tensor>& tensors,
+      std::vector<torch::Tensor>& tensors,
       const c10d::BroadcastOptions& opts = c10d::BroadcastOptions()) override {
     return c10::make_intrusive<c10d::Work>();
   }
 
   c10::intrusive_ptr<c10d::Work> reduce(
-      std::vector<at::Tensor>& tensors,
+      std::vector<torch::Tensor>& tensors,
       const c10d::ReduceOptions& opts = c10d::ReduceOptions()) override {
     return c10::make_intrusive<c10d::Work>();
   }
 
   c10::intrusive_ptr<c10d::Work> allgather_coalesced(
-      std::vector<std::vector<at::Tensor>>& outputTensorLists,
-      std::vector<at::Tensor>& inputTensors,
+      std::vector<std::vector<torch::Tensor>>& outputTensorLists,
+      std::vector<torch::Tensor>& inputTensors,
       const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
     return c10::make_intrusive<c10d::Work>();
   }
 
   c10::intrusive_ptr<c10d::Work> reduce_scatter(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
+      std::vector<torch::Tensor>& outputTensors,
+      std::vector<std::vector<torch::Tensor>>& inputTensors,
       const c10d::ReduceScatterOptions& opts =
           c10d::ReduceScatterOptions()) override {
     return c10::make_intrusive<c10d::Work>();
   }
 
   c10::intrusive_ptr<c10d::Work> alltoall_base(
-      at::Tensor& outputTensor,
-      at::Tensor& inputTensor,
+      torch::Tensor& outputTensor,
+      torch::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const c10d::AllToAllOptions& opts = c10d::AllToAllOptions()) override {
@@ -95,26 +95,27 @@ class MockBackend : public c10d::Backend {
   }
 
   c10::intrusive_ptr<c10d::Work> alltoall(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
+      std::vector<torch::Tensor>& outputTensors,
+      std::vector<torch::Tensor>& inputTensors,
       const c10d::AllToAllOptions& opts = c10d::AllToAllOptions()) override {
     return c10::make_intrusive<c10d::Work>();
   }
 
-  c10::intrusive_ptr<c10d::Work> send(std::vector<at::Tensor>& tensors,
+  c10::intrusive_ptr<c10d::Work> send(std::vector<torch::Tensor>& tensors,
                                       int dstRank,
                                       int tag) override {
     return c10::make_intrusive<c10d::Work>();
   }
 
-  c10::intrusive_ptr<c10d::Work> recv(std::vector<at::Tensor>& tensors,
+  c10::intrusive_ptr<c10d::Work> recv(std::vector<torch::Tensor>& tensors,
                                       int srcRank,
                                       int tag) override {
     return c10::make_intrusive<c10d::Work>();
   }
 
-  c10::intrusive_ptr<c10d::Work> recvAnysource(std::vector<at::Tensor>& tensors,
-                                               int tag) override {
+  c10::intrusive_ptr<c10d::Work> recvAnysource(
+      std::vector<torch::Tensor>& tensors,
+      int tag) override {
     return c10::make_intrusive<c10d::Work>();
   }
 

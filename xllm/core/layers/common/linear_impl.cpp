@@ -82,8 +82,9 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
 
 torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
   input = input.to(device_);
-  auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
-                                              : std::nullopt;
+  auto bias = (bias_.defined() && rank_ == 0)
+                  ? std::optional<torch::Tensor>(bias_)
+                  : std::nullopt;
 
   torch::Tensor output;
 
@@ -247,7 +248,7 @@ QKVParallelLinearImpl::QKVParallelLinearImpl(
 torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
   input = input.to(device_);
   auto bias = (qkv_bias_.defined() && rank_ == 0)
-                  ? std::optional<at::Tensor>(qkv_bias_)
+                  ? std::optional<torch::Tensor>(qkv_bias_)
                   : std::nullopt;
   xllm::kernel::MatmulParams matmul_params;
   matmul_params.a = input;
@@ -362,8 +363,9 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     input = xllm::parallel_state::scatter(input, parallel_args_.tp_group_);
   }
 
-  auto bias = (bias_.defined() && rank_ == 0) ? std::optional<at::Tensor>(bias_)
-                                              : std::nullopt;
+  auto bias = (bias_.defined() && rank_ == 0)
+                  ? std::optional<torch::Tensor>(bias_)
+                  : std::nullopt;
   torch::Tensor output;
   if (quant_args_.quant_method() == "smoothquant") {
     torch::Tensor quantized_input;
@@ -461,7 +463,8 @@ ReplicatedLinearImpl::ReplicatedLinearImpl(
 
 torch::Tensor ReplicatedLinearImpl::forward(torch::Tensor input) {
   namespace F = torch::nn::functional;
-  auto bias = bias_.defined() ? std::optional<at::Tensor>(bias_) : std::nullopt;
+  auto bias =
+      bias_.defined() ? std::optional<torch::Tensor>(bias_) : std::nullopt;
   xllm::kernel::MatmulParams matmul_params;
   matmul_params.a = input;
   matmul_params.b = weight_;

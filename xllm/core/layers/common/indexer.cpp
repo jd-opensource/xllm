@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <cmath>
 
+#include "glog/logging.h"
 #include "kernels/ops_api.h"
 
 namespace {
@@ -32,7 +33,7 @@ torch::Tensor create_hadamard_matrix(int64_t n,
                                      torch::Dtype dtype = torch::kFloat32,
                                      torch::Device device = torch::kCPU,
                                      bool normalize = false) {
-  TORCH_CHECK(is_power_of_two(n), "hadamard_matrix: n must be a power of two.");
+  CHECK(is_power_of_two(n)) << "hadamard_matrix: n must be a power of two.";
 
   auto options = torch::TensorOptions().dtype(dtype).device(device);
   // Initial Hadamard matrix H_1 = [1]
@@ -182,8 +183,8 @@ torch::Tensor IndexerImpl::rotate_activation(
     const torch::Tensor& input,
     const torch::Tensor& hadamard_matrix) {
   // Ensure the input is bfloat16 as per interface contract
-  TORCH_CHECK(input.dtype() == torch::kBFloat16,
-              "rotate_activation: input must be bfloat16");
+  CHECK(input.dtype() == torch::kBFloat16)
+      << "rotate_activation: input must be bfloat16";
   int64_t hidden_size = input.size(-1);
   return hadamard_transform_ref(input, hadamard_matrix);
 }
@@ -245,9 +246,9 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   auto k_unsqueezed = k.unsqueeze(1);
   xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
   reshape_paged_cache_params.key = k_unsqueezed;
-  reshape_paged_cache_params.value = c10::nullopt;
+  reshape_paged_cache_params.value = std::nullopt;
   reshape_paged_cache_params.k_cache = k_cache;
-  reshape_paged_cache_params.v_cache = c10::nullopt;
+  reshape_paged_cache_params.v_cache = std::nullopt;
   reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
   reshape_paged_cache_params.direction = false;
   xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
@@ -255,7 +256,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   k = k_unsqueezed.squeeze(1);
   // Unified parameter setup for both prefill and decode modes
   torch::Tensor k_cache_tensor;
-  c10::optional<at::Tensor> cu_seq_q_lens, k_block_table;
+  std::optional<torch::Tensor> cu_seq_q_lens, k_block_table;
   torch::Tensor new_block_tables;
   int batch_size = attn_metadata.kv_seq_lens.size(0);
   torch::Tensor block_table = attn_metadata.block_table;
@@ -264,7 +265,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   if (is_prefill) {
     // Prefill mode parameters
     cu_seq_q_lens = attn_metadata.query_start_loc;
-    k_block_table = c10::nullopt;
+    k_block_table = std::nullopt;
     k_cache_tensor = k;
 
     // Prefill output tensors
@@ -274,7 +275,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
                                         .device(block_table.device()));
   } else {
     // Decode mode parameters
-    cu_seq_q_lens = c10::nullopt;
+    cu_seq_q_lens = std::nullopt;
     k_block_table = block_table;
     k_cache_tensor = k_cache;
     auto seq_len = num_tokens / batch_size;
@@ -297,15 +298,15 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   kernel::MaskedIndexerSelectPagedKVParams params;
   params.is_prefill = is_prefill;
   params.query = q;
-  params.cu_seq_q_lens = cu_seq_q_lens.value_or(at::Tensor());
+  params.cu_seq_q_lens = cu_seq_q_lens.value_or(torch::Tensor());
   params.cu_seq_k_lens = cu_seq_k_lens;
-  params.q_scale = at::Tensor();  // empty tensor as q_scale
+  params.q_scale = torch::Tensor();  // empty tensor as q_scale
   params.weights = weights;
   params.softmax_scale = softmax_scale_;
   params.k_cache = k_cache_tensor;
   params.k_context_lens = attn_metadata.kv_seq_lens;
-  params.k_cache_block_table = k_block_table.value_or(at::Tensor());
-  params.k_scale_cache = at::Tensor();  // empty tensor as k_scale_cache
+  params.k_cache_block_table = k_block_table.value_or(torch::Tensor());
+  params.k_scale_cache = torch::Tensor();  // empty tensor as k_scale_cache
   params.index_topk = index_topk_;
   params.kv_cache_block_table = block_table;
   params.kv_cache_block_size = 1;  // only support 1 for now
