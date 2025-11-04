@@ -390,6 +390,9 @@ DEFINE_string(reasoning_parser,
 // --- qwen3 reranker config ---
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
 
-DEFINE_bool(enable_prefetch_weight,
-            false,
-            "Whether to enable prefetch weight.");
+DEFINE_bool(
+    enable_prefetch_weight,
+    false,
+    "Whether to enable prefetch weight,only applicable to Qwen3-dense model."
+    "The default prefetching ratio for gateup weight is 40%."
+    "If adjustments are needed, e.g. export PREFETCH_COEFFOCIENT=0.5");
