@@ -13,7 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "glog/logging.h"
+#include <glog/logging.h>
+
 #include "mlu_ops_api.h"
 
 namespace xllm::kernel::mlu {
