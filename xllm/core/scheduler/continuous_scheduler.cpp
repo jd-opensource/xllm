@@ -1037,7 +1037,8 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
     }
   }
   if (!stream_requests.empty()) {
-    response_processor_->process_stream_requests(stream_requests);
+    response_processor_->process_stream_requests(stream_requests,
+                                                 last_step_prefill_);
   }
 }
 

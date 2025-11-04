@@ -46,7 +46,8 @@ class AsyncResponseProcessor final {
 
   // in disagg pd mode, decode send requests' responses to prefill
   void process_stream_requests(
-      const std::vector<std::shared_ptr<Request>>& requests);
+      const std::vector<std::shared_ptr<Request>>& requests,
+      bool is_prefill);
 
   // wait for all responses in queue to be handled
   void wait_completion();

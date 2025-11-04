@@ -250,7 +250,7 @@ void DisaggPDScheduler::step(const absl::Duration& timeout) {
   ContinuousScheduler::step(timeout);
   // send first generation token to decode instance
   // and remove the request from running_requests_ to remote_requests_map_
-  if (options_.instance_role() != InstanceRole::DECODE) {
+  if (options_.instance_role() != InstanceRole::DECODE && last_step_prefill_) {
     prefill_send_first_generation();
   }
 }
