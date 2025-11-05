@@ -471,7 +471,7 @@ def check_and_install_pre_commit():
             print("Run 'pre-commit install' failed. Please install pre-commit: pip install pre-commit")
             exit(0)
 
-def run_git_command(command, cwd=None, check=True):
+def run_shell_command(command, cwd=None, check=True):
     try:
         subprocess.run(command, cwd=cwd, check=check, shell=True, capture_output=True, text=True)
         return True
@@ -518,15 +518,15 @@ def apply_patch_safely(patch_file_path, repo_path):
 
     if has_uncommitted_changes(repo_path):
         print(f"⚠️ Uncommitted changes detected. Running `git reset --hard` for {repo_path}")
-        if not run_git_command("git reset --hard", cwd=repo_path):
+        if not run_shell_command("git reset --hard", cwd=repo_path):
             print("❌ Failed to reset changes!")
             return False
     
     print(f"🛠️ Apply patch: {patch_file_path}")
-    apply_success = run_git_command(f"git apply --check {patch_file_path}", cwd=repo_path, check=False)
+    apply_success = run_shell_command(f"git apply --check {patch_file_path}", cwd=repo_path, check=False)
     
     if apply_success:
-        if not run_git_command(f"git apply {patch_file_path}", cwd=repo_path):
+        if not run_shell_command(f"git apply {patch_file_path}", cwd=repo_path):
             print("❌ apply patch fail!")
             apply_success = False
     
@@ -538,7 +538,7 @@ def apply_patch_safely(patch_file_path, repo_path):
         print(f"  cd {repo_path} && git apply {patch_file_path}")
         return False
 
-def apply_patch():
+def pre_build():
     if os.path.exists("third_party/custom_patch"):
         script_path = os.path.dirname(os.path.abspath(__file__))
         mooncake_repo_path = os.path.join(script_path, "third_party/Mooncake")
@@ -546,6 +546,9 @@ def apply_patch():
             exit(0)
         cpprestsdk_repo_path = os.path.join(script_path, "third_party/cpprestsdk")
         if not apply_patch_safely("../custom_patch/cpprestsdk.patch", cpprestsdk_repo_path):
+            exit(0)
+        if not run_shell_command("sh third_party/dependencies.sh", cwd=script_path):
+            print("❌ Failed to reset changes!")
             exit(0)
 
 if __name__ == "__main__":
@@ -563,9 +566,10 @@ if __name__ == "__main__":
             del sys.argv[idx]
             del sys.argv[idx]
     if '--dry_run' not in sys.argv:
-        apply_patch()
+        pre_build()
     else:
         sys.argv.remove("--dry_run") 
+    
     if '--install-xllm-kernels' in sys.argv:
         idx = sys.argv.index('--install-xllm-kernels')
         if idx + 1 < len(sys.argv):
