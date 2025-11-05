@@ -636,6 +636,7 @@ void ProfileManager::generate_random_decode_batch(
     std::vector<int32_t>& token_length_vec,
     std::vector<int32_t>& prefix_length_vec) {
   CHECK(total_length >= batch_size * min_context_len);
+  CHECK(total_length <= batch_size * max_context_len);
 
   token_length_vec.resize(batch_size, min_context_len);
   prefix_length_vec.resize(batch_size, min_context_len - 1);
