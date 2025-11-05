@@ -30,7 +30,9 @@ class Tokenizer {
   virtual ~Tokenizer() = default;
 
   virtual bool encode(const std::string_view& text,
-                      std::vector<int32_t>* ids) const = 0;
+                      std::vector<int32_t>* ids) const {
+    return false;
+  }
 
   virtual bool batch_encode(const std::vector<std::string>& texts,
                             std::vector<std::vector<int32_t>>* ids) const {
@@ -45,16 +47,31 @@ class Tokenizer {
   }
 
   virtual std::string decode(const Slice<int32_t>& ids,
-                             bool skip_special_tokens) const = 0;
+                             bool skip_special_tokens) const {
+    return "";
+  }
+
+  // only for generative recommendation
+  virtual bool encode(int64_t item_id, std::vector<int32_t>* token_ids) const {
+    return false;
+  }
+  // only for generative recommendation
+  virtual bool decode(const Slice<int32_t>& token_ids,
+                      bool skip_special_tokens,
+                      std::vector<int64_t>* item_ids) const {
+    return false;
+  }
 
   virtual std::optional<int32_t> token_to_id(
-      const std::string_view& token) const = 0;
+      const std::string_view& token) const {
+    return std::nullopt;
+  }
 
-  virtual std::string id_to_token(int32_t id) const = 0;
+  virtual std::string id_to_token(int32_t id) const { return ""; }
 
-  virtual size_t vocab_size() const = 0;
+  virtual size_t vocab_size() const { return 0; }
 
-  virtual std::unique_ptr<Tokenizer> clone() const = 0;
+  virtual std::unique_ptr<Tokenizer> clone() const { return nullptr; }
 };
 
 }  // namespace xllm

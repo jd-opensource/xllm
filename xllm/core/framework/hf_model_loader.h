@@ -35,6 +35,7 @@ class HFModelLoader : public ModelLoader {
 
  private:
   bool load_args(const std::string& model_weights_path);
+  bool load_rec_vocab(const std::string& model_weights_path);
   bool load_model_args(const std::string& model_weights_path);
   bool load_quant_args(const std::string& model_weights_path);
   bool load_tokenizer_args(const std::string& model_weights_path);
