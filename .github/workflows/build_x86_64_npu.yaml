@@ -18,8 +18,6 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened]
     paths-ignore:
-      - '.github/**'
-      - 'cibuild/**'
       - 'cmake/**'
       - 'docs/**'
       - 'third_party/**'
@@ -36,7 +34,79 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 jobs:
+  check-approval-if-needed:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: [self-hosted]
+    outputs:
+      requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
+      approved: ${{ steps.check_approved.outputs.approved }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure we can compare commits
+
+      - name: Install jq
+        run: yum install -y jq
+
+      - name: Check if sensitive files were changed
+        id: check_sensitive
+        run: |
+          sensitive_files=(
+            ".github/**.yaml"
+            "cibuild/**.sh"
+            "setup.py"
+          )
+          changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
+          echo "=======================> changed_files: $changed_files"
+          requires_approval="false"
+          #for file in "${sensitive_files[@]}"; do
+          #  if echo "$changed_files" | grep -Fxq "$file"; then
+          #    echo "======================> requires_approval=true"
+          #    requires_approval="true"
+          #    break
+          #  fi
+          #done
+          while IFS= read -r changed_file; do
+            [[ -z "$changed_file" ]] && continue
+            echo "=========================> start -z changed_file"
+            for pattern in "${sensitive_files[@]}"; do
+              echo "=========================> start cmp: $changed_file"
+              if [[ "$changed_file" == $pattern ]]; then
+                echo "====================> changed_file == pattern: $changed_file"
+                requires_approval="true"
+                break 2
+              fi
+          done
+          done < <(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")
+
+          echo "=======================> requires_approval = $requires_approval"
+          echo "requires_approval=$requires_approval" >> $GITHUB_OUTPUT
+
+      - name: Check PR approvals
+        id: check_approved
+        if: ${{ steps.check_sensitive.outputs.requires_approval == 'true' }}
+          echo "=========================> Check PR approvals - true"
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: |
+            pr_number=${{ github.event.pull_request.number }}
+            response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/$pr_number/reviews")
+          
+            if echo "$response" | jq -e '.[] | select(.state == "APPROVED")' > /dev/null; then
+              echo "approved=true" >> $GITHUB_OUTPUT
+            else
+              echo "approved=false" >> $GITHUB_OUTPUT
+            fi
+        else
+          echo "=========================> Check PR approvals - no need"
+          echo "approved=true" >> $GITHUB_OUTPUT
+        fi
+
   build:
+    needs: check-approval-if-needed
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' }}
     runs-on: [self-hosted]
     steps:

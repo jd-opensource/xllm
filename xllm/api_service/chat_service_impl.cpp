@@ -54,6 +54,9 @@ ToolCallResult process_tool_calls(std::string text,
                                   google::protobuf::Arena* arena = nullptr) {
   ToolCallResult result;
 
+  /// --------------
+  LOG(ERROR) << "====================== test =======================";
+
   function_call::FunctionCallParser parser(tools, parser_format);
 
   if (!parser.has_tool_call(text)) {
