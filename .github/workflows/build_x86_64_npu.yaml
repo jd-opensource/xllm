@@ -17,6 +17,14 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
+    paths-ignore:
+      - 'cmake/**'
+      - 'docs/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - '*.md'
+      - '*.txt'
+      - '*.yml'
   pull_request_review:
     types: [submitted]
     paths-ignore:
@@ -36,56 +44,47 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 jobs:
-  determine-target:
+  # need to review code first when sensitive files are modified.
+  check-sensitive-step-1:
     runs-on: [self-hosted]
     outputs:
-      should_run: ${{ steps.decide.outputs.should_run }}
-      pr_number: ${{ steps.set_vars.outputs.pr_number }}
-      head_sha: ${{ steps.set_vars.outputs.head_sha }}
+      should_check: ${{ steps.decide.outputs.should_check }}
+      approved: ${{ steps.decide.outputs.approved }}
     steps:
-      - name: Set variables based on event
-        id: set_vars
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request_review" ]; then
-            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
-            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
-            echo "head_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
-          else
-            echo "pr_number=" >> $GITHUB_OUTPUT
-            echo "head_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Decide whether to run build
+      - name: Decide whether to check sensitive file
         id: decide
         run: |
           event="${{ github.event_name }}"
           if [[ "$event" == "workflow_dispatch" || "$event" == "push" ]]; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "ignore workflow_dispatch and push events in check-sensitive-step-1."
+            echo "should_check=false" >> $GITHUB_OUTPUT
+            echo "approved=false" >> $GITHUB_OUTPUT
           elif [[ "$event" == "pull_request" ]]; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "should_check=true" >> $GITHUB_OUTPUT
+            echo "approved=false" >> $GITHUB_OUTPUT
           elif [[ "$event" == "pull_request_review" ]]; then
             if [[ "${{ github.event.review.state }}" == "approved" ]]; then
-              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "should_check=false" >> $GITHUB_OUTPUT
+              echo "approved=true" >> $GITHUB_OUTPUT
             else
-              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "should_check=false" >> $GITHUB_OUTPUT
+              echo "approved=false" >> $GITHUB_OUTPUT
             fi
           else
-            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "should_check=false" >> $GITHUB_OUTPUT
+            echo "approved=false" >> $GITHUB_OUTPUT
           fi
 
-  check-sensitive-and-approval:
-    #if: ${{ github.event_name == 'pull_request' }}
-    needs: determine-target
+  check-sensitive-step-2:
+    needs: check-sensitive-step-1
+    #if: >
+    #  needs.check-sensitive-step-1.outputs.should_check == 'true' &&
+    #  (github.event_name == 'pull_request' || github.event_name == 'pull_request_review')
     if: >
-      needs.determine-target.outputs.should_run == 'true' &&
-      (github.event_name == 'pull_request' || github.event_name == 'pull_request_review')
+      needs.check-sensitive-step-1.outputs.should_check == 'true' && github.event_name == 'pull_request'
     runs-on: [self-hosted]
     outputs:
-      #requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
-      #approved: ${{ steps.check_approved.outputs.approved }}
-      can_proceed: ${{ steps.check.outputs.can_proceed }}
+      do_build: ${{ steps.check.outputs.do_build }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -104,29 +103,17 @@ jobs:
             "setup.py"
           )
           changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
-          echo "=======================> changed_files: $changed_files"
           requires_approval="false"
-          #for file in "${sensitive_files[@]}"; do
-          #  if echo "$changed_files" | grep -Fxq "$file"; then
-          #    echo "======================> requires_approval=true"
-          #    requires_approval="true"
-          #    break
-          #  fi
-          #done
           while IFS= read -r changed_file; do
             [[ -z "$changed_file" ]] && continue
-            echo "=========================> start -z changed_file"
             for pattern in "${sensitive_files[@]}"; do
-              echo "=========================> start cmp: $changed_file"
               if [[ "$changed_file" == $pattern ]]; then
-                echo "====================> changed_file == pattern: $changed_file"
                 requires_approval="true"
                 break 2
               fi
           done
           done < <(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")
 
-          echo "=======================> requires_approval = $requires_approval"
           echo "requires_approval=$requires_approval" >> $GITHUB_OUTPUT
 
       - name: Check PR approvals
@@ -146,32 +133,39 @@ jobs:
             echo "approved=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Final decision
+      - name: Final check
         id: check
         run: |
-          if [ "${{ github.event_name }}" == "pull_request_review" ]; then
-            echo "can_proceed=true" >> $GITHUB_OUTPUT
-            #if [ "${{ steps.check_sensitive.outputs.requires_approval }}" == "true" ]; then
-            #  echo "can_proceed=true" >> $GITHUB_OUTPUT
-            #else
-            #  echo "can_proceed=true" >> $GITHUB_OUTPUT
-            #fi
+          if [ "${{ steps.check_sensitive.outputs.requires_approval }}" != "true" ]; then
+            echo "do_build=true" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.check_approved.outputs.approved }}" == "true" ]; then
+            echo "do_build=true" >> $GITHUB_OUTPUT
           else
-            if [ "${{ steps.check_sensitive.outputs.requires_approval }}" != "true" ]; then
-              echo "can_proceed=true" >> $GITHUB_OUTPUT
-            elif [ "${{ steps.check_approved.outputs.approved }}" == "true" ]; then
-              echo "can_proceed=true" >> $GITHUB_OUTPUT
-            else
-              echo "can_proceed=false" >> $GITHUB_OUTPUT
-            fi
+            echo "do_build=false" >> $GITHUB_OUTPUT
+          fi
+
+  check-sensitive-step-3:
+    needs: check-sensitive-step-1
+    if: >
+      github.event_name == 'pull_request_review'
+    runs-on: [self-hosted]
+    outputs:
+      do_build: ${{ steps.check.outputs.do_build }}
+    steps:
+      - name: Checkout status
+        id: check
+        run:
+          if [ "${{ needs.check-sensitive-step-1.outputs.approved }}" == "true" ]; then
+            echo "do_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "do_build=false" >> $GITHUB_OUTPUT
           fi
 
   build:
-    needs: [determine-target, check-sensitive-and-approval]
-    #if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+    needs: [check-sensitive-step-1, check-sensitive-step-2, check-sensitive-step-3]
     if: >
       (github.event_name == 'workflow_dispatch' || github.event_name == 'push') ||
-      (needs.check-sensitive-and-approval.outputs.can_proceed == 'true')
+      (needs.check-sensitive-step-2.outputs.do_build == 'true' || needs.check-sensitive-step-3.outputs.do_build == 'true')
     runs-on: [self-hosted]
     steps:
     - name: Checkout Code
