@@ -664,7 +664,22 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       << "The processed raw forward inputs size "
       << batched_raw_forward_inputs.size() << " is not equal to dp size "
       << dp_size_ << ".";
-
+  static bool set_enable_mla = FLAGS_enable_customize_mla_kernel;
+  // decode phase with tokens more than this limit will lead to error in
+  // customize mla kernel. once detect any input exceed the limit, fall back to
+  // default kernel.
+  const int num_tokens_limit = 230;
+  if (set_enable_mla) {
+    FLAGS_enable_customize_mla_kernel = std::all_of(
+        batched_raw_forward_inputs.begin(),
+        batched_raw_forward_inputs.end(),
+        [](const std::vector<RawForwardInput>& inputs) {
+          return std::all_of(
+              inputs.begin(), inputs.end(), [](const RawForwardInput& input) {
+                return input.flatten_tokens_vec.size() < num_tokens_limit;
+              });
+        });
+  }
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
 

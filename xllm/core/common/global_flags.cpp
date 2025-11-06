@@ -79,6 +79,8 @@ DEFINE_bool(enable_mla,
             false,
             "Whether to enable multi-head latent attention.");
 
+DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
+
 // --- graph mode execution config ---
 
 DEFINE_bool(enable_acl_graph,

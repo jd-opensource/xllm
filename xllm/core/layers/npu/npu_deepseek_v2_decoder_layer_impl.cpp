@@ -286,6 +286,8 @@ NpuDeepseekV2DecoderLayerImpl::NpuDeepseekV2DecoderLayerImpl(
 
   param_from_args(prefill_param_, model_args, parallel_args, true);
   param_from_args(decode_param_, model_args, parallel_args, false);
+  param_from_args(decode_mla_param_, model_args, parallel_args, false);
+  decode_mla_param_.enableCustomizeMla = FLAGS_enable_customize_mla_kernel;
 
   initialize_tensors(options);
 }
@@ -1437,6 +1439,7 @@ void NpuDeepseekV2DecoderLayerImpl::update_expert_weight() {
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[index]);
     prefill_node_.inTensors.at(index) = &atb_weight_tensors_[index];
     decode_node_.inTensors.at(index) = &atb_weight_tensors_[index];
+    decode_mla_node_.inTensors.at(index) = &atb_weight_tensors_[index];
   }
   expert_routing_map_[layer_id_ - first_k_dense_replace_] =
       expert_routing_map_buffer_;
@@ -1456,6 +1459,7 @@ int64_t NpuDeepseekV2DecoderLayerImpl::init_layer() {
   model_name_ = "DeepSeek_V2";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
+  CHECK_OPERATION_STATUS_RETURN(init_node(decode_mla_node_, decode_mla_param_));
   return atb::NO_ERROR;
 }
 
@@ -1536,17 +1540,31 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
   } else {
     std::vector<torch::Tensor> attn_mask{tensor_placeholder_,
                                          tensor_placeholder_};
-    build_node_variant_pack(decode_node_,
-                            x,
-                            cos_pos,
-                            sin_pos,
-                            attn_mask,
-                            kv_cache,
-                            input_params,
-                            false);
-    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
-    LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute decode layer fail, error code: " << st;
+    if (!FLAGS_enable_customize_mla_kernel) {
+      build_node_variant_pack(decode_node_,
+                              x,
+                              cos_pos,
+                              sin_pos,
+                              attn_mask,
+                              kv_cache,
+                              input_params,
+                              false);
+      st = execute_node(decode_node_, node_id + 1000, event, event_flag);
+      LOG_IF(FATAL, st != 0)
+          << model_name_ << "excute decode layer fail, error code: " << st;
+    } else {
+      build_node_variant_pack(decode_mla_node_,
+                              x,
+                              cos_pos,
+                              sin_pos,
+                              attn_mask,
+                              kv_cache,
+                              input_params,
+                              false);
+      st = execute_node(decode_mla_node_, node_id + 1000, event, event_flag);
+      LOG_IF(FATAL, st != 0)
+          << model_name_ << "excute decode layer fail, error code: " << st;
+    }
   }
   return tensor_placeholder_;
 }

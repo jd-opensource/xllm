@@ -313,9 +313,11 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
 
   atb_speed::deepseekV2::DecoderLayerParam prefill_param_;
   atb_speed::deepseekV2::DecoderLayerParam decode_param_;
+  atb_speed::deepseekV2::DecoderLayerParam decode_mla_param_;
 
   atb_speed::Model::Node prefill_node_;
   atb_speed::Model::Node decode_node_;
+  atb_speed::Model::Node decode_mla_node_;
 
   atb::Tensor internal_tensor_;
   atb::Tensor internal_tensor_auxiliary_;

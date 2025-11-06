@@ -125,6 +125,8 @@ DECLARE_int32(expert_parallel_degree);
 
 DECLARE_int32(max_reconnect_count);
 
+DECLARE_bool(enable_customize_mla_kernel);
+
 DECLARE_bool(enable_atb_comm_multiprocess);
 
 DECLARE_string(tool_call_parser);
