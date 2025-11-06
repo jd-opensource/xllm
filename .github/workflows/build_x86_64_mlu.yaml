@@ -78,25 +78,19 @@ jobs:
       - name: Check PR approvals
         id: check_approved
         if: ${{ steps.check_sensitive.outputs.requires_approval == 'true' }}
-          echo "=========================> Check PR approvals - true"
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          run: |
-            pr_number=${{ github.event.pull_request.number }}
-            response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls/$pr_number/reviews")
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr_number=${{ github.event.pull_request.number }}
+          response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$pr_number/reviews")
 
-            if echo "$response" | jq -e '.[] | select(.state == "APPROVED")' > /dev/null; then
-              echo "approved=true" >> $GITHUB_OUTPUT
-            else
-              echo "approved=false" >> $GITHUB_OUTPUT
-            fi
-        else
-
-          echo "=========================> Check PR approvals - no need"
-          echo "approved=true" >> $GITHUB_OUTPUT
-        fi
+          if echo "$response" | jq -e '.[] | select(.state == "APPROVED")' > /dev/null; then
+            echo "approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "approved=false" >> $GITHUB_OUTPUT
+          fi
 
   build:
     needs: check-approval-if-needed

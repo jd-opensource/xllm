@@ -17,6 +17,8 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted]
     paths-ignore:
       - 'cmake/**'
       - 'docs/**'
@@ -34,12 +36,56 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 jobs:
-  check-approval-if-needed:
-    if: ${{ github.event_name == 'pull_request' }}
+  determine-target:
     runs-on: [self-hosted]
     outputs:
-      requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
-      approved: ${{ steps.check_approved.outputs.approved }}
+      should_run: ${{ steps.decide.outputs.should_run }}
+      pr_number: ${{ steps.set_vars.outputs.pr_number }}
+      head_sha: ${{ steps.set_vars.outputs.head_sha }}
+    steps:
+      - name: Set variables based on event
+        id: set_vars
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request_review" ]; then
+            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "head_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "pr_number=" >> $GITHUB_OUTPUT
+            echo "head_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Decide whether to run build
+        id: decide
+        run: |
+          event="${{ github.event_name }}"
+          if [[ "$event" == "workflow_dispatch" || "$event" == "push" ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          elif [[ "$event" == "pull_request" ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          elif [[ "$event" == "pull_request_review" ]]; then
+            if [[ "${{ github.event.review.state }}" == "approved" ]]; then
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            else
+              echo "should_run=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  check-sensitive-and-approval:
+    #if: ${{ github.event_name == 'pull_request' }}
+    needs: determine-target
+    if: >
+      needs.determine-target.outputs.should_run == 'true' &&
+      (github.event_name == 'pull_request' || github.event_name == 'pull_request_review')
+    runs-on: [self-hosted]
+    outputs:
+      #requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
+      #approved: ${{ steps.check_approved.outputs.approved }}
+      can_proceed: ${{ steps.check.outputs.can_proceed }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -85,29 +131,47 @@ jobs:
 
       - name: Check PR approvals
         id: check_approved
-        if: ${{ steps.check_sensitive.outputs.requires_approval == 'true' }}
-          echo "=========================> Check PR approvals - true"
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          run: |
-            pr_number=${{ github.event.pull_request.number }}
-            response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls/$pr_number/reviews")
+        if: ${{ github.event_name == 'pull_request' && steps.check_sensitive.outputs.requires_approval == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr_number=${{ github.event.pull_request.number }}
+          response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$pr_number/reviews")
           
-            if echo "$response" | jq -e '.[] | select(.state == "APPROVED")' > /dev/null; then
-              echo "approved=true" >> $GITHUB_OUTPUT
+          if echo "$response" | jq -e '.[] | select(.state == "APPROVED")' > /dev/null; then
+            echo "approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "approved=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Final decision
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request_review" ]; then
+            echo "can_proceed=true" >> $GITHUB_OUTPUT
+            #if [ "${{ steps.check_sensitive.outputs.requires_approval }}" == "true" ]; then
+            #  echo "can_proceed=true" >> $GITHUB_OUTPUT
+            #else
+            #  echo "can_proceed=true" >> $GITHUB_OUTPUT
+            #fi
+          else
+            if [ "${{ steps.check_sensitive.outputs.requires_approval }}" != "true" ]; then
+              echo "can_proceed=true" >> $GITHUB_OUTPUT
+            elif [ "${{ steps.check_approved.outputs.approved }}" == "true" ]; then
+              echo "can_proceed=true" >> $GITHUB_OUTPUT
             else
-              echo "approved=false" >> $GITHUB_OUTPUT
+              echo "can_proceed=false" >> $GITHUB_OUTPUT
             fi
-        else
-          echo "=========================> Check PR approvals - no need"
-          echo "approved=true" >> $GITHUB_OUTPUT
-        fi
+          fi
 
   build:
-    needs: check-approval-if-needed
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+    needs: [determine-target, check-sensitive-and-approval]
+    #if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+    if: >
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push') ||
+      (needs.check-sensitive-and-approval.outputs.can_proceed == 'true')
     runs-on: [self-hosted]
     steps:
     - name: Checkout Code
