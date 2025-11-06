@@ -27,6 +27,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state/parallel_state.h"
+#include "util/env_var.h"
 #include "util/pretty_print.h"
 #include "util/utils.h"
 #include "worker.h"
@@ -75,8 +76,16 @@ void VLMEngine::process_group_test() {
     for (auto& worker : workers_) {
       futures.emplace_back(worker->process_group_test_async());
     }
-    // wait up to 4 seconds for all futures to complete
-    folly::collectAll(futures).within(std::chrono::seconds(4)).get();
+    // Wait for all futures to complete with a configurable timeout.
+    // The timeout can be adjusted via the
+    // XLLM_PROCESS_GROUP_ASYNC_TIMEOUT_SECONDS environment variable (default: 4
+    // seconds). This is particularly important in multi-node multi-device
+    // communication scenarios where network latency may require a longer
+    // timeout period.
+    const int timeout_seconds = util::get_process_group_test_timeout_seconds();
+    folly::collectAll(futures)
+        .within(std::chrono::seconds(timeout_seconds))
+        .get();
   }
 #endif
 }
