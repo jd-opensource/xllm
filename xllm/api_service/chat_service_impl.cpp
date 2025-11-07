@@ -344,7 +344,7 @@ bool send_delta_to_client_brpc(
     std::shared_ptr<StreamOutputParser> stream_parser = nullptr) {
   auto& response = call->response();
 
-  if (output.outputs.size() > 0) {
+  if (stream_parser && output.outputs.size() > 0) {
     stream_parser->check_resize_for_index(output.outputs.size() - 1);
   }
   // send delta to client
@@ -371,7 +371,7 @@ bool send_delta_to_client_brpc(
 
     // Handle reasoning text
     if (!cur_text.empty()) {
-      if (stream_parser->is_reasoning()) {
+      if (stream_parser && stream_parser->is_reasoning()) {
         auto parser = stream_parser->get_reasoning_parser(index);
         auto result = parser->parse_stream_chunk(cur_text);
         if (result.normal_text.has_value()) {
@@ -392,7 +392,7 @@ bool send_delta_to_client_brpc(
 
     if (!cur_text.empty()) {
       // Handle tool call text
-      if (stream_parser->is_tool_call()) {
+      if (stream_parser && stream_parser->is_tool_call()) {
         if (!process_tool_call_stream(call,
                                       stream_parser,
                                       index,
@@ -422,7 +422,7 @@ bool send_delta_to_client_brpc(
     // Handle finish reason
     if (seq_output.finish_reason.has_value()) {
       // Check for unstreamed tool args before sending finish reason
-      if (stream_parser->get_has_tool_call(index)) {
+      if (stream_parser && stream_parser->get_has_tool_call(index)) {
         if (!check_for_unstreamed_tool_args(
                 call, stream_parser, index, request_id, created_time, model)) {
           return false;
@@ -438,7 +438,7 @@ bool send_delta_to_client_brpc(
       choice->set_index(index);
       choice->mutable_delta();
 
-      if (stream_parser->get_has_tool_call(index) &&
+      if (stream_parser && stream_parser->get_has_tool_call(index) &&
           seq_output.finish_reason.value() == "stop") {
         choice->set_finish_reason("tool_calls");
       } else {
@@ -615,7 +615,8 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
       request_params.chat_template_kwargs, reasoning_parser_format_);
 
   std::shared_ptr<StreamOutputParser> stream_parser;
-  if (request_params.streaming) {
+  if (request_params.streaming && (!tool_call_parser_format_.empty() ||
+                                   !reasoning_parser_format_.empty())) {
     stream_parser =
         std::make_shared<StreamOutputParser>(request_params.tools,
                                              tool_call_parser_format_,
