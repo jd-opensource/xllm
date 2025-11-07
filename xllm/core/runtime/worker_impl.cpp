@@ -66,6 +66,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 
   device_.set_device();
   device_.init_device_context();
+  threadpool_.schedule([this]() mutable { device_.set_device(); });
   general_threadpool_.schedule([this]() mutable { device_.set_device(); });
 
   prepare_stream_ = device_.get_stream_from_pool();
