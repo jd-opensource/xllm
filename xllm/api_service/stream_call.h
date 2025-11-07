@@ -39,8 +39,13 @@ class StreamCall : public Call {
   StreamCall(brpc::Controller* controller,
              ::google::protobuf::Closure* done,
              Request* request,
-             Response* response)
-      : Call(controller), done_(done), request_(request), response_(response) {
+             Response* response,
+             bool use_arena = true)
+      : Call(controller),
+        done_(done),
+        request_(request),
+        response_(response),
+        use_arena_(use_arena) {
     stream_ = request_->stream();
     if (stream_) {
       pa_ = controller_->CreateProgressiveAttachment();
@@ -66,6 +71,10 @@ class StreamCall : public Call {
     // For non stream response, call brpc done Run
     if (!stream_) {
       done_->Run();
+    }
+    if (!use_arena_) {
+      delete request_;
+      delete response_;
     }
   }
 
@@ -142,6 +151,7 @@ class StreamCall : public Call {
   Response* response_;
 
   bool stream_ = false;
+  bool use_arena_ = true;
   butil::intrusive_ptr<brpc::ProgressiveAttachment> pa_;
   butil::IOBuf io_buf_;
 
