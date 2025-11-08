@@ -146,8 +146,8 @@ void ChatCompletionsImpl(std::unique_ptr<Service>& service,
     return;
   }
 
-  auto call =
-      std::make_shared<ChatCall>(ctrl, guard.release(), req_pb, resp_pb);
+  auto call = std::make_shared<ChatCall>(
+      ctrl, guard.release(), req_pb, resp_pb, arena != nullptr /*use_arena*/);
   service->process_async(call);
 }
 }  // namespace
@@ -166,17 +166,18 @@ void APIService::ChatCompletionsHttp(
     return;
   }
 
-  auto arena = response->GetArena();
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
   if (FLAGS_backend == "llm") {
+    auto arena = response->GetArena();
     CHECK(chat_service_impl_) << " chat service is invalid.";
     ChatCompletionsImpl<ChatCall, ChatServiceImpl>(
         chat_service_impl_, done_guard, arena, ctrl);
   } else if (FLAGS_backend == "vlm") {
     CHECK(mm_chat_service_impl_) << " mm chat service is invalid.";
+    // TODO: fix me - temporarily using heap allocation instead of arena
     ChatCompletionsImpl<MMChatCall, MMChatServiceImpl>(
-        mm_chat_service_impl_, done_guard, arena, ctrl);
+        mm_chat_service_impl_, done_guard, nullptr, ctrl);
   }
 }
 
