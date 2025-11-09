@@ -96,8 +96,8 @@ bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
     std::string vocab_full_path =
         path.append(tokenizer_args_.vocab_file()).string();
 
-    LOG(INFO) << "model_version:" << model_version;
-    LOG(INFO) << "vocab_full_path:" << vocab_full_path;
+    LOG(INFO) << "model_version:" << model_version
+              << ", vocab_full_path:" << vocab_full_path;
 
     CHECK(nullptr != VersionSingleton<RecVocabDict>::GetInstance(model_version))
         << "Failed to get vocab dict instance";
@@ -105,7 +105,7 @@ bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
               ->initialize(vocab_full_path))
         << "Failed to initialize vocab dict from " << vocab_full_path;
   } else {
-    LOG(INFO) << "vocab file is not set";
+    LOG(ERROR) << "vocab file is not set";
   }
 
   return true;
