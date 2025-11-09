@@ -349,7 +349,7 @@ DEFINE_bool(
     "and two micro batches in prefill stage.");
 
 DEFINE_int32(micro_batch_num,
-             2,
+             1,
              "Default use two micro batches for multi-stream parallel.");
 
 // --- dit config ---
