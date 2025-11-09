@@ -1,8 +1,25 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
 #pragma once
 
 #include <list>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -21,7 +38,7 @@ class VersionSingleton {
     T* instance = nullptr;
 
     {
-      std::lock_guard<std::mutex> lock(instance_map_mutex_);
+      std::shared_lock<std::shared_mutex> lock(instance_map_mutex_);
       auto it = instance_map_.find(version);
       if (it != instance_map_.end()) {
         instance = it->second.get();
@@ -29,7 +46,7 @@ class VersionSingleton {
     }
 
     if (instance == nullptr) {
-      std::lock_guard<std::mutex> lock(instance_map_mutex_);
+      std::unique_lock<std::shared_mutex> lock(instance_map_mutex_);
 
       auto it = instance_map_.find(version);
       if (it == instance_map_.end()) {
@@ -63,14 +80,10 @@ class VersionSingleton {
     return versions;
   }
 
-  static void DestroyInstance(const std::string& version) {
-    std::lock_guard<std::mutex> lock(instance_map_mutex_);
-    instance_map_.erase(version);
-  }
-
   static void DestroyAllInstances() {
     std::lock_guard<std::mutex> lock(instance_map_mutex_);
     instance_map_.clear();
+    instance_version_list_.clear();
   }
 
   VersionSingleton(const VersionSingleton&) = delete;
@@ -82,7 +95,7 @@ class VersionSingleton {
 
   static std::unordered_map<std::string, std::unique_ptr<T>> instance_map_;
   static std::list<std::string> instance_version_list_;
-  static std::mutex instance_map_mutex_;
+  static std::shared_mutex instance_map_mutex_;
 };
 
 template <typename T>
@@ -91,6 +104,6 @@ std::unordered_map<std::string, std::unique_ptr<T>>
 template <typename T>
 std::list<std::string> VersionSingleton<T>::instance_version_list_;
 template <typename T>
-std::mutex VersionSingleton<T>::instance_map_mutex_;
+std::shared_mutex VersionSingleton<T>::instance_map_mutex_;
 
 }  // namespace xllm
