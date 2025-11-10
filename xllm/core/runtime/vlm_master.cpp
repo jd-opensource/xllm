@@ -350,6 +350,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
   sampling_param.top_k = sp.top_k;
   sampling_param.logprobs = sp.logprobs;
   sampling_param.top_logprobs = sp.top_logprobs;
+  sampling_param.is_embeddings = sp.is_embeddings;
   if (best_of > sp.n) {
     // enable logprobs for best_of to generate sequence logprob
     sampling_param.logprobs = true;

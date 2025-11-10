@@ -120,6 +120,7 @@ class APIService : public proto::XllmAPIService {
   std::unique_ptr<ChatServiceImpl> chat_service_impl_;
   std::unique_ptr<MMChatServiceImpl> mm_chat_service_impl_;
   std::unique_ptr<EmbeddingServiceImpl> embedding_service_impl_;
+  std::unique_ptr<MMEmbeddingServiceImpl> mm_embedding_service_impl_;
   std::unique_ptr<ModelsServiceImpl> models_service_impl_;
   std::unique_ptr<ImageGenerationServiceImpl> image_generation_service_impl_;
   std::unique_ptr<RerankServiceImpl> rerank_service_impl_;

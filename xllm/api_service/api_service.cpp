@@ -64,6 +64,8 @@ APIService::APIService(Master* master,
     auto vlm_master = dynamic_cast<VLMMaster*>(master);
     mm_chat_service_impl_ =
         std::make_unique<MMChatServiceImpl>(vlm_master, model_names);
+    mm_embedding_service_impl_ =
+        std::make_unique<MMEmbeddingServiceImpl>(vlm_master, model_names);
   } else if (FLAGS_backend == "dit") {
     image_generation_service_impl_ =
         std::make_unique<ImageGenerationServiceImpl>(
@@ -190,10 +192,13 @@ void APIService::Embeddings(::google::protobuf::RpcController* controller,
   // TODO with xllm-service
 }
 
-void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
-                                const proto::HttpRequest* request,
-                                proto::HttpResponse* response,
-                                ::google::protobuf::Closure* done) {
+namespace {
+template <typename EmbeddingCall, typename Service>
+void EmbeddingsImpl(std::unique_ptr<Service>& embedding_service_impl_,
+                    ::google::protobuf::RpcController* controller,
+                    const proto::HttpRequest* request,
+                    proto::HttpResponse* response,
+                    ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
       std::bind(request_in_metric, nullptr),
@@ -202,12 +207,13 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
   }
-
   auto arena = response->GetArena();
   auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::EmbeddingRequest>(arena);
+      google::protobuf::Arena::CreateMessage<typename EmbeddingCall::ReqType>(
+          arena);
   auto resp_pb =
-      google::protobuf::Arena::CreateMessage<proto::EmbeddingResponse>(arena);
+      google::protobuf::Arena::CreateMessage<typename EmbeddingCall::ResType>(
+          arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string error;
@@ -229,6 +235,22 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
   std::shared_ptr<Call> call = std::make_shared<EmbeddingCall>(
       ctrl, done_guard.release(), req_pb, resp_pb);
   embedding_service_impl_->process_async(call);
+}
+}  // namespace
+
+void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
+                                const proto::HttpRequest* request,
+                                proto::HttpResponse* response,
+                                ::google::protobuf::Closure* done) {
+  if (FLAGS_backend == "llm") {
+    CHECK(embedding_service_impl_) << " embedding service is invalid.";
+    EmbeddingsImpl<EmbeddingCall, EmbeddingServiceImpl>(
+        embedding_service_impl_, controller, request, response, done);
+  } else if (FLAGS_backend == "vlm") {
+    CHECK(mm_chat_service_impl_) << " mm embedding service is invalid.";
+    EmbeddingsImpl<MMEmbeddingCall, MMEmbeddingServiceImpl>(
+        mm_embedding_service_impl_, controller, request, response, done);
+  }
 }
 
 void APIService::ImageGeneration(::google::protobuf::RpcController* controller,
