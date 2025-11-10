@@ -231,15 +231,9 @@ torch::Tensor fused_moe(FusedMoEParams& params) {
                         params.topk_group,
                         params.route_scale,
                         params.start_expert_id,
-                        params.block_n,
                         params.avg_moe,
-                        params.class_reduce_weight,
-                        params.class_expert_id,
                         params.w1_quant_flag,
-                        params.w2_quant_flag,
-                        params.world_size,
-                        params.shared_expert_num,
-                        params.parallel_mode);
+                        params.w2_quant_flag);
 #elif defined(USE_CUDA)
   LOG(FATAL) << "fused_moe for cuda not implemented";
 #else

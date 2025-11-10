@@ -160,15 +160,9 @@ torch::Tensor fused_moe(
     int topk_group,
     double route_scale,
     int start_expert_id,
-    int block_n,
     bool avg_moe,
-    const std::optional<torch::Tensor>& class_reduce_weight,
-    const std::optional<torch::Tensor>& class_expert_id,
     const std::optional<torch::List<int64_t>>& w1_quant_flag,
-    const std::optional<torch::List<int64_t>>& w2_quant_flag,
-    int world_size,
-    int shared_expert_num,
-    const std::string& parallel_mode);
+    const std::optional<torch::List<int64_t>>& w2_quant_flag);
 
 std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
     const torch::Tensor& x,
