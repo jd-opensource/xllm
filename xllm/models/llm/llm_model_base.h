@@ -40,6 +40,7 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #else
 #include "core/layers/common/attention.h"
+#include "core/layers/common/layer_utils.h"
 #endif
 
 namespace xllm {
@@ -306,15 +307,18 @@ class LlmModelImplBase : public torch::nn::Module {
     auto cancated_h = torch::cat(hs, 0);
     return norm_(cancated_h, 0);
 #else
-    bool is_prefill = input_params[0].q_max_seq_len > 1;
+    auto modified_input_params = input_params[0];
+    auto position = positions[0];
+    layer::update_dummy_run_input(dp_rank_, position, modified_input_params);
+    bool is_prefill = modified_input_params.q_max_seq_len > 1;
     auto attn_metadata =
-        layer::AttentionMetadata::build(input_params[0], is_prefill);
+        layer::AttentionMetadata::build(modified_input_params, is_prefill);
 
     torch::Tensor h;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
       h = layer(
-          hs[0], positions[0], attn_metadata, kv_caches[i], input_params[0]);
+          hs[0], position, attn_metadata, kv_caches[i], modified_input_params);
     }
     return norm_(h);
 #endif
@@ -369,13 +373,14 @@ class LlmModelImplBase : public torch::nn::Module {
   }
 
  protected:
-#if defined(USE_NPU)
-  torch::Tensor cos_pos_;
-  torch::Tensor sin_pos_;
   torch::Tensor cos_sin_;
   int max_seq_len_ = 0;
+  torch::Tensor cos_pos_;
+  torch::Tensor sin_pos_;
   int device_id = 0;
   layer::AttentionMask attn_mask_;
+  int dp_rank_ = 0;
+#if defined(USE_NPU)
   std::vector<layer::PosEmbedding> atb_pos_embeds_;
 #endif
 
@@ -403,20 +408,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     // register submodules
     model_ = register_module("model", LlmModelType(context));
 
-#if defined(USE_NPU)
     lm_head_ = register_module("lm_head", layer::LmHead(context));
-#else
-    // lm_head_ is default to no quantization
-    lm_head_ =
-        register_module("lm_head",
-                        layer::LmHead(context.get_model_args().hidden_size(),
-                                      context.get_model_args().vocab_size(),
-                                      /*bias=*/false,
-                                      /*gather_output=*/true,
-                                      QuantArgs{},
-                                      context.get_parallel_args(),
-                                      context.get_tensor_options()));
-#endif
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {

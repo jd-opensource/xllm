@@ -28,9 +28,7 @@ Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
   const auto& options = context.get_tensor_options();
 
   // Initialize attention layers
-  attention_ = register_module(
-      "self_attn",
-      Qwen3Attention(model_args, quant_args, parallel_args, options));
+  attention_ = register_module("self_attn", Qwen2Attention(context));
 
   // Initialize norm layers
   input_norm_ = register_module(

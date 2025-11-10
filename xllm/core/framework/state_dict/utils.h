@@ -56,7 +56,8 @@ void load_fused_weight(const StateDict& state_dict,
                        int32_t world_size,
                        std::vector<torch::Tensor>& accumulated_tensors,
                        torch::Tensor& weight,
-                       bool& weight_is_loaded);
+                       bool& weight_is_loaded,
+                       int32_t num_kv_head_replicas = 1);
 
 bool load_tensor_list(const StateDict& state_dict,
                       const std::vector<std::string>& prefixes,
@@ -64,7 +65,8 @@ bool load_tensor_list(const StateDict& state_dict,
                       int64_t dim,
                       int32_t rank,
                       int32_t world_size,
-                      std::vector<torch::Tensor>& accumulated_tensors);
+                      std::vector<torch::Tensor>& accumulated_tensors,
+                      int32_t num_kv_head_replicas = 1);
 
 void load_moe_weight(const StateDict& state_dict,
                      const std::string& sub_prefix,
@@ -113,6 +115,18 @@ void load_moe_fused_weight(const StateDict& state_dict,
                             name##_list_, \
                             name##_,      \
                             name##_is_loaded_);
+
+#define LOAD_QKV_WEIGHT(name, dim, num_kv_head_replicas) \
+  weight::load_fused_weight(state_dict,                  \
+                            prefixes,                    \
+                            #name,                       \
+                            dim,                         \
+                            rank,                        \
+                            world_size,                  \
+                            name##_list_,                \
+                            name##_,                     \
+                            name##_is_loaded_,           \
+                            num_kv_head_replicas);
 
 #define LOAD_SHARDED_WEIGHT(name, dim) \
   weight::load_sharded_weight(         \

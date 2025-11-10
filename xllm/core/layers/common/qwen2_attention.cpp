@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "qwen3_attention.h"
+#include "qwen2_attention.h"
 
 #include <glog/logging.h>
 
@@ -22,13 +22,17 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen3AttentionImpl::Qwen3AttentionImpl(const ModelArgs& args,
-                                       const QuantArgs& quant_args,
-                                       const ParallelArgs& parallel_args,
-                                       const torch::TensorOptions& options) {
+Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
+  const auto& args = context.get_model_args();
+  const auto& quant_args = context.get_quant_args();
+  const auto& parallel_args = context.get_parallel_args();
+  const auto& options = context.get_tensor_options();
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   const int64_t total_num_heads = args.n_heads();
   const int64_t total_num_kv_heads = args.n_kv_heads().value_or(args.n_heads());
+
+  is_qwen3_style_ =
+      (args.model_type() == "qwen3" || args.model_type() == "qwen3_moe");
 
   CHECK(total_num_heads % tp_size == 0);
   num_heads_ = total_num_heads / tp_size;
@@ -55,7 +59,7 @@ Qwen3AttentionImpl::Qwen3AttentionImpl(const ModelArgs& args,
                                                 num_kv_heads_,
                                                 args.head_dim(),
                                                 num_kv_head_replicas_,
-                                                /*bias=*/false,
+                                                args.attention_bias(),
                                                 /*gather_output=*/false,
                                                 parallel_args,
                                                 options));
@@ -72,11 +76,13 @@ Qwen3AttentionImpl::Qwen3AttentionImpl(const ModelArgs& args,
                                               options));
 
   // 3. RMSNorm
-  q_norm_ = register_module(
-      "q_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
+  if (is_qwen3_style_) {
+    q_norm_ = register_module(
+        "q_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
 
-  k_norm_ = register_module(
-      "k_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
+    k_norm_ = register_module(
+        "k_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
+  }
 
   // 4. Rotary embedding
   rotary_emb_ = register_module("rope",
@@ -95,7 +101,7 @@ Qwen3AttentionImpl::Qwen3AttentionImpl(const ModelArgs& args,
                                     args.sliding_window()));
 }
 
-torch::Tensor Qwen3AttentionImpl::forward(
+torch::Tensor Qwen2AttentionImpl::forward(
     const torch::Tensor& positions,
     const torch::Tensor& hidden_states,
     const AttentionMetadata& attn_metadata,
@@ -109,11 +115,13 @@ torch::Tensor Qwen3AttentionImpl::forward(
 
   const int64_t T = q.size(0);
 
-  // 2. q-norm
-  q = q_norm_->forward(q);
+  if (is_qwen3_style_) {
+    // 2. q-norm
+    q = q_norm_->forward(q);
 
-  // 3. k-norm
-  k = k_norm_->forward(k);
+    // 3. k-norm
+    k = k_norm_->forward(k);
+  }
 
   // 4. rope
   rotary_emb_->forward(q,
@@ -132,14 +140,12 @@ torch::Tensor Qwen3AttentionImpl::forward(
   return o_proj_->forward(out);
 }
 
-void Qwen3AttentionImpl::load_state_dict(const StateDict& state_dict) {
+void Qwen2AttentionImpl::load_state_dict(const StateDict& state_dict) {
   qkv_proj_->load_state_dict(state_dict);
   o_proj_->load_state_dict(state_dict.get_dict_with_prefix("o_proj."));
-  if (auto w = state_dict.get_tensor("q_norm.weight"); w.defined()) {
-    q_norm_->load_state_dict(StateDict({{"weight", w}}));
-  }
-  if (auto w = state_dict.get_tensor("k_norm.weight"); w.defined()) {
-    k_norm_->load_state_dict(StateDict({{"weight", w}}));
+  if (is_qwen3_style_) {
+    q_norm_->load_state_dict(state_dict.get_dict_with_prefix("q_norm."));
+    k_norm_->load_state_dict(state_dict.get_dict_with_prefix("k_norm."));
   }
 }
 

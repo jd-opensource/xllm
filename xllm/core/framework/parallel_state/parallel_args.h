@@ -99,10 +99,10 @@ struct ParallelArgs {
   // ep size
   PROPERTY(int32_t, ep_size) = 1;
 
-#if defined(USE_NPU)
   // atb hccl mapping json data
   PROPERTY(nlohmann::json, mapping_data);
 
+#if defined(USE_NPU)
   // atb hccl mapping
   PROPERTY(atb_speed::base::Mapping, mapping);
 

@@ -39,13 +39,19 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
+    auto parallel_args = context.get_parallel_args();
+    auto dp_local_tp_size =
+        parallel_args.world_size() / parallel_args.dp_size();
+    dp_rank_ = parallel_args.rank() / dp_local_tp_size;
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
     norm_ = register_module("norm", layer::RmsNorm(context));
     for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_.push_back(layer::WordEmbedding(context));
+#if defined(USE_NPU)
       atb_pos_embeds_.push_back(layer::PosEmbedding(context));
+#endif
     }
     cos_sin_ = get_concat_rotary_embedding(
         model_args.hidden_size() / model_args.n_heads(),
@@ -87,6 +93,8 @@ REGISTER_MODEL_ARGS(qwen2, [&] {
   LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
   LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
   LOAD_ARG(n_kv_heads, "num_key_value_heads");
+  LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
+  LOAD_ARG_OR(attention_bias, "attention_bias", true);
   // LOAD_ARG_OR(no_bias, "no_bias", true);
   LOAD_ARG_OR(intermediate_size, "intermediate_size", 18944);
   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 32768);

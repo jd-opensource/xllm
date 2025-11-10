@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "linear_impl.h"
+#include "linear.h"
 
 #include <glog/logging.h>
 #include <torch/torch.h>
@@ -82,9 +82,8 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
 
 torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
   input = input.to(device_);
-  auto bias = (bias_.defined() && rank_ == 0)
-                  ? std::optional<torch::Tensor>(bias_)
-                  : std::nullopt;
+  auto bias =
+      bias_.defined() ? std::optional<torch::Tensor>(bias_) : std::nullopt;
 
   torch::Tensor output;
 
@@ -148,8 +147,8 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
 
 // load the weight from the checkpoint
 void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
-  const auto rank = rank_;
-  const auto world_size = world_size_;
+  const int64_t rank = rank_;
+  const int64_t world_size = world_size_;
 
   // load and merge the weights on dim 0
   // If quant_args_ indicates SmoothQuant, load qweight; otherwise, load
@@ -172,8 +171,8 @@ void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
 void ColumnParallelLinearImpl::load_state_dict(
     const StateDict& state_dict,
     const std::vector<std::string>& prefixes) {
-  const auto rank = rank_;
-  const auto world_size = world_size_;
+  const int64_t rank = rank_;
+  const int64_t world_size = world_size_;
 
   // load and merge the weights on dim 0
   // If quant_args_ indicates SmoothQuant, load qweight
@@ -192,7 +191,6 @@ void ColumnParallelLinearImpl::load_state_dict(
         break;
       }
     }
-
     LOAD_FUSED_WEIGHT(qweight, 0);
     LOAD_FUSED_WEIGHT(per_channel_scale, 0);
   } else {
@@ -223,36 +221,32 @@ QKVParallelLinearImpl::QKVParallelLinearImpl(
       parallel_args_(parallel_args),
       options_(options),
       device_(options.device()) {
-  const int32_t QKV_CNT = 3;
   rank_ = parallel_args_.tp_group_->rank();
   world_size_ = parallel_args_.tp_group_->world_size();
   const int64_t out_features_per_partition =
       (num_heads + 2 * num_kv_heads) * head_size;
   // Note: torch.nn.functional.linear performs XA^T + b and as a result
   // we allocate the transpose.
-  qkv_weight_ = register_parameter(
+  weight_ = register_parameter(
       "weight",
       torch::empty({out_features_per_partition, hidden_size}, options),
       /*requires_grad=*/false);
-  qkv_weight_list_.resize(QKV_CNT);
 
   if (bias) {
-    qkv_bias_ =
+    bias_ =
         register_parameter("bias",
                            torch::empty({out_features_per_partition}, options),
                            /*requires_grad=*/false);
-    qkv_bias_list_.resize(QKV_CNT);
   }
 }
 
 torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
   input = input.to(device_);
-  auto bias = (qkv_bias_.defined() && rank_ == 0)
-                  ? std::optional<torch::Tensor>(qkv_bias_)
-                  : std::nullopt;
+  auto bias =
+      bias_.defined() ? std::optional<torch::Tensor>(bias_) : std::nullopt;
   xllm::kernel::MatmulParams matmul_params;
   matmul_params.a = input;
-  matmul_params.b = qkv_weight_;
+  matmul_params.b = weight_;
   matmul_params.bias = bias;
 
   auto output = xllm::kernel::matmul(matmul_params);
@@ -262,46 +256,13 @@ torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
   return output;
 }
 
-bool QKVParallelLinearImpl::load_qkv_weight(const StateDict& state_dict,
-                                            int32_t index) {
-  if (qkv_weight_list_[index].defined() || state_dict.size() == 0) {
-    return false;
-  }
-  DEFINE_WEIGHT(weight);
-  int64_t out_feature = num_heads_ * head_size_;
-  int64_t rank = rank_;
-  int64_t world_size = world_size_;
-  if (index > 0) {
-    rank = rank_ / num_kv_head_replicas_;
-    world_size = world_size_ / num_kv_head_replicas_;
-    out_feature = num_kv_heads_ * head_size_;
-  }
-  weight_ = torch::empty({out_feature, hidden_size_}, options_);
-  LOAD_SHARDED_WEIGHT(weight, 0);
-  if (weight_is_loaded_) {
-    qkv_weight_list_[index] = weight_.clone();
-  }
-  return weight_is_loaded_;
-}
-
 void QKVParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   std::vector<std::string> prefixes = {"q_proj.", "k_proj.", "v_proj."};
-  if (!qkv_weight_is_loaded_) {
-    bool all_loaded = true;
-    for (size_t i = 0; i < prefixes.size(); ++i) {
-      all_loaded =
-          all_loaded &&
-          load_qkv_weight(state_dict.get_dict_with_prefix(prefixes[i]), i);
-    }
-    if (all_loaded) {
-      const auto merged_weight = torch::cat(qkv_weight_list_, /*dim=*/0);
-      CHECK_EQ(qkv_weight_.sizes(), merged_weight.sizes())
-          << "weight size mismatch";
-      qkv_weight_.copy_(merged_weight);
-      // release the memory for weight_list
-      qkv_weight_list_.clear();
-      qkv_weight_is_loaded_ = true;
-    }
+  const int64_t rank = rank_;
+  const int64_t world_size = world_size_;
+  LOAD_QKV_WEIGHT(weight, 0, num_kv_head_replicas_);
+  if (bias_.defined()) {
+    LOAD_QKV_WEIGHT(bias, 0, num_kv_head_replicas_);
   }
 }
 
@@ -424,8 +385,8 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
 
 // load the weight from the checkpoint
 void RowParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
-  const auto rank = rank_;
-  const auto world_size = world_size_;
+  const int64_t rank = rank_;
+  const int64_t world_size = world_size_;
 
   // If quant_args_ indicates SmoothQuant, load qweight; otherwise, load
   // normal weight.
@@ -462,7 +423,6 @@ ReplicatedLinearImpl::ReplicatedLinearImpl(
 }
 
 torch::Tensor ReplicatedLinearImpl::forward(torch::Tensor input) {
-  namespace F = torch::nn::functional;
   auto bias =
       bias_.defined() ? std::optional<torch::Tensor>(bias_) : std::nullopt;
   xllm::kernel::MatmulParams matmul_params;

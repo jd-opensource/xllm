@@ -18,18 +18,32 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
-#include "linear_impl.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/quant_args.h"
+#include "framework/state_dict/state_dict.h"
+#include "framework/state_dict/utils.h"
 
 namespace xllm {
 namespace layer {
 
-class ColumnParallelLinear
-    : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
- public:
-  using torch::nn::ModuleHolder<ColumnParallelLinearImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = ColumnParallelLinearImpl;
+// extra args for fused linear operation
+struct FusedLinearExtraArgs {
+  // parameters for fusing smooth quant activation mode and is_gated
+  std::string act_mode;
+  bool is_gated;
 
-  ColumnParallelLinear(
+  // default constructor
+  FusedLinearExtraArgs(const std::string& act_mode_ = "none",
+                       bool is_gated_ = false)
+      : act_mode(act_mode_), is_gated(is_gated_) {}
+};
+
+// Linear layer with column parallelism.
+// The linear layer is defined as Y = XA + b. A is parallelized along
+// its second dimension as A = [A_1, ..., A_p].
+class ColumnParallelLinearImpl : public torch::nn::Module {
+ public:
+  ColumnParallelLinearImpl(
       int64_t in_features,
       int64_t out_features,
       bool bias,
@@ -37,52 +51,111 @@ class ColumnParallelLinear
       const QuantArgs& quant_args,
       const ParallelArgs& parallel_args,
       const torch::TensorOptions& options,
-      const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs())
-      : ModuleHolder(
-            std::make_shared<ColumnParallelLinearImpl>(in_features,
-                                                       out_features,
-                                                       bias,
-                                                       gather_output,
-                                                       quant_args,
-                                                       parallel_args,
-                                                       options,
-                                                       linear_extra_args)) {}
+      const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs());
+
+  torch::Tensor forward(torch::Tensor input);
+
+  // load the weight from the checkpoint
+  void load_state_dict(const StateDict& state_dict);
+
+  // special load_state_dict for fused cases
+  void load_state_dict(const StateDict& state_dict,
+                       const std::vector<std::string>& prefixes);
+
+  void pretty_print(std::ostream& stream) const {
+    stream << name() << " " << weight_.sizes() << " " << weight_.device();
+  }
+
+  // return the weight (for testing)
+  torch::Tensor weight() const { return weight_; }
+
+  bool is_weight_loaded() const { return weight_is_loaded_; }
+
+ private:
+  // parameter members, must be registered
+  // we allocate the transpose since linear performs XA^T.
+  // A^T: [out_features_per_partition, in_features]
+  DEFINE_FUSED_WEIGHT(weight);
+  DEFINE_FUSED_WEIGHT(qweight);
+  DEFINE_FUSED_WEIGHT(per_channel_scale);
+  DEFINE_WEIGHT(smooth);
+  DEFINE_FUSED_WEIGHT(bias);
+
+  int64_t rank_;
+  int64_t world_size_;
+  // whether to gather the output
+  bool gather_output_;
+  at::Device device_;
+  // parallel args
+  ParallelArgs parallel_args_;
+
+  // quantization args
+  QuantArgs quant_args_;
+  at::ScalarType output_dtype_;
+  FusedLinearExtraArgs linear_extra_args_;
 };
+TORCH_MODULE(ColumnParallelLinear);
 
-class QKVParallelLinear
-    : public torch::nn::ModuleHolder<QKVParallelLinearImpl> {
+class QKVParallelLinearImpl : public torch::nn::Module {
  public:
-  using torch::nn::ModuleHolder<QKVParallelLinearImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = QKVParallelLinearImpl;
+  QKVParallelLinearImpl(int64_t hidden_size,
+                        int64_t num_heads,
+                        int64_t num_kv_heads,
+                        int64_t head_size,
+                        int64_t num_kv_head_replicas,
+                        bool bias,
+                        bool gather_output,
+                        const ParallelArgs& parallel_args,
+                        const torch::TensorOptions& options);
 
-  QKVParallelLinear(int64_t hidden_size,
-                    int64_t num_heads,
-                    int64_t num_kv_heads,
-                    int64_t head_size,
-                    int64_t num_kv_head_replicas,
-                    bool bias,
-                    bool gather_output,
-                    const ParallelArgs& parallel_args,
-                    const torch::TensorOptions& options)
-      : ModuleHolder(
-            std::make_shared<QKVParallelLinearImpl>(hidden_size,
-                                                    num_heads,
-                                                    num_kv_heads,
-                                                    head_size,
-                                                    num_kv_head_replicas,
-                                                    bias,
-                                                    gather_output,
-                                                    parallel_args,
-                                                    options)) {}
+  torch::Tensor forward(torch::Tensor input);
+
+  // load the weight from the checkpoint
+  void load_state_dict(const StateDict& state_dict);
+
+  void pretty_print(std::ostream& stream) const {
+    stream << name() << " " << weight().sizes() << " " << weight().device();
+  }
+
+  // return the weight (for testing)
+  torch::Tensor weight() const { return weight_; }
+
+ private:
+  // parameter members, must be registered
+  // we allocate the transpose since linear performs XA^T.
+  // A^T: [out_features_per_partition, in_features]
+  DEFINE_FUSED_WEIGHT(weight);
+  DEFINE_FUSED_WEIGHT(bias);
+
+  int64_t rank_;
+  int64_t world_size_;
+  int64_t hidden_size_;
+  int64_t num_heads_;
+  int64_t num_kv_heads_;
+  int64_t head_size_;
+  int64_t num_kv_head_replicas_;
+  // whether to gather the output
+  bool gather_output_;
+  at::Device device_;
+  // parallel args
+  ParallelArgs parallel_args_;
+  torch::TensorOptions options_;
 };
+TORCH_MODULE(QKVParallelLinear);
 
-class RowParallelLinear
-    : public torch::nn::ModuleHolder<RowParallelLinearImpl> {
+// Linear layer with row parallelism.
+//     The linear layer is defined as Y = XA + b. A is parallelized along
+//     its first dimension and X along its second dimension as:
+//                -   -
+//               | A_1 |
+//               | .   |
+//           A = | .   |       X = [X_1, ..., X_p]
+//               | .   |
+//               | A_p |
+//                -   -
+class RowParallelLinearImpl : public torch::nn::Module {
  public:
-  using torch::nn::ModuleHolder<RowParallelLinearImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = RowParallelLinearImpl;
-
-  RowParallelLinear(
+  RowParallelLinearImpl(
       int64_t in_features,
       int64_t out_features,
       bool bias,
@@ -91,35 +164,77 @@ class RowParallelLinear
       const QuantArgs& quant_args,
       const ParallelArgs& parallel_args,
       const torch::TensorOptions& options,
-      const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs())
-      : ModuleHolder(
-            std::make_shared<RowParallelLinearImpl>(in_features,
-                                                    out_features,
-                                                    bias,
-                                                    input_is_parallelized,
-                                                    if_reduce_results,
-                                                    quant_args,
-                                                    parallel_args,
-                                                    options,
-                                                    linear_extra_args)) {}
-};
+      const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs());
 
-class ReplicatedLinear : public torch::nn::ModuleHolder<ReplicatedLinearImpl> {
+  torch::Tensor forward(torch::Tensor input);
+
+  // load the weight from the checkpoint
+  void load_state_dict(const StateDict& state_dict);
+
+  void pretty_print(std::ostream& stream) const {
+    stream << name() << " " << weight_.sizes() << " " << weight_.device();
+  }
+
+  // return the weight (for testing)
+  torch::Tensor weight() const { return weight_; }
+
+ private:
+  // parameter members, must be registered
+  // we allocate the transpose since linear performs XA^T.
+  // A^T: [out_features, in_features_per_partition]
+  DEFINE_WEIGHT(weight);
+  DEFINE_WEIGHT(qweight);
+  DEFINE_WEIGHT(per_channel_scale);
+  DEFINE_WEIGHT(smooth);
+  DEFINE_WEIGHT(bias);
+
+  // whether the input is already parallelized
+  bool input_is_parallelized_;
+
+  // whether to reduce the results
+  bool if_reduce_results_;
+
+  // parallel args
+  ParallelArgs parallel_args_;
+
+  int64_t rank_;
+  int64_t world_size_;
+
+  // quantization args
+  QuantArgs quant_args_;
+  at::ScalarType output_dtype_;
+  FusedLinearExtraArgs linear_extra_args_;
+};
+TORCH_MODULE(RowParallelLinear);
+
+class ReplicatedLinearImpl : public torch::nn::Module {
  public:
-  using torch::nn::ModuleHolder<ReplicatedLinearImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = ReplicatedLinearImpl;
+  ReplicatedLinearImpl(int64_t in_features,
+                       int64_t out_features,
+                       bool bias,
+                       const QuantArgs& quant_args,
+                       const torch::TensorOptions& options);
 
-  ReplicatedLinear(int64_t in_features,
-                   int64_t out_features,
-                   bool bias,
-                   const QuantArgs& quant_args,
-                   const torch::TensorOptions& options)
-      : ModuleHolder(std::make_shared<ReplicatedLinearImpl>(in_features,
-                                                            out_features,
-                                                            bias,
-                                                            quant_args,
-                                                            options)) {}
+  torch::Tensor forward(torch::Tensor input);
+
+  // load the weight from the checkpoint
+  void load_state_dict(const StateDict& state_dict);
+
+  void pretty_print(std::ostream& stream) const {
+    stream << name() << " " << weight_.sizes() << " " << weight_.device();
+  }
+
+  // return the weight (for testing)
+  torch::Tensor weight() const { return weight_; }
+
+ private:
+  // parameter members, must be registered
+  // we allocate the transpose since linear performs XA^T.
+  // A^T: [out_features, in_features]
+  DEFINE_WEIGHT(weight);
+  DEFINE_WEIGHT(bias);
 };
+TORCH_MODULE(ReplicatedLinear);
 
 }  // namespace layer
 }  // namespace xllm

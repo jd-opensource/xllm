@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "qwen3_decoder_layer.h"
+#include "qwen2_decoder_layer.h"
 
 #include <glog/logging.h>
 
@@ -22,7 +22,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen3DecoderImpl::Qwen3DecoderImpl(const ModelContext& context)
+Qwen2DecoderImpl::Qwen2DecoderImpl(const ModelContext& context)
     : parallel_args_(context.get_parallel_args()) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
@@ -30,9 +30,7 @@ Qwen3DecoderImpl::Qwen3DecoderImpl(const ModelContext& context)
   const auto& options = context.get_tensor_options();
 
   // Initialize attention layers
-  attention_ = register_module(
-      "self_attn",
-      Qwen3Attention(model_args, quant_args, parallel_args, options));
+  attention_ = register_module("self_attn", Qwen2Attention(context));
 
   // Initialize norm layers
   input_norm_ = register_module(
@@ -55,7 +53,7 @@ Qwen3DecoderImpl::Qwen3DecoderImpl(const ModelContext& context)
                                   options));
 }
 
-void Qwen3DecoderImpl::load_state_dict(const StateDict& state_dict) {
+void Qwen2DecoderImpl::load_state_dict(const StateDict& state_dict) {
   attention_->load_state_dict(state_dict.get_dict_with_prefix("self_attn."));
   input_norm_->load_state_dict(
       state_dict.get_dict_with_prefix("input_layernorm."));
@@ -64,15 +62,11 @@ void Qwen3DecoderImpl::load_state_dict(const StateDict& state_dict) {
   mlp_->load_state_dict(state_dict.get_dict_with_prefix("mlp."));
 }
 
-torch::Tensor Qwen3DecoderImpl::forward(torch::Tensor& x,
+torch::Tensor Qwen2DecoderImpl::forward(torch::Tensor& x,
                                         torch::Tensor& positions,
                                         const AttentionMetadata& attn_metadata,
                                         KVCache& kv_cache,
                                         const ModelInputParams& input_params) {
-  bool is_dummy = is_dummy_run(input_params, parallel_args_);
-  if (is_dummy) {
-    return x;
-  }
   // Pre-attention norm
   auto residual = x;
   x = input_norm_->forward(x);

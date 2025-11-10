@@ -20,6 +20,7 @@ limitations under the License.
 #else
 #include "common/word_embedding_impl.h"
 #endif
+#include "core/framework/model_context.h"
 
 namespace xllm {
 namespace layer {
@@ -39,6 +40,7 @@ class WordEmbedding : public torch::nn::ModuleHolder<WordEmbeddingImpl> {
  public:
   using torch::nn::ModuleHolder<WordEmbeddingImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = WordEmbeddingImpl;
+
   WordEmbedding(int64_t num_embeddings,
                 int64_t embedding_dim,
                 const ParallelArgs& parallel_args,
@@ -47,6 +49,12 @@ class WordEmbedding : public torch::nn::ModuleHolder<WordEmbeddingImpl> {
                                                          embedding_dim,
                                                          parallel_args,
                                                          options)) {}
+  WordEmbedding(const ModelContext& context)
+      : ModuleHolder(std::make_shared<WordEmbeddingImpl>(
+            context.get_model_args().vocab_size(),
+            context.get_model_args().hidden_size(),
+            context.get_parallel_args(),
+            context.get_tensor_options())) {}
 };
 
 #endif

@@ -23,6 +23,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
+#include "framework/state_dict/utils.h"
 
 namespace xllm {
 namespace layer {
@@ -33,54 +34,14 @@ class WordEmbeddingImpl : public torch::nn::Module {
   WordEmbeddingImpl(int64_t num_embeddings,
                     int64_t embedding_dim,
                     const ParallelArgs& parallel_args,
-                    const torch::TensorOptions& options)
-      : parallel_args_(parallel_args) {
-    rank_ = parallel_args_.tp_group_->rank();
-    world_size_ = parallel_args_.tp_group_->world_size();
-
-    CHECK(embedding_dim % world_size_ == 0)
-        << "out_features " << embedding_dim << " not divisible by world_size "
-        << world_size_;
-    const int64_t embedding_dim_per_partition = embedding_dim / world_size_;
-
-    // register the weight parameter
-    weight_ = register_parameter(
-        "weight",
-        torch::empty({num_embeddings, embedding_dim_per_partition}, options),
-        /*requires_grad=*/false);
-  }
+                    const torch::TensorOptions& options);
 
   // The input to the module is a list of indices, and the output is the
   // corresponding word embeddings.
-  torch::Tensor forward(torch::Tensor input) {
-    namespace F = torch::nn::functional;
-    auto output = F::embedding(input, weight_);
-    if (world_size_ > 1) {
-      output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
-    }
-    return output;
-  }
+  torch::Tensor forward(torch::Tensor input);
 
   // load the weight from the checkpoint
-  void load_state_dict(const StateDict& state_dict) {
-    const auto weight =
-        state_dict.get_sharded_tensor("weight",
-                                      /*dim=*/1,
-                                      /*rank=*/rank_,
-                                      /*world_size=*/world_size_);
-    if (weight.defined()) {
-      CHECK_EQ(weight_.sizes(), weight.sizes())
-          << "weight size mismatch for " << name();
-      weight_.copy_(weight);
-      weight_is_loaded_ = true;
-    }
-  }
-
-  // whether the weight is loaded
-  void verify_loaded_weights(const std::string& prefix) const {
-    CHECK(weight_is_loaded_)
-        << "weight is not loaded for " << prefix + "weight";
-  }
+  void load_state_dict(const StateDict& state_dict);
 
   void pretty_print(std::ostream& stream) const override {
     stream << name() << " " << weight_.sizes() << " " << weight_.device();

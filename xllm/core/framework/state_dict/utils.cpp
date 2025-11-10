@@ -81,14 +81,21 @@ void load_fused_weight(const StateDict& state_dict,
                        int32_t world_size,
                        std::vector<torch::Tensor>& accumulated_tensors,
                        torch::Tensor& weight,
-                       bool& weight_is_loaded) {
+                       bool& weight_is_loaded,
+                       int32_t num_kv_head_replicas) {
   // return if the weight is already loaded
   if (weight_is_loaded) {
     return;
   }
 
-  weight_is_loaded = load_tensor_list(
-      state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
+  weight_is_loaded = load_tensor_list(state_dict,
+                                      prefixes,
+                                      name,
+                                      dim,
+                                      rank,
+                                      world_size,
+                                      accumulated_tensors,
+                                      num_kv_head_replicas);
 
   if (weight_is_loaded) {
     const auto merged_weight = torch::cat(accumulated_tensors, /*dim=*/dim);
@@ -106,7 +113,8 @@ bool load_tensor_list(const StateDict& state_dict,
                       int64_t dim,
                       int32_t rank,
                       int32_t world_size,
-                      std::vector<torch::Tensor>& tensors) {
+                      std::vector<torch::Tensor>& tensors,
+                      int32_t num_kv_head_replicas) {
   // resize the accumulated weight list if needed
   if (tensors.size() < prefixes.size()) {
     tensors.resize(prefixes.size());
@@ -116,6 +124,14 @@ bool load_tensor_list(const StateDict& state_dict,
   for (size_t i = 0; i < prefixes.size(); ++i) {
     if (tensors[i].defined()) {
       continue;
+    }
+
+    // When the number of key/value heads is smaller than the number of query
+    // heads (e.g., multi-query/grouped-query attention), the key/value head may
+    // be replicated while the query heads are partitioned.
+    if (i == 1 && num_kv_head_replicas > 1) {
+      rank = rank / num_kv_head_replicas;
+      world_size = world_size / num_kv_head_replicas;
     }
 
     const std::string tensor_name = prefixes[i] + name;

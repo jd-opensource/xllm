@@ -19,6 +19,7 @@ limitations under the License.
 #else
 #include "common/fuse_norm.h"
 #endif
+#include "core/framework/model_context.h"
 
 namespace xllm {
 namespace layer {
@@ -40,6 +41,11 @@ class RmsNorm : public torch::nn::ModuleHolder<FusedRMSNormImpl> {
 
   RmsNorm(int64_t dim, double eps, const torch::TensorOptions& options)
       : ModuleHolder(std::make_shared<FusedRMSNormImpl>(dim, eps, options)) {}
+  RmsNorm(const ModelContext& context)
+      : ModuleHolder(std::make_shared<FusedRMSNormImpl>(
+            context.get_model_args().hidden_size(),
+            context.get_model_args().rms_norm_eps(),
+            context.get_tensor_options())) {}
 };
 #endif
 

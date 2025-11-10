@@ -28,7 +28,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "fused_moe.h"
 #include "layers/rms_norm.h"
-#include "qwen3_attention.h"
+#include "qwen2_attention.h"
 
 namespace xllm {
 namespace layer {
@@ -48,7 +48,7 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module {
                         const ModelInputParams& input_params);
 
  private:
-  Qwen3Attention attention_{nullptr};
+  Qwen2Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};
   FusedMoE moe_mlp_{nullptr};
   RmsNorm input_norm_{nullptr};

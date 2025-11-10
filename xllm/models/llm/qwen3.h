@@ -35,19 +35,25 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
+    auto parallel_args = context.get_parallel_args();
+    auto dp_local_tp_size =
+        parallel_args.world_size() / parallel_args.dp_size();
+    dp_rank_ = parallel_args.rank() / dp_local_tp_size;
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-#if defined(USE_NPU)
     norm_ = register_module("norm", layer::RmsNorm(context));
     for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
       embed_tokens_.push_back(layer::WordEmbedding(context));
+#if defined(USE_NPU)
       atb_pos_embeds_.push_back(layer::PosEmbedding(context));
+#endif
     }
     cos_sin_ = get_concat_rotary_embedding(128,
                                            model_args.max_position_embeddings(),
                                            model_args.rope_theta(),
                                            options);
+#if defined(USE_NPU)
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     // encode_attn_mask_ =
     //   layer::AttentionMask(options.device(),
@@ -56,17 +62,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
-#else
-    norm_ = register_module(
-        "norm",
-        layer::RmsNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
-    for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
-      embed_tokens_.push_back(layer::WordEmbedding(model_args.vocab_size(),
-                                                   model_args.hidden_size(),
-                                                   context.get_parallel_args(),
-                                                   options));
-    }
 #endif
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
@@ -226,15 +221,18 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     auto cancated_h = torch::cat(hs, 0);
     return norm_(cancated_h, 0);
 #else
-    bool is_prefill = input_params[0].q_max_seq_len > 1;
+    auto modified_input_params = input_params[0];
+    auto position = positions[0];
+    layer::update_dummy_run_input(dp_rank_, position, modified_input_params);
+    bool is_prefill = modified_input_params.q_max_seq_len > 1;
     auto attn_metadata =
-        layer::AttentionMetadata::build(input_params[0], is_prefill);
+        layer::AttentionMetadata::build(modified_input_params, is_prefill);
 
     torch::Tensor h;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
       h = layer(
-          hs[0], positions[0], attn_metadata, kv_caches[i], input_params[0]);
+          hs[0], position, attn_metadata, kv_caches[i], modified_input_params);
     }
     return norm_(h);
 #endif

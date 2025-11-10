@@ -17,6 +17,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_qwen2_decoder_layer_impl.h"
+#elif defined(USE_MLU)
+#include "common/qwen2_decoder_layer.h"
 #endif
 
 namespace xllm {
@@ -31,6 +33,15 @@ class Qwen2DecoderLayer
 
   Qwen2DecoderLayer(const ModelContext& context)
       : ModuleHolder(std::make_shared<NpuQwen2DecoderLayerImpl>(context)) {}
+};
+#elif defined(USE_MLU)
+class Qwen2DecoderLayer : public torch::nn::ModuleHolder<Qwen2DecoderImpl> {
+ public:
+  using torch::nn::ModuleHolder<Qwen2DecoderImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = Qwen2DecoderImpl;
+
+  Qwen2DecoderLayer(const ModelContext& context)
+      : ModuleHolder(std::make_shared<Qwen2DecoderImpl>(context)) {}
 };
 #endif
 

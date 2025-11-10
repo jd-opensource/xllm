@@ -61,9 +61,6 @@ class IndexerImpl : public torch::nn::Module {
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict);
 
-  // whether the weight is loaded
-  void verify_loaded_weights(const std::string& prefix = "") const;
-
  private:
   int64_t dim_;
   int64_t n_heads_;

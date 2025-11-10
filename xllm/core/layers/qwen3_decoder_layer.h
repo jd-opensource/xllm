@@ -18,7 +18,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "npu/npu_qwen3_decoder_layer_impl.h"
 #else
-#include "common/qwen3_decoder_layer.h"
+#include "common/qwen2_decoder_layer.h"
 #endif
 
 namespace xllm {
@@ -35,13 +35,13 @@ class Qwen3DecoderLayer
       : ModuleHolder(std::make_shared<NpuQwen3DecoderLayerImpl>(context)) {}
 };
 #else
-class Qwen3DecoderLayer : public torch::nn::ModuleHolder<Qwen3DecoderImpl> {
+class Qwen3DecoderLayer : public torch::nn::ModuleHolder<Qwen2DecoderImpl> {
  public:
-  using torch::nn::ModuleHolder<Qwen3DecoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen3DecoderImpl;
+  using torch::nn::ModuleHolder<Qwen2DecoderImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = Qwen2DecoderImpl;
 
   Qwen3DecoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<Qwen3DecoderImpl>(context)) {}
+      : ModuleHolder(std::make_shared<Qwen2DecoderImpl>(context)) {}
 };
 #endif
 

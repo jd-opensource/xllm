@@ -59,12 +59,7 @@ torch::Tensor FusedRMSNormImpl::forward_output(torch::Tensor& input,
 }
 
 void FusedRMSNormImpl::load_state_dict(const StateDict& state_dict) {
-  const auto weight = state_dict.get_tensor("weight");
-  if (weight.defined()) {
-    CHECK_EQ(weight_.sizes(), weight.sizes())
-        << "weight size mismatch for " << name();
-    weight_.copy_(weight);
-  }
+  LOAD_WEIGHT(weight);
 }
 
 }  // namespace layer

@@ -323,13 +323,5 @@ void IndexerImpl::load_state_dict(const StateDict& state_dict) {
       state_dict.get_dict_with_prefix("weights_proj."));
 }
 
-// whether the weight is loaded
-void IndexerImpl::verify_loaded_weights(const std::string& prefix) const {
-  // Verify that all linear layers have loaded their weights
-  wq_b_->verify_loaded_weights(prefix + "wq_b.");
-  wk_->verify_loaded_weights(prefix + "wk.");
-  weights_proj_->verify_loaded_weights(prefix + "weights_proj.");
-}
-
 }  // namespace layer
 }  // namespace xllm

@@ -145,11 +145,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
-#if defined(USE_NPU)
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
 
-    atb_pos_emb_ = layer::PosEmbedding(context);
     cos_sin_ =
         get_qwen3_moe_rotary_embedding(128,
                                        model_args.max_position_embeddings(),
@@ -157,24 +155,16 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
                                        options);
 
     max_seq_len_ = model_args.max_position_embeddings();
+#if defined(USE_NPU)
+    atb_pos_emb_ = layer::PosEmbedding(context);
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
+#endif
     norm_ = register_module("norm", layer::RmsNorm(context));
     mapping_data_ = parallel_args.mapping_data();
-#else
-    norm_ = register_module(
-        "norm",
-        layer::RmsNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
-    embed_tokens_ =
-        register_module("embed_tokens",
-                        layer::WordEmbedding(model_args.vocab_size(),
-                                             model_args.hidden_size(),
-                                             context.get_parallel_args(),
-                                             options));
-#endif
+
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
       auto block = Qwen3MoeDecoderLayer(context, i);
       layers_.push_back(block);
@@ -368,8 +358,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::AttentionMask attn_mask_;
   layer::RmsNorm norm_{nullptr};
-#if defined(USE_NPU)
   torch::Tensor cos_sin_;
+#if defined(USE_NPU)
   layer::PosEmbedding atb_pos_emb_{nullptr};
 #endif
   std::vector<int64_t> mrope_section_;
@@ -380,20 +370,7 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
  public:
   Qwen3MoeForCausalLMImpl(const ModelContext& context) {
     model_ = register_module("model", Qwen3MoeModel(context));
-#if defined(USE_NPU)
     lm_head_ = register_module("lm_head", layer::LmHead(context));
-#else
-    // lm_head_ is default to no quantization
-    lm_head_ =
-        register_module("lm_head",
-                        layer::LmHead(context.get_model_args().hidden_size(),
-                                      context.get_model_args().vocab_size(),
-                                      /*bias=*/false,
-                                      /*gather_output=*/true,
-                                      QuantArgs{},
-                                      context.get_parallel_args(),
-                                      context.get_tensor_options()));
-#endif
   }
 
   // tokens: [num_tokens]

@@ -20,18 +20,6 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-bool is_dummy_run(const ModelInputParams& input_params,
-                  const ParallelArgs& parallel_args) {
-  int64_t dp_rank = 0;
-  if (parallel_args.dp_size() > 1) {
-    dp_rank = parallel_args.dp_local_process_group_->rank();
-  }
-  if (input_params.dp_global_token_nums.size() <= 1) {
-    return input_params.q_max_seq_len == 0;
-  }
-  return input_params.dp_global_token_nums[dp_rank] == 0;
-}
-
 void update_dummy_run_input(int64_t dp_rank,
                             torch::Tensor& positions,
                             ModelInputParams& input_params) {
