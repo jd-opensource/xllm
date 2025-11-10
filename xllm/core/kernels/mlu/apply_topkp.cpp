@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #include "mlu_ops_api.h"
-
 namespace xllm::kernel::mlu {
 
 torch::Tensor apply_top_k_top_p(const torch::Tensor& logits,
@@ -25,7 +24,7 @@ torch::Tensor apply_top_k_top_p(const torch::Tensor& logits,
     return logits;
   }
   torch::Tensor temperature, topk, topp;
-  if (!temperature.defined()) {
+  if (!temperature_list.defined()) {
     temperature =
         torch::ones({logits.size(0)},
                     torch::dtype(torch::kFloat32).device(logits.device()));
@@ -57,14 +56,17 @@ torch::Tensor apply_top_k_top_p(const torch::Tensor& logits,
       {logits.size(0)}, torch::dtype(torch::kInt32).device(logits.device()));
 
   // Special case handling
+  // Create a variable to hold the logits to use (may be modified in special
+  // case)
+  torch::Tensor logits_for_kernel = logits;
   if (!topk_list.defined() && topp_list.defined()) {
-    auto topk_result = torch::topk(logits, logits.size(1));
-    auto topk_logits = std::get<0>(topk_result);
+    auto topk_result = torch::topk(logits, logits.size(-1));
+    logits_for_kernel = std::get<0>(topk_result);
     auto topk_indices = std::get<1>(topk_result);
     index_out = topk_indices.to(torch::kInt32);
   }
 
-  tmo::torch_api::apply_topkp_v2(logits.to(torch::kFloat32),
+  tmo::torch_api::apply_topkp_v2(logits_for_kernel.to(torch::kFloat32),
                                  index_in,
                                  temperature,
                                  /*min_topp=*/torch::Tensor(),
