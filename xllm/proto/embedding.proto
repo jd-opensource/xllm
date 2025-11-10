@@ -4,6 +4,7 @@ option go_package = "jd.com/jd-infer/xllm;xllm";
 package xllm.proto;
 
 import "common.proto";
+import "multimodal.proto";
 
 message EmbeddingRequest {
   // ID of the model to use. You can use the ListModels endpoint to list available models.
@@ -81,3 +82,21 @@ message EmbeddingResponse {
   Usage usage = 6;
 }
 
+message MMEmbeddingRequest {
+  // ID of the model to use. You can use the ListModels endpoint to list available models.
+  string model = 1;
+
+  repeated MMChatMessage messages = 3;
+
+  // The number of dimensions the resulting output embeddings should have. Only supported in text-embedding-3 and later models.
+  optional int32 dimensions = 6;
+
+  // The format to return the embeddings in. Can be either float or base64.
+  // [default = "float"]
+  optional string encoding_format = 7;
+
+  // A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
+  optional string user = 8;
+
+  optional string service_request_id = 9;
+}

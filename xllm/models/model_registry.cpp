@@ -101,6 +101,19 @@ void ModelRegistry::register_embeddinglm_factory(const std::string& name,
   }
 }
 
+void ModelRegistry::register_embeddingvlm_factory(const std::string& name,
+                                                  EmbeddingVLMFactory factory) {
+  ModelRegistry* instance = get_instance();
+
+  if (instance->model_registry_[name].embedding_vlm_factory != nullptr) {
+    SAFE_LOG_WARNING("embedding vlm factory for " << name
+                                                  << " already registered.");
+  } else {
+    instance->model_registry_[name].embedding_vlm_factory = factory;
+    instance->model_backend_[name] = "vlm";
+  }
+}
+
 void ModelRegistry::register_dit_model_factory(const std::string& name,
                                                DiTModelFactory factory) {
   ModelRegistry* instance = get_instance();
@@ -195,6 +208,13 @@ EmbeddingLMFactory ModelRegistry::get_embeddinglm_factory(
   return instance->model_registry_[name].embedding_lm_factory;
 }
 
+EmbeddingVLMFactory ModelRegistry::get_embeddingvlm_factory(
+    const std::string& name) {
+  ModelRegistry* instance = get_instance();
+
+  return instance->model_registry_[name].embedding_vlm_factory;
+}
+
 DiTModelFactory ModelRegistry::get_dit_model_factory(const std::string& name) {
   ModelRegistry* instance = get_instance();
   return instance->model_registry_[name].dit_model_factory;
@@ -270,6 +290,21 @@ std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
     const ModelContext& context) {
   // get the factory function for the model type from model registry
   auto factory = ModelRegistry::get_embeddinglm_factory(
+      context.get_model_args().model_type());
+  if (factory) {
+    return factory(context);
+  }
+
+  LOG(ERROR) << "Unsupported model type: "
+             << context.get_model_args().model_type();
+
+  return nullptr;
+}
+
+std::unique_ptr<EmbeddingVLM> create_embeddingvlm_model(
+    const ModelContext& context) {
+  // get the factory function for the model type from model registry
+  auto factory = ModelRegistry::get_embeddingvlm_factory(
       context.get_model_args().model_type());
   if (factory) {
     return factory(context);

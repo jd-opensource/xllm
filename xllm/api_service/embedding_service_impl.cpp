@@ -28,6 +28,7 @@ limitations under the License.
 namespace xllm {
 namespace {
 
+template <typename EmbeddingCall>
 bool send_result_to_client_brpc(std::shared_ptr<EmbeddingCall> call,
                                 const std::string& request_id,
                                 int64_t created_time,
@@ -113,9 +114,64 @@ void EmbeddingServiceImpl::process_async_impl(
           }
         }
 
-        return send_result_to_client_brpc(
+        return send_result_to_client_brpc<EmbeddingCall>(
             call, request_id, created_time, model, req_output);
       });
 }
 
+MMEmbeddingServiceImpl::MMEmbeddingServiceImpl(
+    VLMMaster* master,
+    const std::vector<std::string>& models)
+    : APIServiceImpl(models), master_(master) {
+  CHECK(master_ != nullptr);
+}
+
+void MMEmbeddingServiceImpl::process_async_impl(
+    std::shared_ptr<MMEmbeddingCall> call) {
+  const auto& rpc_request = call->request();
+  // check if model is supported
+  const auto& model = rpc_request.model();
+  if (!models_.contains(model)) {
+    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+    return;
+  }
+
+  // create RequestParams for embeddings request
+  // set is_embeddings and max_tokens = 1 to control engine step once.
+  RequestParams request_params(
+      rpc_request, call->get_x_request_id(), call->get_x_request_time());
+
+  auto& req_messages = rpc_request.messages();
+
+  std::vector<Message> messages;
+  MMInput mm_inputs;
+
+  static MMInputHelper helper;
+  if (!helper.trans(req_messages, messages, mm_inputs.items_)) {
+    call->finish_with_error(StatusCode::INVALID_ARGUMENT,
+                            "inputs argument is invalid.");
+    return;
+  }
+
+  // schedule the request
+  master_->handle_request(
+      std::move(messages),
+      std::move(mm_inputs),
+      std::move(request_params),
+      [call,
+       model,
+       request_id = request_params.request_id,
+       created_time = absl::ToUnixSeconds(absl::Now())](
+          const RequestOutput& req_output) -> bool {
+        if (req_output.status.has_value()) {
+          const auto& status = req_output.status.value();
+          if (!status.ok()) {
+            return call->finish_with_error(status.code(), status.message());
+          }
+        }
+
+        return send_result_to_client_brpc<MMEmbeddingCall>(
+            call, request_id, created_time, model, req_output);
+      });
+}
 }  // namespace xllm
