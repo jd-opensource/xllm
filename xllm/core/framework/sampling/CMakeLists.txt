@@ -10,12 +10,14 @@ cc_library(
     rejection_sampler.h
     sampler.h
     beam_searcher.h
+    rec_constrained_decoding.h
   SRCS
     sampling_params.cpp
     logits_utils.cpp
     rejection_sampler.cpp
     sampler.cpp
     beam_searcher.cpp
+    rec_constrained_decoding.cpp
   DEPS
     :common
     glog::glog
