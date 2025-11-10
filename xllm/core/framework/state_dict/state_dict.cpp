@@ -19,10 +19,14 @@ limitations under the License.
 #include <ATen/core/TensorBody.h>
 #include <absl/strings/match.h>
 #include <caffe2/serialize/inline_container.h>
+#include <fcntl.h>
 #include <glog/logging.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/torch.h>
+#include <unistd.h>
 
 #include <memory>
 
@@ -79,6 +83,40 @@ std::vector<int64_t> get_sizes(const View* view) {
   return sizes;
 }
 
+std::unique_ptr<MemoryMapping> create_memory_mapping(const char* weights_file) {
+  auto mapping = std::make_unique<MemoryMapping>();
+
+  mapping->fd = open(weights_file, O_RDONLY);
+  if (mapping->fd == -1) {
+    LOG(FATAL) << "Failed to open weight file: " << weights_file;
+  }
+
+  struct stat sb;
+  if (fstat(mapping->fd, &sb) == -1) {
+    LOG(FATAL) << "Failed to get file size for weight file: " << weights_file;
+  }
+  mapping->mapped_size = sb.st_size;
+
+  mapping->mapped_addr =
+      mmap(NULL, mapping->mapped_size, PROT_READ, MAP_PRIVATE, mapping->fd, 0);
+  if (mapping->mapped_addr == MAP_FAILED) {
+    LOG(FATAL) << "Failed to map file: " << weights_file;
+  }
+
+  return mapping;
+}
+
+void destroy_memory_mapping(MemoryMapping* mapping) {
+  if (mapping) {
+    if (mapping->mapped_addr != MAP_FAILED) {
+      munmap(mapping->mapped_addr, mapping->mapped_size);
+    }
+    if (mapping->fd != -1) {
+      close(mapping->fd);
+    }
+    free(mapping);
+  }
+}
 }  // namespace
 
 StateDict::StateDict(std::unordered_map<std::string, torch::Tensor> dict,
@@ -145,25 +183,31 @@ StateDict StateDict::get_dict_with_prefix(
 }
 
 StateDictFromSafeTensor::StateDictFromSafeTensor(
-    std::unique_ptr<folly::MemoryMapping> mem_map,
+    std::unique_ptr<MemoryMapping> mem_map,
     std::unordered_map<std::string, torch::Tensor> dict)
     : StateDict(std::move(dict)), mem_map_(std::move(mem_map)) {}
 
+StateDictFromSafeTensor::~StateDictFromSafeTensor() {
+  destroy_memory_mapping(mem_map_.release());
+}
+
 std::unique_ptr<StateDict> StateDictFromSafeTensor::load(
     const std::string& weights_file) {
-  folly::MemoryMapping::Options options;
-  options.setPrefault(true).setReadable(true);
-  auto mem_map = std::make_unique<folly::MemoryMapping>(weights_file.c_str(),
-                                                        0,   // offset
-                                                        -1,  // length
-                                                        options);
-  if (util::get_bool_env(ENV_MLOCK_ENABLED, DEFAULT_MLOCK_ENABLED)) {
-    mem_map->mlock(folly::MemoryMapping::LockMode::MUST_LOCK);
+  std::unique_ptr<MemoryMapping> mem_map = std::unique_ptr<MemoryMapping>(
+      create_memory_mapping(weights_file.c_str()));
+
+  if (!mem_map) {
+    LOG(FATAL) << "Failed to create memory mapping for " << weights_file;
   }
-  const folly::ByteRange content = mem_map->range();
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(content.data());
-  const size_t size = content.size();
+
+  if (util::get_bool_env(ENV_MLOCK_ENABLED, DEFAULT_MLOCK_ENABLED)) {
+    if (mlock(mem_map->mapped_addr, mem_map->mapped_size) == -1) {
+      LOG(FATAL) << "Failed to lock memory for file: " << weights_file;
+    }
+  }
+
+  const uint8_t* data = static_cast<const uint8_t*>(mem_map->mapped_addr);
+  const size_t size = mem_map->mapped_size;
 
   std::unordered_map<std::string, torch::Tensor> dict;
   // safetensors

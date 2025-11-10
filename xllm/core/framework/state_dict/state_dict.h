@@ -16,7 +16,6 @@ limitations under the License.
 
 #pragma once
 #include <c10/core/DeviceType.h>
-#include <folly/system/MemoryMapping.h>
 #include <torch/torch.h>
 
 #include <memory>
@@ -66,16 +65,26 @@ class StateDict {
   std::string prefix_;
 };
 
+struct MemoryMapping {
+  void* mapped_addr = nullptr;
+  size_t mapped_size = 0;
+  int fd = -1;
+
+  MemoryMapping() = default;
+};
+
 class StateDictFromSafeTensor : public StateDict {
  public:
-  StateDictFromSafeTensor(std::unique_ptr<folly::MemoryMapping> mem_map,
+  StateDictFromSafeTensor(std::unique_ptr<MemoryMapping> mem_map,
                           std::unordered_map<std::string, torch::Tensor> dict);
+
+  ~StateDictFromSafeTensor();
 
   static std::unique_ptr<StateDict> load(const std::string& weights_file);
 
  private:
   // memory mapping for safetensors
-  std::unique_ptr<folly::MemoryMapping> mem_map_;
+  std::unique_ptr<MemoryMapping> mem_map_;
 };
 
 }  // namespace xllm
