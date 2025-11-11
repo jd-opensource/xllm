@@ -30,3 +30,14 @@ cc_library(
     re2::re2
 )
 
+cc_test(
+  NAME
+    fast_tokenizer_test
+  SRCS
+    tests/fast_tokenizer_tests.cpp
+  DEPS
+    :tokenizer
+    glog::glog
+    GTest::gtest_main
+)
+
