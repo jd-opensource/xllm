@@ -22,12 +22,16 @@ ThreadPool::ThreadPool(size_t num_threads) : ThreadPool(num_threads, nullptr) {}
 
 ThreadPool::ThreadPool(size_t num_threads, Runnable init_func)
     : queues_(num_threads) {
+  BlockingCounter counter(num_threads);
   for (size_t i = 0; i < num_threads; ++i) {
-    threads_.emplace_back(
-        [this, i, init_func = std::move(init_func)]() mutable {
-          internal_loop(i, std::move(init_func));
-        });
+    threads_.emplace_back([this,
+                           i,
+                           init_func_ptr = &init_func,
+                           counter_ptr = &counter]() mutable {
+      internal_loop(i, init_func_ptr, counter_ptr);
+    });
   }
+  counter.wait();
 }
 
 ThreadPool::~ThreadPool() {
@@ -66,10 +70,13 @@ void ThreadPool::schedule_with_tid(Runnable runnable, size_t tid) {
   queues_[tid].enqueue(std::move(runnable));
 }
 
-void ThreadPool::internal_loop(size_t index, Runnable&& init_func) {
-  if (init_func != nullptr) {
-    init_func();
+void ThreadPool::internal_loop(size_t index,
+                               Runnable* init_func,
+                               BlockingCounter* block_counter) {
+  if (init_func != nullptr && *init_func != nullptr) {
+    (*init_func)();
   }
+  block_counter->decrement_count();
 
   while (true) {
     Runnable runnable;
