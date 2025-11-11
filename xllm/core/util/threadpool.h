@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <thread>
 
+#include "util/blocking_counter.h"
 #include "util/blockingconcurrentqueue.h"
 
 namespace xllm {
@@ -56,7 +57,9 @@ class ThreadPool final {
   size_t size() { return threads_.size(); }
 
  private:
-  void internal_loop(size_t tid, Runnable&& init_func);
+  void internal_loop(size_t tid,
+                     Runnable* init_func,
+                     BlockingCounter* block_counter);
 
   std::vector<std::thread> threads_;
   std::vector<moodycamel::BlockingConcurrentQueue<Runnable>> queues_;
