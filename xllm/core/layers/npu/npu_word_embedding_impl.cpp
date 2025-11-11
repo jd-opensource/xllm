@@ -125,6 +125,11 @@ torch::Tensor NpuWordEmbeddingImpl::forward(const torch::Tensor& x,
 
 void NpuWordEmbeddingImpl::build_node_variant_pack(atb_speed::Model::Node& node,
                                                    const torch::Tensor& x) {
+  if (!node.operation) {
+    throw std::runtime_error(
+        "node.operation is null in build_node_variant_pack");
+  }
+
   internalTensors = atb_speed::Utils::AtTensor2Tensor(x);
   // node.outTensors[0] = &internalTensors;
 
@@ -133,6 +138,13 @@ void NpuWordEmbeddingImpl::build_node_variant_pack(atb_speed::Model::Node& node,
   inTensorDescs.resize(node.variantPack.inTensors.size());
 
   atb::SVector<atb::TensorDesc> outTensorDescs;
+
+  auto output_num = node.operation->GetOutputNum();
+  if (output_num <= 0) {
+    throw std::runtime_error("Invalid output number: " +
+                             std::to_string(output_num));
+  }
+
   outTensorDescs.reserve(node.operation->GetOutputNum());
   outTensorDescs.resize(node.operation->GetOutputNum());
 

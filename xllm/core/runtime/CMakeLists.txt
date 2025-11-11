@@ -61,6 +61,7 @@ cc_library(
     :state_dict
     :dit_cache
     $<$<BOOL:${USE_NPU}>:npu_layers>
+    $<$<BOOL:${USE_NPU}>:common_layers>
     :model
     :models
     :sampler

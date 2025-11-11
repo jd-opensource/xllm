@@ -18,6 +18,7 @@ limitations under the License.
 #include "mapping_npu.h"
 
 #if defined(USE_NPU)
+#include "npu_process_group.h"
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
 #include "xllm_kernels/models/base/param/mapping.h"
@@ -29,23 +30,6 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "parallel_args.h"
 #include "util/net.h"
-
-namespace {
-#if defined(USE_NPU)
-std::unique_ptr<xllm::ProcessGroup> create_process_group(
-    int rank,
-    int world_size,
-    int rank_size,
-    int port,
-    bool trans,
-    const std::string& host,
-    const std::string& group_name,
-    const torch::Device& device) {
-  LOG(FATAL) << "Unsupported device type";
-  return nullptr;
-}
-#endif
-}  // namespace
 
 namespace xllm {
 

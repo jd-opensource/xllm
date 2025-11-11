@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) && !defined(USE_NPU_TORCH)
 #include "dit/pipeline_flux.h"       // IWYU pragma: keep
 #include "dit/pipeline_flux_fill.h"  // IWYU pragma: keep
 #include "llm/deepseek_v2.h"         // IWYU pragma: keep
@@ -37,4 +37,6 @@ limitations under the License.
 
 #include "llm/llm_model_base.h"  // IWYU pragma: keep
 #include "llm/qwen3.h"           // IWYU pragma: keep
-#include "llm/qwen3_moe.h"       // IWYU pragma: keep
+#if !defined(USE_NPU_TORCH)
+#include "llm/qwen3_moe.h"  // IWYU pragma: keep
+#endif

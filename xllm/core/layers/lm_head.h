@@ -17,23 +17,23 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_lm_head_impl.h"
-#else
-#include "common/linear_impl.h"
 #endif
+#include "common/linear_impl.h"
 
 namespace xllm {
 namespace layer {
 
 #if defined(USE_NPU)
-class LmHead : public torch::nn::ModuleHolder<NpuLmHeadImpl> {
+class NpuLmHead : public torch::nn::ModuleHolder<NpuLmHeadImpl> {
  public:
   using torch::nn::ModuleHolder<NpuLmHeadImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = NpuLmHeadImpl;
 
-  LmHead(const ModelContext& context)
+  NpuLmHead(const ModelContext& context)
       : ModuleHolder(std::make_shared<NpuLmHeadImpl>(context)) {}
 };
-#else
+
+#endif
 class LmHead : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
  public:
   using torch::nn::ModuleHolder<ColumnParallelLinearImpl>::ModuleHolder;
@@ -54,7 +54,6 @@ class LmHead : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
                                                                 parallel_args,
                                                                 options)) {}
 };
-#endif
 
 }  // namespace layer
 }  // namespace xllm

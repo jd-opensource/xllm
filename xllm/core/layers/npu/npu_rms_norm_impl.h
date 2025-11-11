@@ -54,7 +54,7 @@ class NpuRmsNormImpl : public NpuBaseLayer {
 
   void merge_loaded_weights() override;
 
-  torch::Tensor forward(torch::Tensor& x, int nodeId);
+  torch::Tensor forward(torch::Tensor& x, int nodeId = 0);
 
  private:
   int64_t init_layer() override;

@@ -17,6 +17,8 @@ limitations under the License.
 
 #if defined(USE_MLU)
 #include "mlu/mlu_ops_api.h"
+#elif defined(USE_NPU)
+#include "npu/npu_ops_api.h"
 #elif defined(USE_CUDA)
 #include "cuda/cuda_ops_api.h"
 #endif
@@ -38,6 +40,8 @@ void apply_rotary(RotaryParams& params) {
                     params.discrete,
                     params.dynamic_ntk,
                     params.max_query_len);
+#elif defined(USE_NPU)
+  npu::apply_rotary(params.q, params.k, params.cos_sin, params.positions);
 #elif defined(USE_CUDA)
   cuda::apply_rope_pos_ids_cos_sin_cache(params.q,
                                          params.k,
@@ -66,6 +70,14 @@ void active(ActivationParams& params) {
 #endif
 }
 
+torch::Tensor active_tensor(ActivationParams& params) {
+#if defined(USE_NPU)
+  return npu::active(params.input, params.act_mode);
+#else
+  LOG(FATAL) << "active_tensor not implemented";
+#endif
+}
+
 void reshape_paged_cache(ReshapePagedCacheParams& params) {
 #if defined(USE_MLU)
   mlu::reshape_paged_cache(params.key,
@@ -74,6 +86,12 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
                            params.v_cache,
                            params.slot_mapping,
                            params.direction);
+#elif defined(USE_NPU)
+  npu::reshape_paged_cache(params.key,
+                           params.value,
+                           params.k_cache,
+                           params.v_cache,
+                           params.slot_mapping);
 #elif defined(USE_CUDA)
   cuda::reshape_paged_cache(params.slot_mapping,
                             params.key,
@@ -109,6 +127,14 @@ void batch_prefill(AttentionParams& params) {
                      params.window_size_right,
                      params.compute_dtype,
                      params.return_lse);
+#elif defined(USE_NPU)
+  npu::batch_prefill(params.query,
+                     params.key,
+                     params.value,
+                     params.attn_mask,
+                     params.seq_lens,
+                     params.scale,
+                     params.output);
 #elif defined(USE_CUDA)
   cuda::batch_prefill(params.float_workspace_buffer,
                       params.int_workspace_buffer,
@@ -151,6 +177,14 @@ void batch_decode(AttentionParams& params) {
                     params.scale,
                     params.return_lse,
                     params.kv_cache_quant_bit_size);
+#elif defined(USE_NPU)
+  npu::batch_decode(params.query,
+                    params.k_cache,
+                    params.v_cache,
+                    params.scale,
+                    params.block_table.value(),
+                    params.seq_lens,
+                    params.output);
 #elif defined(USE_CUDA)
   params.query = params.query.squeeze(1);
   params.output = params.output.squeeze(1);
@@ -197,10 +231,21 @@ void fused_layernorm(FusedLayerNormParams& params) {
 #endif
 }
 
+torch::Tensor fused_layernorm_tensor(FusedLayerNormParams& params) {
+#if defined(USE_NPU)
+  return npu::fused_layernorm(
+      params.input, params.weight, params.eps, params.mode);
+#else
+  LOG(FATAL) << "fused_layernorm not implemented";
+#endif
+}
+
 torch::Tensor matmul(MatmulParams& params) {
 #if defined(USE_MLU)
   return mlu::matmul(
       params.a, params.b, params.bias, params.c, params.alpha, params.beta);
+#elif defined(USE_NPU)
+  return npu::matmul(params.a, params.b, params.bias);
 #elif defined(USE_CUDA)
   return cuda::matmul(params.a, params.b, params.bias);
 #else

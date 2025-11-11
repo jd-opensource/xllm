@@ -49,6 +49,7 @@ cc_library(
     :platform
 )
 
+if(NOT USE_NPU)
 # Add test for DenseMLP
 cc_test(
   NAME
@@ -99,3 +100,4 @@ cc_test(
     torch
     GTest::gtest_main
 )
+endif()

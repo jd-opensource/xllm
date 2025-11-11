@@ -51,6 +51,7 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module {
   Qwen3Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};
   FusedMoE moe_mlp_{nullptr};
+
   RmsNorm input_norm_{nullptr};
   RmsNorm post_norm_{nullptr};
 };

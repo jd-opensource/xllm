@@ -81,11 +81,11 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
                                                   sm_scale,
                                                   options));
       atb_pos_embs_.push_back(layer::PosEmbedding(context));
-      eh_projs_.push_back(layer::ColumnParallelLinear(context));
+      eh_projs_.push_back(layer::NpuColumnParallelLinear(context));
     }
-    enorm_ = register_module("enorm", layer::RmsNorm(context));
-    hnorm_ = register_module("hnorm", layer::RmsNorm(context));
-    final_norm_ = register_module("final_norm", layer::RmsNorm(context));
+    enorm_ = register_module("enorm", layer::NpuRmsNorm(context));
+    hnorm_ = register_module("hnorm", layer::NpuRmsNorm(context));
+    final_norm_ = register_module("final_norm", layer::NpuRmsNorm(context));
 
     // dp_size_=4;
     dp_size_ = parallel_args.dp_size();
@@ -218,11 +218,12 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
     final_norm_->merge_loaded_weights();
   }
 
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() {
     return embed_tokens_;
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(
+      std::vector<layer::NpuWordEmbedding>& word_embedding) {
     embed_tokens_ = word_embedding;
   }
 
@@ -237,14 +238,14 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
   nlohmann::json mapping_data_;
   int32_t num_experts_per_tok_;
   at::Device device_;
-  std::vector<layer::WordEmbedding> embed_tokens_;
+  std::vector<layer::NpuWordEmbedding> embed_tokens_;
   std::vector<std::shared_ptr<RotaryEmbedding>> pos_embs_;
   std::vector<layer::PosEmbedding> atb_pos_embs_;
   layer::AttentionMask attn_mask_;
-  std::vector<layer::ColumnParallelLinear> eh_projs_;
-  layer::RmsNorm enorm_{nullptr};
-  layer::RmsNorm hnorm_{nullptr};
-  layer::RmsNorm final_norm_{nullptr};
+  std::vector<layer::NpuColumnParallelLinear> eh_projs_;
+  layer::NpuRmsNorm enorm_{nullptr};
+  layer::NpuRmsNorm hnorm_{nullptr};
+  layer::NpuRmsNorm final_norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2MtpModel);
 
@@ -295,21 +296,25 @@ class DeepseekV2MtpForCausalLMImpl : public torch::nn::Module {
     return;
   }
   void update_expert_weight(int32_t layer_id) { return; }
-  layer::LmHead get_lm_head() { return lm_head_; }
+#if defined(USE_NPU)
+  layer::NpuLmHead get_lm_head() { return lm_head_; }
 
-  void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
+  void set_lm_head(layer::NpuLmHead& head) { lm_head_ = head; }
 
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() {
     return model_->get_word_embedding();
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(
+      std::vector<layer::NpuWordEmbedding>& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
 
  private:
+  layer::NpuLmHead lm_head_{nullptr};
+#endif
+ private:
   DeepseekV2MtpModel model_{nullptr};
-  layer::LmHead lm_head_{nullptr};
 };
 TORCH_MODULE(DeepseekV2MtpForCausalLM);
 

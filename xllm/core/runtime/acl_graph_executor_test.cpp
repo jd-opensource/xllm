@@ -234,22 +234,23 @@ class SimpleCausalLM : public CausalLM {
     // Simple implementation for testing
   }
 
-  layer::LmHead get_lm_head() override {
+  layer::NpuLmHead get_lm_head() override {
     // Simple implementation for testing
-    return layer::LmHead(nullptr);
+    return layer::NpuLmHead(nullptr);
   }
 
-  void set_lm_head(layer::LmHead& head) override {
+  void set_lm_head(layer::NpuLmHead& head) override {
     // Simple implementation for testing
   }
 
-  std::vector<layer::WordEmbedding> get_word_embedding() override {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() override {
     // Simple implementation for testing
-    return std::vector<layer::WordEmbedding>{layer::WordEmbedding(nullptr)};
+    return std::vector<layer::NpuWordEmbedding>{
+        layer::NpuWordEmbedding(nullptr)};
   }
 
   void set_word_embedding(
-      std::vector<layer::WordEmbedding>& embedding) override {
+      std::vector<layer::NpuWordEmbedding>& embedding) override {
     // Simple implementation for testing
   }
 

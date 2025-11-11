@@ -104,6 +104,12 @@ void WorkerServer::create_server(
   const ParallelArgs* parallel_args = comm.parallel_args();
 #if defined(USE_MLU) || defined(USE_CUDA)
   comm.create_process_groups(master_node_addr, device);
+#elif defined(USE_NPU)
+  // TODO: Refactor to use model_type or other appropriate enumeration for
+  // condition checking
+  if (FLAGS_enable_npu_torch) {
+    comm.create_process_groups(master_node_addr, device);
+  }
 #endif
 
   WorkerType worker_type =

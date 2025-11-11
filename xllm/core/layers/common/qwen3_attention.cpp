@@ -77,7 +77,6 @@ Qwen3AttentionImpl::Qwen3AttentionImpl(const ModelArgs& args,
 
   k_norm_ = register_module(
       "k_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
-
   // 4. Rotary embedding
   rotary_emb_ = register_module("rope",
                                 RotaryEmbedding(/*rotary_dim=*/head_dim_,

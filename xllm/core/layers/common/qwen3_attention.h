@@ -56,8 +56,10 @@ class Qwen3AttentionImpl : public torch::nn::Module {
 
   QKVParallelLinear qkv_proj_{nullptr};
   RowParallelLinear o_proj_{nullptr};
+
   RmsNorm q_norm_{nullptr};
   RmsNorm k_norm_{nullptr};
+
   Attention attn_{nullptr};
   RotaryEmbedding rotary_emb_{nullptr};
 };

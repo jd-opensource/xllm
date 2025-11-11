@@ -23,13 +23,13 @@ namespace xllm {
 namespace layer {
 
 #if defined(USE_NPU)
-class ColumnParallelLinear
+class NpuColumnParallelLinear
     : public torch::nn::ModuleHolder<NpuColumnParallelLinearImpl> {
  public:
   using torch::nn::ModuleHolder<NpuColumnParallelLinearImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = NpuColumnParallelLinearImpl;
 
-  ColumnParallelLinear(const ModelContext& context)
+  NpuColumnParallelLinear(const ModelContext& context)
       : ModuleHolder(std::make_shared<NpuColumnParallelLinearImpl>(context)) {}
 };
 #endif

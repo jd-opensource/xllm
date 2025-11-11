@@ -119,7 +119,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
         model_args.rope_scaling_original_max_position_embeddings());
     float sm_scale = 1.0f;
     for (auto i = 0; i < FLAGS_micro_batch_num; i++) {
-      embed_tokens_.push_back(layer::WordEmbedding(context));
+      embed_tokens_.push_back(layer::NpuWordEmbedding(context));
       pos_embs_.push_back(create_rotary_embedding(model_args,
                                                   model_args.rotary_dim(),
                                                   inv_freq,
@@ -140,7 +140,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    norm_ = register_module("norm", layer::RmsNorm(context));
+    norm_ = register_module("norm", layer::NpuRmsNorm(context));
     // dp_size_=4;
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
@@ -264,11 +264,12 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     layers_[layer_id]->update_expert_weight();
   }
 
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() {
     return embed_tokens_;
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(
+      std::vector<layer::NpuWordEmbedding>& word_embedding) {
     embed_tokens_ = word_embedding;
   }
 
@@ -285,11 +286,11 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   int32_t num_speculative_tokens_ = 0;
   at::Device device_;
   torch::Dtype dtype_;
-  std::vector<layer::WordEmbedding> embed_tokens_;
+  std::vector<layer::NpuWordEmbedding> embed_tokens_;
   std::vector<std::shared_ptr<RotaryEmbedding>> pos_embs_;
   std::vector<layer::PosEmbedding> atb_pos_embs_;
   layer::AttentionMask attn_mask_;
-  layer::RmsNorm norm_{nullptr};
+  layer::NpuRmsNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Model);
 
@@ -297,7 +298,7 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
  public:
   DeepseekV2ForCausalLMImpl(const ModelContext& context) {
     model_ = register_module("model", DeepseekV2Model(context));
-    lm_head_ = register_module("lm_head", layer::LmHead(context));
+    lm_head_ = register_module("lm_head", layer::NpuLmHead(context));
     first_k_dense_replace_ = context.get_model_args().first_k_dense_replace();
   }
 
@@ -342,22 +343,25 @@ class DeepseekV2ForCausalLMImpl : public torch::nn::Module {
   void update_expert_weight(int32_t layer_id) {
     model_->update_expert_weight(layer_id + first_k_dense_replace_);
   }
+#if defined(USE_NPU)
+  layer::NpuLmHead get_lm_head() { return lm_head_; }
 
-  layer::LmHead get_lm_head() { return lm_head_; }
+  void set_lm_head(layer::NpuLmHead& head) { lm_head_ = head; }
 
-  void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
-
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() {
     return model_->get_word_embedding();
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(
+      std::vector<layer::NpuWordEmbedding>& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
 
  private:
+  layer::NpuLmHead lm_head_{nullptr};
+#endif
+ private:
   DeepseekV2Model model_{nullptr};
-  layer::LmHead lm_head_{nullptr};
   int32_t first_k_dense_replace_;
 };
 TORCH_MODULE(DeepseekV2ForCausalLM);

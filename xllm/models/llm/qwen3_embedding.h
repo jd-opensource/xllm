@@ -73,18 +73,20 @@ class EmbeddingLMImpl<xllm::QWen3ForEmbedding> : public EmbeddingLM {
     return;
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
-
+#if defined(USE_NPU)
   // Delegate head/embedding accessors to underlying model implementation.
-  layer::LmHead get_lm_head() override { return model_->get_lm_head(); }
-  void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); }
-  std::vector<layer::WordEmbedding> get_word_embedding() override {
+  layer::NpuLmHead get_lm_head() override { return model_->get_lm_head(); }
+  void set_lm_head(layer::NpuLmHead& head) override {
+    model_->set_lm_head(head);
+  }
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() override {
     return model_->get_word_embedding();
   }
   void set_word_embedding(
-      std::vector<layer::WordEmbedding>& embedding) override {
+      std::vector<layer::NpuWordEmbedding>& embedding) override {
     model_->set_word_embedding(embedding);
   }
-
+#endif
  private:
   xllm::QWen3ForEmbedding model_;
   torch::TensorOptions options_;

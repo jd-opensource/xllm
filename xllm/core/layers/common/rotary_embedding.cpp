@@ -45,6 +45,12 @@ RotaryEmbeddingImpl::RotaryEmbeddingImpl(int rotary_dim,
   t = t.to(dev_options);
 
   const auto freqs = torch::einsum("i,j->ij", {t, inv_freq});
+#if defined(USE_NPU)
+  const auto cos_sin =
+      torch::cat({freqs.cos(), freqs.sin()}, /*dim=*/-1).contiguous();
+  cos_sin_cache_ = register_buffer("cos_sin_cache", cos_sin.to(options));
+  auto cos_sin_vec = cos_sin_cache_.chunk(2, /*dim=*/-1);
+#else
   // Create cos and sin embeddings.
   torch::Tensor emd;
   if (interleaved) {
@@ -61,6 +67,7 @@ RotaryEmbeddingImpl::RotaryEmbeddingImpl(int rotary_dim,
   auto cos_sin_vec = cos_sin_cache_.chunk(2, /*dim=*/-1);
   cos_ = cos_sin_vec[0].view({-1, rotary_dim});
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
+#endif
 }
 
 void RotaryEmbeddingImpl::forward(torch::Tensor& q,
@@ -84,8 +91,12 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& q,
   xllm::kernel::RotaryParams rotary_params;
   rotary_params.q = q;
   rotary_params.k = k;
+#if defined(USE_NPU)
+  rotary_params.positions = positions;
+#else
   rotary_params.sin = sin_;
   rotary_params.cos = cos_;
+#endif
   rotary_params.cos_sin = cos_sin_cache_;
   rotary_params.position_ids = position_ids;
   rotary_params.cu_query_lens = cu_query_lens;

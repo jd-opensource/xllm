@@ -17,14 +17,14 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_qwen3_decoder_layer_impl.h"
-#else
-#include "common/qwen3_decoder_layer.h"
 #endif
+
+#include "common/qwen3_decoder_layer.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) && !defined(USE_NPU_TORCH)
 class Qwen3DecoderLayer
     : public torch::nn::ModuleHolder<NpuQwen3DecoderLayerImpl> {
  public:

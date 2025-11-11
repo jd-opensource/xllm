@@ -28,6 +28,7 @@ cc_library(
     absl::random_random
     absl::strings
     torch
+    $<$<BOOL:${USE_NPU}>:torch_python>
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_MSPTI}>:mspti>
     $<$<BOOL:${USE_NPU}>:ms_tools_ext>

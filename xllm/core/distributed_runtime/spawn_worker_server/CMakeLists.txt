@@ -12,6 +12,7 @@ cc_binary(
     :models
     :model
     :distributed_runtime
+    :parallel_state
     absl::strings
     xllm_kernels
     ascendcl

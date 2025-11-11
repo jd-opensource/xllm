@@ -66,11 +66,13 @@ class CausalLM : public torch::nn::Module {
 
   virtual const torch::TensorOptions& options() const = 0;
 
-  virtual layer::LmHead get_lm_head() = 0;
-  virtual void set_lm_head(layer::LmHead& head) = 0;
-  virtual std::vector<layer::WordEmbedding> get_word_embedding() = 0;
+#if defined(USE_NPU)
+  virtual layer::NpuLmHead get_lm_head() = 0;
+  virtual void set_lm_head(layer::NpuLmHead& head) = 0;
+  virtual std::vector<layer::NpuWordEmbedding> get_word_embedding() = 0;
   virtual void set_word_embedding(
-      std::vector<layer::WordEmbedding>& embedding) = 0;
+      std::vector<layer::NpuWordEmbedding>& embedding) = 0;
+#endif
 };
 
 template <typename Model>
@@ -104,20 +106,22 @@ class CausalLMImpl : public CausalLM {
   virtual void update_expert_weight(int32_t layer_id) {
     return model_->update_expert_weight(layer_id);
   }
+#if defined(USE_NPU)
+  layer::NpuLmHead get_lm_head() override { return model_->get_lm_head(); };
 
-  layer::LmHead get_lm_head() override { return model_->get_lm_head(); };
+  void set_lm_head(layer::NpuLmHead& head) override {
+    model_->set_lm_head(head);
+  };
 
-  void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); };
-
-  std::vector<layer::WordEmbedding> get_word_embedding() override {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() override {
     return model_->get_word_embedding();
   };
 
   void set_word_embedding(
-      std::vector<layer::WordEmbedding>& embedding) override {
+      std::vector<layer::NpuWordEmbedding>& embedding) override {
     model_->set_word_embedding(embedding);
   };
-
+#endif
   torch::Device device() const override { return options_.device(); }
 
   const torch::TensorOptions& options() const override { return options_; }

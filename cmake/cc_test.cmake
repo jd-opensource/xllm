@@ -69,6 +69,14 @@ function(cc_test)
     PRIVATE ${CC_TEST_LINKOPTS}
   )
 
+  if(USE_NPU)
+    set(COMMON_LIBS Python::Python torch_npu torch_python)
+  endif()
+
+  if(USE_NPU AND DEFINED COMMON_LIBS)
+    target_link_libraries(${CC_TEST_NAME} PRIVATE ${COMMON_LIBS})
+  endif()
+
   add_dependencies(all_tests ${CC_TEST_NAME})
 
   gtest_add_tests(

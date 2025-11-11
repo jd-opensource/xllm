@@ -51,6 +51,7 @@ class Qwen3DecoderImpl : public torch::nn::Module {
  private:
   Qwen3Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};
+
   RmsNorm input_norm_{nullptr};
   RmsNorm post_norm_{nullptr};
 

@@ -108,7 +108,7 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path) {
     CHECK_EQ(draft_impl_->get_status(), WorkerImpl::Status::UNINITIALIZED);
     result = draft_impl_->WorkerImpl::init_model(model_weights_path);
   }
-
+#if defined(USE_NPU)
   if (draft_impl_->get_status() == WorkerImpl::Status::LOADED) {
     // Deepseek MTP
     auto head = impl_->get_lm_head();
@@ -116,6 +116,7 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path) {
     auto word_embedding = impl_->get_word_embedding();
     draft_impl_->set_word_embedding(word_embedding);
   }
+#endif
   return result;
 }
 

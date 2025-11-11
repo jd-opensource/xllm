@@ -37,6 +37,14 @@ FusedRMSNormImpl::FusedRMSNormImpl(int64_t dim,
 torch::Tensor FusedRMSNormImpl::forward(torch::Tensor& input) {
   auto org_shape = input.sizes().vec();
   input = input.reshape({-1, norm_dim_});
+#if defined(USE_NPU)
+  xllm::kernel::FusedLayerNormParams fused_layernorm_params;
+  fused_layernorm_params.input = input;
+  fused_layernorm_params.weight = weight_;
+  fused_layernorm_params.eps = eps_;
+  fused_layernorm_params.mode = kRmsNormMode;
+  auto output = xllm::kernel::fused_layernorm_tensor(fused_layernorm_params);
+#else
   auto output = torch::empty_like(input);
 
   xllm::kernel::FusedLayerNormParams fused_layernorm_params;
@@ -47,6 +55,7 @@ torch::Tensor FusedRMSNormImpl::forward(torch::Tensor& input) {
   fused_layernorm_params.eps = eps_;
 
   xllm::kernel::fused_layernorm(fused_layernorm_params);
+#endif
 
   output = output.view(org_shape);
   return output;

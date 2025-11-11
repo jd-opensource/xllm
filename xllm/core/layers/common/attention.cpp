@@ -22,14 +22,18 @@ DECLARE_bool(enable_chunked_prefill);
 namespace xllm {
 namespace layer {
 
-AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
-                                           bool is_prefill) {
-  return AttentionMetadata::build(params, "float", is_prefill);
+AttentionMetadata AttentionMetadata::build(
+    const ModelInputParams& params,
+    bool is_prefill,
+    const std::optional<torch::Tensor>& attn_mask) {
+  return AttentionMetadata::build(params, "float", is_prefill, attn_mask);
 }
 
-AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
-                                           const std::string& compute_dtype,
-                                           bool is_prefill) {
+AttentionMetadata AttentionMetadata::build(
+    const ModelInputParams& params,
+    const std::string& compute_dtype,
+    bool is_prefill,
+    const std::optional<torch::Tensor>& attn_mask) {
   AttentionMetadata attn_metadata;
   attn_metadata.query_start_loc = params.q_seq_lens;
   attn_metadata.seq_start_loc = params.kv_seq_lens;
@@ -37,6 +41,12 @@ AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
   attn_metadata.max_seq_len = params.kv_max_seq_len;
   attn_metadata.slot_mapping = params.new_cache_slots;
   attn_metadata.compute_dtype = compute_dtype;
+
+  // for npu
+  if (attn_mask.has_value()) {
+    attn_metadata.attn_mask = attn_mask.value();
+    attn_metadata.seq_lens = params.kv_seq_lens.to(torch::kCPU);
+  }
 
   // for flashinfer
   attn_metadata.paged_kv_indptr = params.paged_kv_indptr;
@@ -95,7 +105,6 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   reshape_paged_cache_params.v_cache = v_cache;
   reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
   xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
-
   xllm::kernel::AttentionParams attention_params;
   attention_params.query = query;
   attention_params.output = output;
@@ -121,7 +130,10 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     attention_params.query_start_loc = attn_metadata.query_start_loc;
     attention_params.seq_start_loc = attn_metadata.seq_start_loc;
     attention_params.max_query_len = attn_metadata.max_query_len;
-
+#if defined(USE_NPU)
+    attention_params.attn_mask = attn_metadata.attn_mask;
+    attention_params.seq_lens = attn_metadata.seq_lens;
+#endif
     // for flashinfer
     attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;
 
@@ -138,6 +150,9 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   } else {
     query = query.view({-1, 1, num_heads_, head_size_});
     output = output.view({-1, 1, num_heads_, head_size_});
+#if defined(USE_NPU)
+    attention_params.seq_lens = attn_metadata.seq_lens;
+#endif
 
     attention_params.query = query;
     attention_params.output = output;

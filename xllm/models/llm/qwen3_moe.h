@@ -147,7 +147,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     num_speculative_tokens_ = model_args.num_speculative_tokens();
 #if defined(USE_NPU)
     embed_tokens_ =
-        register_module("embed_tokens", layer::WordEmbedding(context));
+        register_module("embed_tokens", layer::NpuWordEmbedding(context));
 
     atb_pos_emb_ = layer::PosEmbedding(context);
     cos_sin_ =
@@ -161,7 +161,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
-    norm_ = register_module("norm", layer::RmsNorm(context));
+    norm_ = register_module("norm", layer::NpuRmsNorm(context));
     mapping_data_ = parallel_args.mapping_data();
 #else
     norm_ = register_module(
@@ -170,10 +170,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
             model_args.hidden_size(), model_args.rms_norm_eps(), options));
     embed_tokens_ =
         register_module("embed_tokens",
-                        layer::WordEmbedding(model_args.vocab_size(),
-                                             model_args.hidden_size(),
-                                             context.get_parallel_args(),
-                                             options));
+                        layer::NpuWordEmbedding(model_args.vocab_size(),
+                                                model_args.hidden_size(),
+                                                context.get_parallel_args(),
+                                                options));
 #endif
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
       auto block = Qwen3MoeDecoderLayer(context, i);
@@ -335,11 +335,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   }
 #endif
 
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() {
     return {embed_tokens_};
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(
+      std::vector<layer::NpuWordEmbedding>& word_embedding) {
     embed_tokens_ = word_embedding[0];
   }
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -365,12 +366,15 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   int32_t num_speculative_tokens_ = 0;
   at::Device device_;
   torch::Dtype dtype_;
-  layer::WordEmbedding embed_tokens_{nullptr};
+  layer::NpuWordEmbedding embed_tokens_{nullptr};
   layer::AttentionMask attn_mask_;
-  layer::RmsNorm norm_{nullptr};
+
 #if defined(USE_NPU)
   torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};
+  layer::NpuRmsNorm norm_{nullptr};
+#else
+  layer::RmsNorm norm_{nullptr};
 #endif
   std::vector<int64_t> mrope_section_;
 };
@@ -381,7 +385,7 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
   Qwen3MoeForCausalLMImpl(const ModelContext& context) {
     model_ = register_module("model", Qwen3MoeModel(context));
 #if defined(USE_NPU)
-    lm_head_ = register_module("lm_head", layer::LmHead(context));
+    lm_head_ = register_module("lm_head", layer::NpuLmHead(context));
 #else
     // lm_head_ is default to no quantization
     lm_head_ =
@@ -449,22 +453,26 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
     return;
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
+#if defined(USE_NPU)
+  layer::NpuLmHead get_lm_head() { return lm_head_; }
 
-  layer::LmHead get_lm_head() { return lm_head_; }
+  void set_lm_head(layer::NpuLmHead& head) { lm_head_ = head; }
 
-  void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
-
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() {
     return model_->get_word_embedding();
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(
+      std::vector<layer::NpuWordEmbedding>& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
 
  private:
+  layer::NpuLmHead lm_head_{nullptr};
+#endif
+
+ private:
   Qwen3MoeModel model_{nullptr};
-  layer::LmHead lm_head_{nullptr};
 };
 TORCH_MODULE(Qwen3MoeForCausalLM);
 

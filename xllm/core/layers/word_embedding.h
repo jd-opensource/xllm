@@ -17,23 +17,22 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_word_embedding_impl.h"
-#else
-#include "common/word_embedding_impl.h"
 #endif
+#include "common/word_embedding_impl.h"
 
 namespace xllm {
 namespace layer {
 
 #if defined(USE_NPU)
-class WordEmbedding : public torch::nn::ModuleHolder<NpuWordEmbeddingImpl> {
+class NpuWordEmbedding : public torch::nn::ModuleHolder<NpuWordEmbeddingImpl> {
  public:
   using torch::nn::ModuleHolder<NpuWordEmbeddingImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = NpuWordEmbeddingImpl;
-  WordEmbedding(const ModelContext& context)
+  NpuWordEmbedding(const ModelContext& context)
       : ModuleHolder(std::make_shared<NpuWordEmbeddingImpl>(context)) {}
 };
 
-#else
+#endif
 
 class WordEmbedding : public torch::nn::ModuleHolder<WordEmbeddingImpl> {
  public:
@@ -48,8 +47,6 @@ class WordEmbedding : public torch::nn::ModuleHolder<WordEmbeddingImpl> {
                                                          parallel_args,
                                                          options)) {}
 };
-
-#endif
 
 }  // namespace layer
 }  // namespace xllm

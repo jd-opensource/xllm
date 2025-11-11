@@ -1249,19 +1249,22 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     resampler_->verify_loaded_weights("resampler.");
     vpm_->verify_loaded_weights("vpm.");
   }
+#if defined(USE_NPU)
+  layer::NpuLmHead get_lm_head() { return language_model_->get_lm_head(); }
 
-  layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
+  void set_lm_head(layer::NpuLmHead& head) {
+    language_model_->set_lm_head(head);
+  }
 
-  void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
-
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  std::vector<layer::NpuWordEmbedding> get_word_embedding() {
     return language_model_->get_word_embedding();
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(
+      std::vector<layer::NpuWordEmbedding>& word_embedding) {
     language_model_->set_word_embedding(word_embedding);
   }
-
+#endif
  private:
   QWen2ForCausalLM language_model_{nullptr};
   ModelArgs model_args_;

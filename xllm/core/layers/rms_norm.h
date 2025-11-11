@@ -16,23 +16,23 @@ limitations under the License.
 #pragma once
 #if defined(USE_NPU)
 #include "npu/npu_rms_norm_impl.h"
-#else
-#include "common/fuse_norm.h"
 #endif
+#include "common/fuse_norm.h"
 
 namespace xllm {
 namespace layer {
 
 #if defined(USE_NPU)
-class RmsNorm : public torch::nn::ModuleHolder<NpuRmsNormImpl> {
+class NpuRmsNorm : public torch::nn::ModuleHolder<NpuRmsNormImpl> {
  public:
   using torch::nn::ModuleHolder<NpuRmsNormImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = NpuRmsNormImpl;
 
-  RmsNorm(const ModelContext& context)
+  NpuRmsNorm(const ModelContext& context)
       : ModuleHolder(std::make_shared<NpuRmsNormImpl>(context)) {}
 };
-#else
+
+#endif
 class RmsNorm : public torch::nn::ModuleHolder<FusedRMSNormImpl> {
  public:
   using torch::nn::ModuleHolder<FusedRMSNormImpl>::ModuleHolder;
@@ -41,7 +41,6 @@ class RmsNorm : public torch::nn::ModuleHolder<FusedRMSNormImpl> {
   RmsNorm(int64_t dim, double eps, const torch::TensorOptions& options)
       : ModuleHolder(std::make_shared<FusedRMSNormImpl>(dim, eps, options)) {}
 };
-#endif
 
 }  // namespace layer
 }  // namespace xllm
