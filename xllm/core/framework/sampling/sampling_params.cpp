@@ -24,6 +24,8 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
+#include "common/global_flags.h"
+
 namespace xllm {
 
 void SamplingParameters::init(
@@ -35,9 +37,11 @@ void SamplingParameters::init(
     const std::vector<int32_t>& unique_token_lens_vec) {
   CHECK_EQ(req_sampling_params.size(), selected_token_idxes.size());
   CHECK_GE(req_sampling_params.size(), sample_idxes.size());
-  CHECK_EQ(req_sampling_params.size(), unique_token_ids_vec.size());
-  CHECK_EQ(req_sampling_params.size(), unique_token_counts_vec.size());
-  CHECK_EQ(req_sampling_params.size(), unique_token_lens_vec.size());
+  if (FLAGS_backend != "rec") {
+    CHECK_EQ(req_sampling_params.size(), unique_token_ids_vec.size());
+    CHECK_EQ(req_sampling_params.size(), unique_token_counts_vec.size());
+    CHECK_EQ(req_sampling_params.size(), unique_token_lens_vec.size());
+  }
 
   std::vector<float> frequency_penalties;
   std::vector<float> presence_penalties;

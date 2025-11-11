@@ -65,6 +65,9 @@ struct SequenceParams {
   // enable_schedule_overlap or not. default = false.
   bool enable_schedule_overlap = false;
 
+  // whether this is a rec model. default = false.
+  bool is_rec_model = false;
+  int32_t bos_token_id = 0;
   // sampling params
   // reference from request
   RequestSamplingParam* sampling_param;  // not owned
@@ -192,6 +195,9 @@ class Sequence final {
   void close() { closed_ = true; }
   bool is_closed() const { return closed_; }
 
+  // finish the sequence by setting finished status and reason
+  void finish();
+
   // time between two tokens
   int64_t tbt(const absl::Time& now);
   // set sequence ttft
@@ -265,6 +271,22 @@ class Sequence final {
   // get sequence id
   int32_t seq_id() const { return seq_id_; }
 
+  // rec model specific: get encoder tokens
+  const std::vector<int32_t>& encoder_tokens() const { return encoder_tokens_; }
+
+  // rec model specific: get encoder sequence length
+  size_t encoder_seq_len() const { return num_encoder_tokens_; }
+
+  // rec model specific: get number of decoder embeddings
+  size_t num_decoder_embeddings() const { return num_decoder_embeddings_; }
+
+  // rec model specific: check if this is a rec model
+  bool is_rec_model() const { return is_rec_model_; }
+
+  // rec model specific: static constants for embedding names
+  static const std::string ENCODER_SPARSE_EMBEDDING_NAME;
+  static const std::string DECODER_CONTEXT_EMBEDDING_NAME;
+
  private:
   // the index of the sequence in the request
   size_t index_ = 0;
@@ -311,6 +333,18 @@ class Sequence final {
 
   // the length of the prompt tokens
   size_t num_prompt_tokens_ = 0;
+
+  // rec model specific: number of encoder tokens
+  size_t num_encoder_tokens_ = 0;
+
+  // rec model specific: number of decoder embeddings
+  size_t num_decoder_embeddings_ = 0;
+
+  // rec model specific: encoder tokens storage
+  std::vector<int32_t> encoder_tokens_;
+
+  // rec model specific: whether this is a rec model
+  bool is_rec_model_ = false;
 
   // NOTE: MUST FIXME Later
   // record all tokens num in last turn when the request is

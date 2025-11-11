@@ -22,6 +22,9 @@ limitations under the License.
 namespace xllm {
 namespace util {
 
+// Environment variable keys
+const std::string EXTRA_THREAD_NUM = "EXTRA_THREAD_NUM";
+
 bool get_bool_env(const std::string& key, bool defaultValue) {
   const char* val = std::getenv(key.c_str());
   if (val == nullptr) {

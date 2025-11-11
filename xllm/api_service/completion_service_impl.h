@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "api_service_impl.h"
 #include "completion.pb.h"
+#include "rec.pb.h"
 #include "stream_call.h"
 
 namespace xllm {
@@ -39,6 +40,21 @@ class CompletionServiceImpl final : public APIServiceImpl<CompletionCall> {
  private:
   DISALLOW_COPY_AND_ASSIGN(CompletionServiceImpl);
   LLMMaster* master_ = nullptr;
+};
+
+class RecMaster;
+// a class to handle completion requests
+class RecCompletionServiceImpl final : public APIServiceImpl<CompletionCall> {
+ public:
+  RecCompletionServiceImpl(RecMaster* master,
+                           const std::vector<std::string>& models);
+
+  // brpc call_data needs to use shared_ptr
+  void process_async_impl(std::shared_ptr<CompletionCall> call);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(RecCompletionServiceImpl);
+  RecMaster* master_ = nullptr;
 };
 
 }  // namespace xllm

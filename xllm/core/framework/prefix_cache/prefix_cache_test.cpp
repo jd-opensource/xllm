@@ -7,6 +7,7 @@
 #include <iostream>
 
 #include "framework/block/block_manager_impl.h"
+#include "util/hash_util.h"
 
 namespace xllm {
 

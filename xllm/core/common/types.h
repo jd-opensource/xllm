@@ -31,6 +31,7 @@ class EngineType {
     SSM = 1,
     VLM = 2,
     DIT = 3,
+    REC = 4,
     INVALID = -1,
   };
 
@@ -44,6 +45,8 @@ class EngineType {
       value_ = VLM;
     } else if (str == "DIT") {
       value_ = DIT;
+    } else if (str == "REC") {
+      value_ = REC;
     } else {
       value_ = INVALID;
     }
@@ -68,6 +71,8 @@ class EngineType {
       return "VLM";
     } else if (this->value_ == DIT) {
       return "DIT";
+    } else if (this->value_ == REC) {
+      return "REC";
     } else {
       return "INVALID";
     }

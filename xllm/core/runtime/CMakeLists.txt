@@ -22,10 +22,12 @@ cc_library(
     dit_worker.h
     embed_worker_impl.h
     embed_vlm_worker_impl.h
+    rec_worker_impl.h
     engine.h
     llm_engine.h
     vlm_engine.h
     dit_engine.h
+    rec_engine.h
     worker_client.h
     xservice_client.h
     speculative_engine.h
@@ -40,12 +42,14 @@ cc_library(
     worker_impl.cpp
     llm_worker_impl.cpp
     vlm_worker_impl.cpp
+    rec_worker_impl.cpp
     dit_worker.cpp
     embed_worker_impl.cpp
     embed_vlm_worker_impl.cpp
     llm_engine.cpp
     vlm_engine.cpp
     dit_engine.cpp
+    rec_engine.cpp
     worker_client.cpp
     xservice_client.cpp
     params_utils.cpp
@@ -88,11 +92,13 @@ cc_library(
     master.h
     vlm_master.h
     dit_master.h
+    rec_master.h
   SRCS
     llm_master.cpp
     master.cpp
     vlm_master.cpp
     dit_master.cpp
+    rec_master.cpp
   DEPS
     :common
     :distributed_runtime

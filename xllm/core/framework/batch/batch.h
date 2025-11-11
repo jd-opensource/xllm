@@ -65,14 +65,15 @@ class Batch {
 
   // get the number of sequences in the batch
   size_t size() const { return sequences_.size(); }
-  bool empty() const { return sequences_.empty(); }
+  bool empty() const { return sequences_.empty() && sequence_groups_.empty(); }
 
   Sequence* operator[](size_t i) { return sequences_[i]; }
 
   // prepare forward inputs
   ForwardInput prepare_forward_input(uint32_t num_decoding_tokens,
                                      uint32_t min_decoding_bach_size,
-                                     const ModelArgs& args);
+                                     const ModelArgs& args,
+                                     ThreadPool* thread_pool = nullptr);
 
   // Convert Batch to pb type, which will be pass to remote worker.
   RawForwardInput prepare_forward_input(uint32_t start_idx,
@@ -110,6 +111,19 @@ class Batch {
   }
 
   bool get_batch_prefill_status() const { return all_seqs_in_prefill_; }
+
+  void finish();
+
+  // prepare forward inputs for Rec model
+  ForwardInput prepare_rec_forward_input(uint32_t num_decoding_tokens,
+                                         uint32_t min_decoding_batch_size,
+                                         const ModelArgs& args,
+                                         ThreadPool* thread_pool = nullptr);
+
+ protected:
+  // Get sequences for iteration - returns sequences_ if not empty,
+  // otherwise extracts sequences from sequence_groups_
+  std::vector<Sequence*> get_sequences() const;
 
  private:
   bool update_sequence_state(Sequence* seq, bool replace_fake_token);

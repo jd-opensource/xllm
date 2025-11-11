@@ -137,6 +137,12 @@ struct RequestState final {
 
   bool enable_schedule_overlap = false;
 
+  // rec model specific flag
+  bool is_rec_model = false;
+
+  // The bos token id of the model.
+  int32_t bos_token_id = 0;
+
   // The thread id of the thread pool in the response handler to ensure that
   // stream responses for the same request are executed sequentially during
   // multi-threaded stream processing.
