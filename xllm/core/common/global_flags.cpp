@@ -56,10 +56,11 @@ DEFINE_string(model_id, "", "hf model name.");
 
 DEFINE_string(model, "", "Name or path of the huggingface model to use.");
 
-DEFINE_string(backend,
-              "llm",
-              "Choose the backend model type. 'llm' for text-only, "
-              "'vlm' for multimodal (text and images).");
+DEFINE_string(
+    backend,
+    "",
+    "Choose the backend model type. 'llm' for text-only, "
+    "'vlm' for multimodal (text and images), 'dit' for diffusion models.");
 
 DEFINE_string(task,
               "generate",

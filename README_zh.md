@@ -168,7 +168,6 @@ python setup.py bdist_wheel
 ```bash
 ./build/xllm/core/server/xllm \    # 启动 xllm 服务器程序
     --model=/path/to/your/llm  \   # 指定模型路径（需替换为实际路径）
-    --backend=llm \                # 指定后端类型为 LLM
     --port=9977 \                  # 设置服务端口为 9977
     --max_memory_utilization 0.90  # 设置最大内存利用率为 90
 ```

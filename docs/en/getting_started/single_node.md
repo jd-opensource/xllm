@@ -4,7 +4,6 @@ Start the single-node `xllm` service directly:
 ```bash linenums="1"
 ./build/xllm/core/server/xllm \
     --model=/path/to/your/qwen2-7b  \
-    --backend=llm \
     --port=9977 \
     --max_memory_utilization 0.90
 ```

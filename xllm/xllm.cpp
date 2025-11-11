@@ -30,9 +30,12 @@ limitations under the License.
 #include "core/common/options.h"
 #include "core/common/types.h"
 #include "core/runtime/master.h"
+#include "core/util/json_reader.h"
 #include "core/util/net.h"
 #include "core/util/utils.h"
+#include "models/model_registry.h"
 #include "server/xllm_server_registry.h"
+
 using namespace xllm;
 
 static std::atomic<uint32_t> signal_received{0};
@@ -42,30 +45,35 @@ void shutdown_handler(int signal) {
   exit(1);
 }
 
-std::optional<std::vector<uint32_t>> parse_batch_sizes(
-    const std::string& batch_sizes_str) {
-  if (batch_sizes_str.empty() || batch_sizes_str == "auto") {
-    return std::nullopt;
-  }
+std::string get_model_backend(const std::filesystem::path& model_path) {
+  JsonReader reader;
+  // for llm, vlm and rec models, the config.json file is in the model path
+  std::filesystem::path config_json_path = model_path / "config.json";
+  // for dit models, the model_index.json file is in the model path
+  std::filesystem::path model_index_json_path = model_path / "model_index.json";
 
-  // parse devices string
-  const std::vector<std::string> size_strs =
-      absl::StrSplit(batch_sizes_str, ',');
-  // remove duplicates
-  std::unordered_set<uint32_t> sizes_set;
-  for (const auto& size_str : size_strs) {
-    uint32_t batch_size = 0;
-    if (!absl::SimpleAtoi(size_str, &batch_size)) {
-      LOG(ERROR) << "Failed to parse batch size: " << size_str;
-      continue;
+  if (std::filesystem::exists(model_index_json_path)) {
+    reader.parse(model_index_json_path);
+
+    if (reader.value<std::string>("_diffusers_version").has_value()) {
+      return "dit";
+    } else {
+      LOG(FATAL) << "Please check model_index.json file in model path: "
+                 << model_path << ", it should contain _diffusers_version key.";
     }
-    sizes_set.insert(batch_size);
+  } else if (std::filesystem::exists(config_json_path)) {
+    reader.parse(config_json_path);
+    std::string model_type = reader.value<std::string>("model_type").value();
+    if (model_type.empty()) {
+      LOG(FATAL) << "Please check config.json file in model path: "
+                 << model_path << ", it should contain model_type key.";
+    }
+    return ModelRegistry::get_model_backend(model_type);
+  } else {
+    LOG(FATAL) << "Please check config.json or model_index.json file, one of "
+                  "them should exist in the model path: "
+               << model_path;
   }
-
-  if (sizes_set.empty()) {
-    return std::nullopt;
-  }
-  return std::vector<uint32_t>{sizes_set.begin(), sizes_set.end()};
 }
 
 int run() {
@@ -74,16 +82,21 @@ int run() {
     LOG(FATAL) << "Model path " << FLAGS_model << " does not exist.";
   }
 
+  std::filesystem::path model_path =
+      std::filesystem::path(FLAGS_model).lexically_normal();
+
   if (FLAGS_model_id.empty()) {
     // use last part of the path as model id
-    std::filesystem::path model_path =
-        std::filesystem::path(FLAGS_model).lexically_normal();
     if (model_path.has_filename()) {
       FLAGS_model_id = std::filesystem::path(FLAGS_model).filename();
     } else {
       FLAGS_model_id =
           std::filesystem::path(FLAGS_model).parent_path().filename();
     }
+  }
+
+  if (FLAGS_backend.empty()) {
+    FLAGS_backend = get_model_backend(model_path);
   }
 
   if (FLAGS_host.empty()) {
@@ -200,8 +213,6 @@ int run() {
 
   // supported models
   std::vector<std::string> model_names = {FLAGS_model_id};
-  std::filesystem::path model_path =
-      std::filesystem::path(FLAGS_model).lexically_normal();
   std::string model_version;
   if (model_path.has_filename()) {
     model_version = std::filesystem::path(FLAGS_model).filename();

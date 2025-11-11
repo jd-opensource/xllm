@@ -71,6 +71,7 @@ void ModelRegistry::register_causallm_factory(const std::string& name,
                                               << " already registered.");
   } else {
     instance->model_registry_[name].causal_lm_factory = factory;
+    instance->model_backend_[name] = "llm";
   }
 }
 
@@ -83,6 +84,7 @@ void ModelRegistry::register_causalvlm_factory(const std::string& name,
                                                << " already registered.");
   } else {
     instance->model_registry_[name].causal_vlm_factory = factory;
+    instance->model_backend_[name] = "vlm";
   }
 }
 
@@ -95,6 +97,7 @@ void ModelRegistry::register_embeddinglm_factory(const std::string& name,
                                                  << " already registered.");
   } else {
     instance->model_registry_[name].embedding_lm_factory = factory;
+    instance->model_backend_[name] = "llm";
   }
 }
 
@@ -107,6 +110,7 @@ void ModelRegistry::register_dit_model_factory(const std::string& name,
                                               << " already registered.");
   } else {
     instance->model_registry_[name].dit_model_factory = factory;
+    instance->model_backend_[name] = "dit";
   }
 }
 
@@ -227,6 +231,11 @@ TokenizerArgsLoader ModelRegistry::get_tokenizer_args_loader(
   ModelRegistry* instance = get_instance();
 
   return instance->model_registry_[name].tokenizer_args_loader;
+}
+
+std::string ModelRegistry::get_model_backend(const std::string& name) {
+  ModelRegistry* instance = get_instance();
+  return instance->model_backend_[name];
 }
 
 std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context) {

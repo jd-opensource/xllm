@@ -26,7 +26,6 @@ xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 | `enable_prefix_cache` | bool | true | false | 是否开启prefix cache（DeepSeek暂不支持） |  |
 | `communication_backend` | string | "hccl" | "lccl" | 通信操作采用的后端 |  |
 | `block_size` | int32 | 128 |  | KV Cache存储的block size大小 |  |
-| `backend` | string | "llm" | "vlm" | 模型类型 |  |
 | `task` | string | "generate" | "embed" | 服务类型，生成式或embedding |  |
 | `max_cache_size` | int64 | 0 |  | 可使用的KV Cache大小，单位byte |  |
 

@@ -126,8 +126,11 @@ class ModelRegistry {
   static ImageProcessorFactory get_image_processor_factory(
       const std::string& name);
 
+  static std::string get_model_backend(const std::string& name);
+
  private:
   std::unordered_map<std::string, ModelMeta> model_registry_;
+  std::unordered_map<std::string, std::string> model_backend_;
 };
 
 std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context);

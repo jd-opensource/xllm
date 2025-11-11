@@ -167,7 +167,6 @@ Run the following command to start xLLM engine:
 ```bash
 ./build/xllm/core/server/xllm \    # launch xllm server
     --model=/path/to/your/llm  \   # model path（to replace with your own path）
-    --backend=llm \                # indicate the LLM backend
     --port=9977 \                  # set service port to 9977
     --max_memory_utilization 0.90  # set the maximal utilization of device memory
 ```
