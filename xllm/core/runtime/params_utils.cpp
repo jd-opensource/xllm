@@ -729,7 +729,6 @@ uint64_t proto_to_block_transfer_info(
 }
 
 bool block_transfer_info_to_proto(
-    const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info,
     proto::BlockTransferInfos* pb_block_transfer_info) {
   pb_block_transfer_info->mutable_transfer_infos()->Reserve(
@@ -754,11 +753,23 @@ bool block_transfer_info_to_proto(
     pb_cache.set_dst_block_id(info.dst_block_id);
     pb_cache.set_hash_key(info.hash_key, MURMUR_HASH3_VALUE_LEN);
 
-    *pb_block_transfer_info->mutable_transfer_infos()->Add() = pb_cache;
+    *pb_block_transfer_info->mutable_transfer_infos()->Add() =
+        std::move(pb_cache);
   }
-  pb_block_transfer_info->set_batch_id(batch_id);
   pb_block_transfer_info->set_transfer_type(proto::TransferType(transfer_type));
 
+  return true;
+}
+
+bool block_transfer_info_to_proto(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    proto::BlockTransferInfos* pb_block_transfer_info) {
+  if (!block_transfer_info_to_proto(block_transfer_info,
+                                    pb_block_transfer_info)) {
+    return false;
+  }
+  pb_block_transfer_info->set_batch_id(batch_id);
   return true;
 }
 

@@ -101,8 +101,6 @@ class PrefixCache {
   size_t insert(const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,
                 std::vector<Murmur3Key>* insert_keys);
-  size_t insert(const std::vector<Block>& blocks,
-                std::vector<Murmur3Key>* insert_keys);
   size_t evict(size_t n_blocks, std::vector<Murmur3Key>* evict_keys);
 
   struct Node {

@@ -34,6 +34,9 @@ namespace xllm {
 
 struct ModelArgs;
 
+static uint64_t batch_counter_ = 1;
+constexpr uint64_t UNINITIALIZED_BATCH_ID = 0x0;
+
 class Batch {
  public:
   Batch() = default;
@@ -56,8 +59,12 @@ class Batch {
   }
 
   void set_batch_id() {
-    if (batch_id_ == 0x0) {
-      batch_id_ = absl::ToUnixMicros(absl::Now());
+    if (batch_id_ == UNINITIALIZED_BATCH_ID) {
+      batch_id_ = batch_counter_;
+      batch_counter_++;
+      if (batch_counter_ == UINT64_MAX) {
+        batch_counter_ = 1;
+      }
     }
   }
 
@@ -138,7 +145,7 @@ class Batch {
   // all sequences in this batch are in prefill stage
   bool all_seqs_in_prefill_ = false;
 
-  uint64_t batch_id_ = 0x0;
+  uint64_t batch_id_ = UNINITIALIZED_BATCH_ID;
 };
 
 }  // namespace xllm

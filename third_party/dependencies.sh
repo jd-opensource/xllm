@@ -59,8 +59,8 @@ if [ -d "yalantinglibs" ]; then
 fi
 
 # Clone yalantinglibs
-echo "Cloning yalantinglibs from https://github.com/alibaba/yalantinglibs.git"
-git clone https://github.com/alibaba/yalantinglibs.git
+echo "Cloning yalantinglibs from https://gitcode.com/gh_mirrors/ya/yalantinglibs.git"
+git clone https://gitcode.com/gh_mirrors/ya/yalantinglibs.git
 check_success "Failed to clone yalantinglibs"
 
 # Build and install yalantinglibs

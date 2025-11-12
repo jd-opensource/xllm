@@ -75,23 +75,12 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   device_.set_device();
   device_.init_device_context();
   threadpool_.schedule([this]() mutable { device_.set_device(); });
-  for (int i = 0; i < h2d_threadpool_.size(); i++) {
-    h2d_threadpool_.schedule_with_tid(
-        [this]() mutable {
-          device_.set_device();
-          h2d_stream_[std::this_thread::get_id()] =
-              device_.get_stream_from_pool(TIMEOUT_MS);
-        },
-        i);
-  }
-  for (int i = 0; i < d2h_threadpool_.size(); i++) {
-    d2h_threadpool_.schedule_with_tid(
-        [this]() mutable {
-          device_.set_device();
-          d2h_stream_[std::this_thread::get_id()] =
-              device_.get_stream_from_pool(TIMEOUT_MS);
-        },
-        i);
+  h2d_threadpool_ = std::make_unique<ThreadPool>(
+      2, [this]() mutable { device_.set_device(); });
+  d2h_threadpool_ = std::make_unique<ThreadPool>(
+      5, [this]() mutable { device_.set_device(); });
+  for (int i = 0; i < h2d_threadpool_->size() + d2h_threadpool_->size(); i++) {
+    copy_stream_.enqueue(device_.get_stream_from_pool(TIMEOUT_MS));
   }
 
   prepare_stream_ = device_.get_stream_from_pool();
@@ -162,18 +151,9 @@ bool WorkerImpl::allocate_host_kv_cache(
   host_kv_cache_shape[1][0] = num_layers;
 
   // create a KVCache shape: block_size * [layers, token, head, dim]
-  host_kv_caches_.reserve(host_bolck_size);
+  aligned_tensor_creater_ = std::make_unique<AlignedTensorCreater>(
+      host_kv_cache_shape, dtype_, host_bolck_size, &host_kv_caches_);
 
-  for (int64_t i = 0; i < host_bolck_size; ++i) {
-    torch::Tensor key_cache, value_cache;
-    key_cache = torch::empty(host_kv_cache_shape[0],
-                             torch::dtype(dtype_).device(torch::kCPU))
-                    .pin_memory();
-    value_cache = torch::empty(host_kv_cache_shape[1],
-                               torch::dtype(dtype_).device(torch::kCPU))
-                      .pin_memory();
-    host_kv_caches_.emplace_back(key_cache, value_cache);
-  }
   LOG(INFO) << "Initializing host kv block size: " << host_bolck_size;
 
   int32_t device_id = device_.index();
@@ -198,6 +178,8 @@ bool WorkerImpl::allocate_host_kv_cache(
     config.tp_rank = options_.dp_size() > 1
                          ? options_.node_rank() % options_.dp_size()
                          : options_.node_rank();
+    config.total_size = aligned_tensor_creater_->get_total_size();
+    config.tensor_data = aligned_tensor_creater_->get_base_ptr();
 
     if (!KVCacheStore::get_instance().init(config, &host_kv_caches_)) {
       LOG(ERROR) << "Init KVCacheStore fail!";
@@ -520,8 +502,9 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
         std::lock_guard<std::mutex> lock(mutex_);
         if (layer_wise_load_synchronizer_.count(input.input_params.batch_id) !=
             0) {
-          input.input_params.layer_wise_load_synchronizer =
-              layer_wise_load_synchronizer_[input.input_params.batch_id];
+          input.input_params.layer_wise_load_synchronizer = std::move(
+              layer_wise_load_synchronizer_[input.input_params.batch_id]);
+          layer_wise_load_synchronizer_.erase(input.input_params.batch_id);
         }
       }
     }
@@ -720,7 +703,7 @@ void WorkerImpl::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   CHECK(!block_transfer_info.empty());
-  h2d_threadpool_.schedule(
+  h2d_threadpool_->schedule(
       [this,
        batch_id = batch_id,
        block_transfer_info = std::move(block_transfer_info)]() mutable {
@@ -783,9 +766,9 @@ uint32_t WorkerImpl::offload_kv_blocks(
     auto slice = transfer_info_slice.slice(
         i, std::min(i + max_blocks_per_batch, block_transfer_info.size()));
 
-    d2h_threadpool_.schedule([this,
-                              promise = std::move(promise),
-                              slice = std::move(slice)]() mutable {
+    d2h_threadpool_->schedule([this,
+                               promise = std::move(promise),
+                               slice = std::move(slice)]() mutable {
       bool ret = d2h_batch_copy(slice);
       auto success_cnt = offload_to_store(slice);
       if (success_cnt != slice.size()) {
@@ -817,9 +800,6 @@ uint32_t WorkerImpl::offload_kv_blocks(
 
 bool WorkerImpl::d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
 #if defined(USE_NPU)
-  CHECK(d2h_stream_.count(std::this_thread::get_id()) != 0)
-      << "WorkerImpl::d2h_batch_copy can only be called in d2h_threadpool_.";
-
   const int64_t num_layers = context_.get_model_args().n_layers();
   uint32_t num_batches = block_transfer_info.size() * num_layers * 2;
   void** srcs = new void*[num_batches];
@@ -852,8 +832,9 @@ bool WorkerImpl::d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
     }
   }
 
-  c10::StreamGuard streamGuard =
-      d2h_stream_[std::this_thread::get_id()]->set_stream_guard();
+  std::unique_ptr<Stream> stream;
+  copy_stream_.wait_dequeue(stream);
+  c10::StreamGuard streamGuard = stream->set_stream_guard();
 
   // TODO(kangmeng): change to async API
   aclError ret = aclrtMemcpyBatch(dsts,
@@ -868,13 +849,17 @@ bool WorkerImpl::d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
   if (ret != 0 || fail_index != SIZE_MAX) {
     LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
                << ", fail_index:" << fail_index;
+    copy_stream_.enqueue(std::move(stream));
     return false;
   }
 
-  if (d2h_stream_[std::this_thread::get_id()]->synchronize() != 0) {
+  if (stream->synchronize() != 0) {
     LOG(ERROR) << "d2h_batch_copy timeout!";
+    copy_stream_.enqueue(std::move(stream));
     return false;
   }
+
+  copy_stream_.enqueue(std::move(stream));
 
   delete[] dsts;
   delete[] srcs;
@@ -887,8 +872,6 @@ bool WorkerImpl::d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
 bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
                                 Slice<BlockTransferInfo>& block_transfer_info) {
 #if defined(USE_NPU)
-  CHECK(h2d_stream_.count(std::this_thread::get_id()) != 0)
-      << "WorkerImpl::h2d_batch_copy can only be called in h2d_threadpool_.";
   CHECK(block_transfer_info.size() < BATCH_COPY_MAX_SIZE / 2)
       << "h2d_batch_copy support copy blocks less than "
       << BATCH_COPY_MAX_SIZE / 2 << ", but got " << block_transfer_info.size();
@@ -915,9 +898,10 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
   aclrtMemcpyBatchAttr attrs[1] = {h2d_attrs_};
   size_t attrs_indexes[1] = {0};
 
-  c10::StreamGuard streamGuard =
-      h2d_stream_[std::this_thread::get_id()]->set_stream_guard();
-  auto stream = h2d_stream_[std::this_thread::get_id()]->get_stream()->stream();
+  std::unique_ptr<Stream> stream;
+  copy_stream_.wait_dequeue(stream);
+  c10::StreamGuard streamGuard = stream->set_stream_guard();
+
   aclError ret = 0;
 
   for (int layer_id = 0; layer_id < num_layers; layer_id++) {
@@ -958,7 +942,7 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
       LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
                  << ", fail_index:" << fail_index;
     } else {
-      ret = aclrtRecordEvent(*event, stream);
+      ret = aclrtRecordEvent(*event, stream->get_stream()->stream());
       if (ret != 0) {
         LOG(ERROR) << "aclrtRecordEvent error: " << ret;
       }
@@ -967,10 +951,12 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
     if (ret != 0) break;
   }
 
-  if (h2d_stream_[std::this_thread::get_id()]->synchronize() != 0) {
+  if (stream->synchronize() != 0) {
     LOG(ERROR) << "h2d_batch_copy timeout!";
+    copy_stream_.enqueue(std::move(stream));
     return false;
   }
+  copy_stream_.enqueue(std::move(stream));
 
   delete[] dsts;
   delete[] srcs;
@@ -1036,6 +1022,70 @@ uint32_t WorkerImpl::prefetch_from_storage(
         }
       })
       .get();
+}
+
+AlignedTensorCreater::AlignedTensorCreater(
+    const std::vector<std::vector<int64_t>>& tensor_shapes,
+    const torch::ScalarType dtype,
+    const uint32_t num_tensors,
+    std::vector<xllm::KVCache>* tensors) {
+  CHECK(tensor_shapes.size() == 2)
+      << "tensor_shapes.size() must equal to 2, but got "
+      << tensor_shapes.size();
+
+  int64_t elements_per_k_tensor = 1;
+  int64_t elements_per_v_tensor = 1;
+
+  for (auto dim : tensor_shapes[0]) {
+    elements_per_k_tensor *= dim;
+  }
+  for (auto dim : tensor_shapes[1]) {
+    elements_per_v_tensor *= dim;
+  }
+
+  size_t element_size = torch::elementSize(dtype);
+  size_t bytes_per_k_tensor = elements_per_k_tensor * element_size;
+  size_t bytes_per_v_tensor = elements_per_v_tensor * element_size;
+  size_t page_size = sysconf(_SC_PAGESIZE);
+  total_size_ = num_tensors * (bytes_per_k_tensor + bytes_per_v_tensor);
+  total_size_ = ((total_size_ + page_size - 1) / page_size) * page_size;
+
+  base_ptr_ = mmap(nullptr,
+                   total_size_,
+                   PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS,
+                   -1,
+                   0);
+
+  if (base_ptr_ == MAP_FAILED) {
+    LOG(FATAL) << "Failed to allocate aligned memory pool!";
+  }
+
+  if (mlock(base_ptr_, total_size_) != 0) {
+    munmap(base_ptr_, total_size_);
+    LOG(FATAL) << "Failed to lock memory pool!";
+  }
+
+  size_t current_offset = 0;
+  auto options = torch::TensorOptions().dtype(dtype).device(torch::kCPU);
+  tensors->reserve(num_tensors);
+
+  for (size_t i = 0; i < num_tensors; ++i) {
+    void* k_tensor_ptr = static_cast<char*>(base_ptr_) + current_offset;
+    torch::Tensor k_tensor =
+        torch::from_blob(k_tensor_ptr, tensor_shapes[0], options);
+    current_offset += bytes_per_k_tensor;
+
+    void* v_tensor_ptr = static_cast<char*>(base_ptr_) + current_offset;
+    torch::Tensor v_tensor =
+        torch::from_blob(v_tensor_ptr, tensor_shapes[1], options);
+    current_offset += bytes_per_v_tensor;
+
+    tensors->emplace_back(k_tensor, v_tensor);
+  }
+
+  LOG(INFO) << "Page aligned: "
+            << ((uintptr_t)base_ptr_ % page_size == 0 ? "YES" : "NO");
 }
 
 }  // namespace xllm

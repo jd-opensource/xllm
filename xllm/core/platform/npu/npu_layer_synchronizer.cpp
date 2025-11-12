@@ -27,7 +27,7 @@ NPULayerSynchronizerImpl::NPULayerSynchronizerImpl(const int64_t num_layers,
   uint32_t flags = ACL_EVENT_SYNC;
   for (int64_t i = 0; i < num_layers; ++i) {
     auto ret = aclrtCreateEventWithFlag(&events_[i], flags);
-    CHECK(ret == ACL_SUCCESS) << "Create event failed.";
+    CHECK(ret == ACL_SUCCESS) << "Create event failed:" << ret;
   }
 }
 

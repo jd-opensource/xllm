@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <folly/futures/Future.h>
+#include <sys/mman.h>
 #include <torch/torch.h>
 
 #include <memory>
@@ -44,6 +45,8 @@ limitations under the License.
 #include "util/threadpool.h"
 
 namespace xllm {
+
+class AlignedTensorCreater;
 
 class WorkerImpl {
  public:
@@ -210,15 +213,12 @@ class WorkerImpl {
   ThreadPool threadpool_;
 
   // working thread for data copy
-  ThreadPool h2d_threadpool_{2};
-  ThreadPool d2h_threadpool_{5};
+  std::unique_ptr<ThreadPool> h2d_threadpool_;
+  std::unique_ptr<ThreadPool> d2h_threadpool_;
   ThreadPool batchget_threadpool_{5};
   ThreadPool batchput_threadpool_{2};
-  // copy streams
-  // only can be used in h2d_threadpool_
-  std::unordered_map<std::thread::id, std::unique_ptr<Stream>> h2d_stream_;
-  // only can be used in d2h_threadpool_
-  std::unordered_map<std::thread::id, std::unique_ptr<Stream>> d2h_stream_;
+  // copy streams only can be used in h2d_threadpool_ and d2h_threadpool_
+  moodycamel::BlockingConcurrentQueue<std::unique_ptr<Stream>> copy_stream_;
 
   // dtype of the model
   torch::ScalarType dtype_;
@@ -237,6 +237,7 @@ class WorkerImpl {
   // kv caches
   std::vector<xllm::KVCache> kv_caches_;
   std::vector<xllm::KVCache> host_kv_caches_;
+  std::unique_ptr<AlignedTensorCreater> aligned_tensor_creater_;
 
   // causal LM model
   std::unique_ptr<CausalLM> model_;
@@ -275,6 +276,28 @@ class WorkerImpl {
   mutable std::mutex mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<NPULayerSynchronizerImpl>>
       layer_wise_load_synchronizer_;
+};
+
+class AlignedTensorCreater {
+ private:
+  void* base_ptr_;
+  size_t total_size_;
+
+ public:
+  AlignedTensorCreater(const std::vector<std::vector<int64_t>>& tensor_shapes,
+                       const torch::ScalarType dtype,
+                       const uint32_t num_tensors,
+                       std::vector<xllm::KVCache>* tensors);
+
+  ~AlignedTensorCreater() {
+    if (base_ptr_ != nullptr) {
+      munlock(base_ptr_, total_size_);
+      munmap(base_ptr_, total_size_);
+    }
+  }
+
+  void* get_base_ptr() const { return base_ptr_; }
+  size_t get_total_size() const { return total_size_; }
 };
 
 }  // namespace xllm

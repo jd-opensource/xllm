@@ -55,30 +55,18 @@ bool KVCacheStore::init(const StoreConfig& config,
   LOG(INFO) << "v_cache_size_per_block: " << v_cache_size_per_block_;
 
   if (config_.protocol == "rdma") {
-    for (int block = 0; block < host_kv_caches_->size(); block++) {
-      void* key_cache = static_cast<char*>(
-          host_kv_caches_->at(block).get_k_cache().data_ptr());
-
-      auto register_k_result = client_ptr_->RegisterLocalMemory(
-          key_cache, k_cache_size_per_block_, "cpu:0", false, false);
-
-      if (!register_k_result.has_value()) {
-        LOG(ERROR) << "Failed to register local memory for key cache: "
-                   << toString(register_k_result.error());
+    if (config_.total_size > 0 && config_.tensor_data != nullptr) {
+      auto result = client_ptr_->RegisterLocalMemory(
+          config_.tensor_data, config_.total_size, "cpu:0", false, false);
+      if (!result.has_value()) {
+        LOG(ERROR) << "Failed to register local memory: "
+                   << toString(result.error());
         return false;
       }
-
-      void* value_cache = static_cast<char*>(
-          host_kv_caches_->at(block).get_v_cache().data_ptr());
-
-      auto register_v_result = client_ptr_->RegisterLocalMemory(
-          value_cache, v_cache_size_per_block_, "cpu:0", false, false);
-
-      if (!register_v_result.has_value()) {
-        LOG(ERROR) << "Failed to register local memory for value cache: "
-                   << toString(register_v_result.error());
-        return false;
-      }
+    } else {
+      LOG(FATAL) << "rdma must RegisterLocalMemory, but got register size: "
+                 << config_.total_size
+                 << ", and data ptr: " << uint64_t(config_.tensor_data);
     }
   }
   is_initialized_ = true;

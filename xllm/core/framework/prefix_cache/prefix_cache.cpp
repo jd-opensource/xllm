@@ -124,11 +124,6 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
   return insert(token_ids, blocks, &insert_keys);
 }
 
-size_t PrefixCache::insert(const std::vector<Block>& blocks) {
-  std::vector<Murmur3Key> insert_keys;
-  return insert(blocks, &insert_keys);
-}
-
 size_t PrefixCache::evict(size_t n_blocks) {
   std::vector<Murmur3Key> evict_keys;
   return evict(n_blocks, &evict_keys);
@@ -197,13 +192,11 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
   return n_tokens;
 }
 
-size_t PrefixCache::insert(const std::vector<Block>& blocks,
-                           std::vector<Murmur3Key>* insert_keys) {
+size_t PrefixCache::insert(const std::vector<Block>& blocks) {
   const int64_t now = absl::ToUnixMicros(absl::Now());
   DNodeList node_list;
   Murmur3Key token_hash_key;
 
-  insert_keys->reserve(blocks.size());
   for (size_t i = 0; i < blocks.size(); i++) {
     if (!blocks[i].is_valid()) {
       continue;
@@ -227,8 +220,6 @@ size_t PrefixCache::insert(const std::vector<Block>& blocks,
       cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
 
       num_blocks_++;
-
-      insert_keys->emplace_back(token_hash_key.data);
     }
   }
 

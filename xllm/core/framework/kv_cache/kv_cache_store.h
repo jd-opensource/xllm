@@ -19,6 +19,8 @@ struct StoreConfig {
   std::string master_server_address = "";
   int replica_num = 1;
   uint32_t tp_rank = 0;
+  size_t total_size = 0;
+  void* tensor_data = nullptr;
 };
 
 class KVCacheStore {

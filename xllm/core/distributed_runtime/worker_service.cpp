@@ -425,7 +425,7 @@ void WorkerService::TransferBlocks(
   std::vector<BlockTransferInfo> block_transfer_info;
   uint64_t batch_id = proto_to_block_transfer_info(*req, block_transfer_info);
 
-  if (batch_id == 0x0) {
+  if (batch_id == UNINITIALIZED_BATCH_ID) {
     resp->set_success_cnt(worker_->transfer_kv_blocks(block_transfer_info));
   } else {
     worker_->transfer_kv_blocks(batch_id, std::move(block_transfer_info));
@@ -441,11 +441,7 @@ class ServerStreamHandler : public brpc::StreamInputHandler {
  public:
   ~ServerStreamHandler() {
     if (!promise_set_.exchange(true)) {
-      try {
-        close_promise_.set_value();
-      } catch (const std::exception& e) {
-        LOG(WARNING) << "Exception in destructor: " << e.what();
-      }
+      close_promise_.set_value();
     }
   }
 

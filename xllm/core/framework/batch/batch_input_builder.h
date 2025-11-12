@@ -159,7 +159,7 @@ class BatchInputBuilder {
 
   // thread pool for multithreaded processing, not owned
   ThreadPool* thread_pool_ = nullptr;
-  uint64_t batch_id_ = 0x0;
+  uint64_t batch_id_;
 };
 
 }  // namespace xllm

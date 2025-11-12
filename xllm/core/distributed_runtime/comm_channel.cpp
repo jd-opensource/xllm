@@ -312,8 +312,9 @@ void CommChannel::transfer_kv_blocks(
     const std::vector<BlockTransferInfo>& block_transfer_info,
     folly::Promise<uint32_t>& promise) {
   proto::BlockTransferInfos pb_block_transfer_info;
-  if (!block_transfer_info_to_proto(
-          0x0, block_transfer_info, &pb_block_transfer_info)) {
+  if (!block_transfer_info_to_proto(block_transfer_info,
+                                    &pb_block_transfer_info)) {
+    LOG(ERROR) << "transfer_kv_blocks fail: create proto fail!";
     promise.setValue(0);
     return;
   }
@@ -330,6 +331,8 @@ void CommChannel::transfer_kv_blocks(
   proto::BlockTransferInfos pb_block_transfer_info;
   if (!block_transfer_info_to_proto(
           batch_id, block_transfer_info, &pb_block_transfer_info)) {
+    LOG(ERROR) << "transfer_kv_blocks with batch id " << batch_id
+               << " fail: create proto fail!";
     return;
   }
   brpc::Controller cntl;
@@ -351,11 +354,7 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
 
   ~ClientStreamReceiver() {
     if (!promise_set_.exchange(true)) {
-      try {
-        close_promise_.set_value();
-      } catch (const std::exception& e) {
-        LOG(WARNING) << "Exception in destructor: " << e.what();
-      }
+      close_promise_.set_value();
     }
   }
 
@@ -400,8 +399,9 @@ void CommChannel::prefetch_from_storage(
     const std::vector<BlockTransferInfo>& block_transfer_info,
     std::shared_ptr<std::atomic<uint32_t>>& success_cnt) {
   proto::BlockTransferInfos pb_block_transfer_info;
-  if (!block_transfer_info_to_proto(
-          0x0, block_transfer_info, &pb_block_transfer_info)) {
+  if (!block_transfer_info_to_proto(block_transfer_info,
+                                    &pb_block_transfer_info)) {
+    LOG(ERROR) << "prefetch_from_storage fail: create proto fail!";
     return;
   }
   ClientStreamReceiver receiver(flag, success_cnt);
@@ -420,6 +420,7 @@ void CommChannel::prefetch_from_storage(
 
   if (cntl.Failed()) {
     LOG(ERROR) << "Fail to connect stream, " << cntl.ErrorText();
+    return;
   }
 
   receiver.get_close_future().wait();

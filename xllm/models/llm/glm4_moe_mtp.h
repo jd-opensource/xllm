@@ -153,6 +153,7 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
         events[0] = input_params.layer_synchronizer->get_event(i);
         event_flags[0] = input_params.layer_synchronizer->get_event_flag(i);
       }
+      // TODO(liangzhiwei20): MTP need more support for layer wise copy.
       if (input_params.layer_wise_load_synchronizer != nullptr) {
         if (!input_params.layer_wise_load_synchronizer->synchronize_layer(i)) {
           return torch::Tensor();

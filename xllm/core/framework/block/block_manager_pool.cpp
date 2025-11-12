@@ -156,13 +156,9 @@ void BlockManagerPool::set_offload_callback(
                     device_block_mgr_ptr = block_managers_[i].get()](
                        std::vector<folly::Try<uint32_t>>&& results) {
           for (auto&& result : results) {
-            try {
-              if (result.value() != host_blocks.size()) {
-                LOG(FATAL) << "Offload copy fail, expected "
-                           << host_blocks.size() << ", got " << result.value();
-              }
-            } catch (const std::exception& e) {
-              LOG(FATAL) << "Offload copy fail! Exception caught: " << e.what();
+            if (result.value() != host_blocks.size()) {
+              LOG(FATAL) << "Offload copy fail, expected " << host_blocks.size()
+                         << ", got " << result.value();
             }
           }
           host_block_mgr_ptr->cache(host_blocks);

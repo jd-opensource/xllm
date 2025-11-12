@@ -27,7 +27,11 @@ limitations under the License.
 
 namespace xllm {
 
-enum class TransferType : uint8_t { G2H = 0, H2D = 1, D2G = 2 };
+enum class TransferType : uint8_t {
+  G2H = 0,  // global memory(KVCache store) to host memory(DRAM)
+  H2D = 1,  // host memory(DRAM) to device memory(HBM)
+  D2G = 2   // host memory(DRAM) to global memory(KVCache store)
+};
 
 struct BlockTransferInfo {
   int32_t src_block_id = -1;

@@ -57,6 +57,10 @@ uint64_t proto_to_block_transfer_info(
     std::vector<BlockTransferInfo>& block_transfer_info);
 
 bool block_transfer_info_to_proto(
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    proto::BlockTransferInfos* pb_block_transfer_info);
+
+bool block_transfer_info_to_proto(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info,
     proto::BlockTransferInfos* pb_block_transfer_info);
