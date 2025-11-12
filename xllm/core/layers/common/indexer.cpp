@@ -104,12 +104,12 @@ torch::Tensor hadamard_transform_ref(const torch::Tensor& x,
 namespace xllm {
 namespace layer {
 
-IndexerImpl::IndexerImpl(int dim,
-                         int index_n_heads,
-                         int index_head_dim,
-                         int qk_rope_head_dim,
-                         int index_topk,
-                         int q_lora_rank,
+IndexerImpl::IndexerImpl(int64_t dim,
+                         int64_t index_n_heads,
+                         int64_t index_head_dim,
+                         int64_t qk_rope_head_dim,
+                         int64_t index_topk,
+                         int64_t q_lora_rank,
                          DeepseekScalingRotaryEmbedding& rotary_emb,
                          const QuantArgs& quant_args,
                          const ParallelArgs& parallel_args,
@@ -157,7 +157,7 @@ IndexerImpl::IndexerImpl(int dim,
   k_norm_->to(options.device());
 
   // Create hadamard matrix
-  int head_dim_padded = std::pow(2, std::ceil(std::log2(head_dim_)));
+  int64_t head_dim_padded = std::pow(2, std::ceil(std::log2(head_dim_)));
   // Construct the Hadamard matrix on CPU with float32, then cast to target
   // dtype and device set normalize=true is equivalent to scale=hidden_size **
   // -0.5
@@ -228,7 +228,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   auto weights = weights_proj_->forward(x);
 
   // kv_cache part
-  int num_tokens = x.size(0);
+  int64_t num_tokens = x.size(0);
 
   // Reshape paged cache
   auto k_unsqueezed = k.unsqueeze(1);
@@ -246,7 +246,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   torch::Tensor k_cache_tensor;
   std::optional<torch::Tensor> cu_seq_q_lens, k_block_table;
   torch::Tensor new_block_tables;
-  int batch_size = attn_metadata.kv_seq_lens.size(0);
+  int64_t batch_size = attn_metadata.kv_seq_lens.size(0);
   torch::Tensor block_table = attn_metadata.block_table;
   torch::Tensor cu_seq_k_lens = attn_metadata.query_start_loc;
 

@@ -35,7 +35,7 @@ namespace test {
 // Mock Backend for testing - minimal implementation for tp=1 tests
 class MockBackend : public c10d::Backend {
  public:
-  MockBackend(int rank, int world_size)
+  MockBackend(int64_t rank, int64_t world_size)
       : c10d::Backend(rank, world_size), rank_(rank), world_size_(world_size) {}
 
   c10::intrusive_ptr<c10d::Work> allreduce(
@@ -119,9 +119,9 @@ class MockBackend : public c10d::Backend {
     return c10::make_intrusive<c10d::Work>();
   }
 
-  int getRank() const { return rank_; }
+  int64_t getRank() const { return rank_; }
 
-  int getSize() const { return world_size_; }
+  int64_t getSize() const { return world_size_; }
 
 #if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 7
   void shutdown() override {
@@ -130,16 +130,16 @@ class MockBackend : public c10d::Backend {
 #endif
 
  private:
-  int rank_;
-  int world_size_;
+  int64_t rank_;
+  int64_t world_size_;
 };
 
 // Mock ProcessGroup for testing
 class MockProcessGroup : public xllm::ProcessGroup {
  public:
   MockProcessGroup(const torch::Device& device,
-                   int rank = 0,
-                   int world_size = 1)
+                   int64_t rank = 0,
+                   int64_t world_size = 1)
       : xllm::ProcessGroup(device) {
     // Initialize pg_ with a mock backend for testing
     pg_ = std::make_unique<MockBackend>(rank, world_size);
@@ -153,7 +153,7 @@ class MockProcessGroup : public xllm::ProcessGroup {
                  std::vector<torch::Tensor>& outputs) override {
     // Mock implementation - just copy input to outputs
     outputs.resize(this->world_size());
-    for (int i = 0; i < this->world_size(); ++i) {
+    for (size_t i = 0; i < this->world_size(); ++i) {
       outputs[i] = input.clone();
     }
   }

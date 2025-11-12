@@ -109,8 +109,8 @@ class ColumnParallelLinearImpl : public ParallelLinearImpl {
   DEFINE_WEIGHT(smooth);
   DEFINE_FUSED_WEIGHT(bias);
 
-  int rank_;
-  int world_size_;
+  int64_t rank_;
+  int64_t world_size_;
   // whether to gather the output
   bool gather_output_;
   at::Device device_;
@@ -163,8 +163,8 @@ class QKVParallelLinearImpl : public ParallelLinearImpl {
   DEFINE_FUSED_WEIGHT(qkv_weight);
   DEFINE_FUSED_WEIGHT(qkv_bias);
 
-  int rank_;
-  int world_size_;
+  int64_t rank_;
+  int64_t world_size_;
   int64_t hidden_size_;
   int64_t num_heads_;
   int64_t num_kv_heads_;
@@ -240,8 +240,8 @@ class RowParallelLinearImpl : public ParallelLinearImpl {
   // parallel args
   ParallelArgs parallel_args_;
 
-  int rank_;
-  int world_size_;
+  int64_t rank_;
+  int64_t world_size_;
 
   // quantization args
   QuantArgs quant_args_;

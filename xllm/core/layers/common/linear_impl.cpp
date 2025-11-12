@@ -269,8 +269,8 @@ bool QKVParallelLinearImpl::load_qkv_weight(const StateDict& state_dict,
   }
   DEFINE_WEIGHT(weight);
   int64_t out_feature = num_heads_ * head_size_;
-  int32_t rank = rank_;
-  int world_size = world_size_;
+  int64_t rank = rank_;
+  int64_t world_size = world_size_;
   if (index > 0) {
     rank = rank_ / num_kv_head_replicas_;
     world_size = world_size_ / num_kv_head_replicas_;

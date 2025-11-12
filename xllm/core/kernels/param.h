@@ -70,7 +70,7 @@ struct RotaryParams {
   // Maximum query length. In pad mode (4D input), must equal to input.size(1).
   // Must be less than or equal to rope_seqlen if not using discrete
   // position_ids.
-  int max_query_len;
+  int64_t max_query_len;
 };
 
 // Activation parameters
@@ -105,10 +105,10 @@ struct ActivationParams {
   bool is_gated;
   // Starting expert ID for MoE activation. Used when processing multiple
   // experts.
-  int start_expert_id = 0;
+  int64_t start_expert_id = 0;
   // Expert size for MoE activation. Used when bias is provided.
   // Bias tensor shape must be [expert_size, in_channel].
-  int expert_size = 0;
+  int64_t expert_size = 0;
 };
 
 // Reshape paged cache parameters
@@ -185,12 +185,12 @@ struct AttentionParams {
   // computation.
   // - Prefill: max_seq_len_kv
   // - Decode: max_context_len
-  int max_seq_len;
+  int64_t max_seq_len;
   // Left window size for sliding window attention. Must be >= 0.
-  int window_size_left;
+  int64_t window_size_left;
   // Right window size for sliding window attention. Default: -1.
   // In decode mode, only supports window_size_right < 0 currently.
-  int window_size_right = -1;
+  int64_t window_size_right = -1;
   // Softmax scaling factor. Applied to Q@K^T before softmax.
   float scale;
   // Whether to return log-sum-exp values in output_lse.
@@ -240,7 +240,7 @@ struct AttentionParams {
   // - 3D [batch, num_kv_heads, head_dim_vo]: sage per-channel quantization
   std::optional<torch::Tensor> v_quant_scale;
   // Maximum query length. Used for workspace allocation in prefill.
-  int max_query_len;
+  int64_t max_query_len;
   // Whether to apply causal mask. Default: true.
   bool is_causal = true;
 
@@ -277,7 +277,7 @@ struct AttentionParams {
   // KV cache quantization bit size. Default: -1 (no quantization).
   // Supported values: -1 (no quant), 4 (int4), 8 (int8).
   // If 4, k_cache and v_cache shapes are adjusted for int4 packing.
-  int kv_cache_quant_bit_size = -1;
+  int64_t kv_cache_quant_bit_size = -1;
 };
 
 // Fused layer norm parameters
@@ -411,7 +411,7 @@ struct FusedMoEParams {
   // Optional expert score correction bias.
   std::optional<torch::Tensor> e_score_correction_bias;
   // Number of top-k experts to select per token.
-  int topk;
+  int64_t topk;
   // Whether to renormalize expert weights after top-k selection.
   bool renormalize;
   // Whether to use gated activation. If true, activation output shape is
@@ -424,14 +424,14 @@ struct FusedMoEParams {
   // Supported: "softmax", "sigmoid".
   std::string scoring_func = "softmax";
   // Number of expert groups. Default: -1.
-  int num_expert_group = -1;
+  int64_t num_expert_group = -1;
   // Top-k group parameter. Default: 0.
-  int topk_group = 0;
+  int64_t topk_group = 0;
   // Route scaling factor. Default: 1.0.
   double route_scale = 1.0;
   // Starting expert ID. Used to slice token_count and cusum_token_count.
   // Processing range: [start_expert_id, start_expert_id + expert_size).
-  int start_expert_id = 0;
+  int64_t start_expert_id = 0;
   // Enforce every expert get equal number of tokens
   // This option has not implemented yet.
   bool avg_moe = false;

@@ -38,12 +38,12 @@ class IndexerImpl : public torch::nn::Module {
  public:
   IndexerImpl() = default;
 
-  IndexerImpl(int dim,
-              int index_n_heads,
-              int index_head_dim,
-              int qk_rope_head_dim,
-              int index_topk,
-              int q_lora_rank,
+  IndexerImpl(int64_t dim,
+              int64_t index_n_heads,
+              int64_t index_head_dim,
+              int64_t qk_rope_head_dim,
+              int64_t index_topk,
+              int64_t q_lora_rank,
               DeepseekScalingRotaryEmbedding& rotary_emb,
               const QuantArgs& quant_args,
               const ParallelArgs& parallel_args,
@@ -65,12 +65,12 @@ class IndexerImpl : public torch::nn::Module {
   void verify_loaded_weights(const std::string& prefix = "") const;
 
  private:
-  int dim_;
-  int n_heads_;
-  int head_dim_;
-  int rope_head_dim_;
-  int index_topk_;
-  int q_lora_rank_;
+  int64_t dim_;
+  int64_t n_heads_;
+  int64_t head_dim_;
+  int64_t rope_head_dim_;
+  int64_t index_topk_;
+  int64_t q_lora_rank_;
   float softmax_scale_;
   float hadamard_transform_scale_;
 

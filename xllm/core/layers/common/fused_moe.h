@@ -31,19 +31,19 @@ namespace layer {
 class FusedMoEImpl : public torch::nn::Module {
  public:
   FusedMoEImpl() = default;
-  FusedMoEImpl(int num_experts,
-               int top_k,
-               int num_expert_group,
-               int topk_group,
+  FusedMoEImpl(int64_t num_experts,
+               int64_t top_k,
+               int64_t num_expert_group,
+               int64_t topk_group,
                double route_scale,
-               int hidden_size,
-               int intermediate_size,
-               int n_shared_experts,
+               int64_t hidden_size,
+               int64_t intermediate_size,
+               int64_t n_shared_experts,
                bool is_gated,
                bool has_score_bias,
                bool has_bias,
                bool skip_bias_add,
-               int renormalize,
+               int64_t renormalize,
                const std::string& hidden_act,
                const std::string& scoring_func,
                const std::string& topk_method,
@@ -60,22 +60,22 @@ class FusedMoEImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict);
 
  private:
-  int topk_;
-  int num_expert_group_;
-  int topk_group_;
+  int64_t topk_;
+  int64_t num_expert_group_;
+  int64_t topk_group_;
   double route_scale_;
-  int n_shared_experts_;
+  int64_t n_shared_experts_;
   bool is_gated_;
   bool has_score_bias_;
   bool has_bias_;
   bool skip_bias_add_;
-  int renormalize_;
+  int64_t renormalize_;
   std::string hidden_act_;
   std::string scoring_func_;
   bool is_smoothquant_;
 
-  int num_experts_per_rank_;
-  int start_expert_id_;
+  int64_t num_experts_per_rank_;
+  int64_t start_expert_id_;
 
   ReplicatedLinear gate_{nullptr};
   DenseMLP shared_experts_{nullptr};

@@ -23,7 +23,7 @@ namespace layer {
 bool is_dummy_run(const ModelInputParams& input_params,
                   const ParallelArgs& parallel_args);
 
-void update_dummy_run_input(int dp_rank,
+void update_dummy_run_input(int64_t dp_rank,
                             torch::Tensor& positions,
                             ModelInputParams& input_params);
 

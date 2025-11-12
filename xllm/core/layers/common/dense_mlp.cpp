@@ -22,8 +22,8 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-DenseMLPImpl::DenseMLPImpl(int hidden_size,
-                           int intermediate_size,
+DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
+                           int64_t intermediate_size,
                            bool is_gated,
                            bool has_bias,
                            const std::string& hidden_act,

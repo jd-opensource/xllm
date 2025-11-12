@@ -23,19 +23,19 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-FusedMoEImpl::FusedMoEImpl(int num_experts,
-                           int top_k,
-                           int num_expert_group,
-                           int topk_group,
+FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
+                           int64_t top_k,
+                           int64_t num_expert_group,
+                           int64_t topk_group,
                            double route_scale,
-                           int hidden_size,
-                           int intermediate_size,
-                           int n_shared_experts,
+                           int64_t hidden_size,
+                           int64_t intermediate_size,
+                           int64_t n_shared_experts,
                            bool is_gated,
                            bool has_score_bias,
                            bool has_bias,
                            bool skip_bias_add,
-                           int renormalize,
+                           int64_t renormalize,
                            const std::string& hidden_act,
                            const std::string& scoring_func,
                            const std::string& topk_method,
@@ -57,8 +57,8 @@ FusedMoEImpl::FusedMoEImpl(int num_experts,
       quant_args_(quant_args),
       parallel_args_(parallel_args),
       options_(options) {
-  int ep_size = parallel_args.ep_size();
-  int ep_rank = 0;
+  int64_t ep_size = parallel_args.ep_size();
+  int64_t ep_rank = 0;
   tp_pg_ = parallel_args.tp_group_;
   if (ep_size > 1) {
     ep_rank = parallel_args.moe_ep_group_->rank();
@@ -108,8 +108,8 @@ FusedMoEImpl::FusedMoEImpl(int num_experts,
   }
 
   // create weight buffer
-  const auto world_size = tp_pg_->world_size();
-  auto local_intermediate_size = intermediate_size / world_size;
+  const int64_t world_size = tp_pg_->world_size();
+  int64_t local_intermediate_size = intermediate_size / world_size;
   if (is_smoothquant_) {
     auto quant_option = options_.dtype(torch::kInt8);
     auto fp_option = options_.dtype(torch::kFloat32);
@@ -224,7 +224,7 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
 
   if (need_slice) {
     const auto& dp_tokens = input_params.dp_global_token_nums;
-    const int dp_rank = parallel_args_.dp_local_process_group_->rank();
+    const int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
     auto start =
         std::accumulate(dp_tokens.begin(), dp_tokens.begin() + dp_rank, 0);
     auto end = start + dp_tokens[dp_rank];
@@ -241,10 +241,10 @@ void FusedMoEImpl::load_e_score_correction_bias(const StateDict& state_dict) {
 }
 
 void FusedMoEImpl::load_experts(const StateDict& state_dict) {
-  const auto rank = tp_pg_->rank();
-  const auto world_size = tp_pg_->world_size();
-  const auto start_expert_id = start_expert_id_;
-  const auto num_experts_per_rank = num_experts_per_rank_;
+  const int64_t rank = tp_pg_->rank();
+  const int64_t world_size = tp_pg_->world_size();
+  const int64_t start_expert_id = start_expert_id_;
+  const int64_t num_experts_per_rank = num_experts_per_rank_;
   std::vector<std::string> prefixes = {"gate_proj.", "up_proj."};
   if (is_smoothquant_) {
     LOAD_MOE_FUSED_WEIGHT("qweight", w1, w3, w13);

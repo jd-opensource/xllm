@@ -26,7 +26,7 @@ void apply_rotary(torch::Tensor& q,
                   bool interleaved,
                   bool discrete,
                   bool dynamic_ntk,
-                  int max_query_len) {
+                  int64_t max_query_len) {
   const int64_t rotary_dim = sin.size(-1);
   const int64_t T = q.size(0);
   torch::Tensor qk = q;

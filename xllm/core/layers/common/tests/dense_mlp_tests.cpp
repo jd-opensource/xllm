@@ -352,9 +352,9 @@ TEST_F(DenseMLPTest, SmoothquantPrecisionVerificationTest) {
   // Fill input_values with test data using custom dimensions
   input_values.reserve(batch_size * custom_hidden_size);
   // Populate the input_values vector:
-  for (int i = 0; i < batch_size; ++i) {
+  for (size_t i = 0; i < batch_size; ++i) {
     float value = 0.5f;
-    for (int j = 0; j < custom_hidden_size; ++j) {
+    for (size_t j = 0; j < custom_hidden_size; ++j) {
       input_values.push_back(value);
     }
   }
@@ -381,8 +381,8 @@ TEST_F(DenseMLPTest, SmoothquantPrecisionVerificationTest) {
 
   // Fill expected_values with placeholder data using custom dimensions
   expected_values.reserve(batch_size * custom_hidden_size);
-  for (int i = 0; i < batch_size; ++i) {
-    for (int j = 0; j < custom_hidden_size; ++j) {
+  for (size_t i = 0; i < batch_size; ++i) {
+    for (size_t j = 0; j < custom_hidden_size; ++j) {
       expected_values.push_back(1105920.0f);  // calculated via vLLM MLU
     }
   }

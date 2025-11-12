@@ -25,7 +25,7 @@ bool get_bool_env(const std::string& key, bool defaultValue);
 // Get an integer value from an environment variable.
 // Returns the default value if the environment variable is not set or cannot be
 // parsed.
-int get_int_env(const std::string& key, int defaultValue);
+int64_t get_int_env(const std::string& key, int64_t defaultValue);
 
 std::string get_string_env(const std::string& name);
 
@@ -37,7 +37,7 @@ std::string get_string_env(const std::string& name);
 // particularly useful in multi-node multi-device communication scenarios
 // where network latency may cause the default 4-second timeout to be
 // insufficient.
-int get_process_group_test_timeout_seconds();
+int64_t get_process_group_test_timeout_seconds();
 
 }  // namespace util
 }  // namespace xllm

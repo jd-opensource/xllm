@@ -23,8 +23,8 @@ void active(const torch::Tensor& input,
             const std::optional<torch::Tensor>& cusum_token_count,
             const std::string& act_mode,
             bool is_gated,
-            int start_expert_id,
-            int expert_size) {
+            int64_t start_expert_id,
+            int64_t expert_size) {
   tmo::torch_api::active(input,
                          output,
                          bias,

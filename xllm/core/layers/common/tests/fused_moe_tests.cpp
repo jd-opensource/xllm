@@ -76,7 +76,7 @@ class FusedMoETest : public ::testing::Test {
     // Create test weights for each expert
     std::unordered_map<std::string, torch::Tensor> weight_dict;
 
-    for (int expert_id = 0; expert_id < num_experts; ++expert_id) {
+    for (size_t expert_id = 0; expert_id < num_experts; ++expert_id) {
       std::string expert_prefix = "experts." + std::to_string(expert_id) + ".";
 
       // Create gate_proj weights (ColumnParallelLinear)
@@ -157,19 +157,19 @@ class FusedMoETest : public ::testing::Test {
   }
 
   // Helper function to create FusedMoE with custom dimensions
-  FusedMoE CreateFusedMoE(int num_experts,
-                          int top_k,
-                          int num_expert_group,
-                          int topk_group,
+  FusedMoE CreateFusedMoE(int64_t num_experts,
+                          int64_t top_k,
+                          int64_t num_expert_group,
+                          int64_t topk_group,
                           double route_scale,
                           int64_t hidden_size,
                           int64_t intermediate_size,
-                          int n_shared_experts = 1,
+                          int64_t n_shared_experts = 1,
                           bool is_gated = true,
                           bool has_score_bias = false,
                           bool has_bias = false,
                           bool skip_bias_add = false,
-                          int renormalize = 0,
+                          int64_t renormalize = 0,
                           const std::string& hidden_act = "silu",
                           const std::string& scoring_func = "sigmoid",
                           const std::string& topk_method = "noaux_tc") {
@@ -197,7 +197,7 @@ class FusedMoETest : public ::testing::Test {
   // Helper function to create test weights for the FusedMoE (w8a8 smoothquant
   // format)
   std::unordered_map<std::string, torch::Tensor> CreateTestWeights(
-      int num_experts,
+      int64_t num_experts,
       int64_t custom_hidden_size = -1,
       int64_t custom_intermediate_size = -1) {
     // Use custom sizes if provided, otherwise use model_args_ values
@@ -262,17 +262,17 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
   const int64_t seq_len = 32;
   const int64_t hidden_size = 7168;
   const int64_t intermediate_size = 2048;
-  const int num_experts = 16;
-  const int num_expert_group = 4;
-  const int topk_group = 4;
-  const int top_k = 2;
+  const int64_t num_experts = 16;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
   const double route_scale = 2.5;
   const bool gated = true;
   const bool has_score_bias = true;
   const bool has_bias = false;
   const bool skip_bias_add = false;
-  const int renormalize = 1;
-  const int n_shared_experts = 1;
+  const int64_t renormalize = 1;
+  const int64_t n_shared_experts = 1;
 
   // Create FusedMoE with default dimensions
   auto fused_moe = CreateFusedMoE(num_experts,
@@ -305,8 +305,8 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
   // Create router logits (batch_size * seq_len, num_experts)
   std::vector<float> router_values;
   router_values.reserve(batch_size * seq_len * num_experts);
-  for (int i = 0; i < batch_size * seq_len; ++i) {
-    for (int j = 0; j < num_experts; ++j) {
+  for (size_t i = 0; i < batch_size * seq_len; ++i) {
+    for (size_t j = 0; j < num_experts; ++j) {
       router_values.push_back(static_cast<float>(j) * 0.1f);
     }
   }
@@ -336,17 +336,17 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   const int64_t seq_len = 32;
   const int64_t hidden_size = 7168;
   const int64_t intermediate_size = 2048;
-  const int num_experts = 16;
-  const int num_expert_group = 4;
-  const int topk_group = 4;
-  const int top_k = 2;
+  const int64_t num_experts = 16;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
   const double route_scale = 2.5;
   const bool gated = true;
   const bool has_score_bias = true;
   const bool has_bias = false;
   const bool skip_bias_add = false;
-  const int renormalize = 1;
-  const int n_shared_experts = 1;
+  const int64_t renormalize = 1;
+  const int64_t n_shared_experts = 1;
 
   // Create FusedMoE with default dimensions
   auto fused_moe = CreateFusedMoE(num_experts,
@@ -379,8 +379,8 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   // Create router logits (batch_size * seq_len, num_experts)
   std::vector<float> router_values;
   router_values.reserve(batch_size * seq_len * num_experts);
-  for (int i = 0; i < batch_size * seq_len; ++i) {
-    for (int j = 0; j < num_experts; ++j) {
+  for (size_t i = 0; i < batch_size * seq_len; ++i) {
+    for (size_t j = 0; j < num_experts; ++j) {
       router_values.push_back(static_cast<float>(j) * 0.1f);
     }
   }
@@ -409,9 +409,9 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
 
   // Fill expected_values with placeholder data using custom dimensions
   expected_values.reserve(batch_size * seq_len * hidden_size);
-  for (int i = 0; i < batch_size; ++i) {
-    for (int j = 0; j < seq_len; ++j) {
-      for (int k = 0; k < hidden_size; ++k) {
+  for (size_t i = 0; i < batch_size; ++i) {
+    for (size_t j = 0; j < seq_len; ++j) {
+      for (size_t k = 0; k < hidden_size; ++k) {
         expected_values.push_back(1064.0f);  // Placeholder - to be calculated
       }
     }
