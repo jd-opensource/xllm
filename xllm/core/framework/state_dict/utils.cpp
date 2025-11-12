@@ -87,45 +87,143 @@ void load_fused_weight(const StateDict& state_dict,
     return;
   }
 
-  // resize the accumulated weight list if needed
-  if (accumulated_tensors.size() < prefixes.size()) {
-    accumulated_tensors.resize(prefixes.size());
-  }
+  weight_is_loaded = load_tensor_list(
+      state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
 
-  // load the weights from the state_dict
-  std::vector<torch::Tensor> tensors(prefixes.size());
-  for (size_t i = 0; i < prefixes.size(); ++i) {
-    const std::string tensor_name = prefixes[i] + name;
-    const auto tensor =
-        state_dict.get_sharded_tensor(tensor_name, dim, rank, world_size);
-    if (tensor.defined()) {
-      tensors[i] = tensor;
-    } else if (accumulated_tensors[i].defined()) {
-      // carry over the accumulated weight
-      tensors[i] = accumulated_tensors[i];
-    }
-  }
-
-  const bool all_loaded =
-      std::all_of(tensors.begin(), tensors.end(), [](const torch::Tensor& t) {
-        return t.defined();
-      });
-  if (!all_loaded) {
-    // accumulate the weights for future merge
-    for (size_t i = 0; i < tensors.size(); ++i) {
-      if (!accumulated_tensors[i].defined() && tensors[i].defined()) {
-        // make a clone for safety
-        accumulated_tensors[i] = tensors[i].clone();
-      }
-    }
-  } else {
-    const auto merged_weight = torch::cat(tensors, /*dim=*/dim);
+  if (weight_is_loaded) {
+    const auto merged_weight = torch::cat(accumulated_tensors, /*dim=*/dim);
     CHECK_EQ(weight.sizes(), merged_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << name;
     weight.copy_(merged_weight);
     // release the memory for weight_list
     accumulated_tensors.clear();
-    weight_is_loaded = true;
+  }
+}
+
+bool load_tensor_list(const StateDict& state_dict,
+                      const std::vector<std::string>& prefixes,
+                      const std::string& name,
+                      int64_t dim,
+                      int32_t rank,
+                      int32_t world_size,
+                      std::vector<torch::Tensor>& tensors) {
+  // resize the accumulated weight list if needed
+  if (tensors.size() < prefixes.size()) {
+    tensors.resize(prefixes.size());
+  }
+
+  // load the weights from the state_dict
+  for (size_t i = 0; i < prefixes.size(); ++i) {
+    if (tensors[i].defined()) {
+      continue;
+    }
+
+    const std::string tensor_name = prefixes[i] + name;
+    torch::Tensor tensor;
+    if (dim < 0) {
+      tensor = state_dict.get_tensor(tensor_name);
+    } else {
+      tensor =
+          state_dict.get_sharded_tensor(tensor_name, dim, rank, world_size);
+    }
+    if (tensor.defined()) {
+      tensors[i] = tensor;
+    }
+  }
+
+  return std::all_of(tensors.begin(),
+                     tensors.end(),
+                     [](const torch::Tensor& t) { return t.defined(); });
+}
+
+void load_moe_weight(const StateDict& state_dict,
+                     const std::string& sub_prefix,
+                     const std::string& name,
+                     int64_t dim,
+                     int64_t rank,
+                     int64_t world_size,
+                     int64_t start_expert_id,
+                     int64_t num_experts_per_rank,
+                     std::vector<torch::Tensor>& accumulated_tensors,
+                     torch::Tensor& weight,
+                     bool& weight_is_loaded) {
+  // return if the weight is already loaded
+  if (weight_is_loaded) {
+    return;
+  }
+  std::vector<std::string> prefixes;
+  for (size_t idx = 0; idx < num_experts_per_rank; idx++) {
+    std::string expert_id_str = std::to_string(start_expert_id + idx) + ".";
+    prefixes.emplace_back(expert_id_str + sub_prefix);
+  }
+
+  weight_is_loaded = load_tensor_list(
+      state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
+
+  if (weight_is_loaded) {
+    const auto merged_weight = torch::stack(accumulated_tensors);
+    CHECK_EQ(weight.sizes(), merged_weight.sizes())
+        << "weight size mismatch for " << state_dict.prefix() << "["
+        << start_expert_id << ":" << (start_expert_id + num_experts_per_rank)
+        << "]." << sub_prefix << name;
+    weight.copy_(merged_weight);
+    // release the memory for weight_list
+    accumulated_tensors.clear();
+  }
+}
+
+void load_moe_fused_weight(const StateDict& state_dict,
+                           const std::vector<std::string>& prefixes,
+                           const std::string& name,
+                           int64_t rank,
+                           int64_t world_size,
+                           int64_t start_expert_id,
+                           int64_t num_experts_per_rank,
+                           std::vector<torch::Tensor>& w1_tensors,
+                           std::vector<torch::Tensor>& w3_tensors,
+                           torch::Tensor& w13,
+                           bool& w1_is_loaded,
+                           bool& w3_is_loaded,
+                           bool& w13_is_loaded) {
+  // return if the weight is already loaded
+  if (w13_is_loaded) {
+    return;
+  }
+  CHECK_EQ(prefixes.size(), 2) << "only support load moe gate_proj and up_proj";
+
+  std::vector<std::string> w1_prefixes, w3_prefixes;
+  for (size_t idx = 0; idx < num_experts_per_rank; idx++) {
+    std::string expert_id_str = std::to_string(start_expert_id + idx) + ".";
+    w1_prefixes.emplace_back(expert_id_str + prefixes[0]);
+    w3_prefixes.emplace_back(expert_id_str + prefixes[1]);
+  }
+
+  const int64_t dim = 0;
+  if (!w1_is_loaded) {
+    w1_is_loaded = load_tensor_list(
+        state_dict, w1_prefixes, name, dim, rank, world_size, w1_tensors);
+  }
+  if (!w3_is_loaded) {
+    w3_is_loaded = load_tensor_list(
+        state_dict, w3_prefixes, name, dim, rank, world_size, w3_tensors);
+  }
+  w13_is_loaded = w1_is_loaded && w3_is_loaded;
+
+  if (w13_is_loaded) {
+    std::vector<torch::Tensor> w13_vec(num_experts_per_rank);
+    for (size_t idx = 0; idx < num_experts_per_rank; idx++) {
+      w13_vec[idx] = torch::cat({w1_tensors[idx], w3_tensors[idx]});
+    }
+    const auto merged_weight = torch::stack(w13_vec);
+    CHECK_EQ(w13.sizes(), merged_weight.sizes())
+        << "weight size mismatch for " << state_dict.prefix() << "["
+        << start_expert_id << ":" << (start_expert_id + num_experts_per_rank)
+        << "].{" << prefixes[0] << ", " << prefixes[1] << "}." << name;
+    w13.copy_(merged_weight);
+
+    // release the memory for weight_list
+    w1_tensors.clear();
+    w3_tensors.clear();
   }
 }
 

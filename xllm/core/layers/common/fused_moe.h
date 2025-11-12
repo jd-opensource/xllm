@@ -60,13 +60,10 @@ class FusedMoEImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict);
 
  private:
-  int num_experts_;
   int topk_;
   int num_expert_group_;
   int topk_group_;
   double route_scale_;
-  int hidden_size_;
-  int intermediate_size_;
   int n_shared_experts_;
   bool is_gated_;
   bool has_score_bias_;
@@ -88,22 +85,18 @@ class FusedMoEImpl : public torch::nn::Module {
   torch::TensorOptions options_;
   ProcessGroup* tp_pg_;
 
-  DEFINE_FUSED_WEIGHT(w13);
+  DEFINE_WEIGHT(w13);
   DEFINE_FUSED_WEIGHT(w1);
   DEFINE_FUSED_WEIGHT(w3);
   DEFINE_FUSED_WEIGHT(w2);
   DEFINE_WEIGHT(e_score_correction_bias);
-  DEFINE_FUSED_WEIGHT(w13_scale);
+  DEFINE_WEIGHT(w13_scale);
   DEFINE_FUSED_WEIGHT(w1_scale);
   DEFINE_FUSED_WEIGHT(w3_scale);
   DEFINE_FUSED_WEIGHT(w2_scale);
   DEFINE_FUSED_WEIGHT(input_smooth);
   DEFINE_FUSED_WEIGHT(act_smooth);
 
-  void pack_params();
-  torch::Tensor map_param_data(const std::vector<torch::Tensor>& param_list);
-  void load_w13(const StateDict& state_dict, int idx, bool is_gated);
-  void load_w2(const StateDict& state_dict, int idx);
   void load_e_score_correction_bias(const StateDict& state_dict);
   void load_experts(const StateDict& state_dict);
 };
