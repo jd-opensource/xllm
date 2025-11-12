@@ -109,7 +109,7 @@ enum DecoderLayerTensorId : int {
   K_NORM_WEIGHT = 69
 };
 
-static uint64_t WEIGHT_COUNT_PER_LAYER = 70;
+static uint64_t WEIGHT_COUNT_PER_LAYER = 68;
 
 static std::unordered_map<std::string, int> WEIGHT_MAPPING = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
@@ -124,9 +124,6 @@ static std::unordered_map<std::string, int> WEIGHT_MAPPING = {
     {"self_attn.v_proj.bias", IN_QKV_BIAS_2},
 
     {"self_attn.o_proj.weight", IN_QKV_DENSE_WEIGHT},
-
-    {"self_attn.q_norm.weight", Q_NORM_WEIGHT},
-    {"self_attn.k_norm.weight", K_NORM_WEIGHT},
 
     {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
 
@@ -179,9 +176,6 @@ static std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"self_attn.o_proj.deq_scale", IN_QKV_DENSE_DESCALE},
     {"self_attn.o_proj.weight_offset", IN_QKV_DENSE_OFFSET},
     {"self_attn.o_proj.weight_scale", IN_QKV_DENSE_SCALE},
-
-    {"self_attn.q_norm.weight", Q_NORM_WEIGHT},
-    {"self_attn.k_norm.weight", K_NORM_WEIGHT},
 
     {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
     {"post_attention_layernorm.bias", IN_POST_ATTN_NORM_NEW_BIAS},
