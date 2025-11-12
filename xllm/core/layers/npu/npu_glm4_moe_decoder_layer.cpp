@@ -388,7 +388,7 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
 
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
-  param.enableSplitFuse = FLAGS_enable_chunked_prefill && is_prefill;
+  param.enableSplitFuse = (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}
