@@ -330,6 +330,7 @@ REGISTER_MODEL_ARGS(glm4_moe_mtp, [&] {
   LOAD_ARG_OR(num_experts_per_tok, "num_experts_per_tok", 8);
   LOAD_ARG_OR(n_layers, "num_hidden_layers", 48);
   LOAD_ARG_OR(n_kv_heads, "num_key_value_heads", 4);
+  LOAD_ARG_OR(use_qk_norm, "use_qk_norm", true);
   LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-6);
   LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);

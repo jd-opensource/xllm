@@ -53,6 +53,8 @@ struct ModelArgs {
 
   PROPERTY(int64_t, vocab_size) = -1;
 
+  PROPERTY(bool, use_qk_norm) = false;
+  
   PROPERTY(float, rms_norm_eps) = 0.0f;
 
   PROPERTY(float, layer_norm_eps) = 0.0f;
