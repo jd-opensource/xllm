@@ -20,7 +20,6 @@ limitations under the License.
 
 #include "util/blocking_counter.h"
 #include "util/blockingconcurrentqueue.h"
-
 namespace xllm {
 
 class ThreadPool final {

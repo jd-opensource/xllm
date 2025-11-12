@@ -215,8 +215,6 @@ class WorkerImpl {
   // working thread for data copy
   std::unique_ptr<ThreadPool> h2d_threadpool_;
   std::unique_ptr<ThreadPool> d2h_threadpool_;
-  ThreadPool batchget_threadpool_{5};
-  ThreadPool batchput_threadpool_{2};
   // copy streams only can be used in h2d_threadpool_ and d2h_threadpool_
   moodycamel::BlockingConcurrentQueue<std::unique_ptr<Stream>> copy_stream_;
 
@@ -262,6 +260,10 @@ class WorkerImpl {
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
   aclrtMemcpyBatchAttr h2d_attrs_;
   aclrtMemcpyBatchAttr d2h_attrs_;
+
+  mutable std::mutex mutex_;
+  std::unordered_map<uint64_t, std::shared_ptr<NPULayerSynchronizerImpl>>
+      layer_wise_load_synchronizer_;
 #endif
 
   uint64_t key_cache_size_per_layer_;
@@ -272,10 +274,6 @@ class WorkerImpl {
   Status status_ = Status::UNINITIALIZED;
 
   torch::Tensor expert_load_data_;
-
-  mutable std::mutex mutex_;
-  std::unordered_map<uint64_t, std::shared_ptr<NPULayerSynchronizerImpl>>
-      layer_wise_load_synchronizer_;
 };
 
 class AlignedTensorCreater {

@@ -21,6 +21,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 #if defined(USE_NPU)
+#include "acl/acl.h"
 #include "kernels/npu/xllm_ops/replace_token.h"
 #elif defined(USE_MLU)
 #include <torch_mlu/csrc/framework/core/caching_allocator.h>
@@ -32,7 +33,6 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
-#include "acl/acl.h"
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -138,7 +138,7 @@ bool WorkerImpl::allocate_host_kv_cache(
   if (options_.host_blocks_factor() <= 0.00001) {
     return true;
   }
-
+#if defined(USE_NPU)
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(host_kv_caches_.empty()) << "KV caches are already initialized.";
   CHECK(device_kv_cache_shape[0][0] == device_kv_cache_shape[1][0]);
@@ -148,6 +148,9 @@ bool WorkerImpl::allocate_host_kv_cache(
   int64_t host_bolck_size =
       device_kv_cache_shape[0][0] * options_.host_blocks_factor();
   host_kv_cache_shape[0][0] = num_layers;
+  CHECK(!host_kv_cache_shape[1].empty())
+      << "v cache shape should not be empty!";
+  // TODO(kangmeng3): support mlu kvcache
   host_kv_cache_shape[1][0] = num_layers;
 
   // create a KVCache shape: block_size * [layers, token, head, dim]
@@ -188,6 +191,7 @@ bool WorkerImpl::allocate_host_kv_cache(
   }
 
   status_ = Status::READY;
+#endif
   return true;
 }
 
@@ -497,6 +501,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   threadpool_.schedule([this,
                         inputs = std::move(batched_inputs_on_device),
                         promise = std::move(promise)]() mutable {
+#if defined(USE_NPU)
     for (auto& input : inputs.micro_inputs) {
       {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -508,6 +513,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
         }
       }
     }
+#endif
     // run the model on the given input in working thread
     if (!enable_schedule_overlap()) {
       const auto output = this->step(inputs);
@@ -743,6 +749,7 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
+// TODO(kangmeng): abstract this code(and the code below) into a new class here.
 uint32_t WorkerImpl::offload_kv_blocks(
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   if (block_transfer_info.empty()) {
@@ -972,27 +979,7 @@ uint32_t WorkerImpl::offload_to_store(
     return block_transfer_info.size();
   }
 
-  folly::Promise<uint32_t> promise;
-  auto future = promise.getSemiFuture();
-
-  batchput_threadpool_.schedule(
-      [this, &block_transfer_info, promise = std::move(promise)]() mutable {
-        promise.setValue(
-            KVCacheStore::get_instance().batch_put(block_transfer_info));
-      });
-
-  return std::move(future)
-      .via(folly::getGlobalCPUExecutor())
-      .within(std::chrono::seconds(TIMEOUT_S))
-      .thenTry([](folly::Try<uint32_t>&& t) -> uint32_t {
-        if (t.hasValue()) {
-          return t.value();
-        } else {
-          LOG(WARNING) << "BatchPut operation timed out";
-          return 0u;
-        }
-      })
-      .get();
+  return KVCacheStore::get_instance().batch_put(block_transfer_info);
 }
 
 uint32_t WorkerImpl::prefetch_from_storage(
@@ -1000,28 +987,7 @@ uint32_t WorkerImpl::prefetch_from_storage(
   if (!options_.enable_kvcache_store()) {
     return 0;
   }
-
-  folly::Promise<uint32_t> promise;
-  auto future = promise.getSemiFuture();
-
-  batchget_threadpool_.schedule(
-      [this, &block_transfer_info, promise = std::move(promise)]() mutable {
-        promise.setValue(
-            KVCacheStore::get_instance().batch_get(block_transfer_info));
-      });
-
-  return std::move(future)
-      .via(folly::getGlobalCPUExecutor())
-      .within(std::chrono::seconds(TIMEOUT_S))
-      .thenTry([](folly::Try<uint32_t>&& t) -> uint32_t {
-        if (t.hasValue()) {
-          return t.value();
-        } else {
-          LOG(WARNING) << "BatchGet operation timed out";
-          return 0u;
-        }
-      })
-      .get();
+  return KVCacheStore::get_instance().batch_get(block_transfer_info);
 }
 
 AlignedTensorCreater::AlignedTensorCreater(

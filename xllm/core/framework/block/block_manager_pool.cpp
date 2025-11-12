@@ -118,7 +118,7 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
   cache(sequence);
   if (!host_block_managers_.empty()) {
-    record_offload_blocks(sequence);
+    save_offload_blocks(sequence);
   }
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
   // release the blocks after prefix cache insertion
@@ -140,7 +140,7 @@ BlockManagerPool::get_load_block_transfer_infos() {
   return &load_block_transfer_infos_;
 }
 
-void BlockManagerPool::set_offload_callback(
+void BlockManagerPool::postprocess_offload(
     std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) {
   DCHECK(futures.size() == block_managers_.size());
   for (int i = 0; i < futures.size(); i++) {
@@ -356,7 +356,7 @@ void BlockManagerPool::allocate_host_shared(Sequence* sequence) {
   }
 }
 
-void BlockManagerPool::record_offload_blocks(Sequence* sequence) {
+void BlockManagerPool::save_offload_blocks(Sequence* sequence) {
   DCHECK(sequence != nullptr);
 
   auto* blocks = sequence->kv_state().mutable_kv_blocks();

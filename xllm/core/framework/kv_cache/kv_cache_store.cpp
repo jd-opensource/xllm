@@ -64,9 +64,10 @@ bool KVCacheStore::init(const StoreConfig& config,
         return false;
       }
     } else {
-      LOG(FATAL) << "rdma must RegisterLocalMemory, but got register size: "
+      LOG(ERROR) << "rdma must RegisterLocalMemory, but got register size: "
                  << config_.total_size
                  << ", and data ptr: " << uint64_t(config_.tensor_data);
+      return false;
     }
   }
   is_initialized_ = true;

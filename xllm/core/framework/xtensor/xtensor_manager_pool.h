@@ -74,9 +74,9 @@ class XTensorManagerPool final : public KVCacheManager {
                   "manager pool";
   }
 
-  void set_offload_callback(
+  void postprocess_offload(
       std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) override {
-    LOG(FATAL) << "set_offload_callback is not implemented for page "
+    LOG(FATAL) << "postprocess_offload is not implemented for page "
                   "manager pool";
   }
 

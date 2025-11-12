@@ -154,9 +154,8 @@ class WorkerService : public proto::DistributeWorker {
   std::unique_ptr<std::thread> polling_thread_;
 
   std::unique_ptr<ThreadPool> threadpool_;
-  ThreadPool copy_threadpool_{5};
 
-  uint32_t stream_copy_batch_size_ = 2;
+  ThreadPool copy_threadpool_{5};
 };
 
 }  // namespace xllm

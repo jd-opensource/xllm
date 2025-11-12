@@ -64,7 +64,7 @@ class BlockManagerPool final : public KVCacheManager {
   get_offload_block_transfer_infos() override;
   std::vector<std::vector<BlockTransferInfo>>* get_load_block_transfer_infos()
       override;
-  void set_offload_callback(
+  void postprocess_offload(
       std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) override;
   void reset_transfer_infos() override;
 
@@ -77,6 +77,9 @@ class BlockManagerPool final : public KVCacheManager {
   std::vector<size_t> num_free_blocks() const override;
   std::vector<size_t> num_used_blocks() const override;
   double kv_cache_utilization() const override;
+  bool allow_host_block_extend() override {
+    return !host_block_managers_.empty();
+  };
 
   // get the options for the block manager
   const Options& options() const { return options_; }
@@ -86,7 +89,7 @@ class BlockManagerPool final : public KVCacheManager {
   int32_t get_dp_rank(Sequence* sequence) const;
 
   void allocate_host_shared(Sequence* sequence);
-  void record_offload_blocks(Sequence* sequence);
+  void save_offload_blocks(Sequence* sequence);
 
   void process_beam_search(Sequence* sequence, bool need_swap = false);
 

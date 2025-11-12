@@ -33,6 +33,8 @@ limitations under the License.
 
 namespace xllm {
 
+constexpr uint32_t COPY_BATCH_SIZE = 1;
+
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
     : options_(options), device_(device), initialized_(false) {
@@ -498,15 +500,14 @@ void WorkerService::PrefetchFromStorage(
         auto close_future = stream_handler->get_close_future();
         bool is_completed = false;
 
-        for (size_t i = 0; i < transfer_slice.size();
-             i += stream_copy_batch_size_) {
+        for (size_t i = 0; i < transfer_slice.size(); i += COPY_BATCH_SIZE) {
           auto current_slice = transfer_slice.slice(
-              i, std::min(i + stream_copy_batch_size_, transfer_slice.size()));
+              i, std::min(i + COPY_BATCH_SIZE, transfer_slice.size()));
 
           auto success_cnt = worker_->prefetch_from_storage(current_slice);
 
           if (success_cnt != current_slice.size() ||
-              i + stream_copy_batch_size_ >= transfer_slice.size()) {
+              i + COPY_BATCH_SIZE >= transfer_slice.size()) {
             is_completed = true;
           }
 

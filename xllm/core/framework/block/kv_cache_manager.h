@@ -51,7 +51,7 @@ class KVCacheManager {
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_load_block_transfer_infos() = 0;
 
-  virtual void set_offload_callback(
+  virtual void postprocess_offload(
       std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) = 0;
 
   virtual void reset_transfer_infos() = 0;
@@ -62,6 +62,7 @@ class KVCacheManager {
   virtual std::vector<size_t> num_free_blocks() const = 0;
   virtual std::vector<size_t> num_used_blocks() const = 0;
   virtual double kv_cache_utilization() const = 0;
+  virtual bool allow_host_block_extend() { return false; };
 
  protected:
   KVCacheManager() = default;
