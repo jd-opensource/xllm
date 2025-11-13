@@ -13,6 +13,7 @@ cc_library(
     double_buffer.h
     env_var.h
     hash_util.h
+    http_downloader.h
     json_reader.h
     lightweightsemaphore.h
     net.h
@@ -31,6 +32,7 @@ cc_library(
   SRCS
     device_name_utils.cpp
     env_var.cpp
+    http_downloader.cpp
     json_reader.cpp
     net.cpp
     pretty_print.cpp
@@ -68,7 +70,7 @@ cc_test(
     GTest::gtest_main
     gflags::gflags
 )
-target_link_libraries(util_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(util_test PRIVATE brpc leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto)
 add_dependencies(util_test brpc-static)
 
 

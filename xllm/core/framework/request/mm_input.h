@@ -18,10 +18,9 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/common/message.h"
 #include "core/common/types.h"
-#include "core/framework/chat_template/jinja_chat_template.h"
 #include "mm_data.h"
-#include "multimodal.pb.h"
 
 namespace xllm {
 
@@ -38,13 +37,13 @@ struct MMInputItem {
   torch::Tensor decode_data_;  // image: rgb, [c,h,w], uint8
 };
 
-using MMInputItemVec = std::vector<MMInputItem>;
-using MMChatMessageVec =
-    ::google::protobuf::RepeatedPtrField<proto::MMChatMessage>;
-using MMInputDataVec = ::google::protobuf::RepeatedPtrField<proto::MMInputData>;
-
 struct MMInput {
   bool empty() const { return items_.empty(); }
+  void clear() { items_.clear(); }
+
+  void insert(const std::vector<MMInputItem>& items) {
+    items_.insert(items_.end(), items.begin(), items.end());
+  }
 
   std::vector<torch::Tensor> get_decode_data(MMType type) const {
     std::vector<torch::Tensor> vec;
@@ -57,31 +56,19 @@ struct MMInput {
     return std::move(vec);
   }
 
-  MMInputItemVec items_;
+  std::vector<MMInputItem> items_;
 };
 
 class MMHandlerSet;
-class MMInputHelper {
+class MMInputTransfer {
  public:
-  MMInputHelper();
-  ~MMInputHelper();
+  MMInputTransfer();
+  ~MMInputTransfer();
 
-  bool trans(const MMChatMessageVec& vec,
-             std::vector<Message>& messages,
-             MMInputItemVec& inputs);
-
-  bool trans(const std::vector<MMChatMessage>& raw_input_data,
-             std::vector<Message>& messages,
-             MMInputItemVec& inputs);
+  bool trans(const std::vector<Message>& messages, MMInput& inputs);
 
  private:
-  bool trans(const MMInputDataVec& vec,
-             Message::MMContentVec& mmc,
-             MMInputItemVec& input);
-
-  bool trans(const std::vector<MMInputData>& vec,
-             Message::MMContentVec& mmc,
-             MMInputItemVec& input);
+  bool trans(const MMContentVec& mmc, std::vector<MMInputItem>& inputs);
 
   std::unique_ptr<MMHandlerSet> mm_handlers_;
 };

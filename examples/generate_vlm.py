@@ -3,8 +3,7 @@
 import os
 import signal
 
-from xllm import ArgumentParser, VLM, RequestParams
-from xllm_export import MMType, MMData
+from xllm import ArgumentParser, VLM, RequestParams, MMType, MMData
 
 from PIL import Image
 from transformers import AutoImageProcessor

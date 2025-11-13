@@ -18,7 +18,7 @@ from xllm.pybind.llm import LLM
 from xllm.pybind.vlm import VLM
 from xllm.pybind.args import ArgumentParser
 from xllm_export import (LLMMaster, Options, RequestParams, RequestOutput,
-                         SequenceOutput, Status, StatusCode, MMChatMessage, MMInputData)
+                         SequenceOutput, Status, StatusCode, MMType, MMData)
 
 __all__ = [
     "ArgumentParser",

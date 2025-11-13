@@ -284,17 +284,4 @@ struct EplbInfo {
   int32_t update_layer_id = -1;
 };
 
-struct MMInputData {
-  std::string type = "";
-  std::string text = "";
-  std::string image_url = "";
-  std::string video_url = "";
-  std::string audio_url = "";
-};
-
-struct MMChatMessage {
-  std::string role = "";
-  std::vector<MMInputData> content;
-};
-
 }  // namespace xllm

@@ -31,7 +31,6 @@ limitations under the License.
 #include "api_service/stream_output_parser.h"
 #include "core/common/instance_name.h"
 #include "core/common/types.h"
-#include "core/framework/request/mm_input_helper.h"
 #include "core/framework/request/request_params.h"
 #include "core/runtime/llm_master.h"
 #include "core/runtime/vlm_master.h"
@@ -703,22 +702,6 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
     return;
   }
 
-  // check if the request image number exceeds the allowed image limit.
-  int image_count = 0;
-  const int image_limit = master_->get_image_limit();
-  for (const auto& message : req_messages) {
-    for (const auto& content_item : message.content()) {
-      if (content_item.type() == "image_url") {
-        ++image_count;
-        if (image_count > image_limit) {
-          call->finish_with_error(
-              StatusCode::INVALID_ARGUMENT,
-              "Number of images exceeds the allowed image limit.");
-          return;
-        }
-      }
-    }
-  }
   // Check if the request is being rate-limited.
   if (master_->get_rate_limiter()->is_limited()) {
     call->finish_with_error(
@@ -731,13 +714,43 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
 
   std::vector<Message> messages;
-  MMInput mm_inputs;
+  messages.reserve(rpc_request.messages_size());
 
-  static MMInputHelper helper;
-  if (!helper.trans(req_messages, messages, mm_inputs.items_)) {
-    call->finish_with_error(StatusCode::INVALID_ARGUMENT,
-                            "inputs argument is invalid.");
-    return;
+  for (const auto& req_message : req_messages) {
+    MMContentVec contents;
+    for (const auto& input : req_message.content()) {
+      auto& item = const_cast<::xllm::proto::MMInputData&>(input);
+      if (item.type() == "text") {
+        contents.emplace_back(item.type(), *item.release_text());
+      } else if (item.type() == "image_url") {
+        ImageURL image_url;
+        image_url.url = std::move(*item.mutable_image_url()->release_url());
+        contents.emplace_back(item.type(), image_url);
+      } else if (item.type() == "video_url") {
+        VideoURL video_url;
+        video_url.url = std::move(*item.mutable_video_url()->release_url());
+        contents.emplace_back(item.type(), video_url);
+      } else if (item.type() == "audio_url") {
+        AudioURL audio_url;
+        audio_url.url = std::move(*item.mutable_audio_url()->release_url());
+        contents.emplace_back(item.type(), audio_url);
+      } else {
+        call->finish_with_error(StatusCode::INVALID_ARGUMENT,
+                                "message content type is invalid.");
+        return;
+      }
+    }
+    messages.emplace_back(req_message.role(), std::move(contents));
+  }
+
+  //  check if the request image number exceeds the allowed image limit.
+  for (auto& msg : messages) {
+    if (msg.calc_count("image_url") > master_->get_image_limit()) {
+      call->finish_with_error(StatusCode::INVALID_ARGUMENT,
+                              "Number of images in a single message exceeds "
+                              "the allowed image limit.");
+      return;
+    }
   }
 
   bool include_usage = false;
@@ -751,7 +764,6 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
   // schedule the request
   master_->handle_request(
       std::move(messages),
-      std::move(mm_inputs),
       std::move(request_params),
       [call,
        model,

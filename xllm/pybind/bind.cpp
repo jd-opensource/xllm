@@ -218,22 +218,7 @@ PYBIND11_MODULE(xllm_export, m) {
         return "SequenceOutput({}: {!r})"_s.format(self.index, self.text);
       });
 
-  // 8. export MMInputData
-  py::class_<MMInputData>(m, "MMInputData")
-      .def(py::init())
-      .def_readwrite("type", &MMInputData::type)
-      .def_readwrite("text", &MMInputData::text)
-      .def_readwrite("image_url", &MMInputData::image_url)
-      .def_readwrite("video_url", &MMInputData::video_url)
-      .def_readwrite("audio_url", &MMInputData::audio_url);
-
-  // 9. export MMChatMessage
-  py::class_<MMChatMessage>(m, "MMChatMessage")
-      .def(py::init())
-      .def_readwrite("role", &MMChatMessage::role)
-      .def_readwrite("content", &MMChatMessage::content);
-
-  // 10. export MMType
+  // 8. export MMType
   py::enum_<MMType::Value>(m, "MMType")
       .value("NONE", MMType::Value::NONE)
       .value("IMAGE", MMType::Value::IMAGE)
@@ -242,7 +227,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .value("EMBEDDING", MMType::EMBEDDING)
       .export_values();
 
-  // 11. export MMData
+  // 9. export MMData
   py::class_<MMData>(m, "MMData")
       .def(py::init<int, const MMDict&>(), py::arg("ty"), py::arg("data"))
       .def("get",
@@ -274,11 +259,6 @@ PYBIND11_MODULE(xllm_export, m) {
   py::class_<VLMMaster>(m, "VLMMaster")
       .def(py::init<const Options&>(),
            py::arg("options"),
-           py::call_guard<py::gil_scoped_release>())
-      .def("handle_request",
-           py::overload_cast<const std::vector<MMChatMessage>&,
-                             RequestParams,
-                             OutputCallback>(&VLMMaster::handle_request),
            py::call_guard<py::gil_scoped_release>())
       .def("handle_batch_request",
            py::overload_cast<const std::vector<std::string>&,

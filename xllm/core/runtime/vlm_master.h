@@ -28,7 +28,7 @@ limitations under the License.
 #include "common/options.h"
 #include "common/types.h"
 #include "framework/chat_template/jinja_chat_template.h"
-#include "framework/request/mm_input_helper.h"
+#include "framework/request/mm_input.h"
 #include "framework/request/request_output.h"
 #include "framework/request/request_params.h"
 #include "runtime/engine.h"
@@ -49,24 +49,18 @@ class VLMMaster : public Master {
   // completion
   void handle_request(const std::string& prompt,
                       const MMData& mm_data,
-                      RequestParams sp,
-                      OutputCallback callback);
-
-  // chat
-  void handle_request(const std::vector<Message>& messages,
-                      const MMInput& mm_inputs,
-                      RequestParams sp,
+                      const RequestParams& sp,
                       OutputCallback callback);
 
   // chat
   void handle_request(const std::vector<Message>& messages,
                       const MMData& mm_data,
-                      RequestParams sp,
+                      const RequestParams& sp,
                       OutputCallback callback);
 
   // chat
-  void handle_request(const std::vector<MMChatMessage>& raw_input_data,
-                      RequestParams sp,
+  void handle_request(const std::vector<Message>& messages,
+                      const RequestParams& sp,
                       OutputCallback callback);
 
   // batch completion

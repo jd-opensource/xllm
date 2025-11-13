@@ -70,9 +70,9 @@ std::optional<std::string> JinjaChatTemplate::apply(
 
     if (std::holds_alternative<std::string>(message.content)) {
       message_json["content"] = std::get<std::string>(message.content);
-    } else if (std::holds_alternative<Message::MMContentVec>(message.content)) {
+    } else if (std::holds_alternative<MMContentVec>(message.content)) {
       message_json["content"] =
-          get_mm_content(std::get<Message::MMContentVec>(message.content));
+          get_mm_content(std::get<MMContentVec>(message.content));
     }
 
     messages_json.push_back(message_json);
@@ -110,7 +110,7 @@ std::optional<std::string> JinjaChatTemplate::apply(
 }
 
 nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
-    const Message::MMContentVec& vec) const {
+    const MMContentVec& vec) const {
   nlohmann::ordered_json content_json = nlohmann::json::array();
 
   for (const auto& item : vec) {

@@ -20,7 +20,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/model/model_args.h"
-#include "core/framework/request/mm_input_helper.h"
+#include "core/framework/request/mm_input.h"
 
 namespace xllm {
 

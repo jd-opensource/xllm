@@ -9,6 +9,7 @@ cc_library(
     global_flags.h
     instance_name.h
     macros.h
+    message.h
     metrics.h
     $<$<BOOL:${USE_NPU}>:mspti_helper.h>
     options.h

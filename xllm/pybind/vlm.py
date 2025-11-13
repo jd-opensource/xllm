@@ -5,8 +5,7 @@ from . import util
 from typing import List, Optional, Union, Dict, Any
 
 from xllm_export import (VLMMaster, Options, RequestOutput,
-                         RequestParams, MMInputData, MMChatMessage,
-                         MMType, MMData)
+                         RequestParams, MMType, MMData)
 
 class VLM:
     def __init__(

@@ -1,0 +1,92 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#pragma once
+
+#include <optional>
+#include <string>
+#include <variant>
+#include <vector>
+
+namespace xllm {
+
+struct ImageURL {
+  std::string url;
+};
+
+struct VideoURL {
+  std::string url;
+};
+
+struct AudioURL {
+  std::string url;
+};
+
+struct MMContent {
+  MMContent(const std::string& type, const std::string& text)
+      : type(type), text(std::move(text)) {}
+  MMContent(const std::string& type, const ImageURL& image_url)
+      : type(type), image_url(std::move(image_url)) {}
+  MMContent(const std::string& type, const VideoURL& video_url)
+      : type(type), video_url(std::move(video_url)) {}
+  MMContent(const std::string& type, const AudioURL& audio_url)
+      : type(type), audio_url(std::move(audio_url)) {}
+
+  std::string type;
+
+  std::string text;
+  ImageURL image_url;
+
+  VideoURL video_url;
+  AudioURL audio_url;
+};
+using MMContentVec = std::vector<MMContent>;
+
+struct Message {
+  using Content = std::variant<std::string, MMContentVec>;
+
+  Message(const std::string& role, const std::string& content)
+      : role(role), content(content) {}
+
+  Message(const std::string& role, const MMContentVec& content)
+      : role(role), content(std::move(content)) {}
+
+  int calc_count(const std::string& type) {
+    if (std::holds_alternative<std::string>(content)) {
+      if (type == "text") {
+        return 1;
+      } else {
+        return 0;
+      }
+    }
+
+    const auto& mmc = std::get<MMContentVec>(content);
+    int count = 0;
+    for (const auto& item : mmc) {
+      if (item.type == type) {
+        ++count;
+      }
+    }
+
+    return count;
+  }
+
+  std::string role;
+  Content content;
+};
+
+using ChatMessages = std::vector<Message>;
+
+}  // namespace xllm

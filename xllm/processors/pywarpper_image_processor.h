@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <vector>
 
-#include "core/framework/request/mm_input_helper.h"
 #include "image_processor.h"
 
 namespace xllm {
