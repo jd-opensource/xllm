@@ -85,12 +85,14 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   }
 
   // 4. Rotary embedding
-  rotary_emb_ = register_module("rope",
-                                RotaryEmbedding(/*rotary_dim=*/head_dim_,
-                                                args.max_position_embeddings(),
-                                                args.rope_theta(),
-                                                /*interleaved=*/false,
-                                                options));
+  rotary_emb_ =
+      register_module("rope",
+                      MRotaryEmbedding(/*rotary_dim=*/head_dim_,
+                                       args.max_position_embeddings(),
+                                       args.rope_theta(),
+                                       /*interleaved=*/false,
+                                       args.rope_scaling_mrope_section(),
+                                       options));
 
   // 5. Attention
   attn_ = register_module("attn",
@@ -101,11 +103,10 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                     args.sliding_window()));
 }
 
-torch::Tensor Qwen2AttentionImpl::forward(
-    const torch::Tensor& positions,
-    const torch::Tensor& hidden_states,
-    const AttentionMetadata& attn_metadata,
-    KVCache& kv_cache) {
+torch::Tensor Qwen2AttentionImpl::forward(const torch::Tensor& positions,
+                                          const torch::Tensor& hidden_states,
+                                          AttentionMetadata& attn_metadata,
+                                          KVCache& kv_cache) {
   // 1. qkv projection
   auto qkv = qkv_proj_->forward(hidden_states);
 
@@ -124,12 +125,7 @@ torch::Tensor Qwen2AttentionImpl::forward(
   }
 
   // 4. rope
-  rotary_emb_->forward(q,
-                       k,
-                       positions,
-                       attn_metadata.query_start_loc,
-                       attn_metadata.max_query_len,
-                       attn_metadata.is_prefill);
+  rotary_emb_->forward(q, k, positions, attn_metadata);
   q = q.view({T, q_size_});
   k = k.view({T, kv_size_});
 

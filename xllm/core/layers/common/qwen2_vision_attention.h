@@ -17,42 +17,46 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include <functional>
-
-#include "dense_mlp.h"
-#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "fused_moe.h"
-#include "layers/rms_norm.h"
-#include "qwen2_attention.h"
+#include "linear.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3MoeDecoderImpl : public torch::nn::Module {
+class Qwen2VisionAttentionImpl : public torch::nn::Module {
  public:
-  explicit Qwen3MoeDecoderImpl(const ModelContext& context, int32_t layer_id);
+  Qwen2VisionAttentionImpl() = default;
+  Qwen2VisionAttentionImpl(const ModelContext& context);
 
-  ~Qwen3MoeDecoderImpl() {};
+  torch::Tensor forward(torch::Tensor& hidden_states,
+                        torch::Tensor& m_cos_pos,
+                        torch::Tensor& m_sin_pos,
+                        torch::Tensor& cu_seq_len,
+                        std::vector<int32_t>& cu_seq_len_vec,
+                        ModelInputParams& input_params);
 
   void load_state_dict(const StateDict& state_dict);
 
-  torch::Tensor forward(torch::Tensor& x,
-                        torch::Tensor& positions,
-                        AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache,
-                        const ModelInputParams& input_params);
-
  private:
-  Qwen2Attention attention_{nullptr};
-  DenseMLP mlp_{nullptr};
-  FusedMoE moe_mlp_{nullptr};
-  RmsNorm input_norm_{nullptr};
-  RmsNorm post_norm_{nullptr};
+  std::vector<torch::Tensor> split_qkv(const torch::Tensor& qkv);
+
+  int64_t num_heads_;
+  int64_t head_dim_;
+  int64_t hidden_size_per_attention_head_;
+  int64_t num_attention_heads_per_partition_;
+  float scale_;
+
+  ProcessGroup* tp_group_;
+
+  ColumnParallelLinear qkv_proj_{nullptr};
+  RowParallelLinear proj_{nullptr};
 };
+TORCH_MODULE(Qwen2VisionAttention);
 
 }  // namespace layer
 }  // namespace xllm

@@ -268,6 +268,14 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
   kv_cache_shape.emplace_back(std::vector<int64_t>{
       kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
+#if defined(USE_MLU)
+  // transpose kv_cache layout for mlu
+  // default layout: [n_blocks, block_size, n_head, head_dim]
+  // => mlu layout: [n_blocks, n_head, block_size, head_dim]
+  for (auto& shape : kv_cache_shape) {
+    std::swap(shape[1], shape[2]);
+  }
+#endif
 
   LOG(INFO) << "Initializing k cache with shape: [" << kv_cache_shape[0] << "]";
   LOG(INFO) << "Initializing v cache with shape: [" << kv_cache_shape[1] << "]";

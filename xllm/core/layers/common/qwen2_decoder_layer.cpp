@@ -65,7 +65,7 @@ void Qwen2DecoderImpl::load_state_dict(const StateDict& state_dict) {
 
 torch::Tensor Qwen2DecoderImpl::forward(torch::Tensor& x,
                                         torch::Tensor& positions,
-                                        const AttentionMetadata& attn_metadata,
+                                        AttentionMetadata& attn_metadata,
                                         KVCache& kv_cache,
                                         const ModelInputParams& input_params) {
   // Pre-attention norm

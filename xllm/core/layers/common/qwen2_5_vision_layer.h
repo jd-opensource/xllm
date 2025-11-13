@@ -20,38 +20,39 @@ limitations under the License.
 #include <functional>
 
 #include "dense_mlp.h"
-#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "fused_moe.h"
 #include "layers/rms_norm.h"
-#include "qwen2_attention.h"
+#include "qwen2_vision_attention.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3MoeDecoderImpl : public torch::nn::Module {
+class Qwen2_5_VisionLayerImpl : public torch::nn::Module {
  public:
-  explicit Qwen3MoeDecoderImpl(const ModelContext& context, int32_t layer_id);
+  explicit Qwen2_5_VisionLayerImpl(const ModelContext& context);
 
-  ~Qwen3MoeDecoderImpl() {};
+  ~Qwen2_5_VisionLayerImpl() {};
 
   void load_state_dict(const StateDict& state_dict);
 
   torch::Tensor forward(torch::Tensor& x,
-                        torch::Tensor& positions,
-                        AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+                        torch::Tensor& m_cos_pos,
+                        torch::Tensor& m_sin_pos,
+                        torch::Tensor& cu_seq_len,
+                        std::vector<int32_t>& cu_seq_len_vec,
+                        ModelInputParams& input_params,
+                        int node_id);
 
  private:
-  Qwen2Attention attention_{nullptr};
+  Qwen2VisionAttention attention_{nullptr};
   DenseMLP mlp_{nullptr};
-  FusedMoE moe_mlp_{nullptr};
-  RmsNorm input_norm_{nullptr};
-  RmsNorm post_norm_{nullptr};
+  RmsNorm norm1_{nullptr};
+  RmsNorm norm2_{nullptr};
 };
 
 }  // namespace layer

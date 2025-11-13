@@ -335,6 +335,9 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
         kv_cache_cap.n_blocks, block_size, 1, args_.index_head_dim()});
   }
 #if defined(USE_MLU)
+  // transpose kv_cache layout for mlu
+  // default layout: [n_blocks, block_size, n_head, head_dim]
+  // => mlu layout: [n_blocks, n_head, block_size, head_dim]
   for (auto& shape : kv_cache_shape) {
     std::swap(shape[1], shape[2]);
   }

@@ -132,7 +132,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 #else
   virtual torch::Tensor forward(torch::Tensor& x,
                                 torch::Tensor& positions,
-                                const layer::AttentionMetadata& attn_metadata,
+                                layer::AttentionMetadata& attn_metadata,
                                 KVCache& kv_cache,
                                 const ModelInputParams& input_params) {
     return decoder_layer_(x, positions, attn_metadata, kv_cache, input_params);
@@ -197,6 +197,9 @@ class LlmModelImplBase : public torch::nn::Module {
 
 #if defined(USE_NPU)
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
+#else
+    auto target_cos_sin = cos_sin_.index({positions});
+#endif
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
@@ -257,7 +260,6 @@ class LlmModelImplBase : public torch::nn::Module {
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
       }
     }
-#endif
 
 #if defined(USE_NPU)
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -290,23 +292,22 @@ class LlmModelImplBase : public torch::nn::Module {
             event,
             event_flag);
     }
-
     return norm_(h, 0);
 #else
-    auto modified_input_params = input_params;
-    auto position = positions;
-    layer::update_dummy_run_input(dp_rank_, position, modified_input_params);
-    bool is_prefill = modified_input_params.q_max_seq_len > 1;
+    layer::update_dummy_run_input(dp_rank_, positions, input_params_new);
+    bool is_prefill = input_params_new.q_max_seq_len > 1;
     auto attn_metadata =
-        layer::AttentionMetadata::build(modified_input_params, is_prefill);
+        layer::AttentionMetadata::build(input_params_new, is_prefill);
+    if (positions.dim() == 2) {
+      attn_metadata.mrope_cos = std::move(cos_pos);
+      attn_metadata.mrope_sin = std::move(sin_pos);
+    }
 
-    torch::Tensor h_ret;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h_ret = layer(
-          h, position, attn_metadata, kv_caches[i], modified_input_params);
+      h = layer(h, positions, attn_metadata, kv_caches[i], input_params_new);
     }
-    return norm_(h_ret);
+    return norm_(h);
 #endif
   }
 

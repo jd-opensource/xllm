@@ -41,7 +41,7 @@ class Qwen2AttentionImpl : public torch::nn::Module {
 
   torch::Tensor forward(const torch::Tensor& positions,
                         const torch::Tensor& hidden_states,
-                        const AttentionMetadata& attn_metadata,
+                        AttentionMetadata& attn_metadata,
                         KVCache& kv_cache);
 
   void load_state_dict(const StateDict& state_dict);
@@ -61,7 +61,7 @@ class Qwen2AttentionImpl : public torch::nn::Module {
   RmsNorm q_norm_{nullptr};
   RmsNorm k_norm_{nullptr};
   Attention attn_{nullptr};
-  RotaryEmbedding rotary_emb_{nullptr};
+  MRotaryEmbedding rotary_emb_{nullptr};
 };
 TORCH_MODULE(Qwen2Attention);
 

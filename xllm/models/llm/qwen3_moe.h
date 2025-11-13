@@ -62,7 +62,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
 #else
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& positions,
-                        const layer::AttentionMetadata& attn_metadata,
+                        layer::AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params) {
     return decoder_layer_(x, positions, attn_metadata, kv_cache, input_params);
