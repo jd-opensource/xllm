@@ -47,6 +47,9 @@ void tokenizers_free(TokenizerHandle handle);
 
 void tokenizers_get_vocab_size(TokenizerHandle handle, size_t* size);
 
+void tokenizers_free_encode_results(TokenizerEncodeResult* results,
+                                    size_t num_seqs);
+
 #ifdef __cplusplus
 }
 #endif

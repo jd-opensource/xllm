@@ -23,13 +23,11 @@ std::unique_ptr<Tokenizer> TokenizerFactory::create_tokenizer(
     const std::string& model_weights_path,
     TokenizerArgs tokenizer_args,
     bool proxy) {
-  const std::string tokenizer_json_path =
-      model_weights_path + "/tokenizer.json";
   std::unique_ptr<Tokenizer> tokenizer;
-  if (std::filesystem::exists(tokenizer_json_path)) {
+  if (tokenizer_args.tokenizer_type() == "fast") {
     // 1. fast tokenizer
     LOG(INFO) << "Create fast tokenizer.";
-    tokenizer = std::make_unique<FastTokenizer>(tokenizer_json_path);
+    tokenizer = std::make_unique<FastTokenizer>(tokenizer_args);
   } else if (tokenizer_args.tokenizer_type() == "tiktoken" ||
              tokenizer_args.tokenizer_class() == "TikTokenTokenizer") {
     // 2. create tiktoken tokenizer

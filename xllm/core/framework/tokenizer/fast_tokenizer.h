@@ -17,13 +17,14 @@ limitations under the License.
 #pragma once
 
 #include "tokenizer.h"
+#include "tokenizer_args.h"
 #include "tokenizers/tokenizers.h"
 
 namespace xllm {
 
 class FastTokenizer : public Tokenizer {
  public:
-  FastTokenizer(const std::string& tokenizer_json_path);
+  FastTokenizer(const TokenizerArgs& tokenizer_args);
 
   ~FastTokenizer() override;
 
@@ -44,8 +45,7 @@ class FastTokenizer : public Tokenizer {
   std::unique_ptr<Tokenizer> clone() const override;
 
  private:
-  std::string tokenizer_json_path_;
-
+  TokenizerArgs tokenizer_args_;
   TokenizerHandle handle_ = nullptr;
 };
 
