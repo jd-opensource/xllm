@@ -13,22 +13,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "qwen3_moe_decoder_layer.h"
-
-#include <glog/logging.h>
+#include "deepseek_v2_decoder_layer.h"
 
 namespace xllm {
 namespace layer {
 
-Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
-                                         int32_t layer_id) {
+DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const ModelContext& context,
+                                             int32_t layer_id)
+    : parallel_args_(context.get_parallel_args()) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
-  const auto& parallel_args = context.get_parallel_args();
   const auto& options = context.get_tensor_options();
 
+  // get rank and world_size from parallel_args_
+  rank_ = parallel_args_.rank();
+  world_size_ = parallel_args_.world_size();
+
   // Initialize attention layers
-  attention_ = register_module("self_attn", Qwen2Attention(context));
+  attention_ = register_module(
+      "self_attn",
+      DeepseekV2Attention(model_args, quant_args, parallel_args_, options));
 
   // Initialize norm layers
   input_norm_ = register_module(
@@ -40,46 +44,43 @@ Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
       RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   // Initialize mlp
-  auto mlp_only_layers = model_args.mlp_only_layers();
-  if ((std::count(mlp_only_layers.begin(), mlp_only_layers.end(), layer_id) ==
-       0) &&
-      model_args.num_experts() > 0 &&
-      (layer_id + 1) % model_args.decoder_sparse_step() == 0) {
+  auto first_k_dense_replace = model_args.first_k_dense_replace();
+  if (layer_id >= first_k_dense_replace) {
     moe_mlp_ = register_module("mlp",
-                               FusedMoE(model_args.num_experts(),
+                               FusedMoE(model_args.n_routed_experts(),
                                         model_args.num_experts_per_tok(),
-                                        -1,   // num_expert_group
-                                        0,    // topk_group
-                                        1.0,  // route_scale
+                                        model_args.n_group(),
+                                        model_args.topk_group(),
+                                        model_args.routed_scaling_factor(),
                                         model_args.hidden_size(),
                                         model_args.moe_intermediate_size(),
-                                        0,      // n_shared_experts
-                                        true,   // is_gated
-                                        false,  // has_score_bias
-                                        false,  // has_bias
-                                        false,  // skip_bias_add
+                                        model_args.n_shared_experts(),
+                                        /*is_gated=*/true,
+                                        /*has_score_bias=*/false,
+                                        /*has_bias=*/false,
+                                        /*skip_bias_add=*/false,
                                         model_args.norm_topk_prob(),
                                         model_args.hidden_act(),
-                                        "softmax",
-                                        "",
+                                        model_args.scoring_func(),
+                                        model_args.topk_method(),
                                         quant_args,
-                                        parallel_args,
+                                        parallel_args_,
                                         options));
   } else {
     mlp_ = register_module("mlp",
                            DenseMLP(model_args.hidden_size(),
                                     model_args.intermediate_size(),
-                                    true,
-                                    false,
+                                    /*is_gated=*/true,
+                                    /*has_bias=*/false,
                                     model_args.hidden_act(),
                                     /*enable_result_reduction=*/true,
                                     quant_args,
-                                    parallel_args,
+                                    parallel_args_,
                                     options));
   }
 }
 
-void Qwen3MoeDecoderImpl::load_state_dict(const StateDict& state_dict) {
+void DeepseekV2DecoderImpl::load_state_dict(const StateDict& state_dict) {
   attention_->load_state_dict(state_dict.get_dict_with_prefix("self_attn."));
   input_norm_->load_state_dict(
       state_dict.get_dict_with_prefix("input_layernorm."));
@@ -92,18 +93,26 @@ void Qwen3MoeDecoderImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-torch::Tensor Qwen3MoeDecoderImpl::forward(
+torch::Tensor DeepseekV2DecoderImpl::forward(
     torch::Tensor& x,
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
     const ModelInputParams& input_params) {
-  // Pre-attention norm
+  // Input norm
   torch::Tensor residual = x;
   x = input_norm_(x);
 
   // Attention
   x = attention_->forward(positions, x, attn_metadata, kv_cache);
+
+  // add tensor model group all reduce
+  // to avoid implicit communcation in deepseek attention layer.
+  if (world_size_ > 1) {
+    x = xllm::parallel_state::reduce(x, parallel_args_.tp_group_);
+  }
+
+  // add up residual before post norm
   x = x + residual;
 
   // Post-attention norm
@@ -116,6 +125,8 @@ torch::Tensor Qwen3MoeDecoderImpl::forward(
   } else {
     x = mlp_(x);
   }
+
+  // add up residual after mlp/moe
   x = x + residual;
 
   return x;

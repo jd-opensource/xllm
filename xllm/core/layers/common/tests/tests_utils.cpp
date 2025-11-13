@@ -139,6 +139,130 @@ ParallelArgs CreateDefaultParallelArgs(
   return parallel_args;
 }
 
+// helper function for seeded_tensor
+// Calculate number of elements from shape
+inline int64_t numel_from_shape(torch::IntArrayRef shape) {
+  return std::accumulate(
+      shape.begin(), shape.end(), (int64_t)1, std::multiplies<int64_t>());
+}
+
+// helper function for seeded_tensor
+// FNV-1a 64-bit hash function
+inline uint64_t fnv1a64(const std::string& s) {
+  uint64_t h = 0xcbf29ce484222325ULL;
+  for (unsigned char c : s) {
+    h ^= c;
+    h *= 0x100000001b3ULL;
+  }
+  return h;
+}
+
+// helper struct for seeded_tensor
+// SplitMix64 pseudo-random number generator
+struct SplitMix64 {
+  uint64_t state;
+  explicit SplitMix64(uint64_t seed) : state(seed) {}
+  inline uint64_t next_u64() {
+    state += 0x9E3779B97F4A7C15ULL;
+    uint64_t z = state;
+    z ^= (z >> 30);
+    z *= 0xBF58476D1CE4E5B9ULL;
+    z ^= (z >> 27);
+    z *= 0x94D049BB133111EBULL;
+    z ^= (z >> 31);
+    return z;
+  }
+};
+
+// Generate tensor consistent with Python version
+torch::Tensor seeded_tensor(const std::string& key,
+                            torch::IntArrayRef shape,
+                            torch::ScalarType dtype,
+                            torch::Device device) {
+  const int64_t N = numel_from_shape(shape);
+  // Generate u64 stream
+  SplitMix64 rng(fnv1a64(key));
+  std::vector<uint64_t> buf;
+  buf.reserve(N);
+  for (int64_t i = 0; i < N; ++i) buf.push_back(rng.next_u64());
+
+  // Map and build CPU tensor according to dtype
+  torch::Tensor out_cpu;
+
+  if (torch::isFloatingType(dtype)) {
+    // Floating point: use high 53 bit -> [0,1)
+    std::vector<double> vals;
+    vals.reserve(N);
+    const double inv_2_53 = 1.0 / static_cast<double>(1ULL << 53);
+    for (uint64_t u : buf)
+      vals.push_back(static_cast<double>(u >> 11) * inv_2_53);
+    out_cpu =
+        torch::from_blob(
+            vals.data(), {N}, torch::TensorOptions().dtype(torch::kDouble))
+            .clone()
+            .to(dtype);
+  } else if (dtype == torch::kBool) {
+    std::vector<uint8_t> vals;
+    vals.reserve(N);
+    for (uint64_t u : buf) vals.push_back(static_cast<uint8_t>(u & 1ULL));
+    out_cpu = torch::from_blob(
+                  vals.data(), {N}, torch::TensorOptions().dtype(torch::kBool))
+                  .clone();
+  } else if (torch::isIntegralType(dtype, /*includeBool=*/false)) {
+    // Integer: min + (u % span), use __int128 to handle (cover int64)
+    auto map_mod_span = [&](auto tag) -> torch::Tensor {
+      using T = decltype(tag);
+      std::vector<T> vals;
+      vals.reserve(N);
+      const __int128 minv =
+          static_cast<__int128>(std::numeric_limits<T>::min());
+      const __int128 maxv =
+          static_cast<__int128>(std::numeric_limits<T>::max());
+      const unsigned __int128 span =
+          static_cast<unsigned __int128>(maxv - minv) + 1U;
+      for (uint64_t u : buf) {
+        T x = static_cast<T>(
+            minv +
+            static_cast<__int128>((static_cast<unsigned __int128>(u) % span)));
+        vals.push_back(x);
+      }
+      return torch::from_blob(
+                 vals.data(), {N}, torch::TensorOptions().dtype(dtype))
+          .clone();
+    };
+
+    // handle aliases in a single point for each type.
+    switch (dtype) {
+      case torch::kUInt8:  // alias for torch::kByte
+        out_cpu = map_mod_span(uint8_t{});
+        break;
+      case torch::kInt8:  // alias for torch::kChar
+        out_cpu = map_mod_span(int8_t{});
+        break;
+      case torch::kInt16:  // alias for torch::kShort
+        out_cpu = map_mod_span(int16_t{});
+        break;
+      case torch::kInt32:  // alias for torch::kInt
+        out_cpu = map_mod_span(int32_t{});
+        break;
+      case torch::kInt64:  // alias for torch::kLong
+        out_cpu = map_mod_span(int64_t{});
+        break;
+      default:
+        TORCH_CHECK(false, "Unsupported integer dtype: ", dtype);
+    }
+  } else {
+    TORCH_CHECK(false, "Unsupported dtype for seeded_tensor");
+  }
+
+  // Shape & device
+  out_cpu = out_cpu.view(shape).contiguous();
+  if (device != c10::Device(c10::kCPU)) {
+    return out_cpu.to(device);
+  }
+  return out_cpu;
+}
+
 }  // namespace test
 }  // namespace layer
 }  // namespace xllm

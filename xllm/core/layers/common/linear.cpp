@@ -272,13 +272,13 @@ RowParallelLinearImpl::RowParallelLinearImpl(
     int64_t out_features,
     bool bias,
     bool input_is_parallelized,
-    bool if_reduce_results,
+    bool enable_result_reduction,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options,
     const FusedLinearExtraArgs& linear_extra_args)
     : input_is_parallelized_(input_is_parallelized),
-      if_reduce_results_(if_reduce_results),
+      enable_result_reduction_(enable_result_reduction),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
       linear_extra_args_(linear_extra_args) {
@@ -377,7 +377,7 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     matmul_params.bias = bias;
     output = xllm::kernel::matmul(matmul_params);
   }
-  if (if_reduce_results_ && world_size_ > 1) {
+  if (enable_result_reduction_ && world_size_ > 1) {
     output = xllm::parallel_state::reduce(output, parallel_args_.tp_group_);
   }
   return output;

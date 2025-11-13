@@ -48,6 +48,7 @@ Qwen2DecoderImpl::Qwen2DecoderImpl(const ModelContext& context)
                                   true,
                                   false,
                                   model_args.hidden_act(),
+                                  /*enable_result_reduction=*/true,
                                   quant_args,
                                   parallel_args,
                                   options));

@@ -17,6 +17,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_deepseek_v2_decoder_layer_impl.h"
+#else
+#include "common/deepseek_v2_decoder_layer.h"
 #endif
 
 namespace xllm {
@@ -36,6 +38,19 @@ class DeepseekV2DecoderLayer
             std::make_shared<NpuDeepseekV2DecoderLayerImpl>(context,
                                                             layer_id,
                                                             sm_scale)) {}
+};
+#else
+// DeepSeek V3.2 used different structure but
+// it is still compatible with DeepSeek V2.
+class DeepseekV2DecoderLayer
+    : public torch::nn::ModuleHolder<DeepseekV2DecoderImpl> {
+ public:
+  using torch::nn::ModuleHolder<DeepseekV2DecoderImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = DeepseekV2DecoderImpl;
+
+  DeepseekV2DecoderLayer(const ModelContext& context, const int32_t layer_id)
+      : ModuleHolder(
+            std::make_shared<DeepseekV2DecoderImpl>(context, layer_id)) {}
 };
 #endif
 

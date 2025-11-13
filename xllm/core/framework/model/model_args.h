@@ -116,6 +116,7 @@ struct ModelArgs {
   PROPERTY(bool, norm_topk_prob) = false;
   PROPERTY(int32_t, n_group) = 0;
   PROPERTY(int32_t, topk_group) = 0;
+  PROPERTY(std::string, scoring_func);
   // deepseek v2/v3 MLA
   PROPERTY(int32_t, qk_nope_head_dim) = 0;
   PROPERTY(int32_t, qk_rope_head_dim) = 0;

@@ -17,42 +17,49 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include "attention.h"
+#include "deepseek_v2_attention.h"
+#include "dense_mlp.h"
+#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
+#include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "linear.h"
+#include "fused_moe.h"
+#include "layers/rms_norm.h"
 
 namespace xllm {
 namespace layer {
 
-class DenseMLPImpl : public torch::nn::Module {
+class DeepseekV2DecoderImpl : public torch::nn::Module {
  public:
-  DenseMLPImpl() = default;
-  DenseMLPImpl(int64_t hidden_size,
-               int64_t intermediate_size,
-               bool is_gated,
-               bool has_bias,
-               const std::string& hidden_act,
-               bool enable_result_reduction,
-               const QuantArgs& quant_args,
-               const ParallelArgs& parallel_args,
-               const torch::TensorOptions& options);
+  explicit DeepseekV2DecoderImpl(const ModelContext& context, int32_t layer_id);
 
-  torch::Tensor forward(const torch::Tensor& hidden_states);
+  ~DeepseekV2DecoderImpl() {};
 
   void load_state_dict(const StateDict& state_dict);
 
+  torch::Tensor forward(torch::Tensor& x,
+                        torch::Tensor& positions,
+                        const AttentionMetadata& attn_metadata,
+                        KVCache& kv_cache,
+                        const ModelInputParams& input_params);
+
  private:
-  bool is_gated_;
-  int64_t intermediate_size_;
+  // parallel args
+  int64_t rank_;
+  int64_t world_size_;
   ParallelArgs parallel_args_;
-  ColumnParallelLinear gate_up_proj_{nullptr};
-  RowParallelLinear down_proj_{nullptr};
-  bool is_smoothquant_;
-  std::string hidden_act_;
+
+  DeepseekV2Attention attention_{nullptr};
+  DenseMLP mlp_{nullptr};
+  FusedMoE moe_mlp_{nullptr};
+  RmsNorm input_norm_{nullptr};
+  RmsNorm post_norm_{nullptr};
 };
-TORCH_MODULE(DenseMLP);
 
 }  // namespace layer
 }  // namespace xllm

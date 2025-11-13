@@ -19,6 +19,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <numeric>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -202,6 +204,14 @@ torch::TensorOptions CreateDefaultTensorOptions();
 // Helper function to create default parallel arguments for testing
 ParallelArgs CreateDefaultParallelArgs(
     std::unique_ptr<xllm::ProcessGroup>& mock_process_group);
+
+// create a tensor with a seeded random number generator (based on key and
+// shape) It is robust enough to generate the same tensor across any device or
+// os
+torch::Tensor seeded_tensor(const std::string& key,
+                            torch::IntArrayRef shape,
+                            torch::ScalarType dtype = torch::kFloat,
+                            torch::Device device = torch::Device(torch::kCPU));
 
 }  // namespace test
 }  // namespace layer

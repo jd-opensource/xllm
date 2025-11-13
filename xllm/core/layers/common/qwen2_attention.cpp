@@ -70,7 +70,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                               args.hidden_size(),
                                               /*bias=*/false,
                                               /*input_is_parallelized=*/true,
-                                              /*if_reduce_results=*/true,
+                                              /*enable_result_reduction=*/true,
                                               quant_args,
                                               parallel_args,
                                               options));

@@ -160,7 +160,7 @@ class RowParallelLinearImpl : public torch::nn::Module {
       int64_t out_features,
       bool bias,
       bool input_is_parallelized,
-      bool if_reduce_results,
+      bool enable_result_reduction,
       const QuantArgs& quant_args,
       const ParallelArgs& parallel_args,
       const torch::TensorOptions& options,
@@ -192,7 +192,7 @@ class RowParallelLinearImpl : public torch::nn::Module {
   bool input_is_parallelized_;
 
   // whether to reduce the results
-  bool if_reduce_results_;
+  bool enable_result_reduction_;
 
   // parallel args
   ParallelArgs parallel_args_;

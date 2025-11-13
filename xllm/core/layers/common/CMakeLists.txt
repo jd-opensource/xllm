@@ -18,6 +18,8 @@ cc_library(
     word_embedding_impl.h
     layer_utils.h
     indexer.h
+    deepseek_v2_attention.h
+    deepseek_v2_decoder_layer.h
   SRCS
     flashinfer_workspace.cpp
     deepseek_v2_attention.cpp
@@ -33,6 +35,8 @@ cc_library(
     word_embedding_impl.cpp
     layer_utils.cpp
     indexer.cpp
+    deepseek_v2_attention.cpp
+    deepseek_v2_decoder_layer.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"

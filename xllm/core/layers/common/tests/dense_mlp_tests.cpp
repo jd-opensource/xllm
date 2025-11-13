@@ -170,9 +170,10 @@ class DenseMLPTest : public ::testing::Test {
     // Create MLP with specified dimensions using the new constructor
     return DenseMLP(DenseMLPImpl(hidden_size,
                                  intermediate_size,
-                                 true,    // is_gated
-                                 false,   // has_bias
-                                 "silu",  // hidden_act
+                                 /*is_gated=*/true,
+                                 /*has_bias=*/false,
+                                 /*hidden_act=*/"silu",
+                                 /*enable_result_reduction=*/true,
                                  quant_args_,
                                  parallel_args_,
                                  options_));
@@ -250,9 +251,10 @@ TEST_F(DenseMLPTest, Bfloat16LoadStateDictTest) {
   // Create MLP in bfloat16 mode
   auto mlp = DenseMLP(DenseMLPImpl(hidden_size,
                                    intermediate_size,
-                                   true,    // is_gated
-                                   false,   // has_bias
-                                   "silu",  // hidden_act
+                                   /*is_gated=*/true,
+                                   /*has_bias=*/false,
+                                   /*hidden_act=*/"silu",
+                                   /*enable_result_reduction=*/true,
                                    bfloat16_quant_args,
                                    parallel_args_,
                                    options_));

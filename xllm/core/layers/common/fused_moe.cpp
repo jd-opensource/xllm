@@ -95,6 +95,13 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
       "gate_proj",
       ReplicatedLinear(hidden_size, num_experts, false, quant_args, options));
   if (n_shared_experts_ > 0) {
+    /*
+    The shared_experts are usually implemented using the RowParallelLinear
+    layer. Typically, this output serves as the enable_result_reduction results
+    for the module. If only tensor parallelism is applied, immediate
+    reduction of the shared_experts output isn't necessary; instead, we perform
+    the reduction once at the end of the MoE operation.
+    */
     shared_experts_ =
         register_module("shared_experts",
                         DenseMLP(hidden_size,
@@ -102,6 +109,7 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
                                  is_gated_,
                                  false,
                                  hidden_act_,
+                                 /*enable_result_reduction=*/false,
                                  quant_args,
                                  parallel_args,
                                  options));
