@@ -40,6 +40,7 @@ cc_test(
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )
 
@@ -55,6 +56,7 @@ cc_test(
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )
 
@@ -70,6 +72,7 @@ cc_test(
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )
 
@@ -85,6 +88,7 @@ cc_test(
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )
 
@@ -100,5 +104,6 @@ cc_test(
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )

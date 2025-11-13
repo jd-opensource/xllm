@@ -55,6 +55,12 @@ ProfileManager::ProfileManager(Engine* engine, const Options& options)
   }
   // more profile here, such as token_budget profile and decode length
   // prediction.
+
+  // Warmup ACL graph executor if enabled
+  if (FLAGS_enable_acl_graph) {
+    LOG(INFO) << "Starting ACL graph warmup.";
+    warmup_for_acl_graph();
+  }
 }
 
 // --------------------- for test only ---------------------------
@@ -668,6 +674,62 @@ void ProfileManager::generate_random_decode_batch(
     }
     ++idx;
   }
+}
+
+void ProfileManager::warmup_for_acl_graph() {
+  LOG(INFO) << "Starting ACL graph warmup with prefill and decode requests...";
+
+  auto& model_args = engine_->model_args();
+  int32_t max_context_len = model_args.max_position_embeddings();
+
+  // Warmup parameters - align with bucket logic
+  // Prefill: align max_tokens_per_batch to bucket
+  int32_t prefill_tokens =
+      std::min(FLAGS_max_tokens_per_batch, max_context_len);
+
+  std::vector<int32_t> decode_seq_lens = {16};
+
+  // Generate decode_batch_sizes aligned with bucket logic
+  // For decode: n_tokens = batch_size * num_decoding_tokens (usually
+  // num_decoding_tokens = 1) So batch_size directly corresponds to n_tokens
+  // bucket values Bucket values: 1, 2, 4, 8, 16, then 32, 48, 64, ...
+  // (multiples of 16)
+  std::vector<int32_t> decode_batch_sizes = {1, 2, 4, 8, 16};
+  int32_t max_seqs_per_batch = FLAGS_max_seqs_per_batch;
+  // From 32 onwards, use multiples of 16 (bucket alignment)
+  for (int32_t batch_size = 32; batch_size <= max_seqs_per_batch;
+       batch_size += 16) {
+    decode_batch_sizes.push_back(batch_size);
+  }
+  // Ensure max_seqs_per_batch is included if not already added
+  if (decode_batch_sizes.back() != max_seqs_per_batch) {
+    decode_batch_sizes.push_back(max_seqs_per_batch);
+  }
+
+  // Limit decode seq_lens to max_context_len
+  for (auto& seq_len : decode_seq_lens) {
+    if (seq_len > max_context_len) {
+      seq_len = max_context_len;
+    }
+  }
+
+  // ========== Warmup Prefill Request ==========
+  LOG(INFO) << "Warming up prefill request: tokens=" << prefill_tokens;
+  try {
+    // Prefill: prefix_length = 0 (empty KV cache), batch_size = 10,
+    // sequence_length = prefill_tokens / 10
+    double latency = run_request(prefill_tokens, 0, 1);
+    LOG(INFO) << "Prefill warmup completed: tokens=" << prefill_tokens
+              << ", latency=" << latency << " ms";
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Prefill warmup failed: tokens=" << prefill_tokens
+                 << ", error: " << e.what();
+  }
+
+  // ========== Warmup Decode Requests ==========
+  // confict with async_schedule, so skip for now
+
+  LOG(INFO) << "ACL graph warmup completed";
 }
 
 }  // namespace xllm

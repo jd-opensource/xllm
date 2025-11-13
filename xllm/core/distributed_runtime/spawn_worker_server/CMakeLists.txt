@@ -17,6 +17,7 @@ cc_binary(
     ascendcl
     nnopbase
     atb
+    atb_customize
     c_sec
     spdlog::spdlog
 )

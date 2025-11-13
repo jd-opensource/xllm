@@ -82,6 +82,22 @@ struct MMData {
   }
 
   template <typename T>
+  bool update(uint32_t type, const MMKey& key, const T& value) {
+    const auto& itor = data_.find(key);
+    if (itor != data_.end()) {
+      // Key exists, update it
+      data_[key] = value;
+      ty_ |= type;
+      return true;
+    } else {
+      // Key doesn't exist, add it (same as add method)
+      ty_ |= type;
+      data_.insert({key, value});
+      return true;
+    }
+  }
+
+  template <typename T>
   std::optional<T> get(const MMKey& key) const {
     if (!valid()) return std::nullopt;
 

@@ -28,20 +28,20 @@ if(USE_NPU)
     if(DEVICE_TYPE STREQUAL "USE_A3")
         message("downloading a3 arm xllm kernels")
         file(DOWNLOAD 
-            "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.2-Linux.a3.arm.rpm"
+            "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.3-Linux.a3.arm.rpm"
             "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
         )
     else()  
       if(DEVICE_ARCH STREQUAL "ARM")
           message("downloading a2 arm xllm_kernels")
           file(DOWNLOAD 
-              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.2-Linux.a2.arm.rpm"
+              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.3-Linux.a2.arm.rpm"
               "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
           )
       else()
           message("downloading a2 x86 xllm_kernels")
           file(DOWNLOAD 
-              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.2-Linux.a2.x86.rpm"
+              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.3-Linux.a2.x86.rpm"
               "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
           )
       endif()

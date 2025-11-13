@@ -170,7 +170,6 @@ class Glm4MoeDecoderImpl : public NpuBaseLayer {
                                const ModelInputParams& input_params,
                                torch::Tensor& expert_array,
                                bool is_prefill);
-
   std::string model_name_;
 
   int32_t device_id_;

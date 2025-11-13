@@ -86,9 +86,15 @@ DEFINE_bool(enable_acl_graph,
             "Whether to enable ACL graph execution for decode phase.");
 
 DEFINE_int32(max_seq_len_for_graph_mode,
-             20480,
-             "Maximum number of tokens per sequence for ACL graph execution.");
+             0,
+             "Maximum number of tokens per sequence for ACL graph execution. "
+             "If 0, use model max_position_embeddings.");
 
+DEFINE_bool(enable_acl_graph_no_padding,
+            false,
+            "Whether to enable ACL graph execution for decode phase without "
+            "padding. If true, graph will be caputured with every actual num "
+            "tokens, as stride is 1.");
 // --- vlm config ---
 
 DEFINE_int32(limit_image_per_prompt,

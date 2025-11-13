@@ -666,10 +666,12 @@ TEST(ChunkedPrefillSchedulerTest, LatencySchedule) {
   auto requests = generate_request(
       {10, 10, 10}, {10, 10, 10}, std::nullopt, std::nullopt, 30000);
   // check if time equation fits well
-  EXPECT_TRUE(static_cast<int32_t>(profile_manager->predict_step_time(
-                  requests[0]->sequences()[0].get(), true, true)) == 150);
-  EXPECT_TRUE(static_cast<int32_t>(
-                  profile_manager->predict_step_time(2, 0, true, true)) == 22);
+  EXPECT_EQ(static_cast<int32_t>(profile_manager->predict_step_time(
+                requests[0]->sequences()[0].get(), true, true)),
+            150);
+  EXPECT_EQ(static_cast<int32_t>(
+                profile_manager->predict_step_time(2, 0, true, true)),
+            22);
 
   std::vector<std::shared_ptr<Request>> running_requests;
 
@@ -678,9 +680,9 @@ TEST(ChunkedPrefillSchedulerTest, LatencySchedule) {
     scheduler->add_request(req);
   }
   auto batch = scheduler->prepare_batch_test();
-  EXPECT_TRUE(batch.size() == 1);
-  EXPECT_TRUE(batch[0].size() == 3);
-  EXPECT_TRUE(scheduler->get_running_requests().size() == 3);
+  EXPECT_EQ(batch.size(), 1);
+  EXPECT_EQ(batch[0].size(), 3);
+  EXPECT_EQ(scheduler->get_running_requests().size(), 3);
   running_requests = scheduler->get_running_requests();
   update_requests(running_requests);
 
@@ -691,13 +693,13 @@ TEST(ChunkedPrefillSchedulerTest, LatencySchedule) {
   batch = scheduler->prepare_batch_test();
   auto running_sequences_budgets = scheduler->get_running_sequences_budgets();
 
-  EXPECT_TRUE(batch.size() == 1);
+  EXPECT_EQ(batch.size(), 1);
   // tpot = 150 > 3 * 10 , all requests enter decode. But not enough for extra
   // whole prefill, then do chunked
-  EXPECT_TRUE(batch[0].size() == 4);
-  EXPECT_TRUE(scheduler->get_running_requests().size() == 4);
-  EXPECT_TRUE(running_sequences_budgets.size() == 4);
-  EXPECT_TRUE(running_sequences_budgets[3] == max_tokens_per_chunk_for_prefill);
+  EXPECT_EQ(batch[0].size(), 4);
+  EXPECT_EQ(scheduler->get_running_requests().size(), 4);
+  EXPECT_EQ(running_sequences_budgets.size(), 4);
+  EXPECT_EQ(running_sequences_budgets[3], max_tokens_per_chunk_for_prefill);
 }
 
 }  // namespace xllm

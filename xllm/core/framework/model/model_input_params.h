@@ -95,7 +95,11 @@ struct ModelInputParams {
     params.kv_cache_start_offsets = safe_to(kv_cache_start_offsets, device);
 
     // Copy graph_buffer to device
-    params.graph_buffer = safe_to(graph_buffer, device, true);
+    // params.graph_buffer = safe_to(graph_buffer, device, true);
+    params.graph_buffer.attn_mask =
+        safe_to(graph_buffer.attn_mask, device, true);
+    params.graph_buffer.tiling_data =
+        safe_to(graph_buffer.tiling_data, device, true);
 
     return params;
   }
@@ -200,7 +204,12 @@ struct ModelInputParams {
   torch::Tensor kv_cache_start_offsets;
   // Graph execution buffer for temporary tensor storage
   // Used by ACL Graph Executor to avoid repeated memory allocation
-  torch::Tensor graph_buffer;
+
+  struct GraphBuffer {
+    torch::Tensor attn_mask;
+    torch::Tensor tiling_data;
+  };
+  GraphBuffer graph_buffer;
 };
 
 }  // namespace xllm

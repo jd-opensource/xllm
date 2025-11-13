@@ -34,7 +34,7 @@ target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb ZLIB::ZLIB p
 add_dependencies(xllm brpc-static)
 
 if(USE_NPU)
-  set(COMMON_LIBS Python::Python ascendcl hccl c_sec nnopbase ms_tools_ext)
+  set(COMMON_LIBS Python::Python ascendcl atb_customize hccl c_sec nnopbase ms_tools_ext)
 elseif(USE_MLU)
   set(COMMON_LIBS Python::Python)
 endif()
