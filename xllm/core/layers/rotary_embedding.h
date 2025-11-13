@@ -20,7 +20,9 @@ limitations under the License.
 #include <c10/core/ScalarType.h>
 #include <torch/torch.h>
 
+#include <functional>
 #include <tuple>
+#include <unordered_map>
 
 #include "framework/model/model_args.h"
 
@@ -53,6 +55,40 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                     bool interleaved,
                                     torch::Tensor inv_freq,
                                     const torch::TensorOptions& options);
+
+// Internal: Cache descriptor structure for cos_sin_cache sharing
+struct CosSinCacheDesc {
+  int64_t rotary_dim;
+  int64_t max_position_embeddings;
+  bool interleaved;
+  float scaling_factor;
+  float attn_factor;
+  float mscale;
+  float mscale_all_dim;
+  size_t inv_freq_hash;  // Hash of inv_freq tensor content
+  torch::Device device;
+  torch::ScalarType dtype;
+
+  bool operator==(const CosSinCacheDesc& other) const {
+    return rotary_dim == other.rotary_dim &&
+           max_position_embeddings == other.max_position_embeddings &&
+           interleaved == other.interleaved &&
+           scaling_factor == other.scaling_factor &&
+           attn_factor == other.attn_factor && mscale == other.mscale &&
+           mscale_all_dim == other.mscale_all_dim &&
+           inv_freq_hash == other.inv_freq_hash && device == other.device &&
+           dtype == other.dtype;
+  }
+};
+
+// Internal: Hash function for CosSinCacheDesc
+inline size_t hash_combine(size_t seed, size_t value) {
+  return seed ^ (value + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+}
+
+// Internal: Compute hash for inv_freq tensor
+size_t compute_inv_freq_hash(const torch::Tensor& inv_freq);
+
 }  // namespace rotary
 
 class RotaryEmbedding : public torch::nn::Module {

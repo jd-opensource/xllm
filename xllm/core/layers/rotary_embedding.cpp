@@ -28,6 +28,53 @@ limitations under the License.
 namespace xllm {
 
 namespace {
+
+// Hash function for CosSinCacheDesc
+struct CosSinCacheDescHash {
+  size_t operator()(const rotary::CosSinCacheDesc& key) const {
+    size_t hash = 0;
+    hash = rotary::hash_combine(hash, std::hash<int64_t>{}(key.rotary_dim));
+    hash = rotary::hash_combine(
+        hash, std::hash<int64_t>{}(key.max_position_embeddings));
+    hash = rotary::hash_combine(hash, std::hash<bool>{}(key.interleaved));
+    hash = rotary::hash_combine(hash, std::hash<float>{}(key.scaling_factor));
+    hash = rotary::hash_combine(hash, std::hash<float>{}(key.attn_factor));
+    hash = rotary::hash_combine(hash, std::hash<float>{}(key.mscale));
+    hash = rotary::hash_combine(hash, std::hash<float>{}(key.mscale_all_dim));
+    hash = rotary::hash_combine(hash, key.inv_freq_hash);
+    hash = rotary::hash_combine(hash, std::hash<torch::Device>{}(key.device));
+    hash =
+        rotary::hash_combine(hash, std::hash<torch::ScalarType>{}(key.dtype));
+    return hash;
+  }
+};
+
+// Cache manager for cos_sin_cache sharing
+class CosSinCacheManager {
+ public:
+  static CosSinCacheManager& get_instance() {
+    static CosSinCacheManager instance;
+    return instance;
+  }
+
+  torch::Tensor get_or_create_cache(const rotary::CosSinCacheDesc& key,
+                                    std::function<torch::Tensor()> factory) {
+    auto it = cache_.find(key);
+    if (it != cache_.end()) {
+      return it->second;  // Return shared tensor
+    }
+    // Create new and cache it
+    auto tensor = factory();
+    cache_[key] = tensor;
+    return tensor;
+  }
+
+ private:
+  std::
+      unordered_map<rotary::CosSinCacheDesc, torch::Tensor, CosSinCacheDescHash>
+          cache_;
+};
+
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
 
@@ -90,6 +137,38 @@ inline std::tuple<int, int> yarn_find_correction_range(
   return std::make_tuple(std::max(low, 0), std::min(high, dim - 1));
 }
 
+// Create cos_sin tensor for rotary embedding cache
+inline torch::Tensor create_cos_sin_tensor(
+    int64_t max_position_embeddings,
+    float scaling_factor,
+    float attn_factor,
+    float mscale,
+    float mscale_all_dim,
+    bool interleaved,
+    const torch::Tensor& inv_freq,
+    const torch::TensorOptions& options) {
+  float mscale_ = static_cast<float>(
+      rotary::yarn_get_mscale(scaling_factor, mscale) /
+      rotary::yarn_get_mscale(scaling_factor, mscale_all_dim) * attn_factor);
+  // [max_position_embeddings]
+  auto t = torch::arange(max_position_embeddings * scaling_factor);
+  // [max_position_embeddings, rotary_dim/2]
+  const auto freqs = torch::einsum("i,j->ij", {t, inv_freq});
+  // Create cos and sin embeddings.
+  torch::Tensor emd;
+  if (interleaved) {
+    // [a, b, c, d] => [a, a, b, b, c, c, d, d]
+    emd = freqs.repeat_interleave(/*repeats=*/2, /*dim=*/-1);
+  } else {
+    // [a, b, c, d] => [a, b, c, d, a, b, c, d]
+    emd = torch::cat({freqs, freqs}, /*dim=*/-1);
+  }
+  const auto cos_sin =
+      torch::cat({emd.cos() * mscale_, emd.sin() * mscale_}, /*dim=*/-1)
+          .to(options);
+  return cos_sin;
+}
+
 inline torch::Tensor yarn_linear_ramp_mask(float low, float high, int64_t dim) {
   if (low == high) {
     high += 0.001;  // Prevent singularity
@@ -115,6 +194,25 @@ std::tuple<torch::Tensor, torch::Tensor> apply_rotary_pos_emb(
 }  // namespace
 
 namespace rotary {
+
+// Compute hash for inv_freq tensor content
+size_t compute_inv_freq_hash(const torch::Tensor& inv_freq) {
+  // Ensure tensor is contiguous and on CPU for hashing
+  auto cpu_tensor = inv_freq.contiguous().cpu();
+  auto numel = cpu_tensor.numel();
+  if (numel == 0) {
+    return 0;
+  }
+
+  // Compute hash based on tensor data
+  size_t hash = 0;
+  auto data_ptr = cpu_tensor.data_ptr<float>();
+  for (int64_t i = 0; i < numel; ++i) {
+    // Hash each float value
+    hash = hash_combine(hash, std::hash<float>{}(data_ptr[i]));
+  }
+  return hash;
+}
 
 float yarn_get_mscale(float scale, float mscale) {
   if (scale <= 0.0) {
@@ -165,26 +263,30 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                     float mscale_all_dim,
                                     torch::Tensor inv_freq,
                                     const torch::TensorOptions& options) {
-  float mscale_ = static_cast<float>(
-      yarn_get_mscale(scaling_factor, mscale) /
-      yarn_get_mscale(scaling_factor, mscale_all_dim) * attn_factor);
-  // [max_position_embeddings]
-  auto t = torch::arange(max_position_embeddings * scaling_factor);
-  // [max_position_embeddings, rotary_dim/2]
-  const auto freqs = torch::einsum("i,j->ij", {t, inv_freq});
-  // Create cos and sin embeddings.
-  torch::Tensor emd;
-  if (interleaved) {
-    // [a, b, c, d] => [a, a, b, b, c, c, d, d]
-    emd = freqs.repeat_interleave(/*repeats=*/2, /*dim=*/-1);
-  } else {
-    // [a, b, c, d] => [a, b, c, d, a, b, c, d]
-    emd = torch::cat({freqs, freqs}, /*dim=*/-1);
-  }
-  const auto cos_sin =
-      torch::cat({emd.cos() * mscale_, emd.sin() * mscale_}, /*dim=*/-1)
-          .to(options);
-  return cos_sin;
+  // Create cache descriptor using aggregate initialization
+  CosSinCacheDesc desc{rotary_dim,
+                       max_position_embeddings,
+                       interleaved,
+                       scaling_factor,
+                       attn_factor,
+                       mscale,
+                       mscale_all_dim,
+                       compute_inv_freq_hash(inv_freq),
+                       options.device(),
+                       options.dtype().toScalarType()};
+
+  // Get or create cache using cache manager
+  auto& cache_manager = CosSinCacheManager::get_instance();
+  return cache_manager.get_or_create_cache(desc, [&]() {
+    return create_cos_sin_tensor(max_position_embeddings,
+                                 scaling_factor,
+                                 attn_factor,
+                                 mscale,
+                                 mscale_all_dim,
+                                 interleaved,
+                                 inv_freq,
+                                 options);
+  });
 }
 
 torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
