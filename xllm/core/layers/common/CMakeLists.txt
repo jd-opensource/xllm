@@ -5,11 +5,13 @@ cc_library(
     common_layers
   HDRS
     qwen2_attention.h
+    qwen2_vision_attention.h
     fuse_norm.h
     rotary_embedding.h
     fused_moe.h
     dense_mlp.h
     qwen2_decoder_layer.h
+    qwen2_5_vision_layer.h
     qwen3_moe_decoder_layer.h
     linear.h
     word_embedding_impl.h
@@ -17,11 +19,13 @@ cc_library(
     indexer.h
   SRCS
     qwen2_attention.cpp
+    qwen2_vision_attention.cpp
     fuse_norm.cpp
     rotary_embedding.cpp
     fused_moe.cpp
     dense_mlp.cpp
     qwen2_decoder_layer.cpp
+    qwen2_5_vision_layer.cpp
     qwen3_moe_decoder_layer.cpp
     linear.cpp
     word_embedding_impl.cpp

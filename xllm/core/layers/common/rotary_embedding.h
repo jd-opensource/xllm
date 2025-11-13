@@ -20,6 +20,11 @@ limitations under the License.
 
 #include <memory>
 
+#if defined(USE_MLU)
+#include "../mlu/attention.h"
+#elif defined(USE_CUDA)
+#include "../cuda/attention.h"
+#endif
 #include "framework/model/model_args.h"
 #include "layers/rotary_embedding.h"
 
@@ -50,6 +55,30 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
   torch::Tensor cos_sin_cache_;
 };
 TORCH_MODULE(RotaryEmbedding);
+
+class MRotaryEmbeddingImpl : public RotaryEmbeddingImpl {
+ public:
+  MRotaryEmbeddingImpl(int64_t rotary_dim,
+                       int64_t max_position_embeddings,
+                       int64_t rope_theta,
+                       bool interleaved,
+                       const std::vector<int64_t>& rope_scaling_mrope_section,
+                       const torch::TensorOptions& options);
+
+  void forward(torch::Tensor& q,
+               torch::Tensor& k,
+               const torch::Tensor& positions,
+               AttentionMetadata& attn_metadata);
+
+  void precompute_sin_cos_cache(const torch::Tensor& positions,
+                                AttentionMetadata& attn_metadata);
+
+ private:
+  bool interleaved_;
+  std::vector<int64_t> mrope_section_;
+  torch::Tensor mrope_cu_seq_lens_;
+};
+TORCH_MODULE(MRotaryEmbedding);
 
 class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
  public:

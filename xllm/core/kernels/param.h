@@ -55,7 +55,7 @@ struct RotaryParams {
   // Required in pack mode (when q/k are 3D). Size should be [batch_size + 1].
   // Note: In current MLU implementation, this is always passed to underlying
   // API.
-  torch::Tensor cu_query_lens;
+  std::optional<torch::Tensor> cu_query_lens;
   // Whether to use interleaved rotary embedding pattern.
   bool interleaved;
   // Whether to use discrete position mode. If true, position_ids must be

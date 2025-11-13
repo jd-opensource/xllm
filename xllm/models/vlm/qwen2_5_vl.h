@@ -15,7 +15,12 @@ limitations under the License.
 
 #pragma once
 
+#if defined(USE_NPU)
 #include <atb/atb_infer.h>
+
+#include "xllm_kernels/core/include/atb_speed/log.h"
+#endif
+
 #include <c10/core/ScalarType.h>
 #include <torch/torch.h>
 
@@ -31,7 +36,6 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
 
@@ -174,10 +178,12 @@ class Qwen2_5_VisionBlockImpl : public torch::nn::Module {
     encoder_layer_->load_state_dict(state_dict);
   }
 
+#if defined(USE_NPU)
   void verify_loaded_weights(const std::string& prefix) const {
     encoder_layer_->verify_loaded_weights();
   }
   void merge_loaded_weights() { encoder_layer_->merge_loaded_weights(); }
+#endif
 
  private:
   layer::Qwen2dot5VisionEncoderLayer encoder_layer_{nullptr};
@@ -287,7 +293,13 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
 
     hidden_size_ =
         context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
+#if defined(USE_NPU)
     ln_q_ = register_module("ln_q", layer::RmsNorm(context));
+#else
+    ln_q_ = register_module(
+        "ln_q",
+        layer::RmsNorm(context_dim, model_args.rms_norm_eps(), options));
+#endif
 
     auto cpl = torch::nn::Linear(
         torch::nn::LinearOptions(hidden_size_, hidden_size_).bias(true));
@@ -303,7 +315,11 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor x) {
+#if defined(USE_NPU)
     x = ln_q_(x, 0);
+#elif defined(USE_MLU)
+    x = ln_q_(x);
+#endif
     x = x.view({-1, hidden_size_});
     return mlp_->forward(x);
   }
@@ -344,6 +360,7 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
     }
   }
 
+#if defined(USE_NPU)
   void verify_loaded_weights(const std::string& prefix) const {
     ln_q_->verify_loaded_weights(prefix + "ln_q.");
     CHECK(is_cpl_weight_loaded)
@@ -357,6 +374,7 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
   }
 
   void merge_loaded_weights() { ln_q_->merge_loaded_weights(); }
+#endif
 
  private:
   int64_t hidden_size_;
@@ -564,16 +582,21 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
     cu_seqlens = F::pad(
         cu_seqlens, F::PadFuncOptions({1, 0}).mode(torch::kConstant).value(0));
 
+    m_cos = rotary_pos_emb.cos().type_as(hidden_states);
+    m_sin = rotary_pos_emb.sin().type_as(hidden_states);
+
+#if defined(USE_NPU)
     // transformers
     cu_seqlens = torch::diff(cu_seqlens);
     cu_window_seqlens = torch::diff(cu_window_seqlens);
-    m_cos = rotary_pos_emb.cos().type_as(hidden_states);
+
     m_cos = torch::nn::functional::pad(
         m_cos, torch::nn::functional::PadFuncOptions({0, 24}));
-    m_cos = m_cos.repeat({1, 2});
-    m_sin = rotary_pos_emb.sin().type_as(hidden_states);
     m_sin = torch::nn::functional::pad(
         m_sin, torch::nn::functional::PadFuncOptions({0, 24}));
+#endif
+
+    m_cos = m_cos.repeat({1, 2});
     m_sin = m_sin.repeat({1, 2});
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
@@ -623,6 +646,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
     merger_->load_state_dict(state_dict.get_dict_with_prefix("merger."));
   }
 
+#if defined(USE_NPU)
   void verify_loaded_weights(const std::string& prefix) const {
     patch_embed_->verify_loaded_weights(prefix + "patch_embed.");
     for (int idx = 0; idx < blocks_->size(); ++idx) {
@@ -638,6 +662,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
     }
     merger_->merge_loaded_weights();
   }
+#endif
 
  private:
   int hidden_size_ = 0;
@@ -738,9 +763,12 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     for (const auto& state_dict : loader->get_state_dicts()) {
       visual_->load_state_dict(state_dict->get_dict_with_prefix("visual."));
     }
+
+#if defined(USE_NPU)
     // verify
     visual_->verify_loaded_weights("visual.");
     visual_->merge_loaded_weights();
+#endif
     if (!model_args_.image_embedding_mode()) {
       language_model_->load_model(std::move(loader));
     }
@@ -782,6 +810,7 @@ REGISTER_MODEL_ARGS(qwen2_5_vl, [&] {
   LOAD_ARG_OR(video_token_id, "video_token_id", 151656);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
+  LOAD_ARG_OR(attention_bias, "attention_bias", true);
   // LOAD_ARG_OR(initializer_range, "initializer_range", 0.02);
   LOAD_ARG_OR(intermediate_size, "intermediate_size", 18944);
   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 128000);
