@@ -277,7 +277,8 @@ Glm4MoeDecoderImpl::Glm4MoeDecoderImpl(const ModelContext& context,
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       num_speculative_tokens_(
-          context.get_model_args().num_speculative_tokens()) {
+          context.get_model_args().num_speculative_tokens()),
+      context_(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -382,7 +383,12 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
 
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
-  param.enableSplitFuse = (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+  param.enableSplitFuse =
+      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+
+  // not support MTP model yet
+  param.enableAclGraph =
+      FLAGS_enable_acl_graph && !is_prefill && args.n_layers() > 1;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}
@@ -406,7 +412,7 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
   param.enableSwiGLUQuantForSharedExperts = false;  // TODO
 
   param.useQKNorm = args.use_qk_norm();
-  if(args.use_qk_norm()){
+  if (args.use_qk_norm()) {
     WEIGHT_COUNT_PER_LAYER = 70;
     WEIGHT_MAPPING_W8A8["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
     WEIGHT_MAPPING_W8A8["self_attn.k_norm.weight"] = K_NORM_WEIGHT;
@@ -1086,8 +1092,9 @@ torch::Tensor Glm4MoeDecoderImpl::forward(
     std::vector<std::atomic<bool>*> event_flag,
     int node_id) {
   atb::Status st;
-  if (input_params.decode_seq_range.second !=
-      input_params.q_seq_lens.size(0) - 1) {
+  bool is_prefill = input_params.decode_seq_range.second !=
+                    input_params.q_seq_lens.size(0) - 1;
+  if (is_prefill) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -1199,6 +1206,13 @@ void Glm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
+
+  if (FLAGS_enable_acl_graph && !is_prefill &&
+      input_params.graph_buffer.tiling_data.defined()) {
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.graph_buffer.tiling_data);
+  }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     CHECK_THROW(node.inTensors.at(i) == nullptr,

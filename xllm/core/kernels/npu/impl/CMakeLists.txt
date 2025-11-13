@@ -37,9 +37,11 @@ cc_test(
     :npu_kernels_impl
     GTest::gtest
     GTest::gtest_main
+    opapi
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )
 
@@ -52,9 +54,11 @@ cc_test(
     :npu_kernels_impl
     GTest::gtest
     GTest::gtest_main
+    opapi
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )
 
@@ -67,9 +71,11 @@ cc_test(
     :npu_kernels_impl
     GTest::gtest
     GTest::gtest_main
+    opapi
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )
 
@@ -82,9 +88,11 @@ cc_test(
     :npu_kernels_impl
     GTest::gtest
     GTest::gtest_main
+    opapi
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )
 
@@ -97,8 +105,10 @@ cc_test(
     :npu_kernels_impl
     GTest::gtest
     GTest::gtest_main
+    opapi
     xllm_kernels
     c_sec
     atb
+    opapi
     spdlog::spdlog
 )

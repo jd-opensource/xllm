@@ -30,12 +30,13 @@ void NpuWordEmbeddingImpl::param_from_args(
   if (dp_size_ > 1) {
     param.tensorParallelInfo.rank = dp_local_tp_rank_;
     param.tensorParallelInfo.worldSize = dp_local_tp_size_;
-    param.tensorParallelInfo.backend = "lccl";
+    param.tensorParallelInfo.backend = FLAGS_communication_backend;
   } else if (parallel_args.world_size() != 1) {
     // param.tensorParallelInfo = {parallel_args.rank(),
     // parallel_args.world_size(), "lccl"};
-    param.tensorParallelInfo = {
-        parallel_args.rank(), parallel_args.world_size(), "lccl"};
+    param.tensorParallelInfo = {parallel_args.rank(),
+                                parallel_args.world_size(),
+                                FLAGS_communication_backend};
   }
   // param.linearParallelParam.tensorParallelInfo.backend =
   // FLAGS_communication_backend;
