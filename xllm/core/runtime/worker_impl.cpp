@@ -759,4 +759,13 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
+bool WorkerImpl::check_is_prefill(const std::vector<int>& q_seq_lens_vec) {
+  for (auto q_len : q_seq_lens_vec) {
+    if (q_len > 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace xllm
