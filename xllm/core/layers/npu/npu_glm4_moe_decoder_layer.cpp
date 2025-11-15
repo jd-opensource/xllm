@@ -382,7 +382,8 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
 
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
-  param.enableSplitFuse = (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+  param.enableSplitFuse =
+      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}
@@ -406,7 +407,7 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
   param.enableSwiGLUQuantForSharedExperts = false;  // TODO
 
   param.useQKNorm = args.use_qk_norm();
-  if(args.use_qk_norm()){
+  if (args.use_qk_norm()) {
     WEIGHT_COUNT_PER_LAYER = 70;
     WEIGHT_MAPPING_W8A8["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
     WEIGHT_MAPPING_W8A8["self_attn.k_norm.weight"] = K_NORM_WEIGHT;

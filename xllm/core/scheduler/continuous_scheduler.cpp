@@ -93,7 +93,6 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   } else {
     min_speculative_tokens_required_ = options_.num_speculative_tokens();
   }
-
 }
 
 ContinuousScheduler::~ContinuousScheduler() { running_requests_.clear(); }
