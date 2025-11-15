@@ -1039,5 +1039,13 @@ AlignedTensorCreater::AlignedTensorCreater(
   LOG(INFO) << "Page aligned: "
             << ((uintptr_t)base_ptr_ % page_size == 0 ? "YES" : "NO");
 }
+bool WorkerImpl::check_is_prefill(const std::vector<int>& q_seq_lens_vec) {
+  for (auto q_len : q_seq_lens_vec) {
+    if (q_len > 1) {
+      return true;
+    }
+  }
+  return false;
+}
 
 }  // namespace xllm

@@ -174,7 +174,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
   // should be in same prefill stage, so, to judge empty_kv_cache,
   // just use micro batch 0 here
   if (options_.enable_speculative_decode() && !is_spec_draft_) {
-    if (input.input_params.q_seq_lens_vec[0] > 1) {
+    if (check_is_prefill(input.input_params.q_seq_lens_vec)) {
       output.sample_output.embeddings = hidden_states;
     } else if (sampling_params.sample_idxes.defined()) {
       // auto sample_idxes =

@@ -171,7 +171,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
   }
 
   // TODO: support data parallel case
-  if (input.input_params.q_seq_lens_vec[0] > 1) {
+  if (check_is_prefill(input.input_params.q_seq_lens_vec)) {
     return step_prefill(input);
   } else {
     return step_decode(input);
@@ -180,7 +180,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step_empty(
     const ForwardInput& input) {
-  if (input.input_params.q_seq_lens_vec[0] > 1) {
+  if (check_is_prefill(input.input_params.q_seq_lens_vec)) {
     auto output = impl_->step(input);
     auto draft_output = draft_impl_->step(input);
     return output;
@@ -224,9 +224,10 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
   auto offset = input.input_params.num_sequences;
   auto token_offset = prefill_input.token_ids.size(0);
   if (token_offset > 0) {
-    prefill_input.input_params.mm_data = MMData(
-        MMType::EMBEDDING,
-        {{"embedding", embeddings.narrow(0, token_start_idx, token_offset)}});
+    prefill_input.input_params.mm_data =
+        MMData(MMType::EMBEDDING,
+               {{"embedding",
+                 embeddings.narrow(0, token_start_idx, token_offset).clone()}});
   }
   if (next_tokens.defined()) {
     auto& token_ids = prefill_input.token_ids;
@@ -329,7 +330,11 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
       // final step
       prepare_validate_inputs(input, validate_input, true);
     } else {
-      prepare_draft_inputs(draft_input, next_step_input, 1, device_);
+      if (i == 0) {
+        prepare_draft_inputs(input, next_step_input, 1, device_);
+      } else {
+        prepare_draft_inputs(draft_input, next_step_input, 1, device_);
+      }
     }
     draft_outputs.push_back(std::move(future).get().value());
     // update input of next step
@@ -759,7 +764,7 @@ void SpeculativeWorkerImpl::update_sampling_params(
 void SpeculativeWorkerImpl::prepare_work_before_execute(
     const ForwardInput& input,
     ForwardInput& processed_input) {
-  if (input.input_params.q_seq_lens_vec[0] > 1) {
+  if (check_is_prefill(input.input_params.q_seq_lens_vec)) {
     WorkerImpl::prepare_work_before_execute(input, processed_input);
   } else {
     if (enable_schedule_overlap()) {
