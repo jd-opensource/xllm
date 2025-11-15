@@ -319,7 +319,7 @@ void SpeculativeWorkerImpl::prepare_prefill_inputs(
       new_token_ids.insert(new_token_ids.end(),
                            tokens_ids_slice_i.begin(),
                            tokens_ids_slice_i.end());
-      new_token_ids.emplace_back(extra_token_ids[i]);
+      new_token_ids.emplace_back(extra_token_ids[j]);
     }
     prefill_input.token_ids =
         torch::tensor(new_token_ids, prefill_input.positions.options());
