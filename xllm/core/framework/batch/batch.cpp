@@ -52,8 +52,8 @@ void Batch::add(Sequence* sequence, uint32_t allowed_max_token) {
     input_embeddings_vec_.emplace_back(input_embedding);
 
   const auto& mm_data = sequence->get_mm_data();
-  // if (sequence->is_prefill_stage() &&  mm_data.valid()) // TODO:Compatible
-  // With Chunked Prefill
+  //  if (sequence->is_prefill_stage() &&  mm_data.valid()) // TODO:Compatible
+  //  With Chunked Prefill
   if ((sequence->kv_state().kv_cache_tokens_num() <
        sequence->num_prompt_tokens()) &&
       mm_data.valid())
@@ -83,6 +83,7 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
 
 RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
                                              uint32_t end_idx,
+                                             const ModelArgs& args,
                                              ThreadPool* thread_pool) {
   BatchInputBuilder builder(sequences_,
                             allowed_max_tokens_,
@@ -91,7 +92,7 @@ RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
                             copy_in_cache_block_infos_,
                             copy_out_cache_block_infos_,
                             swap_cache_block_infos_,
-                            nullptr,
+                            &args,
                             thread_pool);
   return builder.build_raw_forward_input(start_idx, end_idx);
 }

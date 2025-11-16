@@ -1,5 +1,5 @@
-# python examples/generate_vlm.py --model='/path/models/Qwen2.5-VL-7B' --devices='npu:0'
-# python generate_vlm.py --model='/path/models/Qwen2.5-VL-7B' --devices='npu:0,npu:1'
+# python generate_vlm.py --model /path/to/Qwen2.5-VL-7B-Instruct/ --disable_prefix_cache --disable_chunked_prefill --max_seqs_per_batch 4 --devices='npu:0' --enable_shm
+# python generate_vlm.py --model /path/to/Qwen2.5-VL-7B-Instruct/ --disable_prefix_cache --disable_chunked_prefill --max_seqs_per_batch 4 --devices='npu:0,npu:1' --enable_shm
 
 import os
 import signal

@@ -46,6 +46,7 @@ class Embedding:
         options.devices = devices
         options.draft_model_path = None
         options.draft_devices = None
+        options.backend = "llm"
         options.block_size = block_size
         options.max_cache_size = max_cache_size
         options.max_memory_utilization = max_memory_utilization

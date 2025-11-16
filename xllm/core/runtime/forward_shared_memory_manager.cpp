@@ -59,6 +59,15 @@ INLINE size_t get_vector_size(const std::vector<T>& vec) {
   return type_size<uint64_t> + vec.size() * type_size<T>;
 }
 
+INLINE size_t get_tensor_size(const torch::Tensor& tensor) {
+  uint64_t size = type_size<uint64_t>;             // ndim
+  size += type_size<uint64_t> * tensor.dim();      // shape
+  size += type_size<int8_t>;                       // dtype
+  size += type_size<uint64_t>;                     // databytes
+  size += tensor.numel() * tensor.element_size();  // data
+  return size;
+}
+
 template <typename T>
 INLINE size_t get_2d_vector_size(const std::vector<std::vector<T>>& vec2d) {
   size_t size = type_size<uint64_t>;
@@ -149,7 +158,27 @@ INLINE size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
                  3  // max_seq_len + q_max_seq_len + prefill_seq_len
            + type_size<int32_t>  // num_sequences
            + get_eplb_info_size(input.eplb_info);
-
+  // m_position
+  total += get_2d_vector_size(input.m_positions_vec);
+  // mm_data {mm_dict,mm_type}
+  auto& mm_data = input.mm_data;
+  auto& data = mm_data.data();
+  uint32_t mm_data_type = mm_data.type();
+  total += type_size<size_t> + type_size<uint32_t>;  // mm_dict size + mm_type
+  for (auto& [mm_key, mm_value] : data) {
+    // mm_value using MMValue = std::variant<torch::Tensor,
+    // std::vector<torch::Tensor>>;
+    total += get_string_size(mm_key);
+    total += type_size<int32_t>;  // num of tensors
+    if (std::holds_alternative<torch::Tensor>(mm_value)) {
+      total += get_tensor_size(std::get<torch::Tensor>(mm_value));
+    } else if (std::holds_alternative<std::vector<torch::Tensor>>(mm_value)) {
+      for (const auto& tensor :
+           std::get<std::vector<torch::Tensor>>(mm_value)) {
+        total += get_tensor_size(tensor);
+      }
+    }
+  }
   return total;
 }
 
@@ -165,6 +194,29 @@ INLINE void write_string(char*& buffer, const std::string& str) {
   if (len > 0) {
     std::memcpy(buffer, str.data(), len);
     buffer += len;
+  }
+}
+
+INLINE void write_tensor(char*& buffer, const torch::Tensor& tensor) {
+  auto contig_tensor = tensor.cpu().contiguous();
+  // write dtype
+  const int8_t tensor_dtype = static_cast<int8_t>(contig_tensor.scalar_type());
+  write_data(buffer, tensor_dtype);
+  // write ndim
+  const uint64_t tensor_ndim = contig_tensor.dim();
+  write_data(buffer, tensor_ndim);
+  // write shape
+  for (int64_t i = 0; i < contig_tensor.dim(); ++i) {
+    write_data(buffer, static_cast<uint64_t>(contig_tensor.size(i)));
+  }
+  // write data_bytes
+  const uint64_t tensor_data_bytes =
+      contig_tensor.numel() * contig_tensor.element_size();
+  write_data(buffer, tensor_data_bytes);
+
+  if (tensor_data_bytes > 0) {
+    std::memcpy(buffer, contig_tensor.data_ptr(), tensor_data_bytes);
+    buffer += tensor_data_bytes;
   }
 }
 
@@ -283,6 +335,35 @@ INLINE void write_cache_blocks(char*& buffer,
   }
 }
 
+INLINE void write_mm_data(char*& buffer, const MMData& mm_data) {
+  auto& mm_dict = mm_data.data();
+  // size
+  size_t size = mm_dict.size();
+  write_data(buffer, (size_t)size);
+  // mm_type
+  uint32_t mm_type = mm_data.type();
+  write_data(buffer, mm_type);
+  // tensor num
+  int32_t tensor_num = 1;
+  for (auto& [mm_key, mm_value] : mm_dict) {
+    write_string(buffer, mm_key);
+
+    if (std::holds_alternative<torch::Tensor>(mm_value)) {
+      tensor_num = 1;
+      write_data(buffer, tensor_num);
+      auto& tensor = std::get<torch::Tensor>(mm_value);
+      write_tensor(buffer, tensor);
+    } else if (std::holds_alternative<std::vector<torch::Tensor>>(mm_value)) {
+      auto& tensor_vec = std::get<std::vector<torch::Tensor>>(mm_value);
+      tensor_num = tensor_vec.size();
+      write_data(buffer, tensor_num);
+      for (const auto& tensor : tensor_vec) {
+        write_tensor(buffer, tensor);
+      }
+    }
+  }
+}
+
 template <typename T>
 INLINE void read_data(const char*& buffer, T& data) {
   data = *reinterpret_cast<const T*>(buffer);
@@ -298,6 +379,34 @@ INLINE void read_string(const char*& buffer, std::string& str) {
   } else {
     str.clear();
   }
+}
+
+INLINE void read_tensor(const char*& buffer, torch::Tensor& tensor) {
+  // read dtype
+  int8_t tensor_dtype;
+  read_data(buffer, tensor_dtype);
+  auto dtype = static_cast<torch::ScalarType>(tensor_dtype);
+  // read ndim
+  uint64_t ndim;
+  read_data(buffer, ndim);
+  // read shape
+  std::vector<int64_t> shape(ndim);
+  for (size_t i = 0; i < ndim; ++i) {
+    int64_t dim_size;
+    read_data(buffer, dim_size);
+    shape[i] = static_cast<int64_t>(dim_size);
+  }
+  // read data_bytes
+  uint64_t data_bytes;
+  read_data(buffer, data_bytes);
+
+  tensor = torch::from_blob(const_cast<void*>(static_cast<const void*>(buffer)),
+                            shape,
+                            torch::TensorOptions()
+                                .dtype(dtype)
+                                .device(torch::kCPU)
+                                .pinned_memory(true));
+  buffer += data_bytes;
 }
 
 template <typename T>
@@ -413,6 +522,32 @@ INLINE void read_cache_blocks(const char*& buffer,
   }
 }
 
+INLINE void read_mm_data(const char*& buffer, MMData& mm_data) {
+  auto& mm_dict = mm_data.data();
+  size_t size;
+  read_data(buffer, size);
+  uint32_t mm_type;
+  read_data(buffer, mm_type);
+  mm_data.ty_ = mm_type;
+  int32_t tensor_num;
+  while (size--) {
+    std::string mm_key;
+    read_string(buffer, mm_key);
+    read_data(buffer, tensor_num);
+    if (tensor_num == 1) {
+      torch::Tensor tensor;
+      read_tensor(buffer, tensor);
+      mm_data.add(mm_type, mm_key, tensor);
+    } else {
+      std::vector<torch::Tensor> tensor_vec(tensor_num);
+      for (size_t i = 0; i < tensor_num; ++i) {
+        read_tensor(buffer, tensor_vec[i]);
+      }
+      mm_data.add(mm_type, mm_key, tensor_vec);
+    }
+  }
+}
+
 INLINE void deserialize_raw_forward_input(
     const char*& buffer,
     RawForwardInput& input,
@@ -469,6 +604,8 @@ INLINE void deserialize_raw_forward_input(
   read_data(buffer, input.num_sequences);
   read_eplb_info(buffer, input.eplb_info);
   read_data(buffer, input.prefill_seq_len);
+  read_2d_vector(buffer, input.m_positions_vec);
+  read_mm_data(buffer, input.mm_data);
 }
 
 INLINE void serialize_raw_forward_input(const RawForwardInput& input,
@@ -514,19 +651,15 @@ INLINE void serialize_raw_forward_input(const RawForwardInput& input,
   write_cache_blocks(buffer, input.copy_in_blocks);
   write_cache_blocks(buffer, input.swap_blocks);
 
-  *reinterpret_cast<bool*>(buffer) = input.empty_kv_cache;
-  buffer += 1;
-  *reinterpret_cast<bool*>(buffer) = input.global_empty_kv_cache;
-  buffer += 1;
-  *reinterpret_cast<uint32_t*>(buffer) = input.max_seq_len;
-  buffer += 4;
-  *reinterpret_cast<uint32_t*>(buffer) = input.q_max_seq_len;
-  buffer += 4;
-  *reinterpret_cast<int32_t*>(buffer) = input.num_sequences;
-  buffer += 4;
+  write_data(buffer, input.empty_kv_cache);
+  write_data(buffer, input.global_empty_kv_cache);
+  write_data(buffer, input.max_seq_len);
+  write_data(buffer, input.q_max_seq_len);
+  write_data(buffer, input.num_sequences);
   write_eplb_info(buffer, input.eplb_info);
-  *reinterpret_cast<uint32_t*>(buffer) = input.prefill_seq_len;
-  buffer += 4;
+  write_data(buffer, input.prefill_seq_len);
+  write_2d_vector(buffer, input.m_positions_vec);
+  write_mm_data(buffer, input.mm_data);
 }
 
 size_t calculate_raw_token_size(const RawToken& token) {
@@ -706,9 +839,13 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
 
   forward_input.token_ids =
       torch::tensor(std::move(raw_input.flatten_tokens_vec), tensor_options);
-  forward_input.positions =
-      torch::tensor(std::move(raw_input.flatten_positions_vec), tensor_options);
-
+  if (raw_input.flatten_positions_vec.size() > 0) {
+    forward_input.positions = torch::tensor(
+        std::move(raw_input.flatten_positions_vec), tensor_options);
+  } else if (raw_input.m_positions_vec.size() > 0) {
+    forward_input.positions =
+        create_2d_tensor(std::move(raw_input.m_positions_vec), torch::kInt);
+  }
   std::pair<int, int> decode_seq_range{0, 0};
 #if defined(USE_NPU)
   if (raw_input.q_seq_lens.size() >= 1) {
@@ -757,13 +894,8 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
       std::move(raw_input.new_cache_slot_offsets), tensor_options);
   input_params.kv_cache_start_offsets = torch::tensor(
       std::move(raw_input.kv_cache_start_offsets), tensor_options);
-  if (!raw_input.embeddings.empty()) {
-    torch::Tensor embeddings =
-        create_2d_tensor(std::move(raw_input.embeddings), torch::kBFloat16);
-    input_params.mm_data =
-        MMData(MMType::EMBEDDING, {{"embedding", embeddings}});
-  }
 
+  input_params.mm_data = std::move(raw_input.mm_data);
   if (!raw_input.selected_token_idxes.empty()) {
     util::pad_2d_vector<int64_t>(raw_input.unique_token_ids_vec, 0);
     util::pad_2d_vector(raw_input.unique_token_counts_vec, 0);

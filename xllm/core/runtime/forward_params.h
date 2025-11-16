@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
+#include "framework/request/mm_data.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 
@@ -138,6 +139,7 @@ struct ForwardOutput {
 struct RawForwardInput {
   std::vector<int32_t> flatten_tokens_vec;
   std::vector<int32_t> flatten_positions_vec;
+  std::vector<std::vector<int32_t>> m_positions_vec;
   std::vector<const RequestSamplingParam*> sampling_params;
   std::vector<int32_t> selected_token_idxes;
   std::vector<int32_t> sample_idxes;
@@ -180,6 +182,8 @@ struct RawForwardInput {
   std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
   // beam search kernel input
   std::vector<float> acc_logprob_vec;
+  // multimodal data
+  MMData mm_data;
 };
 
 struct RawSampleOutput {

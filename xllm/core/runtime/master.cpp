@@ -109,20 +109,26 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
     runtime::Options eng_options;
     eng_options.model_path(options_.model_path())
         .devices(devices)
+        .backend(options.backend())
         .block_size(options.block_size())
         .max_cache_size(options.max_cache_size())
         .max_memory_utilization(options.max_memory_utilization())
         .enable_prefix_cache(options.enable_prefix_cache())
         .task_type(options.task_type())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
-        .enable_disagg_pd(options_.enable_disagg_pd())
-        .enable_service_routing(options_.enable_service_routing())
-        .enable_cache_upload(options_.enable_cache_upload())
-        .enable_schedule_overlap(options_.enable_schedule_overlap())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
-        .is_local(options_.is_local());
+        .is_local(options_.is_local())
+        .enable_schedule_overlap(options_.enable_schedule_overlap())
+        .master_node_addr(options.master_node_addr())
+        .nnodes(options.nnodes())
+        .node_rank(options.node_rank())
+        .dp_size(options.dp_size())
+        .ep_size(options.ep_size())
+        .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .max_tokens_per_chunk_for_prefill(
+            options_.max_tokens_per_chunk_for_prefill());
 
     auto engine = std::make_unique<VLMEngine>(eng_options);
     engine_ = std::move(engine);
@@ -139,6 +145,7 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .draft_model_path(draft_model_path)
         .devices(devices)
         .draft_devices(draft_devices)
+        .backend(options_.backend())
         .block_size(options_.block_size())
         .max_cache_size(options_.max_cache_size())
         .max_memory_utilization(options_.max_memory_utilization())
@@ -182,6 +189,7 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
     runtime::Options eng_options;
     eng_options.model_path(options_.model_path())
         .devices(devices)
+        .backend(options_.backend())
         .block_size(options_.block_size())
         .max_cache_size(options_.max_cache_size())
         .max_memory_utilization(options_.max_memory_utilization())

@@ -57,6 +57,7 @@ class VLM:
         options.devices = devices
         options.draft_model_path = draft_model
         options.draft_devices = draft_devices
+        options.backend ="vlm"
         options.block_size = block_size
         options.max_cache_size = max_cache_size
         options.max_memory_utilization = max_memory_utilization

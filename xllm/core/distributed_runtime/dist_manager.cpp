@@ -31,65 +31,10 @@ namespace xllm {
 
 DistManager::DistManager(const runtime::Options& options) {
   auto master_node_addr = options.master_node_addr().value_or("");
-  // Single-Node Worker Mode
-  if (master_node_addr.empty()) {
-    setup_single_node_workers(options);
-  } else {
-    // Multi-node Worker Mode
+  if (!master_node_addr.empty()) {
     setup_multi_node_workers(options, master_node_addr);
-  }
-}
-
-void DistManager::setup_single_node_workers(const runtime::Options& options) {
-  const auto& devices = options.devices();
-  CHECK_EQ((devices.size() % options.dp_size()), 0)
-      << "Device size must be divisible by dp size in single-node serving "
-         "mode.";
-
-  // initialize process groups if there are multiple devices
-  if (devices.size() > 1) {
-    // create a process group for each device if there are multiple gpus
-    process_groups_ = parallel_state::create_npu_process_groups(devices);
-  }
-
-  const int32_t dp_local_tp_size = devices.size() / options.dp_size();
-  if (options.dp_size() > 1 && options.dp_size() < devices.size()) {
-    dp_local_process_groups_.reserve(options.dp_size());
-    for (size_t dp_rank = 0; dp_rank < options.dp_size(); ++dp_rank) {
-      auto dp_local_group_device_begin_idx = devices.begin();
-      std::advance(dp_local_group_device_begin_idx, dp_rank * dp_local_tp_size);
-      auto dp_local_group_device_end_idx = devices.begin();
-      std::advance(dp_local_group_device_end_idx,
-                   (dp_rank + 1) * dp_local_tp_size);
-      std::vector<torch::Device> dp_local_group_devices;
-      std::copy(dp_local_group_device_begin_idx,
-                dp_local_group_device_end_idx,
-                std::back_inserter(dp_local_group_devices));
-      dp_local_process_groups_.emplace_back(
-          parallel_state::create_npu_process_groups(dp_local_group_devices));
-    }
-  }
-
-  // create a worker(as worker client also) for each device
-  const int32_t world_size = static_cast<int32_t>(devices.size());
-  WorkerType worker_type =
-      (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
-  for (size_t i = 0; i < devices.size(); ++i) {
-    const int32_t rank = static_cast<int32_t>(i);
-    ProcessGroup* pg = world_size > 1 ? process_groups_[i].get() : nullptr;
-    // dp local process groups
-    ProcessGroup* dp_local_pg =
-        (options.dp_size() > 1 && options.dp_size() < world_size)
-            ? (dp_local_process_groups_[i / dp_local_tp_size]
-                                       [i % dp_local_tp_size])
-                  .get()
-            : nullptr;
-    ParallelArgs parallel_args(
-        rank, world_size, pg, dp_local_pg, options.dp_size());
-    workers_.emplace_back(std::make_unique<Worker>(
-        parallel_args, devices[i], options, worker_type));
-    worker_clients_.emplace_back(
-        std::make_unique<WorkerClient>(workers_.back().get()));
+  } else {
+    LOG(FATAL) << "master_node_addr is empty.";
   }
 }
 
@@ -166,10 +111,17 @@ void DistManager::setup_multi_node_workers(
 
   runtime::Options worker_server_options = options;
   worker_server_options.world_size(world_size);
-
-  WorkerType worker_type =
-      (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
-
+  WorkerType worker_type("LLM");
+  const auto& model_backend = options.backend();
+  if (model_backend == "llm") {
+    worker_type =
+        (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
+  } else if (model_backend == "vlm") {
+    worker_type = (options.task_type() == "generate") ? WorkerType::VLM
+                                                      : WorkerType::EVLM;
+  } else {
+    LOG(ERROR) << "Unsupported " << model_backend << " in multi-node.";
+  }
   // create local workers
   for (size_t i = 0; i < devices.size(); ++i) {
     // worldsize = 8

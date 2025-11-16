@@ -39,6 +39,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("devices", &Options::devices_)
       .def_readwrite("draft_model_path", &Options::draft_model_path_)
       .def_readwrite("draft_devices", &Options::draft_devices_)
+      .def_readwrite("backend", &Options::backend_)
       .def_readwrite("block_size", &Options::block_size_)
       .def_readwrite("max_cache_size", &Options::max_cache_size_)
       .def_readwrite("max_memory_utilization",

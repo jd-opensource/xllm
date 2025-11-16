@@ -609,8 +609,19 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   }
   RawForwardInput raw_forward_input;
   raw_forward_input.flatten_tokens_vec = std::move(state_.flatten_tokens_vec);
-  raw_forward_input.flatten_positions_vec =
-      std::move(state_.flatten_positions_vec);
+  if (!use_mrope_) {
+    raw_forward_input.flatten_positions_vec =
+        std::move(state_.flatten_positions_vec);
+  } else {
+    auto m_positions = torch::cat(state_.mrope_positions_vec, 1);
+    for (int64_t idx = 0; idx < m_positions.size(0); ++idx) {
+      torch::Tensor position = m_positions[idx];
+      Slice<int32_t> position_slice = {position.data_ptr<int32_t>(),
+                                       position.size(0)};
+      raw_forward_input.m_positions_vec.push_back(position_slice);
+    }
+  }
+
   raw_forward_input.sampling_params = std::move(state_.sampling_params);
   raw_forward_input.selected_token_idxes =
       std::move(state_.selected_token_idxes);
@@ -647,21 +658,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
     raw_forward_input.kv_cache_start_offsets =
         std::move(state_.kv_cache_start_offsets);
   }
-
-  if (mm_data_vec_.size() != 0) {
-    MMData mm_data = MMData::batch(mm_data_vec_);
-    const auto& res = mm_data.get<torch::Tensor>("embedding");
-    if (res) {
-      torch::Tensor embeddings = res.value();
-      for (int64_t output_idx = 0; output_idx < embeddings.size(0);
-           ++output_idx) {
-        torch::Tensor embedding = embeddings[output_idx].to(torch::kFloat32);
-        Slice<float> embedding_slice = {embedding.data_ptr<float>(),
-                                        embedding.size(0)};
-        raw_forward_input.embeddings.push_back(embedding_slice);
-      }
-    }
-  }
+  raw_forward_input.mm_data = MMData::batch(mm_data_vec_);
 
   if (copy_out_cache_block_infos_ != nullptr &&
       copy_out_cache_block_infos_->size() > 0) {

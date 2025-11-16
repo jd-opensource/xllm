@@ -58,24 +58,19 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(
     const BatchedForwardInputs& inputs) {
   Timer timer;
   // TODO guojinrong, to adapt multi stream parallel later
-  // all tensors should be on the same device as model
-  auto flatten_tokens = inputs.micro_inputs[0].token_ids.to(device_);
-  auto flatten_positions = inputs.micro_inputs[0].positions.to(device_);
-  auto params = inputs.micro_inputs[0].input_params.to(device_);
-  auto sampling_params =
-      inputs.micro_inputs[0].sampling_params.to(device_, dtype_);
-
   // call model executor forward to get hidden states
-  auto hidden_states = model_executor_->forward(
-      {flatten_tokens}, {flatten_positions}, kv_caches_, {params});
-
+  auto hidden_states =
+      model_executor_->forward({inputs.micro_inputs[0].token_ids},
+                               {inputs.micro_inputs[0].positions},
+                               kv_caches_,
+                               {inputs.micro_inputs[0].input_params});
+  auto& sampling_params = inputs.micro_inputs[0].sampling_params;
   torch::Tensor logits;
   if (sampling_params.selected_token_idxes.defined()) {
     logits =
         model_->logits(hidden_states, sampling_params.selected_token_idxes);
   }
 
-  auto ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
   if (!driver_) {
@@ -96,6 +91,7 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
   }
+  auto ret = device_.synchronize_default_stream();
   return output;
 }
 
