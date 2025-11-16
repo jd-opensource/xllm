@@ -530,7 +530,8 @@ void NpuDeepseekV2DecoderLayerImpl::initialize_mlp_parameters(
   param.enableIndexGmm = false;
   param.enableLcocAll2All = param.isPrefill && dp_size_ == 1;
 #else
-  param.enableIndexGmm = true;
+  // TODO: xllm ops's GMM need to support MTP.
+  param.enableIndexGmm = false;
 #endif
   if (layer_id_ >= param.firstKDenseReplace) {
     param.enableQkvdownDp = false;
@@ -1068,9 +1069,11 @@ void NpuDeepseekV2DecoderLayerImpl::merge_loaded_weights() {
   }
   // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT] =
   // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT].transpose(0, 1);
+  at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
+      at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
   if (quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
-        at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
+    // at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
+    //     at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
     if (!prefill_param_.isBF16) {
       at_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
           convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_A_DESCALE]);
@@ -1219,7 +1222,8 @@ void NpuDeepseekV2DecoderLayerImpl::merge_experts_weights() {
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
       at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
 #else
-  if (decode_param_.isBF16) {
+  // TODO: xllm ops's GMM need to support MTP.
+  if (decode_param_.isBF16 && false) {
     torch::Tensor mlp_down_weight =
         merge_experts_weights(experts_weights_["down_proj.weight"],
                               device_,
