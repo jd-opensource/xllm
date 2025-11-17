@@ -151,7 +151,8 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
   void param_from_args(atb_speed::deepseekV2::DecoderLayerParam& param,
                        const ModelArgs& args,
                        const ParallelArgs& parallel_args,
-                       bool is_prefill);
+                       bool is_prefill,
+                       bool is_prefixcache);
 
   void reserve_experts_weights(int num_of_device_experts);
   void initialize_device_expert_list(int numdevice, int num_layers);
@@ -159,7 +160,8 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
       atb_speed::deepseekV2::DecoderLayerParam& param,
       const ModelArgs& args,
       const ParallelArgs& parallel_args,
-      bool is_prefill);
+      bool is_prefill,
+      bool is_prefixcache);
 
   void initialize_attention_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param,
@@ -312,9 +314,11 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
   int32_t num_speculative_tokens_ = 0;
 
   atb_speed::deepseekV2::DecoderLayerParam prefill_param_;
+  atb_speed::deepseekV2::DecoderLayerParam prefill_param_prefixcache_;
   atb_speed::deepseekV2::DecoderLayerParam decode_param_;
 
   atb_speed::Model::Node prefill_node_;
+  atb_speed::Model::Node prefill_node_prefixcache_;
   atb_speed::Model::Node decode_node_;
 
   atb::Tensor internal_tensor_;
