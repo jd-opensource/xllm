@@ -132,7 +132,8 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
         attn_mask = torch::cat(req_mask_vec, 0);
       }
     } else {
-      if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
+      if (num_speculative_tokens_ == 0 ||
+          input_params.batch_forward_type.is_prefill()) {
         attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
       } else {
         attn_mask = attn_mask_.gen_free_mask(

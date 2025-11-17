@@ -865,7 +865,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     std::atomic<bool>* event_flag,
     int node_id) {
   atb::Status st;
-  if (input_params.global_empty_kv_cache) {
+  if (input_params.batch_forward_type.is_prefill()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,

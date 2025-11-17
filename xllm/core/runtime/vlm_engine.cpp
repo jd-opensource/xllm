@@ -445,7 +445,6 @@ std::vector<std::vector<RawForwardInput>> VLMEngine::prepare_inputs(
   std::vector<std::vector<int32_t>> dp_global_token_nums;
   dp_global_token_nums.resize(micro_batches_num,
                               std::vector<int32_t>(dp_size_));
-  bool global_empty_kv_cache = true;
 
   // build model input for every single micro batch
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
@@ -460,16 +459,13 @@ std::vector<std::vector<RawForwardInput>> VLMEngine::prepare_inputs(
                                                          threadpool_.get())));
       dp_global_token_nums[i][dp_rank] =
           batched_inputs[dp_rank][i].flatten_tokens_vec.size();
-      global_empty_kv_cache =
-          batched_inputs[dp_rank][i].empty_kv_cache && global_empty_kv_cache;
     }
   }
 
-  // update dp_global_token_nums and global_empty_kv_cache
+  // update dp_global_token_nums
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     for (auto i = 0; i < micro_batches_num; ++i) {
       batched_inputs[dp_rank][i].dp_global_token_nums = dp_global_token_nums[i];
-      batched_inputs[dp_rank][i].global_empty_kv_cache = global_empty_kv_cache;
     }
   }
 

@@ -613,7 +613,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       input_params.block_tables =
           create_2d_tensor(block_tables_vec, torch::kInt).to(device_);
     }
-    input_params.decode_seq_range.second = input_params.num_sequences - 1;
+    input_params.batch_forward_type = BatchForwardType::DECODE;
 
     // update the sampling_params
     update_sampling_params(
