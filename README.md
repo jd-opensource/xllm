@@ -111,7 +111,7 @@ Supported models list:
 - Qwen2/2.5/QwQ
 - Qwen2.5-VL
 - Qwen3 / Qwen3-MoE
-
+- Qwen3-VL / Qwen3-VL-MoE
 
 ---
 
