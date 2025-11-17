@@ -125,8 +125,11 @@ bool WorkerImpl::allocate_kv_cache(
 
   key_cache_size_per_layer_ = kv_caches_[0].get_k_cache()[0].numel() *
                               kv_caches_[0].get_k_cache()[0].element_size();
-  value_cache_size_per_layer_ = kv_caches_[0].get_v_cache()[0].numel() *
-                                kv_caches_[0].get_v_cache()[0].element_size();
+  // make sure value cache is not empty
+  if (!kv_cache_shape[1].empty()) {
+    value_cache_size_per_layer_ = kv_caches_[0].get_v_cache()[0].numel() *
+                                  kv_caches_[0].get_v_cache()[0].element_size();
+  }
 
   allocate_host_kv_cache(kv_cache_shape);
   status_ = Status::READY;

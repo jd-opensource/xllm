@@ -29,6 +29,7 @@ message DeviceMemory {
 message KVCacheShape {
   repeated int64 key_shape = 1;
   repeated int64 value_shape = 2;
+  repeated int64 index_shape = 3;
 }
 
 message XTensorOptions {

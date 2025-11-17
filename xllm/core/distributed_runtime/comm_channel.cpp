@@ -57,9 +57,22 @@ bool CommChannel::allocate_kv_cache(
   shape.mutable_key_shape()->Reserve(kv_cache_shape[0].size());
   shape.mutable_value_shape()->Reserve(kv_cache_shape[1].size());
 
+  // add key shape
   for (size_t i = 0; i < kv_cache_shape[0].size(); ++i) {
     shape.add_key_shape(kv_cache_shape[0][i]);
+  }
+
+  // add value shape
+  for (size_t i = 0; i < kv_cache_shape[1].size(); ++i) {
     shape.add_value_shape(kv_cache_shape[1][i]);
+  }
+
+  // add index shape if exists
+  if (kv_cache_shape.size() > 2) {
+    shape.mutable_index_shape()->Reserve(kv_cache_shape[2].size());
+    for (size_t i = 0; i < kv_cache_shape[2].size(); ++i) {
+      shape.add_index_shape(kv_cache_shape[2][i]);
+    }
   }
 
   proto::Status s;
@@ -292,9 +305,22 @@ bool CommChannel::allocate_kv_cache_with_transfer(
   shape->mutable_key_shape()->Reserve(kv_cache_shape[0].size());
   shape->mutable_value_shape()->Reserve(kv_cache_shape[1].size());
 
+  // add key shape
   for (size_t i = 0; i < kv_cache_shape[0].size(); ++i) {
     shape->add_key_shape(kv_cache_shape[0][i]);
+  }
+
+  // add value shape
+  for (size_t i = 0; i < kv_cache_shape[1].size(); ++i) {
     shape->add_value_shape(kv_cache_shape[1][i]);
+  }
+
+  // add index shape if exists
+  if (kv_cache_shape.size() > 2) {
+    shape->mutable_index_shape()->Reserve(kv_cache_shape[2].size());
+    for (size_t i = 0; i < kv_cache_shape[2].size(); ++i) {
+      shape->add_index_shape(kv_cache_shape[2][i]);
+    }
   }
 
   proto::Status s;

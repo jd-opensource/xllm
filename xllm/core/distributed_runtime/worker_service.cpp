@@ -306,11 +306,17 @@ void WorkerService::AllocateKVCache(
   threadpool_->schedule([this, controller, request, response, done]() mutable {
     brpc::ClosureGuard done_guard(done);
     std::vector<std::vector<int64_t>> kv_cache_shape;
-    kv_cache_shape.reserve(2);
+    // Reserve for key, value, and optionally index shape
+    kv_cache_shape.reserve(3);
     kv_cache_shape.emplace_back(std::vector<int64_t>(
         request->key_shape().begin(), request->key_shape().end()));
     kv_cache_shape.emplace_back(std::vector<int64_t>(
         request->value_shape().begin(), request->value_shape().end()));
+    // add index shape if exists
+    if (request->index_shape_size() > 0) {
+      kv_cache_shape.emplace_back(std::vector<int64_t>(
+          request->index_shape().begin(), request->index_shape().end()));
+    }
     auto future = worker_->allocate_kv_cache_async(kv_cache_shape);
     bool status = std::move(future).get();
     response->set_ok(status);
