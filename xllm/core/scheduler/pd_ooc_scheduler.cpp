@@ -375,7 +375,11 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
                            kv_cache_manager_->get_copy_in_cache_block_infos(),
                            kv_cache_manager_->get_copy_out_cache_block_infos());
 
-  if (!batches[0].empty()) {
+  bool is_batches_empty =
+      (std::all_of(batches.begin(), batches.end(), [](const Batch& one_batch) {
+        return one_batch.empty();
+      }));
+  if (!is_batches_empty) {
     // only update the scheduling latency when there are requests to process
     COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
   }

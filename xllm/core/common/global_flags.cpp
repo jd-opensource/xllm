@@ -413,3 +413,11 @@ DEFINE_bool(
     "Whether to enable prefetch weight,only applicable to Qwen3-dense model."
     "The default prefetching ratio for gateup weight is 40%."
     "If adjustments are needed, e.g. export PREFETCH_COEFFOCIENT=0.5");
+
+// --- dp load balance ---
+
+DEFINE_bool(
+    enable_dp_balance,
+    false,
+    "Whether to enable dp load balance, if true, sequences within a single "
+    "dp batch will be shuffled.");

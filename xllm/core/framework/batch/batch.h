@@ -111,6 +111,11 @@ class Batch {
 
   bool get_batch_prefill_status() const { return all_seqs_in_prefill_; }
 
+  std::map<uint32_t, uint32_t> cal_seq_exchange_index_test(
+      std::vector<uint32_t>& kv_cache_tokens_num) {
+    return cal_seq_exchange_index(kv_cache_tokens_num);
+  }
+
  private:
   bool update_sequence_state(Sequence* seq, bool replace_fake_token);
 
@@ -120,6 +125,11 @@ class Batch {
                                  bool replace_fake_token);
 
   void process_beam_search();
+
+  std::map<uint32_t, uint32_t> cal_seq_exchange_index(
+      std::vector<uint32_t>& kv_cache_tokens_num);
+
+  void dp_balance_shuffle_seqs();
 
   std::vector<Sequence*> sequences_;
   std::vector<SequencesGroup*> sequence_groups_;
