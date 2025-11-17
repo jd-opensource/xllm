@@ -21,6 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/state_dict/state_dict.h"
+#include "core/util/threadpool.h"
 #include "model_loader.h"
 
 namespace xllm {
@@ -49,5 +50,7 @@ class HFModelLoader : public ModelLoader {
 
   // models weights tensors
   std::vector<std::unique_ptr<StateDict>> state_dicts_;
+
+  std::unique_ptr<ThreadPool> threadpool_;
 };
 }  // namespace xllm

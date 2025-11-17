@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/framework/tokenizer/sentencepiece_tokenizer.h"
 #include "core/framework/tokenizer/tiktoken_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer_factory.h"
+#include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
 #include "models/model_registry.h"
 
@@ -50,6 +51,7 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
       << "Failed to find model weights files in " << model_weights_path;
   // sort the model weights files by name
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
+  threadpool_ = std::make_unique<ThreadPool>(32);
 }
 
 std::unique_ptr<Tokenizer> HFModelLoader::tokenizer() const {
@@ -61,11 +63,19 @@ std::vector<std::unique_ptr<StateDict>>& HFModelLoader::get_state_dicts() {
   if (state_dicts_.empty()) {
     // load state dict
     state_dicts_.reserve(model_weights_files_.size());
-    for (auto& model_weights_file : model_weights_files_) {
-      LOG(INFO) << "Loading model weights from " << model_weights_file;
-      state_dicts_.emplace_back(
-          StateDictFromSafeTensor::load(model_weights_file));
+    auto file_cnt = model_weights_files_.size();
+    BlockingCounter counter(file_cnt);
+    state_dicts_.resize(model_weights_files_.size());
+    for (int file_id = 0; file_id < file_cnt; file_id++) {
+      threadpool_->schedule([this, file_id, &counter]() mutable {
+        LOG(INFO) << "Loading model weights from "
+                  << model_weights_files_[file_id];
+        state_dicts_[file_id] = std::move(
+            StateDictFromSafeTensor::load(model_weights_files_[file_id]));
+        counter.decrement_count();
+      });
     }
+    counter.wait();
   }
   return state_dicts_;
 }
