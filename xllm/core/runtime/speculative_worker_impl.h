@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "common/macros.h"
-#include "framework/kv_cache/embedding_allocator.h"
+#include "framework/kv_cache/token_cache_allocator.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache/spec_kv_cache_transfer.h"
 #endif
@@ -114,35 +114,42 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   };
 
  private:
-  std::optional<ForwardOutput> step_prefill(const BatchedForwardInputs& inputs);
-
-  std::optional<ForwardOutput> step_decode(const BatchedForwardInputs& inputs);
-
   // When enable DP, inputs sometimes be empty but model need to execute.
-  std::optional<ForwardOutput> step_empty(const BatchedForwardInputs& inputs);
+  std::optional<ForwardOutput> step_empty(ForwardInput& input);
+  std::optional<ForwardOutput> step_prefill(const ForwardInput& input);
+  std::optional<ForwardOutput> step_decode(const ForwardInput& input);
 
-  // prepare inputs for draft model at Prefill phase.
-  void prepare_prefill_inputs(const BatchedForwardInputs& inputs,
-                              BatchedForwardInputs& prefill_inputs);
+  folly::SemiFuture<std::optional<ForwardOutput>> get_output_async(
+      LLMWorkerImpl* impl,
+      const ForwardInput& input) {
+    BatchedForwardInputs batch_inputs;
+    batch_inputs.micro_inputs.push_back(input);
+    batch_inputs.concated_sampling_params = input.sampling_params;
+    return impl->step_async(batch_inputs);
+  };
 
-  // prepare inputs for draft model at Decode phase.
-  void prepare_draft_inputs(const BatchedForwardInputs& inputs,
-                            BatchedForwardInputs& draft_inputs,
-                            const int64_t offset,
-                            const torch::Device device);
+  // prepare first step inputs of draft model at Prefill phase.
+  void prepare_first_prefill_input(const ForwardInput& input,
+                                   ForwardInput& draft_input);
 
-  // prepare inputs for target model at Decode phase.
-  void prepare_validate_inputs(const BatchedForwardInputs& inputs,
-                               BatchedForwardInputs& validate_inputs,
-                               bool enable_schedule_overlap);
+  // prepare first step inputs of draft model at Decode phase.
+  void prepare_first_decode_input(const ForwardInput& input,
+                                  ForwardInput& draft_input,
+                                  const SampleOutput val_output);
+
+  // prepare next step inputs of draft model.
+  void prepare_draft_input(const ForwardInput& input,
+                           ForwardInput& draft_input,
+                           const int64_t offset);
+
+  // prepare inputs of target model for validation at Decode phase.
+  void prepare_validate_input(const ForwardInput& input,
+                              ForwardInput& validate_input,
+                              std::vector<std::vector<int32_t>>& draft_tokens);
 
   SampleOutput validate(const SamplingParameters& sampling_params,
-                        const std::vector<ForwardOutput>& draft_outputs,
+                        std::vector<std::vector<int32_t>>& draft_tokens,
                         const ForwardOutput& target_output);
-
-  void update_sampling_params(SamplingParameters& sampling_params,
-                              const int32_t num_val_tokens,
-                              const int32_t total_num_val_tokens);
 
  private:
   int32_t embedding_size_ = 0;
@@ -150,7 +157,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   std::unique_ptr<LLMWorkerImpl> impl_;
   std::unique_ptr<LLMWorkerImpl> draft_impl_;
 
-  std::shared_ptr<EmbeddingAllocator> embedding_allocator_;
+  std::shared_ptr<TokenCacheAllocator> token_allocator_;
 #if defined(USE_NPU)
   std::shared_ptr<SpecKVCacheTransfer> kv_cache_transfer_;
 #endif

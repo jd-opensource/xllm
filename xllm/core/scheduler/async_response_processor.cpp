@@ -276,8 +276,8 @@ void AsyncResponseProcessor::process_stream_requests(
 
     std::vector<size_t> indexes;
     std::vector<size_t> num_tokens;
-    for (size_t i = 0; i < request->sequences().size(); ++i) {
-      auto& seq = request->sequences()[i];
+    for (size_t seq_idx = 0; seq_idx < request->sequences().size(); ++seq_idx) {
+      auto& seq = request->sequences()[seq_idx];
       if (seq->is_closed()) {
         // skip already closed sequences
         continue;
@@ -285,7 +285,7 @@ void AsyncResponseProcessor::process_stream_requests(
 
       // check if the sequence has enough tokens to output
       if (seq->has_new_tokens_generated() || seq->finished()) {
-        indexes.push_back(i);
+        indexes.push_back(seq_idx);
         num_tokens.push_back(seq->num_tokens());
       }
 

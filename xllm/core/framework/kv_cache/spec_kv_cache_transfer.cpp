@@ -111,33 +111,11 @@ void SpecKVCacheTransfer::_allocate_kv_cache(
   }
 }
 
-void SpecKVCacheTransfer::allocate_embedding(
-    std::shared_ptr<EmbeddingAllocator> embedding_allocator,
-    const std::vector<int64_t>& embedding_shape,
-    torch::ScalarType dtype,
-    torch::Device device) {
-  const auto& it = kScalarTypeToDtype.find(dtype);
-  CHECK(it != kScalarTypeToDtype.cend()) << "Unsupport data type : " << dtype;
-  auto ge_dtype = it->second;
-  CacheDesc embed_cache_desc;
-  embed_cache_desc.num_tensors = 1;
-  embed_cache_desc.data_type = ge_dtype;
-  embed_cache_desc.shape = embedding_shape;
-  CHECK_LDD_RET(llm_data_dist_->AllocateCache(embed_cache_desc, embed_cache_));
-
-  embed_host_cache_.cache_desc = embed_cache_.cache_desc;
-  embed_host_cache_.cache_desc.placement = CachePlacement::kHost;
-  CHECK_EQ(embed_host_cache_.cache_desc.num_tensors, 1);
-  embed_host_cache_.tensor_addrs.emplace_back(reinterpret_cast<uint64_t>(
-      embedding_allocator->get_embeddings_cache_ptr()));
-}
-
 void SpecKVCacheTransfer::free_kv_cache() {
   llm_data_dist_->DeallocateCache(k_cache_.cache_id);
   llm_data_dist_->DeallocateCache(v_cache_.cache_id);
   llm_data_dist_->DeallocateCache(spec_k_cache_.cache_id);
   llm_data_dist_->DeallocateCache(spec_v_cache_.cache_id);
-  llm_data_dist_->DeallocateCache(embed_cache_.cache_id);
 }
 
 bool SpecKVCacheTransfer::pull_kv_blocks(
@@ -160,12 +138,6 @@ bool SpecKVCacheTransfer::pull_kv_blocks(
   CacheIndex spec_v_cache_index{src_cluster_id, spec_v_cache_.cache_id};
   CHECK_LDD_RET(llm_data_dist_->PullKvBlocks(
       spec_v_cache_index, spec_v_cache_, src_blocks, dst_blocks));
-
-  CacheIndex embed_cache_index{src_cluster_id, embed_cache_.cache_id};
-  CHECK_LDD_RET(llm_data_dist_->PullKvBlocks(embed_cache_index,
-                                             embed_cache_,
-                                             {src_blocks.back()},
-                                             {dst_blocks.back()}));
   return true;
 }
 
@@ -173,10 +145,6 @@ bool SpecKVCacheTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     bool is_spec_draft) {
-  if (!layer_synchronizer) {
-    return push_embed_blocks(merged_kv_infos);
-  }
-
   if (is_spec_draft) {
     return push_kv_blocks_spec(merged_kv_infos, layer_synchronizer);
   }
@@ -240,24 +208,6 @@ bool SpecKVCacheTransfer::push_kv_blocks_spec(
                                                  kv_info.dst_blocks,
                                                  ext_param));
     }
-  }
-  return true;
-}
-
-bool SpecKVCacheTransfer::push_embed_blocks(
-    std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos) {
-  for (const auto& pair : merged_kv_infos) {
-    const KVCacheInfo& kv_info = pair.second;
-    CacheIndex cache_index{kv_info.dst_cluster_id, embed_cache_.cache_id};
-    KvCacheExtParam ext_param{};
-    ext_param.src_layer_range = std::pair<int32_t, int32_t>(0, 0);
-    ext_param.dst_layer_range = std::pair<int32_t, int32_t>(0, 0);
-    ext_param.tensor_num_per_layer = 1;
-    CHECK_LDD_RET(llm_data_dist_->PushKvBlocks(embed_cache_,
-                                               cache_index,
-                                               kv_info.src_embed_ids,
-                                               kv_info.dst_embed_ids,
-                                               ext_param));
   }
   return true;
 }
@@ -341,8 +291,6 @@ void SpecKVCacheTransfer::merge_kv_blocks(
         kv_info.dst_blocks.insert(kv_info.dst_blocks.end(),
                                   info.remote_blocks_ids.begin(),
                                   info.remote_blocks_ids.end());
-        kv_info.src_embed_ids.push_back(kv_info.src_blocks.back());
-        kv_info.dst_embed_ids.push_back(kv_info.dst_blocks.back());
         merged_kv_infos[key] = std::move(kv_info);
       } else {
         merged_kv_infos[key].src_blocks.insert(
@@ -353,28 +301,8 @@ void SpecKVCacheTransfer::merge_kv_blocks(
             merged_kv_infos[key].dst_blocks.end(),
             info.remote_blocks_ids.begin(),
             info.remote_blocks_ids.end());
-        merged_kv_infos[key].src_embed_ids.push_back(
-            merged_kv_infos[key].src_blocks.back());
-        merged_kv_infos[key].dst_embed_ids.push_back(
-            merged_kv_infos[key].dst_blocks.back());
       }
     }
-  }
-}
-
-void SpecKVCacheTransfer::copy_blocks(const std::vector<int>& blocks,
-                                      bool h2d) {
-  std::vector<uint64_t> _blocks;
-  _blocks.reserve(blocks.size());
-  for (const auto& block : blocks) {
-    _blocks.push_back(static_cast<uint64_t>(block));
-  }
-  if (h2d) {
-    CHECK_LDD_RET(llm_data_dist_->CopyKvBlocks(
-        embed_host_cache_, embed_cache_, _blocks, {_blocks}));
-  } else {
-    CHECK_LDD_RET(llm_data_dist_->CopyKvBlocks(
-        embed_cache_, embed_host_cache_, _blocks, {_blocks}));
   }
 }
 }  // namespace xllm

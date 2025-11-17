@@ -7,7 +7,7 @@ cc_library(
   NAME
     kv_cache
   HDRS
-    embedding_allocator.h
+    token_cache_allocator.h
     $<$<BOOL:${USE_NPU}>:hccl_kv_cache_transfer.h>
     kv_cache.h
     kv_cache_event.h
@@ -16,7 +16,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.h>
     kv_cache_store.h
   SRCS
-    embedding_allocator.cpp
+    token_cache_allocator.cpp
     $<$<BOOL:${USE_NPU}>:hccl_kv_cache_transfer.cpp>
     kv_cache.cpp
     kv_cache_transfer.cpp
