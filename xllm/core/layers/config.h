@@ -79,6 +79,13 @@ REGISTER_NOT_IMPLEMENTED_CLASS(LlamaDecoderLayerImpl);
 #endif
 
 #if defined(USE_NPU)
+#include "npu/npu_qwen2_vision_encoder_layer_impl.h"
+#else
+#include "common/qwen2_5_vision_layer.h"
+UNIFY_CLASS_NAME(Qwen2_VisionLayerImpl, Qwen2VisionEncoderLayerImpl)
+#endif
+
+#if defined(USE_NPU)
 #include "npu/npu_qwen2dot5_vision_encoder_layer_impl.h"
 #else
 #include "common/qwen2_5_vision_layer.h"

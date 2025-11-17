@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "npu_qwen3_vision_encoder_layer_impl.h"
+#include "npu_qwen2_vision_encoder_layer_impl.h"
 
 #include <glog/logging.h>
 #include <mstx/ms_tools_ext.h>
@@ -30,7 +30,7 @@ namespace layer {
 
 const uint64_t WEIGHT_COUNT_PER_LAYER = 18;
 
-void Qwen3VisionEncoderLayerImpl::param_from_args(
+void Qwen2VisionEncoderLayerImpl::param_from_args(
     atb_speed::qwen::VisionEncoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -47,10 +47,10 @@ void Qwen3VisionEncoderLayerImpl::param_from_args(
   param.rank = parallel_args.rank();
   param.backend = "lccl";
   param.enableLogN = false;
-  param.MLPActivationType = atb::infer::ActivationType::ACTIVATION_GELU;
+  param.MLPActivationType = atb::infer::ActivationType::ACTIVATION_SWISH;
 }
 
-Qwen3VisionEncoderLayerImpl::Qwen3VisionEncoderLayerImpl(
+Qwen2VisionEncoderLayerImpl::Qwen2VisionEncoderLayerImpl(
     const ModelContext& context)
     : BaseLayer(context) {
   auto model_args = context.get_model_args();
@@ -63,11 +63,11 @@ Qwen3VisionEncoderLayerImpl::Qwen3VisionEncoderLayerImpl(
   device_id_ = options.device().index();
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
-  loader_ = std::make_unique<Qwen3VisionEncoderLoader>(WEIGHT_COUNT_PER_LAYER,
+  loader_ = std::make_unique<Qwen2VisionEncoderLoader>(WEIGHT_COUNT_PER_LAYER,
                                                        context);
 }
 
-void Qwen3VisionEncoderLayerImpl::merge_loaded_weights() {
+void Qwen2VisionEncoderLayerImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
@@ -79,14 +79,14 @@ void Qwen3VisionEncoderLayerImpl::merge_loaded_weights() {
   init_layer();
 }
 
-int64_t Qwen3VisionEncoderLayerImpl::init_layer() {
-  name_ = "qwen3_encoder_layer";
-  model_name_ = "qwen3_vl";
+int64_t Qwen2VisionEncoderLayerImpl::init_layer() {
+  name_ = "qwen2_encoder_layer";
+  model_name_ = "qwen2_vl";
   CHECK_OPERATION_STATUS_RETURN(init_node(encode_node_, encode_param_));
   return atb::NO_ERROR;
 }
 
-int64_t Qwen3VisionEncoderLayerImpl::init_node(
+int64_t Qwen2VisionEncoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::qwen::VisionEncoderLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -116,7 +116,7 @@ int64_t Qwen3VisionEncoderLayerImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor Qwen3VisionEncoderLayerImpl::forward(
+torch::Tensor Qwen2VisionEncoderLayerImpl::forward(
     torch::Tensor& x,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
@@ -143,7 +143,7 @@ torch::Tensor Qwen3VisionEncoderLayerImpl::forward(
   return x;
 }
 
-void Qwen3VisionEncoderLayerImpl::build_node_variant_pack(
+void Qwen2VisionEncoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,

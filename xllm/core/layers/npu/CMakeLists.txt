@@ -9,6 +9,7 @@ cc_library(
     npu_word_embedding_impl.h
     npu_pos_embedding_impl.h
     npu_lm_head_impl.h
+    npu_qwen2_vision_encoder_layer_impl.h
     npu_qwen2dot5_vision_encoder_layer_impl.h
     npu_qwen3_vision_encoder_layer_impl.h
     npu_qwen3_moe_decoder_layer_impl.h
@@ -38,6 +39,7 @@ cc_library(
     loader/deepseek_v2_decoder_loader.h
     loader/glm4_moe_decoder_loader.h
     loader/llama_decoder_loader.h
+    loader/qwen2_vision_encoder_loader.h
     loader/qwen2dot5_vision_encoder_loader.h
     loader/qwen3_vision_encoder_loader.h
     loader/rms_norm_loader.h
@@ -50,6 +52,7 @@ cc_library(
     npu_word_embedding_impl.cpp
     npu_pos_embedding_impl.cpp
     npu_lm_head_impl.cpp
+    npu_qwen2_vision_encoder_layer_impl.cpp
     npu_qwen2dot5_vision_encoder_layer_impl.cpp
     npu_qwen3_vision_encoder_layer_impl.cpp
     npu_qwen3_moe_decoder_layer_impl.cpp
@@ -79,6 +82,7 @@ cc_library(
     loader/deepseek_v2_decoder_loader.cpp
     loader/glm4_moe_decoder_loader.cpp
     loader/llama_decoder_loader.cpp
+    loader/qwen2_vision_encoder_loader.cpp
     loader/qwen2dot5_vision_encoder_loader.cpp
     loader/qwen3_vision_encoder_loader.cpp
     loader/rms_norm_loader.cpp
