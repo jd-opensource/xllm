@@ -113,7 +113,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
     return;
   }
   // Initialize ATB context for prelaunch
-  atb::Status status = atb::CreateContext(&context_prelaunch_);
+  atb::Status status = atb::customize::CreatePlanContext(&context_prelaunch_);
   CHECK_EQ(status, atb::NO_ERROR)
       << "Failed to create ATB context for prelaunch";
 
