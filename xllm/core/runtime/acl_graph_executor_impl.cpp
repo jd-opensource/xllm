@@ -205,10 +205,12 @@ void GraphPersistentParam::update(const torch::Tensor& tokens,
   // Copy block table data
   const int64_t actual_block_table_len = params.block_tables.size(1);
   const int64_t actual_batch_size = params.num_sequences;
-  persistent_block_tables_
-      .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-      .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len)
-      .copy_(params.block_tables, /*non_blocking=*/true);
+  auto slice_persistent_block_tables =
+      persistent_block_tables_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
+  slice_persistent_block_tables.copy_(params.block_tables,
+                                      /*non_blocking=*/true);
 
   // Update persistent embedding from mm_data if available
   const auto& embedding_res = params.mm_data.get<torch::Tensor>("embedding");
@@ -648,6 +650,17 @@ bool AclGraph::capture(CausalLM* model,
   ModelInputParams graph_params = params;
   graph_params.kv_seq_lens = persistent_param_.kv_seq_lens(num_tokens_);
   graph_params.q_seq_lens = persistent_param_.q_seq_lens(num_tokens_);
+  CHECK_GE(num_tokens_, actual_num_tokens)
+      << "num_tokens_ >= actual_num_tokens";
+  graph_params.kv_seq_lens_vec.resize(num_tokens_);
+  graph_params.q_seq_lens_vec.resize(num_tokens_);
+  for (int i = actual_num_tokens; i < num_tokens_; i++) {
+    graph_params.kv_seq_lens_vec[i] = 1;
+    graph_params.q_seq_lens_vec[i] = 1;
+  }
+  graph_params.num_sequences = num_tokens_;
+  graph_params.decode_seq_range = {0, num_tokens_ - 1};
+
   graph_params.new_cache_slots =
       persistent_param_.persistent_new_cache_slots(num_tokens_);
   graph_params.block_tables =
@@ -779,9 +792,13 @@ torch::Tensor AclGraphExecutorImpl::run(
   // (not first forward pass)
   const bool in_decoding_phase =
       (params_single.q_max_seq_len == 1) && !params_single.empty_kv_cache;
-
+  VLOG(50) << "in_decoding_phase: " << in_decoding_phase
+           << " q_max_seq_len: " << params_single.q_max_seq_len
+           << " empty_kv_cache: " << params_single.empty_kv_cache
+           << " n_layers: " << args_.n_layers();
   // If not in decode phase, use eager mode directly without acl graph
   if (!in_decoding_phase || args_.n_layers() == 1) {
+    VLOG(50) << "AclGraphExecutorImpl::run() in eager mode";
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
   }
@@ -819,12 +836,14 @@ torch::Tensor AclGraphExecutorImpl::run(
   auto it = graphs_.find(bucket_num_tokens);
   if (it != graphs_.end()) {
     // Replay the existing graph
+    VLOG(50) << "AclGraphExecutorImpl::run() in replay mode";
     return it->second->replay(
         tokens_tensor, positions_tensor, kv_caches, params_single);
   }
 
   // Graph doesn't exist for this bucket num_tokens, try to create it lazily
   auto graph = std::make_unique<AclGraph>(*persistent_param_);
+  VLOG(50) << "AclGraphExecutorImpl::run() in capture mode";
   bool capture_success = graph->capture(model_,
                                         args_,
                                         options_,

@@ -160,13 +160,22 @@ class Glm4MoeModelImpl : public torch::nn::Module {
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
+        VLOG(50) << "Glm4MoeModelImpl::forward() generate att_mask in chunked "
+                    "prefill mode. attn_mask.sizes: "
+                 << attn_mask.sizes();
       }
     } else {
       if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
         attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
+        VLOG(50) << "Glm4MoeModelImpl::forward() generate att_mask in "
+                    "no-chunked prefill mode. attn_mask.sizes: "
+                 << attn_mask.sizes();
       } else {
         attn_mask = attn_mask_.gen_free_mask(
             num_speculative_tokens_ + 1, dtype_, device_);
+        VLOG(50) << "Glm4MoeModelImpl::forward() generate att_mask in free "
+                    "mask mode. attn_mask.sizes: "
+                 << attn_mask.sizes();
       }
     }
 
