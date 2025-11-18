@@ -859,6 +859,9 @@ void AclGraph::print_graph_tensors() const {
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
     uint32_t num_tokens) const {
+  if (FLAGS_enable_acl_graph_no_padding) {
+    return num_tokens;
+  }
   if (num_tokens <= 1) {
     return 1;
   } else if (num_tokens <= 2) {
