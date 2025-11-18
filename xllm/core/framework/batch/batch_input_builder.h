@@ -62,6 +62,8 @@ class BatchInputBuilder {
 
   void process_swap_block_infos(RawForwardInput& raw_forward_input);
 
+  void process_batch_forward_type();
+
   // State management
   struct BuilderState {
     // Token and position data
@@ -81,6 +83,7 @@ class BatchInputBuilder {
 
     // Sequence metadata
     bool empty_kv_cache = true;
+    BatchForwardType batch_forward_type;
     uint32_t max_seq_len = 0;
     uint32_t q_max_seq_len = 0;
 #if defined(USE_NPU)

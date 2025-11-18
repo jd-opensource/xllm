@@ -822,6 +822,8 @@ std::vector<std::vector<RawForwardInput>> LLMEngine::prepare_inputs(
   dp_global_token_nums.resize(micro_batches_num,
                               std::vector<int32_t>(dp_size_));
   bool global_empty_kv_cache = true;
+  // All empty batches use the first non-empty batch's forward type.
+  BatchForwardType batch_forward_type;
 
   // eplb related
   EplbInfo eplb_info;
@@ -841,6 +843,12 @@ std::vector<std::vector<RawForwardInput>> LLMEngine::prepare_inputs(
           batched_inputs[dp_rank][i].flatten_tokens_vec.size();
       global_empty_kv_cache =
           batched_inputs[dp_rank][i].empty_kv_cache && global_empty_kv_cache;
+      if (batched_inputs[dp_rank][i].batch_forward_type.is_empty()) {
+        continue;
+      }
+      if (batch_forward_type.is_empty() || batch_forward_type.is_prefill()) {
+        batch_forward_type = batched_inputs[dp_rank][i].batch_forward_type;
+      }
     }
   }
 
@@ -853,6 +861,9 @@ std::vector<std::vector<RawForwardInput>> LLMEngine::prepare_inputs(
     for (auto i = 0; i < micro_batches_num; ++i) {
       batched_inputs[dp_rank][i].dp_global_token_nums = dp_global_token_nums[i];
       batched_inputs[dp_rank][i].global_empty_kv_cache = global_empty_kv_cache;
+      if (batched_inputs[dp_rank][i].batch_forward_type.is_empty()) {
+        batched_inputs[dp_rank][i].batch_forward_type = batch_forward_type;
+      }
       if (FLAGS_enable_eplb) {
         batched_inputs[dp_rank][i].eplb_info = eplb_info;
       }

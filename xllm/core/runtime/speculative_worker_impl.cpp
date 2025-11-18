@@ -173,7 +173,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
   }
 
   // TODO: support data parallel case
-  if (check_is_prefill(inputs.micro_inputs[0].input_params.q_seq_lens_vec)) {
+  if (!inputs.micro_inputs[0].input_params.batch_forward_type.is_decode()) {
     return step_prefill(inputs);
   } else {
     return step_decode(inputs);
@@ -182,7 +182,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step_empty(
     const BatchedForwardInputs& inputs) {
-  if (check_is_prefill(inputs.micro_inputs[0].input_params.q_seq_lens_vec)) {
+  if (!inputs.micro_inputs[0].input_params.batch_forward_type.is_decode()) {
     auto output = impl_->step(inputs);
     auto draft_output = draft_impl_->step(inputs);
     return output;
@@ -833,7 +833,7 @@ void SpeculativeWorkerImpl::update_sampling_params(
 void SpeculativeWorkerImpl::prepare_work_before_execute(
     const BatchedForwardInputs& inputs,
     BatchedForwardInputs& processed_inputs) {
-  if (check_is_prefill(inputs.micro_inputs[0].input_params.q_seq_lens_vec)) {
+  if (!inputs.micro_inputs[0].input_params.batch_forward_type.is_decode()) {
     WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
   } else {
     if (enable_schedule_overlap()) {

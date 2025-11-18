@@ -166,8 +166,6 @@ class WorkerImpl {
 
   torch::ScalarType dtype() const { return dtype_; }
 
-  bool check_is_prefill(const std::vector<int>& q_seq_lens_vec);
-
   int32_t hidden_size() const {
     return context_.get_model_args().hidden_size();
   }

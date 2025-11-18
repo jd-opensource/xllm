@@ -434,9 +434,8 @@ void WorkerImpl::prepare_work_before_execute(
                             .device(torch::kCPU)
                             .dtype(torch::kInt32)
                             .pinned_memory(true));
-      bool is_prefill = fwd_inputs_on_device.input_params.global_empty_kv_cache
-                            ? true
-                            : false;
+      bool is_prefill =
+          fwd_inputs_on_device.input_params.batch_forward_type.is_prefill();
       DpEpPadding dp_ep_padding(token_size_per_dp_group,
                                 context_.get_model_args().num_experts_per_tok(),
                                 context_.get_parallel_args().mapping_data(),
@@ -524,7 +523,8 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
     } else {
       for (auto i = 0; i < inputs.micro_inputs.size(); ++i) {
         if (last_step_output_valid_ &&
-            !inputs.micro_inputs[i].input_params.empty_kv_cache) {
+            inputs.micro_inputs[i]
+                .input_params.batch_forward_type.has_decode()) {
           // replace step i model input with true output of step i-1
           inputs.micro_inputs[i] =
               update_input_by_last_step_output(inputs.micro_inputs[i]);
@@ -757,15 +757,6 @@ int64_t WorkerImpl::get_active_activation_memory() {
   return DeviceMonitor::get_instance()
       .get_device_stats(device_.index())
       .active_activation_memory;
-}
-
-bool WorkerImpl::check_is_prefill(const std::vector<int>& q_seq_lens_vec) {
-  for (auto q_len : q_seq_lens_vec) {
-    if (q_len > 1) {
-      return true;
-    }
-  }
-  return false;
 }
 
 }  // namespace xllm
