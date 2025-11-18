@@ -261,157 +261,122 @@ constexpr uint32_t TILING_HEAD_SIZE = 44;
 
 void parse_host_tiling_buffer(const uint32_t* hostTilingBuffer,
                               uint64_t tilingBufferSize) {
-  std::cout << "hostTilingBuffer.tilingBuffer: " << (void*)hostTilingBuffer
-            << std::endl;
-  std::cout << "hostTilingBuffer.tilingBufferSize: " << tilingBufferSize
-            << std::endl;
+  VLOG(50) << "hostTilingBuffer.tilingBuffer: " << (void*)hostTilingBuffer;
+  VLOG(50) << "hostTilingBuffer.tilingBufferSize: " << tilingBufferSize;
   if (hostTilingBuffer == nullptr || tilingBufferSize == 0) {
-    std::cout << "Invalid host tiling buffer!" << std::endl;
+    VLOG(50) << "Invalid host tiling buffer!";
     return;
   }
 
   uint32_t tilingParamSize = tilingBufferSize / sizeof(uint32_t);
-  std::cout << "Total tiling param elements: " << tilingParamSize << std::endl;
+  VLOG(50) << "Total tiling param elements: " << tilingParamSize;
 
   // Parse header fields (TILING_HEAD_SIZE = 44)
-  std::cout << "\n=== Tiling Header Fields ===" << std::endl;
-  std::cout << "TILING_BATCH(tiling_head[0]): " << hostTilingBuffer[0]
-            << std::endl;
-  std::cout << "TILING_NUMHEADS(tiling_head[1]): " << hostTilingBuffer[1]
-            << std::endl;
-  std::cout << "TILING_HEADDIM(tiling_head[2]): " << hostTilingBuffer[2]
-            << std::endl;
-  std::cout << "TILING_NUMBLOKS(tiling_head[3]): " << hostTilingBuffer[3]
-            << std::endl;
-  std::cout << "TILING_BLOCKSIZE(tiling_head[4]): " << hostTilingBuffer[4]
-            << std::endl;
-  std::cout << "TILING_MAXBLOCKS(tiling_head[5]): " << hostTilingBuffer[5]
-            << std::endl;
-  std::cout << "TILING_TOR(tiling_head[6]): " << hostTilingBuffer[6]
-            << std::endl;
-  std::cout << "TILING_KVHEADS(tiling_head[7]): " << hostTilingBuffer[7]
-            << std::endl;
-  std::cout << "TILING_FORMER_BATCH(tiling_head[8]): " << hostTilingBuffer[8]
-            << std::endl;
-  std::cout << "TILING_FORMER_HEAD(tiling_head[9]): " << hostTilingBuffer[9]
-            << std::endl;
-  std::cout << "TILING_TAIL_BATCH(tiling_head[10]): " << hostTilingBuffer[10]
-            << std::endl;
-  std::cout << "TILING_TAIL_HEAD(tiling_head[11]): " << hostTilingBuffer[11]
-            << std::endl;
-  std::cout << "TILING_HEADNUM_MOVE(tiling_head[12]): " << hostTilingBuffer[12]
-            << std::endl;
-  std::cout << "TILING_MASK_MAX_LEN(tiling_head[13]): " << hostTilingBuffer[13]
-            << std::endl;
-  std::cout << "TILING_BATCH_STRIDE(tiling_head[14]): " << hostTilingBuffer[14]
-            << std::endl;
-  std::cout << "TILING_HEAD_STRIDE(tiling_head[15]): " << hostTilingBuffer[15]
-            << std::endl;
-  std::cout << "TILING_KEY(tiling_head[16]): " << hostTilingBuffer[16]
-            << std::endl;
-  std::cout << "TILING_HEADSIZE(tiling_head[17]): " << hostTilingBuffer[17]
-            << std::endl;
-  std::cout << "TILING_PARASIZE(tiling_head[18]): " << hostTilingBuffer[18]
-            << std::endl;
-  std::cout << "TILING_GROUPNUM(tiling_head[19]): " << hostTilingBuffer[19]
-            << std::endl;
-  std::cout << "TILING_FORMER_GROUP_MOVE(tiling_head[20]): "
-            << hostTilingBuffer[20] << std::endl;
-  std::cout << "TILING_TAIL_GROUP_MOVE(tiling_head[21]): "
-            << hostTilingBuffer[21] << std::endl;
-  std::cout << "TILING_MAX_KVSEQLEN(tiling_head[22]): " << hostTilingBuffer[22]
-            << std::endl;
-  std::cout << "TILING_KVSPLIT(tiling_head[23]): " << hostTilingBuffer[23]
-            << std::endl;
-  std::cout << "TILING_KVCORENUM(tiling_head[24]): " << hostTilingBuffer[24]
-            << std::endl;
-  std::cout << "TILING_BLOCKSIZE_CALC(tiling_head[25]): "
-            << hostTilingBuffer[25] << std::endl;
-  std::cout << "TILING_TOTAL_BLOCK_NUM(tiling_head[26]): "
-            << hostTilingBuffer[26] << std::endl;
-  std::cout << "TILING_PREFILL_BS(tiling_head[27]): " << hostTilingBuffer[27]
-            << std::endl;
-  std::cout << "TILING_DECODER_BS(tiling_head[28]): " << hostTilingBuffer[28]
-            << std::endl;
-  std::cout << "TILING_HEADDIM_V(tiling_head[29]): " << hostTilingBuffer[29]
-            << std::endl;
-  std::cout << "TILING_MODCOEF(tiling_head[30]): " << hostTilingBuffer[30]
-            << std::endl;
-  std::cout << "TILING_DIVCOEF(tiling_head[31]): " << hostTilingBuffer[31]
-            << std::endl;
-  std::cout << "TILING_QHEADORIGINAL(tiling_head[32]): " << hostTilingBuffer[32]
-            << std::endl;
-  std::cout << "TILING_COMPRESSHEAD(tiling_head[33]): " << hostTilingBuffer[33]
-            << std::endl;
-  std::cout << "TILING_QUANTYPE(tiling_head[34]): " << hostTilingBuffer[34]
-            << std::endl;
-  std::cout << "TILING_DATA_SHAPE_TYPE(tiling_head[35]): "
-            << hostTilingBuffer[35] << std::endl;
-  std::cout << "TILING_SCALETYPE(tiling_head[36]): " << hostTilingBuffer[36]
-            << std::endl;
-  std::cout << "TILING_MASK_TYPE_ND(tiling_head[37]): " << hostTilingBuffer[37]
-            << std::endl;
-  std::cout << "TILING_HEADDIM_K_SPLIT(tiling_head[38]): "
-            << hostTilingBuffer[38] << std::endl;
-  std::cout << "TILING_HEADDIM_V_SPLIT(tiling_head[39]): "
-            << hostTilingBuffer[39] << std::endl;
-  std::cout << "TILING_HEADDIM_V_SPLIT_VECTOR_FORMER(tiling_head[40]): "
-            << hostTilingBuffer[40] << std::endl;
-  std::cout << "TILING_HEADDIM_V_SPLIT_VECTOR_TAIL(tiling_head[41]): "
-            << hostTilingBuffer[41] << std::endl;
-  std::cout << "TILING_MTP_HEAD_SPLIT_SIZE(tiling_head[42]): "
-            << hostTilingBuffer[42] << std::endl;
-  std::cout << "TILING_MTP_HEAD_SPLIT_NUM(tiling_head[43]): "
-            << hostTilingBuffer[43] << std::endl;
+  VLOG(50) << "\n=== Tiling Header Fields ===";
+  VLOG(50) << "TILING_BATCH(tiling_head[0]): " << hostTilingBuffer[0];
+  VLOG(50) << "TILING_NUMHEADS(tiling_head[1]): " << hostTilingBuffer[1];
+  VLOG(50) << "TILING_HEADDIM(tiling_head[2]): " << hostTilingBuffer[2];
+  VLOG(50) << "TILING_NUMBLOKS(tiling_head[3]): " << hostTilingBuffer[3];
+  VLOG(50) << "TILING_BLOCKSIZE(tiling_head[4]): " << hostTilingBuffer[4];
+  VLOG(50) << "TILING_MAXBLOCKS(tiling_head[5]): " << hostTilingBuffer[5];
+  VLOG(50) << "TILING_TOR(tiling_head[6]): " << hostTilingBuffer[6];
+  VLOG(50) << "TILING_KVHEADS(tiling_head[7]): " << hostTilingBuffer[7];
+  VLOG(50) << "TILING_FORMER_BATCH(tiling_head[8]): " << hostTilingBuffer[8];
+  VLOG(50) << "TILING_FORMER_HEAD(tiling_head[9]): " << hostTilingBuffer[9];
+  VLOG(50) << "TILING_TAIL_BATCH(tiling_head[10]): " << hostTilingBuffer[10];
+  VLOG(50) << "TILING_TAIL_HEAD(tiling_head[11]): " << hostTilingBuffer[11];
+  VLOG(50) << "TILING_HEADNUM_MOVE(tiling_head[12]): " << hostTilingBuffer[12];
+  VLOG(50) << "TILING_MASK_MAX_LEN(tiling_head[13]): " << hostTilingBuffer[13];
+  VLOG(50) << "TILING_BATCH_STRIDE(tiling_head[14]): " << hostTilingBuffer[14];
+  VLOG(50) << "TILING_HEAD_STRIDE(tiling_head[15]): " << hostTilingBuffer[15];
+  VLOG(50) << "TILING_KEY(tiling_head[16]): " << hostTilingBuffer[16];
+  VLOG(50) << "TILING_HEADSIZE(tiling_head[17]): " << hostTilingBuffer[17];
+  VLOG(50) << "TILING_PARASIZE(tiling_head[18]): " << hostTilingBuffer[18];
+  VLOG(50) << "TILING_GROUPNUM(tiling_head[19]): " << hostTilingBuffer[19];
+  VLOG(50) << "TILING_FORMER_GROUP_MOVE(tiling_head[20]): "
+           << hostTilingBuffer[20];
+  VLOG(50) << "TILING_TAIL_GROUP_MOVE(tiling_head[21]): "
+           << hostTilingBuffer[21];
+  VLOG(50) << "TILING_MAX_KVSEQLEN(tiling_head[22]): " << hostTilingBuffer[22];
+  VLOG(50) << "TILING_KVSPLIT(tiling_head[23]): " << hostTilingBuffer[23];
+  VLOG(50) << "TILING_KVCORENUM(tiling_head[24]): " << hostTilingBuffer[24];
+  VLOG(50) << "TILING_BLOCKSIZE_CALC(tiling_head[25]): "
+           << hostTilingBuffer[25];
+  VLOG(50) << "TILING_TOTAL_BLOCK_NUM(tiling_head[26]): "
+           << hostTilingBuffer[26];
+  VLOG(50) << "TILING_PREFILL_BS(tiling_head[27]): " << hostTilingBuffer[27];
+  VLOG(50) << "TILING_DECODER_BS(tiling_head[28]): " << hostTilingBuffer[28];
+  VLOG(50) << "TILING_HEADDIM_V(tiling_head[29]): " << hostTilingBuffer[29];
+  VLOG(50) << "TILING_MODCOEF(tiling_head[30]): " << hostTilingBuffer[30];
+  VLOG(50) << "TILING_DIVCOEF(tiling_head[31]): " << hostTilingBuffer[31];
+  VLOG(50) << "TILING_QHEADORIGINAL(tiling_head[32]): " << hostTilingBuffer[32];
+  VLOG(50) << "TILING_COMPRESSHEAD(tiling_head[33]): " << hostTilingBuffer[33];
+  VLOG(50) << "TILING_QUANTYPE(tiling_head[34]): " << hostTilingBuffer[34];
+  VLOG(50) << "TILING_DATA_SHAPE_TYPE(tiling_head[35]): "
+           << hostTilingBuffer[35];
+  VLOG(50) << "TILING_SCALETYPE(tiling_head[36]): " << hostTilingBuffer[36];
+  VLOG(50) << "TILING_MASK_TYPE_ND(tiling_head[37]): " << hostTilingBuffer[37];
+  VLOG(50) << "TILING_HEADDIM_K_SPLIT(tiling_head[38]): "
+           << hostTilingBuffer[38];
+  VLOG(50) << "TILING_HEADDIM_V_SPLIT(tiling_head[39]): "
+           << hostTilingBuffer[39];
+  VLOG(50) << "TILING_HEADDIM_V_SPLIT_VECTOR_FORMER(tiling_head[40]): "
+           << hostTilingBuffer[40];
+  VLOG(50) << "TILING_HEADDIM_V_SPLIT_VECTOR_TAIL(tiling_head[41]): "
+           << hostTilingBuffer[41];
+  VLOG(50) << "TILING_MTP_HEAD_SPLIT_SIZE(tiling_head[42]): "
+           << hostTilingBuffer[42];
+  VLOG(50) << "TILING_MTP_HEAD_SPLIT_NUM(tiling_head[43]): "
+           << hostTilingBuffer[43];
 
   // Parse batch parameters
   if (tilingParamSize > TILING_HEAD_SIZE) {
     uint32_t batchCount = hostTilingBuffer[0];
-    std::cout << "\n=== Batch Parameters ===" << std::endl;
-    std::cout << "Number of batches: " << batchCount << std::endl;
+    VLOG(50) << "\n=== Batch Parameters ===";
+    VLOG(50) << "Number of batches: " << batchCount;
     batchCount = std::min(batchCount, 20u);
 
     for (uint32_t batchIdx = 0; batchIdx < batchCount; ++batchIdx) {
       uint32_t offset = TILING_HEAD_SIZE + batchIdx * TILING_PARA_SIZE;
       if (offset + TILING_PARA_SIZE <= tilingParamSize) {
-        std::cout << "\n--- Batch " << batchIdx << " ---" << std::endl;
-        std::cout << "  qSeqLen(batch_tiling_param[0]): "
-                  << hostTilingBuffer[offset + 0] << std::endl;
-        std::cout << "  kvSeqLen(batch_tiling_param[1]): "
-                  << hostTilingBuffer[offset + 1] << std::endl;
-        std::cout << "  qSBlockTile(batch_tiling_param[2]): "
-                  << hostTilingBuffer[offset + 2] << std::endl;
-        std::cout << "  blockSize(batch_tiling_param[3]): "
-                  << hostTilingBuffer[offset + 3] << std::endl;
-        std::cout << "  addrQSeqOffset[high](batch_tiling_param[4]): "
-                  << hostTilingBuffer[offset + 4] << std::endl;
-        std::cout << "  addrQSeqOffset[low](batch_tiling_param[5]): "
-                  << hostTilingBuffer[offset + 5] << std::endl;
-        std::cout << "  addrOSeqOffset[high](batch_tiling_param[6]): "
-                  << hostTilingBuffer[offset + 6] << std::endl;
-        std::cout << "  addrOSeqOffset[low](batch_tiling_param[7]): "
-                  << hostTilingBuffer[offset + 7] << std::endl;
-        std::cout << "  seqIdx(batch_tiling_param[8]): "
-                  << hostTilingBuffer[offset + 8] << std::endl;
-        std::cout << "  totalQBlkNum(batch_tiling_param[9]): "
-                  << hostTilingBuffer[offset + 9] << std::endl;
-        std::cout << "  maskOffset[high](batch_tiling_param[10]): "
-                  << hostTilingBuffer[offset + 10] << std::endl;
-        std::cout << "  addrLSeqOffset[high](batch_tiling_param[11]): "
-                  << hostTilingBuffer[offset + 11] << std::endl;
-        std::cout << "  addrLSeqOffset[low](batch_tiling_param[12]): "
-                  << hostTilingBuffer[offset + 12] << std::endl;
-        std::cout << "  maskOffset[low](batch_tiling_param[14]): "
-                  << hostTilingBuffer[offset + 14] << std::endl;
-        std::cout << "  addrOFdSeqOffset[high](batch_tiling_param[15]): "
-                  << hostTilingBuffer[offset + 15] << std::endl;
-        std::cout << "  addrOFdSeqOffset[low](batch_tiling_param[16]): "
-                  << hostTilingBuffer[offset + 16] << std::endl;
+        VLOG(50) << "\n--- Batch " << batchIdx << " ---";
+        VLOG(50) << "  qSeqLen(batch_tiling_param[0]): "
+                 << hostTilingBuffer[offset + 0];
+        VLOG(50) << "  kvSeqLen(batch_tiling_param[1]): "
+                 << hostTilingBuffer[offset + 1];
+        VLOG(50) << "  qSBlockTile(batch_tiling_param[2]): "
+                 << hostTilingBuffer[offset + 2];
+        VLOG(50) << "  blockSize(batch_tiling_param[3]): "
+                 << hostTilingBuffer[offset + 3];
+        VLOG(50) << "  addrQSeqOffset[high](batch_tiling_param[4]): "
+                 << hostTilingBuffer[offset + 4];
+        VLOG(50) << "  addrQSeqOffset[low](batch_tiling_param[5]): "
+                 << hostTilingBuffer[offset + 5];
+        VLOG(50) << "  addrOSeqOffset[high](batch_tiling_param[6]): "
+                 << hostTilingBuffer[offset + 6];
+        VLOG(50) << "  addrOSeqOffset[low](batch_tiling_param[7]): "
+                 << hostTilingBuffer[offset + 7];
+        VLOG(50) << "  seqIdx(batch_tiling_param[8]): "
+                 << hostTilingBuffer[offset + 8];
+        VLOG(50) << "  totalQBlkNum(batch_tiling_param[9]): "
+                 << hostTilingBuffer[offset + 9];
+        VLOG(50) << "  maskOffset[high](batch_tiling_param[10]): "
+                 << hostTilingBuffer[offset + 10];
+        VLOG(50) << "  addrLSeqOffset[high](batch_tiling_param[11]): "
+                 << hostTilingBuffer[offset + 11];
+        VLOG(50) << "  addrLSeqOffset[low](batch_tiling_param[12]): "
+                 << hostTilingBuffer[offset + 12];
+        VLOG(50) << "  maskOffset[low](batch_tiling_param[14]): "
+                 << hostTilingBuffer[offset + 14];
+        VLOG(50) << "  addrOFdSeqOffset[high](batch_tiling_param[15]): "
+                 << hostTilingBuffer[offset + 15];
+        VLOG(50) << "  addrOFdSeqOffset[low](batch_tiling_param[16]): "
+                 << hostTilingBuffer[offset + 16];
       }
     }
   }
 
-  std::cout << "\n=== End of Tiling Buffer Parse ===" << std::endl;
+  VLOG(50) << "\n=== End of Tiling Buffer Parse ===";
 }
 
 void GraphPersistentParam::update_tiling_data(
@@ -497,8 +462,10 @@ void GraphPersistentParam::update_tiling_data(
   CHECK_GT(tiling_buffer_info.tilingBufferSize, 0)
       << "Tiling buffer size is zero";
 
-  // parse_host_tiling_buffer((uint32_t*)tiling_buffer_info.tilingBuffer,
-  //                          tiling_buffer_info.tilingBufferSize);
+  if (VLOG_IS_ON(50)) {
+    parse_host_tiling_buffer((uint32_t*)tiling_buffer_info.tilingBuffer,
+                             tiling_buffer_info.tilingBufferSize);
+  }
   aclError acl_status =
       aclrtMemcpyAsync(tiling_data_.data_ptr(),
                        tiling_data_.numel() * sizeof(uint32_t),

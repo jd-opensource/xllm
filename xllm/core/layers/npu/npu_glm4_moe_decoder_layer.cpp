@@ -1094,14 +1094,14 @@ torch::Tensor Glm4MoeDecoderImpl::forward(
   atb::Status st;
   bool is_prefill = input_params.decode_seq_range.second !=
                     input_params.q_seq_lens.size(0) - 1;
-  VLOG(50) << "Glm4MoeDecoderImpl::forward() is_prefill: " << is_prefill
-           << " decode_seq_range.second: "
-           << input_params.decode_seq_range.second
-           << " q_seq_lens.size(0): " << input_params.q_seq_lens.size(0)
-           << " input_params.global_empty_kv_cache: "
-           << input_params.global_empty_kv_cache;
+  // VLOG(50) << "Glm4MoeDecoderImpl::forward() is_prefill: " << is_prefill
+  //          << " decode_seq_range.second: "
+  //          << input_params.decode_seq_range.second
+  //          << " q_seq_lens.size(0): " << input_params.q_seq_lens.size(0)
+  //          << " input_params.global_empty_kv_cache: "
+  //          << input_params.global_empty_kv_cache;
   if (is_prefill) {
-    VLOG(50) << "Glm4MoeDecoderImpl::forward() in prefill mode";
+    // VLOG(50) << "Glm4MoeDecoderImpl::forward() in prefill mode";
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
