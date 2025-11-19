@@ -825,8 +825,12 @@ void SpeculativeWorkerImpl::update_sampling_params(
   TENSOR_REPEAT(sampling_params.frequency_penalties, num_val_tokens);
   TENSOR_REPEAT(sampling_params.presence_penalties, num_val_tokens);
   TENSOR_REPEAT(sampling_params.repetition_penalties, num_val_tokens);
+  TENSOR_REPEAT(sampling_params.temperatures, num_val_tokens);
   TENSOR_REPEAT(sampling_params.top_p, num_val_tokens);
   TENSOR_REPEAT(sampling_params.top_k, num_val_tokens);
+  TENSOR_REPEAT(sampling_params.unique_token_ids, num_val_tokens);
+  TENSOR_REPEAT(sampling_params.unique_token_counts, num_val_tokens);
+  TENSOR_REPEAT(sampling_params.unique_token_ids_lens, num_val_tokens);
   TENSOR_REPEAT(sampling_params.do_sample, num_val_tokens);
 }
 
