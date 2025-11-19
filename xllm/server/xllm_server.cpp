@@ -50,6 +50,8 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
   }
 
   brpc::ServerOptions options;
+  options.rpc_pb_message_factory =
+      brpc::GetArenaRpcPBMessageFactory<1024 * 1024, 1024 * 1024 * 100>();
   options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
   options.num_threads = FLAGS_num_threads;
   if (server_->Start(FLAGS_port, &options) != 0) {
