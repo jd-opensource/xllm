@@ -21,6 +21,8 @@ limitations under the License.
 
 namespace xllm {
 
+constexpr int32_t local_device_count = 8;
+
 class ProcessGroupCncl : public ProcessGroup {
  public:
   ProcessGroupCncl(int32_t global_rank,
@@ -42,8 +44,8 @@ class ProcessGroupCncl : public ProcessGroup {
           get_group_rank(world_size, global_rank, rank_size, trans);
       pg_options->global_ranks_in_group = group_ranks;
       rank = local_rank;
-      int32_t server_ip_idx = group_ranks[0] / card_cnt_;
-      int32_t cur_ip_idx = global_rank / card_cnt_;
+      int32_t server_ip_idx = group_ranks[0] / local_device_count;
+      int32_t cur_ip_idx = global_rank / local_device_count;
       if (server_ip_idx == cur_ip_idx) {
         local_host = "127.0.0.1";
       }
@@ -53,9 +55,6 @@ class ProcessGroupCncl : public ProcessGroup {
     pg_ = std::make_unique<torch_mlu::ProcessGroupCNCL>(
         store, rank, rank_size, pg_options);
   }
-
- private:
-  int32_t card_cnt_ = 8;
 };
 
 std::unique_ptr<xllm::ProcessGroup> create_process_group(
