@@ -277,8 +277,7 @@ Glm4MoeDecoderImpl::Glm4MoeDecoderImpl(const ModelContext& context,
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       num_speculative_tokens_(
-          context.get_model_args().num_speculative_tokens()),
-      context_(context) {
+          context.get_model_args().num_speculative_tokens()) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -1094,14 +1093,7 @@ torch::Tensor Glm4MoeDecoderImpl::forward(
   atb::Status st;
   bool is_prefill = input_params.decode_seq_range.second !=
                     input_params.q_seq_lens.size(0) - 1;
-  // VLOG(50) << "Glm4MoeDecoderImpl::forward() is_prefill: " << is_prefill
-  //          << " decode_seq_range.second: "
-  //          << input_params.decode_seq_range.second
-  //          << " q_seq_lens.size(0): " << input_params.q_seq_lens.size(0)
-  //          << " input_params.global_empty_kv_cache: "
-  //          << input_params.global_empty_kv_cache;
   if (is_prefill) {
-    // VLOG(50) << "Glm4MoeDecoderImpl::forward() in prefill mode";
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,

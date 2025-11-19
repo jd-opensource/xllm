@@ -727,24 +727,7 @@ void ProfileManager::warmup_for_acl_graph() {
   }
 
   // ========== Warmup Decode Requests ==========
-  // LOG(INFO) << "Warming up decode requests...";
-  // for (int32_t seq_len : decode_seq_lens) {
-  //   for (int32_t batch_size : decode_batch_sizes) {
-  //     try {
-  //       LOG(INFO) << "Decode warmup: batch_size=" << batch_size
-  //                 << ", seq_len=" << seq_len;
-  //       // Decode: prefix_length = seq_len - 1 (KV cache has seq_len - 1
-  //       tokens) double latency = run_request(seq_len, seq_len - 1,
-  //       batch_size); LOG(INFO) << "Decode warmup completed: batch_size=" <<
-  //       batch_size
-  //                 << ", seq_len=" << seq_len << ", latency=" << latency
-  //                 << " ms";
-  //     } catch (const std::exception& e) {
-  //       LOG(WARNING) << "Decode warmup failed: batch_size=" << batch_size
-  //                    << ", seq_len=" << seq_len << ", error: " << e.what();
-  //     }
-  //   }
-  // }
+  // confict with async_schedule, so skip for now
 
   LOG(INFO) << "ACL graph warmup completed";
 }

@@ -137,18 +137,18 @@ class GraphPersistentParam {
 
  private:
   // Initialize tiling tensor
-  void initialize_tiling_data(const torch::Device& device);
+  void initialize_paged_attention_plan_context(const torch::Device& device);
 
   // Update attention mask efficiently from input parameters
   void update_attention_mask(const ModelInputParams& input_params);
 
-  // Update tiling tensor based on input parameters
-  void update_tiling_data(const torch::Tensor& tokens,
-                          const torch::Tensor& k_cache,
-                          const torch::Tensor& v_cache,
-                          const torch::Tensor& block_tables,
-                          const ModelInputParams& input_params,
-                          aclrtStream stream);
+  // Update paged attention tiling based on input parameters
+  void plan_paged_attention_tiling(const torch::Tensor& tokens,
+                                   const torch::Tensor& k_cache,
+                                   const torch::Tensor& v_cache,
+                                   const torch::Tensor& block_tables,
+                                   const ModelInputParams& input_params,
+                                   aclrtStream stream);
 
   const ModelArgs& args_;
   const torch::Device& device_;
@@ -171,12 +171,12 @@ class GraphPersistentParam {
   // for mtp model
   torch::Tensor persistent_embedding_;
 
-  // ATB context and operation for prelaunch (for tiling tensor)
-  atb::Context* context_prelaunch_;
-  atb::Operation* customOp_prelaunch_;
-  aclrtStream stream_prelaunch_;
+  // ATB context and operation for paged attention plan
+  atb::Context* context_for_plan_;
+  atb::Operation* custom_pa_op_for_plan_;
+  aclrtStream stream_for_plan_;
 
-  // Persistent tiling tensor on device
+  // Persistent paged attention tiling tensor on device
   torch::Tensor tiling_data_;
 
   // Cached attention parameters

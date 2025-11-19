@@ -54,9 +54,9 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
     : args_(args),
       device_(device),
       options_(options),
-      context_prelaunch_(nullptr),
-      customOp_prelaunch_(nullptr),
-      stream_prelaunch_(nullptr),
+      context_for_plan_(nullptr),
+      custom_pa_op_for_plan_(nullptr),
+      stream_for_plan_(nullptr),
       need_update_attn_mask_(need_update_attn_mask) {
   // Use max_tokens_per_batch for first dimension size
   // num_decode_tokens
@@ -112,74 +112,22 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   if (args_.head_dim() == 0) {
     return;
   }
-  // Initialize ATB context for prelaunch
-  atb::Status status = atb::customize::CreatePlanContext(&context_prelaunch_);
-  CHECK_EQ(status, atb::NO_ERROR)
-      << "Failed to create ATB context for prelaunch";
 
-  // Create stream for prelaunch
-  aclError acl_status = aclrtCreateStream(&stream_prelaunch_);
-  CHECK_EQ(acl_status, ACL_SUCCESS)
-      << "Failed to create ACL stream for prelaunch";
-  context_prelaunch_->SetExecuteStream(stream_prelaunch_);
-
-  // Set launch mode to GRAPH_LAUNCH_MODE
-  status =
-      context_prelaunch_->SetLaunchMode(atb::LaunchMode::GRAPH_LAUNCH_MODE);
-  CHECK_EQ(status, atb::NO_ERROR)
-      << "Failed to set launch mode to GRAPH_LAUNCH_MODE";
-
-  // Create custom paged attention operation
-  const int dp_local_tp_size = options_.world_size() / options_.dp_size();
-
-  // Cache headNum and head_dim as member variables
-  num_head_ = static_cast<int32_t>(args_.n_heads() / dp_local_tp_size);
-  head_dim_ = static_cast<int32_t>(args_.head_dim());
-
-  atb::customize::CustomPagedAttentionParam paOpParam;
-  if (need_update_attn_mask) {
-    paOpParam.maskType =
-        atb::infer::PagedAttentionParam::MaskType::MASK_TYPE_NORM;
-  }
-  paOpParam.headNum = num_head_;
-
-  std::optional<long int> optionalValue = args_.n_kv_heads();
-  paOpParam.kvHeadNum =
-      std::max(1,
-               static_cast<int32_t>(optionalValue.value_or(args_.n_heads())) /
-                   dp_local_tp_size);
-
-  const float head_dim_float = static_cast<float>(head_dim_);
-  paOpParam.qkScale = 1.0f / std::sqrt(head_dim_float);
-
-  const bool isBF16 = args_.dtype() == "bfloat16";
-  if (isBF16) {
-    paOpParam.outDataType = ACL_BF16;
-  } else {
-    paOpParam.outDataType = ACL_FLOAT16;
-  }
-
-  status = atb::CreateOperation(paOpParam, &customOp_prelaunch_);
-  CHECK_EQ(status, atb::NO_ERROR)
-      << "Failed to create custom paged attention operation";
-  CHECK_NE(customOp_prelaunch_, nullptr) << "customOp_prelaunch_ is null";
-
-  // Initialize tiling tensor
-  initialize_tiling_data(device);
+  initialize_paged_attention_plan_context(device);
 }
 
 GraphPersistentParam::~GraphPersistentParam() {
-  if (customOp_prelaunch_ != nullptr) {
-    atb::DestroyOperation(customOp_prelaunch_);
-    customOp_prelaunch_ = nullptr;
+  if (custom_pa_op_for_plan_ != nullptr) {
+    atb::DestroyOperation(custom_pa_op_for_plan_);
+    custom_pa_op_for_plan_ = nullptr;
   }
-  if (stream_prelaunch_ != nullptr) {
-    aclrtDestroyStream(stream_prelaunch_);
-    stream_prelaunch_ = nullptr;
+  if (stream_for_plan_ != nullptr) {
+    aclrtDestroyStream(stream_for_plan_);
+    stream_for_plan_ = nullptr;
   }
-  if (context_prelaunch_ != nullptr) {
-    atb::DestroyContext(context_prelaunch_);
-    context_prelaunch_ = nullptr;
+  if (context_for_plan_ != nullptr) {
+    atb::DestroyContext(context_for_plan_);
+    context_for_plan_ = nullptr;
   }
 }
 
@@ -244,23 +192,77 @@ void GraphPersistentParam::update(const torch::Tensor& tokens,
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
 
     // Update tiling tensor
-    update_tiling_data(
+    plan_paged_attention_tiling(
         tokens, k_cache, v_cache, persistent_block_tables_, params, stream);
   }
 }
 
-void GraphPersistentParam::initialize_tiling_data(const torch::Device& device) {
-  // max tiling params size is 1024 * 1024
-  const int64_t tiling_size = 1024 * 256;
-  tiling_data_ =
-      torch::zeros({tiling_size}, torch::dtype(torch::kInt32).device(device));
+void GraphPersistentParam::initialize_paged_attention_plan_context(
+    const torch::Device& device) {
+  // max paged attention tiling buffer size is 1024 * 256
+  constexpr int64_t tiling_buffer_size = 1024 * 256;
+  tiling_data_ = torch::zeros({tiling_buffer_size},
+                              torch::dtype(torch::kInt32).device(device));
+
+  // Initialize ATB context for paged attention plan
+  atb::Status status = atb::customize::CreatePlanContext(&context_for_plan_);
+  CHECK_EQ(status, atb::NO_ERROR)
+      << "Failed to create ATB context for paged attention plan";
+
+  // Create stream for paged attention plan
+  aclError acl_status = aclrtCreateStream(&stream_for_plan_);
+  CHECK_EQ(acl_status, ACL_SUCCESS)
+      << "Failed to create ACL stream for paged attention plan";
+  context_for_plan_->SetExecuteStream(stream_for_plan_);
+
+  // Set launch mode to GRAPH_LAUNCH_MODE
+  status = context_for_plan_->SetLaunchMode(atb::LaunchMode::GRAPH_LAUNCH_MODE);
+  CHECK_EQ(status, atb::NO_ERROR)
+      << "Failed to set launch mode to GRAPH_LAUNCH_MODE";
+
+  // Create custom paged attention operation
+  const int dp_local_tp_size = options_.world_size() / options_.dp_size();
+
+  // Cache headNum and head_dim as member variables
+  num_head_ = static_cast<int32_t>(args_.n_heads() / dp_local_tp_size);
+  head_dim_ = static_cast<int32_t>(args_.head_dim());
+
+  atb::customize::CustomPagedAttentionParam paOpParam;
+  // default mask type is UNDEFINED, which means no mask is needed
+  if (need_update_attn_mask_) {
+    paOpParam.maskType =
+        atb::infer::PagedAttentionParam::MaskType::MASK_TYPE_NORM;
+  }
+  paOpParam.headNum = num_head_;
+
+  std::optional<long int> optionalValue = args_.n_kv_heads();
+  paOpParam.kvHeadNum =
+      std::max(1,
+               static_cast<int32_t>(optionalValue.value_or(args_.n_heads())) /
+                   dp_local_tp_size);
+
+  const float head_dim_float = static_cast<float>(head_dim_);
+  paOpParam.qkScale = 1.0f / std::sqrt(head_dim_float);
+
+  const bool isBF16 = args_.dtype() == "bfloat16";
+  if (isBF16) {
+    paOpParam.outDataType = ACL_BF16;
+  } else {
+    paOpParam.outDataType = ACL_FLOAT16;
+  }
+
+  status = atb::CreateOperation(paOpParam, &custom_pa_op_for_plan_);
+  CHECK_EQ(status, atb::NO_ERROR)
+      << "Failed to create custom paged attention operation";
+  CHECK_NE(custom_pa_op_for_plan_, nullptr) << "custom_pa_op_for_plan_ is null";
 }
 
 constexpr uint32_t TILING_PARA_SIZE = 17;
 constexpr uint32_t TILING_HEAD_SIZE = 44;
 
-void parse_host_tiling_buffer(const uint32_t* hostTilingBuffer,
-                              uint64_t tilingBufferSize) {
+namespace {
+void parse_pa_host_tiling_buffer(const uint32_t* hostTilingBuffer,
+                                 uint64_t tilingBufferSize) {
   VLOG(50) << "hostTilingBuffer.tilingBuffer: " << (void*)hostTilingBuffer;
   VLOG(50) << "hostTilingBuffer.tilingBufferSize: " << tilingBufferSize;
   if (hostTilingBuffer == nullptr || tilingBufferSize == 0) {
@@ -378,8 +380,9 @@ void parse_host_tiling_buffer(const uint32_t* hostTilingBuffer,
 
   VLOG(50) << "\n=== End of Tiling Buffer Parse ===";
 }
+}  // namespace
 
-void GraphPersistentParam::update_tiling_data(
+void GraphPersistentParam::plan_paged_attention_tiling(
     const torch::Tensor& tokens,
     const torch::Tensor& k_cache,
     const torch::Tensor& v_cache,
@@ -448,14 +451,14 @@ void GraphPersistentParam::update_tiling_data(
   custom_variantPack.outTensors.push_back(atb_query);
 
   uint64_t custom_workspace_size = 0;
-  atb::Status status = customOp_prelaunch_->Setup(
-      custom_variantPack, custom_workspace_size, context_prelaunch_);
+  atb::Status status = custom_pa_op_for_plan_->Setup(
+      custom_variantPack, custom_workspace_size, context_for_plan_);
   CHECK_EQ(status, atb::NO_ERROR)
       << "Failed to setup custom paged attention operation for tiling";
 
   atb::customize::TilingBufferInfo tiling_buffer_info =
       atb::customize::GetHostTilingBufferFromCustomPagedAttentionOperation(
-          customOp_prelaunch_);
+          custom_pa_op_for_plan_);
 
   CHECK_NE(tiling_buffer_info.tilingBuffer, nullptr)
       << "Tiling buffer is null after setup";
@@ -463,8 +466,8 @@ void GraphPersistentParam::update_tiling_data(
       << "Tiling buffer size is zero";
 
   if (VLOG_IS_ON(50)) {
-    parse_host_tiling_buffer((uint32_t*)tiling_buffer_info.tilingBuffer,
-                             tiling_buffer_info.tilingBufferSize);
+    parse_pa_host_tiling_buffer((uint32_t*)tiling_buffer_info.tilingBuffer,
+                                tiling_buffer_info.tilingBufferSize);
   }
   aclError acl_status =
       aclrtMemcpyAsync(tiling_data_.data_ptr(),
@@ -841,18 +844,18 @@ torch::Tensor AclGraphExecutorImpl::run(
 }
 
 void AclGraph::print_graph_tensors() const {
-  LOG(INFO) << "graph persistent_tokens_: "
-            << persistent_param_.persistent_tokens();
-  LOG(INFO) << "graph persistent_positions_: "
-            << persistent_param_.persistent_positions();
-  LOG(INFO) << "graph persistent_new_cache_slots_: "
-            << persistent_param_.persistent_new_cache_slots();
-  LOG(INFO) << "graph q_seq_lens_: " << persistent_param_.q_seq_lens();
-  LOG(INFO) << "graph kv_seq_lens_: " << persistent_param_.kv_seq_lens();
-  LOG(INFO) << "graph persistent_block_tables_: "
-            << persistent_param_.persistent_block_tables();
-  LOG(INFO) << "graph hidden_states_: " << persistent_param_.hidden_states();
-  // LOG(INFO) << "graph persistent_mask_: " <<
+  VLOG(50) << "graph persistent_tokens_: "
+           << persistent_param_.persistent_tokens();
+  VLOG(50) << "graph persistent_positions_: "
+           << persistent_param_.persistent_positions();
+  VLOG(50) << "graph persistent_new_cache_slots_: "
+           << persistent_param_.persistent_new_cache_slots();
+  VLOG(50) << "graph q_seq_lens_: " << persistent_param_.q_seq_lens();
+  VLOG(50) << "graph kv_seq_lens_: " << persistent_param_.kv_seq_lens();
+  VLOG(50) << "graph persistent_block_tables_: "
+           << persistent_param_.persistent_block_tables();
+  VLOG(50) << "graph hidden_states_: " << persistent_param_.hidden_states();
+  // VLOG(50) << "graph persistent_mask_: " <<
   // persistent_param_.persistent_mask();
 }
 
