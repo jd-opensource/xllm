@@ -193,6 +193,7 @@ message ForwardInput {
   repeated int64 kv_cache_start_offsets = 36;
   // beam search kernel
   repeated float acc_logprob_vec = 37;
+  int32 batch_forward_type = 38;
 }
 
  message BatchedForwardInputs {

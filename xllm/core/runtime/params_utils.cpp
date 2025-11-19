@@ -203,6 +203,8 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.empty_kv_cache = pb_forward_input->empty_kv_cache();
   input_params.global_empty_kv_cache =
       pb_forward_input->global_empty_kv_cache();
+  input_params.batch_forward_type =
+      BatchForwardType(pb_forward_input->batch_forward_type());
   input_params.num_sequences = block_tables_vec.size();
   assert(input_params.num_sequences == pb_forward_input->num_sequences());
   input_params.prefill_seq_len = pb_forward_input->prefill_seq_len();
@@ -391,6 +393,7 @@ void forward_input_to_proto(const RawForwardInput& inputs,
                       inputs.unique_token_lens_vec);
   pb_forward_input->set_empty_kv_cache(inputs.empty_kv_cache);
   pb_forward_input->set_global_empty_kv_cache(inputs.global_empty_kv_cache);
+  pb_forward_input->set_batch_forward_type(inputs.batch_forward_type.value());
   pb_forward_input->set_max_seq_len(inputs.max_seq_len);
   pb_forward_input->set_q_max_seq_len(inputs.q_max_seq_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_seq_lens(), inputs.seq_lens);
