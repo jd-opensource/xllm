@@ -106,8 +106,7 @@ void DistManager::setup_multi_node_workers(
 
   CHECK_EQ((world_size % dp_size), 0)
       << "Global world size must be divisible by dp size in multi-node "
-         "serving "
-         "mode.";
+         "serving mode.";
 
   runtime::Options worker_server_options = options;
   worker_server_options.world_size(world_size);

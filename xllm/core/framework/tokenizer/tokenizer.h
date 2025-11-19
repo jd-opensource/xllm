@@ -30,7 +30,8 @@ class Tokenizer {
   virtual ~Tokenizer() = default;
 
   virtual bool encode(const std::string_view& text,
-                      std::vector<int32_t>* ids) const = 0;
+                      std::vector<int32_t>* ids,
+                      bool add_special_tokens = true) const = 0;
 
   virtual bool batch_encode(const std::vector<std::string>& texts,
                             std::vector<std::vector<int32_t>>* ids) const {

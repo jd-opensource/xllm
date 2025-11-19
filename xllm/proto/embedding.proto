@@ -39,6 +39,8 @@ message EmbeddingRequest {
   optional string user = 8;
 
   optional string service_request_id = 9;
+
+  optional bool add_special_tokens = 10;
 }
 
 message EmbeddingResponseData {

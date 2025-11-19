@@ -129,7 +129,9 @@ message ChatRequest {
 
   optional int32 beam_width = 33;
 
-  optional google.protobuf.Struct chat_template_kwargs = 34;
+  optional bool add_special_tokens = 34;
+
+  optional google.protobuf.Struct chat_template_kwargs = 35;
 }
 
 message ChatLogProbData {
