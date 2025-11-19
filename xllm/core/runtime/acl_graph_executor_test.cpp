@@ -121,6 +121,10 @@ class SimpleCausalLM : public CausalLM {
                              const ModelInputParams& params) {
     // Simple computation: token embedding + position embedding + linear layer
     // This creates temporary tensors that NPUGraph mempool will manage
+    LOG(INFO) << "SimpleCausalLM forward_impl, tokens: " << tokens.sizes()
+              << ", positions: " << positions.sizes()
+              << ", kv_caches: " << kv_caches.size()
+              << ", params: " << params.num_sequences;
     const int64_t num_tokens = tokens.size(0);
     const int64_t hidden_size = args_.hidden_size();
 
@@ -138,17 +142,17 @@ class SimpleCausalLM : public CausalLM {
     auto output = linear_->forward(combined);
 
     // Add some computation using other params to make it more realistic
-    if (params.kv_seq_lens.defined()) {
-      // Use kv_seq_lens in computation
-      auto kv_lens_sum = torch::sum(params.kv_seq_lens);
-      output = output + kv_lens_sum * kv_scale_;
-    }
+    // if (params.kv_seq_lens.defined()) {
+    //   // Use kv_seq_lens in computation
+    //   auto kv_lens_sum = torch::sum(params.kv_seq_lens);
+    //   output = output + kv_lens_sum * kv_scale_;
+    // }
 
-    if (params.q_seq_lens.defined()) {
-      // Use q_seq_lens in computation
-      auto q_lens_sum = torch::sum(params.q_seq_lens);
-      output = output + q_lens_sum * q_scale_;
-    }
+    // if (params.q_seq_lens.defined()) {
+    //   // Use q_seq_lens in computation
+    //   auto q_lens_sum = torch::sum(params.q_seq_lens);
+    //   output = output + q_lens_sum * q_scale_;
+    // }
 
     if (params.new_cache_slots.defined()) {
       // Use new_cache_slots in computation

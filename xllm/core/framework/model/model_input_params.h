@@ -128,7 +128,11 @@ struct ModelInputParams {
     params.kv_cache_start_offsets = safe_to(kv_cache_start_offsets, device);
 
     // Copy graph_buffer to device
-    params.graph_buffer = safe_to(graph_buffer, device, true);
+    // params.graph_buffer = safe_to(graph_buffer, device, true);
+    params.graph_buffer.attn_mask =
+        safe_to(graph_buffer.attn_mask, device, true);
+    params.graph_buffer.tiling_data =
+        safe_to(graph_buffer.tiling_data, device, true);
 
     // params for flashinfer
     params.paged_kv_indptr = safe_to(paged_kv_indptr, device);
@@ -237,9 +241,6 @@ struct ModelInputParams {
   // kvcache offset of sequence in the xtensor for all layers
   // IntTensor: [n_seq]
   torch::Tensor kv_cache_start_offsets;
-  // Graph execution buffer for temporary tensor storage
-  // Used by ACL Graph Executor to avoid repeated memory allocation
-  torch::Tensor graph_buffer;
 
   // the indptr of the paged kv-cache
   // used in flashinfer
@@ -257,6 +258,12 @@ struct ModelInputParams {
   torch::Tensor paged_kv_last_page_len;
 
   uint64_t batch_id;
+
+  struct GraphBuffer {
+    torch::Tensor attn_mask;
+    torch::Tensor tiling_data;
+  };
+  GraphBuffer graph_buffer;
 };
 
 }  // namespace xllm

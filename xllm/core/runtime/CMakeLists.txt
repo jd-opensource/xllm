@@ -70,6 +70,7 @@ cc_library(
     :worker_service
     :xllm_server
     $<$<BOOL:${USE_NPU}>:xllm_ops>
+    $<$<BOOL:${USE_NPU}>:atb_customize>
     :eplb
     glog::glog
     Folly::folly
@@ -124,6 +125,7 @@ cc_test(
     :kv_cache
     GTest::gtest_main
     torch_npu
+    atb_customize
 )
 target_link_libraries(acl_graph_executor_test
                       PRIVATE
