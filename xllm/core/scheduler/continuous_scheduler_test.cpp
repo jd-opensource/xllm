@@ -15,7 +15,9 @@ namespace xllm {
 namespace {
 class FakeTokenizer : public Tokenizer {
  public:
-  bool encode(const std::string_view& text, std::vector<int32_t>* ids) const {
+  bool encode(const std::string_view& text,
+              std::vector<int32_t>* ids,
+              bool add_special_tokens = true) const {
     LOG(FATAL) << "Not implemented";
   }
   std::string decode(const Slice<int32_t>& ids,

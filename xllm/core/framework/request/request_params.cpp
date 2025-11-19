@@ -129,6 +129,11 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
       ignore_eos = true;
     }
   }
+  if (request.has_add_special_tokens()) {
+    add_special_tokens = request.add_special_tokens();
+  } else {
+    add_special_tokens = true;
+  }
 }
 
 namespace {
@@ -297,6 +302,12 @@ void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
     }
   }
 
+  if (request.has_add_special_tokens()) {
+    params.add_special_tokens = request.add_special_tokens();
+  } else {
+    params.add_special_tokens = false;
+  }
+
   if (request.has_chat_template_kwargs()) {
     params.chat_template_kwargs =
         proto_struct_to_json(request.chat_template_kwargs());
@@ -330,6 +341,11 @@ RequestParams::RequestParams(const proto::EmbeddingRequest& request,
   request_id = generate_embedding_request_id();
   if (request.has_service_request_id()) {
     service_request_id = request.service_request_id();
+  }
+  if (request.has_add_special_tokens()) {
+    add_special_tokens = request.add_special_tokens();
+  } else {
+    add_special_tokens = true;
   }
   x_request_id = x_rid;
   x_request_time = x_rtime;

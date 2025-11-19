@@ -34,10 +34,11 @@ std::unique_ptr<Tokenizer> FastTokenizer::clone() const {
 FastTokenizer::~FastTokenizer() { tokenizers_free(handle_); }
 
 bool FastTokenizer::encode(const std::string_view& text,
-                           std::vector<int32_t>* ids) const {
+                           std::vector<int32_t>* ids,
+                           bool add_special_tokens) const {
   TokenizerEncodeResult result;
   tokenizers_encode(
-      handle_, text.data(), text.size(), /*add_special_tokens=*/1, &result);
+      handle_, text.data(), text.size(), add_special_tokens, &result);
 
   std::vector<int32_t> ret(result.token_ids, result.token_ids + result.len);
   *ids = std::move(ret);

@@ -128,7 +128,8 @@ bool SentencePieceTokenizer::encode_internal(const std::string_view& text,
 }
 
 bool SentencePieceTokenizer::encode(const std::string_view& text,
-                                    std::vector<int32_t>* ids) const {
+                                    std::vector<int32_t>* ids,
+                                    bool add_special_tokens) const {
   // prepend prefix tokens if exists
   if (!prefix_token_ids_.empty()) {
     ids->insert(

@@ -28,7 +28,8 @@ class FastTokenizer : public Tokenizer {
   ~FastTokenizer() override;
 
   bool encode(const std::string_view& text,
-              std::vector<int32_t>* ids) const override;
+              std::vector<int32_t>* ids,
+              bool add_special_tokens = true) const override;
 
   std::string decode(const Slice<int32_t>& ids,
                      bool skip_special_tokens) const override;
