@@ -169,7 +169,7 @@ DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
 
 DEFINE_string(
     communication_backend,
-    "lccl",
+    "hccl",
     "NPU communication backend.(e.g. lccl, hccl). When enable dp, use hccl.");
 
 // --- ep load balance config ---
