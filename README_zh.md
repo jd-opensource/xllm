@@ -115,22 +115,22 @@ xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与
 首先下载我们提供的镜像：
 ```bash
 # A2 x86
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-x86
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.7.1-dev-hb-rc2-x86
 # A2 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-arm
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.7.1-dev-hb-rc2-arm
 # A3 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hc-rc2-arm
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.7.1-dev-hc-rc2-arm
 # 或者
 # A2 x86
-docker pull xllm/xllm-ai:xllm-dev-hb-rc2-x86
+docker pull xllm/xllm-ai:xllm-0.7.1-dev-hb-rc2-x86
 # A2 arm
-docker pull xllm/xllm-ai:xllm-dev-hb-rc2-arm
+docker pull xllm/xllm-ai:xllm-0.7.1-dev-hb-rc2-arm
 # A3 arm
-docker pull xllm/xllm-ai:xllm-dev-hc-rc2-arm
+docker pull xllm/xllm-ai:xllm-0.7.1-dev-hc-rc2-arm
 ```
 然后创建对应的容器
 ```bash
-sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/ -v /etc/hccn.conf:/etc/hccn.conf xllm/xllm-ai:xllm-dev-hb-rc2-x86
+sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/ -v /etc/hccn.conf:/etc/hccn.conf quay.io/jd_xllm/xllm-ai:xllm-0.7.1-dev-hb-rc2-x86
 ```
 
 下载官方仓库与模块依赖：

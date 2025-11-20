@@ -1,3 +1,30 @@
+# Release xllm 0.7.1
+
+## **Major Features and Improvements**
+
+### Model Support
+
+- Support GLM-4.5-Air.
+- Support Qwen3-VL-Moe.
+
+### Feature
+
+- Support scheduler overlap when enable chunked prefill and MTP.
+- Enable multi-process mode when running VLM model.
+- Support AclGraph for GLM-4.5.
+
+### Bugfix
+
+- Reslove core dump of qwen embedding 0.6B.
+- Resolve duplicate content in multi-turn tool call conversations.
+- Support sampler parameters for MTP.
+- Enable MTP and schedule overlap to work simultaneously.
+- Resolve google.protobuf.Struct parsing failures which broke tool_call and think toggle functionality.
+- Fix the precision issue in the Qwen2 model caused by model_type is not be assigned.
+- Fix core dump of GLM 4.5 when enable MTP.
+- Temporarily use heap allocation for VLM backend.
+- Reslove core dump of stream chat completion request for VLM.
+
 # Release xllm 0.7.0
 
 ## **Major Features and Improvements**
