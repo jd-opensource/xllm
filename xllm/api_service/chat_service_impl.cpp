@@ -593,7 +593,30 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   std::vector<Message> messages;
   messages.reserve(rpc_request.messages_size());
   for (const auto& message : rpc_request.messages()) {
-    messages.emplace_back(message.role(), message.content());
+    Message msg(message.role(), message.content());
+
+    if (message.has_tool_call_id()) {
+      msg.tool_call_id = message.tool_call_id();
+    }
+
+    if (message.has_reasoning_content()) {
+      msg.reasoning_content = message.reasoning_content();
+    }
+
+    if (message.tool_calls_size() > 0) {
+      Message::ToolCallVec tool_calls;
+      for (const auto& tool_call : message.tool_calls()) {
+        Message::ToolCall tc;
+        tc.id = tool_call.id();
+        tc.type = tool_call.type();
+        tc.function.name = tool_call.function().name();
+        tc.function.arguments = tool_call.function().arguments();
+        tool_calls.push_back(tc);
+      }
+      msg.tool_calls = std::move(tool_calls);
+    }
+
+    messages.push_back(std::move(msg));
   }
 
   bool include_usage = false;

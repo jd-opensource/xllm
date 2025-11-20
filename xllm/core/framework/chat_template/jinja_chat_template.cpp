@@ -75,8 +75,35 @@ std::optional<std::string> JinjaChatTemplate::apply(
           get_mm_content(std::get<Message::MMContentVec>(message.content));
     }
 
+    if (message.tool_call_id.has_value()) {
+      message_json["tool_call_id"] = message.tool_call_id.value();
+    }
+
+    if (message.reasoning_content.has_value()) {
+      message_json["reasoning_content"] = message.reasoning_content.value();
+    }
+
+    if (message.tool_calls.has_value()) {
+      nlohmann::ordered_json tool_calls_json = nlohmann::json::array();
+      for (const auto& tool_call : message.tool_calls.value()) {
+        nlohmann::ordered_json tool_call_json;
+        tool_call_json["id"] = tool_call.id;
+        tool_call_json["type"] = tool_call.type;
+
+        nlohmann::ordered_json function_json;
+        function_json["name"] = tool_call.function.name;
+        function_json["arguments"] = tool_call.function.arguments;
+        tool_call_json["function"] = function_json;
+
+        tool_calls_json.push_back(tool_call_json);
+      }
+      message_json["tool_calls"] = tool_calls_json;
+    }
+
     messages_json.push_back(message_json);
   }
+  std::cerr << "Complete messages_json: " << messages_json.dump(2, ' ', false)
+            << std::endl;
 
   nlohmann::ordered_json tools_json = nlohmann::json::array();
   for (const auto& json_tool : json_tools) {
@@ -106,7 +133,10 @@ std::optional<std::string> JinjaChatTemplate::apply(
   input.extra_context = chat_template_kwargs;
   minja::chat_template_options options;
 
-  return template_->apply(input, options);
+  auto result = template_->apply(input, options);
+  std::cerr << "JinjaChatTemplate apply result: " << result << std::endl;
+
+  return result;
 }
 
 nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
