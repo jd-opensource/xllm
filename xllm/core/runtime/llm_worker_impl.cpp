@@ -181,8 +181,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(
   // if running in multi_stream_parallel step, all micro batches
   // should be in same prefill stage, so, to judge empty_kv_cache,
   // just use micro batch 0 here
-  if (options_.enable_speculative_decode() && !is_spec_draft_) {
-    if (!inputs.micro_inputs[0].input_params.batch_forward_type.is_decode()) {
+  if (options_.enable_speculative_decode()) {
+    if (!inputs.micro_inputs[0].input_params.batch_forward_type.is_decode() &&
+        !is_spec_draft_) {
       output.sample_output.embeddings = hidden_states;
     } else if (concated_sampling_params.selected_token_idxes.defined()) {
       auto embeddings = hidden_states.index_select(

@@ -711,6 +711,9 @@ SampleOutput SpeculativeWorkerImpl::validate(
 ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
   // only process decode batch, so prepare draft input here.
+  if (!inputs.input_params.batch_forward_type.is_decode()) {
+    return inputs;
+  }
   ForwardInput& new_inputs = inputs;
   auto& input_params = new_inputs.input_params;
 

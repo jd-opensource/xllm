@@ -754,7 +754,7 @@ void BatchInputBuilder::process_batch_forward_type() {
     if (q_len > 1) {
       all_decode = false;
     }
-    if (q_len == 1) {
+    if (q_len == 1 && kv_len > 1) {
       all_prefill = false;
     }
   }
@@ -773,7 +773,7 @@ void BatchInputBuilder::process_batch_forward_type() {
     if (q_len > 1) {
       all_decode = false;
     }
-    if (q_len == 1) {
+    if (q_len == 1 && kv_len > 1) {
       all_prefill = false;
     }
   }
