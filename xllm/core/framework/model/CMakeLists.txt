@@ -34,6 +34,7 @@ cc_library(
     embedding_lm.h
     model_args.h
     npu_dp_ep_padding.h
+    batch_forward_type.h
     model_input_params.h
   SRCS
     npu_dp_ep_padding.cpp

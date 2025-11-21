@@ -71,6 +71,7 @@ ForwardInput BatchInputBuilder::build_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
   process_sequences(0, static_cast<uint32_t>(num_sequences_));
+  process_batch_forward_type();
   padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
 
   return state_to_forward_input();
@@ -84,6 +85,7 @@ RawForwardInput BatchInputBuilder::build_raw_forward_input(uint32_t start_idx,
   } else {
     process_sequences_multithreaded(start_idx, end_idx);
   }
+  process_batch_forward_type();
   return state_to_raw_forward_input();
 }
 
@@ -189,7 +191,6 @@ void BatchInputBuilder::process_sequences_multithreaded(uint32_t start_idx,
     state_.unique_token_lens_vec.insert(state_.unique_token_lens_vec.end(),
                                         state.unique_token_lens_vec.begin(),
                                         state.unique_token_lens_vec.end());
-    state_.empty_kv_cache = state_.empty_kv_cache && state.empty_kv_cache;
     state_.max_seq_len = std::max(state_.max_seq_len, state.max_seq_len);
     state_.q_max_seq_len = std::max(state_.q_max_seq_len, state.q_max_seq_len);
 #if defined(USE_NPU)
@@ -278,7 +279,6 @@ void BatchInputBuilder::process_single_sequence(
                          << allowed_max_tokens_[seq_index];
 
   // Update state
-  state.empty_kv_cache = state.empty_kv_cache && (n_kv_cache_tokens == 0);
   state.max_seq_len = std::max(state.max_seq_len, seq_len);
   state.q_max_seq_len = std::max(state.q_max_seq_len, q_seq_len);
 #if defined(USE_NPU)
@@ -498,7 +498,7 @@ void BatchInputBuilder::padding_decode_batch_size(
   if (num_sequences_ < min_decoding_batch_size) {
     const uint32_t n_tokens = state_.flatten_tokens_vec.size();
     // kv_cache is not empty in decoding phase
-    const bool in_decoding_phase = !state_.empty_kv_cache;
+    const bool in_decoding_phase = !state_.batch_forward_type.is_prefill();
     const bool same_num_decoding_tokens =
         state_.q_max_seq_len == num_decoding_tokens &&
         n_tokens == num_sequences_ * num_decoding_tokens;
@@ -551,7 +551,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
 
   auto& input_params = forward_input.input_params;
-  input_params.empty_kv_cache = state_.empty_kv_cache;
+  input_params.batch_forward_type = state_.batch_forward_type;
   input_params.num_sequences = state_.block_tables_vec.size();
   input_params.kv_max_seq_len = state_.max_seq_len;
   input_params.q_max_seq_len = state_.q_max_seq_len;
@@ -561,8 +561,6 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   input_params.q_seq_lens_vec = std::move(state_.q_seq_lens);
   input_params.new_cache_slots =
       torch::tensor(state_.new_token_slot_ids, torch::kInt);
-  input_params.decode_seq_range =
-      util::find_ones_indices(input_params.q_seq_lens_vec);
 
   // for flashinfer
   input_params.paged_kv_indptr =
@@ -644,8 +642,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.unique_token_counts_vec);
   raw_forward_input.unique_token_lens_vec =
       std::move(state_.unique_token_lens_vec);
-  raw_forward_input.empty_kv_cache = state_.empty_kv_cache;
-  // raw_forward_input.global_empty_kv_cache = ;
+  raw_forward_input.batch_forward_type = state_.batch_forward_type;
   raw_forward_input.max_seq_len = state_.max_seq_len;
   raw_forward_input.q_max_seq_len = state_.q_max_seq_len;
   raw_forward_input.seq_lens = std::move(state_.seq_lens);
@@ -725,6 +722,71 @@ void BatchInputBuilder::process_swap_block_infos(
     raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
                                          swap_block_transfer_infos_->begin(),
                                          swap_block_transfer_infos_->end());
+  }
+}
+
+void BatchInputBuilder::process_batch_forward_type() {
+  CHECK_EQ(state_.seq_lens.size(), state_.q_seq_lens.size())
+      << "seq_lens size must be equal to q_seq_lens size";
+
+  if (state_.q_max_seq_len == 1) {
+    state_.batch_forward_type = BatchForwardType::DECODE;
+    return;
+  }
+
+  bool empty_kv_cache = true;
+  bool all_decode = true;
+  bool all_prefill = true;
+
+#if defined(USE_NPU)
+  if (state_.seq_lens.size() == 0) {
+    state_.batch_forward_type = BatchForwardType::EMPTY;
+    return;
+  }
+  for (size_t i = 0; i < state_.seq_lens.size(); ++i) {
+    auto q_len = state_.q_seq_lens[i];
+    auto kv_len = state_.seq_lens[i];
+    auto cache_len = kv_len - q_len;
+    if (cache_len > 0) {
+      empty_kv_cache = false;
+    }
+    if (q_len > 1) {
+      all_decode = false;
+    }
+    if (q_len == 1) {
+      all_prefill = false;
+    }
+  }
+#elif defined(USE_MLU)
+  if (state_.seq_lens.size() == 1) {
+    state_.batch_forward_type = BatchForwardType::EMPTY;
+    return;
+  }
+  for (size_t i = 1; i < state_.seq_lens.size(); ++i) {
+    auto q_len = state_.q_seq_lens[i] - state_.q_seq_lens[i - 1];
+    auto kv_len = state_.seq_lens[i] - state_.seq_lens[i - 1];
+    auto cache_len = kv_len - q_len;
+    if (cache_len > 0) {
+      empty_kv_cache = false;
+    }
+    if (q_len > 1) {
+      all_decode = false;
+    }
+    if (q_len == 1) {
+      all_prefill = false;
+    }
+  }
+#endif
+  if (empty_kv_cache) {
+    state_.batch_forward_type = BatchForwardType::PREFILL;
+  } else {
+    if (all_prefill) {
+      state_.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+    } else if (all_decode) {
+      state_.batch_forward_type = BatchForwardType::DECODE;
+    } else {
+      state_.batch_forward_type = BatchForwardType::MIXED;
+    }
   }
 }
 }  // namespace xllm
