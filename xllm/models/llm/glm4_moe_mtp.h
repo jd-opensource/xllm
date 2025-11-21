@@ -247,8 +247,7 @@ class Glm4MoeMtpForCausalLMImpl : public torch::nn::Module {
  public:
   Glm4MoeMtpForCausalLMImpl(const ModelContext& context) {
     model_ = register_module("model", Glm4MoeMtpModel(context));
-    // lm_head_ = register_module(
-    //     "lm_head", LlmHead(context));
+    // lm_head_ = register_module("lm_head", layer::LmHead(context));
   }
 
   // tokens: [num_tokens]

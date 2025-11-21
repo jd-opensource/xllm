@@ -15,7 +15,6 @@ limitations under the License.
 
 #pragma once
 
-#include "embedding_allocator.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "llm_data_dist_transfer.h"
 
@@ -52,12 +51,6 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
       Cache& k_cache,
       Cache& v_cache);
 
-  void allocate_embedding(
-      std::shared_ptr<EmbeddingAllocator> embedding_allocator,
-      const std::vector<int64_t>& embedding_shape,
-      torch::ScalarType dtype,
-      torch::Device device);
-
   void free_kv_cache() override;
 
   bool pull_kv_blocks(const uint64_t src_cluster_id,
@@ -82,23 +75,16 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer);
 
-  bool push_embed_blocks(
-      std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos);
-
   void merge_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       const std::vector<TransferKVInfo>& transfer_kv_infos,
       const ParallelArgs& parallel_args) override;
-
-  void copy_blocks(const std::vector<int>& blocks, bool h2d);
 
  private:
   int64_t spec_num_layers_;
 
   Cache spec_k_cache_;
   Cache spec_v_cache_;
-  Cache embed_cache_;
-  Cache embed_host_cache_;
 
   Cache host_cache;
   std::vector<std::vector<uint16_t>> buffers;
