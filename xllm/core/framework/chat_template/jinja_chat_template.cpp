@@ -75,21 +75,43 @@ std::optional<std::string> JinjaChatTemplate::apply(
           get_mm_content(std::get<Message::MMContentVec>(message.content));
     }
 
-    messages_json.push_back(message_json);
+    if (message.tool_call_id.has_value()) {
+      message_json["tool_call_id"] = *message.tool_call_id;
+    }
+
+    if (message.reasoning_content.has_value()) {
+      message_json["reasoning_content"] = *message.reasoning_content;
+    }
+
+    if (message.tool_calls.has_value()) {
+      nlohmann::ordered_json tool_calls_json = nlohmann::json::array();
+      const auto& tool_calls = *message.tool_calls;
+
+      for (const auto& tool_call : tool_calls) {
+        tool_calls_json.emplace_back(nlohmann::ordered_json{
+            {"id", tool_call.id},
+            {"type", tool_call.type},
+            {"function",
+             nlohmann::ordered_json{
+                 {"name", tool_call.function.name},
+                 {"arguments", tool_call.function.arguments}}}});
+      }
+      message_json["tool_calls"] = std::move(tool_calls_json);
+    }
+
+    messages_json.emplace_back(std::move(message_json));
   }
 
   nlohmann::ordered_json tools_json = nlohmann::json::array();
+
   for (const auto& json_tool : json_tools) {
-    nlohmann::ordered_json tool_json;
-    tool_json["type"] = json_tool.type;
-
-    nlohmann::ordered_json function_json;
-    function_json["name"] = json_tool.function.name;
-    function_json["description"] = json_tool.function.description;
-    function_json["parameters"] = json_tool.function.parameters;
-
-    tool_json["function"] = function_json;
-    tools_json.push_back(tool_json);
+    tools_json.emplace_back(nlohmann::ordered_json{
+        {"type", json_tool.type},
+        {"function",
+         nlohmann::ordered_json{
+             {"name", json_tool.function.name},
+             {"description", json_tool.function.description},
+             {"parameters", json_tool.function.parameters}}}});
   }
   // apply the template
   return apply(messages_json, tools_json, chat_template_kwargs);
