@@ -194,11 +194,11 @@ void APIService::Embeddings(::google::protobuf::RpcController* controller,
 
 namespace {
 template <typename EmbeddingCall, typename Service>
-void EmbeddingsImpl(std::unique_ptr<Service>& embedding_service_impl_,
-                    ::google::protobuf::RpcController* controller,
-                    const proto::HttpRequest* request,
-                    proto::HttpResponse* response,
-                    ::google::protobuf::Closure* done) {
+void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
+                              ::google::protobuf::RpcController* controller,
+                              const proto::HttpRequest* request,
+                              proto::HttpResponse* response,
+                              ::google::protobuf::Closure* done) {
   xllm::ClosureGuard done_guard(
       done,
       std::bind(request_in_metric, nullptr),
@@ -244,11 +244,11 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
                                 ::google::protobuf::Closure* done) {
   if (FLAGS_backend == "llm") {
     CHECK(embedding_service_impl_) << " embedding service is invalid.";
-    EmbeddingsImpl<EmbeddingCall, EmbeddingServiceImpl>(
+    handle_embedding_request<EmbeddingCall, EmbeddingServiceImpl>(
         embedding_service_impl_, controller, request, response, done);
   } else if (FLAGS_backend == "vlm") {
-    CHECK(mm_chat_service_impl_) << " mm embedding service is invalid.";
-    EmbeddingsImpl<MMEmbeddingCall, MMEmbeddingServiceImpl>(
+    CHECK(mm_embedding_service_impl_) << " mm embedding service is invalid.";
+    handle_embedding_request<MMEmbeddingCall, MMEmbeddingServiceImpl>(
         mm_embedding_service_impl_, controller, request, response, done);
   }
 }

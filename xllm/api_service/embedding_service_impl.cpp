@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "common/instance_name.h"
 #include "framework/request/request_params.h"
+#include "mm_service_utils.h"
 #include "runtime/llm_master.h"
 #include "util/utils.h"
 #include "util/uuid.h"
@@ -144,23 +145,18 @@ void MMEmbeddingServiceImpl::process_async_impl(
   auto& req_messages = rpc_request.messages();
 
   std::vector<Message> messages;
-  MMInput mm_inputs;
-
-  static MMInputHelper helper;
-  if (!helper.trans(req_messages, messages, mm_inputs.items_)) {
-    call->finish_with_error(StatusCode::INVALID_ARGUMENT,
-                            "inputs argument is invalid.");
+  if (!build_messages<MMEmbeddingCall>(
+          req_messages, messages, call, master_->get_image_limit())) {
     return;
   }
-
+  auto request_id = request_params.request_id;
   // schedule the request
   master_->handle_request(
       std::move(messages),
-      std::move(mm_inputs),
       std::move(request_params),
       [call,
        model,
-       request_id = request_params.request_id,
+       request_id = request_id,
        created_time = absl::ToUnixSeconds(absl::Now())](
           const RequestOutput& req_output) -> bool {
         if (req_output.status.has_value()) {

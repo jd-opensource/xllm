@@ -36,6 +36,7 @@ limitations under the License.
 #include "core/runtime/vlm_master.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
+#include "mm_service_utils.h"
 
 namespace xllm {
 namespace {
@@ -737,43 +738,9 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
 
   std::vector<Message> messages;
-  messages.reserve(rpc_request.messages_size());
-
-  for (const auto& req_message : req_messages) {
-    MMContentVec contents;
-    for (const auto& input : req_message.content()) {
-      auto& item = const_cast<::xllm::proto::MMInputData&>(input);
-      if (item.type() == "text") {
-        contents.emplace_back(item.type(), *item.release_text());
-      } else if (item.type() == "image_url") {
-        ImageURL image_url;
-        image_url.url = std::move(*item.mutable_image_url()->release_url());
-        contents.emplace_back(item.type(), image_url);
-      } else if (item.type() == "video_url") {
-        VideoURL video_url;
-        video_url.url = std::move(*item.mutable_video_url()->release_url());
-        contents.emplace_back(item.type(), video_url);
-      } else if (item.type() == "audio_url") {
-        AudioURL audio_url;
-        audio_url.url = std::move(*item.mutable_audio_url()->release_url());
-        contents.emplace_back(item.type(), audio_url);
-      } else {
-        call->finish_with_error(StatusCode::INVALID_ARGUMENT,
-                                "message content type is invalid.");
-        return;
-      }
-    }
-    messages.emplace_back(req_message.role(), std::move(contents));
-  }
-
-  //  check if the request image number exceeds the allowed image limit.
-  for (auto& msg : messages) {
-    if (msg.calc_count("image_url") > master_->get_image_limit()) {
-      call->finish_with_error(StatusCode::INVALID_ARGUMENT,
-                              "Number of images in a single message exceeds "
-                              "the allowed image limit.");
-      return;
-    }
+  if (!build_messages<MMChatCall>(
+          req_messages, messages, call, master_->get_image_limit())) {
+    return;
   }
 
   bool include_usage = false;

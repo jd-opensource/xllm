@@ -612,6 +612,9 @@ void ContinuousScheduler::handle_running_requests(
 
   // check if the request can be expanded
   if (request->expand_sequences()) {
+    LOG(INFO) << "$$$$$$$$$$ Request " << request->request_id()
+              << " expanded to " << request->sequences().size()
+              << " sequences.";
     // cache the blocks to share among the sequences
     kv_cache_manager_->cache(request->sequences()[0].get());
   }
