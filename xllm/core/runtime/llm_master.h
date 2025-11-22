@@ -129,6 +129,8 @@ class LLMMaster : public Master {
 
   // flag to indicate if the handler is running
   std::atomic_bool running_{false};
+
+  std::string task_type_;
 };
 
 class LLMAssistantMaster : public Master {

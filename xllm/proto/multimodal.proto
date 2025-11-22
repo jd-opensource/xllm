@@ -140,5 +140,7 @@ message MMChatRequest {
 
   optional int32 beam_width = 32;
 
-  optional google.protobuf.Struct chat_template_kwargs = 33;
+  optional bool add_special_tokens = 33;
+
+  optional google.protobuf.Struct chat_template_kwargs = 34;
 }

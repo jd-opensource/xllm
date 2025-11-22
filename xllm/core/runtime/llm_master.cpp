@@ -49,6 +49,7 @@ LLMMaster::LLMMaster(const Options& options)
                  ? EngineType::LLM
                  : EngineType::SSM) {
   CHECK(engine_->init());
+  task_type_ = options_.task_type();
 
   model_args_ = engine_->model_args();
 
@@ -292,7 +293,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   if (prompt_tokens.has_value()) {
     local_prompt_tokens = std::move(prompt_tokens.value());
   } else {
-    if (!tokenizer_->encode(prompt, &local_prompt_tokens)) {
+    if (!tokenizer_->encode(
+            prompt, &local_prompt_tokens, sp.add_special_tokens)) {
       LOG(ERROR) << "Failed to encode prompt: " << prompt;
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                           "Failed to encode prompt");
@@ -374,13 +376,16 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       std::move(stop_tokens),
       std::move(stop_sequences));
 
-  auto finish_reason =
-      stopping_checker.check(local_prompt_tokens, local_prompt_tokens.size());
-  if (finish_reason != FinishReason::NONE) {
-    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Invalid Prompt");
-    LOG(ERROR) << "Invalid Prompt EndWith Token_ID:"
-               << local_prompt_tokens[local_prompt_tokens.size() - 1];
-    return nullptr;
+  if (task_type_ != "embed") {
+    auto finish_reason =
+        stopping_checker.check(local_prompt_tokens, local_prompt_tokens.size());
+    if (finish_reason != FinishReason::NONE) {
+      LOG(INFO) << " finish_reason " << finish_reason.to_string().value();
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Invalid Prompt");
+      LOG(ERROR) << "Invalid Prompt EndWith Token_ID:"
+                 << local_prompt_tokens[local_prompt_tokens.size() - 1];
+      return nullptr;
+    }
   }
 
   bool stream = sp.streaming;
