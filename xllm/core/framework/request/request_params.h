@@ -49,6 +49,9 @@ struct RequestParams {
   RequestParams(const proto::EmbeddingRequest& request,
                 const std::string& x_rid,
                 const std::string& x_rtime);
+  RequestParams(const proto::MMEmbeddingRequest& request,
+                const std::string& x_rid,
+                const std::string& x_rtime);
   RequestParams(const proto::RerankRequest& request,
                 const std::string& x_rid,
                 const std::string& x_rtime);
