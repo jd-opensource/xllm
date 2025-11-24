@@ -190,6 +190,7 @@ class NpuQwen3MoeDecoderLayerImpl : public NpuBaseLayer {
   int32_t start_expert_id_;
   int32_t end_expert_id_;
   int32_t ep_rank_;
+  int32_t n_kv_heads_;
 
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
