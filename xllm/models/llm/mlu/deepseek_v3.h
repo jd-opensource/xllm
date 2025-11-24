@@ -59,6 +59,7 @@ REGISTER_MODEL_ARGS(deepseek_v3, [&] {
   LOAD_ARG_OR(v_head_dim, "v_head_dim", 128);
   LOAD_ARG_OR(q_lora_rank, "q_lora_rank", 1536);
   LOAD_ARG_OR(kv_lora_rank, "kv_lora_rank", 512);
+  LOAD_ARG_OR(num_nextn_predict_layers, "num_nextn_predict_layers", 1);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
     return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
