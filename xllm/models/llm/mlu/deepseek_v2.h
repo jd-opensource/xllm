@@ -28,15 +28,13 @@ limitations under the License.
 
 namespace xllm {
 
-using torch::indexing::None;
-using ISlice = torch::indexing::Slice;
-
 class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
-  DeepseekV2DecoderLayerImpl(const ModelContext& context, const int32_t i) {
+  DeepseekV2DecoderLayerImpl(const ModelContext& context,
+                             const int32_t layer_index) {
     // register submodules
-    decoder_layer_ = register_module("decoder_layer",
-                                     layer::DeepseekV2DecoderLayer(context, i));
+    decoder_layer_ = register_module(
+        "decoder_layer", layer::DeepseekV2DecoderLayer(context, layer_index));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -71,14 +69,6 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-
-    // register submodules
-    num_speculative_tokens_ = model_args.num_speculative_tokens();
-
-    // MTP is not support for now
-    if (num_speculative_tokens_ > 0) {
-      LOG(FATAL) << "DeepSeek MTP on MLU is not support for now";
-    }
 
     embed_tokens_ =
         register_module("embed_tokens",
@@ -115,12 +105,13 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     bool is_prefill = input_params.q_max_seq_len > 1;
     auto attn_metadata =
         layer::AttentionMetadata::build(input_params, is_prefill);
-    torch::Tensor h = embed_tokens_(tokens);
+    torch::Tensor hidden_states = embed_tokens_(tokens);
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer(h, positions, attn_metadata, kv_caches[i], input_params);
+      hidden_states = layer(
+          hidden_states, positions, attn_metadata, kv_caches[i], input_params);
     }
-    return norm_(h);
+    return norm_(hidden_states);
   }
 
   // Provide batched signature to satisfy callers that pass vectors
@@ -156,7 +147,6 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   int32_t rank_;
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
-  int32_t num_speculative_tokens_ = 0;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RmsNorm norm_{nullptr};
 };
@@ -210,6 +200,7 @@ REGISTER_MODEL_ARGS(deepseek_v2, [&] {
   LOAD_ARG_OR(v_head_dim, "v_head_dim", 128);
   LOAD_ARG_OR(q_lora_rank, "q_lora_rank", 0);
   LOAD_ARG_OR(kv_lora_rank, "kv_lora_rank", 512);
+  LOAD_ARG_OR(num_nextn_predict_layers, "num_nextn_predict_layers", 1);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
     return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();

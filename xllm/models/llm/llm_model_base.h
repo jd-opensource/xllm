@@ -443,8 +443,9 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
 #endif
   }
 
-  void load_model(std::unique_ptr<ModelLoader> loader,
-                  std::string prefix = "model." /*llm model weight prefix*/) {
+  virtual void load_model(
+      std::unique_ptr<ModelLoader> loader,
+      std::string prefix = "model." /*llm model weight prefix*/) {
     for (const auto& state_dict : loader->get_state_dicts()) {
       model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
       if (tie_word_embeddings) {

@@ -58,6 +58,85 @@ int32_t kv_cache_slot_id(int32_t position,
   return block_id * block_size + block_offset;
 }
 
+// Convert tensor to int64 for MLU platform (temp workaround)
+// MLU will support int32 for masked_scatter in the future
+torch::Tensor ensure_int64_for_certain_platform(torch::Tensor tensor) {
+#if defined(USE_MLU)
+  return tensor.to(torch::kInt64);
+#else
+  return tensor;
+#endif
+}
+
+// Push cumulative sum to vector (used for cumulative format)
+void push_cumsum(std::vector<int32_t>& vec, int32_t len) {
+  if (vec.empty()) {
+    vec.emplace_back(0);
+  }
+  vec.emplace_back(vec.back() + len);
+}
+
+// Batch expansion strategy for validation
+// Process validation sequence lengths for each token (used in
+// prepare_validate_inputs) For NPU without ATB: add direct values for each
+// token For MLU: add cumulative values for each token
+void batch_expansion_process_seq_lens(
+    std::vector<int32_t>& kv_seq_lens_vec,
+    std::vector<int32_t>& q_seq_lens_vec,
+    std::vector<std::vector<int32_t>>& block_tables_vec,
+    const Slice<int32_t>& kv_seq_lens_slice,
+    const Slice<int32_t>& block_table_slice,
+    int32_t seq_id,
+    int32_t position_offset,
+    int32_t num_val_tokens) {
+  for (int32_t offset = position_offset;
+       offset < num_val_tokens + position_offset;
+       ++offset) {
+#if defined(USE_MLU)
+    // process kv length and q length with the style of cumulative lengths
+    // we use batch expansion strategy for validation, so q_len is always 1
+    int32_t kv_len =
+        kv_seq_lens_slice[seq_id + 1] - kv_seq_lens_slice[seq_id] + offset;
+    int32_t q_len = 1;
+    push_cumsum(kv_seq_lens_vec, kv_len);
+    push_cumsum(q_seq_lens_vec, q_len);
+#else
+    // For NPU without ATB: direct format
+    q_seq_lens_vec.emplace_back(1);
+    kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] + token_id);
+#endif
+    block_tables_vec.emplace_back(block_table_slice);
+  }
+}
+
+// Update kv_seq_lens_vec based on platform type
+// For NPU: directly add kv_seq_lens_slice[seq_id] + offset
+// For others: build cumulative format
+// Also updates kv_max_seq_len to track the maximum sequence length
+void update_kv_seq_lens_vec(std::vector<int32_t>& kv_seq_lens_vec,
+                            const Slice<int32_t>& kv_seq_lens_slice,
+                            int32_t seq_id,
+                            int32_t offset,
+                            int32_t& kv_max_seq_len) {
+#if defined(USE_NPU)
+  int32_t new_kv_len = kv_seq_lens_slice[seq_id] + offset;
+  kv_seq_lens_vec.emplace_back(new_kv_len);
+  // Update max for NPU: direct format, compare with new value
+  if (new_kv_len > kv_max_seq_len) {
+    kv_max_seq_len = new_kv_len;
+  }
+#else
+  // build cumulative format for kv_seq_lens
+  int32_t offset_kv_len =
+      kv_seq_lens_slice[seq_id + 1] - kv_seq_lens_slice[seq_id] + offset;
+  // Update max for GPU/MLU: offset_kv_len is the actual kv_len value
+  if (offset_kv_len > kv_max_seq_len) {
+    kv_max_seq_len = offset_kv_len;
+  }
+  push_cumsum(kv_seq_lens_vec, offset_kv_len);
+#endif
+}
+
 }  // namespace
 
 SpeculativeWorkerImpl::SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
@@ -68,6 +147,11 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
   runtime_options.enable_schedule_overlap(false);
   impl_ =
       std::make_unique<LLMWorkerImpl>(parallel_args, device, runtime_options);
+  // here we specify num speculative tokens to 0 to pass the indication of
+  //  draft model to worker when enable_speculative_decode.
+  // NOTE: If you want to modify this part, make sure you also check the usage
+  // of
+  //  num_speculative_tokens in draft model.
   runtime_options.num_decoding_tokens(1).num_speculative_tokens(0);
   draft_impl_ =
       std::make_unique<LLMWorkerImpl>(parallel_args, device, runtime_options);
@@ -194,13 +278,15 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
 
   // prepare input for draft model
   auto& embeddings = output.sample_output.embeddings;
-  auto next_tokens = safe_to(output.sample_output.next_tokens, torch::kInt);
+  auto next_tokens = ensure_int64_for_certain_platform(
+      safe_to(output.sample_output.next_tokens, torch::kInt));
 
   if (embeddings.defined()) {
     prefill_input.input_params.input_embedding = embeddings.clone();
   }
   if (next_tokens.defined()) {
     auto& token_ids = prefill_input.token_ids;
+    token_ids = ensure_int64_for_certain_platform(token_ids);
     auto mask = (token_ids == -1);
     token_ids.masked_scatter_(mask, next_tokens);
   }
@@ -257,7 +343,7 @@ void SpeculativeWorkerImpl::prepare_prefill_inputs(
   new_token_ids.reserve(input.token_ids.numel());
   for (size_t i = 0; i < input_params.num_sequences; ++i) {
     int32_t q_len = 0;
-    q_len = input_params.q_seq_lens_vec[i];
+    q_len = input_params.get_q_seq_len(i);
     Slice<int32_t> tokens_ids_slice_i =
         tokens_ids_slice.slice(start_idx + 1, start_idx + q_len);
     start_idx += q_len;
@@ -314,9 +400,10 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
 
   for (int i = 0; i < options_.num_speculative_tokens(); ++i) {
     ForwardOutput draft_output = draft_outputs[i];
-    auto next_tokens =
-        safe_to(draft_output.sample_output.next_tokens, torch::kInt);
+    auto next_tokens = ensure_int64_for_certain_platform(
+        safe_to(draft_output.sample_output.next_tokens, torch::kInt));
     auto& token_ids = validate_input.token_ids;
+    token_ids = ensure_int64_for_certain_platform(token_ids);
     auto mask = (token_ids == -1 * (i + 1));
     token_ids.masked_scatter_(mask, next_tokens);
   }
@@ -379,9 +466,13 @@ void SpeculativeWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
   Slice<int32_t> kv_seq_lens_slice = input_params.kv_seq_lens_vec;
   torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
 
+  // Initialize kv_max_seq_len to 0
+  int32_t kv_max_seq_len = 0;
+
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
     new_positions.emplace_back(positions_slice[seq_id] + offset);
-    kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] + offset);
+    update_kv_seq_lens_vec(
+        kv_seq_lens_vec, kv_seq_lens_slice, seq_id, offset, kv_max_seq_len);
     torch::Tensor block_table = block_tables[seq_id];
     Slice<int32_t> block_table_slice = {block_table.data_ptr<int32_t>(),
                                         block_table.numel()};
@@ -392,7 +483,7 @@ void SpeculativeWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
 
   draft_input.positions = torch::tensor(new_positions, int_options);
   // update the input_params
-  input_params.kv_max_seq_len = input_params.kv_max_seq_len + offset;
+  input_params.kv_max_seq_len = kv_max_seq_len;
   input_params.kv_seq_lens_vec = kv_seq_lens_vec;
   input_params.kv_seq_lens = torch::tensor(kv_seq_lens_vec, int_options);
   input_params.new_cache_slots = torch::tensor(new_token_slot_ids, int_options);
@@ -451,17 +542,21 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
 
     // process kv length and q length
     if (FLAGS_enable_atb_spec_kernel) {
+      // expand the num of decode tokens for each batch in the batch for
+      // validation
       kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] +
                                    num_speculative_tokens + position_offset);
       q_seq_lens_vec.emplace_back(num_val_tokens);
     } else {
-      for (int32_t offset = position_offset;
-           offset < num_val_tokens + position_offset;
-           ++offset) {
-        q_seq_lens_vec.emplace_back(1);
-        kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] + offset);
-        block_tables_vec.emplace_back(block_table_slice);
-      }
+      // expand the batch sizes for validation
+      batch_expansion_process_seq_lens(kv_seq_lens_vec,
+                                       q_seq_lens_vec,
+                                       block_tables_vec,
+                                       kv_seq_lens_slice,
+                                       block_table_slice,
+                                       seq_id,
+                                       position_offset,
+                                       num_val_tokens);
     }
 
     // process slot id
@@ -571,6 +666,7 @@ SampleOutput SpeculativeWorkerImpl::validate(
   size_t num_draft_tokens = num_target_tokens - batch_size;
   COUNTER_ADD(speculative_num_draft_tokens_total, num_draft_tokens);
   COUNTER_ADD(speculative_num_accepted_tokens_total, num_draft_tokens - count);
+
   return sample_output;
 }
 
@@ -589,11 +685,14 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   torch::Tensor positions = safe_to(inputs.positions, torch::kCPU);
   Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
                                     positions.numel()};
+  // Get the tokens generated in the last step (flattened for easier indexing)
   torch::Tensor last_token_ids = safe_to(
       last_step_output_.sample_output.next_tokens.flatten(), torch::kCPU);
   Slice<int64_t> last_tokens_ids_slice = {last_token_ids.data_ptr<int64_t>(),
                                           last_token_ids.numel()};
 
+  // Determine how many tokens were decoded in the last step
+  // If the output is 2D, it means multiple tokens were generated per sequence
   int32_t last_step_decode_num = 1;
   if (last_step_output_.sample_output.next_tokens.dim() == 2) {
     last_step_decode_num = last_step_output_.sample_output.next_tokens.size(1);
@@ -611,13 +710,23 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   kv_seq_lens_vec.reserve(num_sequences);
   new_token_slot_ids.reserve(num_sequences);
 
-  // get right token id and position
+  // Initialize kv_max_seq_len to 0
+  int32_t kv_max_seq_len = 0;
+
+  // Process each sequence to get the correct token ID and position for the next
+  // step
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
     int32_t postion_offset = 0;
     int32_t last_step_token_id = 0;
+
+    // If the token ID is non-negative, it's a direct token ID (not a
+    // placeholder)
     if (tokens_ids_slice[seq_id] >= 0) {
       last_step_token_id = tokens_ids_slice[seq_id];
     } else {
+      // Negative token IDs are placeholders that need to be resolved from
+      // last_step_output_ The absolute value minus 1 gives the index into the
+      // last step's output
       int32_t last_step_index = -1 * tokens_ids_slice[seq_id] - 1;
       last_step_index = last_step_index * last_step_decode_num;
       postion_offset = -1;
@@ -632,8 +741,14 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
 
     new_token_ids.emplace_back(last_step_token_id);
     new_positions.emplace_back(positions_slice[seq_id] + postion_offset);
-    kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] + postion_offset);
+    update_kv_seq_lens_vec(kv_seq_lens_vec,
+                           kv_seq_lens_slice,
+                           seq_id,
+                           postion_offset,
+                           kv_max_seq_len);
 
+    // Calculate the new cache slot ID based on the position offset
+    // This handles cases where we need to move to a different block
     torch::Tensor block_table = block_tables[seq_id];
     Slice<int32_t> block_table_slice = {block_table.data_ptr<int32_t>(),
                                         block_table.numel()};
@@ -642,12 +757,12 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
     new_token_slot_ids.emplace_back(slot_id);
   }
 
+  // Create new tensors with updated values
   torch::TensorOptions int_options = inputs.token_ids.options();
   new_inputs.token_ids = torch::tensor(new_token_ids, int_options);
   new_inputs.positions = torch::tensor(new_positions, int_options);
   // update the input_params
-  input_params.kv_max_seq_len =
-      *std::max_element(kv_seq_lens_vec.begin(), kv_seq_lens_vec.end());
+  input_params.kv_max_seq_len = kv_max_seq_len;
   input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
   input_params.kv_seq_lens =
       torch::tensor(input_params.kv_seq_lens_vec, int_options);

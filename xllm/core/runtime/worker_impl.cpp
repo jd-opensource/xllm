@@ -600,9 +600,26 @@ bool WorkerImpl::init_model(const std::string& model_weights_path) {
     }
   }
 
+#if defined(USE_NPU)
   if (options_.enable_speculative_decode() && FLAGS_enable_atb_spec_kernel) {
     args.num_speculative_tokens(options_.num_speculative_tokens());
   }
+#else
+  if (options_.enable_speculative_decode()) {
+    args.num_speculative_tokens(options_.num_speculative_tokens());
+    // When running speculative decoding, the draft worker reuses the same
+    // checkpoint as the target DeepSeek V3/V32 model. The draft worker needs to
+    // instantiate the MTP variant, so override the model_type here without
+    // mutating the original config.
+    if (options_.num_speculative_tokens() == 0 &&
+        (args.model_type() == "deepseek_v3" ||
+         args.model_type() == "deepseek_v32")) {
+      LOG(INFO) << "Overriding draft model_type from " << args.model_type()
+                << " to deepseek_mtp for speculative decoding";
+      args.model_type("deepseek_mtp");
+    }
+  }
+#endif
 
   // create model context
   dtype_ = dtype;
