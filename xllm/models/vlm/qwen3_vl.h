@@ -769,7 +769,7 @@ REGISTER_MODEL_ARGS(qwen3_vl, [&] {
   // LOAD_ARG_OR(transformers_version, "transformers_version", "4.41.2");
   // LOAD_ARG_OR(use_cache, "use_cache", true);
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
-  LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
+  LOAD_ARG_OR_FUNC(head_dim, "text_config.head_dim", [&] {
     return args->hidden_size() / args->n_heads();
   });
   // vision_config
