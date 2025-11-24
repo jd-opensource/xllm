@@ -42,24 +42,6 @@ limitations under the License.
 
 namespace xllm {
 
-namespace {
-void try_to_enable_mla(const std::vector<RawForwardInput>& raw_forward_inputs) {
-  static bool set_enable_mla = FLAGS_enable_customize_mla_kernel;
-  // decode phase with tokens more than this limit will lead to error in
-  // customize mla kernel. once detect any input exceed the limit, fall back to
-  // default kernel.
-  const int num_tokens_limit = 230;
-  if (set_enable_mla) {
-    FLAGS_enable_customize_mla_kernel =
-        std::all_of(raw_forward_inputs.begin(),
-                    raw_forward_inputs.end(),
-                    [](const RawForwardInput& input) {
-                      return input.flatten_tokens_vec.size() < num_tokens_limit;
-                    });
-  }
-}
-}  // namespace
-
 LLMEngine::LLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
     : options_(options), dist_manager_(dist_manager) {
@@ -714,8 +696,6 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   DCHECK(dp_size_ == raw_forward_inputs.size())
       << "The processed raw forward inputs size " << raw_forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
-
-  try_to_enable_mla(raw_forward_inputs);
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);

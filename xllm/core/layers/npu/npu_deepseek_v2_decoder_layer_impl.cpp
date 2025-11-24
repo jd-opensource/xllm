@@ -1540,7 +1540,12 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute prefill layer fail, error code: " << st;
   } else {
-    if (!FLAGS_enable_customize_mla_kernel) {
+    const int num_tokens = x.sizes().at(0);
+    // decode phase with tokens more than this limit will lead to error in
+    // customize mla kernel. once detect any input exceed the limit, fall back
+    // to default kernel.
+    const int num_tokens_limit = 230;
+    if (!FLAGS_enable_customize_mla_kernel || num_tokens >= num_tokens_limit) {
       build_node_variant_pack(decode_node_,
                               x,
                               cos_pos,
