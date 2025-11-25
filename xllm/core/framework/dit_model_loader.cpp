@@ -174,6 +174,15 @@ bool DiTFolderLoader::load_tokenizer_args(
   JsonReader tokenizer_reader;
   const std::string tokenizer_args_file_path =
       model_weights_path_ + "/tokenizer_config.json";
+
+  // check if tokenizer.json exists, if exists, set the tokenizer type to fast
+  const std::string tokenizer_json_path =
+      model_weights_path + "/tokenizer.json";
+  if (std::filesystem::exists(tokenizer_json_path)) {
+    tokenizer_args_.tokenizer_type() = "fast";
+    tokenizer_args_.vocab_file() = tokenizer_json_path;
+  }
+
   if (!std::filesystem::exists(tokenizer_args_file_path)) {
     return true;
   }
