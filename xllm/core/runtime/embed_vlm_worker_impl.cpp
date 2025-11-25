@@ -82,7 +82,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   SampleOutput sample_output;
 
   if (sampling_params.selected_token_idxes.defined() &&
-      inputs.micro_inputs[0].sampling_params.is_embeddings) {
+      input.sampling_params.is_embeddings) {
     EmbeddingVLM* em_model = dynamic_cast<EmbeddingVLM*>(model_.get());
     auto embeddings =
         em_model->pooler(hidden_states, sampling_params.selected_token_idxes);
