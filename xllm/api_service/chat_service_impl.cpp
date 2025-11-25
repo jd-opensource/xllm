@@ -37,6 +37,7 @@ limitations under the License.
 #include "core/runtime/vlm_master.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
+#include "mm_service_utils.h"
 
 namespace xllm {
 namespace {
@@ -760,61 +761,64 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
   if (!helper.trans(req_messages, messages, mm_inputs.items_)) {
     call->finish_with_error(StatusCode::INVALID_ARGUMENT,
                             "inputs argument is invalid.");
-    return;
-  }
 
-  bool include_usage = false;
-  if (rpc_request.has_stream_options()) {
-    include_usage = rpc_request.stream_options().include_usage();
-  }
+    if (!build_messages<MMChatCall>(
+            req_messages, messages, call, master_->get_image_limit())) {
+      return;
+    }
 
-  auto saved_streaming = request_params.streaming;
-  auto saved_request_id = request_params.request_id;
+    bool include_usage = false;
+    if (rpc_request.has_stream_options()) {
+      include_usage = rpc_request.stream_options().include_usage();
+    }
 
-  // schedule the request
-  master_->handle_request(
-      std::move(messages),
-      std::move(mm_inputs),
-      std::move(request_params),
-      [call,
-       model,
-       master = master_,
-       stream = std::move(saved_streaming),
-       include_usage = include_usage,
-       first_message_sent = std::unordered_set<size_t>(),
-       request_id = std::move(saved_request_id),
-       created_time = absl::ToUnixSeconds(absl::Now())](
-          const RequestOutput& req_output) mutable -> bool {
-        if (req_output.status.has_value()) {
-          const auto& status = req_output.status.value();
-          if (!status.ok()) {
-            // Reduce the number of concurrent requests when a request is
-            // finished with error.
-            master->get_rate_limiter()->decrease_one_request();
+    auto saved_streaming = request_params.streaming;
+    auto saved_request_id = request_params.request_id;
 
-            return call->finish_with_error(status.code(), status.message());
+    // schedule the request
+    master_->handle_request(
+        std::move(messages),
+        std::move(mm_inputs),
+        std::move(request_params),
+        [call,
+         model,
+         master = master_,
+         stream = std::move(saved_streaming),
+         include_usage = include_usage,
+         first_message_sent = std::unordered_set<size_t>(),
+         request_id = std::move(saved_request_id),
+         created_time = absl::ToUnixSeconds(absl::Now())](
+            const RequestOutput& req_output) mutable -> bool {
+          if (req_output.status.has_value()) {
+            const auto& status = req_output.status.value();
+            if (!status.ok()) {
+              // Reduce the number of concurrent requests when a request is
+              // finished with error.
+              master->get_rate_limiter()->decrease_one_request();
+
+              return call->finish_with_error(status.code(), status.message());
+            }
           }
-        }
 
-        // Reduce the number of concurrent requests when a request is finished
-        // or canceled.
-        if (req_output.finished || req_output.cancelled) {
-          master->get_rate_limiter()->decrease_one_request();
-        }
+          // Reduce the number of concurrent requests when a request is finished
+          // or canceled.
+          if (req_output.finished || req_output.cancelled) {
+            master->get_rate_limiter()->decrease_one_request();
+          }
 
-        if (stream) {
-          // send delta to client
-          return send_delta_to_client_brpc(call,
-                                           include_usage,
-                                           &first_message_sent,
-                                           request_id,
-                                           created_time,
-                                           model,
-                                           req_output);
-        }
-        return send_result_to_client_brpc(
-            call, request_id, created_time, model, req_output);
-      });
-}
+          if (stream) {
+            // send delta to client
+            return send_delta_to_client_brpc(call,
+                                             include_usage,
+                                             &first_message_sent,
+                                             request_id,
+                                             created_time,
+                                             model,
+                                             req_output);
+          }
+          return send_result_to_client_brpc(
+              call, request_id, created_time, model, req_output);
+        });
+  }
 
 }  // namespace xllm
