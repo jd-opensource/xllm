@@ -91,11 +91,11 @@ class ModelRegistry {
   static void register_causalvlm_factory(const std::string& name,
                                          CausalVLMFactory factory);
 
-  static void register_embeddinglm_factory(const std::string& name,
-                                           EmbeddingLMFactory factory);
+  static void register_lm_embedding_factory(const std::string& name,
+                                            EmbeddingLMFactory factory);
 
-  static void register_embeddingvlm_factory(const std::string& name,
-                                            EmbeddingVLMFactory factory);
+  static void register_vlm_embedding_factory(const std::string& name,
+                                             EmbeddingVLMFactory factory);
 
   static void register_dit_model_factory(const std::string& name,
                                          DiTModelFactory factory);
@@ -147,10 +147,10 @@ std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context);
 
 std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context);
 
-std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
+std::unique_ptr<EmbeddingLM> create_lm_embedding_model(
     const ModelContext& context);
 
-std::unique_ptr<EmbeddingVLM> create_embeddingvlm_model(
+std::unique_ptr<EmbeddingVLM> create_vlm_embedding_model(
     const ModelContext& context);
 
 std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
@@ -189,7 +189,7 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 // Macro to register a causal model with the ModelRegistry
 #define REGISTER_EMBEDDING_MODEL_WITH_VARNAME(VarName, ModelType, ModelClass) \
   const bool VarName##_registered = []() {                                    \
-    ModelRegistry::register_embeddinglm_factory(                              \
+    ModelRegistry::register_lm_embedding_factory(                             \
         #ModelType, [](const ModelContext& context) {                         \
           ModelClass model(context);                                          \
           model->eval();                                                      \
@@ -205,7 +205,7 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_EMBEDDING_VLM_MODEL_WITH_VARNAME(                     \
     VarName, ModelType, ModelClass)                                    \
   const bool VarName##_registered = []() {                             \
-    ModelRegistry::register_embeddingvlm_factory(                      \
+    ModelRegistry::register_vlm_embedding_factory(                     \
         #ModelType, [](const ModelContext& context) {                  \
           ModelClass model(context);                                   \
           model->eval();                                               \

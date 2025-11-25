@@ -88,8 +88,8 @@ void ModelRegistry::register_causalvlm_factory(const std::string& name,
   }
 }
 
-void ModelRegistry::register_embeddinglm_factory(const std::string& name,
-                                                 EmbeddingLMFactory factory) {
+void ModelRegistry::register_lm_embedding_factory(const std::string& name,
+                                                  EmbeddingLMFactory factory) {
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].embedding_lm_factory != nullptr) {
@@ -101,8 +101,9 @@ void ModelRegistry::register_embeddinglm_factory(const std::string& name,
   }
 }
 
-void ModelRegistry::register_embeddingvlm_factory(const std::string& name,
-                                                  EmbeddingVLMFactory factory) {
+void ModelRegistry::register_vlm_embedding_factory(
+    const std::string& name,
+    EmbeddingVLMFactory factory) {
   ModelRegistry* instance = get_instance();
 
   if (instance->model_registry_[name].embedding_vlm_factory != nullptr) {
@@ -286,7 +287,7 @@ std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context) {
   return nullptr;
 }
 
-std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
+std::unique_ptr<EmbeddingLM> create_lm_embedding_model(
     const ModelContext& context) {
   // get the factory function for the model type from model registry
   auto factory = ModelRegistry::get_embeddinglm_factory(
@@ -301,7 +302,7 @@ std::unique_ptr<EmbeddingLM> create_embeddinglm_model(
   return nullptr;
 }
 
-std::unique_ptr<EmbeddingVLM> create_embeddingvlm_model(
+std::unique_ptr<EmbeddingVLM> create_vlm_embedding_model(
     const ModelContext& context) {
   // get the factory function for the model type from model registry
   auto factory = ModelRegistry::get_embeddingvlm_factory(

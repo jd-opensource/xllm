@@ -63,10 +63,6 @@ void Request::create_sequences_group() {
                                                       state_.input_embedding,
                                                       state_.mm_data,
                                                       sequence_params);
-  LOG(INFO) << "$$$$$$$$$$ Request " << request_id_
-            << " created with prompt: " << state_.prompt;
-  LOG(INFO) << "$$$$$$$$$$ Created SequencesGroup with "
-            << sequences_group_->sequences().size() << " sequences.";
 }
 
 bool Request::finished() const { return sequences_group_->finished(); }
