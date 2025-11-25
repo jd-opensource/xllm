@@ -135,7 +135,7 @@ DEFINE_double(max_memory_utilization,
 
 DEFINE_int32(max_tokens_per_batch, 20480, "Max number of tokens per batch.");
 
-DEFINE_int32(max_seqs_per_batch, 256, "Max number of sequences per batch.");
+DEFINE_int32(max_seqs_per_batch, 1024, "Max number of sequences per batch.");
 
 DEFINE_bool(enable_schedule_overlap,
             true,
@@ -172,7 +172,7 @@ DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
 
 DEFINE_string(
     communication_backend,
-    "lccl",
+    "hccl",
     "NPU communication backend.(e.g. lccl, hccl). When enable dp, use hccl.");
 
 // --- ep load balance config ---
