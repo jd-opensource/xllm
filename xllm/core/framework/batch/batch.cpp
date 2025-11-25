@@ -225,7 +225,7 @@ void Batch::append_token_for_sequence(Sequence* seq,
         seq->pre_scheduled_step_prefill_queue().pop();
       }
     }
-  } else {
+  } else if (!seq->cancelled()) {
     // truely update the real token if replace_fake_token
     seq->update_last_step_token(token, token_idx);
     if (FLAGS_enable_chunked_prefill && token_idx == 0) {

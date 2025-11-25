@@ -84,7 +84,6 @@ class Sequence final {
            const SequenceParams& seq_params);
 
   Sequence(const Sequence& other);
-
   // get mm data
   const MMData& get_mm_data() const { return mm_data_; }
   void set_mrope_position_delta(int val) { mrope_position_delta_ = val; }
@@ -265,6 +264,10 @@ class Sequence final {
   // get sequence id
   int32_t seq_id() const { return seq_id_; }
 
+  void set_cancel() { cancelled_.store(true, std::memory_order_relaxed); }
+
+  bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
+
  private:
   // the index of the sequence in the request
   size_t index_ = 0;
@@ -356,6 +359,8 @@ class Sequence final {
 
   // kvcache store copy async result
   std::optional<std::vector<folly::SemiFuture<uint32_t>>> futures_;
+
+  std::atomic<bool> cancelled_{false};
 };
 
 }  // namespace xllm
