@@ -558,7 +558,9 @@ void NpuQwen3MoeDecoderLayerImpl::process_general_weights(
 
   if (index == IN_QKV_WEIGHT_1 || index == IN_QKV_WEIGHT_2 ||
       index == IN_QKV_BIAS_1 || index == IN_QKV_BIAS_2 ||
-      index == IN_QKV_DESCALE_1 || index == IN_QKV_DESCALE_2) {
+      index == IN_QKV_DESCALE_1 || index == IN_QKV_DESCALE_2 ||
+      index == IN_QKV_OFFSET_1 || index == IN_QKV_OFFSET_2 ||
+      index == IN_QKV_SCALE_1 || index == IN_QKV_SCALE_2) {
     if (n_kv_heads_ < dp_local_tp_size_) {
       int32_t repeat_times = (dp_local_tp_size_ / n_kv_heads_);
 
