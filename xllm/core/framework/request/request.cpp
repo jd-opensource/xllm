@@ -125,6 +125,13 @@ size_t Request::total_num_blocks() {
   return num;
 }
 
+void Request::set_cancel() {
+  cancelled_.store(true, std::memory_order_relaxed);
+  for (const auto& seq : sequences()) {
+    seq->set_cancel();
+  }
+}
+
 RequestOutput Request::generate_output(const Tokenizer& tokenizer,
                                        ThreadPool* thread_pool) {
   // summarize statistics for all sequences
@@ -159,7 +166,7 @@ void Request::update_connection_status() {
   if (!is_disconnected) {
     return;
   }
-  cancelled_.store(true, std::memory_order_relaxed);
+  set_cancel();
 }
 
 }  // namespace xllm

@@ -55,7 +55,7 @@ class Request : public RequestBase {
 
   SequencesGroup* sequence_group() { return sequences_group_.get(); }
 
-  void set_cancel() { cancelled_.store(true, std::memory_order_relaxed); }
+  void set_cancel();
 
   bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
 

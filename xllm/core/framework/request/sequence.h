@@ -251,6 +251,10 @@ class Sequence final {
   // get sequence id
   int32_t seq_id() const { return seq_id_; }
 
+  void set_cancel() { cancelled_.store(true, std::memory_order_relaxed); }
+
+  bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
+
  private:
   // the index of the sequence in the request
   size_t index_ = 0;
@@ -339,6 +343,8 @@ class Sequence final {
   // update stage, we pop the state from the queue.
   // 2 valid elements at most, maximum 2 steps pre scheduled.
   std::queue<bool> is_pre_scheduled_step_prefill_;
+
+  std::atomic<bool> cancelled_{false};
 
   // kvcache store copy async result
   std::atomic<bool> termination_flag_{false};
