@@ -37,7 +37,14 @@ limitations under the License.
 
 namespace xllm {
 
-enum class SequenceStage : int8_t { PREFILL = 0, DECODE = 1 };
+enum class SequenceStage : int8_t {
+  // Prefill without using kv cache.
+  PREFILL = 0,
+  // Chunked prefill using kv cache.
+  CHUNKED_PREFILL = 1,
+  // Decode one token.
+  DECODE = 2
+};
 
 struct SequenceParams {
   // max tokens count in the sequence.
@@ -96,12 +103,17 @@ class Sequence final {
   }
 
   // check if in prefill stage
-  bool is_prefill_stage() const { return stage() == SequenceStage::PREFILL; }
+  bool is_chunked_prefill_stage() const {
+    return stage() == SequenceStage::CHUNKED_PREFILL;
+  }
+
   // get the sequence stage
   SequenceStage stage() const {
-    if ((kv_state_.kv_cache_tokens_num() <
-         std::max(volatile_num_prompt_tokens_, num_prompt_tokens())) &&
-        kv_state_.kv_cache_tokens_num() > 0) {
+    if (kv_state_.kv_cache_tokens_num() <
+        std::max(volatile_num_prompt_tokens_, num_prompt_tokens())) {
+      if (kv_state_.kv_cache_tokens_num() > 0) {
+        return SequenceStage::CHUNKED_PREFILL;
+      }
       return SequenceStage::PREFILL;
     }
     return SequenceStage::DECODE;

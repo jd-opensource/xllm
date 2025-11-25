@@ -45,6 +45,7 @@ BatchInputBuilder::BatchInputBuilder(
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     const uint64_t batch_id,
     const ModelArgs* args,
+    BatchForwardType batch_forward_type,
     ThreadPool* thread_pool)
     : sequences_(sequences),
       allowed_max_tokens_(allowed_max_tokens),
@@ -65,6 +66,7 @@ BatchInputBuilder::BatchInputBuilder(
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
   }
   write_block_ids_.clear();
+  state_.batch_forward_type = batch_forward_type;
 }
 
 ForwardInput BatchInputBuilder::build_forward_input(
@@ -305,7 +307,7 @@ void BatchInputBuilder::process_single_sequence(
   }
 
   // Track prefill sequences
-  if (sequence->is_prefill_stage()) {
+  if (sequence->is_chunked_prefill_stage()) {
     state.prefill_seq_len++;
   }
 
@@ -552,6 +554,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
 
   auto& input_params = forward_input.input_params;
   input_params.empty_kv_cache = state_.empty_kv_cache;
+  input_params.batch_forward_type = state_.batch_forward_type;
   input_params.num_sequences = state_.block_tables_vec.size();
   input_params.kv_max_seq_len = state_.max_seq_len;
   input_params.q_max_seq_len = state_.q_max_seq_len;
@@ -645,7 +648,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.unique_token_lens_vec =
       std::move(state_.unique_token_lens_vec);
   raw_forward_input.empty_kv_cache = state_.empty_kv_cache;
-  // raw_forward_input.global_empty_kv_cache = ;
+  raw_forward_input.batch_forward_type = state_.batch_forward_type;
   raw_forward_input.max_seq_len = state_.max_seq_len;
   raw_forward_input.q_max_seq_len = state_.q_max_seq_len;
   raw_forward_input.seq_lens = std::move(state_.seq_lens);

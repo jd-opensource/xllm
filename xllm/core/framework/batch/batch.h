@@ -23,6 +23,7 @@ limitations under the License.
 #include <limits>
 #include <vector>
 
+#include "framework/batch/batch_forward_type.h"
 #include "framework/request/mm_data.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
@@ -52,6 +53,8 @@ class Batch {
   void add(SequencesGroup* sequence_group) {
     sequence_groups_.push_back(sequence_group);
   }
+
+  void update_forward_type(Sequence* sequence);
 
   void set_swap_block_transfer_infos(
       std::vector<BlockTransferInfo>* swap_block_transfer_infos) {
@@ -113,12 +116,6 @@ class Batch {
     return allowed_max_tokens_;
   }
 
-  void set_batch_prefill_status(const bool all_seqs_in_prefill) {
-    all_seqs_in_prefill_ = all_seqs_in_prefill;
-  }
-
-  bool get_batch_prefill_status() const { return all_seqs_in_prefill_; }
-
   std::map<uint32_t, uint32_t> cal_seq_exchange_index_test(
       std::vector<uint32_t>& kv_cache_tokens_num) {
     return cal_seq_exchange_index(kv_cache_tokens_num);
@@ -152,8 +149,7 @@ class Batch {
   // mm_data in the batch
   std::vector<MMData> mm_data_vec_;
 
-  // all sequences in this batch are in prefill stage
-  bool all_seqs_in_prefill_ = false;
+  BatchForwardType batch_forward_type_;
 
   uint64_t batch_id_ = UNINITIALIZED_BATCH_ID;
 };

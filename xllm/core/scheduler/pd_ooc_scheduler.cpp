@@ -1159,7 +1159,7 @@ void PDOOCScheduler::prepare_offline_dispatch_queue() {
     for (size_t i = 0; i < running_requests_.size(); ++i) {
       auto& request = running_requests_[i];
       if (request && request->offline() && !request->sequences().empty() &&
-          !request->sequences()[0]->is_prefill_stage()) {
+          !request->sequences()[0]->is_chunked_prefill_stage()) {
         size_t req_len = request->sequences()[0]->num_tokens();
         if (req_len <= max_len) {
           size_t diff = preferred_len > req_len ? preferred_len - req_len

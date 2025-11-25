@@ -148,6 +148,7 @@ struct RawForwardInput {
   std::vector<int32_t> unique_token_lens_vec;
   bool empty_kv_cache = true;
   bool global_empty_kv_cache = true;
+  BatchForwardType batch_forward_type;
   uint32_t max_seq_len;
   uint32_t q_max_seq_len;
   std::vector<int32_t> seq_lens;

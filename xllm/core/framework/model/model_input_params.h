@@ -21,6 +21,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
+#include "framework/batch/batch_forward_type.h"
 #include "framework/request/mm_data.h"
 #include "npu_dp_ep_padding.h"
 #include "util/tensor_helper.h"
@@ -88,6 +89,7 @@ struct ModelInputParams {
     ModelInputParams params;
     params.empty_kv_cache = empty_kv_cache;
     params.global_empty_kv_cache = global_empty_kv_cache;
+    params.batch_forward_type = batch_forward_type;
     params.num_sequences = num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
     params.q_max_seq_len = q_max_seq_len;
@@ -163,6 +165,7 @@ struct ModelInputParams {
   }
   // whether the kv-cache is empty for all sequences.
   bool empty_kv_cache = true;
+  BatchForwardType batch_forward_type;
 
   // total number of sequences in the batch
   int32_t num_sequences = 0;

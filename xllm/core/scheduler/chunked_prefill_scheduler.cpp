@@ -94,7 +94,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       // decode stage. Now Partially use `num_tokens_to_handle` to replace
       // `current_step_handle_tokens`.
       size_t num_tokens_to_handle =
-          sequence->is_prefill_stage()
+          sequence->is_chunked_prefill_stage()
               ? std::min(assume_max_tokens, num_tokens - kv_cache_tokens_num)
               : 1 + min_speculative_tokens_required_;
 
@@ -142,7 +142,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
 
       // the new request do chunked prefill
       if (sequence->kv_state().kv_cache_tokens_num() == 0 ||
-          sequence->is_prefill_stage()) {
+          sequence->is_chunked_prefill_stage()) {
         prefill_stage_sequences.emplace_back(sequence.get());
       }
 
@@ -738,8 +738,8 @@ bool ChunkedPrefillScheduler::allocate_blocks_for(
   // prefill stage don't need speculative decoding.
   //
   // if in decoding stage
-  if (options_.num_speculative_tokens() > 0 && !sequence->is_prefill_stage() &&
-      kv_cache_tokens_num > 0) {
+  if (options_.num_speculative_tokens() > 0 &&
+      !sequence->is_chunked_prefill_stage() && kv_cache_tokens_num > 0) {
     max_handle_num_tokens += min_speculative_tokens_required_;
   }
 
@@ -759,7 +759,7 @@ void ChunkedPrefillScheduler::allocate_shared_blocks_for(Sequence* sequence) {
     kv_cache_manager_->allocate_shared(sequence);
     return;
   }
-  if (sequence->is_prefill_stage()) {
+  if (sequence->is_chunked_prefill_stage()) {
     const size_t max_tokens_per_chunk_for_prefill =
         std::max(options_.max_tokens_per_chunk_for_prefill(), 64);
     size_t total_chunked_size =

@@ -1039,7 +1039,7 @@ void ContinuousScheduler::update_token_latency_metrics(
     std::vector<Sequence*>& sequences) {
   const auto now = absl::Now();
   for (Sequence* sequence : sequences) {
-    if (sequence->is_prefill_stage()) {
+    if (sequence->is_chunked_prefill_stage()) {
       // skip chunked prefill stage
       continue;
     }

@@ -52,12 +52,39 @@ void Batch::add(Sequence* sequence, uint32_t allowed_max_token) {
     input_embeddings_vec_.emplace_back(input_embedding);
 
   const auto& mm_data = sequence->get_mm_data();
-  //  if (sequence->is_prefill_stage() &&  mm_data.valid()) // TODO:Compatible
-  //  With Chunked Prefill
-  if ((sequence->kv_state().kv_cache_tokens_num() <
-       sequence->num_prompt_tokens()) &&
-      mm_data.valid())
+  //  if (sequence->is_chunked_prefill_stage() &&  mm_data.valid())
+  // TODO:Compatible With Chunked Prefill
+  if ((sequence->stage() == SequenceStage::PREFILL) && mm_data.valid()) {
     mm_data_vec_.emplace_back(mm_data);
+  }
+}
+
+void Batch::update_forward_type(Sequence* sequence) {
+  auto stage = sequence->stage();
+  switch (batch_forward_type_.value()) {
+    case BatchForwardType::PREFILL:
+      if (stage == SequenceStage::CHUNKED_PREFILL) {
+        batch_forward_type_ = BatchForwardType::CHUNKED_PREFILL;
+      } else if (stage == SequenceStage::DECODE) {
+        batch_forward_type_ = BatchForwardType::MIXED;
+      }
+      break;
+    case BatchForwardType::CHUNKED_PREFILL:
+      if (stage == SequenceStage::DECODE) {
+        batch_forward_type_ = BatchForwardType::MIXED;
+      }
+      break;
+    case BatchForwardType::DECODE:
+      if (stage != SequenceStage::DECODE) {
+        batch_forward_type_ = BatchForwardType::MIXED;
+      }
+      break;
+    case BatchForwardType::MIXED:
+      break;
+    case BatchForwardType::EMPTY:
+      batch_forward_type_ = BatchForwardType(static_cast<int32_t>(stage));
+      break;
+  }
 }
 
 void Batch::add(const std::vector<Sequence*>& sequences) {
@@ -75,7 +102,8 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                             mm_data_vec_,
                             swap_block_transfer_infos_,
                             batch_id_,
-                            &args);
+                            &args,
+                            batch_forward_type_);
   return builder.build_forward_input(num_decoding_tokens,
                                      min_decoding_batch_size);
 }
@@ -180,6 +208,7 @@ RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
                             swap_block_transfer_infos_,
                             batch_id_,
                             &args,
+                            batch_forward_type_,
                             thread_pool);
   return builder.build_raw_forward_input(start_idx, end_idx);
 }
@@ -282,7 +311,7 @@ bool Batch::update_sequence_state(Sequence* seq, bool replace_fake_token) {
   // prefill-or-not state of last stage, otherwise, we need the state
   // of current stage.
   if (FLAGS_enable_chunked_prefill) {
-    if (!replace_fake_token && seq->is_prefill_stage()) {
+    if (!replace_fake_token && seq->is_chunked_prefill_stage()) {
       seq->pre_scheduled_step_prefill_queue().push(true);
       // if not replace_fake_token, pop out here to avoid endless growth
       if (seq->pre_scheduled_step_prefill_queue().size() > 2) {

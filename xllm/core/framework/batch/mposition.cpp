@@ -20,7 +20,7 @@ limitations under the License.
 namespace xllm {
 
 torch::Tensor MPositionHelper::get_positions() {
-  // if (seq_.is_prefill_stage()) {
+  // if (seq_.is_chunked_prefill_stage()) {
   if (seq_.kv_state().kv_cache_tokens_num() < seq_.num_prompt_tokens()) {
     auto& mm_data = seq_.get_mm_data();
 

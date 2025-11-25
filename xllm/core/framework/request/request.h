@@ -92,7 +92,9 @@ class Request : public RequestBase {
     return state_.sampling_param.beam_width > 1;
   }
 
-  bool is_prefill_stage() const { return sequences_group_->is_prefill_stage(); }
+  bool is_chunked_prefill_stage() const {
+    return sequences_group_->is_chunked_prefill_stage();
+  }
 
  private:
   RequestState state_;

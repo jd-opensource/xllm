@@ -41,6 +41,7 @@ class BatchInputBuilder {
       std::vector<BlockTransferInfo>* swap_block_transfer_infos,
       const uint64_t batch_id,
       const ModelArgs* args,
+      BatchForwardType batch_forward_type,
       ThreadPool* thread_pool = nullptr);
 
   ForwardInput build_forward_input(uint32_t num_decoding_tokens,
@@ -77,6 +78,7 @@ class BatchInputBuilder {
     std::vector<int32_t> unique_token_lens_vec;
 
     // Sequence metadata
+    BatchForwardType batch_forward_type;
     bool empty_kv_cache = true;
     uint32_t max_seq_len = 0;
     uint32_t q_max_seq_len = 0;

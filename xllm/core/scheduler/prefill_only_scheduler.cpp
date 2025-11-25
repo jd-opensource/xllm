@@ -487,7 +487,7 @@ std::vector<Batch> PrefillOnlyScheduler::prepare_batch() {
           continue;
         }
         handle_running_requests(*it);
-        if ((*it)->is_prefill_stage()) {
+        if ((*it)->is_chunked_prefill_stage()) {
           last_step_prefill_requests.emplace_back(*it);
         } else {
           if ((*it)->offline()) {
@@ -530,7 +530,7 @@ std::vector<Batch> PrefillOnlyScheduler::prepare_batch() {
         continue;
       }
       handle_running_requests(*it);
-      if ((*it)->is_prefill_stage()) {
+      if ((*it)->is_chunked_prefill_stage()) {
         last_step_prefill_requests.emplace_back(*it);
       } else {
         if ((*it)->offline()) {

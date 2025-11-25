@@ -200,6 +200,7 @@ message ForwardInput {
   // beam search kernel
   repeated float acc_logprob_vec = 37;
   uint64 batch_id = 38;
+  int32 batch_forward_type = 39;
 }
 
  message BatchedForwardInputs {
