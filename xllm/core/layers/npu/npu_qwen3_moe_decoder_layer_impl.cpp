@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
+#include <unordered_set>
+
 #include "common/global_flags.h"
 
 namespace xllm {
@@ -556,11 +558,18 @@ void NpuQwen3MoeDecoderLayerImpl::process_general_weights(
   int32_t tp_rank = dp_local_tp_rank_;
   int32_t tp_size = dp_local_tp_size_;
 
-  if (index == IN_QKV_WEIGHT_1 || index == IN_QKV_WEIGHT_2 ||
-      index == IN_QKV_BIAS_1 || index == IN_QKV_BIAS_2 ||
-      index == IN_QKV_DESCALE_1 || index == IN_QKV_DESCALE_2 ||
-      index == IN_QKV_OFFSET_1 || index == IN_QKV_OFFSET_2 ||
-      index == IN_QKV_SCALE_1 || index == IN_QKV_SCALE_2) {
+  static const std::unordered_set<int> qkv_tensor_indices = {IN_QKV_WEIGHT_1,
+                                                             IN_QKV_WEIGHT_2,
+                                                             IN_QKV_BIAS_1,
+                                                             IN_QKV_BIAS_2,
+                                                             IN_QKV_DESCALE_1,
+                                                             IN_QKV_DESCALE_2,
+                                                             IN_QKV_OFFSET_1,
+                                                             IN_QKV_OFFSET_2,
+                                                             IN_QKV_SCALE_1,
+                                                             IN_QKV_SCALE_2};
+
+  if (qkv_tensor_indices.count(index) > 0) {
     if (n_kv_heads_ < dp_local_tp_size_) {
       int32_t repeat_times = (dp_local_tp_size_ / n_kv_heads_);
 
