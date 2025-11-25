@@ -18,7 +18,8 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen2_5_VisionLayerImpl::Qwen2_5_VisionLayerImpl(const ModelContext& context) {
+Qwen2_5_VisionLayerImpl::Qwen2_5_VisionLayerImpl(const ModelContext& context,
+                                                 bool is_qwen3_style) {
   const auto& args = context.get_model_args();
   const auto& quant_config = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
@@ -26,13 +27,21 @@ Qwen2_5_VisionLayerImpl::Qwen2_5_VisionLayerImpl(const ModelContext& context) {
   int64_t dim = args.mm_hidden_size();
   int64_t mlp_intermediate_size = args.mm_intermediate_size();
   std::string act_layer = args.mm_hidden_act();
+  bool is_gated = true;
   attention_ = register_module("self_attn", Qwen2VisionAttention(context));
   norm1_ = register_module("norm1", RmsNorm(dim, args.rms_norm_eps(), options));
   norm2_ = register_module("norm2", RmsNorm(dim, args.rms_norm_eps(), options));
+
+  if (is_qwen3_style) {
+    norm1_->set_layernorm_mode();
+    norm2_->set_layernorm_mode();
+    is_gated = false;
+  }
+
   mlp_ = register_module("mlp",
                          DenseMLP(dim,
                                   args.mm_intermediate_size(),
-                                  /*is_gated=*/true,
+                                  /*is_gated=*/is_gated,
                                   /*has_bias=*/true,
                                   args.mm_hidden_act(),
                                   /*enable_result_reduction=*/true,
@@ -66,6 +75,17 @@ torch::Tensor Qwen2_5_VisionLayerImpl::forward(
   auto norm_output2 = norm2_(output);
   output = output + mlp_(norm_output2);
   return output;
+}
+
+Qwen3_VisionLayerImpl::Qwen3_VisionLayerImpl(const ModelContext& context)
+    : Qwen2_5_VisionLayerImpl(context, true) {}
+
+void Qwen3_VisionLayerImpl::load_state_dict(const StateDict& state_dict) {
+  attention_->load_state_dict(state_dict.get_dict_with_prefix("attn."));
+  mlp_->load_state_dict(
+      state_dict.get_dict_with_prefix("mlp."), {"linear_fc1."}, "linear_fc2.");
+  norm1_->load_state_dict(state_dict.get_dict_with_prefix("norm1."));
+  norm2_->load_state_dict(state_dict.get_dict_with_prefix("norm2."));
 }
 
 }  // namespace layer

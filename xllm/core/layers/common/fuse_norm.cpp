@@ -28,7 +28,7 @@ const static std::string kRmsNormMode = "rmsnorm";
 FusedRMSNormImpl::FusedRMSNormImpl(int64_t dim,
                                    double eps,
                                    const torch::TensorOptions& options)
-    : norm_dim_(dim), eps_(eps) {
+    : norm_dim_(dim), eps_(eps), mode_(kRmsNormMode) {
   weight_ = register_parameter("weight",
                                torch::empty({dim}, options),
                                /*requires_grad=*/false);
@@ -49,8 +49,11 @@ torch::Tensor FusedRMSNormImpl::forward_output(torch::Tensor& input,
   fused_layernorm_params.input = input;
   fused_layernorm_params.output = output;
   fused_layernorm_params.weight = weight_;
-  fused_layernorm_params.mode = kRmsNormMode;
+  fused_layernorm_params.mode = mode_;
   fused_layernorm_params.eps = eps_;
+  if (bias_.defined()) {
+    fused_layernorm_params.beta = bias_;
+  }
 
   xllm::kernel::fused_layernorm(fused_layernorm_params);
 
@@ -60,6 +63,15 @@ torch::Tensor FusedRMSNormImpl::forward_output(torch::Tensor& input,
 
 void FusedRMSNormImpl::load_state_dict(const StateDict& state_dict) {
   LOAD_WEIGHT(weight);
+  if (bias_.defined()) {
+    LOAD_WEIGHT(bias);
+  }
+}
+
+void FusedRMSNormImpl::set_layernorm_mode() {
+  mode_ = kLayerNormMode;
+  bias_ = register_parameter(
+      "bias", torch::empty({norm_dim_}, weight_.options()), false);
 }
 
 }  // namespace layer

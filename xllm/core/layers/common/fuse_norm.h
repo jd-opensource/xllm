@@ -31,13 +31,16 @@ class FusedRMSNormImpl : public torch::nn::Module {
 
   torch::Tensor forward(torch::Tensor& input);
   torch::Tensor forward_output(torch::Tensor& input, torch::Tensor& output);
+  void set_layernorm_mode();
 
   void load_state_dict(const StateDict& state_dict);
 
  private:
   DEFINE_WEIGHT(weight);
+  DEFINE_WEIGHT(bias);
   int64_t norm_dim_;
   double eps_;
+  std::string mode_;
 };
 
 }  // namespace layer

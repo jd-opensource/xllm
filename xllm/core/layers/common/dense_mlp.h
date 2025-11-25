@@ -42,6 +42,9 @@ class DenseMLPImpl : public torch::nn::Module {
   torch::Tensor forward(const torch::Tensor& hidden_states);
 
   void load_state_dict(const StateDict& state_dict);
+  void load_state_dict(const StateDict& state_dict,
+                       const std::vector<std::string>& gate_up_name,
+                       const std::string& down_name);
 
  private:
   bool is_gated_;

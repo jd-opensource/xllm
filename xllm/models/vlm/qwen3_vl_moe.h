@@ -15,7 +15,11 @@ limitations under the License.
 
 #pragma once
 
+#if defined(USE_NPU)
 #include <atb/atb_infer.h>
+
+#include "xllm_kernels/core/include/atb_speed/log.h"
+#endif
 #include <c10/core/ScalarType.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
@@ -35,7 +39,6 @@ limitations under the License.
 #include "processors/qwen2_vl_image_processor.h"
 #include "qwen2_5_vl.h"
 #include "qwen3_vl.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
 
@@ -111,9 +114,11 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
       visual_->load_state_dict(
           state_dict->get_dict_with_prefix("model.visual."));
     }
+#if defined(USE_NPU)
     // verify
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
+#endif
     if (!model_args_.image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }

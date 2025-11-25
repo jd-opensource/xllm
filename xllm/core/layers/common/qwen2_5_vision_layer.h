@@ -34,7 +34,8 @@ namespace layer {
 
 class Qwen2_5_VisionLayerImpl : public torch::nn::Module {
  public:
-  explicit Qwen2_5_VisionLayerImpl(const ModelContext& context);
+  explicit Qwen2_5_VisionLayerImpl(const ModelContext& context,
+                                   bool is_qwen3_style = false);
 
   ~Qwen2_5_VisionLayerImpl() {};
 
@@ -48,11 +49,17 @@ class Qwen2_5_VisionLayerImpl : public torch::nn::Module {
                         ModelInputParams& input_params,
                         int node_id);
 
- private:
+ protected:
   Qwen2VisionAttention attention_{nullptr};
   DenseMLP mlp_{nullptr};
   RmsNorm norm1_{nullptr};
   RmsNorm norm2_{nullptr};
+};
+
+class Qwen3_VisionLayerImpl : public Qwen2_5_VisionLayerImpl {
+ public:
+  Qwen3_VisionLayerImpl(const ModelContext& context);
+  void load_state_dict(const StateDict& state_dict);
 };
 
 }  // namespace layer

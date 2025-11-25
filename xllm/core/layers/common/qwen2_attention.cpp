@@ -19,6 +19,14 @@ limitations under the License.
 
 #include <tuple>
 
+namespace {
+inline bool is_qwen3_model(const std::string& model_type) {
+  static const std::set<std::string> qwen3_type_set = {
+      "qwen3", "qwen3_vl", "qwen3_moe", "qwen3_vl_moe"};
+  return qwen3_type_set.contains(model_type);
+}
+}  // namespace
+
 namespace xllm {
 namespace layer {
 
@@ -30,9 +38,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   const int64_t total_num_heads = args.n_heads();
   const int64_t total_num_kv_heads = args.n_kv_heads().value_or(args.n_heads());
-
-  is_qwen3_style_ =
-      (args.model_type() == "qwen3" || args.model_type() == "qwen3_moe");
+  is_qwen3_style_ = is_qwen3_model(args.model_type());
 
   CHECK(total_num_heads % tp_size == 0);
   num_heads_ = total_num_heads / tp_size;

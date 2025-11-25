@@ -17,6 +17,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_qwen3_vision_encoder_layer_impl.h"
+#else
+#include "common/qwen2_5_vision_layer.h"
 #endif
 
 namespace xllm {
@@ -32,6 +34,16 @@ class Qwen3VisionEncoderLayer
   Qwen3VisionEncoderLayer(const ModelContext& context)
       : ModuleHolder(
             std::make_shared<NpuQwen3VisionEncoderLayerImpl>(context)) {}
+};
+#else
+class Qwen3VisionEncoderLayer
+    : public torch::nn::ModuleHolder<Qwen3_VisionLayerImpl> {
+ public:
+  using torch::nn::ModuleHolder<Qwen3_VisionLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = Qwen3_VisionLayerImpl;
+
+  Qwen3VisionEncoderLayer(const ModelContext& context)
+      : ModuleHolder(std::make_shared<Qwen3_VisionLayerImpl>(context)) {}
 };
 #endif
 
