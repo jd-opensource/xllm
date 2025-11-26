@@ -292,7 +292,7 @@ class LlmModelImplBase : public torch::nn::Module {
             event,
             event_flag);
     }
-
+    return norm_(h, 0);
 #else
     layer::update_dummy_run_input(dp_rank_, positions, input_params_new);
     bool is_prefill = input_params_new.q_max_seq_len > 1;
@@ -307,8 +307,8 @@ class LlmModelImplBase : public torch::nn::Module {
       auto& layer = layers_[i];
       h = layer(h, positions, attn_metadata, kv_caches[i], input_params_new);
     }
-#endif
     return norm_(h);
+#endif
   }
 
   // load the weight from the checkpoint

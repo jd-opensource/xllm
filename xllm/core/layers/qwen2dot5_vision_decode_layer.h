@@ -17,7 +17,7 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu/npu_qwen2dot5_vision_encoder_layer_impl.h"
-#elif defined(USE_MLU)
+#else
 #include "common/qwen2_5_vision_layer.h"
 #endif
 
@@ -36,7 +36,7 @@ class Qwen2dot5VisionEncoderLayer
       : ModuleHolder(
             std::make_shared<NpuQwen2dot5VisionEncoderLayerImpl>(context)) {}
 };
-#elif defined(USE_MLU)
+#else
 class Qwen2dot5VisionEncoderLayer
     : public torch::nn::ModuleHolder<Qwen2_5_VisionLayerImpl> {
  public:

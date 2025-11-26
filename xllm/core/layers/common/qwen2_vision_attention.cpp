@@ -92,10 +92,9 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   auto qkv = qkv_proj_->forward(hidden_states);
   // 2. split qkv
   auto qkv_split = split_qkv(qkv);
-  // 3. transpose to [b, s, h, d]
+  // 3. transpose [s, b, h, d] -> [b, s, h, d]
   for (auto& tensor : qkv_split) {
-    tensor =
-        tensor.transpose(0, 1).contiguous();  // [s, b, h, d] -> [b, s, h, d]
+    tensor = tensor.transpose(0, 1).contiguous();
   }
   auto q = qkv_split[0];
   auto k = qkv_split[1];
@@ -145,10 +144,10 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
 
   // context_layer = rearrange(output, "(b s) h d -> s b (h d)", b=batch_size)
   output = output.view({B, S, -1});
-  auto out = output.transpose(0, 1).reshape(
-      {-1, output.size(-1)});  // [B, S, ...] -> [S, B, ...]
+  // [B, S, ...] -> [S, B, ...]
+  output = output.transpose(0, 1).reshape({-1, output.size(-1)});
   // 6. output projection
-  return proj_->forward(out);
+  return proj_->forward(output);
 }
 
 void Qwen2VisionAttentionImpl::load_state_dict(const StateDict& state_dict) {

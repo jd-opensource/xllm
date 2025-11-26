@@ -16,7 +16,6 @@ limitations under the License.
 #include "rotary_embedding.h"
 
 #include "kernels/ops_api.h"
-#include "layer_utils.h"
 #include "platform/device.h"
 
 namespace xllm {
