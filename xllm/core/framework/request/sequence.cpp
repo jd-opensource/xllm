@@ -382,6 +382,7 @@ void Sequence::add_host_kv_blocks(const std::vector<Block>& blocks) {
 void Sequence::reset() {
   kv_state_.reset();
   host_kv_state_.reset();
+  timeout_checker_.reset();
   volatile_num_prompt_tokens_ = num_tokens_;
 }
 
@@ -456,9 +457,14 @@ Slice<int32_t> Sequence::get_generated_tokens() const {
   return {tokens_.data(), 0};
 }
 
-void Sequence::update_prefetch_result() {
+bool Sequence::update_prefetch_result() {
   if (prefetch_results_.empty()) {
-    return;
+    return true;
+  }
+
+  if (!termination_flag_.load(std::memory_order_acquire) &&
+      timeout_checker_.check_timeout()) {
+    return false;
   }
 
   termination_flag_.store(true, std::memory_order_release);
@@ -471,6 +477,7 @@ void Sequence::update_prefetch_result() {
         success_cnt * host_kv_state_.kv_blocks()[0].size());
   }
   prefetch_results_.clear();
+  return true;
 }
 
 }  // namespace xllm

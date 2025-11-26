@@ -115,8 +115,8 @@ class WorkerClient {
       const std::vector<BlockTransferInfo>& block_transfer_info);
 
   virtual void prefetch_from_storage(
-      const std::atomic<bool>& flag,
       const std::vector<BlockTransferInfo>& block_transfer_info,
+      std::atomic<bool>* flag,
       std::shared_ptr<std::atomic<uint32_t>>& success_cnt);
 
   // Run the model on the given input. async call

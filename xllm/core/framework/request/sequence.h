@@ -19,6 +19,7 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <folly/futures/Future.h>
 
+#include <chrono>
 #include <cstdint>
 #include <vector>
 
@@ -72,6 +73,44 @@ struct SequenceParams {
   // stopping checker
   // reference from request
   StoppingChecker* stopping_checker;  // not owned
+};
+
+static uint32_t timeout_ms = 0;
+class TimeoutChecker {
+ private:
+  std::chrono::steady_clock::time_point timeout_start_;
+  bool is_timeout_set_ = false;
+
+ public:
+  TimeoutChecker() { init(); }
+
+  bool check_timeout() {
+    if (!is_timeout_set_) {
+      timeout_start_ = std::chrono::steady_clock::now();
+      is_timeout_set_ = true;
+
+      return false;
+    } else {
+      auto now = std::chrono::steady_clock::now();
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          now - timeout_start_);
+
+      return elapsed.count() >= timeout_ms;
+    }
+  }
+
+  void reset() { is_timeout_set_ = false; }
+
+ private:
+  static void init_timeout() {
+    const char* env_str = std::getenv("PREFETCH_TIMEOUT_MS");
+    timeout_ms = env_str ? std::strtoul(env_str, nullptr, 10) : 0;
+    LOG(INFO) << "Prefetch timeout set as: " << timeout_ms;
+  }
+  static void init() {
+    static std::once_flag flag_;
+    std::call_once(flag_, init_timeout);
+  }
 };
 
 class Sequence final {
@@ -230,12 +269,12 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
-  const std::atomic<bool>& get_termination_flag() { return termination_flag_; }
+  std::atomic<bool>* get_termination_flag() { return &termination_flag_; }
   std::vector<std::shared_ptr<std::atomic<uint32_t>>>* get_prefetch_results() {
     return &prefetch_results_;
   }
 
-  void update_prefetch_result();
+  bool update_prefetch_result();
 
   void reset();
 
@@ -343,6 +382,8 @@ class Sequence final {
   // kvcache store copy async result
   std::atomic<bool> termination_flag_{false};
   std::vector<std::shared_ptr<std::atomic<uint32_t>>> prefetch_results_;
+
+  TimeoutChecker timeout_checker_;
 };
 
 }  // namespace xllm

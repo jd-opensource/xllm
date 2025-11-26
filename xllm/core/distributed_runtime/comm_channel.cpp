@@ -368,13 +368,13 @@ void CommChannel::transfer_kv_blocks(
 
 class ClientStreamReceiver : public brpc::StreamInputHandler {
  private:
-  const std::atomic<bool>& termination_flag_;
+  std::atomic<bool>* termination_flag_;
   std::shared_ptr<std::atomic<uint32_t>> success_cnt_;
   std::promise<void> close_promise_;
   std::atomic<bool> promise_set_{false};
 
  public:
-  ClientStreamReceiver(const std::atomic<bool>& termination_flag,
+  ClientStreamReceiver(std::atomic<bool>* termination_flag,
                        std::shared_ptr<std::atomic<uint32_t>>& success_cnt)
       : termination_flag_(termination_flag), success_cnt_(success_cnt) {}
 
@@ -394,9 +394,10 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
       int32_t success_cnt = std::stoi(msg_str);
 
       if (success_cnt > 0 &&
-          !termination_flag_.load(std::memory_order_acquire)) {
+          !termination_flag_->load(std::memory_order_acquire)) {
         success_cnt_->fetch_add(success_cnt, std::memory_order_relaxed);
       } else {
+        termination_flag_->store(true, std::memory_order_release);
         brpc::StreamClose(id);
         if (!promise_set_.exchange(true)) {
           close_promise_.set_value();
@@ -421,8 +422,8 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
 };
 
 void CommChannel::prefetch_from_storage(
-    const std::atomic<bool>& flag,
     const std::vector<BlockTransferInfo>& block_transfer_info,
+    std::atomic<bool>* flag,
     std::shared_ptr<std::atomic<uint32_t>>& success_cnt) {
   proto::BlockTransferInfos pb_block_transfer_info;
   if (!block_transfer_info_to_proto(block_transfer_info,
