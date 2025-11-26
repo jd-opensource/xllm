@@ -512,9 +512,8 @@ void WorkerService::PrefetchFromStorage(
             break;
           }
         }
-        if (is_completed) {
-          close_future.wait();
-        }
+
+        close_future.wait();
         brpc::StreamClose(*stream_id.get());
       });
 
