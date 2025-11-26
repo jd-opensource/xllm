@@ -225,7 +225,6 @@ PYBIND11_MODULE(xllm_export, m) {
       .value("IMAGE", MMType::Value::IMAGE)
       .value("VIDEO", MMType::Value::VIDEO)
       .value("AUDIO", MMType::Value::AUDIO)
-      .value("EMBEDDING", MMType::EMBEDDING)
       .export_values();
 
   // 9. export MMData

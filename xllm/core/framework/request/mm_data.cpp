@@ -29,8 +29,6 @@ std::optional<std::string> MMType::to_string() {
       return "video";
     case Value::AUDIO:
       return "audio";
-    case Value::EMBEDDING:
-      return "embedding";
     default:
       LOG(WARNING) << "Unknown mm type: " << static_cast<int>(value);
   }

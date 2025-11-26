@@ -230,7 +230,6 @@ void Sequence::update_embeddings(const torch::Tensor& embeddings) {
     if (output_embedding_.dim() == 1) {
       output_embedding_ = output_embedding_.unsqueeze(0);
     }
-    mm_data_ = MMData(MMType::EMBEDDING, {{"embedding", output_embedding_}});
   }
 }
 

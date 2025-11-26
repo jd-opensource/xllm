@@ -100,6 +100,17 @@ struct ForwardInput {
     inputs.acc_logprob = safe_to(acc_logprob, device, true);
     return inputs;
   }
+
+  void print() const {
+    LOG(INFO) << "  token_ids: " << token_ids << std::endl;
+    LOG(INFO) << "  positions: " << positions << std::endl;
+    input_params.print();
+    LOG(INFO) << " params.selected_token_idxes "
+              << sampling_params.selected_token_idxes;
+    LOG(INFO) << " params.sample_idxes " << sampling_params.sample_idxes;
+    LOG(INFO) << " params.do_sample " << sampling_params.do_sample;
+  }
+
   // flatten token ids
   torch::Tensor token_ids;
   // flatten positions

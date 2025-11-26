@@ -508,7 +508,8 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       const auto output = this->step(input);
       promise.setValue(output);
     } else {
-      if (last_step_output_valid_ && !input.input_params.empty_kv_cache) {
+      if (last_step_output_valid_ &&
+          input.input_params.batch_forward_type.has_decode()) {
         // replace step i model input with true output of step i-1
         input = update_input_by_last_step_output(input);
       }
@@ -1039,13 +1040,4 @@ AlignedTensorCreater::AlignedTensorCreater(
   LOG(INFO) << "Page aligned: "
             << ((uintptr_t)base_ptr_ % page_size == 0 ? "YES" : "NO");
 }
-bool WorkerImpl::check_is_prefill(const std::vector<int>& q_seq_lens_vec) {
-  for (auto q_len : q_seq_lens_vec) {
-    if (q_len > 1) {
-      return true;
-    }
-  }
-  return false;
-}
-
 }  // namespace xllm
