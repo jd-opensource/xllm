@@ -96,8 +96,8 @@ class Engine {
 
   virtual void prefetch_from_storage(
       const uint32_t dp_rank,
-      const std::atomic<bool>& flag,
       const std::vector<BlockTransferInfo>& block_transfer_info,
+      std::atomic<bool>* flag,
       std::vector<std::shared_ptr<std::atomic<uint32_t>>>* prefetch_results) {
     LOG(FATAL) << " prefetch_from_storage is not implemented!";
   };
