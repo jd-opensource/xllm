@@ -185,7 +185,7 @@ message ForwardInput {
   bool global_empty_kv_cache = 21;
   repeated TransferKVInfo transfer_kv_infos = 22;
   repeated Embeddings embeds = 23;
-  uint32 prefill_seq_len = 24;
+  // uint32 prefill_seq_len = 24;
   repeated int32 embedding_ids = 25;
   repeated int32 extra_token_ids = 26;
   EplbInfo eplb_info =27;

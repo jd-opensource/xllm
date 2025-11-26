@@ -196,9 +196,7 @@ std::map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
   return index_shift;
 }
 
-RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
-                                             uint32_t end_idx,
-                                             const ModelArgs& args,
+RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                                              ThreadPool* thread_pool) {
   dp_balance_shuffle_seqs();
   BatchInputBuilder builder(sequences_,
@@ -210,7 +208,7 @@ RawForwardInput Batch::prepare_forward_input(uint32_t start_idx,
                             &args,
                             batch_forward_type_,
                             thread_pool);
-  return builder.build_raw_forward_input(start_idx, end_idx);
+  return builder.build_raw_forward_input();
 }
 
 void Batch::process_sample_output(const RawForwardOutput& raw_output,

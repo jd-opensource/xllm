@@ -149,11 +149,10 @@ INLINE size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   total += type_size<uint64_t> +
            input.swap_blocks.size() * swap_block_info_fixed_size();
 
-  total += type_size<bool> * 2   // empty_kv_cache + global_empty_kv_cache
-           + type_size<int32_t>  // batch_forward_type
-           + type_size<uint32_t> *
-                 3  // max_seq_len + q_max_seq_len + prefill_seq_len
-           + type_size<int32_t>  // num_sequences
+  total += type_size<bool> * 2        // empty_kv_cache + global_empty_kv_cache
+           + type_size<int32_t>       // batch_forward_type
+           + type_size<uint32_t> * 2  // max_seq_len + q_max_seq_len
+           + type_size<int32_t>       // num_sequences
            + get_eplb_info_size(input.eplb_info);
   // m_position
   total += get_2d_vector_size(input.m_positions_vec);
@@ -577,7 +576,6 @@ INLINE void deserialize_raw_forward_input(
   read_data(buffer, input.q_max_seq_len);
   read_data(buffer, input.num_sequences);
   read_eplb_info(buffer, input.eplb_info);
-  read_data(buffer, input.prefill_seq_len);
   read_2d_vector(buffer, input.m_positions_vec);
   read_mm_data(buffer, input.mm_data);
 }
@@ -630,7 +628,6 @@ INLINE void serialize_raw_forward_input(const RawForwardInput& input,
   write_data(buffer, input.q_max_seq_len);
   write_data(buffer, input.num_sequences);
   write_eplb_info(buffer, input.eplb_info);
-  write_data(buffer, input.prefill_seq_len);
   write_2d_vector(buffer, input.m_positions_vec);
   write_mm_data(buffer, input.mm_data);
 }
@@ -832,7 +829,6 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   input_params.num_sequences = raw_input.num_sequences;
   input_params.kv_max_seq_len = raw_input.max_seq_len;
   input_params.q_max_seq_len = raw_input.q_max_seq_len;
-  input_params.prefill_seq_len = raw_input.prefill_seq_len;
   input_params.embedding_ids = std::move(raw_input.embedding_ids);
   input_params.dp_global_token_nums = std::move(raw_input.dp_global_token_nums);
 

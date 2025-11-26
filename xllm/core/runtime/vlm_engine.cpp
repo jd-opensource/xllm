@@ -430,8 +430,8 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
   bool global_empty_kv_cache = true;
 
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
-        0, batch[dp_rank].size(), args_, threadpool_.get())));
+    batched_inputs.emplace_back(std::move(
+        batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     global_empty_kv_cache =

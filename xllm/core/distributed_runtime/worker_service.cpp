@@ -136,24 +136,15 @@ void WorkerService::step(ForwardInput& fwd_input,
       }
     }
   } else {
+    auto int_options = torch::TensorOptions().device(torch::kCPU);
     if (worker_->is_driver()) {
       // construct fake output tensor
-      auto options =
-          torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-      auto total_prefill_seq_len = 0;
-      auto total_num_sequences = 0;
-
-      total_num_sequences += fwd_input.input_params.num_sequences;
-      total_prefill_seq_len += fwd_input.input_params.prefill_seq_len;
-
-      next_tokens =
-          torch::arange(-1,
-                        -1 * (total_num_sequences - total_prefill_seq_len + 1),
-                        -1,
-                        options);
+      int32_t num_decode_seqs = fwd_input.sampling_params.sample_idxes.size(0);
+      next_tokens = torch::arange(
+          -1, -1 * (num_decode_seqs + 1), -1, int_options.dtype(torch::kInt32));
       std::move(future).deferValue([](auto&&) {});
     }
-    expert_load_data = torch::zeros({1, 1}).to(torch::kInt64).contiguous();
+    expert_load_data = torch::zeros({1, 1}, int_options.dtype(torch::kInt64));
   }
 }
 

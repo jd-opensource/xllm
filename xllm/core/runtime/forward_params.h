@@ -165,8 +165,6 @@ struct RawForwardInput {
   // chunked prefill case of speculative decoding
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
-  // num of prefill sequence in chunked prefill case
-  uint32_t prefill_seq_len;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
   // swap

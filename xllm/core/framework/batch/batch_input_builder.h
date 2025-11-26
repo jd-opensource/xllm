@@ -47,12 +47,12 @@ class BatchInputBuilder {
   ForwardInput build_forward_input(uint32_t num_decoding_tokens,
                                    uint32_t min_decoding_batch_size);
 
-  RawForwardInput build_raw_forward_input(uint32_t start_idx, uint32_t end_idx);
+  RawForwardInput build_raw_forward_input();
 
  private:
   // Core building methods
-  void process_sequences(uint32_t start_idx, uint32_t end_idx);
-  void process_sequences_multithreaded(uint32_t start_idx, uint32_t end_idx);
+  void process_sequences();
+  void process_sequences_multithreaded();
   void padding_decode_batch_size(uint32_t num_decoding_tokens,
                                  uint32_t min_decoding_batch_size);
   ForwardInput state_to_forward_input();
@@ -100,7 +100,6 @@ class BatchInputBuilder {
     // Additional data
     std::vector<int32_t> embedding_ids;
     std::vector<int32_t> extra_token_ids;
-    uint32_t prefill_seq_len = 0;
     std::vector<TransferKVInfo> transfer_kv_infos;
 
     // for continuous kvcache
@@ -153,7 +152,7 @@ class BatchInputBuilder {
 
   // Configuration
   bool use_mrope_ = false;
-  int32_t num_sequences_ = 0;
+  uint32_t num_sequences_ = 0;
 
   // copy in and out cache contents
   std::unordered_set<int32_t> write_block_ids_;

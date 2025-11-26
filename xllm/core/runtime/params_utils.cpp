@@ -191,7 +191,6 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       BatchForwardType(pb_forward_input->batch_forward_type());
   input_params.num_sequences = block_tables_vec.size();
   assert(input_params.num_sequences == pb_forward_input->num_sequences());
-  input_params.prefill_seq_len = pb_forward_input->prefill_seq_len();
   input_params.kv_max_seq_len = pb_forward_input->max_seq_len();
   input_params.q_max_seq_len = pb_forward_input->q_max_seq_len();
   input_params.kv_seq_lens = torch::tensor(seq_lens, tensor_options);
@@ -455,7 +454,6 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     *pb_forward_input->mutable_embeds()->Add() = embeds;
   }
 
-  pb_forward_input->set_prefill_seq_len(inputs.prefill_seq_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),
