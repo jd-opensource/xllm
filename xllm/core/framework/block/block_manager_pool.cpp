@@ -315,10 +315,10 @@ uint32_t BlockManagerPool::pre_allocate(Sequence* sequence) {
   if (host_blocks.size() != num_additional_blocks) {
     return 0;
   }
-
-  PrefixCache::compute_hash_keys(sequence->tokens(), host_blocks);
-
   sequence->host_kv_state().add_kv_blocks(host_blocks);
+  PrefixCache::compute_hash_keys(
+      sequence->tokens(), *sequence->host_kv_state().mutable_kv_blocks());
+
   return num_additional_blocks;
 }
 
@@ -400,6 +400,7 @@ void BlockManagerPool::save_offload_blocks(Sequence* sequence) {
         released_device_blocks_[dp_rank].back().id(),
         released_host_blocks_[dp_rank].back().id(),
         released_host_blocks_[dp_rank].back().get_immutable_hash_value(),
+        released_host_blocks_[dp_rank].back().get_hash_value_len(),
         TransferType::D2G));
   }
   host_block_managers_[dp_rank]->cache(
