@@ -103,18 +103,21 @@ class BaseLayer : public torch::nn::Module {
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
                   int weight_position,
-                  int dim);
+                  int dim,
+                  bool to_host = false);
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
-                  int weight_position);
+                  int weight_position,
+                  bool to_host = false);
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
                   int weight_position,
                   int dim,
                   int rank,
-                  int world_size);
+                  int world_size,
+                  bool to_host = false);
 
   virtual void run_task(std::string taskName, std::function<int()> task) const {
   };
@@ -126,6 +129,7 @@ class BaseLayer : public torch::nn::Module {
 
  protected:
   std::vector<at::Tensor> at_weight_tensors_;
+  std::vector<at::Tensor> at_host_weight_tensors_;
   at::Device device_;
   std::string name_;
   torch::ScalarType dtype_;

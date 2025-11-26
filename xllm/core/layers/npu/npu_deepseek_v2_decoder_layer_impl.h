@@ -56,7 +56,6 @@ class ExpertBuffer {
                            const torch::TensorOptions& weight_options,
                            const torch::TensorOptions& offset_options,
                            const torch::TensorOptions& scale_options,
-
                            bool force_reinit = false) {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -124,6 +123,8 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
 
   void update_expert_weight();
 
+  void merge_and_move_pinned_host();
+
   virtual int64_t init_layer() override;
 
   torch::Tensor forward(torch::Tensor& x,
@@ -142,6 +143,10 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
     int index;
     bool use_dp_sharding = false;
   };
+
+  virtual void init_atb_tensors() override;
+
+  void merge_loaded_at_weights();
 
   void initialize_tensors(const torch::TensorOptions& options);
 

@@ -51,7 +51,7 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
       << "Failed to find model weights files in " << model_weights_path;
   // sort the model weights files by name
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
-  threadpool_ = std::make_unique<ThreadPool>(32);
+  threadpool_ = std::make_unique<ThreadPool>(64);
 }
 
 std::unique_ptr<Tokenizer> HFModelLoader::tokenizer() const {

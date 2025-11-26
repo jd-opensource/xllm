@@ -35,6 +35,9 @@ limitations under the License.
 #include "core/layers/lm_head.h"
 #include "core/layers/pos_embedding.h"
 #include "core/layers/rms_norm.h"
+#include "core/util/blocking_counter.h"
+#include "core/util/threadpool.h"
+#include "models/lazy_layer_loader.h"
 #include "models/model_registry.h"
 #if defined(USE_NPU)
 #include "xllm_kernels/core/include/atb_speed/log.h"
@@ -125,6 +128,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
   virtual void verify_loaded_weights(const std::string& prefix) const {
     decoder_layer_->verify_loaded_weights();
   }
+
   virtual void merge_loaded_weights() {
     decoder_layer_->merge_loaded_weights();
     block_copy_->merge_loaded_weights();
@@ -162,6 +166,11 @@ class LlmModelImplBase : public torch::nn::Module {
       this->layer_forward_interrupted_ = interrupted;
     });
     mrope_section_ = args.rope_scaling_mrope_section();
+#if defined(USE_NPU)
+    aclrtGetDevice(&device_id_);
+    threadpool_ = std::make_unique<ThreadPool>(
+        args.n_layers(), [this]() mutable { c10_npu::SetDevice(device_id_); });
+#endif
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -320,6 +329,7 @@ class LlmModelImplBase : public torch::nn::Module {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
+
     norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
   }
 
@@ -340,6 +350,7 @@ class LlmModelImplBase : public torch::nn::Module {
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
+
     norm_->merge_loaded_weights();
   }
 #endif
@@ -375,7 +386,9 @@ class LlmModelImplBase : public torch::nn::Module {
   bool layer_forward_interrupted_ = false;
 
  private:
+  std::unique_ptr<ThreadPool> threadpool_;
   std::string model_type_;
+  int32_t device_id_;
 };
 
 template <typename LlmModelType>

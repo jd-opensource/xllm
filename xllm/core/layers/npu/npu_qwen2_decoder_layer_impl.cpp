@@ -164,6 +164,7 @@ NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
   param_from_args(prefill_param_, model_args, parallel_args, true);
   param_from_args(decode_param_, model_args, parallel_args, false);
   at_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
+  at_host_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   placeholder_vec_ = {1};
   dtype_ = c10::typeMetaToScalarType(options.dtype());
@@ -182,7 +183,7 @@ NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
 
 void NpuQwen2DecoderLayerImpl::verify_loaded_weights() const {
   for (const auto& [index, name] : WEIGHT_MAPPING) {
-    CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
+    CHECK(at_host_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
 }
@@ -199,121 +200,148 @@ TransposeType NpuQwen2DecoderLayerImpl::check_transpose(at::Tensor& tensor) {
 }
 
 void NpuQwen2DecoderLayerImpl::merge_loaded_weights() {
+  merge_loaded_at_weights();
+  init_weight_slices(WEIGHT_COUNT_PER_LAYER);
+  copy_weights_to_device();
+  init_attn_mask();
+  init_atb_tensors();
+  init_layer();
+}
+
+void NpuQwen2DecoderLayerImpl::merge_and_move_pinned_host() {
+  merge_loaded_at_weights();
+  init_weight_slices(WEIGHT_COUNT_PER_LAYER);
+  copy_weights_to_pinned_host();
+  init_attn_mask();
+  init_atb_tensors();
+  init_layer();
+}
+
+void NpuQwen2DecoderLayerImpl::merge_loaded_at_weights() {
+  auto make_zero_like = [](const torch::Tensor& ref) {
+    return torch::zeros(
+        {1},
+        torch::TensorOptions().dtype(ref.scalar_type()).device(torch::kCPU));
+  };
+
   if (quantize_type_ == "w8a8") {
-    at_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE] =
-        at_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE].to(torch::kFloat32);
-    at_weight_tensors_[IN_Q_DEQSCALE] =
-        torch::cat({at_weight_tensors_[IN_Q_DEQSCALE],
-                    at_weight_tensors_[IN_K_DEQSCALE],
-                    at_weight_tensors_[IN_V_DEQSCALE]},
+    at_host_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE] =
+        at_host_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE].to(torch::kFloat32);
+    at_host_weight_tensors_[IN_Q_DEQSCALE] =
+        torch::cat({at_host_weight_tensors_[IN_Q_DEQSCALE],
+                    at_host_weight_tensors_[IN_K_DEQSCALE],
+                    at_host_weight_tensors_[IN_V_DEQSCALE]},
                    0)
             .to(torch::kFloat32);
-    at_weight_tensors_[IN_K_DEQSCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_V_DEQSCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_K_OFFSET] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_V_OFFSET] = torch::zeros({1}).to(device_);
-
-    at_weight_tensors_[IN_K_SCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_V_SCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_MLP_W2_BIAS] =
-        torch::cat({at_weight_tensors_[IN_MLP_W2_BIAS],
-                    at_weight_tensors_[IN_MLP_W1_BIAS]},
+    at_host_weight_tensors_[IN_K_DEQSCALE] =
+        make_zero_like(at_host_weight_tensors_[IN_K_DEQSCALE]);
+    at_host_weight_tensors_[IN_V_DEQSCALE] =
+        make_zero_like(at_host_weight_tensors_[IN_V_DEQSCALE]);
+    at_host_weight_tensors_[IN_K_OFFSET] =
+        make_zero_like(at_host_weight_tensors_[IN_K_OFFSET]);
+    at_host_weight_tensors_[IN_V_OFFSET] =
+        make_zero_like(at_host_weight_tensors_[IN_V_OFFSET]);
+    at_host_weight_tensors_[IN_K_SCALE] =
+        make_zero_like(at_host_weight_tensors_[IN_K_SCALE]);
+    at_host_weight_tensors_[IN_V_SCALE] =
+        make_zero_like(at_host_weight_tensors_[IN_V_SCALE]);
+    at_host_weight_tensors_[IN_MLP_W2_BIAS] =
+        torch::cat({at_host_weight_tensors_[IN_MLP_W2_BIAS],
+                    at_host_weight_tensors_[IN_MLP_W1_BIAS]},
                    0);
-    at_weight_tensors_[IN_MLP_W1_BIAS] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_MLP_W2_DEQSCALE] =
-        torch::cat({at_weight_tensors_[IN_MLP_W2_DEQSCALE],
-                    at_weight_tensors_[IN_MLP_W1_DEQSCALE]},
+    at_host_weight_tensors_[IN_MLP_W1_BIAS] =
+        make_zero_like(at_host_weight_tensors_[IN_MLP_W1_BIAS]);
+    at_host_weight_tensors_[IN_MLP_W2_DEQSCALE] =
+        torch::cat({at_host_weight_tensors_[IN_MLP_W2_DEQSCALE],
+                    at_host_weight_tensors_[IN_MLP_W1_DEQSCALE]},
                    0)
             .to(torch::kFloat32);
-    at_weight_tensors_[IN_MLP_W1_DEQSCALE] = torch::zeros({1}).to(device_);
-
-    at_weight_tensors_[IN_MLP_W1_OFFSET] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_MLP_W1_SCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_Q_OFFSET] =
-        at_weight_tensors_[IN_Q_OFFSET].to(torch::kInt8).to(device_);
-    at_weight_tensors_[IN_ATTENTION_OUT_OFFSET] =
-        at_weight_tensors_[IN_ATTENTION_OUT_OFFSET]
-            .to(torch::kInt8)
-            .to(device_);
-    at_weight_tensors_[IN_MLP_W2_OFFSET] =
-        at_weight_tensors_[IN_MLP_W2_OFFSET].to(torch::kInt8).to(device_);
+    at_host_weight_tensors_[IN_MLP_W1_DEQSCALE] =
+        make_zero_like(at_host_weight_tensors_[IN_MLP_W1_DEQSCALE]);
+    at_host_weight_tensors_[IN_MLP_W1_OFFSET] =
+        make_zero_like(at_host_weight_tensors_[IN_MLP_W1_OFFSET]);
+    at_host_weight_tensors_[IN_MLP_W1_SCALE] =
+        make_zero_like(at_host_weight_tensors_[IN_MLP_W1_SCALE]);
+    at_host_weight_tensors_[IN_Q_OFFSET] =
+        at_host_weight_tensors_[IN_Q_OFFSET].to(torch::kInt8);
+    at_host_weight_tensors_[IN_ATTENTION_OUT_OFFSET] =
+        at_host_weight_tensors_[IN_ATTENTION_OUT_OFFSET].to(torch::kInt8);
+    at_host_weight_tensors_[IN_MLP_W2_OFFSET] =
+        at_host_weight_tensors_[IN_MLP_W2_OFFSET].to(torch::kInt8);
     if (device_id_ != 0) {
-      torch::Tensor original_tensor = at_weight_tensors_[IN_ATTENTION_OUT_BIAS];
+      torch::Tensor original_tensor =
+          at_host_weight_tensors_[IN_ATTENTION_OUT_BIAS];
       auto shape = original_tensor.sizes();
       auto dtype = original_tensor.dtype();
-      auto device = original_tensor.device();
 
-      at_weight_tensors_[IN_ATTENTION_OUT_BIAS] = torch::zeros(
-          shape, torch::TensorOptions().dtype(dtype).device(device));
+      at_host_weight_tensors_[IN_ATTENTION_OUT_BIAS] = torch::zeros(
+          shape, torch::TensorOptions().dtype(dtype).device(torch::kCPU));
     }
   }
 
-  auto new_q_weight = torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
-                                  at_weight_tensors_[IN_K_WEIGHT],
-                                  at_weight_tensors_[IN_V_WEIGHT]},
+  auto new_q_weight = torch::cat({at_host_weight_tensors_[IN_Q_WEIGHT],
+                                  at_host_weight_tensors_[IN_K_WEIGHT],
+                                  at_host_weight_tensors_[IN_V_WEIGHT]},
                                  0);
 
-  at_weight_tensors_[IN_Q_WEIGHT] = new_q_weight;
+  at_host_weight_tensors_[IN_Q_WEIGHT] = new_q_weight;
 
-  at_weight_tensors_[IN_K_WEIGHT] = torch::zeros({1}).to(device_);
-  at_weight_tensors_[IN_V_WEIGHT] = torch::zeros({1}).to(device_);
+  at_host_weight_tensors_[IN_K_WEIGHT] =
+      make_zero_like(at_host_weight_tensors_[IN_K_WEIGHT]);
+  at_host_weight_tensors_[IN_V_WEIGHT] =
+      make_zero_like(at_host_weight_tensors_[IN_V_WEIGHT]);
 
-  auto new_q_bias = torch::cat({at_weight_tensors_[IN_Q_BIAS],
-                                at_weight_tensors_[IN_K_BIAS],
-                                at_weight_tensors_[IN_V_BIAS]},
+  auto new_q_bias = torch::cat({at_host_weight_tensors_[IN_Q_BIAS],
+                                at_host_weight_tensors_[IN_K_BIAS],
+                                at_host_weight_tensors_[IN_V_BIAS]},
                                0);
-  at_weight_tensors_[IN_Q_BIAS] = new_q_bias;
+  at_host_weight_tensors_[IN_Q_BIAS] = new_q_bias;
 
-  at_weight_tensors_[IN_K_BIAS] = torch::zeros({1}).to(device_);
-  at_weight_tensors_[IN_V_BIAS] = torch::zeros({1}).to(device_);
+  at_host_weight_tensors_[IN_K_BIAS] =
+      make_zero_like(at_host_weight_tensors_[IN_K_BIAS]);
+  at_host_weight_tensors_[IN_V_BIAS] =
+      make_zero_like(at_host_weight_tensors_[IN_V_BIAS]);
 
   TransposeType transpose_type =
-      check_transpose(at_weight_tensors_[IN_MLP_W2_WEIGHT]);
+      check_transpose(at_host_weight_tensors_[IN_MLP_W2_WEIGHT]);
   int transpose_value = static_cast<int>(transpose_type);
   prefill_param_.linearTransposeType[4] = transpose_value;
   decode_param_.linearTransposeType[4] = transpose_value;
   if (transpose_type == TransposeType::TRANSPOSE) {
-    auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                                      at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                                     0);
-    at_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
+    auto new_mlp_weight =
+        torch::cat({at_host_weight_tensors_[IN_MLP_W2_WEIGHT],
+                    at_host_weight_tensors_[IN_MLP_W1_WEIGHT]},
+                   0);
+    at_host_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
   } else {
-    auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                                      at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                                     0)
-                              .transpose(0, 1);
-    at_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
+    auto new_mlp_weight =
+        torch::cat({at_host_weight_tensors_[IN_MLP_W2_WEIGHT],
+                    at_host_weight_tensors_[IN_MLP_W1_WEIGHT]},
+                   0)
+            .transpose(0, 1);
+    at_host_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
   }
 
-  at_weight_tensors_[IN_MLP_W1_WEIGHT] = torch::zeros({1}).to(device_);
-
-  c10_npu::NPUCachingAllocator::emptyCache();
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
-    atb_weight_tensors_[i] =
-        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[i]);
-  }
-
-  init_layer();
+  at_host_weight_tensors_[IN_MLP_W1_WEIGHT] =
+      make_zero_like(at_host_weight_tensors_[IN_MLP_W1_WEIGHT]);
 }
 
 void NpuQwen2DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   if (quantize_type_ == "w8a8") {
     for (const auto& [index, name] : WEIGHT_MAPPING_W8A8) {
       if (WEIGHT_SHARD_W8A8.find(index) != WEIGHT_SHARD_W8A8.end()) {
-        set_weight(state_dict, name, index, WEIGHT_SHARD_W8A8[index]);
+        set_weight(state_dict, name, index, WEIGHT_SHARD_W8A8[index], true);
       } else {
-        set_weight(state_dict, name, index);
+        set_weight(state_dict, name, index, true);
       }
     }
-    at_weight_tensors_[IN_NORM_BIAS] =
-        torch::zeros(at_weight_tensors_[IN_NORM_WEIGHT].sizes(),
-                     at_weight_tensors_[IN_NORM_WEIGHT].options())
-            .to(device_);
+    at_host_weight_tensors_[IN_NORM_BIAS] =
+        torch::zeros(at_host_weight_tensors_[IN_NORM_WEIGHT].sizes(),
+                     at_host_weight_tensors_[IN_NORM_WEIGHT].options());
 
-    at_weight_tensors_[IN_SELFOUT_NORM_BIAS] =
-        torch::zeros(at_weight_tensors_[IN_SELFOUT_NORM_WEIGHT].sizes(),
-                     at_weight_tensors_[IN_SELFOUT_NORM_WEIGHT].options())
-            .to(device_);
+    at_host_weight_tensors_[IN_SELFOUT_NORM_BIAS] =
+        torch::zeros(at_host_weight_tensors_[IN_SELFOUT_NORM_WEIGHT].sizes(),
+                     at_host_weight_tensors_[IN_SELFOUT_NORM_WEIGHT].options());
 
     prefill_param_.packQuantType = {static_cast<int>(PackType::ALL_W8A8),
                                     static_cast<int>(PackType::ALL_W8A8)};
@@ -338,15 +366,14 @@ void NpuQwen2DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
 
   for (const auto& [index, name] : WEIGHT_MAPPING) {
     if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
-      set_weight(state_dict, name, index, WEIGHT_SHARD[index]);
+      set_weight(state_dict, name, index, WEIGHT_SHARD[index], true);
     } else {
-      set_weight(state_dict, name, index);
+      set_weight(state_dict, name, index, true);
     }
   }
 }
 
 int64_t NpuQwen2DecoderLayerImpl::init_layer() {
-  init_attn_mask();
   name_ = "qwen2_decoder_layer";
   model_name_ = "qwen2";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));

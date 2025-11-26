@@ -108,7 +108,7 @@ class NpuQwen2DecoderLayerImpl : public NpuBaseLayer {
  public:
   explicit NpuQwen2DecoderLayerImpl(const ModelContext& context);
 
-  ~NpuQwen2DecoderLayerImpl() {};
+  ~NpuQwen2DecoderLayerImpl() = default;
 
   TransposeType check_transpose(at::Tensor& tensor);
 
@@ -119,6 +119,10 @@ class NpuQwen2DecoderLayerImpl : public NpuBaseLayer {
   virtual void merge_loaded_weights() override;
 
   virtual int64_t init_layer() override;
+
+  void move_device_and_init_layer();
+
+  void merge_and_move_pinned_host();
 
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& cos_pos,
@@ -139,6 +143,7 @@ class NpuQwen2DecoderLayerImpl : public NpuBaseLayer {
                                KVCache& kv_cache,
                                ModelInputParams& input_params,
                                bool is_prefill);
+  void merge_loaded_at_weights();
 
   void param_from_args(atb_speed::qwen::DecoderLayerParam& param,
                        const ModelArgs& args,
