@@ -177,12 +177,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   forward_inputs.acc_logprob = torch::tensor(
       acc_logprob_vec,
       torch::dtype(torch::kFloat32).device(torch::kCPU).pinned_memory(true));
-  std::pair<int, int> decode_seq_range{0, 0};
-#if defined(USE_NPU)
-  if (q_seq_lens.size() >= 1) {
-    decode_seq_range = util::find_ones_indices(q_seq_lens);
-  }
-#endif
+
   auto& input_params = forward_inputs.input_params;
   input_params.empty_kv_cache = pb_forward_input->empty_kv_cache();
   input_params.global_empty_kv_cache =
@@ -206,7 +201,6 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
 
   input_params.new_cache_slots =
       torch::tensor(new_token_slot_ids, tensor_options);
-  input_params.decode_seq_range = decode_seq_range;
 
   util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
   input_params.block_tables =

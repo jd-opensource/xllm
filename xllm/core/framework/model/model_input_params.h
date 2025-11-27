@@ -101,7 +101,6 @@ struct ModelInputParams {
     params.block_tables = safe_to(block_tables, device, true);
     params.kv_seq_lens_vec = kv_seq_lens_vec;
     params.q_seq_lens_vec = q_seq_lens_vec;
-    params.decode_seq_range = decode_seq_range;
 
     params.input_embedding = safe_to(input_embedding, device);
 
@@ -153,7 +152,8 @@ struct ModelInputParams {
               << " , q_max_seq_len is " << q_max_seq_len;
     LOG(INFO) << "ModelInputParams: kv_seq_lens_vec is " << kv_seq_lens_vec;
     LOG(INFO) << "ModelInputParams: q_seq_lens_vec is " << q_seq_lens_vec;
-    LOG(INFO) << "ModelInputParams: decode_seq_range is " << decode_seq_range;
+    LOG(INFO) << "ModelInputParams: batch_forward_type is "
+              << batch_forward_type.to_string();
     print_tensor(kv_seq_lens, "ModelInputParams: kv_seq_lens", 4);
     print_tensor(q_seq_lens, "ModelInputParams: q_seq_lens", 4);
     print_tensor(new_cache_slots, "ModelInputParams: new_cache_slots", 4);
@@ -172,15 +172,7 @@ struct ModelInputParams {
   torch::Tensor kv_seq_lens;
   std::vector<int> kv_seq_lens_vec;
   std::vector<int> q_seq_lens_vec;
-  // Range of decode sequence indices in the batch [start, end].
-  // Decode sequences are identified by q_seq_lens == 1,
-  // prefill sequences by  q_seq_lens > 1 .
-  // Used to determine whether to use prefill_node_ or
-  // decode_node_ in NPU layers
-  // Values: {-1, -1} if no decode requests (all prefill),
-  //         {0, batch_size-1} if all decode requests,
-  //         {start_idx, end_idx} if mixed prefill/decode requests
-  std::pair<int, int> decode_seq_range;
+
   // max length for qkv.
   int32_t kv_max_seq_len = 0;
   int32_t q_max_seq_len = 0;
