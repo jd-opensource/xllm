@@ -56,11 +56,21 @@ Sequence::Sequence(size_t index,
   // init logprob state
   logprob_state_ = std::make_unique<LogprobState>(num_prompt_tokens_, capacity);
 
+  if (sequence_params_.sampling_param->frequency_penalty != 0 ||
+      sequence_params_.sampling_param->presence_penalty != 0 ||
+      sequence_params_.sampling_param->repetition_penalty != 1) {
+    need_unique_tokens_ = true;
+  }
+
   // add the prompt tokens
   for (const auto token_id : prompt_token_ids) {
     tokens_[num_tokens_++] = token_id;
-    token_to_count_map_[token_id]++;
+    if (need_unique_tokens_) {
+      token_to_count_map_[token_id] = 0;
+    }
   }
+  // need one token to padding even dont need token count
+  token_to_count_map_[prompt_token_ids.back()] = 0;
   input_embedding_ = input_embedding;
   cur_generated_token_idx_ = num_prompt_tokens_;
 }
@@ -133,7 +143,9 @@ void Sequence::append_token(const Token& token) {
     return;
   }
 
-  token_to_count_map_[token_id]++;
+  if (need_unique_tokens_) {
+    token_to_count_map_[token_id]++;
+  }
   // update logprobs if needed
   if (sequence_params_.sampling_param->logprobs) {
     logprob_state_->update_logprob(
@@ -174,7 +186,9 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
 
   const int32_t token_id = static_cast<int32_t>(token.id);
   tokens_[cur_generated_token_idx_] = token_id;
-  token_to_count_map_[token_id]++;
+  if (need_unique_tokens_) {
+    token_to_count_map_[token_id]++;
+  }
   // update logprobs if needed
   if (sequence_params_.sampling_param->logprobs) {
     logprob_state_->update_logprob(
@@ -202,8 +216,10 @@ void Sequence::update_token(size_t index, const Token& token) {
   const int32_t origin_token_id = tokens_[index];
   const int32_t token_id = static_cast<int32_t>(token.id);
   tokens_[index] = token_id;
-  --token_to_count_map_[origin_token_id];
-  ++token_to_count_map_[token_id];
+  if (need_unique_tokens_) {
+    --token_to_count_map_[origin_token_id];
+    ++token_to_count_map_[token_id];
+  }
   // update logprobs if needed
   if (sequence_params_.sampling_param->logprobs) {
     logprob_state_->update_logprob(
