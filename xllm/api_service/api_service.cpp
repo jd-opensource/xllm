@@ -115,7 +115,7 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
   }
 
   std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
-      ctrl, done_guard.release(), req_pb, resp_pb);
+      ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
   completion_service_impl_->process_async(call);
 }
 
