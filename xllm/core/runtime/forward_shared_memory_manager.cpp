@@ -816,12 +816,7 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
     forward_input.positions =
         create_2d_tensor(std::move(raw_input.m_positions_vec), torch::kInt);
   }
-  std::pair<int, int> decode_seq_range{0, 0};
-#if defined(USE_NPU)
-  if (raw_input.q_seq_lens.size() >= 1) {
-    decode_seq_range = util::find_ones_indices(raw_input.q_seq_lens);
-  }
-#endif
+
   auto& input_params = forward_input.input_params;
   input_params.empty_kv_cache = raw_input.empty_kv_cache;
   input_params.global_empty_kv_cache = raw_input.global_empty_kv_cache;
@@ -841,7 +836,7 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
 
   input_params.new_cache_slots =
       torch::tensor(std::move(raw_input.new_token_slot_ids), tensor_options);
-  input_params.decode_seq_range = decode_seq_range;
+
   util::pad_2d_vector(raw_input.block_tables_vec, 0);
   input_params.block_tables =
       create_2d_tensor(std::move(raw_input.block_tables_vec), torch::kInt);

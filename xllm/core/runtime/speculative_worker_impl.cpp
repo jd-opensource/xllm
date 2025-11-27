@@ -559,11 +559,13 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   input_params.q_seq_lens = torch::tensor(q_seq_lens_vec, int_options);
   input_params.new_cache_slots = torch::tensor(new_token_slot_ids, int_options);
   if (!FLAGS_enable_atb_spec_kernel) {
+    input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
     util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
     input_params.block_tables =
         create_2d_tensor(block_tables_vec, torch::kInt).to(device_);
+  } else {
+    input_params.batch_forward_type = BatchForwardType::DECODE;
   }
-  input_params.decode_seq_range.second = input_params.num_sequences - 1;
 
   // update the sampling_params
   update_sampling_params(

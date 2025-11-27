@@ -554,8 +554,6 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   input_params.q_seq_lens_vec = std::move(state_.q_seq_lens);
   input_params.new_cache_slots =
       torch::tensor(state_.new_token_slot_ids, torch::kInt);
-  input_params.decode_seq_range =
-      util::find_ones_indices(input_params.q_seq_lens_vec);
 
   // for flashinfer
   input_params.paged_kv_indptr =
