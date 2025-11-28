@@ -50,10 +50,11 @@ limitations under the License.
 
 namespace xllm {
 
-torch::Tensor get_concat_rotary_embedding(int64_t dim,
-                                          int64_t seq_len,
-                                          double rope_theta,
-                                          const torch::TensorOptions& options) {
+torch::Tensor compute_rotary_embedding(int64_t dim,
+                                       int64_t seq_len,
+                                       double rope_theta,
+                                       const torch::TensorOptions& options,
+                                       bool use_cat) {
   auto options_new =
       torch::device(options.device()).dtype(at::ScalarType::Double);
   auto inv_freq =
@@ -62,7 +63,12 @@ torch::Tensor get_concat_rotary_embedding(int64_t dim,
   auto seq_idx = torch::arange(seq_len, options_new);
 
   auto freqs = torch::ger(seq_idx, inv_freq).to(torch::kFloat32);
-  auto emb = torch::cat({freqs, freqs}, -1);
+  torch::Tensor emb;
+  if (use_cat) {
+    emb = torch::cat({freqs, freqs}, -1);
+  } else {
+    emb = torch::stack({freqs, freqs}, -1);
+  }
   auto rope_cos = torch::cos(emb);
   auto rope_sin = torch::sin(emb);
 
@@ -79,6 +85,21 @@ torch::Tensor get_concat_rotary_embedding(int64_t dim,
   }
   std::vector<torch::Tensor> cos_sin{rope_cos, rope_sin};
   return torch::cat(cos_sin, -1);
+}
+
+torch::Tensor get_concat_rotary_embedding(int64_t dim,
+                                          int64_t seq_len,
+                                          double rope_theta,
+                                          const torch::TensorOptions& options) {
+  return compute_rotary_embedding(dim, seq_len, rope_theta, options, true);
+}
+
+torch::Tensor get_chatglm_rotary_embedding(
+    int64_t dim,
+    int64_t seq_len,
+    double rope_theta,
+    const torch::TensorOptions& options) {
+  return compute_rotary_embedding(dim, seq_len, rope_theta, options, false);
 }
 
 template <typename DecoderType>
