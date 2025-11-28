@@ -124,6 +124,8 @@ struct ModelArgs {
   PROPERTY(int32_t, v_head_dim) = 0;
   PROPERTY(int32_t, q_lora_rank) = 0;
   PROPERTY(int32_t, kv_lora_rank) = 0;
+  // deepseek v3/v3.2 MTP
+  PROPERTY(int32_t, num_nextn_predict_layers) = 0;
 
   // deepseek v3.2 indexer
   PROPERTY(int32_t, index_head_dim) = 0;
