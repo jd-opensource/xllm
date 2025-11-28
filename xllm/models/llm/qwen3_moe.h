@@ -156,8 +156,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
                                        model_args.rope_theta(),
                                        options);
 
-    max_seq_len_ = model_args.max_position_embeddings();
-    int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
@@ -258,11 +257,30 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
 
     torch::Tensor attn_mask;
-    if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
-      attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
-    } else {
-      attn_mask = attn_mask_.gen_free_mask(
-          num_speculative_tokens_ + 1, dtype_, device_);
+    max_seq_len_ = FLAGS_enable_chunked_prefill
+                       ? std::max(input_params.kv_max_seq_len, max_seq_len_)
+                       : 128;
+    if (FLAGS_enable_chunked_prefill) {
+      attn_mask = attn_mask_.get_attn_mask(
+          max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
+
+      int batch_size = input_params.q_seq_lens_vec.size();
+      if (batch_size > 0) {
+        std::vector<torch::Tensor> req_mask_vec;
+        req_mask_vec.reserve(batch_size);
+
+        for (int j = 0; j < batch_size; j++) {
+          int start =
+              input_params.kv_seq_lens_vec[j] - input_params.q_seq_lens_vec[j];
+          int end = input_params.kv_seq_lens_vec[j];
+
+          auto req_mask_slice = attn_mask.slice(0, start, end);
+          req_mask_vec.emplace_back(req_mask_slice);
+        }
+        attn_mask = torch::cat(req_mask_vec, 0);
+      }
+    } else if (input_params.global_empty_kv_cache) {
+      attn_mask = attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();

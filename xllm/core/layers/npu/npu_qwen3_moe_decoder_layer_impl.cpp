@@ -321,6 +321,8 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
 
   param.mlpLinearTransposeType = {-1, -1, -1, -1};
 
+  param.enableSplitFuse =
+      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
   if (quantize_type_.empty()) {
     param.moeLinearTransposeType = std::vector<int>{1, 1, -1, 1};
   } else {
@@ -403,7 +405,6 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_parallel_parameters(
                               nullptr,
                               ""};
 
-  param.PrintParam();
   param.maxDecodeDpTokenSize = 0;  // TODO
 }
 
@@ -895,7 +896,9 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     std::atomic<bool>* event_flag,
     int node_id) {
   atb::Status st;
-  if (input_params.global_empty_kv_cache) {
+  bool is_prefill = input_params.decode_seq_range.second !=
+                    input_params.q_seq_lens.size(0) - 1;
+  if (is_prefill) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -996,6 +999,14 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 15) =
         atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+  }
+
+  if (is_prefill &&
+      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 16) =
+        atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 16).hostData =
+        const_cast<int32_t*>(input_params.q_seq_lens_vec.data());
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
