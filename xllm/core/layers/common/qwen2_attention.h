@@ -41,7 +41,7 @@ class Qwen2AttentionImpl : public torch::nn::Module {
 
   torch::Tensor forward(const torch::Tensor& positions,
                         const torch::Tensor& hidden_states,
-                        AttentionMetadata& attn_metadata,
+                        const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache);
 
   void load_state_dict(const StateDict& state_dict);

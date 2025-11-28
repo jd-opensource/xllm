@@ -90,52 +90,10 @@ MRotaryEmbeddingImpl::MRotaryEmbeddingImpl(
   mrope_cu_seq_lens_ = torch::zeros(2, torch::kInt32).to(options.device());
 }
 
-void MRotaryEmbeddingImpl::precompute_sin_cos_cache(
-    const torch::Tensor& positions,
-    AttentionMetadata& attn_metadata) {
-  int32_t total_len = positions.size(-1);
-  mrope_cu_seq_lens_[1] = total_len;
-  if (attn_metadata.mrope_cos.defined() && attn_metadata.mrope_sin.defined()) {
-    return;
-  }
-
-  auto ndim = positions.dim();
-  CHECK(ndim == 1 || ndim == 2) << "positions must be 1D or 2D tensor";
-  auto cos_sin = get_cos_sin_cache().index({positions});
-  auto chunks = cos_sin.chunk(2, -1);
-  auto cos = chunks[0];
-  auto sin = chunks[1];
-
-  if (positions.dim() == 2) {
-    TORCH_CHECK(!mrope_section_.empty(), "mrope_section must not be empty");
-    std::vector<int64_t> repeated_sections(mrope_section_);
-    repeated_sections.insert(
-        repeated_sections.end(), mrope_section_.begin(), mrope_section_.end());
-
-    const auto apply_multi_rope =
-        [repeated_sections,
-         num_sections = mrope_section_.size()](torch::Tensor tensor) {
-          auto splits = tensor.split(repeated_sections, -1);
-          std::vector<torch::Tensor> processed;
-
-          for (size_t i = 0; i < splits.size(); ++i) {
-            processed.push_back(splits[i][i % num_sections]);
-          }
-          return torch::cat(processed, -1).contiguous();
-        };
-
-    cos = apply_multi_rope(cos);
-    sin = apply_multi_rope(sin);
-  }
-
-  attn_metadata.mrope_cos = std::move(cos);
-  attn_metadata.mrope_sin = std::move(sin);
-}
-
 void MRotaryEmbeddingImpl::forward(torch::Tensor& q,
                                    torch::Tensor& k,
                                    const torch::Tensor& positions,
-                                   AttentionMetadata& attn_metadata) {
+                                   const AttentionMetadata& attn_metadata) {
   bool only_prefill =
       (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
   if (!only_prefill || mrope_section_.empty()) {
@@ -151,8 +109,9 @@ void MRotaryEmbeddingImpl::forward(torch::Tensor& q,
                                         attn_metadata.is_prefill);
   }
 
-  precompute_sin_cos_cache(positions, attn_metadata);
   int64_t num_tokens = positions.size(-1);
+  mrope_cu_seq_lens_[1] = num_tokens;
+  CHECK(attn_metadata.mrope_cos.defined() && attn_metadata.mrope_sin.defined());
   xllm::kernel::RotaryParams rotary_params;
   rotary_params.q = q;
   rotary_params.k = k;
