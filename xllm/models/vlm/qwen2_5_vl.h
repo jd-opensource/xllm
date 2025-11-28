@@ -810,7 +810,6 @@ REGISTER_MODEL_ARGS(qwen2_5_vl, [&] {
   LOAD_ARG_OR(video_token_id, "video_token_id", 151656);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
-  LOAD_ARG_OR(attention_bias, "attention_bias", true);
   // LOAD_ARG_OR(initializer_range, "initializer_range", 0.02);
   LOAD_ARG_OR(intermediate_size, "intermediate_size", 18944);
   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 128000);

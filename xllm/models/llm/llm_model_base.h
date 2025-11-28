@@ -132,7 +132,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 #else
   virtual torch::Tensor forward(torch::Tensor& x,
                                 torch::Tensor& positions,
-                                layer::AttentionMetadata& attn_metadata,
+                                const layer::AttentionMetadata& attn_metadata,
                                 KVCache& kv_cache,
                                 const ModelInputParams& input_params) {
     return decoder_layer_(x, positions, attn_metadata, kv_cache, input_params);

@@ -68,10 +68,7 @@ class MRotaryEmbeddingImpl : public RotaryEmbeddingImpl {
   void forward(torch::Tensor& q,
                torch::Tensor& k,
                const torch::Tensor& positions,
-               AttentionMetadata& attn_metadata);
-
-  void precompute_sin_cos_cache(const torch::Tensor& positions,
-                                AttentionMetadata& attn_metadata);
+               const AttentionMetadata& attn_metadata);
 
  private:
   bool interleaved_;

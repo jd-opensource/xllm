@@ -33,6 +33,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
 
   is_qwen3_style_ =
       (args.model_type() == "qwen3" || args.model_type() == "qwen3_moe");
+  bool qkv_bias = is_qwen3_style_ ? args.attention_bias() : true;
 
   CHECK(total_num_heads % tp_size == 0);
   num_heads_ = total_num_heads / tp_size;
@@ -59,7 +60,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                                 num_kv_heads_,
                                                 args.head_dim(),
                                                 num_kv_head_replicas_,
-                                                args.attention_bias(),
+                                                qkv_bias,
                                                 /*gather_output=*/false,
                                                 parallel_args,
                                                 options));
@@ -103,10 +104,11 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                     args.sliding_window()));
 }
 
-torch::Tensor Qwen2AttentionImpl::forward(const torch::Tensor& positions,
-                                          const torch::Tensor& hidden_states,
-                                          AttentionMetadata& attn_metadata,
-                                          KVCache& kv_cache) {
+torch::Tensor Qwen2AttentionImpl::forward(
+    const torch::Tensor& positions,
+    const torch::Tensor& hidden_states,
+    const AttentionMetadata& attn_metadata,
+    KVCache& kv_cache) {
   // 1. qkv projection
   auto qkv = qkv_proj_->forward(hidden_states);
 
