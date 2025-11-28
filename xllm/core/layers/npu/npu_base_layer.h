@@ -57,7 +57,7 @@ namespace layer {
 class NpuBaseLayer : public BaseLayer {
  public:
   explicit NpuBaseLayer(const ModelContext& context);
-  ~NpuBaseLayer() = default;
+  ~NpuBaseLayer() override;
 
   atb::Status execute_node(atb_speed::Model::Node& node,
                            int nodeId = 0,
@@ -72,15 +72,42 @@ class NpuBaseLayer : public BaseLayer {
   virtual void run_task(std::string taskName,
                         std::function<int()> task) const override;
 
+  void init_weight_slices(int weight_count);
+
+  void copy_weights_to_pinned_host();
+
+  void copy_weights_to_device();
+
+  void copy_weights_to_device_async();
+
+  virtual void init_atb_tensors();
+
  protected:
   atb::Tensor XTensor2Tensor(const std::shared_ptr<xllm::XTensor>& xtensor);
 
  protected:
+  struct WeightSlice {
+    size_t offset = 0;
+    size_t bytes = 0;
+    std::vector<int64_t> sizes;
+    torch::ScalarType dtype = torch::kFloat16;
+  };
+  void* host_pinned_storage_ = nullptr;
+  void* device_storage_ = nullptr;
+  size_t storage_size_ = 0;
+  std::vector<WeightSlice> weight_slices_;
   atb::Context* context_;
   AtbWorkspace work_space_;
-  // std::vector<at::Tensor> at_weight_tensors_;
   std::vector<atb::Tensor> atb_weight_tensors_;
   bool graph_captured_{false};
+  static constexpr size_t kDeviceAlignment = 64;
+  static constexpr size_t kHostAlignment = 64;
+  void release_device_storage();
+  void release_host_storage();
+  torch::Tensor convert_to_torch_tensor(const std::vector<int64_t>& dims,
+                                        const torch::ScalarType dtype,
+                                        const uintptr_t& dev_addr,
+                                        int acl_format = 2);
 };
 
 }  // namespace layer
