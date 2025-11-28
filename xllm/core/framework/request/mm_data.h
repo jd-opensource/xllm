@@ -31,8 +31,7 @@ class MMType {
     NONE = 0,
     IMAGE = 1 << 0,
     VIDEO = 1 << 1,
-    AUDIO = 1 << 2,
-    EMBEDDING = 1 << 3
+    AUDIO = 1 << 2
   };
 
   MMType() = default;
