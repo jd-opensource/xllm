@@ -491,7 +491,6 @@ void WorkerService::PrefetchFromStorage(
           butil::IOBuf buf;
           buf.append(std::to_string(success_cnt));
           if (brpc::StreamWrite(*stream_id.get(), buf) != 0) {
-            brpc::StreamClose(*stream_id.get());
             is_completed = false;
             break;
           }

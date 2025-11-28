@@ -87,7 +87,8 @@ void PrefillOnlyScheduler::handle_prefill_requests(
 
     bool prefetch_result = true;
     for (auto& prefill_sequence : request->sequences()) {
-      prefetch_result &= prefill_sequence->update_prefetch_result();
+      prefetch_result &=
+          prefill_sequence->update_prefetch_result(options_.prefetch_timeout());
     }
 
     if (!prefetch_result) {

@@ -381,7 +381,7 @@ void Sequence::add_host_kv_blocks(const std::vector<Block>& blocks) {
 void Sequence::reset() {
   kv_state_.reset();
   host_kv_state_.reset();
-  timeout_checker_.reset();
+  timer_.reset();
   volatile_num_prompt_tokens_ = num_tokens_;
 }
 
@@ -456,14 +456,20 @@ Slice<int32_t> Sequence::get_generated_tokens() const {
   return {tokens_.data(), 0};
 }
 
-bool Sequence::update_prefetch_result() {
+bool Sequence::update_prefetch_result(uint32_t timeout) {
   if (prefetch_results_.empty()) {
     return true;
   }
 
-  if (!termination_flag_.load(std::memory_order_acquire) &&
-      timeout_checker_.check_timeout()) {
-    return false;
+  if (timeout != 0 && !termination_flag_.load(std::memory_order_acquire)) {
+    if (timer_ != nullptr) {
+      timer_ = std::make_shared<Timer>();
+      return false;
+    }
+
+    if (timer_->elapsed_milliseconds() < timeout) {
+      return false;
+    }
   }
 
   termination_flag_.store(true, std::memory_order_release);

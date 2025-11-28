@@ -268,6 +268,7 @@ class WorkerImpl {
 
   uint64_t key_cache_size_per_layer_;
   uint64_t value_cache_size_per_layer_;
+  uint32_t layers_per_copy_;
 
   bool is_spec_draft_ = false;
 
