@@ -189,6 +189,9 @@ class Options {
 
   // whether the worker and master are on the same machine.
   PROPERTY(bool, is_local) = false;
+
+  // Prefetch timeout for prefetch from kv cache store
+  PROPERTY(uint32_t, prefetch_timeout) = 0;
 };
 
 }  // namespace xllm

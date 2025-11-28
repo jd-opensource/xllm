@@ -117,6 +117,8 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
     // all requests use single global tpot
     PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
+    // Prefetch timeout for prefetch from kv cache store
+    PROPERTY(uint32_t, prefetch_timeout) = 0;
   };
 
   ContinuousScheduler(Engine* engine, const Options& options);

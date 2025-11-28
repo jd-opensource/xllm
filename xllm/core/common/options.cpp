@@ -53,6 +53,7 @@ std::string Options::to_string() const {
      << ", enable_service_routing: " << enable_service_routing()
      << ", enable_cache_upload: " << enable_cache_upload()
      << ", enable_kvcache_store: " << enable_kvcache_store()
+     << ", prefetch_timeout: " << prefetch_timeout()
      << ", store_protocol: " << store_protocol()
      << ", store_master_server_address: " << store_master_server_address()
      << ", store_metadata_server: " << store_metadata_server()

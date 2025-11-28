@@ -153,6 +153,8 @@ DECLARE_bool(use_zero_evict);
 
 DECLARE_int32(max_decode_token_per_sequence);
 
+DECLARE_uint32(prefetch_timeout);
+
 DECLARE_string(priority_strategy);
 
 DECLARE_bool(enable_online_preempt_offline);

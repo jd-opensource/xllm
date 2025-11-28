@@ -164,6 +164,10 @@ DEFINE_int32(
     256,
     "Max decode token per sequence which used for ZeroEvictionScheduler.");
 
+DEFINE_uint32(prefetch_timeout,
+              0,
+              "Prefetch timeout for prefetch from kv cache store.");
+
 // --- parallel config ---
 
 DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
