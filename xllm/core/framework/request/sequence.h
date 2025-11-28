@@ -255,6 +255,8 @@ class Sequence final {
     return sequence_params_.sampling_param->beam_width > 1;
   }
 
+  bool check_need_unique_tokens() { return need_unique_tokens_; }
+
   LogprobState* logprob_state() { return logprob_state_.get(); }
 
   // set sequence id
@@ -310,6 +312,7 @@ class Sequence final {
 
   // the count of each token id
   std::unordered_map<int32_t, int32_t> token_to_count_map_;
+  bool need_unique_tokens_ = false;
 
   // the length of the prompt tokens
   size_t num_prompt_tokens_ = 0;
