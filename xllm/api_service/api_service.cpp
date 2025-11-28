@@ -27,6 +27,8 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/runtime/dit_master.h"
 #include "core/runtime/llm_master.h"
+// TODO. add following when next pr.
+// #include "core/runtime/rec_master.h"
 #include "core/runtime/vlm_master.h"
 #include "core/util/closure_guard.h"
 #include "embedding.pb.h"
@@ -70,6 +72,11 @@ APIService::APIService(Master* master,
     image_generation_service_impl_ =
         std::make_unique<ImageGenerationServiceImpl>(
             dynamic_cast<DiTMaster*>(master), model_names);
+  } else if (FLAGS_backend == "rec") {
+    // TODO. delete this when next pr.
+    using RecMaster = LLMMaster;
+    rec_completion_service_impl_ = std::make_unique<RecCompletionServiceImpl>(
+        dynamic_cast<RecMaster*>(master), model_names);
   }
   models_service_impl_ =
       ServiceImplFactory<ModelsServiceImpl>::create_service_impl(
@@ -80,7 +87,27 @@ void APIService::Completions(::google::protobuf::RpcController* controller,
                              const proto::CompletionRequest* request,
                              proto::CompletionResponse* response,
                              ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null.";
+    return;
+  }
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  auto arena = response->GetArena();
+  std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
+      ctrl,
+      done_guard.release(),
+      const_cast<proto::CompletionRequest*>(request),
+      response,
+      arena != nullptr);
+  if (FLAGS_backend == "llm" || FLAGS_backend == "vlm") {
+    completion_service_impl_->process_async(call);
+  } else if (FLAGS_backend == "rec") {
+    rec_completion_service_impl_->process_async(call);
+  }
 }
 
 void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
@@ -116,7 +143,11 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
 
   std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
       ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
-  completion_service_impl_->process_async(call);
+  if (FLAGS_backend == "llm" || FLAGS_backend == "vlm") {
+    completion_service_impl_->process_async(call);
+  } else if (FLAGS_backend == "rec") {
+    rec_completion_service_impl_->process_async(call);
+  }
 }
 
 void APIService::ChatCompletions(::google::protobuf::RpcController* controller,

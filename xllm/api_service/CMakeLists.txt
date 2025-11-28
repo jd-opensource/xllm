@@ -8,6 +8,7 @@ cc_library(
     api_service_impl.h
     call.h
     completion_service_impl.h
+    rec_completion_service_impl.h
     chat_service_impl.h
     embedding_service_impl.h
     image_generation_service_impl.h
@@ -23,6 +24,7 @@ cc_library(
     api_service.cpp
     call.cpp
     completion_service_impl.cpp
+    rec_completion_service_impl.cpp
     chat_service_impl.cpp
     embedding_service_impl.cpp
     image_generation_service_impl.cpp

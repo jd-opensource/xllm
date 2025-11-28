@@ -181,6 +181,20 @@ DEFINE_COUNTER(proto_latency_seconds_o2proto,
 DEFINE_COUNTER(prepare_input_latency_seconds,
                "Latency of preparing input in seconds");
 
+// rec engine metrics
+DEFINE_COUNTER(prepare_input_latency_microseconds,
+               "Latency of preparing input in microseconds");
+DEFINE_COUNTER(rec_first_token_latency_microseconds,
+               "Latency of rec first token generation in microseconds");
+DEFINE_COUNTER(rec_second_token_latency_microseconds,
+               "Latency of rec second token generation in microseconds");
+DEFINE_COUNTER(rec_third_token_latency_microseconds,
+               "Latency of rec third token generation in microseconds");
+DEFINE_COUNTER(rec_sampling_latency_microseconds,
+               "Latency of rec sampling in microseconds");
+DEFINE_HISTOGRAM(expand_beam_latency_microseconds,
+                 "Histogram of expand beam latency in microseconds");
+
 // multi node metrics
 DEFINE_COUNTER(worker_service_latency_seconds,
                "Worker service execution latency in seconds");

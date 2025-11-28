@@ -424,6 +424,12 @@ DEFINE_bool(
     "The default prefetching ratio for gateup weight is 40%."
     "If adjustments are needed, e.g. export PREFETCH_COEFFOCIENT=0.5");
 
+// rec prefill-only mode
+DEFINE_bool(enable_rec_prefill_only,
+            false,
+            "Enable rec prefill-only mode (no decoder self-attention blocks "
+            "allocation).");
+
 // --- dp load balance ---
 
 DEFINE_bool(
