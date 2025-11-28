@@ -1090,9 +1090,7 @@ torch::Tensor Glm4MoeDecoderImpl::forward(torch::Tensor& x,
                                           std::atomic<bool>* event_flag,
                                           int node_id) {
   atb::Status st;
-  bool is_prefill = input_params.decode_seq_range.second !=
-                    input_params.q_seq_lens.size(0) - 1;
-  if (is_prefill) {
+  if (!input_params.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,

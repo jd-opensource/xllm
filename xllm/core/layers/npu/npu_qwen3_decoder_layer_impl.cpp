@@ -519,8 +519,7 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                                                 std::atomic<bool>* event_flag,
                                                 int node_id) {
   atb::Status st;
-  if (input_params.decode_seq_range.second !=
-      input_params.q_seq_lens.size(0) - 1) {
+  if (!input_params.batch_forward_type.is_decode()) {
     // if (input_params.empty_kv_cache) {
     // mstxRangeId id = mstxRangeStartA("prefill build variant", nullptr);
     build_node_variant_pack(prefill_node_,

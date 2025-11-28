@@ -629,7 +629,7 @@ bool AclGraph::capture(CausalLM* model,
     graph_params.q_seq_lens_vec[i] = 1;
   }
   graph_params.num_sequences = num_tokens_;
-  graph_params.decode_seq_range = {0, num_tokens_ - 1};
+  graph_params.batch_forward_type = BatchForwardType::DECODE;
 
   graph_params.new_cache_slots =
       persistent_param_.persistent_new_cache_slots(num_tokens_);
