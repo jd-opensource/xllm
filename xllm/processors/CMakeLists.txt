@@ -21,6 +21,7 @@ cc_library(
     processors
   HDRS
     image_processor.h
+    glm4v_image_processor.h
     clip_image_processor.h
     minicpmv_image_processor.h
     qwen2_vl_image_processor.h
@@ -28,6 +29,7 @@ cc_library(
     input_processor.h
   SRCS
     image_processor.cpp
+    glm4v_image_processor.cpp
     clip_image_processor.cpp
     minicpmv_image_processor.cpp
     qwen2_vl_image_processor.cpp
