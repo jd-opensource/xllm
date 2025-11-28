@@ -85,7 +85,7 @@ torch::Tensor get_1d_rotary_pos_embed(
     float ntk_factor = 1.0,
     bool repeat_interleave_real = true,
     torch::Dtype freqs_dtype = torch::kFloat32) {
-  TORCH_CHECK(dim % 2 == 0, "Dimension must be even");
+  CHECK_EQ(dim % 2, 0) << "Dimension must be even";
 
   torch::Tensor pos_tensor = pos;
   if (pos.dim() == 0) {

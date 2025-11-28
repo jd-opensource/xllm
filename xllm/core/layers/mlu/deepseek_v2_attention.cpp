@@ -43,8 +43,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   int64_t max_position_embeddings = args.max_position_embeddings();
 
   qk_head_dim_ = qk_nope_head_dim_ + qk_rope_head_dim_;
-  TORCH_CHECK(num_heads % tp_size == 0,
-              "num_heads must be divisible by tensor parallel size");
+  CHECK_EQ(num_heads % tp_size, 0)
+      << "num_heads must be divisible by tensor parallel size";
   num_local_heads_ = num_heads / tp_size;
   float scaling = std::pow(qk_head_dim_, -0.5f);
 

@@ -80,11 +80,8 @@ class ExpertBuffer {
     } else {
       auto validate_shape = [](const torch::Tensor& t,
                                const std::vector<int64_t>& expected) {
-        TORCH_CHECK(t.sizes() == expected,
-                    "Shape mismatch. Expected ",
-                    expected,
-                    " got ",
-                    t.sizes());
+        CHECK_EQ(t.sizes(), expected)
+            << "Shape mismatch. Expected " << expected << " got " << t.sizes();
       };
 
       validate_shape(gateup_weight, gateup_weight_shape);

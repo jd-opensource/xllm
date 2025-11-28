@@ -69,7 +69,7 @@ HcclDataType to_hccl_data_type(const torch::Tensor& input) {
     case at::kBFloat16:
       return HCCL_DATA_TYPE_BFP16;
     default:
-      TORCH_CHECK(false, "Unconvertible HCCL type ", type);
+      LOG(FATAL) << "Unconvertible HCCL type: " << type;
   }
 }
 

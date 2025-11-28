@@ -76,7 +76,7 @@ std::pair<torch::Tensor, std::vector<bool>> EplbPolicy::rebalance_experts(
 torch::Tensor EplbPolicy::compute_balanced_pack(
     const torch::Tensor& expert_loads) {
   // Parameter Validation
-  TORCH_CHECK(expert_loads.dim() == 1, "expert_loads must be 1D tensor");
+  CHECK_EQ(expert_loads.dim(), 1) << "expert_loads must be 1D tensor";
   const int64_t num_experts = expert_loads.size(0);
 
   // Generate Redundant Experts
@@ -139,7 +139,7 @@ std::pair<torch::Tensor, torch::Tensor> EplbPolicy::update_origin_weights(
     torch::Tensor expert_loads,
     int32_t redundancy_experts) {
   //  Parameter Validation
-  TORCH_CHECK(expert_loads.dim() == 1, "expert_loads must be 1D tensor");
+  CHECK_EQ(expert_loads.dim(), 1) << "expert_loads must be 1D tensor";
   const int64_t num_experts = expert_loads.size(0);
 
   //  Initialize Data Structures

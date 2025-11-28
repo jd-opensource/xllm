@@ -249,10 +249,10 @@ torch::Tensor seeded_tensor(const std::string& key,
         out_cpu = map_mod_span(int64_t{});
         break;
       default:
-        TORCH_CHECK(false, "Unsupported integer dtype: ", dtype);
+        LOG(FATAL) << "Unsupported integer dtype: " << dtype;
     }
   } else {
-    TORCH_CHECK(false, "Unsupported dtype for seeded_tensor");
+    LOG(FATAL) << "Unsupported dtype for seeded_tensor";
   }
 
   // Shape & device

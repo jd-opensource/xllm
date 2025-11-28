@@ -592,7 +592,7 @@ inline torch::Tensor get_timestep_embedding(const torch::Tensor& timesteps,
                                             float downscale_freq_shift = 1.0f,
                                             float scale = 1.0f,
                                             int64_t max_period = 10000) {
-  TORCH_CHECK(timesteps.dim() == 1, "Timesteps should be a 1d-array");
+  CHECK_EQ(timesteps.dim(), 1) << "Timesteps should be a 1d-array";
   int64_t half_dim = embedding_dim / 2;
   // -ln(max_period) * [0, 1, ..., half_dim-1] / (half_dim -
   // downscale_freq_shift

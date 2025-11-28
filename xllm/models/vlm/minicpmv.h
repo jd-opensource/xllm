@@ -306,7 +306,7 @@ torch::Tensor get_1d_sincos_pos_embed_from_grid(int embed_dim,
                                                 std::pair<int, int> version = {
                                                     2,
                                                     0}) {
-  TORCH_CHECK(embed_dim % 2 == 0, "embed_dim must be even");
+  CHECK_EQ(embed_dim % 2, 0) << "embed_dim must be even";
 
   // compute omega
   auto omega = torch::arange(embed_dim / 2, torch::kFloat32);
@@ -332,7 +332,7 @@ torch::Tensor get_2d_sincos_pos_embed_from_grid(int embed_dim,
                                                 std::pair<int, int> version = {
                                                     2,
                                                     0}) {
-  TORCH_CHECK(embed_dim % 2 == 0, "embed_dim must be even");
+  CHECK_EQ(embed_dim % 2, 0) << "embed_dim must be even";
 
   auto emb_h =
       get_1d_sincos_pos_embed_from_grid(embed_dim / 2, grid[0], version);
@@ -382,7 +382,7 @@ class Resampler2_5Impl : public BaseResamplerImpl {
   }
 
   torch::Tensor forward(torch::Tensor x, torch::Tensor tgt_sizes) {
-    TORCH_CHECK(x.size(0) == tgt_sizes.size(0), "Batch size mismatch!");
+    CHECK_EQ(x.size(0), tgt_sizes.size(0)) << "Batch size mismatch!";
 
     int64_t batch_size = x.size(0);
     auto device = x.device();
