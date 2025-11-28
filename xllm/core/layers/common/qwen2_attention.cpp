@@ -145,7 +145,7 @@ torch::Tensor Qwen2AttentionImpl::forward(
 }
 
 void Qwen2AttentionImpl::load_state_dict(const StateDict& state_dict) {
-  qkv_proj_->load_state_dict(state_dict);
+  qkv_proj_->load_state_dict(state_dict, {"q_proj.", "k_proj.", "v_proj."});
   o_proj_->load_state_dict(state_dict.get_dict_with_prefix("o_proj."));
   if (is_qwen3_style_) {
     q_norm_->load_state_dict(state_dict.get_dict_with_prefix("q_norm."));

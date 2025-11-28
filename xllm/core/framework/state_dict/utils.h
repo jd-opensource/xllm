@@ -93,6 +93,17 @@ void load_moe_fused_weight(const StateDict& state_dict,
                            bool& w1_is_loaded,
                            bool& w3_is_loaded,
                            bool& w13_is_loaded);
+
+void load_merged_weight(const StateDict& state_dict,
+                        const std::string& name,
+                        int64_t dim,
+                        int32_t rank,
+                        int32_t world_size,
+                        int32_t shard_tensor_count,
+                        int64_t shard_size,
+                        torch::Tensor& weight,
+                        bool& weight_is_loaded);
+
 }  // namespace weight
 
 // helper macros for defining and loading weights
@@ -173,4 +184,14 @@ void load_moe_fused_weight(const StateDict& state_dict,
                                 w3##_is_loaded_,      \
                                 w13##_is_loaded_);
 
+#define LOAD_MERGED_WEIGHT(name, dim)            \
+  weight::load_merged_weight(state_dict,         \
+                             #name,              \
+                             dim,                \
+                             rank,               \
+                             world_size,         \
+                             shard_tensor_count, \
+                             shard_size,         \
+                             name##_,            \
+                             name##_is_loaded_);
 }  // namespace xllm

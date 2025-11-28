@@ -111,6 +111,8 @@ class QKVParallelLinearImpl : public torch::nn::Module {
   torch::Tensor forward(torch::Tensor input);
 
   // load the weight from the checkpoint
+  void load_state_dict(const StateDict& state_dict,
+                       const std::vector<std::string>& prefixes);
   void load_state_dict(const StateDict& state_dict);
 
   void pretty_print(std::ostream& stream) const {

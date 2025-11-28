@@ -26,24 +26,27 @@ Qwen2VisionAttentionImpl::Qwen2VisionAttentionImpl(
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
   const auto& options = context.get_tensor_options();
+  const int64_t hidden_size = args.mm_hidden_size();
   const int64_t num_heads = args.mm_num_attention_heads();
   const int64_t tp_size = parallel_args.tp_group_->world_size();
+  CHECK(num_heads % tp_size == 0);
 
   tp_group_ = parallel_args.tp_group_;
   hidden_size_per_attention_head_ = args.mm_head_dim();
   num_attention_heads_per_partition_ = num_heads / tp_size;
   scale_ = 1.0 / std::sqrt(static_cast<float>(hidden_size_per_attention_head_));
-  const int64_t out_features = num_heads * 3 * hidden_size_per_attention_head_;
-  const int64_t hidden_size = args.mm_hidden_size();
 
-  qkv_proj_ = register_module("qkv_proj",
-                              ColumnParallelLinear(hidden_size,
-                                                   out_features,
-                                                   /*bias=*/true,
-                                                   /*gather_output=*/true,
-                                                   quant_args,
-                                                   parallel_args,
-                                                   options));
+  qkv_proj_ =
+      register_module("qkv_proj",
+                      QKVParallelLinear(hidden_size,
+                                        num_attention_heads_per_partition_,
+                                        num_attention_heads_per_partition_,
+                                        hidden_size_per_attention_head_,
+                                        /*num_kv_head_replicas=*/1,
+                                        /*bias=*/true,
+                                        /*gather_output=*/false,
+                                        parallel_args,
+                                        options));
 
   proj_ = register_module("proj",
                           RowParallelLinear(hidden_size,
@@ -62,12 +65,21 @@ std::vector<torch::Tensor> Qwen2VisionAttentionImpl::split_qkv(
   auto sizes = qkv.sizes();
   int64_t seq_len = qkv.size(0);
   int64_t bs = qkv.sizes() == 3 ? qkv.size(1) : 1;
+  torch::Tensor qkv_gathered =
+      xllm::parallel_state::all_gather_interleaved(qkv, tp_group_);
 
   // [s, b, 3 * head * head_dim] -> 3 * [s, b, head * head_dim]
-  auto qkv_chunks = qkv.chunk(3, /*dim=*/-1);
+  auto qkv_chunks = qkv_gathered.chunk(3, /*dim=*/-1);
   auto q = qkv_chunks[0];
   auto k = qkv_chunks[1];
   auto v = qkv_chunks[2];
+
+  // 3 * [s, b, head * head_dim]
+  if (tp_group_->world_size() > 1) {
+    q = xllm::parallel_state::scatter(q, tp_group_);
+    k = xllm::parallel_state::scatter(k, tp_group_);
+    v = xllm::parallel_state::scatter(v, tp_group_);
+  }
 
   // 3 * [s, b, head * head_dim] -> 3 * [s, b, head, head_dim]
   std::vector<int64_t> new_shape = {seq_len,

@@ -45,15 +45,13 @@ class Qwen2VisionAttentionImpl : public torch::nn::Module {
  private:
   std::vector<torch::Tensor> split_qkv(const torch::Tensor& qkv);
 
-  int64_t num_heads_;
-  int64_t head_dim_;
   int64_t hidden_size_per_attention_head_;
   int64_t num_attention_heads_per_partition_;
   float scale_;
 
   ProcessGroup* tp_group_;
 
-  ColumnParallelLinear qkv_proj_{nullptr};
+  QKVParallelLinear qkv_proj_{nullptr};
   RowParallelLinear proj_{nullptr};
 };
 TORCH_MODULE(Qwen2VisionAttention);
