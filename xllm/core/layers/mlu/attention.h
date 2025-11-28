@@ -46,6 +46,10 @@ struct AttentionMetadata {
   bool is_chunked_prefill;
   bool is_dummy;
 
+  // for mrope
+  torch::Tensor mrope_cos;
+  torch::Tensor mrope_sin;
+
   // for flashinfer
   torch::Tensor paged_kv_indptr;
   torch::Tensor paged_kv_indices;

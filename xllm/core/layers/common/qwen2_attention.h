@@ -61,7 +61,7 @@ class Qwen2AttentionImpl : public torch::nn::Module {
   RmsNorm q_norm_{nullptr};
   RmsNorm k_norm_{nullptr};
   Attention attn_{nullptr};
-  RotaryEmbedding rotary_emb_{nullptr};
+  MRotaryEmbedding rotary_emb_{nullptr};
 };
 TORCH_MODULE(Qwen2Attention);
 

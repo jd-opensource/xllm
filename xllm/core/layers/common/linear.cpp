@@ -86,7 +86,6 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
       bias_.defined() ? std::optional<torch::Tensor>(bias_) : std::nullopt;
 
   torch::Tensor output;
-
   if (quant_args_.quant_method() == "smoothquant") {
     torch::Tensor quantized_input;
     torch::Tensor input_scale;
@@ -256,13 +255,27 @@ torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
   return output;
 }
 
-void QKVParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
-  std::vector<std::string> prefixes = {"q_proj.", "k_proj.", "v_proj."};
+void QKVParallelLinearImpl::load_state_dict(
+    const StateDict& state_dict,
+    const std::vector<std::string>& prefixes) {
   const int64_t rank = rank_;
   const int64_t world_size = world_size_;
   LOAD_QKV_WEIGHT(weight, 0, num_kv_head_replicas_);
   if (bias_.defined()) {
     LOAD_QKV_WEIGHT(bias, 0, num_kv_head_replicas_);
+  }
+}
+
+void QKVParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
+  const int64_t rank = rank_;
+  const int64_t world_size = world_size_;
+  const int32_t shard_tensor_count = 3;
+  const int64_t shard_size = num_heads_ * head_size_;
+  CHECK_EQ(num_heads_, num_kv_heads_);
+  LOAD_MERGED_WEIGHT(weight, 0);
+
+  if (bias_.defined()) {
+    LOAD_MERGED_WEIGHT(bias, 0);
   }
 }
 

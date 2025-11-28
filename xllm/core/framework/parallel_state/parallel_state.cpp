@@ -77,12 +77,12 @@ torch::Tensor gather(const torch::Tensor& input,
   if (!process_group) {
     return input;
   }
-  const auto world_size = process_group->world_size();
+  const int32_t world_size = process_group->world_size();
   if (world_size == 1) {
     return input;
   }
 
-  const auto rank = process_group->rank();
+  const int32_t rank = process_group->rank();
   std::vector<torch::Tensor> tensors(world_size);
   for (int64_t i = 0; i < world_size; ++i) {
     tensors[i] = torch::empty_like(input);
@@ -98,8 +98,8 @@ torch::Tensor gather(const torch::Tensor& input,
   if (!process_group) {
     return input;
   }
-  const auto world_size = process_group->world_size();
-  const auto rank = process_group->rank();
+  const int32_t world_size = process_group->world_size();
+  const int32_t rank = process_group->rank();
   if (world_size == 1) {
     return input;
   }
@@ -131,11 +131,42 @@ torch::Tensor gather(const torch::Tensor& input,
       gathered_input, max_num_tokens, token_num_list);
 }
 
+torch::Tensor all_gather_interleaved(const torch::Tensor& input,
+                                     ProcessGroup* process_group) {
+  if (!process_group) {
+    return input;
+  }
+  const int32_t world_size = process_group->world_size();
+  const int32_t rank = process_group->rank();
+  if (world_size == 1) {
+    return input;
+  }
+
+  std::vector<torch::Tensor> gathered_tensors(world_size);
+  for (int64_t i = 0; i < world_size; ++i) {
+    gathered_tensors[i] = torch::empty_like(input);
+  }
+  process_group->allgather(input, gathered_tensors);
+
+  int32_t dim = -1;
+  size_t num_chunks = 3;
+  std::vector<torch::Tensor> ordered_tensors;
+  int64_t shard_size = input.size(dim) / num_chunks;
+  for (size_t i = 0; i < num_chunks; ++i) {
+    for (size_t j = 0; j < world_size; ++j) {
+      auto shard_tensor =
+          gathered_tensors[j].slice(dim, shard_size * i, shard_size * (i + 1));
+      ordered_tensors.push_back(shard_tensor);
+    }
+  }
+  return torch::cat(ordered_tensors, dim).contiguous();
+}
+
 torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group) {
   if (!process_group) {
     return input;
   }
-  const auto world_size = process_group->world_size();
+  const int32_t world_size = process_group->world_size();
   if (world_size == 1) {
     return input;
   }
@@ -149,20 +180,20 @@ torch::Tensor scatter(torch::Tensor input,
   if (!process_group) {
     return input;
   }
-  const auto world_size = process_group->world_size();
+  const int32_t world_size = process_group->world_size();
   if (world_size == 1) {
     return input;
   }
 
   // get the size for last dimension
-  const auto dim_size = input.size(dim);
+  const int32_t dim_size = input.size(dim);
   CHECK(dim_size % world_size == 0)
       << "dim_size " << dim_size << " cannot be divided by world_size "
       << world_size;
 
   // torch::split does not create contiguous tensors by default.
   const auto tensor_list = input.split(dim_size / world_size, dim);
-  const auto rank = process_group->rank();
+  const int32_t rank = process_group->rank();
   return tensor_list[rank];
 }
 

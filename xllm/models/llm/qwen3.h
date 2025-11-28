@@ -52,7 +52,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
                                            model_args.max_position_embeddings(),
                                            model_args.rope_theta(),
                                            options);
-#if defined(USE_NPU)
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     // encode_attn_mask_ =
     //   layer::AttentionMask(options.device(),
@@ -61,7 +60,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
-#endif
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
       auto block = QWen3DecoderLayer(context);
@@ -104,11 +102,14 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       h = embed_tokens_(tokens);
 #endif
     }
-#if defined(USE_NPU)
     if (use_deepstack) {
       deep_stacks = input_params.deep_stacks;  // [num_deepstack, hidden_size]
     }
+#if defined(USE_NPU)
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
+#else
+    auto target_cos_sin = cos_sin_.index({positions});
+#endif
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
@@ -163,8 +164,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
     }
 
-#endif
-
 #if defined(USE_NPU)
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event{nullptr};
@@ -200,20 +199,26 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     }
     return norm_(h, 0);
 #else
-    auto modified_input_params = input_params;
-    auto position = positions;
-    layer::update_dummy_run_input(dp_rank_, position, modified_input_params);
-    bool is_prefill = modified_input_params.q_max_seq_len > 1;
+    layer::update_dummy_run_input(dp_rank_, positions, input_params_new);
+    bool is_prefill = input_params_new.q_max_seq_len > 1;
     auto attn_metadata =
-        layer::AttentionMetadata::build(modified_input_params, is_prefill);
+        layer::AttentionMetadata::build(input_params_new, is_prefill);
+    if (positions.dim() == 2) {
+      attn_metadata.mrope_cos = std::move(cos_pos);
+      attn_metadata.mrope_sin = std::move(sin_pos);
+    }
 
-    torch::Tensor h_ret;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h_ret = layer(
-          h, positions, attn_metadata, kv_caches[i], modified_input_params);
+      h = layer(h, positions, attn_metadata, kv_caches[i], input_params_new);
+      if (use_deepstack) {
+        if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
+          h = deepstack_process(
+              h, input_params.visual_pos_masks, deep_stacks[i]);
+        }
+      }
     }
-    return norm_(h_ret);
+    return norm_(h);
 #endif
   }
 

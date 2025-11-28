@@ -33,6 +33,9 @@ torch::Tensor gather(const torch::Tensor& input,
                      ProcessGroup* process_group,
                      const std::vector<int32_t>& token_num_list);
 
+torch::Tensor all_gather_interleaved(const torch::Tensor& input,
+                                     ProcessGroup* process_group);
+
 torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group);
 
 torch::Tensor scatter(torch::Tensor input,

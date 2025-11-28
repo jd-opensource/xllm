@@ -243,6 +243,39 @@ void load_moe_fused_weight(const StateDict& state_dict,
   }
 }
 
+void load_merged_weight(const StateDict& state_dict,
+                        const std::string& name,
+                        int64_t dim,
+                        int32_t rank,
+                        int32_t world_size,
+                        int32_t shard_tensor_count,
+                        int64_t shard_size,
+                        torch::Tensor& weight,
+                        bool& weight_is_loaded) {
+  if (weight_is_loaded) {
+    return;
+  }
+  const auto& tensor = state_dict.get_tensor(name);
+  if (!tensor.defined()) {
+    return;
+  }
+  CHECK_EQ(tensor.size(dim), shard_tensor_count * shard_size * world_size)
+      << name << "[" << dim << "] size mismatch for " << state_dict.prefix()
+      << name;
+  std::vector<torch::Tensor> shard_tensors;
+  for (size_t shard_id = 0; shard_id < shard_tensor_count; shard_id++) {
+    int64_t shard_offset =
+        shard_id * shard_size * world_size + rank * shard_size;
+    shard_tensors.push_back(
+        tensor.slice(dim, shard_offset, shard_offset + shard_size));
+  }
+  auto merged_weight = torch::cat(shard_tensors, dim);
+  CHECK_EQ(weight.sizes(), merged_weight.sizes())
+      << "weight size mismatch for " << state_dict.prefix() << name;
+  weight.copy_(merged_weight);
+  weight_is_loaded = true;
+}
+
 }  // namespace weight
 
 }  // namespace xllm

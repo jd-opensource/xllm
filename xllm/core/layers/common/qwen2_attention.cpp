@@ -19,6 +19,14 @@ limitations under the License.
 
 #include <tuple>
 
+namespace {
+inline bool is_qwen3_model(const std::string& model_type) {
+  static const std::set<std::string> qwen3_type_set = {
+      "qwen3", "qwen3_vl", "qwen3_moe", "qwen3_vl_moe"};
+  return qwen3_type_set.contains(model_type);
+}
+}  // namespace
+
 namespace xllm {
 namespace layer {
 
@@ -30,9 +38,8 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   const int64_t total_num_heads = args.n_heads();
   const int64_t total_num_kv_heads = args.n_kv_heads().value_or(args.n_heads());
-
-  is_qwen3_style_ =
-      (args.model_type() == "qwen3" || args.model_type() == "qwen3_moe");
+  is_qwen3_style_ = is_qwen3_model(args.model_type());
+  bool qkv_bias = is_qwen3_style_ ? args.attention_bias() : true;
 
   CHECK(total_num_heads % tp_size == 0);
   num_heads_ = total_num_heads / tp_size;
@@ -59,7 +66,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                                 num_kv_heads_,
                                                 args.head_dim(),
                                                 num_kv_head_replicas_,
-                                                args.attention_bias(),
+                                                qkv_bias,
                                                 /*gather_output=*/false,
                                                 parallel_args,
                                                 options));
@@ -85,12 +92,14 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   }
 
   // 4. Rotary embedding
-  rotary_emb_ = register_module("rope",
-                                RotaryEmbedding(/*rotary_dim=*/head_dim_,
-                                                args.max_position_embeddings(),
-                                                args.rope_theta(),
-                                                /*interleaved=*/false,
-                                                options));
+  rotary_emb_ =
+      register_module("rope",
+                      MRotaryEmbedding(/*rotary_dim=*/head_dim_,
+                                       args.max_position_embeddings(),
+                                       args.rope_theta(),
+                                       /*interleaved=*/false,
+                                       args.rope_scaling_mrope_section(),
+                                       options));
 
   // 5. Attention
   attn_ = register_module("attn",
@@ -124,12 +133,7 @@ torch::Tensor Qwen2AttentionImpl::forward(
   }
 
   // 4. rope
-  rotary_emb_->forward(q,
-                       k,
-                       positions,
-                       attn_metadata.query_start_loc,
-                       attn_metadata.max_query_len,
-                       attn_metadata.is_prefill);
+  rotary_emb_->forward(q, k, positions, attn_metadata);
   q = q.view({T, q_size_});
   k = k.view({T, kv_size_});
 
@@ -141,7 +145,7 @@ torch::Tensor Qwen2AttentionImpl::forward(
 }
 
 void Qwen2AttentionImpl::load_state_dict(const StateDict& state_dict) {
-  qkv_proj_->load_state_dict(state_dict);
+  qkv_proj_->load_state_dict(state_dict, {"q_proj.", "k_proj.", "v_proj."});
   o_proj_->load_state_dict(state_dict.get_dict_with_prefix("o_proj."));
   if (is_qwen3_style_) {
     q_norm_->load_state_dict(state_dict.get_dict_with_prefix("q_norm."));
