@@ -39,11 +39,15 @@ void apply_rotary(RotaryParams& params) {
                     params.dynamic_ntk,
                     params.max_query_len);
 #elif defined(USE_CUDA)
-  cuda::apply_rope_pos_ids_cos_sin_cache(params.q,
-                                         params.k,
-                                         params.cos_sin,
-                                         params.position_ids.value(),
-                                         params.interleaved);
+  bool is_neox = !params.interleaved;
+
+  auto pos_ids = params.position_ids.value().to(torch::kInt64);
+  auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+  auto cos = cos_sin_vec[0];
+  auto sin = cos_sin_vec[2];
+  auto cos_sin = torch::cat({cos, sin}, -1);
+
+  cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
 #else
   LOG(FATAL) << "apply_rotary not implemented";
 #endif
@@ -190,7 +194,14 @@ void fused_layernorm(FusedLayerNormParams& params) {
                        params.store_output_after_norm,
                        params.dynamic_quant);
 #elif defined(USE_CUDA)
-  cuda::rmsnorm(params.output, params.input, params.weight, params.eps);
+  if (params.residual.has_value()) {
+    cuda::fused_add_rms_norm(
+        params.input, params.residual.value(), params.weight, params.eps);
+    params.output = params.input;
+    params.residual_out = params.residual;
+  } else {
+    cuda::rms_norm(params.output, params.input, params.weight, params.eps);
+  }
 #else
   LOG(FATAL) << "fused_layernorm not implemented";
 #endif

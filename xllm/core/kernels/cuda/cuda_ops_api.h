@@ -25,11 +25,13 @@ limitations under the License.
 
 namespace xllm::kernel::cuda {
 
-void apply_rope_pos_ids_cos_sin_cache(torch::Tensor q,
-                                      torch::Tensor k,
-                                      torch::Tensor cos_sin_cache,
-                                      torch::Tensor pos_ids,
-                                      bool interleave);
+// TODO: add head_size parameter
+void rotary_embedding(torch::Tensor& positions,
+                      torch::Tensor& query,
+                      std::optional<torch::Tensor> key,
+                      torch::Tensor& cos_sin_cache,
+                      // int64_t head_size,
+                      bool is_neox);
 
 // act_mode only support silu, gelu, gelu_tanh
 void act_and_mul(torch::Tensor out,
@@ -72,10 +74,15 @@ void batch_decode(torch::Tensor float_workspace_buffer,
                   std::optional<torch::Tensor>& output_lse,
                   bool enable_cuda_graph);
 
-void rmsnorm(torch::Tensor output,
-             torch::Tensor input,
-             torch::Tensor weight,
-             double eps);
+void rms_norm(torch::Tensor output,
+              torch::Tensor input,
+              torch::Tensor weight,
+              double eps);
+
+void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
+                        torch::Tensor& residual,  // [..., hidden_size]
+                        torch::Tensor& weight,    // [hidden_size]
+                        double epsilon);
 
 torch::Tensor matmul(torch::Tensor a,
                      torch::Tensor b,

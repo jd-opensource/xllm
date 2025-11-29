@@ -227,8 +227,6 @@ def set_cuda_envs():
     os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
     os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
     os.environ["CUDA_TOOLKIT_ROOT_DIR"] = "/usr/local/cuda"
-    os.environ["NCCL_ROOT"] = get_nccl_root_path()
-    os.environ["NCCL_VERSION"] = "2"
     
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
