@@ -3,7 +3,7 @@
 #include <memory>
 
 #include "core/framework/model/embedding_lm.h"
-#include "models/llm/embedding_model_base.h"
+#include "embedding_model_base.h"
 #include "qwen3.h"
 
 namespace xllm {
