@@ -431,3 +431,8 @@ DEFINE_bool(
     false,
     "Whether to enable dp load balance, if true, sequences within a single "
     "dp batch will be shuffled.");
+
+DEFINE_string(
+    npu_kernel_backend,
+    "ATB",
+    "NPU kernel backend. Supported options: ATB, TORCH. Default is ATB.");

@@ -18,6 +18,7 @@ limitations under the License.
 #include "mapping_npu.h"
 
 #if defined(USE_NPU)
+#include "npu_process_group.h"
 #include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
 #include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
 #include "xllm_kernels/models/base/param/mapping.h"
@@ -29,23 +30,6 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "parallel_args.h"
 #include "util/net.h"
-
-namespace {
-#if defined(USE_NPU)
-std::unique_ptr<xllm::ProcessGroup> create_process_group(
-    int rank,
-    int world_size,
-    int rank_size,
-    int port,
-    bool trans,
-    const std::string& host,
-    const std::string& group_name,
-    const torch::Device& device) {
-  LOG(FATAL) << "Unsupported device type";
-  return nullptr;
-}
-#endif
-}  // namespace
 
 namespace xllm {
 
@@ -71,6 +55,13 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   // std::unique_ptr<ProcessGroupHCCL> hccl_pg =
   //     std::make_unique<ProcessGroupHCCL>(
   //         global_rank, world_size, device, comm);
+
+  // comunicator will be inited in torch.
+  if (FLAGS_npu_kernel_backend == "TORCH") {
+    parallel_args_ = std::make_unique<ParallelArgs>(
+        global_rank, world_size, dp_size, nullptr, ep_size);
+    return;
+  }
 
   // comunicator will be inited in atb.
   MappingNPU::Options mapping_options;
@@ -116,6 +107,11 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
 void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
+#if defined(USE_NPU)
+  if (FLAGS_npu_kernel_backend == "ATB") {
+    return;
+  }
+#endif
   std::string host;
   int port;
   net::parse_host_port_from_addr(master_addr, host, port);

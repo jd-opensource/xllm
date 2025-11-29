@@ -214,3 +214,5 @@ DECLARE_bool(enable_prefetch_weight);
 DECLARE_int32(flashinfer_workspace_buffer_size);
 
 DECLARE_bool(enable_dp_balance);
+
+DECLARE_string(npu_kernel_backend);
