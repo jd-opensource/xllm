@@ -92,14 +92,27 @@ Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
 
 bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
   std::vector<torch::Tensor> images = inputs.get_decode_data(MMType::IMAGE);
-  if (images.empty()) {
-    LOG(ERROR) << " image tensor not found.";
+  std::vector<torch::Tensor> videos = inputs.get_decode_data(MMType::VIDEO);
+  std::vector<VideoMetadata> video_meta_list =
+      inputs.get_video_metadata(MMType::VIDEO);
+
+  if (images.empty() && (videos.empty() || video_meta_list.empty())) {
+    LOG(ERROR) << "no image/video tensor found.";
     return false;
   }
 
-  if (!this->process_images(images, datas)) {
-    LOG(ERROR) << " process image failed.";
-    return false;
+  if (!images.empty()) {
+    if (!this->process_images(images, datas)) {
+      LOG(ERROR) << " process image failed.";
+      return false;
+    }
+  }
+
+  if (!videos.empty()) {
+    if (!this->process_videos(videos, video_meta_list, datas)) {
+      LOG(ERROR) << " process video failed.";
+      return false;
+    }
   }
 
   return true;
@@ -120,9 +133,9 @@ bool Qwen2VLImageProcessor::process_images(std::vector<torch::Tensor> images,
   auto thw = torch::tensor(grids);
 
   thw = thw.clone().reshape({-1, 3});
-  mm_datas = std::move(MMData(
-      MMType::IMAGE, {{"image_grid_thw", thw}, {"pixel_values", values}}));
 
+  mm_datas.update(MMType::IMAGE, "image_grid_thw", thw);
+  mm_datas.update(MMType::IMAGE, "pixel_values", values);
   return true;
 }
 
@@ -195,6 +208,157 @@ bool Qwen2VLImageProcessor::process_image(
   pixel_values.emplace_back(patches);
   grids.insert(grids.end(), {grid_t, grid_h, grid_w});
 
+  return true;
+}
+
+bool Qwen2VLImageProcessor::process_videos(
+    std::vector<torch::Tensor> videos,
+    std::vector<VideoMetadata> video_meta_list,
+    MMData& mm_datas) {
+  std::vector<torch::Tensor> pixel_values;
+  std::vector<int64_t> grids;
+
+  const size_t video_size = videos.size();
+  for (size_t i = 0; i < video_size; ++i) {
+    auto& vid = videos[i];
+    auto& metadata = video_meta_list[i];
+    if (!this->process_video(vid, metadata, pixel_values, grids)) {
+      return false;
+    }
+  }
+
+  auto values = torch::cat(pixel_values);
+  auto thw = torch::tensor(grids).clone().reshape({-1, 3});
+
+  const size_t num_videos = videos.size();
+  std::vector<double> second_per_grid;
+  second_per_grid.reserve(num_videos);
+  for (size_t i = 0; i < num_videos; ++i) {
+    const auto& metadata = video_meta_list[i];
+    double fps =
+        metadata.sampled_fps > 0.0 ? metadata.sampled_fps : metadata.fps;
+    double seconds_per_grid = static_cast<double>(temporal_patch_size_) / fps;
+    second_per_grid.push_back(seconds_per_grid);
+  }
+
+  auto opts = torch::TensorOptions().dtype(torch::kFloat32);
+  auto second_per_grid_ts = torch::tensor(second_per_grid, opts);
+
+  mm_datas.update(MMType::VIDEO, "video_grid_thw", thw);
+  mm_datas.update(MMType::VIDEO, "pixel_values_videos", values);
+  mm_datas.update(MMType::VIDEO, "second_per_grid_ts", second_per_grid_ts);
+
+  mm_datas.video_metadata = std::move(video_meta_list);
+  return true;
+}
+
+bool Qwen2VLImageProcessor::process_video(
+    torch::Tensor origin_video,
+    VideoMetadata& metadata,
+    std::vector<torch::Tensor>& pixel_values,
+    std::vector<int64_t>& grids) {
+  if (origin_video.dim() != 4) {
+    LOG(FATAL) << "video must be TCHW";
+  }
+
+  torch::Tensor indices;
+  if (do_sample_frame_) {
+    indices = this->sample_frames(metadata,
+                                  temporal_patch_size_,
+                                  min_frames_,
+                                  max_frames_,
+                                  /*num_frames=*/-1,
+                                  /*set_fps=*/2.0);
+  } else {
+    indices = this->init_frames(metadata);  // default sample to 32 frames
+  }
+  auto video = origin_video.index_select(/*dim=*/0, indices);
+  int64_t sampled_total_frames = video.size(0);
+
+  metadata.frame_indices = indices;
+  metadata.timestamps.clear();
+  metadata.timestamps.reserve(static_cast<size_t>(sampled_total_frames));
+  double fps_for_ts = (metadata.fps > 0.0) ? metadata.fps : 24.0;
+  for (int64_t i = 0; i < sampled_total_frames; ++i) {
+    int64_t frame_idx = metadata.frame_indices[i].item<int64_t>();
+    metadata.timestamps.push_back(static_cast<double>(frame_idx) / fps_for_ts);
+  }
+
+  if (metadata.total_num_frames > 0 && metadata.fps > 0.0) {
+    metadata.sampled_fps = double(sampled_total_frames) /
+                           double(metadata.total_num_frames) * metadata.fps;
+  } else {
+    metadata.sampled_fps = fps_for_ts;
+  }
+
+  auto shape = video.sizes();
+  auto time_len = shape[0];
+  auto channel = shape[1];
+  auto resized_height = shape[2];
+  auto resized_width = shape[3];
+
+  if (do_resize_) {
+    auto size = smart_resize(resized_height,
+                             resized_width,
+                             patch_size_ * merge_size_,
+                             size_["shortest_edge"],
+                             size_["longest_edge"]);
+    if (!size) {
+      return false;
+    }
+    std::tie(resized_height, resized_width) = *size;
+  }
+
+  std::vector<torch::Tensor> out_frames;
+  out_frames.reserve(time_len);
+  // for each frame
+  auto frames = video.unbind(0);
+  for (auto& frame : frames) {
+    // resize
+    if (do_resize_)
+      frame =
+          this->resize(frame, {resized_height, resized_width}, resample_, true);
+    // normalize
+    if (do_normalize_) frame = this->normalize(frame, image_mean_, image_std_);
+    // rescale
+    if (do_rescale_) frame = this->rescale(frame, rescale_factor_);
+    out_frames.push_back(frame);
+  }
+
+  auto out_video = torch::stack(out_frames);  // [T,C,H,W]
+
+  auto pad_t = (temporal_patch_size_ - (time_len % temporal_patch_size_)) %
+               temporal_patch_size_;
+  if (pad_t > 0) {
+    auto last =
+        out_video.index({time_len - 1}).unsqueeze(0).repeat({pad_t, 1, 1, 1});
+    out_video = torch::cat({out_video, last}, 0);
+  }
+
+  shape = out_video.sizes();
+  auto grid_h = resized_height / patch_size_;
+  auto grid_w = resized_width / patch_size_;
+  auto grid_t = shape[0] / temporal_patch_size_;
+
+  out_video = out_video.contiguous();
+
+  auto patches = out_video.view({grid_t,
+                                 temporal_patch_size_,
+                                 channel,
+                                 grid_h / merge_size_,
+                                 merge_size_,
+                                 patch_size_,
+                                 grid_w / merge_size_,
+                                 merge_size_,
+                                 patch_size_});
+
+  patches = patches.permute({0, 3, 6, 4, 7, 2, 1, 5, 8});
+  patches = patches.reshape(
+      {grid_t * grid_h * grid_w,
+       channel * temporal_patch_size_ * patch_size_ * patch_size_});
+
+  pixel_values.emplace_back(patches);
+  grids.insert(grids.end(), {grid_t, grid_h, grid_w});
   return true;
 }
 

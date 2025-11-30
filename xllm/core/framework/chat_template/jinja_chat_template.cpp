@@ -121,6 +121,24 @@ std::optional<std::string> JinjaChatTemplate::apply(
     nlohmann::ordered_json& messages,
     const nlohmann::ordered_json& tools,
     const nlohmann::ordered_json& chat_template_kwargs) const {
+  for (auto& msg : messages) {
+    if (!msg.contains("content")) continue;
+    auto& content = msg["content"];
+    auto normalize_item = [](nlohmann::ordered_json& item) {
+      if (item.contains("type") && item["type"].is_string()) {
+        std::string t = item["type"].get<std::string>();
+        if (t == "video_url") item["type"] = "video";
+      }
+      if (item.contains("video_url") && !item.contains("video"))
+        item["video"] = item["video_url"];
+    };
+
+    if (content.is_array()) {
+      for (auto& it : content) normalize_item(it);
+    } else if (content.is_object()) {
+      normalize_item(content);
+    }
+  }
   minja::chat_template_inputs input;
   input.messages = messages;
   input.tools = tools;

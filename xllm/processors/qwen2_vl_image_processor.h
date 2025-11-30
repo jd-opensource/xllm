@@ -36,6 +36,14 @@ class Qwen2VLImageProcessor : public ImageProcessor {
                      std::vector<torch::Tensor>& pixel_values,
                      std::vector<int64_t>& grids);
 
+  bool process_videos(std::vector<torch::Tensor> videos,
+                      std::vector<VideoMetadata> video_meta_list,
+                      MMData& mm_datas);
+  bool process_video(torch::Tensor video,
+                     VideoMetadata& metadata,
+                     std::vector<torch::Tensor>& pixel_values,
+                     std::vector<int64_t>& grids);
+
  private:
   bool do_convert_rgb_ = true;
   bool do_normalize_ = true;
@@ -57,6 +65,11 @@ class Qwen2VLImageProcessor : public ImageProcessor {
 
   std::unordered_map<std::string, int> size_;
   int temporal_patch_size_ = 2;
+
+  bool do_sample_frame_ = false;
+
+  int min_frames_ = 4;
+  int max_frames_ = 768;
 };
 
 }  // namespace xllm
