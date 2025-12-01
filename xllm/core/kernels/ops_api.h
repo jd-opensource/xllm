@@ -38,7 +38,16 @@ void fused_layernorm(FusedLayerNormParams& params);
 
 torch::Tensor matmul(MatmulParams& params);
 
-torch::Tensor fused_moe(FusedMoEParams& params);
+torch::Tensor group_gemm(GroupGemmParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
+    MoeActiveTopkParams& params);
+
+std::vector<torch::Tensor> moe_gen_idx(MoeGenIdxParams& params);
+
+torch::Tensor moe_expand_input(MoeExpandInputParams& params);
+
+torch::Tensor moe_combine_result(MoeCombineResultParams& params);
 
 std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
     ScaledQuantizeParams& params);

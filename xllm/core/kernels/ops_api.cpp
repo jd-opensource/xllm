@@ -207,36 +207,84 @@ torch::Tensor matmul(MatmulParams& params) {
 #endif
 }
 
-torch::Tensor fused_moe(FusedMoEParams& params) {
+torch::Tensor group_gemm(GroupGemmParams& params) {
 #if defined(USE_MLU)
-  return mlu::fused_moe(params.hidden_states,
-                        params.gating_output,
-                        params.w1,
-                        params.w2,
-                        params.bias1,
-                        params.bias2,
-                        params.residual,
-                        params.input_smooth,
-                        params.act_smooth,
-                        params.w1_scale,
-                        params.w2_scale,
-                        params.e_score_correction_bias,
-                        params.topk,
-                        params.renormalize,
-                        params.gated,
-                        params.act_mode,
-                        params.scoring_func,
-                        params.num_expert_group,
-                        params.topk_group,
-                        params.route_scale,
-                        params.start_expert_id,
-                        params.avg_moe,
-                        params.w1_quant_flag,
-                        params.w2_quant_flag);
+  return mlu::group_gemm(params.a,
+                         params.b,
+                         params.token_count,
+                         params.output,
+                         params.a_scale,
+                         params.b_scale,
+                         params.quant_flag,
+                         params.max_dim,
+                         params.trans_a,
+                         params.trans_b,
+                         params.a_quant_bit);
 #elif defined(USE_CUDA)
-  LOG(FATAL) << "fused_moe for cuda not implemented";
+  LOG(FATAL) << "group_gemm for cuda not implemented";
 #else
-  LOG(FATAL) << "fused_moe not implemented";
+  LOG(FATAL) << "group_gemm not implemented";
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
+    MoeActiveTopkParams& params) {
+#if defined(USE_MLU)
+  return mlu::moe_active_topk(params.input,
+                              params.topk,
+                              params.num_expert_group,
+                              params.topk_group,
+                              params.normalize,
+                              params.mask,
+                              params.normed_by,
+                              params.scoring_func,
+                              params.route_scale,
+                              params.e_score_correction_bias);
+#elif defined(USE_CUDA)
+  LOG(FATAL) << "moe_active_topk for cuda not implemented";
+#else
+  LOG(FATAL) << "moe_active_topk not implemented";
+#endif
+}
+
+std::vector<torch::Tensor> moe_gen_idx(MoeGenIdxParams& params) {
+#if defined(USE_MLU)
+  return mlu::moe_gen_idx(params.expert_id, params.expert_num);
+#elif defined(USE_CUDA)
+  LOG(FATAL) << "moe_gen_idx for cuda not implemented";
+#else
+  LOG(FATAL) << "moe_gen_idx not implemented";
+#endif
+}
+
+torch::Tensor moe_expand_input(MoeExpandInputParams& params) {
+#if defined(USE_MLU)
+  return mlu::moe_expand_input(params.input,
+                               params.gather_index,
+                               params.cusum_token_count,
+                               params.start_expert_id,
+                               params.expert_size);
+#elif defined(USE_CUDA)
+  LOG(FATAL) << "moe_expand_input for cuda not implemented";
+#else
+  LOG(FATAL) << "moe_expand_input not implemented";
+#endif
+}
+
+torch::Tensor moe_combine_result(MoeCombineResultParams& params) {
+#if defined(USE_MLU)
+  return mlu::moe_combine_result(params.input,
+                                 params.reduce_weight,
+                                 params.gather_ids,
+                                 params.residual,
+                                 params.cusum_token_count,
+                                 params.start_expert_id,
+                                 params.expert_size,
+                                 params.bias);
+#elif defined(USE_CUDA)
+  LOG(FATAL) << "moe_combine_result for cuda not implemented";
+#else
+  LOG(FATAL) << "moe_combine_result not implemented";
 #endif
 }
 

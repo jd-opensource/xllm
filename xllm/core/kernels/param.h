@@ -371,76 +371,164 @@ struct MatmulParams {
   double beta = 0.0;
 };
 
-// Fused MoE parameters
-struct FusedMoEParams {
-  // Input hidden states tensor. Will be reshaped to 2D [tokens, hidden_size]
-  // internally. tokens = hidden_states.numel() / hidden_states.size(-1)
-  torch::Tensor hidden_states;
-  // Gating output tensor for expert selection. Will be reshaped to 2D [tokens,
-  // expert_num]. expert_num = gating_output.size(-1)
-  torch::Tensor gating_output;
-  // First weight matrix W1. Shape: [expert_size, ...]. expert_size =
-  // w1.size(0). Used in first group_gemm operation (trans_b=true).
-  torch::Tensor w1;
-  // Second weight matrix W2. Shape: [expert_size, ...].
-  // Used in second group_gemm operation (trans_b=true).
-  torch::Tensor w2;
-  // Optional bias for first activation.
-  std::optional<torch::Tensor> bias1;
-  // Optional bias for output combination.
-  std::optional<torch::Tensor> bias2;
-  // Optional residual tensor. Will be reshaped to 2D [tokens, hidden_size]
-  // internally. Added to final output after MoE combine result.
-  std::optional<torch::Tensor> residual;
-  // Optional input smooth quantization scale. For smooth quant mode.
-  // Must be present together with act_smooth, w1_scale, w2_scale.
-  // Used to quantize hidden_states before first group_gemm.
-  std::optional<torch::Tensor> input_smooth;
-  // Optional activation smooth quantization scale. For smooth quant mode.
-  // Must be present together with input_smooth, w1_scale, w2_scale.
-  // Used to quantize gemm1_out after activation.
-  std::optional<torch::Tensor> act_smooth;
-  // Optional W1 quantization scale. For smooth quant mode.
-  // Must be present together with input_smooth, act_smooth, w2_scale.
-  // Used in first group_gemm as b_scale.
-  std::optional<torch::Tensor> w1_scale;
-  // Optional W2 quantization scale. For smooth quant mode.
-  // Must be present together with input_smooth, act_smooth, w1_scale.
-  // Used in second group_gemm as b_scale.
-  std::optional<torch::Tensor> w2_scale;
-  // Optional expert score correction bias.
-  std::optional<torch::Tensor> e_score_correction_bias;
+struct GroupGemmParams {
+  // Input activation tensor.
+  // Shape: 2D [M, K] if trans_a==false; [K, M] if trans_a==true.
+  // Must be contiguous. Dtype: float16, bfloat16, or float32.
+  // Must have same dtype and device as b, output.
+  torch::Tensor a;
+  // Weight tensor.
+  // If trans_b is true, shape is (num_experts, N, K) or (N, K);
+  // if trans_b is false, shape is (num_experts, K, N) or (K, N).
+  // Must be contiguous. Dtype and device must match a, output.
+  torch::Tensor b;
+  // Per-expert token count tensor.
+  // Shape: 1D [num_experts]. Type must be int32.
+  // Controls number of tokens processed per group/expert.
+  torch::Tensor token_count;
+  // Output tensor.
+  // Shape: [num_experts, N] or [num_experts, N, K]. num_experts =
+  // token_count.size(0). Must be contiguous. Dtype and device must match a.
+  torch::Tensor output;
+  // Optional scale tensor for a (input activation), used in quantized mode.
+  // Shape depends on quantization granularity.
+  std::optional<torch::Tensor> a_scale;
+  // Optional scale tensor for b (weight), used in quantized mode.
+  // Shape depends on quantization granularity.
+  std::optional<torch::Tensor> b_scale;
+  // Optional quantization config flag list.
+  // Used to control per-expert weight quantization mode.
+  std::optional<torch::List<int64_t>> quant_flag;
+  // Maximum workspace dimension (e.g., maximum tokens per expert allowed).
+  // Used for configuring inner kernel workspace.
+  int64_t max_dim;
+  // Whether to transpose a:
+  // false: [M, K] (default); true: [K, M].
+  bool trans_a;
+  // Whether to transpose b:
+  // false: [K, N] (default); true: [N, K].
+  bool trans_b;
+  // Quantization bit-width for input a.
+  // Set -1 to disable quantization.
+  int64_t a_quant_bit;
+};
+
+struct MoeActiveTopkParams {
+  // Input tensor.
+  // Shape: [*, num_mask, num_expert] (e.g., [batch, num_mask, num_expert]).
+  // Dtype: float32, float16, bfloat16.
+  // Must be contiguous.
+  torch::Tensor input;
   // Number of top-k experts to select per token.
+  // Constraint: 0 < topk <= num_expert.
   int64_t topk;
+  // Number of expert groups for group-limited top-k selection.
+  // If > 1, mask must be None, and num_expert % num_expert_group == 0.
+  int64_t num_expert_group;
+  // Maximum selected experts per group.
+  // Constraint: 0 < topk_group <= num_expert_group.
+  int64_t topk_group;
   // Whether to renormalize expert weights after top-k selection.
-  bool renormalize;
-  // Whether to use gated activation. If true, activation output shape is
-  // halved.
-  bool gated;
-  // Activation mode string.
-  // Supported: "none", "gelu", "silu".
-  std::string act_mode = "none";
-  // Scoring function for expert selection. Default: "softmax".
+  bool normalize;
+  // Optional mask tensor.
+  // Shape: [1, ..., 1, num_mask, num_expert] (leading dims must be 1).
+  // Dtype must match input.
+  // Must be contiguous.
+  std::optional<torch::Tensor> mask;
+  // Normalization logic after top-k selection.
+  // For softmax: "topk_logit" or "softmax_logit".
+  // For sigmoid: "topk_logit" or "sigmoid_logit".
+  std::string normed_by;
+  // Scoring function for expert selection.
   // Supported: "softmax", "sigmoid".
-  std::string scoring_func = "softmax";
-  // Number of expert groups. Default: -1.
-  int64_t num_expert_group = -1;
-  // Top-k group parameter. Default: 0.
-  int64_t topk_group = 0;
-  // Route scaling factor. Default: 1.0.
-  double route_scale = 1.0;
-  // Starting expert ID. Used to slice token_count and cusum_token_count.
-  // Processing range: [start_expert_id, start_expert_id + expert_size).
+  std::string scoring_func;
+  // Route scaling factor applied to routing scores.
+  double route_scale;
+  // Optional expert score correction bias.
+  // Shape: [num_expert].
+  // Dtype: float32, float16, or bfloat16.
+  // Must be contiguous.
+  std::optional<torch::Tensor> e_score_correction_bias;
+};
+
+struct MoeGenIdxParams {
+  // The input tensor stores the expert id of each token.
+  // Shape: [num_tokens, topk].
+  // Dtype: int32.
+  torch::Tensor expert_id;
+  // Expert number.
+  // Must be >= 0.
+  int64_t expert_num;
+};
+
+struct MoeExpandInputParams {
+  // Input tensor to be expanded.
+  // Shape: [token_num, hidden_size].
+  // Dtype: int8, float, half, or bfloat16.
+  torch::Tensor input;
+  // Index tensor for gather operation.
+  // Shape: [expand_token_num].
+  // Dtype: int32.
+  torch::Tensor gather_index;
+  // Optional prefix sum of token count per expert.
+  // Shape: [num_experts + 1].
+  // Dtype: int32.
+  // If provided, adjusts gather range for each expert.
+  std::optional<torch::Tensor> cusum_token_count;
+  // Starting expert id to process.
+  // Must be >= 0.
+  int64_t start_expert_id;
+  // Number of experts to process in this call.
+  // Must be >= 0.
+  int64_t expert_size;
+};
+
+struct MoeCombineResultParams {
+  // Expert output tensor to be combined.
+  // Shape: [num_tokens * topk, hidden_size].
+  // - Must be contiguous.
+  // - Dtype: float32, float16, or bfloat16.
+  // - This is the concatenated output from all experts, not yet reordered back
+  // to the original sequence order.
+  torch::Tensor input;
+  // Router/gating weights tensor. Used for weighted combination of expert
+  // outputs. Shape: [num_tokens, topk].
+  // - Must be contiguous at last dimension.
+  // - Dtype: float32.
+  // - Constraint: reduce_weight.numel() == input.size(0).
+  torch::Tensor reduce_weight;
+  // Gather index tensor that maps combined output to original token positions.
+  // Shape: [num_tokens * topk].
+  // - Must be contiguous.
+  // - Dtype: int32.
+  // - Corresponds to permutation/scatter indices for reordering expert outputs.
+  torch::Tensor gather_ids;
+  // Optional residual connection input.
+  // Shape: [num_tokens, hidden_size].
+  // - Must have same shape and dtype as output if provided.
+  // - Must be contiguous if provided.
+  // - Default: std::nullopt (no residual).
+  std::optional<torch::Tensor> residual;
+  // Optional cumulative token count for expert assignment.
+  // Shape: [num_experts + 1] or deduced by expert_size.
+  // - Must be contiguous if provided.
+  // - Dtype: int32.
+  // - Used to infer num_expert or assist calculation in some kernels.
+  std::optional<torch::Tensor> cusum_token_count;
+  // Starting expert ID
+  // - Must be >= 0.
+  // - Used to mark the offset of current experts being processed (for
+  // sharding).
   int64_t start_expert_id = 0;
-  // Enforce every expert get equal number of tokens
-  // This option has not implemented yet.
-  bool avg_moe = false;
-  // Optional quantization flag list for W1.
-  // Used in first group gemm.
-  std::optional<torch::List<int64_t>> w1_quant_flag;
-  // Optional quantization flag list for W2.
-  // Used in second group gemm.
-  std::optional<torch::List<int64_t>> w2_quant_flag;
+  // Number of experts processed in this step.
+  // - If cusum_token_count not given, num_expert is set to this value.
+  // - If cusum_token_count given, deduced num_expert must satisfy:
+  //   num_expert >= start_expert_id + expert_size
+  int64_t expert_size = 0;
+  // Optional bias tensor.
+  // WARNING: Bias addition is NOT supported in current implementation.
+  // Always keep as std::nullopt unless bias support is added in the future.
+  std::optional<torch::Tensor> bias;
 };
 
 // Per token smooth quantize parameters

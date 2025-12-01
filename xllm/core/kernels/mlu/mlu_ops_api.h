@@ -138,31 +138,49 @@ torch::Tensor matmul(const torch::Tensor& a,
                      double alpha,
                      double beta);
 
-torch::Tensor fused_moe(
-    const torch::Tensor& hidden_states,
-    const torch::Tensor& gating_output,
-    const torch::Tensor& w1,
-    const torch::Tensor& w2,
-    const std::optional<torch::Tensor>& bias1,
-    const std::optional<torch::Tensor>& bias2,
-    const std::optional<torch::Tensor>& residual,
-    const std::optional<torch::Tensor>& input_smooth,
-    const std::optional<torch::Tensor>& act_smooth,
-    const std::optional<torch::Tensor>& w1_scale,
-    const std::optional<torch::Tensor>& w2_scale,
-    const std::optional<torch::Tensor>& e_score_correction_bias,
+torch::Tensor group_gemm(const torch::Tensor& a,
+                         const torch::Tensor& b,
+                         const torch::Tensor& token_count,
+                         torch::Tensor& output,
+                         const std::optional<torch::Tensor>& a_scale,
+                         const std::optional<torch::Tensor>& b_scale,
+                         const std::optional<torch::List<int64_t>>& quant_flag,
+                         const int64_t max_dim,
+                         const bool trans_a,
+                         const bool trans_b,
+                         const int64_t a_quant_bit);
+
+std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
+    const torch::Tensor& input,
     int64_t topk,
-    bool renormalize,
-    bool gated,
-    const std::string& act_mode,
-    const std::string& scoring_func,
     int64_t num_expert_group,
     int64_t topk_group,
+    bool normalize,
+    const std::optional<torch::Tensor>& mask,
+    const std::string& normed_by,
+    const std::string& scoring_func,
     double route_scale,
+    const std::optional<torch::Tensor>& e_score_correction_bias);
+
+std::vector<torch::Tensor> moe_gen_idx(const torch::Tensor& expert_id,
+                                       int64_t expert_num);
+
+torch::Tensor moe_expand_input(
+    const torch::Tensor& input,
+    const torch::Tensor& gather_index,
+    const std::optional<torch::Tensor>& cusum_token_count,
     int64_t start_expert_id,
-    bool avg_moe,
-    const std::optional<torch::List<int64_t>>& w1_quant_flag,
-    const std::optional<torch::List<int64_t>>& w2_quant_flag);
+    int64_t expert_size);
+
+torch::Tensor moe_combine_result(
+    const torch::Tensor& input,
+    const torch::Tensor& reduce_weight,
+    const torch::Tensor& gather_ids,
+    const std::optional<torch::Tensor>& residual,
+    const std::optional<torch::Tensor>& cusum_token_count,
+    const int64_t start_expert_id,
+    const int64_t expert_size,
+    const std::optional<torch::Tensor>& bias);
 
 std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
     const torch::Tensor& x,

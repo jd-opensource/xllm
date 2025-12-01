@@ -60,6 +60,21 @@ class FusedMoEImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict);
 
  private:
+  // struct to store the selected expert info
+  struct SelectedExpertInfo {
+    torch::Tensor reduce_weight;
+    torch::Tensor combine_idx;
+    torch::Tensor token_count_slice;
+    torch::Tensor cusum_token_count;
+    std::optional<torch::Tensor> input_scale;
+  };
+
+  // initial steps for MoE computation, select the experts for each token
+  torch::Tensor select_experts(const torch::Tensor& hidden_states_2d,
+                               const torch::Tensor& router_logits_2d,
+                               SelectedExpertInfo& selected_expert_info);
+
+ private:
   int64_t topk_;
   int64_t num_expert_group_;
   int64_t topk_group_;

@@ -62,14 +62,14 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
   if (output.has_value()) {
     result_output = output.value();
   } else {
-    result_output = at::empty(output_shape, x.options().dtype(quant_type));
+    result_output = torch::empty(output_shape, x.options().dtype(quant_type));
   }
 
   if (output_scale.has_value()) {
     result_output_scale = output_scale.value();
   } else {
     result_output_scale =
-        at::empty(output_scale_shape, x.options().dtype(at::kFloat));
+        torch::empty(output_scale_shape, x.options().dtype(at::kFloat));
   }
 
   // Call underlying MLU kernel
