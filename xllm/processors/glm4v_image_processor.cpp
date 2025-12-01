@@ -152,8 +152,8 @@ bool Glm4VImageProcessor::process_images(std::vector<torch::Tensor> images,
   auto thw = torch::tensor(grids);
 
   thw = thw.clone().reshape({-1, 3});
-  mm_datas = std::move(MMData(
-      MMType::IMAGE, {{"image_grid_thw", thw}, {"pixel_values", values}}));
+  mm_datas.add(MMType::IMAGE, "image_grid_thw", thw);
+  mm_datas.add(MMType::IMAGE, "pixel_values", values);
 
   return true;
 }
@@ -245,12 +245,13 @@ bool Glm4VImageProcessor::process_videos(
       return false;
     }
   }
+  mm_datas.set_video_metadata(video_meta_list);
 
   auto values = torch::cat(pixel_values);
   auto thw = torch::tensor(grids).clone().reshape({-1, 3});
   mm_datas.update(MMType::VIDEO, "video_grid_thw", thw);
   mm_datas.update(MMType::VIDEO, "pixel_values_videos", values);
-  mm_datas.video_metadata = std::move(video_meta_list);
+
   return true;
 }
 

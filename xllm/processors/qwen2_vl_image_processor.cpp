@@ -134,8 +134,8 @@ bool Qwen2VLImageProcessor::process_images(std::vector<torch::Tensor> images,
 
   thw = thw.clone().reshape({-1, 3});
 
-  mm_datas.update(MMType::IMAGE, "image_grid_thw", thw);
-  mm_datas.update(MMType::IMAGE, "pixel_values", values);
+  mm_datas.add(MMType::IMAGE, "image_grid_thw", thw);
+  mm_datas.add(MMType::IMAGE, "pixel_values", values);
   return true;
 }
 
@@ -240,15 +240,15 @@ bool Qwen2VLImageProcessor::process_videos(
     double seconds_per_grid = static_cast<double>(temporal_patch_size_) / fps;
     second_per_grid.push_back(seconds_per_grid);
   }
+  mm_datas.set_video_metadata(video_meta_list);
 
   auto opts = torch::TensorOptions().dtype(torch::kFloat32);
   auto second_per_grid_ts = torch::tensor(second_per_grid, opts);
 
-  mm_datas.update(MMType::VIDEO, "video_grid_thw", thw);
-  mm_datas.update(MMType::VIDEO, "pixel_values_videos", values);
-  mm_datas.update(MMType::VIDEO, "second_per_grid_ts", second_per_grid_ts);
+  mm_datas.add(MMType::VIDEO, "video_grid_thw", thw);
+  mm_datas.add(MMType::VIDEO, "pixel_values_videos", values);
+  mm_datas.add(MMType::VIDEO, "second_per_grid_ts", second_per_grid_ts);
 
-  mm_datas.video_metadata = std::move(video_meta_list);
   return true;
 }
 
