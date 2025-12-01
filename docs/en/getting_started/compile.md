@@ -48,7 +48,7 @@ pip install --upgrade setuptools wheel
 ```
 
 ## Compilation
-Execute the compilation to generate the executable file `build/xllm/core/server/xllm` under `build/`. The default device is A2, for A3, add `--device a3`, for mlu, add `--device mlu`:
+Execute the compilation to generate the executable file `build/xllm/core/server/xllm` under `build/`. For A3, add `--device a3`, and no need to add `--device` for other devices:
 ```bash
 python setup.py build
 ```

@@ -11,6 +11,7 @@ import sysconfig
 from pathlib import Path
 from typing import List
 from jinja2 import Template
+import argparse
 
 from distutils.core import Command
 from setuptools import Extension, setup, find_packages
@@ -29,6 +30,31 @@ def get_cpu_arch():
         return "arm"
     else:
         raise ValueError(f"Unsupported architecture: {arch}")
+
+# get device type
+def get_device_type():
+    import torch
+
+    if torch.cuda.is_available():
+        return "cuda"
+
+    try:
+        import torch_mlu
+        if torch.mlu.is_available():
+            return "mlu"
+    except ImportError:
+        pass
+
+    try:
+        import torch_npu
+        if torch.npu.is_available():
+            return "a2"
+    except ImportError:
+        pass
+
+    print("Unsupported device type, please install torch, torch_mlu or torch_npu")
+    exit(1)
+
 
 def get_cxx_abi():
     try:
@@ -227,8 +253,6 @@ def set_cuda_envs():
     os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
     os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
     os.environ["CUDA_TOOLKIT_ROOT_DIR"] = "/usr/local/cuda"
-    os.environ["NCCL_ROOT"] = get_nccl_root_path()
-    os.environ["NCCL_VERSION"] = "2"
     
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
@@ -562,54 +586,80 @@ def pre_build():
         if not run_shell_command("sh third_party/dependencies.sh", cwd=script_path):
             print("❌ Failed to reset changes!")
             exit(0)
+            
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description='Setup helper for building xllm',
+        epilog='Example: python setup.py build --device a3',
+        usage='%(prog)s [COMMAND] [OPTIONS]'
+    )
+    
+    parser.add_argument(
+        'setup_args',
+        nargs='*',
+        metavar='argparse.REMAINDER',
+        help='setup command (build, test, bdist_wheel, etc.)'
+    )
+    
+    parser.add_argument(
+        '--device',
+        type=str.lower,
+        choices=['auto', 'a2', 'a3', 'mlu', 'cuda'],
+        default='auto',
+        help='Device type: a2, a3, mlu, or cuda (case-insensitive)'
+    )
+    
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Dry run mode (do not execute pre_build)'
+    )
+    
+    parser.add_argument(
+        '--install-xllm-kernels',
+        type=str.lower,
+        choices=['true', 'false', '1', '0', 'yes', 'no', 'y', 'n', 'on', 'off'],
+        default='true',
+        help='Whether to install xllm kernels'
+    )
+    
+    parser.add_argument(
+        '--generate-so',
+        type=str.lower,
+        choices=['true', 'false', '1', '0', 'yes', 'no', 'y', 'n', 'on', 'off'],
+        default='false',
+        help='Whether to generate so or binary'
+    )
+
+    args = parser.parse_args()
+    
+    sys.argv = [sys.argv[0]] + args.setup_args
+    
+    install_kernels = args.install_xllm_kernels.lower() in ('true', '1', 'yes', 'y', 'on')
+    generate_so = args.generate_so.lower() in ('true', '1', 'yes', 'y', 'on')
+
+    return {
+        'device': args.device,
+        'dry_run': args.dry_run,
+        'install_xllm_kernels': install_kernels,
+        'generate_so': generate_so,
+    }
+
 
 if __name__ == "__main__":
-    device = 'a2'  # default
-    arch = get_cpu_arch()
-    install_kernels = True
-    generate_so = False
-    if '--device' in sys.argv:
-        idx = sys.argv.index('--device')
-        if idx + 1 < len(sys.argv):
-            device = sys.argv[idx+1].lower()
-            if device not in ('a2', 'a3', 'mlu', 'cuda'):
-                print("Error: --device must be a2 or a3 or mlu (case-insensitive)")
-                sys.exit(1)
-            # Remove the arguments so setup() doesn't see them
-            del sys.argv[idx]
-            del sys.argv[idx]
-    if '--dry_run' not in sys.argv:
-        pre_build()
-    else:
-        sys.argv.remove("--dry_run") 
-    
-    if '--install-xllm-kernels' in sys.argv:
-        idx = sys.argv.index('--install-xllm-kernels')
-        if idx + 1 < len(sys.argv):
-            install_kernels = sys.argv[idx+1].lower()
-            if install_kernels in ('true', '1', 'yes', 'y', 'on'):
-                install_kernels = True
-            elif install_kernels in ('false', '0', 'no', 'n', 'off'):
-                install_kernels = False
-            else:
-                print("Error: --install-xllm-kernels must be true or false")
-                sys.exit(1)
-            sys.argv.pop(idx)
-            sys.argv.pop(idx)
+    config = parse_arguments()
 
-    if '--generate-so' in sys.argv:
-        idx = sys.argv.index('--generate-so')
-        if idx + 1 < len(sys.argv):
-            generate_so_val = sys.argv[idx+1].lower()
-            if generate_so_val in ('true', '1', 'yes', 'y', 'on'):
-                generate_so = True
-            elif generate_so_val in ('false', '0', 'no', 'n', 'off'):
-                generate_so = False
-            else:
-                print("Error: --generate-so must be true or false")
-                sys.exit(1)
-            sys.argv.pop(idx)
-            sys.argv.pop(idx)
+    arch = get_cpu_arch()
+    device = config['device']
+    if device == 'auto':
+        device = get_device_type()
+    print(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
+    
+    if not config['dry_run']:
+        pre_build()
+
+    install_kernels = config['install_xllm_kernels']
+    generate_so = config['generate_so']
 
     if "SKIP_TEST" in os.environ:
         BUILD_TEST_FILE = False
@@ -631,7 +681,7 @@ if __name__ == "__main__":
         long_description=read_readme(),
         long_description_content_type="text/markdown",
         url="https://github.com/jd-opensource/xllm",
-        project_url={
+        project_urls={
             "Homepage": "https://xllm.readthedocs.io/zh-cn/latest/",
             "Documentation": "https://xllm.readthedocs.io/zh-cn/latest/",
         },
@@ -658,7 +708,7 @@ if __name__ == "__main__":
         options={'build_ext': {
                     'device': device,
                     'arch': arch,
-                    'install_xllm_kernels': install_kernels if install_kernels is not None else "false",
+                    'install_xllm_kernels': install_kernels,
                     'generate_so': generate_so
                     },
                  'bdist_wheel': {

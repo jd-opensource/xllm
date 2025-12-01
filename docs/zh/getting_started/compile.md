@@ -49,7 +49,7 @@ pip install -r cibuild/requirements-dev.txt -i https://mirrors.tuna.tsinghua.edu
 pip install --upgrade setuptools wheel
 ```
 ## 编译
-执行编译，在`build/`下生成可执行文件`build/xllm/core/server/xllm`。默认为A2，A3请加 `--device a3`，MLU请加 `--device mlu`：
+执行编译，在`build/`下生成可执行文件`build/xllm/core/server/xllm`。如果是A3请加`--device a3`，其他设备无需加`--device`：
 ```bash
 python setup.py build
 ```
