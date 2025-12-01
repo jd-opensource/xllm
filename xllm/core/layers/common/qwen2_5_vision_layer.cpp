@@ -26,7 +26,6 @@ Qwen2_5_VisionLayerImpl::Qwen2_5_VisionLayerImpl(const ModelContext& context,
   const auto& options = context.get_tensor_options();
   int64_t dim = args.mm_hidden_size();
   int64_t mlp_intermediate_size = args.mm_intermediate_size();
-  std::string act_layer = args.mm_hidden_act();
   bool is_gated = true;
   attention_ = register_module("self_attn", Qwen2VisionAttention(context));
   norm1_ = register_module("norm1", RmsNorm(dim, args.rms_norm_eps(), options));

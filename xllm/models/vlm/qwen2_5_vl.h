@@ -842,7 +842,9 @@ REGISTER_MODEL_ARGS(qwen2_5_vl, [&] {
   LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2);
   LOAD_ARG_OR(mm_spatial_patch_size, "vision_config.spatial_patch_size", 14);
   LOAD_ARG_OR(mm_window_size, "vision_config.window_size", 112);
-  LOAD_ARG(mm_fullatt_block_indexes, "vision_config.fullatt_block_indexes");
+  LOAD_ARG_OR(mm_fullatt_block_indexes,
+              "vision_config.fullatt_block_indexes",
+              std::vector<int64_t>({7, 15, 23, 31}));
   LOAD_ARG_OR(mm_tokens_per_second, "vision_config.tokens_per_second", 2);
   LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
   LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {
