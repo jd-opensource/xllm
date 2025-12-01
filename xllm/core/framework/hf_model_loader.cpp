@@ -102,6 +102,11 @@ bool HFModelLoader::load_args(const std::string& model_weights_path) {
     return false;
   }
 
+  if (!load_video_preprocessor_args(model_weights_path)) {
+    LOG(ERROR) << "Failed to load video preprocess args from "
+               << model_weights_path;
+    return false;
+  }
   // Some hacky logics to support loading of old models
   // always use float16 for quantization
   // TODO: support quantization for other data types
@@ -411,6 +416,26 @@ bool HFModelLoader::load_image_preprocessor_args(
 
     args_.mm_use_image_id() =
         image_preprocess_reader.value_or<bool>("use_image_id", false);
+  }
+
+  return true;
+}
+
+bool HFModelLoader::load_video_preprocessor_args(
+    const std::string& model_weights_path) {
+  // image preprocessor args
+  JsonReader video_preprocess_reader;
+  const std::string video_preprocess_file_path =
+      model_weights_path + "/video_preprocessor_config.json";
+  if (video_preprocess_reader.parse(video_preprocess_file_path)) {
+    LOG(INFO) << "Success to parse video preprocess args file: "
+              << video_preprocess_file_path;
+
+    args_.mm_video_shortest_edge() =
+        video_preprocess_reader.value_or<int>("size.shortest_edge", 0);
+
+    args_.mm_video_longest_edge() =
+        video_preprocess_reader.value_or<int>("size.longest_edge", 0);
   }
 
   return true;

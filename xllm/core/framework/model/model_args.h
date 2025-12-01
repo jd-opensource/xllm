@@ -297,6 +297,10 @@ struct ModelArgs {
   PROPERTY(int64_t, mm_image_shortest_edge) = 0;
   PROPERTY(int64_t, mm_image_longest_edge) = 0;
 
+  // GLM
+  PROPERTY(int64_t, mm_video_shortest_edge) = 0;
+  PROPERTY(int64_t, mm_video_longest_edge) = 0;
+
   PROPERTY(int, mm_image_patch_size) = 0;
   PROPERTY(int, mm_image_temporal_patch_size) = 0;
   PROPERTY(int, mm_image_merge_size) = 0;
