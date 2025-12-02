@@ -155,6 +155,10 @@ DECLARE_int32(max_decode_token_per_sequence);
 
 DECLARE_uint32(prefetch_timeout);
 
+DECLARE_uint32(prefetch_bacth_size);
+
+DECLARE_uint32(layers_wise_copy_batchs);
+
 DECLARE_string(priority_strategy);
 
 DECLARE_bool(enable_online_preempt_offline);

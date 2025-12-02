@@ -179,6 +179,14 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
           num_speculative_tokens_ + 1, dtype_, device_);
     }
 
+    uint32_t layers_per_bacth_copy = 0;
+    if (input_params.layer_wise_load_synchronizer != nullptr) {
+      uint32_t event_cnt =
+          input_params.layer_wise_load_synchronizer->get_event_size();
+      layers_per_bacth_copy = layers_.size() / event_cnt +
+                              uint32_t(layers_.size() % event_cnt == 0);
+    }
+
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -186,8 +194,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
         event = input_params.layer_synchronizer->get_event(i);
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
       }
-      if (input_params.layer_wise_load_synchronizer != nullptr) {
-        if (!input_params.layer_wise_load_synchronizer->synchronize_layer(i)) {
+      if (layers_per_bacth_copy > 0 && i % layers_per_bacth_copy == 0) {
+        if (!input_params.layer_wise_load_synchronizer->synchronize_layer(
+                i / layers_per_bacth_copy)) {
           return torch::Tensor();
         }
       }

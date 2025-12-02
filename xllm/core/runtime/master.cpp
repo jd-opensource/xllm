@@ -218,6 +218,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .store_master_server_address(options_.store_master_server_address())
         .store_metadata_server(options_.store_metadata_server())
         .store_local_hostname(options_.store_local_hostname())
+        .prefetch_bacth_size(options_.prefetch_bacth_size())
+        .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
         .enable_continuous_kvcache(options_.enable_continuous_kvcache())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())

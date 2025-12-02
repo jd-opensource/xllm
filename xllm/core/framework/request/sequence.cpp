@@ -382,6 +382,7 @@ void Sequence::reset() {
   kv_state_.reset();
   host_kv_state_.reset();
   timer_.reset();
+  is_timeout_set_ = false;
   volatile_num_prompt_tokens_ = num_tokens_;
 }
 
@@ -462,12 +463,13 @@ bool Sequence::update_prefetch_result(uint32_t timeout) {
   }
 
   if (timeout != 0 && !termination_flag_.load(std::memory_order_acquire)) {
-    if (timer_ != nullptr) {
-      timer_ = std::make_shared<Timer>();
+    if (!is_timeout_set_) {
+      timer_.reset();
+      is_timeout_set_ = true;
       return false;
     }
 
-    if (timer_->elapsed_milliseconds() < timeout) {
+    if (timer_.elapsed_milliseconds() < timeout) {
       return false;
     }
   }
