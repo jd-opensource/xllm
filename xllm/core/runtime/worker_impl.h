@@ -186,6 +186,7 @@ class WorkerImpl {
 
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
+  void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
 
  protected:
   // runtime options

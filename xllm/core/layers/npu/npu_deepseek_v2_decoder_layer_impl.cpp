@@ -284,8 +284,10 @@ NpuDeepseekV2DecoderLayerImpl::NpuDeepseekV2DecoderLayerImpl(
   CHECK_EQ(parallel_args.world_size(), dp_size_ * dp_local_tp_size_);
   dp_local_tp_rank_ = parallel_args.rank() % dp_local_tp_size_;
 
-  param_from_args(prefill_param_, model_args, parallel_args, true);
-  param_from_args(decode_param_, model_args, parallel_args, false);
+  param_from_args(prefill_param_, model_args, parallel_args, true, false);
+  param_from_args(
+      prefill_param_prefixcache_, model_args, parallel_args, true, true);
+  param_from_args(decode_param_, model_args, parallel_args, false, false);
 
   initialize_tensors(options);
 }
@@ -346,8 +348,10 @@ void NpuDeepseekV2DecoderLayerImpl::param_from_args(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
-    bool is_prefill) {
-  initialize_basic_parameters(param, args, parallel_args, is_prefill);
+    bool is_prefill,
+    bool is_prefixcache) {
+  initialize_basic_parameters(
+      param, args, parallel_args, is_prefill, is_prefixcache);
   initialize_attention_parameters(param, args, parallel_args);
   initialize_mlp_parameters(param, args, parallel_args);
   initialize_parallel_parameters(param, parallel_args);
@@ -393,10 +397,14 @@ void NpuDeepseekV2DecoderLayerImpl::initialize_basic_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
-    bool is_prefill) {
+    bool is_prefill,
+    bool is_prefixcache) {
   param.isFA = false;
   param.isPrefill = is_prefill;
   param.isBF16 = args.dtype() == "bfloat16";
+  param.enablePrefixCache =
+      is_prefill && FLAGS_enable_prefix_cache && is_prefixcache;
+  param.isNzCache = FLAGS_enable_prefix_cache;
   param.enableSwiGLU = true;
   param.enableLcoc = true;
   // TODO: modify xllm_atb_layers
@@ -467,7 +475,6 @@ void NpuDeepseekV2DecoderLayerImpl::initialize_attention_parameters(
   }
 
   param.enableFA3 = false;           // TODO
-  param.isNzCache = false;           // TODO
   param.enableKvQuantLayer = false;  // TODO
 }
 
@@ -1459,6 +1466,8 @@ int64_t NpuDeepseekV2DecoderLayerImpl::init_layer() {
   name_ = "deepseek_v2_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "DeepSeek_V2";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(prefill_node_prefixcache_, prefill_param_prefixcache_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
   return atb::NO_ERROR;
 }
@@ -1525,18 +1534,30 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
   atb::Status st;
   // all micro batches are in same prefill/decode stage,
   //  so, to judge empty_kv_cache, use input_params[0] here
-  if (input_params[0].global_empty_kv_cache) {
-    build_node_variant_pack(prefill_node_,
-                            x,
-                            cos_pos,
-                            sin_pos,
-                            attn_mask,
-                            kv_cache,
-                            input_params,
-                            true);
-    st = execute_node(prefill_node_, node_id, event, event_flag);
-    LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute prefill layer fail, error code: " << st;
+   if (input_params[0].batch_forward_type.is_chunked_prefill()) {
+      build_node_variant_pack(prefill_node_prefixcache_,
+                              x,
+                              cos_pos,
+                              sin_pos,
+                              attn_mask,
+                              kv_cache,
+                              input_params,
+                              true);
+      st = execute_node(prefill_node_prefixcache_, node_id, event, event_flag);
+      LOG_IF(FATAL, st != 0)
+          << model_name_ << "excute prefill layer fail, error code: " << st;
+    } else if(input_params[0].batch_forward_type.is_prefill()){
+      build_node_variant_pack(prefill_node_,
+                              x,
+                              cos_pos,
+                              sin_pos,
+                              attn_mask,
+                              kv_cache,
+                              input_params,
+                              true);
+      st = execute_node(prefill_node_, node_id, event, event_flag);
+      LOG_IF(FATAL, st != 0)
+          << model_name_ << "excute prefill layer fail, error code: " << st;
   } else {
     std::vector<torch::Tensor> attn_mask{tensor_placeholder_,
                                          tensor_placeholder_};
@@ -1617,9 +1638,9 @@ void NpuDeepseekV2DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
-      atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
+      atb_speed::Utils::AtTensor2Tensor(input_params[0].kv_cache_tokens_nums);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13).hostData =
-      const_cast<int32_t*>(placeholder_vec_.data());
+      const_cast<int32_t*>(input_params[0].kv_cache_tokens_nums_host.data());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
@@ -1865,14 +1886,32 @@ void NpuDeepseekV2DecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.dynamic_ep_idx());
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 29) =
         atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.moe_idx());
+    int offset = 30;
     if (FLAGS_enable_eplb && layer_id_ >= decode_param_.firstKDenseReplace) {
-      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + offset++) =
           atb_speed::Utils::AtTensor2Tensor(expert_routing_map_);
       if (!is_prefill) {
         node.variantPack.outTensors.at(1) = atb_speed::Utils::AtTensor2Tensor(
             input_params[0].expert_load_data[layer_id_ -
                                              decode_param_.firstKDenseReplace]);
       }
+    }
+    if (input_params[0].batch_forward_type.is_chunked_prefill()) {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + offset) =
+          atb_speed::Utils::AtTensor2Tensor(
+              input_params[0].history_compressed_kv);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + offset + 1) =
+          atb_speed::Utils::AtTensor2Tensor(input_params[0].history_k_rope);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + offset + 2) =
+          atb_speed::Utils::AtTensor2Tensor(input_params[0].ring_cur_seqlen);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + offset + 2)
+          .hostData =
+          const_cast<int32_t*>(input_params[0].ring_cur_seqlen_host.data());
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + offset + 3) =
+          atb_speed::Utils::AtTensor2Tensor(input_params[0].ring_cache_seqlen);
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + offset + 3)
+          .hostData =
+          const_cast<int32_t*>(input_params[0].ring_cache_seqlen_host.data());
     }
   }
 

@@ -63,6 +63,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> q_seq_lens =
       std::vector<int32_t>(pb_forward_input->q_seq_lens().begin(),
                            pb_forward_input->q_seq_lens().end());
+  std::vector<int32_t> kv_cache_tokens_nums =
+      std::vector<int32_t>(pb_forward_input->kv_cache_tokens_nums().begin(),
+                           pb_forward_input->kv_cache_tokens_nums().end());
   // aprint<int32_t>(q_seq_lens, "q_seq_lens", global_rank_);
   std::vector<std::vector<int32_t>> block_tables_vec;
   for (size_t i = 0; i < pb_forward_input->block_tables_vec().size(); ++i) {
@@ -212,6 +215,8 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.q_max_seq_len = pb_forward_input->q_max_seq_len();
   input_params.kv_seq_lens = torch::tensor(seq_lens, tensor_options);
   input_params.q_seq_lens = torch::tensor(q_seq_lens, tensor_options);
+  input_params.kv_cache_tokens_nums =
+      torch::tensor(kv_cache_tokens_nums, tensor_options);
   input_params.kv_seq_lens_vec = std::move(seq_lens);
   input_params.q_seq_lens_vec = std::move(q_seq_lens);
 
@@ -237,6 +242,13 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.dst_block_indices =
       torch::tensor(dst_block_indices, tensor_options);
   input_params.cum_sum = torch::tensor(cum_sum, tensor_options);
+
+  // input_params.ring_cur_seqlen_host = ring_cur_seqlen;
+  // input_params.ring_cache_seqlen_host = ring_cache_seqlen;
+  // input_params.history_compressed_kv = torch::tensor(history_compressed_kv, tensor_options);
+  // input_params.history_k_rope = torch::tensor(history_k_rope, tensor_options);
+  // input_params.ring_cur_seqlen = torch::tensor(ring_cur_seqlen, tensor_options);
+  // input_params.ring_cache_seqlen = torch::tensor(ring_cache_seqlen, tensor_options);
 
   if (pb_forward_input->embeds().size() > 0) {
     const int32_t rows = pb_forward_input->embeds().size();
@@ -397,8 +409,20 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   pb_forward_input->set_max_seq_len(inputs.max_seq_len);
   pb_forward_input->set_q_max_seq_len(inputs.q_max_seq_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_seq_lens(), inputs.seq_lens);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_kv_cache_tokens_nums(),
+                      inputs.kv_cache_tokens_nums);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_q_seq_lens(),
                       inputs.q_seq_lens);
+
+  // ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_history_compressed_kv(),
+  //                     inputs.history_compressed_kv);
+  // ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_history_k_rope(),
+  //                     inputs.history_k_rope);
+  // ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_ring_cur_seqlen(),
+  //                     inputs.ring_cur_seqlen);
+  // ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_ring_cache_seqlen(),
+  //                     inputs.ring_cache_seqlen);
+
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_new_token_slot_ids(),
                       inputs.new_token_slot_ids);
   pb_forward_input->mutable_block_tables_vec()->Reserve(

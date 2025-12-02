@@ -41,6 +41,8 @@ limitations under the License.
 
 namespace xllm {
 
+constexpr int32_t NZ_ALIGNMENT = 16;
+
 namespace {
 uint32_t determine_micro_batches_num(const std::vector<Batch>& batch) {
   bool not_all_in_decode =
@@ -257,7 +259,16 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
   int64_t slot_size = 0;
   if (FLAGS_enable_mla) {
-    slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+    if (FLAGS_enable_prefix_cache) {
+      slot_size =
+          dtype_size *
+          ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
+           (args_.qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT);
+    } else {
+      slot_size =
+          dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+    }
+
   } else {
     slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   }
@@ -299,10 +310,23 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   std::vector<std::vector<int64_t>> kv_cache_shape;
   kv_cache_shape.reserve(2);
   if (FLAGS_enable_mla) {
-    kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
-    kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
+    if (FLAGS_enable_prefix_cache) {
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>{kv_cache_cap.n_blocks,
+                               (args_.kv_lora_rank() + 15) / 16,
+                               block_size,
+                               16});
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>{kv_cache_cap.n_blocks,
+                               (args_.qk_rope_head_dim() + 15) / 16,
+                               block_size,
+                               16});
+    } else {
+      kv_cache_shape.emplace_back(std::vector<int64_t>{
+          kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
+      kv_cache_shape.emplace_back(std::vector<int64_t>{
+          kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
+    }
   } else {
 #if defined(USE_NPU)
     kv_cache_shape.emplace_back(std::vector<int64_t>{

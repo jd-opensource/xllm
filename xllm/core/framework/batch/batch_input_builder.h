@@ -86,6 +86,7 @@ class BatchInputBuilder {
     BatchForwardType batch_forward_type;
     uint32_t max_seq_len = 0;
     uint32_t q_max_seq_len = 0;
+    std::vector<int32_t> kv_cache_tokens_nums;
 #if defined(USE_NPU)
     std::vector<int32_t> seq_lens;
     std::vector<int32_t> q_seq_lens;

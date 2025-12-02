@@ -48,6 +48,8 @@ limitations under the License.
 namespace xllm {
 
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
+constexpr int32_t FORMAT_ND = 2;
+constexpr int32_t FORMAT_NZ = 29;
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
@@ -87,12 +89,14 @@ bool WorkerImpl::allocate_kv_cache(
   for (int64_t i = 0; i < num_layers; ++i) {
     torch::Tensor key_cache, value_cache;
 #if defined(USE_NPU)
+    int32_t npu_format_type =
+        FLAGS_enable_mla && FLAGS_enable_prefix_cache ? FORMAT_NZ : FORMAT_ND;
     key_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_)),
-        2);
+        npu_format_type);
     value_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
-        2);
+        npu_format_type);
 #elif defined(USE_MLU)
     key_cache =
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
@@ -448,6 +452,10 @@ void WorkerImpl::prepare_work_before_execute(
         // expert_load_data_.fill_(0);
         fwd_inputs_on_device.input_params.expert_load_data = expert_load_data_;
       }
+      //deepseek use prefix cache
+      if (FLAGS_enable_mla && input_params.batch_forward_type.is_chunked_prefill()){
+        prepare_mla_prefixcache_inputs(input_params);
+      }
     }
 #endif
     processed_inputs.micro_inputs.push_back(std::move(fwd_inputs_on_device));
@@ -757,6 +765,34 @@ int64_t WorkerImpl::get_active_activation_memory() {
   return DeviceMonitor::get_instance()
       .get_device_stats(device_.index())
       .active_activation_memory;
+}
+
+void WorkerImpl::prepare_mla_prefixcache_inputs(ModelInputParams& input_params){
+    int32_t sum_prefix = input_params.kv_cache_tokens_nums.sum().item<int>();
+    input_params.history_compressed_kv = torch::empty(
+        {sum_prefix, context_.get_model_args().kv_lora_rank()},
+        torch::TensorOptions().dtype(dtype_).pinned_memory(true)).to(device_);
+
+    input_params.history_k_rope = torch::empty(
+        {sum_prefix, context_.get_model_args().qk_rope_head_dim()},
+        torch::TensorOptions().dtype(dtype_).pinned_memory(true)).to(device_);;
+
+    input_params.ring_cur_seqlen =
+        torch::stack({input_params.q_seq_lens, input_params.q_seq_lens}).to(device_);
+
+    input_params.ring_cache_seqlen = torch::stack(
+        {input_params.q_seq_lens, input_params.kv_cache_tokens_nums.to(device_)}).to(device_);
+        
+    torch::Tensor ring_cur_seqlen_host = input_params.ring_cur_seqlen.cpu().contiguous();
+    torch::Tensor ring_cache_seqlen_host = input_params.ring_cache_seqlen.cpu().contiguous();
+    input_params.ring_cur_seqlen_host =
+        std::vector<int>(ring_cur_seqlen_host.data_ptr<int>(),
+                        ring_cur_seqlen_host.data_ptr<int>() +
+                            ring_cur_seqlen_host.numel());
+    input_params.ring_cache_seqlen_host =
+        std::vector<int>(ring_cache_seqlen_host.data_ptr<int>(),
+                        ring_cache_seqlen_host.data_ptr<int>() +
+                            ring_cache_seqlen_host.numel());
 }
 
 }  // namespace xllm
