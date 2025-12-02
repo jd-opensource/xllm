@@ -20,7 +20,7 @@ limitations under the License.
 #include <vector>
 
 #include "acl/acl.h"
-#include "aclnn_apply_top_k_top_p.h"
+#include "aclnnop/aclnn_apply_top_k_top_p.h"
 #include "acltensor_utils.h"
 #include "util/tensor_helper.h"
 

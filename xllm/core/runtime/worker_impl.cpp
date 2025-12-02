@@ -638,7 +638,6 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   if (!status) {
     return false;
   }
-  layers_per_copy_ = context_.get_model_args().n_layers() / 4;
 
   this->load_model(std::move(model_loader));
 
@@ -899,13 +898,15 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
   }
 
   const int64_t num_layers = context_.get_model_args().n_layers();
-  uint32_t layers_per_copy = layers_per_copy_;
+  uint32_t layers_per_bacth_copy =
+      num_layers / options_.layers_wise_copy_batchs();
   uint32_t num_batches = block_transfer_info.size() * 2;
-  while (num_batches * layers_per_copy > BATCH_COPY_MAX_SIZE) {
-    layers_per_copy--;
+  while (num_batches * layers_per_bacth_copy > BATCH_COPY_MAX_SIZE) {
+    layers_per_bacth_copy--;
   }
 
-  uint32_t copy_cnt = (num_layers + layers_per_copy - 1) / layers_per_copy;
+  uint32_t copy_cnt =
+      (num_layers + layers_per_bacth_copy - 1) / layers_per_bacth_copy;
   auto synchronizer = std::make_shared<NPULayerSynchronizerImpl>(copy_cnt);
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -923,17 +924,18 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
   c10::StreamGuard streamGuard = stream->set_stream_guard();
   aclError ret = 0;
 
-  void** srcs = new void*[num_batches * layers_per_copy];
-  void** dsts = new void*[num_batches * layers_per_copy];
-  size_t* copy_size = new size_t[num_batches * layers_per_copy];
+  void** srcs = new void*[num_batches * layers_per_bacth_copy];
+  void** dsts = new void*[num_batches * layers_per_bacth_copy];
+  size_t* copy_size = new size_t[num_batches * layers_per_bacth_copy];
 
   for (int index = 0; index < copy_cnt; index++) {
-    int layer_id = index * layers_per_copy;
+    int layer_id = index * layers_per_bacth_copy;
     size_t fail_index = 0;
     uint32_t curr_index = 0;
     uint32_t layer_cnt = 0;
 
-    while (layer_id < (index + 1) * layers_per_copy && layer_id < num_layers) {
+    while (layer_id < (index + 1) * layers_per_bacth_copy &&
+           layer_id < num_layers) {
       auto dst_k_cache = kv_caches_.at(layer_id).get_k_cache();
       auto dst_v_cache = kv_caches_.at(layer_id).get_v_cache();
 
@@ -955,18 +957,16 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
       layer_cnt++;
     }
 
-    // TODO(kangmeng): change to async API
-    CHECK(layer_cnt <= layers_per_copy)
-        << "layer_cnt should less equal to layers_per_copy.";
-    ret = aclrtMemcpyBatch(dsts,
-                           copy_size,
-                           srcs,
-                           copy_size,
-                           num_batches * layer_cnt,
-                           attrs,
-                           attrs_indexes,
-                           1,
-                           &fail_index);
+    ret = aclrtMemcpyBatchAsync(dsts,
+                                copy_size,
+                                srcs,
+                                copy_size,
+                                num_batches * layer_cnt,
+                                attrs,
+                                attrs_indexes,
+                                1,
+                                &fail_index,
+                                stream->get_stream()->stream());
 
     if (ret != 0 || fail_index != SIZE_MAX) {
       LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
@@ -1020,6 +1020,7 @@ AlignedTensorCreater::AlignedTensorCreater(
     const torch::ScalarType dtype,
     const uint32_t num_tensors,
     std::vector<xllm::KVCache>* tensors) {
+#if defined(USE_NPU)
   CHECK(tensor_shapes.size() == 2)
       << "tensor_shapes.size() must equal to 2, but got "
       << tensor_shapes.size();
@@ -1057,6 +1058,14 @@ AlignedTensorCreater::AlignedTensorCreater(
     LOG(FATAL) << "Failed to lock memory pool!";
   }
 
+  auto ret = aclrtHostRegister(base_ptr_,
+                               total_size_,
+                               aclrtHostRegisterType::ACL_HOST_REGISTER_MAPPED,
+                               &mapped_ptr_);
+  if (ret != 0) {
+    LOG(FATAL) << "aclrtHostRegister fail: " << ret;
+  }
+
   size_t current_offset = 0;
   auto options = torch::TensorOptions().dtype(dtype).device(torch::kCPU);
   tensors->reserve(num_tensors);
@@ -1077,5 +1086,6 @@ AlignedTensorCreater::AlignedTensorCreater(
 
   LOG(INFO) << "Page aligned: "
             << ((uintptr_t)base_ptr_ % page_size == 0 ? "YES" : "NO");
+#endif
 }
 }  // namespace xllm

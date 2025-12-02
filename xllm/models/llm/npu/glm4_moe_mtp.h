@@ -147,18 +147,17 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
         input_length * num_experts_per_tok_,
         torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
 
+    // TODO(liangzhiwei20): MTP need more support for layer wise copy.
+    if (input_params.layer_wise_load_synchronizer != nullptr) {
+      LOG(FATAL) << "MTP not support layer wise copy!";
+    }
+
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
       if (input_params.layer_synchronizer != nullptr) {
         event = input_params.layer_synchronizer->get_event(i);
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
-      }
-      // TODO(liangzhiwei20): MTP need more support for layer wise copy.
-      if (input_params.layer_wise_load_synchronizer != nullptr) {
-        if (!input_params.layer_wise_load_synchronizer->synchronize_layer(i)) {
-          return torch::Tensor();
-        }
       }
 
       auto& layer = layers_[i];

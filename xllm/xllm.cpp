@@ -182,6 +182,8 @@ int run() {
                             FLAGS_enable_prefix_cache &&
                             (FLAGS_host_blocks_factor > 0.0))
       .prefetch_timeout(FLAGS_prefetch_timeout)
+      .prefetch_bacth_size(FLAGS_prefetch_bacth_size)
+      .layers_wise_copy_batchs(FLAGS_layers_wise_copy_batchs)
       .store_protocol(FLAGS_store_protocol)
       .store_master_server_address(FLAGS_store_master_server_address)
       .store_metadata_server(FLAGS_store_metadata_server)

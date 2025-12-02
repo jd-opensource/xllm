@@ -364,7 +364,8 @@ class Sequence final {
   std::atomic<bool> termination_flag_{false};
   std::vector<std::shared_ptr<std::atomic<uint32_t>>> prefetch_results_;
 
-  std::shared_ptr<Timer> timer_ = nullptr;
+  Timer timer_;
+  bool is_timeout_set_ = false;
 };
 
 }  // namespace xllm
