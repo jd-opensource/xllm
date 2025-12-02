@@ -92,9 +92,9 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
 
     torch::Tensor h = embed_tokens_(tokens, 0);
     torch::Tensor enorm = enorm_(h, 0);
-    const auto& res = input_params.mm_data.get<torch::Tensor>("embedding");
-    if (res) {
-      h = res.value();
+    torch::Tensor input_embedding = input_params.input_embedding;
+    if (input_embedding.defined()) {
+      h = input_embedding;
     } else {
       LOG(WARNING) << "hnorm use embedding from tokens.";
     }

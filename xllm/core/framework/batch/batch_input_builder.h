@@ -161,6 +161,9 @@ class BatchInputBuilder {
   // thread pool for multithreaded processing, not owned
   ThreadPool* thread_pool_ = nullptr;
   uint64_t batch_id_;
+
+  // whether prepare draft input for MTP(EAGLE) at Decode phase.
+  bool is_mtp_decode_ = false;
 };
 
 }  // namespace xllm

@@ -170,34 +170,12 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     output.beam_search_output = beam_search_output;
   }
 
-  // if running in multi_stream_parallel step, all micro batches
-  // should be in same prefill stage, so, to judge empty_kv_cache,
-  // just use micro batch 0 here
-  if (options_.enable_speculative_decode() && !is_spec_draft_) {
-    if (check_is_prefill(input.input_params.q_seq_lens_vec)) {
+  if (options_.enable_speculative_decode()) {
+    if (!input.input_params.batch_forward_type.is_decode() && !is_spec_draft_) {
       output.sample_output.embeddings = hidden_states;
-    } else if (sampling_params.sample_idxes.defined()) {
-      // auto sample_idxes =
-      //     concated_sampling_params.selected_token_idxes.index_select(
-      //         /*dim=*/0, concated_sampling_params.sample_idxes);
+    } else if (sampling_params.selected_token_idxes.defined()) {
       auto embeddings = hidden_states.index_select(
-          /*dim=*/0, sampling_params.sample_idxes);
-      output.sample_output.embeddings = embeddings;
-    }
-  }
-
-  // if running in multi_stream_parallel step, all micro batches
-  // should be in same prefill stage, so, to judge empty_kv_cache,
-  // just use micro batch 0 here
-  if (options_.enable_speculative_decode() && !is_spec_draft_) {
-    if (input.input_params.q_seq_lens_vec[0] > 1) {
-      output.sample_output.embeddings = hidden_states;
-    } else if (sampling_params.sample_idxes.defined()) {
-      // auto sample_idxes =
-      //     concated_sampling_params.selected_token_idxes.index_select(
-      //         /*dim=*/0, concated_sampling_params.sample_idxes);
-      auto embeddings = hidden_states.index_select(
-          /*dim=*/0, sampling_params.sample_idxes);
+          /*dim=*/0, sampling_params.selected_token_idxes);
       output.sample_output.embeddings = embeddings;
     }
   }

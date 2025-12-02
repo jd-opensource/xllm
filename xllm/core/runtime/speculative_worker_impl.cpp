@@ -36,48 +36,26 @@ namespace {
                   : tensor_;                                                  \
   } while (0)
 
-int32_t get_new_token_slot_id(const int32_t cur_token_slot_id,
-                              const int32_t block_size,
-                              const int32_t offset,
-                              const Slice<int32_t>& block_table_slice) {
-  if (offset == 0) {
-    return cur_token_slot_id;
+std::vector<int32_t> kv_cache_slots(int32_t pos_start,
+                                    int32_t offset,
+                                    const Slice<int32_t>& block_table_slice,
+                                    int32_t block_size) {
+  std::vector<int32_t> slots;
+  slots.reserve(offset);
+  for (int32_t i = pos_start; i < pos_start + offset; ++i) {
+    const int32_t block_id = block_table_slice[i / block_size];
+    const int32_t block_offset = i % block_size;
+    slots.push_back(block_id * block_size + block_offset);
   }
-  int32_t cur_block_offset = cur_token_slot_id % block_size;
-  int32_t cur_block_id = cur_token_slot_id / block_size;
-  int32_t new_block_offset = cur_block_offset + offset;
+  return slots;
+}
 
-  if (new_block_offset >= 0 && new_block_offset < block_size) {
-    return cur_token_slot_id + offset;
-  }
-  // get right block id
-  int32_t new_block_id = -1;
-  if (new_block_offset < 0) {
-    for (size_t i = 0; i < block_table_slice.size(); ++i) {
-      if (cur_block_id == block_table_slice[i]) {
-        if (i == 0) {
-          LOG(FATAL) << "Find the first block, should never happen.";
-        } else {
-          new_block_id = block_table_slice[i - 1];
-        }
-      }
-    }
-  } else if (new_block_offset >= block_size) {
-    for (size_t i = 0; i < block_table_slice.size(); ++i) {
-      if (cur_block_id == block_table_slice[i]) {
-        if (i >= block_table_slice.size() - 1) {
-          LOG(FATAL) << "Find the last block, should never happen.";
-        } else {
-          new_block_id = block_table_slice[i + 1];
-        }
-      }
-    }
-  }
-  if (new_block_id == -1) {
-    LOG(FATAL) << "Fail to find block id in block table.";
-  }
-  new_block_offset = (new_block_offset + block_size) % block_size;
-  return new_block_id * block_size + new_block_offset;
+int32_t kv_cache_slot_id(int32_t position,
+                         const Slice<int32_t>& block_table_slice,
+                         int32_t block_size) {
+  const int32_t block_id = block_table_slice[position / block_size];
+  const int32_t block_offset = position % block_size;
+  return block_id * block_size + block_offset;
 }
 
 }  // namespace
@@ -170,8 +148,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
     return step_empty(input);
   }
 
-  // TODO: support data parallel case
-  if (check_is_prefill(input.input_params.q_seq_lens_vec)) {
+  if (!input.input_params.batch_forward_type.is_decode()) {
     return step_prefill(input);
   } else {
     return step_decode(input);
@@ -180,7 +157,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step(
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step_empty(
     const ForwardInput& input) {
-  if (check_is_prefill(input.input_params.q_seq_lens_vec)) {
+  if (!input.input_params.batch_forward_type.is_decode()) {
     auto output = impl_->step(input);
     auto draft_output = draft_impl_->step(input);
     return output;
@@ -218,27 +195,15 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
   // prepare input for draft model
   auto& embeddings = output.sample_output.embeddings;
   auto next_tokens = safe_to(output.sample_output.next_tokens, torch::kInt);
-  auto start_idx = 0;
-  auto token_start_idx = 0;
 
-  auto offset = input.input_params.num_sequences;
-  auto token_offset = prefill_input.token_ids.size(0);
-  if (token_offset > 0) {
-    prefill_input.input_params.mm_data =
-        MMData(MMType::EMBEDDING,
-               {{"embedding",
-                 embeddings.narrow(0, token_start_idx, token_offset).clone()}});
+  if (embeddings.defined()) {
+    prefill_input.input_params.input_embedding = embeddings.clone();
   }
   if (next_tokens.defined()) {
     auto& token_ids = prefill_input.token_ids;
     auto mask = (token_ids == -1);
-    // TODO:  support multi stream parallel case
-    // token_ids.masked_scatter_(mask, next_tokens.narrow(0, start_idx,
-    // offset));
     token_ids.masked_scatter_(mask, next_tokens);
   }
-  start_idx += offset;
-  token_start_idx += token_offset;
 
   // generate kv cache for draft model
   timer.reset();
@@ -269,6 +234,10 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
     auto out = std::move(future).get();
   }
 #endif
+
+  if (!enable_schedule_overlap() && !driver_ && !dp_driver_) {
+    return std::nullopt;
+  }
   return output;
 }
 
@@ -305,7 +274,6 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
     const ForwardInput& input) {
   // TODO : now only support Deepseek MTP
   // More work need to support n-gram and native speculative decoding.
-  // ForwardInput draft_inputs = inputs;
   ForwardInput draft_input = input;
   // get embedding cache
 #if defined(USE_NPU)
@@ -316,8 +284,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
 #endif
   torch::Tensor embeddings =
       embedding_allocator_->read(draft_input.input_params.embedding_ids);
-  draft_input.input_params.mm_data =
-      MMData(MMType::EMBEDDING, {{"embedding", embeddings.to(device_)}});
+  draft_input.input_params.input_embedding = embeddings.to(device_);
 
   // run the draft model to get proposals
   std::vector<ForwardOutput> draft_outputs;
@@ -327,35 +294,19 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
   for (size_t i = 0; i < options_.num_speculative_tokens(); ++i) {
     auto future = draft_impl_->step_async(draft_input);
     if (i == options_.num_speculative_tokens() - 1) {
-      // final step
-      prepare_validate_inputs(input, validate_input, true);
+      // final step, prepare validate input
+      prepare_validate_inputs(input, validate_input);
     } else {
-      if (i == 0) {
-        prepare_draft_inputs(input, next_step_input, 1, device_);
-      } else {
-        prepare_draft_inputs(draft_input, next_step_input, 1, device_);
-      }
+      prepare_draft_inputs(draft_input, next_step_input, 1, device_);
     }
     draft_outputs.push_back(std::move(future).get().value());
     // update input of next step
     if (i < options_.num_speculative_tokens() - 1) {
       draft_input = next_step_input;
       auto last_output = draft_outputs.back().sample_output;
-      auto start_idx = 0;
-      auto token_start_idx = 0;
-      auto offset = draft_input.input_params.num_sequences;
-      auto token_offset = draft_input.token_ids.size(0);
-      draft_input.token_ids = safe_to(
-          last_output.next_tokens.narrow(0, start_idx, offset), torch::kInt);
-      if (token_offset > 0) {
-        draft_input.input_params.mm_data = MMData(
-            MMType::EMBEDDING,
-            {{"embedding",
-              last_output.embeddings.narrow(0, token_start_idx, token_offset)
-                  .to(device_)}});
-      }
-      start_idx += offset;
-      token_start_idx += token_offset;
+      draft_input.token_ids = safe_to(last_output.next_tokens, torch::kInt);
+      draft_input.input_params.input_embedding =
+          last_output.embeddings.to(device_);
     }
   }
   COUNTER_ADD(speculative_execution_latency_seconds_draft,
@@ -365,12 +316,9 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
     ForwardOutput draft_output = draft_outputs[i];
     auto next_tokens =
         safe_to(draft_output.sample_output.next_tokens, torch::kInt);
-    int32_t start_idx = 0;
-    int32_t offset = draft_input.input_params.num_sequences;
     auto& token_ids = validate_input.token_ids;
     auto mask = (token_ids == -1 * (i + 1));
-    token_ids.masked_scatter_(mask, next_tokens.narrow(0, start_idx, offset));
-    start_idx += offset;
+    token_ids.masked_scatter_(mask, next_tokens);
   }
 
   // run the target model to get the verification scores
@@ -416,40 +364,34 @@ void SpeculativeWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
 
   auto& input_params = draft_input.input_params;
   const int32_t num_sequences = input_params.num_sequences;
-  torch::Tensor positions = safe_to(input.positions, torch::kCPU);
-  Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
-                                    positions.numel()};
+  int32_t block_size = options_.block_size();
+  torch::TensorOptions int_options = input.token_ids.options();
+
   std::vector<int32_t> new_positions;
   new_positions.reserve(num_sequences);
-  for (int32_t i = 0; i < num_sequences; ++i) {
-    new_positions.emplace_back(positions_slice[i] + offset);
-  }
-  torch::TensorOptions int_options = input.token_ids.options();
-  draft_input.positions = torch::tensor(new_positions, int_options);
-
   std::vector<int32_t> kv_seq_lens_vec = {};
   // slot ids for new token
   std::vector<int32_t> new_token_slot_ids;
 
-  int32_t block_size = options_.block_size();
-  torch::Tensor kv_seq_lens = safe_to(input_params.kv_seq_lens, torch::kCPU);
-  Slice<int32_t> kv_seq_lens_slice = {kv_seq_lens.data_ptr<int32_t>(),
-                                      kv_seq_lens.numel()};
+  torch::Tensor positions = safe_to(input.positions, torch::kCPU);
+  Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
+                                    positions.numel()};
+  Slice<int32_t> kv_seq_lens_slice = input_params.kv_seq_lens_vec;
   torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
-  torch::Tensor new_cache_slots =
-      safe_to(input_params.new_cache_slots, torch::kCPU);
-  Slice<int32_t> new_cache_slots_slice = {new_cache_slots.data_ptr<int32_t>(),
-                                          new_cache_slots.numel()};
+
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
+    new_positions.emplace_back(positions_slice[seq_id] + offset);
     kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] + offset);
     torch::Tensor block_table = block_tables[seq_id];
     Slice<int32_t> block_table_slice = {block_table.data_ptr<int32_t>(),
                                         block_table.numel()};
-    int32_t new_token_slot_id = get_new_token_slot_id(
-        new_cache_slots_slice[seq_id], block_size, offset, block_table_slice);
-    new_token_slot_ids.emplace_back(new_token_slot_id);
+    int32_t slot_id =
+        kv_cache_slot_id(new_positions.back(), block_table_slice, block_size);
+    new_token_slot_ids.emplace_back(slot_id);
   }
 
+  draft_input.positions = torch::tensor(new_positions, int_options);
+  // update the input_params
   input_params.kv_max_seq_len = input_params.kv_max_seq_len + offset;
   input_params.kv_seq_lens_vec = kv_seq_lens_vec;
   input_params.kv_seq_lens = torch::tensor(kv_seq_lens_vec, int_options);
@@ -458,16 +400,17 @@ void SpeculativeWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
 
 void SpeculativeWorkerImpl::prepare_validate_inputs(
     const ForwardInput& input,
-    ForwardInput& validate_input,
-    bool enable_schedule_overlap) {
+    ForwardInput& validate_input) {
   validate_input = input.to(device_, dtype_);
   auto& input_params = validate_input.input_params;
+  torch::TensorOptions int_options = validate_input.token_ids.options();
 
-  const int32_t position_offset = enable_schedule_overlap ? 1 : 0;
+  const int32_t position_offset = enable_schedule_overlap() ? 1 : 0;
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
   const int32_t num_sequences = input_params.num_sequences;
   const int32_t num_val_tokens = num_speculative_tokens + 1;
   const int32_t total_num_val_tokens = num_sequences * num_val_tokens;
+  const int32_t block_size = options_.block_size();
 
   std::vector<std::vector<int32_t>> draft_tokens;
   draft_tokens.reserve(num_speculative_tokens);
@@ -481,48 +424,27 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   torch::Tensor positions = safe_to(input.positions, torch::kCPU);
   Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
                                     positions.numel()};
+  Slice<int32_t> kv_seq_lens_slice = input_params.kv_seq_lens_vec;
+  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
 
   std::vector<int32_t> new_token_ids;
   std::vector<int32_t> new_positions;
   new_token_ids.reserve(total_num_val_tokens);
   new_positions.reserve(total_num_val_tokens);
-  for (int32_t i = 0; i < num_sequences; ++i) {
-    new_token_ids.emplace_back(tokens_ids_slice[i]);
-    new_positions.emplace_back(positions_slice[i] + position_offset);
-    for (int32_t j = 0; j < num_speculative_tokens; ++j) {
-      new_token_ids.emplace_back(draft_tokens[j][i]);
-      new_positions.emplace_back(positions_slice[i] + j + 1 + position_offset);
-    }
-  }
-  torch::TensorOptions int_options = input.token_ids.options();
-  validate_input.token_ids = torch::tensor(new_token_ids, int_options);
-  validate_input.positions = torch::tensor(new_positions, int_options);
-
-  // update the input_params
-  input_params.num_sequences = total_num_val_tokens;
-  input_params.kv_max_seq_len =
-      input_params.kv_max_seq_len + num_speculative_tokens + position_offset;
-  for (auto& it : input_params.dp_global_token_nums) {
-    it *= num_val_tokens;
-  }
-
   std::vector<int32_t> kv_seq_lens_vec = {};
   std::vector<int32_t> q_seq_lens_vec = {};
-  // slot ids for new token
   std::vector<int32_t> new_token_slot_ids;
   std::vector<std::vector<int32_t>> block_tables_vec;
 
-  int32_t block_size = options_.block_size();
-  torch::Tensor kv_seq_lens = safe_to(input_params.kv_seq_lens, torch::kCPU);
-  Slice<int32_t> kv_seq_lens_slice = {kv_seq_lens.data_ptr<int32_t>(),
-                                      kv_seq_lens.numel()};
-  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
-  torch::Tensor new_cache_slots =
-      safe_to(input_params.new_cache_slots, torch::kCPU);
-  Slice<int32_t> new_cache_slots_slice = {new_cache_slots.data_ptr<int32_t>(),
-                                          new_cache_slots.numel()};
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
-    int32_t cur_token_slot_id = new_cache_slots_slice[seq_id];
+    new_token_ids.emplace_back(tokens_ids_slice[seq_id]);
+    new_positions.emplace_back(positions_slice[seq_id] + position_offset);
+    for (int32_t j = 0; j < num_speculative_tokens; ++j) {
+      new_token_ids.emplace_back(draft_tokens[j][seq_id]);
+      new_positions.emplace_back(positions_slice[seq_id] + j + 1 +
+                                 position_offset);
+    }
+
     torch::Tensor block_table = block_tables[seq_id];
     Slice<int32_t> block_table_slice = {block_table.data_ptr<int32_t>(),
                                         block_table.numel()};
@@ -533,38 +455,49 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
                                    num_speculative_tokens + position_offset);
       q_seq_lens_vec.emplace_back(num_val_tokens);
     } else {
-      for (int32_t token_id = position_offset;
-           token_id < num_val_tokens + position_offset;
-           ++token_id) {
+      for (int32_t offset = position_offset;
+           offset < num_val_tokens + position_offset;
+           ++offset) {
         q_seq_lens_vec.emplace_back(1);
-        kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] + token_id);
-        // repeat block table
+        kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] + offset);
         block_tables_vec.emplace_back(block_table_slice);
       }
     }
 
-    // process position related params
-    for (int32_t token_id = position_offset;
-         token_id < num_val_tokens + position_offset;
-         ++token_id) {
-      int32_t new_token_slot_id = get_new_token_slot_id(
-          cur_token_slot_id, block_size, token_id, block_table_slice);
-      new_token_slot_ids.emplace_back(new_token_slot_id);
-    }
+    // process slot id
+    int32_t start_position = positions_slice[seq_id] + position_offset;
+    auto slot_ids = kv_cache_slots(start_position,
+                                   num_val_tokens,
+                                   block_table_slice,
+                                   options_.block_size());
+    new_token_slot_ids.insert(
+        new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
   }
 
-  input_params.kv_seq_lens_vec = kv_seq_lens_vec;
-  input_params.kv_seq_lens = torch::tensor(kv_seq_lens_vec, int_options);
-  input_params.q_seq_lens_vec = q_seq_lens_vec;
-  input_params.q_seq_lens = torch::tensor(q_seq_lens_vec, int_options);
+  validate_input.token_ids = torch::tensor(new_token_ids, int_options);
+  validate_input.positions = torch::tensor(new_positions, int_options);
+  // update the input_params
+  if (!FLAGS_enable_atb_spec_kernel) {
+    input_params.num_sequences = total_num_val_tokens;
+    input_params.q_max_seq_len = 1;
+    input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+  } else {
+    input_params.q_max_seq_len = num_val_tokens;
+    input_params.batch_forward_type = BatchForwardType::DECODE;
+  }
+  input_params.q_seq_lens_vec = std::move(q_seq_lens_vec);
+  input_params.q_seq_lens =
+      torch::tensor(input_params.q_seq_lens_vec, int_options);
+  input_params.kv_max_seq_len =
+      *std::max_element(kv_seq_lens_vec.begin(), kv_seq_lens_vec.end());
+  input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
+  input_params.kv_seq_lens =
+      torch::tensor(input_params.kv_seq_lens_vec, int_options);
   input_params.new_cache_slots = torch::tensor(new_token_slot_ids, int_options);
   if (!FLAGS_enable_atb_spec_kernel) {
-    input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
     util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
     input_params.block_tables =
         create_2d_tensor(block_tables_vec, torch::kInt).to(device_);
-  } else {
-    input_params.batch_forward_type = BatchForwardType::DECODE;
   }
 
   // update the sampling_params
@@ -645,7 +578,10 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
   // only process decode batch, so prepare draft input here.
   ForwardInput& new_inputs = inputs;
+
   auto& input_params = new_inputs.input_params;
+  const int32_t num_sequences = input_params.num_sequences;
+  int32_t block_size = options_.block_size();
 
   torch::Tensor token_ids = safe_to(inputs.token_ids, torch::kCPU);
   Slice<int32_t> tokens_ids_slice = {token_ids.data_ptr<int32_t>(),
@@ -662,28 +598,17 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   if (last_step_output_.sample_output.next_tokens.dim() == 2) {
     last_step_decode_num = last_step_output_.sample_output.next_tokens.size(1);
   }
-  int32_t block_size = options_.block_size();
-  torch::Tensor kv_seq_lens = safe_to(input_params.kv_seq_lens, torch::kCPU);
-  Slice<int32_t> kv_seq_lens_slice = {kv_seq_lens.data_ptr<int32_t>(),
-                                      kv_seq_lens.numel()};
-  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
-  torch::Tensor new_cache_slots =
-      safe_to(input_params.new_cache_slots, torch::kCPU);
-  Slice<int32_t> new_cache_slots_slice = {new_cache_slots.data_ptr<int32_t>(),
-                                          new_cache_slots.numel()};
 
-  const int32_t num_sequences = inputs.input_params.num_sequences;
+  Slice<int32_t> kv_seq_lens_slice = input_params.kv_seq_lens_vec;
+  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
+
   std::vector<int32_t> new_token_ids;
   std::vector<int32_t> new_positions;
-  new_token_ids.reserve(num_sequences);
-  new_positions.reserve(num_sequences);
-
-  // update the input_params
-  input_params.kv_max_seq_len =
-      input_params.kv_max_seq_len + last_step_decode_num - 1;
-
   std::vector<int32_t> kv_seq_lens_vec = {};
   std::vector<int32_t> new_token_slot_ids;
+  new_token_ids.reserve(num_sequences);
+  new_positions.reserve(num_sequences);
+  kv_seq_lens_vec.reserve(num_sequences);
   new_token_slot_ids.reserve(num_sequences);
 
   // get right token id and position
@@ -695,8 +620,8 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
     } else {
       int32_t last_step_index = -1 * tokens_ids_slice[seq_id] - 1;
       last_step_index = last_step_index * last_step_decode_num;
-      last_step_token_id = last_tokens_ids_slice[last_step_index];
-      for (int i = 1; i < last_step_decode_num; ++i) {
+      postion_offset = -1;
+      for (int i = 0; i < last_step_decode_num; ++i) {
         int32_t token_id = last_tokens_ids_slice[last_step_index + i];
         if (token_id >= 0) {
           last_step_token_id = token_id;
@@ -705,33 +630,27 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
       }
     }
 
-    new_token_ids.push_back(last_step_token_id);
-    if (postion_offset == 0) {
-      new_positions.emplace_back(positions_slice[seq_id]);
-      kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id]);
-      new_token_slot_ids.emplace_back(new_cache_slots_slice[seq_id]);
-      continue;
-    }
+    new_token_ids.emplace_back(last_step_token_id);
     new_positions.emplace_back(positions_slice[seq_id] + postion_offset);
     kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] + postion_offset);
 
     torch::Tensor block_table = block_tables[seq_id];
     Slice<int32_t> block_table_slice = {block_table.data_ptr<int32_t>(),
                                         block_table.numel()};
-    int32_t new_token_slot_id =
-        get_new_token_slot_id(new_cache_slots_slice[seq_id],
-                              block_size,
-                              postion_offset,
-                              block_table_slice);
-    new_token_slot_ids.emplace_back(new_token_slot_id);
+    int32_t slot_id =
+        kv_cache_slot_id(new_positions.back(), block_table_slice, block_size);
+    new_token_slot_ids.emplace_back(slot_id);
   }
 
   torch::TensorOptions int_options = inputs.token_ids.options();
   new_inputs.token_ids = torch::tensor(new_token_ids, int_options);
   new_inputs.positions = torch::tensor(new_positions, int_options);
-
-  input_params.kv_seq_lens_vec = kv_seq_lens_vec;
-  input_params.kv_seq_lens = torch::tensor(kv_seq_lens_vec, int_options);
+  // update the input_params
+  input_params.kv_max_seq_len =
+      *std::max_element(kv_seq_lens_vec.begin(), kv_seq_lens_vec.end());
+  input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
+  input_params.kv_seq_lens =
+      torch::tensor(input_params.kv_seq_lens_vec, int_options);
   input_params.new_cache_slots = torch::tensor(new_token_slot_ids, int_options);
 
   return new_inputs.to(device_, dtype_);
@@ -741,8 +660,6 @@ void SpeculativeWorkerImpl::update_sampling_params(
     SamplingParameters& sampling_params,
     const int32_t num_val_tokens,
     const int32_t total_num_val_tokens) {
-  // sleceted tokens to return logits, including generated tokens and last
-  // prompt token
   std::vector<int32_t> selected_token_idxes_vec;
   selected_token_idxes_vec.reserve(total_num_val_tokens);
   for (int32_t i = 0; i < total_num_val_tokens; i++) {
@@ -750,30 +667,30 @@ void SpeculativeWorkerImpl::update_sampling_params(
   }
   torch::Tensor selected_token_idxes = torch::tensor(selected_token_idxes_vec);
 
+  // sample_idxes equals to selected_token_idxes since only process decode batch
   sampling_params.selected_token_idxes = selected_token_idxes.to(device_);
-  // assume sample_idxes equals to selected_token_idxes
-  // when disable chunked prefill
   sampling_params.sample_idxes = selected_token_idxes.to(device_);
 
   TENSOR_REPEAT(sampling_params.frequency_penalties, num_val_tokens);
   TENSOR_REPEAT(sampling_params.presence_penalties, num_val_tokens);
   TENSOR_REPEAT(sampling_params.repetition_penalties, num_val_tokens);
+  TENSOR_REPEAT(sampling_params.temperatures, num_val_tokens);
   TENSOR_REPEAT(sampling_params.top_p, num_val_tokens);
   TENSOR_REPEAT(sampling_params.top_k, num_val_tokens);
+  TENSOR_REPEAT(sampling_params.unique_token_ids, num_val_tokens);
+  TENSOR_REPEAT(sampling_params.unique_token_counts, num_val_tokens);
+  TENSOR_REPEAT(sampling_params.unique_token_ids_lens, num_val_tokens);
   TENSOR_REPEAT(sampling_params.do_sample, num_val_tokens);
 }
 
 void SpeculativeWorkerImpl::prepare_work_before_execute(
     const ForwardInput& input,
     ForwardInput& processed_input) {
-  if (check_is_prefill(input.input_params.q_seq_lens_vec)) {
-    WorkerImpl::prepare_work_before_execute(input, processed_input);
-  } else {
-    if (enable_schedule_overlap()) {
-      prepare_draft_inputs(input, processed_input, -1, torch::kCPU);
-    } else {
-      prepare_draft_inputs(input, processed_input, -1, device_);
-    }
+  WorkerImpl::prepare_work_before_execute(input, processed_input);
+  if (input.input_params.batch_forward_type.is_decode() &&
+      enable_schedule_overlap()) {
+    processed_input.token_ids = safe_to(processed_input.token_ids, torch::kCPU);
+    processed_input.positions = safe_to(processed_input.positions, torch::kCPU);
   }
 }
 }  // namespace xllm

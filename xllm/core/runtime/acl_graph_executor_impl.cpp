@@ -160,10 +160,9 @@ void GraphPersistentParam::update(const torch::Tensor& tokens,
   slice_persistent_block_tables.copy_(params.block_tables,
                                       /*non_blocking=*/true);
 
-  // Update persistent embedding from mm_data if available
-  const auto& embedding_res = params.mm_data.get<torch::Tensor>("embedding");
-  if (embedding_res) {
-    const torch::Tensor& embedding = embedding_res.value();
+  // Update persistent embedding from input_embedding if available
+  const auto& embedding = params.input_embedding;
+  if (embedding.defined()) {
     const int64_t embedding_tokens = embedding.size(0);
 
     // Initialize persistent_embedding_ if needed and not already initialized
@@ -643,17 +642,12 @@ bool AclGraph::capture(CausalLM* model,
   graph_params.graph_buffer.tiling_data = persistent_param_.tiling_data();
 
   // Set persistent embedding if available and original input has embedding
-  const auto& original_embedding =
-      params.mm_data.get<torch::Tensor>("embedding");
-  if (original_embedding.has_value()) {
+  const auto& original_embedding = params.input_embedding;
+  if (original_embedding.defined()) {
     torch::Tensor persistent_embedding =
         persistent_param_.persistent_embedding(num_tokens_);
     if (persistent_embedding.numel() > 0) {
-      // graph_params.input_embedding = persistent_embedding;
-      // Replace embedding in mm_data with persistent embedding using update
-      // method
-      graph_params.mm_data.update<torch::Tensor>(
-          MMType::EMBEDDING, "embedding", persistent_embedding);
+      graph_params.input_embedding = persistent_embedding;
     }
   }
 

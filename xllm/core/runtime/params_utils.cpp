@@ -231,8 +231,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     }
     torch::Tensor embeddings =
         create_2d_tensor(embeddings_vec, torch::kBFloat16);
-    input_params.mm_data =
-        MMData(MMType::EMBEDDING, {{"embedding", embeddings}});
+    input_params.input_embedding = embeddings;
   }
 
   CHECK_EQ(sampling_params.size(), selected_token_idxes.size());

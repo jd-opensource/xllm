@@ -72,6 +72,9 @@ BatchInputBuilder::BatchInputBuilder(
 ForwardInput BatchInputBuilder::build_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
+  // Since dont test multithreaded for ForwardInput, set thread_pool_ to
+  // nullptr.
+  thread_pool_ = nullptr;
   process_sequences();
   padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
 
@@ -79,17 +82,25 @@ ForwardInput BatchInputBuilder::build_forward_input(
 }
 
 RawForwardInput BatchInputBuilder::build_raw_forward_input() {
-  if (!thread_pool_ || num_sequences_ < thread_pool_->size()) {
-    process_sequences();
-  } else {
-    process_sequences_multithreaded();
-  }
+  process_sequences();
   return state_to_raw_forward_input();
 }
 
 void BatchInputBuilder::process_sequences() {
-  for (int32_t i = 0; i < num_sequences_; ++i) {
-    process_single_sequence(i);
+  // when speculative decoding, we need to build raw forward input
+  // of decode batch for MTP (Eagle).
+  is_mtp_decode_ = false;
+  if (state_.batch_forward_type.is_decode() &&
+      FLAGS_num_speculative_tokens > 0) {
+    is_mtp_decode_ = true;
+  }
+
+  if (thread_pool_ && num_sequences_ >= thread_pool_->size()) {
+    process_sequences_multithreaded();
+  } else {
+    for (int32_t i = 0; i < num_sequences_; ++i) {
+      process_single_sequence(i);
+    }
   }
 }
 
@@ -275,14 +286,15 @@ void BatchInputBuilder::process_single_sequence(
                          << allowed_max_tokens_[seq_index];
 
   // Update state
+  int32_t offset = is_mtp_decode_ ? -1 : 0;
   state.empty_kv_cache = state.empty_kv_cache && (n_kv_cache_tokens == 0);
-  state.max_seq_len = std::max(state.max_seq_len, seq_len);
+  state.max_seq_len = std::max(state.max_seq_len, seq_len + offset);
   state.q_max_seq_len = std::max(state.q_max_seq_len, q_seq_len);
 #if defined(USE_NPU)
-  state.seq_lens.push_back(seq_len);
+  state.seq_lens.push_back(seq_len + offset);
   state.q_seq_lens.push_back(q_seq_len);
 #elif defined(USE_MLU) || defined(USE_CUDA)
-  state.seq_lens.push_back(state.seq_lens.back() + seq_len);
+  state.seq_lens.push_back(state.seq_lens.back() + seq_len + offset);
   state.q_seq_lens.push_back(state.q_seq_lens.back() + q_seq_len);
 #endif
   // Process tokens and positions
@@ -338,7 +350,8 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.flatten_tokens_vec.push_back(token_ids[j]);
 
     if (!use_mrope_) {
-      state.flatten_positions_vec.push_back(static_cast<int32_t>(j));
+      int32_t offset = is_mtp_decode_ ? -1 : 0;
+      state.flatten_positions_vec.push_back(static_cast<int32_t>(j + offset));
     }
 
     // Handle sampling for last tokens
@@ -422,6 +435,9 @@ void BatchInputBuilder::setup_kv_cache_info(
   // update kv cache tokens num
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
+  int32_t offset = is_mtp_decode_ ? -1 : 0;
+  seq_len += offset;
+  n_kv_cache_tokens += offset;
   const auto blocks = sequence->kv_state().kv_blocks();
   const auto slot_ids =
       sequence->kv_state().kv_cache_slots(n_kv_cache_tokens, seq_len);
@@ -443,6 +459,7 @@ void BatchInputBuilder::setup_kv_cache_info(
       (seq_len % block_size == 0) ? block_size : seq_len % block_size;
   state.paged_kv_last_page_len.push_back(last_page_len);
 
+  // calculate the block ids that need to be written
   int32_t kv_cache_block_idx = n_kv_cache_tokens / block_size;
   for (auto iter = block_ids.begin() + kv_cache_block_idx;
        iter != block_ids.end();

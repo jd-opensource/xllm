@@ -132,8 +132,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
 
   // prepare inputs for target model at Decode phase.
   void prepare_validate_inputs(const ForwardInput& inputs,
-                               ForwardInput& validate_inputs,
-                               bool enable_schedule_overlap);
+                               ForwardInput& validate_inputs);
 
   SampleOutput validate(const SamplingParameters& sampling_params,
                         const std::vector<ForwardOutput>& draft_outputs,
