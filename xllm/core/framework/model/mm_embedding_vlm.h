@@ -33,9 +33,6 @@ class MMEmbeddingVLM : public CausalVLM {
  public:
   ~MMEmbeddingVLM() override = default;
 
-  // hidden_states: [num_tokens, hidden_size]
-  // seleted_idxes: [num_tokens]
-  // returns: [num_seqs, hidden_size]
   virtual std::vector<torch::Tensor> encode(
       const ModelInputParams& input_params) = 0;
 
