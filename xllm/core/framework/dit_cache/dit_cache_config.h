@@ -25,9 +25,6 @@ enum class PolicyType {
 };
 
 struct DiTBaseCacheOptions {
-  // the number of inference steps.
-  int num_inference_steps = 25;
-
   // the number of warmup steps.
   int warmup_steps = 0;
 };

@@ -20,14 +20,9 @@ namespace xllm {
 void FBCache::init(const DiTCacheConfig& cfg) {
   CHECK_GE(cfg.fbcache.residual_diff_threshold, 0.0)
       << "residual_diff_threshold must be >= 0";
-  CHECK_GT(cfg.fbcache.num_inference_steps, 0)
-      << "num_inference_steps must be > 0";
   CHECK_GE(cfg.fbcache.warmup_steps, 0) << "warmup_steps must be >= 0";
-  CHECK_LE(cfg.fbcache.warmup_steps, cfg.fbcache.num_inference_steps)
-      << "warmup_steps cannot exceed num_inference_steps";
 
   residual_diff_threshold_ = cfg.fbcache.residual_diff_threshold;
-  num_inference_steps_ = cfg.fbcache.num_inference_steps;
   warmup_steps_ = cfg.fbcache.warmup_steps;
   current_step_ = 0;
   use_cache_ = false;

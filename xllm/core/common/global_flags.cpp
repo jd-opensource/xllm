@@ -437,3 +437,24 @@ DEFINE_bool(
     false,
     "Whether to enable dp load balance, if true, sequences within a single "
     "dp batch will be shuffled.");
+
+// --- dit cache config ---
+
+DEFINE_string(dit_cache_policy,
+              "TaylorSeer",
+              "The policy of dit cache(e.g. None, FBCache, TaylorSeer, "
+              "FBCacheTaylorSeer).");
+
+DEFINE_int64(dit_cache_warmup_steps, 0, "The number of warmup steps.");
+
+DEFINE_int64(dit_cache_n_derivatives,
+             3,
+             "The number of derivatives to use in TaylorSeer.");
+
+DEFINE_int64(dit_cache_skip_interval_steps,
+             3,
+             "The interval steps to skip for derivative calculation.");
+
+DEFINE_double(dit_cache_residual_diff_threshold,
+              0.09f,
+              "The residual difference threshold for cache reuse.");

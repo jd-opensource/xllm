@@ -22,20 +22,11 @@ double factorial(int k) { return std::tgamma(static_cast<double>(k) + 1.0); }
 }  // namespace
 
 void TaylorSeer::init(const DiTCacheConfig& cfg) {
-  CHECK_GT(cfg.taylorseer.num_inference_steps, 0)
-      << "num_inference_steps must be > 0";
   CHECK_GE(cfg.taylorseer.warmup_steps, 0) << "warmup_steps must be >= 0";
   CHECK_GE(cfg.taylorseer.skip_interval_steps, 0)
       << "skip_interval_steps must be >= 0";
   CHECK_GE(cfg.taylorseer.n_derivatives, 0) << "n_derivatives must be >= 0";
 
-  CHECK_LT(cfg.taylorseer.skip_interval_steps,
-           cfg.taylorseer.num_inference_steps)
-      << "skip_interval_steps must be less than num_inference_steps";
-  CHECK_LT(cfg.taylorseer.warmup_steps, cfg.taylorseer.num_inference_steps)
-      << "warmup_steps must be less than num_inference_steps";
-
-  num_inference_steps_ = cfg.taylorseer.num_inference_steps;
   warmup_steps_ = cfg.taylorseer.warmup_steps;
   skip_interval_steps_ = cfg.taylorseer.skip_interval_steps;
   n_derivatives_ = cfg.taylorseer.n_derivatives;

@@ -38,6 +38,35 @@ limitations under the License.
 #include "util/utils.h"
 
 namespace xllm {
+
+namespace {
+DiTCacheConfig parse_dit_cache_from_flags() {
+  DiTCacheConfig cache_config;
+  if (FLAGS_dit_cache_policy == "FBCache") {
+    cache_config.selected_policy = PolicyType::FBCache;
+    cache_config.fbcache.warmup_steps = FLAGS_dit_cache_warmup_steps;
+    cache_config.fbcache.residual_diff_threshold =
+        FLAGS_dit_cache_residual_diff_threshold;
+  } else if (FLAGS_dit_cache_policy == "TaylorSeer") {
+    cache_config.selected_policy = PolicyType::TaylorSeer;
+    cache_config.taylorseer.n_derivatives = FLAGS_dit_cache_n_derivatives;
+    cache_config.taylorseer.skip_interval_steps =
+        FLAGS_dit_cache_skip_interval_steps;
+    cache_config.taylorseer.warmup_steps = FLAGS_dit_cache_warmup_steps;
+  } else if (FLAGS_dit_cache_policy == "FBCacheTaylorSeer") {
+    cache_config.selected_policy = PolicyType::FBCacheTaylorSeer;
+    cache_config.fbcachetaylorseer.n_derivatives =
+        FLAGS_dit_cache_n_derivatives;
+    cache_config.fbcachetaylorseer.warmup_steps = FLAGS_dit_cache_warmup_steps;
+    cache_config.fbcachetaylorseer.residual_diff_threshold =
+        FLAGS_dit_cache_residual_diff_threshold;
+  } else if (FLAGS_dit_cache_policy == "None") {
+    cache_config.selected_policy = PolicyType::TaylorSeer;
+  }
+  return cache_config;
+}
+}  // namespace
+
 DiTWorker::DiTWorker(const ParallelArgs& parallel_args,
                      const torch::Device& device,
                      const runtime::Options& options)
@@ -65,17 +94,8 @@ bool DiTWorker::init_model(const std::string& model_weights_path) {
   dit_model_executor_ =
       std::make_unique<DiTExecutor>(dit_model_.get(), options_);
 
-  DiTCacheConfig cache_config_;
-
-  // TODO: Optimize ditcache configuration initialization.
-  cache_config_.selected_policy = PolicyType::TaylorSeer;
-  cache_config_.taylorseer.n_derivatives = 3;
-  cache_config_.taylorseer.skip_interval_steps = 3;
-  cache_config_.taylorseer.num_inference_steps = 25;
-  cache_config_.taylorseer.warmup_steps = 0;
-
-  bool success = DiTCache::get_instance().init(cache_config_);
-  CHECK(success) << "DiTCache init failed";
+  DiTCacheConfig cache_config = parse_dit_cache_from_flags();
+  DiTCache::get_instance().init(cache_config);
 
   return true;
 }

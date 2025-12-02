@@ -214,3 +214,13 @@ DECLARE_bool(enable_prefetch_weight);
 DECLARE_int32(flashinfer_workspace_buffer_size);
 
 DECLARE_bool(enable_dp_balance);
+
+DECLARE_string(dit_cache_policy);
+
+DECLARE_int64(dit_cache_warmup_steps);
+
+DECLARE_int64(dit_cache_n_derivatives);
+
+DECLARE_int64(dit_cache_skip_interval_steps);
+
+DECLARE_double(dit_cache_residual_diff_threshold);

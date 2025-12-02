@@ -20,18 +20,12 @@ namespace xllm {
 void FBCacheTaylorSeer::init(const DiTCacheConfig& cfg) {
   CHECK_GE(cfg.fbcachetaylorseer.residual_diff_threshold, 0.0)
       << "residual_diff_threshold must be >= 0";
-  CHECK_GT(cfg.fbcachetaylorseer.num_inference_steps, 0)
-      << "num_inference_steps must be > 0";
   CHECK_GE(cfg.fbcachetaylorseer.warmup_steps, 0)
       << "warmup_steps must be >= 0";
   CHECK_GE(cfg.fbcachetaylorseer.n_derivatives, 0)
       << "n_derivatives must be >= 0";
-  CHECK_LE(cfg.fbcachetaylorseer.warmup_steps,
-           cfg.fbcachetaylorseer.num_inference_steps)
-      << "warmup_steps cannot exceed num_inference_steps";
 
   residual_diff_threshold_ = cfg.fbcachetaylorseer.residual_diff_threshold;
-  num_inference_steps_ = cfg.fbcachetaylorseer.num_inference_steps;
   warmup_steps_ = cfg.fbcachetaylorseer.warmup_steps;
 
   if (!taylorseer) {
@@ -40,8 +34,6 @@ void FBCacheTaylorSeer::init(const DiTCacheConfig& cfg) {
 
   DiTCacheConfig ts_cfg;
   ts_cfg.taylorseer.n_derivatives = cfg.fbcachetaylorseer.n_derivatives;
-  ts_cfg.taylorseer.num_inference_steps =
-      cfg.fbcachetaylorseer.num_inference_steps;
   taylorseer->init(ts_cfg);
 }
 
