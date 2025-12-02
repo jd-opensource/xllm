@@ -1,0 +1,54 @@
+{
+    "hash": "54dbbff1e8c9211e6317bcf05d094140dd59887febb3c262546f5ceabcc45e68",
+    "target": {
+        "backend": "npu",
+        "arch": "Ascend910B2C",
+        "warp_size": 0
+    },
+    "debug": false,
+    "sanitize_overflow": true,
+    "llvm_version": 15,
+    "kernel_name": "add_kernel",
+    "cluster_dims": [
+        1,
+        1,
+        1
+    ],
+    "num_warps": -1,
+    "num_ctas": -1,
+    "num_stages": 2,
+    "num_buffers_warp_spec": 0,
+    "num_consumer_groups": 0,
+    "reg_dec_producer": 0,
+    "reg_inc_consumer": 0,
+    "enable_warp_specialization": false,
+    "enable_nd2nz_on_vector": false,
+    "enable_persistent": false,
+    "optimize_epilogue": false,
+    "enable_fp_fusion": true,
+    "allow_fp8e4nv": false,
+    "allowed_dot_input_precisions": [
+        "ieee",
+        "hf32"
+    ],
+    "max_num_imprecise_acc_default": null,
+    "extern_libs": null,
+    "multibuffer": true,
+    "enable_hivm_auto_cv_balance": null,
+    "unit_flag": null,
+    "inject_barrier_all": null,
+    "limit_auto_multi_buffer_only_for_local_buffer": null,
+    "limit_auto_multi_buffer_of_local_buffer": null,
+    "set_workspace_multibuffer": null,
+    "tile_mix_vector_loop": null,
+    "tile_mix_cube_loop": null,
+    "stream": null,
+    "shared": 1,
+    "mix_mode": "aiv",
+    "name": "add_kernel aiv",
+    "tensor_kinds": [
+        0,
+        0,
+        1
+    ]
+}
