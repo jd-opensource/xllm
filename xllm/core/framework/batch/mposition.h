@@ -37,6 +37,10 @@ class MPositionHelper {
       torch::Tensor image_grid_thw,
       torch::Tensor video_grid_thw,
       torch::Tensor second_per_grid_ts);
+  std::tuple<torch::Tensor, int> get_positions_glm(
+      torch::Tensor image_grid_thw,
+      torch::Tensor video_grid_thw);
+
   torch::Tensor get_positions_d();
 
  private:
