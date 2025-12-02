@@ -27,6 +27,7 @@ limitations under the License.
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/deepseek_v2_decoder_loader.h"
 #include "npu_base_layer.h"
 #include "xllm_kernels/models/deepseekv2/layer/decoder_layer.h"
 
@@ -110,11 +111,9 @@ class DeepseekV2DecoderLayerImpl : public BaseLayer {
 
   ~DeepseekV2DecoderLayerImpl() {};
 
-  virtual void load_state_dict(const StateDict& state_dict) override;
-
-  void verify_loaded_weights(const std::string& prefix) const;
-
   virtual void merge_loaded_weights() override;
+
+  torch::Tensor build_expert_routing_map(std::vector<int32_t> expert_lists);
 
   void prepare_expert_weight(const std::vector<int32_t>& expert_list);
 
@@ -139,9 +138,11 @@ class DeepseekV2DecoderLayerImpl : public BaseLayer {
     bool use_dp_sharding = false;
   };
 
-  void initialize_tensors(const torch::TensorOptions& options);
+  std::string get_expert_shm_key(int32_t layer_id,
+                                 int32_t expert_index,
+                                 const std::string& suffix);
 
-  void initialize_weight_tensors(const torch::TensorOptions& options);
+  void initialize_tensors(const torch::TensorOptions& options);
 
   void param_from_args(atb_speed::deepseekV2::DecoderLayerParam& param,
                        const ModelArgs& args,
@@ -149,7 +150,9 @@ class DeepseekV2DecoderLayerImpl : public BaseLayer {
                        bool is_prefill);
 
   void reserve_experts_weights(int num_of_device_experts);
+
   void initialize_device_expert_list(int numdevice, int num_layers);
+
   void initialize_basic_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param,
       const ModelArgs& args,
@@ -177,79 +180,6 @@ class DeepseekV2DecoderLayerImpl : public BaseLayer {
       atb_speed::deepseekV2::DecoderLayerParam& param,
       const ModelArgs& args,
       bool is_prefill);
-
-  torch::Tensor get_sharded_tensor(const StateDict& state_dict,
-                                   const std::string& name,
-                                   int dim);
-
-  torch::Tensor get_sharded_tensor(const StateDict& state_dict,
-                                   const std::string& name,
-                                   int dim,
-                                   int local_tp_rank,
-                                   int local_tp_size);
-
-  std::string extract_endswith(const std::string& input);
-
-  std::string get_expert_shm_key(int32_t layer_id,
-                                 int32_t expert_ids,
-                                 const std::string& suffix);
-  torch::Tensor build_expert_routing_map(std::vector<int32_t> expert_lists);
-  void set_kv_weight(const StateDict& state_dict,
-                     const std::string& tensor_name,
-                     int weight_position,
-                     int dim);
-
-  int extract_expert_index(const std::string& name);
-
-  void convert_descaled_weights_to_float();
-
-  void convert_offsets_to_int8();
-
-  torch::Tensor convert_fp16_to_int64(const torch::Tensor& fp16_tensor);
-
-  void handle_device_specific_bias();
-
-  void merge_shared_experts_weights();
-
-  void merge_experts_weights();
-
-  void squeeze_experts_weights();
-
-  void preprocess_linear_for_rope();
-
-  void process_expert_weights(const StateDict& state_dict,
-                              const std::string& name,
-                              const torch::Tensor& tensor);
-
-  void process_shared_expert_weights(const StateDict& state_dict,
-                                     const std::string& name,
-                                     const torch::Tensor& tensor);
-
-  void process_mlp_common_weights(const StateDict& state_dict,
-                                  const std::string& name,
-                                  const torch::Tensor& tensor);
-
-  void process_general_weights(const StateDict& state_dict,
-                               const std::string& name,
-                               const torch::Tensor& tensor);
-
-  int get_mapped_index(const std::string& name,
-                       const std::unordered_map<std::string, int>& mapping);
-
-  torch::Tensor view_tensor(torch::Tensor weight,
-                            const std::string& name,
-                            bool pre_view);
-
-  torch::Tensor trans_rope_weight(torch::Tensor weight);
-
-  torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts,
-                                      at::Device device,
-                                      bool transpose = false);
-
-  torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_up,
-                                      std::vector<torch::Tensor>& experts_gate,
-                                      at::Device device,
-                                      bool transpose = false);
 
   void merge_and_copy_gate_up_weights(
       torch::Tensor& target_buffer,
@@ -328,17 +258,7 @@ class DeepseekV2DecoderLayerImpl : public BaseLayer {
   torch::Tensor at_in_device_expert_count_;
 
   std::vector<int32_t> int_placeholder_;
-  std::vector<int32_t> device_expert_list_;
 
-  std::unordered_map<std::string, torch::Tensor> shared_experts_weights_;
-  std::unordered_map<std::string, std::vector<torch::Tensor>> experts_weights_;
-  std::unordered_map<std::string, std::vector<torch::Tensor>>
-      all_experts_weights_buffer_;
-
-  std::mutex shared_experts_mutex_;
-  std::mutex experts_mutex_;
-
-  std::unique_ptr<ExpertBufferManager> shared_buffer_ = nullptr;
   torch::Tensor expert_routing_map_;
   torch::Tensor expert_routing_map_buffer_;
 };

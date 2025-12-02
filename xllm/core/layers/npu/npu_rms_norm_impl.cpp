@@ -29,28 +29,17 @@ void RMSNormImpl::param_from_args(atb::infer::RmsNormParam& param,
 RMSNormImpl::RMSNormImpl(const ModelContext& context) : BaseLayer(context) {
   param_from_args(norm_param_, context.get_model_args());
 
-  at_weight_tensors_.resize(1);
+  // at_weight_tensors_.resize(1);
   atb_weight_tensors_.resize(1);
-
-  auto options = context.get_tensor_options();
-  dtype_ = c10::typeMetaToScalarType(options.dtype());
-  at_weight_tensors_[0] = torch::zeros({1}).to(options);
-}
-
-void RMSNormImpl::verify_loaded_weights(const std::string weight_str) const {
-  CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
-      << "final norm weight is not loaded for " << weight_str;
+  loader_ = std::make_unique<RMSNORMLoader>((uint64_t)1,  // 1 weight
+                                            context);
 }
 
 void RMSNormImpl::merge_loaded_weights() {
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
   atb_weight_tensors_[0] =
-      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[0]);
+      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
   init_layer();
-}
-
-void RMSNormImpl::load_state_dict(const StateDict& state_dict) {
-  set_weight(state_dict, "weight", 0);
-  at_weight_tensors_[0] = at_weight_tensors_[0].to(dtype_);
 }
 
 int64_t RMSNormImpl::init_layer() {

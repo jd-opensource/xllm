@@ -47,8 +47,6 @@ class BlockCopyImpl : public BaseLayer {
 
   void load_state_dict(const StateDict& state_dict) {};
 
-  void verify_loaded_weights(const std::string weight_str) const {};
-
   void merge_loaded_weights();
 
   int64_t init_layer();

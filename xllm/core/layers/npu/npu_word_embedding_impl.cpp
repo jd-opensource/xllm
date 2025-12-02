@@ -51,32 +51,17 @@ WordEmbeddingImpl::WordEmbeddingImpl(const ModelContext& context)
   auto options = context.get_tensor_options();
 
   param_from_args(embedding_param_, model_args, parallel_args);
-  at_weight_tensors_.resize(1);
   atb_weight_tensors_.resize(1);
   atOutTensors_.resize(1);
   dtype_ = c10::typeMetaToScalarType(options.dtype());
-  at_weight_tensors_[0] = torch::zeros({1}).to(options);
-}
-
-void WordEmbeddingImpl::verify_loaded_weights(
-    const std::string weight_str) const {
-  CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
-      << "weight is not loaded for " << weight_str;
+  loader_ = std::make_unique<WordEmbeddingLoader>(1, context);
 }
 
 void WordEmbeddingImpl::merge_loaded_weights() {
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
   atb_weight_tensors_[0] =
-      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[0]);
+      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
   init_layer();
-}
-
-void WordEmbeddingImpl::load_state_dict(const StateDict& state_dict) {
-  if (dp_size_ > 1) {
-    set_weight(
-        state_dict, "weight", 0, 1, dp_local_tp_rank_, dp_local_tp_size_);
-  } else {
-    set_weight(state_dict, "weight", 0, 1);
-  }
 }
 
 int64_t WordEmbeddingImpl::init_layer() {

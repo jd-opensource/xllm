@@ -39,6 +39,7 @@ limitations under the License.
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/xtensor.h"
+#include "loader/base_loader.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "pytorch/adapter/workspace/workspace.h"
 
@@ -115,11 +116,30 @@ class BaseLayer : public torch::nn::Module {
                            aclrtEvent* event,
                            std::atomic<bool>* event_flag);
 
-  virtual void load_state_dict(const StateDict& state_dict) {};
+  virtual void load_state_dict(const StateDict& state_dict) {
+    if (loader_) {
+      loader_->load_state_dict(state_dict);
+    }
+  };
 
-  virtual void verify_loaded_weights() const {};
+  virtual void verify_loaded_weights() const {
+    if (loader_) {
+      loader_->verify_loaded_weights();
+    }
+  };
 
-  virtual void merge_loaded_weights() {};
+  virtual void verify_loaded_weights(const std::string& prefix) const {
+    if (loader_) {
+      loader_->verify_loaded_weights(prefix);
+    }
+  };
+
+  virtual void merge_loaded_weights() {
+    if (loader_) {
+      loader_->merge_loaded_weights();
+    }
+    init_layer();
+  };
 
   virtual int64_t init_layer() { return 0; };
 
@@ -150,6 +170,7 @@ class BaseLayer : public torch::nn::Module {
   atb::Tensor XTensor2Tensor(const std::shared_ptr<xllm::XTensor>& xtensor);
 
  protected:
+  std::unique_ptr<BaseLoader> loader_ = nullptr;
   std::vector<at::Tensor> at_weight_tensors_;
   at::Device device_;
   std::string name_;

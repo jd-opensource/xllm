@@ -45,37 +45,22 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
     : BaseLayer(context) {
   param_from_args(
       linear_param_, context.get_model_args(), context.get_parallel_args());
-  at_weight_tensors_.resize(1);
   atb_weight_tensors_.resize(1);
   at_out_tensors_.resize(1);
 
   auto options = context.get_tensor_options();
   dtype_ = c10::typeMetaToScalarType(options.dtype());
-  at_weight_tensors_[0] = torch::zeros({1}).to(options);
   tensor_placeholder_ = torch::zeros({1}).to(options);
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
-}
-
-void ColumnParallelLinearImpl::verify_loaded_weights(
-    const std::string weight_str) const {
-  CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
-      << "weight is not loaded for " << weight_str;
+  loader_ = std::make_unique<ColumParallelLinearLoader>(1, context);
 }
 
 void ColumnParallelLinearImpl::merge_loaded_weights() {
-  atb_weight_tensors_[0] =
-      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[0]);
-  init_layer();
-}
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
 
-void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
-  if (dp_size_ > 1) {
-    set_weight(
-        state_dict, "weight", 0, 0, dp_local_tp_rank_, dp_local_tp_size_);
-  } else {
-    set_weight(state_dict, "weight", 0, 0);
-  }
-  at_weight_tensors_[0] = at_weight_tensors_[0].to(dtype_);
+  atb_weight_tensors_[0] =
+      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
+  init_layer();
 }
 
 int64_t ColumnParallelLinearImpl::init_layer() {

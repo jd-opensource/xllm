@@ -26,6 +26,7 @@ limitations under the License.
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/qwen3_moe_decoder_loader.h"
 #include "npu_base_layer.h"
 #include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
 #include "xllm_kernels/core/include/atb_speed/base/model.h"
@@ -42,10 +43,6 @@ class Qwen3MoeDecoderLayerImpl : public BaseLayer {
                                     const int32_t layer_id);
 
   ~Qwen3MoeDecoderLayerImpl() {};
-
-  virtual void load_state_dict(const StateDict& state_dict);
-
-  virtual void verify_loaded_weights(const std::string& prefix) const;
 
   virtual void merge_loaded_weights();
 
@@ -71,14 +68,10 @@ class Qwen3MoeDecoderLayerImpl : public BaseLayer {
 
   void initialize_tensors(const torch::TensorOptions& options);
 
-  void initialize_weight_tensors(const torch::TensorOptions& options);
-
   void param_from_args(atb_speed::qwen::MoeDecoderLayerParam& param,
                        const ModelArgs& args,
                        const ParallelArgs& parallel_args,
                        bool is_prefill);
-
-  void resize_experts_weights(int num_of_device_experts);
 
   void initialize_basic_parameters(atb_speed::qwen::MoeDecoderLayerParam& param,
                                    const ModelArgs& args,
@@ -100,68 +93,6 @@ class Qwen3MoeDecoderLayerImpl : public BaseLayer {
 
   void initialize_quantization_parameters(
       atb_speed::qwen::MoeDecoderLayerParam& param);
-
-  torch::Tensor get_sharded_tensor(const StateDict& state_dict,
-                                   const std::string& name,
-                                   int dim);
-  torch::Tensor get_sharded_tensor(const StateDict& state_dict,
-                                   const std::string& name,
-                                   int dim,
-                                   int local_tp_rank,
-                                   int local_tp_size);
-
-  std::string extract_endswith(const std::string& input);
-
-  void set_kv_weight(const StateDict& state_dict,
-                     const std::string& tensor_name,
-                     int weight_position,
-                     int dim);
-
-  int extract_expert_index(const std::string& name);
-
-  void convert_descaled_weights_to_float();
-
-  torch::Tensor convert_fp16_to_int64(const torch::Tensor& fp16_tensor);
-
-  void merge_shared_experts_weights();
-
-  void merge_experts_weights();
-
-  void squeeze_experts_weights();
-
-  void preprocess_linear_for_rope();
-
-  void process_expert_weights(const StateDict& state_dict,
-                              const std::string& name,
-                              const torch::Tensor& tensor);
-
-  void process_shared_expert_weights(const StateDict& state_dict,
-                                     const std::string& name,
-                                     const torch::Tensor& tensor);
-
-  void process_mlp_common_weights(const StateDict& state_dict,
-                                  const std::string& name,
-                                  const torch::Tensor& tensor);
-
-  void process_general_weights(const StateDict& state_dict,
-                               const std::string& name,
-                               const torch::Tensor& tensor);
-
-  int get_mapped_index(const std::string& name,
-                       const std::unordered_map<std::string, int>& mapping);
-
-  torch::Tensor view_tensor(torch::Tensor weight,
-                            const std::string& name,
-                            bool pre_view);
-
-  torch::Tensor trans_rope_weight(torch::Tensor weight);
-
-  torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts,
-                                      bool transpose = false);
-
-  torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_up,
-                                      std::vector<torch::Tensor>& experts_gate,
-                                      bool transpose = false);
 
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::qwen::MoeDecoderLayerParam& param);
@@ -190,7 +121,6 @@ class Qwen3MoeDecoderLayerImpl : public BaseLayer {
   int32_t start_expert_id_;
   int32_t end_expert_id_;
   int32_t ep_rank_;
-  int32_t n_kv_heads_;
 
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
@@ -214,8 +144,6 @@ class Qwen3MoeDecoderLayerImpl : public BaseLayer {
   torch::Tensor one_hot_;
   torch::Tensor zero_hot_;
   torch::Tensor final_hidden_states_;
-  torch::Tensor at_start_expert_id_;
-  torch::Tensor at_in_device_expert_count_;
 
   std::vector<int32_t> int_placeholder_;
 

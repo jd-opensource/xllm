@@ -49,10 +49,6 @@ class LlamaDecoderLayerImpl : public BaseLayer {
 
   ~LlamaDecoderLayerImpl() {};
 
-  virtual void load_state_dict(const StateDict& state_dict) override;
-
-  virtual void verify_loaded_weights() const override;
-
   virtual void merge_loaded_weights() override;
 
   virtual int64_t init_layer() override;

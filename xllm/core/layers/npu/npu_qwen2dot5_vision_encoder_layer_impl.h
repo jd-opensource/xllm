@@ -34,6 +34,7 @@ limitations under the License.
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
+#include "loader/qwen2dot5_vision_encoder_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
@@ -42,36 +43,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-enum VisionEncoderLayerTensorId : int {
-  IN_INPUT_NORM_WEIGHT = 0,
-  IN_POST_NORM_WEIGHT,
-  IN_QKV_WEIGHT,
-  IN_QKV_BIAS,
-  IN_WATTENTION_OUT_WEIGHT,
-  IN_WATTENTION_OUT_BIAS,
-  IN_MLP_GATE_WEIGHT,
-  IN_MLP_GATE_BIAS,
-  IN_MLP_UP_WEIGHT,
-  IN_MLP_UP_BIAS,
-  IN_MLP_DOWN_WEIGHT,
-  IN_MLP_DOWN_BIAS,
-  IN_VISION_Q_WEIGHT,
-  IN_VISION_Q_BIAS,
-  IN_VISION_K_WEIGHT,
-  IN_VISION_K_BIAS,
-  IN_VISION_V_WEIGHT,
-  IN_VISION_V_BIAS
-};
-
 class Qwen2dot5VisionEncoderLayerImpl : public BaseLayer {
  public:
   explicit Qwen2dot5VisionEncoderLayerImpl(const ModelContext& context);
 
   ~Qwen2dot5VisionEncoderLayerImpl() {};
-
-  void load_state_dict(const StateDict& state_dict) override;
-
-  void verify_loaded_weights() const override;
 
   void merge_loaded_weights() override;
 
@@ -97,36 +73,12 @@ class Qwen2dot5VisionEncoderLayerImpl : public BaseLayer {
                                ModelInputParams& input_params,
                                bool is_prefill);
 
-  void get_weights_col_packed_qkv();
-
   void param_from_args(atb_speed::qwen::VisionEncoderLayerParam& param,
                        const ModelArgs& args,
                        const ParallelArgs& parallel_args);
 
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::qwen::VisionEncoderLayerParam& param);
-
-  void pad_qkv_weights();
-
-  void pad_mlp_weights();
-
-  torch::Tensor pad_tensor(const torch::Tensor& tensor,
-                           int64_t target_shape,
-                           int64_t dim = 0) {
-    int64_t pad_size = target_shape - tensor.size(dim);
-    if (tensor.dim() == 1) {
-      return torch::nn::functional::pad(
-          tensor, torch::nn::functional::PadFuncOptions({0, pad_size}));
-    } else if (tensor.dim() == 2) {
-      if (1 == dim)
-        return torch::nn::functional::pad(
-            tensor, torch::nn::functional::PadFuncOptions({0, pad_size, 0, 0}));
-      else
-        return torch::nn::functional::pad(
-            tensor, torch::nn::functional::PadFuncOptions({0, 0, 0, pad_size}));
-    }
-    return tensor;
-  }
 
   atb_speed::Model::Node encode_node_;
   std::string model_name_;

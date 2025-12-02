@@ -19,6 +19,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/siglip_encoder_loader.h"
 #include "npu_base_layer.h"
 #include "xllm_kernels/pytorch/atb_torch/core/include/base_operation.h"
 #include "xllm_kernels/pytorch/atb_torch/core/include/graph_operation.h"

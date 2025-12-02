@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/qwen3_decoder_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
@@ -39,7 +40,6 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
 #include "xllm_kernels/models/qwen3/layer/decoder_layer.h"
-
 namespace xllm {
 namespace layer {
 
@@ -49,9 +49,9 @@ class Qwen3DecoderLayerImpl : public BaseLayer {
 
   ~Qwen3DecoderLayerImpl() {};
 
-  virtual void load_state_dict(const StateDict& state_dict) override;
+  //   virtual void load_state_dict(const StateDict& state_dict) override;
 
-  virtual void verify_loaded_weights() const override;
+  //   virtual void verify_loaded_weights() const override;
 
   virtual void merge_loaded_weights() override;
 

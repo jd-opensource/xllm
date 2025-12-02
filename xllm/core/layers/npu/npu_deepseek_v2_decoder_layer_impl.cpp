@@ -129,127 +129,6 @@ enum DecoderLayerTensorId : int {
 
 static const uint64_t WEIGHT_COUNT_PER_LAYER = 84;
 
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {};
-
-static const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
-    {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
-    {"input_layernorm.bias", IN_INPUT_NORM_BIAS},
-
-    {"self_attn.q_a_proj.weight", IN_Q_PROJ_A_WEIGHT},
-    {"self_attn.q_a_proj.quant_bias", IN_Q_PROJ_A_BIAS},
-    {"self_attn.q_a_proj.deq_scale", IN_Q_PROJ_A_DESCALE},
-    {"self_attn.q_a_proj.input_offset", IN_Q_PROJ_A_OFFSET},
-    {"self_attn.q_a_proj.input_scale", IN_Q_PROJ_A_SCALE},
-    {"self_attn.q_a_layernorm.weight", IN_Q_PROJ_A_LAYERNORM_WEIGHT},
-    {"self_attn.q_a_layernorm.bias", IN_Q_PROJ_A_LAYERNORM_BIAS},
-
-    {"self_attn.q_proj.weight", IN_Q_PROJ_B_WEIGHT},
-    {"self_attn.q_b_proj.weight", IN_Q_PROJ_B_WEIGHT},
-    {"self_attn.q_b_proj.quant_bias", IN_Q_PROJ_B_BIAS},
-    {"self_attn.q_b_proj.input_scale", IN_Q_PROJ_B_SCALE},
-    {"self_attn.q_b_proj.deq_scale", IN_Q_PROJ_B_DESCALE},
-    {"self_attn.q_b_proj.input_offset", IN_Q_PROJ_B_OFFSET},
-
-    {"self_attn.kv_a_proj_with_mqa.weight", IN_KV_PROJ_WITH_MQA_WEIGHT},
-    {"self_attn.kv_a_proj_with_mqa.quant_bias", IN_KV_PROJ_WITH_MQA_BIAS},
-    {"self_attn.kv_a_proj_with_mqa.deq_scale", IN_KV_PROJ_WITH_MQA_DESCALE},
-    {"self_attn.kv_a_proj_with_mqa.input_offset", IN_KV_PROJ_WITH_MQA_OFFSET},
-    {"self_attn.kv_a_proj_with_mqa.input_scale", IN_KV_PROJ_WITH_MQA_SCALE},
-
-    {"self_attn.kv_a_layernorm.weight", IN_KV_PROJ_A_LAYERNORM_WEIGHT},
-    {"self_attn.kv_a_layernorm.bias", IN_KV_PROJ_A_LAYERNORM_BIAS},
-
-    {"self_attn.kv_b_proj.weight", IN_K_PROJ_B_FOR_Q_WEIGHT},  // merge
-    // {"self_attn.kv_b_proj.weight", IN_V_PROJ_B_FOR_O_WEIGHT},  // merge
-
-    {"self_attn.o_proj.weight", IN_ATTENTION_OUT_WEIGHT},
-    {"self_attn.o_proj.quant_bias", IN_ATTENTION_OUT_BIAS},
-    {"self_attn.o_proj.deq_scale", IN_ATTENTION_OUT_DESCALE},
-    {"self_attn.o_proj.input_offset", IN_ATTENTION_OUT_OFFSET},
-    {"self_attn.o_proj.input_scale", IN_ATTENTION_OUT_SCALE},
-
-    {"post_attention_layernorm.weight", IN_SELFATTENTION_OUT_NORM_WEIGHT},
-    {"post_attention_layernorm.bias", IN_SELFATTENTION_OUT_NORM_BIAS},
-
-    {"mlp.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.gate_proj.weight_offset", IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.gate_proj.weight_scale", IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.up_proj.weight_offset", IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.up_proj.weight_scale", IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-    {"mlp.down_proj.weight_offset", IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
-    {"mlp.down_proj.weight_scale", IN_MLP_DOWN_SCALE_SHARED_EXPERT},
-
-    {"mlp.shared_experts.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight_offset",
-     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight_scale",
-     IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.shared_experts.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight_offset",
-     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight_scale",
-     IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.shared_experts.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight_offset",
-     IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight_scale",
-     IN_MLP_DOWN_SCALE_SHARED_EXPERT},
-
-    {"mlp.gate.weight", IN_BLOCK_SPARSE_MOE_GATE_WEIGHT},
-    {"mlp.gate.e_score_correction_bias", IN_BLOCK_SPARSE_MOE_GATE_BIAS},
-
-    {"gate_proj.weight", IN_MLP_GATEUP_WEIGHT_EXPERT},
-    {"gate_proj.weight_offset", IN_MLP_GATEUP_OFFSET_EXPERT},
-    {"gate_proj.weight_scale", IN_MLP_GATEUP_SCALE_EXPERT},
-    {"up_proj.weight", IN_MLP_GATEUP_WEIGHT_EXPERT},
-    {"up_proj.weight_offset", IN_MLP_GATEUP_OFFSET_EXPERT},
-    {"up_proj.weight_scale", IN_MLP_GATEUP_SCALE_EXPERT},
-
-    {"down_proj.weight", IN_MLP_DOWN_WEIGHT_EXPERT},
-    {"down_proj.weight_offset", IN_MLP_DOWN_OFFSET_EXPERT},
-    {"down_proj.weight_scale", IN_MLP_DOWN_SCALE_EXPERT},
-};
-
-static const std::map<int, int> WEIGHT_SHARD = {};
-
-static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
-    {IN_Q_PROJ_B_WEIGHT, 0},
-    {IN_Q_PROJ_B_BIAS, 0},
-    {IN_Q_PROJ_B_DESCALE, 0},
-    {IN_K_PROJ_B_FOR_Q_WEIGHT, 0},
-    {IN_V_PROJ_B_FOR_O_WEIGHT, 0},
-    {IN_ATTENTION_OUT_WEIGHT, 1},
-    {IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT, 0},
-    {IN_MLP_GATEUP_OFFSET_SHARED_EXPERT, 0},
-    {IN_MLP_GATEUP_SCALE_SHARED_EXPERT, 0},
-    {IN_MLP_DOWN_WEIGHT_SHARED_EXPERT, 1},
-    {IN_MLP_GATEUP_WEIGHT_EXPERT, 0},
-    {IN_MLP_GATEUP_OFFSET_EXPERT, 0},
-    {IN_MLP_GATEUP_SCALE_EXPERT, 0},
-    {IN_MLP_DOWN_WEIGHT_EXPERT, 1},
-};
-
-static std::vector<int> SQUEEZE_WEIGHT_VEC = {
-    IN_MLP_GATEUP_OFFSET_SHARED_EXPERT,
-    IN_MLP_GATEUP_SCALE_SHARED_EXPERT,
-    IN_MLP_DOWN_OFFSET_SHARED_EXPERT,
-    IN_MLP_DOWN_SCALE_SHARED_EXPERT};
-
-static std::vector<std::string> LINEAR_FOR_ROPE = {
-    "self_attn.q_b_proj.weight",
-    "self_attn.q_b_proj.quant_bias",
-    "self_attn.q_b_proj.deq_scale",
-    "self_attn.kv_a_proj_with_mqa.weight",
-    "self_attn.kv_a_proj_with_mqa.quant_bias",
-    "self_attn.kv_a_proj_with_mqa.deq_scale",
-};
-
 DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
     const ModelContext& context,
     const int32_t layer_id)
@@ -279,6 +158,7 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   auto parallel_args = context.get_parallel_args();
   auto model_args = context.get_model_args();
   auto options = context.get_tensor_options();
+
   rank_ = parallel_args.rank();
   first_k_dense_replace_ = model_args.first_k_dense_replace();
   n_layers_ = model_args.n_layers();
@@ -307,13 +187,27 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   param_from_args(decode_mla_param_, model_args, parallel_args, false);
   decode_mla_param_.enableCustomizeMla = FLAGS_enable_customize_mla_kernel;
 
+  loader_ = std::make_unique<DeekseekV2DecoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      layer_id_,
+      prefill_param_.firstKDenseReplace,
+      prefill_param_.numOfDeviceExperts,
+      prefill_param_.qkRopeHeadDim,
+      prefill_param_.numAttentionHeadsPerRank,
+      decode_param_.worldSize,
+      qk_nope_head_dim_,
+      kv_lora_rank_,
+      num_key_value_heads_,
+      v_head_dim_,
+      prefill_param_.isBF16,
+      decode_param_.isBF16);
   initialize_tensors(options);
 }
 
 void DeepseekV2DecoderLayerImpl::initialize_tensors(
     const torch::TensorOptions& options) {
   // initializ placeholder
-  at_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   placeholder_vec_ = {1};
   int_tensor_placeholder_ = torch::ones({1}).to(torch::kInt32).to(device_);
@@ -322,7 +216,6 @@ void DeepseekV2DecoderLayerImpl::initialize_tensors(
       torch::zeros({1, 1}).to(torch::kInt32).to(device_);
   tensor_placeholder_ = torch::zeros({1}).to(options);
 
-  reserve_experts_weights(prefill_param_.numOfDeviceExperts);
   expert_group_ = torch::arange(1024, torch::kInt32).to(device_);
   one_hot_ = torch::tensor({1}, torch::kInt32).to(device_);
   zero_hot_ = torch::tensor({0}, torch::kInt32).to(device_);
@@ -331,34 +224,16 @@ void DeepseekV2DecoderLayerImpl::initialize_tensors(
   at_in_device_expert_count_ =
       torch::tensor({num_experts_per_partition_ - 1}, torch::kInt64)
           .to(device_);
-  initialize_weight_tensors(options);
-  initialize_device_expert_list(decode_param_.worldSize,
-                                num_experts_per_partition_);
+
+  auto& device_expert_list = loader_->get_device_expert_list();
   if (FLAGS_enable_eplb) {
     auto layer_expert_routing_map_ =
-        build_expert_routing_map(device_expert_list_);
+        build_expert_routing_map(device_expert_list);
     std::vector<torch::Tensor> tensors_vec;
     for (int i = 0; i < n_layers_ - first_k_dense_replace_; i++) {
       tensors_vec.emplace_back(layer_expert_routing_map_);
     }
     expert_routing_map_ = torch::stack(tensors_vec, 0);
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::initialize_device_expert_list(
-    int num_device,
-    int num_device_expert) {
-  int32_t num_device_route_expert = num_device_expert;
-  if (FLAGS_enable_eplb) {
-    num_device_route_expert = num_device_expert - redundant_experts_num_;
-  }
-  for (int i = 0; i < num_device * num_device_route_expert; ++i) {
-    device_expert_list_.emplace_back(i);
-    if (FLAGS_enable_eplb && (i + 1) % num_device_route_expert == 0) {
-      for (int redundant_expert = 0; redundant_expert < redundant_experts_num_;
-           ++redundant_expert)
-        device_expert_list_.emplace_back(i);
-    }
   }
 }
 
@@ -373,40 +248,6 @@ void DeepseekV2DecoderLayerImpl::param_from_args(
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
   initialize_kimi_k2_parameters(param, args, is_prefill);
-}
-
-void DeepseekV2DecoderLayerImpl::reserve_experts_weights(
-    int num_of_device_experts) {
-  experts_weights_.clear();
-  std::vector<std::string> weight_names = {
-      "gate_proj.weight", "up_proj.weight", "down_proj.weight"};
-  if (quantize_type_ == "w8a8_dynamic") {
-    weight_names.emplace_back("gate_proj.weight_offset");
-    weight_names.emplace_back("up_proj.weight_offset");
-    weight_names.emplace_back("down_proj.weight_offset");
-    weight_names.emplace_back("gate_proj.weight_scale");
-    weight_names.emplace_back("up_proj.weight_scale");
-    weight_names.emplace_back("down_proj.weight_scale");
-  }
-  std::lock_guard<std::mutex> lock(experts_mutex_);
-  for (const auto& weight_name : weight_names) {
-    experts_weights_[weight_name] =
-        std::vector<torch::Tensor>(num_of_device_experts);
-    ;
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::initialize_weight_tensors(
-    const torch::TensorOptions& options) {
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
-    at_weight_tensors_[i] = torch::zeros({1}).to(options);
-  }
-  if (FLAGS_enable_eplb) {
-    const int64_t size =
-        50LL * 1024LL * 1024LL * int64_t(n_layers_ - first_k_dense_replace_);
-    shared_buffer_ = std::make_unique<ExpertBufferManager>(
-        num_experts_, n_layers_ - first_k_dense_replace_, size);
-  }
 }
 
 void DeepseekV2DecoderLayerImpl::initialize_basic_parameters(
@@ -659,750 +500,15 @@ void DeepseekV2DecoderLayerImpl::initialize_quantization_parameters(
   }
 }
 
-void DeepseekV2DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
-  for (const auto& [name, tensor] : state_dict) {
-    bool is_sharded = false;
-    int index = 0;
-
-    if (absl::EndsWith(name, "self_attn.kv_b_proj.weight")) {
-      index = WEIGHT_MAPPING_W8A8.at(name);
-      set_kv_weight(state_dict, name, index, WEIGHT_SHARD_W8A8.at(index));
-      continue;
-    }
-
-    if (absl::StartsWith(name, "mlp.experts")) {
-      process_expert_weights(state_dict, name, tensor);
-      continue;
-    }
-
-    if (absl::StartsWith(name, "mlp.shared_experts")) {
-      process_shared_expert_weights(state_dict, name, tensor);
-      continue;
-    }
-
-    if (absl::StartsWith(name, "mlp") && !absl::StrContains(name, "gate.")) {
-      process_mlp_common_weights(state_dict, name, tensor);
-      continue;
-    }
-
-    process_general_weights(state_dict, name, tensor);
-  }
-}
-
-int DeepseekV2DecoderLayerImpl::get_mapped_index(
-    const std::string& name,
-    const std::unordered_map<std::string, int>& mapping) {
-  const auto it = mapping.find(name);
-  if (it == mapping.end()) {
-    LOG(WARNING) << "Parameter '" << name
-                 << "' not found in mapping and will not be used.";
-    return -1;
-  }
-  return it->second;
-}
-
-std::string DeepseekV2DecoderLayerImpl::get_expert_shm_key(
-    int32_t layer_id,
-    int32_t expert_index,
-    const std::string& suffix) {
-  std::string shm_key =
-      "layer_" + std::to_string(layer_id - first_k_dense_replace_) + "_" +
-      "expert_" + std::to_string(expert_index) + "_" + suffix;
-  return shm_key;
-}
-
-void DeepseekV2DecoderLayerImpl::process_expert_weights(
-    const StateDict& state_dict,
-    const std::string& name,
-    const torch::Tensor& tensor) {
-  // Step 1: Early checks and basic info extraction
-  int expert_index = extract_expert_index(name);
-  const std::string suffix = extract_endswith(name);
-  const int index = get_mapped_index(suffix, WEIGHT_MAPPING_W8A8);
-  if (index == -1) {
-    return;
-  }
-
-  const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
-  const bool needs_eplb = FLAGS_enable_eplb && (rank_ % localWorldSize_ ==
-                                                expert_index % localWorldSize_);
-
-  // Step 2: Check if expert is in partition
-  const int start_idx = ep_rank_ * num_experts_per_partition_;
-  const int end_idx = (ep_rank_ + 1) * num_experts_per_partition_;
-  const int safe_end =
-      std::min(end_idx, static_cast<int>(device_expert_list_.size()));
-
-  auto it = std::find(device_expert_list_.begin() + start_idx,
-                      device_expert_list_.begin() + safe_end,
-                      expert_index);
-  const bool in_partition = it != device_expert_list_.begin() + safe_end;
-
-  // Early return if neither EPLB nor partition needs this expert
-  if (!needs_eplb && !in_partition) {
-    return;
-  }
-
-  // Step 3: Process tensor
-  torch::Tensor processed_tensor;
-  {
-    std::lock_guard<std::mutex> lock(experts_mutex_);
-    processed_tensor = is_sharded
-                           ? get_sharded_tensor(state_dict,
-                                                name,
-                                                WEIGHT_SHARD_W8A8.at(index),
-                                                ep_local_tp_rank_,
-                                                ep_local_tp_size_)
-                           : tensor;
-
-    if (!decode_param_.isBF16) {
-      if (absl::EndsWith(name, "_offset")) {
-        processed_tensor = processed_tensor.to(torch::kFloat16);
-      } else if (absl::EndsWith(name, "_scale")) {
-        processed_tensor = processed_tensor.to(torch::kFloat32);
-      }
-    }
-  }
-
-  // Step 4: Handle EPLB case
-  if (needs_eplb) {
-    std::lock_guard<std::mutex> lock(experts_mutex_);
-    std::string shm_key = get_expert_shm_key(layer_id_, expert_index, suffix);
-    shared_buffer_->add_tensor(expert_index,
-                               layer_id_ - first_k_dense_replace_,
-                               shm_key,
-                               processed_tensor.contiguous());
-  }
-
-  // Step 5: Handle partition case
-  if (in_partition) {
-    std::vector<size_t> matches_pos;
-    for (auto iter = it; iter != device_expert_list_.begin() + safe_end;
-         ++iter) {
-      if (*iter == expert_index) {
-        matches_pos.emplace_back(
-            std::distance(device_expert_list_.begin(), iter) - start_idx);
-      }
-    }
-
-    if (!matches_pos.empty()) {
-      std::lock_guard<std::mutex> lock(experts_mutex_);
-      for (auto pos : matches_pos) {
-        experts_weights_[suffix][pos] = processed_tensor.clone();
-      }
-    }
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::process_shared_expert_weights(
-    const StateDict& state_dict,
-    const std::string& name,
-    const torch::Tensor& tensor) {
-  torch::Tensor tmp_tensor;
-  std::lock_guard<std::mutex> lock(shared_experts_mutex_);
-  const int index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
-  if (index == -1) {
-    return;
-  }
-  if (FLAGS_expert_parallel_degree == 2) {
-    tmp_tensor = tensor.to(device_);
-  } else {
-    const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
-    tmp_tensor = is_sharded ? get_sharded_tensor(
-                                  state_dict, name, WEIGHT_SHARD_W8A8.at(index))
-                                  .to(device_)
-                            : tensor.to(device_);
-  }
-  if (absl::StrContains(name, "down_proj")) {
-    at_weight_tensors_[index] = tmp_tensor;
-  } else {
-    shared_experts_weights_[name] = tmp_tensor;
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::process_mlp_common_weights(
-    const StateDict& state_dict,
-    const std::string& name,
-    const torch::Tensor& tensor) {
-  const int index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
-  if (index == -1) {
-    return;
-  }
-  const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
-  std::lock_guard<std::mutex> lock(shared_experts_mutex_);
-
-  torch::Tensor tmp_tensor =
-      is_sharded ? get_sharded_tensor(state_dict,
-                                      name,
-                                      WEIGHT_SHARD_W8A8.at(index),
-                                      dp_local_tp_rank_,
-                                      dp_local_tp_size_)
-                       .to(device_)
-                 : tensor.to(device_);
-  if (absl::StrContains(name, "down_proj")) {
-    at_weight_tensors_[index] = tmp_tensor;
-  } else {
-    shared_experts_weights_[name] = tmp_tensor;
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::process_general_weights(
-    const StateDict& state_dict,
-    const std::string& name,
-    const torch::Tensor& tensor) {
-  const int index = get_mapped_index(name, WEIGHT_MAPPING_W8A8);
-  if (index == -1) {
-    return;
-  }
-  const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
-  torch::Tensor tmp_tensor;
-
-  tmp_tensor = is_sharded ? get_sharded_tensor(state_dict,
-                                               name,
-                                               WEIGHT_SHARD_W8A8.at(index),
-                                               dp_local_tp_rank_,
-                                               dp_local_tp_size_)
-                                .to(device_)
-                          : tensor.to(device_);
-
-  correct_tensor_dtype(tmp_tensor, name);
-  at_weight_tensors_[index] = tmp_tensor;
-}
-
-void DeepseekV2DecoderLayerImpl::set_kv_weight(const StateDict& state_dict,
-                                               const std::string& tensor_name,
-                                               int weight_position,
-                                               int dim) {
-  torch::Tensor mutable_tensor;
-  if (parallel_args_.world_size() <= 1) {
-    mutable_tensor = state_dict.get_tensor(tensor_name).to(device_);
-    correct_tensor_dtype(mutable_tensor, tensor_name);
-  } else {
-    mutable_tensor =
-        get_sharded_tensor(
-            state_dict, tensor_name, dim, dp_local_tp_rank_, dp_local_tp_size_)
-            .to(device_);
-    // mutable_tensor = get_sharded_tensor(state_dict, tensor_name, dim);
-    correct_tensor_dtype(mutable_tensor, tensor_name);
-  }
-
-  torch::Tensor kv_b_proj_weight =
-      mutable_tensor.reshape({num_key_value_heads_ / dp_local_tp_size_,
-                              qk_nope_head_dim_ + v_head_dim_,
-                              kv_lora_rank_});
-  torch::Tensor k_b_proj_preprocessed =
-      kv_b_proj_weight.slice(1, 0, qk_nope_head_dim_).contiguous();
-  torch::Tensor v_b_proj_preprocessed =
-      kv_b_proj_weight
-          .slice(1, qk_nope_head_dim_, qk_nope_head_dim_ + v_head_dim_)
-          .transpose(1, 2)
-          .contiguous();
-  at_weight_tensors_[weight_position] = k_b_proj_preprocessed.to(device_);
-  at_weight_tensors_[weight_position + 6] = v_b_proj_preprocessed.to(device_);
-}
-
-void DeepseekV2DecoderLayerImpl::preprocess_linear_for_rope() {
-  for (const auto& name : LINEAR_FOR_ROPE) {
-    if (quantize_type_ == "") {
-      if (!absl::EndsWith(name, "weight")) {
-        continue;
-      }
-    }
-    int index = WEIGHT_MAPPING_W8A8.at(name);
-    at_weight_tensors_[index] =
-        view_tensor(at_weight_tensors_[index], name, true);
-    at_weight_tensors_[index] = trans_rope_weight(at_weight_tensors_[index]);
-    at_weight_tensors_[index] =
-        (!absl::EndsWith(name, "weight"))
-            ? view_tensor(at_weight_tensors_[index], name, false).flatten()
-            : view_tensor(at_weight_tensors_[index], name, false);
-  }
-}
-
-torch::Tensor DeepseekV2DecoderLayerImpl::view_tensor(torch::Tensor weight,
-                                                      const std::string& name,
-                                                      bool pre_view) {
-  if (absl::StrContains(name, "q_b_proj")) {
-    if (pre_view) {
-      return weight
-          .view({prefill_param_.numAttentionHeadsPerRank,
-                 qk_nope_head_dim_ + prefill_param_.qkRopeHeadDim,
-                 -1})
-          .contiguous();
-    } else {
-      return weight
-          .view({prefill_param_.numAttentionHeadsPerRank *
-                     (qk_nope_head_dim_ + prefill_param_.qkRopeHeadDim),
-                 -1})
-          .contiguous();
-    }
-  } else if (absl::StrContains(name, "kv_a_proj_with_mqa")) {
-    return weight.view({kv_lora_rank_ + prefill_param_.qkRopeHeadDim, -1})
-        .contiguous();
-  }
-  return weight;
-}
-
-torch::Tensor DeepseekV2DecoderLayerImpl::trans_rope_weight(
-    torch::Tensor weight) {
-  int64_t d = weight.size(-2);
-  int64_t rope_dim = prefill_param_.qkRopeHeadDim;
-  torch::Tensor weight_1 =
-      weight.slice(-2, d - rope_dim, torch::indexing::None, 2).contiguous();
-
-  torch::Tensor weight_2 =
-      weight.slice(-2, d - rope_dim + 1, torch::indexing::None, 2).contiguous();
-
-  torch::Tensor combined = torch::cat({weight_1, weight_2}, -2);
-
-  weight.slice(-2, d - rope_dim, d).copy_(combined);
-
-  return weight.contiguous();
-}
-
-torch::Tensor DeepseekV2DecoderLayerImpl::get_sharded_tensor(
-    const StateDict& state_dict,
-    const std::string& name,
-    int dim) {
-  if (parallel_args_.world_size() > 1) {
-    return state_dict.get_sharded_tensor(
-        name, dim, parallel_args_.rank(), parallel_args_.world_size());
-  } else {
-    return state_dict.get_tensor(name);
-  }
-}
-
-torch::Tensor DeepseekV2DecoderLayerImpl::get_sharded_tensor(
-    const StateDict& state_dict,
-    const std::string& name,
-    int dim,
-    int loacal_tp_rank,
-    int local_tp_size) {
-  if (local_tp_size > 1) {
-    return state_dict.get_sharded_tensor(
-        name, dim, loacal_tp_rank, local_tp_size);
-  } else {
-    return state_dict.get_tensor(name);
-  }
-}
-
-std::string DeepseekV2DecoderLayerImpl::extract_endswith(
-    const std::string& input) {
-  std::vector<std::string> parts;
-  std::stringstream ss(input);
-  std::string part;
-  while (std::getline(ss, part, '.')) {
-    parts.emplace_back(part);
-  }
-  if (parts.size() < 2) {
-    return "";
-  }
-  std::string result = parts[parts.size() - 2] + "." + parts[parts.size() - 1];
-  return result;
-}
-
-int DeepseekV2DecoderLayerImpl::extract_expert_index(const std::string& name) {
-  std::string prefix = "experts.";
-  size_t pos = name.find(prefix);
-  if (pos != std::string::npos) {
-    pos += prefix.length();
-    size_t end_pos = pos;
-    while (end_pos < name.length() && std::isdigit(name[end_pos])) {
-      ++end_pos;
-    }
-    if (end_pos > pos) {
-      return std::stoi(name.substr(pos, end_pos - pos));
-    }
-  }
-  return -1;
-}
-
-void DeepseekV2DecoderLayerImpl::verify_loaded_weights(
-    const std::string& prefix) const {
-  for (const auto& [index, name] : WEIGHT_MAPPING) {
-    CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
-        << "weight is not loaded for " << prefix + name;
-  }
-}
-
 void DeepseekV2DecoderLayerImpl::merge_loaded_weights() {
-  if (quantize_type_ == "w8a8_dynamic") {
-    if (prefill_param_.isBF16) {
-      convert_descaled_weights_to_float();
-    }
-    convert_offsets_to_int8();
-    handle_device_specific_bias();
-  }
-
-  merge_shared_experts_weights();
-  if (layer_id_ >= prefill_param_.firstKDenseReplace) {
-    merge_experts_weights();
-  }
-
-  squeeze_experts_weights();
-
-  preprocess_linear_for_rope();
-
-  at_weight_tensors_[IN_Q_PROJ_A_WEIGHT] =
-      torch::cat({at_weight_tensors_[IN_KV_PROJ_WITH_MQA_WEIGHT],
-                  at_weight_tensors_[IN_Q_PROJ_A_WEIGHT]},
-                 0)
-          .contiguous();
-  if (quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_Q_PROJ_A_BIAS] =
-        torch::cat({at_weight_tensors_[IN_KV_PROJ_WITH_MQA_BIAS],
-                    at_weight_tensors_[IN_Q_PROJ_A_BIAS]},
-                   0)
-            .contiguous();
-    at_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
-        torch::cat({at_weight_tensors_[IN_KV_PROJ_WITH_MQA_DESCALE],
-                    at_weight_tensors_[IN_Q_PROJ_A_DESCALE]},
-                   0)
-            .contiguous();
-  }
-
-  at_weight_tensors_[IN_Q_PROJ_A_WEIGHT] = at_npu::native::npu_format_cast(
-      at_weight_tensors_[IN_Q_PROJ_A_WEIGHT], 29);
-  at_weight_tensors_[IN_Q_PROJ_B_WEIGHT] = at_npu::native::npu_format_cast(
-      at_weight_tensors_[IN_Q_PROJ_B_WEIGHT], 29);
-
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_WEIGHT] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_BIAS] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_DESCALE] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_OFFSET] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_PROJ_WITH_MQA_SCALE] = tensor_placeholder_;
-  if (FLAGS_expert_parallel_degree != 2) {
-    at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
-        torch::roll(at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT],
-                    {-1 * ep_rank_ * num_experts_per_partition_},
-                    {0})
-            .contiguous();
-    at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_BIAS] =
-        torch::roll(at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_BIAS],
-                    {-1 * ep_rank_ * num_experts_per_partition_},
-                    {0})
-            .contiguous();
-  }
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT] =
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT].transpose(0, 1);
-  at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
-      at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
-  if (quantize_type_ == "w8a8_dynamic") {
-    // at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT] =
-    //     at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_WEIGHT].to(torch::kFloat32);
-    if (!prefill_param_.isBF16) {
-      at_weight_tensors_[IN_Q_PROJ_A_DESCALE] =
-          convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_A_DESCALE]);
-      at_weight_tensors_[IN_Q_PROJ_B_DESCALE] =
-          convert_fp16_to_int64(at_weight_tensors_[IN_Q_PROJ_B_DESCALE]);
-      at_weight_tensors_[IN_ATTENTION_OUT_DESCALE] =
-          convert_fp16_to_int64(at_weight_tensors_[IN_ATTENTION_OUT_DESCALE]);
-
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].to(
-              torch::kFloat16);
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].to(
-              torch::kFloat32);
-      at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].to(
-              torch::kFloat32);
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT].to(torch::kFloat16);
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT].to(torch::kFloat32);
-      at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT].to(torch::kFloat16);
-      at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT].to(torch::kFloat32);
-    }
-  }
+  loader_->merge_loaded_weights();
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
-        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[i]);
+        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
   init_layer();
-}
-
-torch::Tensor DeepseekV2DecoderLayerImpl::convert_fp16_to_int64(
-    const torch::Tensor& fp16_tensor) {
-  auto float_tensor = fp16_tensor.to(torch::kFloat32);
-  auto int32_tensor = float_tensor.view(torch::kInt32);
-  auto int64_tensor = int32_tensor.to(torch::kInt64);
-  return int64_tensor;
-}
-
-void DeepseekV2DecoderLayerImpl::convert_descaled_weights_to_float() {
-  auto convert_to_float = [this](int index) {
-    at_weight_tensors_[index] = at_weight_tensors_[index].to(torch::kFloat32);
-  };
-  convert_to_float(IN_Q_PROJ_A_DESCALE);
-  convert_to_float(IN_Q_PROJ_B_DESCALE);
-  convert_to_float(IN_KV_PROJ_WITH_MQA_DESCALE);
-  convert_to_float(IN_ATTENTION_OUT_DESCALE);
-}
-
-void DeepseekV2DecoderLayerImpl::convert_offsets_to_int8() {
-  auto convert_to_int8 = [this](int index) {
-    at_weight_tensors_[index] =
-        at_weight_tensors_[index].to(torch::kInt8).to(device_);
-  };
-  convert_to_int8(IN_Q_PROJ_A_OFFSET);
-  convert_to_int8(IN_Q_PROJ_B_OFFSET);
-  convert_to_int8(IN_KV_PROJ_WITH_MQA_OFFSET);
-  convert_to_int8(IN_ATTENTION_OUT_OFFSET);
-}
-
-void DeepseekV2DecoderLayerImpl::handle_device_specific_bias() {
-  if (dp_local_tp_rank_ != 0) {
-    torch::Tensor original_tensor = at_weight_tensors_[IN_ATTENTION_OUT_BIAS];
-    at_weight_tensors_[IN_ATTENTION_OUT_BIAS] =
-        torch::zeros(original_tensor.sizes(),
-                     torch::TensorOptions()
-                         .dtype(original_tensor.dtype())
-                         .device(original_tensor.device()));
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::merge_shared_experts_weights() {
-  auto merge_and_clear = [this](int index,
-                                torch::Tensor& shared_experts_gate,
-                                torch::Tensor& shared_experts_up) {
-    at_weight_tensors_[index] =
-        torch::cat({shared_experts_gate, shared_experts_up}, 0)
-            .to(device_)
-            .contiguous();
-    shared_experts_gate = tensor_placeholder_;
-    shared_experts_up = tensor_placeholder_;
-  };
-
-  if (layer_id_ >= prefill_param_.firstKDenseReplace) {
-    merge_and_clear(
-        IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT,
-        shared_experts_weights_["mlp.shared_experts.gate_proj.weight"],
-        shared_experts_weights_["mlp.shared_experts.up_proj.weight"]);
-    if (quantize_type_ == "w8a8_dynamic") {
-      merge_and_clear(
-          IN_MLP_GATEUP_OFFSET_SHARED_EXPERT,
-          shared_experts_weights_["mlp.shared_experts.gate_proj.weight_offset"],
-          shared_experts_weights_["mlp.shared_experts.up_proj.weight_offset"]);
-      merge_and_clear(
-          IN_MLP_GATEUP_SCALE_SHARED_EXPERT,
-          shared_experts_weights_["mlp.shared_experts.gate_proj.weight_scale"],
-          shared_experts_weights_["mlp.shared_experts.up_proj.weight_scale"]);
-    }
-  } else {
-    merge_and_clear(IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT,
-                    shared_experts_weights_["mlp.gate_proj.weight"],
-                    shared_experts_weights_["mlp.up_proj.weight"]);
-    if (quantize_type_ == "w8a8_dynamic") {
-      merge_and_clear(IN_MLP_GATEUP_OFFSET_SHARED_EXPERT,
-                      shared_experts_weights_["mlp.gate_proj.weight_offset"],
-                      shared_experts_weights_["mlp.up_proj.weight_offset"]);
-      merge_and_clear(IN_MLP_GATEUP_SCALE_SHARED_EXPERT,
-                      shared_experts_weights_["mlp.gate_proj.weight_scale"],
-                      shared_experts_weights_["mlp.up_proj.weight_scale"]);
-    }
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::merge_experts_weights() {
-  torch::Tensor mlp_gateup_weight =
-      merge_experts_weights(experts_weights_["gate_proj.weight"],
-                            experts_weights_["up_proj.weight"],
-                            device_,
-                            /*transpose=*/true);
-  at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_gateup_weight, 29);
-  // at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT] =
-  //     at_npu::native::npu_format_cast(mlp_gateup_weight, 2).contiguous();
-  if (quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
-        merge_experts_weights(experts_weights_["gate_proj.weight_offset"],
-                              experts_weights_["up_proj.weight_offset"],
-                              device_);
-    at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
-        merge_experts_weights(experts_weights_["gate_proj.weight_scale"],
-                              experts_weights_["up_proj.weight_scale"],
-                              device_);
-  }
-
-#if defined(USE_A3)
-  torch::Tensor mlp_down_weight =
-      merge_experts_weights(experts_weights_["down_proj.weight"],
-                            device_,
-                            /*transpose=*/false);
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-  //     at_npu::native::npu_format_cast(mlp_down_weight, 29);
-  at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-#else
-  // TODO: xllm ops's GMM need to support MTP.
-  if (decode_param_.isBF16 && false) {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              device_,
-                              /*transpose=*/true);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 29);
-  } else {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              device_,
-                              /*transpose=*/false);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-  }
-#endif
-  if (quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] = merge_experts_weights(
-        experts_weights_["down_proj.weight_offset"], device_);
-    at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] = merge_experts_weights(
-        experts_weights_["down_proj.weight_scale"], device_);
-  }
-}
-
-torch::Tensor DeepseekV2DecoderLayerImpl::merge_experts_weights(
-    std::vector<torch::Tensor>& experts,
-    at::Device device,
-    bool transpose) {
-  torch::Tensor merged_tensor = torch::stack(experts, 0).to(device);
-  if (transpose) {
-    merged_tensor = merged_tensor.transpose(1, 2);
-  }
-  merged_tensor = merged_tensor.contiguous();
-  experts.clear();
-  return merged_tensor;
-}
-
-torch::Tensor DeepseekV2DecoderLayerImpl::merge_experts_weights(
-    std::vector<torch::Tensor>& experts_gate,
-    std::vector<torch::Tensor>& experts_up,
-    at::Device device,
-    bool transpose) {
-  for (size_t i = 0; i < experts_up.size(); ++i) {
-    experts_gate[i] = torch::cat({experts_gate[i], experts_up[i]}, 0);
-  }
-
-  torch::Tensor merged_tensor = torch::stack(experts_gate, 0).to(device);
-
-  if (transpose) {
-    merged_tensor = merged_tensor.transpose(1, 2);
-  }
-
-  merged_tensor = merged_tensor.contiguous();
-  experts_gate.clear();
-  experts_up.clear();
-  return merged_tensor;
-}
-
-void DeepseekV2DecoderLayerImpl::merge_and_copy_gate_up_weights(
-    torch::Tensor&
-        target_buffer,  // [num_experts, hidden_dim, gate_dim + up_dim]
-    const std::vector<torch::Tensor>& experts_gate,  // [gate_dim, hidden_dim]
-    const std::vector<torch::Tensor>& experts_up,    // [up_dim, hidden_dim]
-    bool do_transpose) {
-  const int64_t num_experts = experts_gate.size();
-  const int64_t gate_dim = experts_gate[0].size(0);
-  const int64_t up_dim = experts_up[0].size(0);
-  const int64_t hidden_dim = experts_gate[0].size(1);
-
-  target_buffer = at_npu::native::npu_format_cast(target_buffer.contiguous(), 2)
-                      .reshape({num_experts, gate_dim + up_dim, hidden_dim});
-
-  for (int64_t index = 0; index < num_experts; ++index) {
-    target_buffer[index].slice(0, 0, gate_dim).copy_(experts_gate[index]);
-
-    target_buffer[index]
-        .slice(0, gate_dim, gate_dim + up_dim)
-        .copy_(experts_up[index]);
-  }
-
-  if (do_transpose) {
-    target_buffer = target_buffer.transpose(1, 2).contiguous();
-    ;
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::merge_and_copy_down_weights(
-    torch::Tensor& target_buffer,
-    const std::vector<torch::Tensor>& experts_down) {
-  const int64_t num_experts = experts_down.size();
-
-  for (int64_t index = 0; index < num_experts; ++index) {
-    target_buffer[index].copy_(experts_down[index]);
-  }
-}
-
-void DeepseekV2DecoderLayerImpl::prepare_expert_weight(
-    const std::vector<int32_t>& expert_list) {
-  expert_routing_map_buffer_ = build_expert_routing_map(expert_list);
-  auto& expert_buffer = ExpertBuffer::Instance();
-
-  const int32_t num_local_experts = num_experts_per_partition_;
-  const int32_t hidden_dim =
-      at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT].size(1);
-  const int32_t combined_dim =
-      at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT].size(2);
-  const int32_t gate_dim = combined_dim / 2;
-
-  expert_buffer.initialize_or_reuse(
-      /*gateup_weight_shape*/ {num_experts_per_partition_,
-                               hidden_dim,
-                               combined_dim},
-      /*gateup_offset_shape*/ {num_experts_per_partition_, combined_dim, 1},
-      /*gateup_scale_shape*/ {num_experts_per_partition_, combined_dim, 1},
-      /*down_weight_shape*/ {num_experts_per_partition_, hidden_dim, gate_dim},
-      /*down_offset_shape*/ {num_experts_per_partition_, hidden_dim, 1},
-      /*down_scale_shape*/ {num_experts_per_partition_, hidden_dim, 1},
-      at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT].options(),
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT].options(),
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT].options()
-
-  );
-
-  const int start_expert_idx = num_experts_per_partition_ * ep_rank_;
-  const int end_expert_idx = start_expert_idx + num_experts_per_partition_ - 1;
-
-  for (const auto& pair : experts_weights_) {
-    for (int expert_idx = start_expert_idx; expert_idx <= end_expert_idx;
-         ++expert_idx) {
-      std::string shm_key =
-          get_expert_shm_key(layer_id_, expert_list[expert_idx], pair.first);
-      experts_weights_[pair.first][expert_idx - start_expert_idx] =
-          shared_buffer_->get_tensor(expert_list[expert_idx],
-                                     layer_id_ - first_k_dense_replace_,
-                                     shm_key);
-      // experts_weights_[pair.first][expert_idx] =
-      // shared_buffer_->get_tensors(shm_key);
-    }
-  }
-
-  merge_and_copy_gate_up_weights(expert_buffer.gateup_weight,
-                                 experts_weights_["gate_proj.weight"],
-                                 experts_weights_["up_proj.weight"],
-                                 /*do_transpose=*/true);
-
-  merge_and_copy_gate_up_weights(expert_buffer.gateup_offset,
-                                 experts_weights_["gate_proj.weight_offset"],
-                                 experts_weights_["up_proj.weight_offset"]);
-
-  merge_and_copy_gate_up_weights(expert_buffer.gateup_scale,
-                                 experts_weights_["gate_proj.weight_scale"],
-                                 experts_weights_["up_proj.weight_scale"]);
-
-  merge_and_copy_down_weights(expert_buffer.down_weight,
-                              experts_weights_["down_proj.weight"]);
-
-  merge_and_copy_down_weights(expert_buffer.down_offset,
-                              experts_weights_["down_proj.weight_offset"]);
-
-  merge_and_copy_down_weights(expert_buffer.down_scale,
-                              experts_weights_["down_proj.weight_scale"]);
-
-  expert_buffer.gateup_weight =
-      at_npu::native::npu_format_cast(expert_buffer.gateup_weight, 29);
 }
 
 torch::Tensor DeepseekV2DecoderLayerImpl::build_expert_routing_map(
@@ -1436,8 +542,130 @@ torch::Tensor DeepseekV2DecoderLayerImpl::build_expert_routing_map(
   return result;
 }
 
+std::string DeepseekV2DecoderLayerImpl::get_expert_shm_key(
+    int32_t layer_id,
+    int32_t expert_index,
+    const std::string& suffix) {
+  std::string shm_key =
+      "layer_" + std::to_string(layer_id - first_k_dense_replace_) + "_" +
+      "expert_" + std::to_string(expert_index) + "_" + suffix;
+  return shm_key;
+}
+
+void DeepseekV2DecoderLayerImpl::prepare_expert_weight(
+    const std::vector<int32_t>& expert_list) {
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
+  auto& experts_weights = loader_->get_experts_weight_tensors();
+  expert_routing_map_buffer_ = build_expert_routing_map(expert_list);
+  auto& expert_buffer = ExpertBuffer::Instance();
+
+  const int32_t num_local_experts = num_experts_per_partition_;
+  const int32_t hidden_dim =
+      at_weight_tensors[IN_MLP_GATEUP_WEIGHT_EXPERT].size(1);
+  const int32_t combined_dim =
+      at_weight_tensors[IN_MLP_GATEUP_WEIGHT_EXPERT].size(2);
+  const int32_t gate_dim = combined_dim / 2;
+
+  expert_buffer.initialize_or_reuse(
+      /*gateup_weight_shape*/ {num_experts_per_partition_,
+                               hidden_dim,
+                               combined_dim},
+      /*gateup_offset_shape*/ {num_experts_per_partition_, combined_dim, 1},
+      /*gateup_scale_shape*/ {num_experts_per_partition_, combined_dim, 1},
+      /*down_weight_shape*/
+      {num_experts_per_partition_, hidden_dim, gate_dim},
+      /*down_offset_shape*/ {num_experts_per_partition_, hidden_dim, 1},
+      /*down_scale_shape*/ {num_experts_per_partition_, hidden_dim, 1},
+      at_weight_tensors[IN_MLP_GATEUP_WEIGHT_EXPERT].options(),
+      at_weight_tensors[IN_MLP_GATEUP_OFFSET_EXPERT].options(),
+      at_weight_tensors[IN_MLP_GATEUP_SCALE_EXPERT].options()
+
+  );
+
+  const int start_expert_idx = num_experts_per_partition_ * ep_rank_;
+  const int end_expert_idx = start_expert_idx + num_experts_per_partition_ - 1;
+
+  auto& shared_buffer = loader_->get_expert_shared_buffer();
+  for (const auto& pair : experts_weights) {
+    for (int expert_idx = start_expert_idx; expert_idx <= end_expert_idx;
+         ++expert_idx) {
+      std::string shm_key =
+          get_expert_shm_key(layer_id_, expert_list[expert_idx], pair.first);
+      experts_weights[pair.first][expert_idx - start_expert_idx] =
+          shared_buffer->get_tensor(expert_list[expert_idx],
+                                    layer_id_ - first_k_dense_replace_,
+                                    shm_key);
+      // experts_weights_[pair.first][expert_idx] =
+      // shared_buffer_->get_tensors(shm_key);
+    }
+  }
+
+  merge_and_copy_gate_up_weights(expert_buffer.gateup_weight,
+                                 experts_weights["gate_proj.weight"],
+                                 experts_weights["up_proj.weight"],
+                                 /*do_transpose=*/true);
+
+  merge_and_copy_gate_up_weights(expert_buffer.gateup_offset,
+                                 experts_weights["gate_proj.weight_offset"],
+                                 experts_weights["up_proj.weight_offset"]);
+
+  merge_and_copy_gate_up_weights(expert_buffer.gateup_scale,
+                                 experts_weights["gate_proj.weight_scale"],
+                                 experts_weights["up_proj.weight_scale"]);
+
+  merge_and_copy_down_weights(expert_buffer.down_weight,
+                              experts_weights["down_proj.weight"]);
+
+  merge_and_copy_down_weights(expert_buffer.down_offset,
+                              experts_weights["down_proj.weight_offset"]);
+
+  merge_and_copy_down_weights(expert_buffer.down_scale,
+                              experts_weights["down_proj.weight_scale"]);
+
+  expert_buffer.gateup_weight =
+      at_npu::native::npu_format_cast(expert_buffer.gateup_weight, 29);
+}
+
+void DeepseekV2DecoderLayerImpl::merge_and_copy_gate_up_weights(
+    torch::Tensor&
+        target_buffer,  // [num_experts, hidden_dim, gate_dim + up_dim]
+    const std::vector<torch::Tensor>& experts_gate,  // [gate_dim, hidden_dim]
+    const std::vector<torch::Tensor>& experts_up,    // [up_dim, hidden_dim]
+    bool do_transpose) {
+  const int64_t num_experts = experts_gate.size();
+  const int64_t gate_dim = experts_gate[0].size(0);
+  const int64_t up_dim = experts_up[0].size(0);
+  const int64_t hidden_dim = experts_gate[0].size(1);
+
+  target_buffer = at_npu::native::npu_format_cast(target_buffer.contiguous(), 2)
+                      .reshape({num_experts, gate_dim + up_dim, hidden_dim});
+
+  for (int64_t index = 0; index < num_experts; ++index) {
+    target_buffer[index].slice(0, 0, gate_dim).copy_(experts_gate[index]);
+
+    target_buffer[index]
+        .slice(0, gate_dim, gate_dim + up_dim)
+        .copy_(experts_up[index]);
+  }
+
+  if (do_transpose) {
+    target_buffer = target_buffer.transpose(1, 2).contiguous();
+  }
+}
+
+void DeepseekV2DecoderLayerImpl::merge_and_copy_down_weights(
+    torch::Tensor& target_buffer,
+    const std::vector<torch::Tensor>& experts_down) {
+  const int64_t num_experts = experts_down.size();
+
+  for (int64_t index = 0; index < num_experts; ++index) {
+    target_buffer[index].copy_(experts_down[index]);
+  }
+}
+
 void DeepseekV2DecoderLayerImpl::update_expert_weight() {
   auto& expert_buffer = ExpertBuffer::Instance();
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
   const auto tensor_pairs = {
       std::make_pair(IN_MLP_GATEUP_WEIGHT_EXPERT,
                      std::ref(expert_buffer.gateup_weight)),
@@ -1452,9 +680,9 @@ void DeepseekV2DecoderLayerImpl::update_expert_weight() {
       std::make_pair(IN_MLP_DOWN_SCALE_EXPERT,
                      std::ref(expert_buffer.down_scale))};
   for (auto& [index, buffer_tensor] : tensor_pairs) {
-    std::swap(at_weight_tensors_[index], buffer_tensor);
+    std::swap(at_weight_tensors[index], buffer_tensor);
     atb_weight_tensors_[index] =
-        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[index]);
+        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[index]);
     prefill_node_.inTensors.at(index) = &atb_weight_tensors_[index];
     decode_node_.inTensors.at(index) = &atb_weight_tensors_[index];
     decode_mla_node_.inTensors.at(index) = &atb_weight_tensors_[index];
@@ -1462,14 +690,6 @@ void DeepseekV2DecoderLayerImpl::update_expert_weight() {
   expert_routing_map_[layer_id_ - first_k_dense_replace_] =
       expert_routing_map_buffer_;
   expert_routing_map_ = expert_routing_map_.contiguous();
-}
-
-void DeepseekV2DecoderLayerImpl::squeeze_experts_weights() {
-  for (const auto& index : SQUEEZE_WEIGHT_VEC) {
-    if (at_weight_tensors_[index].dim() > 1) {
-      at_weight_tensors_[index] = at_weight_tensors_[index].squeeze();
-    }
-  }
 }
 
 int64_t DeepseekV2DecoderLayerImpl::init_layer() {

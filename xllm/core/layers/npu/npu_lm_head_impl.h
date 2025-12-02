@@ -29,6 +29,7 @@ limitations under the License.
 #include "atb/atb_infer.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
+#include "loader/lm_head_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
@@ -46,10 +47,6 @@ class LmHeadImpl : public BaseLayer {
   explicit LmHeadImpl(const ModelContext& context);
 
   ~LmHeadImpl() {};
-
-  void load_state_dict(const StateDict& state_dict) override;
-
-  void verify_loaded_weights(const std::string weight_str) const;
 
   void merge_loaded_weights() override;
 

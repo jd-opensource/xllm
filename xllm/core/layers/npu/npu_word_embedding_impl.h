@@ -28,6 +28,7 @@ limitations under the License.
 
 #include "atb/atb_infer.h"
 #include "framework/model/model_input_params.h"
+#include "loader/word_embedding_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
@@ -45,10 +46,6 @@ class WordEmbeddingImpl : public BaseLayer {
   explicit WordEmbeddingImpl(const ModelContext& context);
 
   ~WordEmbeddingImpl() {};
-
-  void load_state_dict(const StateDict& state_dict) override;
-
-  void verify_loaded_weights(const std::string weight_str) const;
 
   void merge_loaded_weights() override;
 

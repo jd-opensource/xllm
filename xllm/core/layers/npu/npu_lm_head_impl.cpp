@@ -79,41 +79,25 @@ LmHeadImpl::LmHeadImpl(const ModelContext& context) : BaseLayer(context) {
                   context.get_parallel_args(),
                   false);
 
-  at_weight_tensors_.resize(1);
   atb_weight_tensors_.resize(1);
   atOutTensors_.resize(1);
 
   auto options = context.get_tensor_options();
   dtype_ = c10::typeMetaToScalarType(options.dtype());
-  at_weight_tensors_[0] = torch::zeros({1}).to(options);
   prefill_tensor_storage_.resize(2);
   decode_tensor_storage_.resize(2);
 
   torch_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(torch_placeholder_);
-}
 
-void LmHeadImpl::verify_loaded_weights(const std::string weight_str) const {
-  // std::cout<<at_weight_tensors_[0]<<std::endl;
-  // std::cout<<at_weight_tensors_[0].sizes()<<std::endl;
-  CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
-      << "final lm_head weight is not loaded for " << weight_str;
+  loader_ = std::make_unique<LmHeadLoader>(1, context);
 }
 
 void LmHeadImpl::merge_loaded_weights() {
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
   atb_weight_tensors_[0] =
-      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[0]);
+      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
   init_layer();
-}
-
-void LmHeadImpl::load_state_dict(const StateDict& state_dict) {
-  // set_weight(state_dict, "weight", 0, 0);
-  if (dp_size_ > 1) {
-    set_weight(
-        state_dict, "weight", 0, 0, dp_local_tp_rank_, dp_local_tp_size_);
-  } else {
-    set_weight(state_dict, "weight", 0, 0);
-  }
 }
 
 int64_t LmHeadImpl::init_layer() {

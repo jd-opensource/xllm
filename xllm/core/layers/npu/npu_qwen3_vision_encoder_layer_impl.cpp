@@ -28,50 +28,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-enum VisionEncoderLayerTensorId : int {
-  IN_INPUT_NORM_WEIGHT = 0,
-  IN_INPUT_NORM_BIAS,
-  IN_POST_NORM_WEIGHT,
-  IN_POST_NORM_BIAS,
-  IN_QKV_WEIGHT,
-  IN_QKV_BIAS,
-  IN_WATTENTION_OUT_WEIGHT,
-  IN_WATTENTION_OUT_BIAS,
-  IN_LINEAR_FC1_WEIGHT,
-  IN_LINEAR_FC1_BIAS,
-  IN_LINEAR_FC2_WEIGHT,
-  IN_LINEAR_FC2_BIAS,
-  IN_VISION_Q_WEIGHT,
-  IN_VISION_Q_BIAS,
-  IN_VISION_K_WEIGHT,
-  IN_VISION_K_BIAS,
-  IN_VISION_V_WEIGHT,
-  IN_VISION_V_BIAS
-};
-
 const uint64_t WEIGHT_COUNT_PER_LAYER = 18;
-
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
-    {IN_INPUT_NORM_WEIGHT, "norm1.weight"},
-    {IN_INPUT_NORM_BIAS, "norm1.bias"},
-    {IN_POST_NORM_WEIGHT, "norm2.weight"},
-    {IN_POST_NORM_BIAS, "norm2.bias"},
-    {IN_QKV_WEIGHT, "attn.qkv.weight"},
-    {IN_QKV_BIAS, "attn.qkv.bias"},
-    {IN_WATTENTION_OUT_WEIGHT, "attn.proj.weight"},
-    {IN_WATTENTION_OUT_BIAS, "attn.proj.bias"},
-    {IN_LINEAR_FC1_WEIGHT, "mlp.linear_fc1.weight"},
-    {IN_LINEAR_FC1_BIAS, "mlp.linear_fc1.bias"},
-    {IN_LINEAR_FC2_WEIGHT, "mlp.linear_fc2.weight"},
-    {IN_LINEAR_FC2_BIAS, "mlp.linear_fc2.bias"}};
-
-// {weight,dim}
-static std::map<int, int> WEIGHT_SHARD = {
-    {IN_WATTENTION_OUT_WEIGHT, 1},
-    {IN_LINEAR_FC1_WEIGHT, 0},
-    {IN_LINEAR_FC1_BIAS, 0},
-    {IN_LINEAR_FC2_WEIGHT, 1},
-};
 
 void Qwen3VisionEncoderLayerImpl::param_from_args(
     atb_speed::qwen::VisionEncoderLayerParam& param,
@@ -99,88 +56,26 @@ Qwen3VisionEncoderLayerImpl::Qwen3VisionEncoderLayerImpl(
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
   param_from_args(encode_param_, model_args, parallel_args);
-  at_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
+  // at_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   dtype_ = c10::typeMetaToScalarType(options.dtype());
   device_id_ = options.device().index();
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
-  at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
-    at_weight_tensors_[i] = torch::zeros({1}).to(options);
-  }
-}
-
-void Qwen3VisionEncoderLayerImpl::verify_loaded_weights() const {
-  for (const auto& [index, name] : WEIGHT_MAPPING) {
-    CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
-        << "weight is not loaded for " << name;
-  }
+  loader_ = std::make_unique<Qwen3VisionEncoderLoader>(WEIGHT_COUNT_PER_LAYER,
+                                                       context);
 }
 
 void Qwen3VisionEncoderLayerImpl::merge_loaded_weights() {
-  // spilt pack qkv weight when enable tp
-  get_weights_col_packed_qkv();
-  if (encode_param_.worldSize > 1) {
-    // merge qkv weight
-    auto new_qkv_weight = torch::cat({at_weight_tensors_[IN_VISION_Q_WEIGHT],
-                                      at_weight_tensors_[IN_VISION_K_WEIGHT],
-                                      at_weight_tensors_[IN_VISION_V_WEIGHT]},
-                                     0);
-    at_weight_tensors_[IN_QKV_WEIGHT] = new_qkv_weight;
-    at_weight_tensors_[IN_VISION_Q_WEIGHT] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_VISION_K_WEIGHT] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_VISION_V_WEIGHT] = torch::zeros({1}).to(device_);
-
-    // merge qkv bias
-    auto new_qkv_bias = torch::cat({at_weight_tensors_[IN_VISION_Q_BIAS],
-                                    at_weight_tensors_[IN_VISION_K_BIAS],
-                                    at_weight_tensors_[IN_VISION_V_BIAS]},
-                                   0);
-    at_weight_tensors_[IN_QKV_BIAS] = new_qkv_bias;
-    at_weight_tensors_[IN_VISION_Q_BIAS] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_VISION_K_BIAS] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_VISION_V_BIAS] = torch::zeros({1}).to(device_);
-  }
+  loader_->merge_loaded_weights();
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
-        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[i]);
+        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
 
   init_layer();
-}
-// tp spilt weight
-void Qwen3VisionEncoderLayerImpl::get_weights_col_packed_qkv() {
-  int rank = encode_param_.rank;
-  int worldSize = encode_param_.worldSize;
-  // split qkv weight
-  qkv_weight = torch::chunk(at_weight_tensors_[IN_QKV_WEIGHT], 3, 0);
-  qkv_bias = torch::chunk(at_weight_tensors_[IN_QKV_BIAS], 3, 0);
-  // weight
-  at_weight_tensors_[IN_VISION_Q_WEIGHT] =
-      (qkv_weight[0].chunk(worldSize, 0))[rank];
-  at_weight_tensors_[IN_VISION_K_WEIGHT] =
-      (qkv_weight[1].chunk(worldSize, 0))[rank];
-  at_weight_tensors_[IN_VISION_V_WEIGHT] =
-      (qkv_weight[2].chunk(worldSize, 0))[rank];
-  // bias
-  at_weight_tensors_[IN_VISION_Q_BIAS] =
-      (qkv_bias[0].chunk(worldSize, 0))[rank];
-  at_weight_tensors_[IN_VISION_K_BIAS] =
-      (qkv_bias[1].chunk(worldSize, 0))[rank];
-  at_weight_tensors_[IN_VISION_V_BIAS] =
-      (qkv_bias[2].chunk(worldSize, 0))[rank];
-}
-
-void Qwen3VisionEncoderLayerImpl::load_state_dict(const StateDict& state_dict) {
-  for (const auto& [index, name] : WEIGHT_MAPPING) {
-    if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
-      set_weight(state_dict, name, index, WEIGHT_SHARD[index]);
-    } else {
-      set_weight(state_dict, name, index);
-    }
-  }
 }
 
 int64_t Qwen3VisionEncoderLayerImpl::init_layer() {
@@ -272,9 +167,6 @@ void Qwen3VisionEncoderLayerImpl::build_node_variant_pack(
     CHECK_THROW(node.inTensors.at(i) == nullptr,
                 model_name_ << "inTensor " << i << "is NULL");
     node.variantPack.inTensors.at(i) = *node.inTensors.at(i);
-    // LOG(INFO) << model_name_ << "inTensors[" << i << "]:"
-    //               << atb_speed::TensorUtil::TensorToString(
-    //                      node.variantPack.inTensors.at(i));
   }
 
   node.variantPack.outTensors.at(0) = internal_tensors_;

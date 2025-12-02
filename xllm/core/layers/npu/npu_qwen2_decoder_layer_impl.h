@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/qwen2_decoder_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
@@ -43,78 +44,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-enum DecoderLayerTensorId : int {
-  IN_NORM_WEIGHT = 0,      // weight
-  IN_NORM_BIAS = 1,        // bias
-  IN_NORM_NEW_WEIGHT = 2,  // new weight
-  IN_NORM_NEW_BIAS = 3,    // new bias
-
-  IN_Q_WEIGHT = 4,    // weight
-  IN_Q_BIAS = 5,      // bias
-  IN_Q_DEQSCALE = 6,  // deq_scale
-  IN_Q_OFFSET = 7,    // offset
-  IN_Q_SCALE = 8,     // scale
-  IN_Q_COMPRESS_IDX = 9,
-
-  IN_K_WEIGHT = 10,    // weight
-  IN_K_BIAS = 11,      // bias
-  IN_K_DEQSCALE = 12,  // deq_scale
-  IN_K_OFFSET = 13,    // offset
-  IN_K_SCALE = 14,     // scale
-  IN_K_COMPRESS_IDX = 15,
-
-  IN_V_WEIGHT = 16,    // weight
-  IN_V_BIAS = 17,      // bias
-  IN_V_DEQSCALE = 18,  // deq_scale
-  IN_V_OFFSET = 19,    // offset
-  IN_V_SCALE = 20,     // scale
-  IN_V_COMPRESS_IDX = 21,
-
-  IN_ATTENTION_OUT_WEIGHT = 22,    // weight
-  IN_ATTENTION_OUT_BIAS = 23,      // bias
-  IN_ATTENTION_OUT_DEQSCALE = 24,  // deq_scale
-  IN_ATTENTION_OUT_OFFSET = 25,    // offset
-  IN_ATTENTION_OUT_SCALE = 26,     // scale
-  IN_ATTENTION_OUT_COMPRESS_IDX = 27,
-
-  IN_SELFOUT_NORM_WEIGHT = 28,      // weight
-  IN_SELFOUT_NORM_BIAS = 29,        // bias
-  IN_SELFOUT_NORM_NEW_WEIGHT = 30,  // new weight
-  IN_SELFOUT_NORM_NEW_BIAS = 31,    // new bias
-
-  IN_MLP_W2_WEIGHT = 32,    // weight
-  IN_MLP_W2_BIAS = 33,      // bias
-  IN_MLP_W2_DEQSCALE = 34,  // deq_scale
-  IN_MLP_W2_OFFSET = 35,    // offset
-  IN_MLP_W2_SCALE = 36,     // scale
-  IN_MLP_W2_COMPRESS_IDX = 37,
-
-  IN_MLP_W1_WEIGHT = 38,    // weight
-  IN_MLP_W1_BIAS = 39,      // bias
-  IN_MLP_W1_DEQSCALE = 40,  // deq_scale
-  IN_MLP_W1_OFFSET = 41,    // offset
-  IN_MLP_W1_SCALE = 42,     // scale
-  IN_MLP_W1_COMPRESS_IDX = 43,
-
-  IN_MLP_CPROJ_WEIGHT = 44,    // weight
-  IN_MLP_CPROJ_BIAS = 45,      // bias
-  IN_MLP_CPROJ_DEQSCALE = 46,  // deq_scale
-  IN_MLP_CPROJ_OFFSET = 47,    // offset
-  IN_MLP_CPROJ_SCALE = 48,     // scale
-  IN_MLP_CPROJ_COMPRESS_IDX = 49,
-};
-
 class Qwen2DecoderLayerImpl : public BaseLayer {
  public:
   explicit Qwen2DecoderLayerImpl(const ModelContext& context);
 
   ~Qwen2DecoderLayerImpl() {};
-
-  TransposeType check_transpose(at::Tensor& tensor);
-
-  virtual void load_state_dict(const StateDict& state_dict) override;
-
-  virtual void verify_loaded_weights() const override;
 
   virtual void merge_loaded_weights() override;
 
@@ -131,6 +65,12 @@ class Qwen2DecoderLayerImpl : public BaseLayer {
                         int node_id = 0);
 
  private:
+  TransposeType check_transpose(at::Tensor& tensor);
+
+  void initialize_quantization_parameters();
+
+  void initialize_linear_transpose_type();
+
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                torch::Tensor& x,
                                torch::Tensor& cos_pos,

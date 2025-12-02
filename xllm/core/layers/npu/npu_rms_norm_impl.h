@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/rms_norm_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
@@ -48,9 +49,9 @@ class RMSNormImpl : public BaseLayer {
 
   ~RMSNormImpl() {};
 
-  void load_state_dict(const StateDict& state_dict) override;
+  // void load_state_dict(const StateDict& state_dict) override;
 
-  void verify_loaded_weights(const std::string weight_str) const;
+  // void verify_loaded_weights(const std::string weight_str) const;
 
   void merge_loaded_weights() override;
 

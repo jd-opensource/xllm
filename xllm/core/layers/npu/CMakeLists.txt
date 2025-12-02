@@ -29,6 +29,20 @@ cc_library(
     npu_siglip_encoder_layer_impl.h
     ../common/rotary_embedding_util.h
     rotary_embedding.h
+    loader/qwen3_decoder_loader.h
+    loader/qwen2_decoder_loader.h
+    loader/qwen3_moe_decoder_loader.h
+    loader/word_embedding_loader.h
+    loader/lm_head_loader.h
+    loader/column_parallel_linear_loader.h
+    loader/deepseek_v2_decoder_loader.h
+    loader/glm4_moe_decoder_loader.h
+    loader/llama_decoder_loader.h
+    loader/qwen2dot5_vision_encoder_loader.h
+    loader/qwen3_vision_encoder_loader.h
+    loader/rms_norm_loader.h
+    loader/siglip_encoder_loader.h
+    loader/base_loader.h
   SRCS
     npu_word_embedding_impl.cpp
     npu_pos_embedding_impl.cpp
@@ -53,6 +67,20 @@ cc_library(
     npu_siglip_encoder_layer_impl.cpp
     ../common/rotary_embedding_util.cpp
     rotary_embedding.cpp
+    loader/qwen3_decoder_loader.cpp
+    loader/qwen2_decoder_loader.cpp
+    loader/qwen3_moe_decoder_loader.cpp
+    loader/word_embedding_loader.cpp
+    loader/lm_head_loader.cpp
+    loader/column_parallel_linear_loader.cpp
+    loader/deepseek_v2_decoder_loader.cpp
+    loader/glm4_moe_decoder_loader.cpp
+    loader/llama_decoder_loader.cpp
+    loader/qwen2dot5_vision_encoder_loader.cpp
+    loader/qwen3_vision_encoder_loader.cpp
+    loader/rms_norm_loader.cpp
+    loader/siglip_encoder_loader.cpp
+    loader/base_loader.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"
