@@ -36,6 +36,7 @@ limitations under the License.
 #include "llm/llama.h"                  // IWYU pragma: keep
 #include "llm/llama3.h"                 // IWYU pragma: keep
 #include "llm/qwen3_embedding.h"        // IWYU pragma: keep
+#include "vlm/glm4_vl.h"                // IWYU pragma: keep
 #include "vlm/minicpmv.h"               // IWYU pragma: keep
 #elif defined(USE_MLU)
 #include "llm/mlu/deepseek_v2.h"   // IWYU pragma: keep
