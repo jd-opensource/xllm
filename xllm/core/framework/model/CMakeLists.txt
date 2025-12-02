@@ -29,6 +29,7 @@ cc_library(
     dit_model.h
     embedding_lm.h
     embedding_vlm.h
+    mm_embedding_vlm.h
     model_args.h
     npu_dp_ep_padding.h
     model_input_params.h
