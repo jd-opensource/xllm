@@ -45,6 +45,9 @@ def get_base_dir():
 def join_path(*paths):
     return os.path.join(get_base_dir(), *paths)
 
+# return the python version as a string like "310" or "311" etc
+def get_python_version():
+    return f"{sys.version_info.major}{sys.version_info.minor}"
 
 def get_version():
     # first read from environment variable
@@ -398,9 +401,9 @@ class BuildDistWheel(bdist_wheel):
         self.run_command('test')
 
         if self.arch == 'arm':
-            ext_path = get_base_dir() + "/build/lib.linux-aarch64-cpython-311/"
+            ext_path = get_base_dir() + f"/build/lib.linux-aarch64-cpython-{get_python_version()}/"
         else:
-            ext_path = get_base_dir() + "/build/lib.linux-x86_64-cpython-311/"
+            ext_path = get_base_dir() + f"/build/lib.linux-x86_64-cpython-{get_python_version()}/"
         if len(ext_path) == 0:
             print("Build wheel failed, not found path.")
             exit(1)
