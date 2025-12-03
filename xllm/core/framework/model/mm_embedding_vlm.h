@@ -37,7 +37,7 @@ class MMEmbeddingVLM : public CausalVLM {
       const ModelInputParams& input_params) = 0;
 
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
-                               const torch::Tensor& seleted_idxes) {
+                               const torch::Tensor& selected_idxes) {
     return torch::Tensor();
   }
 
