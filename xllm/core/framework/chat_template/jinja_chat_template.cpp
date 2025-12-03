@@ -137,7 +137,11 @@ nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
 
   for (const auto& item : vec) {
     nlohmann::ordered_json item_json;
-    item_json["type"] = item.type;
+    if (item.type == "video_url") {
+      item_json["type"] = "video";
+    } else {
+      item_json["type"] = item.type;
+    }
 
     if (item.type == "text") {
       item_json["text"] = item.text;
