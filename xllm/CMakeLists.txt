@@ -1,6 +1,9 @@
 include(cc_binary)
+include(cc_shared_library)
 
 include_directories(.)
+
+option(GENERATE_SO "Enable compile to generate .so" OFF)
 
 add_subdirectory(api_service)
 add_subdirectory(core)
@@ -12,22 +15,48 @@ add_subdirectory(proto)
 add_subdirectory(pybind)
 add_subdirectory(server)
 
-cc_binary(
-  NAME
-    xllm
-  SRCS
-    xllm.cpp
-  DEPS
-    :flags
-    :xllm_server
-    :master
-    absl::strings
-    Boost::serialization
-    gflags::gflags
-    glog::glog
-    Folly::folly
-    nlohmann_json::nlohmann_json
-)
+if(GENERATE_SO)
+  message(STATUS "build libxllm.so and install")
+  cc_shared_library(
+    NAME
+      xllm
+    HDRS
+      cc_api/llm.h
+      cc_api/types.h
+      cc_api/internal.h
+    SRCS
+      cc_api/llm.cpp
+    DEPS
+      :flags
+      :master
+      absl::strings
+      Boost::serialization
+      gflags::gflags
+      glog::glog
+      Folly::folly
+      nlohmann_json::nlohmann_json
+  )
+
+else()
+  message(STATUS "build xllm binary and install")
+  cc_binary(
+    NAME
+      xllm
+    SRCS
+      xllm.cpp
+    DEPS
+      :flags
+      :xllm_server
+      :master
+      absl::strings
+      Boost::serialization
+      gflags::gflags
+      glog::glog
+      Folly::folly
+      nlohmann_json::nlohmann_json
+  )
+
+endif()
 
 # link brpc
 target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf ${OpenCV_LIBS})
@@ -44,25 +73,25 @@ if(USE_MSPTI)
 endif()
 target_link_libraries(xllm PUBLIC ${COMMON_LIBS})
 
-# install xllm binary
+# install xllm
 install(TARGETS xllm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 # Install all dependencies for xllm
 install(CODE [[
-    file(GET_RUNTIME_DEPENDENCIES
-          RESOLVED_DEPENDENCIES_VAR DEPENDENCIES
-          UNRESOLVED_DEPENDENCIES_VAR UNRESOLVED_DEPENDENCIES
-          EXECUTABLES $<TARGET_FILE:xllm>)
+  file(GET_RUNTIME_DEPENDENCIES
+        RESOLVED_DEPENDENCIES_VAR DEPENDENCIES
+        UNRESOLVED_DEPENDENCIES_VAR UNRESOLVED_DEPENDENCIES
+        EXECUTABLES $<TARGET_FILE:xllm>)
 
-    file(INSTALL
-          DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"
-          FILES ${DEPENDENCIES}
-          FOLLOW_SYMLINK_CHAIN)
+  file(INSTALL
+        DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"
+        FILES ${DEPENDENCIES}
+        FOLLOW_SYMLINK_CHAIN)
 
-    # This should not be possible, but error out when a dependency cannot
-    # be resolved.
-    list(LENGTH UNRESOLVED_DEPENDENCIES UNRESOLVED_LENGTH)
-    if(${UNRESOLVED_LENGTH} GREATER 0)
-        message(FATAL_ERROR "Unresolved dependencies: ${UNRESOLVED_DEPENDENCIES}")
-    endif()
+  # This should not be possible, but error out when a dependency cannot
+  # be resolved.
+  list(LENGTH UNRESOLVED_DEPENDENCIES UNRESOLVED_LENGTH)
+  if(${UNRESOLVED_LENGTH} GREATER 0)
+      message(FATAL_ERROR "Unresolved dependencies: ${UNRESOLVED_DEPENDENCIES}")
+  endif()
 ]])
-

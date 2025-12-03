@@ -240,6 +240,7 @@ class ExtBuild(build_ext):
         ("device=", None, "target device type (a3 or a2 or mlu or cuda)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("install-xllm-kernels=", None, "install xllm_kernels RPM package (true/false)"),
+        ("generate-so=", None, "generate so or binary"),
     ]
 
     def initialize_options(self):
@@ -248,6 +249,7 @@ class ExtBuild(build_ext):
         self.device = None  
         self.arch = None
         self.install_xllm_kernels = None
+        self.generate_so = False
 
     def finalize_options(self):
         build_ext.finalize_options(self)
@@ -326,6 +328,12 @@ class ExtBuild(build_ext):
         else:
             raise ValueError("Please set --device to a2 or a3 or mlu or cuda.")
 
+        product = "xllm"
+        if self.generate_so:
+            product = "libxllm.so"
+            cmake_args += ["-DGENERATE_SO=ON"]
+        else:
+            cmake_args += ["-DGENERATE_SO=OFF"]
 
         # Adding CMake arguments set as environment variable
         # (needed e.g. to build for ARM OSx on conda-forge)
@@ -358,7 +366,7 @@ class ExtBuild(build_ext):
 
         os.makedirs(os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"), exist_ok=True)
         shutil.copy(
-            os.path.join(extdir, "xllm"),
+            os.path.join(extdir, product),
             os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"),
         )
 
@@ -556,6 +564,7 @@ if __name__ == "__main__":
     device = 'a2'  # default
     arch = get_cpu_arch()
     install_kernels = True
+    generate_so = False
     if '--device' in sys.argv:
         idx = sys.argv.index('--device')
         if idx + 1 < len(sys.argv):
@@ -581,6 +590,20 @@ if __name__ == "__main__":
                 install_kernels = False
             else:
                 print("Error: --install-xllm-kernels must be true or false")
+                sys.exit(1)
+            sys.argv.pop(idx)
+            sys.argv.pop(idx)
+
+    if '--generate-so' in sys.argv:
+        idx = sys.argv.index('--generate-so')
+        if idx + 1 < len(sys.argv):
+            generate_so_val = sys.argv[idx+1].lower()
+            if generate_so_val in ('true', '1', 'yes', 'y', 'on'):
+                generate_so = True
+            elif generate_so_val in ('false', '0', 'no', 'n', 'off'):
+                generate_so = False
+            else:
+                print("Error: --generate-so must be true or false")
                 sys.exit(1)
             sys.argv.pop(idx)
             sys.argv.pop(idx)
@@ -632,7 +655,8 @@ if __name__ == "__main__":
         options={'build_ext': {
                     'device': device,
                     'arch': arch,
-                    'install_xllm_kernels': install_kernels if install_kernels is not None else "false"
+                    'install_xllm_kernels': install_kernels if install_kernels is not None else "false",
+                    'generate_so': generate_so
                     },
                  'bdist_wheel': {
                     'device': device,
