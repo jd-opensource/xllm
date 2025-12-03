@@ -31,7 +31,9 @@ limitations under the License.
 #include "models/llm/glm4_moe.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
+#include "processors/glm4v_image_processor.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
+#include "models/vlm/glm4v.h"
 
 namespace xllm {
 
@@ -40,7 +42,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
   Glm4vMoeForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    // visual_ = register_module("visual", Glm4VisionTransformer(context));
+    visual_ = register_module("visual", Glm4VisionTransformer(context));
 
     language_model_ =
         register_module("language_model", Glm4MoeForCausalLM(context));
@@ -48,22 +50,21 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor get_input_embeddings(
       torch::Tensor input_ids,
-      // const std::optional<Glm4VImageInputs>& image_input,
-      // const std::optional<Glm4VVideoInputs>& video_input,
+      const std::optional<Glm4VImageInputs>& image_input,
+      const std::optional<Glm4VVideoInputs>& video_input,
       const ModelInputParams& input_params) {
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
-    // if (image_input) {
-    //   // visual
-    //   auto [image_embeds, deep_stacks] =
-    //       visual_(image_input->pixel_values.to(options_),
-    //               image_input->image_grid_thw,
-    //               input_params);
-    //   input_params.deep_stacks = deep_stacks;
-    //   // merge
-    //   auto is_multimodal = torch::isin(input_ids,
-    //   model_args_.image_token_id()); input_params.visual_pos_masks =
-    //   is_multimodal; inputs_embeds.index_put_({is_multimodal}, image_embeds);
-    // }
+    if (image_input) {
+      // visual
+      auto image_embeds =
+          visual_(image_input->pixel_values.to(options_),
+                  image_input->image_grid_thw,
+                  input_params);
+      // merge
+      auto is_multimodal = torch::isin(input_ids,
+      model_args_.image_token_id()); input_params.visual_pos_masks =
+      is_multimodal; inputs_embeds.index_put_({is_multimodal}, image_embeds);
+    }
     return inputs_embeds;
   }
 
@@ -72,21 +73,21 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
-    // const auto& mm_data = input_params.mm_data;
-    // torch::Tensor pixel_values;
-    // if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
-    //   pixel_values = res.value();
+    const auto& mm_data = input_params.mm_data;
+    torch::Tensor pixel_values;
+    if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
+      pixel_values = res.value();
 
-    // torch::Tensor image_grid_thw;
-    // if (const auto& res = mm_data.get<torch::Tensor>("image_grid_thw"))
-    //   image_grid_thw = res.value();
-    // std::optional<Glm4VImageInputs> image_inputs;
-    // std::optional<Glm4VVideoInputs> video_inputs;
+    torch::Tensor image_grid_thw;
+    if (const auto& res = mm_data.get<torch::Tensor>("image_grid_thw"))
+      image_grid_thw = res.value();
+    std::optional<Glm4VImageInputs> image_inputs;
+    std::optional<Glm4VVideoInputs> video_inputs;
 
-    // if (pixel_values.defined() && image_grid_thw.defined())
-    //   image_inputs = Glm4VImageInputs{pixel_values, image_grid_thw};
+    if (pixel_values.defined() && image_grid_thw.defined())
+      image_inputs = Glm4VImageInputs{pixel_values, image_grid_thw};
 
-    auto inputs_embeds = get_input_embeddings(tokens, input_params);
+    auto inputs_embeds = get_input_embeddings(tokens, image_inputs, video_inputs, input_params);
     input_params.input_embedding = inputs_embeds;
     auto emb = language_model_(tokens, positions, kv_caches, input_params);
 
@@ -99,13 +100,13 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
-    // for (const auto& state_dict : loader->get_state_dicts()) {
-    //   visual_->load_state_dict(
-    //       state_dict->get_dict_with_prefix("model.visual."));
-    // }
-    // // verify
-    // visual_->verify_loaded_weights("model.visual.");
-    // visual_->merge_loaded_weights();
+    for (const auto& state_dict : loader->get_state_dicts()) {
+      visual_->load_state_dict(
+          state_dict->get_dict_with_prefix("model.visual."));
+    }
+    // verify
+    visual_->verify_loaded_weights("model.visual.");
+    visual_->merge_loaded_weights();
     if (!model_args_.image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
@@ -125,14 +126,14 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
  private:
   ModelArgs model_args_;
   torch::TensorOptions options_;
-  // Glm4VisionTransformer visual_{nullptr};
+  Glm4VisionTransformer visual_{nullptr};
   Glm4MoeForCausalLM language_model_{nullptr};
 };
 TORCH_MODULE(Glm4vMoeForConditionalGeneration);
 
-// REGISTER_INPUT_PROCESSOR(glm4v_moe, GLM4VInputProcessor);
+REGISTER_INPUT_PROCESSOR(glm4v_moe, GLM4_6_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(glm4v_moe, Glm4vMoeForConditionalGeneration);
-// REGISTER_IMAGE_PROCESSOR(glm4v_moe, Glm4vImageProcessor);
+REGISTER_IMAGE_PROCESSOR(glm4v_moe, Glm4VImageProcessor);
 // register the model args
 REGISTER_MODEL_ARGS(glm4v_moe, [&] {
   LOAD_ARG_OR(model_type, "model_type", "glm4v_moe");
@@ -196,7 +197,7 @@ REGISTER_MODEL_ARGS(glm4v_moe, [&] {
   LOAD_ARG_OR(mm_num_attention_heads, "vision_config.num_heads", 12);
   LOAD_ARG_OR(mm_projection_dim, "vision_config.out_hidden_size", 4096);
   LOAD_ARG_OR(mm_patch_size, "vision_config.patch_size", 14);
-  // LOAD_ARG_OR(mm_rms_norm_eps, "text_config.rms_norm_eps", 1e-05);
+  // LOAD_ARG_OR(mm_rms_norm_eps, "vision_config.rms_norm_eps", 1e-05);
   LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2);
   LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
   LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {
