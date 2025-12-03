@@ -58,13 +58,11 @@ struct MMInput {
     return std::move(vec);
   }
 
-  std::vector<VideoMetadata> get_video_metadata(MMType type) const {
+  std::vector<VideoMetadata> get_video_metadata() const {
     std::vector<VideoMetadata> metas;
     metas.reserve(items_.size());
     for (auto& item : items_) {
-      if (item.type_ == type) {
-        metas.push_back(item.video_meta_);
-      }
+      metas.push_back(item.video_meta_);
     }
     return metas;
   }

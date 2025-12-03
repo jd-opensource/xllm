@@ -43,6 +43,12 @@ class Qwen2VLImageProcessor : public ImageProcessor {
                      VideoMetadata& metadata,
                      std::vector<torch::Tensor>& pixel_values,
                      std::vector<int64_t>& grids);
+  torch::Tensor sample_frames(const VideoMetadata& metadata,
+                              int temporal_patch_size,
+                              int min_frames,
+                              int max_frames,
+                              int num_frames = -1,
+                              double set_fps = -1.0);
 
  private:
   bool do_convert_rgb_ = true;
@@ -66,7 +72,7 @@ class Qwen2VLImageProcessor : public ImageProcessor {
   std::unordered_map<std::string, int> size_;
   int temporal_patch_size_ = 2;
 
-  bool do_sample_frame_ = false;
+  bool do_sample_frame_ = true;
 
   int min_frames_ = 4;
   int max_frames_ = 768;

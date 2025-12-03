@@ -42,6 +42,8 @@ class Glm4VImageProcessor : public ImageProcessor {
                      VideoMetadata& metadata,
                      std::vector<torch::Tensor>& pixel_values,
                      std::vector<int64_t>& grids);
+  torch::Tensor sample_frames(const VideoMetadata& metadata,
+                              int temporal_patch_size);
 
  private:
   bool do_convert_rgb_ = true;

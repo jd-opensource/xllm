@@ -159,8 +159,7 @@ bool OpenCVVideoDecoder::decode(const std::string& raw_data,
   av_dict_set(&opts, "probesize", "20000000", 0);
   av_dict_set(&opts, "analyzeduration", "5000000", 0);
 
-  const AVInputFormat* in_fmt = av_find_input_format("mp4");
-  int ret = avformat_open_input(&fmt, nullptr, in_fmt, &opts);
+  int ret = avformat_open_input(&fmt, nullptr, nullptr, &opts);
   av_dict_free(&opts);
 
   if (ret < 0) {
