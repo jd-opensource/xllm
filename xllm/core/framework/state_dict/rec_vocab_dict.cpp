@@ -18,23 +18,23 @@ bool RecVocabDict::initialize(const std::string& vocab_file) {
   Timer timer;
 
   if (vocab_file.empty()) {
-    LOG(ERROR) << "content data file is empty, file: " << vocab_file;
+    LOG(ERROR) << "Content data file is empty, file: " << vocab_file;
     return false;
   }
   if (!std::filesystem::exists(vocab_file)) {
-    LOG(ERROR) << "fail to find content data file: " << vocab_file;
+    LOG(ERROR) << "Fail to find content data file: " << vocab_file;
     return false;
   }
   std::ifstream ifs(vocab_file.data(), std::ios::binary | std::ios::ate);
   if (!ifs.is_open()) {
-    LOG(ERROR) << "fail to load content data file: " << vocab_file;
+    LOG(ERROR) << "Fail to load content data file: " << vocab_file;
     return false;
   }
 
   const size_t file_size = ifs.tellg();
   ifs.seekg(0, std::ios::beg);
 
-  // each line of content : 1 * int64_t(item id) + REC_TOKEN_SIZE *
+  // Each line of content : 1 * int64_t(item id) + REC_TOKEN_SIZE *
   //  int32_t(token id);
   const size_t itemid_size = sizeof(int64_t);
   const size_t tokens_size = REC_TOKEN_SIZE * sizeof(int32_t);
@@ -69,7 +69,7 @@ bool RecVocabDict::initialize(const std::string& vocab_file) {
   }
 
   if (ifs.gcount() != 0 && ifs.gcount() != line_size) {
-    LOG(ERROR) << "possibly containing incomplete lines : " << vocab_file;
+    LOG(ERROR) << "Possibly containing incomplete lines : " << vocab_file;
     item_to_tokens_map_.clear();
     tokens_to_items_map_.clear();
     prefix_tokens_to_next_tokens_map_.clear();
@@ -77,7 +77,7 @@ bool RecVocabDict::initialize(const std::string& vocab_file) {
   }
 
   initialized_ = true;
-  LOG(INFO) << "total line size:" << estimated_lines
+  LOG(INFO) << "Total line size:" << estimated_lines
             << ",parse tokens to item id map size: "
             << tokens_to_items_map_.size()
             << ", parse item to tokens map size:" << item_to_tokens_map_.size()
