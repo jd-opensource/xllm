@@ -648,9 +648,9 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
        const ModelInputParams& input_params) {
     LOG(INFO) << " Glm4VisionTransformerImpl forward beging ";
     hidden_states = patch_embed_(hidden_states);
-    // at_npu::native::custom_ops::npu_rms_norm()
+    LOG(INFO) << " Glm4VisionTransformerImpl patch_embed_ beging ";
     hidden_states = post_conv_layernorm_(hidden_states);
-    // hidden_states = at_npu::native::custom_ops::npu_rms_norm(hidden_states);
+    LOG(INFO) << " Glm4VisionTransformerImpl post_conv_layernorm_ beging ";
 
     auto [rotary_pos_emb, image_type_ids] = rot_pos_emb(grid_thw);
     auto emb = torch::cat({rotary_pos_emb, rotary_pos_emb}, -1);
@@ -665,9 +665,7 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
     auto repeats = grid_t.squeeze(1);
     auto repeated = torch::repeat_interleave(h_times_w, repeats, 0);
     c10::optional<torch::ScalarType> cumsum_dtype;
-    // if (torch::jit::is_tracing()) {
-    //     cumsum_dtype = grid_thw.scalar_type();
-    // } else {
+
     cumsum_dtype = torch::kInt32;
     auto cu_seqlens = torch::cumsum(repeated, 0, cumsum_dtype);
     namespace F = torch::nn::functional;

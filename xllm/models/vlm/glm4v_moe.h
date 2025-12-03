@@ -42,6 +42,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
   Glm4vMoeForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
+    std::cout << "----------------Glm4vMoeForConditionalGenerationImpl init begin ----------------- " << std::endl;
     visual_ = register_module("visual", Glm4VisionTransformer(context));
 
     language_model_ =
@@ -53,18 +54,20 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
       const std::optional<Glm4VImageInputs>& image_input,
       const std::optional<Glm4VVideoInputs>& video_input,
       const ModelInputParams& input_params) {
+    // visual
+    LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward get_input_embeddings  visual_ begin ";
+    torch::Tensor pixel = image_input->pixel_values.to(options_);
+    LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward get_input_embeddings  pixel aft ";
+    auto image_embeds =
+        visual_(pixel,
+                image_input->image_grid_thw,
+                input_params);
+    LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward get_input_embeddings  visual_ end ";
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
-    if (image_input) {
-      // visual
-      auto image_embeds =
-          visual_(image_input->pixel_values.to(options_),
-                  image_input->image_grid_thw,
-                  input_params);
-      // merge
-      auto is_multimodal = torch::isin(input_ids,
-      model_args_.image_token_id()); input_params.visual_pos_masks =
-      is_multimodal; inputs_embeds.index_put_({is_multimodal}, image_embeds);
-    }
+    // merge
+    auto is_multimodal = torch::isin(input_ids,
+    model_args_.image_token_id()); input_params.visual_pos_masks =
+    is_multimodal; inputs_embeds.index_put_({is_multimodal}, image_embeds);
     return inputs_embeds;
   }
 
@@ -72,6 +75,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
                         const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
+    std::cout << "----------------Glm4vMoeForConditionalGenerationImpl beging ----------------- " << std::endl;
     LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl beging ";
     torch::NoGradGuard no_grad;
     const auto& mm_data = input_params.mm_data;
@@ -87,6 +91,8 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
     LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward Glm4VImageInputs  beging ";
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Glm4VImageInputs{pixel_values, image_grid_thw};
+    else
+      LOG(FATAL) << "Pixel value or image grid thw is null";
 
     LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward get_input_embeddings  beging ";
 
