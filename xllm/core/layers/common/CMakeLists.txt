@@ -17,6 +17,7 @@ cc_library(
     word_embedding_impl.h
     layer_utils.h
     indexer.h
+    deep_ep.h
   SRCS
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
@@ -31,6 +32,7 @@ cc_library(
     word_embedding_impl.cpp
     layer_utils.cpp
     indexer.cpp
+    deep_ep.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"

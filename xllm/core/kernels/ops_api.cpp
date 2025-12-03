@@ -220,8 +220,6 @@ torch::Tensor group_gemm(GroupGemmParams& params) {
                          params.trans_a,
                          params.trans_b,
                          params.a_quant_bit);
-#elif defined(USE_CUDA)
-  LOG(FATAL) << "group_gemm for cuda not implemented";
 #else
   LOG(FATAL) << "group_gemm not implemented";
 #endif
@@ -240,8 +238,6 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.scoring_func,
                               params.route_scale,
                               params.e_score_correction_bias);
-#elif defined(USE_CUDA)
-  LOG(FATAL) << "moe_active_topk for cuda not implemented";
 #else
   LOG(FATAL) << "moe_active_topk not implemented";
 #endif
@@ -250,8 +246,6 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
 std::vector<torch::Tensor> moe_gen_idx(MoeGenIdxParams& params) {
 #if defined(USE_MLU)
   return mlu::moe_gen_idx(params.expert_id, params.expert_num);
-#elif defined(USE_CUDA)
-  LOG(FATAL) << "moe_gen_idx for cuda not implemented";
 #else
   LOG(FATAL) << "moe_gen_idx not implemented";
 #endif
@@ -264,8 +258,6 @@ torch::Tensor moe_expand_input(MoeExpandInputParams& params) {
                                params.cusum_token_count,
                                params.start_expert_id,
                                params.expert_size);
-#elif defined(USE_CUDA)
-  LOG(FATAL) << "moe_expand_input for cuda not implemented";
 #else
   LOG(FATAL) << "moe_expand_input not implemented";
 #endif
@@ -281,10 +273,87 @@ torch::Tensor moe_combine_result(MoeCombineResultParams& params) {
                                  params.start_expert_id,
                                  params.expert_size,
                                  params.bias);
-#elif defined(USE_CUDA)
-  LOG(FATAL) << "moe_combine_result for cuda not implemented";
 #else
   LOG(FATAL) << "moe_combine_result not implemented";
+#endif
+}
+
+torch::Tensor moe_all2all_gen_send_layout(
+    MoeAll2AllGenSendLayoutParams& params) {
+#if defined(USE_MLU)
+  return mlu::moe_all2all_gen_send_layout(params.token_count, params.nrank);
+#else
+  LOG(FATAL) << "moe_all2all_gen_send_layout not implemented";
+#endif
+}
+
+std::vector<torch::Tensor> moe_all2all_gen_gather_index(
+    MoeAll2AllGenGatherIndexParams& params) {
+#if defined(USE_MLU)
+  return mlu::moe_all2all_gen_gather_index(
+      params.token_num, params.pad_num, params.return_cusum_token_count);
+#else
+  LOG(FATAL) << "moe_all2all_gen_gather_index not implemented";
+#endif
+}
+
+std::vector<torch::Tensor> moe_all2all_create(MoeAll2AllCreateParams& params) {
+#if defined(USE_MLU)
+  return mlu::moe_all2all_create(params.dispatch_token_byte,
+                                 params.combine_token_byte,
+                                 params.max_expert_num,
+                                 params.max_token_num,
+                                 params.rank,
+                                 params.nrank,
+                                 params.device);
+#else
+  LOG(FATAL) << "moe_all2all_create not implemented";
+#endif
+}
+
+void moe_all2all_init(MoeAll2AllInitParams& params) {
+#if defined(USE_MLU)
+  mlu::moe_all2all_init(params.handle, params.all_exchange_info, params.device);
+#else
+  LOG(FATAL) << "moe_all2all_init not implemented";
+#endif
+}
+
+void moe_all2all_dispatch(MoeAll2AllDispatchParams& params) {
+#if defined(USE_MLU)
+  mlu::moe_all2all_dispatch(params.handle,
+                            params.token_byte,
+                            params.token_num,
+                            params.send_layout,
+                            params.send_token_num,
+                            params.recv_layout,
+                            params.recv_token_num,
+                            params.send_token,
+                            params.recv_token);
+#else
+  LOG(FATAL) << "moe_all2all_dispatch not implemented";
+#endif
+}
+
+void moe_all2all_combine(MoeAll2AllCombineParams& params) {
+#if defined(USE_MLU)
+  mlu::moe_all2all_combine(params.handle,
+                           params.token_byte,
+                           params.token_num,
+                           params.send_src_layout,
+                           params.send_dst_layout,
+                           params.send_token,
+                           params.recv_token);
+#else
+  LOG(FATAL) << "moe_all2all_combine not implemented";
+#endif
+}
+
+void moe_all2all_destroy(MoeAll2AllDestroyParams& params) {
+#if defined(USE_MLU)
+  mlu::moe_all2all_destroy(params.handle, params.device);
+#else
+  LOG(FATAL) << "moe_all2all_destroy not implemented";
 #endif
 }
 
@@ -369,6 +438,18 @@ void masked_indexer_select_paged_kv(MaskedIndexerSelectPagedKVParams& params) {
                                       params.quant_block_size);
 #else
   LOG(FATAL) << "masked_indexer_select_paged_kv not implemented";
+#endif
+}
+
+void gather_split(GatherSplitParams& params) {
+#if defined(USE_MLU)
+  mlu::gather_split(params.input,
+                    params.gather_index,
+                    params.valid_token_num,
+                    params.output_head,
+                    params.output_tail);
+#else
+  LOG(FATAL) << "gather_split not implemented";
 #endif
 }
 

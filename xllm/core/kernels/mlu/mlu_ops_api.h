@@ -182,6 +182,46 @@ torch::Tensor moe_combine_result(
     const int64_t expert_size,
     const std::optional<torch::Tensor>& bias);
 
+torch::Tensor moe_all2all_gen_send_layout(const torch::Tensor& token_count,
+                                          int64_t nrank);
+
+std::vector<torch::Tensor> moe_all2all_gen_gather_index(
+    const torch::Tensor& token_num,
+    int64_t pad_num,
+    bool return_cusum_token_count);
+
+std::vector<torch::Tensor> moe_all2all_create(int64_t dispatch_token_byte,
+                                              int64_t combine_token_byte,
+                                              int64_t max_expert_num,
+                                              int64_t max_token_num,
+                                              int64_t rank,
+                                              int64_t nrank,
+                                              const torch::Device& device);
+
+void moe_all2all_init(int64_t handle,
+                      const torch::Tensor& all_exchange_info,
+                      const torch::Device& device);
+
+void moe_all2all_dispatch(int64_t handle,
+                          int64_t token_byte,
+                          int64_t token_num,
+                          const torch::Tensor& send_layout,
+                          const torch::Tensor& send_token_num,
+                          const torch::Tensor& recv_layout,
+                          const torch::Tensor& recv_token_num,
+                          const std::optional<torch::Tensor>& send_token,
+                          const std::optional<torch::Tensor>& recv_token);
+
+void moe_all2all_combine(int64_t handle,
+                         int64_t token_byte,
+                         int64_t token_num,
+                         const torch::Tensor& send_src_layout,
+                         const torch::Tensor& send_dst_layout,
+                         const std::optional<torch::Tensor>& send_token,
+                         const std::optional<torch::Tensor>& recv_token);
+
+void moe_all2all_destroy(int64_t handle, const torch::Device& device);
+
 std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
     const torch::Tensor& x,
     const torch::Tensor& smooth,
@@ -221,5 +261,11 @@ torch::Tensor apply_top_k_top_p(const torch::Tensor& logits,
                                 const torch::Tensor& topp_list);
 
 torch::Tensor random_sample(const torch::Tensor& probs);
+
+void gather_split(const torch::Tensor& input,
+                  const torch::Tensor& gather_index,
+                  const torch::Tensor& valid_token_num,
+                  const torch::Tensor& output_head,
+                  const torch::Tensor& output_tail);
 
 }  // namespace xllm::kernel::mlu
