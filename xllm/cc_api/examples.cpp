@@ -4,6 +4,17 @@
 
 #include "llm.h"
 
+/**
+ * How to compile examples.cpp:
+ * Step 1: compile libxllm.so using the python setup.py build --generate-so true
+ * command
+ * Step 2: install the xllm package to the /usr/local directory using
+ * install.sh
+ * Step 3: g++ xllm/cc_api/examples.cpp -o llm_examples
+ * -I/usr/local/xllm/include -L/usr/local/xllm/lib -lxllm
+ * -Wl,-rpath=/usr/local/xllm/lib -D_GLIBCXX_USE_CXX11_ABI=0
+ */
+
 std::string devices = "npu:0";
 std::string model_path = "/export/home/models/Qwen3-8B";
 
@@ -22,7 +33,8 @@ int main(int argc, char** argv) {
     std::cout << "llm completions start" << std::endl;
 
     std::string prompt =
-        "请推荐3个便宜又好用的电动剃须刀，简要说下产品名称、价格、特色即可";
+        "recommend 3 cheap and easy-to-use electric shavers, briefly "
+        "describe the product name, price, and features";
     xllm::XLLM_RequestParams params;
     params.max_tokens = 500;
     xllm::XLLM_Response response =
@@ -49,13 +61,17 @@ int main(int argc, char** argv) {
     xllm::XLLM_ChatMessage message;
     message.role = "user";
     message.content =
-        "你是一个电商场景专家，当前场景是京东B商城电商搜索引擎，B商城是服务于企"
-        "业用户的企业版京东商城，经营品类较全面，任务是判断在电商搜索引擎中'"
-        "用户query'和'商品标题'是否相关。\n判别标准：如果搜索'用户query'返回'"
-        "商品标题'符合用户的需求则任务相关。\n输出要求：你在'相关'或者'不相关'"
-        "中给答案，不要说其他内容,用户query:火锅酱料\n商品标题:"
-        "草原红太阳火锅底料蘸料多味烧烤酱料番茄酱韭花酱夜宵搭配 "
-        "【新】香辣味烧烤酱100g";
+        "You are an expert in e-commerce scenarios. The current scenario is an "
+        "e-commerce search engine with a comprehensive range of business "
+        "categories. Your task is to determine whether 'user query' and "
+        "'product title' are related in the e-commerce search engine. "
+        "Discrimination criteria: If the search for 'user query' returns' "
+        "product title 'that meets the user's needs, then the task is "
+        "relevant. Output requirement: Please provide the answer in the "
+        "'related' or 'unrelated' section, without mentioning any other "
+        "content. User query: 'Hotpot sauce'. Product title: 'Grassland Red "
+        "Sun Hotpot Base Dip Multi flavored Barbecue Sauce Tomato Sauce Leek "
+        "Flower Sauce Nightsnack Paired with [New] Spicy Barbecue Sauce 100g'";
 
     std::vector<xllm::XLLM_ChatMessage> messages;
     messages.emplace_back(message);
