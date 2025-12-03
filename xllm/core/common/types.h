@@ -289,19 +289,6 @@ struct EplbInfo {
   int32_t update_layer_id = -1;
 };
 
-struct MMInputData {
-  std::string type = "";
-  std::string text = "";
-  std::string image_url = "";
-  std::string video_url = "";
-  std::string audio_url = "";
-};
-
-struct MMChatMessage {
-  std::string role = "";
-  std::vector<MMInputData> content;
-};
-
 inline constexpr int REC_TOKEN_SIZE = 3;
 
 using RecTokenTriple = std::array<int32_t, REC_TOKEN_SIZE>;

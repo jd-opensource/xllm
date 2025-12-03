@@ -52,11 +52,11 @@ class Tokenizer {
     return "";
   }
 
-  // only for generative recommendation
+  // Only for generative recommendation
   virtual bool encode(int64_t item_id, std::vector<int32_t>* token_ids) const {
     return false;
   }
-  // only for generative recommendation
+  // Only for generative recommendation
   virtual bool decode(const Slice<int32_t>& token_ids,
                       bool skip_special_tokens,
                       std::vector<int64_t>* item_ids) const {
