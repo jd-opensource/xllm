@@ -72,6 +72,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
                         const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
+    LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl beging ";
     torch::NoGradGuard no_grad;
     const auto& mm_data = input_params.mm_data;
     torch::Tensor pixel_values;
@@ -83,9 +84,11 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
       image_grid_thw = res.value();
     std::optional<Glm4VImageInputs> image_inputs;
     std::optional<Glm4VVideoInputs> video_inputs;
-
+    LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward Glm4VImageInputs  beging ";
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Glm4VImageInputs{pixel_values, image_grid_thw};
+
+    LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward get_input_embeddings  beging ";
 
     auto inputs_embeds = get_input_embeddings(tokens, image_inputs, video_inputs, input_params);
     input_params.input_embedding = inputs_embeds;

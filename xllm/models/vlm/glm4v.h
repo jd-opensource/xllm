@@ -425,13 +425,8 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
       namespace F = torch::nn::functional;
       auto interpolated_embed = F::grid_sample(
         pos_embed_2d,
-        grid);
-      // namespace F = torch::nn::functional;
-      // auto interpolated_embed = F::grid_sample(
-      //   pos_embed_2d,
-      //   grid,
-      //   F::GridSampleFuncOptions().mode(torch::kBicubic).padding_mode(torch::kBorder).align_corners(false));
-      // TODO
+        grid,
+        F::GridSampleFuncOptions().mode(torch::kBicubic).padding_mode(torch::kBorder).align_corners(false));
       adapted_pos_embed = interpolated_embed
           .squeeze(0)
           .squeeze(-1)
@@ -651,6 +646,7 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
        torch::Tensor hidden_states,
        torch::Tensor grid_thw,
        const ModelInputParams& input_params) {
+    LOG(INFO) << " Glm4VisionTransformerImpl forward beging ";
     hidden_states = patch_embed_(hidden_states);
     // at_npu::native::custom_ops::npu_rms_norm()
     hidden_states = post_conv_layernorm_(hidden_states);
@@ -686,7 +682,7 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
       seqlens_tensor.cpu().to(torch::kLong).data_ptr<int64_t>(),
       seqlens_tensor.cpu().to(torch::kLong).data_ptr<int64_t>() + seqlens_tensor.numel()
     );
-
+    LOG(INFO) << " Glm4VisionTransformerImpl forward embedding before ";
     hidden_states = embeddings_(hidden_states, seqlens, grid_thw, image_type_ids.select(1, 0), image_type_ids.select(1, 1));
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
@@ -697,12 +693,15 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
     for (int idx = 0; idx < blocks_->size(); ++idx) {  
       hidden_states = layers_[idx](hidden_states, m_cos, m_sin, cu_seqlens, cu_seqlens_vec, input_params_new, idx); //TODO
     }
+    LOG(INFO) << " Glm4VisionTransformerImpl forward layer after ";
     hidden_states = post_layernorm_(hidden_states);
     hidden_states = hidden_states.view({-1, spatial_merge_size_, spatial_merge_size_, hidden_states.size(-1)});
     // TO down sample  merge op
     hidden_states = hidden_states.permute({0, 3, 1, 2});
     hidden_states = downsample_(hidden_states).view({-1, out_hidden_size_});
+    LOG(INFO) << " Glm4VisionTransformerImpl downsample after";
     hidden_states = merger_(hidden_states);
+    LOG(INFO) << " Glm4VisionTransformerImpl forward end";
     return hidden_states;
   };
 
