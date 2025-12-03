@@ -20,7 +20,7 @@ limitations under the License.
 
 namespace xllm {
 
-// constrained decoding is used to ensure that the generated content
+// Constrained decoding is used to ensure that the generated content
 // conforms to specific formats or rules.
 class ConstrainedDecoding {
  public:
@@ -28,8 +28,8 @@ class ConstrainedDecoding {
 
   virtual bool build_mask_cache();
 
-  // input generated_token_list: [sequence_num][generated_token_ids]
-  // output: mask tensor[sequence_num,vocab_size]
+  // Input generated_token_list: [sequence_num][generated_token_ids]
+  // Output: mask tensor[sequence_num,vocab_size]
   virtual torch::Tensor generate_mask(
       const std::vector<std::vector<int32_t>>& generated_token_list);
 };

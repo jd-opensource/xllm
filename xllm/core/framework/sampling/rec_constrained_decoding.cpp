@@ -59,7 +59,7 @@ bool RecConstrainedDecoding::build_mask_cache() {
 
   build_mask_cache_ = true;
 
-  LOG(INFO) << "build mask cache, first token ids size:"
+  LOG(INFO) << "Build mask cache, first token ids size:"
             << first_token_ids.size();
 
   return true;
@@ -73,14 +73,14 @@ torch::Tensor RecConstrainedDecoding::generate_mask(
 
   size_t token_size = generated_token_list[0].size();
 
-  // generate mask for first token
+  // Generate mask for first token
   if (0 == token_size) {
     size_t sequence_num = generated_token_list.size();
     auto mask = first_token_mask_.unsqueeze(0);
     return mask.repeat({sequence_num, 1});
   }
 
-  // generate mask for non-first token
+  // Generate mask for non-first token
   return generate_decode_mask(generated_token_list);
 }
 
@@ -121,12 +121,12 @@ torch::Tensor RecConstrainedDecoding::generate_decode_mask(
           local_vocab_indices.push_back(static_cast<int64_t>(vocab_idx));
         }
       } else {
-        LOG(ERROR) << "fail to generate mask for tokens:"
+        LOG(ERROR) << "Fail to generate mask for tokens:"
                    << generated_token_list[token_idx];
       }
     }
 
-    // merge local results to global batch (thread-safe)
+    // Merge local results to global batch (thread-safe)
     if (!local_token_indices.empty()) {
       std::lock_guard<std::mutex> lock(global_batch_mutex);
       global_batch_token_indices.insert(global_batch_token_indices.end(),
