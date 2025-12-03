@@ -24,20 +24,11 @@ limitations under the License.
 
 namespace xllm {
 
-using OptBool = std::optional<bool>;
-using OptInt32 = std::optional<int32_t>;
-using OptInt64 = std::optional<int64_t>;
-using OptUInt32 = std::optional<uint32_t>;
-using OptFloat = std::optional<float>;
-using OptString = std::optional<std::string>;
-using OptStringVec = std::optional<std::vector<std::string>>;
-using OptInt32Vec = std::optional<std::vector<int32_t>>;
-
 struct XLLM_CAPI_EXPORT XLLM_ChatMessage {
-  // the role of the messages author. One of "system", "user", "assistant".
+  // The role of the messages author. One of "system", "user", "assistant".
   std::string role;
 
-  // the content of the message. null for assistant messages with function
+  // The content of the message. null for assistant messages with function
   // calls.
   std::string content;
 };
@@ -147,80 +138,71 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
 };
 
 struct XLLM_CAPI_EXPORT XLLM_RequestParams {
-  // whether to include the original prompt in the response. default = true
-  OptBool echo;
+  // Whether to include the original prompt in the response. default = false
+  bool echo = false;
 
-  OptBool offline;
+  // whether is a offline request. default = false.
+  bool offline = false;
 
-  // include the log probabilities of the chosen tokens. the maximum value is 5.
-  OptBool logprobs;
+  // Whether to return the log probabilities of the tokens. default = false.
+  bool logprobs = false;
 
-  // whether to ignore the end of sequence token. default = false.
-  OptBool ignore_eos;
+  // Whether to ignore the end of sequence token. default = false.
+  bool ignore_eos = false;
 
-  // whether to skip special tokens in the output. default = true
-  OptBool skip_special_tokens;
+  // Whether to skip special tokens in the output text. default = true.
+  bool skip_special_tokens = true;
 
-  // number of completions to return for each prompt. default = 1
-  OptUInt32 n;
+  // Number of completions to return for each prompt. default = 1
+  uint32_t n = 1;
 
-  // number of tokens to generate
+  // Number of tokens to generate
   // the prompt token count + max_tokens can't exceed the model's max context
   // length.
-  OptUInt32 max_tokens;
+  uint32_t max_tokens = 5120;
 
-  // the number of sequence to generate server-side and returns the "best".
-  // default = None
-  // Results can't be streamed.
-  // when used with n, best_of controls the number of candidate completions and
-  // n specifies how many to return. best_of must be greater than or equal to n.
-  OptUInt32 best_of;
+  // Number of sequences to generate for each prompt and select n best among.
+  std::optional<uint32_t> best_of;
 
-  OptInt32 slo_ms;
+  int32_t slo_ms = 0;
 
-  OptInt32 beam_width;
+  int32_t beam_width = 0;
 
-  // the number of log probabilities to include in the response, between [0,
-  // 20]. default = 0
-  OptInt32 top_logprobs;
+  // Number of top log probabilities to return. default = 0.
+  int64_t top_logprobs = 0;
 
-  // top_k sampling cutoff, default = -1 (no cutoff)
-  OptInt64 top_k;
+  // top_k sampling cutoff. default = -1 to disable.
+  int64_t top_k = -1;
 
-  // top_p sampling cutoff, between [0, 1.0]. default = 1.0
-  OptFloat top_p;
+  // top_p sampling cutoff, between [0.0, 1.0]. default = 1.0
+  float top_p = 1.0;
 
   // frequency penalty to reduce the likelihood of generating the same word
   // multiple times. values between [0.0, 2.0]. 0.0 means no penalty. default =
   // 0.0 Positive values penalize new tokens based on their existing frequency
   // in the text.
-  OptFloat frequency_penalty;
+  float frequency_penalty = 0.0;
 
   // presence penalty to reduce the likelihood of generating words already in
   // the prompt. values between [-2.0, 2.0]. Positive values penalize new tokens
   // based on their existing in the prompt. default = 0.0
-  OptFloat presence_penalty;
+  float presence_penalty = 0.0;
 
-  // repetition penalty to penalize new tokens based on their occurence in the
+  // Repetition penalty to penalize new tokens based on their occurence in the
   // text. values > 1.0 encourage the model to use new tokens, while values
   // < 1.0 encourage the model to repeat tokens. default = 1.0
-  OptFloat repetition_penalty;
+  float repetition_penalty = 1.0;
 
-  // temperature of the sampling, between [0, 2]. default = 0.0
+  // Temperature of the sampling, between [0, 2]. default = 0.0
   // higher value will make the ouput more random.
-  OptFloat temperature;
+  float temperature = 0.0;
 
-  OptString service_request_id;
+  // The list of strings to stop generating further tokens.
+  // the output will contain the stop string.
+  std::optional<std::vector<std::string>> stop;
 
-  // A unique identifier representing your end-user, which can help system to
-  // monitor and detect abuse.
-  OptString user;
-
-  // up to 4 sequences where the API will stop generating further tokens.
-  OptStringVec stop;
-
-  // the list of token ids where the API will stop generating further tokens.
-  OptInt32Vec stop_token_ids;
+  // The list of token ids to stop generating further tokens.
+  std::optional<std::vector<int32_t>> stop_token_ids;
 };
 
 enum XLLM_CAPI_EXPORT XLLM_StatusCode {
@@ -233,58 +215,58 @@ enum XLLM_CAPI_EXPORT XLLM_StatusCode {
 };
 
 struct XLLM_CAPI_EXPORT XLLM_Usage {
-  // the number of tokens in the prompt.
+  // The number of tokens in the prompt.
   int32_t prompt_tokens;
 
-  // the number of tokens in the generated completion.
+  // The number of tokens in the generated completion.
   int32_t completion_tokens;
 
-  // the total number of tokens used in the request (prompt + completion).
+  // The total number of tokens used in the request (prompt + completion).
   int32_t total_tokens;
 };
 
 struct XLLM_CAPI_EXPORT XLLM_LogProbData {
-  // token
+  // Token
   std::string token;
 
-  // the token id.
+  // Token id.
   int32_t token_id;
 
-  // the log probability of the token.
+  // Log probability of the token.
   float logprob;
 };
 
 struct XLLM_CAPI_EXPORT XLLM_LogProb {
-  // token
+  // Token
   std::string token;
 
-  // the token id.
+  // Token id.
   int32_t token_id;
 
-  // the log probability of the token.
+  // Log probability of the token.
   float logprob;
 
-  // the log probability of top tokens.
+  // Log probability of top tokens.
   std::vector<XLLM_LogProbData> top_logprobs;
 };
 
 struct XLLM_CAPI_EXPORT XLLM_Choice {
-  // the index of the generated completion
+  // The index of the generated completion
   uint32_t index;
 
-  // the generated text for completions inference
+  // The generated text for completions inference
   std::optional<std::string> text;
 
-  // the generated item for rec inference
+  // The generated item for rec inference
   std::optional<uint64_t> item_id;
 
-  // the generated message for chatcompletions inference
+  // The generated message for chatcompletions inference
   std::optional<XLLM_ChatMessage> message;
 
-  // the log probabilities of output tokens.
+  // The log probabilities of output tokens.
   std::optional<std::vector<XLLM_LogProb>> logprobs;
 
-  // the reason of the model stoped generating tokens.
+  // The reason of the model stoped generating tokens.
   // "stop" - the model hit a natural stop point or a provided stop sequence.
   // "length" - the maximum number of tokens specified in the request was
   // reached. "function_call" - the model called a function.
@@ -298,22 +280,22 @@ struct XLLM_CAPI_EXPORT XLLM_Response {
   // Optional error details (populated if status_code != kSuccess)
   std::string error_info;
 
-  // unique id for the completion request
+  // Unique id for the completion request
   std::string id;
 
-  // the object type, which is always "text_completion".
+  // The object type, which is always "text_completion".
   std::string object;
 
-  // the unix timestamp (in seconds) of when the completion was created.
+  // The unix timestamp (in seconds) of when the completion was created.
   int64_t created;
 
-  // the model used for the completion
+  // The model used for the completion
   std::string model;
 
-  // list of generated completion choices for the input prompt
+  // List of generated completion choices for the input prompt
   std::vector<XLLM_Choice> choices;
 
-  // usage statistics for the completion request.
+  // Usage statistics for the completion request.
   XLLM_Usage usage;
 };
 

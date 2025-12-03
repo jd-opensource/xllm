@@ -49,7 +49,8 @@ class XLLM_CAPI_EXPORT LLM {
    * @param init_options Advanced initialization options, Provided default
    * configuration
    * @return bool true if initialization succeeds; false if fails
-   * @note Must be called before Generate(), and only needs to be called once
+   * @note Must be called before Completions/ChatCompletions, and only needs to
+   * be called once
    */
   bool Initialize(const std::string& model_path,
                   const std::string& devices,

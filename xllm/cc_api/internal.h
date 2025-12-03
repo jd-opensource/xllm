@@ -49,49 +49,27 @@ std::string generate_request_id() {
 
 enum class InterfaceType { COMPLETIONS, CHAT_COMPLETIONS };
 
-template <typename T, typename U>
-void copy_optional_value(T& dest, const U& src) {
-  if (src.has_value()) {
-    dest = src.value();
-  }
-}
-
 RequestParams transfer_request_params(
     const XLLM_RequestParams& request_params) {
   RequestParams xllm_request_params;
 
-  copy_optional_value(xllm_request_params.echo, request_params.echo);
-  copy_optional_value(xllm_request_params.offline, request_params.offline);
-  copy_optional_value(xllm_request_params.logprobs, request_params.logprobs);
-  copy_optional_value(xllm_request_params.best_of, request_params.best_of);
-  copy_optional_value(xllm_request_params.slo_ms, request_params.slo_ms);
-  copy_optional_value(xllm_request_params.top_k, request_params.top_k);
-  copy_optional_value(xllm_request_params.top_p, request_params.top_p);
-  copy_optional_value(xllm_request_params.ignore_eos,
-                      request_params.ignore_eos);
-  copy_optional_value(xllm_request_params.skip_special_tokens,
-                      request_params.skip_special_tokens);
-  copy_optional_value(xllm_request_params.n, request_params.n);
-  copy_optional_value(xllm_request_params.max_tokens,
-                      request_params.max_tokens);
-  copy_optional_value(xllm_request_params.frequency_penalty,
-                      request_params.frequency_penalty);
-  copy_optional_value(xllm_request_params.presence_penalty,
-                      request_params.presence_penalty);
-  copy_optional_value(xllm_request_params.repetition_penalty,
-                      request_params.repetition_penalty);
-  copy_optional_value(xllm_request_params.service_request_id,
-                      request_params.service_request_id);
-  copy_optional_value(xllm_request_params.stop, request_params.stop);
-  copy_optional_value(xllm_request_params.stop_token_ids,
-                      request_params.stop_token_ids);
-
-  if (request_params.beam_width.has_value()) {
-    xllm_request_params.beam_width = request_params.beam_width.value();
-    if (xllm_request_params.beam_width > 1) {
-      xllm_request_params.ignore_eos = true;
-    }
-  }
+  xllm_request_params.echo = request_params.echo;
+  xllm_request_params.offline = request_params.offline;
+  xllm_request_params.logprobs = request_params.logprobs;
+  xllm_request_params.best_of = request_params.best_of;
+  xllm_request_params.slo_ms = request_params.slo_ms;
+  xllm_request_params.top_k = request_params.top_k;
+  xllm_request_params.top_p = request_params.top_p;
+  xllm_request_params.ignore_eos = request_params.ignore_eos;
+  xllm_request_params.skip_special_tokens = request_params.skip_special_tokens;
+  xllm_request_params.n = request_params.n;
+  xllm_request_params.max_tokens = request_params.max_tokens;
+  xllm_request_params.frequency_penalty = request_params.frequency_penalty;
+  xllm_request_params.presence_penalty = request_params.presence_penalty;
+  xllm_request_params.repetition_penalty = request_params.repetition_penalty;
+  xllm_request_params.stop = request_params.stop;
+  xllm_request_params.stop_token_ids = request_params.stop_token_ids;
+  xllm_request_params.beam_width = request_params.beam_width;
 
   return xllm_request_params;
 }
