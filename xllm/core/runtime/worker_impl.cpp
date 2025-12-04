@@ -957,16 +957,16 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
       layer_cnt++;
     }
 
-    ret = aclrtMemcpyBatchAsync(dsts,
-                                copy_size,
-                                srcs,
-                                copy_size,
-                                num_batches * layer_cnt,
-                                attrs,
-                                attrs_indexes,
-                                1,
-                                &fail_index,
-                                stream->get_stream()->stream());
+    // TODO(kangmeng): change to async API
+    ret = aclrtMemcpyBatch(dsts,
+                           copy_size,
+                           srcs,
+                           copy_size,
+                           num_batches * layer_cnt,
+                           attrs,
+                           attrs_indexes,
+                           1,
+                           &fail_index);
 
     if (ret != 0 || fail_index != SIZE_MAX) {
       LOG(ERROR) << "aclrtMemcpyBatch error: " << ret

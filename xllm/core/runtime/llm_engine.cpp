@@ -30,6 +30,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
+#include "framework/block/multi_tier_block_manager_pool.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/xtensor/multi_layer_xtensor_transfer.h"
@@ -346,7 +347,12 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload())
       .enable_kvcache_store(options_.enable_kvcache_store());
-  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
+  if (options_.host_blocks_factor() > 0.0001) {
+    kv_cache_manager_ =
+        std::make_unique<MultiTierBlockManagerPool>(options, this, dp_size_);
+  } else {
+    kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
+  }
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;

@@ -85,13 +85,8 @@ void PrefillOnlyScheduler::handle_prefill_requests(
           << "Waiting request should have only one sequence.";
     }
 
-    bool prefetch_result = true;
-    for (auto& prefill_sequence : request->sequences()) {
-      prefetch_result &=
-          prefill_sequence->update_prefetch_result(options_.prefetch_timeout());
-    }
-
-    if (!prefetch_result) {
+    if (!kv_cache_manager_->update_prefetch_result(
+            request, options_.prefetch_timeout())) {
       waiting_priority_queue.pop();
       waiting_priority_queue.push(request);
       continue;

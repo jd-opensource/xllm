@@ -101,7 +101,7 @@ bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
-  prefetch_from_storage(request);
+  kv_cache_manager_->prefetch_from_storage(request);
 
   if (request_queue_.write(request)) {
     return true;
@@ -212,13 +212,8 @@ void ContinuousScheduler::handle_prefill_requests(
           << "Waiting request should have only one sequence.";
     }
 
-    bool prefetch_result = true;
-    for (auto& prefill_sequence : request->sequences()) {
-      prefetch_result &=
-          prefill_sequence->update_prefetch_result(options_.prefetch_timeout());
-    }
-
-    if (!prefetch_result) {
+    if (!kv_cache_manager_->update_prefetch_result(
+            request, options_.prefetch_timeout())) {
       waiting_priority_queue.pop();
       waiting_priority_queue.push(request);
       continue;
@@ -821,45 +816,9 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   if (!is_batches_empty) {
     // only update the scheduling latency when there are requests to process
     COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
-
-    // TODO(kangmeng): abstract this code(and the code below) into a new class
-    // here.
-    if (kv_cache_manager_->allow_host_block_extend()) {
-      auto* load_block_transfer_infos =
-          kv_cache_manager_->get_load_block_transfer_infos();
-
-      for (int i = 0; i < batches.size(); i++) {
-        if (!load_block_transfer_infos->at(i).empty()) {
-          batches[i].set_batch_id();
-          engine_->transfer_kv_blocks(
-              i,
-              batches[i].batch_id(),
-              std::move(load_block_transfer_infos->at(i)));
-        }
-      }
-    }
-  }
-
-  if (kv_cache_manager_->allow_host_block_extend()) {
-    auto* offload_block_transfer_infos =
-        kv_cache_manager_->get_offload_block_transfer_infos();
-
-    bool is_all_dp_copy_info_empty = true;
-    std::vector<std::vector<folly::SemiFuture<uint32_t>>> futures;
-    futures.resize(offload_block_transfer_infos->size());
-
-    for (int i = 0; i < futures.size(); i++) {
-      if (!offload_block_transfer_infos->at(i).empty()) {
-        futures[i] = std::move(engine_->transfer_kv_blocks(
-            i, std::move(offload_block_transfer_infos->at(i))));
-
-        is_all_dp_copy_info_empty = false;
-      }
-    }
-
-    if (!is_all_dp_copy_info_empty) {
-      kv_cache_manager_->postprocess_offload(futures);
-    }
+    kv_cache_manager_->transfer_blocks(&batches);
+  } else {
+    kv_cache_manager_->transfer_blocks();
   }
 
   GAUGE_SET(num_pending_requests,
@@ -923,39 +882,6 @@ std::vector<Batch> ContinuousScheduler::schedule_request(
   }
   // return an empty batch
   return batch;
-}
-
-void ContinuousScheduler::prefetch_from_storage(
-    std::shared_ptr<Request>& request) {
-  if (request->sequences()[0]->kv_state().num_kv_blocks() != 0 ||
-      request->sequences()[0]->host_kv_state().num_kv_blocks() != 0) {
-    LOG(ERROR)
-        << "prefetch_from_storage can only be called before prepare batch!";
-    return;
-  }
-  for (auto& prefill_sequence : request->sequences()) {
-    const size_t num_additional_blocks =
-        kv_cache_manager_->pre_allocate(prefill_sequence.get());
-    if (num_additional_blocks > 0) {
-      const auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
-      std::vector<BlockTransferInfo> block_transfer_infos;
-      block_transfer_infos.reserve(num_additional_blocks);
-      for (int i = host_blocks.size() - num_additional_blocks;
-           i < host_blocks.size();
-           i++) {
-        block_transfer_infos.emplace_back(
-            BlockTransferInfo(-1,
-                              host_blocks[i].id(),
-                              host_blocks[i].get_immutable_hash_value(),
-                              TransferType::G2H));
-      }
-
-      engine_->prefetch_from_storage(prefill_sequence->dp_rank(),
-                                     std::move(block_transfer_infos),
-                                     prefill_sequence->get_termination_flag(),
-                                     prefill_sequence->get_prefetch_results());
-    }
-  }
 }
 
 // step the scheduler forward by one step

@@ -1,0 +1,268 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#include "multi_tier_block_manager_pool.h"
+
+#include "block_manager_impl.h"
+#include "concurrent_block_manager_impl.h"
+
+namespace xllm {
+
+MultiTierBlockManagerPool::MultiTierBlockManagerPool(
+    const BlockManagerPool::Options& options,
+    Engine* engine,
+    int32_t dp_size)
+    : engine_(engine), BlockManagerPool(options, dp_size) {
+  CHECK(dp_size > 0) << "dp_size must be greater than 0";
+  host_block_managers_.reserve(dp_size);
+
+  BlockManager::Options host_options;
+  host_options.num_blocks(options_.num_blocks())
+      .block_size(options_.block_size())
+      .enable_prefix_cache(options_.enable_prefix_cache())
+      .enable_disagg_pd(options_.enable_disagg_pd())
+      .num_blocks(options_.host_num_blocks())
+      .enable_cache_upload(false);
+
+  for (int32_t i = 0; i < dp_size; ++i) {
+    if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
+      host_block_managers_.emplace_back(
+          std::make_unique<ConcurrentBlockManagerImpl>(host_options));
+    } else {
+      host_block_managers_.emplace_back(
+          std::make_unique<BlockManagerImpl>(host_options));
+    }
+  }
+
+  load_block_transfer_infos_.resize(host_block_managers_.size());
+  offload_block_transfer_infos_.resize(host_block_managers_.size());
+  saved_host_blocks_.resize(host_block_managers_.size());
+  saved_device_blocks_.resize(host_block_managers_.size());
+}
+
+void MultiTierBlockManagerPool::deallocate(Sequence* sequence) {
+  DCHECK(sequence != nullptr);
+  // add blocks to the prefix cache
+  int32_t dp_rank = BlockManagerPool::get_dp_rank(sequence);
+  BlockManagerPool::cache(sequence);
+
+  auto* blocks = sequence->kv_state().mutable_kv_blocks();
+  auto* host_blocks = sequence->host_kv_state().mutable_kv_blocks();
+
+  if (blocks->size() == 0 || host_blocks->size() >= blocks->size()) {
+    return;
+  }
+
+  int cached_block_num =
+      sequence->host_kv_state().kv_cache_tokens_num() / options_.block_size();
+
+  if (host_blocks->size() > 0) {
+    host_block_managers_[dp_rank]->cache(sequence->tokens(), *host_blocks);
+  }
+
+  size_t needed_block_num =
+      sequence->num_tokens() / options_.block_size() - host_blocks->size();
+
+  if (needed_block_num == 0) {
+    return;
+  }
+
+  sequence->host_kv_state().add_kv_blocks(
+      host_block_managers_[dp_rank]->allocate(needed_block_num));
+
+  for (int i = cached_block_num; i < host_blocks->size(); i++) {
+    if (blocks->at(i).ref_count() != 2) {
+      continue;
+    }
+
+    host_blocks->at(i).set_hash_value(blocks->at(i).get_immutable_hash_value());
+    saved_host_blocks_[dp_rank].emplace_back(std::move(host_blocks->at(i)));
+    saved_device_blocks_[dp_rank].emplace_back(std::move(blocks->at(i)));
+    offload_block_transfer_infos_[dp_rank].emplace_back(BlockTransferInfo(
+        saved_device_blocks_[dp_rank].back().id(),
+        saved_host_blocks_[dp_rank].back().id(),
+        saved_host_blocks_[dp_rank].back().get_immutable_hash_value(),
+        saved_host_blocks_[dp_rank].back().get_hash_value_len(),
+        TransferType::D2G));
+  }
+  host_block_managers_[dp_rank]->cache(
+      *sequence->host_kv_state().mutable_kv_blocks());
+  host_block_managers_[dp_rank]->deallocate(
+      sequence->host_kv_state().kv_blocks());
+
+  block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+  // release the blocks after prefix cache insertion
+  sequence->reset();
+}
+
+bool MultiTierBlockManagerPool::allocate(Sequence* sequence,
+                                         size_t num_tokens) {
+  BlockManagerPool::allocate(sequence, num_tokens);
+
+  if (sequence->host_kv_state().num_kv_blocks() == 0) {
+    allocate_host_shared(sequence);
+  }
+
+  int32_t dp_rank = BlockManagerPool::get_dp_rank(sequence);
+  size_t hbm_cache_token_num = sequence->kv_state().kv_cache_tokens_num();
+  size_t host_cache_token_num = sequence->host_kv_state().kv_cache_tokens_num();
+  if (hbm_cache_token_num < host_cache_token_num) {
+    auto hbm_blocks = sequence->kv_state().kv_blocks();
+    auto host_blocks = sequence->host_kv_state().kv_blocks();
+
+    for (int i = hbm_cache_token_num / options_.block_size();
+         i < host_cache_token_num / options_.block_size();
+         i++) {
+      load_block_transfer_infos_[dp_rank].emplace_back(
+          BlockTransferInfo(host_blocks[i].id(),
+                            hbm_blocks[i].id(),
+                            host_blocks[i].get_immutable_hash_value(),
+                            TransferType::H2D));
+    }
+    sequence->kv_state().incr_kv_cache_tokens_num(host_cache_token_num -
+                                                  hbm_cache_token_num);
+  }
+  return true;
+}
+
+void MultiTierBlockManagerPool::allocate_host_shared(Sequence* sequence) {
+  if (options_.enable_prefix_cache()) {
+    int32_t dp_rank = BlockManagerPool::get_dp_rank(sequence);
+    std::vector<Block> shared_blocks =
+        host_block_managers_[dp_rank]->allocate_shared(sequence->tokens());
+    sequence->add_shared_host_kv_blocks(std::move(shared_blocks));
+  }
+}
+
+void MultiTierBlockManagerPool::prefetch_from_storage(
+    std::shared_ptr<Request>& request) {
+  if (!options_.enable_kvcache_store()) {
+    return;
+  }
+
+  for (auto& prefill_sequence : request->sequences()) {
+    DCHECK(prefill_sequence.get() != nullptr);
+
+    int32_t dp_rank = BlockManagerPool::get_dp_rank(prefill_sequence.get());
+    std::vector<Block> shared_blocks =
+        host_block_managers_[dp_rank]->allocate_shared(
+            prefill_sequence->tokens());
+    prefill_sequence->add_shared_host_kv_blocks(std::move(shared_blocks));
+
+    const size_t num_blocks = prefill_sequence->host_kv_state().num_kv_blocks();
+    // round down to the nearest block number
+    const size_t block_size = options_.block_size();
+    const size_t num_additional_blocks =
+        prefill_sequence->num_tokens() / block_size - num_blocks;
+    if (num_additional_blocks <= 0) {
+      return;
+    }
+
+    auto host_blocks =
+        host_block_managers_[dp_rank]->allocate(num_additional_blocks);
+    if (host_blocks.size() != num_additional_blocks) {
+      return;
+    }
+    prefill_sequence->host_kv_state().add_kv_blocks(host_blocks);
+    PrefixCache::compute_hash_keys(
+        prefill_sequence->tokens(),
+        *prefill_sequence->host_kv_state().mutable_kv_blocks());
+
+    if (num_additional_blocks > 0) {
+      const auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
+      std::vector<BlockTransferInfo> block_transfer_infos;
+      block_transfer_infos.reserve(num_additional_blocks);
+      for (int i = host_blocks.size() - num_additional_blocks;
+           i < host_blocks.size();
+           i++) {
+        block_transfer_infos.emplace_back(
+            BlockTransferInfo(-1,
+                              host_blocks[i].id(),
+                              host_blocks[i].get_immutable_hash_value(),
+                              TransferType::G2H));
+      }
+
+      engine_->prefetch_from_storage(prefill_sequence->dp_rank(),
+                                     std::move(block_transfer_infos),
+                                     prefill_sequence->get_termination_flag(),
+                                     prefill_sequence->get_prefetch_results());
+    }
+  }
+}
+
+bool MultiTierBlockManagerPool::update_prefetch_result(
+    std::shared_ptr<Request>& request,
+    const uint32_t timeout) {
+  if (!options_.enable_kvcache_store()) {
+    return true;
+  }
+
+  bool prefetch_result = true;
+  for (auto& prefill_sequence : request->sequences()) {
+    prefetch_result &= prefill_sequence->update_prefetch_result(timeout);
+  }
+  return prefetch_result;
+}
+
+void MultiTierBlockManagerPool::transfer_blocks(std::vector<Batch>* batches) {
+  if (batches != nullptr) {
+    // load blocks from host to device
+    for (int i = 0; i < batches->size(); i++) {
+      if (!load_block_transfer_infos_[i].empty()) {
+        batches->at(i).set_batch_id();
+        engine_->transfer_kv_blocks(i,
+                                    batches->at(i).batch_id(),
+                                    std::move(load_block_transfer_infos_[i]));
+      }
+    }
+
+    load_block_transfer_infos_.clear();
+    load_block_transfer_infos_.resize(host_block_managers_.size());
+  }
+
+  // offload blocks from device to host and kvcache store
+  for (int i = 0; i < offload_block_transfer_infos_.size(); i++) {
+    if (!offload_block_transfer_infos_[i].empty()) {
+      folly::collectAll(std::move(engine_->transfer_kv_blocks(
+                            i, std::move(offload_block_transfer_infos_[i]))))
+          .via(folly::getGlobalCPUExecutor())
+          .thenValue([host_blocks = std::move(saved_host_blocks_[i]),
+                      device_blocks = std::move(saved_device_blocks_[i]),
+                      host_block_mgr_ptr = host_block_managers_[i].get(),
+                      device_block_mgr_ptr = block_managers_[i].get()](
+                         std::vector<folly::Try<uint32_t>>&& results) {
+            for (auto&& result : results) {
+              if (result.value() != host_blocks.size()) {
+                LOG(FATAL) << "Offload copy fail, expected "
+                           << host_blocks.size() << ", got " << result.value();
+              }
+            }
+            host_block_mgr_ptr->cache(host_blocks);
+            host_block_mgr_ptr->deallocate({host_blocks});
+            device_block_mgr_ptr->deallocate({device_blocks});
+            return 0;
+          });
+    }
+  }
+
+  offload_block_transfer_infos_.clear();
+  saved_host_blocks_.clear();
+  saved_device_blocks_.clear();
+  offload_block_transfer_infos_.resize(host_block_managers_.size());
+  saved_host_blocks_.resize(host_block_managers_.size());
+  saved_device_blocks_.resize(host_block_managers_.size());
+}
+
+}  // namespace xllm
