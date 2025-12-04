@@ -67,7 +67,7 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
   accessDesc.location.id = device_id;
   accessDesc.accessFlags = CN_MEM_ACCESS_FLAGS_PROT_READWRITE;
   ret = cnMemSetAccess(phy_mem_handle, granularity_size, &accessDesc, 1);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   CUmemAllocationProp prop = {};
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
@@ -97,7 +97,7 @@ void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   ret = aclrtReserveMemAddress(&vir_ptr, aligned_size, 0, nullptr, 0);
 #elif defined(USE_MLU)
   ret = cnMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
 #endif
   CHECK_EQ(ret, 0) << "Failed to create virtual memory handle";
@@ -109,7 +109,7 @@ void release_phy_mem_handle(PhyMemHandle& phy_mem_handle) {
   ret = aclrtFreePhysical(phy_mem_handle);
 #elif defined(USE_MLU)
   ret = cnMemRelease(phy_mem_handle);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemRelease(phy_mem_handle);
 #endif
   CHECK_EQ(ret, 0) << "Failed to release physical memory handle";
@@ -121,7 +121,7 @@ void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   ret = aclrtReleaseMemAddress(vir_ptr);
 #elif defined(USE_MLU)
   ret = cnMemAddressFree(vir_ptr, aligned_size);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemAddressFree(vir_ptr, aligned_size);
 #endif
   CHECK_EQ(ret, 0) << "Failed to release virtual memory handle";
@@ -135,7 +135,7 @@ void map(VirPtr& vir_ptr, PhyMemHandle& phy_mem_handle) {
 #elif defined(USE_MLU)
   ret =
       cnMemMap(vir_ptr, FLAGS_phy_page_granularity_size, 0, phy_mem_handle, 0);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   ret =
       cuMemMap(vir_ptr, FLAGS_phy_page_granularity_size, 0, phy_mem_handle, 0);
 #endif
@@ -148,7 +148,7 @@ void unmap(VirPtr& vir_ptr, size_t aligned_size) {
   ret = aclrtUnmapMem(vir_ptr);
 #elif defined(USE_MLU)
   ret = cnMemUnmap(vir_ptr, aligned_size);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemUnmap(vir_ptr, aligned_size);
 #endif
   CHECK_EQ(ret, 0) << "Failed to unmap virtual memory from physical memory";

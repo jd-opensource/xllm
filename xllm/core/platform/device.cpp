@@ -18,7 +18,7 @@ limitations under the License.
 #include <cn_api.h>
 #include <torch_mlu/csrc/framework/core/device.h>
 #include <torch_mlu/csrc/framework/core/device_utils.h>
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
 #include <c10/cuda/CUDAStream.h>
 #include <cuda.h>
 #endif
@@ -34,7 +34,7 @@ void Device::set_device() const {
   c10_npu::set_device(index());
 #elif defined(USE_MLU)
   torch_mlu::setDevice(index());
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   c10::cuda::set_device(index());
 #endif
 }
@@ -55,7 +55,7 @@ int Device::device_count() {
   return c10_npu::device_count();
 #elif defined(USE_MLU)
   return torch_mlu::device_count();
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   return c10::cuda::device_count();
 #endif
 }
@@ -65,7 +65,7 @@ std::string Device::type_str() {
   return "npu";
 #elif defined(USE_MLU)
   return "mlu";
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   return "cuda";
 #endif
 }
@@ -73,7 +73,7 @@ std::string Device::type_str() {
 torch::DeviceType Device::type_torch() {
 #if defined(USE_NPU) || defined(USE_MLU)
   return torch::kPrivateUse1;
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   return torch::kCUDA;
 #endif
 }
@@ -87,7 +87,7 @@ Device::DeviceMem Device::get_device_mem() const {
   aclrtGetMemInfo(ACL_HBM_MEM, &free_memory, &total_memory);
 #elif defined(USE_MLU)
   cnrtMemGetInfo(&free_memory, &total_memory);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   cudaMemGetInfo(&free_memory, &total_memory);
 #endif
   device_mem.total_memory = static_cast<int64_t>(total_memory);
@@ -104,7 +104,7 @@ int Device::synchronize_default_stream() {
   return aclrtSynchronizeStream(c10_npu::getCurrentNPUStream(index()).stream());
 #elif defined(USE_MLU)
   torch_mlu::getCurrentMLUStream(index()).synchronize();
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   c10::cuda::getCurrentCUDAStream().synchronize();
 #endif
   return 0;

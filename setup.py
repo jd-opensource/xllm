@@ -109,11 +109,11 @@ def get_torch_root_path():
     except ImportError:
         return None
 
-def get_torch_mlu_root_path():
+def get_ixformer_root_path():
     try:
-        import torch_mlu
+        import ixformer
         import os
-        return os.path.dirname(os.path.abspath(torch_mlu.__file__))
+        return os.path.dirname(os.path.abspath(ixformer.__file__))
     except ImportError:
         return None
 
@@ -229,7 +229,15 @@ def set_cuda_envs():
     os.environ["CUDA_TOOLKIT_ROOT_DIR"] = "/usr/local/cuda"
     os.environ["NCCL_ROOT"] = get_nccl_root_path()
     os.environ["NCCL_VERSION"] = "2"
-    
+
+def set_ilu_envs():
+    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
+    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
+    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
+    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
+    os.environ["CUDA_TOOLKIT_ROOT_DIR"] = "/usr/local/corex"
+    os.environ["IXFORMER_INSTALL_PATH"] = get_ixformer_root_path()
+
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
         super().__init__(name, sources=[])
@@ -280,8 +288,7 @@ class ExtBuild(build_ext):
             for ext in self.extensions:
                 self.build_extension(ext)
         except Exception as e:
-            print("ERROR: Build failed.")
-            print(f"Details: {e}")
+            print("Build failed.")
             exit(1)
 
     def build_extension(self, ext: CMakeExtension):
@@ -313,7 +320,7 @@ class ExtBuild(build_ext):
             f"-DDEVICE_ARCH={self.arch.upper()}",
             f"-DINSTALL_XLLM_KERNELS={'ON' if self.install_xllm_kernels else 'OFF'}",
         ]
-        
+
         if self.device == "a2" or self.device == "a3":
             cmake_args += ["-DUSE_NPU=ON"]
             # set npu environment variables
@@ -328,6 +335,9 @@ class ExtBuild(build_ext):
                            f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}"]
             # set cuda environment variables
             set_cuda_envs()
+        elif self.device == "ilu":
+            cmake_args += ["-DUSE_ILU=ON"]
+            set_ilu_envs()
         else:
             raise ValueError("Please set --device to a2 or a3 or mlu or cuda.")
 
@@ -351,6 +361,7 @@ class ExtBuild(build_ext):
         
         build_args = ["--config", build_type]
         max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
+        # max_jobs="2"
         build_args += ["-j" + max_jobs]
 
         env = os.environ.copy()
@@ -572,7 +583,7 @@ if __name__ == "__main__":
         idx = sys.argv.index('--device')
         if idx + 1 < len(sys.argv):
             device = sys.argv[idx+1].lower()
-            if device not in ('a2', 'a3', 'mlu', 'cuda'):
+            if device not in ('a2', 'a3', 'mlu', 'cuda', 'ilu'):
                 print("Error: --device must be a2 or a3 or mlu (case-insensitive)")
                 sys.exit(1)
             # Remove the arguments so setup() doesn't see them

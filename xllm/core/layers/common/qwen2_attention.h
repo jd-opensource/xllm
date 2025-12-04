@@ -21,6 +21,8 @@ limitations under the License.
 #include "../mlu/attention.h"
 #elif defined(USE_CUDA)
 #include "../cuda/attention.h"
+#elif defined(USE_ILU)
+#include "../ilu/attention.h"
 #endif
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"

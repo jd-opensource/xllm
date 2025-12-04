@@ -25,6 +25,8 @@ limitations under the License.
 #include "mlu_process_group.h"
 #elif defined(USE_CUDA)
 #include "cuda_process_group.h"
+#elif defined(USE_ILU)
+#include "ilu_process_group.h"
 #endif
 #include "common/global_flags.h"
 #include "parallel_args.h"
