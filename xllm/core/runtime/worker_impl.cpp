@@ -565,19 +565,26 @@ folly::SemiFuture<folly::Unit> WorkerImpl::process_group_test_async() {
 
 // initialize model, cache manager. async call
 folly::SemiFuture<bool> WorkerImpl::init_model_async(
-    const std::string& model_weights_path) {
+    const std::string& model_weights_path,
+    int32_t random_seed) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule(
-      [this, model_weights_path, promise = std::move(promise)]() mutable {
-        auto status = this->init_model(model_weights_path);
-        promise.setValue(status);
-      });
+  threadpool_.schedule([this,
+                        model_weights_path,
+                        random_seed,
+                        promise = std::move(promise)]() mutable {
+    auto status = this->init_model(model_weights_path, random_seed);
+    promise.setValue(status);
+  });
 
   return future;
 }
 
-bool WorkerImpl::init_model(const std::string& model_weights_path) {
+bool WorkerImpl::init_model(const std::string& model_weights_path,
+                            int32_t random_seed) {
+  // set same random seed for all worker
+  device_.set_seed(random_seed);
+
   auto model_loader = ModelLoader::create(model_weights_path);
   auto tokenizer = model_loader->tokenizer();
   CHECK(tokenizer != nullptr);

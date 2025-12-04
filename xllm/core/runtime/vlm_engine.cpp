@@ -162,13 +162,14 @@ bool VLMEngine::init_model() {
   LOG(INFO) << "Initializing model with " << args_;
   LOG(INFO) << "Initializing model with quant args: " << quant_args_;
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
+  LOG(INFO) << "Initializing model with random seed: " << FLAGS_random_seed;
 
   // init model for each worker in parallel
   // multiple workers, call async init
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
-    futures.push_back(worker->init_model_async(model_path));
+    futures.push_back(worker->init_model_async(model_path, FLAGS_random_seed));
   }
   // wait for all futures to complete
   auto results = folly::collectAll(futures).get();

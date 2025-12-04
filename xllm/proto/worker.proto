@@ -13,8 +13,9 @@ message CommInfo {
   bytes comm_info = 1;
 }
 
-message ModelPath {
+message InitModelRequest {
   string model_weights_path = 1;
+  int32 random_seed = 2;
 }
 
 message ActivationMemory {
@@ -244,7 +245,7 @@ service Collective {
 // Worker receive action from master engine.
 service DistributeWorker {
   rpc Hello (Status) returns (Status);
-  rpc InitModel (ModelPath) returns (Status);
+  rpc InitModel (InitModelRequest) returns (Status);
   rpc ProcessGroupTest (Empty) returns (Status);
   rpc ProfileDeviceMemory (Empty) returns (DeviceMemory);
   rpc AllocateKVCache (KVCacheShape) returns (Status);

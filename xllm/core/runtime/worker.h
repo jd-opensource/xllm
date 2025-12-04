@@ -43,7 +43,7 @@ class Worker {
   ~Worker();
 
   // initialize model, cache manager. blocking call
-  bool init_model(const std::string& model_weights_path);
+  bool init_model(const std::string& model_weights_path, int32_t random_seed);
 
   std::tuple<int64_t, int64_t> estimate_kv_cache_capacity();
 
@@ -80,7 +80,8 @@ class Worker {
 
   // initialize model, cache manager. async call
   folly::SemiFuture<bool> init_model_async(
-      const std::string& model_weights_path);
+      const std::string& model_weights_path,
+      int32_t random_seed);
 
   folly::SemiFuture<std::tuple<int64_t, int64_t>>
   estimate_kv_cache_capacity_async();

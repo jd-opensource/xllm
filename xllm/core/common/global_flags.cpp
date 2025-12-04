@@ -424,7 +424,7 @@ DEFINE_bool(
     "The default prefetching ratio for gateup weight is 40%."
     "If adjustments are needed, e.g. export PREFETCH_COEFFOCIENT=0.5");
 
-// rec prefill-only mode
+// --- rec prefill-only mode ---
 DEFINE_bool(enable_rec_prefill_only,
             false,
             "Enable rec prefill-only mode (no decoder self-attention blocks "
@@ -437,6 +437,9 @@ DEFINE_bool(
     false,
     "Whether to enable dp load balance, if true, sequences within a single "
     "dp batch will be shuffled.");
+
+// --- the seed for random number generator ---
+DEFINE_int32(random_seed, -1, "Random seed for random number generator.");
 
 // --- dit cache config ---
 

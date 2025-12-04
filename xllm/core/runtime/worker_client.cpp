@@ -32,8 +32,9 @@ limitations under the License.
 
 namespace xllm {
 
-bool WorkerClient::init_model(const std::string& model_weights_path) {
-  return worker_->init_model(model_weights_path);
+bool WorkerClient::init_model(const std::string& model_weights_path,
+                              int32_t random_seed) {
+  return worker_->init_model(model_weights_path, random_seed);
 }
 
 bool WorkerClient::allocate_kv_cache(
@@ -120,8 +121,9 @@ folly::SemiFuture<folly::Unit> WorkerClient::process_group_test_async() {
 
 // initialize model, cache manager. async call
 folly::SemiFuture<bool> WorkerClient::init_model_async(
-    const std::string& model_weights_path) {
-  return worker_->init_model_async(model_weights_path);
+    const std::string& model_weights_path,
+    int32_t random_seed) {
+  return worker_->init_model_async(model_weights_path, random_seed);
 }
 
 folly::SemiFuture<bool> WorkerClient::allocate_kv_cache_async(

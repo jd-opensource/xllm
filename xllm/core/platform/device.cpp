@@ -14,10 +14,13 @@ limitations under the License.
 ==============================================================================*/
 
 #include "device.h"
-#if defined(USE_MLU)
+#if defined(USE_NPU)
+#include <torch_npu/csrc/aten/NPUGeneratorImpl.h>
+#elif defined(USE_MLU)
 #include <cn_api.h>
 #include <torch_mlu/csrc/framework/core/device.h>
 #include <torch_mlu/csrc/framework/core/device_utils.h>
+#include <torch_mlu/csrc/framework/generator/generator_impl.h>
 #elif defined(USE_CUDA)
 #include <c10/cuda/CUDAStream.h>
 #include <cuda.h>
@@ -36,6 +39,22 @@ void Device::set_device() const {
   torch_mlu::setDevice(index());
 #elif defined(USE_CUDA)
   c10::cuda::set_device(index());
+#endif
+}
+
+void Device::set_seed(uint64_t seed) const {
+  torch::manual_seed(seed);
+#if defined(USE_NPU)
+  auto gen = at_npu::detail::getDefaultNPUGenerator(index());
+  gen.set_current_seed(seed);
+#elif defined(USE_MLU)
+  auto gen = torch_mlu::getDefaultMLUGenerator(index());
+  {
+    std::lock_guard<std::mutex> lock(gen.mutex());
+    gen.set_current_seed(seed);
+  }
+#elif defined(USE_CUDA)
+  torch::cuda::manual_seed(seed);
 #endif
 }
 

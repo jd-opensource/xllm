@@ -45,7 +45,7 @@ class WorkerService : public proto::DistributeWorker {
              ::google::protobuf::Closure* done) override;
 
   void InitModel(::google::protobuf::RpcController* controller,
-                 const proto::ModelPath* request,
+                 const proto::InitModelRequest* request,
                  proto::Status* response,
                  ::google::protobuf::Closure* done) override;
 

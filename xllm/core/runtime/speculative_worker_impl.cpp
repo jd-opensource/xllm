@@ -73,18 +73,20 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
       std::make_unique<LLMWorkerImpl>(parallel_args, device, runtime_options);
 }
 
-bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path) {
+bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
+                                       int32_t random_seed) {
   // initialize model
   bool result = true;
   if (impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {
-    result = impl_->WorkerImpl::init_model(model_weights_path);
+    result = impl_->WorkerImpl::init_model(model_weights_path, random_seed);
     if (result) {
       dtype_ = impl_->dtype();
       embedding_size_ = impl_->hidden_size();
     }
   } else {
     CHECK_EQ(draft_impl_->get_status(), WorkerImpl::Status::UNINITIALIZED);
-    result = draft_impl_->WorkerImpl::init_model(model_weights_path);
+    result =
+        draft_impl_->WorkerImpl::init_model(model_weights_path, random_seed);
   }
 
   if (draft_impl_->get_status() == WorkerImpl::Status::LOADED) {
