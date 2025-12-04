@@ -912,9 +912,6 @@ REGISTER_MODEL_ARGS(glm4v, [&] {
   // LOAD_ARG_OR(pad_token_id, "text_config.pad_token_id", 151329);
   LOAD_ARG_OR(
       eos_token_id_vec, "text_config.eos_token_id", std::vector<int>{151329});
-  LOAD_ARG_OR_FUNC(head_dim, "text_config.head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
-  });
   LOAD_ARG_OR(attention_bias, "text_config.attention_bias", true);
   LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f);
   LOAD_ARG_OR(first_k_dense_replace, "text_config.first_k_dense_replace", 1);
@@ -925,6 +922,9 @@ REGISTER_MODEL_ARGS(glm4v, [&] {
   LOAD_ARG_OR(
       max_position_embeddings, "text_config.max_position_embeddings", 131072);
   LOAD_ARG_OR(n_heads, "text_config.num_attention_heads", 96);
+  LOAD_ARG_OR_FUNC(head_dim, "text_config.head_dim", [&] {
+    return args->hidden_size() / args->n_heads();
+  });
   LOAD_ARG_OR(num_experts_per_tok, "text_config.num_experts_per_tok", 8);
   LOAD_ARG_OR(n_layers, "text_config.num_hidden_layers", 46);
   LOAD_ARG_OR(n_kv_heads, "text_config.num_key_value_heads", 8);

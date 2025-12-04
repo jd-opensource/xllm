@@ -85,7 +85,6 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
     } else {
       h = embed_tokens_(tokens, 0);
     }
-
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
@@ -98,7 +97,7 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
         for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
           int64_t offset = dim_idx;
           int64_t section_len = mrope_section_[dim_idx];
-          int64_t length = section_len * 3;
+          int64_t length = section_len * 2;
           auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
           auto idx_second_half = torch::arange(offset, length, 3, torch::kLong);
           auto idx_tensor =
@@ -114,7 +113,8 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
       sin_pos = apply(sin_pos.reshape(
           {positions.sizes().front(), -1, sin_pos.sizes().back()}));
     }
-
+    cos_pos = cos_pos.reshape({-1, cos_pos.sizes().back() /2, 2});
+    sin_pos = sin_pos.reshape({-1, sin_pos.sizes().back() /2, 2});
     torch::Tensor attn_mask;
     if (FLAGS_enable_chunked_prefill) {
       int max_kv_seq = input_params.kv_max_seq_len;

@@ -68,6 +68,7 @@ torch::Tensor compute_rotary_embedding(int64_t dim,
     emb = torch::cat({freqs, freqs}, -1);
   } else {
     emb = torch::stack({freqs, freqs}, -1);
+    emb = emb.reshape({seq_len, dim});
   }
   auto rope_cos = torch::cos(emb);
   auto rope_sin = torch::sin(emb);
