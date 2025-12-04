@@ -363,7 +363,7 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
   }
   torch::Tensor forward(
       torch::Tensor x,
-      std::vector<int64_t> lengths,
+      std::vector<int> lengths,
       torch::Tensor image_shapes,
       torch::Tensor h_coords,
       torch::Tensor w_coords
@@ -399,12 +399,12 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
       std::vector<torch::Tensor> target_w_list;
       target_h_list.reserve(batch_size);
       target_w_list.reserve(batch_size);
-
+      LOG(INFO) << " Glm4vVisionEmbeddingsImpl forward  batch_size: " << batch_size << "image_shapes " << image_shapes;
       for (int64_t i = 0; i < batch_size; ++i) {
         const int64_t seq_len = lengths[i];
         const auto img_h = image_shapes.index({i, 1}).to(torch::kFloat32);
         const auto img_w = image_shapes.index({i, 2}).to(torch::kFloat32);
-
+        LOG(INFO) << " Glm4vVisionEmbeddingsImpl forward  batch_size idx " << i;
         target_h_list.push_back(img_h.repeat({seq_len}));
         target_w_list.push_back(img_w.repeat({seq_len}));
       }
@@ -417,16 +417,17 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
 
       const auto norm_w = ((w_coords_fp32 + 0.5f) / target_w) * 2.0f - 1.0f;
       const auto norm_h = ((h_coords_fp32 + 0.5f) / target_h) * 2.0f - 1.0f;
-
+      LOG(INFO) << " Glm4vVisionEmbeddingsImpl stack";
       auto grid = torch::stack({norm_w, norm_h}, -1)
           .unsqueeze(0)
           .unsqueeze(2);
-
+      LOG(INFO) << " Glm4vVisionEmbeddingsImpl stack after";
       namespace F = torch::nn::functional;
       auto interpolated_embed = F::grid_sample(
         pos_embed_2d,
         grid,
         F::GridSampleFuncOptions().mode(torch::kBicubic).padding_mode(torch::kBorder).align_corners(false));
+      LOG(INFO) << " Glm4vVisionEmbeddingsImpl interpolated_embed";
       adapted_pos_embed = interpolated_embed
           .squeeze(0)
           .squeeze(-1)
@@ -656,34 +657,32 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
     auto emb = torch::cat({rotary_pos_emb, rotary_pos_emb}, -1);
     auto m_cos = emb.cos(); 
     auto m_sin = emb.sin();
+    LOG(INFO) << " Glm4VisionTransformerImpl" << " numel=" << grid_thw.numel() << " min=" << grid_thw.min().item<float>();
+    LOG(INFO) << grid_thw;
 
     auto device = grid_thw.device();
-    auto grid_t = grid_thw.index_select(1, torch::tensor({0}, torch::TensorOptions().dtype(torch::kLong).device(device)));
-    auto grid_h = grid_thw.index_select(1, torch::tensor({1}, torch::TensorOptions().dtype(torch::kLong).device(device)));
-    auto grid_w = grid_thw.index_select(1, torch::tensor({2}, torch::TensorOptions().dtype(torch::kLong).device(device)));
+    auto grid_t = grid_thw.index_select(1, torch::tensor({0}, torch::TensorOptions().dtype(torch::kInt).device(device)));
+    auto grid_h = grid_thw.index_select(1, torch::tensor({1}, torch::TensorOptions().dtype(torch::kInt).device(device)));
+    auto grid_w = grid_thw.index_select(1, torch::tensor({2}, torch::TensorOptions().dtype(torch::kInt).device(device)));
     auto h_times_w = (grid_h * grid_w).squeeze(1);
     auto repeats = grid_t.squeeze(1);
     auto repeated = torch::repeat_interleave(h_times_w, repeats, 0);
     c10::optional<torch::ScalarType> cumsum_dtype;
 
+    LOG(INFO) << " Glm4VisionTransformerImpl repeated " << repeated;
+
     cumsum_dtype = torch::kInt32;
     auto cu_seqlens = torch::cumsum(repeated, 0, cumsum_dtype);
     namespace F = torch::nn::functional;
-    cu_seqlens = F::pad(
-        cu_seqlens, F::PadFuncOptions({1, 0}).mode(torch::kConstant).value(0));
-    cu_seqlens = torch::diff(cu_seqlens);
-    torch::Tensor cu_seqlens_slice1 = cu_seqlens.narrow(0, 1, cu_seqlens.size(0) - 1);
-    torch::Tensor cu_seqlens_slice0 = cu_seqlens.narrow(0, 0, cu_seqlens.size(0) - 1);
-    torch::Tensor seqlens_tensor = cu_seqlens_slice1 - cu_seqlens_slice0;
-    std::vector<int64_t> seqlens;
-    seqlens.assign(
-      seqlens_tensor.cpu().to(torch::kLong).data_ptr<int64_t>(),
-      seqlens_tensor.cpu().to(torch::kLong).data_ptr<int64_t>() + seqlens_tensor.numel()
-    );
-    LOG(INFO) << " Glm4VisionTransformerImpl forward embedding before ";
+    cu_seqlens = F::pad(cu_seqlens, F::PadFuncOptions({1, 0}).mode(torch::kConstant).value(0));
+    cu_seqlens = torch::diff(cu_seqlens).cpu().to(torch::kInt);
+    std::vector<int> seqlens;
+    seqlens.assign(cu_seqlens.data_ptr<int>(),cu_seqlens.data_ptr<int>() + cu_seqlens.numel());
+
+    LOG(INFO) << " Glm4VisionTransformerImpl forward embedding before cu_seqlens " << cu_seqlens << "seqlens.size()" << seqlens.size();
     hidden_states = embeddings_(hidden_states, seqlens, grid_thw, image_type_ids.select(1, 0), image_type_ids.select(1, 1));
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
+    LOG(INFO) << " Glm4VisionTransformerImpl forward embedding after ";
+    ModelInputParams& input_params_new = const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     std::vector<int> cu_seqlens_vec( 
         cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec

@@ -60,7 +60,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
     LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward get_input_embeddings  pixel aft ";
     auto image_embeds =
         visual_(pixel,
-                image_input->image_grid_thw,
+                image_input->image_grid_thw.to(pixel.device()),
                 input_params);
     LOG(INFO) << " Glm4vMoeForConditionalGenerationImpl forward get_input_embeddings  visual_ end ";
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
