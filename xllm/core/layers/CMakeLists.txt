@@ -6,12 +6,15 @@ if(USE_NPU)
   )
   add_subdirectory(npu)
 else()
+  add_subdirectory(common)
   if(USE_MLU)
     add_subdirectory(mlu)
+  elseif(USE_ILU)
+    add_subdirectory(ilu)
   else()
     add_subdirectory(cuda)
   endif()
-  add_subdirectory(common)
+
 endif()
 
 cc_library(
@@ -75,6 +78,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:npu_layers>
     $<$<BOOL:${USE_MLU}>:mlu_layers>
     $<$<BOOL:${USE_CUDA}>:cuda_layers>
+    $<$<BOOL:${USE_ILU}>:ilu_layers>
     :parallel_state
     :state_dict
     :kv_cache

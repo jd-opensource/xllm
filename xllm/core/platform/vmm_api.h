@@ -19,7 +19,7 @@ limitations under the License.
 #include "acl/acl.h"
 #elif defined(USE_MLU)
 #include <cn_api.h>
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
 #include <cuda.h>
 #endif
 
@@ -31,7 +31,7 @@ using PhyMemHandle = aclrtDrvMemHandle;
 #elif defined(USE_MLU)
 using VirPtr = CNaddr;
 using PhyMemHandle = CNmemGenericAllocationHandle;
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
 using VirPtr = CUdeviceptr;
 using PhyMemHandle = CUmemGenericAllocationHandle;
 #endif
