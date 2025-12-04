@@ -25,7 +25,7 @@ limitations under the License.
 #include "kernels/npu/xllm_ops/replace_token.h"
 #elif defined(USE_MLU)
 #include <torch_mlu/csrc/framework/core/caching_allocator.h>
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
@@ -351,7 +351,7 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
       device_id, &torch_cache, &torch_largest_block);
 #elif defined(USE_MLU)
   torch_mlu::MLUCachingAllocator::emptyCache();
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_ILU)
   c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
   const auto available_memory = device_.free_memory();

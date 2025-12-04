@@ -44,6 +44,9 @@ limitations under the License.
 #if defined(USE_CUDA)
 #include "core/layers/cuda/attention.h"
 #endif
+#if defined(USE_ILU)
+#include "core/layers/ilu/attention.h"
+#endif
 #if defined(USE_MLU)
 #include "core/layers/mlu/attention.h"
 #endif
