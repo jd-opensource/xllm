@@ -464,34 +464,36 @@ class Glm4_VisionPatchMergerImpl : public torch::nn::Module {
  public:
   Glm4_VisionPatchMergerImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
-    auto options = context.get_tensor_options();
+    options_ = context.get_tensor_options();
     auto parallel_args = context.get_parallel_args();
     int64_t dim = model_args.mm_projection_dim();
     int64_t context_dim = model_args.mm_intermediate_size();
     norm_ = register_module("norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions({dim})));
-    norm_->weight.set_data(norm_->weight.to(options));
-    norm_->bias.set_data(norm_->bias.to(options));
+    norm_->weight.set_data(norm_->weight.to(options_));
+    norm_->bias.set_data(norm_->bias.to(options_));
     proj_ = register_module(
         "proj",
         torch::nn::Linear(torch::nn::LinearOptions(dim, dim).bias(false)));
-
+    proj_->weight.set_data(proj_->weight.to(options_));
     act_ = register_module("act", torch::nn::GELU());
     silu_ = register_module("silu", torch::nn::SiLU());
 
     gate_ = register_module(
         "gate",
         torch::nn::Linear(torch::nn::LinearOptions(dim, context_dim).bias(false)));
-
+    gate_->weight.set_data(gate_->weight.to(options_));
     up_ = register_module(
         "up",
         torch::nn::Linear(torch::nn::LinearOptions(dim, context_dim).bias(false)));
-
+    up_->weight.set_data(up_->weight.to(options_));
     down_ = register_module(
         "down",
         torch::nn::Linear(torch::nn::LinearOptions(context_dim, dim).bias(false)));
+    down_->weight.set_data(down_->weight.to(options_));
   }
 
   torch::Tensor forward(torch::Tensor x) {
+    LOG(INFO) << " Glm4_VisionPatchMergerImpl forward beging " << x.device() << "options_.device() : " << options_.device();
     x = proj_(x);
     x = act_(norm_(x));
     x = down_(torch::mul(silu_((gate_(x))), up_(x)));
@@ -568,6 +570,7 @@ class Glm4_VisionPatchMergerImpl : public torch::nn::Module {
   torch::nn::Linear down_{nullptr};
   torch::nn::GELU act_{nullptr};
   torch::nn::SiLU silu_{nullptr};
+  torch::TensorOptions options_;
 
 
   bool is_proj_weight_loaded = false;
@@ -607,6 +610,8 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
 
     downsample_ = register_module("downsample", torch::nn::Conv2d(torch::nn::Conv2dOptions(hidden_size_, out_hidden_size_, spatial_merge_size_)
                                                                   .stride(spatial_merge_size_).bias(true).padding(0)));
+    downsample_->weight.set_data(downsample_->weight.to(options_));
+    downsample_->bias.set_data(downsample_->bias.to(options_));
     merger_ = register_module("merger", Glm4_VisionPatchMerger(context));
 
   }
@@ -655,10 +660,8 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
 
     auto [rotary_pos_emb, image_type_ids] = rot_pos_emb(grid_thw);
     auto emb = torch::cat({rotary_pos_emb, rotary_pos_emb}, -1);
-    auto m_cos = emb.cos(); 
-    auto m_sin = emb.sin();
-    LOG(INFO) << " Glm4VisionTransformerImpl" << " numel=" << grid_thw.numel() << " min=" << grid_thw.min().item<float>();
-    LOG(INFO) << grid_thw;
+    auto m_cos = emb.cos().type_as(hidden_states);
+    auto m_sin = emb.sin().type_as(hidden_states);
 
     auto device = grid_thw.device();
     auto grid_t = grid_thw.index_select(1, torch::tensor({0}, torch::TensorOptions().dtype(torch::kInt).device(device)));
@@ -689,6 +692,7 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
         cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
     for (int idx = 0; idx < blocks_->size(); ++idx) {  
       hidden_states = layers_[idx](hidden_states, m_cos, m_sin, cu_seqlens, cu_seqlens_vec, input_params_new, idx); //TODO
+      LOG(INFO) << " Glm4VisionTransformerImpl forward layer "<< idx;
     }
     LOG(INFO) << " Glm4VisionTransformerImpl forward layer after ";
     hidden_states = post_layernorm_(hidden_states);
@@ -782,6 +786,8 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
   bool is_post_layernorm_weight_loaded = false;
   bool is_downsample_weight_loaded_ = false;
   bool is_downsample_bias_loaded_ = false;
+  torch::Tensor m_cos;
+  torch::Tensor m_sin;
 };
 TORCH_MODULE(Glm4VisionTransformer);
 
