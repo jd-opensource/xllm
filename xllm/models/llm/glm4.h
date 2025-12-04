@@ -93,20 +93,18 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
 
     if (positions.dim() == 2) {  // mrope
       auto apply = [this](torch::Tensor x) {
-        auto freqs_t = x[0].clone();
-        for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
-          int64_t offset = dim_idx;
-          int64_t section_len = mrope_section_[dim_idx];
-          int64_t length = section_len * 2;
-          auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
-          auto idx_second_half = torch::arange(offset, length, 3, torch::kLong);
-          auto idx_tensor =
-              torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
-          // freqs_t[..., idx] = freqs[dim_idx][..., idx]
-          auto src = x[dim_idx].index_select(-1, idx_tensor);
-          freqs_t.index_copy_(-1, idx_tensor, src);
+        auto sections = mrope_section_;
+        sections.insert(sections.end(), sections.begin(), sections.end());
+
+        auto vec = x.split(sections, -1);
+        std::vector<torch::Tensor> selects;
+        selects.reserve(vec.size());
+
+        for (int64_t i = 0; i < vec.size(); ++i) {
+          auto m = vec[i];
+          selects.push_back(m[i % mrope_section_.size()]);
         }
-        return freqs_t;
+        return torch::cat(selects, -1);
       };
       cos_pos = apply(cos_pos.reshape(
           {positions.sizes().front(), -1, cos_pos.sizes().back()}));

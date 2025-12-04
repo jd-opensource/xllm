@@ -605,7 +605,6 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
       blocks_->push_back(block);
       layers_.push_back(block);
     }
-     // TODO 融合算子
     post_layernorm_ = register_module("post_layernorm", Glm4VisionRmsNorm(context));
 
     downsample_ = register_module("downsample", torch::nn::Conv2d(torch::nn::Conv2dOptions(hidden_size_, out_hidden_size_, spatial_merge_size_)
@@ -672,8 +671,6 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
     auto repeated = torch::repeat_interleave(h_times_w, repeats, 0);
     c10::optional<torch::ScalarType> cumsum_dtype;
 
-    LOG(INFO) << " Glm4VisionTransformerImpl repeated " << repeated;
-
     cumsum_dtype = torch::kInt32;
     auto cu_seqlens = torch::cumsum(repeated, 0, cumsum_dtype);
     namespace F = torch::nn::functional;
@@ -682,27 +679,21 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
     std::vector<int> seqlens;
     seqlens.assign(cu_seqlens.data_ptr<int>(),cu_seqlens.data_ptr<int>() + cu_seqlens.numel());
 
-    LOG(INFO) << " Glm4VisionTransformerImpl forward embedding before cu_seqlens " << cu_seqlens << "seqlens.size()" << seqlens.size();
     hidden_states = embeddings_(hidden_states, seqlens, grid_thw, image_type_ids.select(1, 0), image_type_ids.select(1, 1));
-    LOG(INFO) << " Glm4VisionTransformerImpl forward embedding after ";
     ModelInputParams& input_params_new = const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     std::vector<int> cu_seqlens_vec( 
-        cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
+        cu_seqlens_cpu.data_ptr<int>(), 
         cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
+    cu_seqlens = cu_seqlens.to(hidden_states.device());
     for (int idx = 0; idx < blocks_->size(); ++idx) {  
-      hidden_states = layers_[idx](hidden_states, m_cos, m_sin, cu_seqlens, cu_seqlens_vec, input_params_new, idx); //TODO
-      LOG(INFO) << " Glm4VisionTransformerImpl forward layer "<< idx;
+      hidden_states = layers_[idx](hidden_states, m_cos, m_sin, cu_seqlens, cu_seqlens_vec, input_params_new, idx);
     }
-    LOG(INFO) << " Glm4VisionTransformerImpl forward layer after ";
     hidden_states = post_layernorm_(hidden_states);
     hidden_states = hidden_states.view({-1, spatial_merge_size_, spatial_merge_size_, hidden_states.size(-1)});
-    // TO down sample  merge op
     hidden_states = hidden_states.permute({0, 3, 1, 2});
     hidden_states = downsample_(hidden_states).view({-1, out_hidden_size_});
-    LOG(INFO) << " Glm4VisionTransformerImpl downsample after";
     hidden_states = merger_(hidden_states);
-    LOG(INFO) << " Glm4VisionTransformerImpl forward end";
     return hidden_states;
   };
 
@@ -820,12 +811,10 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
       const ModelInputParams& input_params) {
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
     if (image_input) {
-      // visual
       auto image_embeds =
           visual_(image_input->pixel_values.to(options_),
                   image_input->image_grid_thw,
                   input_params);
-      // merge
       auto is_multimodal = torch::isin(input_ids,
       model_args_.image_token_id()); input_params.visual_pos_masks =
       is_multimodal; inputs_embeds.index_put_({is_multimodal}, image_embeds);
@@ -851,7 +840,6 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
 
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Glm4VImageInputs{pixel_values, image_grid_thw};
-
     auto inputs_embeds = get_input_embeddings(tokens, image_inputs, video_inputs, input_params);
     input_params.input_embedding = inputs_embeds;
     auto emb = language_model_(tokens, positions, kv_caches, input_params);
@@ -869,7 +857,6 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
       visual_->load_state_dict(
           state_dict->get_dict_with_prefix("model.visual."));
     }
-    // verify
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
     if (!model_args_.image_embedding_mode()) {

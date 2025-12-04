@@ -121,6 +121,24 @@ std::optional<std::string> JinjaChatTemplate::apply(
     nlohmann::ordered_json& messages,
     const nlohmann::ordered_json& tools,
     const nlohmann::ordered_json& chat_template_kwargs) const {
+  for (auto& msg : messages) {
+    if (!msg.contains("content")) continue;
+    auto& content = msg["content"];
+    auto normalize_item = [](nlohmann::ordered_json& item) {
+      if (item.contains("type") && item["type"].is_string()) {
+        std::string t = item["type"].get<std::string>();
+        if (t == "video_url") item["type"] = "video";
+      }
+      if (item.contains("video_url") && !item.contains("video"))
+        item["video"] = item["video_url"];
+    };
+
+    if (content.is_array()) {
+      for (auto& it : content) normalize_item(it);
+    } else if (content.is_object()) {
+      normalize_item(content);
+    }
+  }
   minja::chat_template_inputs input;
   input.messages = messages;
   input.tools = tools;
@@ -137,23 +155,10 @@ nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
 
   for (const auto& item : vec) {
     nlohmann::ordered_json item_json;
-    if (item.type == "video_url") {
-      item_json["type"] = "video";
-    } else {
-      item_json["type"] = item.type;
-    }
+    item_json["type"] = item.type;
 
     if (item.type == "text") {
       item_json["text"] = item.text;
-    } else if (item.type == "video_url") {
-      item_json["video"] = "mm place holder";
-      item_json["video_url"] = "mm place holder";
-    } else if (item.type == "image_url") {
-      item_json["image"] = "mm place holder";
-      item_json["image_url"] = "mm place holder";
-    } else if (item.type == "audio_url") {
-      item_json["audio"] = "mm place holder";
-      item_json["audio_url"] = "mm place holder";
     } else {
       item_json[item.type] = "mm place holder";
     }
