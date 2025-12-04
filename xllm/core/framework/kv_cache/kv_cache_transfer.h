@@ -36,8 +36,6 @@ class KVCacheTransfer {
     int64_t dst_v_cache_id;
     std::vector<uint64_t> src_blocks;
     std::vector<uint64_t> dst_blocks;
-    std::vector<uint64_t> src_embed_ids;
-    std::vector<uint64_t> dst_embed_ids;
   };
 
   KVCacheTransfer() = default;
