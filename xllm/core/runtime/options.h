@@ -106,6 +106,22 @@ struct Options {
   // Default set as 1 for non-MoE model.
   PROPERTY(int32_t, ep_size) = 1;
 
+  // dit data parallelism size
+  // Default set as 1
+  PROPERTY(int32_t, dit_dp_size) = 1;
+
+  // dit tensor parallelism size
+  // Default set as 1
+  PROPERTY(int32_t, dit_tp_size) = 1;
+
+  // dit sequence parallelism size
+  // Default set as 1
+  PROPERTY(int32_t, dit_sp_size) = 1;
+
+  // dit classifier-free guidance  parallelism size
+  // Default set as 1
+  PROPERTY(int32_t, dit_cfg_size) = 1;
+
   // enable enable_schedule_overlap to improve runtime execution efficiency.
   PROPERTY(bool, enable_schedule_overlap) = true;
 

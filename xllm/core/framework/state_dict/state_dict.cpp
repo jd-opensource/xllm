@@ -182,6 +182,11 @@ StateDict StateDict::get_dict_with_prefix(
   return tensors;
 }
 
+bool StateDict::has(const std::string& tensor_name) const {
+  const auto it = dict_.find(tensor_name);
+  return it != dict_.end();
+}
+
 StateDictFromSafeTensor::StateDictFromSafeTensor(
     std::unique_ptr<MemoryMapping> mem_map,
     std::unordered_map<std::string, torch::Tensor> dict)

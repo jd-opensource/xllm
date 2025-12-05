@@ -60,7 +60,7 @@ std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
 }
 
 std::unique_ptr<DiTScheduler> create_dit_scheduler(
-    DiTEngine* engine,
+    Engine* engine,
     DiTScheduler::Options options) {
   return std::make_unique<DiTDynamicBatchScheduler>(engine, options);
 }

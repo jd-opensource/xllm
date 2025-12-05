@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "dit_worker.h"
+#include "dit_worker_impl.h"
 
 #include <c10/core/DeviceGuard.h>
 #include <folly/Unit.h>
@@ -61,81 +61,114 @@ DiTCacheConfig parse_dit_cache_from_flags() {
     cache_config.fbcachetaylorseer.warmup_steps = FLAGS_dit_cache_warmup_steps;
     cache_config.fbcachetaylorseer.residual_diff_threshold =
         FLAGS_dit_cache_residual_diff_threshold;
+  } else if (FLAGS_dit_cache_policy == "ResidualCache") {
+    cache_config.selected_policy = PolicyType::ResidualCache;
+    cache_config.residual_cache.dit_cache_start_steps =
+        FLAGS_dit_cache_start_steps;
+    cache_config.residual_cache.dit_cache_end_steps = FLAGS_dit_cache_end_steps;
+    cache_config.residual_cache.dit_cache_start_blocks =
+        FLAGS_dit_cache_start_blocks;
+    cache_config.residual_cache.dit_cache_end_blocks =
+        FLAGS_dit_cache_end_blocks;
+    cache_config.residual_cache.skip_interval_steps =
+        FLAGS_dit_cache_skip_interval_steps;
   } else if (FLAGS_dit_cache_policy == "None") {
-    cache_config.selected_policy = PolicyType::TaylorSeer;
+    cache_config.selected_policy = PolicyType::None;
   }
   return cache_config;
 }
 }  // namespace
 
-DiTWorker::DiTWorker(const ParallelArgs& parallel_args,
-                     const torch::Device& device,
-                     const runtime::Options& options)
-    : device_(device), options_(options), parallel_args_(parallel_args) {
+DiTWorkerImpl::DiTWorkerImpl(const ParallelArgs& parallel_args,
+                             const torch::Device& device,
+                             const runtime::Options& options)
+    : WorkerImpl(parallel_args, device, options) {
   device_.set_device();
 }
 
-bool DiTWorker::init_model(const std::string& model_weights_path) {
+bool DiTWorkerImpl::init_model(ModelContext& context) {
+  LOG(ERROR)
+      << "init model with model_context was not implemented for dit models";
+  return false;
+}
+
+bool DiTWorkerImpl::init_model(const std::string& model_weights_path,
+                               int32_t random_seed,
+                               MasterStatus master_status) {
   CHECK(dit_model_ == nullptr) << "Model is already initialized.";
+
+  // set same random seed for all worker
+  device_.set_seed(random_seed);
 
   auto loader = std::make_unique<DiTModelLoader>(model_weights_path);
   dtype_ = util::parse_dtype(loader->get_torch_dtype(), device_);
 
   auto tensor_options = torch::dtype(dtype_).device(device_);
-  context_ = DiTModelContext(parallel_args_,
-                             std::move(loader->get_model_args()),
-                             std::move(loader->get_quant_args()),
-                             tensor_options,
-                             options_.model_id());
+  DiTCacheConfig cache_config = parse_dit_cache_from_flags();
+  dit_context_ = DiTModelContext(parallel_args_,
+                                 std::move(loader->get_model_args()),
+                                 std::move(loader->get_quant_args()),
+                                 tensor_options,
+                                 cache_config,
+                                 options_.model_id());
 
-  dit_model_ = create_dit_model(context_);
+  dit_model_ = create_dit_model(dit_context_);
   CHECK(dit_model_ != nullptr) << "Failed to create model.";
   dit_model_->load_model(std::move(loader));
 
   dit_model_executor_ =
       std::make_unique<DiTExecutor>(dit_model_.get(), options_);
 
-  DiTCacheConfig cache_config = parse_dit_cache_from_flags();
   DiTCache::get_instance().init(cache_config);
 
   return true;
 }
 
-folly::SemiFuture<bool> DiTWorker::init_model_async(
-    const std::string& model_weights_path) {
+folly::SemiFuture<bool> DiTWorkerImpl::init_model_async(
+    const std::string& model_weights_path,
+    int32_t random_seed,
+    MasterStatus master_status) {
   auto promise = std::make_shared<folly::Promise<bool>>();
   auto future = promise->getSemiFuture();
-  threadpool_.schedule([this, model_weights_path, promise]() mutable {
-    bool status = this->init_model(model_weights_path);
+  threadpool_.schedule([this,
+                        model_weights_path,
+                        random_seed,
+                        master_status,
+                        promise]() mutable {
+    bool status =
+        this->init_model(model_weights_path, random_seed, master_status);
     promise->setValue(status);
   });
   return future;
 }
 
-std::optional<DiTForwardOutput> DiTWorker::step(const DiTForwardInput& inputs) {
+std::optional<ForwardOutput> DiTWorkerImpl::step(const ForwardInput& inputs) {
+  torch::DeviceGuard device_guard(device_);
   Timer timer;
-
-  auto output = dit_model_executor_->forward(inputs.to(device_, dtype_));
+  auto output = dit_model_executor_->forward(
+      inputs.input_params.dit_forward_input.to(device_, dtype_));
 
   auto ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
-
-  return output;
+  ForwardOutput forward_output;
+  forward_output.dit_forward_output = output;
+  return forward_output;
 }
 
-folly::SemiFuture<std::optional<DiTForwardOutput>> DiTWorker::step_async(
-    const DiTForwardInput& inputs) {
-  auto promise =
-      std::make_shared<folly::Promise<std::optional<DiTForwardOutput>>>();
-  auto future = promise->getSemiFuture();
-  threadpool_.schedule([this, inputs, promise]() mutable {
-    auto output = this->step(inputs);
-    promise->setValue(output);
+folly::SemiFuture<std::optional<ForwardOutput>> DiTWorkerImpl::step_async(
+    const ForwardInput& inputs) {
+  folly::Promise<std::optional<ForwardOutput>> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this,
+                        input = std::move(inputs),
+                        promise = std::move(promise)]() mutable {
+    auto output = this->step(input);
+    promise.setValue(output);
   });
   return future;
 }
 
-void DiTWorker::process_group_test() {
+void DiTWorkerImpl::process_group_test() {
   // create random tensors
   const auto options = torch::dtype(torch::kHalf).device(device_);
   torch::Tensor tensor = torch::randn({10, 10}, options);
@@ -153,7 +186,7 @@ void DiTWorker::process_group_test() {
   // context_.get_parallel_args().process_group_);
 }
 
-folly::SemiFuture<folly::Unit> DiTWorker::process_group_test_async() {
+folly::SemiFuture<folly::Unit> DiTWorkerImpl::process_group_test_async() {
   folly::Promise<folly::Unit> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this, promise = std::move(promise)]() mutable {
@@ -164,11 +197,11 @@ folly::SemiFuture<folly::Unit> DiTWorker::process_group_test_async() {
 }
 
 // prepare input for execution
-DiTForwardInput DiTWorker::prepare_inputs(DiTBatch& batch) {
+DiTForwardInput DiTWorkerImpl::prepare_inputs(DiTBatch& batch) {
   return dit_model_executor_->prepare_inputs(batch);
 }
 
-int64_t DiTWorker::get_active_activation_memory() {
+int64_t DiTWorkerImpl::get_active_activation_memory() {
   return DeviceMonitor::get_instance()
       .get_device_stats(device_.index())
       .active_activation_memory;

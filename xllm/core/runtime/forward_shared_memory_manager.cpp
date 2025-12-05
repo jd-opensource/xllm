@@ -241,6 +241,51 @@ inline size_t get_mm_batch_data_size(const MMBatchData& mm_data) {
   return total;
 }
 
+// calculate dit input size
+inline size_t get_dit_generation_params_size(
+    const DiTGenerationParams& params) {
+  return type_size<int32_t> *
+             4  // width, height, num_inference_steps, max_sequence_length
+         + type_size<float> * 3  // true_cfg_scale, guidance_scale, strength
+         + type_size<uint32_t>   // num_images_per_prompt
+         + type_size<int64_t>;   // seed
+}
+
+inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
+  size_t size = type_size<int>;  // batch_size
+
+  // Vector of strings
+  size += get_string_vector_size(input.prompts);
+  size += get_string_vector_size(input.prompts_2);
+  size += get_string_vector_size(input.negative_prompts);
+  size += get_string_vector_size(input.negative_prompts_2);
+
+  // Tensors
+  size += get_tensor_size(input.images);
+  size += get_tensor_size(input.condition_images);
+  size += get_tensor_size(input.mask_images);
+  size += get_tensor_size(input.control_image);
+  size += get_tensor_size(input.masked_image_latents);
+  size += get_tensor_size(input.prompt_embeds);
+  size += get_tensor_size(input.pooled_prompt_embeds);
+  size += get_tensor_size(input.negative_prompt_embeds);
+  size += get_tensor_size(input.negative_pooled_prompt_embeds);
+  size += get_tensor_size(input.latents);
+
+  // Generation params
+  size += get_dit_generation_params_size(input.generation_params);
+
+  return size;
+}
+
+inline size_t get_dit_forward_output_size(const DiTForwardOutput& output) {
+  size_t size = type_size<uint64_t>;  // vector size
+  for (const auto& tensor : output.tensors) {
+    size += get_tensor_size(tensor);
+  }
+  return size;
+}
+
 size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   size_t total = 0;
 
@@ -304,6 +349,9 @@ size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   }
   // eplb_info
   total += get_eplb_info_size(input.eplb_info);
+
+  // dit input
+  total += get_dit_forward_input_size(input.dit_forward_input);
 
   return total;
 }
@@ -596,6 +644,51 @@ inline void write_mm_batch_data(char*& buffer, const MMBatchData& mm_data) {
       is_mm_item ? write_mm_data_items : write_mm_data_dict;
   for (const auto& mm_data : vec) {
     write_mm_data(buffer, mm_data);
+  }
+}
+
+// write dit data
+inline void write_dit_generation_params(char*& buffer,
+                                        const DiTGenerationParams& params) {
+  write_data(buffer, params.width);
+  write_data(buffer, params.height);
+  write_data(buffer, params.num_inference_steps);
+  write_data(buffer, params.true_cfg_scale);
+  write_data(buffer, params.guidance_scale);
+  write_data(buffer, params.num_images_per_prompt);
+  write_data(buffer, params.seed);
+  write_data(buffer, params.max_sequence_length);
+  write_data(buffer, params.strength);
+}
+
+inline void write_dit_forward_input(char*& buffer,
+                                    const DiTForwardInput& input) {
+  write_data(buffer, input.batch_size);
+
+  write_string_vector(buffer, input.prompts);
+  write_string_vector(buffer, input.prompts_2);
+  write_string_vector(buffer, input.negative_prompts);
+  write_string_vector(buffer, input.negative_prompts_2);
+
+  write_tensor(buffer, input.images);
+  write_tensor(buffer, input.condition_images);
+  write_tensor(buffer, input.mask_images);
+  write_tensor(buffer, input.control_image);
+  write_tensor(buffer, input.masked_image_latents);
+  write_tensor(buffer, input.prompt_embeds);
+  write_tensor(buffer, input.pooled_prompt_embeds);
+  write_tensor(buffer, input.negative_prompt_embeds);
+  write_tensor(buffer, input.negative_pooled_prompt_embeds);
+  write_tensor(buffer, input.latents);
+
+  write_dit_generation_params(buffer, input.generation_params);
+}
+
+inline void write_dit_forward_output(char*& buffer,
+                                     const DiTForwardOutput& output) {
+  write_data(buffer, static_cast<uint64_t>(output.tensors.size()));
+  for (const auto& tensor : output.tensors) {
+    write_tensor(buffer, tensor);
   }
 }
 
@@ -1026,6 +1119,53 @@ inline void read_mm_batch_data(const char*& buffer,
   batch_mm_data.batch(std::move(vec));
 }
 
+// read dit data
+inline void read_dit_generation_params(const char*& buffer,
+                                       DiTGenerationParams& params) {
+  read_data(buffer, params.width);
+  read_data(buffer, params.height);
+  read_data(buffer, params.num_inference_steps);
+  read_data(buffer, params.true_cfg_scale);
+  read_data(buffer, params.guidance_scale);
+  read_data(buffer, params.num_images_per_prompt);
+  read_data(buffer, params.seed);
+  read_data(buffer, params.max_sequence_length);
+  read_data(buffer, params.strength);
+}
+
+inline void read_dit_forward_input(const char*& buffer,
+                                   DiTForwardInput& input) {
+  read_data(buffer, input.batch_size);
+
+  read_string_vector(buffer, input.prompts);
+  read_string_vector(buffer, input.prompts_2);
+  read_string_vector(buffer, input.negative_prompts);
+  read_string_vector(buffer, input.negative_prompts_2);
+
+  read_tensor(buffer, input.images);
+  read_tensor(buffer, input.condition_images);
+  read_tensor(buffer, input.mask_images);
+  read_tensor(buffer, input.control_image);
+  read_tensor(buffer, input.masked_image_latents);
+  read_tensor(buffer, input.prompt_embeds);
+  read_tensor(buffer, input.pooled_prompt_embeds);
+  read_tensor(buffer, input.negative_prompt_embeds);
+  read_tensor(buffer, input.negative_pooled_prompt_embeds);
+  read_tensor(buffer, input.latents);
+
+  read_dit_generation_params(buffer, input.generation_params);
+}
+
+inline void read_dit_forward_output(const char*& buffer,
+                                    DiTForwardOutput& output) {
+  uint64_t size;
+  read_data(buffer, size);
+  output.tensors.resize(size);
+  for (auto& tensor : output.tensors) {
+    read_tensor(buffer, tensor);
+  }
+}
+
 inline void deserialize_raw_forward_input(const char*& buffer,
                                           const uint64_t buffer_size,
                                           ForwardInput& forward_input,
@@ -1127,6 +1267,9 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   // root cause is identified and the error is resolved.
   read_tensor(buffer, input_params.new_cache_slots);
   read_tensor(buffer, input_params.block_tables);
+
+  // read dit input
+  read_dit_forward_input(buffer, input_params.dit_forward_input);
 }
 
 inline void serialize_raw_forward_input(const RawForwardInput& input,
@@ -1137,7 +1280,6 @@ inline void serialize_raw_forward_input(const RawForwardInput& input,
   } else {
     write_2d_vector_to_tensor(buffer, input.m_positions_vec);
   }
-
   // ModelInputParams
   write_data(buffer, input.batch_forward_type.value());
   write_data(buffer, input.num_sequences);
@@ -1210,6 +1352,9 @@ inline void serialize_raw_forward_input(const RawForwardInput& input,
   // root cause is identified and the error is resolved.
   write_vector_to_tensor(buffer, input.new_token_slot_ids);
   write_2d_vector_to_tensor(buffer, input.block_tables_vec);
+
+  // write dit input
+  write_dit_forward_input(buffer, input.dit_forward_input);
 }
 
 size_t calculate_raw_token_size(const RawToken& token) {
@@ -1248,6 +1393,8 @@ size_t calculate_raw_forward_output_size(const RawForwardOutput& output) {
   size += get_vector_size(output.out_tokens);
   size += get_vector_size(output.out_logprobs);
   size += type_size<int32_t>;  // prepared_layer_id
+  // dit output data
+  size += get_dit_forward_output_size(output.dit_forward_output);
 
   return size;
 }
@@ -1313,6 +1460,8 @@ void deserialize_raw_forward_output(const char* buffer,
   read_data(buffer, output.prepared_layer_id);
 
   read_vector_tensor(buffer, output.mm_embeddings);
+  // read dit output
+  read_dit_forward_output(buffer, output.dit_forward_output);
 }
 
 void serialize_raw_forward_output(const RawForwardOutput& output,
@@ -1327,6 +1476,8 @@ void serialize_raw_forward_output(const RawForwardOutput& output,
   write_data(buffer, output.prepared_layer_id);
 
   write_vector_tensor(buffer, output.mm_embeddings);
+  // write dit output
+  write_dit_forward_output(buffer, output.dit_forward_output);
 }
 
 void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
@@ -1389,6 +1540,10 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
       std::move(raw_input.kv_cache_start_offsets), tensor_options);
 
   input_params.mm_data = std::move(raw_input.mm_data);
+
+  // dit input data
+  input_params.dit_forward_input = std::move(raw_input.dit_forward_input);
+
   if (!raw_input.selected_token_idxes.empty()) {
     util::pad_2d_vector<int64_t>(raw_input.unique_token_ids_vec, 0);
     util::pad_2d_vector(raw_input.unique_token_counts_vec, 0);
@@ -1415,6 +1570,7 @@ void convert_tensor_to_raw_output(
     const torch::Tensor& top_logprobs,
     const torch::Tensor& embeddings,
     const std::vector<torch::Tensor>& mm_embeddings,
+    const std::vector<torch::Tensor>& dit_images,
     const torch::Tensor& expert_load_data,
     int32_t prepared_layer_id,
     const torch::Tensor& src_seq_idxes,
@@ -1459,6 +1615,7 @@ void convert_tensor_to_raw_output(
 
   raw_output.outputs.reserve(num_seqs);
   raw_output.mm_embeddings = mm_embeddings;
+  raw_output.dit_forward_output.tensors = dit_images;
   for (int32_t output_idx = 0; output_idx < num_seqs; ++output_idx) {
     RawSampleOutput raw_sample_output;
 
@@ -1587,7 +1744,6 @@ bool ForwardSharedMemoryManager::raw_input_write(const RawForwardInput& input) {
   CHECK(total_size == real_size) << "total_size != real_size.";
   std::atomic_thread_fence(std::memory_order_release);
   control_ptr_->version = ++last_version_;
-
   return true;
 }
 
@@ -1607,7 +1763,6 @@ void ForwardSharedMemoryManager::raw_input_read(ForwardInput& input,
   uint64_t total_size;
   read_data(data_ptr, total_size);
   deserialize_raw_forward_input(data_ptr, total_size, input, device);
-
   return;
 }
 
@@ -1618,6 +1773,7 @@ bool ForwardSharedMemoryManager::raw_output_write(
     const torch::Tensor& top_logprobs,
     const torch::Tensor& embeddings,
     const std::vector<torch::Tensor>& mm_embeddings,
+    const std::vector<torch::Tensor>& dit_images,
     const torch::Tensor& expert_load_data,
     int32_t prepared_layer_id,
     const torch::Tensor& src_seq_idxes,
@@ -1630,6 +1786,7 @@ bool ForwardSharedMemoryManager::raw_output_write(
                                top_logprobs,
                                embeddings,
                                mm_embeddings,
+                               dit_images,
                                expert_load_data,
                                prepared_layer_id,
                                src_seq_idxes,
@@ -1649,7 +1806,6 @@ bool ForwardSharedMemoryManager::raw_output_write(
   char* test = static_cast<char*>(base_address()) + sizeof(ControlMetadata);
   std::atomic_thread_fence(std::memory_order_release);
   control_ptr_->version = ++last_version_;
-
   return true;
 }
 

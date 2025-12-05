@@ -19,26 +19,51 @@ namespace xllm {
 
 bool DiTCache::init(const DiTCacheConfig& cfg) {
   active_cache_ = create_dit_cache(cfg);
-  if (!active_cache_) {
+  active_cond_cache_ = create_dit_cache(cfg);
+  if (!active_cache_ || !active_cond_cache_) {
     return false;
   }
   active_cache_->init(cfg);
+  active_cond_cache_->init(cfg);
   return true;
 }
 
+torch::Tensor DiTCache::get_tensor_or_empty(const TensorMap& m,
+                                            const std::string& k) {
+  auto it = m.find(k);
+  if (it != m.end()) return it->second;
+  return torch::Tensor();
+}
+
 bool DiTCache::on_before_block(const CacheBlockIn& blockin) {
+  auto use_cfg = get_tensor_or_empty(blockin.tensors, "use_cfg");
+  if (use_cfg.defined() && use_cfg.item<bool>()) {
+    return active_cond_cache_->on_before_block(blockin);
+  }
   return active_cache_->on_before_block(blockin);
 }
 
 CacheBlockOut DiTCache::on_after_block(const CacheBlockIn& blockin) {
+  auto use_cfg = get_tensor_or_empty(blockin.tensors, "use_cfg");
+  if (use_cfg.defined() && use_cfg.item<bool>()) {
+    return active_cond_cache_->on_after_block(blockin);
+  }
   return active_cache_->on_after_block(blockin);
 }
 
 bool DiTCache::on_before_step(const CacheStepIn& stepin) {
+  auto use_cfg = get_tensor_or_empty(stepin.tensors, "use_cfg");
+  if (use_cfg.defined() && use_cfg.item<bool>()) {
+    return active_cond_cache_->on_before_step(stepin);
+  }
   return active_cache_->on_before_step(stepin);
 }
 
 CacheStepOut DiTCache::on_after_step(const CacheStepIn& stepin) {
+  auto use_cfg = get_tensor_or_empty(stepin.tensors, "use_cfg");
+  if (use_cfg.defined() && use_cfg.item<bool>()) {
+    return active_cond_cache_->on_after_step(stepin);
+  }
   return active_cache_->on_after_step(stepin);
 }
 

@@ -44,7 +44,6 @@ SharedMemoryManager::SharedMemoryManager(const std::string& name,
   // First try to create exclusively (O_CREAT | O_EXCL)
   fd_ = shm_open(name.c_str(), O_CREAT | O_RDWR | O_EXCL, 0666);
   is_creator = (fd_ != -1);
-
   // If creation failed, try opening existing
   if (!is_creator) {
     fd_ = shm_open(name.c_str(), O_RDWR, 0666);
