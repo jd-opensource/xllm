@@ -43,10 +43,6 @@ class XTensorManagerPool final : public KVCacheManager {
     LOG(FATAL) << "cache is not implemented for page manager pool";
   }
 
-  uint32_t pre_allocate(Sequence* sequence) override {
-    LOG(FATAL) << "pre_allocate is not implemented for page manager pool";
-  }
-
   std::vector<Block> allocate(size_t num_tokens, int32_t& dp_rank) override {
     LOG(FATAL) << "allocate is not implemented for page manager pool";
   }
@@ -55,28 +51,9 @@ class XTensorManagerPool final : public KVCacheManager {
     LOG(FATAL) << "allocate_shared is not implemented for page manager pool";
   }
 
-  std::vector<std::vector<BlockTransferInfo>>*
-  get_offload_block_transfer_infos() override {
-    LOG(FATAL)
-        << "get_offload_block_transfer_infos is not implemented for page "
-           "manager pool";
-  }
-
-  std::vector<std::vector<BlockTransferInfo>>* get_load_block_transfer_infos()
-      override {
-    LOG(FATAL) << "get_load_block_transfer_infos is not implemented for page "
-                  "manager pool";
-  }
-
   std::vector<std::vector<BlockTransferInfo>>* get_swap_block_transfer_infos()
       override {
     LOG(FATAL) << "get_swap_block_transfer_infos is not implemented for page "
-                  "manager pool";
-  }
-
-  void postprocess_offload(
-      std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) override {
-    LOG(FATAL) << "postprocess_offload is not implemented for page "
                   "manager pool";
   }
 

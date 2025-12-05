@@ -11,11 +11,13 @@ cc_library(
     block_manager_pool.h
     block_manager_impl.h
     concurrent_block_manager_impl.h
+    multi_tier_block_manager_pool.h
   SRCS 
     block.cpp
     block_manager_pool.cpp
     concurrent_block_manager_impl.cpp
     block_manager_impl.cpp
+    multi_tier_block_manager_pool.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:graph>

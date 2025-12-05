@@ -30,6 +30,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
+#include "framework/block/multi_tier_block_manager_pool.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/xtensor/multi_layer_xtensor_transfer.h"
@@ -345,7 +346,12 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload())
       .enable_kvcache_store(options_.enable_kvcache_store());
-  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
+  if (options_.host_blocks_factor() > 0.0001) {
+    kv_cache_manager_ =
+        std::make_unique<MultiTierBlockManagerPool>(options, this, dp_size_);
+  } else {
+    kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
+  }
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;
@@ -509,15 +515,15 @@ void LLMEngine::transfer_kv_blocks(
 
 void LLMEngine::prefetch_from_storage(
     const uint32_t dp_rank,
-    const std::atomic<bool>& flag,
     const std::vector<BlockTransferInfo>& block_transfer_info,
+    std::atomic<bool>* flag,
     std::vector<std::shared_ptr<std::atomic<uint32_t>>>* prefetch_results) {
-  prefetch_results->resize(dp_local_tp_size_,
-                           std::make_shared<std::atomic<uint32_t>>(0));
+  prefetch_results->reserve(dp_local_tp_size_);
   for (auto tp_rank = 0; tp_rank < dp_local_tp_size_; ++tp_rank) {
+    prefetch_results->emplace_back(std::make_shared<std::atomic<uint32_t>>(0));
     worker_clients_[tp_rank + dp_local_tp_size_ * dp_rank]
         ->prefetch_from_storage(
-            flag, block_transfer_info, prefetch_results->at(tp_rank));
+            block_transfer_info, flag, prefetch_results->at(tp_rank));
   }
 }
 

@@ -309,15 +309,15 @@ void RemoteWorker::transfer_kv_blocks(
 }
 
 void RemoteWorker::prefetch_from_storage(
-    const std::atomic<bool>& flag,
     const std::vector<BlockTransferInfo>& block_transfer_info,
+    std::atomic<bool>* flag,
     std::shared_ptr<std::atomic<uint32_t>>& success_cnt) {
   copy_threadpool_.schedule(
       [this,
-       flag = &flag,
+       flag = flag,
        block_transfer_info = std::move(block_transfer_info),
        success_cnt = success_cnt]() mutable {
-        channel_->prefetch_from_storage(flag, block_transfer_info, success_cnt);
+        channel_->prefetch_from_storage(block_transfer_info, flag, success_cnt);
       });
 }
 

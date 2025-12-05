@@ -874,9 +874,16 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
   }
 
   const int64_t num_layers = context_.get_model_args().n_layers();
+  uint32_t layers_per_bacth_copy =
+      num_layers / options_.layers_wise_copy_batchs();
   uint32_t num_batches = block_transfer_info.size() * 2;
+  while (num_batches * layers_per_bacth_copy > BATCH_COPY_MAX_SIZE) {
+    layers_per_bacth_copy--;
+  }
 
-  auto synchronizer = std::make_shared<NPULayerSynchronizerImpl>(num_layers);
+  uint32_t copy_cnt =
+      (num_layers + layers_per_bacth_copy - 1) / layers_per_bacth_copy;
+  auto synchronizer = std::make_shared<NPULayerSynchronizerImpl>(copy_cnt);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (layer_wise_load_synchronizer_.count(batch_id) != 0) {
@@ -885,39 +892,45 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
     layer_wise_load_synchronizer_[batch_id] = synchronizer;
   }
 
-  void** srcs = new void*[num_batches];
-  void** dsts = new void*[num_batches];
-  size_t* copy_size = new size_t[num_batches];
   aclrtMemcpyBatchAttr attrs[1] = {h2d_attrs_};
   size_t attrs_indexes[1] = {0};
 
   std::unique_ptr<Stream> stream;
   copy_stream_.wait_dequeue(stream);
   c10::StreamGuard streamGuard = stream->set_stream_guard();
-
   aclError ret = 0;
 
-  for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-    auto dst_k_cache = kv_caches_.at(layer_id).get_k_cache();
-    auto dst_v_cache = kv_caches_.at(layer_id).get_v_cache();
+  void** srcs = new void*[num_batches * layers_per_bacth_copy];
+  void** dsts = new void*[num_batches * layers_per_bacth_copy];
+  size_t* copy_size = new size_t[num_batches * layers_per_bacth_copy];
+
+  for (int index = 0; index < copy_cnt; index++) {
+    int layer_id = index * layers_per_bacth_copy;
     size_t fail_index = 0;
     uint32_t curr_index = 0;
-    auto* event = synchronizer->get_event(layer_id);
-    auto* event_flag = synchronizer->get_event_flag(layer_id);
+    uint32_t layer_cnt = 0;
 
-    for (const auto& info : block_transfer_info) {
-      auto src_k_cache = host_kv_caches_.at(info.src_block_id).get_k_cache();
-      auto src_v_cache = host_kv_caches_.at(info.src_block_id).get_v_cache();
+    while (layer_id < (index + 1) * layers_per_bacth_copy &&
+           layer_id < num_layers) {
+      auto dst_k_cache = kv_caches_.at(layer_id).get_k_cache();
+      auto dst_v_cache = kv_caches_.at(layer_id).get_v_cache();
 
-      srcs[curr_index] = src_k_cache[layer_id].data_ptr();
-      dsts[curr_index] = dst_k_cache[info.dst_block_id].data_ptr();
-      copy_size[curr_index] = key_cache_size_per_layer_;
-      curr_index++;
+      for (const auto& info : block_transfer_info) {
+        auto src_k_cache = host_kv_caches_.at(info.src_block_id).get_k_cache();
+        auto src_v_cache = host_kv_caches_.at(info.src_block_id).get_v_cache();
 
-      srcs[curr_index] = src_v_cache[layer_id].data_ptr();
-      dsts[curr_index] = dst_v_cache[info.dst_block_id].data_ptr();
-      copy_size[curr_index] = value_cache_size_per_layer_;
-      curr_index++;
+        srcs[curr_index] = src_k_cache[layer_id].data_ptr();
+        dsts[curr_index] = dst_k_cache[info.dst_block_id].data_ptr();
+        copy_size[curr_index] = key_cache_size_per_layer_;
+        curr_index++;
+
+        srcs[curr_index] = src_v_cache[layer_id].data_ptr();
+        dsts[curr_index] = dst_v_cache[info.dst_block_id].data_ptr();
+        copy_size[curr_index] = value_cache_size_per_layer_;
+        curr_index++;
+      }
+      layer_id++;
+      layer_cnt++;
     }
 
     // TODO(kangmeng): change to async API
@@ -925,7 +938,7 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
                            copy_size,
                            srcs,
                            copy_size,
-                           num_batches,
+                           num_batches * layer_cnt,
                            attrs,
                            attrs_indexes,
                            1,
@@ -935,11 +948,13 @@ bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
       LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
                  << ", fail_index:" << fail_index;
     } else {
+      auto* event = synchronizer->get_event(index);
       ret = aclrtRecordEvent(*event, stream->get_stream()->stream());
       if (ret != 0) {
         LOG(ERROR) << "aclrtRecordEvent error: " << ret;
       }
     }
+    auto* event_flag = synchronizer->get_event_flag(index);
     event_flag->store(true, std::memory_order_release);
     if (ret != 0) break;
   }
@@ -981,6 +996,7 @@ AlignedTensorCreater::AlignedTensorCreater(
     const torch::ScalarType dtype,
     const uint32_t num_tensors,
     std::vector<xllm::KVCache>* tensors) {
+#if defined(USE_NPU)
   CHECK(tensor_shapes.size() == 2)
       << "tensor_shapes.size() must equal to 2, but got "
       << tensor_shapes.size();
@@ -1018,6 +1034,14 @@ AlignedTensorCreater::AlignedTensorCreater(
     LOG(FATAL) << "Failed to lock memory pool!";
   }
 
+  auto ret = aclrtHostRegister(base_ptr_,
+                               total_size_,
+                               aclrtHostRegisterType::ACL_HOST_REGISTER_MAPPED,
+                               &mapped_ptr_);
+  if (ret != 0) {
+    LOG(FATAL) << "aclrtHostRegister fail: " << ret;
+  }
+
   size_t current_offset = 0;
   auto options = torch::TensorOptions().dtype(dtype).device(torch::kCPU);
   tensors->reserve(num_tensors);
@@ -1038,5 +1062,6 @@ AlignedTensorCreater::AlignedTensorCreater(
 
   LOG(INFO) << "Page aligned: "
             << ((uintptr_t)base_ptr_ % page_size == 0 ? "YES" : "NO");
+#endif
 }
 }  // namespace xllm

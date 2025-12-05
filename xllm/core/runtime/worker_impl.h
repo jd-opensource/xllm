@@ -277,6 +277,7 @@ class WorkerImpl {
 class AlignedTensorCreater {
  private:
   void* base_ptr_;
+  void* mapped_ptr_;
   size_t total_size_;
 
  public:
@@ -287,6 +288,9 @@ class AlignedTensorCreater {
 
   ~AlignedTensorCreater() {
     if (base_ptr_ != nullptr) {
+#if defined(USE_NPU)
+      aclrtHostUnregister(base_ptr_);
+#endif
       munlock(base_ptr_, total_size_);
       munmap(base_ptr_, total_size_);
     }

@@ -189,6 +189,15 @@ class Options {
 
   // whether the worker and master are on the same machine.
   PROPERTY(bool, is_local) = false;
+
+  // Prefetch timeout for prefetch from kv cache store
+  PROPERTY(uint32_t, prefetch_timeout) = 0;
+
+  // Prefetch from kvcache store copy batch size
+  PROPERTY(uint32_t, prefetch_bacth_size) = 2;
+
+  // Layer wise H2D copy batchs
+  PROPERTY(uint32_t, layers_wise_copy_batchs) = 4;
 };
 
 }  // namespace xllm
