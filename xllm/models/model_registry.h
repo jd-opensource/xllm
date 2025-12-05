@@ -102,7 +102,7 @@ class ModelRegistry {
   static void register_vlm_embedding_factory(const std::string& name,
                                              EmbeddingVLMFactory factory);
 
-  static void register_vlm_mm_embedding_factory(const std::string& name,
+  static void register_mm_embedding_vlm_factory(const std::string& name,
                                                 MMEmbeddingVLMFactory factory);
 
   static void register_dit_model_factory(const std::string& name,
@@ -235,7 +235,7 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_MM_EMBEDDING_VLM_MODEL_WITH_VARNAME(                    \
     VarName, ModelType, ModelClass)                                      \
   const bool VarName##_registered = []() {                               \
-    ModelRegistry::register_vlm_mm_embedding_factory(                    \
+    ModelRegistry::register_mm_embedding_vlm_factory(                    \
         #ModelType, [](const ModelContext& context) {                    \
           ModelClass model(context);                                     \
           model->eval();                                                 \

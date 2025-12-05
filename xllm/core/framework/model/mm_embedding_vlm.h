@@ -35,6 +35,18 @@ class MMEmbeddingVLM : public CausalVLM {
 
   virtual std::vector<torch::Tensor> encode(
       const ModelInputParams& input_params) = 0;
+};
+
+template <typename Model>
+class MMEmbeddingVLMImpl : public MMEmbeddingVLM {
+ public:
+  MMEmbeddingVLMImpl(Model model, const torch::TensorOptions& options)
+      : model_(std::move(model)), options_(options) {}
+
+  virtual std::vector<torch::Tensor> encode(
+      const ModelInputParams& input_params) override {
+    return model_->encode(input_params);
+  };
 
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& selected_idxes) {
@@ -56,18 +68,6 @@ class MMEmbeddingVLM : public CausalVLM {
   virtual layer::LmHead get_lm_head() { return nullptr; }
   virtual layer::WordEmbedding get_word_embedding() { return nullptr; }
   virtual void set_word_embedding(layer::WordEmbedding& embedding) { return; }
-};
-
-template <typename Model>
-class MMEmbeddingVLMImpl : public MMEmbeddingVLM {
- public:
-  MMEmbeddingVLMImpl(Model model, const torch::TensorOptions& options)
-      : model_(std::move(model)), options_(options) {}
-
-  virtual std::vector<torch::Tensor> encode(
-      const ModelInputParams& input_params) override {
-    return model_->encode(input_params);
-  };
 
   void load_model(std::unique_ptr<ModelLoader> loader) override {
     model_->load_model(std::move(loader));

@@ -115,7 +115,7 @@ void ModelRegistry::register_vlm_embedding_factory(
   }
 }
 
-void ModelRegistry::register_vlm_mm_embedding_factory(
+void ModelRegistry::register_mm_embedding_vlm_factory(
     const std::string& name,
     MMEmbeddingVLMFactory factory) {
   ModelRegistry* instance = get_instance();
