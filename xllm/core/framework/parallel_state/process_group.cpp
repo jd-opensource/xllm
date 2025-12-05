@@ -109,6 +109,35 @@ void ProcessGroup::reduce_scatter(const torch::Tensor& input,
       ->wait();
 }
 
+void ProcessGroup::all_to_all_single(
+    torch::Tensor output,
+    torch::Tensor input,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    bool async_op,
+    c10::intrusive_ptr<c10d::Work>* async_work) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  CHECK(output.defined())
+      << "Output of all_to_all_single function is not defined";
+  CHECK(input.defined())
+      << "Input of all_to_all_single function is not defined";
+  if (input.is_complex()) {
+    input = torch::view_as_real(input);
+  }
+  if (output.is_complex()) {
+    output = torch::view_as_real(output);
+  }
+
+  auto opts = c10d::AllToAllOptions();
+  auto work = pg_->alltoall_base(
+      output, input, output_split_sizes, input_split_sizes, opts);
+  if (async_op) {
+    *async_work = work;
+  } else {
+    work->wait();
+  }
+}
+
 std::unique_ptr<ProcessGroup> create_process_group(
     int32_t rank,
     int32_t world_size,
@@ -122,4 +151,31 @@ std::unique_ptr<ProcessGroup> create_process_group(
       rank, world_size, rank_size, port, trans, host, group_name, device);
 }
 
+#if defined(USE_NPU)
+// TODO: This function is used by DiT models, since the DiT communication group
+// info have already been caculated by rank_generator, we only need to pass the
+// info to create the process groups. For any device that want to reuse the
+// function and dit process groups, please implement the corresponding
+// ProcessGroupImpl construct function.
+std::unique_ptr<ProcessGroup> create_process_group(
+    int32_t global_rank,
+    int32_t local_rank,
+    const std::vector<int32_t>& group_ranks,
+    int32_t world_size,
+    int32_t rank_size,
+    int32_t port,
+    const std::string& host,
+    const std::string& group_name,
+    const torch::Device& device) {
+  return std::make_unique<ProcessGroupImpl>(global_rank,
+                                            local_rank,
+                                            group_ranks,
+                                            world_size,
+                                            rank_size,
+                                            port,
+                                            host,
+                                            group_name,
+                                            device);
+}
+#endif
 }  // namespace xllm

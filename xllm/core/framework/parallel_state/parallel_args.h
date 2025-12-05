@@ -84,6 +84,21 @@ struct ParallelArgs {
         dp_local_process_group_(dp_local_process_group),
         dp_size_(dp_size) {}
 
+  ParallelArgs(int32_t rank,
+               int32_t world_size,
+               int32_t dit_dp_size,
+               int32_t dit_tp_size,
+               int32_t dit_sp_size,
+               int32_t dit_cfg_size,
+               ProcessGroup* process_group)
+      : rank_(rank),
+        world_size_(world_size),
+        dit_dp_size_(dit_dp_size),
+        dit_tp_size_(dit_tp_size),
+        dit_sp_size_(dit_sp_size),
+        dit_cfg_size_(dit_cfg_size),
+        process_group_(process_group) {}
+
   // rank of current process
   PROPERTY(int32_t, rank) = 0;
 
@@ -95,6 +110,18 @@ struct ParallelArgs {
 
   // ep size
   PROPERTY(int32_t, ep_size) = 1;
+
+  // dit dp size
+  PROPERTY(int32_t, dit_dp_size) = 1;
+
+  // dit tp size
+  PROPERTY(int32_t, dit_tp_size) = 1;
+
+  // dit sp size
+  PROPERTY(int32_t, dit_sp_size) = 1;
+
+  // dit cfg size
+  PROPERTY(int32_t, dit_cfg_size) = 1;
 
   // atb hccl mapping json data
   PROPERTY(nlohmann::json, mapping_data);
@@ -122,6 +149,12 @@ struct ParallelArgs {
   ProcessGroup* sp_group_ = nullptr;
   ProcessGroup* moe_ep_group_ = nullptr;
   ProcessGroup* moe_tp_group_ = nullptr;
+
+  // ProcessGroups for DiT models
+  ProcessGroup* dit_tp_group_ = nullptr;
+  ProcessGroup* dit_sp_group_ = nullptr;
+  ProcessGroup* dit_cfg_group_ = nullptr;
+  ProcessGroup* dit_dp_group_ = nullptr;
 };
 
 }  // namespace xllm
