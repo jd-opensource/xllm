@@ -48,7 +48,7 @@ void Batch::add(Sequence* sequence, uint32_t allowed_max_token) {
   allowed_max_tokens_.push_back(allowed_max_token);
 
   const auto& input_embedding = sequence->get_input_embedding();
-  if (input_embedding.defined())
+  if (sequence->stage() == SequenceStage::PREFILL && input_embedding.defined())
     input_embeddings_vec_.emplace_back(input_embedding);
 
   const auto& mm_data = sequence->get_mm_data();
