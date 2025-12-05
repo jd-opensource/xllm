@@ -61,6 +61,7 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
   std::vector<torch::Tensor> negative_pooled_prompt_embeds;
 
   std::vector<torch::Tensor> images;
+  std::vector<torch::Tensor> condition_images;
   std::vector<torch::Tensor> mask_images;
   std::vector<torch::Tensor> control_images;
   std::vector<torch::Tensor> latents;
@@ -106,6 +107,7 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
 
     images.emplace_back(input_params.image);
     mask_images.emplace_back(input_params.mask_image);
+    condition_images.emplace_back(input_params.condition_image);
     control_images.emplace_back(input_params.control_image);
   }
 
@@ -127,6 +129,10 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
 
   if (check_tensors_valid(images)) {
     input.images = torch::stack(images);
+  }
+
+  if (check_tensors_valid(condition_images)) {
+    input.condition_images = torch::stack(condition_images);
   }
 
   if (check_tensors_valid(mask_images)) {

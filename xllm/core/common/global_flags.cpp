@@ -603,7 +603,7 @@ DEFINE_int32(random_seed, -1, "Random seed for random number generator.");
 DEFINE_string(dit_cache_policy,
               "TaylorSeer",
               "The policy of dit cache(e.g. None, FBCache, TaylorSeer, "
-              "FBCacheTaylorSeer).");
+              "FBCacheTaylorSeer, ResidualCache).");
 
 DEFINE_int64(dit_cache_warmup_steps, 0, "The number of warmup steps.");
 
@@ -624,6 +624,48 @@ DEFINE_bool(enable_constrained_decoding,
             "Whether to enable constrained decoding, which is used to ensure "
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
+
+DEFINE_int64(dit_cache_start_steps,
+             5,
+             "The number of steps to skip at the start");
+
+DEFINE_int64(dit_cache_end_steps, 5, "The number of steps to skip at the end.");
+
+DEFINE_int64(dit_cache_start_blocks,
+             5,
+             "The number of blocks to skip at the start.");
+
+DEFINE_int64(dit_cache_end_blocks,
+             5,
+             "The number of blocks to skip at the end.");
+
+// --- dit parallel config ---
+
+DEFINE_int64(dit_dp_size, 1, "Data parallelism size for DiT models.");
+
+DEFINE_int64(dit_tp_size, 1, "Tensor parallelism size for DiT models");
+
+DEFINE_int64(dit_sp_size, 1, "Sequence parallelism size for DiT models");
+
+DEFINE_int64(dit_cfg_size,
+             1,
+             "Classifier-free guidiance parallelism size for DiT models");
+
+DEFINE_int64(dit_sp_communication_overlap,
+             1,
+             "Communication & Computation overlap for sequence parallel");
+
+// --- dit debug ---
+
+DEFINE_bool(dit_debug_print,
+            false,
+            "whether print the debug info for dit models");
+
+// --- embedding type ---
+
+DEFINE_bool(enable_return_mm_full_embeddings,
+            false,
+            "return vit and sequence embeddings for vlm models");
 
 DEFINE_bool(
     use_audio_in_video,

@@ -373,6 +373,12 @@ TokenizerArgsLoader ModelRegistry::get_tokenizer_args_loader(
   return instance->model_registry_[name].tokenizer_args_loader;
 }
 
+bool ModelRegistry::has_dit_model_factory(const std::string& name) {
+  ModelRegistry* instance = get_instance();
+  return (instance->model_registry_.find(name) !=
+          instance->model_registry_.end());
+}
+
 std::string ModelRegistry::get_model_backend(const std::string& name) {
   ModelRegistry* instance = get_instance();
   return instance->model_backend_[name];
