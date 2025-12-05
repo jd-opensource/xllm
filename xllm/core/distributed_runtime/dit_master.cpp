@@ -37,20 +37,10 @@ limitations under the License.
 #include "util/timer.h"
 
 namespace xllm {
+volatile bool DiTAssistantMaster::running_ = false;
+
 DiTMaster::DiTMaster(const Options& options)
     : Master(options, EngineType::DIT) {
-  // construct engine
-  const auto devices =
-      DeviceNameUtils::parse_devices(options_.devices().value_or("auto"));
-  LOG(INFO) << "Creating engine with devices: "
-            << DeviceNameUtils::to_string(devices);
-
-  runtime::Options eng_options;
-  eng_options.model_path(options.model_path())
-      .model_id(options.model_id())
-      .devices(devices);
-
-  engine_ = std::make_unique<DiTEngine>(eng_options);
   CHECK(engine_->init());
 
   DiTScheduler::Options scheduler_options;
@@ -155,6 +145,38 @@ void DiTMaster::generate() {
   running_.store(true, std::memory_order_relaxed);
   scheduler_->generate();
   running_.store(false, std::memory_order_relaxed);
+}
+
+DiTAssistantMaster::DiTAssistantMaster(const Options& options)
+    : Master(options, EngineType::DIT) {
+  // setup process workers
+  auto master_node_addr = options_.master_node_addr().value_or("");
+  // TODO: support local unix domain socket later.
+  if (master_node_addr.empty()) {
+    LOG(FATAL)
+        << "MultiNodeEngine required master_node_addr, current value is empty.";
+    return;
+  }
+
+  running_ = true;
+}
+
+DiTAssistantMaster::~DiTAssistantMaster() {
+  // wait for the loop thread to finish
+  if (loop_thread_.joinable()) {
+    loop_thread_.join();
+  }
+}
+
+void DiTAssistantMaster::run() {
+  signal(SIGINT, DiTAssistantMaster::handle_signal);
+  signal(SIGTERM, DiTAssistantMaster::handle_signal);
+
+  loop_thread_ = std::thread([this]() {
+    while (running_) {
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+  });
 }
 
 }  // namespace xllm

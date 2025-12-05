@@ -98,6 +98,8 @@ struct DiTInputParams {
 
   torch::Tensor image;
 
+  torch::Tensor condition_image;
+
   torch::Tensor control_image;
 
   torch::Tensor mask_image;

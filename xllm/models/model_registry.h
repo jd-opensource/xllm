@@ -146,6 +146,8 @@ class ModelRegistry {
   static ImageProcessorFactory get_image_processor_factory(
       const std::string& name);
 
+  static bool has_dit_model_factory(const std::string& name);
+
   static std::string get_model_backend(const std::string& name);
 
  private:

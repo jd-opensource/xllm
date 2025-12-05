@@ -40,7 +40,8 @@ namespace xllm {
 CollectiveCommunicator::CollectiveCommunicator(int global_rank,
                                                int world_size,
                                                int dp_size,
-                                               int ep_size) {
+                                               int ep_size)
+    : CollectiveCommunicatorBase(global_rank, world_size) {
 #if defined(USE_NPU)
   // create hccl process group with hccl_root_info
   // std::vector<HcclRootInfo> unique_ids;

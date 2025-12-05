@@ -26,13 +26,14 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "common/types.h"
+#include "distributed_runtime/dit_engine.h"
+#include "distributed_runtime/engine.h"
 #include "framework/batch/dit_batch.h"
 #include "framework/request/dit_request.h"
 #include "scheduler.h"
 #include "util/threadpool.h"
 
 namespace xllm {
-class DiTEngine;
 
 class DiTAsyncResponseProcessor final {
  public:
@@ -65,7 +66,7 @@ class DiTScheduler : public SchedulerBase {
 
 class DiTDynamicBatchScheduler : public DiTScheduler {
  public:
-  DiTDynamicBatchScheduler(DiTEngine* engine, const Options& options);
+  DiTDynamicBatchScheduler(Engine* engine, const Options& options);
   virtual ~DiTDynamicBatchScheduler();
 
   bool add_request(std::shared_ptr<DiTRequest>& request) override;
