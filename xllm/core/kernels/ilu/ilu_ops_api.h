@@ -105,11 +105,14 @@ void batch_decode(torch::Tensor& query,
                   bool is_causal,
                   int64_t kv_cache_quant_bit_size);
 
-void layer_norm(at::Tensor& input,
-                at::Tensor& weight,
-                c10::optional<at::Tensor>& bias_tensor,
-                at::Tensor& output,
-                double eps);
+void residual_layer_norm(torch::Tensor& input,
+                         torch::Tensor& output,
+                         std::optional<torch::Tensor>& residual,
+                         torch::Tensor& weight,
+                         std::optional<torch::Tensor>& beta,
+                         std::optional<torch::Tensor>& bias,
+                         std::optional<torch::Tensor>& residual_out,
+                         double eps);
 
 torch::Tensor matmul(torch::Tensor a,
                      torch::Tensor b,

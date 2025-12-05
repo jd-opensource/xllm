@@ -255,8 +255,14 @@ void fused_layernorm(FusedLayerNormParams& params) {
 #elif defined(USE_CUDA)
   cuda::rmsnorm(params.output, params.input, params.weight, params.eps);
 #elif defined(USE_ILU)
-  ilu::layer_norm(
-      params.input, params.weight, params.bias, params.output, params.eps);
+  ilu::residual_layer_norm(params.input,
+                           params.output,
+                           params.residual,
+                           params.weight,
+                           params.beta,  // weight_bias
+                           params.bias,  // residual_bias
+                           params.residual_out,
+                           params.eps);
 #else
   LOG(FATAL) << "fused_layernorm not implemented";
 #endif

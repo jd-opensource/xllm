@@ -65,4 +65,15 @@ void vllm_rotary_embedding(at::Tensor& positions,
                            int64_t head_size,
                            at::Tensor& cos_sin_cache,
                            bool is_neox);
+
+void residual_layer_norm(at::Tensor& input,
+                         at::Tensor& residual,
+                         at::Tensor& weight,
+                         at::Tensor& bias,
+                         c10::optional<at::Tensor>& fused_bias,
+                         c10::optional<at::Tensor>& output,
+                         c10::optional<at::Tensor>& residual_output,
+                         double alpha,
+                         double eps,
+                         bool is_post);
 }  // namespace ixformer::infer

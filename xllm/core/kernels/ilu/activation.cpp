@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #include "ilu_ops_api.h"
-#include "ixformer.h"
 
 using namespace ixformer;
 
