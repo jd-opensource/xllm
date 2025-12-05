@@ -216,8 +216,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   const size_t block_size = options_.block_size();
   const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
   if (num_blocks_needed <= num_blocks) {
-    process_beam_search(sequence, /*need_swap*/ true);
-    return true;
+    return process_beam_search(sequence, /*need_swap*/ true);
   }
   process_beam_search(sequence);
 
@@ -263,14 +262,14 @@ std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
   return block_managers_[dp_rank]->allocate(num_blocks_needed);
 }
 
-void BlockManagerPool::process_beam_search(Sequence* sequence, bool need_swap) {
+bool BlockManagerPool::process_beam_search(Sequence* sequence, bool need_swap) {
   if (!sequence->check_beam_search()) {
-    return;
+    return true;
   }
 
   auto src_blocks = sequence->kv_state().src_blocks();
   if (src_blocks.size() == 0) {
-    return;
+    return true;
   }
 
   // when sequence need to swap the last block and no new block appended,
@@ -278,12 +277,16 @@ void BlockManagerPool::process_beam_search(Sequence* sequence, bool need_swap) {
   if (need_swap && sequence->kv_state().need_swap()) {
     int32_t dp_rank = get_dp_rank(sequence);
     auto new_blocks = block_managers_[dp_rank]->allocate(1);
+    if (new_blocks.size() == 0) {
+      return false;
+    }
     swap_block_transfer_infos_[dp_rank].emplace_back(src_blocks.back().id(),
                                                      new_blocks[0].id());
-    sequence->kv_state().process_beam_search(new_blocks);
+    sequence->kv_state().process_beam_search(new_blocks[0]);
   } else {
-    sequence->kv_state().process_beam_search({});
+    sequence->kv_state().process_beam_search(std::nullopt);
   }
+  return true;
 }
 
 uint32_t BlockManagerPool::pre_allocate(Sequence* sequence) {

@@ -143,14 +143,13 @@ void KVCacheState::reset() {
   transfer_kv_info_.reset();
 }
 
-void KVCacheState::process_beam_search(const std::vector<Block>& new_blocks) {
+void KVCacheState::process_beam_search(std::optional<Block> new_block) {
   blocks_.clear();
   blocks_ = std::move(src_blocks_);
 
-  if (!new_blocks.empty()) {
-    CHECK_EQ(new_blocks.size(), 1);
+  if (new_block.has_value()) {
     blocks_.pop_back();
-    blocks_.insert(blocks_.end(), new_blocks.begin(), new_blocks.end());
+    blocks_.emplace_back(new_block.value());
   }
 }
 
