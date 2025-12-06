@@ -42,7 +42,6 @@ REGISTER_MODEL_ARGS(deepseek_v3, [&] {
   LOAD_ARG_OR(max_window_layers, "max_window_layers", 61);
 
   LOAD_ARG_OR(first_k_dense_replace, "first_k_dense_replace", 3);
-  LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(moe_layer_freq, "moe_layer_freq", 1);
   LOAD_ARG_OR(topk_method, "topk_method", "noaux_tc");
   LOAD_ARG_OR(n_routed_experts, "n_routed_experts", 256);
@@ -53,7 +52,6 @@ REGISTER_MODEL_ARGS(deepseek_v3, [&] {
   LOAD_ARG_OR(norm_topk_prob, "norm_topk_prob", true);
   LOAD_ARG_OR(n_group, "n_group", 8);
   LOAD_ARG_OR(topk_group, "topk_group", 4);
-  LOAD_ARG_OR(scoring_func, "scoring_func", "sigmoid");
   LOAD_ARG_OR(qk_nope_head_dim, "qk_nope_head_dim", 128);
   LOAD_ARG_OR(qk_rope_head_dim, "qk_rope_head_dim", 64);
   LOAD_ARG_OR(v_head_dim, "v_head_dim", 128);

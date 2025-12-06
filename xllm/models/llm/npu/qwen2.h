@@ -49,6 +49,12 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
     norm_ = register_module("norm", layer::RmsNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
+    atb_pos_emb_ = layer::PosEmbedding(context);
+    cos_sin_ = get_concat_rotary_embedding(
+        model_args.hidden_size() / model_args.n_heads(),
+        model_args.max_position_embeddings(),
+        model_args.rope_theta(),
+        options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
