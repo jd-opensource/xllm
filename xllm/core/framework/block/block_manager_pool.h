@@ -91,7 +91,7 @@ class BlockManagerPool final : public KVCacheManager {
   void allocate_host_shared(Sequence* sequence);
   void save_offload_blocks(Sequence* sequence);
 
-  void process_beam_search(Sequence* sequence, bool need_swap = false);
+  bool process_beam_search(Sequence* sequence, bool need_swap = false);
 
  private:
   std::vector<std::unique_ptr<BlockManager>> block_managers_;

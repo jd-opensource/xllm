@@ -62,7 +62,7 @@ class KVCacheState {
 
   void reset();
 
-  void process_beam_search(const std::vector<Block>& new_blocks);
+  void process_beam_search(std::optional<Block> new_block = std::nullopt);
 
  private:
   // number of tokens in kv cache
