@@ -161,6 +161,17 @@ struct ModelInputParams {
     LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
               << dp_global_token_nums;
   }
+
+  int32_t get_q_seq_len(int32_t seq_idx) const {
+#if defined(USE_NPU)
+    CHECK(seq_idx < q_seq_lens_vec.size()) << "seq_idx out of range";
+    return q_seq_lens_vec[seq_idx];
+#else
+    CHECK(seq_idx < q_seq_lens_vec.size() - 1) << "seq_idx out of range";
+    return q_seq_lens_vec[seq_idx + 1] - q_seq_lens_vec[seq_idx];
+#endif
+  }
+
   // whether the kv-cache is empty for all sequences.
   bool empty_kv_cache = true;
   BatchForwardType batch_forward_type;
