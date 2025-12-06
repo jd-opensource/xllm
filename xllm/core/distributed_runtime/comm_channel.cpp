@@ -211,10 +211,12 @@ bool CommChannel::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
-bool CommChannel::init_model(const std::string& model_weights_path) {
-  proto::ModelPath request;
+bool CommChannel::init_model(const std::string& model_weights_path,
+                             int32_t random_seed) {
+  proto::InitModelRequest request;
 
   request.set_model_weights_path(model_weights_path);
+  request.set_random_seed(random_seed);
   proto::Status response;
   brpc::Controller cntl;
   stub_->InitModel(&cntl, &request, &response, nullptr);
@@ -226,10 +228,12 @@ bool CommChannel::init_model(const std::string& model_weights_path) {
 }
 
 bool CommChannel::init_model_async(const std::string& model_weights_path,
+                                   int32_t random_seed,
                                    folly::Promise<bool>& promise) {
-  proto::ModelPath request;
+  proto::InitModelRequest request;
 
   request.set_model_weights_path(model_weights_path);
+  request.set_random_seed(random_seed);
   auto done = new InitModelClosure();
   done->promise = std::move(promise);
   stub_->InitModel(&done->cntl, &request, &done->response, done);

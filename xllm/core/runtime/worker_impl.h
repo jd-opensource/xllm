@@ -65,7 +65,8 @@ class WorkerImpl {
   // initialize model, cache manager. blocking call
   virtual bool init_model(ModelContext& context) = 0;
 
-  virtual bool init_model(const std::string& model_weights_path);
+  virtual bool init_model(const std::string& model_weights_path,
+                          int32_t random_seed);
 
   virtual void load_model(std::unique_ptr<ModelLoader> loader);
 
@@ -123,7 +124,8 @@ class WorkerImpl {
 
   // initialize model, cache manager. async call
   virtual folly::SemiFuture<bool> init_model_async(
-      const std::string& model_weights_path);
+      const std::string& model_weights_path,
+      int32_t random_seed);
 
   virtual folly::SemiFuture<std::tuple<int64_t, int64_t>>
   estimate_kv_cache_capacity_async();

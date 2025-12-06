@@ -33,6 +33,8 @@ class Device {
 
   void set_device() const;
 
+  void set_seed(uint64_t seed = 42) const;
+
   const torch::Device& unwrap() const;
   int32_t index() const;
 

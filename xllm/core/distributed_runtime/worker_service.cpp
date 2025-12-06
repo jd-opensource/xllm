@@ -220,13 +220,15 @@ void WorkerService::Hello(::google::protobuf::RpcController* controller,
 }
 
 void WorkerService::InitModel(::google::protobuf::RpcController* controller,
-                              const proto::ModelPath* request,
+                              const proto::InitModelRequest* request,
                               proto::Status* response,
                               ::google::protobuf::Closure* done) {
   threadpool_->schedule([this, controller, request, response, done]() mutable {
     brpc::ClosureGuard done_guard(done);
     auto model_weights_path = request->model_weights_path();
-    auto init_future = worker_->init_model_async(model_weights_path);
+    auto random_seed = request->random_seed();
+    auto init_future =
+        worker_->init_model_async(model_weights_path, random_seed);
     bool status = std::move(init_future).get();
     if (!status) {
       response->set_ok(false);

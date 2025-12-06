@@ -58,8 +58,9 @@ Worker::Worker(const ParallelArgs& parallel_args,
 
 Worker::~Worker() { delete impl_; }
 
-bool Worker::init_model(const std::string& model_weights_path) {
-  return impl_->init_model(model_weights_path);
+bool Worker::init_model(const std::string& model_weights_path,
+                        int32_t random_seed) {
+  return impl_->init_model(model_weights_path, random_seed);
 }
 
 bool Worker::allocate_kv_cache(
@@ -127,8 +128,9 @@ folly::SemiFuture<folly::Unit> Worker::process_group_test_async() {
 
 // initialize model, cache manager. async call
 folly::SemiFuture<bool> Worker::init_model_async(
-    const std::string& model_weights_path) {
-  return impl_->init_model_async(model_weights_path);
+    const std::string& model_weights_path,
+    int32_t random_seed) {
+  return impl_->init_model_async(model_weights_path, random_seed);
 }
 
 folly::SemiFuture<bool> Worker::allocate_kv_cache_async(

@@ -207,6 +207,10 @@ int run() {
     auto master = std::make_unique<LLMAssistantMaster>(options);
     master->run();
     return 0;
+  } else {
+    if (FLAGS_random_seed < 0) {
+      FLAGS_random_seed = std::random_device{}() % (1 << 30);
+    }
   }
 
   // master node
