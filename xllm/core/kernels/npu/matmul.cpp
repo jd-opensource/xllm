@@ -13,18 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-#include "impl/npu_linear_impl.h"
+#include "npu_ops_api.h"
+#include "ops_npu/npu_ops.h"
 
-namespace xllm::kernel {
+namespace xllm::kernel::npu {
 
-class Linear : public torch::nn::ModuleHolder<NpuLinearImpl> {
- public:
-  using torch::nn::ModuleHolder<NpuLinearImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuLinearImpl;
+torch::Tensor matmul(const torch::Tensor& a,
+                     const torch::Tensor& b,
+                     const std::optional<torch::Tensor>& bias) {
+  if (!bias.has_value()) {
+    return torch::nn::functional::linear(a, b);
+  } else {
+    return torch::nn::functional::linear(a, b, bias.value());
+  }
+}
 
-  Linear(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuLinearImpl>(context)) {}
-};
-
-}  // namespace xllm::kernel
+}  // namespace xllm::kernel::npu

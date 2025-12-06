@@ -35,7 +35,11 @@ FusedRMSNormImpl::FusedRMSNormImpl(int64_t dim,
 }
 
 torch::Tensor FusedRMSNormImpl::forward(torch::Tensor& input) {
+#if defined(USE_NPU)
+  torch::Tensor output;
+#else
   auto output = torch::empty_like(input);
+#endif
   return forward_output(input, output);
 }
 

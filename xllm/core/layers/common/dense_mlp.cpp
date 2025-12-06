@@ -90,17 +90,15 @@ torch::Tensor DenseMLPImpl::forward(const torch::Tensor& hidden_states) {
     // For w8a8 quantization, the active operation is fused with the down_proj
     return down_proj_->forward(gate_up);
   } else {
-    int64_t batch_size = gate_up.sizes()[0];
-    auto output = torch::empty(
-        {batch_size,
-         intermediate_size_ / parallel_args_.tp_group_->world_size()},
-        gate_up.options());
+    torch::Tensor output;
 
     xllm::kernel::ActivationParams activation_params;
     activation_params.input = gate_up;
     activation_params.output = output;
     activation_params.act_mode = hidden_act_;
     activation_params.is_gated = is_gated_;
+    activation_params.intermediate_size = intermediate_size_;
+    activation_params.world_size = parallel_args_.tp_group_->world_size();
     xllm::kernel::active(activation_params);
 
     return down_proj_->forward(output);

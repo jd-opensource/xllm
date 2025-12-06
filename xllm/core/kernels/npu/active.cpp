@@ -13,18 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-#include "impl/npu_rope_impl.h"
+#include <torch_npu/csrc/aten/CustomFunctions.h>
 
-namespace xllm::kernel {
+#include "npu_ops_api.h"
+#include "ops_npu/npu_ops.h"
 
-class Rope : public torch::nn::ModuleHolder<NpuRopeImpl> {
- public:
-  using torch::nn::ModuleHolder<NpuRopeImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuRopeImpl;
+namespace xllm::kernel::npu {
 
-  Rope(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuRopeImpl>(context)) {}
-};
-
-}  // namespace xllm::kernel
+torch::Tensor active(const torch::Tensor& input, const std::string& act_mode) {
+  if (act_mode != "silu" && act_mode != "swiglu") {
+    throw std::runtime_error(
+        "Only swiglu activation is supported in NPU active");
+  }
+  return at_npu::native::custom_ops::npu_swiglu(input);
+}
+}  // namespace xllm::kernel::npu
