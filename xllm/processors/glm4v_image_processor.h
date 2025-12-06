@@ -23,10 +23,10 @@ limitations under the License.
 
 namespace xllm {
 
-class Qwen2VLImageProcessor : public ImageProcessor {
+class Glm4VImageProcessor : public ImageProcessor {
  public:
-  Qwen2VLImageProcessor(const ModelArgs&);
-  ~Qwen2VLImageProcessor() override = default;
+  Glm4VImageProcessor(const ModelArgs&);
+  ~Glm4VImageProcessor() override = default;
 
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
 
@@ -35,7 +35,6 @@ class Qwen2VLImageProcessor : public ImageProcessor {
   bool process_image(torch::Tensor image,
                      std::vector<torch::Tensor>& pixel_values,
                      std::vector<int64_t>& grids);
-
   bool process_videos(std::vector<torch::Tensor> videos,
                       std::vector<VideoMetadata> video_meta_list,
                       MMData& mm_datas);
@@ -44,11 +43,7 @@ class Qwen2VLImageProcessor : public ImageProcessor {
                      std::vector<torch::Tensor>& pixel_values,
                      std::vector<int64_t>& grids);
   torch::Tensor sample_frames(const VideoMetadata& metadata,
-                              int temporal_patch_size,
-                              int min_frames,
-                              int max_frames,
-                              int num_frames = -1,
-                              double set_fps = -1.0);
+                              int temporal_patch_size);
 
  private:
   bool do_convert_rgb_ = true;

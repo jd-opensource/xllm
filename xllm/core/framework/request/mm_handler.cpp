@@ -83,9 +83,36 @@ bool ImageHandler::decode(MMInputItem& input) {
   return decoder.decode(input.raw_data_, input.decode_data_);
 }
 
+bool VideoHandler::load(const MMContent& content, MMInputItem& input) {
+  input.clear();
+
+  const auto& video_url = content.video_url;
+  const auto& url = video_url.url;
+
+  if (url.compare(0, dataurl_prefix_.size(), dataurl_prefix_) ==
+      0) {  // data url
+
+    input.type_ = MMType::VIDEO;
+    return this->load_from_dataurl(url, input.raw_data_);
+  } else if (url.compare(0, httpurl_prefix_.size(), httpurl_prefix_) ==
+             0) {  // http url
+
+    input.type_ = MMType::VIDEO;
+    return this->load_from_http(url, input.raw_data_);
+  } else {
+    LOG(ERROR) << " video url is invalid, url is " << url;
+    return false;
+  }
+}
+
+bool VideoHandler::decode(MMInputItem& input) {
+  OpenCVVideoDecoder decoder;
+  return decoder.decode(input.raw_data_, input.decode_data_, input.video_meta_);
+}
+
 MMHandlerSet::MMHandlerSet() {
   handlers_["image_url"] = std::make_unique<ImageHandler>();
-  // handlers_["video_url"] = std::make_unique<VideoHandler>();
+  handlers_["video_url"] = std::make_unique<VideoHandler>();
   // handlers_["audio_url"] = std::make_unique<AudioHandler>();
 }
 

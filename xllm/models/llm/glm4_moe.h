@@ -117,6 +117,14 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     }
   }
 
+  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
+#if defined(USE_NPU)
+    return embed_tokens_(input_ids, 0);
+#else
+    return embed_tokens_(input_ids);
+#endif
+  }
+
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   torch::Tensor forward(torch::Tensor tokens,
@@ -260,6 +268,10 @@ class Glm4MoeForCausalLMImpl : public torch::nn::Module {
     lm_head_ = register_module("lm_head", layer::LmHead(context));
   }
 
+  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
+    return model_->get_input_embeddings(input_ids);
+  }
+
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
@@ -280,14 +292,15 @@ class Glm4MoeForCausalLMImpl : public torch::nn::Module {
     return lm_head_(hidden_states, seleted_idxes, 0);
   }
 
-  void load_model(std::unique_ptr<ModelLoader> loader) {
+  void load_model(std::unique_ptr<ModelLoader> loader,
+                  std::string prefix = "model." /*llm model weight prefix*/) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(state_dict->get_dict_with_prefix("model."));
+      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
       lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
     }
 
     // verify
-    model_->verify_loaded_weights("model.");
+    model_->verify_loaded_weights(prefix);
     lm_head_->verify_loaded_weights("lm_head.");
 
     model_->merge_loaded_weights();

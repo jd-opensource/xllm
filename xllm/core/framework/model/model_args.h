@@ -136,6 +136,12 @@ struct ModelArgs {
   PROPERTY(int32_t, image_token_id) = 0;
   PROPERTY(int32_t, video_token_id) = 0;
 
+  // glm4v moe
+  PROPERTY(int32_t, image_start_token_id) = 0;
+  PROPERTY(int32_t, image_end_token_id) = 0;
+  PROPERTY(int32_t, video_start_token_id) = 0;
+  PROPERTY(int32_t, video_end_token_id) = 0;
+
   PROPERTY(std::string, vision_custom_adapter);
   PROPERTY(int32_t, vision_max_slice_nums) = 0;
 
@@ -296,6 +302,10 @@ struct ModelArgs {
 
   PROPERTY(int64_t, mm_image_shortest_edge) = 0;
   PROPERTY(int64_t, mm_image_longest_edge) = 0;
+
+  // GLM
+  PROPERTY(int64_t, mm_video_shortest_edge) = 0;
+  PROPERTY(int64_t, mm_video_longest_edge) = 0;
 
   PROPERTY(int, mm_image_patch_size) = 0;
   PROPERTY(int, mm_image_temporal_patch_size) = 0;

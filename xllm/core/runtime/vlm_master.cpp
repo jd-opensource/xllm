@@ -220,7 +220,11 @@ void VLMMaster::handle_request(const std::vector<Message>& messages,
                         "Image processor process failed.");
     return;
   }
-
+  if (const auto& res = mm_data.get<torch::Tensor>("image_grid_thw"))
+  {
+    auto image_grid_thw = res.value();
+  LOG(INFO)<<"image_grid_thw:"<<image_grid_thw;
+  }
   this->handle_request(messages, mm_data, sp, callback);
 }
 
@@ -307,7 +311,6 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
   }
   Timer timer;
   input_processor_->process(prompt, mm_data);
-
   std::vector<int> prompt_tokens;
   if (!tokenizer_->encode(prompt, &prompt_tokens)) {
     LOG(ERROR) << "Failed to encode prompt: " << prompt;

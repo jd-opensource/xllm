@@ -722,6 +722,15 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       auto is_multimodal = torch::isin(input_ids, model_args_.image_token_id());
       inputs_embeds.index_put_({is_multimodal}, image_embeds);
     }
+    if (video_input) {
+      // visual
+      auto video_embeds = visual_(video_input->pixel_values_videos.to(options_),
+                                  video_input->video_grid_thw,
+                                  input_params);
+      // merge
+      auto is_multimodal = torch::isin(input_ids, model_args_.video_token_id());
+      inputs_embeds.index_put_({is_multimodal}, video_embeds);
+    }
     return inputs_embeds;
   }
 
@@ -740,11 +749,29 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (const auto& res = mm_data.get<torch::Tensor>("image_grid_thw"))
       image_grid_thw = res.value();
 
+    torch::Tensor pixel_values_videos;
+    if (const auto& res = mm_data.get<torch::Tensor>("pixel_values_videos"))
+      pixel_values_videos = res.value();
+
+    torch::Tensor video_grid_thw;
+    if (const auto& res = mm_data.get<torch::Tensor>("video_grid_thw"))
+      video_grid_thw = res.value();
+
+    torch::Tensor second_per_grid_ts;
+    if (const auto& res = mm_data.get<torch::Tensor>("second_per_grid_ts"))
+      second_per_grid_ts = res.value();
+
     std::optional<Qwen2_5_VLImageInputs> image_inputs;
     std::optional<Qwen2_5_VLVideoInputs> video_inputs;
 
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Qwen2_5_VLImageInputs{pixel_values, image_grid_thw};
+
+    if (pixel_values_videos.defined() && video_grid_thw.defined() &&
+        second_per_grid_ts.defined())
+      video_inputs = Qwen2_5_VLVideoInputs{
+          pixel_values_videos, video_grid_thw, second_per_grid_ts};
+
     auto inputs_embeds =
         get_input_embeddings(tokens, image_inputs, video_inputs, input_params);
     input_params.input_embedding = inputs_embeds;
