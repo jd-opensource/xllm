@@ -372,14 +372,14 @@ void CommChannel::transfer_kv_blocks(
 
 class ClientStreamReceiver : public brpc::StreamInputHandler {
  private:
-  std::atomic<bool>* termination_flag_;
+  std::shared_ptr<std::atomic<bool>> termination_flag_;
   std::shared_ptr<std::atomic<uint32_t>> success_cnt_;
   std::promise<void> close_promise_;
   std::atomic<bool> promise_set_{false};
 
  public:
-  ClientStreamReceiver(std::atomic<bool>* termination_flag,
-                       std::shared_ptr<std::atomic<uint32_t>>& success_cnt)
+  ClientStreamReceiver(std::shared_ptr<std::atomic<bool>> termination_flag,
+                       std::shared_ptr<std::atomic<uint32_t>> success_cnt)
       : termination_flag_(termination_flag), success_cnt_(success_cnt) {}
 
   ~ClientStreamReceiver() {
@@ -427,8 +427,8 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
 
 void CommChannel::prefetch_from_storage(
     const std::vector<BlockTransferInfo>& block_transfer_info,
-    std::atomic<bool>* flag,
-    std::shared_ptr<std::atomic<uint32_t>>& success_cnt) {
+    std::shared_ptr<std::atomic<bool>> flag,
+    std::shared_ptr<std::atomic<uint32_t>> success_cnt) {
   proto::BlockTransferInfos pb_block_transfer_info;
   if (!block_transfer_info_to_proto(block_transfer_info,
                                     &pb_block_transfer_info)) {

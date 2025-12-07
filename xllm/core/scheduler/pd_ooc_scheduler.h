@@ -133,7 +133,7 @@ class PDOOCScheduler : public DisaggPDScheduler {
   std::atomic<bool> decode_send_pull_signal_pending_ = true;
   std::atomic<bool> waiting_pull_finished_ = false;
 
-  xllm_moodycamel::BlockingConcurrentQueue<proto::PullSignal> pull_signals_;
+  moodycamel::BlockingConcurrentQueue<proto::PullSignal> pull_signals_;
 
   std::vector<std::string> prefill_inst_names_;
   int current_prefill_idx_ = 0;
@@ -142,13 +142,13 @@ class PDOOCScheduler : public DisaggPDScheduler {
 
   std::unique_ptr<std::thread> dispatch_offline_thread_;
 
-  // xllm_moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
+  // moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
   // offline_requests_to_dispatch_;
-  xllm_moodycamel::BlockingConcurrentQueue<
+  moodycamel::BlockingConcurrentQueue<
       std::pair<std::shared_ptr<Request>, std::string>>
       offline_requests_to_dispatch_;  // Requests to dispatch and their
                                       // specified decoding instance names.
-  xllm_moodycamel::BlockingConcurrentQueue<
+  moodycamel::BlockingConcurrentQueue<
       std::pair<std::shared_ptr<Request>, std::string>>
       offline_requests_to_transfer_;
 

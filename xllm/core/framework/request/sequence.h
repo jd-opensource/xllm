@@ -243,7 +243,9 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
-  std::atomic<bool>* get_termination_flag() { return &termination_flag_; }
+  std::shared_ptr<std::atomic<bool>> get_termination_flag() {
+    return termination_flag_;
+  }
   std::vector<std::shared_ptr<std::atomic<uint32_t>>>* get_prefetch_results() {
     return &prefetch_results_;
   }
@@ -360,7 +362,7 @@ class Sequence final {
   std::atomic<bool> cancelled_{false};
 
   // kvcache store copy async result
-  std::atomic<bool> termination_flag_{false};
+  std::shared_ptr<std::atomic<bool>> termination_flag_;
   std::vector<std::shared_ptr<std::atomic<uint32_t>>> prefetch_results_;
 
   Timer timer_;

@@ -144,9 +144,9 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // for prefill, dispatch request to Decode instance
   std::unique_ptr<std::thread> dispatch_thread_;
 
-  xllm_moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
+  moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
       prefill_request_queue_;
-  xllm_moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
+  moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
       prefill_request_queue_offline_;
 
   // for prefill save all remote requests

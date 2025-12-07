@@ -30,8 +30,8 @@ limitations under the License.
 #include "framework/kv_cache/llm_data_dist_transfer.h"
 #endif
 #include "framework/eplb/eplb_executor.h"
+#include "framework/kv_cache/hierarchy_kv_cache_transfer.h"
 #include "framework/kv_cache/kv_cache_store.h"
-#include "framework/kv_cache/multi_tier_kv_cache_transfer.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
 #include "framework/model/model_input_params.h"
@@ -183,7 +183,7 @@ class WorkerImpl {
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
 
-  void init_multi_tier_kv_cache_transfer();
+  void init_hierarchy_kv_cache_transfer();
 
  protected:
   // runtime options
@@ -239,7 +239,7 @@ class WorkerImpl {
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
 #endif
 
-  std::unique_ptr<MultiTierKVCacheTransfer> multi_tier_kv_cache_transfer_;
+  std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
 
   bool is_spec_draft_ = false;
 

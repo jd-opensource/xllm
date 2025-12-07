@@ -19,20 +19,19 @@ limitations under the License.
 
 #include <memory>
 
-#include "acl/acl_rt.h"
 #include "common/types.h"
-#include "framework/kv_cache/kv_cache_store.h"
 #include "framework/model/model_input_params.h"
 #include "kv_cache.h"
 #include "platform/device.h"
 #include "util/threadpool.h"
 
 #if defined(USE_NPU)
+#include "acl/acl_rt.h"
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
 
 namespace xllm {
-class MultiTierKVCacheTransfer {
+class HierarchyKVCacheTransfer {
  public:
   struct Options {
     PROPERTY(uint32_t, tp_rank);
@@ -46,10 +45,10 @@ class MultiTierKVCacheTransfer {
     PROPERTY(std::string, store_local_hostname) = "";
   };
 
-  MultiTierKVCacheTransfer(const Options& options,
+  HierarchyKVCacheTransfer(const Options& options,
                            const torch::Device& device,
                            std::vector<xllm::KVCache>* kv_caches_ptr);
-  ~MultiTierKVCacheTransfer();
+  ~HierarchyKVCacheTransfer();
 
   uint32_t transfer_kv_blocks(
       const uint64_t batch_id,
@@ -58,10 +57,7 @@ class MultiTierKVCacheTransfer {
   uint32_t transfer_kv_blocks(const uint64_t batch_id,
                               Slice<BlockTransferInfo>& block_transfer_info);
 
-#if defined(USE_NPU)
-  std::shared_ptr<NPULayerSynchronizerImpl> get_layer_synchronizer(
-      uint64_t batch_id);
-#endif
+  void set_layer_synchronizer(ModelInputParams& params);
 
  private:
   void create_page_aligned_host_cache();
@@ -86,8 +82,7 @@ class MultiTierKVCacheTransfer {
   std::unique_ptr<ThreadPool> h2d_threadpool_;
   std::unique_ptr<ThreadPool> d2h_threadpool_;
   // copy streams only can be used in h2d_threadpool_ and d2h_threadpool_
-  xllm_moodycamel::BlockingConcurrentQueue<std::unique_ptr<Stream>>
-      copy_stream_;
+  moodycamel::BlockingConcurrentQueue<std::unique_ptr<Stream>> copy_stream_;
 
   std::vector<xllm::KVCache>* kv_caches_ptr_;
   std::vector<xllm::KVCache> host_kv_caches_;

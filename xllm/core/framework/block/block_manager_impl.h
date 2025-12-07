@@ -35,6 +35,8 @@ class BlockManagerImpl : public BlockManager {
 
   void deallocate(const Slice<Block>& blocks) override;
 
+  void deallocate(std::vector<Block>& blocks) override;
+
   // allocate shared blocks when enable prefix cache
   std::vector<Block> allocate_shared(
       const Slice<int32_t>& tokens_ids,

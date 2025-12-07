@@ -1,4 +1,4 @@
-// Provides an efficient blocking version of xllm_moodycamel::ConcurrentQueue.
+// Provides an efficient blocking version of moodycamel::ConcurrentQueue.
 // ©2015-2020 Cameron Desrochers. Distributed under the terms of the simplified
 // BSD license, available at the top of concurrentqueue.h.
 // Also dual-licensed under the Boost Software License (see LICENSE.md)
@@ -17,15 +17,15 @@
 #include "lightweightsemaphore.h"
 
 namespace xllm {
-namespace xllm_moodycamel {
+namespace moodycamel {
 // This is a blocking version of the queue. It has an almost identical interface
 // to the normal non-blocking version, with the addition of various
 // wait_dequeue() methods and the removal of producer-specific dequeue methods.
 template <typename T, typename Traits = ConcurrentQueueDefaultTraits>
 class BlockingConcurrentQueue {
  private:
-  typedef xllm_moodycamel::ConcurrentQueue<T, Traits> ConcurrentQueue;
-  typedef xllm_moodycamel::LightweightSemaphore LightweightSemaphore;
+  typedef moodycamel::ConcurrentQueue<T, Traits> ConcurrentQueue;
+  typedef moodycamel::LightweightSemaphore LightweightSemaphore;
 
  public:
   typedef typename ConcurrentQueue::producer_token_t producer_token_t;
@@ -70,7 +70,7 @@ class BlockingConcurrentQueue {
            "BlockingConcurrentQueue must have ConcurrentQueue as its first "
            "member");
     if (!sema) {
-      XLLM_MOODYCAMEL_THROW(std::bad_alloc());
+      MOODYCAMEL_THROW(std::bad_alloc());
     }
   }
 
@@ -87,15 +87,15 @@ class BlockingConcurrentQueue {
            "BlockingConcurrentQueue must have ConcurrentQueue as its first "
            "member");
     if (!sema) {
-      XLLM_MOODYCAMEL_THROW(std::bad_alloc());
+      MOODYCAMEL_THROW(std::bad_alloc());
     }
   }
 
   // Disable copying and copy assignment
   BlockingConcurrentQueue(BlockingConcurrentQueue const&)
-      XLLM_MOODYCAMEL_DELETE_FUNCTION;
+      MOODYCAMEL_DELETE_FUNCTION;
   BlockingConcurrentQueue& operator=(BlockingConcurrentQueue const&)
-      XLLM_MOODYCAMEL_DELETE_FUNCTION;
+      MOODYCAMEL_DELETE_FUNCTION;
 
   // Moving is supported, but note that it is *not* a thread-safe operation.
   // Nobody can use the queue while it's being moved, and the memory effects
@@ -103,12 +103,12 @@ class BlockingConcurrentQueue {
   // Note: When a queue is moved, its tokens are still valid but can only be
   // used with the destination queue (i.e. semantically they are moved along
   // with the queue itself).
-  BlockingConcurrentQueue(BlockingConcurrentQueue&& other)
-      XLLM_MOODYCAMEL_NOEXCEPT : inner(std::move(other.inner)),
-                                 sema(std::move(other.sema)) {}
+  BlockingConcurrentQueue(BlockingConcurrentQueue&& other) MOODYCAMEL_NOEXCEPT
+      : inner(std::move(other.inner)),
+        sema(std::move(other.sema)) {}
 
   inline BlockingConcurrentQueue& operator=(BlockingConcurrentQueue&& other)
-      XLLM_MOODYCAMEL_NOEXCEPT {
+      MOODYCAMEL_NOEXCEPT {
     return swap_internal(other);
   }
 
@@ -117,7 +117,7 @@ class BlockingConcurrentQueue {
   // the tokens that were created for one queue must be used with
   // only the swapped queue (i.e. the tokens are tied to the
   // queue's movable state, not the object itself).
-  inline void swap(BlockingConcurrentQueue& other) XLLM_MOODYCAMEL_NOEXCEPT {
+  inline void swap(BlockingConcurrentQueue& other) MOODYCAMEL_NOEXCEPT {
     swap_internal(other);
   }
 
@@ -601,10 +601,9 @@ class BlockingConcurrentQueue {
 
 template <typename T, typename Traits>
 inline void swap(BlockingConcurrentQueue<T, Traits>& a,
-                 BlockingConcurrentQueue<T, Traits>& b)
-    XLLM_MOODYCAMEL_NOEXCEPT {
+                 BlockingConcurrentQueue<T, Traits>& b) MOODYCAMEL_NOEXCEPT {
   a.swap(b);
 }
 
-}  // end namespace xllm_moodycamel
+}  // end namespace moodycamel
 }  // namespace xllm

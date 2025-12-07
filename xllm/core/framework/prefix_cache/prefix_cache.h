@@ -89,10 +89,7 @@ class PrefixCache {
     }
   }
 
-  virtual KvCacheEvent* get_upload_kvcache_events() {
-    LOG(ERROR) << "Not implemented!";
-    return nullptr;
-  }
+  virtual KvCacheEvent* get_upload_kvcache_events() { return nullptr; }
 
   static uint32_t compute_hash_keys(const Slice<int32_t>& token_ids,
                                     std::vector<Block>& blocks);

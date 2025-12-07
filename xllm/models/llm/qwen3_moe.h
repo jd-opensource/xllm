@@ -225,7 +225,6 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();
-
     ModelInputParams modified_input_params = input_params;
     layer::update_dummy_run_input(dp_rank_, positions, modified_input_params);
     bool is_prefill = modified_input_params.q_max_seq_len > 1;

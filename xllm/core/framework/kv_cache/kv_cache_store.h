@@ -49,8 +49,6 @@ class KVCacheStore {
 
   uint32_t batch_get(Slice<BlockTransferInfo>& block_transfer_info);
 
-  uint32_t batch_remove(Slice<BlockTransferInfo>& block_transfer_info);
-
   uint32_t batch_exist(std::vector<std::string>&& keys);
 
   static KVCacheStore& get_instance() {
@@ -63,6 +61,8 @@ class KVCacheStore {
   KVCacheStore(const KVCacheStore&) = delete;
   KVCacheStore& operator=(const KVCacheStore&) = delete;
 
+  std::vector<mooncake::Slice> genarate_mooncake_slice(int32_t block_id);
+
  private:
   bool is_initialized_ = false;
 
@@ -71,8 +71,9 @@ class KVCacheStore {
 
   std::vector<xllm::KVCache>* host_kv_caches_;
 
-  uint64_t k_cache_size_per_block_;
-  uint64_t v_cache_size_per_block_;
+  uint64_t k_cache_size_per_block_ = 0;
+  uint64_t v_cache_size_per_block_ = 0;
+  uint64_t index_cache_size_per_block_ = 0;
 
   std::shared_ptr<mooncake::Client> client_ptr_;
 };

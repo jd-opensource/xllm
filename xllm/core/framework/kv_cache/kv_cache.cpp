@@ -37,7 +37,7 @@ torch::Tensor KVCache::get_index_cache() const { return index_cache_; }
 
 std::vector<std::vector<int64_t>> KVCache::get_shapes() {
   std::vector<std::vector<int64_t>> tensor_shapes(3);
-  if (key_cache_.defined()) {
+  if (key_cache_.defined() && key_cache_.numel() != 0) {
     std::vector<int64_t> shape;
     auto sizes = key_cache_.sizes();
     shape.resize(sizes.size());
@@ -47,7 +47,7 @@ std::vector<std::vector<int64_t>> KVCache::get_shapes() {
     tensor_shapes[0] = std::move(shape);
   }
 
-  if (value_cache_.defined() && key_cache_.numel() != 0) {
+  if (value_cache_.defined() && value_cache_.numel() != 0) {
     std::vector<int64_t> shape;
     auto sizes = value_cache_.sizes();
     shape.resize(sizes.size());

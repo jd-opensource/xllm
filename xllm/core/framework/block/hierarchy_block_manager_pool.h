@@ -22,18 +22,18 @@ namespace xllm {
 
 class Engine;
 
-class MultiTierBlockManagerPool : public BlockManagerPool {
+class HierarchyBlockManagerPool : public BlockManagerPool {
  public:
-  explicit MultiTierBlockManagerPool(const BlockManagerPool::Options& options,
+  explicit HierarchyBlockManagerPool(const BlockManagerPool::Options& options,
                                      Engine* engine,
                                      int32_t dp_size = 1);
-  ~MultiTierBlockManagerPool() = default;
+  ~HierarchyBlockManagerPool() = default;
 
   bool allocate(Sequence* sequence, size_t num_tokens) override;
 
   void deallocate(Sequence* sequence) override;
 
-  void transfer_blocks(std::vector<Batch>* batches = nullptr) override;
+  void transfer_blocks(std::optional<std::vector<Batch>> batches) override;
 
   void prefetch_from_storage(std::shared_ptr<Request>& request) override;
 

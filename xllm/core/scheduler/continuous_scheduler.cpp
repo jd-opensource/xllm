@@ -816,9 +816,9 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   if (!is_batches_empty) {
     // only update the scheduling latency when there are requests to process
     COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
-    kv_cache_manager_->transfer_blocks(&batches);
+    kv_cache_manager_->transfer_blocks(batches);
   } else {
-    kv_cache_manager_->transfer_blocks();
+    kv_cache_manager_->transfer_blocks(std::nullopt);
   }
 
   GAUGE_SET(num_pending_requests,

@@ -115,7 +115,7 @@ bool WorkerImpl::allocate_kv_cache(
     kv_caches_.emplace_back(key_cache, value_cache, index_cache);
   }
 
-  init_multi_tier_kv_cache_transfer();
+  init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -183,7 +183,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   }
 #endif
 
-  init_multi_tier_kv_cache_transfer();
+  init_hierarchy_kv_cache_transfer();
 
   status_ = Status::READY;
   return true;
@@ -209,7 +209,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
   }
 
-  init_multi_tier_kv_cache_transfer();
+  init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -414,13 +414,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
   threadpool_.schedule([this,
                         input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
-#if defined(USE_NPU)
-    if (multi_tier_kv_cache_transfer_ != nullptr) {
-      input.input_params.layer_wise_load_synchronizer =
-          multi_tier_kv_cache_transfer_->get_layer_synchronizer(
-              input.input_params.batch_id);
+    if (hierarchy_kv_cache_transfer_ != nullptr) {
+      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
     }
-#endif
+
     // run the model on the given input in working thread
     if (!enable_schedule_overlap()) {
       const auto output = this->step(input);
@@ -622,15 +619,15 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 uint32_t WorkerImpl::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
-  return multi_tier_kv_cache_transfer_->transfer_kv_blocks(
+  return hierarchy_kv_cache_transfer_->transfer_kv_blocks(
       batch_id, std::move(block_transfer_info));
 }
 
 uint32_t WorkerImpl::transfer_kv_blocks(
     const uint64_t batch_id,
     Slice<BlockTransferInfo>& block_transfer_info) {
-  return multi_tier_kv_cache_transfer_->transfer_kv_blocks(batch_id,
-                                                           block_transfer_info);
+  return hierarchy_kv_cache_transfer_->transfer_kv_blocks(batch_id,
+                                                          block_transfer_info);
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(
@@ -655,9 +652,9 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
-void WorkerImpl::init_multi_tier_kv_cache_transfer() {
+void WorkerImpl::init_hierarchy_kv_cache_transfer() {
   if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
-    MultiTierKVCacheTransfer::Options transfer_options;
+    HierarchyKVCacheTransfer::Options transfer_options;
     transfer_options
         .tp_rank(options_.dp_size() > 1
                      ? options_.node_rank() % options_.dp_size()
@@ -670,7 +667,7 @@ void WorkerImpl::init_multi_tier_kv_cache_transfer() {
         .store_master_server_address(options_.store_master_server_address())
         .store_metadata_server(options_.store_metadata_server())
         .store_local_hostname(options_.store_local_hostname());
-    multi_tier_kv_cache_transfer_ = std::make_unique<MultiTierKVCacheTransfer>(
+    hierarchy_kv_cache_transfer_ = std::make_unique<HierarchyKVCacheTransfer>(
         transfer_options, device_, &kv_caches_);
   }
 }

@@ -76,7 +76,7 @@ class BlockManagerPool : public KVCacheManager {
   int32_t get_manager_with_max_free_blocks() const;
   int32_t get_dp_rank(Sequence* sequence) const;
 
-  void process_beam_search(Sequence* sequence, bool need_swap = false);
+  bool process_beam_search(Sequence* sequence, bool need_swap = false);
 
  private:
   std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;

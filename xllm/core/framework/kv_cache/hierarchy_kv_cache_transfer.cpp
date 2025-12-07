@@ -13,13 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "multi_tier_kv_cache_transfer.h"
+#include "hierarchy_kv_cache_transfer.h"
 
 #include <folly/futures/Future.h>
 #include <sys/mman.h>
 
 #include <memory>
 
+#include "kv_cache_store.h"
 namespace xllm {
 
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
@@ -27,7 +28,7 @@ constexpr uint32_t BATCH_COPY_MAX_SIZE = 4096;
 constexpr uint32_t TIMEOUT_S = 60;      // second
 constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
 
-MultiTierKVCacheTransfer::MultiTierKVCacheTransfer(
+HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
     const Options& options,
     const torch::Device& device,
     std::vector<xllm::KVCache>* kv_caches_ptr)
@@ -62,7 +63,7 @@ MultiTierKVCacheTransfer::MultiTierKVCacheTransfer(
   }
 }
 
-MultiTierKVCacheTransfer::~MultiTierKVCacheTransfer() {
+HierarchyKVCacheTransfer::~HierarchyKVCacheTransfer() {
   if (page_aligned_data_ != nullptr) {
 #if defined(USE_NPU)
     aclrtHostUnregister(page_aligned_data_);
@@ -72,7 +73,7 @@ MultiTierKVCacheTransfer::~MultiTierKVCacheTransfer() {
   }
 }
 
-uint32_t MultiTierKVCacheTransfer::transfer_kv_blocks(
+uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   CHECK(!block_transfer_info.empty());
@@ -103,7 +104,7 @@ uint32_t MultiTierKVCacheTransfer::transfer_kv_blocks(
   return 0;
 }
 
-uint32_t MultiTierKVCacheTransfer::transfer_kv_blocks(
+uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
     const uint64_t batch_id,
     Slice<BlockTransferInfo>& block_transfer_info) {
   CHECK(!block_transfer_info.empty());
@@ -119,22 +120,25 @@ uint32_t MultiTierKVCacheTransfer::transfer_kv_blocks(
   return 0;
 }
 
+void HierarchyKVCacheTransfer::set_layer_synchronizer(
+    ModelInputParams& params) {
 #if defined(USE_NPU)
-std::shared_ptr<NPULayerSynchronizerImpl>
-MultiTierKVCacheTransfer::get_layer_synchronizer(uint64_t batch_id) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (layer_wise_load_synchronizer_.count(batch_id) != 0) {
-      auto ret = layer_wise_load_synchronizer_[batch_id];
-      layer_wise_load_synchronizer_.erase(batch_id);
-      return ret;
+    if (layer_wise_load_synchronizer_.count(params.batch_id) != 0) {
+      params.layer_wise_load_synchronizer =
+          layer_wise_load_synchronizer_[params.batch_id];
+      layer_wise_load_synchronizer_.erase(params.batch_id);
+      uint32_t event_cnt =
+          params.layer_wise_load_synchronizer->get_event_size();
+      params.layers_per_bacth_copy =
+          (options_.layers() + event_cnt - 1) / event_cnt;
     }
   }
-  return nullptr;
-}
 #endif
+}
 
-uint32_t MultiTierKVCacheTransfer::offload_kv_blocks(
+uint32_t HierarchyKVCacheTransfer::offload_kv_blocks(
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   if (block_transfer_info.empty()) {
     return 0;
@@ -190,8 +194,9 @@ uint32_t MultiTierKVCacheTransfer::offload_kv_blocks(
   return block_transfer_info.size();
 }
 
-bool MultiTierKVCacheTransfer::d2h_batch_copy(
+bool HierarchyKVCacheTransfer::d2h_batch_copy(
     Slice<BlockTransferInfo>& block_transfer_info) {
+#if defined(USE_NPU)
   const int64_t num_layers = options_.layers();
   uint32_t num_batches =
       block_transfer_info.size() * num_layers * cache_tensor_cnt_;
@@ -266,12 +271,14 @@ bool MultiTierKVCacheTransfer::d2h_batch_copy(
   delete[] dsts;
   delete[] srcs;
   delete[] copy_size;
+#endif
   return true;
 }
 
-bool MultiTierKVCacheTransfer::h2d_batch_copy(
+bool HierarchyKVCacheTransfer::h2d_batch_copy(
     const uint64_t batch_id,
     Slice<BlockTransferInfo>& block_transfer_info) {
+#if defined(USE_NPU)
   CHECK(block_transfer_info.size() < BATCH_COPY_MAX_SIZE / cache_tensor_cnt_)
       << "h2d_batch_copy support copy blocks less than "
       << BATCH_COPY_MAX_SIZE / cache_tensor_cnt_ << ", but got "
@@ -353,16 +360,15 @@ bool MultiTierKVCacheTransfer::h2d_batch_copy(
       layer_cnt++;
     }
 
-    ret = aclrtMemcpyBatchAsync(dsts,
-                                copy_size,
-                                srcs,
-                                copy_size,
-                                num_batches * layer_cnt,
-                                attrs,
-                                attrs_indexes,
-                                1,
-                                &fail_index,
-                                stream->get_stream()->stream());
+    ret = aclrtMemcpyBatch(dsts,
+                           copy_size,
+                           srcs,
+                           copy_size,
+                           num_batches * layer_cnt,
+                           attrs,
+                           attrs_indexes,
+                           1,
+                           &fail_index);
 
     if (ret != 0 || fail_index != SIZE_MAX) {
       LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
@@ -390,11 +396,11 @@ bool MultiTierKVCacheTransfer::h2d_batch_copy(
   delete[] dsts;
   delete[] srcs;
   delete[] copy_size;
-
+#endif
   return true;
 }
 
-uint32_t MultiTierKVCacheTransfer::offload_to_store(
+uint32_t HierarchyKVCacheTransfer::offload_to_store(
     Slice<BlockTransferInfo>& block_transfer_info) {
   if (!options_.enable_kvcache_store()) {
     return block_transfer_info.size();
@@ -403,7 +409,7 @@ uint32_t MultiTierKVCacheTransfer::offload_to_store(
   return KVCacheStore::get_instance().batch_put(block_transfer_info);
 }
 
-uint32_t MultiTierKVCacheTransfer::load_from_store(
+uint32_t HierarchyKVCacheTransfer::load_from_store(
     Slice<BlockTransferInfo>& block_transfer_info) {
   if (!options_.enable_kvcache_store()) {
     return 0;
@@ -411,7 +417,7 @@ uint32_t MultiTierKVCacheTransfer::load_from_store(
   return KVCacheStore::get_instance().batch_get(block_transfer_info);
 }
 
-void MultiTierKVCacheTransfer::create_page_aligned_host_cache() {
+void HierarchyKVCacheTransfer::create_page_aligned_host_cache() {
   CHECK(kv_caches_ptr_->size() > 0) << "hbm kv cache size should > 0.";
   CHECK(options_.host_blocks_factor() > 1) << "host_blocks_factor should > 1.";
 

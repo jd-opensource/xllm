@@ -13,14 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "multi_tier_block_manager_pool.h"
+#include "hierarchy_block_manager_pool.h"
 
 #include "block_manager_impl.h"
 #include "concurrent_block_manager_impl.h"
 
 namespace xllm {
 
-MultiTierBlockManagerPool::MultiTierBlockManagerPool(
+HierarchyBlockManagerPool::HierarchyBlockManagerPool(
     const BlockManagerPool::Options& options,
     Engine* engine,
     int32_t dp_size)
@@ -52,7 +52,7 @@ MultiTierBlockManagerPool::MultiTierBlockManagerPool(
   saved_device_blocks_.resize(host_block_managers_.size());
 }
 
-void MultiTierBlockManagerPool::deallocate(Sequence* sequence) {
+void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
   DCHECK(sequence != nullptr);
   // add blocks to the prefix cache
   int32_t dp_rank = BlockManagerPool::get_dp_rank(sequence);
@@ -65,7 +65,7 @@ void MultiTierBlockManagerPool::deallocate(Sequence* sequence) {
     return;
   }
 
-  int cached_block_num =
+  size_t cached_block_num =
       sequence->host_kv_state().kv_cache_tokens_num() / options_.block_size();
 
   if (host_blocks->size() > 0) {
@@ -82,7 +82,7 @@ void MultiTierBlockManagerPool::deallocate(Sequence* sequence) {
   sequence->host_kv_state().add_kv_blocks(
       host_block_managers_[dp_rank]->allocate(needed_block_num));
 
-  for (int i = cached_block_num; i < host_blocks->size(); i++) {
+  for (size_t i = cached_block_num; i < host_blocks->size(); i++) {
     if (blocks->at(i).ref_count() != 2) {
       continue;
     }
@@ -107,11 +107,12 @@ void MultiTierBlockManagerPool::deallocate(Sequence* sequence) {
   sequence->reset();
 }
 
-bool MultiTierBlockManagerPool::allocate(Sequence* sequence,
+bool HierarchyBlockManagerPool::allocate(Sequence* sequence,
                                          size_t num_tokens) {
   BlockManagerPool::allocate(sequence, num_tokens);
 
-  if (sequence->host_kv_state().num_kv_blocks() == 0) {
+  if (sequence->host_kv_state().num_kv_blocks() == 0 &&
+      sequence->stage() != SequenceStage::DECODE) {
     allocate_host_shared(sequence);
   }
 
@@ -137,7 +138,7 @@ bool MultiTierBlockManagerPool::allocate(Sequence* sequence,
   return true;
 }
 
-void MultiTierBlockManagerPool::allocate_host_shared(Sequence* sequence) {
+void HierarchyBlockManagerPool::allocate_host_shared(Sequence* sequence) {
   if (options_.enable_prefix_cache()) {
     int32_t dp_rank = BlockManagerPool::get_dp_rank(sequence);
     std::vector<Block> shared_blocks =
@@ -146,7 +147,7 @@ void MultiTierBlockManagerPool::allocate_host_shared(Sequence* sequence) {
   }
 }
 
-void MultiTierBlockManagerPool::prefetch_from_storage(
+void HierarchyBlockManagerPool::prefetch_from_storage(
     std::shared_ptr<Request>& request) {
   if (!options_.enable_kvcache_store()) {
     return;
@@ -202,7 +203,7 @@ void MultiTierBlockManagerPool::prefetch_from_storage(
   }
 }
 
-bool MultiTierBlockManagerPool::update_prefetch_result(
+bool HierarchyBlockManagerPool::update_prefetch_result(
     std::shared_ptr<Request>& request,
     const uint32_t timeout) {
   if (!options_.enable_kvcache_store()) {
@@ -216,8 +217,9 @@ bool MultiTierBlockManagerPool::update_prefetch_result(
   return prefetch_result;
 }
 
-void MultiTierBlockManagerPool::transfer_blocks(std::vector<Batch>* batches) {
-  if (batches != nullptr) {
+void HierarchyBlockManagerPool::transfer_blocks(
+    std::optional<std::vector<Batch>> batches) {
+  if (batches.has_value()) {
     // load blocks from host to device
     for (int i = 0; i < batches->size(); i++) {
       if (!load_block_transfer_infos_[i].empty()) {
@@ -265,7 +267,7 @@ void MultiTierBlockManagerPool::transfer_blocks(std::vector<Batch>* batches) {
   saved_device_blocks_.resize(host_block_managers_.size());
 }
 
-void MultiTierBlockManagerPool::get_merged_kvcache_event(
+void HierarchyBlockManagerPool::get_merged_kvcache_event(
     KvCacheEvent* event) const {
   if (host_block_managers_.empty()) {
     BlockManagerPool::get_merged_kvcache_event(event);

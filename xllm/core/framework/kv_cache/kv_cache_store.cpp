@@ -43,16 +43,22 @@ bool KVCacheStore::init(const StoreConfig& config,
   }
   client_ptr_ = client_opt.value();
 
-  auto k_tensor_one_block = host_kv_caches_->at(0).get_k_cache();
-  auto v_tensor_one_block = host_kv_caches_->at(0).get_v_cache();
+  auto k_cache = host_kv_caches_->at(0).get_k_cache();
+  k_cache_size_per_block_ = k_cache.numel() * k_cache.element_size();
+  LOG(INFO) << "key cache size per block: " << k_cache_size_per_block_;
 
-  k_cache_size_per_block_ =
-      k_tensor_one_block.numel() * k_tensor_one_block.element_size();
-  v_cache_size_per_block_ =
-      v_tensor_one_block.numel() * v_tensor_one_block.element_size();
+  auto v_cache = host_kv_caches_->at(0).get_v_cache();
+  if (v_cache.defined() && v_cache.numel() != 0) {
+    v_cache_size_per_block_ = v_cache.numel() * v_cache.element_size();
+    LOG(INFO) << "value cache size per block: " << v_cache_size_per_block_;
+  }
 
-  LOG(INFO) << "k_cache_size_per_block: " << k_cache_size_per_block_;
-  LOG(INFO) << "v_cache_size_per_block: " << v_cache_size_per_block_;
+  auto index_cache = host_kv_caches_->at(0).get_index_cache();
+  if (index_cache.defined() && index_cache.numel() != 0) {
+    index_cache_size_per_block_ =
+        index_cache.numel() * index_cache.element_size();
+    LOG(INFO) << "index cache size per block: " << index_cache_size_per_block_;
+  }
 
   if (config_.protocol == "rdma") {
     if (config_.total_size > 0 && config_.tensor_data != nullptr) {
@@ -102,15 +108,8 @@ uint32_t KVCacheStore::batch_put(
     }
 
     str_keys.emplace_back(str_key);
-
-    void* k_cache =
-        host_kv_caches_->at(block_info.dst_block_id).get_k_cache().data_ptr();
-    void* v_cache =
-        host_kv_caches_->at(block_info.dst_block_id).get_k_cache().data_ptr();
-
-    slices.emplace_back(std::vector<mooncake::Slice>{
-        mooncake::Slice{k_cache, k_cache_size_per_block_},
-        mooncake::Slice{v_cache, v_cache_size_per_block_}});
+    slices.emplace_back(
+        std::move(genarate_mooncake_slice(block_info.dst_block_id)));
   }
 
   if (str_keys.size() == 0) {
@@ -149,17 +148,8 @@ uint32_t KVCacheStore::batch_get(
     }
 
     str_keys.emplace_back(str_key);
-
-    void* k_cache =
-        host_kv_caches_->at(block_info.dst_block_id).get_k_cache().data_ptr();
-    void* v_cache =
-        host_kv_caches_->at(block_info.dst_block_id).get_k_cache().data_ptr();
-
-    slices.insert(
-        std::make_pair(str_key,
-                       std::vector<mooncake::Slice>{
-                           mooncake::Slice{k_cache, k_cache_size_per_block_},
-                           mooncake::Slice{v_cache, v_cache_size_per_block_}}));
+    slices.insert(std::make_pair(
+        str_key, std::move(genarate_mooncake_slice(block_info.dst_block_id))));
   }
 
   if (str_keys.size() == 0) {
@@ -177,24 +167,6 @@ uint32_t KVCacheStore::batch_get(
   return success_cnt;
 }
 
-uint32_t KVCacheStore::batch_remove(
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  CHECK(is_initialized_) << "KVCacheStore is not initialized.";
-  uint32_t success_cnt = 0;
-  for (auto block_info : block_transfer_info) {
-    std::string str_key(reinterpret_cast<const char*>(block_info.hash_key),
-                        MURMUR_HASH3_VALUE_LEN);
-    str_key.append(std::to_string(config_.tp_rank));
-
-    auto result = client_ptr_->Remove(str_key);
-
-    if (result.has_value()) {
-      success_cnt++;
-    }
-  }
-  return success_cnt;
-}
-
 uint32_t KVCacheStore::batch_exist(std::vector<std::string>&& keys) {
   if (!is_initialized_) {
     return 0;
@@ -208,6 +180,28 @@ uint32_t KVCacheStore::batch_exist(std::vector<std::string>&& keys) {
     ret++;
   }
   return ret;
+}
+
+std::vector<mooncake::Slice> KVCacheStore::genarate_mooncake_slice(
+    int32_t block_id) {
+  std::vector<mooncake::Slice> slice;
+  slice.reserve(3);
+
+  void* k_cache = host_kv_caches_->at(block_id).get_k_cache().data_ptr();
+  slice.emplace_back(mooncake::Slice{k_cache, k_cache_size_per_block_});
+
+  if (v_cache_size_per_block_ != 0) {
+    void* v_cache = host_kv_caches_->at(block_id).get_v_cache().data_ptr();
+    slice.emplace_back(mooncake::Slice{v_cache, v_cache_size_per_block_});
+  }
+
+  if (index_cache_size_per_block_ != 0) {
+    void* index_cache =
+        host_kv_caches_->at(block_id).get_index_cache().data_ptr();
+    slice.emplace_back(
+        mooncake::Slice{index_cache, index_cache_size_per_block_});
+  }
+  return slice;
 }
 
 }  // namespace xllm
