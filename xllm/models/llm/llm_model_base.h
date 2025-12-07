@@ -50,10 +50,11 @@ limitations under the License.
 
 namespace xllm {
 
-torch::Tensor get_concat_rotary_embedding(int64_t dim,
-                                          int64_t seq_len,
-                                          double rope_theta,
-                                          const torch::TensorOptions& options) {
+torch::Tensor compute_rotary_embedding(int64_t dim,
+                                       int64_t seq_len,
+                                       double rope_theta,
+                                       const torch::TensorOptions& options,
+                                       bool use_cat) {
   auto options_new =
       torch::device(options.device()).dtype(at::ScalarType::Double);
   auto inv_freq =
@@ -62,7 +63,13 @@ torch::Tensor get_concat_rotary_embedding(int64_t dim,
   auto seq_idx = torch::arange(seq_len, options_new);
 
   auto freqs = torch::ger(seq_idx, inv_freq).to(torch::kFloat32);
-  auto emb = torch::cat({freqs, freqs}, -1);
+  torch::Tensor emb;
+  if (use_cat) {
+    emb = torch::cat({freqs, freqs}, -1);
+  } else {
+    emb = torch::stack({freqs, freqs}, -1);
+    emb = emb.reshape({seq_len, dim});
+  }
   auto rope_cos = torch::cos(emb);
   auto rope_sin = torch::sin(emb);
 
@@ -79,6 +86,21 @@ torch::Tensor get_concat_rotary_embedding(int64_t dim,
   }
   std::vector<torch::Tensor> cos_sin{rope_cos, rope_sin};
   return torch::cat(cos_sin, -1);
+}
+
+torch::Tensor get_concat_rotary_embedding(int64_t dim,
+                                          int64_t seq_len,
+                                          double rope_theta,
+                                          const torch::TensorOptions& options) {
+  return compute_rotary_embedding(dim, seq_len, rope_theta, options, true);
+}
+
+torch::Tensor get_chatglm_rotary_embedding(
+    int64_t dim,
+    int64_t seq_len,
+    double rope_theta,
+    const torch::TensorOptions& options) {
+  return compute_rotary_embedding(dim, seq_len, rope_theta, options, false);
 }
 
 template <typename DecoderType>
@@ -197,9 +219,6 @@ class LlmModelImplBase : public torch::nn::Module {
 
 #if defined(USE_NPU)
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
-#else
-    auto target_cos_sin = cos_sin_.index({positions});
-#endif
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
@@ -260,6 +279,7 @@ class LlmModelImplBase : public torch::nn::Module {
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
       }
     }
+#endif
 
 #if defined(USE_NPU)
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -292,22 +312,23 @@ class LlmModelImplBase : public torch::nn::Module {
             event,
             event_flag);
     }
+
     return norm_(h, 0);
 #else
-    layer::update_dummy_run_input(dp_rank_, positions, input_params_new);
-    bool is_prefill = input_params_new.q_max_seq_len > 1;
+    auto modified_input_params = input_params;
+    auto position = positions;
+    layer::update_dummy_run_input(dp_rank_, position, modified_input_params);
+    bool is_prefill = modified_input_params.q_max_seq_len > 1;
     auto attn_metadata =
-        layer::AttentionMetadata::build(input_params_new, is_prefill);
-    if (positions.dim() == 2) {
-      attn_metadata.mrope_cos = std::move(cos_pos);
-      attn_metadata.mrope_sin = std::move(sin_pos);
-    }
+        layer::AttentionMetadata::build(modified_input_params, is_prefill);
 
+    torch::Tensor h_ret;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer(h, positions, attn_metadata, kv_caches[i], input_params_new);
+      h_ret = layer(
+          h, position, attn_metadata, kv_caches[i], modified_input_params);
     }
-    return norm_(h);
+    return norm_(h_ret);
 #endif
   }
 

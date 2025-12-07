@@ -166,7 +166,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Glm4vMoeForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(glm4v_moe, GLM4_6_VLInputProcessor);
+REGISTER_INPUT_PROCESSOR(glm4v_moe, GLM4VInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(glm4v_moe, Glm4vMoeForConditionalGeneration);
 REGISTER_IMAGE_PROCESSOR(glm4v_moe, Glm4VImageProcessor);
 // register the model args

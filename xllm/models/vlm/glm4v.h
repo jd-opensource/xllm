@@ -26,17 +26,17 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/layers/lm_head.h"
-#include "models/llm/glm4_moe.h"
+#include "models/llm/glm4.h"
 #include "models/model_registry.h"
+#include "processors/glm4v_image_processor.h"
 #include "processors/input_processor.h"
 #include "torch_npu/csrc/aten/CustomFunctions.h"
 #include "xllm/core/layers/glm4_vision_encode_layer.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
-#define PrintTensor(tensor) print_tensor(tensor, #tensor, 10, true, false);
 
-class GLM4_6_VLInputProcessor : public InputProcessor {
+class GLM4VInputProcessor : public InputProcessor {
   enum class TokenType {
     INVALID,
     IMAGE,
@@ -44,7 +44,7 @@ class GLM4_6_VLInputProcessor : public InputProcessor {
   };
 
  public:
-  GLM4_6_VLInputProcessor(const ModelArgs& args) {
+  GLM4VInputProcessor(const ModelArgs& args) {
     merge_size_ = args.mm_image_merge_size();
   }
 
@@ -271,7 +271,6 @@ class Glm4_VisionBlockImpl : public torch::nn::Module {
     encoder_layer_ = register_module("encoder_layer",
                                      layer::Glm4VisionEncoderLayer(context));
   }
-
   torch::Tensor forward(torch::Tensor& x,
                         torch::Tensor& m_cos_pos,
                         torch::Tensor& m_sin_pos,
@@ -398,11 +397,11 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
       std::vector<torch::Tensor> target_w_list;
       target_h_list.reserve(batch_size);
       target_w_list.reserve(batch_size);
-
       for (int64_t i = 0; i < batch_size; ++i) {
         const int64_t seq_len = lengths[i];
         const auto img_h = image_shapes.index({i, 1}).to(torch::kFloat32);
         const auto img_w = image_shapes.index({i, 2}).to(torch::kFloat32);
+
         target_h_list.push_back(img_h.repeat({seq_len}));
         target_w_list.push_back(img_w.repeat({seq_len}));
       }
@@ -415,9 +414,7 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
 
       const auto norm_w = ((w_coords_fp32 + 0.5f) / target_w) * 2.0f - 1.0f;
       const auto norm_h = ((h_coords_fp32 + 0.5f) / target_h) * 2.0f - 1.0f;
-
       auto grid = torch::stack({norm_w, norm_h}, -1).unsqueeze(0).unsqueeze(2);
-
       namespace F = torch::nn::functional;
       auto interpolated_embed = F::grid_sample(pos_embed_2d,
                                                grid,
@@ -425,7 +422,6 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
                                                    .mode(torch::kBicubic)
                                                    .padding_mode(torch::kBorder)
                                                    .align_corners(false));
-
       adapted_pos_embed =
           interpolated_embed.squeeze(0).squeeze(-1).permute({1, 0}).to(dtype);
     }
@@ -468,28 +464,23 @@ class Glm4_VisionPatchMergerImpl : public torch::nn::Module {
         "norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions({dim})));
     norm_->weight.set_data(norm_->weight.to(options_));
     norm_->bias.set_data(norm_->bias.to(options_));
-    // register proj module
     proj_ = register_module(
         "proj",
         torch::nn::Linear(torch::nn::LinearOptions(dim, dim).bias(false)));
     proj_->weight.set_data(proj_->weight.to(options_));
-    // register act and silu module
     act_ = register_module("act", torch::nn::GELU());
     silu_ = register_module("silu", torch::nn::SiLU());
 
-    // register gate module
     gate_ = register_module(
         "gate",
         torch::nn::Linear(
             torch::nn::LinearOptions(dim, context_dim).bias(false)));
     gate_->weight.set_data(gate_->weight.to(options_));
-    // register up module
     up_ = register_module(
         "up",
         torch::nn::Linear(
             torch::nn::LinearOptions(dim, context_dim).bias(false)));
     up_->weight.set_data(up_->weight.to(options_));
-    // register down module
     down_ = register_module(
         "down",
         torch::nn::Linear(
@@ -611,7 +602,6 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
       blocks_->push_back(block);
       layers_.push_back(block);
     }
-    // TODO: fuse op
     post_layernorm_ =
         register_module("post_layernorm", Glm4VisionRmsNorm(context));
 
@@ -714,14 +704,12 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
                                 grid_thw,
                                 image_type_ids.select(1, 0),
                                 image_type_ids.select(1, 1));
-
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     std::vector<int> cu_seqlens_vec(
-        cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
+        cu_seqlens_cpu.data_ptr<int>(),
         cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
-
     cu_seqlens = cu_seqlens.to(hidden_states.device());
     for (int idx = 0; idx < blocks_->size(); ++idx) {
       hidden_states = layers_[idx](hidden_states,
@@ -730,18 +718,14 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
                                    cu_seqlens,
                                    cu_seqlens_vec,
                                    input_params_new,
-                                   idx);  // TODO
+                                   idx);
     }
-
     hidden_states = post_layernorm_(hidden_states);
     hidden_states = hidden_states.view(
         {-1, spatial_merge_size_, spatial_merge_size_, hidden_states.size(-1)});
-    // TO down sample  merge op
     hidden_states = hidden_states.permute({0, 3, 1, 2});
     hidden_states = downsample_(hidden_states).view({-1, out_hidden_size_});
-
     hidden_states = merger_(hidden_states);
-
     return hidden_states;
   };
 
@@ -844,6 +828,197 @@ struct Glm4VImageInputs {
 struct Glm4VVideoInputs {
   torch::Tensor pixel_values_videos;
   torch::Tensor video_grid_thw;
-  torch::Tensor second_per_grid_ts;
 };
+
+class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
+ public:
+  Glm4vForConditionalGenerationImpl(const ModelContext& context)
+      : model_args_(context.get_model_args()),
+        options_(context.get_tensor_options()) {
+    visual_ = register_module("visual", Glm4VisionTransformer(context));
+
+    language_model_ =
+        register_module("language_model", Glm4ForCausalLM(context));
+  }
+
+  torch::Tensor get_input_embeddings(
+      torch::Tensor input_ids,
+      const std::optional<Glm4VImageInputs>& image_input,
+      const std::optional<Glm4VVideoInputs>& video_input,
+      const ModelInputParams& input_params) {
+    auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
+    if (image_input) {
+      auto image_embeds = visual_(image_input->pixel_values.to(options_),
+                                  image_input->image_grid_thw,
+                                  input_params);
+      auto is_multimodal = torch::isin(input_ids, model_args_.image_token_id());
+      inputs_embeds.index_put_({is_multimodal}, image_embeds);
+    }
+    if (video_input) {
+      std::vector<torch::Tensor> temp_frames_hw;
+      for (int i = 0; i < video_input->video_grid_thw.size(0); ++i) {
+        auto t = video_input->video_grid_thw[i][0].item<int32_t>();
+        auto h = video_input->video_grid_thw[i][1].item<int32_t>();
+        auto w = video_input->video_grid_thw[i][2].item<int32_t>();
+        auto repeated_row =
+            torch::tensor({1, h, w}).unsqueeze(0).repeat({t, 1});
+        temp_frames_hw.push_back(repeated_row);
+      }
+      auto flatten_video_grid_thw = torch::cat(temp_frames_hw, 0);
+      auto video_embeds = visual_(video_input->pixel_values_videos.to(options_),
+                                  flatten_video_grid_thw,
+                                  input_params);
+      auto is_multimodal = torch::isin(input_ids, model_args_.image_token_id());
+      inputs_embeds.index_put_({is_multimodal}, video_embeds);
+    }
+    return inputs_embeds;
+  }
+
+  torch::Tensor forward(const torch::Tensor& tokens,
+                        const torch::Tensor& positions,
+                        std::vector<KVCache>& kv_caches,
+                        const ModelInputParams& input_params) {
+    torch::NoGradGuard no_grad;
+    const auto& mm_data = input_params.mm_data;
+    torch::Tensor pixel_values;
+    if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
+      pixel_values = res.value();
+
+    torch::Tensor image_grid_thw;
+    if (const auto& res = mm_data.get<torch::Tensor>("image_grid_thw"))
+      image_grid_thw = res.value();
+
+    torch::Tensor pixel_values_videos;
+    if (const auto& res = mm_data.get<torch::Tensor>("pixel_values_videos"))
+      pixel_values_videos = res.value();
+
+    torch::Tensor video_grid_thw;
+    if (const auto& res = mm_data.get<torch::Tensor>("video_grid_thw"))
+      video_grid_thw = res.value();
+
+    std::optional<Glm4VImageInputs> image_inputs;
+    std::optional<Glm4VVideoInputs> video_inputs;
+
+    if (pixel_values.defined() && image_grid_thw.defined())
+      image_inputs = Glm4VImageInputs{pixel_values, image_grid_thw};
+
+    if (pixel_values_videos.defined() && video_grid_thw.defined()) {
+      video_inputs = Glm4VVideoInputs{pixel_values_videos, video_grid_thw};
+    }
+    auto inputs_embeds =
+        get_input_embeddings(tokens, image_inputs, video_inputs, input_params);
+    input_params.input_embedding = inputs_embeds;
+    auto emb = language_model_(tokens, positions, kv_caches, input_params);
+
+    return emb;
+  }
+
+  torch::Tensor logits(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) {
+    return language_model_->logits(hidden_states, seleted_idxes);
+  }
+
+  void load_model(std::unique_ptr<ModelLoader> loader) {
+    for (const auto& state_dict : loader->get_state_dicts()) {
+      visual_->load_state_dict(
+          state_dict->get_dict_with_prefix("model.visual."));
+    }
+    visual_->verify_loaded_weights("model.visual.");
+    visual_->merge_loaded_weights();
+    if (!model_args_.image_embedding_mode()) {
+      language_model_->load_model(std::move(loader), "model.language_model.");
+    }
+  }
+
+  layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
+  void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
+
+  layer::WordEmbedding get_word_embedding() {
+    return language_model_->get_word_embedding();
+  }
+
+  void set_word_embedding(layer::WordEmbedding& word_embedding) {
+    language_model_->set_word_embedding(word_embedding);
+  }
+
+ private:
+  ModelArgs model_args_;
+  torch::TensorOptions options_;
+  Glm4VisionTransformer visual_{nullptr};
+  Glm4ForCausalLM language_model_{nullptr};
+};
+TORCH_MODULE(Glm4vForConditionalGeneration);
+
+REGISTER_INPUT_PROCESSOR(glm4v, GLM4VInputProcessor);
+REGISTER_CAUSAL_VLM_MODEL(glm4v, Glm4vForConditionalGeneration);
+REGISTER_IMAGE_PROCESSOR(glm4v, Glm4VImageProcessor);
+// register the model args
+REGISTER_MODEL_ARGS(glm4v, [&] {
+  LOAD_ARG_OR(model_type, "model_type", "glm4v");
+  LOAD_ARG_OR(image_start_token_id, "image_start_token_id", 151339);
+  LOAD_ARG_OR(image_end_token_id, "image_end_token_id", 151340);
+  LOAD_ARG_OR(video_start_token_id, "video_start_token_id", 151341);
+  LOAD_ARG_OR(video_end_token_id, "video_end_token_id", 151342);
+  LOAD_ARG_OR(image_token_id, "image_token_id", 151363);
+  LOAD_ARG_OR(video_token_id, "video_token_id", 151364);
+  LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
+
+  // text config
+  LOAD_ARG_OR(vocab_size, "text_config.vocab_size", 151552);
+  // LOAD_ARG_OR(pad_token_id, "text_config.pad_token_id", 151329);
+  LOAD_ARG_OR(
+      eos_token_id_vec, "text_config.eos_token_id", std::vector<int>{151329});
+  LOAD_ARG_OR(attention_bias, "text_config.attention_bias", true);
+  LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f);
+  LOAD_ARG_OR(first_k_dense_replace, "text_config.first_k_dense_replace", 1);
+  LOAD_ARG_OR(hidden_act, "text_config.hidden_act", "silu");
+  LOAD_ARG_OR(hidden_size, "text_config.hidden_size", 4096);
+  LOAD_ARG_OR(initializer_range, "text_config.initializer_range", 0.02);
+  LOAD_ARG_OR(intermediate_size, "text_config.intermediate_size", 10944);
+  LOAD_ARG_OR(
+      max_position_embeddings, "text_config.max_position_embeddings", 131072);
+  LOAD_ARG_OR(n_heads, "text_config.num_attention_heads", 96);
+  LOAD_ARG_OR_FUNC(head_dim, "text_config.head_dim", [&] {
+    return args->hidden_size() / args->n_heads();
+  });
+  LOAD_ARG_OR(num_experts_per_tok, "text_config.num_experts_per_tok", 8);
+  LOAD_ARG_OR(n_layers, "text_config.num_hidden_layers", 46);
+  LOAD_ARG_OR(n_kv_heads, "text_config.num_key_value_heads", 8);
+  // LOAD_ARG_OR(partial_rotary_factor, "text_config.partial_rotary_factor",
+  // 0.5);
+  LOAD_ARG_OR(rms_norm_eps, "text_config.rms_norm_eps", 1e-05);
+  LOAD_ARG_OR(dtype, "text_config.dtype", "bfloat16");
+  LOAD_ARG_OR(rope_scaling_rope_type, "text_config.rope_scaling.type", "mrope");
+  LOAD_ARG(rope_scaling_mrope_section,
+           "text_config.rope_scaling.mrope_section");
+  LOAD_ARG_OR(rope_theta, "text_config.rope_theta", 500000.0f);
+  LOAD_ARG_OR(routed_scaling_factor, "text_config.routed_scaling_factor", 1.0);
+  LOAD_ARG_OR(topk_group, "text_config.topk_group", 1);
+  // LOAD_ARG_OR(use_cache, "text_config.use_cache", true);
+  LOAD_ARG_OR(use_qk_norm, "text_config.use_qk_norm", false);
+
+  // vision config
+  // LOAD_ARG_OR(mm_attention_bias, "vision_config.attention_bias", false);
+  // LOAD_ARG_OR(mm_attention_dropout, "vision_config.attention_dropout", 0.0f);
+  LOAD_ARG_OR(mm_num_hidden_layers, "vision_config.depth", 24);
+  LOAD_ARG_OR(mm_hidden_act, "vision_config.hidden_act", "silu");
+  LOAD_ARG_OR(mm_hidden_size, "vision_config.hidden_size", 1536);
+  LOAD_ARG_OR(mm_image_size, "vision_config.image_size", 336);
+  LOAD_ARG_OR(mm_num_channels, "vision_config.in_channels", 3);
+  LOAD_ARG_OR(mm_initializer_range, "vision_config.initializer_range", 0.02);
+  LOAD_ARG_OR(mm_intermediate_size, "vision_config.intermediate_size", 10944);
+  LOAD_ARG_OR(mm_num_attention_heads, "vision_config.num_heads", 12);
+  LOAD_ARG_OR(mm_projection_dim, "vision_config.out_hidden_size", 4096);
+  LOAD_ARG_OR(mm_patch_size, "vision_config.patch_size", 14);
+  // LOAD_ARG_OR(mm_rms_norm_eps, "vision_config.rms_norm_eps", 1e-05);
+  LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2);
+  LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
+  LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {
+    return args->mm_hidden_size() / args->mm_num_attention_heads();
+  });
+
+  SET_ARG(stop_token_ids,
+          std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
+                                      args->eos_token_id_vec().end()));
+});
 }  // namespace xllm
