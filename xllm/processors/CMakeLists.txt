@@ -24,6 +24,7 @@ cc_library(
     clip_image_processor.h
     minicpmv_image_processor.h
     qwen2_vl_image_processor.h
+    glm4v_image_processor.h
     pywarpper_image_processor.h
     input_processor.h
   SRCS
@@ -31,6 +32,7 @@ cc_library(
     clip_image_processor.cpp
     minicpmv_image_processor.cpp
     qwen2_vl_image_processor.cpp
+    glm4v_image_processor.cpp
     pywarpper_image_processor.cpp
   DEPS
     ${BASE_DEPS}
