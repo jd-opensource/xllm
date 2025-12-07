@@ -20,6 +20,8 @@ limitations under the License.
 #include <opencv2/opencv.hpp>
 #include <string>
 
+#include "mm_data.h"
+
 namespace xllm {
 
 class OpenCVImageDecoder {
@@ -41,4 +43,13 @@ class OpenCVImageEncoder {
   bool valid(const torch::Tensor& t);
 };
 
+class OpenCVVideoDecoder {
+ public:
+  OpenCVVideoDecoder() = default;
+  ~OpenCVVideoDecoder() = default;
+
+  bool decode(const std::string& raw_data,
+              torch::Tensor& t,
+              VideoMetadata& meta);
+};
 }  // namespace xllm

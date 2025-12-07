@@ -118,9 +118,8 @@ torch::Tensor ImageProcessor::normalize(const torch::Tensor& image,
     result = image.to(torch::kFloat32);
   }
 
-  auto dtype = image.dtype();
   auto device = image.device();
-  auto options = torch::dtype(dtype).device(device);
+  auto options = torch::dtype(torch::kFloat32).device(device);
 
   auto m_tensor = torch::tensor(mean, options).reshape({-1, 1, 1});
   auto s_tensor = torch::tensor(std, options).reshape({-1, 1, 1});
