@@ -330,15 +330,6 @@ void XServiceClient::heartbeat() {
                                            sizeof(hash_key.data));
           }
         }
-
-        if (event.offload_cache.size()) {
-          cache_event->mutable_offload_cache()->Reserve(
-              event.offload_cache.size());
-          for (auto& hash_key : event.offload_cache) {
-            cache_event->add_offload_cache(hash_key.data,
-                                           sizeof(hash_key.data));
-          }
-        }
       }
 
       req.mutable_load_metrics()->set_gpu_cache_usage_perc(

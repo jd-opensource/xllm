@@ -19,7 +19,6 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <folly/futures/Future.h>
 
-#include <chrono>
 #include <cstdint>
 #include <vector>
 
@@ -249,7 +248,7 @@ class Sequence final {
     return &prefetch_results_;
   }
 
-  bool update_prefetch_result(uint32_t timeout = 30);
+  bool update_prefetch_result(uint32_t timeout);
 
   void reset();
 

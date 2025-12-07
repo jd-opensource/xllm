@@ -171,7 +171,6 @@ void BlockManagerImpl::get_merged_kvcache_event(KvCacheEvent* event) const {
   if (events != nullptr) {
     event->removed_cache.merge(events->removed_cache);
     event->stored_cache.merge(events->stored_cache);
-    event->offload_cache.merge(events->offload_cache);
     events->clear();
   }
 }

@@ -265,4 +265,15 @@ void MultiTierBlockManagerPool::transfer_blocks(std::vector<Batch>* batches) {
   saved_device_blocks_.resize(host_block_managers_.size());
 }
 
+void MultiTierBlockManagerPool::get_merged_kvcache_event(
+    KvCacheEvent* event) const {
+  if (host_block_managers_.empty()) {
+    BlockManagerPool::get_merged_kvcache_event(event);
+  } else {
+    for (int32_t i = 0; i < host_block_managers_.size(); ++i) {
+      host_block_managers_[i]->get_merged_kvcache_event(event);
+    }
+  }
+}
+
 }  // namespace xllm

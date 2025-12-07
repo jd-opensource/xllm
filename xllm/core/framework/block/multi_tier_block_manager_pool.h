@@ -40,6 +40,8 @@ class MultiTierBlockManagerPool : public BlockManagerPool {
   bool update_prefetch_result(std::shared_ptr<Request>& request,
                               const uint32_t timeout) override;
 
+  void get_merged_kvcache_event(KvCacheEvent* event) const override;
+
  private:
   void allocate_host_shared(Sequence* sequence);
 

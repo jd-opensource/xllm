@@ -42,7 +42,6 @@ message InstanceMetaInfo {
 message KvCacheEvent {
     repeated bytes stored_cache = 1;
     repeated bytes removed_cache = 2;
-    repeated bytes offload_cache = 3;
 }
 
 message LoadMetrics {
@@ -55,7 +54,6 @@ message LatencyMetrics {
   int64 recent_max_tbt = 2;
 }
 
-// TODO: add metainfo/metrics
 message HeartbeatRequest {
   string name = 1;
   KvCacheEvent cache_event = 2;

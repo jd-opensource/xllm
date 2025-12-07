@@ -25,13 +25,10 @@ struct KvCacheEvent {
       stored_cache;
   std::unordered_set<Murmur3Key, FixedStringKeyHash, FixedStringKeyEqual>
       removed_cache;
-  std::unordered_set<Murmur3Key, FixedStringKeyHash, FixedStringKeyEqual>
-      offload_cache;
 
   void clear() {
     stored_cache.clear();
     removed_cache.clear();
-    offload_cache.clear();
   }
 };
 
