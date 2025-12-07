@@ -92,6 +92,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
                                            model_args.max_position_embeddings(),
                                            model_args.rope_theta(),
                                            options);
+    mrope_section_ = model_args.rope_scaling_mrope_section();
 
     // int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
@@ -117,6 +118,14 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     }
   }
 
+  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
+#if defined(USE_NPU)
+    return embed_tokens_(input_ids, 0);
+#else
+    return embed_tokens_(input_ids);
+#endif
+  }
+
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   torch::Tensor forward(torch::Tensor tokens,
@@ -130,7 +139,13 @@ class Glm4MoeModelImpl : public torch::nn::Module {
       }
     }
 
-    auto h = embed_tokens_(tokens, 0);
+    auto inputs_embeds = input_params.input_embedding;
+    torch::Tensor h;
+    if (inputs_embeds.defined()) {
+      h = inputs_embeds;
+    } else {
+      h = embed_tokens_(tokens, 0);
+    }
     int64_t input_length = tokens.size(0);
     torch::Tensor expert_array = torch::arange(
         0,
@@ -140,6 +155,26 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
+    if (positions.dim() == 2) {  // mrope
+      auto apply = [this](torch::Tensor x) {
+        auto sections = mrope_section_;
+        sections.insert(sections.end(), sections.begin(), sections.end());
+
+        auto vec = x.split(sections, -1);
+        std::vector<torch::Tensor> selects;
+        selects.reserve(vec.size());
+
+        for (int64_t i = 0; i < vec.size(); ++i) {
+          auto m = vec[i];
+          selects.push_back(m[i % mrope_section_.size()]);
+        }
+        return torch::cat(selects, -1);
+      };
+      cos_pos = apply(cos_pos.reshape(
+          {positions.sizes().front(), -1, cos_pos.sizes().back()}));
+      sin_pos = apply(sin_pos.reshape(
+          {positions.sizes().front(), -1, sin_pos.sizes().back()}));
+    }
     cos_pos = cos_pos.view(at::IntArrayRef{-1, 2, cos_pos.size(-1) / 2});
     sin_pos = sin_pos.view(at::IntArrayRef{-1, 2, sin_pos.size(-1) / 2});
     torch::Tensor attn_mask;
@@ -250,6 +285,8 @@ class Glm4MoeModelImpl : public torch::nn::Module {
   layer::RmsNorm norm_{nullptr};
   torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};
+
+  std::vector<int64_t> mrope_section_;
 };
 TORCH_MODULE(Glm4MoeModel);
 
@@ -258,6 +295,10 @@ class Glm4MoeForCausalLMImpl : public torch::nn::Module {
   Glm4MoeForCausalLMImpl(const ModelContext& context) {
     model_ = register_module("model", Glm4MoeModel(context));
     lm_head_ = register_module("lm_head", layer::LmHead(context));
+  }
+
+  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
+    return model_->get_input_embeddings(input_ids);
   }
 
   // tokens: [num_tokens]
@@ -280,14 +321,15 @@ class Glm4MoeForCausalLMImpl : public torch::nn::Module {
     return lm_head_(hidden_states, seleted_idxes, 0);
   }
 
-  void load_model(std::unique_ptr<ModelLoader> loader) {
+  void load_model(std::unique_ptr<ModelLoader> loader,
+                  std::string prefix = "model." /*llm model weight prefix*/) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(state_dict->get_dict_with_prefix("model."));
+      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
       lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
     }
 
     // verify
-    model_->verify_loaded_weights("model.");
+    model_->verify_loaded_weights(prefix);
     lm_head_->verify_loaded_weights("lm_head.");
 
     model_->merge_loaded_weights();

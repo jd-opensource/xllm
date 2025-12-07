@@ -56,6 +56,7 @@ cc_library(
   HDRS
     column_parallel_linear.h
     deepseek_v2_decoder_layer.h
+    glm4_vision_encode_layer.h
     llama_decoder_layer.h
     multi_head_attention.h
     qwen2_decoder_layer.h

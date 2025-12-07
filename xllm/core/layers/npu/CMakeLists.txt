@@ -19,6 +19,7 @@ cc_library(
     npu_base_layer.h
     npu_column_parallel_linear_impl.h
     npu_glm4_moe_decoder_layer.h
+    npu_glm4_vision_encoder_layer_impl.h
     npu_deepseek_v2_decoder_layer_impl.h
     npu_llama_decoder_layer_impl.h
     npu_qwen2_decoder_layer_impl.h
@@ -39,6 +40,7 @@ cc_library(
     npu_base_layer.cpp
     npu_column_parallel_linear_impl.cpp
     npu_glm4_moe_decoder_layer.cpp
+    npu_glm4_vision_encoder_layer_impl.cpp
     npu_deepseek_v2_decoder_layer_impl.cpp
     npu_llama_decoder_layer_impl.cpp
     npu_qwen2_decoder_layer_impl.cpp
