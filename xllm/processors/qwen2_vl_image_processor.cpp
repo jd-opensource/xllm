@@ -60,6 +60,72 @@ std::optional<Size> smart_resize(int height,
 }
 }  // namespace
 
+torch::Tensor Qwen2VLImageProcessor::sample_frames(
+    const VideoMetadata& metadata,
+    int temporal_patch_size,
+    int min_frames,
+    int max_frames,
+    int num_frames,
+    double set_fps) {
+  if (set_fps > 0.0 && num_frames > 0) {
+    LOG(FATAL) << "num_frames and fps are mutually exclusive arguments, please "
+                  "use only one!";
+  }
+
+  double fps = set_fps;
+
+  int total_num_frames = metadata.total_num_frames;
+
+  if (num_frames > 0) {
+    double double_num_frames =
+        std::round(static_cast<double>(num_frames) / temporal_patch_size) *
+        temporal_patch_size;
+    num_frames = static_cast<int>(double_num_frames);
+  } else if (fps > 0.0) {
+    if (metadata.fps <= 0.0) {
+      LOG(FATAL)
+          << "Asked to sample `fps` frames per second but no video metadata "
+             "was provided which is required when sampling with `fps`. ";
+    }
+
+    max_frames =
+        (std::min(max_frames, total_num_frames) / temporal_patch_size) *
+        temporal_patch_size;
+    double double_num_frames =
+        static_cast<double>(total_num_frames) / metadata.fps * fps;
+    double_num_frames = std::min(
+        std::min(std::max(double_num_frames, static_cast<double>(min_frames)),
+                 static_cast<double>(max_frames)),
+        static_cast<double>(total_num_frames));
+    double_num_frames = std::floor(double_num_frames / temporal_patch_size) *
+                        temporal_patch_size;
+
+    num_frames = static_cast<int>(double_num_frames);
+  }
+
+  if (num_frames > total_num_frames) {
+    LOG(FATAL) << "Video can't be sampled. The inferred num_frames="
+               << num_frames << " exceeds total_num_frames=" << total_num_frames
+               << ".";
+  }
+
+  if (num_frames > 0) {
+    std::vector<int64_t> indices;
+    indices.reserve(num_frames);
+    for (int i = 0; i < num_frames; ++i) {
+      int64_t k = static_cast<int64_t>(
+          (static_cast<int64_t>(i) * total_num_frames) / num_frames);
+      if (k >= total_num_frames) k = total_num_frames - 1;
+      indices.push_back(k);
+    }
+    return torch::tensor(indices, torch::TensorOptions().dtype(torch::kLong));
+  } else {
+    return torch::arange(0,
+                         static_cast<int64_t>(total_num_frames),
+                         torch::TensorOptions().dtype(torch::kLong));
+  }
+}
+
 Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
   image_mean_ = args.mm_image_normalize_mean();
   image_std_ = args.mm_image_normalize_std();
@@ -92,14 +158,26 @@ Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
 
 bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
   std::vector<torch::Tensor> images = inputs.get_decode_data(MMType::IMAGE);
-  if (images.empty()) {
-    LOG(ERROR) << " image tensor not found.";
+  std::vector<torch::Tensor> videos = inputs.get_decode_data(MMType::VIDEO);
+  std::vector<VideoMetadata> video_meta_list = inputs.get_video_metadata();
+
+  if (images.empty() && (videos.empty() || video_meta_list.empty())) {
+    LOG(ERROR) << "no image/video tensor found.";
     return false;
   }
 
-  if (!this->process_images(images, datas)) {
-    LOG(ERROR) << " process image failed.";
-    return false;
+  if (!images.empty()) {
+    if (!this->process_images(images, datas)) {
+      LOG(ERROR) << " process image failed.";
+      return false;
+    }
+  }
+
+  if (!videos.empty()) {
+    if (!this->process_videos(videos, video_meta_list, datas)) {
+      LOG(ERROR) << " process video failed.";
+      return false;
+    }
   }
 
   return true;
@@ -120,9 +198,9 @@ bool Qwen2VLImageProcessor::process_images(std::vector<torch::Tensor> images,
   auto thw = torch::tensor(grids);
 
   thw = thw.clone().reshape({-1, 3});
-  mm_datas = std::move(MMData(
-      MMType::IMAGE, {{"image_grid_thw", thw}, {"pixel_values", values}}));
 
+  mm_datas.add(MMType::IMAGE, "image_grid_thw", thw);
+  mm_datas.add(MMType::IMAGE, "pixel_values", values);
   return true;
 }
 
@@ -195,6 +273,159 @@ bool Qwen2VLImageProcessor::process_image(
   pixel_values.emplace_back(patches);
   grids.insert(grids.end(), {grid_t, grid_h, grid_w});
 
+  return true;
+}
+
+bool Qwen2VLImageProcessor::process_videos(
+    std::vector<torch::Tensor> videos,
+    std::vector<VideoMetadata> video_meta_list,
+    MMData& mm_datas) {
+  std::vector<torch::Tensor> pixel_values;
+  std::vector<int64_t> grids;
+
+  const size_t video_size = videos.size();
+  for (size_t i = 0; i < video_size; ++i) {
+    auto& vid = videos[i];
+    auto& metadata = video_meta_list[i];
+    if (!this->process_video(vid, metadata, pixel_values, grids)) {
+      return false;
+    }
+  }
+
+  auto values = torch::cat(pixel_values);
+  auto thw = torch::tensor(grids).clone().reshape({-1, 3});
+
+  const size_t num_videos = videos.size();
+  std::vector<double> second_per_grid;
+  second_per_grid.reserve(num_videos);
+  for (size_t i = 0; i < num_videos; ++i) {
+    const auto& metadata = video_meta_list[i];
+    double fps =
+        metadata.sampled_fps > 0.0 ? metadata.sampled_fps : metadata.fps;
+    double seconds_per_grid = static_cast<double>(temporal_patch_size_) / fps;
+    second_per_grid.push_back(seconds_per_grid);
+  }
+  mm_datas.set_video_metadata(video_meta_list);
+
+  auto opts = torch::TensorOptions().dtype(torch::kFloat32);
+  auto second_per_grid_ts = torch::tensor(second_per_grid, opts);
+
+  mm_datas.add(MMType::VIDEO, "video_grid_thw", thw);
+  mm_datas.add(MMType::VIDEO, "pixel_values_videos", values);
+  mm_datas.add(MMType::VIDEO, "second_per_grid_ts", second_per_grid_ts);
+
+  return true;
+}
+
+bool Qwen2VLImageProcessor::process_video(
+    torch::Tensor origin_video,
+    VideoMetadata& metadata,
+    std::vector<torch::Tensor>& pixel_values,
+    std::vector<int64_t>& grids) {
+  if (origin_video.dim() != 4) {
+    LOG(FATAL) << "video must be TCHW";
+  }
+
+  torch::Tensor indices;
+  if (do_sample_frame_) {
+    indices = this->sample_frames(metadata,
+                                  temporal_patch_size_,
+                                  min_frames_,
+                                  max_frames_,
+                                  /*num_frames=*/-1,
+                                  /*set_fps=*/2.0);
+  } else {
+    indices = torch::arange(0,
+                            static_cast<int64_t>(origin_video.size(0)),
+                            torch::TensorOptions().dtype(torch::kLong));
+  }
+  auto video = origin_video.index_select(/*dim=*/0, indices);
+  int64_t sampled_total_frames = video.size(0);
+
+  metadata.frame_indices = indices;
+  metadata.timestamps.clear();
+  metadata.timestamps.reserve(static_cast<size_t>(sampled_total_frames));
+  double fps_for_ts = (metadata.fps > 0.0) ? metadata.fps : 24.0;
+  for (int64_t i = 0; i < sampled_total_frames; ++i) {
+    int64_t frame_idx = metadata.frame_indices[i].item<int64_t>();
+    metadata.timestamps.push_back(static_cast<double>(frame_idx) / fps_for_ts);
+  }
+
+  if (metadata.total_num_frames > 0 && metadata.fps > 0.0) {
+    metadata.sampled_fps = double(sampled_total_frames) /
+                           double(metadata.total_num_frames) * metadata.fps;
+  } else {
+    metadata.sampled_fps = fps_for_ts;
+  }
+
+  auto shape = video.sizes();
+  auto time_len = shape[0];
+  auto channel = shape[1];
+  auto resized_height = shape[2];
+  auto resized_width = shape[3];
+
+  if (do_resize_) {
+    auto size = smart_resize(resized_height,
+                             resized_width,
+                             patch_size_ * merge_size_,
+                             size_["shortest_edge"],
+                             size_["longest_edge"]);
+    if (!size) {
+      return false;
+    }
+    std::tie(resized_height, resized_width) = *size;
+  }
+
+  std::vector<torch::Tensor> out_frames;
+  out_frames.reserve(time_len);
+  // for each frame
+  auto frames = video.unbind(0);
+  for (auto& frame : frames) {
+    // resize
+    if (do_resize_)
+      frame =
+          this->resize(frame, {resized_height, resized_width}, resample_, true);
+    // normalize
+    if (do_normalize_) frame = this->normalize(frame, image_mean_, image_std_);
+    // rescale
+    if (do_rescale_) frame = this->rescale(frame, rescale_factor_);
+    out_frames.push_back(frame);
+  }
+
+  auto out_video = torch::stack(out_frames);  // [T,C,H,W]
+
+  auto pad_t = (temporal_patch_size_ - (time_len % temporal_patch_size_)) %
+               temporal_patch_size_;
+  if (pad_t > 0) {
+    auto last =
+        out_video.index({time_len - 1}).unsqueeze(0).repeat({pad_t, 1, 1, 1});
+    out_video = torch::cat({out_video, last}, 0);
+  }
+
+  shape = out_video.sizes();
+  auto grid_h = resized_height / patch_size_;
+  auto grid_w = resized_width / patch_size_;
+  auto grid_t = shape[0] / temporal_patch_size_;
+
+  out_video = out_video.contiguous();
+
+  auto patches = out_video.view({grid_t,
+                                 temporal_patch_size_,
+                                 channel,
+                                 grid_h / merge_size_,
+                                 merge_size_,
+                                 patch_size_,
+                                 grid_w / merge_size_,
+                                 merge_size_,
+                                 patch_size_});
+
+  patches = patches.permute({0, 3, 6, 4, 7, 2, 1, 5, 8});
+  patches = patches.reshape(
+      {grid_t * grid_h * grid_w,
+       channel * temporal_patch_size_ * patch_size_ * patch_size_});
+
+  pixel_values.emplace_back(patches);
+  grids.insert(grids.end(), {grid_t, grid_h, grid_w});
   return true;
 }
 

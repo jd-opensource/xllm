@@ -24,6 +24,7 @@ pybind_extension(
     torch
     c10
 )
+target_link_options(xllm_export PRIVATE -Wl,-Bsymbolic)
 target_link_libraries(common PRIVATE leveldb::leveldb ZLIB::ZLIB OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
 add_dependencies(common brpc-static)
 

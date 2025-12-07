@@ -59,6 +59,18 @@ class ImageHandler : public MMHandlerBase {
   std::string dataurl_prefix_{"data:image"};
 };
 
+class VideoHandler : public MMHandlerBase {
+ public:
+  VideoHandler() = default;
+  ~VideoHandler() = default;
+
+  virtual bool load(const MMContent& content, MMInputItem& input) override;
+  virtual bool decode(MMInputItem& input) override;
+
+ private:
+  std::string dataurl_prefix_{"data:video"};
+};
+
 class MMHandlerSet {
  public:
   MMHandlerSet();

@@ -35,6 +35,8 @@ struct MMInputItem {
   std::string raw_data_;  // binary
 
   torch::Tensor decode_data_;  // image: rgb, [c,h,w], uint8
+
+  VideoMetadata video_meta_;
 };
 
 struct MMInput {
@@ -54,6 +56,17 @@ struct MMInput {
       }
     }
     return std::move(vec);
+  }
+
+  std::vector<VideoMetadata> get_video_metadata() const {
+    std::vector<VideoMetadata> metas;
+    metas.reserve(items_.size());
+    for (auto& item : items_) {
+      if (item.type_ == MMType::VIDEO) {
+        metas.push_back(item.video_meta_);
+      }
+    }
+    return metas;
   }
 
   std::vector<MMInputItem> items_;
