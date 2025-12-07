@@ -402,11 +402,8 @@ void WorkerService::TransferBlocks(
   std::vector<BlockTransferInfo> block_transfer_info;
   uint64_t batch_id = proto_to_block_transfer_info(*req, block_transfer_info);
 
-  if (batch_id == UNINITIALIZED_BATCH_ID) {
-    resp->set_success_cnt(worker_->transfer_kv_blocks(block_transfer_info));
-  } else {
-    worker_->transfer_kv_blocks(batch_id, std::move(block_transfer_info));
-  }
+  resp->set_success_cnt(
+      worker_->transfer_kv_blocks(batch_id, std::move(block_transfer_info)));
   return;
 }
 
@@ -482,7 +479,8 @@ void WorkerService::PrefetchFromStorage(
                                    std::min(i + options_.prefetch_bacth_size(),
                                             transfer_slice.size()));
 
-          auto success_cnt = worker_->prefetch_from_storage(current_slice);
+          auto success_cnt = worker_->transfer_kv_blocks(UNINITIALIZED_BATCH_ID,
+                                                         current_slice);
 
           if (success_cnt != current_slice.size() ||
               i + options_.prefetch_bacth_size() >= transfer_slice.size()) {

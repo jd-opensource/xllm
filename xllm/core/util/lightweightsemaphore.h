@@ -39,13 +39,13 @@ __declspec(dllimport) int __stdcall ReleaseSemaphore(void* hSemaphore,
 
 #if defined(__GLIBC_PREREQ) && defined(_GNU_SOURCE)
 #if __GLIBC_PREREQ(2, 30)
-#define MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
+#define XLLM_MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
 #endif
 #endif
 #endif
 
 namespace xllm {
-namespace moodycamel {
+namespace xllm_moodycamel {
 namespace details {
 
 // Code in the mpmc_sema namespace below is an adaptation of Jeff Preshing's
@@ -74,8 +74,8 @@ class Semaphore {
  private:
   void* m_hSema;
 
-  Semaphore(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
-  Semaphore& operator=(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore(const Semaphore& other) XLLM_MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore& operator=(const Semaphore& other) XLLM_MOODYCAMEL_DELETE_FUNCTION;
 
  public:
   Semaphore(int initialCount = 0) {
@@ -112,8 +112,8 @@ class Semaphore {
  private:
   semaphore_t m_sema;
 
-  Semaphore(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
-  Semaphore& operator=(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore(const Semaphore& other) XLLM_MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore& operator=(const Semaphore& other) XLLM_MOODYCAMEL_DELETE_FUNCTION;
 
  public:
   Semaphore(int initialCount = 0) {
@@ -157,8 +157,8 @@ class Semaphore {
  private:
   sem_t m_sema;
 
-  Semaphore(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
-  Semaphore& operator=(const Semaphore& other) MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore(const Semaphore& other) XLLM_MOODYCAMEL_DELETE_FUNCTION;
+  Semaphore& operator=(const Semaphore& other) XLLM_MOODYCAMEL_DELETE_FUNCTION;
 
  public:
   Semaphore(int initialCount = 0) {
@@ -191,7 +191,7 @@ class Semaphore {
     struct timespec ts;
     const int usecs_in_1_sec = 1000000;
     const int nsecs_in_1_sec = 1000000000;
-#ifdef MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
+#ifdef XLLM_MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
     clock_gettime(CLOCK_MONOTONIC, &ts);
 #else
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -207,7 +207,7 @@ class Semaphore {
 
     int rc;
     do {
-#ifdef MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
+#ifdef XLLM_MOODYCAMEL_LIGHTWEIGHTSEMAPHORE_MONOTONIC
       rc = sem_clockwait(&m_sema, CLOCK_MONOTONIC, &ts);
 #else
       rc = sem_timedwait(&m_sema, &ts);
@@ -389,5 +389,5 @@ class LightweightSemaphore {
   }
 };
 
-}  // end namespace moodycamel
+}  // end namespace xllm_moodycamel
 }  // namespace xllm

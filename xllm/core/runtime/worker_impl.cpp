@@ -75,14 +75,6 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   device_.set_device();
   device_.init_device_context();
   threadpool_.schedule([this]() mutable { device_.set_device(); });
-  h2d_threadpool_ = std::make_unique<ThreadPool>(
-      2, [this]() mutable { device_.set_device(); });
-  d2h_threadpool_ = std::make_unique<ThreadPool>(
-      5, [this]() mutable { device_.set_device(); });
-  for (int i = 0; i < h2d_threadpool_->size() + d2h_threadpool_->size(); i++) {
-    copy_stream_.enqueue(device_.get_stream_from_pool(TIMEOUT_MS));
-  }
-
   prepare_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
 }
@@ -123,78 +115,8 @@ bool WorkerImpl::allocate_kv_cache(
     kv_caches_.emplace_back(key_cache, value_cache, index_cache);
   }
 
-  key_cache_size_per_layer_ = kv_caches_[0].get_k_cache()[0].numel() *
-                              kv_caches_[0].get_k_cache()[0].element_size();
-  // make sure value cache is not empty
-  if (!kv_cache_shape[1].empty()) {
-    value_cache_size_per_layer_ = kv_caches_[0].get_v_cache()[0].numel() *
-                                  kv_caches_[0].get_v_cache()[0].element_size();
-  }
-
-  allocate_host_kv_cache(kv_cache_shape);
+  init_multi_tier_kv_cache_transfer();
   status_ = Status::READY;
-  return true;
-}
-
-bool WorkerImpl::allocate_host_kv_cache(
-    const std::vector<std::vector<int64_t>>& device_kv_cache_shape) {
-  if (options_.host_blocks_factor() <= 0.00001) {
-    return true;
-  }
-#if defined(USE_NPU)
-  CHECK(model_ != nullptr) << "Model is not initialized.";
-  CHECK(host_kv_caches_.empty()) << "KV caches are already initialized.";
-  CHECK(device_kv_cache_shape[0][0] == device_kv_cache_shape[1][0]);
-
-  std::vector<std::vector<int64_t>> host_kv_cache_shape = device_kv_cache_shape;
-  const int64_t num_layers = context_.get_model_args().n_layers();
-  int64_t host_bolck_size =
-      device_kv_cache_shape[0][0] * options_.host_blocks_factor();
-  host_kv_cache_shape[0][0] = num_layers;
-  CHECK(!host_kv_cache_shape[1].empty())
-      << "v cache shape should not be empty!";
-  // TODO(kangmeng3): support mlu kvcache
-  host_kv_cache_shape[1][0] = num_layers;
-
-  // create a KVCache shape: block_size * [layers, token, head, dim]
-  aligned_tensor_creater_ = std::make_unique<AlignedTensorCreater>(
-      host_kv_cache_shape, dtype_, host_bolck_size, &host_kv_caches_);
-
-  LOG(INFO) << "Initializing host kv block size: " << host_bolck_size;
-
-  int32_t device_id = device_.index();
-  h2d_attrs_.dstLoc.id = device_id;
-  h2d_attrs_.dstLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_DEVICE;
-  h2d_attrs_.srcLoc.id = device_id;
-  h2d_attrs_.srcLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_HOST;
-  memset(h2d_attrs_.rsv, 0, 16);
-
-  d2h_attrs_.dstLoc.id = device_id;
-  d2h_attrs_.dstLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_HOST;
-  d2h_attrs_.srcLoc.id = device_id;
-  d2h_attrs_.srcLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_DEVICE;
-  memset(d2h_attrs_.rsv, 0, 16);
-
-  if (options_.enable_kvcache_store()) {
-    StoreConfig config;
-    config.localhost_name = options_.store_local_hostname();
-    config.protocol = options_.store_protocol();
-    config.metadata_server = options_.store_metadata_server();
-    config.master_server_address = options_.store_master_server_address();
-    config.tp_rank = options_.dp_size() > 1
-                         ? options_.node_rank() % options_.dp_size()
-                         : options_.node_rank();
-    config.total_size = aligned_tensor_creater_->get_total_size();
-    config.tensor_data = aligned_tensor_creater_->get_base_ptr();
-
-    if (!KVCacheStore::get_instance().init(config, &host_kv_caches_)) {
-      LOG(ERROR) << "Init KVCacheStore fail!";
-      return false;
-    }
-  }
-
-  status_ = Status::READY;
-#endif
   return true;
 }
 
@@ -261,7 +183,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   }
 #endif
 
-  allocate_host_kv_cache(kv_cache_shape);
+  init_multi_tier_kv_cache_transfer();
+
   status_ = Status::READY;
   return true;
 }
@@ -286,7 +209,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
   }
 
-  allocate_host_kv_cache(kv_cache_shape);
+  init_multi_tier_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -492,16 +415,11 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
                         input = std::move(input_on_device),
                         promise = std::move(promise)]() mutable {
 #if defined(USE_NPU)
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (layer_wise_load_synchronizer_.count(input.input_params.batch_id) !=
-          0) {
-        input.input_params.layer_wise_load_synchronizer = std::move(
-            layer_wise_load_synchronizer_[input.input_params.batch_id]);
-        layer_wise_load_synchronizer_.erase(input.input_params.batch_id);
-      }
+    if (multi_tier_kv_cache_transfer_ != nullptr) {
+      input.input_params.layer_wise_load_synchronizer =
+          multi_tier_kv_cache_transfer_->get_layer_synchronizer(
+              input.input_params.batch_id);
     }
-
 #endif
     // run the model on the given input in working thread
     if (!enable_schedule_overlap()) {
@@ -702,39 +620,17 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 }
 
 uint32_t WorkerImpl::transfer_kv_blocks(
-    const std::vector<BlockTransferInfo>& block_transfer_info) {
-  CHECK(!block_transfer_info.empty());
-
-  switch (block_transfer_info[0].transfer_type) {
-    case TransferType::D2G:
-      return offload_kv_blocks(block_transfer_info);
-    default:
-      LOG(ERROR) << "Unsupport copy type: "
-                 << uint32_t(block_transfer_info[0].transfer_type);
-      return 0;
-  }
-}
-
-void WorkerImpl::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
-  CHECK(!block_transfer_info.empty());
-  h2d_threadpool_->schedule(
-      [this,
-       batch_id = batch_id,
-       block_transfer_info = std::move(block_transfer_info)]() mutable {
-        switch (block_transfer_info[0].transfer_type) {
-          case TransferType::H2D: {
-            Slice<BlockTransferInfo> info_slice{block_transfer_info};
-            h2d_batch_copy(batch_id, info_slice);
-            break;
-          }
-          default:
-            LOG(ERROR) << "Unsupport copy type: "
-                       << uint32_t(block_transfer_info[0].transfer_type);
-            break;
-        }
-      });
+  return multi_tier_kv_cache_transfer_->transfer_kv_blocks(
+      batch_id, std::move(block_transfer_info));
+}
+
+uint32_t WorkerImpl::transfer_kv_blocks(
+    const uint64_t batch_id,
+    Slice<BlockTransferInfo>& block_transfer_info) {
+  return multi_tier_kv_cache_transfer_->transfer_kv_blocks(batch_id,
+                                                           block_transfer_info);
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(
@@ -759,333 +655,24 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
-// TODO(kangmeng): abstract this code(and the code below) into a new class here.
-uint32_t WorkerImpl::offload_kv_blocks(
-    const std::vector<BlockTransferInfo>& block_transfer_info) {
-  if (block_transfer_info.empty()) {
-    return 0;
+void WorkerImpl::init_multi_tier_kv_cache_transfer() {
+  if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
+    MultiTierKVCacheTransfer::Options transfer_options;
+    transfer_options
+        .tp_rank(options_.dp_size() > 1
+                     ? options_.node_rank() % options_.dp_size()
+                     : options_.node_rank())
+        .layers(context_.get_model_args().n_layers())
+        .host_blocks_factor(options_.host_blocks_factor())
+        .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
+        .enable_kvcache_store(options_.enable_kvcache_store())
+        .store_protocol(options_.store_protocol())
+        .store_master_server_address(options_.store_master_server_address())
+        .store_metadata_server(options_.store_metadata_server())
+        .store_local_hostname(options_.store_local_hostname());
+    multi_tier_kv_cache_transfer_ = std::make_unique<MultiTierKVCacheTransfer>(
+        transfer_options, device_, &kv_caches_);
   }
-
-  const int64_t num_layers = context_.get_model_args().n_layers();
-  uint32_t max_blocks_per_batch = BATCH_COPY_MAX_SIZE / (2 * num_layers);
-  uint32_t total_slice =
-      block_transfer_info.size() / max_blocks_per_batch +
-      uint32_t(block_transfer_info.size() % max_blocks_per_batch != 0);
-
-  Slice transfer_info_slice(block_transfer_info);
-  std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(total_slice);
-
-  for (size_t i = 0; i < block_transfer_info.size();
-       i += max_blocks_per_batch) {
-    folly::Promise<bool> promise;
-    auto future = promise.getSemiFuture();
-    auto slice = transfer_info_slice.slice(
-        i, std::min(i + max_blocks_per_batch, block_transfer_info.size()));
-
-    d2h_threadpool_->schedule([this,
-                               promise = std::move(promise),
-                               slice = std::move(slice)]() mutable {
-      bool ret = d2h_batch_copy(slice);
-      auto success_cnt = offload_to_store(slice);
-      if (success_cnt != slice.size()) {
-        LOG(WARNING) << "KVCacheStore not all put success: " << success_cnt
-                     << "/" << slice.size();
-      }
-      promise.setValue(ret);
-    });
-
-    futures.emplace_back(std::move(future));
-  }
-
-  if (!futures.empty()) {
-    try {
-      // TODO(kangmeng): add timeout
-      auto all_results = folly::collect(futures).get();
-      if (!std::all_of(all_results.begin(), all_results.end(), [](bool result) {
-            return result;
-          })) {
-        LOG(FATAL) << "Not all D2H copy returned true";
-      }
-    } catch (const std::exception& e) {
-      LOG(FATAL) << "Future execution failed: " << e.what();
-    }
-  }
-
-  return block_transfer_info.size();
 }
 
-bool WorkerImpl::d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info) {
-#if defined(USE_NPU)
-  const int64_t num_layers = context_.get_model_args().n_layers();
-  uint32_t num_batches = block_transfer_info.size() * num_layers * 2;
-  void** srcs = new void*[num_batches];
-  void** dsts = new void*[num_batches];
-  size_t* copy_size = new size_t[num_batches];
-  aclrtMemcpyBatchAttr attrs[1] = {d2h_attrs_};
-  size_t attrs_indexes[1] = {0};
-  size_t fail_index;
-  uint32_t curr_index = 0;
-
-  for (const auto& info : block_transfer_info) {
-    auto dst_k_cache = host_kv_caches_.at(info.dst_block_id).get_k_cache();
-    auto dst_v_cache = host_kv_caches_.at(info.dst_block_id).get_v_cache();
-
-    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-      auto src_k_cache = kv_caches_.at(layer_id).get_k_cache();
-      auto src_v_cache = kv_caches_.at(layer_id).get_v_cache();
-
-      srcs[curr_index] = src_k_cache[info.src_block_id].data_ptr();
-      dsts[curr_index] = dst_k_cache[layer_id].data_ptr();
-      copy_size[curr_index] = key_cache_size_per_layer_;
-
-      curr_index++;
-
-      srcs[curr_index] = src_v_cache[info.src_block_id].data_ptr();
-      dsts[curr_index] = dst_v_cache[layer_id].data_ptr();
-      copy_size[curr_index] = value_cache_size_per_layer_;
-
-      curr_index++;
-    }
-  }
-
-  std::unique_ptr<Stream> stream;
-  copy_stream_.wait_dequeue(stream);
-  c10::StreamGuard streamGuard = stream->set_stream_guard();
-
-  // TODO(kangmeng): change to async API
-  aclError ret = aclrtMemcpyBatch(dsts,
-                                  copy_size,
-                                  srcs,
-                                  copy_size,
-                                  num_batches,
-                                  attrs,
-                                  attrs_indexes,
-                                  1,
-                                  &fail_index);
-  if (ret != 0 || fail_index != SIZE_MAX) {
-    LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
-               << ", fail_index:" << fail_index;
-    copy_stream_.enqueue(std::move(stream));
-    return false;
-  }
-
-  if (stream->synchronize() != 0) {
-    LOG(ERROR) << "d2h_batch_copy timeout!";
-    copy_stream_.enqueue(std::move(stream));
-    return false;
-  }
-
-  copy_stream_.enqueue(std::move(stream));
-
-  delete[] dsts;
-  delete[] srcs;
-  delete[] copy_size;
-
-#endif
-  return true;
-}
-
-bool WorkerImpl::h2d_batch_copy(const uint64_t batch_id,
-                                Slice<BlockTransferInfo>& block_transfer_info) {
-#if defined(USE_NPU)
-  CHECK(block_transfer_info.size() < BATCH_COPY_MAX_SIZE / 2)
-      << "h2d_batch_copy support copy blocks less than "
-      << BATCH_COPY_MAX_SIZE / 2 << ", but got " << block_transfer_info.size();
-
-  if (block_transfer_info.empty()) {
-    return true;
-  }
-
-  const int64_t num_layers = context_.get_model_args().n_layers();
-  uint32_t layers_per_bacth_copy =
-      num_layers / options_.layers_wise_copy_batchs();
-  uint32_t num_batches = block_transfer_info.size() * 2;
-  while (num_batches * layers_per_bacth_copy > BATCH_COPY_MAX_SIZE) {
-    layers_per_bacth_copy--;
-  }
-
-  uint32_t copy_cnt =
-      (num_layers + layers_per_bacth_copy - 1) / layers_per_bacth_copy;
-  auto synchronizer = std::make_shared<NPULayerSynchronizerImpl>(copy_cnt);
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (layer_wise_load_synchronizer_.count(batch_id) != 0) {
-      LOG(FATAL) << "Batch id already exists!";
-    }
-    layer_wise_load_synchronizer_[batch_id] = synchronizer;
-  }
-
-  aclrtMemcpyBatchAttr attrs[1] = {h2d_attrs_};
-  size_t attrs_indexes[1] = {0};
-
-  std::unique_ptr<Stream> stream;
-  copy_stream_.wait_dequeue(stream);
-  c10::StreamGuard streamGuard = stream->set_stream_guard();
-  aclError ret = 0;
-
-  void** srcs = new void*[num_batches * layers_per_bacth_copy];
-  void** dsts = new void*[num_batches * layers_per_bacth_copy];
-  size_t* copy_size = new size_t[num_batches * layers_per_bacth_copy];
-
-  for (int index = 0; index < copy_cnt; index++) {
-    int layer_id = index * layers_per_bacth_copy;
-    size_t fail_index = 0;
-    uint32_t curr_index = 0;
-    uint32_t layer_cnt = 0;
-
-    while (layer_id < (index + 1) * layers_per_bacth_copy &&
-           layer_id < num_layers) {
-      auto dst_k_cache = kv_caches_.at(layer_id).get_k_cache();
-      auto dst_v_cache = kv_caches_.at(layer_id).get_v_cache();
-
-      for (const auto& info : block_transfer_info) {
-        auto src_k_cache = host_kv_caches_.at(info.src_block_id).get_k_cache();
-        auto src_v_cache = host_kv_caches_.at(info.src_block_id).get_v_cache();
-
-        srcs[curr_index] = src_k_cache[layer_id].data_ptr();
-        dsts[curr_index] = dst_k_cache[info.dst_block_id].data_ptr();
-        copy_size[curr_index] = key_cache_size_per_layer_;
-        curr_index++;
-
-        srcs[curr_index] = src_v_cache[layer_id].data_ptr();
-        dsts[curr_index] = dst_v_cache[info.dst_block_id].data_ptr();
-        copy_size[curr_index] = value_cache_size_per_layer_;
-        curr_index++;
-      }
-      layer_id++;
-      layer_cnt++;
-    }
-
-    // TODO(kangmeng): change to async API
-    ret = aclrtMemcpyBatch(dsts,
-                           copy_size,
-                           srcs,
-                           copy_size,
-                           num_batches * layer_cnt,
-                           attrs,
-                           attrs_indexes,
-                           1,
-                           &fail_index);
-
-    if (ret != 0 || fail_index != SIZE_MAX) {
-      LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
-                 << ", fail_index:" << fail_index;
-    } else {
-      auto* event = synchronizer->get_event(index);
-      ret = aclrtRecordEvent(*event, stream->get_stream()->stream());
-      if (ret != 0) {
-        LOG(ERROR) << "aclrtRecordEvent error: " << ret;
-      }
-    }
-    auto* event_flag = synchronizer->get_event_flag(index);
-    event_flag->store(true, std::memory_order_release);
-    if (ret != 0) break;
-  }
-
-  if (stream->synchronize() != 0) {
-    LOG(ERROR) << "h2d_batch_copy timeout!";
-    copy_stream_.enqueue(std::move(stream));
-    return false;
-  }
-  copy_stream_.enqueue(std::move(stream));
-
-  delete[] dsts;
-  delete[] srcs;
-  delete[] copy_size;
-
-#endif
-  return true;
-}
-
-uint32_t WorkerImpl::offload_to_store(
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  if (!options_.enable_kvcache_store()) {
-    return block_transfer_info.size();
-  }
-
-  return KVCacheStore::get_instance().batch_put(block_transfer_info);
-}
-
-uint32_t WorkerImpl::prefetch_from_storage(
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  if (!options_.enable_kvcache_store()) {
-    return 0;
-  }
-  return KVCacheStore::get_instance().batch_get(block_transfer_info);
-}
-
-AlignedTensorCreater::AlignedTensorCreater(
-    const std::vector<std::vector<int64_t>>& tensor_shapes,
-    const torch::ScalarType dtype,
-    const uint32_t num_tensors,
-    std::vector<xllm::KVCache>* tensors) {
-#if defined(USE_NPU)
-  CHECK(tensor_shapes.size() == 2)
-      << "tensor_shapes.size() must equal to 2, but got "
-      << tensor_shapes.size();
-
-  int64_t elements_per_k_tensor = 1;
-  int64_t elements_per_v_tensor = 1;
-
-  for (auto dim : tensor_shapes[0]) {
-    elements_per_k_tensor *= dim;
-  }
-  for (auto dim : tensor_shapes[1]) {
-    elements_per_v_tensor *= dim;
-  }
-
-  size_t element_size = torch::elementSize(dtype);
-  size_t bytes_per_k_tensor = elements_per_k_tensor * element_size;
-  size_t bytes_per_v_tensor = elements_per_v_tensor * element_size;
-  size_t page_size = sysconf(_SC_PAGESIZE);
-  total_size_ = num_tensors * (bytes_per_k_tensor + bytes_per_v_tensor);
-  total_size_ = ((total_size_ + page_size - 1) / page_size) * page_size;
-
-  base_ptr_ = mmap(nullptr,
-                   total_size_,
-                   PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS,
-                   -1,
-                   0);
-
-  if (base_ptr_ == MAP_FAILED) {
-    LOG(FATAL) << "Failed to allocate aligned memory pool!";
-  }
-
-  if (mlock(base_ptr_, total_size_) != 0) {
-    munmap(base_ptr_, total_size_);
-    LOG(FATAL) << "Failed to lock memory pool!";
-  }
-
-  auto ret = aclrtHostRegister(base_ptr_,
-                               total_size_,
-                               aclrtHostRegisterType::ACL_HOST_REGISTER_MAPPED,
-                               &mapped_ptr_);
-  if (ret != 0) {
-    LOG(FATAL) << "aclrtHostRegister fail: " << ret;
-  }
-
-  size_t current_offset = 0;
-  auto options = torch::TensorOptions().dtype(dtype).device(torch::kCPU);
-  tensors->reserve(num_tensors);
-
-  for (size_t i = 0; i < num_tensors; ++i) {
-    void* k_tensor_ptr = static_cast<char*>(base_ptr_) + current_offset;
-    torch::Tensor k_tensor =
-        torch::from_blob(k_tensor_ptr, tensor_shapes[0], options);
-    current_offset += bytes_per_k_tensor;
-
-    void* v_tensor_ptr = static_cast<char*>(base_ptr_) + current_offset;
-    torch::Tensor v_tensor =
-        torch::from_blob(v_tensor_ptr, tensor_shapes[1], options);
-    current_offset += bytes_per_v_tensor;
-
-    tensors->emplace_back(k_tensor, v_tensor);
-  }
-
-  LOG(INFO) << "Page aligned: "
-            << ((uintptr_t)base_ptr_ % page_size == 0 ? "YES" : "NO");
-#endif
-}
 }  // namespace xllm

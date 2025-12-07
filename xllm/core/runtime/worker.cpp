@@ -166,19 +166,15 @@ folly::SemiFuture<bool> Worker::pull_kv_blocks_async(
 }
 
 uint32_t Worker::transfer_kv_blocks(
-    const std::vector<BlockTransferInfo>& block_transfer_info) {
-  return impl_->transfer_kv_blocks(block_transfer_info);
-}
-
-void Worker::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
-  impl_->transfer_kv_blocks(batch_id, std::move(block_transfer_info));
+  return impl_->transfer_kv_blocks(batch_id, std::move(block_transfer_info));
 }
 
-uint32_t Worker::prefetch_from_storage(
+uint32_t Worker::transfer_kv_blocks(
+    const uint64_t batch_id,
     Slice<BlockTransferInfo>& block_transfer_info) {
-  return impl_->prefetch_from_storage(block_transfer_info);
+  return impl_->transfer_kv_blocks(batch_id, block_transfer_info);
 }
 
 const torch::Device& Worker::device() const { return impl_->device(); }

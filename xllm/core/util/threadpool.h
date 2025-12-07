@@ -61,7 +61,7 @@ class ThreadPool final {
                      BlockingCounter* block_counter);
 
   std::vector<std::thread> threads_;
-  std::vector<moodycamel::BlockingConcurrentQueue<Runnable>> queues_;
+  std::vector<xllm_moodycamel::BlockingConcurrentQueue<Runnable>> queues_;
 
   std::atomic<size_t> index_{0};
 };

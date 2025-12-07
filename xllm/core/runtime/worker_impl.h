@@ -31,6 +31,7 @@ limitations under the License.
 #endif
 #include "framework/eplb/eplb_executor.h"
 #include "framework/kv_cache/kv_cache_store.h"
+#include "framework/kv_cache/multi_tier_kv_cache_transfer.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
 #include "framework/model/model_input_params.h"
@@ -45,8 +46,6 @@ limitations under the License.
 #include "util/threadpool.h"
 
 namespace xllm {
-
-class AlignedTensorCreater;
 
 class WorkerImpl {
  public:
@@ -74,9 +73,6 @@ class WorkerImpl {
 
   // allocate kv cache. blocking call
   virtual bool allocate_kv_cache(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
-
-  virtual bool allocate_host_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
   virtual bool allocate_kv_cache_with_transfer(
@@ -150,11 +146,12 @@ class WorkerImpl {
       const std::vector<uint64_t>& dst_blocks);
 
   virtual uint32_t transfer_kv_blocks(
-      const std::vector<BlockTransferInfo>& block_transfer_info);
-
-  virtual void transfer_kv_blocks(
       const uint64_t batch_id,
       const std::vector<BlockTransferInfo>& block_transfer_info);
+
+  virtual uint32_t transfer_kv_blocks(
+      const uint64_t batch_id,
+      Slice<BlockTransferInfo>& block_transfer_info);
 
   // Run the model on the given input. async call
   // the future returns a successfull status with no meaningful value
@@ -183,20 +180,10 @@ class WorkerImpl {
 
   Status get_status() const { return status_; }
 
-  virtual uint32_t prefetch_from_storage(
-      Slice<BlockTransferInfo>& block_transfer_info);
-
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
 
-  uint32_t offload_kv_blocks(
-      const std::vector<BlockTransferInfo>& block_transfer_info);
-
-  bool d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info);
-  bool h2d_batch_copy(const uint64_t batch_id,
-                      Slice<BlockTransferInfo>& block_transfer_info);
-
-  uint32_t offload_to_store(Slice<BlockTransferInfo>& block_transfer_info);
+  void init_multi_tier_kv_cache_transfer();
 
  protected:
   // runtime options
@@ -211,12 +198,6 @@ class WorkerImpl {
   // if enable_schedule_overlap, two step tasks might be dispatched to
   // the task queue, step need to be executed one-by-one
   ThreadPool threadpool_;
-
-  // working thread for data copy
-  std::unique_ptr<ThreadPool> h2d_threadpool_;
-  std::unique_ptr<ThreadPool> d2h_threadpool_;
-  // copy streams only can be used in h2d_threadpool_ and d2h_threadpool_
-  moodycamel::BlockingConcurrentQueue<std::unique_ptr<Stream>> copy_stream_;
 
   // dtype of the model
   torch::ScalarType dtype_;
@@ -234,8 +215,6 @@ class WorkerImpl {
 
   // kv caches
   std::vector<xllm::KVCache> kv_caches_;
-  std::vector<xllm::KVCache> host_kv_caches_;
-  std::unique_ptr<AlignedTensorCreater> aligned_tensor_creater_;
 
   // causal LM model
   std::unique_ptr<CausalLM> model_;
@@ -258,48 +237,15 @@ class WorkerImpl {
 
 #if defined(USE_NPU)
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
-  aclrtMemcpyBatchAttr h2d_attrs_;
-  aclrtMemcpyBatchAttr d2h_attrs_;
-
-  mutable std::mutex mutex_;
-  std::unordered_map<uint64_t, std::shared_ptr<NPULayerSynchronizerImpl>>
-      layer_wise_load_synchronizer_;
 #endif
 
-  uint64_t key_cache_size_per_layer_;
-  uint64_t value_cache_size_per_layer_;
+  std::unique_ptr<MultiTierKVCacheTransfer> multi_tier_kv_cache_transfer_;
 
   bool is_spec_draft_ = false;
 
   Status status_ = Status::UNINITIALIZED;
 
   torch::Tensor expert_load_data_;
-};
-
-class AlignedTensorCreater {
- private:
-  void* base_ptr_;
-  void* mapped_ptr_;
-  size_t total_size_;
-
- public:
-  AlignedTensorCreater(const std::vector<std::vector<int64_t>>& tensor_shapes,
-                       const torch::ScalarType dtype,
-                       const uint32_t num_tensors,
-                       std::vector<xllm::KVCache>* tensors);
-
-  ~AlignedTensorCreater() {
-    if (base_ptr_ != nullptr) {
-#if defined(USE_NPU)
-      aclrtHostUnregister(base_ptr_);
-#endif
-      munlock(base_ptr_, total_size_);
-      munmap(base_ptr_, total_size_);
-    }
-  }
-
-  void* get_base_ptr() const { return base_ptr_; }
-  size_t get_total_size() const { return total_size_; }
 };
 
 }  // namespace xllm

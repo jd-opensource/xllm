@@ -175,7 +175,7 @@ void WorkerClient::prefetch_from_storage(
 void WorkerClient::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
-  worker_->transfer_kv_blocks(batch_id, block_transfer_info);
+  LOG(FATAL) << "WorkerClient Method transfer_kv_blocks is UnImplemented.";
 }
 
 const torch::Device& WorkerClient::device() const { return worker_->device(); }
