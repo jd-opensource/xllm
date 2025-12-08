@@ -29,6 +29,7 @@ limitations under the License. -->
 
 
 ### 📢 News
+- 2025-12-08: 🎉 We day-0 support high-performance inference for the [GLM-4.6V](https://github.com/zai-org/GLM-V) model.
 - 2025-12-05: 🎉 We now support high-performance inference for the [GLM-4.5/GLM-4.6](https://github.com/zai-org/GLM-4.5/blob/main/README_zh.md) series models.
 - 2025-12-05: 🎉 We now support high-performance inference for the [VLM-R1](https://github.com/om-ai-lab/VLM-R1) model.
 - 2025-12-05: 🎉 We build hybrid KV cache management based on [Mooncake](https://github.com/kvcache-ai/Mooncake), supporting global KV cache management with intelligent offloading and prefetching.
@@ -114,7 +115,7 @@ Supported models list:
 - Qwen2.5-VL
 - Qwen3 / Qwen3-MoE
 - Qwen3-VL / Qwen3-VL-MoE
-- GLM4.5 / GLM4.6
+- GLM4.5 / GLM4.6 / GLM-4.6V
 - VLM-R1
 
 ---
