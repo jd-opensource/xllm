@@ -19,6 +19,7 @@ limitations under the License.
 #include "butil/base64.h"
 #include "core/common/instance_name.h"
 #include "core/common/macros.h"
+#include "core/util/utils.h"
 #include "core/util/uuid.h"
 #include "mm_codec.h"
 #include "request.h"
@@ -33,165 +34,6 @@ std::string generate_image_generation_request_id() {
 }
 
 }  // namespace
-
-static torch::ScalarType datatype_proto_to_torch(
-    const std::string& proto_datatype) {
-  static const std::unordered_map<std::string, torch::ScalarType> kDatatypeMap =
-      {{"BOOL", torch::kBool},
-       {"INT32", torch::kInt},
-       {"INT64", torch::kLong},
-       {"UINT32", torch::kInt32},
-       {"UINT64", torch::kInt64},
-       {"FP32", torch::kFloat},
-       {"FP64", torch::kDouble},
-       {"BYTES", torch::kByte}};
-
-  auto iter = kDatatypeMap.find(proto_datatype);
-  if (iter == kDatatypeMap.end()) {
-    LOG(FATAL)
-        << "Unsupported proto datatype: " << proto_datatype
-        << " (supported types: BOOL/INT32/INT64/UINT32/UINT64/FP32/FP64/BYTES)";
-  }
-  return iter->second;
-}
-
-template <typename T>
-static const void* get_data_from_contents(const proto::TensorContents& contents,
-                                          const std::string& datatype) {
-  if constexpr (std::is_same_v<T, bool>) {
-    if (contents.bool_contents().empty()) {
-      LOG(ERROR) << "TensorContents.bool_contents is empty (datatype="
-                 << datatype << ")";
-      return nullptr;
-    }
-    return contents.bool_contents().data();
-  } else if constexpr (std::is_same_v<T, int32_t>) {
-    if (contents.int_contents().empty()) {
-      LOG(ERROR) << "TensorContents.int_contents is empty (datatype="
-                 << datatype << ")";
-      return nullptr;
-    }
-    return contents.int_contents().data();
-  } else if constexpr (std::is_same_v<T, int64_t>) {
-    if (contents.int64_contents().empty()) {
-      LOG(ERROR) << "TensorContents.int64_contents is empty (datatype="
-                 << datatype << ")";
-      return nullptr;
-    }
-    return contents.int64_contents().data();
-  } else if constexpr (std::is_same_v<T, uint32_t>) {
-    if (contents.uint_contents().empty()) {
-      LOG(ERROR) << "TensorContents.uint_contents is empty (datatype="
-                 << datatype << ")";
-      return nullptr;
-    }
-    return contents.uint_contents().data();
-  } else if constexpr (std::is_same_v<T, uint64_t>) {
-    if (contents.uint64_contents().empty()) {
-      LOG(ERROR) << "TensorContents.uint64_contents is empty (datatype="
-                 << datatype << ")";
-      return nullptr;
-    }
-    return contents.uint64_contents().data();
-  } else if constexpr (std::is_same_v<T, float>) {
-    if (contents.fp32_contents().empty()) {
-      LOG(ERROR) << "TensorContents.fp32_contents is empty (datatype="
-                 << datatype << ")";
-      return nullptr;
-    }
-    return contents.fp32_contents().data();
-  } else if constexpr (std::is_same_v<T, double>) {
-    if (contents.fp64_contents().empty()) {
-      LOG(ERROR) << "TensorContents.fp64_contents is empty (datatype="
-                 << datatype << ")";
-      return nullptr;
-    }
-    return contents.fp64_contents().data();
-  } else {
-    LOG(FATAL) << "Unsupported data type for TensorContents: "
-               << typeid(T).name();
-    return nullptr;
-  }
-}
-
-torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor) {
-  if (proto_tensor.datatype().empty()) {
-    LOG(ERROR) << "Proto Tensor missing required field: datatype (e.g., "
-                  "\"FP32\", \"INT64\")";
-    return torch::Tensor();
-  }
-  if (proto_tensor.shape().empty()) {
-    LOG(ERROR) << "Proto Tensor has empty shape (invalid tensor)";
-    return torch::Tensor();
-  }
-  if (!proto_tensor.has_contents()) {
-    LOG(ERROR)
-        << "Proto Tensor missing required field: contents (TensorContents)";
-    return torch::Tensor();
-  }
-  const auto& proto_contents = proto_tensor.contents();
-
-  const std::string& proto_datatype = proto_tensor.datatype();
-  torch::ScalarType torch_dtype = datatype_proto_to_torch(proto_datatype);
-  const size_t element_size = torch::elementSize(torch_dtype);
-
-  std::vector<int64_t> torch_shape;
-  int64_t total_elements = 1;
-  for (const auto& dim : proto_tensor.shape()) {
-    if (dim <= 0) {
-      LOG(ERROR) << "Proto Tensor has invalid dimension: " << dim
-                 << " (must be positive, datatype=" << proto_datatype << ")";
-      return torch::Tensor();
-    }
-    torch_shape.emplace_back(dim);
-    total_elements *= dim;
-  }
-  torch::IntArrayRef tensor_shape(torch_shape);
-
-  const void* data_ptr = nullptr;
-  size_t data_count = 0;
-  if (proto_datatype == "BOOL") {
-    data_ptr = get_data_from_contents<bool>(proto_contents, proto_datatype);
-    data_count = proto_contents.bool_contents_size();
-  } else if (proto_datatype == "INT32") {
-    data_ptr = get_data_from_contents<int32_t>(proto_contents, proto_datatype);
-    data_count = proto_contents.int_contents_size();
-  } else if (proto_datatype == "INT64") {
-    data_ptr = get_data_from_contents<int64_t>(proto_contents, proto_datatype);
-    data_count = proto_contents.int64_contents_size();
-  } else if (proto_datatype == "UINT32") {
-    data_ptr = get_data_from_contents<uint32_t>(proto_contents, proto_datatype);
-    data_count = proto_contents.uint_contents_size();
-  } else if (proto_datatype == "UINT64") {
-    data_ptr = get_data_from_contents<uint64_t>(proto_contents, proto_datatype);
-    data_count = proto_contents.uint64_contents_size();
-  } else if (proto_datatype == "FP32") {
-    data_ptr = get_data_from_contents<float>(proto_contents, proto_datatype);
-    data_count = proto_contents.fp32_contents_size();
-  } else if (proto_datatype == "FP64") {
-    data_ptr = get_data_from_contents<double>(proto_contents, proto_datatype);
-    data_count = proto_contents.fp64_contents_size();
-  }
-
-  if (data_ptr == nullptr) {
-    LOG(ERROR) << "Failed to get data from TensorContents (datatype="
-               << proto_datatype << ")";
-    return torch::Tensor();
-  }
-  if (data_count != static_cast<size_t>(total_elements)) {
-    LOG(ERROR) << "Proto Tensor data count mismatch (datatype="
-               << proto_datatype << "): "
-               << "expected " << total_elements
-               << " elements (shape=" << tensor_shape << "), "
-               << "got " << data_count << " elements";
-    return torch::Tensor();
-  }
-
-  torch::Tensor tensor =
-      torch::from_blob(const_cast<void*>(data_ptr), tensor_shape, torch_dtype)
-          .clone();
-  return tensor;
-}
 
 std::pair<int, int> splitResolution(const std::string& s) {
   size_t pos = s.find('*');
@@ -227,26 +69,26 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   }
 
   if (input.has_prompt_embed()) {
-    input_params.prompt_embed = proto_to_torch(input.prompt_embed());
+    input_params.prompt_embed = util::proto_to_torch(input.prompt_embed());
   }
   if (input.has_pooled_prompt_embed()) {
     input_params.pooled_prompt_embed =
-        proto_to_torch(input.pooled_prompt_embed());
+        util::proto_to_torch(input.pooled_prompt_embed());
   }
   if (input.has_negative_prompt_embed()) {
     input_params.negative_prompt_embed =
-        proto_to_torch(input.negative_prompt_embed());
+        util::proto_to_torch(input.negative_prompt_embed());
   }
   if (input.has_negative_pooled_prompt_embed()) {
     input_params.negative_pooled_prompt_embed =
-        proto_to_torch(input.negative_pooled_prompt_embed());
+        util::proto_to_torch(input.negative_pooled_prompt_embed());
   }
   if (input.has_latent()) {
-    input_params.latent = proto_to_torch(input.latent());
+    input_params.latent = util::proto_to_torch(input.latent());
   }
   if (input.has_masked_image_latent()) {
     input_params.masked_image_latent =
-        proto_to_torch(input.masked_image_latent());
+        util::proto_to_torch(input.masked_image_latent());
   }
 
   OpenCVImageDecoder decoder;

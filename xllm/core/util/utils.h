@@ -24,8 +24,11 @@ limitations under the License.
 #include <stdexcept>
 #include <vector>
 
+#include "core/framework/request/mm_data.h"
 #include "rec.pb.h"
 #include "slice.h"
+#include "tensor.pb.h"
+#include "worker.pb.h"
 
 namespace xllm {
 namespace util {
@@ -75,5 +78,13 @@ std::vector<uint32_t> cal_vec_split_index(uint32_t vec_size, uint32_t part_num);
 torch::Tensor convert_rec_tensor_to_torch(
     const proto::InferInputTensor& input_tensor);
 
+torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor);
+
+bool torch_to_proto(const torch::Tensor& torch_tensor,
+                    proto::Tensor* proto_tensor);
+
+bool cpp_mmdata_to_pb(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata);
+
+bool pb_mmdata_to_cpp(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata);
 }  // namespace util
 }  // namespace xllm

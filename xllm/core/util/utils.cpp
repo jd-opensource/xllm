@@ -243,5 +243,457 @@ torch::Tensor convert_rec_tensor_to_torch(
   }
 }
 
+torch::ScalarType datatype_proto_to_torch(const std::string& proto_datatype) {
+  static const std::unordered_map<std::string, torch::ScalarType> kDatatypeMap =
+      {{"BOOL", torch::kBool},
+       {"INT32", torch::kInt},
+       {"INT64", torch::kLong},
+       {"UINT32", torch::kInt32},
+       {"UINT64", torch::kInt64},
+       {"FP32", torch::kFloat},
+       {"FP64", torch::kDouble},
+       {"BYTES", torch::kByte}};
+
+  auto iter = kDatatypeMap.find(proto_datatype);
+  if (iter == kDatatypeMap.end()) {
+    LOG(FATAL)
+        << "Unsupported proto datatype: " << proto_datatype
+        << " (supported types: BOOL/INT32/INT64/UINT32/UINT64/FP32/FP64/BYTES)";
+  }
+  return iter->second;
+}
+
+template <typename T>
+const void* get_data_from_contents(const proto::TensorContents& contents,
+                                   const std::string& datatype) {
+  if constexpr (std::is_same_v<T, bool>) {
+    if (contents.bool_contents().empty()) {
+      LOG(ERROR) << "TensorContents.bool_contents is empty (datatype="
+                 << datatype << ")";
+      return nullptr;
+    }
+    return contents.bool_contents().data();
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    if (contents.int_contents().empty()) {
+      LOG(ERROR) << "TensorContents.int_contents is empty (datatype="
+                 << datatype << ")";
+      return nullptr;
+    }
+    return contents.int_contents().data();
+  } else if constexpr (std::is_same_v<T, int64_t>) {
+    if (contents.int64_contents().empty()) {
+      LOG(ERROR) << "TensorContents.int64_contents is empty (datatype="
+                 << datatype << ")";
+      return nullptr;
+    }
+    return contents.int64_contents().data();
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    if (contents.uint_contents().empty()) {
+      LOG(ERROR) << "TensorContents.uint_contents is empty (datatype="
+                 << datatype << ")";
+      return nullptr;
+    }
+    return contents.uint_contents().data();
+  } else if constexpr (std::is_same_v<T, uint64_t>) {
+    if (contents.uint64_contents().empty()) {
+      LOG(ERROR) << "TensorContents.uint64_contents is empty (datatype="
+                 << datatype << ")";
+      return nullptr;
+    }
+    return contents.uint64_contents().data();
+  } else if constexpr (std::is_same_v<T, float>) {
+    if (contents.fp32_contents().empty()) {
+      LOG(ERROR) << "TensorContents.fp32_contents is empty (datatype="
+                 << datatype << ")";
+      return nullptr;
+    }
+    return contents.fp32_contents().data();
+  } else if constexpr (std::is_same_v<T, double>) {
+    if (contents.fp64_contents().empty()) {
+      LOG(ERROR) << "TensorContents.fp64_contents is empty (datatype="
+                 << datatype << ")";
+      return nullptr;
+    }
+    return contents.fp64_contents().data();
+  } else {
+    LOG(FATAL) << "Unsupported data type for TensorContents: "
+               << typeid(T).name();
+    return nullptr;
+  }
+}
+
+torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor) {
+  if (proto_tensor.datatype().empty()) {
+    LOG(ERROR) << "Proto Tensor missing required field: datatype (e.g., "
+                  "\"FP32\", \"INT64\")";
+    return torch::Tensor();
+  }
+  if (proto_tensor.shape().empty()) {
+    LOG(ERROR) << "Proto Tensor has empty shape (invalid tensor)";
+    return torch::Tensor();
+  }
+  if (!proto_tensor.has_contents()) {
+    LOG(ERROR)
+        << "Proto Tensor missing required field: contents (TensorContents)";
+    return torch::Tensor();
+  }
+  const auto& proto_contents = proto_tensor.contents();
+
+  const std::string& proto_datatype = proto_tensor.datatype();
+  torch::ScalarType torch_dtype = datatype_proto_to_torch(proto_datatype);
+  const size_t element_size = torch::elementSize(torch_dtype);
+
+  std::vector<int64_t> torch_shape;
+  int64_t total_elements = 1;
+  for (const auto& dim : proto_tensor.shape()) {
+    if (dim <= 0) {
+      LOG(ERROR) << "Proto Tensor has invalid dimension: " << dim
+                 << " (must be positive, datatype=" << proto_datatype << ")";
+      return torch::Tensor();
+    }
+    torch_shape.emplace_back(dim);
+    total_elements *= dim;
+  }
+  torch::IntArrayRef tensor_shape(torch_shape);
+
+  const void* data_ptr = nullptr;
+  size_t data_count = 0;
+  if (proto_datatype == "BOOL") {
+    data_ptr = get_data_from_contents<bool>(proto_contents, proto_datatype);
+    data_count = proto_contents.bool_contents_size();
+  } else if (proto_datatype == "INT32") {
+    data_ptr = get_data_from_contents<int32_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.int_contents_size();
+  } else if (proto_datatype == "INT64") {
+    data_ptr = get_data_from_contents<int64_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.int64_contents_size();
+  } else if (proto_datatype == "UINT32") {
+    data_ptr = get_data_from_contents<uint32_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.uint_contents_size();
+  } else if (proto_datatype == "UINT64") {
+    data_ptr = get_data_from_contents<uint64_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.uint64_contents_size();
+  } else if (proto_datatype == "FP32") {
+    data_ptr = get_data_from_contents<float>(proto_contents, proto_datatype);
+    data_count = proto_contents.fp32_contents_size();
+  } else if (proto_datatype == "FP64") {
+    data_ptr = get_data_from_contents<double>(proto_contents, proto_datatype);
+    data_count = proto_contents.fp64_contents_size();
+  }
+
+  if (data_ptr == nullptr) {
+    LOG(ERROR) << "Failed to get data from TensorContents (datatype="
+               << proto_datatype << ")";
+    return torch::Tensor();
+  }
+  if (data_count != static_cast<size_t>(total_elements)) {
+    LOG(ERROR) << "Proto Tensor data count mismatch (datatype="
+               << proto_datatype << "): "
+               << "expected " << total_elements
+               << " elements (shape=" << tensor_shape << "), "
+               << "got " << data_count << " elements";
+    return torch::Tensor();
+  }
+
+  torch::Tensor tensor =
+      torch::from_blob(const_cast<void*>(data_ptr), tensor_shape, torch_dtype)
+          .clone();
+  return tensor;
+}
+
+std::string torch_datatype_to_proto(torch::ScalarType torch_dtype) {
+  static const std::unordered_map<torch::ScalarType, std::string> kDatatypeMap =
+      {{torch::kBool, "BOOL"},
+       {torch::kInt, "INT32"},
+       {torch::kLong, "INT64"},
+       {torch::kInt32, "UINT32"},
+       {torch::kInt64, "UINT64"},
+       {torch::kFloat, "FP32"},
+       {torch::kDouble, "FP64"},
+       {torch::kByte, "BYTES"}};
+
+  auto iter = kDatatypeMap.find(torch_dtype);
+  if (iter == kDatatypeMap.end()) {
+    LOG(ERROR) << "Unsupported torch datatype: " << torch::toString(torch_dtype)
+               << " (supported types: "
+                  "kBool/kInt/kLong/kInt32/kInt64/kFloat/kDouble/kByte)";
+    return "";
+  }
+  return iter->second;
+}
+
+template <typename T>
+bool set_data_to_contents(proto::TensorContents* contents,
+                          const torch::Tensor& tensor,
+                          const std::string& proto_datatype) {
+  torch::Tensor contig_tensor = tensor.contiguous().cpu();
+  const T* data_ptr = contig_tensor.data_ptr<T>();
+  size_t data_count = static_cast<size_t>(contig_tensor.numel());
+
+  if (data_ptr == nullptr) {
+    LOG(ERROR) << "Failed to get data pointer from torch Tensor (datatype="
+               << proto_datatype << ")";
+    return false;
+  }
+
+  if constexpr (std::is_same_v<T, bool>) {
+    contents->mutable_bool_contents()->Reserve(data_count);
+    for (size_t i = 0; i < data_count; ++i) {
+      contents->add_bool_contents(data_ptr[i]);
+    }
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    contents->mutable_int_contents()->Reserve(data_count);
+    for (size_t i = 0; i < data_count; ++i) {
+      contents->add_int_contents(data_ptr[i]);
+    }
+  } else if constexpr (std::is_same_v<T, int64_t>) {
+    contents->mutable_int64_contents()->Reserve(data_count);
+    for (size_t i = 0; i < data_count; ++i) {
+      contents->add_int64_contents(data_ptr[i]);
+    }
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    contents->mutable_uint_contents()->Reserve(data_count);
+    for (size_t i = 0; i < data_count; ++i) {
+      contents->add_uint_contents(data_ptr[i]);
+    }
+  } else if constexpr (std::is_same_v<T, uint64_t>) {
+    contents->mutable_uint64_contents()->Reserve(data_count);
+    for (size_t i = 0; i < data_count; ++i) {
+      contents->add_uint64_contents(data_ptr[i]);
+    }
+  } else if constexpr (std::is_same_v<T, float>) {
+    contents->mutable_fp32_contents()->Reserve(data_count);
+    for (size_t i = 0; i < data_count; ++i) {
+      contents->add_fp32_contents(data_ptr[i]);
+    }
+  } else if constexpr (std::is_same_v<T, double>) {
+    contents->mutable_fp64_contents()->Reserve(data_count);
+    for (size_t i = 0; i < data_count; ++i) {
+      contents->add_fp64_contents(data_ptr[i]);
+    }
+  } else if constexpr (std::is_same_v<T, uint8_t>) {
+    const char* char_ptr = reinterpret_cast<const char*>(data_ptr);
+    std::string bytes(char_ptr, data_count * sizeof(T));
+    contents->mutable_bytes_contents()->Add(std::move(bytes));
+  } else {
+    LOG(ERROR) << "Unsupported data type for TensorContents: "
+               << typeid(T).name();
+    return false;
+  }
+
+  return true;
+}
+
+bool torch_to_proto(const torch::Tensor& torch_tensor,
+                    proto::Tensor* proto_tensor) {
+  if (!torch_tensor.defined()) {
+    LOG(ERROR) << "Input torch Tensor is undefined (null)";
+    return false;
+  }
+  if (0 == torch_tensor.numel()) {
+    LOG(ERROR) << "Input torch Tensor is empty (numel=0)";
+    return false;
+  }
+
+  torch::ScalarType torch_dtype = torch_tensor.scalar_type();
+  std::string proto_datatype = torch_datatype_to_proto(torch_dtype);
+  if (proto_datatype.empty()) {
+    return false;
+  }
+  proto_tensor->set_datatype(proto_datatype);
+
+  proto_tensor->clear_shape();
+  int64_t total_elements = 1;
+  for (const auto& dim : torch_tensor.sizes()) {
+    if (dim <= 0) {
+      LOG(ERROR) << "Torch Tensor has invalid dimension: " << dim
+                 << " (must be positive, datatype=" << proto_datatype << ")";
+      return false;
+    }
+    proto_tensor->add_shape(dim);
+    total_elements *= dim;
+  }
+
+  proto::TensorContents* proto_contents = proto_tensor->mutable_contents();
+  proto_contents->Clear();
+
+  bool data_set_success = false;
+  switch (torch_dtype) {
+    case torch::kBool:
+      data_set_success = set_data_to_contents<bool>(
+          proto_contents, torch_tensor, proto_datatype);
+      break;
+    case torch::kInt:
+      data_set_success = set_data_to_contents<int32_t>(
+          proto_contents, torch_tensor, proto_datatype);
+      break;
+    case torch::kLong:
+      data_set_success = set_data_to_contents<int64_t>(
+          proto_contents, torch_tensor, proto_datatype);
+      break;
+    case torch::kFloat:
+      data_set_success = set_data_to_contents<float>(
+          proto_contents, torch_tensor, proto_datatype);
+      break;
+    case torch::kDouble:
+      data_set_success = set_data_to_contents<double>(
+          proto_contents, torch_tensor, proto_datatype);
+      break;
+    case torch::kByte:
+      data_set_success = set_data_to_contents<uint8_t>(
+          proto_contents, torch_tensor, proto_datatype);
+      break;
+    default:
+      LOG(ERROR) << "Unsupported torch dtype for serialization: "
+                 << torch::toString(torch_dtype);
+      data_set_success = false;
+  }
+
+  if (!data_set_success) {
+    LOG(ERROR) << "Failed to set data to TensorContents (datatype="
+               << proto_datatype << ")";
+    return false;
+  }
+
+  size_t actual_count = 0;
+  if (proto_datatype == "BOOL") {
+    actual_count = proto_contents->bool_contents_size();
+  } else if (proto_datatype == "INT32") {
+    actual_count = proto_contents->int_contents_size();
+  } else if (proto_datatype == "INT64") {
+    actual_count = proto_contents->int64_contents_size();
+  } else if (proto_datatype == "UINT32") {
+    actual_count = proto_contents->uint_contents_size();
+  } else if (proto_datatype == "UINT64") {
+    actual_count = proto_contents->uint64_contents_size();
+  } else if (proto_datatype == "FP32") {
+    actual_count = proto_contents->fp32_contents_size();
+  } else if (proto_datatype == "FP64") {
+    actual_count = proto_contents->fp64_contents_size();
+  } else if (proto_datatype == "BYTES") {
+    for (const auto& bytes : proto_contents->bytes_contents()) {
+      actual_count += bytes.size() / sizeof(uint8_t);
+    }
+  }
+
+  if (actual_count != static_cast<size_t>(total_elements)) {
+    LOG(WARNING) << "Torch Tensor data count mismatch (datatype="
+                 << proto_datatype << "): "
+                 << "expected " << total_elements << ", got " << actual_count;
+  }
+
+  return true;
+}
+
+bool cpp_mmvalue_to_pb(const xllm::MMValue& cpp_value,
+                       proto::MMValue* pb_value) {
+  if (!pb_value) {
+    LOG(ERROR) << "PB MMValue pointer is null";
+    return false;
+  }
+
+  if (std::holds_alternative<torch::Tensor>(cpp_value)) {
+    auto& torch_tensor = std::get<torch::Tensor>(cpp_value);
+    proto::Tensor* pb_tensor = pb_value->mutable_single_tensor();
+    if (!torch_to_proto(torch_tensor, pb_tensor)) {
+      LOG(ERROR) << "Failed to convert torch Tensor to PB Tensor";
+      return false;
+    }
+  } else if (std::holds_alternative<std::vector<torch::Tensor>>(cpp_value)) {
+    auto& torch_tensor_vec = std::get<std::vector<torch::Tensor>>(cpp_value);
+    proto::TensorList* pb_tensor_list = pb_value->mutable_tensor_list();
+    pb_tensor_list->mutable_tensors()->Reserve(torch_tensor_vec.size());
+    for (const auto& torch_tensor : torch_tensor_vec) {
+      proto::Tensor* pb_tensor = pb_tensor_list->add_tensors();
+      if (!torch_to_proto(torch_tensor, pb_tensor)) {
+        LOG(ERROR) << "Failed to convert torch Tensor to PB Tensor (list item)";
+        return false;
+      }
+    }
+  } else {
+    LOG(ERROR) << "Unsupported struct MMValue type";
+    return false;
+  }
+
+  return true;
+}
+
+std::optional<xllm::MMValue> pb_mmvalue_to_cpp(const proto::MMValue& pb_value) {
+  if (pb_value.has_single_tensor()) {
+    const auto& pb_tensor = pb_value.single_tensor();
+    torch::Tensor torch_tensor = proto_to_torch(pb_tensor);
+    if (!torch_tensor.defined()) {
+      LOG(ERROR) << "Failed to convert PB Tensor to torch Tensor";
+      return std::nullopt;
+    }
+    return xllm::MMValue(torch_tensor);
+  } else if (pb_value.has_tensor_list()) {
+    const auto& pb_tensor_list = pb_value.tensor_list();
+    std::vector<torch::Tensor> torch_tensor_vec;
+    torch_tensor_vec.reserve(pb_tensor_list.tensors_size());
+    for (const auto& pb_tensor : pb_tensor_list.tensors()) {
+      torch::Tensor torch_tensor = proto_to_torch(pb_tensor);
+      if (!torch_tensor.defined()) {
+        LOG(ERROR) << "Failed to convert PB Tensor to torch Tensor (list item)";
+        return std::nullopt;
+      }
+      torch_tensor_vec.emplace_back(std::move(torch_tensor));
+    }
+    return xllm::MMValue(torch_tensor_vec);
+  } else {
+    LOG(ERROR) << "PB MMValue has no valid value";
+    return std::nullopt;
+  }
+}
+
+bool cpp_mmdata_to_pb(const xllm::MMData& cpp_mmdata,
+                      proto::MMData* pb_mmdata) {
+  if (!pb_mmdata) {
+    LOG(ERROR) << "PB MMData pointer is null";
+    return false;
+  }
+  if (!cpp_mmdata.valid()) {
+    LOG(ERROR) << "Struct MMData is invalid (type=NONE)";
+    return false;
+  }
+
+  pb_mmdata->set_type(cpp_mmdata.type());
+  auto* pb_dict = pb_mmdata->mutable_dict();
+
+  const auto& cpp_dict = cpp_mmdata.data();
+  for (const auto& [key, cpp_value] : cpp_dict) {
+    proto::MMValue& pb_value = (*pb_dict)[key];
+    if (!cpp_mmvalue_to_pb(cpp_value, &pb_value)) {
+      LOG(ERROR) << "Failed to convert struct MMValue for key: " << key;
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool pb_mmdata_to_cpp(const proto::MMData& pb_mmdata,
+                      xllm::MMData* cpp_mmdata) {
+  if (!cpp_mmdata) {
+    LOG(ERROR) << "Struct MMData pointer is null";
+    return false;
+  }
+
+  *cpp_mmdata = MMData();
+  cpp_mmdata->ty_ = pb_mmdata.type();
+
+  const auto& pb_dict = pb_mmdata.dict();
+  for (const auto& [key, pb_value] : pb_dict) {
+    auto cpp_value_opt = pb_mmvalue_to_cpp(pb_value);
+    if (!cpp_value_opt) {
+      LOG(ERROR) << "Failed to convert PB MMValue for key: " << key;
+      return false;
+    }
+    cpp_mmdata->data_.emplace(key, std::move(*cpp_value_opt));
+  }
+
+  return true;
+}
+
 }  // namespace util
 }  // namespace xllm

@@ -6,7 +6,7 @@ option cc_enable_arenas = true;
 option cc_generic_services = true;
 
 import "common.proto";
-
+import "tensor.proto";
 
 // NPU: HcclRootInfo
 message CommInfo {
@@ -155,6 +155,22 @@ message BlockPair {
   int32 host_block_id = 2;
 }
 
+message TensorList {
+  repeated Tensor tensors = 1;
+}
+
+message MMValue {
+  oneof value {
+    Tensor single_tensor = 1;
+    TensorList tensor_list = 2;
+  }
+}
+
+message MMData {
+  uint32 type = 1;
+  map<string, MMValue> dict = 2;
+}
+
 message ForwardInput {
   // flatten the token ids and positions
   repeated int32 flatten_tokens_vec = 1;
@@ -201,6 +217,7 @@ message ForwardInput {
   repeated float acc_logprob_vec = 37;
   uint64 batch_id = 38;
   int32 batch_forward_type = 39;
+  MMData mm_data = 40;
 }
 
  message BatchedForwardInputs {
