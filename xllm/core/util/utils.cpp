@@ -243,6 +243,7 @@ torch::Tensor convert_rec_tensor_to_torch(
   }
 }
 
+namespace {
 torch::ScalarType datatype_proto_to_torch(const std::string& proto_datatype) {
   static const std::unordered_map<std::string, torch::ScalarType> kDatatypeMap =
       {{"BOOL", torch::kBool},
@@ -320,85 +321,6 @@ const void* get_data_from_contents(const proto::TensorContents& contents,
                << typeid(T).name();
     return nullptr;
   }
-}
-
-torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor) {
-  if (proto_tensor.datatype().empty()) {
-    LOG(ERROR) << "Proto Tensor missing required field: datatype (e.g., "
-                  "\"FP32\", \"INT64\")";
-    return torch::Tensor();
-  }
-  if (proto_tensor.shape().empty()) {
-    LOG(ERROR) << "Proto Tensor has empty shape (invalid tensor)";
-    return torch::Tensor();
-  }
-  if (!proto_tensor.has_contents()) {
-    LOG(ERROR)
-        << "Proto Tensor missing required field: contents (TensorContents)";
-    return torch::Tensor();
-  }
-  const auto& proto_contents = proto_tensor.contents();
-
-  const std::string& proto_datatype = proto_tensor.datatype();
-  torch::ScalarType torch_dtype = datatype_proto_to_torch(proto_datatype);
-  const size_t element_size = torch::elementSize(torch_dtype);
-
-  std::vector<int64_t> torch_shape;
-  int64_t total_elements = 1;
-  for (const auto& dim : proto_tensor.shape()) {
-    if (dim <= 0) {
-      LOG(ERROR) << "Proto Tensor has invalid dimension: " << dim
-                 << " (must be positive, datatype=" << proto_datatype << ")";
-      return torch::Tensor();
-    }
-    torch_shape.emplace_back(dim);
-    total_elements *= dim;
-  }
-  torch::IntArrayRef tensor_shape(torch_shape);
-
-  const void* data_ptr = nullptr;
-  size_t data_count = 0;
-  if (proto_datatype == "BOOL") {
-    data_ptr = get_data_from_contents<bool>(proto_contents, proto_datatype);
-    data_count = proto_contents.bool_contents_size();
-  } else if (proto_datatype == "INT32") {
-    data_ptr = get_data_from_contents<int32_t>(proto_contents, proto_datatype);
-    data_count = proto_contents.int_contents_size();
-  } else if (proto_datatype == "INT64") {
-    data_ptr = get_data_from_contents<int64_t>(proto_contents, proto_datatype);
-    data_count = proto_contents.int64_contents_size();
-  } else if (proto_datatype == "UINT32") {
-    data_ptr = get_data_from_contents<uint32_t>(proto_contents, proto_datatype);
-    data_count = proto_contents.uint_contents_size();
-  } else if (proto_datatype == "UINT64") {
-    data_ptr = get_data_from_contents<uint64_t>(proto_contents, proto_datatype);
-    data_count = proto_contents.uint64_contents_size();
-  } else if (proto_datatype == "FP32") {
-    data_ptr = get_data_from_contents<float>(proto_contents, proto_datatype);
-    data_count = proto_contents.fp32_contents_size();
-  } else if (proto_datatype == "FP64") {
-    data_ptr = get_data_from_contents<double>(proto_contents, proto_datatype);
-    data_count = proto_contents.fp64_contents_size();
-  }
-
-  if (data_ptr == nullptr) {
-    LOG(ERROR) << "Failed to get data from TensorContents (datatype="
-               << proto_datatype << ")";
-    return torch::Tensor();
-  }
-  if (data_count != static_cast<size_t>(total_elements)) {
-    LOG(ERROR) << "Proto Tensor data count mismatch (datatype="
-               << proto_datatype << "): "
-               << "expected " << total_elements
-               << " elements (shape=" << tensor_shape << "), "
-               << "got " << data_count << " elements";
-    return torch::Tensor();
-  }
-
-  torch::Tensor tensor =
-      torch::from_blob(const_cast<void*>(data_ptr), tensor_shape, torch_dtype)
-          .clone();
-  return tensor;
 }
 
 std::string torch_datatype_to_proto(torch::ScalarType torch_dtype) {
@@ -482,6 +404,147 @@ bool set_data_to_contents(proto::TensorContents* contents,
   }
 
   return true;
+}
+
+bool mmvalue_to_proto(const xllm::MMValue& cpp_value,
+                      proto::MMValue* pb_value) {
+  if (!pb_value) {
+    LOG(ERROR) << "PB MMValue pointer is null";
+    return false;
+  }
+
+  if (std::holds_alternative<torch::Tensor>(cpp_value)) {
+    auto& torch_tensor = std::get<torch::Tensor>(cpp_value);
+    proto::Tensor* pb_tensor = pb_value->mutable_single_tensor();
+    if (!torch_to_proto(torch_tensor, pb_tensor)) {
+      LOG(ERROR) << "Failed to convert torch Tensor to PB Tensor";
+      return false;
+    }
+  } else if (std::holds_alternative<std::vector<torch::Tensor>>(cpp_value)) {
+    auto& torch_tensor_vec = std::get<std::vector<torch::Tensor>>(cpp_value);
+    proto::TensorList* pb_tensor_list = pb_value->mutable_tensor_list();
+    pb_tensor_list->mutable_tensors()->Reserve(torch_tensor_vec.size());
+    for (const auto& torch_tensor : torch_tensor_vec) {
+      proto::Tensor* pb_tensor = pb_tensor_list->add_tensors();
+      if (!torch_to_proto(torch_tensor, pb_tensor)) {
+        LOG(ERROR) << "Failed to convert torch Tensor to PB Tensor (list item)";
+        return false;
+      }
+    }
+  } else {
+    LOG(ERROR) << "Unsupported struct MMValue type";
+    return false;
+  }
+
+  return true;
+}
+
+std::optional<xllm::MMValue> proto_to_mmvalue(const proto::MMValue& pb_value) {
+  if (pb_value.has_single_tensor()) {
+    const auto& pb_tensor = pb_value.single_tensor();
+    torch::Tensor torch_tensor = proto_to_torch(pb_tensor);
+    if (!torch_tensor.defined()) {
+      LOG(ERROR) << "Failed to convert PB Tensor to torch Tensor";
+      return std::nullopt;
+    }
+    return xllm::MMValue(torch_tensor);
+  } else if (pb_value.has_tensor_list()) {
+    const auto& pb_tensor_list = pb_value.tensor_list();
+    std::vector<torch::Tensor> torch_tensor_vec;
+    torch_tensor_vec.reserve(pb_tensor_list.tensors_size());
+    for (const auto& pb_tensor : pb_tensor_list.tensors()) {
+      torch::Tensor torch_tensor = proto_to_torch(pb_tensor);
+      if (!torch_tensor.defined()) {
+        LOG(ERROR) << "Failed to convert PB Tensor to torch Tensor (list item)";
+        return std::nullopt;
+      }
+      torch_tensor_vec.emplace_back(std::move(torch_tensor));
+    }
+    return xllm::MMValue(torch_tensor_vec);
+  } else {
+    LOG(ERROR) << "PB MMValue has no valid value";
+    return std::nullopt;
+  }
+}
+}  // namespace
+
+torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor) {
+  if (proto_tensor.datatype().empty()) {
+    LOG(ERROR) << "Proto Tensor missing required field: datatype (e.g., "
+                  "\"FP32\", \"INT64\")";
+    return torch::Tensor();
+  }
+  if (proto_tensor.shape().empty()) {
+    LOG(ERROR) << "Proto Tensor has empty shape (invalid tensor)";
+    return torch::Tensor();
+  }
+  if (!proto_tensor.has_contents()) {
+    LOG(ERROR)
+        << "Proto Tensor missing required field: contents (TensorContents)";
+    return torch::Tensor();
+  }
+  const auto& proto_contents = proto_tensor.contents();
+
+  const std::string& proto_datatype = proto_tensor.datatype();
+  torch::ScalarType torch_dtype = datatype_proto_to_torch(proto_datatype);
+  const size_t element_size = torch::elementSize(torch_dtype);
+
+  std::vector<int64_t> torch_shape;
+  int64_t total_elements = 1;
+  for (const auto& dim : proto_tensor.shape()) {
+    if (dim <= 0) {
+      LOG(ERROR) << "Proto Tensor has invalid dimension: " << dim
+                 << " (must be positive, datatype=" << proto_datatype << ")";
+      return torch::Tensor();
+    }
+    torch_shape.emplace_back(dim);
+    total_elements *= dim;
+  }
+  torch::IntArrayRef tensor_shape(torch_shape);
+
+  const void* data_ptr = nullptr;
+  size_t data_count = 0;
+  if (proto_datatype == "BOOL") {
+    data_ptr = get_data_from_contents<bool>(proto_contents, proto_datatype);
+    data_count = proto_contents.bool_contents_size();
+  } else if (proto_datatype == "INT32") {
+    data_ptr = get_data_from_contents<int32_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.int_contents_size();
+  } else if (proto_datatype == "INT64") {
+    data_ptr = get_data_from_contents<int64_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.int64_contents_size();
+  } else if (proto_datatype == "UINT32") {
+    data_ptr = get_data_from_contents<uint32_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.uint_contents_size();
+  } else if (proto_datatype == "UINT64") {
+    data_ptr = get_data_from_contents<uint64_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.uint64_contents_size();
+  } else if (proto_datatype == "FP32") {
+    data_ptr = get_data_from_contents<float>(proto_contents, proto_datatype);
+    data_count = proto_contents.fp32_contents_size();
+  } else if (proto_datatype == "FP64") {
+    data_ptr = get_data_from_contents<double>(proto_contents, proto_datatype);
+    data_count = proto_contents.fp64_contents_size();
+  }
+
+  if (data_ptr == nullptr) {
+    LOG(ERROR) << "Failed to get data from TensorContents (datatype="
+               << proto_datatype << ")";
+    return torch::Tensor();
+  }
+  if (data_count != static_cast<size_t>(total_elements)) {
+    LOG(ERROR) << "Proto Tensor data count mismatch (datatype="
+               << proto_datatype << "): "
+               << "expected " << total_elements
+               << " elements (shape=" << tensor_shape << "), "
+               << "got " << data_count << " elements";
+    return torch::Tensor();
+  }
+
+  torch::Tensor tensor =
+      torch::from_blob(const_cast<void*>(data_ptr), tensor_shape, torch_dtype)
+          .clone();
+  return tensor;
 }
 
 bool torch_to_proto(const torch::Tensor& torch_tensor,
@@ -583,67 +646,6 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
   }
 
   return true;
-}
-
-bool mmvalue_to_proto(const xllm::MMValue& cpp_value,
-                      proto::MMValue* pb_value) {
-  if (!pb_value) {
-    LOG(ERROR) << "PB MMValue pointer is null";
-    return false;
-  }
-
-  if (std::holds_alternative<torch::Tensor>(cpp_value)) {
-    auto& torch_tensor = std::get<torch::Tensor>(cpp_value);
-    proto::Tensor* pb_tensor = pb_value->mutable_single_tensor();
-    if (!torch_to_proto(torch_tensor, pb_tensor)) {
-      LOG(ERROR) << "Failed to convert torch Tensor to PB Tensor";
-      return false;
-    }
-  } else if (std::holds_alternative<std::vector<torch::Tensor>>(cpp_value)) {
-    auto& torch_tensor_vec = std::get<std::vector<torch::Tensor>>(cpp_value);
-    proto::TensorList* pb_tensor_list = pb_value->mutable_tensor_list();
-    pb_tensor_list->mutable_tensors()->Reserve(torch_tensor_vec.size());
-    for (const auto& torch_tensor : torch_tensor_vec) {
-      proto::Tensor* pb_tensor = pb_tensor_list->add_tensors();
-      if (!torch_to_proto(torch_tensor, pb_tensor)) {
-        LOG(ERROR) << "Failed to convert torch Tensor to PB Tensor (list item)";
-        return false;
-      }
-    }
-  } else {
-    LOG(ERROR) << "Unsupported struct MMValue type";
-    return false;
-  }
-
-  return true;
-}
-
-std::optional<xllm::MMValue> proto_to_mmvalue(const proto::MMValue& pb_value) {
-  if (pb_value.has_single_tensor()) {
-    const auto& pb_tensor = pb_value.single_tensor();
-    torch::Tensor torch_tensor = proto_to_torch(pb_tensor);
-    if (!torch_tensor.defined()) {
-      LOG(ERROR) << "Failed to convert PB Tensor to torch Tensor";
-      return std::nullopt;
-    }
-    return xllm::MMValue(torch_tensor);
-  } else if (pb_value.has_tensor_list()) {
-    const auto& pb_tensor_list = pb_value.tensor_list();
-    std::vector<torch::Tensor> torch_tensor_vec;
-    torch_tensor_vec.reserve(pb_tensor_list.tensors_size());
-    for (const auto& pb_tensor : pb_tensor_list.tensors()) {
-      torch::Tensor torch_tensor = proto_to_torch(pb_tensor);
-      if (!torch_tensor.defined()) {
-        LOG(ERROR) << "Failed to convert PB Tensor to torch Tensor (list item)";
-        return std::nullopt;
-      }
-      torch_tensor_vec.emplace_back(std::move(torch_tensor));
-    }
-    return xllm::MMValue(torch_tensor_vec);
-  } else {
-    LOG(ERROR) << "PB MMValue has no valid value";
-    return std::nullopt;
-  }
 }
 
 bool mmdata_to_proto(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata) {
