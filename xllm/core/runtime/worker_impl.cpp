@@ -56,6 +56,8 @@ constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 constexpr uint32_t BATCH_COPY_MAX_SIZE = 4096;
 constexpr uint32_t TIMEOUT_S = 60;      // second
 constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
+constexpr int32_t FORMAT_ND = 2;
+constexpr int32_t FORMAT_NZ = 29;
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
@@ -94,16 +96,18 @@ bool WorkerImpl::allocate_kv_cache(
   for (int64_t i = 0; i < num_layers; ++i) {
     torch::Tensor key_cache, value_cache, index_cache;
 #if defined(USE_NPU)
+    int32_t npu_format_type =
+        FLAGS_enable_mla && FLAGS_enable_prefix_cache ? FORMAT_NZ : FORMAT_ND;
     key_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_)),
-        2);
+        npu_format_type);
     value_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
-        2);
+        npu_format_type);
     if (enable_lighting_indexer) {
       index_cache = at_npu::native::npu_format_cast(
           torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_)),
-          2);
+          npu_format_type);
     }
 #else
     key_cache =
@@ -375,6 +379,10 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     for (int layer_id = 0; layer_id < num_layers; layer_id++) {
       kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
     }
+  }
+  if (FLAGS_enable_mla &&
+      input_params.batch_forward_type.is_chunked_prefill()) {
+    prepare_mla_prefixcache_inputs(input_params);
   }
 
   if (!context_.get_parallel_args().mapping_data().empty()) {
@@ -675,6 +683,40 @@ void WorkerImpl::init_hierarchy_kv_cache_transfer() {
     hierarchy_kv_cache_transfer_ = std::make_unique<HierarchyKVCacheTransfer>(
         transfer_options, device_, &kv_caches_);
   }
+}
+void WorkerImpl::prepare_mla_prefixcache_inputs(
+    ModelInputParams& input_params) {
+  int32_t sum_prefix = input_params.kv_cache_tokens_nums.sum().item<int>();
+  input_params.history_compressed_kv =
+      torch::empty({sum_prefix, context_.get_model_args().kv_lora_rank()},
+                   torch::TensorOptions().dtype(dtype_).pinned_memory(true))
+          .to(device_);
+
+  input_params.history_k_rope =
+      torch::empty({sum_prefix, context_.get_model_args().qk_rope_head_dim()},
+                   torch::TensorOptions().dtype(dtype_).pinned_memory(true))
+          .to(device_);
+  ;
+
+  input_params.ring_cur_seqlen =
+      torch::stack({input_params.q_seq_lens, input_params.q_seq_lens})
+          .to(device_);
+
+  input_params.ring_cache_seqlen =
+      torch::stack({input_params.q_seq_lens,
+                    input_params.kv_cache_tokens_nums.to(device_)})
+          .to(device_);
+
+  torch::Tensor ring_cur_seqlen_host =
+      input_params.ring_cur_seqlen.cpu().contiguous();
+  torch::Tensor ring_cache_seqlen_host =
+      input_params.ring_cache_seqlen.cpu().contiguous();
+  input_params.ring_cur_seqlen_host = std::vector<int>(
+      ring_cur_seqlen_host.data_ptr<int>(),
+      ring_cur_seqlen_host.data_ptr<int>() + ring_cur_seqlen_host.numel());
+  input_params.ring_cache_seqlen_host = std::vector<int>(
+      ring_cache_seqlen_host.data_ptr<int>(),
+      ring_cache_seqlen_host.data_ptr<int>() + ring_cache_seqlen_host.numel());
 }
 
 }  // namespace xllm

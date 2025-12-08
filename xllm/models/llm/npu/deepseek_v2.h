@@ -158,9 +158,13 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     auto sin_pos = cos_sin_chunks[1].contiguous();
 
     torch::Tensor attn_mask;
-    if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
+    if (FLAGS_enable_prefix_cache &&
+        !input_params.batch_forward_type.is_decode()) {
+      attn_mask = attn_mask_.get_attn_mask(512, dtype_, device_);
+    } else if (input_params.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
-    } else {
+    } else if (num_speculative_tokens_ > 0) {
+      // TODO :the judgement of gen_free_mask need more check
       attn_mask = attn_mask_.gen_free_mask(
           num_speculative_tokens_ + 1, dtype_, device_);
     }

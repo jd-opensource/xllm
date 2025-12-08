@@ -64,6 +64,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> q_seq_lens =
       std::vector<int32_t>(pb_forward_input->q_seq_lens().begin(),
                            pb_forward_input->q_seq_lens().end());
+  std::vector<int32_t> kv_cache_tokens_nums =
+      std::vector<int32_t>(pb_forward_input->kv_cache_tokens_nums().begin(),
+                           pb_forward_input->kv_cache_tokens_nums().end());
   // aprint<int32_t>(q_seq_lens, "q_seq_lens", global_rank_);
   std::vector<int32_t> q_cu_seq_lens(q_seq_lens.size());
   std::partial_sum(q_seq_lens.begin(), q_seq_lens.end(), q_cu_seq_lens.begin());
@@ -197,6 +200,12 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.kv_seq_lens = torch::tensor(seq_lens, tensor_options);
   input_params.q_seq_lens = torch::tensor(q_seq_lens, tensor_options);
   input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens, tensor_options);
+  input_params.kv_cache_tokens_nums =
+      torch::tensor(kv_cache_tokens_nums, tensor_options);
+  input_params.kv_cache_tokens_nums_host =
+      std::vector<int>(input_params.kv_cache_tokens_nums.data_ptr<int>(),
+                       input_params.kv_cache_tokens_nums.data_ptr<int>() +
+                           input_params.kv_cache_tokens_nums.numel());
   input_params.kv_seq_lens_vec = std::move(seq_lens);
   input_params.q_seq_lens_vec = std::move(q_seq_lens);
 
@@ -390,6 +399,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   pb_forward_input->set_max_seq_len(inputs.max_seq_len);
   pb_forward_input->set_q_max_seq_len(inputs.q_max_seq_len);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_seq_lens(), inputs.seq_lens);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_kv_cache_tokens_nums(),
+                      inputs.kv_cache_tokens_nums);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_q_seq_lens(),
                       inputs.q_seq_lens);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_q_cu_seq_lens(),

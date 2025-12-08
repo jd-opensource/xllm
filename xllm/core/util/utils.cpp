@@ -65,8 +65,8 @@ std::pair<int, int> find_ones_indices(std::vector<int>& q_seq_lens) {
 }
 
 torch::ScalarType parse_dtype(const std::string& dtype_str,
-                              const torch::Device& device) {
-  if (device.is_cpu()) {
+                              const std::optional<torch::Device>& device) {
+  if (device.has_value() && device.value().is_cpu()) {
     // cpu only supports float32 for now
     return torch::kFloat32;
   }
@@ -86,7 +86,8 @@ torch::ScalarType parse_dtype(const std::string& dtype_str,
   if (dtype_str.empty() || boost::iequals(dtype_str, "auto")) {
     return torch::kFloat16;
   }
-  CHECK(false) << "Unsupported dtype: " << dtype_str << " on device " << device;
+  CHECK(false) << "Unsupported dtype: " << dtype_str << " on device "
+               << device.value();
 }
 
 std::optional<std::vector<uint32_t>> parse_batch_sizes(

@@ -141,6 +141,7 @@ INLINE size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   total += get_vector_size(input.unique_token_lens_vec);
   total += get_vector_size(input.seq_lens);
   total += get_vector_size(input.q_seq_lens);
+  total += get_vector_size(input.kv_cache_tokens_nums);
   total += get_vector_size(input.new_token_slot_ids);
   total += get_vector_size(input.dp_global_token_nums);
   total += get_vector_size(input.dp_is_decode);
@@ -545,6 +546,7 @@ INLINE void deserialize_raw_forward_input(
   read_vector(buffer, input.unique_token_lens_vec);
   read_vector(buffer, input.seq_lens);
   read_vector(buffer, input.q_seq_lens);
+  read_vector(buffer, input.kv_cache_tokens_nums);
   read_vector(buffer, input.new_token_slot_ids);
   read_vector(buffer, input.dp_global_token_nums);
   read_vector(buffer, input.embedding_ids);
@@ -602,6 +604,7 @@ INLINE void serialize_raw_forward_input(const RawForwardInput& input,
   write_vector(buffer, input.unique_token_lens_vec);
   write_vector(buffer, input.seq_lens);
   write_vector(buffer, input.q_seq_lens);
+  write_vector(buffer, input.kv_cache_tokens_nums);
   write_vector(buffer, input.new_token_slot_ids);
   write_vector(buffer, input.dp_global_token_nums);
   write_vector(buffer, input.embedding_ids);
@@ -843,6 +846,8 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
 
   input_params.new_cache_slots =
       torch::tensor(std::move(raw_input.new_token_slot_ids), tensor_options);
+  input_params.kv_cache_tokens_nums =
+      torch::tensor(std::move(raw_input.kv_cache_tokens_nums), tensor_options);
 
   util::pad_2d_vector(raw_input.block_tables_vec, 0);
   input_params.block_tables =

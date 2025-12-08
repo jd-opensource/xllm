@@ -182,6 +182,8 @@ class WorkerImpl {
 
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
+  // Only used for deepseek chunked prefill ops on npu device
+  void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
 
   void init_hierarchy_kv_cache_transfer();
 

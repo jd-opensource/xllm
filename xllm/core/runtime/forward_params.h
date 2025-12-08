@@ -170,6 +170,7 @@ struct RawForwardInput {
   std::vector<int32_t> seq_lens;
   std::vector<int32_t> q_seq_lens;
   std::vector<int32_t> q_cu_seq_lens;
+  std::vector<int32_t> kv_cache_tokens_nums;
   std::vector<int32_t> new_token_slot_ids;
   std::vector<std::vector<int32_t>> block_tables_vec;
   int32_t num_sequences;

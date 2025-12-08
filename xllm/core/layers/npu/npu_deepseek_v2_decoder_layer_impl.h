@@ -147,7 +147,8 @@ class DeepseekV2DecoderLayerImpl : public BaseLayer {
   void param_from_args(atb_speed::deepseekV2::DecoderLayerParam& param,
                        const ModelArgs& args,
                        const ParallelArgs& parallel_args,
-                       bool is_prefill);
+                       bool is_prefill,
+                       bool is_prefixcache);
 
   void reserve_experts_weights(int num_of_device_experts);
 
@@ -157,7 +158,8 @@ class DeepseekV2DecoderLayerImpl : public BaseLayer {
       atb_speed::deepseekV2::DecoderLayerParam& param,
       const ModelArgs& args,
       const ParallelArgs& parallel_args,
-      bool is_prefill);
+      bool is_prefill,
+      bool is_prefixcache);
 
   void initialize_attention_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param,
@@ -236,10 +238,12 @@ class DeepseekV2DecoderLayerImpl : public BaseLayer {
   int32_t num_speculative_tokens_ = 0;
 
   atb_speed::deepseekV2::DecoderLayerParam prefill_param_;
+  atb_speed::deepseekV2::DecoderLayerParam prefill_param_prefixcache_;
   atb_speed::deepseekV2::DecoderLayerParam decode_param_;
   atb_speed::deepseekV2::DecoderLayerParam decode_mla_param_;
 
   atb_speed::Model::Node prefill_node_;
+  atb_speed::Model::Node prefill_node_prefixcache_;
   atb_speed::Model::Node decode_node_;
   atb_speed::Model::Node decode_mla_node_;
 

@@ -122,8 +122,15 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
     auto cos_pos = cos_sin_chunks[0].contiguous();
     auto sin_pos = cos_sin_chunks[1].contiguous();
 
-    auto attn_mask = attn_mask_.get_attn_mask(
-        128, cos_pos.dtype().toScalarType(), cos_pos.device());
+    torch::Tensor attn_mask;
+    if (FLAGS_enable_prefix_cache &&
+        !input_params.batch_forward_type.is_decode()) {
+      attn_mask = attn_mask_.get_attn_mask(
+          512, cos_pos.dtype().toScalarType(), cos_pos.device());
+    } else {
+      attn_mask = attn_mask_.get_attn_mask(
+          128, cos_pos.dtype().toScalarType(), cos_pos.device());
+    }
 
     // TODO(liangzhiwei20): MTP need more support for layer wise copy.
     if (input_params.layer_wise_load_synchronizer != nullptr) {
