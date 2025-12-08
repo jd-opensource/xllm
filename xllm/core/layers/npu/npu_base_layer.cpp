@@ -27,15 +27,38 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-NpuBaseLayer::NpuBaseLayer(const ModelContext& context) : BaseLayer(context) {
+BaseLayer::BaseLayer(const ModelContext& context)
+    : device_(context.get_tensor_options().device()),
+      name_(""),
+      parallel_args_(context.get_parallel_args()) {
+  auto quant_args = context.get_quant_args();
+  if (!quant_args.quantize_type().empty()) {
+    quantize_type_ = quant_args.quantize_type();
+  }
+
+  if (!quant_args.torch_dtype().empty()) {
+    torch_dtype_ = quant_args.torch_dtype();
+  }
+
+  dp_size_ = parallel_args_.dp_size();
+  dp_local_tp_size_ = parallel_args_.world_size() / dp_size_;
+  dp_rank_ = parallel_args_.rank() / dp_local_tp_size_;
+  CHECK_EQ(parallel_args_.world_size(), dp_size_ * dp_local_tp_size_);
+  dp_local_tp_rank_ = parallel_args_.rank() % dp_local_tp_size_;
+
+  run_task_func_ = [this](const std::string& task_name,
+                          std::function<int()> task) {
+    this->run_task(task_name, task);
+  };
+
   context_ = const_cast<atb::Context*>(context.get_atb_context());
   work_space_ = AtbWorkspace(device_);
 }
 
-atb::Status NpuBaseLayer::execute_node(atb_speed::Model::Node& node,
-                                       int node_id,
-                                       aclrtEvent* event,
-                                       std::atomic<bool>* event_flag) {
+atb::Status BaseLayer::execute_node(atb_speed::Model::Node& node,
+                                    int node_id,
+                                    aclrtEvent* event,
+                                    std::atomic<bool>* event_flag) {
   // TODO（by zhangminchao1@jd.com): Stream management needs to be refactored
   // for better separation of concerns Current issues:
   // 1. ACLGraph capture requires execution on a non-default stream, so we
@@ -92,10 +115,10 @@ atb::Status NpuBaseLayer::execute_node(atb_speed::Model::Node& node,
   return st;
 }
 
-atb::Status NpuBaseLayer::execute_plan(const atb_speed::Model::Node& node,
-                                       const std::string& op_name,
-                                       aclrtEvent* event,
-                                       std::atomic<bool>* event_flag) {
+atb::Status BaseLayer::execute_plan(const atb_speed::Model::Node& node,
+                                    const std::string& op_name,
+                                    aclrtEvent* event,
+                                    std::atomic<bool>* event_flag) {
   atb::Status st = node.operation->Execute(
       node.variantPack, (uint8_t*)node.workspace, node.workspaceSize, context_);
   LOG_IF(ERROR, st != 0) << name_ << " execute plan fail, error code: " << st;
@@ -116,15 +139,15 @@ atb::Status NpuBaseLayer::execute_plan(const atb_speed::Model::Node& node,
   return st;
 }
 
-void NpuBaseLayer::run_task(std::string taskName,
-                            std::function<int()> task) const {
+void BaseLayer::run_task(std::string taskName,
+                         std::function<int()> task) const {
   at_npu::native::OpCommand cmd;
   cmd.Name(taskName);
   cmd.SetCustomHandler(task);
   cmd.Run();
 }
 
-atb::Tensor NpuBaseLayer::XTensor2Tensor(
+atb::Tensor BaseLayer::XTensor2Tensor(
     const std::shared_ptr<xllm::XTensor>& xtensor) {
   static std::map<at::ScalarType, aclDataType> dtypeMap = {
       {at::ScalarType::Bool, ACL_BOOL},
@@ -159,6 +182,108 @@ atb::Tensor NpuBaseLayer::XTensor2Tensor(
   tensor.dataSize = 0;
 
   return tensor;
+}
+
+torch::Dtype BaseLayer::string2dtype(const std::string& dtype_str) {
+  if (dtype_str.compare("float16") == 0) {
+    return torch::kFloat16;
+  } else if (dtype_str.compare("bfloat16") == 0) {
+    return torch::kBFloat16;
+  } else if (dtype_str.compare("float32") == 0) {
+    return torch::kFloat32;
+  } else if (dtype_str.compare("float64") == 0) {
+    return torch::kFloat64;
+  } else if (dtype_str.compare("int8") == 0) {
+    return torch::kInt8;
+  } else if (dtype_str.compare("int16") == 0) {
+    return torch::kInt16;
+  } else if (dtype_str.compare("int32") == 0) {
+    return torch::kInt32;
+  } else if (dtype_str.compare("int64") == 0) {
+    return torch::kInt64;
+  } else if (dtype_str.compare("uint8") == 0) {
+    return torch::kUInt8;
+  } else if (dtype_str.compare("bool") == 0) {
+    return torch::kBool;
+  }
+
+  LOG(FATAL) << "Unsupported dtype string: " << dtype_str;
+}
+
+void BaseLayer::correct_tensor_dtype(torch::Tensor& tensor,
+                                     const std::string& tensorName) {
+  if (absl::EndsWith(tensorName, "deq_scale") &&
+      (torch_dtype_.compare("bfloat16") == 0)) {
+    return;
+  }
+
+  if (tensor.dtype() != torch::kInt8 && tensor.dtype() != torch::kInt32 &&
+      tensor.dtype() != torch::kInt64) {
+    torch::Dtype dtype = string2dtype(torch_dtype_);
+    tensor = tensor.to(dtype);
+  }
+}
+
+void BaseLayer::set_weight(const StateDict& state_dict,
+                           const std::string& tensor_name,
+                           int weight_position) {
+  for (const auto& [name, tensor] : state_dict) {
+    if (absl::EndsWith(name, tensor_name)) {
+      at::Tensor mutable_tensor = tensor;
+      correct_tensor_dtype(mutable_tensor, tensor_name);
+      at_weight_tensors_[weight_position] = mutable_tensor.to(device_);
+    }
+  }
+}
+
+void BaseLayer::set_weight(const StateDict& state_dict,
+                           const std::string& tensor_name,
+                           int weight_position,
+                           int dim) {
+  for (const auto& [name, tensor] : state_dict) {
+    if (absl::EndsWith(name, tensor_name)) {
+      if (parallel_args_.world_size() <= 1) {
+        at::Tensor mutable_tensor = tensor;
+        correct_tensor_dtype(mutable_tensor, tensor_name);
+        at_weight_tensors_[weight_position] = mutable_tensor.to(device_);
+      } else {
+        at_weight_tensors_[weight_position] =
+            state_dict
+                .get_sharded_tensor(tensor_name,
+                                    /*dim=*/dim,
+                                    /*rank=*/parallel_args_.rank(),
+                                    /*world_size=*/parallel_args_.world_size())
+                .to(device_);
+        correct_tensor_dtype(at_weight_tensors_[weight_position], tensor_name);
+      }
+    }
+  }
+}
+
+void BaseLayer::set_weight(const StateDict& state_dict,
+                           const std::string& tensor_name,
+                           int weight_position,
+                           int dim,
+                           int rank,
+                           int world_size) {
+  for (const auto& [name, tensor] : state_dict) {
+    if (absl::EndsWith(name, tensor_name)) {
+      if (world_size <= 1) {
+        at::Tensor mutable_tensor = tensor;
+        correct_tensor_dtype(mutable_tensor, tensor_name);
+        at_weight_tensors_[weight_position] = mutable_tensor.to(device_);
+      } else {
+        at_weight_tensors_[weight_position] =
+            state_dict
+                .get_sharded_tensor(tensor_name,
+                                    /*dim=*/dim,
+                                    /*rank=*/rank,
+                                    /*world_size=*/world_size)
+                .to(device_);
+        correct_tensor_dtype(at_weight_tensors_[weight_position], tensor_name);
+      }
+    }
+  }
 }
 
 }  // namespace layer

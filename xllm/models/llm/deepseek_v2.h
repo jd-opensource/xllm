@@ -27,12 +27,12 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
-#include "core/layers/attention_mask.h"
+#include "core/layers/common/attention_mask_impl.h"
 #include "core/layers/deepseek_v2_decoder_layer.h"
 #include "core/layers/lm_head.h"
+#include "core/layers/npu/npu_rms_norm_impl.h"
+#include "core/layers/npu/rotary_embedding.h"
 #include "core/layers/pos_embedding.h"
-#include "core/layers/rms_norm.h"
-#include "core/layers/rotary_embedding.h"
 #include "core/layers/word_embedding.h"
 #include "models/model_registry.h"
 // DeepSeek v2 compatible with huggingface weights
@@ -46,12 +46,10 @@ using ISlice = torch::indexing::Slice;
 
 class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
-  DeepseekV2DecoderLayerImpl(const ModelContext& context,
-                             const int32_t i,
-                             const float sm_scale) {
+  DeepseekV2DecoderLayerImpl(const ModelContext& context, const int32_t i) {
     // register submodules
-    decoder_layer_ = register_module(
-        "decoder_layer", layer::DeepseekV2DecoderLayer(context, i, sm_scale));
+    decoder_layer_ = register_module("decoder_layer",
+                                     layer::DeepseekV2DecoderLayer(context, i));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -108,23 +106,11 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
 
-    // rotary positional embedding
-    auto inv_freq = rotary::apply_deepseek_yarn_rope_scaling(
-        model_args.rope_scaling_factor(),
-        model_args.rope_extrapolation_factor(),
-        model_args.rope_scaling_beta_fast(),
-        model_args.rope_scaling_beta_slow(),
-        model_args.rotary_dim(),
-        model_args.rope_theta(),
-        model_args.rope_scaling_original_max_position_embeddings());
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    float sm_scale = 1.0f;
     pos_emb_ = create_rotary_embedding(model_args,
                                        model_args.rotary_dim(),
-                                       inv_freq,
                                        /*interleaved=*/false,
-                                       sm_scale,
                                        options);
     atb_pos_emb_ = layer::PosEmbedding(context);
 
@@ -135,12 +121,12 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                                       /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto block = DeepseekV2DecoderLayer(context, i, sm_scale);
+      auto block = DeepseekV2DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
     }
 
-    norm_ = register_module("norm", layer::RmsNorm(context));
+    norm_ = register_module("norm", layer::RMSNorm(context));
     // dp_size_=4;
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
@@ -173,9 +159,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
-      attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
+      attn_mask = attn_mask_->get_attn_mask(128, dtype_, device_);
     } else {
-      attn_mask = attn_mask_.gen_free_mask(
+      attn_mask = attn_mask_->gen_free_mask(
           num_speculative_tokens_ + 1, dtype_, device_);
     }
 
@@ -265,8 +251,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   layer::WordEmbedding embed_tokens_{nullptr};
   std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
   layer::PosEmbedding atb_pos_emb_{nullptr};
-  layer::AttentionMask attn_mask_;
-  layer::RmsNorm norm_{nullptr};
+  layer::AttentionMask attn_mask_{nullptr};
+  layer::RMSNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Model);
 

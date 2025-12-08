@@ -20,10 +20,9 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-NpuSiglipEncoderLayerUpImpl::NpuSiglipEncoderLayerUpImpl(
-    const ModelContext& context,
-    const std::string& prefix)
-    : NpuBaseLayer(context),
+SiglipEncoderLayerUpImpl::SiglipEncoderLayerUpImpl(const ModelContext& context,
+                                                   const std::string& prefix)
+    : BaseLayer(context),
       graph_("siglip_encoder_layer_up"),
       model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
@@ -31,7 +30,7 @@ NpuSiglipEncoderLayerUpImpl::NpuSiglipEncoderLayerUpImpl(
   build_graph(prefix);
 }
 
-void NpuSiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
+void SiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
   // set graph input names and output names
   std::vector<std::string> input_names = {
       "hidden_states",
@@ -142,7 +141,7 @@ void NpuSiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
   graph_.Build();
 }
 
-void NpuSiglipEncoderLayerUpImpl::load_state_dict(const StateDict& state_dict) {
+void SiglipEncoderLayerUpImpl::load_state_dict(const StateDict& state_dict) {
   const std::set<std::string> key_names = {"layer_norm1.weight",
                                            "layer_norm1.bias",
                                            "self_attn.q_proj.weight",
@@ -164,7 +163,7 @@ void NpuSiglipEncoderLayerUpImpl::load_state_dict(const StateDict& state_dict) {
   graph_.SetWeights(weights_map);
 }
 
-torch::Tensor NpuSiglipEncoderLayerUpImpl::forward(torch::Tensor& x) {
+torch::Tensor SiglipEncoderLayerUpImpl::forward(torch::Tensor& x) {
   // set graph forward inputs
   atb_torch::TorchTensorMap inputs;
   atb_torch::TorchTensorMap outputs;
@@ -185,7 +184,7 @@ torch::Tensor NpuSiglipEncoderLayerUpImpl::forward(torch::Tensor& x) {
 NpuSiglipEncoderLayerDownImpl::NpuSiglipEncoderLayerDownImpl(
     const ModelContext& context,
     const std::string& prefix)
-    : NpuBaseLayer(context),
+    : BaseLayer(context),
       graph_("siglip_encoder_layer_down"),
       model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
@@ -333,10 +332,9 @@ torch::Tensor NpuSiglipEncoderLayerDownImpl::forward(torch::Tensor& x,
   return output["layer_down_out"];
 }
 
-NpuSiglipEncoderLayerImpl::NpuSiglipEncoderLayerImpl(
-    const ModelContext& context,
-    const std::string& prefix)
-    : NpuBaseLayer(context),
+SiglipEncoderLayerImpl::SiglipEncoderLayerImpl(const ModelContext& context,
+                                               const std::string& prefix)
+    : BaseLayer(context),
       model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
       prefix_(prefix) {
@@ -344,12 +342,12 @@ NpuSiglipEncoderLayerImpl::NpuSiglipEncoderLayerImpl(
   down_ = NpuSiglipEncoderLayerDown(context, prefix);
 }
 
-void NpuSiglipEncoderLayerImpl::load_state_dict(const StateDict& state_dict) {
+void SiglipEncoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   up_->load_state_dict(state_dict);
   down_->load_state_dict(state_dict);
 }
 
-torch::Tensor NpuSiglipEncoderLayerImpl::forward(torch::Tensor& x) {
+torch::Tensor SiglipEncoderLayerImpl::forward(torch::Tensor& x) {
   auto residual = x.clone();
   auto batch = x.size(0);
   auto seq_len = x.size(1);

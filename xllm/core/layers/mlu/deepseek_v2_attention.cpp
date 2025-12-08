@@ -56,7 +56,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
         ReplicatedLinear(
             hidden_size, q_lora_rank_, false, QuantArgs(), options));
     q_a_layernorm_ = register_module(
-        "q_a_layernorm", RmsNorm(q_lora_rank_, args.rms_norm_eps(), options));
+        "q_a_layernorm", RMSNorm(q_lora_rank_, args.rms_norm_eps(), options));
     q_b_proj_ = register_module("q_b_proj",
                                 ColumnParallelLinear(q_lora_rank_,
                                                      num_heads * qk_head_dim_,
@@ -84,7 +84,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                        QuantArgs(),
                                        options));
   kv_a_layernorm_ = register_module(
-      "kv_a_layernorm", RmsNorm(kv_lora_rank_, args.rms_norm_eps(), options));
+      "kv_a_layernorm", RMSNorm(kv_lora_rank_, args.rms_norm_eps(), options));
   kv_b_proj_ = register_module(
       "kv_b_proj",
       ColumnParallelLinear(kv_lora_rank_,
@@ -120,8 +120,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                           options));
 
   if (args.rope_scaling_rope_type() == "deepseek_yarn") {
-    float mscale = rotary::yarn_get_mscale(args.rope_scaling_factor(),
-                                           args.rope_scaling_mscale_all_dim());
+    float mscale = layer::rotary::yarn_get_mscale(
+        args.rope_scaling_factor(), args.rope_scaling_mscale_all_dim());
     scaling *= mscale * mscale;
   }
 

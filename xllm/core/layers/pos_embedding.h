@@ -15,23 +15,19 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_pos_embedding_impl.h"
-#endif
+#include "config.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
-class PosEmbedding : public torch::nn::ModuleHolder<NpuRotaryEmbeddingImpl> {
+class PosEmbedding : public torch::nn::ModuleHolder<RotaryEmbeddingImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuRotaryEmbeddingImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuRotaryEmbeddingImpl;
+  using torch::nn::ModuleHolder<RotaryEmbeddingImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = RotaryEmbeddingImpl;
 
   PosEmbedding(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuRotaryEmbeddingImpl>(context)) {}
+      : ModuleHolder(std::make_shared<RotaryEmbeddingImpl>(context)) {}
 };
-#endif
 
 }  // namespace layer
 }  // namespace xllm

@@ -15,35 +15,20 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_qwen2_decoder_layer_impl.h"
-#else
-#include "common/qwen2_decoder_layer.h"
-#endif
+#include "config.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
 class Qwen2DecoderLayer
-    : public torch::nn::ModuleHolder<NpuQwen2DecoderLayerImpl> {
+    : public torch::nn::ModuleHolder<Qwen2DecoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuQwen2DecoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuQwen2DecoderLayerImpl;
+  using torch::nn::ModuleHolder<Qwen2DecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = Qwen2DecoderLayerImpl;
 
   Qwen2DecoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuQwen2DecoderLayerImpl>(context)) {}
+      : ModuleHolder(std::make_shared<Qwen2DecoderLayerImpl>(context)) {}
 };
-#else
-class Qwen2DecoderLayer : public torch::nn::ModuleHolder<Qwen2DecoderImpl> {
- public:
-  using torch::nn::ModuleHolder<Qwen2DecoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen2DecoderImpl;
-
-  Qwen2DecoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<Qwen2DecoderImpl>(context)) {}
-};
-#endif
 
 }  // namespace layer
 }  // namespace xllm

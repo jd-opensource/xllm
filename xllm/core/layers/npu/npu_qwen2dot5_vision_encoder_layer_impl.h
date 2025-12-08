@@ -63,11 +63,11 @@ enum VisionEncoderLayerTensorId : int {
   IN_VISION_V_BIAS
 };
 
-class NpuQwen2dot5VisionEncoderLayerImpl : public NpuBaseLayer {
+class Qwen2dot5VisionEncoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuQwen2dot5VisionEncoderLayerImpl(const ModelContext& context);
+  explicit Qwen2dot5VisionEncoderLayerImpl(const ModelContext& context);
 
-  ~NpuQwen2dot5VisionEncoderLayerImpl() {};
+  ~Qwen2dot5VisionEncoderLayerImpl() {};
 
   void load_state_dict(const StateDict& state_dict) override;
 

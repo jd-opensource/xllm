@@ -30,7 +30,9 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/qwen3_vision_encode_layer.h"
-#include "core/layers/rms_norm.h"
+#if defined(USE_NPU)
+#include "core/layers/npu/npu_rms_norm_impl.h"
+#endif
 #include "models/llm/qwen3.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"

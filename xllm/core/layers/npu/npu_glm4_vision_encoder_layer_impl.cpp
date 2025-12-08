@@ -88,7 +88,7 @@ void NpuGlm4VisionEncoderLayerImpl::param_from_args(
 
 NpuGlm4VisionEncoderLayerImpl::NpuGlm4VisionEncoderLayerImpl(
     const ModelContext& context)
-    : NpuBaseLayer(context) {
+    : BaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();

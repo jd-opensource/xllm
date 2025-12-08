@@ -273,7 +273,7 @@ static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
 
 Glm4MoeDecoderImpl::Glm4MoeDecoderImpl(const ModelContext& context,
                                        const int32_t layer_id)
-    : NpuBaseLayer(context),
+    : BaseLayer(context),
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       num_speculative_tokens_(
@@ -1039,7 +1039,7 @@ torch::Tensor Glm4MoeDecoderImpl::merge_experts_weights(
 }
 
 int64_t Glm4MoeDecoderImpl::init_layer() {
-  NpuBaseLayer::name_ = "glm4_moe_decoder_layer " + std::to_string(layer_id_);
+  BaseLayer::name_ = "glm4_moe_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "Glm4_Moe";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));

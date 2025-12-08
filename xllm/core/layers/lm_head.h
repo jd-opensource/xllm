@@ -15,42 +15,19 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_lm_head_impl.h"
-#else
-#include "common/linear.h"
-#endif
-#include "core/framework/model_context.h"
+#include "config.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
-class LmHead : public torch::nn::ModuleHolder<NpuLmHeadImpl> {
+class LmHead : public torch::nn::ModuleHolder<LmHeadImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuLmHeadImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuLmHeadImpl;
+  using torch::nn::ModuleHolder<LmHeadImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = LmHeadImpl;
 
   LmHead(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuLmHeadImpl>(context)) {}
+      : ModuleHolder(std::make_shared<LmHeadImpl>(context)) {}
 };
-#else
-class LmHead : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
- public:
-  using torch::nn::ModuleHolder<ColumnParallelLinearImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = ColumnParallelLinearImpl;
-
-  LmHead(const ModelContext& context)
-      : ModuleHolder(std::make_shared<ColumnParallelLinearImpl>(
-            context.get_model_args().hidden_size(),
-            context.get_model_args().vocab_size(),
-            /*bias=*/false,
-            /*gather_output=*/true,
-            QuantArgs{},
-            context.get_parallel_args(),
-            context.get_tensor_options())) {}
-};
-#endif
 
 }  // namespace layer
 }  // namespace xllm

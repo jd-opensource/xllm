@@ -36,12 +36,12 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuQwen3MoeDecoderLayerImpl : public NpuBaseLayer {
+class Qwen3MoeDecoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuQwen3MoeDecoderLayerImpl(const ModelContext& context,
-                                       const int32_t layer_id);
+  explicit Qwen3MoeDecoderLayerImpl(const ModelContext& context,
+                                    const int32_t layer_id);
 
-  ~NpuQwen3MoeDecoderLayerImpl() {};
+  ~Qwen3MoeDecoderLayerImpl() {};
 
   virtual void load_state_dict(const StateDict& state_dict);
 

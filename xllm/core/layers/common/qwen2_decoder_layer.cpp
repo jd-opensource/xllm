@@ -22,7 +22,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen2DecoderImpl::Qwen2DecoderImpl(const ModelContext& context)
+Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context)
     : parallel_args_(context.get_parallel_args()) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
@@ -35,11 +35,11 @@ Qwen2DecoderImpl::Qwen2DecoderImpl(const ModelContext& context)
   // Initialize norm layers
   input_norm_ = register_module(
       "input_layernorm",
-      RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   post_norm_ = register_module(
       "post_attention_layernorm",
-      RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   // Initialize mlp
   mlp_ = register_module("mlp",
@@ -54,7 +54,7 @@ Qwen2DecoderImpl::Qwen2DecoderImpl(const ModelContext& context)
                                   options));
 }
 
-void Qwen2DecoderImpl::load_state_dict(const StateDict& state_dict) {
+void Qwen2DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   attention_->load_state_dict(state_dict.get_dict_with_prefix("self_attn."));
   input_norm_->load_state_dict(
       state_dict.get_dict_with_prefix("input_layernorm."));
@@ -63,11 +63,12 @@ void Qwen2DecoderImpl::load_state_dict(const StateDict& state_dict) {
   mlp_->load_state_dict(state_dict.get_dict_with_prefix("mlp."));
 }
 
-torch::Tensor Qwen2DecoderImpl::forward(torch::Tensor& x,
-                                        torch::Tensor& positions,
-                                        const AttentionMetadata& attn_metadata,
-                                        KVCache& kv_cache,
-                                        const ModelInputParams& input_params) {
+torch::Tensor Qwen2DecoderLayerImpl::forward(
+    torch::Tensor& x,
+    torch::Tensor& positions,
+    const AttentionMetadata& attn_metadata,
+    KVCache& kv_cache,
+    const ModelInputParams& input_params) {
   // Pre-attention norm
   auto residual = x;
   x = input_norm_->forward(x);

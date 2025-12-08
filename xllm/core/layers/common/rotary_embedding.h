@@ -25,8 +25,9 @@ limitations under the License.
 #elif defined(USE_CUDA)
 #include "../cuda/attention.h"
 #endif
+#include "core/framework/model_context.h"
 #include "framework/model/model_args.h"
-#include "layers/rotary_embedding.h"
+#include "rotary_embedding_util.h"
 
 namespace xllm {
 namespace layer {
@@ -38,6 +39,7 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
                       int64_t rope_theta,
                       bool interleaved,
                       const torch::TensorOptions& options);
+  RotaryEmbeddingImpl(const ModelContext& context);
 
   void forward(torch::Tensor& q,
                torch::Tensor& k,

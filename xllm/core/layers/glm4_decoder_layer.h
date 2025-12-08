@@ -10,26 +10,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #pragma once
-#include "npu/npu_glm4_decoder_layer_impl.h"
+
+#include "config.h"
+
 namespace xllm {
 namespace layer {
-#if defined(USE_NPU)
-class Glm4DecoderLayer
-    : public torch::nn::ModuleHolder<NpuGlm4DecoderLayerImpl> {
+
+class Glm4DecoderLayer : public torch::nn::ModuleHolder<Glm4DecoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuGlm4DecoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuGlm4DecoderLayerImpl;
+  using torch::nn::ModuleHolder<Glm4DecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = Glm4DecoderLayerImpl;
   Glm4DecoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuGlm4DecoderLayerImpl>(context)) {}
+      : ModuleHolder(std::make_shared<Glm4DecoderLayerImpl>(context)) {}
 };
-#else
-class Glm4DecoderLayer : public torch::nn::ModuleHolder<Qwen2DecoderImpl> {
- public:
-  using torch::nn::ModuleHolder<Qwen2DecoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen2DecoderImpl;
-  Glm4DecoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<Qwen2DecoderImpl>(context)) {}
-};
-#endif
+
 }  // namespace layer
 }  // namespace xllm

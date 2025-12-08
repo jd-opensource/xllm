@@ -88,7 +88,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                                              options));
     norm_ = register_module(
         "norm",
-        layer::RmsNorm(
+        layer::RMSNorm(
             model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
     // create decoder layers
@@ -158,7 +158,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   int32_t dp_local_tp_size_;
   int32_t num_speculative_tokens_ = 0;
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RmsNorm norm_{nullptr};
+  layer::RMSNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Model);
 

@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <cstdint>
 
+#include "core/framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
@@ -31,6 +32,7 @@ namespace layer {
 // Embedding parallelized in the embedding dimension.
 class WordEmbeddingImpl : public torch::nn::Module {
  public:
+  WordEmbeddingImpl(const ModelContext& context);
   WordEmbeddingImpl(int64_t num_embeddings,
                     int64_t embedding_dim,
                     const ParallelArgs& parallel_args,

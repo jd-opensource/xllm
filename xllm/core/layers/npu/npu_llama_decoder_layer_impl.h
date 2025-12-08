@@ -43,11 +43,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuLlamaDecoderLayerImpl : public NpuBaseLayer {
+class LlamaDecoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuLlamaDecoderLayerImpl(const ModelContext& context);
+  explicit LlamaDecoderLayerImpl(const ModelContext& context);
 
-  ~NpuLlamaDecoderLayerImpl() {};
+  ~LlamaDecoderLayerImpl() {};
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 

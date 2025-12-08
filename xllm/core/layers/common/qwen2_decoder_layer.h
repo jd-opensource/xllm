@@ -32,17 +32,17 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "layers/rms_norm.h"
+#include "layers/common/rms_norm.h"
 #include "qwen2_attention.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen2DecoderImpl : public torch::nn::Module {
+class Qwen2DecoderLayerImpl : public torch::nn::Module {
  public:
-  explicit Qwen2DecoderImpl(const ModelContext& context);
+  explicit Qwen2DecoderLayerImpl(const ModelContext& context);
 
-  ~Qwen2DecoderImpl() {};
+  ~Qwen2DecoderLayerImpl() {};
 
   void load_state_dict(const StateDict& state_dict);
 
@@ -55,11 +55,13 @@ class Qwen2DecoderImpl : public torch::nn::Module {
  private:
   Qwen2Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};
-  RmsNorm input_norm_{nullptr};
-  RmsNorm post_norm_{nullptr};
+  RMSNorm input_norm_{nullptr};
+  RMSNorm post_norm_{nullptr};
 
   ParallelArgs parallel_args_;
 };
+
+using Qwen3DecoderLayerImpl = Qwen2DecoderLayerImpl;
 
 }  // namespace layer
 }  // namespace xllm

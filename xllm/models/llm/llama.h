@@ -26,10 +26,10 @@ limitations under the License.
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/attention_mask.h"
+#include "core/layers/common/attention_mask_impl.h"
 #include "core/layers/llama_decoder_layer.h"
 #include "core/layers/lm_head.h"
-#include "core/layers/rms_norm.h"
+#include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/word_embedding.h"
 #include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
@@ -115,7 +115,7 @@ class LlamaModelImpl : public torch::nn::Module {
     layers_.reserve(context.get_model_args().n_layers());
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    norm_ = register_module("norm", layer::RmsNorm(context));
+    norm_ = register_module("norm", layer::RMSNorm(context));
 
     std::tie(cos_pos_, sin_pos_) =
         get_llama_rotary_embedding(128,
@@ -158,7 +158,7 @@ class LlamaModelImpl : public torch::nn::Module {
     max_seq_len_ = FLAGS_enable_chunked_prefill
                        ? std::max(max_of_seq.item<int>(), max_seq_len_)
                        : 128;
-    auto attn_mask = attn_mask_.get_attn_mask(
+    auto attn_mask = attn_mask_->get_attn_mask(
         max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
     if (FLAGS_enable_chunked_prefill) {
@@ -226,9 +226,9 @@ class LlamaModelImpl : public torch::nn::Module {
   torch::Tensor sin_pos_;
   int max_seq_len_ = 0;
   int device_id_ = 0;
-  layer::AttentionMask attn_mask_;
+  layer::AttentionMask attn_mask_{nullptr};
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RmsNorm norm_{nullptr};
+  layer::RMSNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast

@@ -88,10 +88,11 @@ class Glm4MoeModelImpl : public torch::nn::Module {
         register_module("embed_tokens", layer::WordEmbedding(context));
 
     atb_pos_emb_ = layer::PosEmbedding(context);
-    cos_sin_ = get_concat_rotary_embedding(64,
-                                           model_args.max_position_embeddings(),
-                                           model_args.rope_theta(),
-                                           options);
+    cos_sin_ = layer::rotary::get_concat_rotary_embedding(
+        64,
+        model_args.max_position_embeddings(),
+        model_args.rope_theta(),
+        options);
     mrope_section_ = model_args.rope_scaling_mrope_section();
 
     // int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
@@ -105,7 +106,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    norm_ = register_module("norm", layer::RmsNorm(context));
+    norm_ = register_module("norm", layer::RMSNorm(context));
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
@@ -187,20 +188,20 @@ class Glm4MoeModelImpl : public torch::nn::Module {
 
         for (int j = 0; j < num_sequences; j++) {
           auto mask =
-              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                         input_params.kv_seq_lens_vec[j],
-                                         max_kv_seq,
-                                         cos_pos.dtype().toScalarType(),
-                                         cos_pos.device());
+              attn_mask_->gen_append_mask(input_params.q_seq_lens_vec[j],
+                                          input_params.kv_seq_lens_vec[j],
+                                          max_kv_seq,
+                                          cos_pos.dtype().toScalarType(),
+                                          cos_pos.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       }
     } else {
       if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
-        attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
+        attn_mask = attn_mask_->get_attn_mask(128, dtype_, device_);
       } else {
-        attn_mask = attn_mask_.gen_free_mask(
+        attn_mask = attn_mask_->gen_free_mask(
             num_speculative_tokens_ + 1, dtype_, device_);
       }
     }
@@ -281,8 +282,8 @@ class Glm4MoeModelImpl : public torch::nn::Module {
   at::Device device_;
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::AttentionMask attn_mask_;
-  layer::RmsNorm norm_{nullptr};
+  layer::AttentionMask attn_mask_{nullptr};
+  layer::RMSNorm norm_{nullptr};
   torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};
 

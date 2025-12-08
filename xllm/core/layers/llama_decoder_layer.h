@@ -15,24 +15,20 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_llama_decoder_layer_impl.h"
-#endif
+#include "config.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
 class LlamaDecoderLayer
-    : public torch::nn::ModuleHolder<NpuLlamaDecoderLayerImpl> {
+    : public torch::nn::ModuleHolder<LlamaDecoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuLlamaDecoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuLlamaDecoderLayerImpl;
+  using torch::nn::ModuleHolder<LlamaDecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = LlamaDecoderLayerImpl;
 
   LlamaDecoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuLlamaDecoderLayerImpl>(context)) {}
+      : ModuleHolder(std::make_shared<LlamaDecoderLayerImpl>(context)) {}
 };
-#endif
 
 }  // namespace layer
 }  // namespace xllm

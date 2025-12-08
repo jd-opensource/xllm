@@ -15,49 +15,18 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_word_embedding_impl.h"
-#else
-#include "common/word_embedding_impl.h"
-#endif
-#include "core/framework/model_context.h"
+#include "config.h"
 
 namespace xllm {
 namespace layer {
-
-#if defined(USE_NPU)
-class WordEmbedding : public torch::nn::ModuleHolder<NpuWordEmbeddingImpl> {
- public:
-  using torch::nn::ModuleHolder<NpuWordEmbeddingImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuWordEmbeddingImpl;
-  WordEmbedding(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuWordEmbeddingImpl>(context)) {}
-};
-
-#else
 
 class WordEmbedding : public torch::nn::ModuleHolder<WordEmbeddingImpl> {
  public:
   using torch::nn::ModuleHolder<WordEmbeddingImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = WordEmbeddingImpl;
-
-  WordEmbedding(int64_t num_embeddings,
-                int64_t embedding_dim,
-                const ParallelArgs& parallel_args,
-                const torch::TensorOptions& options)
-      : ModuleHolder(std::make_shared<WordEmbeddingImpl>(num_embeddings,
-                                                         embedding_dim,
-                                                         parallel_args,
-                                                         options)) {}
   WordEmbedding(const ModelContext& context)
-      : ModuleHolder(std::make_shared<WordEmbeddingImpl>(
-            context.get_model_args().vocab_size(),
-            context.get_model_args().hidden_size(),
-            context.get_parallel_args(),
-            context.get_tensor_options())) {}
+      : ModuleHolder(std::make_shared<WordEmbeddingImpl>(context)) {}
 };
-
-#endif
 
 }  // namespace layer
 }  // namespace xllm

@@ -129,7 +129,7 @@ static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
                                           {IN_MLP_GATEUP_WEIGHT, 0},
                                           {IN_MLP_CPROJ_WEIGHT, 1}};
 
-void NpuGlm4DecoderLayerImpl::param_from_args(
+void Glm4DecoderLayerImpl::param_from_args(
     atb_speed::chatglm::ChatglmLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -164,7 +164,7 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
   param.usePostMlpLayerNorm = true;
   initialize_quantization_parameters(param);
 }
-void NpuGlm4DecoderLayerImpl::initialize_quantization_parameters(
+void Glm4DecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::chatglm::ChatglmLayerParam& param) {
   param.linearDescs = {static_cast<int>(LinearTypeV2::INVALID),
                        static_cast<int>(LinearTypeV2::INVALID),
@@ -184,8 +184,8 @@ void NpuGlm4DecoderLayerImpl::initialize_quantization_parameters(
                            static_cast<int>(LinearType::FP)};
 }
 
-NpuGlm4DecoderLayerImpl::NpuGlm4DecoderLayerImpl(const ModelContext& context)
-    : NpuBaseLayer(context) {
+Glm4DecoderLayerImpl::Glm4DecoderLayerImpl(const ModelContext& context)
+    : BaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -204,14 +204,14 @@ NpuGlm4DecoderLayerImpl::NpuGlm4DecoderLayerImpl(const ModelContext& context)
     at_weight_tensors_[i] = torch::zeros({1}).to(options);
   }
 }
-void NpuGlm4DecoderLayerImpl::verify_loaded_weights() const {
+void Glm4DecoderLayerImpl::verify_loaded_weights() const {
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
 }
 
-void NpuGlm4DecoderLayerImpl::merge_loaded_weights() {
+void Glm4DecoderLayerImpl::merge_loaded_weights() {
   at_weight_tensors_[IN_Q_WEIGHT] =
       torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
                   at_weight_tensors_[IN_K_WEIGHT],
@@ -238,7 +238,7 @@ void NpuGlm4DecoderLayerImpl::merge_loaded_weights() {
   init_layer();
 }
 
-void NpuGlm4DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
+void Glm4DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
       set_weight(state_dict, name, index, WEIGHT_SHARD[index]);
@@ -248,7 +248,7 @@ void NpuGlm4DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-int64_t NpuGlm4DecoderLayerImpl::init_layer() {
+int64_t Glm4DecoderLayerImpl::init_layer() {
   init_attn_mask();
   name_ = "glm4_decoder_layer";
   model_name_ = "glm4";
@@ -258,7 +258,7 @@ int64_t NpuGlm4DecoderLayerImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t NpuGlm4DecoderLayerImpl::init_attn_mask() {
+int64_t Glm4DecoderLayerImpl::init_attn_mask() {
   torch::Dtype dtype =
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
@@ -266,7 +266,7 @@ int64_t NpuGlm4DecoderLayerImpl::init_attn_mask() {
   return atb::NO_ERROR;
 }
 
-int64_t NpuGlm4DecoderLayerImpl::init_node(
+int64_t Glm4DecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::chatglm::ChatglmLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -297,15 +297,15 @@ int64_t NpuGlm4DecoderLayerImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuGlm4DecoderLayerImpl::forward(torch::Tensor& x,
-                                               torch::Tensor& cos_pos,
-                                               torch::Tensor& sin_pos,
-                                               torch::Tensor& attn_mask,
-                                               KVCache& kv_cache,
-                                               ModelInputParams& input_params,
-                                               aclrtEvent* event,
-                                               std::atomic<bool>* event_flag,
-                                               int node_id) {
+torch::Tensor Glm4DecoderLayerImpl::forward(torch::Tensor& x,
+                                            torch::Tensor& cos_pos,
+                                            torch::Tensor& sin_pos,
+                                            torch::Tensor& attn_mask,
+                                            KVCache& kv_cache,
+                                            ModelInputParams& input_params,
+                                            aclrtEvent* event,
+                                            std::atomic<bool>* event_flag,
+                                            int node_id) {
   atb::Status st;
   if (!input_params.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
@@ -337,7 +337,7 @@ torch::Tensor NpuGlm4DecoderLayerImpl::forward(torch::Tensor& x,
   return at_placeholder_;
 }
 
-void NpuGlm4DecoderLayerImpl::build_node_variant_pack(
+void Glm4DecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,

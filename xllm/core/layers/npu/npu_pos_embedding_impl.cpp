@@ -20,22 +20,22 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-NpuRotaryEmbeddingImpl::NpuRotaryEmbeddingImpl(const ModelContext& context)
-    : NpuBaseLayer(context) {
+RotaryEmbeddingImpl::RotaryEmbeddingImpl(const ModelContext& context)
+    : BaseLayer(context) {
   atOutTensors_.resize(2);
   dtype_ = c10::typeMetaToScalarType(context.get_tensor_options().dtype());
   init_layer();
 }
 
-int64_t NpuRotaryEmbeddingImpl::init_layer() {
-  NpuBaseLayer::name_ = "rotary_embedding_layer";
+int64_t RotaryEmbeddingImpl::init_layer() {
+  BaseLayer::name_ = "rotary_embedding_layer";
   modelName_ = "llm";
   CHECK_OPERATION_STATUS_RETURN(init_node(embedding_node_));
 
   return atb::NO_ERROR;
 }
 
-int64_t NpuRotaryEmbeddingImpl::init_node(atb_speed::Model::Node& node) {
+int64_t RotaryEmbeddingImpl::init_node(atb_speed::Model::Node& node) {
   atb::Operation* operation = nullptr;
   CHECK_OPERATION_STATUS_RETURN(
       atb_speed::common::PositionalEmbeddingGatherV2(&operation));
@@ -69,9 +69,9 @@ int64_t NpuRotaryEmbeddingImpl::init_node(atb_speed::Model::Node& node) {
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuRotaryEmbeddingImpl::forward(const torch::Tensor& cos_sin_pos,
-                                              const torch::Tensor& position,
-                                              int nodeId) {
+torch::Tensor RotaryEmbeddingImpl::forward(const torch::Tensor& cos_sin_pos,
+                                           const torch::Tensor& position,
+                                           int nodeId) {
   atb::Status st;
   build_node_variant_pack(embedding_node_, cos_sin_pos, position);
   st = execute_node(embedding_node_, nodeId);
@@ -81,7 +81,7 @@ torch::Tensor NpuRotaryEmbeddingImpl::forward(const torch::Tensor& cos_sin_pos,
   return atOutTensors_.at(0);
 }
 
-void NpuRotaryEmbeddingImpl::build_node_variant_pack(
+void RotaryEmbeddingImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     const torch::Tensor& cos_sin_pos,
     const torch::Tensor& position) {

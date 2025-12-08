@@ -25,6 +25,15 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
+    : ColumnParallelLinearImpl(context.get_model_args().hidden_size(),
+                               context.get_model_args().vocab_size(),
+                               /*bias=*/false,
+                               /*gather_output=*/true,
+                               QuantArgs{},
+                               context.get_parallel_args(),
+                               context.get_tensor_options()) {}
+
 // Linear layer with column parallelism.
 ColumnParallelLinearImpl::ColumnParallelLinearImpl(
     int64_t in_features,

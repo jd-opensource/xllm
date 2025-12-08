@@ -26,12 +26,12 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuSiglipEncoderLayerUpImpl : public NpuBaseLayer {
+class SiglipEncoderLayerUpImpl : public BaseLayer {
  public:
-  NpuSiglipEncoderLayerUpImpl(const ModelContext& context,
-                              const std::string& prefix = "");
+  SiglipEncoderLayerUpImpl(const ModelContext& context,
+                           const std::string& prefix = "");
 
-  ~NpuSiglipEncoderLayerUpImpl() {};
+  ~SiglipEncoderLayerUpImpl() {};
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 
@@ -51,18 +51,18 @@ class NpuSiglipEncoderLayerUpImpl : public NpuBaseLayer {
 };
 
 class NpuSiglipEncoderLayerUp
-    : public torch::nn::ModuleHolder<NpuSiglipEncoderLayerUpImpl> {
+    : public torch::nn::ModuleHolder<SiglipEncoderLayerUpImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuSiglipEncoderLayerUpImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuSiglipEncoderLayerUpImpl;
+  using torch::nn::ModuleHolder<SiglipEncoderLayerUpImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = SiglipEncoderLayerUpImpl;
 
   NpuSiglipEncoderLayerUp(const ModelContext& context,
                           const std::string& prefix = "")
       : ModuleHolder(
-            std::make_shared<NpuSiglipEncoderLayerUpImpl>(context, prefix)) {}
+            std::make_shared<SiglipEncoderLayerUpImpl>(context, prefix)) {}
 };
 
-class NpuSiglipEncoderLayerDownImpl : public NpuBaseLayer {
+class NpuSiglipEncoderLayerDownImpl : public BaseLayer {
  public:
   NpuSiglipEncoderLayerDownImpl(const ModelContext& context,
                                 const std::string& prefix = "");
@@ -98,12 +98,12 @@ class NpuSiglipEncoderLayerDown
             std::make_shared<NpuSiglipEncoderLayerDownImpl>(context, prefix)) {}
 };
 
-class NpuSiglipEncoderLayerImpl : public NpuBaseLayer {
+class SiglipEncoderLayerImpl : public BaseLayer {
  public:
-  NpuSiglipEncoderLayerImpl(const ModelContext& context,
-                            const std::string& prefix = "");
+  SiglipEncoderLayerImpl(const ModelContext& context,
+                         const std::string& prefix = "");
 
-  ~NpuSiglipEncoderLayerImpl() {};
+  ~SiglipEncoderLayerImpl() {};
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 

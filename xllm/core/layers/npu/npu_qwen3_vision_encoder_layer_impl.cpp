@@ -73,7 +73,7 @@ static std::map<int, int> WEIGHT_SHARD = {
     {IN_LINEAR_FC2_WEIGHT, 1},
 };
 
-void NpuQwen3VisionEncoderLayerImpl::param_from_args(
+void Qwen3VisionEncoderLayerImpl::param_from_args(
     atb_speed::qwen::VisionEncoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -92,9 +92,9 @@ void NpuQwen3VisionEncoderLayerImpl::param_from_args(
   param.enableLogN = false;
 }
 
-NpuQwen3VisionEncoderLayerImpl::NpuQwen3VisionEncoderLayerImpl(
+Qwen3VisionEncoderLayerImpl::Qwen3VisionEncoderLayerImpl(
     const ModelContext& context)
-    : NpuBaseLayer(context) {
+    : BaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -111,14 +111,14 @@ NpuQwen3VisionEncoderLayerImpl::NpuQwen3VisionEncoderLayerImpl(
   }
 }
 
-void NpuQwen3VisionEncoderLayerImpl::verify_loaded_weights() const {
+void Qwen3VisionEncoderLayerImpl::verify_loaded_weights() const {
   for (const auto& [index, name] : WEIGHT_MAPPING) {
     CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
 }
 
-void NpuQwen3VisionEncoderLayerImpl::merge_loaded_weights() {
+void Qwen3VisionEncoderLayerImpl::merge_loaded_weights() {
   // spilt pack qkv weight when enable tp
   get_weights_col_packed_qkv();
   if (encode_param_.worldSize > 1) {
@@ -151,7 +151,7 @@ void NpuQwen3VisionEncoderLayerImpl::merge_loaded_weights() {
   init_layer();
 }
 // tp spilt weight
-void NpuQwen3VisionEncoderLayerImpl::get_weights_col_packed_qkv() {
+void Qwen3VisionEncoderLayerImpl::get_weights_col_packed_qkv() {
   int rank = encode_param_.rank;
   int worldSize = encode_param_.worldSize;
   // split qkv weight
@@ -173,8 +173,7 @@ void NpuQwen3VisionEncoderLayerImpl::get_weights_col_packed_qkv() {
       (qkv_bias[2].chunk(worldSize, 0))[rank];
 }
 
-void NpuQwen3VisionEncoderLayerImpl::load_state_dict(
-    const StateDict& state_dict) {
+void Qwen3VisionEncoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   for (const auto& [index, name] : WEIGHT_MAPPING) {
     if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
       set_weight(state_dict, name, index, WEIGHT_SHARD[index]);
@@ -184,14 +183,14 @@ void NpuQwen3VisionEncoderLayerImpl::load_state_dict(
   }
 }
 
-int64_t NpuQwen3VisionEncoderLayerImpl::init_layer() {
+int64_t Qwen3VisionEncoderLayerImpl::init_layer() {
   name_ = "qwen3_encoder_layer";
   model_name_ = "qwen3_vl";
   CHECK_OPERATION_STATUS_RETURN(init_node(encode_node_, encode_param_));
   return atb::NO_ERROR;
 }
 
-int64_t NpuQwen3VisionEncoderLayerImpl::init_node(
+int64_t Qwen3VisionEncoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::qwen::VisionEncoderLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -221,7 +220,7 @@ int64_t NpuQwen3VisionEncoderLayerImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuQwen3VisionEncoderLayerImpl::forward(
+torch::Tensor Qwen3VisionEncoderLayerImpl::forward(
     torch::Tensor& x,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
@@ -248,7 +247,7 @@ torch::Tensor NpuQwen3VisionEncoderLayerImpl::forward(
   return x;
 }
 
-void NpuQwen3VisionEncoderLayerImpl::build_node_variant_pack(
+void Qwen3VisionEncoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,

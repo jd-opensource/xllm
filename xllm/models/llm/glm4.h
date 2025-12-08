@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/layers/common/rotary_embedding_util.h"
 #include "core/layers/glm4_decoder_layer.h"
 #include "llm_model_base.h"
 
@@ -42,17 +43,17 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    norm_ = register_module("norm", layer::RmsNorm(context));
+    norm_ = register_module("norm", layer::RMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
 #if defined(USE_NPU)
     atb_pos_emb_ = layer::PosEmbedding(context);
 #endif
-    cos_sin_ =
-        get_chatglm_rotary_embedding(64,
-                                     model_args.max_position_embeddings(),
-                                     model_args.rope_theta(),
-                                     options);
+    cos_sin_ = layer::rotary::get_chatglm_rotary_embedding(
+        64,
+        model_args.max_position_embeddings(),
+        model_args.rope_theta(),
+        options);
 #if defined(USE_NPU)
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
@@ -123,11 +124,11 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
 
         for (int j = 0; j < num_sequences; j++) {
           auto mask =
-              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                         input_params.kv_seq_lens_vec[j],
-                                         max_kv_seq,
-                                         cos_pos.dtype().toScalarType(),
-                                         cos_pos.device());
+              attn_mask_->gen_append_mask(input_params.q_seq_lens_vec[j],
+                                          input_params.kv_seq_lens_vec[j],
+                                          max_kv_seq,
+                                          cos_pos.dtype().toScalarType(),
+                                          cos_pos.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
@@ -135,12 +136,12 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
     } else {
       if (FLAGS_num_speculative_tokens == 0 ||
           input_params.global_empty_kv_cache) {
-        attn_mask = attn_mask_.get_attn_mask(
+        attn_mask = attn_mask_->get_attn_mask(
             128, cos_pos.dtype().toScalarType(), cos_pos.device());
       } else {
-        attn_mask = attn_mask_.gen_free_mask(FLAGS_num_speculative_tokens + 1,
-                                             cos_pos.dtype().toScalarType(),
-                                             cos_pos.device());
+        attn_mask = attn_mask_->gen_free_mask(FLAGS_num_speculative_tokens + 1,
+                                              cos_pos.dtype().toScalarType(),
+                                              cos_pos.device());
       }
     }
 

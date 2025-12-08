@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include "core/framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
@@ -52,6 +53,8 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
       const ParallelArgs& parallel_args,
       const torch::TensorOptions& options,
       const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs());
+
+  ColumnParallelLinearImpl(const ModelContext& context);
 
   torch::Tensor forward(torch::Tensor input);
 

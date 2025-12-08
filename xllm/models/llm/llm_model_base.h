@@ -30,13 +30,13 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/attention_mask.h"
-#include "core/layers/block_copy.h"
+#include "core/layers/common/attention_mask_impl.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/pos_embedding.h"
-#include "core/layers/rms_norm.h"
 #include "models/model_registry.h"
 #if defined(USE_NPU)
+#include "core/layers/npu/npu_block_copy_impl.h"
+#include "core/layers/npu/npu_rms_norm_impl.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 #else
 #include "core/layers/common/layer_utils.h"
@@ -49,59 +49,6 @@ limitations under the License.
 #endif
 
 namespace xllm {
-
-torch::Tensor compute_rotary_embedding(int64_t dim,
-                                       int64_t seq_len,
-                                       double rope_theta,
-                                       const torch::TensorOptions& options,
-                                       bool use_cat) {
-  auto options_new =
-      torch::device(options.device()).dtype(at::ScalarType::Double);
-  auto inv_freq =
-      1.0 / torch::pow(rope_theta, torch::arange(0, dim, 2, options_new) / dim)
-                .to(at::ScalarType::Float);
-  auto seq_idx = torch::arange(seq_len, options_new);
-
-  auto freqs = torch::ger(seq_idx, inv_freq).to(torch::kFloat32);
-  torch::Tensor emb;
-  if (use_cat) {
-    emb = torch::cat({freqs, freqs}, -1);
-  } else {
-    emb = torch::stack({freqs, freqs}, -1);
-    emb = emb.reshape({seq_len, dim});
-  }
-  auto rope_cos = torch::cos(emb);
-  auto rope_sin = torch::sin(emb);
-
-  auto dtype = options.dtype();
-  if (dtype == torch::kFloat16 || dtype == torch::kBFloat16 ||
-      dtype == torch::kInt8) {
-    if (dtype == torch::kBFloat16) {
-      rope_cos = rope_cos.to(torch::kBFloat16);
-      rope_sin = rope_sin.to(torch::kBFloat16);
-    } else {
-      rope_cos = rope_cos.to(torch::kFloat16);
-      rope_sin = rope_sin.to(torch::kFloat16);
-    }
-  }
-  std::vector<torch::Tensor> cos_sin{rope_cos, rope_sin};
-  return torch::cat(cos_sin, -1);
-}
-
-torch::Tensor get_concat_rotary_embedding(int64_t dim,
-                                          int64_t seq_len,
-                                          double rope_theta,
-                                          const torch::TensorOptions& options) {
-  return compute_rotary_embedding(dim, seq_len, rope_theta, options, true);
-}
-
-torch::Tensor get_chatglm_rotary_embedding(
-    int64_t dim,
-    int64_t seq_len,
-    double rope_theta,
-    const torch::TensorOptions& options) {
-  return compute_rotary_embedding(dim, seq_len, rope_theta, options, false);
-}
 
 template <typename DecoderType>
 class LlmDecoderLayerImplBase : public torch::nn::Module {
@@ -251,7 +198,7 @@ class LlmModelImplBase : public torch::nn::Module {
       max_seq_len_ = FLAGS_enable_chunked_prefill
                          ? std::max(input_params.kv_max_seq_len, max_seq_len_)
                          : 128;
-      attn_mask = attn_mask_.get_attn_mask(
+      attn_mask = attn_mask_->get_attn_mask(
           max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
       max_seq_len_ = FLAGS_enable_chunked_prefill
@@ -265,17 +212,17 @@ class LlmModelImplBase : public torch::nn::Module {
 
           for (int j = 0; j < num_sequences; j++) {
             auto mask =
-                attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                           input_params.kv_seq_lens_vec[j],
-                                           max_seq_len_,
-                                           cos_pos.dtype().toScalarType(),
-                                           cos_pos.device());
+                attn_mask_->gen_append_mask(input_params.q_seq_lens_vec[j],
+                                            input_params.kv_seq_lens_vec[j],
+                                            max_seq_len_,
+                                            cos_pos.dtype().toScalarType(),
+                                            cos_pos.device());
             req_mask_vec.emplace_back(mask);
           }
           attn_mask = torch::cat(req_mask_vec, 0);
         }
       } else {
-        attn_mask = attn_mask_.get_attn_mask(
+        attn_mask = attn_mask_->get_attn_mask(
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
       }
     }
@@ -378,7 +325,7 @@ class LlmModelImplBase : public torch::nn::Module {
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
   int device_id = 0;
-  layer::AttentionMask attn_mask_;
+  layer::AttentionMask attn_mask_{nullptr};
   int dp_rank_ = 0;
 #if defined(USE_NPU)
   layer::PosEmbedding atb_pos_emb_{nullptr};
@@ -388,7 +335,7 @@ class LlmModelImplBase : public torch::nn::Module {
   // test
   //  ParallelEmbedding embed_tokens_{nullptr};
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RmsNorm norm_{nullptr};
+  layer::RMSNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast

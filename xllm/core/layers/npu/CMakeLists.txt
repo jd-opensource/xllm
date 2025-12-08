@@ -27,6 +27,8 @@ cc_library(
     npu_glm4_decoder_layer_impl.h
     npu_rms_norm_impl.h
     npu_siglip_encoder_layer_impl.h
+    ../common/rotary_embedding_util.h
+    rotary_embedding.h
   SRCS
     npu_word_embedding_impl.cpp
     npu_pos_embedding_impl.cpp
@@ -49,10 +51,12 @@ cc_library(
     npu_glm4_decoder_layer_impl.cpp
     npu_rms_norm_impl.cpp
     npu_siglip_encoder_layer_impl.cpp
+    ../common/rotary_embedding_util.cpp
+    rotary_embedding.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"
-    :base_layer
+    :attention_mask
     :kv_cache
     :prefix_cache
     :block

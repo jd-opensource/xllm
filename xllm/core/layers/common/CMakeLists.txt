@@ -6,8 +6,9 @@ cc_library(
   HDRS
     qwen2_attention.h
     qwen2_vision_attention.h
-    fuse_norm.h
+    rms_norm.h
     rotary_embedding.h
+    rotary_embedding_util.h
     fused_moe.h
     dense_mlp.h
     qwen2_decoder_layer.h
@@ -20,8 +21,9 @@ cc_library(
   SRCS
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
-    fuse_norm.cpp
+    rms_norm.cpp
     rotary_embedding.cpp
+    rotary_embedding_util.cpp
     fused_moe.cpp
     dense_mlp.cpp
     qwen2_decoder_layer.cpp

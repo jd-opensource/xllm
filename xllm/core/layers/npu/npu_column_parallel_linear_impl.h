@@ -45,11 +45,11 @@ namespace layer {
 // Linear layer with column parallelism.
 // The linear layer is defined as Y = XA + b. A is parallelized along
 // its second dimension as A = [A_1, ..., A_p].
-class NpuColumnParallelLinearImpl : public NpuBaseLayer {
+class ColumnParallelLinearImpl : public BaseLayer {
  public:
-  NpuColumnParallelLinearImpl(const ModelContext& context);
+  ColumnParallelLinearImpl(const ModelContext& context);
 
-  ~NpuColumnParallelLinearImpl() {};
+  ~ColumnParallelLinearImpl() {};
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 
@@ -82,6 +82,7 @@ class NpuColumnParallelLinearImpl : public NpuBaseLayer {
 
   atb_speed::common::LinearParallelParam linear_param_;
 };
+TORCH_MODULE(ColumnParallelLinear);
 
 }  // namespace layer
 }  // namespace xllm

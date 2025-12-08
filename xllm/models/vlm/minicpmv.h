@@ -25,7 +25,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/multi_head_attention.h"
+#include "core/layers/common/multi_head_attention.h"
 #include "core/layers/siglip_encoder_layer.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"

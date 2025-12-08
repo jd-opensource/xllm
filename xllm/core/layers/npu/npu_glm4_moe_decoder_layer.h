@@ -31,7 +31,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class Glm4MoeDecoderImpl : public NpuBaseLayer {
+class Glm4MoeDecoderImpl : public BaseLayer {
  public:
   explicit Glm4MoeDecoderImpl(const ModelContext& context,
                               const int32_t layer_id);

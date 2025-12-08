@@ -43,7 +43,7 @@ namespace xllm {
 namespace layer {
 
 // copy from qwen3 vl, please follow its modifications
-class NpuGlm4VisionEncoderLayerImpl : public NpuBaseLayer {
+class NpuGlm4VisionEncoderLayerImpl : public BaseLayer {
  public:
   explicit NpuGlm4VisionEncoderLayerImpl(const ModelContext& context);
 

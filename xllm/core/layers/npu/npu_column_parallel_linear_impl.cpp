@@ -18,7 +18,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-void NpuColumnParallelLinearImpl::param_from_args(
+void ColumnParallelLinearImpl::param_from_args(
     atb_speed::common::LinearParallelParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -41,9 +41,8 @@ void NpuColumnParallelLinearImpl::param_from_args(
   }
 }
 
-NpuColumnParallelLinearImpl::NpuColumnParallelLinearImpl(
-    const ModelContext& context)
-    : NpuBaseLayer(context) {
+ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
+    : BaseLayer(context) {
   param_from_args(
       linear_param_, context.get_model_args(), context.get_parallel_args());
   at_weight_tensors_.resize(1);
@@ -57,19 +56,19 @@ NpuColumnParallelLinearImpl::NpuColumnParallelLinearImpl(
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 }
 
-void NpuColumnParallelLinearImpl::verify_loaded_weights(
+void ColumnParallelLinearImpl::verify_loaded_weights(
     const std::string weight_str) const {
   CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
       << "weight is not loaded for " << weight_str;
 }
 
-void NpuColumnParallelLinearImpl::merge_loaded_weights() {
+void ColumnParallelLinearImpl::merge_loaded_weights() {
   atb_weight_tensors_[0] =
       atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[0]);
   init_layer();
 }
 
-void NpuColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
+void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   if (dp_size_ > 1) {
     set_weight(
         state_dict, "weight", 0, 0, dp_local_tp_rank_, dp_local_tp_size_);
@@ -79,7 +78,7 @@ void NpuColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   at_weight_tensors_[0] = at_weight_tensors_[0].to(dtype_);
 }
 
-int64_t NpuColumnParallelLinearImpl::init_layer() {
+int64_t ColumnParallelLinearImpl::init_layer() {
   name_ = "atb_parallel_linear_layer";
   model_name_ = "Atb Parallel Linear";
   CHECK_OPERATION_STATUS_RETURN(init_node(linear_node_, linear_param_));
@@ -87,7 +86,7 @@ int64_t NpuColumnParallelLinearImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t NpuColumnParallelLinearImpl::init_node(
+int64_t ColumnParallelLinearImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::common::LinearParallelParam& linearParam) {
   atb::Operation* operation = nullptr;
@@ -125,8 +124,8 @@ int64_t NpuColumnParallelLinearImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuColumnParallelLinearImpl::forward(const torch::Tensor& input,
-                                                   int nodeId) {
+torch::Tensor ColumnParallelLinearImpl::forward(const torch::Tensor& input,
+                                                int nodeId) {
   atb::Status st;
   build_node_variant_pack(linear_node_, input);
   st = execute_node(linear_node_, nodeId);
@@ -136,7 +135,7 @@ torch::Tensor NpuColumnParallelLinearImpl::forward(const torch::Tensor& input,
   return at_out_tensors_.at(0);
 }
 
-void NpuColumnParallelLinearImpl::build_node_variant_pack(
+void ColumnParallelLinearImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     const torch::Tensor& input) {
   internal_input = atb_speed::Utils::AtTensor2Tensor(input);

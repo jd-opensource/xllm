@@ -15,44 +15,23 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_deepseek_v2_decoder_layer_impl.h"
-#else
-#include "mlu/deepseek_v2_decoder_layer_impl.h"
-#endif
+#include "config.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
-class DeepseekV2DecoderLayer
-    : public torch::nn::ModuleHolder<NpuDeepseekV2DecoderLayerImpl> {
- public:
-  using torch::nn::ModuleHolder<NpuDeepseekV2DecoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuDeepseekV2DecoderLayerImpl;
-
-  DeepseekV2DecoderLayer(const ModelContext& context,
-                         const int32_t layer_id,
-                         const float sm_scale)
-      : ModuleHolder(
-            std::make_shared<NpuDeepseekV2DecoderLayerImpl>(context,
-                                                            layer_id,
-                                                            sm_scale)) {}
-};
-#else
 // DeepSeek V3.2 used different structure but
 // it is still compatible with DeepSeek V2.
 class DeepseekV2DecoderLayer
-    : public torch::nn::ModuleHolder<DeepseekV2DecoderImpl> {
+    : public torch::nn::ModuleHolder<DeepseekV2DecoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<DeepseekV2DecoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = DeepseekV2DecoderImpl;
+  using torch::nn::ModuleHolder<DeepseekV2DecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = DeepseekV2DecoderLayerImpl;
 
   DeepseekV2DecoderLayer(const ModelContext& context, const int32_t layer_id)
       : ModuleHolder(
-            std::make_shared<DeepseekV2DecoderImpl>(context, layer_id)) {}
+            std::make_shared<DeepseekV2DecoderLayerImpl>(context, layer_id)) {}
 };
-#endif
 
 }  // namespace layer
 }  // namespace xllm

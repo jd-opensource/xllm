@@ -85,10 +85,10 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   // 3. RMSNorm
   if (is_qwen3_style_) {
     q_norm_ = register_module(
-        "q_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
+        "q_norm", RMSNorm(args.head_dim(), args.rms_norm_eps(), options));
 
     k_norm_ = register_module(
-        "k_norm", RmsNorm(args.head_dim(), args.rms_norm_eps(), options));
+        "k_norm", RMSNorm(args.head_dim(), args.rms_norm_eps(), options));
   }
 
   // 4. Rotary embedding

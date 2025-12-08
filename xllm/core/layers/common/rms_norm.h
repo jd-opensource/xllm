@@ -15,22 +15,33 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_block_copy_impl.h"
-#endif
+#include <torch/torch.h>
+
+#include "core/framework/model_context.h"
+#include "framework/state_dict/state_dict.h"
+#include "framework/state_dict/utils.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
-class BlockCopy : public torch::nn::ModuleHolder<NpuBlockCopyImpl> {
+class RMSNormImpl : public torch::nn::Module {
  public:
-  using torch::nn::ModuleHolder<NpuBlockCopyImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuBlockCopyImpl;
-  BlockCopy(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuBlockCopyImpl>(context)) {}
+  RMSNormImpl(int64_t dim, double eps, const torch::TensorOptions& options);
+  RMSNormImpl(const ModelContext& context);
+  torch::Tensor forward(torch::Tensor& input);
+  torch::Tensor forward_output(torch::Tensor& input, torch::Tensor& output);
+  void set_layernorm_mode();
+
+  void load_state_dict(const StateDict& state_dict);
+
+ private:
+  DEFINE_WEIGHT(weight);
+  DEFINE_WEIGHT(bias);
+  int64_t norm_dim_;
+  double eps_;
+  std::string mode_;
 };
-#endif
+TORCH_MODULE(RMSNorm);
 
 }  // namespace layer
 }  // namespace xllm

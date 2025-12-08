@@ -43,11 +43,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuGlm4DecoderLayerImpl : public NpuBaseLayer {
+class Glm4DecoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuGlm4DecoderLayerImpl(const ModelContext& context);
+  explicit Glm4DecoderLayerImpl(const ModelContext& context);
 
-  ~NpuGlm4DecoderLayerImpl() {};
+  ~Glm4DecoderLayerImpl() {};
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 

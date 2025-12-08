@@ -18,8 +18,9 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const ModelContext& context,
-                                             int32_t layer_id)
+DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
+    const ModelContext& context,
+    int32_t layer_id)
     : parallel_args_(context.get_parallel_args()) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
@@ -37,11 +38,11 @@ DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const ModelContext& context,
   // Initialize norm layers
   input_norm_ = register_module(
       "input_layernorm",
-      RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   post_norm_ = register_module(
       "post_attention_layernorm",
-      RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   // Initialize mlp
   auto first_k_dense_replace = model_args.first_k_dense_replace();
@@ -80,7 +81,7 @@ DeepseekV2DecoderImpl::DeepseekV2DecoderImpl(const ModelContext& context,
   }
 }
 
-void DeepseekV2DecoderImpl::load_state_dict(const StateDict& state_dict) {
+void DeepseekV2DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   attention_->load_state_dict(state_dict.get_dict_with_prefix("self_attn."));
   input_norm_->load_state_dict(
       state_dict.get_dict_with_prefix("input_layernorm."));
@@ -93,7 +94,7 @@ void DeepseekV2DecoderImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-torch::Tensor DeepseekV2DecoderImpl::forward(
+torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     torch::Tensor& x,
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,

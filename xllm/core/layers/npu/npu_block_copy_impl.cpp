@@ -20,23 +20,22 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-NpuBlockCopyImpl::NpuBlockCopyImpl(const ModelContext& context)
-    : NpuBaseLayer(context) {
+BlockCopyImpl::BlockCopyImpl(const ModelContext& context) : BaseLayer(context) {
   auto options = context.get_tensor_options();
   dtype_ = c10::typeMetaToScalarType(options.dtype());
 }
 
-void NpuBlockCopyImpl::merge_loaded_weights() { init_layer(); }
+void BlockCopyImpl::merge_loaded_weights() { init_layer(); }
 
-int64_t NpuBlockCopyImpl::init_layer() {
-  NpuBaseLayer::name_ = "block_copy_layer";
+int64_t BlockCopyImpl::init_layer() {
+  BaseLayer::name_ = "block_copy_layer";
   model_name_ = "llm";
   CHECK_OPERATION_STATUS_RETURN(init_node(node_, param_));
   return atb::NO_ERROR;
 }
 
-int64_t NpuBlockCopyImpl::init_node(atb_speed::Model::Node& node,
-                                    atb::infer::BlockCopyParam& param) {
+int64_t BlockCopyImpl::init_node(atb_speed::Model::Node& node,
+                                 atb::infer::BlockCopyParam& param) {
   atb::Operation* operation = nullptr;
   atb::Status atbStatus = atb::CreateOperation(param, &operation);
   if (atbStatus != atb::NO_ERROR) {
@@ -63,12 +62,12 @@ int64_t NpuBlockCopyImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuBlockCopyImpl::forward(const torch::Tensor& key_cache,
-                                        const torch::Tensor& value_cache,
-                                        const torch::Tensor& src_block_ids,
-                                        const torch::Tensor& dst_block_ids,
-                                        const torch::Tensor& cum_sum,
-                                        int nodeId) {
+torch::Tensor BlockCopyImpl::forward(const torch::Tensor& key_cache,
+                                     const torch::Tensor& value_cache,
+                                     const torch::Tensor& src_block_ids,
+                                     const torch::Tensor& dst_block_ids,
+                                     const torch::Tensor& cum_sum,
+                                     int nodeId) {
   atb::Status st;
   build_node_variant_pack(
       node_, key_cache, value_cache, src_block_ids, dst_block_ids, cum_sum);
@@ -78,13 +77,12 @@ torch::Tensor NpuBlockCopyImpl::forward(const torch::Tensor& key_cache,
   return key_cache;
 }
 
-void NpuBlockCopyImpl::build_node_variant_pack(
-    atb_speed::Model::Node& node,
-    const torch::Tensor& key_cache,
-    const torch::Tensor& value_cache,
-    const torch::Tensor& src_block_ids,
-    const torch::Tensor& dst_block_ids,
-    const torch::Tensor& cum_sum) {
+void BlockCopyImpl::build_node_variant_pack(atb_speed::Model::Node& node,
+                                            const torch::Tensor& key_cache,
+                                            const torch::Tensor& value_cache,
+                                            const torch::Tensor& src_block_ids,
+                                            const torch::Tensor& dst_block_ids,
+                                            const torch::Tensor& cum_sum) {
   internal_key_tensors_ = atb_speed::Utils::AtTensor2Tensor(key_cache);
   internal_value_tensors_ = atb_speed::Utils::AtTensor2Tensor(value_cache);
   internal_src_block_ids_tensors_ =

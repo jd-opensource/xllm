@@ -26,17 +26,18 @@ limitations under the License.
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "fused_moe.h"
-#include "layers/rms_norm.h"
+#include "layers/common/rms_norm.h"
 #include "qwen2_attention.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3MoeDecoderImpl : public torch::nn::Module {
+class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
  public:
-  explicit Qwen3MoeDecoderImpl(const ModelContext& context, int32_t layer_id);
+  explicit Qwen3MoeDecoderLayerImpl(const ModelContext& context,
+                                    int32_t layer_id);
 
-  ~Qwen3MoeDecoderImpl() {};
+  ~Qwen3MoeDecoderLayerImpl() {};
 
   void load_state_dict(const StateDict& state_dict);
 
@@ -50,8 +51,8 @@ class Qwen3MoeDecoderImpl : public torch::nn::Module {
   Qwen2Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};
   FusedMoE moe_mlp_{nullptr};
-  RmsNorm input_norm_{nullptr};
-  RmsNorm post_norm_{nullptr};
+  RMSNorm input_norm_{nullptr};
+  RMSNorm post_norm_{nullptr};
 };
 
 }  // namespace layer

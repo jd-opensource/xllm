@@ -27,7 +27,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "layers/rms_norm.h"
+#include "layers/common/rms_norm.h"
 #include "linear.h"
 #include "rotary_embedding.h"
 
@@ -58,8 +58,8 @@ class Qwen2AttentionImpl : public torch::nn::Module {
 
   QKVParallelLinear qkv_proj_{nullptr};
   RowParallelLinear o_proj_{nullptr};
-  RmsNorm q_norm_{nullptr};
-  RmsNorm k_norm_{nullptr};
+  RMSNorm q_norm_{nullptr};
+  RMSNorm k_norm_{nullptr};
   Attention attn_{nullptr};
   MRotaryEmbedding rotary_emb_{nullptr};
 };

@@ -21,15 +21,18 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+RotaryEmbeddingImpl::RotaryEmbeddingImpl(const ModelContext& context) {
+  LOG(FATAL) << "Not implement currently.";
+}
+
 RotaryEmbeddingImpl::RotaryEmbeddingImpl(int64_t rotary_dim,
                                          int64_t max_position_embeddings,
                                          int64_t rope_theta,
                                          bool interleaved,
                                          const torch::TensorOptions& options)
     : interleaved_(interleaved) {
-  auto inv_freq =
-      xllm::rotary::compute_inv_freq(rotary_dim, rope_theta, options);
-  const auto cos_sin = xllm::rotary::compute_cos_sin_cache(
+  auto inv_freq = rotary::compute_inv_freq(rotary_dim, rope_theta, options);
+  const auto cos_sin = rotary::compute_cos_sin_cache(
       rotary_dim, max_position_embeddings, interleaved, inv_freq, options);
   cos_sin_cache_ = register_buffer("cos_sin_cache", cos_sin);
 
@@ -147,7 +150,7 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
     : head_size_(head_size),
       rotary_dim_(rotary_dim),
       interleaved_(interleaved) {
-  auto inv_freq = xllm::rotary::apply_deepseek_yarn_rope_scaling(
+  auto inv_freq = rotary::apply_deepseek_yarn_rope_scaling(
       scaling_factor,
       extrapolation_factor,
       beta_fast,
@@ -155,16 +158,15 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
       rotary_dim,
       rope_theta,
       rope_scaling_original_max_position_embeddings);
-  const auto cos_sin =
-      xllm::rotary::compute_cos_sin_cache(rotary_dim,
-                                          max_position_embeddings,
-                                          interleaved,
-                                          scaling_factor,
-                                          attn_factor,
-                                          mscale,
-                                          mscale_all_dim,
-                                          inv_freq,
-                                          options);
+  const auto cos_sin = rotary::compute_cos_sin_cache(rotary_dim,
+                                                     max_position_embeddings,
+                                                     interleaved,
+                                                     scaling_factor,
+                                                     attn_factor,
+                                                     mscale,
+                                                     mscale_all_dim,
+                                                     inv_freq,
+                                                     options);
   cos_sin_cache_ = register_buffer("cos_sin_cache", cos_sin);
 
   auto cos_sin_vec = cos_sin_cache_.chunk(2, /*dim=*/-1);

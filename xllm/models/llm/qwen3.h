@@ -42,16 +42,17 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    norm_ = register_module("norm", layer::RmsNorm(context));
+    norm_ = register_module("norm", layer::RMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
 #if defined(USE_NPU)
     atb_pos_emb_ = layer::PosEmbedding(context);
 #endif
-    cos_sin_ = get_concat_rotary_embedding(128,
-                                           model_args.max_position_embeddings(),
-                                           model_args.rope_theta(),
-                                           options);
+    cos_sin_ = layer::rotary::get_concat_rotary_embedding(
+        128,
+        model_args.max_position_embeddings(),
+        model_args.rope_theta(),
+        options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     // encode_attn_mask_ =
     //   layer::AttentionMask(options.device(),
@@ -143,7 +144,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     max_seq_len_ = FLAGS_enable_chunked_prefill
                        ? std::max(max_of_seq.item<int>(), max_seq_len_)
                        : 128;
-    attn_mask = attn_mask_.get_attn_mask(
+    attn_mask = attn_mask_->get_attn_mask(
         max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
     if (FLAGS_enable_chunked_prefill) {

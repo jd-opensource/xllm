@@ -29,16 +29,17 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/dense_mlp.h"
 #include "layers/common/fused_moe.h"
-#include "layers/rms_norm.h"
+#include "layers/common/rms_norm.h"
 
 namespace xllm {
 namespace layer {
 
-class DeepseekV2DecoderImpl : public torch::nn::Module {
+class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
-  explicit DeepseekV2DecoderImpl(const ModelContext& context, int32_t layer_id);
+  explicit DeepseekV2DecoderLayerImpl(const ModelContext& context,
+                                      int32_t layer_id);
 
-  ~DeepseekV2DecoderImpl() {};
+  ~DeepseekV2DecoderLayerImpl() {};
 
   void load_state_dict(const StateDict& state_dict);
 
@@ -57,8 +58,8 @@ class DeepseekV2DecoderImpl : public torch::nn::Module {
   DeepseekV2Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};
   FusedMoE moe_mlp_{nullptr};
-  RmsNorm input_norm_{nullptr};
-  RmsNorm post_norm_{nullptr};
+  RMSNorm input_norm_{nullptr};
+  RMSNorm post_norm_{nullptr};
 };
 
 }  // namespace layer

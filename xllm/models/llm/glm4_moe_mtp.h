@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
-#include "core/layers/column_parallel_linear.h"
+#include "core/layers/npu/npu_column_parallel_linear_impl.h"
 #include "core/layers/npu/npu_glm4_moe_decoder_layer.h"
 #include "glm4_moe.h"
 #include "llm_model_base.h"
@@ -44,10 +44,11 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
         register_module("embed_tokens", layer::WordEmbedding(context));
 
     atb_pos_emb_ = layer::PosEmbedding(context);
-    cos_sin_ = get_concat_rotary_embedding(64,
-                                           model_args.max_position_embeddings(),
-                                           model_args.rope_theta(),
-                                           options);
+    cos_sin_ = layer::rotary::get_concat_rotary_embedding(
+        64,
+        model_args.max_position_embeddings(),
+        model_args.rope_theta(),
+        options);
 
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
@@ -61,9 +62,9 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
     }
 
     eh_proj_ = register_module("eh_proj", layer::ColumnParallelLinear(context));
-    enorm_ = register_module("enorm", layer::RmsNorm(context));
-    hnorm_ = register_module("hnorm", layer::RmsNorm(context));
-    final_norm_ = register_module("final_norm", layer::RmsNorm(context));
+    enorm_ = register_module("enorm", layer::RMSNorm(context));
+    hnorm_ = register_module("hnorm", layer::RMSNorm(context));
+    final_norm_ = register_module("final_norm", layer::RMSNorm(context));
 
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
@@ -122,20 +123,20 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
 
         for (int j = 0; j < num_sequences; j++) {
           auto mask =
-              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                         input_params.kv_seq_lens_vec[j],
-                                         max_kv_seq,
-                                         cos_pos.dtype().toScalarType(),
-                                         cos_pos.device());
+              attn_mask_->gen_append_mask(input_params.q_seq_lens_vec[j],
+                                          input_params.kv_seq_lens_vec[j],
+                                          max_kv_seq,
+                                          cos_pos.dtype().toScalarType(),
+                                          cos_pos.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       }
     } else {
       if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
-        attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
+        attn_mask = attn_mask_->get_attn_mask(128, dtype_, device_);
       } else {
-        attn_mask = attn_mask_.gen_free_mask(
+        attn_mask = attn_mask_->gen_free_mask(
             num_speculative_tokens_ + 1, dtype_, device_);
       }
     }
@@ -231,13 +232,13 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
   at::Device device_;
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::AttentionMask attn_mask_;
+  layer::AttentionMask attn_mask_{nullptr};
   torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};
   layer::ColumnParallelLinear eh_proj_{nullptr};
-  layer::RmsNorm enorm_{nullptr};
-  layer::RmsNorm hnorm_{nullptr};
-  layer::RmsNorm final_norm_{nullptr};
+  layer::RMSNorm enorm_{nullptr};
+  layer::RMSNorm hnorm_{nullptr};
+  layer::RMSNorm final_norm_{nullptr};
 };
 TORCH_MODULE(Glm4MoeMtpModel);
 

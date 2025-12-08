@@ -103,13 +103,12 @@ class ExpertBuffer {
   bool initialized_ = false;
 };
 
-class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
+class DeepseekV2DecoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuDeepseekV2DecoderLayerImpl(const ModelContext& context,
-                                         const int32_t layer_id,
-                                         const float sm_scale);
+  explicit DeepseekV2DecoderLayerImpl(const ModelContext& context,
+                                      const int32_t layer_id);
 
-  ~NpuDeepseekV2DecoderLayerImpl() {};
+  ~DeepseekV2DecoderLayerImpl() {};
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 

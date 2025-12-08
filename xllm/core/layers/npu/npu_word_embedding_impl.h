@@ -40,11 +40,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuWordEmbeddingImpl : public NpuBaseLayer {
+class WordEmbeddingImpl : public BaseLayer {
  public:
-  explicit NpuWordEmbeddingImpl(const ModelContext& context);
+  explicit WordEmbeddingImpl(const ModelContext& context);
 
-  ~NpuWordEmbeddingImpl() {};
+  ~WordEmbeddingImpl() {};
 
   void load_state_dict(const StateDict& state_dict) override;
 

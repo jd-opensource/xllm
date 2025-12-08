@@ -19,13 +19,13 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class AttentionMask : public torch::nn::Module {
+class AttentionMaskImpl : public torch::nn::Module {
  public:
-  AttentionMask() = default;
+  AttentionMaskImpl() = default;
 
-  explicit AttentionMask(at::Device device,
-                         torch::Dtype dtype,
-                         float mask_value = -9984);
+  explicit AttentionMaskImpl(at::Device device,
+                             torch::Dtype dtype,
+                             float mask_value = -9984);
 
   torch::Tensor get_decode_attn_mask(torch::Tensor input_lengths,
                                      int64_t max_s,
@@ -55,6 +55,7 @@ class AttentionMask : public torch::nn::Module {
   float mask_value_;
   at::Tensor atten_mask_cache_;
 };
+TORCH_MODULE(AttentionMask);
 
 }  // namespace layer
 }  // namespace xllm

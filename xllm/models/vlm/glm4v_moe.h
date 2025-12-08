@@ -27,7 +27,7 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/lm_head.h"
-#include "core/layers/rms_norm.h"
+#include "core/layers/npu/npu_rms_norm_impl.h"
 #include "models/llm/glm4_moe.h"
 #include "models/model_registry.h"
 #include "models/vlm/glm4v.h"

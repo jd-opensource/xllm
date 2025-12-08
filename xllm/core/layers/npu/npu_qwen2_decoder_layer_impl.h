@@ -104,11 +104,11 @@ enum DecoderLayerTensorId : int {
   IN_MLP_CPROJ_COMPRESS_IDX = 49,
 };
 
-class NpuQwen2DecoderLayerImpl : public NpuBaseLayer {
+class Qwen2DecoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuQwen2DecoderLayerImpl(const ModelContext& context);
+  explicit Qwen2DecoderLayerImpl(const ModelContext& context);
 
-  ~NpuQwen2DecoderLayerImpl() {};
+  ~Qwen2DecoderLayerImpl() {};
 
   TransposeType check_transpose(at::Tensor& tensor);
 

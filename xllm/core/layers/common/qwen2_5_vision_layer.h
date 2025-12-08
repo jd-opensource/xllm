@@ -26,7 +26,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "layers/rms_norm.h"
+#include "layers/common/rms_norm.h"
 #include "qwen2_vision_attention.h"
 
 namespace xllm {
@@ -52,8 +52,8 @@ class Qwen2_5_VisionLayerImpl : public torch::nn::Module {
  protected:
   Qwen2VisionAttention attention_{nullptr};
   DenseMLP mlp_{nullptr};
-  RmsNorm norm1_{nullptr};
-  RmsNorm norm2_{nullptr};
+  RMSNorm norm1_{nullptr};
+  RMSNorm norm2_{nullptr};
 };
 
 class Qwen3_VisionLayerImpl : public Qwen2_5_VisionLayerImpl {

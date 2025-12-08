@@ -43,11 +43,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuQwen3DecoderLayerImpl : public NpuBaseLayer {
+class Qwen3DecoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuQwen3DecoderLayerImpl(const ModelContext& context);
+  explicit Qwen3DecoderLayerImpl(const ModelContext& context);
 
-  ~NpuQwen3DecoderLayerImpl() {};
+  ~Qwen3DecoderLayerImpl() {};
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 

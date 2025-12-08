@@ -15,26 +15,22 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_siglip_encoder_layer_impl.h"
-#endif
+#include "config.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
 class SiglipEncoderLayer
-    : public torch::nn::ModuleHolder<NpuSiglipEncoderLayerImpl> {
+    : public torch::nn::ModuleHolder<SiglipEncoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuSiglipEncoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuSiglipEncoderLayerImpl;
+  using torch::nn::ModuleHolder<SiglipEncoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = SiglipEncoderLayerImpl;
 
   SiglipEncoderLayer(const ModelContext& context,
                      const std::string& prefix = "")
       : ModuleHolder(
-            std::make_shared<NpuSiglipEncoderLayerImpl>(context, prefix)) {}
+            std::make_shared<SiglipEncoderLayerImpl>(context, prefix)) {}
 };
-#endif
-}  // namespace layer
 
+}  // namespace layer
 }  // namespace xllm

@@ -25,8 +25,8 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/indexer.h"
 #include "layers/common/linear.h"
+#include "layers/common/rms_norm.h"
 #include "layers/common/rotary_embedding.h"
-#include "layers/rms_norm.h"
 
 namespace xllm {
 namespace layer {
@@ -66,10 +66,10 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   ReplicatedLinear q_a_proj_{nullptr};
   ColumnParallelLinear q_b_proj_{nullptr};
   ColumnParallelLinear q_proj_{nullptr};
-  RmsNorm q_a_layernorm_{nullptr};
+  RMSNorm q_a_layernorm_{nullptr};
 
   ReplicatedLinear kv_a_proj_with_mqa_{nullptr};
-  RmsNorm kv_a_layernorm_{nullptr};
+  RMSNorm kv_a_layernorm_{nullptr};
 
   ColumnParallelLinear kv_b_proj_{nullptr};
   RowParallelLinear o_proj_{nullptr};

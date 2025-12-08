@@ -41,11 +41,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuLmHeadImpl : public NpuBaseLayer {
+class LmHeadImpl : public BaseLayer {
  public:
-  explicit NpuLmHeadImpl(const ModelContext& context);
+  explicit LmHeadImpl(const ModelContext& context);
 
-  ~NpuLmHeadImpl() {};
+  ~LmHeadImpl() {};
 
   void load_state_dict(const StateDict& state_dict) override;
 

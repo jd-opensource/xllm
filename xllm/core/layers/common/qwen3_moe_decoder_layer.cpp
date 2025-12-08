@@ -20,8 +20,8 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
-                                         int32_t layer_id) {
+Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
+                                                   int32_t layer_id) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
@@ -33,11 +33,11 @@ Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
   // Initialize norm layers
   input_norm_ = register_module(
       "input_layernorm",
-      RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   post_norm_ = register_module(
       "post_attention_layernorm",
-      RmsNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
 
   // Initialize mlp
   auto mlp_only_layers = model_args.mlp_only_layers();
@@ -79,7 +79,7 @@ Qwen3MoeDecoderImpl::Qwen3MoeDecoderImpl(const ModelContext& context,
   }
 }
 
-void Qwen3MoeDecoderImpl::load_state_dict(const StateDict& state_dict) {
+void Qwen3MoeDecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   attention_->load_state_dict(state_dict.get_dict_with_prefix("self_attn."));
   input_norm_->load_state_dict(
       state_dict.get_dict_with_prefix("input_layernorm."));
@@ -92,7 +92,7 @@ void Qwen3MoeDecoderImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-torch::Tensor Qwen3MoeDecoderImpl::forward(
+torch::Tensor Qwen3MoeDecoderLayerImpl::forward(
     torch::Tensor& x,
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,

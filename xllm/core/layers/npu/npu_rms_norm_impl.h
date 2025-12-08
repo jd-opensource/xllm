@@ -42,11 +42,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuRmsNormImpl : public NpuBaseLayer {
+class RMSNormImpl : public BaseLayer {
  public:
-  explicit NpuRmsNormImpl(const ModelContext& context);
+  explicit RMSNormImpl(const ModelContext& context);
 
-  ~NpuRmsNormImpl() {};
+  ~RMSNormImpl() {};
 
   void load_state_dict(const StateDict& state_dict) override;
 
@@ -71,6 +71,7 @@ class NpuRmsNormImpl : public NpuBaseLayer {
   atb::infer::RmsNormParam norm_param_;
   atb::Tensor internal_tensors_;
 };
+TORCH_MODULE(RMSNorm);
 
 }  // namespace layer
 }  // namespace xllm
