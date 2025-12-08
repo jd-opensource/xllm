@@ -27,8 +27,8 @@ std::vector<torch::Tensor> moe_all2all_gen_gather_index(
     int64_t pad_num,
     bool return_cusum_token_count) {
   // get dimension information
-  auto rank_num = token_num.size(0);
-  auto expert_num = token_num.size(1);
+  int32_t rank_num = token_num.size(0);
+  int32_t expert_num = token_num.size(1);
 
   // prepare tensor options (keep same device as input, enforce int32)
   auto options =
