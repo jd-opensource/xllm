@@ -46,6 +46,8 @@ void pad_2d_vector(std::vector<std::vector<T>>& vec, T pad_value) {
 torch::ScalarType parse_dtype(const std::string& dtype_str,
                               const torch::Device& device);
 
+torch::ScalarType parse_dtype(const std::string& dtype_str);
+
 std::optional<std::vector<uint32_t>> parse_batch_sizes(
     const std::string& batch_sizes_str);
 

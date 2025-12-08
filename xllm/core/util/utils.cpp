@@ -80,13 +80,32 @@ torch::ScalarType parse_dtype(const std::string& dtype_str,
   }
   if ((boost::iequals(dtype_str, "float") ||
        boost::iequals(dtype_str, "float32"))) {
-    return torch::kFloat16;
+    return torch::kFloat32;
   }
 
   if (dtype_str.empty() || boost::iequals(dtype_str, "auto")) {
     return torch::kFloat16;
   }
   CHECK(false) << "Unsupported dtype: " << dtype_str << " on device " << device;
+}
+
+torch::ScalarType parse_dtype(const std::string& dtype_str) {
+  if (boost::iequals(dtype_str, "half") ||
+      boost::iequals(dtype_str, "float16")) {
+    return torch::kFloat16;
+  }
+  if (boost::iequals(dtype_str, "bfloat16")) {
+    return torch::kBFloat16;
+  }
+  if ((boost::iequals(dtype_str, "float") ||
+       boost::iequals(dtype_str, "float32"))) {
+    return torch::kFloat32;
+  }
+
+  if (dtype_str.empty() || boost::iequals(dtype_str, "auto")) {
+    return torch::kFloat16;
+  }
+  CHECK(false) << "Unsupported dtype: " << dtype_str;
 }
 
 std::optional<std::vector<uint32_t>> parse_batch_sizes(
