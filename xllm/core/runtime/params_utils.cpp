@@ -320,7 +320,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   eplb_info.update_layer_id = pb_forward_input->eplb_info().update_layer_id();
 
   if (pb_forward_input->has_mm_data()) {
-    util::pb_mmdata_to_cpp(pb_forward_input->mm_data(), &input_params.mm_data);
+    util::proto_to_mmdata(pb_forward_input->mm_data(), &input_params.mm_data);
   }
 
   COUNTER_ADD(proto_latency_seconds_proto2i, timer.elapsed_seconds());
@@ -472,7 +472,7 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_cum_sum(), inputs.cum_sum);
 
   if (inputs.mm_data.valid()) {
-    util::cpp_mmdata_to_pb(inputs.mm_data, pb_forward_input->mutable_mm_data());
+    util::mmdata_to_proto(inputs.mm_data, pb_forward_input->mutable_mm_data());
   }
 
   COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());

@@ -83,8 +83,8 @@ torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor);
 bool torch_to_proto(const torch::Tensor& torch_tensor,
                     proto::Tensor* proto_tensor);
 
-bool cpp_mmdata_to_pb(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata);
+bool mmdata_to_proto(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata);
 
-bool pb_mmdata_to_cpp(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata);
+bool proto_to_mmdata(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata);
 }  // namespace util
 }  // namespace xllm

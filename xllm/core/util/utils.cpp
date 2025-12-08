@@ -585,8 +585,8 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
   return true;
 }
 
-bool cpp_mmvalue_to_pb(const xllm::MMValue& cpp_value,
-                       proto::MMValue* pb_value) {
+bool mmvalue_to_proto(const xllm::MMValue& cpp_value,
+                      proto::MMValue* pb_value) {
   if (!pb_value) {
     LOG(ERROR) << "PB MMValue pointer is null";
     return false;
@@ -618,7 +618,7 @@ bool cpp_mmvalue_to_pb(const xllm::MMValue& cpp_value,
   return true;
 }
 
-std::optional<xllm::MMValue> pb_mmvalue_to_cpp(const proto::MMValue& pb_value) {
+std::optional<xllm::MMValue> proto_to_mmvalue(const proto::MMValue& pb_value) {
   if (pb_value.has_single_tensor()) {
     const auto& pb_tensor = pb_value.single_tensor();
     torch::Tensor torch_tensor = proto_to_torch(pb_tensor);
@@ -646,8 +646,7 @@ std::optional<xllm::MMValue> pb_mmvalue_to_cpp(const proto::MMValue& pb_value) {
   }
 }
 
-bool cpp_mmdata_to_pb(const xllm::MMData& cpp_mmdata,
-                      proto::MMData* pb_mmdata) {
+bool mmdata_to_proto(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata) {
   if (!pb_mmdata) {
     LOG(ERROR) << "PB MMData pointer is null";
     return false;
@@ -663,7 +662,7 @@ bool cpp_mmdata_to_pb(const xllm::MMData& cpp_mmdata,
   const auto& cpp_dict = cpp_mmdata.data();
   for (const auto& [key, cpp_value] : cpp_dict) {
     proto::MMValue& pb_value = (*pb_dict)[key];
-    if (!cpp_mmvalue_to_pb(cpp_value, &pb_value)) {
+    if (!mmvalue_to_proto(cpp_value, &pb_value)) {
       LOG(ERROR) << "Failed to convert struct MMValue for key: " << key;
       return false;
     }
@@ -672,19 +671,17 @@ bool cpp_mmdata_to_pb(const xllm::MMData& cpp_mmdata,
   return true;
 }
 
-bool pb_mmdata_to_cpp(const proto::MMData& pb_mmdata,
-                      xllm::MMData* cpp_mmdata) {
+bool proto_to_mmdata(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata) {
   if (!cpp_mmdata) {
     LOG(ERROR) << "Struct MMData pointer is null";
     return false;
   }
 
-  *cpp_mmdata = MMData();
   cpp_mmdata->ty_ = pb_mmdata.type();
 
   const auto& pb_dict = pb_mmdata.dict();
   for (const auto& [key, pb_value] : pb_dict) {
-    auto cpp_value_opt = pb_mmvalue_to_cpp(pb_value);
+    auto cpp_value_opt = proto_to_mmvalue(pb_value);
     if (!cpp_value_opt) {
       LOG(ERROR) << "Failed to convert PB MMValue for key: " << key;
       return false;
