@@ -29,12 +29,24 @@ limitations under the License.
 #include "util/net.h"
 namespace xllm {
 
-DistManager::DistManager(const runtime::Options& options) {
+DistManager::DistManager(const runtime::Options& options)
+    : server_name_("CollectiveServer") {
   auto master_node_addr = options.master_node_addr().value_or("");
   if (!master_node_addr.empty()) {
+    server_name_.append(std::to_string(options.server_idx()));
     setup_multi_node_workers(options, master_node_addr);
   } else {
     LOG(FATAL) << "master_node_addr is empty.";
+  }
+}
+
+DistManager::~DistManager() {
+  XllmServer* collective_server =
+      ServerRegistry::get_instance().get_server(server_name_);
+  if (collective_server != nullptr) {
+    collective_server->stop();
+
+    ServerRegistry::get_instance().unregister_server(server_name_);
   }
 }
 
@@ -156,7 +168,7 @@ void DistManager::setup_multi_node_workers(
         std::make_shared<CollectiveService>(
             dp_local_process_group_num, world_size, devices[0].index());
     XllmServer* collective_server =
-        ServerRegistry::get_instance().register_server("CollectiveServer");
+        ServerRegistry::get_instance().register_server(server_name_);
     if (!collective_server->start(collective_service, master_node_addr)) {
       LOG(ERROR) << "failed to start collective server on address: "
                  << master_node_addr;

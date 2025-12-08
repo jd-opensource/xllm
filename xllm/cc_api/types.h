@@ -135,6 +135,10 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
 
   // Devices to run the draft model on, e.g. npu:0, npu:0,npu:1
   std::optional<std::string> draft_devices = std::nullopt;
+
+  // Index ID for internal server ID, which must be set different values
+  // if the model supports multiple version or there are multiple models.
+  int64_t server_idx = 0;
 };
 
 struct XLLM_CAPI_EXPORT XLLM_RequestParams {

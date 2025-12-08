@@ -95,7 +95,8 @@ LLMMaster::LLMMaster(const Options& options)
       .disable_ttft_profiling(options_.disable_ttft_profiling())
       .enable_forward_interruption(options_.enable_forward_interruption())
       .max_global_ttft_ms(options_.max_global_ttft_ms())
-      .max_global_tpot_ms(options_.max_global_tpot_ms());
+      .max_global_tpot_ms(options_.max_global_tpot_ms())
+      .server_idx(options_.server_idx());
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {

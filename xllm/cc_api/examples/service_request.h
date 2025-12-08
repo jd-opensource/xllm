@@ -13,32 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-
-#include <torch/torch.h>
-
-#include <vector>
-
-#include "common/macros.h"
+#include "llm.h"
 
 namespace xllm {
-namespace xtensor {
-struct Options {
-  // devices for xtensor manager pool
-  PROPERTY(std::vector<torch::Device>, devices);
+namespace cc_api_test {
+// Send Completion request and print the inference result.
+void run_completion_request(const std::string& model_name,
+                            xllm::LLM* llm_instance);
 
-  // num of layers
-  PROPERTY(int64_t, num_layers) = 0;
-
-  // total pages for xtensor manager
-  PROPERTY(int64_t, num_total_pages) = 0;
-
-  // key or value cache size in bytes per token
-  PROPERTY(int64_t, cache_size_per_token) = 0;
-
-  // Index ID for internal server ID, which must be set different values
-  // if the model supports multiple version or there are multiple models.
-  PROPERTY(int64_t, server_idx) = 0;
-};
-}  // namespace xtensor
+// Send ChatCompletion request and print the inference result.
+void run_chat_completion_request(const std::string& model_name,
+                                 xllm::LLM* llm_instance);
+}  // namespace cc_api_test
 }  // namespace xllm

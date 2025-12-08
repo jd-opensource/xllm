@@ -26,11 +26,24 @@ limitations under the License.
 namespace xllm {
 XTensorManagerPool::XTensorManagerPool(const xtensor::Options& options,
                                        int32_t dp_size)
-    : options_(options), dp_size_(dp_size) {
+    : options_(options),
+      dp_size_(dp_size),
+      collective_server_name_("XTensorManagerCollectiveServer") {
   if (FLAGS_master_node_addr.empty()) {
     setup_single_node_xtensor_managers();
   } else {
+    collective_server_name_.append(std::to_string(options.server_idx()));
     setup_multi_node_xtensor_managers(FLAGS_master_node_addr);
+  }
+}
+
+XTensorManagerPool::~XTensorManagerPool() {
+  XllmServer* collective_server =
+      ServerRegistry::get_instance().register_server(collective_server_name_);
+  if (collective_server != nullptr) {
+    collective_server->stop();
+
+    ServerRegistry::get_instance().unregister_server(collective_server_name_);
   }
 }
 
@@ -78,7 +91,7 @@ void XTensorManagerPool::setup_multi_node_xtensor_managers(
               dp_local_process_group_num, world_size, devices[0].index());
       XllmServer* collective_server =
           ServerRegistry::get_instance().register_server(
-              "XTensorManagerCollectiveServer");
+              collective_server_name_);
       if (!collective_server->start(collective_service, master_node_addr)) {
         LOG(ERROR) << "failed to start collective server on address: "
                    << master_node_addr;

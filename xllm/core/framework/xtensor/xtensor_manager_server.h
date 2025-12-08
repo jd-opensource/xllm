@@ -54,5 +54,6 @@ class XTensorManagerServer {
 
  private:
   std::unique_ptr<std::thread> xtensor_manager_thread_;
+  std::string server_name_;
 };
 }  // namespace xllm

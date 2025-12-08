@@ -177,6 +177,10 @@ struct Options {
 
   // whether the worker and master are on the same machine.
   PROPERTY(bool, is_local) = false;
+
+  // Index ID for internal server ID, which must be set different values
+  // if the model supports multiple version or there are multiple models.
+  PROPERTY(int64_t, server_idx) = 0;
 };
 
 }  // namespace runtime

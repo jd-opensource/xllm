@@ -40,8 +40,8 @@ void XTensorManagerServer::create_server(const xtensor::Options& options,
       xtensor_manager_global_rank, world_size, d);
 
   auto addr = net::get_local_ip_addr();
-  auto xtensor_manager_server = ServerRegistry::get_instance().register_server(
-      "DistributeXTensorManagerServer");
+  auto xtensor_manager_server =
+      ServerRegistry::get_instance().register_server(server_name_);
   if (!xtensor_manager_server->start(xtensor_manager_service, addr + ":0")) {
     LOG(ERROR)
         << "failed to start distribute xtensor manager server on address: "
@@ -75,7 +75,9 @@ XTensorManagerServer::XTensorManagerServer(int local_xtensor_manager_idx,
                                            const std::string& master_node_addr,
                                            std::atomic<bool>& done,
                                            const torch::Device& device,
-                                           const xtensor::Options& options) {
+                                           const xtensor::Options& options)
+    : server_name_("DistributeXTensorManagerServer") {
+  server_name_.append(std::to_string(options.server_idx()));
   xtensor_manager_thread_ =
       std::make_unique<std::thread>([this,
                                      &options,

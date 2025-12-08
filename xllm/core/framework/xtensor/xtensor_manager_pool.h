@@ -24,7 +24,7 @@ namespace xllm {
 class XTensorManagerPool final : public KVCacheManager {
  public:
   explicit XTensorManagerPool(const xtensor::Options& options, int32_t dp_size);
-  ~XTensorManagerPool() = default;
+  ~XTensorManagerPool();
 
   bool allocate(Sequence* sequence) override;
   bool allocate(std::vector<Sequence*>& sequences) override;
@@ -120,5 +120,6 @@ class XTensorManagerPool final : public KVCacheManager {
   std::vector<std::shared_ptr<XTensorManagerClient>> xtensor_manager_clients_;
   std::vector<std::shared_ptr<XTensorManager>> xtensor_managers_;
   std::vector<std::unique_ptr<XTensorManagerServer>> xtensor_manager_servers_;
+  std::string collective_server_name_;
 };
 }  // namespace xllm

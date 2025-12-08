@@ -39,7 +39,7 @@ limitations under the License.
 namespace xllm {
 
 DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
-    : ContinuousScheduler(engine, options) {
+    : ContinuousScheduler(engine, options), server_name_("DisaggPDServer") {
   if (!options_.instance_role().has_value()) {
     LOG(FATAL) << "Instance type is not set in disagg pd mode.";
   }
@@ -52,10 +52,11 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
         &DisaggPDScheduler::dispatch_requests, this);
 
     // Start RPC server thread
+    server_name_.append(std::to_string(options.server_idx()));
     rpc_server_thread_ = std::make_unique<std::thread>(
         &DisaggPDScheduler::start_rpc_server, this);
-    initialize_rpc_server_and_client("DisaggPDServer");
-    register_instance_info("DisaggPDServer", engine);
+    initialize_rpc_server_and_client(server_name_);
+    register_instance_info(server_name_, engine);
 
     // Profile ttft & topt and update instance info (for mix instances)
     if (!options_.disable_ttft_profiling() &&
@@ -76,6 +77,13 @@ DisaggPDScheduler::~DisaggPDScheduler() {
   // or in subclass for OOC mode)
   if (dispatch_thread_ && dispatch_thread_->joinable()) {
     dispatch_thread_->join();
+  }
+
+  auto rpc_server = ServerRegistry::get_instance().get_server(server_name_);
+  if (rpc_server != nullptr) {
+    rpc_server->stop();
+
+    ServerRegistry::get_instance().unregister_server(server_name_);
   }
 }
 
@@ -238,7 +246,7 @@ void DisaggPDScheduler::start_rpc_server() {
   std::unique_ptr<DisaggPDService> service =
       std::make_unique<DisaggPDService>(this, engine_);
   auto rpc_server =
-      ServerRegistry::get_instance().register_server("DisaggPDServer");
+      ServerRegistry::get_instance().register_server(server_name_);
   if (!rpc_server->start(std::move(service))) {
     LOG(ERROR) << "Failed to start brpc disagg pd server on port "
                << FLAGS_disagg_pd_port;

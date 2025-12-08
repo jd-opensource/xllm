@@ -26,7 +26,7 @@ namespace xllm {
 class DistManager {
  public:
   explicit DistManager(const runtime::Options& options);
-  virtual ~DistManager() = default;
+  virtual ~DistManager();
 
   std::vector<std::shared_ptr<WorkerClient>> get_worker_clients() {
     return worker_clients_;
@@ -55,5 +55,7 @@ class DistManager {
   std::vector<std::unique_ptr<Worker>> workers_;
   // For distributed serving
   std::vector<std::unique_ptr<WorkerServer>> servers_;
+
+  std::string server_name_;
 };
 }  // namespace xllm

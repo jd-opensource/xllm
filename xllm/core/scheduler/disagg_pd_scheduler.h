@@ -201,6 +201,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // Lock for multi-threaded read-write linked instances
   std::mutex linked_instances_mutex_;
   std::set<std::string> linked_instance_;
+
+  std::string server_name_;
 };
 
 }  // namespace xllm

@@ -94,6 +94,7 @@ class WorkerServer {
   bool use_spwan_worker_ = false;
   posix_spawn_file_actions_t file_actions_;
   posix_spawnattr_t spawn_attr_;
+  std::string server_name_;
 };
 
 }  // namespace xllm

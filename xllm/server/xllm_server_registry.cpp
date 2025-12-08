@@ -21,7 +21,8 @@ XllmServer* ServerRegistry::register_server(const std::string& name) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (servers_.find(name) != servers_.end()) {
-      LOG(ERROR) << "Register server failed, " << name << " is existed already";
+      LOG(ERROR) << "Register server failed, " << name
+                 << " has been registered already.";
       return servers_[name].get();
     }
 
@@ -30,11 +31,24 @@ XllmServer* ServerRegistry::register_server(const std::string& name) {
   }
 }
 
+void ServerRegistry::unregister_server(const std::string& name) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto iter = servers_.find(name);
+    if (iter == servers_.end()) {
+      LOG(ERROR) << "Unregister server failed, " << name
+                 << " isn't registered.";
+    } else {
+      servers_.erase(iter);
+    }
+  }
+}
+
 XllmServer* ServerRegistry::get_server(const std::string& name) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (servers_.find(name) == servers_.end()) {
-      LOG(ERROR) << "Server " << name << " not existed.";
+      LOG(ERROR) << "Server " << name << " doesn't exist.";
       return nullptr;
     }
 

@@ -83,7 +83,7 @@ void WorkerServer::create_server(
 
   auto addr = net::get_local_ip_addr();
   auto worker_server =
-      ServerRegistry::get_instance().register_server("DistributeWorkerServer");
+      ServerRegistry::get_instance().register_server(server_name_);
   if (!worker_server->start(worker_service, addr + ":0")) {
     LOG(ERROR) << "failed to start distribute worker server on address: "
                << addr;
@@ -210,7 +210,10 @@ WorkerServer::WorkerServer(int local_worker_idx,
                            const torch::Device& d,
                            const runtime::Options& options,
                            WorkerType worker_type,
-                           bool use_spawn_worker) {
+                           bool use_spawn_worker)
+    : server_name_("DistributeWorkerServer") {
+  server_name_.append(std::to_string(options.server_idx()));
+
   if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM ||
       worker_type == WorkerType::VLM || worker_type == WorkerType::EVLM) {
     if (use_spawn_worker) {
@@ -309,6 +312,13 @@ WorkerServer::~WorkerServer() {
   if (use_spwan_worker_) {
     posix_spawn_file_actions_destroy(&file_actions_);
     posix_spawnattr_destroy(&spawn_attr_);
+  }
+
+  auto worker_server = ServerRegistry::get_instance().get_server(server_name_);
+  if (worker_server != nullptr) {
+    worker_server->stop();
+
+    ServerRegistry::get_instance().unregister_server(server_name_);
   }
 }
 

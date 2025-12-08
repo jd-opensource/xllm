@@ -437,7 +437,8 @@ bool LLMEngine::allocate_continuous_kv_cache(
   xtensor_manager_options.devices(options_.devices())
       .num_total_pages(kv_cache_cap.n_pages)
       .num_layers(args_.n_layers())
-      .cache_size_per_token(cache_size_per_token);
+      .cache_size_per_token(cache_size_per_token)
+      .server_idx(options_.server_idx());
   kv_cache_manager_ = std::make_unique<XTensorManagerPool>(
       xtensor_manager_options, options_.dp_size());
   return true;
