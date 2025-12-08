@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <cstdlib>
 
+#include "core/platform/device.h"
 #include "core/util/env_var.h"
 
 namespace {
@@ -39,23 +40,7 @@ const std::unordered_map<torch::ScalarType, std::string_view>
 
 namespace xllm::kernel::cuda {
 
-// Whether to enable Programmatic Dependent Launch (PDL). See
-// https://docs.nvidia.com/cuda/cuda-c-programming-guide/#programmatic-dependent-launch-and-synchronization
-// Only supported for >= sm90, and currently only for FA2, CUDA core, and
-// trtllm-gen decode.
-bool support_pdl() {
-  static bool supported = []() {
-    cudaDeviceProp prop;
-    cudaError_t err = cudaGetDeviceProperties(&prop, /*device_id=*/0);
-    if (err != cudaSuccess) {
-      LOG(ERROR) << "cuda get device properties failed";
-      return false;
-    }
-    return prop.major >= 9;
-  }();
-
-  return supported;
-}
+bool support_pdl() { return Device::is_enable_pdl(); }
 
 std::string path_to_uri_so_lib(const std::string& uri) {
   return util::get_string_env("FLASHINFER_OPS_PATH") + "/" + uri + "/" + uri +

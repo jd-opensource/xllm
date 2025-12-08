@@ -23,9 +23,34 @@ limitations under the License.
 #include <cuda.h>
 #endif
 
+namespace {
+// Whether to enable Programmatic Dependent Launch (PDL). See
+// https://docs.nvidia.com/cuda/cuda-c-programming-guide/#programmatic-dependent-launch-and-synchronization
+// Only supported for >= sm90, and currently only for FA2, CUDA core, and
+// trtllm-gen decode.
+#if defined(USE_CUDA)
+bool support_pdl(int32_t device_id) {
+  cudaDeviceProp prop;
+  cudaError_t err = cudaGetDeviceProperties(&prop, device_id);
+  if (err != cudaSuccess) {
+    LOG(ERROR) << "cuda get device properties failed";
+    return false;
+  }
+  return prop.major >= 9;
+}
+#endif
+}  // namespace
+
 namespace xllm {
 
-Device::Device(torch::Device device) : device_(device) {}
+bool Device::enable_pdl_ = false;
+
+Device::Device(const torch::Device& device) : device_(device) {
+#if defined(USE_CUDA)
+  static bool enable_pdl = support_pdl(device.index());
+  enable_pdl_ = enable_pdl;
+#endif
+}
 
 Device::operator torch::Device() const { return unwrap(); }
 
@@ -77,6 +102,8 @@ torch::DeviceType Device::type_torch() {
   return torch::kCUDA;
 #endif
 }
+
+bool Device::is_enable_pdl() { return enable_pdl_; }
 
 // set device before get device mem
 Device::DeviceMem Device::get_device_mem() const {

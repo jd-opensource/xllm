@@ -21,4 +21,5 @@ cc_library(
     tvm_ffi
     torch
     :util
+    :platform
 )

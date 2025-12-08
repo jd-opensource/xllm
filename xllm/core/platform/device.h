@@ -27,7 +27,7 @@ namespace xllm {
 
 class Device {
  public:
-  explicit Device(torch::Device device);
+  explicit Device(const torch::Device& device);
   ~Device() = default;
   operator torch::Device() const;
 
@@ -41,6 +41,7 @@ class Device {
   static int device_count();
   static std::string type_str();
   static torch::DeviceType type_torch();
+  static bool is_enable_pdl();
 
   int64_t total_memory();
   int64_t free_memory();
@@ -58,6 +59,9 @@ class Device {
 
  private:
   torch::Device device_;
+
+  // only used for cuda
+  static bool enable_pdl_;
 };
 
 }  // namespace xllm
