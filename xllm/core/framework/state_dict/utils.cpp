@@ -188,6 +188,41 @@ void load_moe_weight(const StateDict& state_dict,
   }
 }
 
+void load_moe_all_expert_weight(const StateDict& state_dict,
+                                const std::string& sub_prefix,
+                                const std::string& name,
+                                int64_t dim,
+                                int64_t rank,
+                                int64_t world_size,
+                                int64_t num_total_experts,
+                                std::vector<torch::Tensor>& accumulated_tensors,
+                                torch::Tensor& weight,
+                                bool& weight_is_loaded) {
+  // return if the weight is already loaded
+  if (weight_is_loaded) {
+    return;
+  }
+  // load all expert weight from state_dict
+  std::vector<std::string> prefixes;
+  for (size_t idx = 0; idx < num_total_experts; idx++) {
+    std::string expert_id_str = std::to_string(idx) + ".";
+    prefixes.emplace_back(expert_id_str + sub_prefix);
+  }
+
+  weight_is_loaded = load_tensor_list(
+      state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
+
+  if (weight_is_loaded) {
+    const auto merged_weight = torch::stack(accumulated_tensors);
+    CHECK_EQ(weight.sizes(), merged_weight.sizes())
+        << "weight size mismatch for " << state_dict.prefix() << "[" << 0 << ":"
+        << (0 + num_total_experts) << "]." << sub_prefix << name;
+    weight.copy_(merged_weight);
+    // release the memory for weight_list
+    accumulated_tensors.clear();
+  }
+}
+
 void load_moe_fused_weight(const StateDict& state_dict,
                            const std::vector<std::string>& prefixes,
                            const std::string& name,

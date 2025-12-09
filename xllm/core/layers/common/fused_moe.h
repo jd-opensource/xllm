@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include "deep_ep.h"
 #include "dense_mlp.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -51,10 +52,11 @@ class FusedMoEImpl : public torch::nn::Module {
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
 
-  torch::Tensor forward_expert(
+  torch::Tensor forward_experts(
       const torch::Tensor& hidden_states,
       const torch::Tensor& router_logits,
-      const std::optional<torch::Tensor>& shared_output);
+      const std::optional<torch::Tensor>& shared_output,
+      bool enable_all2all_communication);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
@@ -65,20 +67,23 @@ class FusedMoEImpl : public torch::nn::Module {
     torch::Tensor reduce_weight;
     torch::Tensor combine_idx;
     torch::Tensor token_count_slice;
-    torch::Tensor cusum_token_count;
+    std::optional<torch::Tensor> cusum_token_count;
     std::optional<torch::Tensor> input_scale;
   };
 
   // initial steps for MoE computation, select the experts for each token
   torch::Tensor select_experts(const torch::Tensor& hidden_states_2d,
                                const torch::Tensor& router_logits_2d,
-                               SelectedExpertInfo& selected_expert_info);
+                               SelectedExpertInfo& selected_expert_info,
+                               bool enable_all2all_communication);
 
  private:
+  int64_t num_total_experts_;
   int64_t topk_;
   int64_t num_expert_group_;
   int64_t topk_group_;
   double route_scale_;
+  int64_t hidden_size_;
   int64_t n_shared_experts_;
   bool is_gated_;
   bool has_score_bias_;
@@ -92,8 +97,16 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t num_experts_per_rank_;
   int64_t start_expert_id_;
 
+  // Deep EP related parameters
+  bool enable_deep_ep_;
+  DeepEPBuffer deep_ep_buffer_;
+  DeepEPParams deep_ep_params_;
+  torch::Tensor dispatch_recv_token_tensor_head_;
+  torch::Tensor dispatch_recv_token_tensor_tail_;
+
   ReplicatedLinear gate_{nullptr};
   DenseMLP shared_experts_{nullptr};
+  DeepEP deep_ep_{nullptr};
 
   QuantArgs quant_args_;
   ParallelArgs parallel_args_;

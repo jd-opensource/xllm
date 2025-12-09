@@ -45,7 +45,7 @@ Qwen2_5_VisionLayerImpl::Qwen2_5_VisionLayerImpl(const ModelContext& context,
                                   args.mm_hidden_act(),
                                   /*enable_result_reduction=*/true,
                                   quant_config,
-                                  parallel_args,
+                                  parallel_args.tp_group_,
                                   options));
 }
 

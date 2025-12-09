@@ -175,7 +175,7 @@ class DenseMLPTest : public ::testing::Test {
                                  /*hidden_act=*/"silu",
                                  /*enable_result_reduction=*/true,
                                  quant_args_,
-                                 parallel_args_,
+                                 parallel_args_.tp_group_,
                                  options_));
   }
 
@@ -256,7 +256,7 @@ TEST_F(DenseMLPTest, Bfloat16LoadStateDictTest) {
                                    /*hidden_act=*/"silu",
                                    /*enable_result_reduction=*/true,
                                    bfloat16_quant_args,
-                                   parallel_args_,
+                                   parallel_args_.tp_group_,
                                    options_));
 
   // Create simple test weights for bfloat16 mode

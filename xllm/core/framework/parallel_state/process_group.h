@@ -63,6 +63,12 @@ class ProcessGroup {
   virtual void allgather(const torch::Tensor& input,
                          std::vector<torch::Tensor>& outputs);
 
+  // reduce_scatter: reduce the input tensor across all processes, scatter the
+  // reduced chunks to all processes so that each process gets one chunk of the
+  // result. we use default dim 0 for reduce_scatter.
+  virtual void reduce_scatter(const torch::Tensor& input,
+                              torch::Tensor& output);
+
  private:
   // device of current process
   torch::Device device_;

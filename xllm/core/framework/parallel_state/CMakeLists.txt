@@ -46,3 +46,5 @@ if(USE_NPU)
       spdlog::spdlog
   )
 endif()
+
+add_subdirectory(tests)

@@ -30,6 +30,25 @@ struct DeepEPBuffer {
   torch::Tensor combine_recv_token_tensor;
 };
 
+// parameters that facilitate the usage of deep ep dispatch and combine
+// the following variables are only assigned once during initialization
+struct DeepEPParams {
+  int64_t dispatch_token_size;
+  int64_t combine_token_size;
+  int64_t max_num_tokens_per_rank;
+  int64_t max_num_tokens_recv;
+  int64_t max_num_tokens_per_expert;
+  torch::Tensor dispatch_recv_layout;
+  torch::Tensor dispatch_recv_token_num;
+};
+
+// the metadata after dispatch processing
+struct DeepEPMetaResult {
+  torch::Tensor gather_rank_index;  // Used for combine step
+  torch::Tensor token_count_slice;  // Used for GEMM
+  torch::Tensor token_sum;          // Valid token count
+};
+
 // DeepEPImpl manages distributed dispatch and combine operations for tokens
 // between expert ranks
 class DeepEPImpl : public torch::nn::Module {
@@ -56,6 +75,30 @@ class DeepEPImpl : public torch::nn::Module {
 
   ~DeepEPImpl();
 
+  // The following three steps form the core of expert token movement in MoE
+  // All2All communication.
+  // 1. Dispatch Step: Automatically generates routing layout and
+  // carries out the All2All token dispatch
+  void dispatch_step(int64_t num_token_expand,
+                     const torch::Tensor& token_count_slice);
+
+  // 2. Process Dispatch Result: Processes the outputs from All2All
+  // communication by generating gather indices,splitting the received buffer
+  // into expert-local outputs.
+  DeepEPMetaResult process_dispatch_result(
+      int64_t num_experts_per_rank,
+      torch::Tensor& output_head,
+      std::optional<torch::Tensor> output_tail = std::nullopt);
+
+  // 3. Combine Step: Performs the All2All combine operation using the
+  // generated gather indices and valid token counts.
+  torch::Tensor combine_step(const torch::Tensor& input,
+                             const torch::Tensor& gather_rank_index,
+                             const torch::Tensor& valid_token_num,
+                             int64_t num_token_expand,
+                             int64_t hidden_size,
+                             torch::ScalarType dtype);
+
   // Dispatch tokens to other experts using all-to-all communication
   void dispatch(int64_t token_byte,
                 int64_t token_num,
@@ -77,9 +120,10 @@ class DeepEPImpl : public torch::nn::Module {
   // Utility function to get the communication buffer
   DeepEPBuffer get_buffer() const;
 
+  DeepEPParams get_params() const;
+
  private:
   int64_t handle_ = 0;  // Communication handle
-  int64_t max_num_tokens_per_rank_;
   bool is_initialized_ = false;
   const ParallelArgs& parallel_args_;
   const torch::TensorOptions& options_;
@@ -90,8 +134,44 @@ class DeepEPImpl : public torch::nn::Module {
   torch::Tensor dispatch_recv_token_tensor_;
   torch::Tensor combine_send_token_tensor_;
   torch::Tensor combine_recv_token_tensor_;
+
+  DeepEPParams deep_ep_params_;
 };
 TORCH_MODULE(DeepEP);
+
+// DeepEPManager is a singleton class that manages the creation and destruction
+// of DeepEP instances
+class DeepEPManager {
+ public:
+  static DeepEP get_instance(int64_t dispatch_token_size,
+                             int64_t combine_token_size,
+                             int64_t max_num_tokens_per_rank,
+                             int64_t num_global_experts,
+                             const ParallelArgs& parallel_args,
+                             const torch::TensorOptions& options) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (instance_.is_empty()) {
+      instance_ = DeepEP(dispatch_token_size,
+                         combine_token_size,
+                         max_num_tokens_per_rank,
+                         num_global_experts,
+                         parallel_args,
+                         options);
+    }
+    return instance_;
+  };
+
+  static void destroy() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!instance_.is_empty()) {
+      instance_ = DeepEP(nullptr);
+    }
+  }
+
+ private:
+  static std::mutex mutex_;
+  static DeepEP instance_;
+};
 
 }  // namespace layer
 }  // namespace xllm
