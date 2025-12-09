@@ -30,11 +30,11 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
                            const std::string& hidden_act,
                            bool enable_result_reduction,
                            const QuantArgs& quant_args,
-                           const ParallelArgs& parallel_args,
+                           ProcessGroup* process_group,
                            const torch::TensorOptions& options)
     : is_gated_(is_gated),
       intermediate_size_(intermediate_size),
-      parallel_args_(parallel_args),
+      process_group_(process_group),
       hidden_act_(hidden_act) {
   // Check if using w8a8 smoothquant quantization
   is_smoothquant_ = quant_args.quant_method() == "smoothquant";
@@ -66,7 +66,7 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
                                            /*bias=*/has_bias,
                                            /*gather_output=*/false,
                                            quant_args,
-                                           parallel_args,
+                                           process_group_,
                                            options,
                                            gate_up_proj_extra_args));
 
@@ -80,7 +80,7 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
                                                  /*input_is_parallelized=*/true,
                                                  enable_result_reduction,
                                                  quant_args,
-                                                 parallel_args,
+                                                 process_group_,
                                                  options,
                                                  down_proj_extra_args));
 }
@@ -97,8 +97,7 @@ torch::Tensor DenseMLPImpl::forward(const torch::Tensor& hidden_states) {
     if (Device::type_str() != "npu") {
       int64_t batch_size = gate_up.sizes()[0];
       output = torch::empty(
-          {batch_size,
-           intermediate_size_ / parallel_args_.tp_group_->world_size()},
+          {batch_size, intermediate_size_ / process_group_->world_size()},
           gate_up.options());
     }
 

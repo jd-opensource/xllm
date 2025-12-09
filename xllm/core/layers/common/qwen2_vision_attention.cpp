@@ -55,7 +55,7 @@ Qwen2VisionAttentionImpl::Qwen2VisionAttentionImpl(
                                             /*input_is_parallelized=*/true,
                                             /*if_reduce_results=*/true,
                                             quant_args,
-                                            parallel_args,
+                                            parallel_args.tp_group_,
                                             options));
 }
 

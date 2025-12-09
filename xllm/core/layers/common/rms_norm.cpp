@@ -42,13 +42,19 @@ RMSNormImpl::RMSNormImpl(const ModelContext& context)
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>> RMSNormImpl::forward(
     torch::Tensor& input,
-    std::optional<torch::Tensor> residual) {
+    std::optional<torch::Tensor> residual,
+    std::optional<torch::Tensor> inplace_output) {
   auto org_shape = input.sizes().vec();
   input = input.reshape({-1, norm_dim_});
 
   torch::Tensor output;
   if (Device::type_str() != "npu") {
-    output = torch::empty_like(input);
+    if (inplace_output.has_value()) {
+      output = inplace_output.value();
+      output = output.reshape({-1, norm_dim_});
+    } else {
+      output = torch::empty_like(input);
+    }
   }
 
   std::optional<torch::Tensor> residual_out;

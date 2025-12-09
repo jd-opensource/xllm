@@ -80,6 +80,17 @@ void load_moe_weight(const StateDict& state_dict,
                      torch::Tensor& weight,
                      bool& weight_is_loaded);
 
+void load_moe_all_expert_weight(const StateDict& state_dict,
+                                const std::string& sub_prefix,
+                                const std::string& name,
+                                int64_t dim,
+                                int64_t rank,
+                                int64_t world_size,
+                                int64_t num_total_experts,
+                                std::vector<torch::Tensor>& accumulated_tensors,
+                                torch::Tensor& weight,
+                                bool& weight_is_loaded);
+
 void load_moe_fused_weight(const StateDict& state_dict,
                            const std::vector<std::string>& prefixes,
                            const std::string& name,
@@ -168,6 +179,18 @@ void load_merged_weight(const StateDict& state_dict,
                           name##_list_,             \
                           name##_,                  \
                           name##_is_loaded_);
+
+#define LOAD_MOE_ALL_EXPERT_WEIGHT(sub_prefix, key, name, dim) \
+  weight::load_moe_all_expert_weight(state_dict,               \
+                                     sub_prefix,               \
+                                     key,                      \
+                                     dim,                      \
+                                     rank,                     \
+                                     world_size,               \
+                                     num_total_experts,        \
+                                     name##_list_,             \
+                                     name##_,                  \
+                                     name##_is_loaded_);
 
 #define LOAD_MOE_FUSED_WEIGHT(key, w1, w3, w13)       \
   weight::load_moe_fused_weight(state_dict,           \

@@ -106,7 +106,8 @@ TORCH_MODULE(DeepseekMultiTokenPredictorLayer);
 
 class DeepseekMTPModelImpl : public torch::nn::Module {
  public:
-  DeepseekMTPModelImpl(const ModelContext& context) {
+  DeepseekMTPModelImpl(const ModelContext& context)
+      : device_(context.get_tensor_options().device()) {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
@@ -148,7 +149,17 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
-    auto attn_metadata = layer::AttentionMetadata::build(input_params);
+    // for dp, if tokens is empty, set tokens to 1 and positions to 0
+    if (dp_size_ > 1) {
+      if (tokens.sizes() == 0) {
+        tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
+        positions = torch::tensor({0}).to(torch::kInt32).to(device_);
+      }
+    }
+
+    ModelInputParams modified_input_params = input_params;
+    layer::update_dummy_run_input(dp_rank_, positions, modified_input_params);
+    auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
     torch::Tensor hidden_states = embed_tokens_(tokens);
     // Mask out embeddings where positions == 0 (for MTP not needed at pos 0)
     auto mask = (positions == 0);  // bool tensor
@@ -166,7 +177,7 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
                             positions,
                             attn_metadata,
                             kv_caches[i],
-                            input_params);
+                            modified_input_params);
     }
     return std::get<0>(norm_(hidden_states, residual));
   }
@@ -202,6 +213,7 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
   int32_t rank_;
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
+  torch::Device device_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
 };

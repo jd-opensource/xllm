@@ -313,8 +313,8 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
   auto router_logits =
       CreateRouterLogits({batch_size * seq_len, num_experts}, router_values);
   auto score_bias = CreateFullTensor({num_experts}, 0.1f);
-  auto output =
-      fused_moe->forward_expert(hidden_states, router_logits, std::nullopt);
+  auto output = fused_moe->forward_experts(
+      hidden_states, router_logits, std::nullopt, false);
 
   // Verify output shape
   ASSERT_EQ(output.sizes().size(), 3) << "Output should be 3D tensor";
@@ -373,7 +373,7 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
 
   // Create input tensors
   auto hidden_states = CreateCustomInput(
-      {batch_size, seq_len, hidden_size},
+      {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
 
   // Create router logits (batch_size * seq_len, num_experts)
@@ -391,16 +391,16 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
       {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 100.0f));
   auto output =
-      fused_moe->forward_expert(hidden_states, router_logits, residual);
+      fused_moe->forward_experts(hidden_states, router_logits, residual, false);
 
   xllm::Device device(options_.device());
   device.synchronize_default_stream();
 
   // Verify output shape
-  ASSERT_EQ(output.sizes().size(), 3) << "Output should be 3D tensor";
-  ASSERT_EQ(output.size(0), batch_size) << "Batch size should match";
-  ASSERT_EQ(output.size(1), seq_len) << "Sequence length should match";
-  ASSERT_EQ(output.size(2), hidden_size) << "Hidden size should match";
+  ASSERT_EQ(output.sizes().size(), 2) << "Output should be 2D tensor";
+  ASSERT_EQ(output.size(0), batch_size * seq_len)
+      << "Batch size * seq_len should match";
+  ASSERT_EQ(output.size(1), hidden_size) << "Hidden size should match";
 
   // Set expected output values for precision verification
   // TODO: Replace these placeholder values with your expected output
