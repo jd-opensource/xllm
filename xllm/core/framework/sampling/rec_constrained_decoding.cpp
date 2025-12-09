@@ -33,20 +33,16 @@ limitations under the License.
 #include "util/tensor_helper.h"
 
 namespace xllm {
-
-constexpr float PRE_MASK_FACTOR = -10000.0f;
-constexpr int GEN_MASK_THREAD_NUM = 16;
-
 RecConstrainedDecoding::RecConstrainedDecoding(uint64_t model_version,
                                                const int32_t vocab_size,
                                                torch::ScalarType dtype,
                                                torch::Device device,
                                                bool use_gen_threadpool)
-    : model_version_(model_version),
+    : use_gen_threadpool_(use_gen_threadpool),
       vocab_size_(vocab_size),
-      dtype_(dtype),
+      model_version_(model_version),
       device_(device),
-      use_gen_threadpool_(use_gen_threadpool) {
+      dtype_(dtype) {
   if (use_gen_threadpool_) {
     gen_threadpool_ = std::make_unique<ThreadPool>(GEN_MASK_THREAD_NUM);
   }

@@ -24,12 +24,12 @@ namespace xllm {
 // conforms to specific formats or rules.
 class ConstrainedDecoding {
  public:
-  virtual ~ConstrainedDecoding();
+  virtual ~ConstrainedDecoding() = default;
 
   // Precompute and cache fixed constraint masks (e.g., static vocabulary
   // whitelists) to avoid redundant calculations during token generation.
   // Returns: true if cache built successfully, false otherwise
-  virtual bool build_mask_cache();
+  virtual bool build_mask_cache() = 0;
 
   // Generate dynamic constraint mask based on already generated token
   // sequences. This mask will be applied to filter invalid tokens.
@@ -42,6 +42,6 @@ class ConstrainedDecoding {
   // tokens for each sequence, the usage is to filter invalid tokens by adding
   // the mask to the model logits.
   virtual torch::Tensor generate_mask(
-      const std::vector<std::vector<int32_t>>& generated_token_list);
+      const std::vector<std::vector<int32_t>>& generated_token_list) = 0;
 };
 }  // namespace xllm

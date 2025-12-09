@@ -41,6 +41,10 @@ class RecConstrainedDecoding : public ConstrainedDecoding {
       const std::vector<std::vector<int32_t>>& generated_token_list);
 
  private:
+  constexpr static float PRE_MASK_FACTOR = -10000.0f;
+  constexpr static int GEN_MASK_THREAD_NUM = 16;
+
+ private:
   bool build_mask_cache_;
   bool use_gen_threadpool_;
   int32_t vocab_size_;
