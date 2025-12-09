@@ -24,6 +24,7 @@ limitations under the License.
 #include "chat.pb.h"
 #include "common.pb.h"
 #include "completion.pb.h"
+#include "core/common/constants.h"
 #include "core/common/metrics.h"
 #include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/llm_master.h"
@@ -155,6 +156,23 @@ void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
 }
 
 namespace {
+
+size_t GetJsonContentLength(const brpc::Controller* ctrl) {
+  const auto infer_content_len =
+      ctrl->http_request().GetHeader(kInferContentLength);
+  if (infer_content_len != nullptr) {
+    return std::stoul(*infer_content_len);
+  }
+
+  const auto content_len = ctrl->http_request().GetHeader(kContentLength);
+  if (content_len != nullptr) {
+    return std::stoul(*content_len);
+  }
+
+  LOG(FATAL) << "Content-Length header is missing.";
+  return (size_t)-1L;
+}
+
 template <typename ChatCall, typename Service>
 void ChatCompletionsImpl(std::unique_ptr<Service>& service,
                          xllm::ClosureGuard& guard,
@@ -165,16 +183,17 @@ void ChatCompletionsImpl(std::unique_ptr<Service>& service,
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
 
-  std::string attachment = std::move(ctrl->request_attachment().to_string());
-  std::string error;
+  auto content_len = GetJsonContentLength(ctrl);
+  std::string attachment;
+  ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
   google::protobuf::util::JsonParseOptions options;
   options.ignore_unknown_fields = true;
-  auto json_status =
+  auto status =
       google::protobuf::util::JsonStringToMessage(attachment, req_pb, options);
-  if (!json_status.ok()) {
-    ctrl->SetFailed(json_status.ToString());
-    LOG(ERROR) << "parse json to proto failed: " << json_status.ToString();
+  if (!status.ok()) {
+    ctrl->SetFailed(status.ToString());
+    LOG(ERROR) << "parse json to proto failed: " << status.ToString();
     return;
   }
 

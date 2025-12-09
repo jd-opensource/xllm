@@ -150,10 +150,15 @@ void MMEmbeddingServiceImpl::process_async_impl(
     return;
   }
   auto request_id = request_params.request_id;
+
+  std::string payload;
+  call->get_binary_payload(payload);
+
   // schedule the request
   master_->handle_request(
       std::move(messages),
       std::move(request_params),
+      std::move(payload),
       [call,
        model,
        request_id = request_id,
