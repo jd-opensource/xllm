@@ -3,6 +3,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 option(USE_NPU "Enable NPU support" OFF)
 option(USE_MLU "Enable MLU support" OFF)
+option(USE_ILU "Enable ILU support" OFF)
 option(USE_CUDA "Enable CUDA support" OFF)
 add_compile_definitions(YLT_ENABLE_IBV)
 add_definitions(-DYLT_ENABLE_IBV)
@@ -105,7 +106,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
-if(USE_NPU)
+if(USE_NPU OR USE_ILU)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=0")
   add_definitions(-D_GLIBCXX_USE_CXX11_ABI=0)
 elseif(USE_MLU OR USE_CUDA)
@@ -206,6 +207,19 @@ if(USE_CUDA)
 
   message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
   message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
+endif()
+
+if(USE_ILU)
+    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/Modules;${CMAKE_MODULE_PATH}")
+    set(CMAKE_EXPORT_COMPILE_COMMANDS   ON)
+    set(CMAKE_CUDA_ARCHITECTURES "ivcore11")
+    set(WARNINGS_AS_ERRORS OFF)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      add_definitions(
+        -Wno-c++11-narrowing
+        -Wno-thread-safety-analysis
+      )
+  endif()
 endif()
 
 # configure vcpkg
@@ -422,6 +436,23 @@ if(USE_CUDA)
   link_directories(
       ${CUDNN_ROOT_DIR}/lib64
       ${CUDNN_ROOT_DIR}/lib
+  )
+endif()
+
+if(USE_ILU)
+  add_definitions(-DUSE_ILU)
+  set(CMAKE_VERBOSE_MAKEFILE ON)
+  include_directories(
+      $ENV{PYTHON_INCLUDE_PATH}
+      $ENV{PYTORCH_INSTALL_PATH}/include
+      $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
+      $ENV{IXFORMER_INSTALL_PATH}/csrc/include/ixformer
+  )
+
+  link_directories(
+    $ENV{PYTHON_LIB_PATH}
+    $ENV{PYTORCH_INSTALL_PATH}/lib
+    $ENV{IXFORMER_INSTALL_PATH}
   )
 endif()
 

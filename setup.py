@@ -39,6 +39,12 @@ def get_device_type():
         return "cuda"
 
     try:
+        import ixformer
+        return "ilu"
+    except ImportError:
+        pass
+
+    try:
         import torch_mlu
         if torch.mlu.is_available():
             return "mlu"
@@ -140,6 +146,14 @@ def get_torch_mlu_root_path():
         import torch_mlu
         import os
         return os.path.dirname(os.path.abspath(torch_mlu.__file__))
+    except ImportError:
+        return None
+
+def get_ixformer_root_path():
+    try:
+        import ixformer
+        import os
+        return os.path.dirname(os.path.abspath(ixformer.__file__))
     except ImportError:
         return None
 
@@ -253,7 +267,14 @@ def set_cuda_envs():
     os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
     os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
     os.environ["CUDA_TOOLKIT_ROOT_DIR"] = "/usr/local/cuda"
-    
+
+def set_ilu_envs():
+    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
+    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
+    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
+    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
+    os.environ["IXFORMER_INSTALL_PATH"] = get_ixformer_root_path()
+        
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
         super().__init__(name, sources=[])
@@ -337,7 +358,7 @@ class ExtBuild(build_ext):
             f"-DDEVICE_ARCH={self.arch.upper()}",
             f"-DINSTALL_XLLM_KERNELS={'ON' if self.install_xllm_kernels else 'OFF'}",
         ]
-        
+
         if self.device == "a2" or self.device == "a3":
             cmake_args += ["-DUSE_NPU=ON"]
             # set npu environment variables
@@ -352,6 +373,9 @@ class ExtBuild(build_ext):
                            f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}"]
             # set cuda environment variables
             set_cuda_envs()
+        elif self.device == "ilu":
+            cmake_args += ["-DUSE_ILU=ON"]
+            set_ilu_envs()
         else:
             raise ValueError("Please set --device to a2 or a3 or mlu or cuda.")
 
@@ -375,6 +399,7 @@ class ExtBuild(build_ext):
         
         build_args = ["--config", build_type]
         max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
+        # max_jobs="2"
         build_args += ["-j" + max_jobs]
 
         env = os.environ.copy()
@@ -604,9 +629,9 @@ def parse_arguments():
     parser.add_argument(
         '--device',
         type=str.lower,
-        choices=['auto', 'a2', 'a3', 'mlu', 'cuda'],
+        choices=['auto', 'a2', 'a3', 'mlu', 'cuda', 'ilu'],
         default='auto',
-        help='Device type: a2, a3, mlu, or cuda (case-insensitive)'
+        help='Device type: a2, a3, mlu, ilu or cuda (case-insensitive)'
     )
     
     parser.add_argument(

@@ -18,8 +18,8 @@ cc_library(
     $<$<BOOL:${USE_MLU}>:torch_mlu>
     $<$<BOOL:${USE_MLU}>:cnrt>
     $<$<BOOL:${USE_MLU}>:cndrv>
-    $<$<BOOL:${USE_CUDA}>:cuda>
-    $<$<BOOL:${USE_CUDA}>:cudart>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_ILU}>>:cuda>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_ILU}>>:cudart>
 )
 
 if(USE_NPU)

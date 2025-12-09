@@ -19,6 +19,8 @@ limitations under the License.
 #include "mlu/mlu_ops_api.h"
 #elif defined(USE_CUDA)
 #include "cuda/cuda_ops_api.h"
+#elif defined(USE_ILU)
+#include "ilu/ilu_ops_api.h"
 #endif
 #include <glog/logging.h>
 
@@ -48,6 +50,13 @@ void apply_rotary(RotaryParams& params) {
   auto cos_sin = torch::cat({cos, sin}, -1);
 
   cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
+#elif defined(USE_ILU)
+  torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
+  ilu::apply_rope_pos_ids_cos_sin_cache(params.q,
+                                        params.k,
+                                        params.cos_sin,
+                                        long_position_ids,
+                                        params.interleaved);
 #else
   LOG(FATAL) << "apply_rotary not implemented";
 #endif
@@ -65,6 +74,8 @@ void active(ActivationParams& params) {
               params.expert_size);
 #elif defined(USE_CUDA)
   cuda::act_and_mul(params.output, params.input, params.act_mode);
+#elif defined(USE_ILU)
+  ilu::act_and_mul(params.output, params.input, params.act_mode);
 #else
   LOG(FATAL) << "active not implemented";
 #endif
@@ -84,6 +95,13 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
                             params.value.value_or(torch::Tensor()),
                             params.k_cache,
                             params.v_cache.value_or(torch::Tensor()));
+#elif defined(USE_ILU)
+  // auto v_cache = params.v_cache.value_or(torch::Tensor());
+  ilu::reshape_paged_cache(params.key,
+                           params.value,
+                           params.k_cache,
+                           params.v_cache,
+                           params.slot_mapping);
 #else
   LOG(FATAL) << "reshape_paged_cache not implemented";
 #endif
@@ -127,6 +145,27 @@ void batch_prefill(AttentionParams& params) {
                       params.output,
                       params.output_lse,
                       params.enable_cuda_graph);
+#elif defined(USE_ILU)
+  ilu::batch_prefill(params.query,
+                     params.key,
+                     params.value,
+                     params.output,
+                     params.output_lse,
+                     params.q_cu_seq_lens,
+                     params.kv_cu_seq_lens,
+                     params.alibi_slope,
+                     params.attn_bias,
+                     params.q_quant_scale,
+                     params.k_quant_scale,
+                     params.v_quant_scale,
+                     params.max_query_len,
+                     params.max_seq_len,
+                     params.scale,
+                     params.is_causal,
+                     params.window_size_left,
+                     params.window_size_right,
+                     params.compute_dtype,
+                     params.return_lse);
 #else
   LOG(FATAL) << "batch_prefill not implemented";
 #endif
@@ -171,6 +210,28 @@ void batch_decode(AttentionParams& params) {
                      params.output,
                      params.output_lse,
                      params.enable_cuda_graph);
+#elif defined(USE_ILU)
+  ilu::batch_decode(params.query,
+                    params.k_cache,
+                    params.output,
+                    params.block_table.value(),
+                    params.kv_seq_lens,
+                    params.v_cache,
+                    params.output_lse,
+                    params.q_quant_scale,
+                    params.k_cache_quant_scale,
+                    params.v_cache_quant_scale,
+                    params.out_quant_scale,
+                    params.alibi_slope,
+                    params.mask,
+                    params.compute_dtype,
+                    params.max_seq_len,
+                    params.window_size_left,
+                    params.window_size_right,
+                    params.scale,
+                    params.return_lse,
+                    params.is_causal,
+                    params.kv_cache_quant_bit_size);
 #else
   LOG(FATAL) << "batch_decode not implemented";
 #endif
@@ -202,6 +263,15 @@ void fused_layernorm(FusedLayerNormParams& params) {
   } else {
     cuda::rms_norm(params.output, params.input, params.weight, params.eps);
   }
+#elif defined(USE_ILU)
+  ilu::residual_layer_norm(params.input,
+                           params.output,
+                           params.residual,
+                           params.weight,
+                           params.beta,  // weight_bias
+                           params.bias,  // residual_bias
+                           params.residual_out,
+                           params.eps);
 #else
   LOG(FATAL) << "fused_layernorm not implemented";
 #endif
@@ -213,6 +283,8 @@ torch::Tensor matmul(MatmulParams& params) {
       params.a, params.b, params.bias, params.c, params.alpha, params.beta);
 #elif defined(USE_CUDA)
   return cuda::matmul(params.a, params.b, params.bias);
+#elif defined(USE_ILU)
+  return ilu::matmul(params.a, params.b, params.bias);
 #else
   LOG(FATAL) << "matmul not implemented";
 #endif

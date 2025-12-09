@@ -25,6 +25,8 @@ limitations under the License.
 #include "../mlu/attention.h"
 #elif defined(USE_CUDA)
 #include "../cuda/attention.h"
+#elif defined(USE_ILU)
+#include "../ilu/attention.h"
 #endif
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"
