@@ -47,7 +47,7 @@ void batch_prefill(torch::Tensor float_workspace_buffer,
   torch::Tensor kv_cu_seq_lens_host = kv_cu_seq_lens.to(torch::kCPU);
   torch::Tensor kv_len_arr_host =
       kv_cu_seq_lens_host.slice(0, 1) - kv_cu_seq_lens_host.slice(0, 0, -1);
-  const int64_t total_num_rows = qo_indptr_host.size(0);
+  const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
   const int64_t batch_size = qo_indptr_host.size(0) - 1;
 
   auto plan_info = FunctionFactory::get_instance().prefill_plan_func(uri).call(
