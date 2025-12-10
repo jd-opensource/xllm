@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <atb/atb_infer.h>
 #include <c10/core/ScalarType.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
@@ -24,12 +25,14 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/layers/lm_head.h"
+#include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/qwen3_vision_encode_layer.h"
-#include "models/llm/qwen3.h"
+#include "models/llm/npu/qwen3.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
 #include "qwen2_5_vl.h"
+#include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
 
@@ -120,6 +123,11 @@ class Qwen3_VisionBlockImpl : public torch::nn::Module {
     // call each submodule's load_state_dict function
     encoder_layer_->load_state_dict(state_dict);
   }
+
+  void verify_loaded_weights(const std::string& prefix) const {
+    encoder_layer_->verify_loaded_weights();
+  }
+  void merge_loaded_weights() { encoder_layer_->merge_loaded_weights(); }
 
  private:
   layer::Qwen3VisionEncoderLayer encoder_layer_{nullptr};
@@ -499,6 +507,9 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     cu_seqlens = F::pad(
         cu_seqlens, F::PadFuncOptions({1, 0}).mode(torch::kConstant).value(0));
 
+    // transformers
+    cu_seqlens = torch::diff(cu_seqlens);
+
     m_cos = rotary_pos_emb.cos().type_as(hidden_states);
     m_cos = m_cos.repeat({1, 2});
     m_sin = rotary_pos_emb.sin().type_as(hidden_states);
@@ -558,6 +569,28 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
           << "weight size mismatch for " << name();
       emb_->weight.data().copy_(emb_weight);
       is_emb_weight_loaded = true;
+    }
+  }
+
+  void verify_loaded_weights(const std::string& prefix) const {
+    patch_embed_->verify_loaded_weights(prefix + "patch_embed.");
+    for (int idx = 0; idx < blocks_->size(); ++idx) {
+      layers_[idx]->verify_loaded_weights(prefix + "blocks." +
+                                          std::to_string(idx) + ".");
+    }
+    merger_->verify_loaded_weights(prefix + "merger.");
+
+    for (int idx = 0; idx < deepstack_merger_layers_.size(); ++idx) {
+      deepstack_merger_layers_[idx]->verify_loaded_weights(
+          "deepstack_merger_list." + std::to_string(idx) + ".");
+    }
+    CHECK(is_emb_weight_loaded)
+        << "weight is not loaded for " << prefix + "" + ".bias";
+  }
+
+  void merge_loaded_weights() {
+    for (int idx = 0; idx < layers_.size(); ++idx) {
+      layers_[idx]->merge_loaded_weights();
     }
   }
 
@@ -670,6 +703,10 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
       visual_->load_state_dict(
           state_dict->get_dict_with_prefix("model.visual."));
     }
+
+    // verify
+    visual_->verify_loaded_weights("model.visual.");
+    visual_->merge_loaded_weights();
 
     if (!model_args_.image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");

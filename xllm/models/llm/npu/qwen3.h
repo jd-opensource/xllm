@@ -15,24 +15,23 @@ limitations under the License.
 
 #pragma once
 
-#include "core/layers/common/rotary_embedding_util.h"
-#include "core/layers/glm4_decoder_layer.h"
+#include "core/layers/qwen3_decoder_layer.h"
 #include "llm_model_base.h"
 
 namespace xllm {
 
-class Glm4DecoderLayerImpl
-    : public LlmDecoderLayerImplBase<layer::Glm4DecoderLayer> {
+class QWen3DecoderLayerImpl
+    : public LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer> {
  public:
-  Glm4DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::Glm4DecoderLayer>(context) {}
+  QWen3DecoderLayerImpl(const ModelContext& context)
+      : LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer>(context) {}
 };
-TORCH_MODULE(Glm4DecoderLayer);
+TORCH_MODULE(QWen3DecoderLayer);
 
-class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
+class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
  public:
-  Glm4ModelImpl(const ModelContext& context)
-      : LlmModelImplBase<Glm4DecoderLayer>("glm4", context.get_model_args()) {
+  QWen3ModelImpl(const ModelContext& context)
+      : LlmModelImplBase<QWen3DecoderLayer>("qwen3", context.get_model_args()) {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
@@ -46,34 +45,46 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
     norm_ = register_module("norm", layer::RMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-#if defined(USE_NPU)
     atb_pos_emb_ = layer::PosEmbedding(context);
-#endif
-    cos_sin_ = layer::rotary::get_chatglm_rotary_embedding(
-        64,
+    cos_sin_ = layer::rotary::get_concat_rotary_embedding(
+        128,
         model_args.max_position_embeddings(),
         model_args.rope_theta(),
         options);
-#if defined(USE_NPU)
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    // encode_attn_mask_ =
+    //   layer::AttentionMask(options.device(),
+    //   options.dtype()).get_attn_mask(2048, options.device(),
+    //   options.dtype());
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
-#endif
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto block = Glm4DecoderLayer(context);
+      auto block = QWen3DecoderLayer(context);
       layers_.push_back(block);
       blocks_->push_back(block);
     }
+  }
+
+  torch::Tensor deepstack_process(torch::Tensor hidden_states,
+                                  torch::Tensor visual_pos_masks,
+                                  torch::Tensor visual_embeds) {
+    visual_pos_masks = visual_pos_masks.to(hidden_states.device());
+    auto selected = hidden_states.index({visual_pos_masks});
+    auto local_this = selected + visual_embeds;
+    hidden_states.index_put_({visual_pos_masks}, local_this);
+    return hidden_states;
   }
 
   virtual torch::Tensor forward(torch::Tensor tokens,
                                 torch::Tensor positions,
                                 std::vector<KVCache>& kv_caches,
                                 const ModelInputParams& input_params) {
+    bool use_deepstack = input_params.deep_stacks.size() > 0;
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
+    std::vector<torch::Tensor> deep_stacks;
 
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
@@ -86,62 +97,61 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
     } else {
       h = embed_tokens_(tokens, 0);
     }
+    if (use_deepstack) {
+      deep_stacks = input_params.deep_stacks;  // [num_deepstack, hidden_size]
+    }
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
-
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
 
     if (positions.dim() == 2) {  // mrope
       auto apply = [this](torch::Tensor x) {
-        auto sections = mrope_section_;
-        sections.insert(sections.end(), sections.begin(), sections.end());
-
-        auto vec = x.split(sections, -1);
-        std::vector<torch::Tensor> selects;
-        selects.reserve(vec.size());
-
-        for (int64_t i = 0; i < vec.size(); ++i) {
-          auto m = vec[i];
-          selects.push_back(m[i % mrope_section_.size()]);
+        auto freqs_t = x[0].clone();
+        for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
+          int64_t offset = dim_idx;
+          int64_t section_len = mrope_section_[dim_idx];
+          int64_t length = section_len * 3;
+          auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
+          auto idx_second_half = torch::arange(offset, length, 3, torch::kLong);
+          auto idx_tensor =
+              torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
+          // freqs_t[..., idx] = freqs[dim_idx][..., idx]
+          auto src = x[dim_idx].index_select(-1, idx_tensor);
+          freqs_t.index_copy_(-1, idx_tensor, src);
         }
-        return torch::cat(selects, -1);
+        return freqs_t;
       };
       cos_pos = apply(cos_pos.reshape(
           {positions.sizes().front(), -1, cos_pos.sizes().back()}));
       sin_pos = apply(sin_pos.reshape(
           {positions.sizes().front(), -1, sin_pos.sizes().back()}));
     }
-    cos_pos = cos_pos.reshape({-1, cos_pos.sizes().back() / 2, 2});
-    sin_pos = sin_pos.reshape({-1, sin_pos.sizes().back() / 2, 2});
-    torch::Tensor attn_mask;
-    if (FLAGS_enable_chunked_prefill) {
-      int max_kv_seq = input_params.kv_max_seq_len;
-      int num_sequences = input_params.num_sequences;
-      if (num_sequences > 0) {
-        std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(num_sequences);
 
-        for (int j = 0; j < num_sequences; j++) {
-          auto mask =
-              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                         input_params.kv_seq_lens_vec[j],
-                                         max_kv_seq,
-                                         cos_pos.dtype().toScalarType(),
-                                         cos_pos.device());
-          req_mask_vec.emplace_back(mask);
+    torch::Tensor attn_mask;
+
+    torch::Tensor max_of_seq = torch::max(input_params.kv_seq_lens);
+    max_seq_len_ = FLAGS_enable_chunked_prefill
+                       ? std::max(max_of_seq.item<int>(), max_seq_len_)
+                       : 128;
+    attn_mask = attn_mask_.get_attn_mask(
+        max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
+
+    if (FLAGS_enable_chunked_prefill) {
+      int batch_size = input_params.q_seq_lens_vec.size();
+      if (batch_size > 0) {
+        std::vector<torch::Tensor> req_mask_vec;
+        req_mask_vec.reserve(batch_size);
+
+        for (int j = 0; j < batch_size; j++) {
+          int start =
+              input_params.kv_seq_lens_vec[j] - input_params.q_seq_lens_vec[j];
+          int end = input_params.kv_seq_lens_vec[j];
+
+          auto req_mask_slice = attn_mask.slice(0, start, end);
+          req_mask_vec.emplace_back(req_mask_slice);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
-      }
-    } else {
-      if (FLAGS_num_speculative_tokens == 0 ||
-          input_params.global_empty_kv_cache) {
-        attn_mask = attn_mask_.get_attn_mask(
-            128, cos_pos.dtype().toScalarType(), cos_pos.device());
-      } else {
-        attn_mask = attn_mask_.gen_free_mask(FLAGS_num_speculative_tokens + 1,
-                                             cos_pos.dtype().toScalarType(),
-                                             cos_pos.device());
       }
     }
 
@@ -170,6 +180,12 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
             i,
             event,
             event_flag);
+      if (use_deepstack) {
+        if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
+          h = deepstack_process(
+              h, input_params.visual_pos_masks, deep_stacks[i]);
+        }
+      }
     }
     return norm_(h, 0);
   }
@@ -177,44 +193,46 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
  private:
   torch::Tensor viusal_pos_mask_;
 };
-TORCH_MODULE(Glm4Model);
+TORCH_MODULE(QWen3Model);
 
-class Glm4ForCausalLMImpl : public LlmForCausalLMImplBase<Glm4Model> {
+class QWen3ForCausalLMImpl : public LlmForCausalLMImplBase<QWen3Model> {
  public:
-  Glm4ForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<Glm4Model>(context) {}
+  QWen3ForCausalLMImpl(const ModelContext& context)
+      : LlmForCausalLMImplBase<QWen3Model>(context) {}
 };
-TORCH_MODULE(Glm4ForCausalLM);
+TORCH_MODULE(QWen3ForCausalLM);
 
 // register the causal model
-REGISTER_CAUSAL_MODEL(glm4, Glm4ForCausalLM);
+REGISTER_CAUSAL_MODEL(qwen3, QWen3ForCausalLM);
 
 // register the model args
-REGISTER_MODEL_ARGS(glm4, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "glm4");
-
+REGISTER_MODEL_ARGS(qwen3, [&] {
+  LOAD_ARG_OR(model_type, "model_type", "qwen3");
   LOAD_ARG_OR(dtype, "torch_dtype", "");
-  LOAD_ARG_OR(attention_bias, "attention_bias", true);
-  LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0f);
-  LOAD_ARG_OR(eos_token_id_vec, "eos_token_id", std::vector<int>{151329});
-  LOAD_ARG_OR(head_dim, "head_dim", 128);
+  LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
+  LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
-  LOAD_ARG_OR(hidden_size, "hidden_size", 4096);
-  LOAD_ARG_OR(initializer_range, "initializer_range", 0.02f);
-  LOAD_ARG_OR(intermediate_size, "intermediate_size", 13696);
+  LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
+  LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
+  LOAD_ARG(n_kv_heads, "num_key_value_heads");
+  // LOAD_ARG_OR(no_bias, "no_bias", true);
+  LOAD_ARG_OR(intermediate_size, "intermediate_size", 18944);
   LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 32768);
-  LOAD_ARG_OR(n_heads, "num_attention_heads", 32);
-  LOAD_ARG_OR(n_layers, "num_hidden_layers", 40);
-  LOAD_ARG_OR(n_kv_heads, "num_key_value_heads", 2);
-  LOAD_ARG_OR(pad_token_id, "pad_token_id", 151329);
-  LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-5);
-  LOAD_ARG_OR(rope_theta, "rope_theta", 10000.0f);
-  LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
-  LOAD_ARG_OR(vocab_size, "vocab_size", 151552);
+  LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-6);
+  LOAD_ARG_OR(eos_token_id, "eos_token_id", 151643);
+  LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
 
-  SET_ARG(stop_token_ids,
-          std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
-                                      args->eos_token_id_vec().end()));
+  // For qwen3/2.5 model < 7B,  tie_word_embeddings = true
+  LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
+
+  LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
+  LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
+
+  LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
+    return args->hidden_size() / args->n_heads();
+  });
+
+  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
 }  // namespace xllm

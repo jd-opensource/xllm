@@ -45,9 +45,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     norm_ = register_module("norm", layer::RMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-#if defined(USE_NPU)
-    atb_pos_emb_ = layer::PosEmbedding(context);
-#endif
+
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         128,
         model_args.max_position_embeddings(),
@@ -97,20 +95,12 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
     } else {
-#if defined(USE_NPU)
-      h = embed_tokens_(tokens, 0);
-#else
       h = embed_tokens_(tokens);
-#endif
     }
     if (use_deepstack) {
       deep_stacks = input_params.deep_stacks;  // [num_deepstack, hidden_size]
     }
-#if defined(USE_NPU)
-    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
-#else
     auto target_cos_sin = cos_sin_.index({positions});
-#endif
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
@@ -165,41 +155,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
     }
 
-#if defined(USE_NPU)
-    for (size_t i = 0; i < layers_.size(); i++) {
-      aclrtEvent* event{nullptr};
-      std::atomic<bool>* event_flag{nullptr};
-
-      if (input_params.layer_synchronizer != nullptr) {
-        event = input_params.layer_synchronizer->get_event(i);
-        event_flag = input_params.layer_synchronizer->get_event_flag(i);
-      }
-      if (input_params.layer_wise_load_synchronizer != nullptr) {
-        if (!input_params.layer_wise_load_synchronizer->synchronize_layer(i)) {
-          return torch::Tensor();
-        }
-      }
-
-      auto& layer = layers_[i];
-
-      layer(h,
-            cos_pos,
-            sin_pos,
-            attn_mask,
-            kv_caches[i],
-            input_params_new,
-            i,
-            event,
-            event_flag);
-      if (use_deepstack) {
-        if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
-          h = deepstack_process(
-              h, input_params.visual_pos_masks, deep_stacks[i]);
-        }
-      }
-    }
-    return norm_(h, 0);
-#else
     layer::update_dummy_run_input(dp_rank_, positions, input_params_new);
     bool is_prefill = input_params_new.q_max_seq_len > 1;
     auto attn_metadata =
@@ -220,7 +175,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
     }
     return norm_(h);
-#endif
   }
 
  private:

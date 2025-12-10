@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include "models/llm/llm_model_base.h"
+#include "llm_model_base.h"
 
 namespace xllm {
 
@@ -60,11 +60,10 @@ class LlmForEmbeddingImplBase : public torch::nn::Module {
       }
       model_->load_state_dict(sub_dict);
     }
-#if defined(USE_NPU)
+
     // verify
     model_->verify_loaded_weights(prefix + "model.");
     model_->merge_loaded_weights();
-#endif
   }
 
   virtual void prepare_expert_weight(int32_t layer_id,

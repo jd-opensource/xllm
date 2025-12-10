@@ -60,8 +60,10 @@ UNIFY_CLASS_NAME(ColumnParallelLinearImpl, LmHeadImpl)
 
 #if defined(USE_NPU)
 #include "npu/npu_deepseek_v2_decoder_layer_impl.h"
-#else
+#elif defined(USE_MLU)
 #include "mlu/deepseek_v2_decoder_layer_impl.h"
+#else
+REGISTER_NOT_IMPLEMENTED_CLASS(DeepseekV2DecoderLayerImpl);
 #endif
 
 #if defined(USE_NPU)

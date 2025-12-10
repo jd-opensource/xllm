@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/framework/model_context.h"
 #include "core/layers/common/multi_head_attention.h"
 #include "core/layers/siglip_encoder_layer.h"
+#include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/minicpmv_image_processor.h"

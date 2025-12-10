@@ -50,7 +50,7 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
     norm_ = register_module("norm", layer::RMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-
+    atb_pos_emb_ = layer::PosEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         model_args.hidden_size() / model_args.n_heads(),
         model_args.max_position_embeddings(),

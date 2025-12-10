@@ -19,7 +19,7 @@ limitations under the License.
 #include <cub/cub.cuh>
 
 #include "cuda_ops_api.h"
-#include "function_factory.h"
+// #include "function_factory.h"
 #include "type_convert.cuh"
 
 // ref to:

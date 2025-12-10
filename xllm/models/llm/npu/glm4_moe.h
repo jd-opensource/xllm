@@ -120,11 +120,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
-#if defined(USE_NPU)
     return embed_tokens_(input_ids, 0);
-#else
-    return embed_tokens_(input_ids);
-#endif
   }
 
   // tokens: [num_tokens]
