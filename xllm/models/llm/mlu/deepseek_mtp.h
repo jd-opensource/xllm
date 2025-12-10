@@ -38,8 +38,8 @@ class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
 
     // register submodules
-    enorm_ = register_module("enorm", layer::RmsNorm(context));
-    hnorm_ = register_module("hnorm", layer::RmsNorm(context));
+    enorm_ = register_module("enorm", layer::RMSNorm(context));
+    hnorm_ = register_module("hnorm", layer::RMSNorm(context));
     // no quantization for eh_proj
     eh_proj_ =
         register_module("eh_proj",
@@ -92,8 +92,8 @@ class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
  private:
-  layer::RmsNorm enorm_{nullptr};
-  layer::RmsNorm hnorm_{nullptr};
+  layer::RMSNorm enorm_{nullptr};
+  layer::RMSNorm hnorm_{nullptr};
   layer::ReplicatedLinear eh_proj_{nullptr};
   layer::DeepseekV2DecoderLayer mtp_block_{nullptr};
 };
@@ -125,7 +125,7 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
                                              model_args.hidden_size(),
                                              context.get_parallel_args(),
                                              options));
-    norm_ = register_module("norm", layer::RmsNorm(context));
+    norm_ = register_module("norm", layer::RMSNorm(context));
 
     // get dp size and rank
     dp_size_ = parallel_args.dp_size();
@@ -196,7 +196,7 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RmsNorm norm_{nullptr};
+  layer::RMSNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekMTPModel);
 
