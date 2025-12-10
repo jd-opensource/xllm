@@ -15,12 +15,17 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/torch.h>
+
 #include <optional>
 #include <string>
 #include <variant>
 #include <vector>
 
+#include "embedding.pb.h"
+
 namespace xllm {
+using Embedding = xllm::proto::Embedding;
 
 struct ImageURL {
   std::string url;
@@ -43,6 +48,8 @@ struct MMContent {
       : type(type), video_url(std::move(video_url)) {}
   MMContent(const std::string& type, const AudioURL& audio_url)
       : type(type), audio_url(std::move(audio_url)) {}
+  MMContent(const std::string& type, const Embedding& embedding)
+      : type(type), embedding(embedding) {}
 
   std::string type;
 
@@ -51,6 +58,8 @@ struct MMContent {
 
   VideoURL video_url;
   AudioURL audio_url;
+
+  Embedding embedding;
 };
 using MMContentVec = std::vector<MMContent>;
 

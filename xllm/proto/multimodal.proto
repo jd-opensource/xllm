@@ -5,6 +5,8 @@ package xllm.proto;
 
 import "common.proto";
 import "google/protobuf/struct.proto";
+import "tensor.proto";
+import "embedding_data.proto";
 
 message ImageURL {
   string url = 1;
@@ -24,6 +26,9 @@ message MMInputData {
   optional ImageURL image_url = 3;
   optional VideoURL video_url = 4;
   optional AudioURL audio_url = 5;
+  optional Embedding image_embedding = 6;
+  optional Embedding video_embedding = 7;
+  optional Embedding audio_embedding = 8;
 }
 
 message MMChatMessage {

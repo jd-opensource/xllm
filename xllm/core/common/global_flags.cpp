@@ -67,7 +67,7 @@ DEFINE_string(
 
 DEFINE_string(task,
               "generate",
-              "The task to use the model for(e.g. generate, embed).");
+              "The task to use the model for(e.g. generate, embed, mm_embed).");
 
 DEFINE_string(devices,
               "npu:0",

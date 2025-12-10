@@ -32,6 +32,7 @@ limitations under the License.
 #include "runtime/embed_vlm_worker_impl.h"
 #include "runtime/embed_worker_impl.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/mm_embed_vlm_worker_impl.h"
 #include "runtime/rec_worker_impl.h"
 #include "runtime/speculative_worker_impl.h"
 #include "runtime/vlm_worker_impl.h"
@@ -54,6 +55,8 @@ Worker::Worker(const ParallelArgs& parallel_args,
     impl_ = new EmbedVLMWorkerImpl(parallel_args, device, options);
   } else if (worker_type == WorkerType::REC) {
     impl_ = new RecWorkerImpl(parallel_args, device, options);
+  } else if (worker_type == WorkerType::MMEVLM) {
+    impl_ = new MMEmbedVLMWorkerImpl(parallel_args, device, options);
   } else {
     LOG(ERROR) << "Unknown worker type, please check logic";
   }

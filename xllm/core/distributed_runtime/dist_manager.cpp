@@ -125,15 +125,29 @@ void DistManager::setup_multi_node_workers(
   WorkerType worker_type("LLM");
   const auto& model_backend = options.backend();
   if (model_backend == "llm") {
-    worker_type =
-        (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
+    if (options.task_type() == "generate") {
+      worker_type = WorkerType::LLM;
+    } else if (options.task_type() == "embed") {
+      worker_type = WorkerType::ELM;
+    } else {
+      LOG(FATAL) << "Unsupported " << options.task_type()
+                 << " for llm model backend";
+    }
   } else if (model_backend == "vlm") {
-    worker_type = (options.task_type() == "generate") ? WorkerType::VLM
-                                                      : WorkerType::EVLM;
+    if (options.task_type() == "generate") {
+      worker_type = WorkerType::VLM;
+    } else if (options.task_type() == "embed") {
+      worker_type = WorkerType::EVLM;
+    } else if (options.task_type() == "mm_embed") {
+      worker_type = WorkerType::MMEVLM;
+    } else {
+      LOG(FATAL) << "Unsupported " << options.task_type()
+                 << " for vlm model backend";
+    }
   } else if (model_backend == "rec") {
     worker_type = WorkerType::REC;
   } else {
-    LOG(ERROR) << "Unsupported " << model_backend << " in multi-node.";
+    LOG(FATAL) << "Unsupported " << model_backend << " in multi-node.";
   }
   // create local workers
   for (size_t i = 0; i < devices.size(); ++i) {

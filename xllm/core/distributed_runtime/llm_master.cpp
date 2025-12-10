@@ -378,7 +378,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       std::move(stop_tokens),
       std::move(stop_sequences));
 
-  if (task_type_ != "embed") {
+  if (task_type_ != "embed" && task_type_ != "mm_embed") {
     auto finish_reason =
         stopping_checker.check(local_prompt_tokens, local_prompt_tokens.size());
     if (finish_reason != FinishReason::NONE) {

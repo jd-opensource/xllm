@@ -15,6 +15,7 @@ cc_library(
     mm_data_item.h
     mm_data_visitor.h
     mm_handler.h
+    mm_embedding_handler.h
     mm_input.h
     mm_type.h
     request_base.h
@@ -42,6 +43,7 @@ cc_library(
     mm_data_item.cpp
     mm_data_visitor.cpp
     mm_handler.cpp
+    mm_embedding_handler.cpp
     mm_input.cpp
     mm_type.cpp
     request.cpp

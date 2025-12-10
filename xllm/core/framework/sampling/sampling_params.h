@@ -157,6 +157,9 @@ struct SampleOutput {
 
   // [num_seq, ..., embed_dim] FloatTensor
   torch::Tensor embeddings;
+
+  // each element is a FloatTensor
+  std::vector<torch::Tensor> mm_embeddings;
 };
 
 }  // namespace xllm

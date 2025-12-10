@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "core/common/message.h"
 #include "core/common/types.h"
+#include "core/framework/request/request.h"
 #include "mm_type.h"
 
 namespace xllm {
@@ -37,6 +38,8 @@ struct MMInputItem {
   torch::Tensor decode_data_;  // image: rgb, [c,h,w], uint8
 
   VideoMetadata video_meta_;
+
+  EmbeddingOutput embedding_;
 };
 
 struct MMPayload {
@@ -70,6 +73,19 @@ struct MMInput {
 
   bool empty() const { return items_.empty(); }
   void clear() { items_.clear(); }
+  size_t size() const { return items_.size(); }
+
+  const std::vector<MMInputItem>& items() const { return items_; }
+
+  std::vector<MMInputItem>::iterator begin() { return items_.begin(); }
+
+  std::vector<MMInputItem>::iterator end() { return items_.end(); }
+
+  std::vector<MMInputItem>::const_iterator begin() const {
+    return items_.begin();
+  }
+
+  std::vector<MMInputItem>::const_iterator end() const { return items_.end(); }
 
   void insert(const std::vector<MMInputItem>& items) {
     items_.insert(items_.end(), items.begin(), items.end());

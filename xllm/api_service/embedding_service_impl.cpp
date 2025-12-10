@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "common/instance_name.h"
 #include "distributed_runtime/llm_master.h"
+#include "embedding_output_builder.h"
 #include "framework/request/request_params.h"
 #include "mm_service_utils.h"
 #include "util/utils.h"
@@ -42,6 +43,10 @@ bool send_result_to_client_brpc(std::shared_ptr<EmbeddingCall> call,
   response.set_model(model);
 
   response.mutable_data()->Reserve(req_output.outputs.size());
+  std::string encoding_format = call->request().encoding_format();
+  bool use_binary_format = encoding_format == "binary";
+  EmbeddingOutputBuilder mm_embeddings_output_builder(use_binary_format, false);
+  std::string binary_payload;
   for (const auto& output : req_output.outputs) {
     // add data into response
     auto* data = response.add_data();
@@ -51,6 +56,13 @@ bool send_result_to_client_brpc(std::shared_ptr<EmbeddingCall> call,
       data->mutable_embedding()->Add(
           output.embeddings->data(),
           output.embeddings->data() + output.embeddings->size());
+    }
+    if (output.mm_embeddings.has_value()) {
+      call->set_bytes_to_base64(true);
+      mm_embeddings_output_builder.build_repeated_embedding_output(
+          *output.mm_embeddings,
+          *(data->mutable_mm_embeddings()),
+          binary_payload);
     }
   }
 
@@ -65,7 +77,7 @@ bool send_result_to_client_brpc(std::shared_ptr<EmbeddingCall> call,
     proto_usage->set_total_tokens(static_cast<int32_t>(usage.num_total_tokens));
   }
 
-  return call->write_and_finish(response);
+  return call->write_and_finish(response, binary_payload);
 }
 
 }  // namespace

@@ -183,7 +183,7 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
     auto spec_engine = std::make_unique<SpeculativeEngine>(spec_options);
     engine_ = std::move(spec_engine);
   } else if (type == EngineType::LLM) {
-    if (options_.task_type() == "embed") {
+    if (options_.task_type() == "embed" || options.task_type() == "mm_embed") {
       options_.enable_schedule_overlap(false);
       LOG(WARNING) << "Force to disable schedule overlap for embedding model, "
                       "avoiding performance degradation.";

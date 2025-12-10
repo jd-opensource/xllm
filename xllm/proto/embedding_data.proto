@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package xllm.proto;
+
+import "common.proto";
+import "tensor.proto";
+
+message Embedding {
+  Tensor embedding = 1;
+  map<string, Tensor> metadata = 2;
+}
