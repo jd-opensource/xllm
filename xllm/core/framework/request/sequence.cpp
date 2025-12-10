@@ -28,6 +28,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/metrics.h"
+#include "core/framework/request/mm_data_visitor.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
 #include "core/util/tensor_helper.h"
@@ -304,6 +305,20 @@ void Sequence::update_token(size_t index, const Token& token) {
   finish_status_invalidated_ = true;
 }
 
+void Sequence::update_mm_embeddings(
+    const std::vector<torch::Tensor>& mm_embeddings) {
+  // cannot update embeddings to a finished sequence
+  if (finished_) {
+    return;
+  }
+  output_mm_embeddings_ = mm_embeddings;
+  CHECK(sequence_params_.sampling_param->is_embeddings);
+  // invalidate the finish status once a new token is appended
+  finish_status_invalidated_ = false;
+  finished_ = true;
+  finish_reason_ = FinishReason::STOP;
+}
+
 void Sequence::update_embeddings(const torch::Tensor& embeddings) {
   // cannot update embeddings to a finished sequence
   if (finished_) {
@@ -406,6 +421,28 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
   AUTO_COUNTER(detokenization_latency_seconds_non_stream);
 
   // build embeddings for output
+  if (sequence_params_.sampling_param->is_embeddings &&
+      output_mm_embeddings_.size() > 0) {
+    SequenceOutput output;
+    output.index = index_;
+    std::vector<EmbeddingOutput> embedding_outputs;
+    embedding_outputs.reserve(output_mm_embeddings_.size());
+    std::unordered_map<MMKey, std::vector<torch::Tensor>> metadata;
+    CollectItemTensorVisitor visitor(metadata, {"pixel_values"});
+    mm_data_.foreach (visitor);
+    for (int i = 0; i < output_mm_embeddings_.size(); i++) {
+      const auto& output_mm_embedding = output_mm_embeddings_[i];
+      EmbeddingOutput embedding_output;
+      embedding_output.embedding = output_mm_embedding;
+      for (const auto& [key, value] : metadata) {
+        embedding_output.metadata[key] = value[i];
+      }
+      embedding_outputs.push_back(embedding_output);
+    };
+    output.mm_embeddings = embedding_outputs;
+    return output;
+  }
+
   if (sequence_params_.sampling_param->is_embeddings) {
     SequenceOutput output;
     output.index = index_;
