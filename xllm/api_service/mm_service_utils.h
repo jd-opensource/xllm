@@ -1,5 +1,4 @@
 /* Copyright 2025 The xLLM Authors. All Rights Reserved.
-Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -54,7 +53,12 @@ bool build_messages(const google::protobuf::RepeatedPtrField<
         AudioURL audio_url;
         audio_url.url = std::move(*item.mutable_audio_url()->release_url());
         contents.emplace_back(item.type(), audio_url);
-
+      } else if (item.type() == "image_embedding") {
+        contents.emplace_back("image_embedding", item.image_embedding());
+      } else if (item.type() == "video_embedding") {
+        contents.emplace_back("video_embedding", item.video_embedding());
+      } else if (item.type() == "audio_embedding") {
+        contents.emplace_back("audio_embedding", item.audio_embedding());
       } else {
         call->finish_with_error(StatusCode::INVALID_ARGUMENT,
                                 "message content type is invalid.");

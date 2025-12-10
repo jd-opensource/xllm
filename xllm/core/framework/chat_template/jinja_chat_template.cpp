@@ -150,6 +150,15 @@ nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
     } else if (item.type == "audio_url") {
       item_json["audio"] = "mm place holder";
       item_json["audio_url"] = "mm place holder";
+    } else if (item.type == "image_embedding") {
+      item_json["image"] = "mm place holder";
+      item_json["image_url"] = "mm place holder";
+    } else if (item.type == "video_embedding") {
+      item_json["video"] = "mm place holder";
+      item_json["video_url"] = "mm place holder";
+    } else if (item.type == "audio_embedding") {
+      item_json["audio"] = "mm place holder";
+      item_json["audio_url"] = "mm place holder";
     } else {
       item_json[item.type] = "mm place holder";
     }

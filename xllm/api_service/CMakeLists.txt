@@ -20,6 +20,7 @@ cc_library(
     models_service_impl.h
     stream_output_parser.h
     mm_service_utils.h
+    embedding_output_builder.h
   SRCS
     api_service.cpp
     call.cpp
@@ -32,6 +33,7 @@ cc_library(
     rerank_service_impl.cpp
     stream_output_parser.cpp
     qwen3_rerank_service_impl.cpp
+    embedding_output_builder.cpp
   DEPS
     :master
     :chat_template

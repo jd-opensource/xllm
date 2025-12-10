@@ -26,6 +26,7 @@ cc_library(
     embed_worker_impl.h
     embed_vlm_worker_impl.h
     rec_worker_impl.h
+    mm_embed_vlm_worker_impl.h
     worker_client.h
     xservice_client.h
     speculative_worker_impl.h
@@ -45,6 +46,7 @@ cc_library(
     embed_worker_impl.cpp
     embed_vlm_worker_impl.cpp
     rec_worker_impl.cpp
+    mm_embed_vlm_worker_impl.cpp
     worker_client.cpp
     xservice_client.cpp
     params_utils.cpp

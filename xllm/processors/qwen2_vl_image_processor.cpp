@@ -157,29 +157,67 @@ Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
 }
 
 bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
-  std::vector<torch::Tensor> images = inputs.get_decode_data(MMType::IMAGE);
-  std::vector<torch::Tensor> videos = inputs.get_decode_data(MMType::VIDEO);
-  std::vector<VideoMetadata> video_meta_list = inputs.get_video_metadata();
+  for (auto& input_item : inputs) {
+    std::vector<torch::Tensor> images;
+    std::vector<EmbeddingOutput> images_embedding;
+    std::vector<torch::Tensor> videos;
+    std::vector<VideoMetadata> video_meta_list;
 
-  if (images.empty() && (videos.empty() || video_meta_list.empty())) {
-    LOG(ERROR) << "no image/video tensor found.";
-    return false;
-  }
+    if (input_item.type_ == MMType::IMAGE) {
+      if (input_item.decode_data_.defined()) {
+        images.push_back(input_item.decode_data_);
+      } else if (input_item.embedding_.embedding.defined()) {
+        images_embedding.push_back(input_item.embedding_);
+      }
+    } else if (input_item.type_ == MMType::VIDEO) {
+      if (input_item.decode_data_.defined()) {
+        videos.push_back(input_item.decode_data_);
+      }
+      video_meta_list.push_back(input_item.video_meta_);
+    }
 
-  if (!images.empty()) {
-    if (!this->process_images(images, datas)) {
-      LOG(ERROR) << " process image failed.";
+    if (images_embedding.empty() && images.empty() &&
+        (videos.empty() || video_meta_list.empty())) {
+      LOG(ERROR) << "no image/video tensor or embedding found.";
       return false;
     }
-  }
 
-  if (!videos.empty()) {
-    if (!this->process_videos(videos, video_meta_list, datas)) {
-      LOG(ERROR) << " process video failed.";
-      return false;
+    if (!images_embedding.empty()) {
+      if (!this->process_images_embedding(images_embedding, datas)) {
+        LOG(ERROR) << " process embedding failed.";
+        return false;
+      }
+    }
+
+    if (!images.empty()) {
+      if (!this->process_images(images, datas)) {
+        LOG(ERROR) << " process image failed.";
+        return false;
+      }
+    }
+
+    if (!videos.empty()) {
+      if (!this->process_videos(videos, video_meta_list, datas)) {
+        LOG(ERROR) << " process video failed.";
+        return false;
+      }
     }
   }
+  return true;
+}
 
+bool Qwen2VLImageProcessor::process_images_embedding(
+    const std::vector<EmbeddingOutput>& images_embedding,
+    MMData& mm_datas) {
+  for (auto& embedding : images_embedding) {
+    auto& item = mm_datas.add(MMType::IMAGE);
+    MMDict data;
+    data["embedding"] = embedding.embedding;
+    for (const auto& [key, value] : embedding.metadata) {
+      data[key] = value;
+    }
+    item.set_data(data);
+  }
   return true;
 }
 

@@ -19,4 +19,5 @@ proto_library(
     xservice.proto
     image_generation.proto
     xtensor_manager.proto
+    embedding_data.proto
 )
