@@ -186,7 +186,7 @@ message ForwardInput {
   repeated UniqueTokenIds unique_token_ids_vec = 6;
   repeated UniqueTokenCounts unique_token_counts_vec = 7;
   repeated int32 unique_token_lens_vec = 8;
-  bool empty_kv_cache = 9;
+  // bool empty_kv_cache = 9;
   uint32 max_seq_len = 10;
   uint32 q_max_seq_len = 11;
   repeated int32  seq_lens = 12;
@@ -199,7 +199,7 @@ message ForwardInput {
   repeated BlockTables block_tables_vec = 18;
   int32 num_sequences = 19;
   repeated int32 dp_global_token_nums = 20;
-  bool global_empty_kv_cache = 21;
+  // bool global_empty_kv_cache = 21;
   repeated TransferKVInfo transfer_kv_infos = 22;
   repeated Embeddings embeds = 23;
   // uint32 prefill_seq_len = 24;
