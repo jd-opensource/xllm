@@ -188,20 +188,20 @@ class Glm4MoeModelImpl : public torch::nn::Module {
 
         for (int j = 0; j < num_sequences; j++) {
           auto mask =
-              attn_mask_->gen_append_mask(input_params.q_seq_lens_vec[j],
-                                          input_params.kv_seq_lens_vec[j],
-                                          max_kv_seq,
-                                          cos_pos.dtype().toScalarType(),
-                                          cos_pos.device());
+              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
+                                         input_params.kv_seq_lens_vec[j],
+                                         max_kv_seq,
+                                         cos_pos.dtype().toScalarType(),
+                                         cos_pos.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       }
     } else {
       if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
-        attn_mask = attn_mask_->get_attn_mask(128, dtype_, device_);
+        attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
       } else {
-        attn_mask = attn_mask_->gen_free_mask(
+        attn_mask = attn_mask_.gen_free_mask(
             num_speculative_tokens_ + 1, dtype_, device_);
       }
     }
@@ -282,7 +282,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
   at::Device device_;
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::AttentionMask attn_mask_{nullptr};
+  layer::AttentionMask attn_mask_;
   layer::RMSNorm norm_{nullptr};
   torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};

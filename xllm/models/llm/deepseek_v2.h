@@ -27,7 +27,7 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
-#include "core/layers/common/attention_mask_impl.h"
+#include "core/layers/common/attention_mask.h"
 #include "core/layers/deepseek_v2_decoder_layer.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
@@ -159,9 +159,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     if (num_speculative_tokens_ == 0 || input_params.global_empty_kv_cache) {
-      attn_mask = attn_mask_->get_attn_mask(128, dtype_, device_);
+      attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
     } else {
-      attn_mask = attn_mask_->gen_free_mask(
+      attn_mask = attn_mask_.gen_free_mask(
           num_speculative_tokens_ + 1, dtype_, device_);
     }
 
@@ -251,7 +251,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   layer::WordEmbedding embed_tokens_{nullptr};
   std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
   layer::PosEmbedding atb_pos_emb_{nullptr};
-  layer::AttentionMask attn_mask_{nullptr};
+  layer::AttentionMask attn_mask_;
   layer::RMSNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Model);

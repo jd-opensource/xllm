@@ -144,7 +144,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     max_seq_len_ = FLAGS_enable_chunked_prefill
                        ? std::max(max_of_seq.item<int>(), max_seq_len_)
                        : 128;
-    attn_mask = attn_mask_->get_attn_mask(
+    attn_mask = attn_mask_.get_attn_mask(
         max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
     if (FLAGS_enable_chunked_prefill) {

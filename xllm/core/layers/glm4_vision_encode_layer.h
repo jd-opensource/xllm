@@ -15,25 +15,20 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_NPU)
-#include "npu/npu_glm4_vision_encoder_layer_impl.h"
-#endif
+#include "config.h"
 
 namespace xllm {
 namespace layer {
 
-#if defined(USE_NPU)
 class Glm4VisionEncoderLayer
-    : public torch::nn::ModuleHolder<NpuGlm4VisionEncoderLayerImpl> {
+    : public torch::nn::ModuleHolder<Glm4VisionEncoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<NpuGlm4VisionEncoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuGlm4VisionEncoderLayerImpl;
+  using torch::nn::ModuleHolder<Glm4VisionEncoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = Glm4VisionEncoderLayerImpl;
 
   Glm4VisionEncoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<NpuGlm4VisionEncoderLayerImpl>(context)) {
-  }
+      : ModuleHolder(std::make_shared<Glm4VisionEncoderLayerImpl>(context)) {}
 };
-#endif
 
 }  // namespace layer
 }  // namespace xllm

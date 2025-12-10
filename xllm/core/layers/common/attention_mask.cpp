@@ -13,14 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "attention_mask_impl.h"
+#include "attention_mask.h"
 
 namespace xllm {
 namespace layer {
 
-AttentionMaskImpl::AttentionMaskImpl(at::Device device,
-                                     torch::Dtype dtype,
-                                     float mask_value) {
+AttentionMask::AttentionMask(at::Device device,
+                             torch::Dtype dtype,
+                             float mask_value) {
   int max_seq_len = 128;
   seq_len_cached_ = max_seq_len;
   auto bias_cache =
@@ -37,25 +37,24 @@ AttentionMaskImpl::AttentionMaskImpl(at::Device device,
                           .to(device);
 }
 
-torch::Tensor AttentionMaskImpl::get_decode_attn_mask(
-    torch::Tensor input_lengths,
-    int64_t max_s,
-    torch::Dtype dtype,
-    torch::Device device) {
+torch::Tensor AttentionMask::get_decode_attn_mask(torch::Tensor input_lengths,
+                                                  int64_t max_s,
+                                                  torch::Dtype dtype,
+                                                  torch::Device device) {
   update_attn_cache(dtype, device, max_s);
   return atten_mask_cache_.index_select(0, input_lengths).view({-1, 1, max_s});
 }
 
-torch::Tensor AttentionMaskImpl::get_attn_mask(int64_t max_s,
-                                               torch::Dtype dtype,
-                                               torch::Device device) {
+torch::Tensor AttentionMask::get_attn_mask(int64_t max_s,
+                                           torch::Dtype dtype,
+                                           torch::Device device) {
   update_attn_cache(dtype, device, max_s);
   return atten_mask_cache_.slice(0, 0, max_s).slice(1, 0, max_s);
 }
 
-torch::Tensor AttentionMaskImpl::gen_free_mask(int32_t q_len,
-                                               torch::Dtype dtype,
-                                               torch::Device device) {
+torch::Tensor AttentionMask::gen_free_mask(int32_t q_len,
+                                           torch::Dtype dtype,
+                                           torch::Device device) {
   float pre_mask_factor = -10000.0f;
   if (dtype == torch::kBFloat16) {
     pre_mask_factor = 1.0f;
@@ -68,11 +67,11 @@ torch::Tensor AttentionMaskImpl::gen_free_mask(int32_t q_len,
   return mask_free;
 }
 
-torch::Tensor AttentionMaskImpl::gen_append_mask(int32_t q_len,
-                                                 int32_t kv_len,
-                                                 int32_t max_kv_len,
-                                                 torch::Dtype dtype,
-                                                 torch::Device device) {
+torch::Tensor AttentionMask::gen_append_mask(int32_t q_len,
+                                             int32_t kv_len,
+                                             int32_t max_kv_len,
+                                             torch::Dtype dtype,
+                                             torch::Device device) {
   int diagonal = kv_len - q_len;
   auto options = torch::TensorOptions().dtype(torch::kBool).device(device);
   auto bias = torch::tril(torch::ones({q_len, max_kv_len}, options), diagonal);
@@ -84,9 +83,9 @@ torch::Tensor AttentionMaskImpl::gen_append_mask(int32_t q_len,
   return mask;
 }
 
-void AttentionMaskImpl::update_attn_cache(torch::Dtype dtype,
-                                          torch::Device device,
-                                          int64_t seqlen) {
+void AttentionMask::update_attn_cache(torch::Dtype dtype,
+                                      torch::Device device,
+                                      int64_t seqlen) {
   if (seqlen > seq_len_cached_ || atten_mask_cache_.dtype() != dtype) {
     seq_len_cached_ = seqlen;
 

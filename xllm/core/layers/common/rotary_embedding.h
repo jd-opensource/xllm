@@ -52,8 +52,10 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
 
   torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
 
- private:
+ protected:
   bool interleaved_;
+
+ private:
   torch::Tensor sin_;
   torch::Tensor cos_;
   torch::Tensor cos_sin_cache_;

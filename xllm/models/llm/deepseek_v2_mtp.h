@@ -25,7 +25,7 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
-#include "core/layers/common/attention_mask_impl.h"
+#include "core/layers/common/attention_mask.h"
 #include "core/layers/deepseek_v2_decoder_layer.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/npu/npu_column_parallel_linear_impl.h"
@@ -122,7 +122,7 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
     auto cos_pos = cos_sin_chunks[0].contiguous();
     auto sin_pos = cos_sin_chunks[1].contiguous();
 
-    auto attn_mask = attn_mask_->get_attn_mask(
+    auto attn_mask = attn_mask_.get_attn_mask(
         128, cos_pos.dtype().toScalarType(), cos_pos.device());
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
@@ -205,7 +205,7 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
   layer::WordEmbedding embed_tokens_{nullptr};
   std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
   layer::PosEmbedding atb_pos_emb_{nullptr};
-  layer::AttentionMask attn_mask_{nullptr};
+  layer::AttentionMask attn_mask_;
   layer::ColumnParallelLinear eh_proj_{nullptr};
   layer::RMSNorm enorm_{nullptr};
   layer::RMSNorm hnorm_{nullptr};

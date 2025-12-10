@@ -21,7 +21,7 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
-#include "core/layers/common/attention_mask_impl.h"
+#include "core/layers/common/attention_mask.h"
 #include "loader/llama_decoder_loader.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"

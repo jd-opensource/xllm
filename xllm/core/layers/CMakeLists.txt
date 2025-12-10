@@ -21,9 +21,9 @@ cc_library(
   NAME
     attention_mask
   HDRS
-    common/attention_mask_impl.h
+    common/attention_mask.h
   SRCS
-    common/attention_mask_impl.cpp
+    common/attention_mask.cpp
   DEPS
     :state_dict
     :block

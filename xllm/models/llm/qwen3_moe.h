@@ -246,7 +246,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
                        ? std::max(input_params.kv_max_seq_len, max_seq_len_)
                        : 128;
     if (FLAGS_enable_chunked_prefill) {
-      attn_mask = attn_mask_->get_attn_mask(
+      attn_mask = attn_mask_.get_attn_mask(
           max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
       int batch_size = input_params.q_seq_lens_vec.size();
@@ -265,7 +265,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         attn_mask = torch::cat(req_mask_vec, 0);
       }
     } else if (input_params.global_empty_kv_cache) {
-      attn_mask = attn_mask_->get_attn_mask(max_seq_len_, dtype_, device_);
+      attn_mask = attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();
@@ -385,7 +385,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   at::Device device_;
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::AttentionMask attn_mask_{nullptr};
+  layer::AttentionMask attn_mask_;
   layer::RMSNorm norm_{nullptr};
   torch::Tensor cos_sin_;
 #if defined(USE_NPU)

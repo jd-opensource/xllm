@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/common/attention_mask_impl.h"
+#include "core/layers/common/attention_mask.h"
 #include "core/layers/llama_decoder_layer.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
@@ -158,7 +158,7 @@ class LlamaModelImpl : public torch::nn::Module {
     max_seq_len_ = FLAGS_enable_chunked_prefill
                        ? std::max(max_of_seq.item<int>(), max_seq_len_)
                        : 128;
-    auto attn_mask = attn_mask_->get_attn_mask(
+    auto attn_mask = attn_mask_.get_attn_mask(
         max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
     if (FLAGS_enable_chunked_prefill) {
@@ -226,7 +226,7 @@ class LlamaModelImpl : public torch::nn::Module {
   torch::Tensor sin_pos_;
   int max_seq_len_ = 0;
   int device_id_ = 0;
-  layer::AttentionMask attn_mask_{nullptr};
+  layer::AttentionMask attn_mask_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
 

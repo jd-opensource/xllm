@@ -30,7 +30,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/common/attention_mask_impl.h"
+#include "core/layers/common/attention_mask.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/pos_embedding.h"
 #include "models/model_registry.h"
@@ -201,7 +201,7 @@ class LlmModelImplBase : public torch::nn::Module {
       max_seq_len_ = FLAGS_enable_chunked_prefill
                          ? std::max(input_params.kv_max_seq_len, max_seq_len_)
                          : 128;
-      attn_mask = attn_mask_->get_attn_mask(
+      attn_mask = attn_mask_.get_attn_mask(
           max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
       max_seq_len_ = FLAGS_enable_chunked_prefill
@@ -215,17 +215,17 @@ class LlmModelImplBase : public torch::nn::Module {
 
           for (int j = 0; j < num_sequences; j++) {
             auto mask =
-                attn_mask_->gen_append_mask(input_params.q_seq_lens_vec[j],
-                                            input_params.kv_seq_lens_vec[j],
-                                            max_seq_len_,
-                                            cos_pos.dtype().toScalarType(),
-                                            cos_pos.device());
+                attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
+                                           input_params.kv_seq_lens_vec[j],
+                                           max_seq_len_,
+                                           cos_pos.dtype().toScalarType(),
+                                           cos_pos.device());
             req_mask_vec.emplace_back(mask);
           }
           attn_mask = torch::cat(req_mask_vec, 0);
         }
       } else {
-        attn_mask = attn_mask_->get_attn_mask(
+        attn_mask = attn_mask_.get_attn_mask(
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
       }
     }
@@ -328,7 +328,7 @@ class LlmModelImplBase : public torch::nn::Module {
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
   int device_id = 0;
-  layer::AttentionMask attn_mask_{nullptr};
+  layer::AttentionMask attn_mask_;
   int dp_rank_ = 0;
 #if defined(USE_NPU)
   layer::PosEmbedding atb_pos_emb_{nullptr};

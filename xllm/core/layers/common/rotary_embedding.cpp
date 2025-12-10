@@ -88,7 +88,6 @@ MRotaryEmbeddingImpl::MRotaryEmbeddingImpl(
                           rope_theta,
                           interleaved,
                           options),
-      interleaved_(interleaved),
       mrope_section_(rope_scaling_mrope_section) {
   mrope_cu_seq_lens_ = torch::zeros(2, torch::kInt32).to(options.device());
 }

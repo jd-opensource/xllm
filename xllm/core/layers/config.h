@@ -113,3 +113,14 @@ REGISTER_NOT_IMPLEMENTED_CLASS(SiglipEncoderLayerImpl);
 #else
 REGISTER_NOT_IMPLEMENTED_CLASS(Glm4DecoderLayerImpl);
 #endif
+
+#if defined(USE_NPU)
+#include "npu/npu_glm4_vision_encoder_layer_impl.h"
+namespace xllm {
+namespace layer {
+using Glm4VisionEncoderLayerImpl = NpuGlm4VisionEncoderLayerImpl;
+}
+}  // namespace xllm
+#else
+REGISTER_NOT_IMPLEMENTED_CLASS(Glm4VisionEncoderLayerImpl);
+#endif
