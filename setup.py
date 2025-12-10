@@ -361,17 +361,14 @@ class ExtBuild(build_ext):
 
         if self.device == "a2" or self.device == "a3":
             cmake_args += ["-DUSE_NPU=ON"]
-            # set npu environment variables
             set_npu_envs()
         elif self.device == "mlu":
             cmake_args += ["-DUSE_MLU=ON"]
-            # set mlu environment variables
             set_mlu_envs()
         elif self.device == "cuda":
             cuda_architectures = "80;89;90"
             cmake_args += ["-DUSE_CUDA=ON", 
                            f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}"]
-            # set cuda environment variables
             set_cuda_envs()
         elif self.device == "ilu":
             cmake_args += ["-DUSE_ILU=ON"]
@@ -393,9 +390,9 @@ class ExtBuild(build_ext):
 
         # check if torch binary is built with cxx11 abi
         if get_cxx_abi():
-            cmake_args += ["-DUSE_CXX11_ABI=ON"]
+            cmake_args += ["-DUSE_CXX11_ABI=ON", "-D_GLIBCXX_USE_CXX11_ABI=1"]
         else:
-            cmake_args += ["-DUSE_CXX11_ABI=OFF"]
+            cmake_args += ["-DUSE_CXX11_ABI=OFF", "-D_GLIBCXX_USE_CXX11_ABI=0"]
         
         build_args = ["--config", build_type]
         max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
