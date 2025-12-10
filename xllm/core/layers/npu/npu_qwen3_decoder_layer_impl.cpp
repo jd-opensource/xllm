@@ -146,7 +146,7 @@ Qwen3DecoderLayerImpl::Qwen3DecoderLayerImpl(const ModelContext& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  loader_ = std::make_unique<Qwen3DecoderLoader>(
+  loader_ = std::make_unique<Qwen3DecoderManualLoader>(
       WEIGHT_COUNT_PER_LAYER,
       context,
       prefill_param_.enableIntraLayerAddNorm ||
@@ -158,7 +158,6 @@ void Qwen3DecoderLayerImpl::merge_loaded_weights() {
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
-    LOG(INFO) << "device: " << at_weight_tensors[i].device();
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
   }
@@ -304,9 +303,6 @@ void Qwen3DecoderLayerImpl::build_node_variant_pack(
     CHECK_THROW(node.inTensors.at(i) == nullptr,
                 model_name_ << "inTensor " << i << "is NULL");
     node.variantPack.inTensors.at(i) = *node.inTensors.at(i);
-    // LOG(INFO) << model_name_ << "inTensors[" << i << "]:"
-    //               << atb_speed::TensorUtil::TensorToString(
-    //                      node.variantPack.inTensors.at(i));
   }
 
   node.variantPack.outTensors.at(0) = internal_tensors_;

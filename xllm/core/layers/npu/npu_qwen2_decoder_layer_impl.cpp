@@ -40,7 +40,6 @@ void Qwen2DecoderLayerImpl::param_from_args(
   param.isFA = false;
   param.isPrefill = isPrefill;
   param.isBF16 = args.dtype() == "bfloat16";
-  // std::cout<<"param.isBF16:"<<param.isBF16<<std::endl;
   param.supportSwiGLU = true;
   param.supportLcoc = isPrefill;  // isPrefill
   param.supportSpeculate = false;
@@ -73,7 +72,6 @@ void Qwen2DecoderLayerImpl::param_from_args(
 
   param.rank = parallel_args.rank();
   param.backend = "lccl";
-  // param.backend = "lccl";
   param.enableLogN = false;
 }
 
@@ -96,15 +94,15 @@ Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  loader_ =
-      std::make_unique<Qwen2DecoderLoader>(WEIGHT_COUNT_PER_LAYER, context);
+  loader_ = std::make_unique<Qwen2DecoderManualLoader>(WEIGHT_COUNT_PER_LAYER,
+                                                       context);
   initialize_quantization_parameters();
 }
 
 void Qwen2DecoderLayerImpl::initialize_linear_transpose_type() {
-  auto& at_weight_tensors = loader_->get_at_weight_tensors();
+  auto& at_host_weight_tensors = loader_->get_at_host_weight_tensors();
   TransposeType transpose_type =
-      check_transpose(at_weight_tensors[IN_MLP_W2_WEIGHT]);
+      check_transpose(at_host_weight_tensors[IN_MLP_W2_WEIGHT]);
   int transpose_value = static_cast<int>(transpose_type);
   prefill_param_.linearTransposeType[4] = transpose_value;
   decode_param_.linearTransposeType[4] = transpose_value;
@@ -257,7 +255,6 @@ void Qwen2DecoderLayerImpl::build_node_variant_pack(
     ModelInputParams& input_params,
     bool is_prefill) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
-  // std::cout<<"node.variantPack.inTensors.size:"<<node.variantPack.inTensors.size()<<std::endl;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
       atb_speed::Utils::AtTensor2Tensor(cos_pos);
@@ -292,9 +289,6 @@ void Qwen2DecoderLayerImpl::build_node_variant_pack(
     CHECK_THROW(node.inTensors.at(i) == nullptr,
                 model_name_ << "inTensor " << i << "is NULL");
     node.variantPack.inTensors.at(i) = *node.inTensors.at(i);
-    // LOG(INFO) << model_name_ << "inTensors[" << i << "]:"
-    //               << atb_speed::TensorUtil::TensorToString(
-    //                      node.variantPack.inTensors.at(i));
   }
 
   node.variantPack.outTensors.at(0) = internal_tensors_;

@@ -42,12 +42,18 @@ BaseLoader::BaseLoader(uint64_t weight_count, const ModelContext& context)
 
 void BaseLoader::set_weight(const StateDict& state_dict,
                             const std::string& tensor_name,
-                            int weight_position) {
+                            int weight_position,
+                            bool to_host) {
+  auto device = to_host ? at::kCPU : device_;
   for (const auto& [name, tensor] : state_dict) {
     if (absl::EndsWith(name, tensor_name)) {
       at::Tensor mutable_tensor = tensor;
       correct_tensor_dtype(mutable_tensor, tensor_name);
-      at_weight_tensors_[weight_position] = mutable_tensor.to(device_);
+      if (to_host) {
+        at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
+      } else {
+        at_weight_tensors_[weight_position] = mutable_tensor.to(device);
+      }
     }
   }
 }
@@ -55,22 +61,35 @@ void BaseLoader::set_weight(const StateDict& state_dict,
 void BaseLoader::set_weight(const StateDict& state_dict,
                             const std::string& tensor_name,
                             int weight_position,
-                            int dim) {
-  for (const auto& [name, tensor] : state_dict) {
-    if (absl::EndsWith(name, tensor_name)) {
-      if (parallel_args_.world_size() <= 1) {
+                            int dim,
+                            bool to_host) {
+  auto device = to_host ? at::kCPU : device_;
+  if (parallel_args_.world_size() <= 1) {
+    for (const auto& [name, tensor] : state_dict) {
+      if (absl::EndsWith(name, tensor_name)) {
         at::Tensor mutable_tensor = tensor;
         correct_tensor_dtype(mutable_tensor, tensor_name);
-        at_weight_tensors_[weight_position] = mutable_tensor.to(device_);
-      } else {
-        at_weight_tensors_[weight_position] =
-            state_dict
-                .get_sharded_tensor(tensor_name,
-                                    /*dim=*/dim,
-                                    /*rank=*/parallel_args_.rank(),
-                                    /*world_size=*/parallel_args_.world_size())
-                .to(device_);
-        correct_tensor_dtype(at_weight_tensors_[weight_position], tensor_name);
+        if (to_host) {
+          at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
+        } else {
+          at_weight_tensors_[weight_position] = mutable_tensor.to(device);
+        }
+      }
+    }
+  } else {
+    for (const auto& [name, tensor] : state_dict) {
+      if (absl::EndsWith(name, tensor_name)) {
+        at::Tensor mutable_tensor = state_dict.get_sharded_tensor(
+            tensor_name,
+            /*dim=*/dim,
+            /*rank=*/parallel_args_.rank(),
+            /*world_size=*/parallel_args_.world_size());
+        correct_tensor_dtype(mutable_tensor, tensor_name);
+        if (to_host) {
+          at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
+        } else {
+          at_weight_tensors_[weight_position] = mutable_tensor.to(device);
+        }
       }
     }
   }
@@ -81,22 +100,35 @@ void BaseLoader::set_weight(const StateDict& state_dict,
                             int weight_position,
                             int dim,
                             int rank,
-                            int world_size) {
-  for (const auto& [name, tensor] : state_dict) {
-    if (absl::EndsWith(name, tensor_name)) {
-      if (world_size <= 1) {
+                            int world_size,
+                            bool to_host) {
+  auto device = to_host ? at::kCPU : device_;
+  if (world_size <= 1) {
+    for (const auto& [name, tensor] : state_dict) {
+      if (absl::EndsWith(name, tensor_name)) {
         at::Tensor mutable_tensor = tensor;
         correct_tensor_dtype(mutable_tensor, tensor_name);
-        at_weight_tensors_[weight_position] = mutable_tensor.to(device_);
-      } else {
-        at_weight_tensors_[weight_position] =
-            state_dict
-                .get_sharded_tensor(tensor_name,
-                                    /*dim=*/dim,
-                                    /*rank=*/rank,
-                                    /*world_size=*/world_size)
-                .to(device_);
-        correct_tensor_dtype(at_weight_tensors_[weight_position], tensor_name);
+        if (to_host) {
+          at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
+        } else {
+          at_weight_tensors_[weight_position] = mutable_tensor.to(device);
+        }
+      }
+    }
+  } else {
+    for (const auto& [name, tensor] : state_dict) {
+      if (absl::EndsWith(name, tensor_name)) {
+        at::Tensor mutable_tensor =
+            state_dict.get_sharded_tensor(tensor_name,
+                                          /*dim=*/dim,
+                                          /*rank=*/rank,
+                                          /*world_size=*/world_size);
+        correct_tensor_dtype(mutable_tensor, tensor_name);
+        if (to_host) {
+          at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
+        } else {
+          at_weight_tensors_[weight_position] = mutable_tensor.to(device);
+        }
       }
     }
   }

@@ -39,6 +39,7 @@ class BaseLoader {
   virtual void verify_loaded_weights(const std::string& prefix) const {};
   virtual void merge_loaded_weights() {};
   virtual void resize_experts_weights(int num_of_device_experts) {};
+
   torch::Dtype string2dtype(const std::string& dtype_str);
 
   void correct_tensor_dtype(torch::Tensor& tensor,
@@ -46,6 +47,10 @@ class BaseLoader {
 
   std::vector<at::Tensor>& get_at_weight_tensors() {
     return at_weight_tensors_;
+  }
+
+  std::vector<at::Tensor>& get_at_host_weight_tensors() {
+    return at_host_weight_tensors_;
   }
 
   std::unordered_map<std::string, std::vector<torch::Tensor>>&
@@ -69,6 +74,7 @@ class BaseLoader {
   torch::ScalarType dtype_;
   torch::TensorOptions options_;
   std::vector<at::Tensor> at_weight_tensors_;
+  std::vector<at::Tensor> at_host_weight_tensors_;
   std::unique_ptr<ExpertBufferManager> shared_buffer_ = nullptr;
   std::unordered_map<std::string, torch::Tensor> shared_experts_weights_;
   std::unordered_map<std::string, std::vector<torch::Tensor>> experts_weights_;
@@ -83,19 +89,22 @@ class BaseLoader {
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
-                  int weight_position);
+                  int weight_position,
+                  bool to_host = false);
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
                   int weight_position,
-                  int dim);
+                  int dim,
+                  bool to_host = false);
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
                   int weight_position,
                   int dim,
                   int rank,
-                  int world_size);
+                  int world_size,
+                  bool to_host = false);
 };
 
 }  // namespace layer
