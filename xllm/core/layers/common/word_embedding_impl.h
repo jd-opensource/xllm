@@ -15,7 +15,6 @@ limitations under the License.
 
 #pragma once
 
-#include <cuda_runtime.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 
