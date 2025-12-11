@@ -131,4 +131,16 @@ inline torch::Tensor safe_concat(const torch::Tensor& t1,
   }
 }
 
+// save torch tensor to .pt file as pickle format, which is same as torch.save
+// in python. .pt file can be loaded by torch.load in python. file_path must end
+// with ".pt".
+inline void save_tensor_as_pickle(const torch::Tensor& tensor,
+                                  const std::string& file_path) {
+  std::vector<char> pickled = torch::pickle_save(tensor);
+  std::ofstream ofs(file_path, std::ios::binary);
+  CHECK(ofs.good()) << "Cannot open file: " << file_path;
+  ofs.write(pickled.data(), static_cast<std::streamsize>(pickled.size()));
+  CHECK(ofs.good()) << "Write failed to: " << file_path;
+}
+
 }  // namespace xllm
