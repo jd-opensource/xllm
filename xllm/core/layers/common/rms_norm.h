@@ -28,8 +28,11 @@ class RMSNormImpl : public torch::nn::Module {
  public:
   RMSNormImpl(int64_t dim, double eps, const torch::TensorOptions& options);
   RMSNormImpl(const ModelContext& context);
-  torch::Tensor forward(torch::Tensor& input);
-  torch::Tensor forward_output(torch::Tensor& input, torch::Tensor& output);
+
+  std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
+      torch::Tensor& input,
+      std::optional<torch::Tensor> residual = std::nullopt);
+
   void set_layernorm_mode();
 
   void load_state_dict(const StateDict& state_dict);

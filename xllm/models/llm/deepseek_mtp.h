@@ -21,7 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/layers/deepseek_v2_decoder_layer.h"
-#include "models/llm/llm_model_base.h"
+#include "llm_model_base.h"
 
 // DeepSeek v2 compatible with huggingface weights
 // ref to:
@@ -53,26 +53,31 @@ class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor embed,
+                        std::optional<torch::Tensor>& residual,
                         torch::Tensor positions,
                         const layer::AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params) {
     // Layer norm on token inputs
-    auto enorm_out = enorm_(embed);
+    auto enorm_out = std::get<0>(enorm_(embed));
 
     torch::Tensor embedding_data = input_params.input_embedding;
     CHECK(embedding_data.defined())
         << "embedding is not defined in input_params.input_embedding";
     torch::Tensor previous_hidden_states = embedding_data;
-    previous_hidden_states = hnorm_(previous_hidden_states);
+    previous_hidden_states = std::get<0>(hnorm_(previous_hidden_states));
 
     // Concatenate along last dimension and project
     auto concat_emb = torch::cat({enorm_out, previous_hidden_states}, -1);
     auto hidden_states = eh_proj_(concat_emb);
 
     // Pass through mtp block
-    hidden_states = mtp_block_(
-        hidden_states, positions, attn_metadata, kv_cache, input_params);
+    hidden_states = mtp_block_(hidden_states,
+                               residual,
+                               positions,
+                               attn_metadata,
+                               kv_cache,
+                               input_params);
 
     return hidden_states;
   }
@@ -155,13 +160,17 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
                                torch::zeros_like(hidden_states.index({mask})));
     }
 
+    std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < mtp_layers_.size(); i++) {
       auto& layer = mtp_layers_[i];
-      hidden_states = layer(
-          hidden_states, positions, attn_metadata, kv_caches[i], input_params);
+      hidden_states = layer(hidden_states,
+                            residual,
+                            positions,
+                            attn_metadata,
+                            kv_caches[i],
+                            input_params);
     }
-    auto result = norm_(hidden_states);
-    return result;
+    return std::get<0>(norm_(hidden_states, residual));
   }
 
   // load the weight from the checkpoint

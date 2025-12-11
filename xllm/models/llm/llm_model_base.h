@@ -53,11 +53,13 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
   }
 
   virtual torch::Tensor forward(torch::Tensor& x,
+                                std::optional<torch::Tensor>& residual,
                                 torch::Tensor& positions,
                                 const layer::AttentionMetadata& attn_metadata,
                                 KVCache& kv_cache,
                                 const ModelInputParams& input_params) {
-    return decoder_layer_(x, positions, attn_metadata, kv_cache, input_params);
+    return decoder_layer_(
+        x, residual, positions, attn_metadata, kv_cache, input_params);
   }
 
   // load the weight from the checkpoint
@@ -113,12 +115,17 @@ class LlmModelImplBase : public torch::nn::Module {
         layer::AttentionMetadata::build(modified_input_params, is_prefill);
 
     torch::Tensor h_ret;
+    std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h_ret = layer(
-          h, position, attn_metadata, kv_caches[i], modified_input_params);
+      h_ret = layer(h,
+                    residual,
+                    position,
+                    attn_metadata,
+                    kv_caches[i],
+                    modified_input_params);
     }
-    return norm_(h_ret);
+    return std::get<0>(norm_(h_ret, residual));
   }
 
   // load the weight from the checkpoint

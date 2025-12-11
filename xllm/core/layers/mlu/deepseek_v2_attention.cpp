@@ -176,7 +176,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   // get q, qr
   if (q_lora_rank_ > 0) {
     auto q_a = q_a_proj_(hidden_states);
-    q_a = q_a_layernorm_(q_a);
+    q_a = std::get<0>(q_a_layernorm_(q_a));
     qr = q_a;
     q = q_b_proj_(q_a).view({-1, num_local_heads_, qk_head_dim_});
   } else {
@@ -197,7 +197,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   auto v_input = latent_cache.slice(-1, 0, kv_lora_rank_);
   auto k_input = latent_cache;
   auto k_input_slice = k_input.slice(-1, 0, kv_lora_rank_);
-  kv_a_layernorm_->forward_output(v_input, k_input_slice);
+  k_input_slice = std::get<0>(kv_a_layernorm_(k_input_slice));
   k_input = k_input.unsqueeze(1);
   auto k_pe = k_input.slice(-1, kv_lora_rank_);
 

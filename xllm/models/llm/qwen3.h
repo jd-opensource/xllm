@@ -164,9 +164,16 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       attn_metadata.mrope_sin = std::move(sin_pos);
     }
 
+    std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer(h, positions, attn_metadata, kv_caches[i], input_params_new);
+      h = layer(h,
+                residual,
+                positions,
+                attn_metadata,
+                kv_caches[i],
+                input_params_new);
+
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
           h = deepstack_process(
@@ -174,7 +181,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         }
       }
     }
-    return norm_(h);
+    return std::get<0>(norm_(h, residual));
   }
 
  private:

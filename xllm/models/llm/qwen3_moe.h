@@ -38,11 +38,13 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor& x,
+                        std::optional<torch::Tensor>& residual,
                         torch::Tensor& positions,
                         const layer::AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params) {
-    return decoder_layer_(x, positions, attn_metadata, kv_cache, input_params);
+    return decoder_layer_(
+        x, residual, positions, attn_metadata, kv_cache, input_params);
   }
 
   void load_state_dict(const StateDict& state_dict) {
@@ -233,15 +235,22 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       attn_metadata.mrope_cos = std::move(cos_pos);
       attn_metadata.mrope_sin = std::move(sin_pos);
     }
+
+    std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer(
-          h, positions, attn_metadata, kv_caches[i], modified_input_params);
+      h = layer(h,
+                residual,
+                positions,
+                attn_metadata,
+                kv_caches[i],
+                modified_input_params);
+
       if (deep_stack_size && i < deep_stack_size) {
         h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);
       }
     }
-    return norm_(h);
+    return std::get<0>(norm_(h, residual));
   }
 
   // load the weight from the checkpoint

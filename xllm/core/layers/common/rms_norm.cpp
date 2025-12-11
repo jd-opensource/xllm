@@ -40,34 +40,47 @@ RMSNormImpl::RMSNormImpl(const ModelContext& context)
                   context.get_model_args().rms_norm_eps(),
                   context.get_tensor_options()) {}
 
-torch::Tensor RMSNormImpl::forward(torch::Tensor& input) {
+std::tuple<torch::Tensor, std::optional<torch::Tensor>> RMSNormImpl::forward(
+    torch::Tensor& input,
+    std::optional<torch::Tensor> residual) {
+  auto org_shape = input.sizes().vec();
+  input = input.reshape({-1, norm_dim_});
+
   torch::Tensor output;
   if (Device::type_str() != "npu") {
     output = torch::empty_like(input);
   }
-  return forward_output(input, output);
-}
 
-torch::Tensor RMSNormImpl::forward_output(torch::Tensor& input,
-                                          torch::Tensor& output) {
-  auto org_shape = output.sizes().vec();
-  input = input.reshape({-1, norm_dim_});
-  output = output.reshape({-1, norm_dim_});
+  std::optional<torch::Tensor> residual_out;
+  if (residual.has_value()) {
+    residual.value() = residual.value().reshape({-1, norm_dim_});
+    if (Device::type_str() == "mlu") {
+      residual_out = torch::empty_like(residual.value());
+    }
+  }
 
   xllm::kernel::FusedLayerNormParams fused_layernorm_params;
   fused_layernorm_params.input = input;
+  fused_layernorm_params.residual = residual;
   fused_layernorm_params.output = output;
+  fused_layernorm_params.residual_out = residual_out;
   fused_layernorm_params.weight = weight_;
-  fused_layernorm_params.mode = mode_;
   fused_layernorm_params.eps = eps_;
+  fused_layernorm_params.mode = mode_;
   if (bias_.defined()) {
     fused_layernorm_params.beta = bias_;
   }
 
   xllm::kernel::fused_layernorm(fused_layernorm_params);
 
+  output = fused_layernorm_params.output;
+  residual_out = fused_layernorm_params.residual_out;
+
   output = output.view(org_shape);
-  return output;
+  if (residual_out.has_value()) {
+    residual_out.value() = residual_out.value().view(org_shape);
+  }
+  return std::make_tuple(output, residual_out);
 }
 
 void RMSNormImpl::load_state_dict(const StateDict& state_dict) {

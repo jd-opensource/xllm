@@ -724,8 +724,13 @@ TEST_F(DeepseekV2DecoderLayerTest,
       torch::zeros({block_num, 1, block_size, index_head_dim}, options_);
   KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
-  auto output = decoder->forward(
-      hidden_states, positions, attn_metadata, kv_cache, input_params);
+  std::optional<torch::Tensor> residual = std::nullopt;
+  auto output = decoder->forward(hidden_states,
+                                 residual,
+                                 positions,
+                                 attn_metadata,
+                                 kv_cache,
+                                 input_params);
 
   // Synchronize device stream
   xllm::Device device(options_.device());
@@ -864,8 +869,13 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
       torch::zeros({block_num, 1, block_size, index_head_dim}, options_);
   KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
-  auto output = decoder->forward(
-      hidden_states, positions, attn_metadata, kv_cache, input_params);
+  std::optional<torch::Tensor> residual = std::nullopt;
+  auto output = decoder->forward(hidden_states,
+                                 residual,
+                                 positions,
+                                 attn_metadata,
+                                 kv_cache,
+                                 input_params);
 
   // Synchronize device stream
   xllm::Device device(options_.device());

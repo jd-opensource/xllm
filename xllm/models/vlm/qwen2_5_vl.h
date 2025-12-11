@@ -298,7 +298,7 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor x) {
-    x = ln_q_(x);
+    x = std::get<0>(ln_q_(x));
     x = x.view({-1, hidden_size_});
     return mlp_->forward(x);
   }

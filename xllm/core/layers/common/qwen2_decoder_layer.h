@@ -24,6 +24,8 @@ limitations under the License.
 #elif defined(USE_CUDA)
 #include "../cuda/attention.h"
 #endif
+#include <optional>
+
 #include "dense_mlp.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
@@ -47,6 +49,7 @@ class Qwen2DecoderLayerImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict);
 
   torch::Tensor forward(torch::Tensor& x,
+                        std::optional<torch::Tensor>& residual,
                         torch::Tensor& positions,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
