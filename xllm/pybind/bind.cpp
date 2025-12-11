@@ -22,11 +22,11 @@ limitations under the License.
 #include "api_service/call.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
+#include "core/distributed_runtime/llm_master.h"
+#include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
-#include "core/runtime/llm_master.h"
-#include "core/runtime/vlm_master.h"
 
 namespace xllm {
 namespace py = pybind11;

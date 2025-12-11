@@ -26,8 +26,8 @@ limitations under the License.
 
 #include "common/instance_name.h"
 #include "completion.pb.h"
+#include "core/distributed_runtime/llm_master.h"
 #include "core/framework/request/request_output.h"
-#include "core/runtime/llm_master.h"
 #include "core/util/utils.h"
 
 #define likely(x) __builtin_expect(!!(x), 1)

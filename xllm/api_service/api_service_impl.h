@@ -19,7 +19,7 @@ limitations under the License.
 #include <memory>
 
 #include "call.h"
-#include "core/runtime/llm_master.h"
+#include "core/distributed_runtime/llm_master.h"
 
 namespace xllm {
 

@@ -22,9 +22,9 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
+#include "runtime/worker.h"
 #include "util/env_var.h"
 #include "util/timer.h"
-#include "worker.h"
 
 namespace xllm {
 DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {

@@ -31,7 +31,7 @@ limitations under the License.
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
 #include "runtime/utils.h"
-#include "runtime/vlm_master.h"
+#include "vlm_master.h"
 
 std::vector<char> get_the_bytes(std::string filename) {
   std::ifstream input(filename, std::ios::binary);

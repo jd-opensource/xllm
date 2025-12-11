@@ -23,7 +23,7 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "framework/xtensor/xtensor_manager_pool.h"
-#include "options.h"
+#include "runtime/options.h"
 
 namespace xllm {
 class Engine {
