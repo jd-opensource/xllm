@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include "activation.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
@@ -52,6 +53,7 @@ class DenseMLPImpl : public torch::nn::Module {
   ParallelArgs parallel_args_;
   ColumnParallelLinear gate_up_proj_{nullptr};
   RowParallelLinear down_proj_{nullptr};
+  Activation act_{nullptr};
   bool is_smoothquant_;
   std::string hidden_act_;
 };

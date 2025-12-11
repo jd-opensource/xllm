@@ -70,6 +70,8 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
                                            options,
                                            gate_up_proj_extra_args));
 
+  act_ = register_module("act", Activation(hidden_act_, is_gated_));
+
   // 2. down
   down_proj_ = register_module("down_proj",
                                RowParallelLinear(intermediate_size_,
@@ -100,13 +102,7 @@ torch::Tensor DenseMLPImpl::forward(const torch::Tensor& hidden_states) {
           gate_up.options());
     }
 
-    xllm::kernel::ActivationParams activation_params;
-    activation_params.input = gate_up;
-    activation_params.output = output;
-    activation_params.act_mode = hidden_act_;
-    activation_params.is_gated = is_gated_;
-    xllm::kernel::active(activation_params);
-
+    act_->forward(gate_up, output);
     return down_proj_->forward(output);
   }
 }
