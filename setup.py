@@ -343,6 +343,15 @@ class ExtBuild(build_ext):
         debug = int(os.environ.get("DEBUG", 0)) if self.debug is None else self.debug
         build_type = "Debug" if debug else "Release"
 
+        max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
+        max_jobs_int = int(max_jobs)
+        
+        # Limit archive (ar/ranlib) concurrency to avoid file locking conflicts.
+        # The ar tool requires exclusive access to archive files (.a files) when
+        # creating or updating static libraries. When multiple ar processes attempt
+        # to modify the same archive file simultaneously, they compete for file locks,
+        # which can cause deadlocks and hang the build process.
+        archive_jobs = min(8, max(1, max_jobs_int // 4))
         cmake_args = [
             "-G",
             "Ninja",
@@ -357,6 +366,7 @@ class ExtBuild(build_ext):
             f"-DDEVICE_TYPE=USE_{self.device.upper()}",
             f"-DDEVICE_ARCH={self.arch.upper()}",
             f"-DINSTALL_XLLM_KERNELS={'ON' if self.install_xllm_kernels else 'OFF'}",
+            f"-DCMAKE_JOB_POOLS=archive={archive_jobs}",
         ]
 
         if self.device == "a2" or self.device == "a3":
@@ -395,11 +405,10 @@ class ExtBuild(build_ext):
             cmake_args += ["-DUSE_CXX11_ABI=OFF", "-D_GLIBCXX_USE_CXX11_ABI=0"]
         
         build_args = ["--config", build_type]
-        max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
-        # max_jobs="2"
         build_args += ["-j" + max_jobs]
 
         env = os.environ.copy()
+        env["VCPKG_MAX_CONCURRENCY"] = str(max_jobs)
         print("CMake Args: ", cmake_args)
         print("Env: ", env)
 
