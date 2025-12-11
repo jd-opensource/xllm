@@ -20,10 +20,10 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "common/types.h"
+#include "distributed_runtime/engine.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
-#include "runtime/engine.h"
 #include "runtime/xservice_client.h"
 #include "time_predictor.h"
 

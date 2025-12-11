@@ -21,7 +21,7 @@ limitations under the License.
 #include <cmath>
 #include <optional>
 
-#include "runtime/engine.h"
+#include "distributed_runtime/engine.h"
 #include "util/utils.h"
 
 namespace xllm {

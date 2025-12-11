@@ -27,12 +27,12 @@ limitations under the License.
 
 #include "common/options.h"
 #include "common/types.h"
+#include "engine.h"
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/request/mm_input.h"
 #include "framework/request/request_output.h"
 #include "framework/request/request_params.h"
-#include "runtime/engine.h"
-#include "runtime/master.h"
+#include "master.h"
 #include "scheduler/continuous_scheduler.h"
 #include "xllm/processors/input_processor.h"
 

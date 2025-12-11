@@ -8,7 +8,7 @@
 #include <optional>
 
 #include "chunked_prefill_scheduler.h"
-#include "runtime/engine.h"
+#include "distributed_runtime/engine.h"
 #include "util/utils.h"
 
 namespace xllm {

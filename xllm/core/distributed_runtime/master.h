@@ -25,8 +25,8 @@ limitations under the License.
 #include "common/options.h"
 #include "common/rate_limiter.h"
 #include "common/types.h"
+#include "engine.h"
 #include "framework/request/request_params.h"
-#include "runtime/engine.h"
 namespace xllm {
 
 class Master {

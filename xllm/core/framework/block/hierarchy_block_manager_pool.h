@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "block_manager_pool.h"
-#include "runtime/engine.h"
+#include "distributed_runtime/engine.h"
 
 namespace xllm {
 

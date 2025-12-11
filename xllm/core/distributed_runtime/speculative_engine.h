@@ -16,13 +16,13 @@ limitations under the License.
 #pragma once
 
 #include "common/macros.h"
+#include "engine.h"
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/model/model_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
-#include "runtime/engine.h"
-#include "runtime/llm_engine.h"
+#include "llm_engine.h"
 
 namespace xllm {
 

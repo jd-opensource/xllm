@@ -28,11 +28,11 @@ limitations under the License.
 #include <sstream>
 
 #include "common/metrics.h"
+#include "distributed_runtime/engine.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/priority_comparator.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
-#include "runtime/engine.h"
 #include "scheduler/decode_priority_queue.h"
 #include "util/utils.h"
 

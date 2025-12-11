@@ -22,13 +22,8 @@ cc_library(
     dit_worker.h
     embed_worker_impl.h
     embed_vlm_worker_impl.h
-    engine.h
-    llm_engine.h
-    vlm_engine.h
-    dit_engine.h
     worker_client.h
     xservice_client.h
-    speculative_engine.h
     speculative_worker_impl.h
     forward_shared_memory_manager.h
   SRCS
@@ -43,13 +38,9 @@ cc_library(
     dit_worker.cpp
     embed_worker_impl.cpp
     embed_vlm_worker_impl.cpp
-    llm_engine.cpp
-    vlm_engine.cpp
-    dit_engine.cpp
     worker_client.cpp
     xservice_client.cpp
     params_utils.cpp
-    speculative_engine.cpp
     speculative_worker_impl.cpp
     forward_shared_memory_manager.cpp
   DEPS
@@ -78,33 +69,6 @@ cc_library(
     absl::synchronization
     absl::flat_hash_map
     proto::xllm_proto
-    $<$<BOOL:${USE_MLU}>:torch_mlu>
-)
-
-cc_library(
-  NAME 
-    master
-  HDRS
-    llm_master.h
-    master.h
-    vlm_master.h
-    dit_master.h
-  SRCS
-    llm_master.cpp
-    master.cpp
-    vlm_master.cpp
-    dit_master.cpp
-  DEPS
-    :common
-    :distributed_runtime
-    :scheduler
-    :request
-    :runtime
-    :model
-    :models
-    $<$<BOOL:${USE_NPU}>:npu_layers>
-    :chat_template
-    glog::glog
     $<$<BOOL:${USE_MLU}>:torch_mlu>
 )
 

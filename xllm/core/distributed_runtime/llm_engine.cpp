@@ -34,7 +34,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/xtensor/multi_layer_xtensor_transfer.h"
-#include "llm_worker_impl.h"
+#include "runtime/llm_worker_impl.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
 #include "util/env_var.h"

@@ -18,8 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/types.h"
+#include "distributed_runtime/llm_engine.h"
 #include "framework/request/request_output.h"
-#include "runtime/llm_engine.h"
 #include "scheduler/pd_ooc_scheduler.h"
 
 namespace xllm {

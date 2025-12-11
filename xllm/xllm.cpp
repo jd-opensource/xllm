@@ -29,7 +29,7 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
-#include "core/runtime/master.h"
+#include "core/distributed_runtime/master.h"
 #include "core/util/json_reader.h"
 #include "core/util/net.h"
 #include "core/util/utils.h"

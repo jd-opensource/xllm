@@ -21,10 +21,10 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
-#include "dit_worker.h"
 #include "framework/batch/dit_batch.h"
 #include "framework/parallel_state/process_group.h"
 #include "framework/quant_args.h"
+#include "runtime/dit_worker.h"
 
 namespace xllm {
 

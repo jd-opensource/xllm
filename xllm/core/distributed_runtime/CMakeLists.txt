@@ -12,6 +12,15 @@ cc_library(
   NAME 
     distributed_runtime
   HDRS
+    engine.h
+    master.h
+    dit_engine.h
+    dit_master.h
+    llm_engine.h
+    llm_master.h
+    vlm_engine.h
+    vlm_master.h
+    speculative_engine.h
     disagg_pd_service.h
     disagg_pd_service_impl.h
     pd_ooc_service.h
@@ -23,6 +32,14 @@ cc_library(
     comm_channel.h
     shm_channel.h
   SRCS
+    master.cpp
+    dit_engine.cpp
+    dit_master.cpp
+    llm_engine.cpp
+    llm_master.cpp
+    vlm_engine.cpp
+    vlm_master.cpp
+    speculative_engine.cpp
     disagg_pd_service.cpp
     disagg_pd_service_impl.cpp
     pd_ooc_service.cpp
@@ -74,3 +91,29 @@ cc_library(
 
 target_link_libraries(worker_service PRIVATE brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
 
+cc_library(
+  NAME 
+    master
+  HDRS
+    llm_master.h
+    master.h
+    vlm_master.h
+    dit_master.h
+  SRCS
+    llm_master.cpp
+    master.cpp
+    vlm_master.cpp
+    dit_master.cpp
+  DEPS
+    :common
+    :distributed_runtime
+    :scheduler
+    :request
+    :runtime
+    :model
+    :models
+    $<$<BOOL:${USE_NPU}>:npu_layers>
+    :chat_template
+    glog::glog
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
+)

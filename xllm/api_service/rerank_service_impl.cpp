@@ -20,8 +20,8 @@ limitations under the License.
 #include <string>
 
 #include "common/instance_name.h"
+#include "distributed_runtime/llm_master.h"
 #include "framework/request/request_params.h"
-#include "runtime/llm_master.h"
 #include "util/blocking_counter.h"
 #include "util/utils.h"
 #include "util/uuid.h"
