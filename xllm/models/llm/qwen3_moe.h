@@ -195,32 +195,6 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
           {positions.sizes().front(), -1, sin_pos.sizes().back()}));
     }
 
-    torch::Tensor attn_mask;
-    max_seq_len_ = FLAGS_enable_chunked_prefill
-                       ? std::max(input_params.kv_max_seq_len, max_seq_len_)
-                       : 128;
-    if (FLAGS_enable_chunked_prefill) {
-      attn_mask = attn_mask_.get_attn_mask(
-          max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
-
-      int batch_size = input_params.q_seq_lens_vec.size();
-      if (batch_size > 0) {
-        std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(batch_size);
-
-        for (int j = 0; j < batch_size; j++) {
-          int start =
-              input_params.kv_seq_lens_vec[j] - input_params.q_seq_lens_vec[j];
-          int end = input_params.kv_seq_lens_vec[j];
-
-          auto req_mask_slice = attn_mask.slice(0, start, end);
-          req_mask_vec.emplace_back(req_mask_slice);
-        }
-        attn_mask = torch::cat(req_mask_vec, 0);
-      }
-    } else if (input_params.global_empty_kv_cache) {
-      attn_mask = attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
-    }
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();
 
@@ -268,7 +242,6 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
  private:
   torch::nn::ModuleList blocks_{nullptr};
   std::vector<Qwen3MoeDecoderLayer> layers_;
-  int32_t max_seq_len_ = 0;
   int32_t dp_rank_;
   int32_t rank_;
   int32_t dp_size_;
@@ -279,7 +252,6 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   at::Device device_;
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::AttentionMask attn_mask_;
   layer::RMSNorm norm_{nullptr};
   torch::Tensor cos_sin_;
   std::vector<int64_t> mrope_section_;

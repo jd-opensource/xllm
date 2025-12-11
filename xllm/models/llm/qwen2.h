@@ -56,10 +56,6 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
         model_args.max_position_embeddings(),
         model_args.rope_theta(),
         options);
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
-    attn_mask_ = layer::AttentionMask(options.device(),
-                                      options.dtype().toScalarType(),
-                                      /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
       auto block = QWen2DecoderLayer(context);

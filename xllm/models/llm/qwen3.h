@@ -52,13 +52,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         model_args.rope_theta(),
         options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
-    // encode_attn_mask_ =
-    //   layer::AttentionMask(options.device(),
-    //   options.dtype()).get_attn_mask(2048, options.device(),
-    //   options.dtype());
-    attn_mask_ = layer::AttentionMask(options.device(),
-                                      options.dtype().toScalarType(),
-                                      /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
       auto block = QWen3DecoderLayer(context);
@@ -128,32 +121,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
           {positions.sizes().front(), -1, sin_pos.sizes().back()}));
     }
 
-    torch::Tensor attn_mask;
-
     torch::Tensor max_of_seq = torch::max(input_params.kv_seq_lens);
     max_seq_len_ = FLAGS_enable_chunked_prefill
                        ? std::max(max_of_seq.item<int>(), max_seq_len_)
                        : 128;
-    attn_mask = attn_mask_.get_attn_mask(
-        max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
-
-    if (FLAGS_enable_chunked_prefill) {
-      int batch_size = input_params.q_seq_lens_vec.size();
-      if (batch_size > 0) {
-        std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(batch_size);
-
-        for (int j = 0; j < batch_size; j++) {
-          int start =
-              input_params.kv_seq_lens_vec[j] - input_params.q_seq_lens_vec[j];
-          int end = input_params.kv_seq_lens_vec[j];
-
-          auto req_mask_slice = attn_mask.slice(0, start, end);
-          req_mask_vec.emplace_back(req_mask_slice);
-        }
-        attn_mask = torch::cat(req_mask_vec, 0);
-      }
-    }
 
     layer::update_dummy_run_input(dp_rank_, positions, input_params_new);
     bool is_prefill = input_params_new.q_max_seq_len > 1;
