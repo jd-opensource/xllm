@@ -31,7 +31,7 @@ class SharedMemoryManager {
   explicit SharedMemoryManager(const std::string& name,
                                size_t size,
                                bool& is_creator);
-  ~SharedMemoryManager();
+  virtual ~SharedMemoryManager();
   void* base_address() const { return addr_; }
   int64_t size() const { return size_; }
   std::string name() const { return shm_name_; }
