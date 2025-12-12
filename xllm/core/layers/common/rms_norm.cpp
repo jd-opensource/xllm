@@ -55,7 +55,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> RMSNormImpl::forward(
   if (residual.has_value()) {
     residual.value() = residual.value().reshape({-1, norm_dim_});
     if (Device::type_str() == "mlu") {
-      residual_out = torch::empty_like(residual.value());
+      residual_out = residual.value();
     }
   }
 
@@ -67,6 +67,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> RMSNormImpl::forward(
   fused_layernorm_params.weight = weight_;
   fused_layernorm_params.eps = eps_;
   fused_layernorm_params.mode = mode_;
+  fused_layernorm_params.store_output_before_norm = residual_out.has_value();
   if (bias_.defined()) {
     fused_layernorm_params.beta = bias_;
   }

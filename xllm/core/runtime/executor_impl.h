@@ -35,6 +35,10 @@ class ExecutorImpl {
 
   virtual ForwardInput prepare_inputs(Batch& batch) = 0;
 
+  virtual void prepare_dp_metadata(const torch::Tensor& tokens,
+                                   const ModelInputParams& params,
+                                   const ParallelArgs& parallel_args) {}
+
   // tokens: vector size is dp_size, each element is [num_tokens/dp_size]
   // positions: vector size is dp_size, each element is [num_tokens/dp_size]
   // token pos in the sequence returns: [num_tokens, hidden_size]
