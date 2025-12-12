@@ -69,6 +69,10 @@ class CausalLM : public torch::nn::Module {
   virtual void set_lm_head(layer::LmHead& head) = 0;
   virtual layer::WordEmbedding get_word_embedding() = 0;
   virtual void set_word_embedding(layer::WordEmbedding& embedding) = 0;
+  virtual void skip_mrope() {}
+  virtual void apply_mrope(const torch::Tensor positions,
+                           torch::Tensor& cos_pos,
+                           torch::Tensor& sin_pos) {}
 };
 
 template <typename Model>
@@ -117,6 +121,20 @@ class CausalLMImpl : public CausalLM {
   torch::Device device() const override { return options_.device(); }
 
   const torch::TensorOptions& options() const override { return options_; }
+
+  void skip_mrope() override {
+#if defined(USE_MLU)
+    model_->skip_mrope();
+#endif
+  }
+
+  void apply_mrope(const torch::Tensor positions,
+                   torch::Tensor& cos_pos,
+                   torch::Tensor& sin_pos) override {
+#if defined(USE_MLU)
+    model_->apply_mrope(positions, cos_pos, sin_pos);
+#endif
+  }
 
  private:
   Model model_;
