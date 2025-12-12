@@ -1,3 +1,20 @@
+# Release xllm 0.7.2
+
+## **Major Features and Improvements**
+
+### Feature
+
+- Enhance Qwen3-MoE to support TP settings beyond 4.
+- Implement chunked prefill and prefix cache for Qwen3 MoE.
+- Support prefix cache for DeepSeek-V3/R1 models.
+
+### Bugfix
+
+- Fix core dump issue triggered by client disconnection. 
+- Fix the incorrect reading of model args from Qwen3-VL's config.json.
+- Setup the tokenizer config function of bos and eos to fast tokenizer.
+- Fix the memory leak issue in the completions interface.
+
 # Release xllm 0.7.1
 
 ## **Major Features and Improvements**
