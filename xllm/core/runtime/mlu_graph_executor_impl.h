@@ -18,10 +18,10 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch_mlu/csrc/framework/graphs/MLUGraph.h>
 
-#include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/causal_lm.h"
-#include "core/framework/model/model_input_params.h"
 #include "executor_impl.h"
+#include "framework/kv_cache/kv_cache.h"
+#include "framework/model/causal_lm.h"
+#include "framework/model/model_input_params.h"
 #include "options.h"
 
 namespace xllm {
@@ -49,14 +49,17 @@ class GraphPersistentParam {
                        const torch::Device& device,
                        const runtime::Options& options);
 
-  ~GraphPersistentParam();
+  ~GraphPersistentParam() = default;
+
+  void init_params(const ModelInputParams& params,
+                   uint32_t padding_num_tokens,
+                   uint32_t padding_needed);
 
   // Update persistent tensors with new input data
   void update_input_buffer(const torch::Tensor& tokens,
                            const torch::Tensor& positions,
                            const ModelInputParams& params,
-                           uint32_t padding_num_tokens,
-                           const std::vector<int32_t>& dp_tokens);
+                           uint32_t padding_needed);
 
   // input tensors
   torch::Tensor tokens_;
@@ -75,6 +78,7 @@ class GraphPersistentParam {
   torch::Tensor kv_seq_lens_;
   torch::Tensor new_cache_slots_;
   torch::Tensor block_table_;
+  uint32_t num_decoding_tokens_;
 
   // for vl
   torch::Tensor input_embeds_;
@@ -83,9 +87,6 @@ class GraphPersistentParam {
 
   // for mtp model
   torch::Tensor embedding_;
-
-  // Cached attention parameters
-  uint32_t num_decoding_tokens_;
 };
 
 // graph executor using libtorch MLUGraph for memory management
@@ -95,20 +96,16 @@ class MluGraph {
   MluGraph(GraphPersistentParam* persistent_param, uint32_t padding_num_tokens);
 
   // Capture computation graph for given bucket num_tokens
-  torch::Tensor capture(CausalLM* model,
-                        std::vector<KVCache>& kv_cache,
-                        torch_mlu::MempoolId_t pool);
+  void capture(CausalLM* model,
+               std::vector<KVCache>& kv_cache,
+               torch_mlu::MempoolId_t& pool);
 
   // Replay captured graph with new input data
-  torch::Tensor replay();
+  void replay();
   void update_input_buffer(const torch::Tensor& tokens,
                            const torch::Tensor& positions,
                            const ModelInputParams& params,
-                           const std::vector<int32_t>& dp_tokens) {
-    persistent_param_->update_input_buffer(
-        tokens, positions, params, padding_num_tokens_, dp_tokens);
-  }
-  torch_mlu::MempoolId_t pool() { return graph_.pool(); }
+                           bool is_init = false);
 
  private:
   // MLUGraph with mempool for managing temporary tensors during forward pass

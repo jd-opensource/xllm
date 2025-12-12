@@ -39,8 +39,7 @@ AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
   attn_metadata.paged_kv_indices = params.paged_kv_indices;
   attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
 
-  attn_metadata.is_chunked_prefill =
-      params.batch_forward_type.is_chunked_prefill();
+  attn_metadata.is_chunked_prefill = params.batch_forward_type.is_mixed();
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
   if (!attn_metadata.is_prefill || FLAGS_enable_mla) {
     attn_metadata.block_table = params.block_tables;

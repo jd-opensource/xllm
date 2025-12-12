@@ -180,11 +180,14 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
+    ModelInputParams modified_input_params = input_params;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
         positions = torch::tensor({1}).to(torch::kInt32).to(device_);
       }
+      auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+      std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
     auto inputs_embeds = input_params.input_embedding;
     torch::Tensor h;
@@ -200,9 +203,6 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();
-    ModelInputParams modified_input_params = input_params;
-    auto& dp_token_nums = modified_input_params.dp_global_token_nums;
-    std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
     if (positions.dim() == 2) {
       attn_metadata.mrope_cos = std::move(cos_pos_);
@@ -253,7 +253,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   int32_t rank_;
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
-  at::Device device_;
+  torch::Device device_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
   torch::Tensor cos_sin_;
