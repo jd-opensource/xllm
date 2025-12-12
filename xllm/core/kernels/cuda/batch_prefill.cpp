@@ -31,7 +31,12 @@ void batch_prefill(torch::Tensor float_workspace_buffer,
                    torch::Tensor output,
                    std::optional<torch::Tensor>& output_lse,
                    bool enable_cuda_graph) {
-  std::string uri = get_batch_prefill_uri(/*backend=*/"fa2",
+  std::string backend =
+      determine_attention_backend(/*pos_encoding_mode=*/0,
+                                  /*use_fp16_qk_reduction=*/false,
+                                  /*use_custom_mask=*/false);
+
+  std::string uri = get_batch_prefill_uri(backend,
                                           query.scalar_type(),
                                           key.scalar_type(),
                                           output.scalar_type(),
@@ -67,32 +72,56 @@ void batch_prefill(torch::Tensor float_workspace_buffer,
       value.size(-1),  // head_dim_vo
       /*causal=*/true);
 
-  FunctionFactory::get_instance().prefill_ragged_run_func(uri).call(
-      float_workspace_buffer,
-      int_workspace_buffer,
-      plan_info,
-      query,
-      key,
-      value,
-      q_cu_seq_lens,
-      kv_cu_seq_lens,
-      output,
-      output_lse,
-      /*mask_mode_code=*/1,  // CAUSAL
-      /*kv_layout_code=*/0,  // NHD layout
-      window_left,
-      support_pdl(),
-      /*maybe_custom_mask=*/std::optional<torch::Tensor>(),
-      /*maybe_mask_indptr=*/std::optional<torch::Tensor>(),
-      /*maybe_alibi_slopes=*/std::optional<torch::Tensor>(),
-      /*maybe_prefix_len_ptr=*/std::optional<torch::Tensor>(),
-      /*maybe_token_pos_in_items_ptr=*/std::optional<torch::Tensor>(),
-      /*maybe_max_item_len_ptr=*/std::optional<torch::Tensor>(),
-      /*logits_soft_cap=*/0.0,
-      sm_scale,
-      /*rope_rcp_scale=*/1.0,
-      /*rope_rcp_theta=*/1.0 / 10000.0,
-      /*token_pos_in_items_len=*/0);
+  if (backend == "fa2") {
+    FunctionFactory::get_instance().fa2_prefill_ragged_run_func(uri).call(
+        float_workspace_buffer,
+        int_workspace_buffer,
+        plan_info,
+        query,
+        key,
+        value,
+        q_cu_seq_lens,
+        kv_cu_seq_lens,
+        output,
+        output_lse,
+        /*mask_mode_code=*/1,  // CAUSAL
+        /*kv_layout_code=*/0,  // NHD layout
+        window_left,
+        support_pdl(),
+        /*maybe_custom_mask=*/std::optional<torch::Tensor>(),
+        /*maybe_mask_indptr=*/std::optional<torch::Tensor>(),
+        /*maybe_alibi_slopes=*/std::optional<torch::Tensor>(),
+        /*maybe_prefix_len_ptr=*/std::optional<torch::Tensor>(),
+        /*maybe_token_pos_in_items_ptr=*/std::optional<torch::Tensor>(),
+        /*maybe_max_item_len_ptr=*/std::optional<torch::Tensor>(),
+        /*logits_soft_cap=*/0.0,
+        sm_scale,
+        /*rope_rcp_scale=*/1.0,
+        /*rope_rcp_theta=*/1.0 / 10000.0,
+        /*token_pos_in_items_len=*/0);
+  } else if (backend == "fa3") {
+    FunctionFactory::get_instance().fa3_prefill_ragged_run_func(uri).call(
+        float_workspace_buffer,
+        int_workspace_buffer,
+        plan_info,
+        query,
+        key,
+        value,
+        q_cu_seq_lens,
+        kv_cu_seq_lens,
+        output,
+        output_lse,
+        /*mask_mode_code=*/1,  // CAUSAL
+        /*kv_layout_code=*/0,  // NHD layout
+        window_left,
+        support_pdl(),
+        /*maybe_prefix_len_ptr=*/std::optional<torch::Tensor>(),
+        /*maybe_token_pos_in_items_ptr=*/std::optional<torch::Tensor>(),
+        /*maybe_max_item_len_ptr=*/std::optional<torch::Tensor>(),
+        /*logits_soft_cap=*/0.0,
+        sm_scale,
+        /*token_pos_in_items_len=*/0);
+  }
 }
 
 }  // namespace xllm::kernel::cuda

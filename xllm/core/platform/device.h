@@ -44,6 +44,7 @@ class Device {
   static std::string type_str();
   static torch::DeviceType type_torch();
   static bool is_enable_pdl();
+  static bool is_support_sm90a();
 
   int64_t total_memory();
   int64_t free_memory();
@@ -64,6 +65,7 @@ class Device {
 
   // only used for cuda
   static bool enable_pdl_;
+  static bool support_sm90a_;
 };
 
 }  // namespace xllm

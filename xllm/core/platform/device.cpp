@@ -27,19 +27,43 @@ limitations under the License.
 #endif
 
 namespace {
+#if defined(USE_CUDA)
+
+std::pair<int32_t, int32_t> get_compute_capability(int32_t device_id) {
+  cudaDeviceProp prop;
+  cudaError_t err = cudaGetDeviceProperties(&prop, device_id);
+  if (err != cudaSuccess) {
+    LOG(FATAL) << "Failed to get compute capability for device " << device_id;
+  }
+  return std::make_pair(prop.major, prop.minor);
+}
+
+int32_t get_cuda_version() {
+  int32_t version;
+  cudaError_t err = cudaRuntimeGetVersion(&version);
+  if (err != cudaSuccess) {
+    LOG(FATAL) << "Failed to get CUDA version!";
+  }
+  return version;
+}
+
+bool cuda_version_at_least(int32_t major, int32_t minor) {
+  int32_t version = get_cuda_version();
+  return version >= major * 1000 + minor * 10;
+}
+
 // Whether to enable Programmatic Dependent Launch (PDL). See
 // https://docs.nvidia.com/cuda/cuda-c-programming-guide/#programmatic-dependent-launch-and-synchronization
 // Only supported for >= sm90, and currently only for FA2, CUDA core, and
 // trtllm-gen decode.
-#if defined(USE_CUDA)
 bool support_pdl(int32_t device_id) {
-  cudaDeviceProp prop;
-  cudaError_t err = cudaGetDeviceProperties(&prop, device_id);
-  if (err != cudaSuccess) {
-    LOG(ERROR) << "cuda get device properties failed";
-    return false;
-  }
-  return prop.major >= 9;
+  auto [major, minor] = get_compute_capability(device_id);
+  return major >= 9;
+}
+
+bool support_sm90a(int32_t device_id) {
+  auto [major, minor] = get_compute_capability(device_id);
+  return (major == 9) && cuda_version_at_least(12, 3);
 }
 #endif
 }  // namespace
@@ -47,11 +71,15 @@ bool support_pdl(int32_t device_id) {
 namespace xllm {
 
 bool Device::enable_pdl_ = false;
+bool Device::support_sm90a_ = false;
 
 Device::Device(const torch::Device& device) : device_(device) {
 #if defined(USE_CUDA)
   static bool enable_pdl = support_pdl(device.index());
   enable_pdl_ = enable_pdl;
+
+  static bool is_sm90a_supported = support_sm90a(device.index());
+  support_sm90a_ = is_sm90a_supported;
 #endif
 }
 
@@ -123,6 +151,8 @@ torch::DeviceType Device::type_torch() {
 }
 
 bool Device::is_enable_pdl() { return enable_pdl_; }
+
+bool Device::is_support_sm90a() { return support_sm90a_; }
 
 // set device before get device mem
 Device::DeviceMem Device::get_device_mem() const {
