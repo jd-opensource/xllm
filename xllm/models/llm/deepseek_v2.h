@@ -104,7 +104,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                                torch::Tensor positions,
                                std::vector<KVCache>& kv_caches,
                                const ModelInputParams& input_params) {
-    auto attn_metadata = layer::AttentionMetadata::build(input_params);
+    bool is_prefill = input_params.q_max_seq_len > 1;
+    auto attn_metadata =
+        layer::AttentionMetadata::build(input_params, is_prefill);
     torch::Tensor hidden_states = embed_tokens_(tokens);
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {

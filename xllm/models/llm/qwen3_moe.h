@@ -202,7 +202,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
     ModelInputParams modified_input_params = input_params;
     layer::update_dummy_run_input(dp_rank_, positions, modified_input_params);
-    auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
+    bool is_prefill = modified_input_params.q_max_seq_len > 1;
+    auto attn_metadata =
+        layer::AttentionMetadata::build(modified_input_params, is_prefill);
     if (positions.dim() == 2) {
       attn_metadata.mrope_cos = std::move(cos_pos);
       attn_metadata.mrope_sin = std::move(sin_pos);
