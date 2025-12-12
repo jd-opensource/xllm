@@ -40,6 +40,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      int num_decoding_tokens,
                                      int block_size,
                                      bool enable_shm,
+                                     uint64_t input_shm_size,
+                                     uint64_t output_shm_size,
                                      bool is_local,
                                      const std::string& task_type,
                                      const std::string& worker_type) {
@@ -51,6 +53,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .enable_offline_inference(true)
       .master_node_addr(master_node_addr)
       .enable_shm(enable_shm)
+      .input_shm_size(input_shm_size)
+      .output_shm_size(output_shm_size)
       .is_local(is_local)
       .task_type(task_type);
   FLAGS_enable_schedule_overlap = false;
