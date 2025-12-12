@@ -44,7 +44,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
   torch::Tensor forward(torch::Tensor& x,
                         std::optional<torch::Tensor>& residual,
                         torch::Tensor& positions,
-                        const AttentionMetadata& attn_metadata,
+                        AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params);
 

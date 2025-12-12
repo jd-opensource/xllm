@@ -89,6 +89,11 @@ UNIFY_CLASS_NAME(Qwen2_5_VisionLayerImpl, Qwen2dot5VisionEncoderLayerImpl)
 #include "npu/npu_qwen3_decoder_layer_impl.h"
 #else
 #include "common/qwen2_decoder_layer.h"
+namespace xllm {
+namespace layer {
+using Qwen3DecoderLayerImpl = Qwen2DecoderLayerImpl;
+}
+}  // namespace xllm
 #endif
 
 #if defined(USE_NPU)

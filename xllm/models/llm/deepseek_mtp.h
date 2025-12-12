@@ -55,7 +55,7 @@ class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
   torch::Tensor forward(torch::Tensor embed,
                         std::optional<torch::Tensor>& residual,
                         torch::Tensor positions,
-                        const layer::AttentionMetadata& attn_metadata,
+                        layer::AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params) {
     // Layer norm on token inputs
@@ -160,6 +160,7 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < mtp_layers_.size(); i++) {
+      attn_metadata.layer_id = i;
       auto& layer = mtp_layers_[i];
       hidden_states = layer(hidden_states,
                             residual,

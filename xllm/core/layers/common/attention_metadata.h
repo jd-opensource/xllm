@@ -29,6 +29,19 @@ struct AttentionMetadata {
   static AttentionMetadata build(const ModelInputParams& params,
                                  const std::string& compute_dtype);
 
+  void update(c10::ScalarType query_dtype,
+              c10::ScalarType key_dtype,
+              c10::ScalarType output_dtype,
+              int head_dim_qk,
+              int head_dim_vo,
+              int num_qo_heads,
+              int num_kv_heads,
+              int block_size,
+              int window_size_left,
+              bool enable_cuda_graph,
+              bool causal);
+
+  int layer_id;
   torch::Tensor q_cu_seq_lens;
   torch::Tensor kv_cu_seq_lens;
   torch::Tensor kv_seq_lens;
@@ -50,6 +63,8 @@ struct AttentionMetadata {
   torch::Tensor paged_kv_indptr;
   torch::Tensor paged_kv_indices;
   torch::Tensor paged_kv_last_page_len;
+  torch::Tensor plan_info;
+  std::string uri;
 };
 
 }  // namespace layer

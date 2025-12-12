@@ -25,6 +25,7 @@ limitations under the License.
 
 namespace xllm {
 namespace layer {
+
 class AttentionImpl : public torch::nn::Module {
  public:
   AttentionImpl() = default;
@@ -36,7 +37,7 @@ class AttentionImpl : public torch::nn::Module {
                 int sliding_window);
 
   std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
-      const AttentionMetadata& attn_metadata,
+      AttentionMetadata& attn_metadata,
       torch::Tensor& query,
       torch::Tensor& key,
       torch::Tensor& value,

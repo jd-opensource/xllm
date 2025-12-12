@@ -25,6 +25,7 @@ limitations under the License.
 
 namespace xllm {
 namespace layer {
+
 class AttentionImpl : public torch::nn::Module {
  public:
   AttentionImpl() = default;

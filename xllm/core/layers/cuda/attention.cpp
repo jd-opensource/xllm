@@ -16,11 +16,14 @@ limitations under the License.
 #include "attention.h"
 
 #include "flashinfer_workspace.h"
+#include "kernels/cuda/function_factory.h"
+#include "kernels/cuda/utils.h"
 #include "kernels/ops_api.h"
 
 DECLARE_bool(enable_chunked_prefill);
 namespace xllm {
 namespace layer {
+
 AttentionImpl::AttentionImpl(int num_heads,
                              int head_size,
                              float scale,
@@ -33,7 +36,7 @@ AttentionImpl::AttentionImpl(int num_heads,
       sliding_window_(sliding_window - 1) {}
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
-    const AttentionMetadata& attn_metadata,
+    AttentionMetadata& attn_metadata,
     torch::Tensor& query,
     torch::Tensor& key,
     torch::Tensor& value,
@@ -52,6 +55,21 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
 
   torch::Tensor k_cache = kv_cache.get_k_cache();
   torch::Tensor v_cache = kv_cache.get_v_cache();
+
+  // maybe we need to update attn_metadata before execute attention,
+  // currently we update flashinfer metadata at layer 0.
+  attn_metadata.update(
+      query.scalar_type(),
+      key.scalar_type(),
+      output.scalar_type(),
+      head_size_,
+      head_size_,
+      num_heads_,
+      num_kv_heads_,
+      /*block_size*/ k_cache.size(1),
+      /*window_size_left*/ sliding_window_,
+      /*enable_cuda_graph*/ false,
+      /*causal*/ attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
 
   xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
   reshape_paged_cache_params.key = key;
@@ -79,6 +97,8 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
           .get_page_locked_int_workspace_buffer();
   attention_params.kv_cu_seq_lens = attn_metadata.kv_cu_seq_lens;
   attention_params.q_cu_seq_lens = attn_metadata.q_cu_seq_lens;
+  attention_params.uri = attn_metadata.uri;
+  attention_params.plan_info = attn_metadata.plan_info;
 
   // TODO: support chunked prefill
   CHECK(!attn_metadata.is_chunked_prefill)
