@@ -853,7 +853,6 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
   // some dp related variables
   std::vector<int32_t> dp_global_token_nums;
   dp_global_token_nums.resize(dp_size_);
-  bool global_empty_kv_cache = true;
   // when enable dp, we need to check the forward type of each batch
   // and set the empty forward type of each batch to the same value as the first
   // batch
@@ -865,8 +864,6 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
         batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
-    global_empty_kv_cache =
-        batched_inputs[dp_rank].empty_kv_cache && global_empty_kv_cache;
     if (batch_forward_type.is_empty() &&
         !batched_inputs[dp_rank].batch_forward_type.is_empty()) {
       batch_forward_type = batched_inputs[dp_rank].batch_forward_type;
@@ -879,10 +876,9 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
     eplb_info = eplb_manager_->get_eplb_info();
   }
 
-  // update dp_global_token_nums and global_empty_kv_cache
+  // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
-    batched_inputs[dp_rank].global_empty_kv_cache = global_empty_kv_cache;
     if (FLAGS_enable_eplb) {
       batched_inputs[dp_rank].eplb_info = eplb_info;
     }
