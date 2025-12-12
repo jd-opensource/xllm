@@ -96,7 +96,7 @@ torch::Tensor Qwen3MoeDecoderLayerImpl::forward(
     torch::Tensor& x,
     std::optional<torch::Tensor>& residual,
     torch::Tensor& positions,
-    const AttentionMetadata& attn_metadata,
+    AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
     const ModelInputParams& input_params) {
   // Pre-attention norm

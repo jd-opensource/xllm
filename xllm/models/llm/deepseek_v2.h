@@ -40,7 +40,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   torch::Tensor forward(torch::Tensor& x,
                         std::optional<torch::Tensor>& residual,
                         torch::Tensor& positions,
-                        const layer::AttentionMetadata& attn_metadata,
+                        layer::AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params) {
     return decoder_layer_(
@@ -108,6 +108,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     torch::Tensor hidden_states = embed_tokens_(tokens);
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
+      attn_metadata.layer_id = i;
       auto& layer = layers_[i];
       hidden_states = layer(hidden_states,
                             residual,
