@@ -23,6 +23,8 @@ limitations under the License.
 #include "runtime/base_executor_impl.h"
 #if defined(USE_NPU)
 #include "runtime/acl_graph_executor_impl.h"
+#else
+#include "runtime/mlu_graph_executor_impl.h"
 #endif
 #include "runtime/options.h"
 
@@ -39,6 +41,13 @@ Executor::Executor(CausalLM* model,
         std::make_unique<AclGraphExecutorImpl>(model, args, device, options);
     return;
   }
+#elif defined(USE_MLU)
+  if (FLAGS_enable_graph) {
+    LOG(INFO) << "Creating Graph Executor for MLU device";
+    impl_ =
+        std::make_unique<MluGraphExecutorImpl>(model, args, device, options);
+    return;
+  }
 #endif
   impl_ = std::make_unique<BaseExecutorImpl>(model, args, device, options);
 }
@@ -47,11 +56,16 @@ ForwardInput Executor::prepare_inputs(Batch& batch) {
   return impl_->prepare_inputs(batch);
 }
 
+void Executor::prepare_dp_metadata(const torch::Tensor& tokens,
+                                   const ModelInputParams& params,
+                                   const ParallelArgs& parallel_args) {
+  impl_->prepare_dp_metadata(tokens, params, parallel_args);
+}
+
 torch::Tensor Executor::forward(const torch::Tensor& tokens,
                                 const torch::Tensor& positions,
                                 std::vector<KVCache>& kv_caches,
                                 const ModelInputParams& params) {
-  COUNTER_INC(num_model_execution_total_eager);
   return impl_->run(tokens, positions, kv_caches, params);
 }
 

@@ -119,6 +119,10 @@ class CausalLM : public torch::nn::Module {
     LOG(FATAL) << "Method 'set_word_embedding' is not implemented/supported by "
                   "this model.";
   }
+  virtual void skip_mrope() {}
+  virtual void apply_mrope(const torch::Tensor positions,
+                           torch::Tensor& cos_pos,
+                           torch::Tensor& sin_pos) {}
 };
 
 template <typename Model>
@@ -187,6 +191,20 @@ class CausalLMImpl : public CausalLM {
   torch::Device device() const override { return options_.device(); }
 
   const torch::TensorOptions& options() const override { return options_; }
+
+  void skip_mrope() override {
+#if defined(USE_MLU)
+    model_->skip_mrope();
+#endif
+  }
+
+  void apply_mrope(const torch::Tensor positions,
+                   torch::Tensor& cos_pos,
+                   torch::Tensor& sin_pos) override {
+#if defined(USE_MLU)
+    model_->apply_mrope(positions, cos_pos, sin_pos);
+#endif
+  }
 
  private:
   Model model_;

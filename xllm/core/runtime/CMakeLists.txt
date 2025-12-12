@@ -3,7 +3,7 @@ include(cc_binary)
 include(cc_test)
 
 cc_library(
-  NAME 
+  NAME
     runtime
   HDRS
     options.h
@@ -15,6 +15,7 @@ cc_library(
     base_executor_impl.h
     dit_executor.h
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.h>
+    $<$<BOOL:${USE_MLU}>:mlu_graph_executor_impl.h>
     worker.h
     worker_impl.h
     llm_worker_impl.h
@@ -31,6 +32,7 @@ cc_library(
     base_executor_impl.cpp
     dit_executor.cpp
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.cpp>
+    $<$<BOOL:${USE_MLU}>:mlu_graph_executor_impl.cpp>
     worker.cpp
     worker_impl.cpp
     llm_worker_impl.cpp
@@ -101,8 +103,9 @@ target_link_libraries(acl_graph_executor_test
                       )
 # Use --whole-archive for spdlog to ensure all symbols are available for xllm_kernels
 # This resolves the undefined reference issues in xllm_kernels
-target_link_options(acl_graph_executor_test PRIVATE 
-  "-Wl,--whole-archive" 
+target_link_options(acl_graph_executor_test PRIVATE
+  "-Wl,--whole-archive"
   "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
   "-Wl,--no-whole-archive")
 endif()
+
