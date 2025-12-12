@@ -18,10 +18,10 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch_mlu/csrc/framework/graphs/MLUGraph.h>
 
-#include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/causal_lm.h"
-#include "core/framework/model/model_input_params.h"
 #include "executor_impl.h"
+#include "framework/kv_cache/kv_cache.h"
+#include "framework/model/causal_lm.h"
+#include "framework/model/model_input_params.h"
 #include "options.h"
 
 namespace xllm {

@@ -18,9 +18,9 @@ limitations under the License.
 #include <cnrt.h>
 #include <torch_mlu/csrc/framework/core/stream_guard.h>
 
-#include "core/common/global_flags.h"
-#include "core/common/metrics.h"
-#include "core/util/utils.h"
+#include "common/global_flags.h"
+#include "common/metrics.h"
+#include "util/utils.h"
 
 namespace {
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
@@ -265,6 +265,10 @@ torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
     actual_num_tokens = util::max(dp_global_token_nums_);
   }
   uint32_t padding_batch_size = get_bucket_num_tokens(actual_num_tokens);
+  if (!dp_global_token_nums_.empty()) {
+    dp_global_token_nums_ =
+        std::vector<int32_t>(dp_global_token_nums_.size(), padding_batch_size);
+  }
   if (persistent_param_->use_mrope_) {
     model_->skip_mrope();
     model_->apply_mrope(positions,
