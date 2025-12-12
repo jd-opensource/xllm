@@ -205,7 +205,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   rotary_emb_(q_pe,
               k_pe,
               positions,
-              attn_metadata.query_start_loc,
+              attn_metadata.q_cu_seq_lens,
               attn_metadata.max_query_len,
               attn_metadata.is_prefill);
   q_input.slice(-1, kv_lora_rank_) = q_pe;

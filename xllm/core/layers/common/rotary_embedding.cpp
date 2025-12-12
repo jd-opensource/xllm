@@ -106,7 +106,7 @@ void MRotaryEmbeddingImpl::forward(torch::Tensor& q,
     return RotaryEmbeddingImpl::forward(q,
                                         k,
                                         position_ids,
-                                        attn_metadata.query_start_loc,
+                                        attn_metadata.q_cu_seq_lens,
                                         attn_metadata.max_query_len,
                                         attn_metadata.is_prefill);
   }

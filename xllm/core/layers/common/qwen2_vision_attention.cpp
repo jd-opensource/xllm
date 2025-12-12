@@ -146,8 +146,8 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   attention_params.window_size_left = -1;
   attention_params.scale = scale_;
   attention_params.compute_dtype = "half";
-  attention_params.query_start_loc = cu_seq_len;
-  attention_params.seq_start_loc = cu_seq_len;
+  attention_params.q_cu_seq_lens = cu_seq_len;
+  attention_params.kv_cu_seq_lens = cu_seq_len;
   attention_params.max_query_len = max_seqlen;
   attention_params.max_seq_len = max_seqlen;
   attention_params.block_table = std::nullopt;

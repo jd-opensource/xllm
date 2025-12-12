@@ -21,39 +21,10 @@ limitations under the License.
 
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
+#include "layers/common/attention_metadata.h"
 
 namespace xllm {
 namespace layer {
-
-struct AttentionMetadata {
- public:
-  static AttentionMetadata build(const ModelInputParams& params,
-                                 bool is_prefill);
-
-  static AttentionMetadata build(const ModelInputParams& params,
-                                 const std::string& compute_dtype,
-                                 bool is_prefill);
-
-  torch::Tensor query_start_loc;
-  torch::Tensor seq_start_loc;
-  torch::Tensor kv_seq_lens;
-  torch::Tensor block_table;
-  torch::Tensor slot_mapping;
-  int64_t max_query_len;
-  int64_t max_seq_len;
-  std::string compute_dtype;
-  bool is_prefill;
-  bool is_chunked_prefill;
-  bool is_dummy;
-
-  // for mrope
-  torch::Tensor mrope_cos;
-  torch::Tensor mrope_sin;
-
-  torch::Tensor q_cu_seq_lens;
-  torch::Tensor kv_cu_seq_lens;
-};
-
 class AttentionImpl : public torch::nn::Module {
  public:
   AttentionImpl() = default;

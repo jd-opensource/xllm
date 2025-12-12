@@ -706,8 +706,7 @@ TEST_F(DeepseekV2DecoderLayerTest,
   input_params = input_params.to(options_.device());
 
   // Build AttentionMetadata for prefill
-  auto attn_metadata =
-      AttentionMetadata::build(input_params, /*is_prefill=*/true);
+  auto attn_metadata = AttentionMetadata::build(input_params);
 
   // Build KVCache with valid shapes
   // Reference: mla_tests.cpp - k_cache shape: [block_num, 1, 1,
@@ -851,8 +850,7 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
   input_params = input_params.to(options_.device());
 
   // Build AttentionMetadata for prefill
-  auto attn_metadata =
-      AttentionMetadata::build(input_params, /*is_prefill=*/true);
+  auto attn_metadata = AttentionMetadata::build(input_params);
 
   // Build KVCache with valid shapes
   // Reference: mla_tests.cpp - k_cache shape: [block_num, 1, 1,
