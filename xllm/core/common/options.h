@@ -187,6 +187,10 @@ class Options {
   // multi-GPU scenario.
   PROPERTY(bool, enable_shm) = false;
 
+  PROPERTY(uint64_t, input_shm_size) = 1024;
+
+  PROPERTY(uint64_t, output_shm_size) = 128;
+
   // whether the worker and master are on the same machine.
   PROPERTY(bool, is_local) = false;
 

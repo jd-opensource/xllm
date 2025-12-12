@@ -33,15 +33,17 @@ ShmChannel::ShmChannel(int dp_group,
     auto name = ForwardSharedMemoryManager::create_unique_name(
         name_prefix, dp_group, FORWARD_RAW_INPUT_TYPE, rank);
     input_shm_manager_ = std::make_unique<ForwardSharedMemoryManager>(
-        name, kInputShmSize, is_creator, FORWARD_RAW_INPUT_TYPE);
-    LOG(INFO) << "Create input shared memory manager with name: " << name;
+        name, options.input_shm_size(), is_creator, FORWARD_RAW_INPUT_TYPE);
+    LOG(INFO) << "Create input shared memory manager with name: " << name
+              << " and size: " << options.input_shm_size();
   }
 
   auto name = ForwardSharedMemoryManager::create_unique_name(
       name_prefix, dp_group, FORWARD_RAW_OUTPUT_TYPE, rank);
   output_shm_manager_ = std::make_unique<ForwardSharedMemoryManager>(
-      name, kOutputShmSize, is_creator, FORWARD_RAW_OUTPUT_TYPE);
-  LOG(INFO) << "Create output shared memory manager with name: " << name;
+      name, options.output_shm_size(), is_creator, FORWARD_RAW_OUTPUT_TYPE);
+  LOG(INFO) << "Create output shared memory manager with name: " << name
+            << " and size: " << options.output_shm_size();
 }
 
 bool ShmChannel::execute_model_with_shm(const RawForwardInput& input,

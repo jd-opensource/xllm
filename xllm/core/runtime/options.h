@@ -180,6 +180,12 @@ struct Options {
   // multi-GPU scenario.
   PROPERTY(bool, enable_shm) = false;
 
+  // Input shared memory size
+  PROPERTY(uint64_t, input_shm_size) = 1024;
+
+  // Output shared memory size
+  PROPERTY(uint64_t, output_shm_size) = 128;
+
   // whether the worker and master are on the same machine.
   PROPERTY(bool, is_local) = false;
 

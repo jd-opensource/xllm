@@ -121,6 +121,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
+        .input_shm_size(options_.input_shm_size() * 1024 * 1024)
+        .output_shm_size(options_.output_shm_size() * 1024 * 1024)
         .is_local(options_.is_local())
         .enable_schedule_overlap(options_.enable_schedule_overlap())
         .master_node_addr(options.master_node_addr())
@@ -174,6 +176,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
+        .input_shm_size(options_.input_shm_size() * 1024 * 1024)
+        .output_shm_size(options_.output_shm_size() * 1024 * 1024)
         .is_local(options_.is_local());
 
     if (options_.device_ip().has_value()) {
@@ -226,6 +230,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
+        .input_shm_size(options_.input_shm_size() * 1024 * 1024)
+        .output_shm_size(options_.output_shm_size() * 1024 * 1024)
         .is_local(options_.is_local())
         .server_idx(options_.server_idx());
 

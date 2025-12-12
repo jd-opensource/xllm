@@ -29,6 +29,8 @@ class SpawnWorkerServer final {
                              int num_decoding_tokens,
                              int block_size,
                              bool enable_shm,
+                             uint64_t input_shm_size,
+                             uint64_t output_shm_size,
                              bool is_local,
                              const std::string& task_type,
                              const std::string& worker_type);

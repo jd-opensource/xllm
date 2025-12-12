@@ -21,10 +21,6 @@ limitations under the License.
 
 namespace xllm {
 
-constexpr size_t kInputShmSize =
-    static_cast<size_t>(1024) * 1024 * 1024;  // 1GB
-constexpr size_t kOutputShmSize =
-    static_cast<size_t>(128) * 1024 * 1024;    // 128MB
 constexpr int64_t kNumWaitNanoseconds = 1000;  // 1us
 
 struct ControlMetadata {

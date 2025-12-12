@@ -107,6 +107,8 @@ bool LLM::Initialize(const std::string& model_path,
         .disable_ttft_profiling(init_options.disable_ttft_profiling)
         .enable_forward_interruption(init_options.enable_forward_interruption)
         .enable_shm(init_options.enable_shm)
+        .input_shm_size(init_options.input_shm_size)
+        .output_shm_size(init_options.output_shm_size)
         .is_local(init_options.is_local)
         .server_idx(init_options.server_idx);
 

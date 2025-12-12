@@ -32,10 +32,12 @@ limitations under the License.
 // @is_local
 // @task_type
 // @worker_type
+// @input_shm_size
+// @output_shm_size
 int main(int argc, char* argv[]) {
-  if (argc < 11) {
+  if (argc < 13) {
     LOG(ERROR)
-        << "Spwan worker process receive wrong args. Need 11 args, receive "
+        << "Spwan worker process receive wrong args. Need 13 args, receive "
         << argc;
     return 1;
   }
@@ -58,6 +60,8 @@ int main(int argc, char* argv[]) {
   int is_local = atoi(argv[9]);
   std::string task_type = std::string(argv[10]);
   std::string worker_type = std::string(argv[11]);
+  uint64_t input_shm_size = atoll(argv[12]);
+  uint64_t output_shm_size = atoll(argv[13]);
 
   LOG(INFO) << "Spwan worker: "
             << "master_node_addr = " << master_node_addr
@@ -67,6 +71,8 @@ int main(int argc, char* argv[]) {
             << ", num_decoding_tokens = " << num_decoding_tokens
             << ", block_size = " << block_size
             << ", enable_shm = " << (enable_shm > 0)
+            << ", input_shm_size = " << input_shm_size
+            << ", output_shm_size = " << output_shm_size
             << ", is_local = " << (is_local > 0)
             << ", task_type = " << task_type
             << ", worker_type = " << worker_type << "\n";
@@ -79,6 +85,8 @@ int main(int argc, char* argv[]) {
                                  num_decoding_tokens,
                                  block_size,
                                  enable_shm > 0,
+                                 input_shm_size,
+                                 output_shm_size,
                                  is_local > 0,
                                  task_type,
                                  worker_type);

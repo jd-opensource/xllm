@@ -304,6 +304,14 @@ DEFINE_int32(npu_phy_id, -1, "npu phy id");
 
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 
+DEFINE_uint64(input_shm_size,
+              1024,
+              "Input shared memory size, default is 1GB.");
+
+DEFINE_uint64(output_shm_size,
+              128,
+              "Output shared memory size, default is 128MB.");
+
 // --- speculative config ---
 
 DEFINE_int32(num_speculative_tokens, 0, "Number of speculative tokens.");

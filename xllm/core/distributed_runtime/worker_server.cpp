@@ -150,6 +150,10 @@ void WorkerServer::create_spawn_server(int local_rank,
   const char* block_size_ptr = block_size_str.c_str();
   auto enable_shm_str = std::to_string(options.enable_shm());
   const char* enable_shm_ptr = enable_shm_str.c_str();
+  auto input_shm_size_str = std::to_string(options.input_shm_size());
+  const char* input_shm_size_ptr = input_shm_size_str.c_str();
+  auto output_shm_size_str = std::to_string(options.output_shm_size());
+  const char* output_shm_size_ptr = output_shm_size_str.c_str();
   auto is_local_str = std::to_string(options.is_local());
   const char* is_local_ptr = is_local_str.c_str();
   const char* worker_type_ptr = worker_type.to_string();
@@ -168,6 +172,8 @@ void WorkerServer::create_spawn_server(int local_rank,
                         is_local_ptr,
                         options.task_type().c_str(),
                         worker_type_ptr,
+                        input_shm_size_ptr,
+                        output_shm_size_ptr,
                         nullptr};
   pid_t pid;
   posix_spawn_file_actions_init(&file_actions_);
@@ -201,13 +207,13 @@ void WorkerServer::prepare_shm(
     string name = ForwardSharedMemoryManager::create_unique_name(
         name_prefix, dp_group, FORWARD_RAW_INPUT_TYPE, parallel_args.rank());
     input_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
-        name, kInputShmSize, is_creator, FORWARD_RAW_INPUT_TYPE);
+        name, options.input_shm_size(), is_creator, FORWARD_RAW_INPUT_TYPE);
     LOG(INFO) << "Create input shared memory manager with name: " << name;
 
     name = ForwardSharedMemoryManager::create_unique_name(
         name_prefix, dp_group, FORWARD_RAW_OUTPUT_TYPE, parallel_args.rank());
     output_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
-        name, kOutputShmSize, is_creator, FORWARD_RAW_OUTPUT_TYPE);
+        name, options.output_shm_size(), is_creator, FORWARD_RAW_OUTPUT_TYPE);
     LOG(INFO) << "Create output shared memory manager with name: " << name;
   }
 }

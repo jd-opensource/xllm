@@ -39,6 +39,8 @@ class ArgumentParser:
         self.parser.add_argument('--disable_ttft_profiling', action='store_true', help='Whether to disable TTFT profiling.')
         self.parser.add_argument('--enable_forward_interruption', action='store_true', help='Whether to enable forward interruption.')
         self.parser.add_argument('--enable_shm', action='store_true', help='Use shared memory for inter-process communication in the single-machine multi-GPU scenario.')
+        self.parser.add_argument('--input_shm_size', type=int, default=1024, help='The size of input shared memory in MB.')
+        self.parser.add_argument('--output_shm_size', type=int, default=128, help='The size of output shared memory in MB.')
 
     def parse_args(self):
         return self.parser.parse_args()

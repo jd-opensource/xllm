@@ -15,8 +15,10 @@ limitations under the License.
 
 #include "shared_memory_manager.h"
 
+#include <fcntl.h>
 #include <glog/logging.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -55,10 +57,36 @@ SharedMemoryManager::SharedMemoryManager(const std::string& name,
     pending_cleanups.push_back(name);
   }
 
-  // Set size for new SHM
-  if (is_creator && ftruncate(fd_, size) == -1) {
+  // Serialize size initialization with a write lock.
+  struct flock lock;
+  std::memset(&lock, 0, sizeof(lock));
+  lock.l_type = F_WRLCK;
+  lock.l_whence = SEEK_SET;
+  lock.l_start = 0;
+  lock.l_len = 0;  // lock the whole file
+  if (fcntl(fd_, F_SETLKW, &lock) == -1) {
     close(fd_);
-    LOG(FATAL) << "ftruncate failed: " << strerror(errno);
+    LOG(FATAL) << "fcntl(F_SETLKW) failed: " << strerror(errno);
+  }
+
+  struct stat st;
+  if (fstat(fd_, &st) == -1) {
+    close(fd_);
+    LOG(FATAL) << "fstat failed: " << strerror(errno);
+  }
+
+  // Ensure size is correct before mapping
+  if (st.st_size != static_cast<off_t>(size)) {
+    if (ftruncate(fd_, size) == -1) {
+      close(fd_);
+      LOG(FATAL) << "ftruncate failed: " << strerror(errno);
+    }
+  }
+
+  lock.l_type = F_UNLCK;
+  if (fcntl(fd_, F_SETLK, &lock) == -1) {
+    close(fd_);
+    LOG(FATAL) << "fcntl(F_SETLK) failed: " << strerror(errno);
   }
 
   // Map into process address space
@@ -68,8 +96,10 @@ SharedMemoryManager::SharedMemoryManager(const std::string& name,
     LOG(FATAL) << "mmap failed: " << strerror(errno);
   }
 
-  // Initialize memory to zero.
-  std::memset(addr_, 0, size_);
+  // Initialize memory to zero only for creator.
+  if (is_creator) {
+    std::memset(addr_, 0, size_);
+  }
 }
 
 SharedMemoryManager::~SharedMemoryManager() {
