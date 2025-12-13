@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "call.h"
 
+#include "core/common/constants.h"
+
 namespace xllm {
 
 Call::Call(brpc::Controller* controller) : controller_(controller) { init(); }
@@ -33,6 +35,31 @@ void Call::init() {
     x_request_time_ =
         *controller_->http_request().GetHeader("x-request-timems");
   }
+}
+
+bool Call::get_binary_payload(std::string& payload) {
+  payload.clear();
+
+  const auto infer_content_len =
+      controller_->http_request().GetHeader(kInferContentLength);
+  const auto content_len =
+      controller_->http_request().GetHeader(kContentLength);
+
+  if (infer_content_len == nullptr || content_len == nullptr) return false;
+
+  auto infer_len = std::stoul(*infer_content_len);
+  auto len = std::stoul(*content_len);
+
+  if (infer_len > len) {
+    LOG(ERROR) << " content length is invalid:"
+               << " infer content len is " << infer_len
+               << " , content length is " << len;
+    return false;
+  }
+
+  controller_->request_attachment().copy_to(
+      &payload, len - infer_len, infer_len);
+  return true;
 }
 
 }  // namespace xllm

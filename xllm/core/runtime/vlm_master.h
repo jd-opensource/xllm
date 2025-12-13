@@ -61,6 +61,7 @@ class VLMMaster : public Master {
   // chat
   void handle_request(const std::vector<Message>& messages,
                       const RequestParams& sp,
+                      const std::string& payload,
                       OutputCallback callback);
 
   // batch completion

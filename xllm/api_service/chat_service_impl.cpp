@@ -751,10 +751,14 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
   auto saved_streaming = request_params.streaming;
   auto saved_request_id = request_params.request_id;
 
+  std::string payload;
+  call->get_binary_payload(payload);
+
   // schedule the request
   master_->handle_request(
       std::move(messages),
       std::move(request_params),
+      std::move(payload),
       [call,
        model,
        master = master_,
