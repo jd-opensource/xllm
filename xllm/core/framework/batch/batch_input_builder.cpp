@@ -588,7 +588,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   input_params.block_tables =
       create_2d_tensor(state_.block_tables_vec, torch::kInt);
 
-  if (input_embeddings_vec_.size() != 0) {
+  if (input_embeddings_vec_.size() > 0) {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
   }
 
@@ -687,6 +687,11 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
 
   process_swap_block_infos(raw_forward_input);
   raw_forward_input.batch_id = batch_id_;
+
+  if (input_embeddings_vec_.size() > 0) {
+    torch::Tensor input_embeddings = torch::cat(input_embeddings_vec_);
+    raw_forward_input.embeddings = tensor_to_2d_float_vector(input_embeddings);
+  }
 
   return raw_forward_input;
 }
