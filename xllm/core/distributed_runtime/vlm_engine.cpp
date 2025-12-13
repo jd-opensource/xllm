@@ -35,7 +35,7 @@ limitations under the License.
 #include "framework/model_loader.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/xtensor/multi_layer_xtensor_transfer.h"
-#include "llm_worker_impl.h"
+#include "runtime/llm_worker_impl.h"
 #include "runtime/worker.h"
 #include "util/env_var.h"
 #include "util/pretty_print.h"

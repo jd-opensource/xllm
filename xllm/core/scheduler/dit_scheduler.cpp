@@ -25,8 +25,8 @@ limitations under the License.
 #include <memory>
 
 #include "common/metrics.h"
+#include "distributed_runtime/dit_engine.h"
 #include "framework/request/dit_request.h"
-#include "runtime/dit_engine.h"
 #include "util/utils.h"
 
 namespace xllm {

@@ -26,9 +26,9 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/instance_name.h"
 #include "completion.pb.h"
+#include "core/distributed_runtime/llm_master.h"
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
-#include "core/runtime/llm_master.h"
 // TODO. add following when next pr.
 // #include "core/runtime/rec_master.h"
 #include "core/util/utils.h"

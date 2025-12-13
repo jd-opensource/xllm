@@ -19,7 +19,7 @@ limitations under the License.
 #include "api_service/api_service_impl.h"
 #include "api_service/call.h"
 #include "api_service/non_stream_call.h"
-#include "core/runtime/vlm_master.h"
+#include "core/distributed_runtime/vlm_master.h"
 #include "embedding.pb.h"
 
 namespace xllm {

@@ -25,7 +25,8 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
-#include "distributed_runtime/dist_manager.h"
+#include "dist_manager.h"
+#include "engine.h"
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/eplb/eplb_manager.h"
@@ -33,11 +34,10 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
-#include "runtime/engine.h"
+#include "runtime/worker.h"
+#include "runtime/worker_client.h"
+#include "runtime/xservice_client.h"
 #include "util/threadpool.h"
-#include "worker.h"
-#include "worker_client.h"
-#include "xservice_client.h"
 
 namespace xllm {
 

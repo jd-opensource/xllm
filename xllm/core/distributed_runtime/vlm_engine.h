@@ -28,9 +28,9 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
+#include "runtime/worker.h"
+#include "runtime/worker_client.h"
 #include "util/threadpool.h"
-#include "worker.h"
-#include "worker_client.h"
 
 namespace xllm {
 

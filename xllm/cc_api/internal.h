@@ -18,9 +18,9 @@ limitations under the License.
 #include <folly/executors/CPUThreadPoolExecutor.h>
 
 #include "core/common/instance_name.h"
+#include "core/distributed_runtime/llm_master.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
-#include "core/runtime/llm_master.h"
 #include "core/util/uuid.h"
 #include "types.h"
 

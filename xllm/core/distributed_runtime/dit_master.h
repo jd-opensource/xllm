@@ -24,7 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "framework/request/dit_request_params.h"
-#include "runtime/master.h"
+#include "master.h"
 #include "scheduler/dit_scheduler.h"
 
 namespace xllm {
