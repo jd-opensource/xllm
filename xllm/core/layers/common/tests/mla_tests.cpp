@@ -149,15 +149,15 @@ class DeepseekMLATest : public ::testing::Test {
                                  int64_t max_seq_len,
                                  bool is_prefill,
                                  int64_t max_num_batched_tokens) {
-    // Create q_cu_seq_lens tensor (cu_seq_q_lens)
+    // Create query_start_loc tensor (cu_seq_q_lens)
     // shape = [batch_size + 1], typically [0, 4, 8, 12, ...] if max_query_len=4
     auto option_int = options_.dtype(torch::kInt32);
-    metadata.q_cu_seq_lens = torch::arange(
+    metadata.query_start_loc = torch::arange(
         0, (batch_size + 1) * max_query_len, max_query_len, option_int);
 
-    // Create kv_cu_seq_lens tensor
+    // Create seq_start_loc tensor
     // TODO: Define proper shape and values based on actual requirements
-    metadata.kv_cu_seq_lens = torch::zeros({batch_size + 1}, option_int);
+    metadata.seq_start_loc = torch::zeros({batch_size + 1}, option_int);
 
     // Create seq_lens tensor
     // Shape: [batch_size]

@@ -21,6 +21,41 @@ limitations under the License.
 DECLARE_bool(enable_chunked_prefill);
 namespace xllm {
 namespace layer {
+
+AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
+                                           bool is_prefill) {
+  return AttentionMetadata::build(params, "float", is_prefill);
+}
+
+AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
+                                           const std::string& compute_dtype,
+                                           bool is_prefill) {
+  AttentionMetadata attn_metadata;
+  attn_metadata.query_start_loc = params.q_seq_lens;
+  attn_metadata.seq_start_loc = params.kv_seq_lens;
+  attn_metadata.max_query_len = params.q_max_seq_len;
+  attn_metadata.max_seq_len = params.kv_max_seq_len;
+  attn_metadata.slot_mapping = params.new_cache_slots;
+  attn_metadata.compute_dtype = compute_dtype;
+
+  // for flashinfer
+  attn_metadata.paged_kv_indptr = params.paged_kv_indptr;
+  attn_metadata.paged_kv_indices = params.paged_kv_indices;
+  attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
+  attn_metadata.q_cu_seq_lens = params.q_seq_lens;
+  attn_metadata.kv_cu_seq_lens = params.kv_seq_lens;  // cumulative kv seqlens
+
+  bool is_start_loc_match = (params.q_seq_lens_vec == params.kv_seq_lens_vec);
+  attn_metadata.is_chunked_prefill = is_prefill && !is_start_loc_match;
+  attn_metadata.is_prefill = is_prefill && !attn_metadata.is_chunked_prefill;
+  if (!attn_metadata.is_prefill) {
+    attn_metadata.block_table = params.block_tables;
+    attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
+  }
+
+  return attn_metadata;
+}
+
 AttentionImpl::AttentionImpl(int num_heads,
                              int head_size,
                              float scale,
@@ -65,7 +100,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   attention_params.query = query;
   attention_params.output = output;
   attention_params.output_lse = output_lse;
-  // attention_params.max_seq_len = attn_metadata.max_seq_len;
+  attention_params.max_seq_len = attn_metadata.max_seq_len;
   attention_params.window_size_left = sliding_window_;
   attention_params.scale = scale_;
   attention_params.compute_dtype = attn_metadata.compute_dtype;
@@ -80,12 +115,25 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   attention_params.kv_cu_seq_lens = attn_metadata.kv_cu_seq_lens;
   attention_params.q_cu_seq_lens = attn_metadata.q_cu_seq_lens;
 
-  // TODO: support chunked prefill
-  CHECK(!attn_metadata.is_chunked_prefill)
-      << "chunked prefill is not supported";
   if (attn_metadata.is_prefill) {
     attention_params.key = key;
     attention_params.value = value;
+    attention_params.query_start_loc = attn_metadata.query_start_loc;
+    attention_params.seq_start_loc = attn_metadata.seq_start_loc;
+    attention_params.max_query_len = attn_metadata.max_query_len;
+
+    // for flashinfer
+    attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;
+
+    xllm::kernel::batch_prefill(attention_params);
+  } else if (attn_metadata.is_chunked_prefill) {
+    attention_params.key = k_cache;
+    attention_params.value = v_cache;
+    attention_params.query_start_loc = attn_metadata.query_start_loc;
+    attention_params.seq_start_loc = attn_metadata.seq_start_loc;
+    attention_params.max_query_len = attn_metadata.max_query_len;
+    attention_params.block_table = attn_metadata.block_table;
+
     xllm::kernel::batch_prefill(attention_params);
   } else {
     query = query.view({-1, 1, num_heads_, head_size_});
@@ -95,6 +143,10 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     attention_params.output = output;
     attention_params.k_cache = k_cache;
     attention_params.v_cache = v_cache;
+
+    // for mlu
+    attention_params.block_table = attn_metadata.block_table;
+    attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
 
     // for flashinfer
     attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;

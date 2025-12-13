@@ -206,7 +206,8 @@ struct AttentionParams {
   torch::Tensor float_workspace_buffer;
   torch::Tensor int_workspace_buffer;
   torch::Tensor page_locked_int_workspace_buffer;
-
+  torch::Tensor kv_cu_seq_lens;
+  torch::Tensor q_cu_seq_lens;
   bool enable_cuda_graph = false;
 
   // ========== Prefill-specific parameters ==========
@@ -225,18 +226,11 @@ struct AttentionParams {
   // Optional cumulative query sequence lengths. Type: int32.
   // Shape: [batch + 1]. Required in packed mode (query is 3D). Must be
   // contiguous.
-  std::optional<torch::Tensor> q_cu_seq_lens;
+  std::optional<torch::Tensor> query_start_loc;
   // Optional cumulative KV sequence lengths. Type: int32.
   // Shape: [batch + 1]. Required in packed mode or when block_table has
   // max_num_blocks_per_seq > 1. Must be contiguous.
-  std::optional<torch::Tensor> kv_cu_seq_lens;
-  // Query sequence lengths.Shape: [batch]. Type: int32. Must be contiguous.
-  // Represents the current query length for each sequence in the batch.
-  torch::Tensor q_seq_lens;
-  // KV sequence lengths tensor. Shape: [batch]. Type: int32. Must be
-  // contiguous. Represents the current context length for each sequence in the
-  // batch.
-  torch::Tensor kv_seq_lens;
+  std::optional<torch::Tensor> seq_start_loc;
   // Optional attention bias tensor. Used for custom attention patterns.
   std::optional<torch::Tensor> attn_bias;
   // Optional key quantization scale tensor.
@@ -263,6 +257,10 @@ struct AttentionParams {
   // shape is [num_blocks, num_kv_heads, v_cache_len, head_dim] where
   // v_cache_len = PAD_UP_DIV(block_size, 2).
   std::optional<torch::Tensor> v_cache;
+  // KV sequence lengths tensor. Shape: [batch]. Type: int32. Must be
+  // contiguous. Represents the current context length for each sequence in the
+  // batch.
+  torch::Tensor kv_seq_lens;
   // Optional key cache quantization scale tensor. Must be contiguous.
   // - 2D [num_kv_heads, head_dim]: per-channel quantization
   // - 3D [num_blocks, num_kv_heads, block_size]: per-token quantization

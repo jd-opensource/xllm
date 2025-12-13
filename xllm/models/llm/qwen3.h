@@ -127,7 +127,9 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
                        : 128;
 
     layer::update_dummy_run_input(dp_rank_, positions, input_params_new);
-    auto attn_metadata = layer::AttentionMetadata::build(input_params_new);
+    bool is_prefill = input_params_new.q_max_seq_len > 1;
+    auto attn_metadata =
+        layer::AttentionMetadata::build(input_params_new, is_prefill);
     if (positions.dim() == 2) {
       attn_metadata.mrope_cos = std::move(cos_pos);
       attn_metadata.mrope_sin = std::move(sin_pos);

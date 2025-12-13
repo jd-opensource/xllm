@@ -20,7 +20,6 @@ cc_library(
     indexer.h
     deep_ep.h
     activation.h
-    attention_metadata.h
   SRCS
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
@@ -38,7 +37,6 @@ cc_library(
     indexer.cpp
     deep_ep.cpp
     activation.cpp
-    attention_metadata.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"
