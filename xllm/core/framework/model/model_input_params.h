@@ -22,7 +22,7 @@ limitations under the License.
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
 #include "framework/batch/batch_forward_type.h"
-#include "framework/request/mm_data.h"
+#include "framework/request/mm_batch_data.h"
 #include "npu_dp_ep_padding.h"
 #include "util/tensor_helper.h"
 
@@ -107,7 +107,7 @@ struct ModelInputParams {
     params.deep_stacks = deep_stacks;
     params.visual_pos_masks = visual_pos_masks;
 
-    params.mm_data = MMData::to(mm_data, device);
+    params.mm_data = mm_data.to(device);
     params.dp_global_token_nums = dp_global_token_nums;
     params.embedding_ids = std::move(embedding_ids);
     params.extra_token_ids = std::move(extra_token_ids);
@@ -198,7 +198,7 @@ struct ModelInputParams {
   mutable torch::Tensor input_embedding;
 
   // multimodal
-  MMData mm_data;
+  MMBatchData mm_data;
 
   // deep_stack for Qwen3-VL
   mutable std::vector<torch::Tensor> deep_stacks;

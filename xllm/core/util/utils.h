@@ -24,7 +24,7 @@ limitations under the License.
 #include <stdexcept>
 #include <vector>
 
-#include "core/framework/request/mm_data.h"
+#include "core/framework/request/mm_batch_data.h"
 #include "rec.pb.h"
 #include "slice.h"
 #include "tensor.pb.h"
@@ -83,8 +83,10 @@ torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor);
 bool torch_to_proto(const torch::Tensor& torch_tensor,
                     proto::Tensor* proto_tensor);
 
-bool mmdata_to_proto(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata);
+bool mmdata_to_proto(const xllm::MMBatchData& cpp_mmdata,
+                     proto::MMData* pb_mmdata);
 
-bool proto_to_mmdata(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata);
+bool proto_to_mmdata(const proto::MMData& pb_mmdata,
+                     xllm::MMBatchData* cpp_mmdata);
 }  // namespace util
 }  // namespace xllm

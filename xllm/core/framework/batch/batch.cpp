@@ -348,32 +348,6 @@ void Batch::append_token_for_sequence(Sequence* seq,
   }
 }
 
-void Batch::process_embedding_output(const torch::Tensor& output_embedding) {
-  Token token(0);
-  if (output_embedding.defined()) {
-    int32_t slice_img_index = 0;
-    for (auto* seq : sequences_) {  // TODO
-      const auto& mm_data = seq->get_mm_data();
-
-      auto pixel_values = mm_data.get_tensor_vec("pixel_values");
-      constexpr const int channel = 3;
-      int32_t slice_num = 0;
-      for (const auto& item : pixel_values) {
-        slice_num += item.size(0) / channel;
-      }
-
-      auto seq_img_embedding =
-          output_embedding
-              .slice(0, slice_img_index, slice_img_index + slice_num)
-              .clone();
-      ;
-      slice_img_index += slice_num;
-      seq->update_embeddings(seq_img_embedding);
-      seq->append_token(token);
-    }
-  }
-}
-
 void Batch::process_beam_search() {
   for (auto* sequence_group : sequence_groups_) {
     sequence_group->process_beam_search();

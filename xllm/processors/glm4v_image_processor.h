@@ -33,15 +33,15 @@ class Glm4VImageProcessor : public ImageProcessor {
  private:
   bool process_images(std::vector<torch::Tensor> images, MMData& mm_datas);
   bool process_image(torch::Tensor image,
-                     std::vector<torch::Tensor>& pixel_values,
-                     std::vector<int64_t>& grids);
+                     torch::Tensor& pixel_values,
+                     torch::Tensor& thw);
   bool process_videos(std::vector<torch::Tensor> videos,
                       std::vector<VideoMetadata> video_meta_list,
                       MMData& mm_datas);
   bool process_video(torch::Tensor video,
                      VideoMetadata& metadata,
-                     std::vector<torch::Tensor>& pixel_values,
-                     std::vector<int64_t>& grids);
+                     torch::Tensor& pixel_values,
+                     torch::Tensor& thw);
   torch::Tensor sample_frames(const VideoMetadata& metadata,
                               int temporal_patch_size);
 

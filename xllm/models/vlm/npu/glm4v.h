@@ -59,7 +59,9 @@ class GLM4VInputProcessor : public InputProcessor {
 
     if (!image_grid_thw.defined() && !video_grid_thw.defined()) return;
 
-    const auto& video_metadata = mm_data.get_video_metadata();
+    std::vector<VideoMetadata> video_metadata;
+    mm_data.get_metadata(MMType::VIDEO, video_metadata);
+
     if (video_metadata.size() > 0) {
       CHECK(video_metadata.size() ==
             static_cast<size_t>(video_grid_thw.sizes()[0]));

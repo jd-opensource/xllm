@@ -44,6 +44,7 @@ cc_library(
     uuid.cpp
     shared_memory_manager.cpp
   DEPS
+    :request
     torch
     brpc
     nlohmann_json::nlohmann_json

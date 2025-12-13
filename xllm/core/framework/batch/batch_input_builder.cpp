@@ -581,7 +581,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
       torch::tensor(state_.paged_kv_last_page_len, torch::kInt);
 
   // Setup multimodal data
-  input_params.mm_data = MMData::batch(mm_data_vec_);
+  input_params.mm_data.batch(mm_data_vec_);
 
   // Setup block tables
   util::pad_2d_vector(state_.block_tables_vec, /*pad_value=*/0);
@@ -683,7 +683,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
     raw_forward_input.kv_cache_start_offsets =
         std::move(state_.kv_cache_start_offsets);
   }
-  raw_forward_input.mm_data = MMData::batch(mm_data_vec_);
+  raw_forward_input.mm_data.batch(mm_data_vec_);
 
   process_swap_block_infos(raw_forward_input);
   raw_forward_input.batch_id = batch_id_;

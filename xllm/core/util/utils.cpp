@@ -648,7 +648,8 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
   return true;
 }
 
-bool mmdata_to_proto(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata) {
+bool mmdata_to_proto(const xllm::MMBatchData& cpp_mmdata,
+                     proto::MMData* pb_mmdata) {
   if (!pb_mmdata) {
     LOG(ERROR) << "PB MMData pointer is null";
     return false;
@@ -673,13 +674,15 @@ bool mmdata_to_proto(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata) {
   return true;
 }
 
-bool proto_to_mmdata(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata) {
+bool proto_to_mmdata(const proto::MMData& pb_mmdata,
+                     xllm::MMBatchData* cpp_mmdata) {
   if (!cpp_mmdata) {
     LOG(ERROR) << "Struct MMData pointer is null";
     return false;
   }
 
-  cpp_mmdata->ty_ = pb_mmdata.type();
+  uint32_t type = pb_mmdata.type();
+  xllm::MMDict cpp_dict;
 
   const auto& pb_dict = pb_mmdata.dict();
   for (const auto& [key, pb_value] : pb_dict) {
@@ -688,8 +691,10 @@ bool proto_to_mmdata(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata) {
       LOG(ERROR) << "Failed to convert PB MMValue for key: " << key;
       return false;
     }
-    cpp_mmdata->data_.emplace(key, std::move(*cpp_value_opt));
+
+    cpp_dict.emplace(key, std::move(*cpp_value_opt));
   }
+  *cpp_mmdata = xllm::MMBatchData(type, std::move(cpp_dict));
 
   return true;
 }

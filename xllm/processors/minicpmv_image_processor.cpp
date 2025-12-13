@@ -46,31 +46,33 @@ bool MiniCPMVImageProcessor::process(const MMInput& mm_inputs,
 bool MiniCPMVImageProcessor::process_images(std::vector<torch::Tensor> images,
                                             MMData& mm_datas) {
   std::vector<torch::Tensor> new_images;
-  std::vector<torch::Tensor> image_sizes;
   std::vector<torch::Tensor> tgt_sizes;
-  const size_t image_list_size = images.size();
-  image_sizes.reserve(image_list_size);
-  new_images.reserve(image_list_size *
+
+  const size_t image_size = images.size();
+  new_images.reserve(image_size *
                      (size_t{1} + static_cast<size_t>(max_slice_nums_)));
-  tgt_sizes.reserve(image_list_size *
+  tgt_sizes.reserve(image_size *
                     (size_t{1} + static_cast<size_t>(max_slice_nums_)));
 
   for (const auto& image : images) {
-    // image shape: [C, H, W]
-    const auto& one_image_size = image.sizes();
-    int orig_w = one_image_size[2];
-    int orig_h = one_image_size[1];
-    image_sizes.emplace_back(torch::tensor({orig_w, orig_h}, torch::kInt64));
+    new_images.clear();
+    tgt_sizes.clear();
 
     if (!this->process_image(image, new_images, tgt_sizes)) return false;
+
+    // image shape: [C, H, W]
+    const auto& image_size = image.sizes();
+    int orig_w = image_size[2];
+    int orig_h = image_size[1];
+
+    auto image_sizes = torch::tensor({orig_w, orig_h}, torch::kInt64);
+    auto tgt_tensor = torch::stack(tgt_sizes);
+
+    auto& item = mm_datas.add(MMType::IMAGE);
+    item.set_data({{"pixel_values", new_images},
+                   {"image_sizes", image_sizes},
+                   {"tgt_sizes", tgt_tensor}});
   }
-
-  torch::Tensor tgt_tensor = torch::stack(tgt_sizes);
-  MMDict mm_dict = {{"pixel_values", new_images},
-                    {"image_sizes", image_sizes},
-                    {"tgt_sizes", tgt_tensor}};
-
-  mm_datas = MMData(MMType::IMAGE, std::move(mm_dict));
 
   return true;
 }

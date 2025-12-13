@@ -107,9 +107,6 @@ class Batch {
   void process_beam_search_output(const RawForwardOutput& raw_output,
                                   bool replace_fake_token);
 
-  // process the accepted output embedding
-  void process_embedding_output(const torch::Tensor& embedding);
-
   const std::vector<uint32_t>& get_allowed_max_tokens() const {
     return allowed_max_tokens_;
   }

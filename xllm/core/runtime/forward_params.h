@@ -23,7 +23,7 @@ limitations under the License.
 
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
-#include "framework/request/mm_data.h"
+#include "framework/request/mm_batch_data.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 
@@ -195,7 +195,7 @@ struct RawForwardInput {
   std::vector<int32_t> paged_kv_indices;        //[num_used_pages]
   std::vector<int32_t> paged_kv_last_page_len;  //[n_seq]
   // multimodal data
-  MMData mm_data;
+  MMBatchData mm_data;
 };
 
 struct RawSampleOutput {

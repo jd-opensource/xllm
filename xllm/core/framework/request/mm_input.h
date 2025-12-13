@@ -20,7 +20,7 @@ limitations under the License.
 
 #include "core/common/message.h"
 #include "core/common/types.h"
-#include "mm_data.h"
+#include "mm_type.h"
 
 namespace xllm {
 
