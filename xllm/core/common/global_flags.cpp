@@ -286,6 +286,14 @@ DEFINE_bool(enable_shm,
             false,
             "Whether to enable shared memory for executing model.");
 
+DEFINE_uint64(input_shm_size,
+              1024,
+              "Input shared memory size, default is 1GB.");
+
+DEFINE_uint64(output_shm_size,
+              128,
+              "Output shared memory size, default is 128MB.");
+
 // --- function call config ---
 
 DEFINE_string(tool_call_parser,

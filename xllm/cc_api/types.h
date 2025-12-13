@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -58,6 +59,12 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
 
   // Whether to enable shared memory for executing model
   bool enable_shm = false;
+
+  // Input shared memory size (MB)
+  uint64_t input_shm_size = 1024;
+
+  // Output shared memory size (MB)
+  uint64_t output_shm_size = 128;
 
   bool is_local = true;
 

@@ -209,6 +209,10 @@ DECLARE_string(reasoning_parser);
 
 DECLARE_bool(enable_shm);
 
+DECLARE_uint64(input_shm_size);
+
+DECLARE_uint64(output_shm_size);
+
 DECLARE_bool(enable_prefetch_weight);
 
 DECLARE_int32(flashinfer_workspace_buffer_size);
