@@ -35,6 +35,8 @@ class BlockManagerImpl : public BlockManager {
 
   void deallocate(const Slice<Block>& blocks) override;
 
+  void deallocate(std::vector<Block>& blocks) override;
+
   // allocate shared blocks when enable prefix cache
   std::vector<Block> allocate_shared(
       const Slice<int32_t>& tokens_ids,
@@ -77,7 +79,7 @@ class BlockManagerImpl : public BlockManager {
   }
 
   float get_gpu_cache_usage_perc() const override {
-    return 1.0 - num_free_blocks_ * 1.0 / num_total_blocks();
+    return 1 - static_cast<float>(num_free_blocks_) / num_total_blocks();
   }
 
   // call BlockManager to free block used by Block.

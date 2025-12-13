@@ -35,6 +35,41 @@ torch::Tensor KVCache::get_k_cache() const { return key_cache_; }
 torch::Tensor KVCache::get_v_cache() const { return value_cache_; }
 torch::Tensor KVCache::get_index_cache() const { return index_cache_; }
 
+std::vector<std::vector<int64_t>> KVCache::get_shapes() {
+  std::vector<std::vector<int64_t>> tensor_shapes(3);
+  if (key_cache_.defined() && key_cache_.numel() != 0) {
+    std::vector<int64_t> shape;
+    auto sizes = key_cache_.sizes();
+    shape.resize(sizes.size());
+    for (int i = 0; i < sizes.size(); ++i) {
+      shape[i] = sizes[i];
+    }
+    tensor_shapes[0] = std::move(shape);
+  }
+
+  if (value_cache_.defined() && value_cache_.numel() != 0) {
+    std::vector<int64_t> shape;
+    auto sizes = value_cache_.sizes();
+    shape.resize(sizes.size());
+    for (int i = 0; i < sizes.size(); ++i) {
+      shape[i] = sizes[i];
+    }
+    tensor_shapes[1] = std::move(shape);
+  }
+
+  if (index_cache_.defined() && index_cache_.numel() != 0) {
+    std::vector<int64_t> shape;
+    auto sizes = index_cache_.sizes();
+    shape.resize(sizes.size());
+    for (int i = 0; i < sizes.size(); ++i) {
+      shape[i] = sizes[i];
+    }
+    tensor_shapes[2] = std::move(shape);
+  }
+
+  return tensor_shapes;
+}
+
 void KVCache::swap_blocks(torch::Tensor& src_tensor,
                           torch::Tensor& dst_tensor) {
   // batch select keys and values

@@ -98,9 +98,9 @@ class CommChannel {
       const std::vector<BlockTransferInfo>& block_transfer_info);
 
   virtual void prefetch_from_storage(
-      const std::atomic<bool>& flag,
       const std::vector<BlockTransferInfo>& block_transfer_info,
-      std::shared_ptr<std::atomic<uint32_t>>& success_cnt);
+      std::shared_ptr<std::atomic<bool>> flag,
+      std::shared_ptr<std::atomic<uint32_t>> success_cnt);
 
   virtual bool get_last_step_result_async(
       folly::Promise<std::optional<RawForwardOutput>>& promise);

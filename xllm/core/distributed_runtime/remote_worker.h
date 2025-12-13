@@ -120,9 +120,9 @@ class RemoteWorker : public WorkerClient {
       const std::vector<BlockTransferInfo>& block_transfer_info) override;
 
   virtual void prefetch_from_storage(
-      const std::atomic<bool>& flag,
       const std::vector<BlockTransferInfo>& block_transfer_info,
-      std::shared_ptr<std::atomic<uint32_t>>& success_cnt) override;
+      std::shared_ptr<std::atomic<bool>> flag,
+      std::shared_ptr<std::atomic<uint32_t>> success_cnt) override;
 
   // Run the model and return the output.
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(

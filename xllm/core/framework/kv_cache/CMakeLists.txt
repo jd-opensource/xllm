@@ -15,6 +15,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.h>
     $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.h>
     kv_cache_store.h
+    hierarchy_kv_cache_transfer.h
   SRCS
     embedding_allocator.cpp
     $<$<BOOL:${USE_NPU}>:hccl_kv_cache_transfer.cpp>
@@ -23,6 +24,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.cpp>
     $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.cpp>
     kv_cache_store.cpp
+    hierarchy_kv_cache_transfer.cpp
   DEPS
     :common
     $<$<BOOL:${USE_NPU}>:graph>

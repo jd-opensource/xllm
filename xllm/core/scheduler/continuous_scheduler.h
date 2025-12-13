@@ -121,6 +121,9 @@ class ContinuousScheduler : public Scheduler {
     // Index ID for internal server ID, which must be set different values
     // if the model supports multiple version or there are multiple models.
     PROPERTY(int64_t, server_idx) = 0;
+
+    // Prefetch timeout for prefetch from kv cache store
+    PROPERTY(uint32_t, prefetch_timeout) = 0;
   };
 
   ContinuousScheduler(Engine* engine, const Options& options);
@@ -269,8 +272,6 @@ class ContinuousScheduler : public Scheduler {
       size_t& num_online_decode_preempt_online_requests,
       size_t& num_online_decode_preempt_offline_requests,
       std::unique_ptr<DecodePriorityQueue>& running_queue);
-
-  virtual void prefetch_from_storage(std::shared_ptr<Request>& request);
 
   void handle_abnormal_request(
       std::unique_ptr<DecodePriorityQueue>& running_queue,

@@ -93,6 +93,12 @@ void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
   }
 }
 
+void BlockManagerImpl::deallocate(std::vector<Block>& blocks) {
+  Slice<Block> slice(blocks);
+  deallocate(slice);
+  blocks.clear();
+}
+
 bool BlockManagerImpl::has_enough_blocks(uint32_t num_blocks) {
   if (num_blocks <= num_free_blocks_) {
     return true;
@@ -171,7 +177,6 @@ void BlockManagerImpl::get_merged_kvcache_event(KvCacheEvent* event) const {
   if (events != nullptr) {
     event->removed_cache.merge(events->removed_cache);
     event->stored_cache.merge(events->stored_cache);
-    event->offload_cache.merge(events->offload_cache);
     events->clear();
   }
 }

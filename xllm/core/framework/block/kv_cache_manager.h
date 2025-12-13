@@ -18,6 +18,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
+#include "framework/batch/batch.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
@@ -32,7 +33,19 @@ class KVCacheManager {
   virtual bool allocate(std::vector<Sequence*>& sequences) = 0;
   virtual bool allocate(Sequence* sequence, size_t num_tokens) = 0;
 
-  virtual uint32_t pre_allocate(Sequence* sequence) = 0;
+  virtual void transfer_blocks(std::optional<std::vector<Batch>> batches) {
+    return;
+  };
+
+  virtual void prefetch_from_storage(std::shared_ptr<Request>& request) {
+    return;
+  };
+
+  virtual bool update_prefetch_result(std::shared_ptr<Request>& request,
+                                      const uint32_t timeout) {
+    return true;
+  };
+
   virtual std::vector<Block> allocate(size_t num_tokens, int32_t& dp_rank) = 0;
 
   virtual void deallocate(Request* request) = 0;
@@ -45,15 +58,6 @@ class KVCacheManager {
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() = 0;
 
-  virtual std::vector<std::vector<BlockTransferInfo>>*
-  get_offload_block_transfer_infos() = 0;
-
-  virtual std::vector<std::vector<BlockTransferInfo>>*
-  get_load_block_transfer_infos() = 0;
-
-  virtual void postprocess_offload(
-      std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) = 0;
-
   virtual void reset_transfer_infos() = 0;
 
   virtual uint32_t num_blocks() const = 0;
@@ -62,7 +66,6 @@ class KVCacheManager {
   virtual std::vector<size_t> num_free_blocks() const = 0;
   virtual std::vector<size_t> num_used_blocks() const = 0;
   virtual double kv_cache_utilization() const = 0;
-  virtual bool allow_host_block_extend() { return false; };
 
  protected:
   KVCacheManager() = default;

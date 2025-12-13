@@ -54,6 +54,8 @@ class BlockManager {
 
   virtual void deallocate(const Slice<Block>& blocks) = 0;
 
+  virtual void deallocate(std::vector<Block>& blocks) = 0;
+
   virtual std::vector<Block> allocate(size_t num_blocks) = 0;
 
   virtual std::vector<Block> allocate_shared(

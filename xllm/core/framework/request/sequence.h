@@ -34,6 +34,7 @@ limitations under the License.
 #include "sequence_kv_state.h"
 #include "sequence_logprob_state.h"
 #include "stopping_checker.h"
+#include "util/timer.h"
 
 namespace xllm {
 
@@ -242,12 +243,14 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
-  const std::atomic<bool>& get_termination_flag() { return termination_flag_; }
+  std::shared_ptr<std::atomic<bool>> get_termination_flag() {
+    return termination_flag_;
+  }
   std::vector<std::shared_ptr<std::atomic<uint32_t>>>* get_prefetch_results() {
     return &prefetch_results_;
   }
 
-  void update_prefetch_result();
+  bool update_prefetch_result(uint32_t timeout);
 
   void reset();
 
@@ -359,8 +362,11 @@ class Sequence final {
   std::atomic<bool> cancelled_{false};
 
   // kvcache store copy async result
-  std::atomic<bool> termination_flag_{false};
+  std::shared_ptr<std::atomic<bool>> termination_flag_;
   std::vector<std::shared_ptr<std::atomic<uint32_t>>> prefetch_results_;
+
+  Timer timer_;
+  bool is_timeout_set_ = false;
 };
 
 }  // namespace xllm

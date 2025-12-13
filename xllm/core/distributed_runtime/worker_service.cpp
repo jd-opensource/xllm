@@ -33,8 +33,6 @@ limitations under the License.
 
 namespace xllm {
 
-constexpr uint32_t COPY_BATCH_SIZE = 1;
-
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
     : options_(options), device_(device), initialized_(false) {
@@ -404,11 +402,8 @@ void WorkerService::TransferBlocks(
   std::vector<BlockTransferInfo> block_transfer_info;
   uint64_t batch_id = proto_to_block_transfer_info(*req, block_transfer_info);
 
-  if (batch_id == UNINITIALIZED_BATCH_ID) {
-    resp->set_success_cnt(worker_->transfer_kv_blocks(block_transfer_info));
-  } else {
-    worker_->transfer_kv_blocks(batch_id, std::move(block_transfer_info));
-  }
+  resp->set_success_cnt(
+      worker_->transfer_kv_blocks(batch_id, std::move(block_transfer_info)));
   return;
 }
 
@@ -477,22 +472,24 @@ void WorkerService::PrefetchFromStorage(
         auto close_future = stream_handler->get_close_future();
         bool is_completed = false;
 
-        for (size_t i = 0; i < transfer_slice.size(); i += COPY_BATCH_SIZE) {
-          auto current_slice = transfer_slice.slice(
-              i, std::min(i + COPY_BATCH_SIZE, transfer_slice.size()));
+        for (size_t i = 0; i < transfer_slice.size();
+             i += options_.prefetch_bacth_size()) {
+          auto current_slice =
+              transfer_slice.slice(i,
+                                   std::min(i + options_.prefetch_bacth_size(),
+                                            transfer_slice.size()));
 
-          auto success_cnt = worker_->prefetch_from_storage(current_slice);
+          auto success_cnt = worker_->transfer_kv_blocks(UNINITIALIZED_BATCH_ID,
+                                                         current_slice);
 
           if (success_cnt != current_slice.size() ||
-              i + COPY_BATCH_SIZE >= transfer_slice.size()) {
+              i + options_.prefetch_bacth_size() >= transfer_slice.size()) {
             is_completed = true;
           }
 
           butil::IOBuf buf;
           buf.append(std::to_string(success_cnt));
           if (brpc::StreamWrite(*stream_id.get(), buf) != 0) {
-            brpc::StreamClose(*stream_id.get());
-            is_completed = false;
             break;
           }
 
@@ -505,9 +502,8 @@ void WorkerService::PrefetchFromStorage(
             break;
           }
         }
-        if (is_completed) {
-          close_future.wait();
-        }
+
+        close_future.wait();
         brpc::StreamClose(*stream_id.get());
       });
 

@@ -331,6 +331,16 @@ DEFINE_bool(enable_online_preempt_offline,
 
 // --- kvcache store config ---
 
+DEFINE_uint32(prefetch_timeout,
+              0,
+              "Prefetch timeout for prefetch from kv cache store.");
+
+DEFINE_uint32(prefetch_bacth_size,
+              2,
+              "Prefetch from kvcache store copy batch size.");
+
+DEFINE_uint32(layers_wise_copy_batchs, 4, "Layer wise H2D copy batchs.");
+
 DEFINE_double(host_blocks_factor,
               0.0,
               "Host block factor, e.g. host block num = host_blocks_factor * "

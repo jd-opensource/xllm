@@ -31,7 +31,8 @@ namespace xllm {
 enum class TransferType : uint8_t {
   G2H = 0,  // global memory(KVCache store) to host memory(DRAM)
   H2D = 1,  // host memory(DRAM) to device memory(HBM)
-  D2G = 2   // host memory(DRAM) to global memory(KVCache store)
+  D2G = 2,  // host memory(DRAM) to global memory(KVCache store)
+  G2D = 3   // global memory(KVCache store) to device memory(HBM)
 };
 
 struct BlockTransferInfo {
@@ -172,6 +173,19 @@ struct ModelInputParams {
 #endif
   }
 
+  bool synchronize_layer(uint32_t layer_idx) const {
+#if defined(USE_NPU)
+    if (layer_wise_load_synchronizer != nullptr &&
+        layer_idx % layers_per_bacth_copy == 0) {
+      if (!layer_wise_load_synchronizer->synchronize_layer(
+              layer_idx / layers_per_bacth_copy)) {
+        return false;
+      }
+    }
+#endif
+    return true;
+  }
+
   // whether the kv-cache is empty for all sequences.
   bool empty_kv_cache = true;
   BatchForwardType batch_forward_type;
@@ -227,6 +241,7 @@ struct ModelInputParams {
 
 #if defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
+  uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
   std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
       nullptr;
 #endif

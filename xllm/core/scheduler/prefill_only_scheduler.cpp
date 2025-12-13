@@ -85,6 +85,13 @@ void PrefillOnlyScheduler::handle_prefill_requests(
           << "Waiting request should have only one sequence.";
     }
 
+    if (!kv_cache_manager_->update_prefetch_result(
+            request, options_.prefetch_timeout())) {
+      waiting_priority_queue.pop();
+      waiting_priority_queue.push(request);
+      continue;
+    }
+
     // TODO: FIXME later
     // Optimization of the scheduling algorithm under multiple sequences
     // TODO: can refactor like handle_decode otherwise request with multiple
@@ -102,7 +109,6 @@ void PrefillOnlyScheduler::handle_prefill_requests(
         continue;
       }
 
-      prefill_sequence->update_prefetch_result();
       // FIXME: use actual num_tokens to handle
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache
@@ -291,7 +297,6 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
         continue;
       }
 
-      prefill_sequence->update_prefetch_result();
       // FIXME: use actual num_tokens to handle
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache

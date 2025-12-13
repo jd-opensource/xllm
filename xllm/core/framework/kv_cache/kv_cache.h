@@ -40,6 +40,8 @@ class KVCache final {
   torch::Tensor get_v_cache() const;
   torch::Tensor get_index_cache() const;
 
+  std::vector<std::vector<int64_t>> get_shapes();
+
   std::shared_ptr<XTensor> get_k_xtensor() const;
   std::shared_ptr<XTensor> get_v_xtensor() const;
 

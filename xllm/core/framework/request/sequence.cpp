@@ -44,7 +44,8 @@ Sequence::Sequence(size_t index,
       mm_data_(mm_data),
       latest_generate_time_(absl::Now()),
       sequence_params_(seq_params),
-      decoder_(std::move(decoder)) {
+      decoder_(std::move(decoder)),
+      termination_flag_(std::make_shared<std::atomic<bool>>(false)) {
   CHECK(!prompt_token_ids.empty()) << "empty prompt token ids";
   auto capacity = sequence_params_.seq_capacity;
   CHECK_GT(capacity, prompt_token_ids.size()) << "capacity too small";
@@ -93,7 +94,8 @@ Sequence::Sequence(const Sequence& other)
       dp_rank_(other.dp_rank_),
       cur_generated_token_idx_(other.cur_generated_token_idx_),
       first_token_(other.first_token_),
-      is_pre_scheduled_step_prefill_(other.is_pre_scheduled_step_prefill_) {
+      is_pre_scheduled_step_prefill_(other.is_pre_scheduled_step_prefill_),
+      termination_flag_(std::make_shared<std::atomic<bool>>(false)) {
   logprob_state_ = std::make_unique<LogprobState>(*other.logprob_state_);
 }
 
@@ -381,6 +383,8 @@ void Sequence::add_host_kv_blocks(const std::vector<Block>& blocks) {
 void Sequence::reset() {
   kv_state_.reset();
   host_kv_state_.reset();
+  timer_.reset();
+  is_timeout_set_ = false;
   volatile_num_prompt_tokens_ = num_tokens_;
 }
 
@@ -455,12 +459,24 @@ Slice<int32_t> Sequence::get_generated_tokens() const {
   return {tokens_.data(), 0};
 }
 
-void Sequence::update_prefetch_result() {
+bool Sequence::update_prefetch_result(uint32_t timeout) {
   if (prefetch_results_.empty()) {
-    return;
+    return true;
   }
 
-  termination_flag_.store(true, std::memory_order_release);
+  if (timeout != 0 && !termination_flag_->load(std::memory_order_acquire)) {
+    if (!is_timeout_set_) {
+      timer_.reset();
+      is_timeout_set_ = true;
+      return false;
+    }
+
+    if (timer_.elapsed_milliseconds() < timeout) {
+      return false;
+    }
+  }
+
+  termination_flag_->store(true, std::memory_order_release);
   uint32_t success_cnt = host_kv_state_.kv_blocks().size();
   for (auto& cnt : prefetch_results_) {
     success_cnt = std::min(success_cnt, cnt->load());
@@ -470,6 +486,7 @@ void Sequence::update_prefetch_result() {
         success_cnt * host_kv_state_.kv_blocks()[0].size());
   }
   prefetch_results_.clear();
+  return true;
 }
 
 }  // namespace xllm

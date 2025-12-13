@@ -107,13 +107,11 @@ class Worker {
       const std::vector<uint64_t>& dst_blocks);
 
   virtual uint32_t transfer_kv_blocks(
-      const std::vector<BlockTransferInfo>& block_transfer_info);
-
-  virtual void transfer_kv_blocks(
       const uint64_t batch_id,
       const std::vector<BlockTransferInfo>& block_transfer_info);
 
-  virtual uint32_t prefetch_from_storage(
+  virtual uint32_t transfer_kv_blocks(
+      const uint64_t batch_id,
       Slice<BlockTransferInfo>& block_transfer_info);
 
   // Run the model on the given input. async call

@@ -23,7 +23,7 @@ limitations under the License.
 
 namespace xllm {
 
-class BlockManagerPool final : public KVCacheManager {
+class BlockManagerPool : public KVCacheManager {
  public:
   struct Options {
     PROPERTY(uint32_t, num_blocks) = 0;
@@ -39,73 +39,52 @@ class BlockManagerPool final : public KVCacheManager {
 
   ~BlockManagerPool() = default;
 
-  BlockManager* get_block_manager(Sequence* sequence, bool is_host);
-
-  bool allocate(Sequence* sequence) override;
-  bool allocate(std::vector<Sequence*>& sequences) override;
-  bool allocate(Sequence* sequence, size_t num_tokens) override;
-
-  uint32_t pre_allocate(Sequence* sequence) override;
+  virtual bool allocate(Sequence* sequence) override;
+  virtual bool allocate(std::vector<Sequence*>& sequences) override;
+  virtual bool allocate(Sequence* sequence, size_t num_tokens) override;
 
   // Try to allocate blocks with num_tokens,
   // return {} if not enough blocks
-  std::vector<Block> allocate(size_t num_tokens, int32_t& dp_rank) override;
+  virtual std::vector<Block> allocate(size_t num_tokens,
+                                      int32_t& dp_rank) override;
 
-  void deallocate(Request* request) override;
-  void deallocate(std::vector<Sequence*>& sequences) override;
-  void deallocate(Sequence* sequence) override;
+  virtual void deallocate(Request* request) override;
+  virtual void deallocate(std::vector<Sequence*>& sequences) override;
+  virtual void deallocate(Sequence* sequence) override;
 
-  void allocate_shared(Sequence* sequence) override;
-  void cache(Sequence* sequence) override;
+  virtual void allocate_shared(Sequence* sequence) override;
+  virtual void cache(Sequence* sequence) override;
 
-  std::vector<std::vector<BlockTransferInfo>>* get_swap_block_transfer_infos()
-      override;
-  std::vector<std::vector<BlockTransferInfo>>*
-  get_offload_block_transfer_infos() override;
-  std::vector<std::vector<BlockTransferInfo>>* get_load_block_transfer_infos()
-      override;
-  void postprocess_offload(
-      std::vector<std::vector<folly::SemiFuture<uint32_t>>>& futures) override;
-  void reset_transfer_infos() override;
+  virtual std::vector<std::vector<BlockTransferInfo>>*
+  get_swap_block_transfer_infos() override;
+  virtual void reset_transfer_infos() override;
 
-  void get_merged_kvcache_event(KvCacheEvent* event) const;
-  float get_gpu_cache_usage_perc() const;
+  virtual void get_merged_kvcache_event(KvCacheEvent* event) const;
+  virtual float get_gpu_cache_usage_perc() const;
 
-  uint32_t num_blocks() const override;
-  int32_t block_size() const override;
-  std::vector<size_t> num_blocks_in_prefix_cache() const override;
-  std::vector<size_t> num_free_blocks() const override;
-  std::vector<size_t> num_used_blocks() const override;
-  double kv_cache_utilization() const override;
-  bool allow_host_block_extend() override {
-    return !host_block_managers_.empty();
-  };
+  virtual uint32_t num_blocks() const override;
+  virtual int32_t block_size() const override;
+  virtual std::vector<size_t> num_blocks_in_prefix_cache() const override;
+  virtual std::vector<size_t> num_free_blocks() const override;
+  virtual std::vector<size_t> num_used_blocks() const override;
+  virtual double kv_cache_utilization() const override;
 
   // get the options for the block manager
   const Options& options() const { return options_; }
 
- private:
+ protected:
   int32_t get_manager_with_max_free_blocks() const;
   int32_t get_dp_rank(Sequence* sequence) const;
-
-  void allocate_host_shared(Sequence* sequence);
-  void save_offload_blocks(Sequence* sequence);
 
   bool process_beam_search(Sequence* sequence, bool need_swap = false);
 
  private:
-  std::vector<std::unique_ptr<BlockManager>> block_managers_;
-  std::vector<std::unique_ptr<BlockManager>> host_block_managers_;
+  std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
 
+ protected:
   // the options for the block manager
   Options options_;
-
-  // BlockTransferInfo per step
-  std::vector<std::vector<BlockTransferInfo>> swap_block_transfer_infos_;
-  std::vector<std::vector<BlockTransferInfo>> load_block_transfer_infos_;
-  std::vector<std::vector<BlockTransferInfo>> offload_block_transfer_infos_;
-  std::vector<std::vector<Block>> released_host_blocks_;
-  std::vector<std::vector<Block>> released_device_blocks_;
+  std::vector<std::unique_ptr<BlockManager>> block_managers_;
 };
 
 }  // namespace xllm
