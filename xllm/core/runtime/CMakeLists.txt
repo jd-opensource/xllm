@@ -22,6 +22,7 @@ cc_library(
     dit_worker.h
     embed_worker_impl.h
     embed_vlm_worker_impl.h
+    mm_embed_vlm_worker_impl.h
     engine.h
     llm_engine.h
     vlm_engine.h
@@ -43,6 +44,7 @@ cc_library(
     dit_worker.cpp
     embed_worker_impl.cpp
     embed_vlm_worker_impl.cpp
+    mm_embed_vlm_worker_impl.cpp
     llm_engine.cpp
     vlm_engine.cpp
     dit_engine.cpp

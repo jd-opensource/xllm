@@ -213,6 +213,20 @@ void Sequence::update_token(size_t index, const Token& token) {
   finish_status_invalidated_ = true;
 }
 
+void Sequence::update_mm_embeddings(
+    const std::vector<torch::Tensor>& mm_embeddings) {
+  // cannot update embeddings to a finished sequence
+  if (finished_) {
+    return;
+  }
+  output_mm_embeddings_ = mm_embeddings;
+  CHECK(sequence_params_.sampling_param->is_embeddings);
+  // invalidate the finish status once a new token is appended
+  finish_status_invalidated_ = false;
+  finished_ = true;
+  finish_reason_ = FinishReason::STOP;
+}
+
 void Sequence::update_embeddings(const torch::Tensor& embeddings) {
   // cannot update embeddings to a finished sequence
   if (finished_) {
@@ -311,6 +325,13 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
   AUTO_COUNTER(detokenization_latency_seconds_non_stream);
 
   // build embeddings for output
+  if (sequence_params_.sampling_param->is_embeddings &&
+      output_mm_embeddings_.size() > 0) {
+    SequenceOutput output;
+    output.index = index_;
+    output.mm_embeddings = output_mm_embeddings_;
+    return output;
+  }
   if (sequence_params_.sampling_param->is_embeddings) {
     SequenceOutput output;
     output.index = index_;

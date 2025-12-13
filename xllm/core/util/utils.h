@@ -86,5 +86,10 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
 bool mmdata_to_proto(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata);
 
 bool proto_to_mmdata(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata);
+
+torch::ScalarType datatype_proto_to_torch(const std::string& proto_datatype);
+
+std::string torch_datatype_to_proto(torch::ScalarType torch_dtype);
+
 }  // namespace util
 }  // namespace xllm

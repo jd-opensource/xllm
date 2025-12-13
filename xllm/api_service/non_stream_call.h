@@ -63,6 +63,27 @@ class NonStreamCall : public Call {
     return true;
   }
 
+  // For non stream response with json and binary payload
+  bool write_and_finish(Response& response, const std::string& binary_payload) {
+    if (!write_and_finish(response)) {
+      return false;
+    }
+    if (binary_payload.size() == 0) {
+      return true;
+    }
+    size_t json_len = controller_->response_attachment().size();
+
+    // Overwrite the header to indicate that the response contains JSON + binary
+    controller_->http_response().SetHeader("Content-Type",
+                                           "application/octet-stream");
+    // Add additional header to indicate the json payload length
+    controller_->http_response().SetHeader("X-Json-Length",
+                                           std::to_string(json_len));
+    controller_->response_attachment().append(binary_payload);
+
+    return true;
+  }
+
   // For non stream response
   bool finish_with_error(const StatusCode& code,
                          const std::string& error_message) {

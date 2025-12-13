@@ -158,6 +158,8 @@ class Sequence final {
     return num_tokens_ > decoder_.output_offset();
   }
 
+  // update mm embeddings to the sequence
+  void update_mm_embeddings(const std::vector<torch::Tensor>& mm_embeddings);
   // update embeddings to the sequence
   void update_embeddings(const torch::Tensor& embedding);
   int32_t get_embedding_id() const { return embedding_id_; }
@@ -301,6 +303,9 @@ class Sequence final {
 
   MMData mm_data_;
   int mrope_position_delta_ = 0;
+
+  // mm embedding of the sequence
+  std::vector<torch::Tensor> output_mm_embeddings_;
 
   // embeddings of the sequence
   torch::Tensor output_embedding_;

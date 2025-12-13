@@ -61,8 +61,10 @@ struct VideoMetadata {
   std::vector<double> timestamps;
 };
 
+using MMImageNumberType = int64_t;
 using MMKey = std::string;
-using MMValue = std::variant<torch::Tensor, std::vector<torch::Tensor>>;
+using MMValue =
+    std::variant<torch::Tensor, std::vector<torch::Tensor>, MMImageNumberType>;
 using MMDict = std::unordered_map<MMKey, MMValue>;
 
 struct MMData {

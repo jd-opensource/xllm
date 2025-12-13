@@ -243,7 +243,6 @@ torch::Tensor convert_rec_tensor_to_torch(
   }
 }
 
-namespace {
 torch::ScalarType datatype_proto_to_torch(const std::string& proto_datatype) {
   static const std::unordered_map<std::string, torch::ScalarType> kDatatypeMap =
       {{"BOOL", torch::kBool},
@@ -264,6 +263,7 @@ torch::ScalarType datatype_proto_to_torch(const std::string& proto_datatype) {
   return iter->second;
 }
 
+namespace {
 template <typename T>
 const void* get_data_from_contents(const proto::TensorContents& contents,
                                    const std::string& datatype) {
@@ -323,6 +323,8 @@ const void* get_data_from_contents(const proto::TensorContents& contents,
   }
 }
 
+}  // namespace
+
 std::string torch_datatype_to_proto(torch::ScalarType torch_dtype) {
   static const std::unordered_map<torch::ScalarType, std::string> kDatatypeMap =
       {{torch::kBool, "BOOL"},
@@ -332,7 +334,9 @@ std::string torch_datatype_to_proto(torch::ScalarType torch_dtype) {
        {torch::kInt64, "UINT64"},
        {torch::kFloat, "FP32"},
        {torch::kDouble, "FP64"},
-       {torch::kByte, "BYTES"}};
+       {torch::kByte, "BYTES"},
+       {torch::kHalf, "FP16"},
+       {torch::kBFloat16, "BF16"}};
 
   auto iter = kDatatypeMap.find(torch_dtype);
   if (iter == kDatatypeMap.end()) {
@@ -344,6 +348,7 @@ std::string torch_datatype_to_proto(torch::ScalarType torch_dtype) {
   return iter->second;
 }
 
+namespace {
 template <typename T>
 bool set_data_to_contents(proto::TensorContents* contents,
                           const torch::Tensor& tensor,
@@ -395,8 +400,7 @@ bool set_data_to_contents(proto::TensorContents* contents,
     }
   } else if constexpr (std::is_same_v<T, uint8_t>) {
     const char* char_ptr = reinterpret_cast<const char*>(data_ptr);
-    std::string bytes(char_ptr, data_count * sizeof(T));
-    contents->mutable_bytes_contents()->Add(std::move(bytes));
+    contents->set_bytes_contents(char_ptr, data_count * sizeof(T));
   } else {
     LOG(ERROR) << "Unsupported data type for TensorContents: "
                << typeid(T).name();
@@ -633,10 +637,12 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
     actual_count = proto_contents->fp32_contents_size();
   } else if (proto_datatype == "FP64") {
     actual_count = proto_contents->fp64_contents_size();
-  } else if (proto_datatype == "BYTES") {
-    for (const auto& bytes : proto_contents->bytes_contents()) {
+  } else if (proto_datatype == "STRING") {
+    for (const auto& bytes : proto_contents->string_contents()) {
       actual_count += bytes.size() / sizeof(uint8_t);
     }
+  } else if (proto_datatype == "BYTES") {
+    actual_count += proto_contents->bytes_contents().size();
   }
 
   if (actual_count != static_cast<size_t>(total_elements)) {
