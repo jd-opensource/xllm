@@ -187,21 +187,39 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   param_from_args(decode_mla_param_, model_args, parallel_args, false);
   decode_mla_param_.enableCustomizeMla = FLAGS_enable_customize_mla_kernel;
 
-  loader_ = std::make_unique<DeekseekV2DecoderLoader>(
-      WEIGHT_COUNT_PER_LAYER,
-      context,
-      layer_id_,
-      prefill_param_.firstKDenseReplace,
-      prefill_param_.numOfDeviceExperts,
-      prefill_param_.qkRopeHeadDim,
-      prefill_param_.numAttentionHeadsPerRank,
-      decode_param_.worldSize,
-      qk_nope_head_dim_,
-      kv_lora_rank_,
-      num_key_value_heads_,
-      v_head_dim_,
-      prefill_param_.isBF16,
-      decode_param_.isBF16);
+  if (FLAGS_enable_manual_load_weights) {
+    loader_ = std::make_unique<DeekseekV2DecoderManualLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        layer_id_,
+        prefill_param_.firstKDenseReplace,
+        prefill_param_.numOfDeviceExperts,
+        prefill_param_.qkRopeHeadDim,
+        prefill_param_.numAttentionHeadsPerRank,
+        decode_param_.worldSize,
+        qk_nope_head_dim_,
+        kv_lora_rank_,
+        num_key_value_heads_,
+        v_head_dim_,
+        prefill_param_.isBF16,
+        decode_param_.isBF16);
+  } else {
+    loader_ = std::make_unique<DeekseekV2DecoderLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        layer_id_,
+        prefill_param_.firstKDenseReplace,
+        prefill_param_.numOfDeviceExperts,
+        prefill_param_.qkRopeHeadDim,
+        prefill_param_.numAttentionHeadsPerRank,
+        decode_param_.worldSize,
+        qk_nope_head_dim_,
+        kv_lora_rank_,
+        num_key_value_heads_,
+        v_head_dim_,
+        prefill_param_.isBF16,
+        decode_param_.isBF16);
+  }
   initialize_tensors(options);
 }
 

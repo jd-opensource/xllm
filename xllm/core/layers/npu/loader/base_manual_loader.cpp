@@ -55,16 +55,12 @@ void BaseManualLoader::init_weight_slices() {
   }
   size_t max_alignment = std::max(kHostAlignment, kDeviceAlignment);
   storage_size_ = AlignUp(offset, max_alignment);
-  // storage_size_ = offset;
 }
 
 void BaseManualLoader::copy_weights_to_pinned_host() {
   CHECK_GT(storage_size_, 0) << "model size must be greater than 0.";
   CHECK_EQ(weight_slices_.size(), at_host_weight_tensors_.size())
       << "weight_slices_ size and at_host_weight_tensors_ size mismatch.";
-
-  size_t max_alignment = std::max(kHostAlignment, kDeviceAlignment);
-  storage_size_ = AlignUp(storage_size_, max_alignment);
 
   auto ret = aclrtMallocHost(&host_pinned_storage_, storage_size_);
   CHECK_EQ(ret, ACL_SUCCESS)
@@ -127,7 +123,7 @@ void BaseManualLoader::copy_weights_to_device() {
                            slice.bytes,
                            ACL_MEMCPY_HOST_TO_DEVICE);
     CHECK_EQ(err, ACL_SUCCESS) << "aclrtMemcpy failed for tensor index " << i;
-    at_host_weight_tensors_[i] = at::Tensor();
+    at_host_weight_tensors_[i] = torch::Tensor();
   }
 }
 
@@ -169,7 +165,7 @@ void BaseManualLoader::release_host_storage() {
 BaseManualLoader::BaseManualLoader(uint64_t weight_count,
                                    const ModelContext& context)
     : BaseLoader(weight_count, context) {
-  at_host_weight_tensors_.resize(weight_count_);
+  at_host_weight_tensors_.resize(weight_count);
 }
 
 torch::Tensor BaseManualLoader::convert_to_torch_tensor(
@@ -196,10 +192,16 @@ torch::Tensor BaseManualLoader::convert_to_torch_tensor(
   storage.set_data_ptr(std::move(c10_data_ptr));
 
   tensor.set_(storage, 0, dims);
-  // cast npu format to nd
-  tensor = at_npu::native::npu_format_cast(tensor, acl_format);
+  // Notice: convert to NZ format forcefully, with the underlying data format
+  // guaranteed by the developer.
+  if (acl_format == 29) {
+    auto* tensor_storage = static_cast<torch_npu::NPUStorageImpl*>(
+        tensor.storage().unsafeGetStorageImpl());
+    tensor_storage->npu_desc_.npu_format_ = ACL_FORMAT_FRACTAL_NZ;
+  }
 
   return tensor;
 }
+
 }  // namespace layer
 }  // namespace xllm
