@@ -56,6 +56,12 @@ class Qwen2_5_VisionLayerImpl : public torch::nn::Module {
   RMSNorm norm2_{nullptr};
 };
 
+class Qwen2_VisionLayerImpl : public Qwen2_5_VisionLayerImpl {
+ public:
+  Qwen2_VisionLayerImpl(const ModelContext& context);
+  void load_state_dict(const StateDict& state_dict);
+};
+
 class Qwen3_VisionLayerImpl : public Qwen2_5_VisionLayerImpl {
  public:
   Qwen3_VisionLayerImpl(const ModelContext& context);
