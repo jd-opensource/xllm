@@ -151,17 +151,17 @@ class IndexerTest : public ::testing::Test {
                                  int64_t max_seq_len,
                                  bool is_prefill,
                                  int64_t max_num_batched_tokens) {
-    // Create query_start_loc tensor (cu_seq_q_lens)
+    // Create q_cu_seq_lens tensor (cu_seq_q_lens)
     // shape = [batch_size + 1], typically [0, 4, 8, 12, ...] if max_query_len=4
-    metadata.query_start_loc = torch::arange(
+    metadata.q_cu_seq_lens = torch::arange(
         0,
         (batch_size + 1) * max_query_len,
         max_query_len,
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 
-    // Create seq_start_loc tensor
+    // Create kv_cu_seq_lens tensor
     // TODO: Define proper shape and values based on actual requirements
-    metadata.seq_start_loc = torch::zeros(
+    metadata.kv_cu_seq_lens = torch::zeros(
         {batch_size + 1},
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 

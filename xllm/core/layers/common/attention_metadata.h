@@ -17,39 +17,40 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include <tuple>
-
-#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "layers/common/attention_metadata.h"
 
 namespace xllm {
 namespace layer {
-class AttentionImpl : public torch::nn::Module {
+
+struct AttentionMetadata {
  public:
-  AttentionImpl() = default;
+  static AttentionMetadata build(const ModelInputParams& params);
 
-  AttentionImpl(int num_heads,
-                int head_size,
-                float scale,
-                int num_kv_heads,
-                int sliding_window);
+  static AttentionMetadata build(const ModelInputParams& params,
+                                 const std::string& compute_dtype);
 
-  std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
-      const AttentionMetadata& attn_metadata,
-      torch::Tensor& query,
-      torch::Tensor& key,
-      torch::Tensor& value,
-      KVCache& kv_cache);
+  torch::Tensor q_cu_seq_lens;
+  torch::Tensor kv_cu_seq_lens;
+  torch::Tensor kv_seq_lens;
+  torch::Tensor q_seq_lens;
+  torch::Tensor block_table;
+  torch::Tensor slot_mapping;
+  int64_t max_query_len;
+  int64_t max_seq_len;
+  std::string compute_dtype;
+  bool is_prefill;
+  bool is_chunked_prefill;
+  bool is_dummy;
 
- private:
-  int num_heads_;
-  int head_size_;
-  float scale_;
-  int num_kv_heads_;
-  int sliding_window_;
+  // for mrope
+  torch::Tensor mrope_cos;
+  torch::Tensor mrope_sin;
+
+  // for flashinfer
+  torch::Tensor paged_kv_indptr;
+  torch::Tensor paged_kv_indices;
+  torch::Tensor paged_kv_last_page_len;
 };
-TORCH_MODULE(Attention);
 
 }  // namespace layer
 }  // namespace xllm

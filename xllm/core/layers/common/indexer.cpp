@@ -210,7 +210,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   rotary_emb_->forward(q_pe,
                        k_pe_unsqueezed,
                        positions,
-                       attn_metadata.query_start_loc,
+                       attn_metadata.q_cu_seq_lens,
                        attn_metadata.max_query_len,
                        attn_metadata.is_prefill);
   k_pe = k_pe_unsqueezed.squeeze(1);
@@ -248,11 +248,11 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   torch::Tensor new_block_tables;
   int64_t batch_size = attn_metadata.kv_seq_lens.size(0);
   torch::Tensor block_table = attn_metadata.block_table;
-  torch::Tensor cu_seq_k_lens = attn_metadata.query_start_loc;
+  torch::Tensor cu_seq_k_lens = attn_metadata.q_cu_seq_lens;
 
   if (is_prefill) {
     // Prefill mode parameters
-    cu_seq_q_lens = attn_metadata.query_start_loc;
+    cu_seq_q_lens = attn_metadata.q_cu_seq_lens;
     k_block_table = std::nullopt;
     k_cache_tensor = k;
 
