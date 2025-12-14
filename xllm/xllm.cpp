@@ -39,16 +39,42 @@ limitations under the License.
 using namespace xllm;
 
 static std::atomic<uint32_t> signal_received{0};
+
+static std::unordered_set<std::string> deepseek_like_model_set = {
+    "deepseek_v2",
+    "deepseek_v3",
+    "deepseek_mtp",
+    "kimi_k2",
+};
+
 void shutdown_handler(int signal) {
   // TODO: gracefully shutdown the server
   LOG(WARNING) << "Received signal " << signal << ", stopping server...";
   exit(1);
 }
 
-std::string get_model_backend(const std::filesystem::path& model_path) {
+std::string get_model_type(const std::filesystem::path& model_path) {
   JsonReader reader;
   // for llm, vlm and rec models, the config.json file is in the model path
   std::filesystem::path config_json_path = model_path / "config.json";
+
+  if (std::filesystem::exists(config_json_path)) {
+    reader.parse(config_json_path);
+    std::string model_type = reader.value<std::string>("model_type").value();
+    if (model_type.empty()) {
+      LOG(FATAL) << "Please check config.json file in model path: "
+                 << model_path << ", it should contain model_type key.";
+    }
+    return model_type;
+  } else {
+    LOG(FATAL) << "Please check config.json or model_index.json file, one of "
+                  "them should exist in the model path: "
+               << model_path;
+  }
+}
+
+std::string get_model_backend(const std::filesystem::path& model_path) {
+  JsonReader reader;
   // for dit models, the model_index.json file is in the model path
   std::filesystem::path model_index_json_path = model_path / "model_index.json";
 
@@ -61,19 +87,13 @@ std::string get_model_backend(const std::filesystem::path& model_path) {
       LOG(FATAL) << "Please check model_index.json file in model path: "
                  << model_path << ", it should contain _diffusers_version key.";
     }
-  } else if (std::filesystem::exists(config_json_path)) {
-    reader.parse(config_json_path);
-    std::string model_type = reader.value<std::string>("model_type").value();
-    if (model_type.empty()) {
-      LOG(FATAL) << "Please check config.json file in model path: "
-                 << model_path << ", it should contain model_type key.";
-    }
-    return ModelRegistry::get_model_backend(model_type);
-  } else {
-    LOG(FATAL) << "Please check config.json or model_index.json file, one of "
-                  "them should exist in the model path: "
-               << model_path;
   }
+
+  // for llm, vlm and rec models, get backend from model type
+  std::string model_type = get_model_type(model_path);
+  // model_type always exists since get_model_type() will log fatal error if
+  // model_type is empty
+  return ModelRegistry::get_model_backend(model_type);
 }
 
 int run() {
@@ -124,6 +144,17 @@ int run() {
   // max_tokens_per_batch
   if (FLAGS_max_tokens_per_chunk_for_prefill < 0) {
     FLAGS_max_tokens_per_chunk_for_prefill = FLAGS_max_tokens_per_batch;
+  }
+
+  // set enable_mla by model type
+  if (FLAGS_backend != "dit") {
+    std::string model_type = get_model_type(model_path);
+    if (deepseek_like_model_set.find(model_type) !=
+        deepseek_like_model_set.end()) {
+      FLAGS_enable_mla = true;
+    } else {
+      FLAGS_enable_mla = false;
+    }
   }
 
   // Create Master
