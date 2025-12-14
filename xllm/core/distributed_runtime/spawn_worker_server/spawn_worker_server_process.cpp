@@ -29,6 +29,8 @@ limitations under the License.
 // @num_decoding_tokens
 // @block_size
 // @enable_shm
+// @input_shm_size
+// @output_shm_size
 // @is_local
 // @task_type
 // @worker_type
@@ -55,6 +57,8 @@ int main(int argc, char* argv[]) {
   int num_decoding_tokens = atoi(argv[6]);
   int block_size = atoi(argv[7]);
   int enable_shm = atoi(argv[8]);
+  uint64_t input_shm_size = atoll(argv[9]);
+  uint64_t output_shm_size = atoll(argv[10]);
   int is_local = atoi(argv[9]);
   std::string task_type = std::string(argv[10]);
   std::string worker_type = std::string(argv[11]);
@@ -67,6 +71,8 @@ int main(int argc, char* argv[]) {
             << ", num_decoding_tokens = " << num_decoding_tokens
             << ", block_size = " << block_size
             << ", enable_shm = " << (enable_shm > 0)
+            << ", input_shm_size = " << input_shm_size
+            << ", output_shm_size = " << output_shm_size
             << ", is_local = " << (is_local > 0)
             << ", task_type = " << task_type
             << ", worker_type = " << worker_type << "\n";
@@ -79,6 +85,8 @@ int main(int argc, char* argv[]) {
                                  num_decoding_tokens,
                                  block_size,
                                  enable_shm > 0,
+                                 input_shm_size,
+                                 output_shm_size,
                                  is_local > 0,
                                  task_type,
                                  worker_type);

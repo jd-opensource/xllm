@@ -19,9 +19,7 @@ limitations under the License.
 #include "params_utils.h"
 #include "util/shared_memory_manager.h"
 
-#define PB_INPUT_SHM_SIZE (1024 * 1024 * 1024)  // 1GB
-#define PB_OUTPUT_SHM_SIZE (128 * 1024 * 1024)  // 128MB
-#define NUM_WAIT_NANOSECONDS (1000)             // 1us
+#define NUM_WAIT_NANOSECONDS (1000)  // 1us
 
 namespace xllm {
 
