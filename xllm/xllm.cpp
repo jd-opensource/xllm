@@ -200,18 +200,19 @@ int run() {
       .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .etcd_addr(FLAGS_etcd_addr)
-      .enable_service_routing(FLAGS_enable_service_routing)
+      .enable_service_routing(FLAGS_enable_service_routing ||
+                              FLAGS_enable_disagg_pd)
       .tool_call_parser(FLAGS_tool_call_parser)
       .reasoning_parser(FLAGS_reasoning_parser)
       .priority_strategy(FLAGS_priority_strategy)
       .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline)
-      .enable_cache_upload(FLAGS_enable_prefix_cache &&
-                           FLAGS_enable_service_routing &&
-                           FLAGS_enable_cache_upload)
+      .enable_cache_upload(
+          (FLAGS_enable_service_routing || FLAGS_enable_disagg_pd) &&
+          FLAGS_enable_prefix_cache && FLAGS_enable_cache_upload)
       .host_blocks_factor(FLAGS_host_blocks_factor)
       .enable_kvcache_store(FLAGS_enable_kvcache_store &&
                             FLAGS_enable_prefix_cache &&
-                            (FLAGS_host_blocks_factor > 0.0))
+                            (FLAGS_host_blocks_factor > 1.0))
       .prefetch_timeout(FLAGS_prefetch_timeout)
       .prefetch_bacth_size(FLAGS_prefetch_bacth_size)
       .layers_wise_copy_batchs(FLAGS_layers_wise_copy_batchs)

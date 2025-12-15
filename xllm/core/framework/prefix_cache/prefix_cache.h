@@ -66,8 +66,13 @@ class PrefixCache {
       const Slice<int32_t>& token_ids,
       const Slice<Block>& existed_shared_blocks = {});
 
+  // insert the token ids and blocks into the prefix tree
+  // and set hash key to the corresponding block
+  // return the length of new inserted tokens
   virtual size_t insert(const Slice<int32_t>& token_ids,
                         std::vector<Block>& blocks);
+
+  // insert the blocks with hash key into the prefix tree
   virtual size_t insert(const std::vector<Block>& blocks);
 
   // evict blocks hold by the prefix cache
@@ -98,6 +103,10 @@ class PrefixCache {
   size_t insert(const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,
                 std::vector<Murmur3Key>* insert_keys);
+
+  size_t insert(const std::vector<Block>& blocks,
+                std::vector<Murmur3Key>* insert_keys);
+
   size_t evict(size_t n_blocks, std::vector<Murmur3Key>* evict_keys);
 
   struct Node {

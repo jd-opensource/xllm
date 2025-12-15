@@ -34,7 +34,7 @@ HierarchyBlockManagerPool::HierarchyBlockManagerPool(
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .num_blocks(options_.host_num_blocks())
-      .enable_cache_upload(false);
+      .enable_cache_upload(options_.enable_cache_upload());
 
   for (int32_t i = 0; i < dp_size; ++i) {
     if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
@@ -69,12 +69,10 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
   size_t needed_block_num =
       sequence->num_tokens() / options_.block_size() - host_blocks->size();
 
-  if (needed_block_num == 0) {
-    return;
+  if (needed_block_num != 0) {
+    sequence->host_kv_state().add_kv_blocks(
+        host_block_managers_[dp_rank]->allocate(needed_block_num));
   }
-
-  sequence->host_kv_state().add_kv_blocks(
-      host_block_managers_[dp_rank]->allocate(needed_block_num));
 
   for (size_t i = cached_block_num; i < host_blocks->size(); i++) {
     if (blocks->at(i).ref_count() != 2) {
@@ -86,8 +84,7 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
         std::move(blocks->at(i)), std::move(host_blocks->at(i)));
     offload_block_pair_queues_[dp_rank].enqueue(std::move(block_pair));
   }
-  host_block_managers_[dp_rank]->cache(
-      *sequence->host_kv_state().mutable_kv_blocks());
+
   host_block_managers_[dp_rank]->deallocate(
       sequence->host_kv_state().kv_blocks());
 

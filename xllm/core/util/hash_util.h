@@ -43,7 +43,7 @@ struct Murmur3Key {
     std::memcpy(data, input_data, MURMUR_HASH3_VALUE_LEN);
   }
 
-  std::string debug_string() {
+  std::string debug_string() const {
     std::string rt;
     for (int i = 0; i < MURMUR_HASH3_VALUE_LEN; i++) {
       rt += std::to_string(int64_t(data[i])) + " ";
