@@ -126,6 +126,14 @@ class APIService : public proto::XllmAPIService {
   std::unique_ptr<ImageGenerationServiceImpl> image_generation_service_impl_;
   std::unique_ptr<RerankServiceImpl> rerank_service_impl_;
   std::unique_ptr<RecCompletionServiceImpl> rec_completion_service_impl_;
+
+  // service guard
+  bool enable_completion_service_ = false;
+  bool enable_chat_service_ = false;
+  bool enable_embedding_service_ = false;
+  bool enable_image_generation_service_ = false;
+  bool enable_rerank_service_ = false;
+  std::string unsupported_reason_ = "";
 };
 
 }  // namespace xllm

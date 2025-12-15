@@ -37,50 +37,74 @@ limitations under the License.
 #include "service_impl_factory.h"
 #include "xllm_metrics.h"
 namespace xllm {
-
 APIService::APIService(Master* master,
                        const std::vector<std::string>& model_names,
                        const std::vector<std::string>& model_versions)
     : master_(master) {
   if (FLAGS_backend == "llm") {
     auto llm_master = dynamic_cast<LLMMaster*>(master);
-    completion_service_impl_ =
-        ServiceImplFactory<CompletionServiceImpl>::create_service_impl(
-            llm_master, model_names);
-    chat_service_impl_ =
-        ServiceImplFactory<ChatServiceImpl>::create_service_impl(llm_master,
-                                                                 model_names);
-    embedding_service_impl_ =
-        ServiceImplFactory<EmbeddingServiceImpl>::create_service_impl(
-            llm_master, model_names);
-    if (FLAGS_enable_qwen3_reranker) {
-      rerank_service_impl_ =
-          ServiceImplFactory<Qwen3RerankServiceImpl>::create_service_impl(
-              llm_master, model_names);
+    if (FLAGS_task == "generate") {
+      // qwen3 reranker using llm backend and generate task
+      if (FLAGS_enable_qwen3_reranker) {
+        enable_rerank_service_ = true;
+        rerank_service_impl_ =
+            ServiceImplFactory<Qwen3RerankServiceImpl>::create_service_impl(
+                llm_master, model_names);
+      } else {
+        // generate task: v1/completions and v1/chat/completions
+        enable_completion_service_ = true;
+        enable_chat_service_ = true;
+        completion_service_impl_ =
+            ServiceImplFactory<CompletionServiceImpl>::create_service_impl(
+                llm_master, model_names);
+        chat_service_impl_ =
+            ServiceImplFactory<ChatServiceImpl>::create_service_impl(
+                llm_master, model_names);
+      }
     } else {
+      // embed task: v1/embeddings and v1/rerank
+      enable_embedding_service_ = true;
+      enable_rerank_service_ = true;
+      embedding_service_impl_ =
+          ServiceImplFactory<EmbeddingServiceImpl>::create_service_impl(
+              llm_master, model_names);
       rerank_service_impl_ =
           ServiceImplFactory<RerankServiceImpl>::create_service_impl(
               llm_master, model_names);
     }
   } else if (FLAGS_backend == "vlm") {
     auto vlm_master = dynamic_cast<VLMMaster*>(master);
-    mm_chat_service_impl_ =
-        std::make_unique<MMChatServiceImpl>(vlm_master, model_names);
-    mm_embedding_service_impl_ =
-        std::make_unique<MMEmbeddingServiceImpl>(vlm_master, model_names);
+    if (FLAGS_task == "generate") {
+      // vlm generate task: v1/chat/completions
+      enable_chat_service_ = true;
+      mm_chat_service_impl_ =
+          std::make_unique<MMChatServiceImpl>(vlm_master, model_names);
+    } else {
+      // vlm embed task: v1/embeddings
+      enable_embedding_service_ = true;
+      mm_embedding_service_impl_ =
+          std::make_unique<MMEmbeddingServiceImpl>(vlm_master, model_names);
+    }
   } else if (FLAGS_backend == "dit") {
+    // image generation task: v1/images/generations
+    enable_image_generation_service_ = true;
     image_generation_service_impl_ =
         std::make_unique<ImageGenerationServiceImpl>(
             dynamic_cast<DiTMaster*>(master), model_names);
   } else if (FLAGS_backend == "rec") {
     // TODO. delete this when next pr.
     using RecMaster = LLMMaster;
+    // rec generate task: v1/completions
+    enable_completion_service_ = true;
     rec_completion_service_impl_ = std::make_unique<RecCompletionServiceImpl>(
         dynamic_cast<RecMaster*>(master), model_names);
   }
   models_service_impl_ =
       ServiceImplFactory<ModelsServiceImpl>::create_service_impl(
           model_names, model_versions);
+
+  unsupported_reason_ = "Current API is not supported for " + FLAGS_backend +
+                        " backend and " + FLAGS_task + " task!";
 }
 
 void APIService::Completions(::google::protobuf::RpcController* controller,
@@ -96,6 +120,11 @@ void APIService::Completions(::google::protobuf::RpcController* controller,
     return;
   }
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (!enable_completion_service_) {
+    LOG(ERROR) << "Completions: " << unsupported_reason_;
+    ctrl->SetFailed(unsupported_reason_);
+    return;
+  }
   auto arena = response->GetArena();
   std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
       ctrl,
@@ -130,6 +159,11 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
       google::protobuf::Arena::CreateMessage<proto::CompletionResponse>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (!enable_completion_service_) {
+    LOG(ERROR) << "Completions: " << unsupported_reason_;
+    ctrl->SetFailed(unsupported_reason_);
+    return;
+  }
   std::string error;
   json2pb::Json2PbOptions options;
   butil::IOBuf& buf = ctrl->request_attachment();
@@ -159,7 +193,7 @@ void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
 
 namespace {
 template <typename ChatCall, typename Service>
-void ChatCompletionsImpl(std::unique_ptr<Service>& service,
+void handle_chat_request(std::unique_ptr<Service>& service,
                          xllm::ClosureGuard& guard,
                          ::google::protobuf::Arena* arena,
                          brpc::Controller* ctrl) {
@@ -202,16 +236,21 @@ void APIService::ChatCompletionsHttp(
   }
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (!enable_chat_service_) {
+    LOG(ERROR) << "ChatCompletions: " << unsupported_reason_;
+    ctrl->SetFailed(unsupported_reason_);
+    return;
+  }
 
   if (FLAGS_backend == "llm") {
     auto arena = response->GetArena();
     CHECK(chat_service_impl_) << " chat service is invalid.";
-    ChatCompletionsImpl<ChatCall, ChatServiceImpl>(
+    handle_chat_request<ChatCall, ChatServiceImpl>(
         chat_service_impl_, done_guard, arena, ctrl);
   } else if (FLAGS_backend == "vlm") {
     CHECK(mm_chat_service_impl_) << " mm chat service is invalid.";
     // TODO: fix me - temporarily using heap allocation instead of arena
-    ChatCompletionsImpl<MMChatCall, MMChatServiceImpl>(
+    handle_chat_request<MMChatCall, MMChatServiceImpl>(
         mm_chat_service_impl_, done_guard, nullptr, ctrl);
   }
 }
@@ -226,19 +265,9 @@ void APIService::Embeddings(::google::protobuf::RpcController* controller,
 namespace {
 template <typename EmbeddingCall, typename Service>
 void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
-                              ::google::protobuf::RpcController* controller,
-                              const proto::HttpRequest* request,
-                              proto::HttpResponse* response,
-                              ::google::protobuf::Closure* done) {
-  xllm::ClosureGuard done_guard(
-      done,
-      std::bind(request_in_metric, nullptr),
-      std::bind(request_out_metric, (void*)controller));
-  if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | respose | controller is null";
-    return;
-  }
-  auto arena = response->GetArena();
+                              xllm::ClosureGuard& guard,
+                              ::google::protobuf::Arena* arena,
+                              brpc::Controller* ctrl) {
   auto req_pb =
       google::protobuf::Arena::CreateMessage<typename EmbeddingCall::ReqType>(
           arena);
@@ -246,7 +275,6 @@ void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
       google::protobuf::Arena::CreateMessage<typename EmbeddingCall::ResType>(
           arena);
 
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string error;
   json2pb::Json2PbOptions options;
   butil::IOBuf& buf = ctrl->request_attachment();
@@ -263,8 +291,8 @@ void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
     req_pb->set_encoding_format("float");
   }
 
-  std::shared_ptr<Call> call = std::make_shared<EmbeddingCall>(
-      ctrl, done_guard.release(), req_pb, resp_pb);
+  std::shared_ptr<Call> call =
+      std::make_shared<EmbeddingCall>(ctrl, guard.release(), req_pb, resp_pb);
   embedding_service_impl_->process_async(call);
 }
 }  // namespace
@@ -273,14 +301,31 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
                                 const proto::HttpRequest* request,
                                 proto::HttpResponse* response,
                                 ::google::protobuf::Closure* done) {
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (!enable_embedding_service_) {
+    LOG(ERROR) << "Embeddings: " << unsupported_reason_;
+    ctrl->SetFailed(unsupported_reason_);
+    return;
+  }
+
+  auto arena = response->GetArena();
   if (FLAGS_backend == "llm") {
     CHECK(embedding_service_impl_) << " embedding service is invalid.";
     handle_embedding_request<EmbeddingCall, EmbeddingServiceImpl>(
-        embedding_service_impl_, controller, request, response, done);
+        embedding_service_impl_, done_guard, arena, ctrl);
   } else if (FLAGS_backend == "vlm") {
     CHECK(mm_embedding_service_impl_) << " mm embedding service is invalid.";
     handle_embedding_request<MMEmbeddingCall, MMEmbeddingServiceImpl>(
-        mm_embedding_service_impl_, controller, request, response, done);
+        mm_embedding_service_impl_, done_guard, arena, ctrl);
   }
 }
 
@@ -314,6 +359,11 @@ void APIService::ImageGenerationHttp(
           arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (!enable_image_generation_service_) {
+    LOG(ERROR) << "ImageGeneration: " << unsupported_reason_;
+    ctrl->SetFailed(unsupported_reason_);
+    return;
+  }
   std::string error;
   json2pb::Json2PbOptions options;
   butil::IOBuf& buf = ctrl->request_attachment();
@@ -357,6 +407,11 @@ void APIService::RerankHttp(::google::protobuf::RpcController* controller,
       google::protobuf::Arena::CreateMessage<proto::RerankResponse>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (!enable_rerank_service_) {
+    LOG(ERROR) << "Rerank: " << unsupported_reason_;
+    ctrl->SetFailed(unsupported_reason_);
+    return;
+  }
   std::string error;
   json2pb::Json2PbOptions options;
   butil::IOBuf& buf = ctrl->request_attachment();
