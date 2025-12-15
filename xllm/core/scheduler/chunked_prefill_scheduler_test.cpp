@@ -669,12 +669,11 @@ TEST(ChunkedPrefillSchedulerTest, LatencySchedule) {
   auto requests = generate_request(
       {10, 10, 10}, {10, 10, 10}, std::nullopt, std::nullopt, 30000);
   // check if time equation fits well
-  EXPECT_EQ(static_cast<int32_t>(profile_manager->predict_step_time(
-                requests[0]->sequences()[0].get(), true, true)),
-            150);
-  EXPECT_EQ(static_cast<int32_t>(
-                profile_manager->predict_step_time(2, 0, true, true)),
-            22);
+  EXPECT_TRUE(
+      static_cast<int32_t>(std::round(profile_manager->predict_step_time(
+          requests[0]->sequences()[0].get(), true, true))) == 150);
+  EXPECT_TRUE(static_cast<int32_t>(std::round(
+                  profile_manager->predict_step_time(2, 0, true, true))) == 22);
 
   std::vector<std::shared_ptr<Request>> running_requests;
 
