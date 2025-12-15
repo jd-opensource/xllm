@@ -723,7 +723,6 @@ uint64_t proto_to_block_transfer_info(
         pb_block_transfer_info.transfer_infos(i).dst_block_id(),
         reinterpret_cast<const uint8_t*>(
             pb_block_transfer_info.transfer_infos(i).hash_key().data()),
-        pb_block_transfer_info.transfer_infos(i).hash_key().size(),
         TransferType(pb_block_transfer_info.transfer_type()));
   }
 
@@ -737,11 +736,6 @@ bool block_transfer_info_to_proto(
       block_transfer_info.size());
   auto transfer_type = block_transfer_info[0].transfer_type;
   for (const BlockTransferInfo info : block_transfer_info) {
-    if (info.hash_key == nullptr) {
-      LOG(ERROR) << "Convert to BlockTransferInfos fail, hash key is nullptr!";
-      return false;
-    }
-
     if (transfer_type != info.transfer_type) {
       LOG(ERROR) << "Convert to BlockTransferInfos fail, TransferType must be "
                     "same, but got "

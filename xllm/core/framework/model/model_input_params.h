@@ -24,6 +24,7 @@ limitations under the License.
 #include "framework/batch/batch_forward_type.h"
 #include "framework/request/mm_data.h"
 #include "npu_dp_ep_padding.h"
+#include "util/hash_util.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {
@@ -38,47 +39,60 @@ enum class TransferType : uint8_t {
 struct BlockTransferInfo {
   int32_t src_block_id = -1;
   int32_t dst_block_id = -1;
-  uint8_t* hash_key = nullptr;
+  uint8_t hash_key[MURMUR_HASH3_VALUE_LEN];
   TransferType transfer_type;
-  uint32_t hash_key_len = -1;
 
   BlockTransferInfo(int32_t src_block_id, int32_t dst_block_id) {
     this->src_block_id = src_block_id;
     this->dst_block_id = dst_block_id;
   }
 
-  BlockTransferInfo(int32_t src_block_id,
-                    int32_t dst_block_id,
-                    const uint8_t* hash_key,
-                    TransferType transfer_type) {
-    this->src_block_id = src_block_id;
-    this->dst_block_id = dst_block_id;
-    this->hash_key = const_cast<uint8_t*>(hash_key);
-    this->transfer_type = transfer_type;
+  BlockTransferInfo(int32_t src_id,
+                    int32_t dst_id,
+                    const uint8_t* key,
+                    TransferType type)
+      : src_block_id(src_id), dst_block_id(dst_id), transfer_type(type) {
+    memcpy(hash_key, key, MURMUR_HASH3_VALUE_LEN);
   }
 
-  BlockTransferInfo(int32_t src_block_id,
-                    int32_t dst_block_id,
-                    const uint8_t* hash_key,
-                    uint32_t hash_key_len,
-                    TransferType transfer_type) {
-    this->src_block_id = src_block_id;
-    this->dst_block_id = dst_block_id;
-    this->hash_key = new uint8_t[hash_key_len];
-    memcpy(this->hash_key, hash_key, hash_key_len);
-    this->transfer_type = transfer_type;
+  BlockTransferInfo(const BlockTransferInfo& other)
+      : src_block_id(other.src_block_id),
+        dst_block_id(other.dst_block_id),
+        transfer_type(other.transfer_type) {
+    memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
   }
 
-  ~BlockTransferInfo() {
-    if (hash_key_len != -1 && hash_key != nullptr) {
-      delete[] hash_key;
-    }
+  BlockTransferInfo(BlockTransferInfo&& other)
+      : src_block_id(other.src_block_id),
+        dst_block_id(other.dst_block_id),
+        transfer_type(other.transfer_type) {
+    memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
+
+    other.src_block_id = -1;
+    other.dst_block_id = -1;
+  }
+
+  BlockTransferInfo& operator=(const BlockTransferInfo& other) {
+    src_block_id = other.src_block_id;
+    dst_block_id = other.dst_block_id;
+    transfer_type = other.transfer_type;
+    memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
+  }
+
+  BlockTransferInfo& operator=(BlockTransferInfo&& other) {
+    src_block_id = other.src_block_id;
+    dst_block_id = other.dst_block_id;
+    transfer_type = other.transfer_type;
+    memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
+
+    other.src_block_id = -1;
+    other.dst_block_id = -1;
   }
 
   std::string to_string() const {
     std::string rt = ", has_key:";
     for (int i = 0; i < 16; i++) {
-      rt += std::to_string(int64_t(*(hash_key + i))) + " ";
+      rt += std::to_string(int64_t(hash_key[i])) + " ";
     }
     return std::to_string(src_block_id) + "->" + std::to_string(dst_block_id) +
            ", " + std::to_string(uint32_t(transfer_type)) + rt;

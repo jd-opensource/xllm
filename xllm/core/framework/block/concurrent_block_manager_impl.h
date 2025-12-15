@@ -30,8 +30,6 @@ class ConcurrentBlockManagerImpl : public BlockManagerImpl {
 
   void deallocate(const Slice<Block>& blocks) override;
 
-  void deallocate(std::vector<Block>& blocks) override;
-
   // try to share blocks among sequences with the same prefix
   std::vector<Block> allocate_shared(
       const Slice<int32_t>& tokens_ids,

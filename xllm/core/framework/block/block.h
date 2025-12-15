@@ -67,7 +67,7 @@ class Block final {
     memcpy(hash_value_, hash_value, MURMUR_HASH3_VALUE_LEN);
   }
 
-  uint32_t get_hash_value_len() { return MURMUR_HASH3_VALUE_LEN; }
+  uint32_t get_hash_value_len() const { return MURMUR_HASH3_VALUE_LEN; }
 
  private:
   // increase reference count

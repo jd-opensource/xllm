@@ -93,12 +93,6 @@ void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
   }
 }
 
-void BlockManagerImpl::deallocate(std::vector<Block>& blocks) {
-  Slice<Block> slice(blocks);
-  deallocate(slice);
-  blocks.clear();
-}
-
 bool BlockManagerImpl::has_enough_blocks(uint32_t num_blocks) {
   if (num_blocks <= num_free_blocks_) {
     return true;

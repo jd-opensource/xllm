@@ -188,8 +188,9 @@ void ContinuousScheduler::handle_prefill_requests(
   bool blocks_exhausted = false;
   while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 && latency_budget > estimate_latency) {
-    if (kv_cache_manager_->kv_cache_utilization() >=
-        FLAGS_prefill_scheduling_memory_usage_threshold) {
+    if (!options_.enable_disagg_pd() &&
+        kv_cache_manager_->kv_cache_utilization() >=
+            FLAGS_prefill_scheduling_memory_usage_threshold) {
       blocks_exhausted = true;
       break;
     }
