@@ -18,7 +18,6 @@ cc_library(
     stream_call.h
     models_service_impl.h
     stream_output_parser.h
-    mm_service_utils.h
   SRCS
     api_service.cpp
     call.cpp
