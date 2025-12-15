@@ -130,11 +130,10 @@ enum DecoderLayerTensorId : int {
 static const uint64_t WEIGHT_COUNT_PER_LAYER = 84;
 
 DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
-    const ModelContext& context,
-    const int32_t layer_id)
+    const ModelContext& context)
     : BaseLayer(context),
       device_id_(context.get_tensor_options().device().index()),
-      layer_id_(layer_id),
+      layer_id_(context.layer_id()),
       num_speculative_tokens_(
           context.get_model_args().num_speculative_tokens()) {
   // compute sm_scale

@@ -62,7 +62,9 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
                                       /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto block = QWen2DecoderLayer(context);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = QWen2DecoderLayer(curr_context);
       layers_.push_back(block);
       blocks_->push_back(block);
     }

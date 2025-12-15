@@ -20,8 +20,8 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
-                                                   int32_t layer_id) {
+Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(
+    const ModelContext& context) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
@@ -41,10 +41,11 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
 
   // Initialize mlp
   auto mlp_only_layers = model_args.mlp_only_layers();
-  if ((std::count(mlp_only_layers.begin(), mlp_only_layers.end(), layer_id) ==
-       0) &&
+  if ((std::count(mlp_only_layers.begin(),
+                  mlp_only_layers.end(),
+                  context.layer_id()) == 0) &&
       model_args.num_experts() > 0 &&
-      (layer_id + 1) % model_args.decoder_sparse_step() == 0) {
+      (context.layer_id() + 1) % model_args.decoder_sparse_step() == 0) {
     moe_mlp_ = register_module("mlp",
                                FusedMoE(model_args.num_experts(),
                                         model_args.num_experts_per_tok(),

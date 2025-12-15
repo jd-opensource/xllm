@@ -25,11 +25,34 @@ limitations under the License.
 
 namespace xllm {
 namespace layer {
+
+// for flashinfer, maybe we need to refactor later
+struct StepwiseAttentionState {
+  int layer_id = -1;
+  torch::Tensor plan_info;
+  std::string uri;
+
+  void update(int layer_id,
+              const AttentionMetadata& attn_meta,
+              c10::ScalarType query_dtype,
+              c10::ScalarType key_dtype,
+              c10::ScalarType output_dtype,
+              int head_dim_qk,
+              int head_dim_vo,
+              int num_qo_heads,
+              int num_kv_heads,
+              int block_size,
+              int window_size_left,
+              bool enable_cuda_graph,
+              bool causal);
+};
+
 class AttentionImpl : public torch::nn::Module {
  public:
   AttentionImpl() = default;
 
-  AttentionImpl(int num_heads,
+  AttentionImpl(int layer_id,
+                int num_heads,
                 int head_size,
                 float scale,
                 int num_kv_heads,
@@ -43,11 +66,15 @@ class AttentionImpl : public torch::nn::Module {
       KVCache& kv_cache);
 
  private:
+  int layer_id_;
   int num_heads_;
   int head_size_;
   float scale_;
   int num_kv_heads_;
   int sliding_window_;
+
+ private:
+  inline static StepwiseAttentionState step_wise_attn_state_;
 };
 TORCH_MODULE(Attention);
 

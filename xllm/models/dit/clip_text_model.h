@@ -496,7 +496,9 @@ class CLIPEncoderImpl : public torch::nn::Module {
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.mm_num_hidden_layers());
     for (int32_t i = 0; i < model_args.mm_num_hidden_layers(); i++) {
-      auto block = CLIPEncoderLayer(context);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = CLIPEncoderLayer(curr_context);
       layers_.push_back(block);
       blocks_->push_back(block);
     }

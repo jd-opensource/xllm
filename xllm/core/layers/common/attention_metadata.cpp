@@ -16,6 +16,9 @@ limitations under the License.
 #include "attention_metadata.h"
 
 #include "core/common/global_flags.h"
+#include "core/layers/cuda/flashinfer_workspace.h"
+#include "kernels/cuda/function_factory.h"
+#include "kernels/cuda/utils.h"
 
 namespace xllm {
 namespace layer {

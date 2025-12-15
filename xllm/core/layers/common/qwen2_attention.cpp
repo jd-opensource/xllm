@@ -103,7 +103,8 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
 
   // 5. Attention
   attn_ = register_module("attn",
-                          Attention(num_heads_,
+                          Attention(context.layer_id(),
+                                    num_heads_,
                                     head_dim_,
                                     scaling_,
                                     num_kv_heads_,

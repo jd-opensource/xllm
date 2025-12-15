@@ -398,7 +398,9 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
     blocks_ = register_module("blocks", torch::nn::ModuleList());
 
     for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
-      auto block = Qwen2_5_VisionBlock(context);
+      auto curr_context = context;
+      curr_context.set_layer_id(idx);
+      auto block = Qwen2_5_VisionBlock(curr_context);
       blocks_->push_back(block);
       layers_.push_back(block);
     }

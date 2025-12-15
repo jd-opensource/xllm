@@ -64,7 +64,5 @@ class Qwen2DecoderLayerImpl : public torch::nn::Module {
   ParallelArgs parallel_args_;
 };
 
-using Qwen3DecoderLayerImpl = Qwen2DecoderLayerImpl;
-
 }  // namespace layer
 }  // namespace xllm

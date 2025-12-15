@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <ATen/DynamicLibrary.h>
 #include <torch/torch.h>
 
 #include <string>

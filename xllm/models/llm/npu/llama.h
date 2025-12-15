@@ -133,7 +133,9 @@ class LlamaModelImpl : public torch::nn::Module {
     max_seq_len_ = 0;
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto block = LlamaDecoderLayer(context);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = LlamaDecoderLayer(curr_context);
       layers_.push_back(block);
       blocks_->push_back(block);
     }

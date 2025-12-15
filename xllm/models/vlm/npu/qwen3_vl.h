@@ -349,12 +349,16 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     merger_ = register_module("merger", Qwen3_VisionPatchMerger(context));
 
     for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
-      auto block = Qwen3_VisionBlock(context);
+      auto curr_context = context;
+      curr_context.set_layer_id(idx);
+      auto block = Qwen3_VisionBlock(curr_context);
       blocks_->push_back(block);
       layers_.push_back(block);
     }
     for (int32_t idx = 0; idx < deepstack_visual_indexes_.size(); idx++) {
-      auto merger = Qwen3_VisionPatchMerger(context, true);
+      auto curr_context = context;
+      curr_context.set_layer_id(idx);
+      auto merger = Qwen3_VisionPatchMerger(curr_context, true);
       deepstack_mergers_->push_back(merger);
       deepstack_merger_layers_.push_back(merger);
     }

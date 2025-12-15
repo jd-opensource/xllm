@@ -66,7 +66,9 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
     atb_pos_emb_ = layer::PosEmbedding(context);
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto block = DeepseekV2DecoderLayer(context, i);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = DeepseekV2DecoderLayer(curr_context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
     }

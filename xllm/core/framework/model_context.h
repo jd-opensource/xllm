@@ -55,6 +55,15 @@ class ModelContext {
     return tensor_options_;
   }
 
+  void set_layer_id(int32_t layer_id) { layer_id_ = layer_id; }
+  const int32_t layer_id() const {
+    if (layer_id_ == -1) {
+      LOG(ERROR) << "layer_id is not set in ModelContext, layer_id_ = "
+                 << layer_id_;
+    }
+    return layer_id_;
+  }
+
 #if defined(USE_NPU)
   const atb::Context* get_atb_context() const { return context_; }
 #endif
@@ -64,6 +73,7 @@ class ModelContext {
   }
 
  private:
+  int32_t layer_id_ = -1;
   ModelArgs model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_;

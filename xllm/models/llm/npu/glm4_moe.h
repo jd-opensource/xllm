@@ -101,7 +101,9 @@ class Glm4MoeModelImpl : public torch::nn::Module {
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto block = Glm4MoeDecoderLayer(context, i);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = Glm4MoeDecoderLayer(curr_context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
     }

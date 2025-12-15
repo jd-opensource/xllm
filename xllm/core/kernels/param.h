@@ -208,6 +208,8 @@ struct AttentionParams {
   torch::Tensor page_locked_int_workspace_buffer;
 
   bool enable_cuda_graph = false;
+  std::string uri;
+  torch::Tensor plan_info;
 
   // ========== Prefill-specific parameters ==========
   // Key tensor. Shape: [num_tokens, num_kv_heads, head_dim_qk] (packed) or

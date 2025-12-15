@@ -1242,14 +1242,18 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
     // mm-dit block
     transformer_block_layers_.reserve(num_layers);
     for (int64_t i = 0; i < num_layers; ++i) {
-      auto block = FluxTransformerBlock(context);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = FluxTransformerBlock(curr_context);
       transformer_blocks_->push_back(block);
       transformer_block_layers_.push_back(block);
     }
     // single mm-dit block
     single_transformer_block_layers_.reserve(num_single_layers);
     for (int64_t i = 0; i < num_single_layers; ++i) {
-      auto block = FluxSingleTransformerBlock(context);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = FluxSingleTransformerBlock(curr_context);
       single_transformer_blocks_->push_back(block);
       single_transformer_block_layers_.push_back(block);
     }
