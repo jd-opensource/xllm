@@ -26,9 +26,11 @@ limitations under the License.
 #include <utility>
 
 #include "common/metrics.h"
+#include "core/common/global_flags.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
+#include "runtime/concurrent_llm_worker_impl.h"
 #include "runtime/embed_vlm_worker_impl.h"
 #include "runtime/embed_worker_impl.h"
 #include "runtime/llm_worker_impl.h"
@@ -44,7 +46,11 @@ Worker::Worker(const ParallelArgs& parallel_args,
   if (options.enable_speculative_decode()) {
     impl_ = new SpeculativeWorkerImpl(parallel_args, device, options);
   } else if (worker_type == WorkerType::LLM) {
-    impl_ = new LLMWorkerImpl(parallel_args, device, options);
+    if (FLAGS_llm_worker_max_concurrency > 1) {
+      impl_ = new ConcurrentLLMWorkerImpl(parallel_args, device, options);
+    } else {
+      impl_ = new LLMWorkerImpl(parallel_args, device, options);
+    }
   } else if (worker_type == WorkerType::VLM) {
     impl_ = new VLMWorkerImpl(parallel_args, device, options);
   } else if (worker_type == WorkerType::ELM) {

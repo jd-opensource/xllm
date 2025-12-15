@@ -17,6 +17,7 @@ cc_library(
     scheduler.h
     dit_scheduler.h
     prefill_only_scheduler.h
+    fixedsteps_scheduler.h
     scheduler_factory.h
     decode_priority_queue.h
     perf_model.h
@@ -29,6 +30,7 @@ cc_library(
     async_response_processor.cpp
     dit_scheduler.cpp
     prefill_only_scheduler.cpp
+    fixedsteps_scheduler.cpp
     scheduler_factory.cpp
     perf_model.cpp
   DEPS
