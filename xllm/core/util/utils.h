@@ -86,5 +86,7 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
 bool mmdata_to_proto(const xllm::MMData& cpp_mmdata, proto::MMData* pb_mmdata);
 
 bool proto_to_mmdata(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata);
+
+int32_t ceil_pow2(int32_t n);
 }  // namespace util
 }  // namespace xllm

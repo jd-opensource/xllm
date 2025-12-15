@@ -223,8 +223,6 @@ void batch_decode(AttentionParams& params) {
                     params.seq_lens,
                     params.output);
 #elif defined(USE_CUDA)
-  params.query = params.query.squeeze(1);
-  params.output = params.output.squeeze(1);
   cuda::batch_decode(params.float_workspace_buffer,
                      params.int_workspace_buffer,
                      params.page_locked_int_workspace_buffer,
@@ -238,7 +236,9 @@ void batch_decode(AttentionParams& params) {
                      params.scale,
                      params.output,
                      params.output_lse,
-                     params.enable_cuda_graph);
+                     params.enable_cuda_graph,
+                     params.use_tensor_core,
+                     params.kv_seq_lens);
 #elif defined(USE_ILU)
   ilu::batch_decode(params.query,
                     params.k_cache,

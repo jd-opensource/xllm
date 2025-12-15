@@ -694,5 +694,17 @@ bool proto_to_mmdata(const proto::MMData& pb_mmdata, xllm::MMData* cpp_mmdata) {
   return true;
 }
 
+// find the least power of 2 that is greater than or equal to x
+int32_t ceil_pow2(int32_t n) {
+  if (n <= 0) return 1;
+  n--;
+  n |= n >> 1;
+  n |= n >> 2;
+  n |= n >> 4;
+  n |= n >> 8;
+  n |= n >> 16;
+  return n + 1;
+}
+
 }  // namespace util
 }  // namespace xllm

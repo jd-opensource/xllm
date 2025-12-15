@@ -208,6 +208,8 @@ struct AttentionParams {
   torch::Tensor page_locked_int_workspace_buffer;
 
   bool enable_cuda_graph = false;
+  // Whether to use tensor core for decode attention computation. Default: true.
+  bool use_tensor_core = true;
 
   // ========== Prefill-specific parameters ==========
   // Key tensor. Shape: [num_tokens, num_kv_heads, head_dim_qk] (packed) or
