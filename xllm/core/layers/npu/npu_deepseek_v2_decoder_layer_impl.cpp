@@ -1534,30 +1534,30 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
   atb::Status st;
   // all micro batches are in same prefill/decode stage,
   //  so, to judge empty_kv_cache, use input_params[0] here
-   if (input_params[0].batch_forward_type.is_chunked_prefill()) {
-      build_node_variant_pack(prefill_node_prefixcache_,
-                              x,
-                              cos_pos,
-                              sin_pos,
-                              attn_mask,
-                              kv_cache,
-                              input_params,
-                              true);
-      st = execute_node(prefill_node_prefixcache_, node_id, event, event_flag);
-      LOG_IF(FATAL, st != 0)
-          << model_name_ << "excute prefill layer fail, error code: " << st;
-    } else if(input_params[0].batch_forward_type.is_prefill()){
-      build_node_variant_pack(prefill_node_,
-                              x,
-                              cos_pos,
-                              sin_pos,
-                              attn_mask,
-                              kv_cache,
-                              input_params,
-                              true);
-      st = execute_node(prefill_node_, node_id, event, event_flag);
-      LOG_IF(FATAL, st != 0)
-          << model_name_ << "excute prefill layer fail, error code: " << st;
+  if (input_params[0].batch_forward_type.is_chunked_prefill()) {
+    build_node_variant_pack(prefill_node_prefixcache_,
+                            x,
+                            cos_pos,
+                            sin_pos,
+                            attn_mask,
+                            kv_cache,
+                            input_params,
+                            true);
+    st = execute_node(prefill_node_prefixcache_, node_id, event, event_flag);
+    LOG_IF(FATAL, st != 0) << model_name_
+                           << "excute prefill layer fail, error code: " << st;
+  } else if (input_params[0].batch_forward_type.is_prefill()) {
+    build_node_variant_pack(prefill_node_,
+                            x,
+                            cos_pos,
+                            sin_pos,
+                            attn_mask,
+                            kv_cache,
+                            input_params,
+                            true);
+    st = execute_node(prefill_node_, node_id, event, event_flag);
+    LOG_IF(FATAL, st != 0) << model_name_
+                           << "excute prefill layer fail, error code: " << st;
   } else {
     std::vector<torch::Tensor> attn_mask{tensor_placeholder_,
                                          tensor_placeholder_};
@@ -1637,10 +1637,17 @@ void NpuDeepseekV2DecoderLayerImpl::build_node_variant_pack(
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
-      atb_speed::Utils::AtTensor2Tensor(input_params[0].kv_cache_tokens_nums);
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13).hostData =
-      const_cast<int32_t*>(input_params[0].kv_cache_tokens_nums_host.data());
+  if (input_params[0].batch_forward_type.is_chunked_prefill()) {
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
+        atb_speed::Utils::AtTensor2Tensor(input_params[0].kv_cache_tokens_nums);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13).hostData =
+        const_cast<int32_t*>(input_params[0].kv_cache_tokens_nums_host.data());
+  } else {
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
+        atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13).hostData =
+        const_cast<int32_t*>(placeholder_vec_.data());
+  }
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
