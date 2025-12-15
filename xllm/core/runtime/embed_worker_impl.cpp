@@ -44,7 +44,7 @@ bool EmbedWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
   // Try to create a embedding LM model
-  model_ = create_lm_embedding_model(context);
+  model_ = create_embeddinglm_model(context);
 
   // Dont find model in embedding models
   CHECK(model_ != nullptr) << "Failed to create model.";

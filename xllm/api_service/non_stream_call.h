@@ -33,8 +33,6 @@ namespace xllm {
 template <typename Request, typename Response>
 class NonStreamCall : public Call {
  public:
-  using ReqType = Request;
-  using ResType = Response;
   NonStreamCall(brpc::Controller* controller,
                 ::google::protobuf::Closure* done,
                 Request* request,
