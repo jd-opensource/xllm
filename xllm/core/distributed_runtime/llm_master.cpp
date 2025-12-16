@@ -343,6 +343,17 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   }
   // sampling_param.do_sample = sp.do_sample;
 
+  SchedulerParam scheduler_param;
+  scheduler_param.offline = sp.offline;
+  scheduler_param.priority = sp.priority;
+  scheduler_param.ttft_slo_ms = sp.ttft_slo_ms;
+  scheduler_param.tpot_slo_ms = sp.tpot_slo_ms;
+  scheduler_param.ttlt_slo_ms = sp.ttlt_slo_ms;
+  scheduler_param.tpot_priority_weight = sp.tpot_priority_weight;
+  scheduler_param.ttft_priority_weight = sp.ttft_priority_weight;
+  scheduler_param.ttlt_priority_weight = sp.ttlt_priority_weight;
+  scheduler_param.priority_weight = sp.priority_weight;
+
   std::unordered_set<int32_t> stop_tokens;
   if (sp.stop_token_ids.has_value()) {
     const auto& stop_token_ids = sp.stop_token_ids.value();
@@ -393,6 +404,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   RequestState req_state(std::move(prompt),
                          std::move(local_prompt_tokens),
                          std::move(sampling_param),
+                         std::move(scheduler_param),
                          std::move(stopping_checker),
                          capacity,
                          sp.n,
@@ -411,16 +423,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                                            sp.x_request_id,
                                            sp.x_request_time,
                                            std::move(req_state),
-                                           sp.service_request_id,
-                                           sp.offline,
-                                           sp.ttlt_slo_ms,
-                                           sp.priority,
-                                           sp.ttft_slo_ms,
-                                           sp.tpot_slo_ms,
-                                           sp.tpot_priority_weight,
-                                           sp.ttft_priority_weight,
-                                           sp.ttlt_priority_weight,
-                                           sp.priority_weight);
+                                           sp.service_request_id);
 
   // add one sequence, rest will be added by scheduler
   return request;

@@ -33,8 +33,6 @@ limitations under the License.
 
 namespace xllm {
 
-enum class RequestPriority { DEFAULT = 0, HIGH = 1, NORMAL = 2, LOW = 3 };
-
 enum class Urgency { URGENT = 2, TIMEOUT = 1, NORMAL = 0 };
 
 class Request : public RequestBase {
@@ -43,16 +41,7 @@ class Request : public RequestBase {
           const std::string& x_request_id,
           const std::string& x_request_time,
           const RequestState& state,
-          const std::string& service_request_id = "",
-          bool offline = false,
-          int32_t ttlt_slo_ms = 0,
-          RequestPriority priority = RequestPriority::NORMAL,
-          int32_t ttft_slo_ms = 0,
-          int32_t tpot_slo_ms = 0,
-          int32_t tpot_priority_weight = 1,
-          int32_t ttft_priority_weight = 1,
-          int32_t ttlt_priority_weight = 1,
-          int32_t priority_weight = 1);
+          const std::string& service_request_id = "");
 
   bool finished() const;
 
@@ -97,14 +86,14 @@ class Request : public RequestBase {
     auto& sequence = sequences()[0];
     // w/o first token buffer
     if (sequence->is_prefill_stage()) {
-      deadline_ms_ = ttft_slo_ms_;
+      deadline_ms_ = ttlt_slo_ms();
     } else {
       deadline_ms_ =
           std::min(static_cast<int32_t>(
                        sequence->time_to_first_token_latency_seconds() * 1000),
-                   ttft_slo_ms_) +
+                   ttlt_slo_ms()) +
           (sequence->num_tokens() - sequence->num_prompt_tokens()) *
-              tpot_slo_ms_;
+              tpot_slo_ms();
     }
     // w/ first token buffer
     // deadline_ms_ = ttft_slo_ms_ + (sequence->num_tokens() -
@@ -121,14 +110,28 @@ class Request : public RequestBase {
   }
   int32_t get_elapsed_time_ms() const { return elapsed_time_ms_; }
 
-  const bool offline() const { return offline_; }
-  const RequestPriority priority() const { return priority_; }
-  const int32_t ttlt_slo_ms() const { return ttlt_slo_ms_; }
-  const int32_t ttft_slo_ms() const { return ttft_slo_ms_; }
-  const int32_t tpot_slo_ms() const { return tpot_slo_ms_; }
-  const int32_t tpot_priority_weight() const { return tpot_priority_weight_; }
-  const int32_t ttft_priority_weight() const { return ttft_priority_weight_; }
-  const int32_t ttlt_priority_weight() const { return ttlt_priority_weight_; }
+  const bool offline() const { return state_.scheduler_param.offline; }
+  const RequestPriority priority() const {
+    return state_.scheduler_param.priority;
+  }
+  const int32_t ttlt_slo_ms() const {
+    return state_.scheduler_param.ttlt_slo_ms;
+  }
+  const int32_t ttft_slo_ms() const {
+    return state_.scheduler_param.ttft_slo_ms;
+  }
+  const int32_t tpot_slo_ms() const {
+    return state_.scheduler_param.tpot_slo_ms;
+  }
+  const int32_t tpot_priority_weight() const {
+    return state_.scheduler_param.tpot_priority_weight;
+  }
+  const int32_t ttft_priority_weight() const {
+    return state_.scheduler_param.ttft_priority_weight;
+  }
+  const int32_t ttlt_priority_weight() const {
+    return state_.scheduler_param.ttlt_priority_weight;
+  }
 
   void set_urgency(Urgency urgency) { urgency_ = urgency; }
   Urgency urgency() const { return urgency_; }
@@ -156,24 +159,6 @@ class Request : public RequestBase {
   int32_t elapsed_time_ms_ = 0;
 
   int32_t deadline_ms_ = 0;
-
-  bool offline_;
-
-  int32_t ttlt_slo_ms_;
-
-  int32_t ttft_slo_ms_;
-
-  int32_t tpot_slo_ms_;
-
-  int32_t tpot_priority_weight_;
-
-  int32_t ttft_priority_weight_;
-
-  int32_t ttlt_priority_weight_;
-
-  int32_t priority_weight_;
-
-  RequestPriority priority_;
 
   Urgency urgency_ = Urgency::NORMAL;
 

@@ -130,6 +130,10 @@ std::vector<std::shared_ptr<Request>> generate_request(
     std::vector<int32_t> prompt_token_ids;
     prompt_token_ids.resize(prompt_lens[i]);
     RequestSamplingParam sampling_param;
+    SchedulerParam scheduler_param;
+    scheduler_param.offline = offline_vec[i];
+    scheduler_param.priority = static_cast<RequestPriority>(priority_vec[i]);
+
     StoppingChecker stopping_checker;
     stopping_checker.set_max_generated_tokens(max_tokens[i]);
     stopping_checker.set_max_context_len(max_context_len);
@@ -138,6 +142,7 @@ std::vector<std::shared_ptr<Request>> generate_request(
     RequestState req_state("x",
                            prompt_token_ids,
                            sampling_param,
+                           scheduler_param,
                            stopping_checker,
                            prompt_lens[i] + 30000,
                            1,
@@ -150,15 +155,8 @@ std::vector<std::shared_ptr<Request>> generate_request(
                            nullptr,
                            nullptr);
 
-    auto request = std::make_shared<Request>(
-        "1",
-        "1",
-        "1",
-        std::move(req_state),
-        "1",
-        offline_vec[i],
-        0,
-        static_cast<RequestPriority>(priority_vec[i]));
+    auto request =
+        std::make_shared<Request>("1", "1", "1", std::move(req_state), "1");
     requests.emplace_back(request);
   }
 
