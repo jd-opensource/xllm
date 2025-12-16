@@ -219,6 +219,7 @@ message ForwardInput {
   uint64 batch_id = 38;
   int32 batch_forward_type = 39;
   MMData mm_data = 40;
+  repeated int32  cum_q_seq_lens = 41;
 }
 
  message BatchedForwardInputs {

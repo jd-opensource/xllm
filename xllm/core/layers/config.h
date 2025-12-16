@@ -67,6 +67,12 @@ REGISTER_NOT_IMPLEMENTED_CLASS(DeepseekV2DecoderLayerImpl);
 #endif
 
 #if defined(USE_NPU)
+#include "npu/npu_deepseek_v32_decoder_layer_impl.h"
+#else
+REGISTER_NOT_IMPLEMENTED_CLASS(DeepseekV32DecoderLayerImpl);
+#endif
+
+#if defined(USE_NPU)
 #include "npu/npu_llama_decoder_layer_impl.h"
 #else
 REGISTER_NOT_IMPLEMENTED_CLASS(LlamaDecoderLayerImpl);

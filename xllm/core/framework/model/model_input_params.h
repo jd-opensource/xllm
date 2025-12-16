@@ -113,6 +113,7 @@ struct ModelInputParams {
 
     params.kv_seq_lens = safe_to(kv_seq_lens, device, true);
     params.q_seq_lens = safe_to(q_seq_lens, device, true);
+    params.cum_q_seq_lens = safe_to(cum_q_seq_lens, device, true);
 
     params.new_cache_slots = safe_to(new_cache_slots, device, true);
     params.block_tables = safe_to(block_tables, device, true);
@@ -173,6 +174,7 @@ struct ModelInputParams {
               << batch_forward_type.to_string();
     print_tensor(kv_seq_lens, "ModelInputParams: kv_seq_lens", 4);
     print_tensor(q_seq_lens, "ModelInputParams: q_seq_lens", 4);
+    print_tensor(cum_q_seq_lens, "ModelInputParams: cum_q_seq_lens", 4);
     print_tensor(new_cache_slots, "ModelInputParams: new_cache_slots", 4);
     print_tensor(block_tables, "ModelInputParams: block_tables", 4);
     LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
@@ -211,6 +213,7 @@ struct ModelInputParams {
 
   torch::Tensor q_seq_lens;
   torch::Tensor kv_seq_lens;
+  torch::Tensor cum_q_seq_lens;
   std::vector<int> kv_seq_lens_vec;
   std::vector<int> q_seq_lens_vec;
 

@@ -43,6 +43,7 @@ static std::atomic<uint32_t> signal_received{0};
 static std::unordered_set<std::string> deepseek_like_model_set = {
     "deepseek_v2",
     "deepseek_v3",
+    "deepseek_v32",
     "deepseek_mtp",
     "kimi_k2",
 };

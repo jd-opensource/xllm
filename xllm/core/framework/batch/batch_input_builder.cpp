@@ -658,6 +658,20 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.q_max_seq_len = state_.q_max_seq_len;
   raw_forward_input.seq_lens = std::move(state_.seq_lens);
   raw_forward_input.q_seq_lens = std::move(state_.q_seq_lens);
+  torch::Tensor q_seq_len_tensor =
+      torch::from_blob(
+          raw_forward_input.q_seq_lens.data(),
+          {static_cast<int64_t>(raw_forward_input.q_seq_lens.size())},
+          torch::kInt32)
+          .clone();
+  torch::Tensor cum_tensor = torch::cumsum(q_seq_len_tensor, 0, torch::kInt32);
+  std::vector<int> cum_vec;
+  cum_vec.resize(cum_tensor.numel());
+  std::memcpy(cum_vec.data(),
+              cum_tensor.data_ptr<int>(),
+              cum_tensor.numel() * sizeof(int));
+  ;
+  raw_forward_input.cum_q_seq_lens = cum_vec;
   raw_forward_input.new_token_slot_ids = std::move(state_.new_token_slot_ids);
   raw_forward_input.block_tables_vec = std::move(state_.block_tables_vec);
   raw_forward_input.num_sequences = num_sequences_;

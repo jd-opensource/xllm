@@ -100,6 +100,11 @@ bool WorkerImpl::allocate_kv_cache(
     value_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
         2);
+    if (enable_lighting_indexer) {
+      index_cache = at_npu::native::npu_format_cast(
+          torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_)),
+          2);
+    }
 #else
     key_cache =
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
