@@ -22,8 +22,6 @@ limitations under the License.
 
 namespace xllm {
 
-std::map<int32_t, std::unique_ptr<AtbBuffer>> AtbWorkspace::buffer_map_;
-
 AtbWorkspace::AtbWorkspace(at::Device device) {
   int32_t device_id = device.index();
   auto it = buffer_map_.find(device_id);

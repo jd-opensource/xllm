@@ -43,6 +43,7 @@ ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
   void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
   context_->SetExecuteStream(stream);
   context_->SetAsyncTilingCopyStatus(true);
+  atb_workspace_ = std::make_shared<AtbWorkspace>(tensor_options.device());
 #endif
 }
 

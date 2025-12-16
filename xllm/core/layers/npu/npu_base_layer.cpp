@@ -52,7 +52,7 @@ BaseLayer::BaseLayer(const ModelContext& context)
   };
 
   context_ = const_cast<atb::Context*>(context.get_atb_context());
-  work_space_ = AtbWorkspace(device_);
+  work_space_ = context.get_atb_workspace();
 }
 
 atb::Status BaseLayer::execute_node(atb_speed::Model::Node& node,
@@ -104,7 +104,7 @@ atb::Status BaseLayer::execute_node(atb_speed::Model::Node& node,
   }
 
   if (node.workspaceSize > 0) {
-    node.workspace = work_space_.get_workspace_buffer(node.workspaceSize);
+    node.workspace = work_space_->get_workspace_buffer(node.workspaceSize);
   }
 
   run_task_func_(name_ + std::to_string(node_id), [=]() {

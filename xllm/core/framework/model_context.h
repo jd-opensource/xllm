@@ -17,6 +17,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include <acl/acl.h>
+
+#include "layers/npu/buffer/atb_workspace.h"
 #endif
 
 #include <memory>
@@ -57,6 +59,9 @@ class ModelContext {
 
 #if defined(USE_NPU)
   const atb::Context* get_atb_context() const { return context_; }
+  std::shared_ptr<AtbWorkspace> get_atb_workspace() const {
+    return atb_workspace_;
+  }
 #endif
 
   void set_image_embedding_mode(bool image_embedding_mode) {
@@ -72,6 +77,7 @@ class ModelContext {
 #if defined(USE_NPU)
   // used for npu atb
   atb::Context* context_;
+  std::shared_ptr<AtbWorkspace> atb_workspace_;
 #endif
 };
 

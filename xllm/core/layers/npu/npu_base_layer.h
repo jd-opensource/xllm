@@ -185,7 +185,7 @@ class BaseLayer : public torch::nn::Module {
   int32_t dp_rank_;
   int32_t dp_local_tp_rank_;
   atb::Context* context_;
-  AtbWorkspace work_space_;
+  std::shared_ptr<AtbWorkspace> work_space_ = nullptr;
   std::vector<atb::Tensor> atb_weight_tensors_;
   bool graph_captured_{false};
 };

@@ -43,7 +43,7 @@ class AtbWorkspace {
   void* get_workspace_buffer(uint64_t bufferSize);
 
  private:
-  static std::map<int32_t, std::unique_ptr<AtbBuffer>> buffer_map_;
+  std::map<int32_t, std::unique_ptr<AtbBuffer>> buffer_map_;
 };
 
 }  // namespace xllm
