@@ -59,7 +59,7 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
   auto* host_blocks = sequence->host_kv_state().mutable_kv_blocks();
 
-  if (blocks->size() == 0 || host_blocks->size() >= blocks->size()) {
+  if (blocks->size() == 0 || host_blocks->size() > blocks->size()) {
     return;
   }
 
@@ -148,12 +148,14 @@ void HierarchyBlockManagerPool::prefetch_from_storage(
             prefill_sequence->tokens());
     prefill_sequence->add_shared_host_kv_blocks(std::move(shared_blocks));
 
-    const size_t num_blocks = prefill_sequence->host_kv_state().num_kv_blocks();
     // round down to the nearest block number
-    const size_t block_size = options_.block_size();
+    size_t shared_blocks_num =
+        prefill_sequence->host_kv_state().shared_kv_blocks_num();
     const size_t num_additional_blocks =
-        prefill_sequence->num_tokens() / block_size - num_blocks;
-    if (num_additional_blocks <= 0) {
+        (prefill_sequence->num_tokens() + options_.block_size() - 1) /
+            options_.block_size() -
+        shared_blocks_num;
+    if (num_additional_blocks <= 1) {
       return;
     }
 
@@ -165,20 +167,19 @@ void HierarchyBlockManagerPool::prefetch_from_storage(
     prefill_sequence->host_kv_state().add_kv_blocks(host_blocks);
     PrefixCache::compute_hash_keys(
         prefill_sequence->tokens(),
-        *prefill_sequence->host_kv_state().mutable_kv_blocks());
+        *prefill_sequence->host_kv_state().mutable_kv_blocks(),
+        shared_blocks_num);
 
-    if (num_additional_blocks > 0) {
+    if (num_additional_blocks > 1) {
       const auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
       std::vector<BlockTransferInfo> block_transfer_infos;
       block_transfer_infos.reserve(num_additional_blocks);
-      for (int i = host_blocks.size() - num_additional_blocks;
-           i < host_blocks.size();
-           i++) {
-        block_transfer_infos.emplace_back(
-            BlockTransferInfo(-1,
-                              host_blocks[i].id(),
-                              host_blocks[i].get_immutable_hash_value(),
-                              TransferType::G2H));
+      for (int i = 0; i < num_additional_blocks - 1; i++) {
+        block_transfer_infos.emplace_back(BlockTransferInfo(
+            -1,
+            host_blocks[shared_blocks_num + i].id(),
+            host_blocks[shared_blocks_num + i].get_immutable_hash_value(),
+            TransferType::G2H));
       }
 
       engine_->prefetch_from_storage(prefill_sequence->dp_rank(),
@@ -198,8 +199,21 @@ bool HierarchyBlockManagerPool::update_prefetch_result(
 
   bool prefetch_result = true;
   for (auto& prefill_sequence : request->sequences()) {
-    prefetch_result &= prefill_sequence->update_prefetch_result(timeout);
+    uint32_t success_cnt = 0;
+    prefetch_result &=
+        prefill_sequence->update_prefetch_result(timeout, success_cnt);
+
+    if (prefetch_result && success_cnt > 0) {
+      int32_t dp_rank = BlockManagerPool::get_dp_rank(prefill_sequence.get());
+      auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
+      auto cached_blocks =
+          prefill_sequence->host_kv_state().shared_kv_blocks_num();
+
+      host_block_managers_[dp_rank]->cache(
+          host_blocks.slice(cached_blocks - success_cnt, cached_blocks));
+    }
   }
+
   return prefetch_result;
 }
 

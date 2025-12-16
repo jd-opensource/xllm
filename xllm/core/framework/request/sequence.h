@@ -245,14 +245,14 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
-  std::shared_ptr<std::atomic<bool>> get_termination_flag() {
+  std::shared_ptr<std::atomic<int32_t>> get_termination_flag() {
     return termination_flag_;
   }
   std::vector<std::shared_ptr<std::atomic<uint32_t>>>* get_prefetch_results() {
     return &prefetch_results_;
   }
 
-  bool update_prefetch_result(uint32_t timeout);
+  bool update_prefetch_result(uint32_t timeout, uint32_t& success_cnt);
 
   void reset();
 
@@ -364,7 +364,7 @@ class Sequence final {
   std::atomic<bool> cancelled_{false};
 
   // kvcache store copy async result
-  std::shared_ptr<std::atomic<bool>> termination_flag_;
+  std::shared_ptr<std::atomic<int32_t>> termination_flag_;
   std::vector<std::shared_ptr<std::atomic<uint32_t>>> prefetch_results_;
 
   Timer timer_;

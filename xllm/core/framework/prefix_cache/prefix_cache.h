@@ -73,6 +73,7 @@ class PrefixCache {
                         std::vector<Block>& blocks);
 
   // insert the blocks with hash key into the prefix tree
+  virtual size_t insert(Slice<Block>& blocks);
   virtual size_t insert(const std::vector<Block>& blocks);
 
   // evict blocks hold by the prefix cache
@@ -97,15 +98,15 @@ class PrefixCache {
   virtual KvCacheEvent* get_upload_kvcache_events() { return nullptr; }
 
   static uint32_t compute_hash_keys(const Slice<int32_t>& token_ids,
-                                    std::vector<Block>& blocks);
+                                    std::vector<Block>& blocks,
+                                    const size_t cached_blocks = 0);
 
  protected:
   size_t insert(const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,
                 std::vector<Murmur3Key>* insert_keys);
 
-  size_t insert(const std::vector<Block>& blocks,
-                std::vector<Murmur3Key>* insert_keys);
+  size_t insert(Slice<Block>& blocks, std::vector<Murmur3Key>* insert_keys);
 
   size_t evict(size_t n_blocks, std::vector<Murmur3Key>* evict_keys);
 

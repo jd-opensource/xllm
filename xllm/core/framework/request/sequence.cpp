@@ -45,7 +45,7 @@ Sequence::Sequence(size_t index,
       latest_generate_time_(absl::Now()),
       sequence_params_(seq_params),
       decoder_(std::move(decoder)),
-      termination_flag_(std::make_shared<std::atomic<bool>>(false)) {
+      termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
   CHECK(!prompt_token_ids.empty()) << "empty prompt token ids";
   auto capacity = sequence_params_.seq_capacity;
   CHECK_GT(capacity, prompt_token_ids.size()) << "capacity too small";
@@ -95,7 +95,7 @@ Sequence::Sequence(const Sequence& other)
       cur_generated_token_idx_(other.cur_generated_token_idx_),
       first_token_(other.first_token_),
       is_pre_scheduled_step_prefill_(other.is_pre_scheduled_step_prefill_),
-      termination_flag_(std::make_shared<std::atomic<bool>>(false)) {
+      termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
   logprob_state_ = std::make_unique<LogprobState>(*other.logprob_state_);
 }
 
@@ -459,12 +459,12 @@ Slice<int32_t> Sequence::get_generated_tokens() const {
   return {tokens_.data(), 0};
 }
 
-bool Sequence::update_prefetch_result(uint32_t timeout) {
+bool Sequence::update_prefetch_result(uint32_t timeout, uint32_t& success_cnt) {
   if (prefetch_results_.empty()) {
     return true;
   }
 
-  if (timeout != 0 && !termination_flag_->load(std::memory_order_acquire)) {
+  if (timeout != 0 && termination_flag_->load(std::memory_order_acquire) > 0) {
     if (!is_timeout_set_) {
       timer_.reset();
       is_timeout_set_ = true;
@@ -476,14 +476,15 @@ bool Sequence::update_prefetch_result(uint32_t timeout) {
     }
   }
 
-  termination_flag_->store(true, std::memory_order_release);
-  uint32_t success_cnt = host_kv_state_.kv_blocks().size();
+  termination_flag_->store(0, std::memory_order_release);
+  success_cnt = host_kv_state_.kv_blocks().size();
   for (auto& cnt : prefetch_results_) {
     success_cnt = std::min(success_cnt, cnt->load());
   }
   if (success_cnt > 0) {
     host_kv_state_.incr_kv_cache_tokens_num(
         success_cnt * host_kv_state_.kv_blocks()[0].size());
+    host_kv_state_.incr_shared_kv_blocks_num(success_cnt);
   }
   prefetch_results_.clear();
   return true;

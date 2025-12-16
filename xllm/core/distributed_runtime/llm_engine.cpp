@@ -518,9 +518,10 @@ void LLMEngine::transfer_kv_blocks(
 void LLMEngine::prefetch_from_storage(
     const uint32_t dp_rank,
     const std::vector<BlockTransferInfo>& block_transfer_info,
-    std::shared_ptr<std::atomic<bool>> flag,
+    std::shared_ptr<std::atomic<int32_t>> flag,
     std::vector<std::shared_ptr<std::atomic<uint32_t>>>* prefetch_results) {
   prefetch_results->reserve(dp_local_tp_size_);
+  flag->store(dp_local_tp_size_, std::memory_order_relaxed);
   for (auto tp_rank = 0; tp_rank < dp_local_tp_size_; ++tp_rank) {
     prefetch_results->emplace_back(std::make_shared<std::atomic<uint32_t>>(0));
     worker_clients_[tp_rank + dp_local_tp_size_ * dp_rank]

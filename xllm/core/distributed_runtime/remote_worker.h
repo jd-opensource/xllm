@@ -121,7 +121,7 @@ class RemoteWorker : public WorkerClient {
 
   virtual void prefetch_from_storage(
       const std::vector<BlockTransferInfo>& block_transfer_info,
-      std::shared_ptr<std::atomic<bool>> flag,
+      std::shared_ptr<std::atomic<int32_t>> flag,
       std::shared_ptr<std::atomic<uint32_t>> success_cnt) override;
 
   // Run the model and return the output.

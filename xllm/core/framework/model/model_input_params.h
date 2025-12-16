@@ -77,6 +77,7 @@ struct BlockTransferInfo {
     dst_block_id = other.dst_block_id;
     transfer_type = other.transfer_type;
     memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
+    return *this;
   }
 
   BlockTransferInfo& operator=(BlockTransferInfo&& other) {
@@ -87,6 +88,7 @@ struct BlockTransferInfo {
 
     other.src_block_id = -1;
     other.dst_block_id = -1;
+    return *this;
   }
 
   std::string to_string() const {

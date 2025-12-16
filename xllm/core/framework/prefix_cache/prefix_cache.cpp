@@ -125,6 +125,11 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
 }
 
 size_t PrefixCache::insert(const std::vector<Block>& blocks) {
+  Slice<Block> slice(blocks);
+  return insert(slice);
+}
+
+size_t PrefixCache::insert(Slice<Block>& blocks) {
   std::vector<Murmur3Key> insert_keys;
   return insert(blocks, &insert_keys);
 }
@@ -197,7 +202,7 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
   return n_tokens;
 }
 
-size_t PrefixCache::insert(const std::vector<Block>& blocks,
+size_t PrefixCache::insert(Slice<Block>& blocks,
                            std::vector<Murmur3Key>* insert_keys) {
   const int64_t now = absl::ToUnixMicros(absl::Now());
   DNodeList node_list;
@@ -279,7 +284,8 @@ size_t PrefixCache::evict(size_t n_blocks,
 }
 
 uint32_t PrefixCache::compute_hash_keys(const Slice<int32_t>& token_ids,
-                                        std::vector<Block>& blocks) {
+                                        std::vector<Block>& blocks,
+                                        const size_t cached_blocks) {
   if (blocks.size() == 0) {
     return 0;
   }
@@ -289,8 +295,10 @@ uint32_t PrefixCache::compute_hash_keys(const Slice<int32_t>& token_ids,
     LOG(ERROR) << "token ids do not cover the allocate block.";
     return 0;
   }
+  size_t full_block_size =
+      std::min(token_ids.size() / block_size, blocks.size());
 
-  for (size_t i = 0; i < token_ids.size() / block_size; i++) {
+  for (size_t i = cached_blocks; i < full_block_size; i++) {
     if (i == 0) {
       murmur_hash3(nullptr,
                    token_ids.slice(i * block_size, (i + 1) * block_size),
@@ -302,7 +310,7 @@ uint32_t PrefixCache::compute_hash_keys(const Slice<int32_t>& token_ids,
     }
   }
 
-  return token_ids.size() / block_size;
+  return full_block_size;
 }
 
 }  // namespace xllm
