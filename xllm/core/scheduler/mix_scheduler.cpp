@@ -73,9 +73,9 @@ void MixScheduler::get_latency_budget_and_request_order(
     }
   }
   // determine latency budget
-  // int32_t yuzhi = static_cast<int32_t>(4 * constant_overhead);
-  int32_t yuzhi = static_cast<int32_t>(0.65 * min_tpot);
-  latency_budget = std::max(min_remaining_time, yuzhi);
+  // int32_t threshold = static_cast<int32_t>(4 * constant_overhead);
+  int32_t threshold = static_cast<int32_t>(0.65 * min_tpot);
+  latency_budget = std::max(min_remaining_time, threshold);
 
   for (auto& request : running_queue) {  // determine urgency
     auto& sequence = request->sequences()[0];

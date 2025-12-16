@@ -49,6 +49,17 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
   sampling_param.top_logprobs = req.top_logprobs();
   sampling_param.is_embeddings = req.is_embeddings();
 
+  SchedulerParam scheduler_param;
+  scheduler_param.offline = req.offline();
+  scheduler_param.priority = static_cast<xllm::RequestPriority>(req.priority());
+  scheduler_param.ttft_slo_ms = req.ttft_slo_ms();
+  scheduler_param.tpot_slo_ms = req.tpot_slo_ms();
+  scheduler_param.ttlt_slo_ms = req.ttlt_slo_ms();
+  scheduler_param.tpot_priority_weight = req.tpot_priority_weight();
+  scheduler_param.ttft_priority_weight = req.ttft_priority_weight();
+  scheduler_param.ttlt_priority_weight = req.ttlt_priority_weight();
+  scheduler_param.priority_weight = req.priority_weight();
+
   std::unordered_set<int32_t> stop_tokens;
   for (auto& stop_token_id : req.stop_token_ids()) {
     stop_tokens.insert(stop_token_id);
@@ -78,6 +89,7 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
   RequestState req_state(std::move(prompt),
                          std::move(prompt_tokens),
                          std::move(sampling_param),
+                         std::move(scheduler_param),
                          std::move(stopping_checker),
                          req.seq_capacity(),
                          req.n(),
@@ -90,21 +102,11 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
                          output_callback,
                          batch_output_callback);
 
-  auto new_request = std::make_shared<Request>(
-      req.req_id(),
-      req.x_request_id(),
-      req.x_request_time(),
-      std::move(req_state),
-      req.service_req_id(),
-      req.offline(),
-      req.ttlt_slo_ms(),
-      static_cast<xllm::RequestPriority>(req.priority()),
-      req.ttft_slo_ms(),
-      req.tpot_slo_ms(),
-      req.tpot_priority_weight(),
-      req.ttft_priority_weight(),
-      req.ttlt_priority_weight(),
-      req.priority_weight());
+  auto new_request = std::make_shared<Request>(req.req_id(),
+                                               req.x_request_id(),
+                                               req.x_request_time(),
+                                               std::move(req_state),
+                                               req.service_req_id());
 
   // add one sequence, rest will be added by scheduler
   return new_request;

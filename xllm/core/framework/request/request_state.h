@@ -37,6 +37,20 @@ using OutputsFunc =
 
 class Call;
 
+enum class RequestPriority { DEFAULT = 0, HIGH = 1, NORMAL = 2, LOW = 3 };
+
+struct SchedulerParam {
+  bool offline = false;
+  int32_t ttlt_slo_ms = 0;
+  int32_t ttft_slo_ms = 0;
+  int32_t tpot_slo_ms = 0;
+  int32_t tpot_priority_weight = 1;
+  int32_t ttft_priority_weight = 1;
+  int32_t ttlt_priority_weight = 1;
+  int32_t priority_weight = 1;
+  RequestPriority priority = RequestPriority::NORMAL;
+};
+
 struct RequestState final {
  public:
   RequestState() {}
@@ -44,6 +58,7 @@ struct RequestState final {
   RequestState(const std::string& prompt,
                const std::vector<int32_t>& prompt_tokens,
                const RequestSamplingParam& sampling_param,
+               const SchedulerParam& scheduler_param,
                const StoppingChecker& stopping_checker,
                size_t seq_capacity,
                size_t n,
@@ -98,6 +113,9 @@ struct RequestState final {
  public:
   // sampling parameters
   RequestSamplingParam sampling_param;
+
+  // scheduling parameters
+  SchedulerParam scheduler_param;
 
   // stopping criteria
   StoppingChecker stopping_checker;
