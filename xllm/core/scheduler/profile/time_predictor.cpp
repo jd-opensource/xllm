@@ -170,7 +170,7 @@ double TimePredictor::get_constant_overhead() {
 
 int32_t TimePredictor::get_quadratic_root(int32_t prefix_length,
                                           double budget) {
-  CHECK(is_prefill_);
+  CHECK(is_prefill_) << "This function is only for prefill.";
   double a = 0.0;
   double b = 0.0;
   double c = 0.0;
