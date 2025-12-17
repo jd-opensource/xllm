@@ -346,13 +346,16 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   SchedulerParam scheduler_param;
   scheduler_param.offline = sp.offline;
   scheduler_param.priority = sp.priority;
-  scheduler_param.ttft_slo_ms = sp.ttft_slo_ms;
-  scheduler_param.tpot_slo_ms = sp.tpot_slo_ms;
-  scheduler_param.ttlt_slo_ms = sp.ttlt_slo_ms;
-  scheduler_param.tpot_priority_weight = sp.tpot_priority_weight;
-  scheduler_param.ttft_priority_weight = sp.ttft_priority_weight;
-  scheduler_param.ttlt_priority_weight = sp.ttlt_priority_weight;
-  scheduler_param.priority_weight = sp.priority_weight;
+  if (!sp.offline){
+    scheduler_param.ttft_slo_ms = sp.ttft_slo_ms;
+    scheduler_param.tpot_slo_ms = sp.tpot_slo_ms;
+    scheduler_param.ttlt_slo_ms = sp.ttlt_slo_ms;
+    scheduler_param.tpot_priority_weight = sp.tpot_priority_weight;
+    scheduler_param.ttft_priority_weight = sp.ttft_priority_weight;
+    scheduler_param.ttlt_priority_weight = sp.ttlt_priority_weight;
+    scheduler_param.priority_weight = sp.priority_weight;
+  }
+  
 
   std::unordered_set<int32_t> stop_tokens;
   if (sp.stop_token_ids.has_value()) {

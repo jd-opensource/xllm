@@ -52,13 +52,15 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
   SchedulerParam scheduler_param;
   scheduler_param.offline = req.offline();
   scheduler_param.priority = static_cast<xllm::RequestPriority>(req.priority());
-  scheduler_param.ttft_slo_ms = req.ttft_slo_ms();
-  scheduler_param.tpot_slo_ms = req.tpot_slo_ms();
-  scheduler_param.ttlt_slo_ms = req.ttlt_slo_ms();
-  scheduler_param.tpot_priority_weight = req.tpot_priority_weight();
-  scheduler_param.ttft_priority_weight = req.ttft_priority_weight();
-  scheduler_param.ttlt_priority_weight = req.ttlt_priority_weight();
-  scheduler_param.priority_weight = req.priority_weight();
+  if (!req.offline()){
+    scheduler_param.ttft_slo_ms = req.ttft_slo_ms();
+    scheduler_param.tpot_slo_ms = req.tpot_slo_ms();
+    scheduler_param.ttlt_slo_ms = req.ttlt_slo_ms();
+    scheduler_param.tpot_priority_weight = req.tpot_priority_weight();
+    scheduler_param.ttft_priority_weight = req.ttft_priority_weight();
+    scheduler_param.ttlt_priority_weight = req.ttlt_priority_weight();
+    scheduler_param.priority_weight = req.priority_weight();
+  }
 
   std::unordered_set<int32_t> stop_tokens;
   for (auto& stop_token_id : req.stop_token_ids()) {

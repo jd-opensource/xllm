@@ -22,6 +22,7 @@ limitations under the License.
 #include <deque>
 #include <string>
 #include <vector>
+#include <limits>
 
 #include "core/framework/sampling/sampling_params.h"
 #include "mm_data.h"
@@ -41,13 +42,13 @@ enum class RequestPriority { DEFAULT = 0, HIGH = 1, NORMAL = 2, LOW = 3 };
 
 struct SchedulerParam {
   bool offline = false;
-  int32_t ttlt_slo_ms = 0;
-  int32_t ttft_slo_ms = 0;
-  int32_t tpot_slo_ms = 0;
-  int32_t tpot_priority_weight = 1;
-  int32_t ttft_priority_weight = 1;
-  int32_t ttlt_priority_weight = 1;
-  int32_t priority_weight = 1;
+  int32_t ttlt_slo_ms = std::numeric_limits<int32_t>::max();
+  int32_t ttft_slo_ms = std::numeric_limits<int32_t>::max();
+  int32_t tpot_slo_ms = std::numeric_limits<int32_t>::max();
+  int32_t tpot_priority_weight = 0;
+  int32_t ttft_priority_weight = 0;
+  int32_t ttlt_priority_weight = 0;
+  int32_t priority_weight = 0;
   RequestPriority priority = RequestPriority::NORMAL;
 };
 
