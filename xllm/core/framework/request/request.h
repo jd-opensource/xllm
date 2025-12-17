@@ -114,6 +114,7 @@ class Request : public RequestBase {
   const RequestPriority priority() const {
     return state_.scheduler_param.priority;
   }
+  // time to last token (end-to-end latency)
   const int32_t ttlt_slo_ms() const {
     return state_.scheduler_param.ttlt_slo_ms;
   }
