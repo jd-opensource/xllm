@@ -19,8 +19,7 @@ namespace xllm {
 namespace layer {
 
 DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
-    const ModelContext& context,
-    int32_t layer_id)
+    const ModelContext& context)
     : parallel_args_(context.get_parallel_args()) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
@@ -46,7 +45,7 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
 
   // Initialize mlp
   auto first_k_dense_replace = model_args.first_k_dense_replace();
-  if (layer_id >= first_k_dense_replace) {
+  if (context.layer_id() >= first_k_dense_replace) {
     moe_mlp_ = register_module("mlp",
                                FusedMoE(model_args.n_routed_experts(),
                                         model_args.num_experts_per_tok(),

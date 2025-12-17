@@ -54,7 +54,9 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto block = QWen3DecoderLayer(context);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = QWen3DecoderLayer(curr_context);
       layers_.push_back(block);
       blocks_->push_back(block);
     }

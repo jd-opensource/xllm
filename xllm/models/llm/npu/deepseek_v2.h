@@ -46,10 +46,10 @@ using ISlice = torch::indexing::Slice;
 
 class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
-  DeepseekV2DecoderLayerImpl(const ModelContext& context, const int32_t i) {
+  DeepseekV2DecoderLayerImpl(const ModelContext& context) {
     // register submodules
     decoder_layer_ = register_module("decoder_layer",
-                                     layer::DeepseekV2DecoderLayer(context, i));
+                                     layer::DeepseekV2DecoderLayer(context));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -121,7 +121,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                                       /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto block = DeepseekV2DecoderLayer(context, i);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = DeepseekV2DecoderLayer(curr_context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
     }

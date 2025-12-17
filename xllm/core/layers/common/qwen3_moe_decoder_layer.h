@@ -34,8 +34,7 @@ namespace layer {
 
 class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
  public:
-  explicit Qwen3MoeDecoderLayerImpl(const ModelContext& context,
-                                    int32_t layer_id);
+  explicit Qwen3MoeDecoderLayerImpl(const ModelContext& context);
 
   ~Qwen3MoeDecoderLayerImpl() {};
 

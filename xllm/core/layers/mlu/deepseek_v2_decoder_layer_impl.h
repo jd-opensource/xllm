@@ -36,8 +36,7 @@ namespace layer {
 
 class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
-  explicit DeepseekV2DecoderLayerImpl(const ModelContext& context,
-                                      int32_t layer_id);
+  explicit DeepseekV2DecoderLayerImpl(const ModelContext& context);
 
   ~DeepseekV2DecoderLayerImpl() {};
 

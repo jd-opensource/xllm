@@ -704,7 +704,9 @@ class DownEncoderBlock2DImpl : public torch::nn::Module {
     // initialize resnet blocks
     for (int64_t i = 0; i < num_layers; ++i) {
       const int64_t current_in_channels = (i == 0) ? in_channels : out_channels;
-      auto block = ResnetBlock2D(context,
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = ResnetBlock2D(curr_context,
                                  current_in_channels,  // in channels
                                  out_channels,
                                  "default");

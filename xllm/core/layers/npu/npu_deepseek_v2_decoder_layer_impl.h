@@ -106,8 +106,7 @@ class ExpertBuffer {
 
 class DeepseekV2DecoderLayerImpl : public BaseLayer {
  public:
-  explicit DeepseekV2DecoderLayerImpl(const ModelContext& context,
-                                      const int32_t layer_id);
+  explicit DeepseekV2DecoderLayerImpl(const ModelContext& context);
 
   ~DeepseekV2DecoderLayerImpl() {};
 

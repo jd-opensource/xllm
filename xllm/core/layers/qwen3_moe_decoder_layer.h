@@ -26,9 +26,9 @@ class Qwen3MoeDecoderLayer
   using torch::nn::ModuleHolder<Qwen3MoeDecoderLayerImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = Qwen3MoeDecoderLayerImpl;
 
-  Qwen3MoeDecoderLayer(const ModelContext& context, int32_t layer_id)
+  Qwen3MoeDecoderLayer(const ModelContext& context)
       : Qwen3MoeDecoderLayer(
-            std::make_shared<Qwen3MoeDecoderLayerImpl>(context, layer_id)) {}
+            std::make_shared<Qwen3MoeDecoderLayerImpl>(context)) {}
 };
 
 }  // namespace layer

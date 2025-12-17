@@ -28,9 +28,8 @@ class DeepseekV2DecoderLayer
   using torch::nn::ModuleHolder<DeepseekV2DecoderLayerImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = DeepseekV2DecoderLayerImpl;
 
-  DeepseekV2DecoderLayer(const ModelContext& context, const int32_t layer_id)
-      : ModuleHolder(
-            std::make_shared<DeepseekV2DecoderLayerImpl>(context, layer_id)) {}
+  DeepseekV2DecoderLayer(const ModelContext& context)
+      : ModuleHolder(std::make_shared<DeepseekV2DecoderLayerImpl>(context)) {}
 };
 
 }  // namespace layer

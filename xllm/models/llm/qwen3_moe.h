@@ -31,10 +31,10 @@ using ISlice = torch::indexing::Slice;
 
 class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
  public:
-  Qwen3MoeDecoderLayerImpl(const ModelContext& context, const int32_t i) {
+  Qwen3MoeDecoderLayerImpl(const ModelContext& context) {
     // register submodules
-    decoder_layer_ = register_module("decoder_layer",
-                                     layer::Qwen3MoeDecoderLayer(context, i));
+    decoder_layer_ =
+        register_module("decoder_layer", layer::Qwen3MoeDecoderLayer(context));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -121,7 +121,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     mapping_data_ = parallel_args.mapping_data();
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto block = Qwen3MoeDecoderLayer(context, i);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto block = Qwen3MoeDecoderLayer(curr_context);
       layers_.push_back(block);
       blocks_->push_back(block);
     }

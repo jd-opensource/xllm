@@ -31,8 +31,7 @@ namespace xllm {
 
 class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
  public:
-  DeepseekMultiTokenPredictorLayerImpl(const ModelContext& context,
-                                       const int32_t layer_index) {
+  DeepseekMultiTokenPredictorLayerImpl(const ModelContext& context) {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
@@ -48,8 +47,8 @@ class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
                                                 /*bias=*/false,
                                                 /*QuantArgs=*/QuantArgs(),
                                                 options));
-    mtp_block_ = register_module(
-        "mtp_block", layer::DeepseekV2DecoderLayer(context, layer_index));
+    mtp_block_ =
+        register_module("mtp_block", layer::DeepseekV2DecoderLayer(context));
   }
 
   torch::Tensor forward(torch::Tensor embed,
@@ -120,7 +119,9 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
 
     // create mtp layers
     for (int32_t i = mtp_start_layer_idx_; i < mtp_end_layer_idx_; ++i) {
-      auto mtp_layer = DeepseekMultiTokenPredictorLayer(context, i);
+      auto curr_context = context;
+      curr_context.set_layer_id(i);
+      auto mtp_layer = DeepseekMultiTokenPredictorLayer(curr_context);
       mtp_layers_.push_back(mtp_layer);
       blocks_->push_back(mtp_layer);
     }
