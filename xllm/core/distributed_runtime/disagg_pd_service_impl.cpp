@@ -52,7 +52,7 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
   SchedulerParam scheduler_param;
   scheduler_param.offline = req.offline();
   scheduler_param.priority = static_cast<xllm::RequestPriority>(req.priority());
-  if (!req.offline()){
+  if (!req.offline()) {
     scheduler_param.ttft_slo_ms = req.ttft_slo_ms();
     scheduler_param.tpot_slo_ms = req.tpot_slo_ms();
     scheduler_param.ttlt_slo_ms = req.ttlt_slo_ms();
