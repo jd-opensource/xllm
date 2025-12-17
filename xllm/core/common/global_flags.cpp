@@ -272,13 +272,16 @@ DEFINE_string(instance_role,
               "DEFAULT",
               "The role of instance(e.g. DEFAULT, PREFILL, DECODE, MIX).");
 
-DEFINE_string(kv_cache_transfer_type,
-              "LlmDataDist",
-              "The type of kv cache transfer(e.g. LlmDataDist, HCCL).");
+DEFINE_string(
+    kv_cache_transfer_type,
+    "LlmDataDist",
+    "The type of kv cache transfer(e.g. LlmDataDist, Mooncake, HCCL).");
 
 DEFINE_string(kv_cache_transfer_mode,
               "PUSH",
               "The mode of kv cache transfer(e.g. PUSH, PULL).");
+
+DEFINE_int32(npu_phy_id, -1, "npu phy id");
 
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 

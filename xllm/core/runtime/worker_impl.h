@@ -28,6 +28,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "framework/kv_cache/hccl_kv_cache_transfer.h"
 #include "framework/kv_cache/llm_data_dist_transfer.h"
+#include "framework/kv_cache/mooncake_te_transfer.h"
 #endif
 #include "framework/eplb/eplb_executor.h"
 #include "framework/kv_cache/hierarchy_kv_cache_transfer.h"

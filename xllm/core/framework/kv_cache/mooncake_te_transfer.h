@@ -15,32 +15,28 @@ limitations under the License.
 
 #pragma once
 
-#include <llm_datadist/llm_datadist.h>
-
 #include "kv_cache_transfer.h"
+#include "mooncake_te.h"
 
 namespace xllm {
 
-using namespace llm_datadist;
-
-class LlmDataDistTransfer : public KVCacheTransfer {
+class MooncakeTeTransfer : public KVCacheTransfer {
  public:
-  LlmDataDistTransfer(const std::string& device_ip,
-                      const uint16_t listen_port,
-                      const InstanceRole& instance_role);
-  virtual ~LlmDataDistTransfer() = default;
+  MooncakeTeTransfer(const int32_t device_id, const int32_t listen_port);
+  virtual ~MooncakeTeTransfer() = default;
 
   virtual void initialize(int32_t device_id) override;
-
-  virtual void finalize() override;
 
   virtual void allocate_kv_cache(
       std::vector<xllm::KVCache>& kv_caches,
       const int64_t num_layers,
       const std::vector<std::vector<int64_t>>& kv_cache_shape,
-      const torch::ScalarType dtype) override;
+      torch::ScalarType dtype) override;
 
-  virtual void free_kv_cache() override;
+  virtual void register_kv_cache(
+      std::vector<xllm::KVCache>& kv_caches,
+      const std::vector<std::vector<int64_t>>& kv_cache_shape,
+      const torch::ScalarType dtype) override;
 
   virtual void get_cache_info(uint64_t& cluster_id,
                               std::string& addr,
@@ -70,22 +66,14 @@ class LlmDataDistTransfer : public KVCacheTransfer {
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
       bool is_spec_draft) override;
 
-  ClusterInfo create_cluster_info(const uint64_t& cluster_id,
-                                  const std::string& remote_ip,
-                                  const uint16_t& remote_port);
-
- protected:
+ private:
+  std::string addr_;
   uint64_t cluster_id_;
-  std::string host_ip_;
-  std::string device_ip_;
-  uint16_t listen_port_;
+  int listen_port_;
+  int32_t device_id_;
   int64_t num_layers_;
-  bool enable_mla_ = false;
-  std::unordered_set<uint64_t> linked_cluster_ids;
 
-  std::shared_ptr<LlmDataDist> llm_data_dist_;
-  Cache k_cache_;
-  Cache v_cache_;
+  std::unique_ptr<MooncakeTe> mooncake_te_;
 };
 
 }  // namespace xllm

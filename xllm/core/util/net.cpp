@@ -97,6 +97,22 @@ uint64_t convert_ip_port_to_uint64(const std::string& ip, uint16_t port) {
   uint32_t ip_network = ip_addr.s_addr;
   return (static_cast<uint64_t>(ip_network) << 32) | port;
 }
+
+std::pair<std::string, uint16_t> convert_uint64_to_ip_port(uint64_t input) {
+  uint16_t port = static_cast<uint16_t>(input & 0xFFFF);
+  uint32_t ip_network = static_cast<uint32_t>(input >> 32);
+
+  in_addr ip_addr;
+  ip_addr.s_addr = ip_network;
+
+  char ip_str[INET_ADDRSTRLEN];
+  const char* result = inet_ntop(AF_INET, &ip_addr, ip_str, INET_ADDRSTRLEN);
+  CHECK(result != nullptr) << "Failed to convert IP address from uint64: "
+                           << input;
+
+  return {std::string(ip_str), port};
+}
+
 // input example: 127.0.0.1:18889
 std::string extract_ip(const std::string& input) {
   std::istringstream stream(input);

@@ -605,12 +605,16 @@ def apply_patch_safely(patch_file_path, repo_path):
         print(f"  cd {repo_path} && git apply {patch_file_path}")
         return False
 
-def pre_build():
+def pre_build(device):
     if os.path.exists("third_party/custom_patch"):
         script_path = os.path.dirname(os.path.abspath(__file__))
         mooncake_repo_path = os.path.join(script_path, "third_party/Mooncake")
-        if not apply_patch_safely("../custom_patch/Mooncake.patch", mooncake_repo_path):
-            exit(0)
+        if device == "a2" or device == "a3":
+            if not apply_patch_safely("../custom_patch/Mooncake_ascend.patch", mooncake_repo_path):
+                exit(0)
+        else:
+            if not apply_patch_safely("../custom_patch/Mooncake.patch", mooncake_repo_path):
+                exit(0)
         cpprestsdk_repo_path = os.path.join(script_path, "third_party/cpprestsdk")
         if not apply_patch_safely("../custom_patch/cpprestsdk.patch", cpprestsdk_repo_path):
             exit(0)
@@ -687,7 +691,7 @@ if __name__ == "__main__":
     print(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
     
     if not config['dry_run']:
-        pre_build()
+        pre_build(device)
 
     install_kernels = config['install_xllm_kernels']
     generate_so = config['generate_so']

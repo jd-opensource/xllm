@@ -46,3 +46,4 @@ cc_test(
     GTest::gtest_main
 )
 
+target_link_libraries(eplb_policy_test PRIVATE $<$<BOOL:${USE_NPU}>:c_sec>)

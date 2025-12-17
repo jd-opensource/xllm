@@ -160,20 +160,31 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
   int32_t device_id = device_.index();
+  // create a KVCache for each layer
+  const int64_t num_layers = context_.get_model_args().n_layers();
+
   if (FLAGS_kv_cache_transfer_type == "LlmDataDist") {
     kv_cache_transfer_ =
         std::make_shared<LlmDataDistTransfer>(options_.device_ip().value(),
                                               options_.transfer_listen_port(),
                                               options_.instance_role());
 
-    // create a KVCache for each layer
-    const int64_t num_layers = context_.get_model_args().n_layers();
     kv_caches_.reserve(num_layers);
 
     int32_t device_id = device_.index();
     kv_cache_transfer_->initialize(device_id);
     kv_cache_transfer_->allocate_kv_cache(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
+  } else if (FLAGS_kv_cache_transfer_type == "Mooncake") {
+    kv_cache_transfer_ = std::make_shared<MooncakeTeTransfer>(
+        device_id, options_.transfer_listen_port());
+
+    kv_cache_transfer_->initialize(device_id);
+
+    kv_cache_transfer_->allocate_kv_cache(
+        kv_caches_, num_layers, kv_cache_shape, dtype_);
+
+    kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
   } else {
     kv_cache_transfer_ = std::make_unique<HcclKVCacheTransfer>(
         device_id, options_.transfer_listen_port());
