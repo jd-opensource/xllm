@@ -107,11 +107,6 @@ class DeepseekV32DecoderLayerImpl : public BaseLayer {
   void initialize_quantization_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param);
 
-  void initialize_kimi_k2_parameters(
-      atb_speed::deepseekV2::DecoderLayerParam& param,
-      const ModelArgs& args,
-      bool is_prefill);
-
   void merge_and_copy_gate_up_weights(
       torch::Tensor& target_buffer,
       const std::vector<torch::Tensor>& experts_gate,

@@ -64,9 +64,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->q_seq_lens().begin(),
                            pb_forward_input->q_seq_lens().end());
   // aprint<int32_t>(q_seq_lens, "q_seq_lens", global_rank_);
-  std::vector<int32_t> cum_q_seq_lens =
-      std::vector<int32_t>(pb_forward_input->cum_q_seq_lens().begin(),
-                           pb_forward_input->cum_q_seq_lens().end());
+  std::vector<int32_t> cum_q_seq_lens(q_seq_lens.size());
+  std::partial_sum(
+      q_seq_lens.begin(), q_seq_lens.end(), cum_q_seq_lens.begin());
   // for flashinfer
   std::vector<int32_t> paged_kv_indptr =
       std::vector<int32_t>(pb_forward_input->paged_kv_indptr().begin(),

@@ -247,7 +247,6 @@ void DeepseekV32DecoderLayerImpl::param_from_args(
   initialize_mlp_parameters(param, args, parallel_args);
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
-  initialize_kimi_k2_parameters(param, args, is_prefill);
 }
 
 void DeepseekV32DecoderLayerImpl::initialize_basic_parameters(
@@ -410,28 +409,6 @@ void DeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   if (layer_id_ < param.firstKDenseReplace) {
     param.isDenseLayer = true;
   }
-}
-
-void DeepseekV32DecoderLayerImpl::initialize_kimi_k2_parameters(
-    atb_speed::deepseekV2::DecoderLayerParam& param,
-    const ModelArgs& args,
-    bool is_prefill) {
-  if (args.model_type() != "kimi_k2") {
-    return;
-  }
-  // NOTE: These operations are theoretically applicable to DeepSeek as well,
-  // but we only apply them to kimi_k2 to ensure DeepSeek behavior remains
-  // unchanged
-  param.enableInfNan = true;
-  param.enableFusedTopk = (args.topk_method() == "noaux_tc" &&
-                           args.n_group() * 32 >= args.n_routed_experts());
-  param.maskfree = is_prefill;
-  // TODO: Pending confirmation whether kimi_k2 model supports
-  // enable_gmmswigluquant set to true
-  bool enable_gmmswigluquant = false;
-  param.enableSwigluQuant =
-      quantize_type_ == "w8a8_dynamic" && !enable_gmmswigluquant;
-  param.enableGMMSwigluQuant = enable_gmmswigluquant;
 }
 
 void DeepseekV32DecoderLayerImpl::initialize_parallel_parameters(
