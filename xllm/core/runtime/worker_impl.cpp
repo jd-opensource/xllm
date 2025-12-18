@@ -177,7 +177,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
   } else if (FLAGS_kv_cache_transfer_type == "Mooncake") {
     kv_cache_transfer_ = std::make_shared<MooncakeTeTransfer>(
-        device_id, options_.transfer_listen_port());
+        device_id, options_.transfer_listen_port(), device_);
 
     kv_cache_transfer_->initialize(device_id);
 

@@ -22,7 +22,9 @@ namespace xllm {
 
 class MooncakeTeTransfer : public KVCacheTransfer {
  public:
-  MooncakeTeTransfer(const int32_t device_id, const int32_t listen_port);
+  MooncakeTeTransfer(const int32_t device_id,
+                     const int32_t listen_port,
+                     const torch::Device& device);
   virtual ~MooncakeTeTransfer() = default;
 
   virtual void initialize(int32_t device_id) override;
@@ -69,7 +71,7 @@ class MooncakeTeTransfer : public KVCacheTransfer {
  private:
   std::string addr_;
   uint64_t cluster_id_;
-  int listen_port_;
+  int32_t listen_port_;
   int32_t device_id_;
   int64_t num_layers_;
 

@@ -22,6 +22,7 @@ limitations under the License.
 #include <thread>
 
 #include "mooncake_te.pb.h"
+#include "platform/device.h"
 
 namespace xllm {
 
@@ -33,7 +34,7 @@ class MooncakeTe final {
  public:
   enum class MoveOpcode { READ = 0, WRITE = 1 };
 
-  MooncakeTe(const int32_t device_id, const int32_t listen_port);
+  MooncakeTe(const int32_t listen_port, const torch::Device& device);
   virtual ~MooncakeTe();
 
   std::string initialize();
@@ -67,11 +68,12 @@ class MooncakeTe final {
  private:
   std::string addr_;
   std::string host_ip_;
-  int rpc_port_;
-  int listen_port_;
-  uint64_t size_per_block_;
-  int32_t device_id_;
+  int32_t rpc_port_;
+  int32_t listen_port_;
+  int64_t size_per_block_;
   int64_t num_layers_;
+
+  Device device_;
 
   std::unordered_map<std::string, SegmentHandle> handles_;
 

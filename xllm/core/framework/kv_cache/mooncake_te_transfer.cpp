@@ -22,12 +22,13 @@ limitations under the License.
 namespace xllm {
 
 MooncakeTeTransfer::MooncakeTeTransfer(const int32_t device_id,
-                                       const int32_t listen_port)
+                                       const int32_t listen_port,
+                                       const torch::Device& device)
     : device_id_(device_id), listen_port_(listen_port), KVCacheTransfer() {
   std::string instance_ip = net::get_local_ip_addr();
-  cluster_id_ = net::convert_ip_port_to_uint64(instance_ip, listen_port);
+  cluster_id_ = net::convert_ip_port_to_uint64(instance_ip, listen_port_);
 
-  mooncake_te_ = std::make_unique<MooncakeTe>(device_id, listen_port);
+  mooncake_te_ = std::make_unique<MooncakeTe>(listen_port_, device);
 }
 
 void MooncakeTeTransfer::initialize(int32_t device_id) {
@@ -98,7 +99,7 @@ void MooncakeTeTransfer::register_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
     torch::ScalarType dtype) {
   num_layers_ = kv_caches.size();
-  int num_cache = num_layers_ * 2;
+  int64_t num_cache = num_layers_ * 2;
 
   std::vector<void*> cache_addrs;
   std::vector<size_t> cache_lens;
@@ -112,7 +113,7 @@ void MooncakeTeTransfer::register_kv_cache(
 
   for (int32_t i = 0; i < num_layers_; ++i) {
     cache_addrs.emplace_back(kv_caches[i].get_v_cache().data_ptr());
-    cache_lens.emplace_back(kv_caches[i].get_k_cache().nbytes());
+    cache_lens.emplace_back(kv_caches[i].get_v_cache().nbytes());
   }
 
   int64_t data_size = torch::scalarTypeToTypeMeta(dtype).itemsize();

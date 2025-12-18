@@ -26,16 +26,16 @@ limitations under the License.
 
 namespace xllm {
 
-MooncakeTe::MooncakeTe(const int32_t device_id, const int32_t listen_port)
-    : device_id_(device_id), listen_port_(listen_port) {
+MooncakeTe::MooncakeTe(const int32_t listen_port, const torch::Device& device)
+    : listen_port_(listen_port), device_(device) {
   engine_ = std::make_unique<TransferEngine>(true);
 
   host_ip_ = net::get_local_ip_addr();
 
-  if (aclrtSetDevice(device_id_) != 0) {
-    LOG(ERROR) << "MooncakeTe aclrtSetDevice failed";
-  }
+  device_.set_device();
+  device_.init_device_context();
 
+  int32_t device_id = device_.index();
   std::string hostname;
   int32_t phy_id = FLAGS_npu_phy_id;
   if (phy_id != -1) {
@@ -43,7 +43,7 @@ MooncakeTe::MooncakeTe(const int32_t device_id, const int32_t listen_port)
                std::to_string(phy_id);
   } else {
     hostname = host_ip_ + ":" + std::to_string(listen_port_) + ":npu_" +
-               std::to_string(device_id_);
+               std::to_string(device_id);
   }
 
   if (engine_->init("P2PHANDSHAKE", hostname, "", 0)) {
@@ -58,8 +58,6 @@ MooncakeTe::~MooncakeTe() {
     server_.Stop(0);
     server_.Join();
   }
-
-  aclrtResetDevice(device_id_);
 }
 
 std::string MooncakeTe::initialize() {
@@ -89,7 +87,7 @@ std::string MooncakeTe::initialize() {
 bool MooncakeTe::register_memory(std::vector<void*> addrs,
                                  std::vector<size_t> lens,
                                  int64_t size_per_block) {
-  int num = addrs.size();
+  int64_t num = addrs.size();
   num_layers_ = num / 2;
 
   std::vector<BufferEntry> buffers;
