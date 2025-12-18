@@ -944,7 +944,7 @@ void DeepseekV32DecoderLayerImpl::build_node_variant_pack(
   }
   if (input_params.q_seq_lens.numel() != 0) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.cum_q_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(input_params.q_cu_seq_lens);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
