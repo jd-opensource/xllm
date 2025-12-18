@@ -27,21 +27,28 @@ void WordEmbeddingImpl::param_from_args(
     const xllm::ModelArgs& args,
     const xllm::ParallelArgs& parallel_args) {
   param.unpadInputs = true;
-  if (dp_size_ > 1) {
-    param.tensorParallelInfo.rank = dp_local_tp_rank_;
-    param.tensorParallelInfo.worldSize = dp_local_tp_size_;
-    param.tensorParallelInfo.backend = FLAGS_communication_backend;
-  } else if (parallel_args.world_size() != 1) {
-    // param.tensorParallelInfo = {parallel_args.rank(),
-    // parallel_args.world_size(), "lccl"};
-    param.tensorParallelInfo = {parallel_args.rank(),
-                                parallel_args.world_size(),
-                                FLAGS_communication_backend};
+
+  if (parallel_args.world_size() > 1) {
+    if (parallel_args.mapping_data().empty()) {
+      if (dp_size_ > 1) {
+        param.tensorParallelInfo.rank = dp_local_tp_rank_;
+        param.tensorParallelInfo.worldSize = dp_local_tp_size_;
+      } else {
+        param.tensorParallelInfo.rank = parallel_args.rank();
+        param.tensorParallelInfo.worldSize = parallel_args.world_size();
+      }
+      param.tensorParallelInfo.commDomain = std::to_string(dp_rank_);
+      param.tensorParallelInfo.backend = FLAGS_communication_backend;
+    } else {
+      atb_speed::common::ParallelInfo parallelInfo =
+          parallel_args.mapping().Get(atb_speed::base::ATTN_TP);
+      param.tensorParallelInfo.rank = parallelInfo.rank;
+      param.tensorParallelInfo.worldSize = parallelInfo.rankIds.size();
+      param.tensorParallelInfo.backend = FLAGS_communication_backend;
+      parallelInfo.InitCommDomain(param.tensorParallelInfo.hcommInfo,
+                                  param.tensorParallelInfo.commDomain);
+    }
   }
-  // param.linearParallelParam.tensorParallelInfo.backend =
-  // FLAGS_communication_backend;
-  param.tensorParallelInfo.commDomain = std::to_string(dp_rank_);
-  // param.tensorParallelInfo.rankTableFile = FLAGS_rank_tablefile;
 }
 
 WordEmbeddingImpl::WordEmbeddingImpl(const ModelContext& context)

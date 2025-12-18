@@ -70,6 +70,7 @@ void Qwen3DecoderLayerImpl::param_from_args(
   param.enableIntraLayerAddNorm = true;
   param.enableInterLayerAddNorm = false;
   param.enablePreFetchWeight = FLAGS_enable_prefetch_weight;
+  initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
 
   if (isPrefill) {
@@ -87,6 +88,18 @@ void Qwen3DecoderLayerImpl::param_from_args(
                                       !FLAGS_enable_chunked_prefill &&
                                       FLAGS_block_size == 128;
   }
+}
+
+void Qwen3DecoderLayerImpl::initialize_parallel_parameters(
+    atb_speed::qwen::QwenLayerParam& param,
+    const ParallelArgs& parallel_args) {
+  param.mapping = parallel_args.mapping();
+  param.tensorParallelInfo = {parallel_args.rank(),
+                              parallel_args.world_size(),
+                              FLAGS_communication_backend,
+                              FLAGS_rank_tablefile,
+                              nullptr,
+                              ""};
 }
 
 void Qwen3DecoderLayerImpl::initialize_quantization_parameters(
