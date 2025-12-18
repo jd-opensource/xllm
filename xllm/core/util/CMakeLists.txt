@@ -5,6 +5,7 @@ cc_library(
   NAME
     util
   HDRS
+    concurrent_queue.h
     blocking_counter.h
     blockingconcurrentqueue.h
     closure_guard.h
