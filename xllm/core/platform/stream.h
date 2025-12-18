@@ -21,6 +21,7 @@ limitations under the License.
 #endif
 // clang-format on
 
+#include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 
@@ -46,6 +47,14 @@ class Stream {
   Stream(Stream&&) = default;
   Stream& operator=(Stream&&) = default;
 
+#if defined(USE_NPU)
+  explicit Stream(c10_npu::NPUStream stream, const int32_t timeout = -1);
+#elif defined(USE_MLU)
+  explicit Stream(torch_mlu::MLUStream stream, const int32_t timeout = -1);
+#elif defined(USE_CUDA) || defined(USE_ILU)
+  explicit Stream(c10::cuda::CUDAStream stream, const int32_t timeout = -1);
+#endif
+
   int synchronize() const;
   c10::StreamGuard set_stream_guard() const;
 #if defined(USE_NPU)
@@ -53,6 +62,7 @@ class Stream {
 #elif defined(USE_MLU)
   torch_mlu::MLUStream* get_stream() { return &stream_; }
 #endif
+  void wait_stream(const Stream& other_stream);
 
  private:
 #if defined(USE_NPU)

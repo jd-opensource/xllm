@@ -26,6 +26,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "linear.h"
+#include "platform/device.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {
@@ -54,11 +55,9 @@ class FusedMoEImpl : public torch::nn::Module {
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
 
-  torch::Tensor forward_experts(
-      const torch::Tensor& hidden_states,
-      const torch::Tensor& router_logits,
-      const std::optional<torch::Tensor>& shared_output,
-      bool enable_all2all_communication);
+  torch::Tensor forward_experts(const torch::Tensor& hidden_states,
+                                const torch::Tensor& router_logits,
+                                bool enable_all2all_communication);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
@@ -78,6 +77,9 @@ class FusedMoEImpl : public torch::nn::Module {
                                const torch::Tensor& router_logits_2d,
                                SelectedExpertInfo& selected_expert_info,
                                bool enable_all2all_communication);
+
+  // check if the streams are initialized for the current device
+  void ensure_streams_initialized(const xllm::Device& current_device);
 
  private:
   int64_t num_total_experts_;
@@ -105,6 +107,12 @@ class FusedMoEImpl : public torch::nn::Module {
   DeepEPParams deep_ep_params_;
   torch::Tensor dispatch_recv_token_tensor_head_;
   torch::Tensor dispatch_recv_token_tensor_tail_;
+
+  // steams for parallel shared experts
+  std::unique_ptr<Stream> shared_stream_;
+  std::unique_ptr<Stream> routed_stream_;
+  xllm::Device device_;
+  bool stream_initialized_ = false;
 
   ReplicatedLinear gate_{nullptr};
   DenseMLP shared_experts_{nullptr};

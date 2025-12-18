@@ -92,12 +92,17 @@ class DeepEPImpl : public torch::nn::Module {
 
   // 3. Combine Step: Performs the All2All combine operation using the
   // generated gather indices and valid token counts.
-  torch::Tensor combine_step(const torch::Tensor& input,
-                             const torch::Tensor& gather_rank_index,
-                             const torch::Tensor& valid_token_num,
-                             int64_t num_token_expand,
-                             int64_t hidden_size,
-                             torch::ScalarType dtype);
+  // we take two steps to complete so that the combine communcation
+  //  can be parallelized with the computation of shared experts if needed
+  torch::Tensor combine_step_pack(const torch::Tensor& input,
+                                  const torch::Tensor& gather_rank_index,
+                                  const torch::Tensor& valid_token_num,
+                                  int64_t hidden_size,
+                                  torch::ScalarType dtype);
+  torch::Tensor combine_step_comm(const torch::Tensor& combine_send_layout,
+                                  int64_t num_token_expand,
+                                  int64_t hidden_size,
+                                  torch::ScalarType dtype);
 
   // Dispatch tokens to other experts using all-to-all communication
   void dispatch(int64_t token_byte,

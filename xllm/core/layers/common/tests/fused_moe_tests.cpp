@@ -125,6 +125,7 @@ class FusedMoETest : public ::testing::Test {
                                      torch::TensorOptions()
                                          .dtype(torch::kFloat32)
                                          .device(options_.device()));
+
       // Add weights to dictionary
       // expert
       weight_dict[expert_prefix + "gate_proj.qweight"] = gate_qweight;
@@ -144,9 +145,50 @@ class FusedMoETest : public ::testing::Test {
     auto gate_weight = CreateFullTensor({num_experts, hidden_size}, 5.0f);
     auto e_score_correction_bias = CreateFullTensor({num_experts}, 0.1f);
 
+    // Create shared experts weights
+    auto shared_expert_up_weight =
+        CreateFullTensor({intermediate_size, hidden_size}, 1.5f);
+    auto shared_expert_up_qweight = shared_expert_up_weight.to(torch::kInt8);
+    auto shared_expert_up_scale = torch::full({intermediate_size},
+                                              0.1f,
+                                              torch::TensorOptions()
+                                                  .dtype(torch::kFloat32)
+                                                  .device(options_.device()));
+    auto shared_expert_up_smooth = torch::full({hidden_size},
+                                               0.05f,
+                                               torch::TensorOptions()
+                                                   .dtype(torch::kFloat32)
+                                                   .device(options_.device()));
+    auto shared_expert_down_weight =
+        CreateFullTensor({hidden_size, intermediate_size}, 1.3f);
+    auto shared_expert_down_qweight =
+        shared_expert_down_weight.to(torch::kInt8);
+    auto shared_expert_down_scale = torch::full({hidden_size},
+                                                0.1f,
+                                                torch::TensorOptions()
+                                                    .dtype(torch::kFloat32)
+                                                    .device(options_.device()));
+    auto shared_expert_down_smooth =
+        torch::full({intermediate_size},
+                    0.05f,
+                    torch::TensorOptions()
+                        .dtype(torch::kFloat32)
+                        .device(options_.device()));
+
     // gate
     weight_dict["gate.weight"] = gate_weight;
     weight_dict["gate.e_score_correction_bias"] = e_score_correction_bias;
+
+    // shared experts
+    weight_dict["shared_experts.up_proj.qweight"] = shared_expert_up_qweight;
+    weight_dict["shared_experts.up_proj.per_channel_scale"] =
+        shared_expert_up_scale;
+    weight_dict["shared_experts.up_proj.smooth"] = shared_expert_up_smooth;
+    weight_dict["shared_experts.down_proj.qweight"] =
+        shared_expert_down_qweight;
+    weight_dict["shared_experts.down_proj.per_channel_scale"] =
+        shared_expert_down_scale;
+    weight_dict["shared_experts.down_proj.smooth"] = shared_expert_down_smooth;
 
     LOG(INFO) << "Test w8a8 smoothquant weights created successfully for "
               << num_experts << " experts";
@@ -299,7 +341,7 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
 
   // Create input tensors
   auto hidden_states = CreateCustomInput(
-      {batch_size, seq_len, hidden_size},
+      {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
 
   // Create router logits (batch_size * seq_len, num_experts)
@@ -316,18 +358,17 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
   auto output =
       fused_moe->forward_experts(hidden_states,
                                  router_logits,
-                                 /*residual=*/std::nullopt,
                                  /*enable_all2all_communication=*/false);
 
   // Verify output shape
-  ASSERT_EQ(output.sizes().size(), 3) << "Output should be 3D tensor";
-  ASSERT_EQ(output.size(0), batch_size) << "Batch size should match";
-  ASSERT_EQ(output.size(1), seq_len) << "Sequence length should match";
-  ASSERT_EQ(output.size(2), hidden_size) << "Hidden size should match";
+  CHECK_EQ(output.sizes().size(), 2) << "Output should be 2D tensor";
+  CHECK_EQ(output.size(0), batch_size * seq_len)
+      << "The number of tokens should match";
+  CHECK_EQ(output.size(1), hidden_size) << "The hidden size should match";
 
   // Verify output is not all zeros (weights were loaded)
   auto output_sum = torch::sum(output).item<float>();
-  ASSERT_NE(output_sum, 0.0f)
+  CHECK_NE(output_sum, 0.0f)
       << "Output should not be all zeros after loading weights";
 
   LOG(INFO) << "State dict loading test passed - output sum: " << output_sum;
@@ -390,13 +431,9 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   // use custom logits and residual tensor for precision verification
   auto router_logits =
       CreateRouterLogits({batch_size * seq_len, num_experts}, router_values);
-  auto residual = CreateCustomInput(
-      {batch_size * seq_len, hidden_size},
-      std::vector<float>(batch_size * seq_len * hidden_size, 100.0f));
   auto output =
       fused_moe->forward_experts(hidden_states,
                                  router_logits,
-                                 residual,
                                  /*enable_all2all_communication=*/false);
 
   xllm::Device device(options_.device());
@@ -418,7 +455,7 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   for (size_t i = 0; i < batch_size; ++i) {
     for (size_t j = 0; j < seq_len; ++j) {
       for (size_t k = 0; k < hidden_size; ++k) {
-        expected_values.push_back(1064.0f);  // Placeholder - to be calculated
+        expected_values.push_back(1792.0f);  // Placeholder - to be calculated
       }
     }
   }

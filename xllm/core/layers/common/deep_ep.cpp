@@ -272,12 +272,12 @@ DeepEPMetaResult DeepEPImpl::process_dispatch_result(
       gather_by_rank_index, token_count_slice_out, token_sum};
 }
 
-torch::Tensor DeepEPImpl::combine_step(const torch::Tensor& input,
-                                       const torch::Tensor& gather_rank_index,
-                                       const torch::Tensor& valid_token_num,
-                                       int64_t num_token_expand,
-                                       int64_t hidden_size,
-                                       torch::ScalarType dtype) {
+torch::Tensor DeepEPImpl::combine_step_pack(
+    const torch::Tensor& input,
+    const torch::Tensor& gather_rank_index,
+    const torch::Tensor& valid_token_num,
+    int64_t hidden_size,
+    torch::ScalarType dtype) {
   // 1. Gather Split (Pack User Tensor to Send Buffer)
   xllm::kernel::GatherSplitParams gather_split_params;
   gather_split_params.input = input;
@@ -299,9 +299,16 @@ torch::Tensor DeepEPImpl::combine_step(const torch::Tensor& input,
   torch::Tensor combine_send_layout =
       xllm::kernel::moe_all2all_gen_send_layout(gen_send_layout_params);
 
+  return combine_send_layout;
+}
+
+torch::Tensor DeepEPImpl::combine_step_comm(
+    const torch::Tensor& combine_send_layout,
+    int64_t num_token_expand,
+    int64_t hidden_size,
+    torch::ScalarType dtype) {
   // Use the cached dispatch recv layout as combine recv layout
   torch::Tensor combine_recv_layout = deep_ep_params_.dispatch_recv_layout;
-
   // 3. Perform Combine
   this->combine(deep_ep_params_.combine_token_size,
                 num_token_expand,
