@@ -129,7 +129,8 @@ class BaseLayer : public torch::nn::Module {
   at::Device device_;
   std::string name_;
   torch::ScalarType dtype_;
-  std::vector<int> placeholder_vec_;
+  std::vector<int32_t> placeholder_vec_;
+  std::vector<int32_t> placeholder_vec_zero_;
   xllm::ParallelArgs parallel_args_;
   std::function<void(const std::string&, std::function<int()>)> run_task_func_;
   std::string quantize_type_;
