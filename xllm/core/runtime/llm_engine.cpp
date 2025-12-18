@@ -263,7 +263,8 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
       slot_size =
           dtype_size *
           ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
-           (args_.qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT);
+           (args_.qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT) *
+          NZ_ALIGNMENT;
     } else {
       slot_size =
           dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
