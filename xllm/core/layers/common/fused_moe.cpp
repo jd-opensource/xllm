@@ -595,27 +595,8 @@ torch::Tensor FusedMoEImpl::forward_experts(
   // reshape the final hidden states to the original shape
   final_hidden_states = final_hidden_states.reshape(hidden_states_shape);
 
-  // TODO: shared experts can be parallelized with the final communication step
-  // during moe computation for now we just perform a add operation to make sure
-  // the result is correct under any parallel config. Helper lambda to handle
-  // residual addition (avoids code duplication)
-  auto apply_residual = [&]() {
-    if (shared_output.has_value()) {
-      const auto& res = shared_output.value();
-      // reshape residual to match hidden states
-      final_hidden_states += res.reshape({-1, res.size(-1)});
-    }
-  };
-
   // Communciation Step 3: All Gather / AllReduce
-  if (enable_all2all_communication) {
-    // For All2All: apply residual before gathering across the Tensor Parallel
-    // group
-    apply_residual();
-    // this tp group is to group the result for next attention computation
-    final_hidden_states = parallel_state::gather(
-        final_hidden_states, parallel_args_.tp_group_, 0);
-  } else {
+  if (!enable_all2all_communication) {
     // For standard Reduce: perform reductions first
     // this tp group is either tp_group_ or moe_tp_group_ for general expert
     // parallel
@@ -626,8 +607,15 @@ torch::Tensor FusedMoEImpl::forward_experts(
       final_hidden_states = parallel_state::reduce(
           final_hidden_states, parallel_args_.moe_ep_group_);
     }
-    // apply residual after reductions are complete
-    apply_residual();
+  }
+
+  // TODO: shared experts can be parallelized with the final communication step
+  // during moe computation for now we just perform a add operation to make sure
+  // the result is correct under any parallel config.
+  if (shared_output.has_value()) {
+    const auto& res = shared_output.value();
+    // reshape residual to match hidden states
+    final_hidden_states += res.reshape({-1, res.size(-1)});
   }
 
   return final_hidden_states;

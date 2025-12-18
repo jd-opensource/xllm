@@ -162,8 +162,9 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
   // add up residual after mlp/moe
   x = x + residual.value();
 
-  // unpadding the output after all gather in fused mlp if tp size > 1
   if (enable_moe_all2all && parallel_args_.tp_group_->world_size() > 1) {
+    // unpadding the output after all gather if tp size > 1
+    x = parallel_state::gather(x, parallel_args_.tp_group_, 0);
     x = check_and_unpad_after_gather(x, pad_info);
   }
   residual = std::nullopt;

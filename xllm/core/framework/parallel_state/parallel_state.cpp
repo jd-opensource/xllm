@@ -99,11 +99,8 @@ torch::Tensor gather(const torch::Tensor& input,
     std::vector<int64_t> pad = {0, 0, 0, num_padding};
     // Explicitly calling kConstant and value of 0 ensures consistency across
     // platforms and versions.
-    padded_input =
-        torch::nn::functional::pad(input,
-                                   torch::nn::functional::PadFuncOptions(pad)
-                                       .mode(torch::kConstant)
-                                       .value(0));
+    padded_input = torch::nn::functional::pad(
+        input, torch::nn::functional::PadFuncOptions(pad));
   }
 
   // perform allgather
@@ -202,11 +199,8 @@ torch::Tensor reduce_scatter(const torch::Tensor& input,
     std::vector<int64_t> pad = {0, 0, 0, num_padding};
     // Explicitly calling kConstant and value of 0 ensures consistency across
     // platforms and versions.
-    padded_input =
-        torch::nn::functional::pad(input,
-                                   torch::nn::functional::PadFuncOptions(pad)
-                                       .mode(torch::kConstant)
-                                       .value(0));
+    padded_input = torch::nn::functional::pad(
+        input, torch::nn::functional::PadFuncOptions(pad));
   }
 
   // prepare output tensor
