@@ -18,9 +18,9 @@ limitations under the License.
 
 #include <thread>
 
+#include "concurrent_queue.h"
 #include "util/blocking_counter.h"
 #include "util/blockingconcurrentqueue.h"
-
 namespace xllm {
 
 class ThreadPool final {
@@ -50,7 +50,7 @@ class ThreadPool final {
 
   bool empty() {
     return std::all_of(queues_.begin(), queues_.end(), [](auto& queue) {
-      return queue.size_approx() == 0;
+      return queue.empty();
     });
   }
 
@@ -62,7 +62,7 @@ class ThreadPool final {
                      BlockingCounter* block_counter);
 
   std::vector<std::thread> threads_;
-  std::vector<moodycamel::BlockingConcurrentQueue<Runnable>> queues_;
+  std::vector<ConcurrentQueue<Runnable>> queues_;
 
   std::atomic<size_t> index_{0};
 };
