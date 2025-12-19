@@ -112,8 +112,12 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
-      ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
+  std::shared_ptr<Call> call =
+      std::make_shared<CompletionCall>(ctrl,
+                                       done_guard.release(),
+                                       req_pb,
+                                       resp_pb,
+                                       /*use_arena=*/arena != nullptr);
   completion_service_impl_->process_async(call);
 }
 
@@ -149,7 +153,7 @@ void ChatCompletionsImpl(std::unique_ptr<Service>& service,
   }
 
   auto call = std::make_shared<ChatCall>(
-      ctrl, guard.release(), req_pb, resp_pb, arena != nullptr /*use_arena*/);
+      ctrl, guard.release(), req_pb, resp_pb, /*use_arena=*/arena != nullptr);
   service->process_async(call);
 }
 }  // namespace
@@ -226,8 +230,12 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
     req_pb->set_encoding_format("float");
   }
 
-  std::shared_ptr<Call> call = std::make_shared<EmbeddingCall>(
-      ctrl, done_guard.release(), req_pb, resp_pb);
+  std::shared_ptr<Call> call =
+      std::make_shared<EmbeddingCall>(ctrl,
+                                      done_guard.release(),
+                                      req_pb,
+                                      resp_pb,
+                                      /*use_arena=*/arena != nullptr);
   embedding_service_impl_->process_async(call);
 }
 
@@ -272,8 +280,11 @@ void APIService::ImageGenerationHttp(
     return;
   }
   std::shared_ptr<ImageGenerationCall> call =
-      std::make_shared<ImageGenerationCall>(
-          ctrl, done_guard.release(), req_pb, resp_pb);
+      std::make_shared<ImageGenerationCall>(ctrl,
+                                            done_guard.release(),
+                                            req_pb,
+                                            resp_pb,
+                                            /*use_arena=*/arena != nullptr);
   image_generation_service_impl_->process_async(call);
 }
 
@@ -316,7 +327,11 @@ void APIService::RerankHttp(::google::protobuf::RpcController* controller,
   }
 
   std::shared_ptr<Call> call =
-      std::make_shared<RerankCall>(ctrl, done_guard.release(), req_pb, resp_pb);
+      std::make_shared<RerankCall>(ctrl,
+                                   done_guard.release(),
+                                   req_pb,
+                                   resp_pb,
+                                   /*use_arena=*/arena != nullptr);
   rerank_service_impl_->process_async(call);
 }
 
@@ -345,6 +360,9 @@ void APIService::ModelsHttp(::google::protobuf::RpcController* controller,
   bool st_models = models_service_impl_->list_models(nullptr, &model_list);
   if (!st_models) {
     LOG(ERROR) << "list models failed.";
+    if (arena == nullptr) {
+      delete resp_pb;
+    }
     return;
   }
   resp_pb->mutable_data()->CopyFrom(model_list.data());
@@ -357,8 +375,10 @@ void APIService::ModelsHttp(::google::protobuf::RpcController* controller,
   butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
   if (!json2pb::ProtoMessageToJson(
           *resp_pb, &json_output, json_options, &err_msg)) {
-    LOG(ERROR) << "proto to json failed";
-    return;
+    LOG(ERROR) << "Proto to json failed : " << err_msg;
+  }
+  if (arena == nullptr) {
+    delete resp_pb;
   }
 }
 
@@ -392,8 +412,10 @@ void APIService::GetCacheInfo(::google::protobuf::RpcController* controller,
   std::string err_msg;
   butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
   if (!json2pb::ProtoMessageToJson(*resp_pb, &json_output, &err_msg)) {
-    LOG(ERROR) << "proto to json failed";
-    return;
+    LOG(ERROR) << "Proto to json failed : " << err_msg;
+  }
+  if (arena == nullptr) {
+    delete resp_pb;
   }
 }
 
@@ -422,6 +444,10 @@ void APIService::LinkCluster(::google::protobuf::RpcController* controller,
   if (!st) {
     ctrl->SetFailed(error);
     LOG(ERROR) << "parse json to proto failed: " << error;
+    if (arena == nullptr) {
+      delete req_pb;
+      delete resp_pb;
+    }
     return;
   }
 
@@ -448,8 +474,11 @@ void APIService::LinkCluster(::google::protobuf::RpcController* controller,
   std::string err_msg;
   butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
   if (!json2pb::ProtoMessageToJson(*resp_pb, &json_output, &err_msg)) {
-    LOG(ERROR) << "proto to json failed";
-    return;
+    LOG(ERROR) << "Proto to json failed : " << err_msg;
+  }
+  if (arena == nullptr) {
+    delete req_pb;
+    delete resp_pb;
   }
 }
 
@@ -504,8 +533,11 @@ void APIService::UnlinkCluster(::google::protobuf::RpcController* controller,
   std::string err_msg;
   butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
   if (!json2pb::ProtoMessageToJson(*resp_pb, &json_output, &err_msg)) {
-    LOG(ERROR) << "proto to json failed";
-    return;
+    LOG(ERROR) << "Proto to json failed : " << err_msg;
+  }
+  if (arena == nullptr) {
+    delete req_pb;
+    delete resp_pb;
   }
 }
 

@@ -31,27 +31,32 @@ limitations under the License.
 namespace xllm {
 
 template <typename Request, typename Response>
-class NonStreamCall : public Call {
+class NonStreamCall : public CallImpl<Request, Response> {
  public:
   NonStreamCall(brpc::Controller* controller,
                 ::google::protobuf::Closure* done,
                 Request* request,
-                Response* response)
-      : Call(controller), done_(done), request_(request), response_(response) {
-    controller_->http_response().SetHeader("Content-Type",
-                                           "text/javascript; charset=utf-8");
+                Response* response,
+                bool use_arena = true)
+      : CallImpl<Request, Response>(controller,
+                                    done,
+                                    request,
+                                    response,
+                                    use_arena) {
+    this->controller_->http_response().SetHeader(
+        "Content-Type", "text/javascript; charset=utf-8");
 
     json_options_.bytes_to_base64 = false;
     json_options_.jsonify_empty_array = true;
     json_options_.always_print_primitive_fields = true;
   }
 
-  ~NonStreamCall() override { done_->Run(); }
+  ~NonStreamCall() override { this->done_->Run(); }
 
   // For non stream response
   bool write_and_finish(Response& response) {
     butil::IOBufAsZeroCopyOutputStream json_output(
-        &controller_->response_attachment());
+        &this->controller_->response_attachment());
     std::string err_msg;
     if (!json2pb::ProtoMessageToJson(
             response, &json_output, json_options_, &err_msg)) {
@@ -64,22 +69,15 @@ class NonStreamCall : public Call {
   // For non stream response
   bool finish_with_error(const StatusCode& code,
                          const std::string& error_message) {
-    controller_->SetFailed(error_message);
+    this->controller_->SetFailed(error_message);
     return true;
   }
 
-  bool is_disconnected() const override { return controller_->IsCanceled(); }
-
-  const Request& request() const { return *request_; }
-  Response& response() { return *response_; }
-  ::google::protobuf::Closure* done() { return done_; }
+  bool is_disconnected() const override {
+    return this->controller_->IsCanceled();
+  }
 
  private:
-  ::google::protobuf::Closure* done_;
-
-  Request* request_;
-  Response* response_;
-
   json2pb::Pb2JsonOptions json_options_;
 };
 
