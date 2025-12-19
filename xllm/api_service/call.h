@@ -41,4 +41,40 @@ class Call {
   std::string x_request_time_;
 };
 
+template <typename Request, typename Response>
+class CallImpl : public Call {
+ public:
+  CallImpl(brpc::Controller* controller,
+           ::google::protobuf::Closure* done,
+           Request* request,
+           Response* response,
+           bool use_arena = true)
+      : Call(controller),
+        done_(done),
+        request_(request),
+        response_(response),
+        use_arena_(use_arena) {
+    init();
+  }
+
+  virtual ~CallImpl() {
+    if (!use_arena_) {
+      delete request_;
+      delete response_;
+    }
+  };
+
+  const Request& request() const { return *request_; }
+  Response& response() { return *response_; }
+  ::google::protobuf::Closure* done() { return done_; }
+
+ protected:
+  ::google::protobuf::Closure* done_;
+
+  Request* request_;
+  Response* response_;
+
+  bool use_arena_ = true;
+};
+
 }  // namespace xllm

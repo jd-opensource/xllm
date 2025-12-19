@@ -31,7 +31,7 @@ limitations under the License.
 namespace xllm {
 
 template <typename Request, typename Response>
-class StreamCall : public Call {
+class StreamCall : public CallImpl<Request, Response> {
  public:
   using ReqType = Request;
   using ResType = Response;
@@ -41,26 +41,26 @@ class StreamCall : public Call {
              Request* request,
              Response* response,
              bool use_arena = true)
-      : Call(controller),
-        done_(done),
-        request_(request),
-        response_(response),
-        use_arena_(use_arena) {
-    stream_ = request_->stream();
+      : CallImpl<Request, Response>(controller,
+                                    done,
+                                    request,
+                                    response,
+                                    use_arena) {
+    stream_ = this->request_->stream();
     if (stream_) {
-      pa_ = controller_->CreateProgressiveAttachment();
+      pa_ = this->controller_->CreateProgressiveAttachment();
 
       // Send the first SSE response
-      controller_->http_response().set_content_type("text/event-stream");
-      controller_->http_response().set_status_code(200);
-      controller_->http_response().SetHeader("Connection", "keep-alive");
-      controller_->http_response().SetHeader("Cache-Control", "no-cache");
+      this->controller_->http_response().set_content_type("text/event-stream");
+      this->controller_->http_response().set_status_code(200);
+      this->controller_->http_response().SetHeader("Connection", "keep-alive");
+      this->controller_->http_response().SetHeader("Cache-Control", "no-cache");
       // Done Run first for steam response
-      done_->Run();
+      this->done_->Run();
 
     } else {
-      controller_->http_response().SetHeader("Content-Type",
-                                             "text/javascript; charset=utf-8");
+      this->controller_->http_response().SetHeader(
+          "Content-Type", "text/javascript; charset=utf-8");
     }
 
     json_options_.bytes_to_base64 = false;
@@ -70,17 +70,13 @@ class StreamCall : public Call {
   ~StreamCall() override {
     // For non stream response, call brpc done Run
     if (!stream_) {
-      done_->Run();
-    }
-    if (!use_arena_) {
-      delete request_;
-      delete response_;
+      this->done_->Run();
     }
   }
 
   bool write_and_finish(Response& response) {
     butil::IOBufAsZeroCopyOutputStream json_output(
-        &controller_->response_attachment());
+        &this->controller_->response_attachment());
     std::string err_msg;
     if (!json2pb::ProtoMessageToJson(
             response, &json_output, json_options_, &err_msg)) {
@@ -92,7 +88,7 @@ class StreamCall : public Call {
   bool finish_with_error(const StatusCode& code,
                          const std::string& error_message) {
     if (!stream_) {
-      controller_->SetFailed(error_message);
+      this->controller_->SetFailed(error_message);
 
     } else {
       io_buf_.clear();
@@ -133,25 +129,16 @@ class StreamCall : public Call {
     if (stream_) {
       return connection_status_ != 0;
     } else {
-      if (controller_) {
-        return controller_->IsCanceled();
+      if (this->controller_) {
+        return this->controller_->IsCanceled();
       }
       return true;
     }
   }
 
-  const Request& request() const { return *request_; }
-  Response& response() { return *response_; }
-  ::google::protobuf::Closure* done() { return done_; }
-
  private:
-  ::google::protobuf::Closure* done_;
-
-  Request* request_;
-  Response* response_;
-
   bool stream_ = false;
-  bool use_arena_ = true;
+
   butil::intrusive_ptr<brpc::ProgressiveAttachment> pa_;
   butil::IOBuf io_buf_;
 
