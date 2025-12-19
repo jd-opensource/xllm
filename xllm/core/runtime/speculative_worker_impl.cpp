@@ -597,10 +597,10 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   if (!FLAGS_enable_atb_spec_kernel) {
     input_params.num_sequences = total_num_val_tokens;
     input_params.q_max_seq_len = 1;
-    input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+    input_params.batch_forward_type = BatchForwardType::DECODE;
   } else {
     input_params.q_max_seq_len = num_val_tokens;
-    input_params.batch_forward_type = BatchForwardType::DECODE;
+    input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
   }
   input_params.q_seq_lens_vec = std::move(q_seq_lens_vec);
   input_params.q_seq_lens =
