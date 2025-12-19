@@ -54,6 +54,13 @@ MooncakeTe::MooncakeTe(const int32_t listen_port, const torch::Device& device)
 }
 
 MooncakeTe::~MooncakeTe() {
+  // free stub
+  for (auto& pair : stub_map_) {
+    delete pair.second;
+    pair.second = nullptr;
+  }
+  stub_map_.clear();
+
   if (has_initialized_) {
     server_.Stop(0);
     server_.Join();
@@ -65,14 +72,14 @@ std::string MooncakeTe::initialize() {
   if (server_.AddService(service_.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
       0) {
     LOG(ERROR) << "Failed to add service to server";
-    return nullptr;
+    return "";
   }
 
   // Start the server.
   brpc::ServerOptions options;
   if (server_.Start(listen_port_, &options) != 0) {
     LOG(ERROR) << "Fail to start Brpc rpc server";
-    return nullptr;
+    return "";
   }
 
   has_initialized_ = true;
@@ -128,6 +135,7 @@ proto::MooncakeTeService* MooncakeTe::create_rpc_channel(uint64_t cluster_id) {
 
     proto::MooncakeTeService_Stub* stub =
         new proto::MooncakeTeService_Stub(channel);
+    stub_map_[cluster_id] = stub;
     return stub;
   }
 
