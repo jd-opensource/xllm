@@ -27,7 +27,7 @@ namespace xllm {
 namespace function_call {
 
 const std::unordered_map<std::string, std::string>
-    FunctionCallParser::ToolCallParserEnum = {
+    FunctionCallParser::kToolCallParserMap = {
         {"qwen25", "qwen25"},
         {"qwen3", "qwen25"},
         {"kimi_k2", "kimi_k2"},
@@ -49,7 +49,7 @@ FunctionCallParser::FunctionCallParser(const std::vector<JsonTool>& tools,
       << "Unsupported tool_call_parser: " << tool_call_parser
       << ". Supported parsers are: " << [this]() {
            std::string supported;
-           for (const auto& [key, value] : ToolCallParserEnum) {
+           for (const auto& [key, value] : kToolCallParserMap) {
              if (!supported.empty()) supported += ", ";
              supported += key;
            }
@@ -80,8 +80,8 @@ StreamingParseResult FunctionCallParser::parse_streaming_increment(
 
 std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
     const std::string& tool_call_parser) {
-  auto it = ToolCallParserEnum.find(tool_call_parser);
-  if (it == ToolCallParserEnum.end()) {
+  auto it = kToolCallParserMap.find(tool_call_parser);
+  if (it == kToolCallParserMap.end()) {
     return nullptr;
   }
 

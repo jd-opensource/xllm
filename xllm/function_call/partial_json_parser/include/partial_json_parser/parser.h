@@ -8,45 +8,40 @@
 
 namespace partial_json_parser {
 
-// Exception class for malformed JSON - matches Go error handling
 class MalformedJSONException : public std::runtime_error {
  public:
   explicit MalformedJSONException(const std::string& message)
       : std::runtime_error(message) {}
 };
 
-// Structure that matches the Go jsonCompletion struct exactly
 struct JsonCompletion {
-  int index;
+  int32_t index;
   std::string string;
 
-  JsonCompletion(int idx = 0, const std::string& str = "")
+  JsonCompletion(int32_t idx = 0, const std::string& str = "")
       : index(idx), string(str) {}
 };
 
-// Main API function - matches Go ParseMalformedString exactly
-std::string ParseMalformedString(const std::string& malformed,
-                                 TypeOptions options,
-                                 bool format = false);
+std::string parse_malformed_string(const std::string& malformed,
+                                   TypeOptions options,
+                                   bool format = false);
 
-// Internal parsing functions - matching Go implementation structure
-std::string parseJson(const std::string& jsonString, TypeOptions allowed);
-JsonCompletion completeAny(const std::string& jsonString,
-                           TypeOptions allowed,
-                           bool topLevel);
-JsonCompletion completeString(const std::string& jsonString,
+std::string parse_json(const std::string& json_string, TypeOptions allowed);
+JsonCompletion complete_any(const std::string& json_string,
+                            TypeOptions allowed,
+                            bool top_level);
+JsonCompletion complete_string(const std::string& json_string,
+                               TypeOptions allowed);
+JsonCompletion complete_array(const std::string& json_string,
                               TypeOptions allowed);
-JsonCompletion completeArray(const std::string& jsonString,
-                             TypeOptions allowed);
-JsonCompletion completeObject(const std::string& jsonString,
-                              TypeOptions allowed);
-JsonCompletion completeNumber(const std::string& jsonString,
-                              TypeOptions allowed,
-                              bool topLevel);
+JsonCompletion complete_object(const std::string& json_string,
+                               TypeOptions allowed);
+JsonCompletion complete_number(const std::string& json_string,
+                               TypeOptions allowed,
+                               bool top_level);
 
-// Utility functions - matching Go implementation
-int skipBlank(const std::string& text, int index);
-std::string formatJson(const std::string& jsonString);
+int32_t skip_blank(const std::string& text, int32_t index);
+std::string format_json(const std::string& json_string);
 
 }  // namespace partial_json_parser
 

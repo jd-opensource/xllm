@@ -27,7 +27,7 @@ limitations under the License.
 namespace xllm {
 namespace function_call {
 
-std::string _find_common_prefix(const std::string& s1, const std::string& s2) {
+std::string find_common_prefix(const std::string& s1, const std::string& s2) {
   std::string prefix;
   size_t min_length = std::min(s1.length(), s2.length());
 
@@ -44,40 +44,28 @@ std::string _find_common_prefix(const std::string& s1, const std::string& s2) {
 
 // Convert our Allow enum to partial_json_parser TypeOptions
 partial_json_parser::TypeOptions convert_allow_to_type_options(Allow flags) {
-  int result = 0;
+  int32_t result = 0;
 
-  if (static_cast<int>(flags) & static_cast<int>(Allow::STR)) {
-    result |= partial_json_parser::STR;
-  }
-  if (static_cast<int>(flags) & static_cast<int>(Allow::NUM)) {
-    result |= partial_json_parser::NUM;
-  }
-  if (static_cast<int>(flags) & static_cast<int>(Allow::ARR)) {
-    result |= partial_json_parser::ARR;
-  }
-  if (static_cast<int>(flags) & static_cast<int>(Allow::OBJ)) {
-    result |= partial_json_parser::OBJ;
-  }
-  if (static_cast<int>(flags) & static_cast<int>(Allow::NULL_TYPE)) {
-    result |= partial_json_parser::NULL_TYPE;
-  }
-  if (static_cast<int>(flags) & static_cast<int>(Allow::BOOL)) {
-    result |= partial_json_parser::BOOL;
-  }
-  if (static_cast<int>(flags) & static_cast<int>(Allow::NAN_TYPE)) {
-    result |= partial_json_parser::NAN_TYPE;
-  }
-  if (static_cast<int>(flags) & static_cast<int>(Allow::INFINITY_TYPE)) {
-    result |= partial_json_parser::INFINITY_TYPE;
-  }
-  if (static_cast<int>(flags) & static_cast<int>(Allow::NEG_INFINITY)) {
-    result |= partial_json_parser::NEG_INFINITY;
-  }
+  auto check_and_set = [&](Allow allow_flag, int32_t parser_flag) {
+    if (static_cast<int32_t>(flags) & static_cast<int32_t>(allow_flag)) {
+      result |= parser_flag;
+    }
+  };
+
+  check_and_set(Allow::STR, partial_json_parser::STR);
+  check_and_set(Allow::NUM, partial_json_parser::NUM);
+  check_and_set(Allow::ARR, partial_json_parser::ARR);
+  check_and_set(Allow::OBJ, partial_json_parser::OBJ);
+  check_and_set(Allow::NULL_TYPE, partial_json_parser::NULL_TYPE);
+  check_and_set(Allow::BOOL, partial_json_parser::BOOL);
+  check_and_set(Allow::NAN_TYPE, partial_json_parser::NAN_TYPE);
+  check_and_set(Allow::INFINITY_TYPE, partial_json_parser::INFINITY_TYPE);
+  check_and_set(Allow::NEG_INFINITY, partial_json_parser::NEG_INFINITY);
 
   return static_cast<partial_json_parser::TypeOptions>(result);
 }
 
-std::tuple<nlohmann::json, int> _partial_json_loads(
+std::tuple<nlohmann::json, int32_t> partial_json_loads(
     const std::string& input_str,
     Allow flags) {
   try {
@@ -85,26 +73,28 @@ std::tuple<nlohmann::json, int> _partial_json_loads(
     auto type_options = convert_allow_to_type_options(flags);
 
     // Use our C++ partial_json_parser
-    std::string completed_json = partial_json_parser::ParseMalformedString(
+    std::string completed_json = partial_json_parser::parse_malformed_string(
         input_str, type_options, false);
 
     // Parse the completed JSON
     nlohmann::json parsed_obj = nlohmann::json::parse(completed_json);
 
-    return std::make_tuple(parsed_obj, static_cast<int>(input_str.length()));
+    return std::make_tuple(parsed_obj,
+                           static_cast<int32_t>(input_str.length()));
 
   } catch (const partial_json_parser::MalformedJSONException& e) {
     // Handle malformed JSON - try standard JSON parsing for "Extra data" case
     try {
       nlohmann::json parsed_obj = nlohmann::json::parse(input_str);
-      return std::make_tuple(parsed_obj, static_cast<int>(input_str.length()));
+      return std::make_tuple(parsed_obj,
+                             static_cast<int32_t>(input_str.length()));
     } catch (const nlohmann::json::parse_error& json_e) {
       // If it contains "Extra data", try to parse just the valid part
       std::string error_msg = json_e.what();
       if (error_msg.find("Extra data") != std::string::npos) {
         // Find the position where valid JSON ends
         size_t pos = 0;
-        int brace_count = 0;
+        int32_t brace_count = 0;
         bool in_string = false;
         bool escaped = false;
 
@@ -137,18 +127,15 @@ std::tuple<nlohmann::json, int> _partial_json_loads(
         if (pos > 0) {
           std::string valid_part = input_str.substr(0, pos);
           nlohmann::json parsed_obj = nlohmann::json::parse(valid_part);
-          return std::make_tuple(parsed_obj, static_cast<int>(pos));
+          return std::make_tuple(parsed_obj, static_cast<int32_t>(pos));
         }
       }
       throw;
     }
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "Error in _partial_json_loads: " << e.what();
-    throw;
   }
 }
 
-bool _is_complete_json(const std::string& input_str) {
+bool is_complete_json(const std::string& input_str) {
   try {
     nlohmann::json::parse(input_str);
     return true;

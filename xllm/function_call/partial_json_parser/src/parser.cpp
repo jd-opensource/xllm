@@ -18,19 +18,18 @@
 
 namespace partial_json_parser {
 
-std::string formatJson(const std::string& jsonString) {
+std::string format_json(const std::string& json_string) {
   try {
-    auto json = nlohmann::json::parse(jsonString);
+    auto json = nlohmann::json::parse(json_string);
     return json.dump(1);
   } catch (const std::exception& e) {
-    return jsonString;
+    return json_string;
   }
 }
 
-// Main API function
-std::string ParseMalformedString(const std::string& malformed,
-                                 TypeOptions options,
-                                 bool format) {
+std::string parse_malformed_string(const std::string& malformed,
+                                   TypeOptions options,
+                                   bool format) {
   std::string str = malformed;
 
   // Trim whitespace
@@ -48,17 +47,17 @@ std::string ParseMalformedString(const std::string& malformed,
     throw MalformedJSONException("string is empty; cannot parse");
   }
 
-  std::string jsonString = parseJson(malformed, options);
+  std::string json_string = parse_json(malformed, options);
 
   if (format) {
-    return formatJson(jsonString);
+    return format_json(json_string);
   } else {
-    return jsonString;
+    return json_string;
   }
 }
 
-int skipBlank(const std::string& text, int index) {
-  int i = index;
+int32_t skip_blank(const std::string& text, int32_t index) {
+  int32_t i = index;
   while (
       i < static_cast<int>(text.length()) &&
       (std::isspace(static_cast<unsigned char>(text[i])) || text[i] == '\n')) {
@@ -67,11 +66,11 @@ int skipBlank(const std::string& text, int index) {
   return i;
 }
 
-std::string parseJson(const std::string& jsonString, TypeOptions allowed) {
-  int i = skipBlank(jsonString, 0);
-  std::string value = jsonString.substr(i);
+std::string parse_json(const std::string& json_string, TypeOptions allowed) {
+  int32_t i = skip_blank(json_string, 0);
+  std::string value = json_string.substr(i);
 
-  JsonCompletion completion = completeAny(value, allowed, true);
+  JsonCompletion completion = complete_any(value, allowed, true);
 
   if (completion.index == 0 && completion.string.empty()) {
     throw MalformedJSONException("no valid JSON content found");
@@ -80,45 +79,45 @@ std::string parseJson(const std::string& jsonString, TypeOptions allowed) {
   return value.substr(0, completion.index) + completion.string;
 }
 
-JsonCompletion completeAny(const std::string& jsonString,
-                           TypeOptions allowed,
-                           bool topLevel) {
-  if (jsonString.empty()) {
+JsonCompletion complete_any(const std::string& json_string,
+                            TypeOptions allowed,
+                            bool top_level) {
+  if (json_string.empty()) {
     throw MalformedJSONException("empty string");
   }
 
-  char firstChar = jsonString[0];
+  char first_char = json_string[0];
 
-  switch (firstChar) {
+  switch (first_char) {
     case '"':
-      return completeString(jsonString, allowed);
+      return complete_string(json_string, allowed);
     case '[':
-      return completeArray(jsonString, allowed);
+      return complete_array(json_string, allowed);
     case '{':
-      return completeObject(jsonString, allowed);
+      return complete_object(json_string, allowed);
     case '-':  // handles negative numbers
-      if (jsonString.length() == 1) {
+      if (json_string.length() == 1) {
         throw MalformedJSONException("cannot parse singular '-'");
-      } else if (jsonString.length() > 1 &&
-                 jsonString[1] != 'I') {  // not negative infinity
-        return completeNumber(jsonString, allowed, topLevel);
+      } else if (json_string.length() > 1 &&
+                 json_string[1] != 'I') {  // not negative infinity
+        return complete_number(json_string, allowed, top_level);
       }
       break;
     default:
-      if (std::isdigit(static_cast<unsigned char>(firstChar))) {
-        return completeNumber(jsonString, allowed, topLevel);
+      if (std::isdigit(static_cast<unsigned char>(first_char))) {
+        return complete_number(json_string, allowed, top_level);
       }
       break;
   }
 
   // Handle NULL
-  if (jsonString.substr(
-          0, std::min(4, static_cast<int>(jsonString.length()))) == "null") {
+  if (json_string.substr(
+          0, std::min(4, static_cast<int>(json_string.length()))) == "null") {
     return JsonCompletion(4, "");
   }
 
-  if (jsonString.length() < 4 &&
-      std::string("null").substr(0, jsonString.length()) == jsonString) {
+  if (json_string.length() < 4 &&
+      std::string("null").substr(0, json_string.length()) == json_string) {
     if ((NULL_TYPE | allowed) == allowed) {
       return JsonCompletion(0, "null");
     }
@@ -126,13 +125,13 @@ JsonCompletion completeAny(const std::string& jsonString,
   }
 
   // Handle boolean true
-  if (jsonString.substr(
-          0, std::min(4, static_cast<int>(jsonString.length()))) == "true") {
+  if (json_string.substr(
+          0, std::min(4, static_cast<int>(json_string.length()))) == "true") {
     return JsonCompletion(4, "");
   }
 
-  if (jsonString.length() < 4 &&
-      std::string("true").substr(0, jsonString.length()) == jsonString) {
+  if (json_string.length() < 4 &&
+      std::string("true").substr(0, json_string.length()) == json_string) {
     if ((BOOL | allowed) == allowed) {
       return JsonCompletion(0, "true");
     }
@@ -140,13 +139,13 @@ JsonCompletion completeAny(const std::string& jsonString,
   }
 
   // Handle boolean false
-  if (jsonString.substr(
-          0, std::min(5, static_cast<int>(jsonString.length()))) == "false") {
+  if (json_string.substr(
+          0, std::min(5, static_cast<int>(json_string.length()))) == "false") {
     return JsonCompletion(5, "");
   }
 
-  if (jsonString.length() < 5 &&
-      std::string("false").substr(0, jsonString.length()) == jsonString) {
+  if (json_string.length() < 5 &&
+      std::string("false").substr(0, json_string.length()) == json_string) {
     if ((BOOL | allowed) == allowed) {
       return JsonCompletion(0, "false");
     }
@@ -154,14 +153,14 @@ JsonCompletion completeAny(const std::string& jsonString,
   }
 
   // Handle infinity
-  if (jsonString.substr(0,
-                        std::min(8, static_cast<int>(jsonString.length()))) ==
+  if (json_string.substr(0,
+                         std::min(8, static_cast<int>(json_string.length()))) ==
       "Infinity") {
     return JsonCompletion(8, "");
   }
 
-  if (jsonString.length() < 8 &&
-      std::string("Infinity").substr(0, jsonString.length()) == jsonString) {
+  if (json_string.length() < 8 &&
+      std::string("Infinity").substr(0, json_string.length()) == json_string) {
     if ((INFINITY_TYPE | allowed) == allowed) {
       return JsonCompletion(0, "Infinity");
     }
@@ -169,14 +168,14 @@ JsonCompletion completeAny(const std::string& jsonString,
   }
 
   // Handle negative infinity
-  if (jsonString.substr(0,
-                        std::min(9, static_cast<int>(jsonString.length()))) ==
+  if (json_string.substr(0,
+                         std::min(9, static_cast<int>(json_string.length()))) ==
       "-Infinity") {
     return JsonCompletion(9, "");
   }
 
-  if (jsonString.length() < 9 &&
-      std::string("-Infinity").substr(0, jsonString.length()) == jsonString) {
+  if (json_string.length() < 9 &&
+      std::string("-Infinity").substr(0, json_string.length()) == json_string) {
     if ((NEG_INFINITY | allowed) == allowed) {
       return JsonCompletion(0, "-Infinity");
     }
@@ -184,13 +183,13 @@ JsonCompletion completeAny(const std::string& jsonString,
   }
 
   // Handle NaN
-  if (jsonString.substr(
-          0, std::min(3, static_cast<int>(jsonString.length()))) == "NaN") {
+  if (json_string.substr(
+          0, std::min(3, static_cast<int>(json_string.length()))) == "NaN") {
     return JsonCompletion(3, "");
   }
 
-  if (jsonString.length() < 3 &&
-      std::string("NaN").substr(0, jsonString.length()) == jsonString) {
+  if (json_string.length() < 3 &&
+      std::string("NaN").substr(0, json_string.length()) == json_string) {
     if ((NAN_TYPE | allowed) == allowed) {
       return JsonCompletion(0, "NaN");
     }
@@ -198,30 +197,29 @@ JsonCompletion completeAny(const std::string& jsonString,
   }
 
   throw MalformedJSONException(std::string("MalformedJSON(unexpected char ") +
-                               firstChar + ")");
+                               first_char + ")");
 }
 
-// Matches Go completeString function exactly
-JsonCompletion completeString(const std::string& jsonString,
-                              TypeOptions allowed) {
-  if (jsonString.empty() || jsonString[0] != '"') {
+JsonCompletion complete_string(const std::string& json_string,
+                               TypeOptions allowed) {
+  if (json_string.empty() || json_string[0] != '"') {
     throw MalformedJSONException("string must start with quote");
   }
 
-  int index = 1;
-  bool charEscaped = false;
-  int stringLength = static_cast<int>(jsonString.length());
+  int32_t index = 1;
+  bool char_escaped = false;
+  int32_t string_length = static_cast<int32_t>(json_string.length());
 
-  while (index < stringLength && (jsonString[index] != '"' || charEscaped)) {
-    if (jsonString[index] == '\\') {
-      charEscaped = !charEscaped;
+  while (index < string_length && (json_string[index] != '"' || char_escaped)) {
+    if (json_string[index] == '\\') {
+      char_escaped = !char_escaped;
     } else {
-      charEscaped = false;
+      char_escaped = false;
     }
     index += 1;
   }
 
-  if (index < stringLength) {
+  if (index < string_length) {
     return JsonCompletion(index + 1, "");
   }
 
@@ -231,57 +229,58 @@ JsonCompletion completeString(const std::string& jsonString,
 
   // Handle unicode and hex strings
   // Handle \uXXXX
-  size_t u_index = jsonString.rfind("\\u");
+  size_t u_index = json_string.rfind("\\u");
   if (u_index != std::string::npos) {
-    if (static_cast<int>(u_index) + 6 == stringLength) {
+    if (static_cast<int>(u_index) + 6 == string_length) {
       return JsonCompletion(static_cast<int>(u_index) + 6, "\"");
     }
     return JsonCompletion(static_cast<int>(u_index) + 2, "\"");
   }
 
   // Handle \UXXXXXXXX
-  size_t U_index = jsonString.rfind("\\U");
+  size_t U_index = json_string.rfind("\\U");
   if (U_index != std::string::npos) {
-    if (static_cast<int>(U_index) + 10 == stringLength) {
+    if (static_cast<int>(U_index) + 10 == string_length) {
       return JsonCompletion(static_cast<int>(U_index) + 10, "\"");
     }
     return JsonCompletion(static_cast<int>(U_index) + 2, "\"");
   }
 
   // Handle \xXX
-  size_t x_index = jsonString.rfind("\\x");
+  size_t x_index = json_string.rfind("\\x");
   if (x_index != std::string::npos) {
-    if (static_cast<int>(x_index) + 4 == stringLength) {
+    if (static_cast<int>(x_index) + 4 == string_length) {
       return JsonCompletion(static_cast<int>(x_index) + 4, "\"");
     }
     return JsonCompletion(static_cast<int>(x_index) + 2, "\"");
   }
 
-  if (charEscaped) {
+  if (char_escaped) {
     return JsonCompletion(index - 1, "\"");
   }
 
   return JsonCompletion(index, "\"");
 }
 
-JsonCompletion completeArray(const std::string& jsonString,
-                             TypeOptions allowed) {
-  int i = 1;
-  int j = 1;
-  int length = static_cast<int>(jsonString.length());
+JsonCompletion complete_array(const std::string& json_string,
+                              TypeOptions allowed) {
+  int32_t i = 1;
+  int32_t j = 1;
+  int32_t length = static_cast<int32_t>(json_string.length());
 
   while (j < length) {
-    j = skipBlank(jsonString, j);
+    j = skip_blank(json_string, j);
     if (j >= length) {
       break;
     }
 
-    if (jsonString[j] == ']') {
+    if (json_string[j] == ']') {
       return JsonCompletion(j + 1, "");
     }
 
     try {
-      JsonCompletion result = completeAny(jsonString.substr(j), allowed, false);
+      JsonCompletion result =
+          complete_any(json_string.substr(j), allowed, false);
 
       // If the string in the result has some char in it, complete the array
       if (!result.string.empty()) {
@@ -295,19 +294,19 @@ JsonCompletion completeArray(const std::string& jsonString,
       j += result.index;
       i = j;
 
-      j = skipBlank(jsonString, j);
+      j = skip_blank(json_string, j);
       if (j >= length) {
         break;
       }
 
-      if (jsonString[j] == ',') {
+      if (json_string[j] == ',') {
         j += 1;
-      } else if (jsonString[j] == ']') {
+      } else if (json_string[j] == ']') {
         return JsonCompletion(j + 1, "");
       } else {
         throw MalformedJSONException(
             std::string("MalformedJSON(expected \",\" or \"]\" got ") +
-            jsonString[j] + ")");
+            json_string[j] + ")");
       }
     } catch (const MalformedJSONException&) {
       // Can't complete the array, make it empty
@@ -325,25 +324,24 @@ JsonCompletion completeArray(const std::string& jsonString,
   throw MalformedJSONException("cannot parse array with given options");
 }
 
-// Matches Go completeObject function exactly
-JsonCompletion completeObject(const std::string& jsonString,
-                              TypeOptions allowed) {
-  int i = 1;
-  int j = 1;
-  int length = static_cast<int>(jsonString.length());
+JsonCompletion complete_object(const std::string& json_string,
+                               TypeOptions allowed) {
+  int32_t i = 1;
+  int32_t j = 1;
+  int32_t length = static_cast<int32_t>(json_string.length());
 
   while (j < length) {
-    j = skipBlank(jsonString, j);
+    j = skip_blank(json_string, j);
     if (j >= length) {
       break;
     }
 
-    if (jsonString[j] == '}') {
+    if (json_string[j] == '}') {
       return JsonCompletion(j + 1, "");
     }
 
     try {
-      JsonCompletion key = completeString(jsonString.substr(j), allowed);
+      JsonCompletion key = complete_string(json_string.substr(j), allowed);
       if (!key.string.empty()) {
         // Can't parse the key or key is incomplete
         if ((OBJ | allowed) == allowed) {
@@ -355,24 +353,25 @@ JsonCompletion completeObject(const std::string& jsonString,
       // Move index by key length
       j += key.index;
 
-      j = skipBlank(jsonString, j);
+      j = skip_blank(json_string, j);
       if (j >= length) {
         break;
       }
 
-      if (jsonString[j] != ':') {
+      if (json_string[j] != ':') {
         throw MalformedJSONException(
-            std::string("MalformedJSON( expected \":\" got ") + jsonString[j] +
+            std::string("MalformedJSON( expected \":\" got ") + json_string[j] +
             ")");
       }
       j += 1;
 
-      j = skipBlank(jsonString, j);
+      j = skip_blank(json_string, j);
       if (j >= length) {
         break;
       }
 
-      JsonCompletion result = completeAny(jsonString.substr(j), allowed, false);
+      JsonCompletion result =
+          complete_any(json_string.substr(j), allowed, false);
 
       // If the string in the result has some char in it, complete the object
       if (!result.string.empty()) {
@@ -386,24 +385,24 @@ JsonCompletion completeObject(const std::string& jsonString,
       j += result.index;
       i = j;
 
-      j = skipBlank(jsonString, j);
+      j = skip_blank(json_string, j);
       if (j >= length) {
         break;
       }
 
-      if (jsonString[j] == ',') {
+      if (json_string[j] == ',') {
         j += 1;
-      } else if (jsonString[j] == '}') {
+      } else if (json_string[j] == '}') {
         return JsonCompletion(j + 1, "");
       } else {
         throw MalformedJSONException(
             std::string("MalformedJSON(expected \",\" or \"}\" got ") +
-            jsonString[j] + ")");
+            json_string[j] + ")");
       }
     } catch (const MalformedJSONException& e) {
       // Check if this is a case where the key is not a valid string start
       // For cases like "{0", we should throw the exception
-      if (j < length && jsonString[j] != '"' && jsonString[j] != '}') {
+      if (j < length && json_string[j] != '"' && json_string[j] != '}') {
         // This is an invalid key (not starting with quote), re-throw exception
         throw e;
       }
@@ -424,35 +423,35 @@ JsonCompletion completeObject(const std::string& jsonString,
   throw MalformedJSONException("cannot parse object with given options");
 }
 
-JsonCompletion completeNumber(const std::string& jsonString,
-                              TypeOptions allowed,
-                              bool topLevel) {
-  int i = 1;
-  int length = static_cast<int>(jsonString.length());
+JsonCompletion complete_number(const std::string& json_string,
+                               TypeOptions allowed,
+                               bool top_level) {
+  int32_t i = 1;
+  int32_t length = static_cast<int32_t>(json_string.length());
 
   // Move forwards while we still have numbers, including exponents and decimals
   while (i < length &&
-         (std::isdigit(static_cast<unsigned char>(jsonString[i])) ||
-          jsonString[i] == '.' || jsonString[i] == '+' ||
-          jsonString[i] == '-' || jsonString[i] == 'e' ||
-          jsonString[i] == 'E')) {
+         (std::isdigit(static_cast<unsigned char>(json_string[i])) ||
+          json_string[i] == '.' || json_string[i] == '+' ||
+          json_string[i] == '-' || json_string[i] == 'e' ||
+          json_string[i] == 'E')) {
     i += 1;
   }
 
-  bool specialNum = false;
+  bool special_num = false;
   // no boundary check initially
-  while (i >= 1 && (jsonString[i - 1] == '.' || jsonString[i - 1] == '-' ||
-                    jsonString[i - 1] == '+' || jsonString[i - 1] == 'e' ||
-                    jsonString[i - 1] == 'E')) {
+  while (i >= 1 && (json_string[i - 1] == '.' || json_string[i - 1] == '-' ||
+                    json_string[i - 1] == '+' || json_string[i - 1] == 'e' ||
+                    json_string[i - 1] == 'E')) {
     i -= 1;
-    specialNum = true;
+    special_num = true;
     // If we've gone to position 0, we need to check if we can continue
     if (i == 0) {
       throw MalformedJSONException("string index out of range");
     }
   }
 
-  if (specialNum || (i == length && !topLevel)) {
+  if (special_num || (i == length && !top_level)) {
     if ((NUM | allowed) == allowed) {
       return JsonCompletion(i, "");
     }

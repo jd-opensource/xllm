@@ -67,7 +67,7 @@ class KimiK2Detector : public BaseFormatDetector {
  private:
   std::string extract_function_name(const std::string& tool_call_id) const;
 
-  int extract_function_index(const std::string& tool_call_id) const;
+  int32_t extract_function_index(const std::string& tool_call_id) const;
 };
 
 }  // namespace function_call

@@ -25,7 +25,7 @@ namespace xllm {
 namespace function_call {
 
 // Allow flags for partial JSON parsing
-enum class Allow : int {
+enum class Allow : int32_t {
   STR = 1 << 0,            // 1
   NUM = 1 << 1,            // 2
   ARR = 1 << 2,            // 4
@@ -46,24 +46,24 @@ enum class Allow : int {
 
 // Bitwise operations for Allow flags
 inline Allow operator|(Allow a, Allow b) {
-  return static_cast<Allow>(static_cast<int>(a) | static_cast<int>(b));
+  return static_cast<Allow>(static_cast<int32_t>(a) | static_cast<int32_t>(b));
 }
 
 inline Allow operator&(Allow a, Allow b) {
-  return static_cast<Allow>(static_cast<int>(a) & static_cast<int>(b));
+  return static_cast<Allow>(static_cast<int32_t>(a) & static_cast<int32_t>(b));
 }
 
 inline Allow operator~(Allow a) {
-  return static_cast<Allow>(~static_cast<int>(a));
+  return static_cast<Allow>(~static_cast<int32_t>(a));
 }
 
-std::string _find_common_prefix(const std::string& s1, const std::string& s2);
+std::string find_common_prefix(const std::string& s1, const std::string& s2);
 
-std::tuple<nlohmann::json, int> _partial_json_loads(
+std::tuple<nlohmann::json, int32_t> partial_json_loads(
     const std::string& input_str,
     Allow flags);
 
-bool _is_complete_json(const std::string& input_str);
+bool is_complete_json(const std::string& input_str);
 
 }  // namespace function_call
 }  // namespace xllm

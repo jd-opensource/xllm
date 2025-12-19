@@ -3,7 +3,6 @@
 
 namespace partial_json_parser {
 
-// TypeOptions enum that matches the Go implementation exactly
 enum TypeOptions {
   STR = 1 << 0,        // 1
   NUM = 1 << 1,        // 2
@@ -17,7 +16,6 @@ enum TypeOptions {
       << 7,  // 128 (using INFINITY_TYPE to avoid conflict with INFINITY macro)
   NEG_INFINITY = 1 << 8,  // 256
 
-  // Composite options - exactly matching Go implementation
   INF = INFINITY_TYPE | NEG_INFINITY,
   SPECIAL = NULL_TYPE | BOOL | INF | NAN_TYPE,
   ATOM = STR | NUM | SPECIAL,
