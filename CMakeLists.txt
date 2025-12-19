@@ -176,31 +176,6 @@ if (DEFINED ENV{DEPENDENCES_ROOT})
 endif()
 
 
-# Build TORCH_CUDA_ARCH_LIST
-if(USE_CUDA)
-# set architecture for CUDA
-  if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES 80)
-  endif()
-  # Build TORCH_CUDA_ARCH_LIST
-  set(TORCH_CUDA_ARCH_LIST "")
-  foreach(CUDA_ARCH IN LISTS CMAKE_CUDA_ARCHITECTURES)
-    if(CUDA_ARCH MATCHES "^([0-9])([0-9])a$")
-      set(TORCH_ARCH "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}a")
-    elseif(CUDA_ARCH MATCHES "^([0-9])([0-9])*$")
-      set(TORCH_ARCH "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
-    elseif(CUDA_ARCH STREQUAL "native")
-      set(TORCH_ARCH "Auto")
-    else()
-      message(FATAL_ERROR "${CUDA_ARCH} is not supported")
-    endif()
-    list(APPEND TORCH_CUDA_ARCH_LIST ${TORCH_ARCH})
-  endforeach()
-
-  message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
-  message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
-endif()
-
 if(USE_ILU)
     set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/Modules;${CMAKE_MODULE_PATH}")
     set(CMAKE_EXPORT_COMPILE_COMMANDS   ON)
@@ -395,6 +370,7 @@ if(USE_MLU)
 endif()
 
 if(USE_CUDA)
+  message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
   add_definitions(-DUSE_CUDA)
   add_compile_definitions(TORCH_CUDA=1)
   set(CMAKE_VERBOSE_MAKEFILE ON)
