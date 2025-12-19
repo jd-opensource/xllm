@@ -309,9 +309,8 @@ INLINE void write_swap_blocks(char*& buffer,
   write_data(buffer, (uint64_t)blocks.size());
 
   for (const auto& b : blocks) {
-    *reinterpret_cast<int32_t*>(buffer) = b.src_block_id;
-    *reinterpret_cast<int32_t*>(buffer + 4) = b.src_block_id;
-    buffer += swap_block_info_fixed_size();
+    write_data(buffer, b.src_block_id);
+    write_data(buffer, b.dst_block_id);
   }
 }
 
@@ -488,9 +487,13 @@ INLINE void read_swap_blocks(const char*& buffer,
   uint64_t size;
   read_data(buffer, size);
   blocks.reserve(size);
+
+  int32_t src_block_id;
+  int32_t dst_block_id;
   for (int i = 0; i < size; i++) {
-    blocks.emplace_back(*reinterpret_cast<const int32_t*>(buffer),
-                        *reinterpret_cast<const int32_t*>(buffer + 4));
+    read_data(buffer, src_block_id);
+    read_data(buffer, dst_block_id);
+    blocks.emplace_back(src_block_id, dst_block_id);
   }
 }
 
