@@ -453,4 +453,11 @@ void Batch::process_beam_search_output(const RawForwardOutput& raw_output,
     update_for_sequence_group(sequence_group_id);
   }
 }
+
+void Batch::finish() {
+  // Finish all sequence groups
+  for (auto* sequence_group : sequence_groups_) {
+    sequence_group->finish();
+  }
+}
 }  // namespace xllm

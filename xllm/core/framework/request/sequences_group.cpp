@@ -292,4 +292,10 @@ void SequencesGroup::process_beam_search() {
   update_for_sequence(0, beam_width);
 }
 
+void SequencesGroup::finish() {
+  for (auto& sequence : sequences_) {
+    sequence->finish();
+  }
+}
+
 }  // namespace xllm

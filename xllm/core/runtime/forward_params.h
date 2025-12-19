@@ -38,6 +38,7 @@ class WorkerType {
     DIT,   // DIT
     ELM,   // Embedding LM
     EVLM,  // Embedding VLM
+    REC,   // Rec
   };
 
   constexpr WorkerType(Value v) : value_(v) {}
@@ -52,6 +53,8 @@ class WorkerType {
       value_ = ELM;
     } else if (str == "EVLM") {
       value_ = EVLM;
+    } else if (str == "REC") {
+      value_ = REC;
     } else {
       value_ = INVALID;
     }
@@ -78,6 +81,8 @@ class WorkerType {
       return "ELM";
     } else if (this->value_ == EVLM) {
       return "EVLM";
+    } else if (this->value_ == REC) {
+      return "REC";
     } else {
       return "INVALID";
     }

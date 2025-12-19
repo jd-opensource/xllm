@@ -181,6 +181,8 @@ class Sequence final {
   FinishReason finish_reason() const { return finish_reason_; }
   // check finish status, use cached value if not invalidated
   bool finished() const;
+  // mark sequence as finished (used by rec model multi-round decoding)
+  void finish();
 
   // get the output of the sequence until the specified number of tokens,
   // returns nullopt if no delta text and not finished

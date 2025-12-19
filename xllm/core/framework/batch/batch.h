@@ -110,6 +110,10 @@ class Batch {
   // process the accepted output embedding
   void process_embedding_output(const torch::Tensor& embedding);
 
+  // mark all sequence groups as finished (used by rec model multi-round
+  // decoding)
+  void finish();
+
   const std::vector<uint32_t>& get_allowed_max_tokens() const {
     return allowed_max_tokens_;
   }

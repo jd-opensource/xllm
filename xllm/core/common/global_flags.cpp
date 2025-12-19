@@ -164,6 +164,11 @@ DEFINE_int32(
     256,
     "Max decode token per sequence which used for ZeroEvictionScheduler.");
 
+// for rec, it's better to set to 100;
+DEFINE_int32(request_queue_size,
+             100000,
+             "The request queue size of the scheduler");
+
 // --- parallel config ---
 
 DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");

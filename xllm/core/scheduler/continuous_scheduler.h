@@ -195,7 +195,7 @@ class ContinuousScheduler : public Scheduler {
 
   KVCacheManager* kv_cache_manager_;
 
-  // a thread safe queue of requests, bounded by kRequestQueueSize
+  // a thread safe queue of requests, bounded by FLAGS_request_queue_size
   // the schedule owns the requests and manages their lifetimes.
   folly::MPMCQueue<std::shared_ptr<Request>> request_queue_;
 

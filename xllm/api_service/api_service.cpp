@@ -27,8 +27,7 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/llm_master.h"
-// TODO. add following when next pr.
-// #include "core/runtime/rec_master.h"
+#include "core/distributed_runtime/rec_master.h"
 #include "core/distributed_runtime/vlm_master.h"
 #include "core/util/closure_guard.h"
 #include "embedding.pb.h"
@@ -73,8 +72,6 @@ APIService::APIService(Master* master,
         std::make_unique<ImageGenerationServiceImpl>(
             dynamic_cast<DiTMaster*>(master), model_names);
   } else if (FLAGS_backend == "rec") {
-    // TODO. delete this when next pr.
-    using RecMaster = LLMMaster;
     rec_completion_service_impl_ = std::make_unique<RecCompletionServiceImpl>(
         dynamic_cast<RecMaster*>(master), model_names);
   }

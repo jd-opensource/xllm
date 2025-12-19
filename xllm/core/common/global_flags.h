@@ -187,6 +187,8 @@ DECLARE_bool(enable_latency_aware_schedule);
 
 DECLARE_int32(profile_max_prompt_length);
 
+DECLARE_int32(request_queue_size);
+
 DECLARE_bool(enable_profile_kv_blocks);
 
 DECLARE_bool(disable_ttft_profiling);

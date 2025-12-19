@@ -27,10 +27,9 @@ limitations under the License.
 #include "common/instance_name.h"
 #include "completion.pb.h"
 #include "core/distributed_runtime/llm_master.h"
+#include "core/distributed_runtime/rec_master.h"
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
-// TODO. add following when next pr.
-// #include "core/runtime/rec_master.h"
 #include "core/util/utils.h"
 
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -89,9 +88,7 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
   // Add rec specific output tensors
   auto output_tensor = response.mutable_output_tensors()->Add();
   output_tensor->set_name("rec_result");
-  // TODO: add following when next pr.
-  // if (FLAGS_enable_constrained_decoding) {
-  if (true) {
+  if (FLAGS_enable_constrained_decoding) {
     output_tensor->set_datatype(proto::DataType::INT64);
     output_tensor->mutable_shape()->Add(req_output.outputs.size());
     output_tensor->mutable_shape()->Add(1);  // Single item per output
@@ -190,11 +187,8 @@ void RecCompletionServiceImpl::process_async_impl(
   master_->handle_request(
       std::move(rpc_request_ref.prompt()),
       std::move(prompt_tokens),
-      // TODO. add following when next pr.
-      // std::move(mm_data),
+      std::move(mm_data),
       std::move(request_params),
-      // TODO. delete this when next pr.
-      call.get(),
       [call,
        model,
        master = master_,

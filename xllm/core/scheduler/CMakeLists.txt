@@ -20,6 +20,7 @@ cc_library(
     scheduler_factory.h
     decode_priority_queue.h
     perf_model.h
+    fixed_steps_scheduler.h
   SRCS
     chunked_prefill_scheduler.cpp
     zero_eviction_scheduler.cpp
@@ -31,6 +32,7 @@ cc_library(
     prefill_only_scheduler.cpp
     scheduler_factory.cpp
     perf_model.cpp
+    fixed_steps_scheduler.cpp
   DEPS
     :batch
     :request
@@ -54,4 +56,3 @@ cc_test(
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:nnopbase>
 )
-

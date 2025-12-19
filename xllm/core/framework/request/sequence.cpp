@@ -489,4 +489,12 @@ bool Sequence::update_prefetch_result(uint32_t timeout) {
   return true;
 }
 
+void Sequence::finish() {
+  finished_ = true;
+  finish_status_invalidated_ = false;
+  if (finish_reason_ == FinishReason::NONE) {
+    finish_reason_ = FinishReason::STOP;
+  }
+}
+
 }  // namespace xllm
