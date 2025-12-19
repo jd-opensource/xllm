@@ -898,7 +898,6 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
     if (all_empty) {
       return;
     }
-
     if (!options_.enable_pd_ooc()) {
       engine_->step(batch);
     } else {

@@ -19,6 +19,7 @@ limitations under the License.
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
 #include "scheduler/dit_scheduler.h"
+#include "scheduler/fixedsteps_scheduler.h"
 #include "scheduler/pd_ooc_scheduler.h"
 #include "scheduler/prefill_only_scheduler.h"
 #include "scheduler/zero_eviction_scheduler.h"
@@ -28,6 +29,9 @@ namespace xllm {
 std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
     Engine* engine,
     ContinuousScheduler::Options options) {
+  if (FLAGS_enable_fixedsteps_scheduler) {
+    return std::make_unique<FixedStepsScheduler>(engine, options);
+  }
   if (options.enable_disagg_pd()) {
     if (options.enable_pd_ooc()) {
       return std::make_unique<PDOOCScheduler>(engine, options);

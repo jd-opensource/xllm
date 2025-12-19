@@ -478,6 +478,17 @@ DEFINE_bool(enable_constrained_decoding,
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
 
+// --- concurrent llm worker config ---
+DEFINE_uint32(llm_worker_max_concurrency,
+              1,
+              "Concurrency for llm worker parallel execution. Less than or "
+              "equal to 1 means disable concurrent llm worker.");
+
+// --- fixedsteps scheduler config ---
+DEFINE_bool(enable_fixedsteps_scheduler,
+            false,
+            "Whether to use fixsteps scheduler.");
+
 #if defined(USE_NPU)
 DEFINE_string(
     npu_kernel_backend,
