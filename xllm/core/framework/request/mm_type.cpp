@@ -17,7 +17,7 @@ limitations under the License.
 
 namespace xllm {
 
-std::optional<std::string> MMType::to_string() {
+std::optional<std::string> MMType::to_string() const {
   switch (value_) {
     case Value::NONE:
       return std::nullopt;
@@ -33,6 +33,20 @@ std::optional<std::string> MMType::to_string() {
       LOG(WARNING) << "Unknown mm type: " << static_cast<int>(value_);
   }
   return std::nullopt;
+}
+
+std::string get_embedding_key(MMType type) {
+  if (type == MMType::IMAGE) {
+    return "image|embedding";
+  }
+  if (type == MMType::VIDEO) {
+    return "video|embedding";
+  }
+  if (type == MMType::AUDIO) {
+    return "audio|embedding";
+  }
+  LOG(FATAL) << "unsupported modality type: " << type;
+  return "";
 }
 
 }  // namespace xllm

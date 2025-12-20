@@ -101,16 +101,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     }
   }
 
-  torch::Tensor deepstack_process(torch::Tensor hidden_states,
-                                  torch::Tensor visual_pos_masks,
-                                  torch::Tensor visual_embeds) {
-    visual_pos_masks = visual_pos_masks.to(hidden_states.device());
-    auto selected = hidden_states.index({visual_pos_masks});
-    auto local_this = selected + visual_embeds;
-    hidden_states.index_put_({visual_pos_masks}, local_this);
-    return hidden_states;
-  }
-
   void set_eagle3_layers_to_capture(
       const std::optional<std::vector<int32_t>>& layer_ids = std::nullopt) {
     capture_aux_hidden_states_ = true;
@@ -265,8 +255,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       rolling_guard.after_layer(layer_index);
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
-          h = deepstack_process(
-              h, input_params.multimodal.visual_pos_masks, deep_stacks[i]);
+          h = h + deep_stacks[i];
         }
       }
     }

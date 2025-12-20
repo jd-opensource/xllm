@@ -50,7 +50,6 @@ class VlmExecutorImpl : public ExecutorImpl {
 
   virtual MMDict encode(const ModelInputParams& params);
 
- private:
   // not own
   CausalVLM* model_;
   ModelArgs args_;

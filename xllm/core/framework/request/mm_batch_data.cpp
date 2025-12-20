@@ -109,7 +109,6 @@ void MMBatchData::debug_print() const {
     mm_data.debug_print();
   }
   LOG(INFO) << "=============== mm batch data dict data ================";
-
   for (const auto& pair : data_) {
     if (std::holds_alternative<torch::Tensor>(pair.second)) {
       torch::Tensor item = std::get<torch::Tensor>(pair.second);

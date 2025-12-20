@@ -39,10 +39,12 @@ class CompositeBlockManager : public BlockManager {
   std::vector<Block> allocate(size_t num_blocks) override;
   std::vector<Block> allocate_shared(
       const Slice<int32_t>& tokens_ids,
-      const Slice<Block>& existed_shared_blocks = {}) override;
+      const Slice<Block>& existed_shared_blocks = {},
+      const MMData& mm_data = MMData()) override;
   void cache(const Slice<int32_t>& token_ids,
              std::vector<Block>& blocks,
-             size_t existed_shared_blocks_num = 0) override;
+             size_t existed_shared_blocks_num = 0,
+             const MMData& mm_data = MMData()) override;
   void cache(const std::vector<Block>& blocks) override;
   void get_merged_kvcache_event(KvCacheEvent* event) const override;
   size_t num_blocks_in_prefix_cache() const override;

@@ -226,6 +226,9 @@ Master::Master(const Options& options, EngineType type)
   }
 
   if (type == EngineType::VLM) {
+    CHECK(!(options.enable_prefix_cache() && options.enable_cache_upload()))
+        << "VLM prefix cache does not support cache upload yet.";
+
     runtime::Options eng_options;
     eng_options.model_path(options_.model_path())
         .devices(devices)

@@ -64,7 +64,10 @@ ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
   mm_data.foreach (scatter);
   CHECK(scatter.finish());
 
-  EncoderEmbeddingGatherVisitor gather(device_);
+  EncoderEmbeddingGatherVisitor gather(device_,
+                                       mm_data.type(),
+                                       params.attention.host.kv_seq_lens,
+                                       params.attention.host.q_seq_lens);
   mm_data.foreach (gather);
   CHECK(gather.finish(mm_data));
 

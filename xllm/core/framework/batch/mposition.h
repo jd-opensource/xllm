@@ -31,6 +31,7 @@ class MPositionHelper {
       : seq_(seq), args_(args) {}
 
   torch::Tensor get_positions();
+  torch::Tensor get_scheduled_positions(int64_t start, int64_t end);
 
  private:
   std::tuple<torch::Tensor, int32_t> get_positions_p(

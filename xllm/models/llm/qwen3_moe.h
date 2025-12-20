@@ -60,16 +60,6 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
     }
   }
 
-  torch::Tensor deepstack_process(torch::Tensor hidden_states,
-                                  torch::Tensor visual_pos_masks,
-                                  torch::Tensor visual_embeds) {
-    visual_pos_masks = visual_pos_masks.to(hidden_states.device());
-    auto selected = hidden_states.index({visual_pos_masks});
-    auto local_this = selected + visual_embeds;
-    hidden_states.index_put_({visual_pos_masks}, local_this);
-    return hidden_states;
-  }
-
   std::pair<torch::Tensor, torch::Tensor> apply_mrope(
       const torch::Tensor positions) override {
     auto target_cos_sin = cos_sin_.index({positions});
@@ -180,8 +170,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       }
 
       if (deep_stack_size && i < deep_stack_size) {
-        h = deepstack_process(
-            h, input_params.multimodal.visual_pos_masks, deep_stacks[i]);
+        h = h + deep_stacks[i];
       }
     }
     auto [hidden_states, residual_out] = norm_(h, residual);

@@ -58,7 +58,13 @@ class MMDataItem {
   bool has(const MMKey& key) const;
 
   void get(const MMKey& key, std::vector<torch::Tensor>& vec) const;
-  bool is_embedded() const { return has("embedding"); }
+  bool is_embedded() const {
+    if (type_ == MMType::IMAGE || type_ == MMType::VIDEO ||
+        type_ == MMType::AUDIO) {
+      return has(get_embedding_key(type_));
+    }
+    return false;
+  }
 
   template <typename T>
   std::optional<T> get(const MMKey& key) const {
@@ -93,8 +99,9 @@ class MMDataItem {
 
   const MMItemState& state() const { return state_; }
   MMItemState& mutable_state() { return state_; }
-
   const MMMetadata& metadata() const { return metadata_; }
+  void set_seq_index(int32_t seq_index) { seq_index_ = seq_index; }
+  int32_t seq_index() const { return seq_index_; }
   void debug_print() const;
 
  private:
@@ -102,6 +109,7 @@ class MMDataItem {
   MMDict data_;
   MMMetadata metadata_;
   MMItemState state_;
+  int32_t seq_index_ = -1;
 };
 
 }  // namespace xllm

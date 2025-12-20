@@ -37,13 +37,15 @@ class BlockManagerImpl : public BlockManager {
 
   // allocate shared blocks when enable prefix cache
   std::vector<Block> allocate_shared(
-      const Slice<int32_t>& tokens_ids,
-      const Slice<Block>& existed_shared_blocks = {}) override;
+      const Slice<int32_t>& token_ids,
+      const Slice<Block>& existed_shared_blocks = {},
+      const MMData& mm_data = MMData()) override;
 
   // cache blocks when enable prefix cache
   void cache(const Slice<int32_t>& token_ids,
              std::vector<Block>& blocks,
-             size_t existed_shared_blocks_num = 0) override;
+             size_t existed_shared_blocks_num = 0,
+             const MMData& mm_data = MMData()) override;
   void cache(const std::vector<Block>& blocks) override;
 
   void get_merged_kvcache_event(KvCacheEvent* event) const override;

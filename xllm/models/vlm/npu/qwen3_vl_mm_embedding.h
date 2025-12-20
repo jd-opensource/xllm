@@ -42,14 +42,6 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
     return images_size;
   }
 
-  torch::Tensor merge(const torch::Tensor& image_embed,
-                      const std::vector<torch::Tensor>& deep_stack) {
-    std::vector<torch::Tensor> tensors;
-    tensors.push_back(image_embed);
-    tensors.insert(tensors.end(), deep_stack.begin(), deep_stack.end());
-    return torch::cat(tensors, 0);
-  }
-
   MMDict encode(const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
     const auto& mm_data = input_params.multimodal.mm_data;
@@ -66,11 +58,9 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
       image_inputs = Qwen3_VLImageInputs{pixel_values, image_grid_thw};
     CHECK(image_inputs.has_value());
 
-    auto [image_embeds, deep_stacks] =
-        visual_(image_inputs->pixel_values.to(options_),
-                image_inputs->image_grid_thw,
-                input_params);
-    input_params.multimodal.deep_stacks = deep_stacks;
+    auto image_embeds = visual_(image_inputs->pixel_values.to(options_),
+                                image_inputs->image_grid_thw,
+                                input_params);
 
     std::vector<int> image_sizes = get_images_size(image_grid_thw);
 
@@ -79,16 +69,8 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
 
     int32_t token_start_idx = 0;
     for (int32_t image_size : image_sizes) {
-      auto image_embed_slice =
+      auto image_embed =
           image_embeds.slice(0, token_start_idx, token_start_idx + image_size);
-      std::vector<torch::Tensor> deep_stack_slices;
-      for (auto& deep_stack : deep_stacks) {
-        auto deep_stack_slice =
-            deep_stack.slice(0, token_start_idx, token_start_idx + image_size);
-        deep_stack_slices.push_back(deep_stack_slice);
-      }
-      auto image_embed = merge(image_embed_slice, deep_stack_slices);
-
       mm_embeddings.emplace_back(image_embed);
       token_start_idx += image_size;
     }

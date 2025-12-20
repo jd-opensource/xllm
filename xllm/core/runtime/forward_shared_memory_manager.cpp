@@ -257,11 +257,14 @@ inline size_t get_mm_item_size(const MMDataItem& mm_item) {
   total += get_mm_dict_size(mm_item.data());  // dict
 
   // token_pos
-  total += type_size<uint32_t> * 2;
+  total += type_size<int32_t> * 2;
 
-  // prefix_cache
+  // mm_token_mask
+  total += get_tensor_size(mm_item.state().mm_token_mask());
+
+  // schedule_data
   total += XXH3_128BITS_HASH_VALUE_LEN;
-  total += type_size<uint32_t>;
+  total += type_size<int32_t> * 2;
 
   return total;
 }
@@ -864,30 +867,40 @@ inline void write_mm_dict(RawInputSerializeContext& context,
 inline void write_mm_item(char*& buffer, const MMDataItem& item) {
   write_data(buffer, item.type());
   write_mm_dict(buffer, item.data());
+  write_data(buffer, item.seq_index());
 
   const auto& state = item.state();
   // write token_pos
   write_data(buffer, state.token_pos().offset);
   write_data(buffer, state.token_pos().length);
 
-  // write prefix_cache
-  memcpy(buffer, state.prefix_cache().key.data, XXH3_128BITS_HASH_VALUE_LEN);
+  // write mm_token_mask
+  write_tensor(buffer, state.mm_token_mask());
+
+  // write schedule_data
+  memcpy(buffer, state.schedule_data().key.data, XXH3_128BITS_HASH_VALUE_LEN);
   buffer += XXH3_128BITS_HASH_VALUE_LEN;
-  write_data(buffer, state.prefix_cache().cached_token_num);
+  write_data(buffer, state.schedule_data().start_pos);
+  write_data(buffer, state.schedule_data().end_pos);
 }
 
 inline void write_mm_item(RawInputSerializeContext& context,
                           const MMDataItem& item) {
   write_data(context.descriptor, item.type());
   write_mm_dict(context, item.data());
+  write_data(context.descriptor, item.seq_index());
 
   const auto& state = item.state();
   write_data(context.descriptor, state.token_pos().offset);
   write_data(context.descriptor, state.token_pos().length);
+
+  write_tensor(context, state.mm_token_mask());
+
   write_bytes(context.descriptor,
-              state.prefix_cache().key.data,
+              state.schedule_data().key.data,
               XXH3_128BITS_HASH_VALUE_LEN);
-  write_data(context.descriptor, state.prefix_cache().cached_token_num);
+  write_data(context.descriptor, state.schedule_data().start_pos);
+  write_data(context.descriptor, state.schedule_data().end_pos);
 }
 
 inline void write_mm_data_items(char*& buffer, const MMData& mm_data) {
@@ -1723,20 +1736,26 @@ inline void read_mm_item(const char*& buffer,
   read_mm_dict(buffer, dict, device_buffer);
   auto mm_type_value = static_cast<MMType::Value>(type);
   item = std::move(MMDataItem(mm_type_value, dict));
+  int32_t seq_index;
+  read_data(buffer, seq_index, device_buffer);
+  item.set_seq_index(seq_index);
   auto& state = item.mutable_state();
 
   // read token_pos
   read_data(buffer, state.mutable_token_pos().offset, device_buffer);
   read_data(buffer, state.mutable_token_pos().length, device_buffer);
 
-  // read prefix_cache
-  std::memcpy(state.mutable_prefix_cache().key.data,
+  // read mm_token_mask
+  read_tensor(buffer, state.mutable_mm_token_mask(), device_buffer);
+
+  // read schedule_data
+  std::memcpy(state.mutable_schedule_data().key.data,
               buffer,
               XXH3_128BITS_HASH_VALUE_LEN);
   buffer += XXH3_128BITS_HASH_VALUE_LEN;
   safe_advance_buffer(device_buffer, XXH3_128BITS_HASH_VALUE_LEN);
-  read_data(
-      buffer, state.mutable_prefix_cache().cached_token_num, device_buffer);
+  read_data(buffer, state.mutable_schedule_data().start_pos, device_buffer);
+  read_data(buffer, state.mutable_schedule_data().end_pos, device_buffer);
 }
 
 inline void read_mm_item(ReadContext& context, MMDataItem& item) {
@@ -1746,16 +1765,22 @@ inline void read_mm_item(ReadContext& context, MMDataItem& item) {
   read_mm_dict(context, dict);
   auto mm_type_value = static_cast<MMType::Value>(type);
   item = std::move(MMDataItem(mm_type_value, dict));
+  int32_t seq_index;
+  read_data(context, seq_index);
+  item.set_seq_index(seq_index);
   auto& state = item.mutable_state();
 
   read_data(context, state.mutable_token_pos().offset);
   read_data(context, state.mutable_token_pos().length);
 
-  std::memcpy(state.mutable_prefix_cache().key.data,
+  read_tensor(context, state.mutable_mm_token_mask());
+
+  std::memcpy(state.mutable_schedule_data().key.data,
               context.descriptor_cursor,
               XXH3_128BITS_HASH_VALUE_LEN);
   advance_descriptor_cursor(context, XXH3_128BITS_HASH_VALUE_LEN);
-  read_data(context, state.mutable_prefix_cache().cached_token_num);
+  read_data(context, state.mutable_schedule_data().start_pos);
+  read_data(context, state.mutable_schedule_data().end_pos);
 }
 
 inline void read_mm_data_dict(const char*& buffer,

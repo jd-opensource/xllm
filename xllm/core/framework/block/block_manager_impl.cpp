@@ -51,8 +51,11 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
   CHECK_GT(options.num_blocks(), 0) << "No blocks to allocate";
   CHECK_GT(options.block_size(), 0) << "Block size must be positive";
   if (options_.enable_prefix_cache()) {
-    prefix_cache_ = create_prefix_cache(options.block_size(),
-                                        options.enable_cache_upload());
+    PrefixCache::Options prefix_cache_options;
+    prefix_cache_options.block_size(options.block_size())
+        .enable_cache_upload(options.enable_cache_upload())
+        .hasher_type(options.hasher_type());
+    prefix_cache_ = create_prefix_cache(prefix_cache_options);
     CHECK(prefix_cache_) << "Failed to create prefix cache!";
   }
 
@@ -154,14 +157,15 @@ bool BlockManagerImpl::has_enough_blocks(uint32_t num_blocks) {
 }
 
 std::vector<Block> BlockManagerImpl::allocate_shared(
-    const Slice<int32_t>& tokens_ids,
-    const Slice<Block>& existed_shared_blocks) {
+    const Slice<int32_t>& token_ids,
+    const Slice<Block>& existed_shared_blocks,
+    const MMData& mm_data) {
   // only allocate shared blocks for prefill sequences
   if (options_.enable_prefix_cache()) {
     AUTO_COUNTER(prefix_cache_latency_seconds_match);
 
     std::vector<Block> shared_blocks =
-        prefix_cache_->match(tokens_ids, existed_shared_blocks);
+        prefix_cache_->match(token_ids, existed_shared_blocks, mm_data);
 
     const size_t prefix_length =
         shared_blocks.empty() ? 0
@@ -181,11 +185,13 @@ std::vector<Block> BlockManagerImpl::allocate_shared(
 
 void BlockManagerImpl::cache(const Slice<int32_t>& token_ids,
                              std::vector<Block>& blocks,
-                             size_t existed_shared_blocks_num) {
+                             size_t existed_shared_blocks_num,
+                             const MMData& mm_data) {
   if (options_.enable_prefix_cache()) {
     AUTO_COUNTER(prefix_cache_latency_seconds_insert);
     // Add the kv cache to the prefix cache
-    prefix_cache_->insert(token_ids, blocks, existed_shared_blocks_num);
+    prefix_cache_->insert(
+        token_ids, blocks, existed_shared_blocks_num, mm_data);
   }
 }
 

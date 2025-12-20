@@ -84,22 +84,49 @@ void MiniCPMInputProcessor::process(std::string& prompt,
 
 void MiniCPMInputProcessor::find_mm_spans(const std::vector<int>& prompt,
                                           MMData& mm_data) {
-  uint32_t global_mm_index = 0;
-  uint32_t offset = 0;
-  uint32_t length = 0;
+  int32_t global_mm_index = 0;
+  int32_t offset = 0;
   auto& mm_items = mm_data.items<MMItemVec>();
-  auto start = prompt.begin();
-  while (true) {
-    auto image_start_it = std::find(start, prompt.end(), im_start_id_);
-    auto image_end_it = std::find(start, prompt.end(), im_end_id_);
-    if (image_start_it == prompt.end()) {
-      break;
+  bool in_image = false;
+  std::vector<int32_t> span_tokens;
+  size_t tokens_num = prompt.size();
+  for (size_t idx = 0; idx < tokens_num; ++idx) {
+    auto token = prompt[idx];
+    if (token == im_start_id_) {
+      in_image = true;
+      offset = static_cast<int32_t>(idx) + 1;
+      span_tokens.clear();
+      continue;
     }
-    offset = std::distance(prompt.begin(), image_start_it);
-    length = std::distance(image_start_it + 1, image_end_it);
-    auto& item = mm_items[global_mm_index++];
-    item.mutable_state().mutable_token_pos() = {offset + 1, length};
-    start = std::next(image_end_it);
+    if (token == im_end_id_) {
+      if (!in_image) {
+        continue;
+      }
+      in_image = false;
+      int32_t length = static_cast<int32_t>(span_tokens.size());
+      auto& item = mm_items[global_mm_index++];
+      item.mutable_state().mutable_token_pos() = {offset, length};
+      if (length == 0) {
+        continue;
+      }
+      std::vector<uint8_t> mask_vec;
+      mask_vec.reserve(length);
+      for (const auto token_id : span_tokens) {
+        mask_vec.push_back(static_cast<uint8_t>(token_id == unk_id_));
+      }
+      auto mask =
+          torch::from_blob(
+              mask_vec.data(),
+              {static_cast<int64_t>(length)},
+              torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU))
+              .clone();
+      item.mutable_state().mutable_mm_token_mask() = mask;
+      continue;
+    }
+    if (!in_image) {
+      continue;
+    }
+    span_tokens.push_back(token);
   }
 }
 

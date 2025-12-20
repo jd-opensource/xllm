@@ -39,6 +39,7 @@ cc_library(
     cpu_affinity.cpp
     device_name_utils.cpp
     env_var.cpp
+    hash_util.cpp
     http_downloader.cpp
     # TODO. add following at next pr.
     json_reader.cpp

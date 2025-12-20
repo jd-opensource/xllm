@@ -435,10 +435,9 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     return torch::cat(outputs, 0);
   }
 
-  std::tuple<torch::Tensor, std::vector<torch::Tensor>> forward(
-      torch::Tensor hidden_states,
-      torch::Tensor grid_thw,  // [batch,thw]
-      const ModelInputParams& input_params) {
+  torch::Tensor forward(torch::Tensor hidden_states,
+                        torch::Tensor grid_thw,  // [batch,thw]
+                        const ModelInputParams& input_params) {
     hidden_states = patch_embed_(hidden_states);
     auto pos_embeds = fast_pos_embed_interpolate(grid_thw);
     hidden_states = hidden_states + pos_embeds;
@@ -487,7 +486,13 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     }
     // adapter
     hidden_states = merger_(hidden_states);
-    return std::make_tuple(hidden_states, deepstack_feature_lists);
+    std::vector<torch::Tensor> tensors;
+    tensors.reserve(deepstack_feature_lists.size() + 1);
+    tensors.push_back(hidden_states);
+    tensors.insert(tensors.end(),
+                   deepstack_feature_lists.begin(),
+                   deepstack_feature_lists.end());
+    return torch::cat(tensors, /*dim=*/1);
   }
 
   void load_state_dict(const StateDict& state_dict) {

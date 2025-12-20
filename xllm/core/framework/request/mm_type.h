@@ -44,11 +44,14 @@ class MMType {
   constexpr bool operator==(Value v) const { return value_ == v; }
   constexpr bool operator!=(Value v) const { return value_ != v; }
 
-  std::optional<std::string> to_string();
+  std::optional<std::string> to_string() const;
 
  private:
   Value value_ = Value::NONE;
 };
+
+// Only valid for IMAGE / VIDEO / AUDIO multimodal items.
+std::string get_embedding_key(MMType type);
 
 struct ImageMetadata {
   int32_t height = 0;

@@ -18,6 +18,7 @@ limitations under the License.
 #include <absl/strings/match.h>
 
 #include "framework/model/model_args.h"
+#include "framework/request/mm_batch_data.h"
 #include "framework/request/sequence.h"
 
 namespace xllm {
@@ -50,9 +51,8 @@ bool is_qwen3_vl_position_model(const std::string& model_type) {
 }  // namespace
 
 torch::Tensor MPositionHelper::get_positions() {
-  // if (seq_.is_chunked_prefill_stage()) {
-  if (seq_.kv_state().kv_cache_tokens_num() < seq_.num_prompt_tokens()) {
-    auto& mm_data = seq_.get_mm_data();
+  if (seq_.stage() != SequenceStage::DECODE) {
+    auto& mm_data = seq_.mm_data();
 
     torch::Tensor image_grid_thw;
     if (auto res = mm_data.get<torch::Tensor>("image_grid_thw"))
@@ -458,6 +458,15 @@ torch::Tensor MPositionHelper::get_positions_d() {
              static_cast<int32_t>(mrope_position_delta + num_tokens),
              torch::kInt32)
       .expand({3, -1});
+}
+
+torch::Tensor MPositionHelper::get_scheduled_positions(int64_t start,
+                                                       int64_t end) {
+  auto positions = get_positions();
+  if (seq_.stage() == SequenceStage::DECODE) {
+    return positions;
+  }
+  return positions.slice(/*dim=*/1, start, end);
 }
 
 }  // namespace xllm

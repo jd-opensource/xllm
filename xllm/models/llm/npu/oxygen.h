@@ -129,8 +129,7 @@ class OxygenModelImpl : public QWen3ModelImpl {
             event_flag);
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
-          h = deepstack_process(
-              h, input_params.multimodal.visual_pos_masks, deep_stacks[i]);
+          h = h + deep_stacks[i];
         }
       }
     }

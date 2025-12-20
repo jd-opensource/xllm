@@ -209,7 +209,6 @@ inline bool has_contiguous_input_buffer_exclusions(
     const ModelInputParams& params) {
   return params.multimodal.mm_data.valid() || params.has_onerec_params() ||
          params.has_llmrec_params() || params.dit_forward_input.valid() ||
-         params.multimodal.visual_pos_masks.defined() ||
          !params.multimodal.deep_stacks.empty();
 }
 

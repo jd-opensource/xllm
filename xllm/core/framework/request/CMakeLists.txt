@@ -42,7 +42,6 @@ cc_library(
     mm_codec.cpp
     mm_data.cpp
     mm_data_item.cpp
-    mm_item_state.cpp
     mm_data_visitor.cpp
     mm_handler.cpp
     mm_embedding_handler.cpp

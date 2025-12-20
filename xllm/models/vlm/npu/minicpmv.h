@@ -1007,7 +1007,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
         num_slices.data_ptr<int64_t>(),
         num_slices.data_ptr<int64_t>() + num_slices.numel());
     multimodal_embeds["image|embedding"] =
-        image_embedding.split(image_tokens_vec, 0 /*dim*/);
+        image_embedding.split(image_tokens_vec, /*dim=*/0);
 
     return multimodal_embeds;
   }
@@ -1016,7 +1016,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
                                      const ModelInputParams& input_params) {
     const auto& mm_data = input_params.multimodal.mm_data;
     torch::Tensor multimodal_embeds;
-    if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
+    if (const auto& emb = mm_data.get<torch::Tensor>("image|embedding")) {
       multimodal_embeds = emb.value();
     }
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);

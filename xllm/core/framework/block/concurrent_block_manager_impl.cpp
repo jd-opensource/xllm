@@ -31,17 +31,21 @@ void ConcurrentBlockManagerImpl::deallocate(const Slice<Block>& blocks) {
 }
 
 std::vector<Block> ConcurrentBlockManagerImpl::allocate_shared(
-    const Slice<int32_t>& tokens_ids,
-    const Slice<Block>& existed_shared_blocks) {
+    const Slice<int32_t>& token_ids,
+    const Slice<Block>& existed_shared_blocks,
+    const MMData& mm_data) {
   std::lock_guard<std::mutex> lock(mutex_);
-  return BlockManagerImpl::allocate_shared(tokens_ids, existed_shared_blocks);
+  return BlockManagerImpl::allocate_shared(
+      token_ids, existed_shared_blocks, mm_data);
 }
 
 void ConcurrentBlockManagerImpl::cache(const Slice<int32_t>& token_ids,
                                        std::vector<Block>& blocks,
-                                       size_t existed_shared_blocks_num) {
+                                       size_t existed_shared_blocks_num,
+                                       const MMData& mm_data) {
   std::lock_guard<std::mutex> lock(mutex_);
-  BlockManagerImpl::cache(token_ids, blocks, existed_shared_blocks_num);
+  BlockManagerImpl::cache(
+      token_ids, blocks, existed_shared_blocks_num, mm_data);
 }
 
 void ConcurrentBlockManagerImpl::cache(const std::vector<Block>& blocks) {

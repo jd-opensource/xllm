@@ -761,14 +761,11 @@ struct MultiModalInput {
 
   // deep_stack for Qwen3-VL
   mutable std::vector<torch::Tensor> deep_stacks;
-  // visual pos mask for Qwen3-VL
-  mutable torch::Tensor visual_pos_masks;
 
   MultiModalInput to(const torch::Device& device) const {
     MultiModalInput out;
     out.mm_data = MMBatchData::to(mm_data, device);
     out.deep_stacks = deep_stacks;
-    out.visual_pos_masks = visual_pos_masks;
     return out;
   }
 };

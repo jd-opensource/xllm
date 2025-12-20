@@ -45,6 +45,8 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};
     PROPERTY(uint32_t, max_seqs_per_batch) = 0;
+    // Hasher type bound to the engine (TEXT for LLM, MM for VLM).
+    PROPERTY(BlockHasherType, hasher_type) = BlockHasherType::TEXT;
   };
 
   explicit BlockManagerPool(const Options& options, int32_t dp_size = 1);

@@ -50,22 +50,38 @@ void MMDataItem::get(const MMKey& key, std::vector<torch::Tensor>& vec) const {
 }
 
 void MMDataItem::debug_print() const {
-  LOG(INFO) << "mm data item debug print, type:" << type_;
+  const std::string type_str = type_.to_string().value_or("none");
+  LOG(INFO) << "MMDataItem"
+            << " type=" << type_str << " seq_index=" << seq_index_
+            << " data_count=" << data_.size();
+  LOG(INFO) << "  token_pos"
+            << " offset=" << state_.token_pos().offset
+            << " length=" << state_.token_pos().length;
+  LOG(INFO) << "  schedule"
+            << " start_pos=" << state_.schedule_data().start_pos
+            << " end_pos=" << state_.schedule_data().end_pos;
+
+  if (data_.empty()) {
+    LOG(INFO) << "  data: empty";
+    return;
+  }
 
   for (const auto& pair : data_) {
     if (std::holds_alternative<torch::Tensor>(pair.second)) {
-      torch::Tensor item = std::get<torch::Tensor>(pair.second);
-      LOG(INFO) << " single tensor, key:" << pair.first
-                << " device:" << item.device() << " dtype:" << item.dtype()
-                << " shape:" << item.sizes();
+      const torch::Tensor& item = std::get<torch::Tensor>(pair.second);
+      LOG(INFO) << "  tensor"
+                << " key=" << pair.first << " device=" << item.device()
+                << " dtype=" << item.dtype() << " shape=" << item.sizes();
     } else if (std::holds_alternative<std::vector<torch::Tensor>>(
                    pair.second)) {
       const auto& lst = std::get<std::vector<torch::Tensor>>(pair.second);
-
-      for (const auto& item : lst) {
-        LOG(INFO) << " vector tensor, key:" << pair.first
-                  << " device:" << item.device() << " dtype:" << item.dtype()
-                  << " shape:" << item.sizes();
+      LOG(INFO) << "  tensor_list"
+                << " key=" << pair.first << " size=" << lst.size();
+      for (size_t i = 0; i < lst.size(); ++i) {
+        const torch::Tensor& item = lst[i];
+        LOG(INFO) << "    item[" << i << "]"
+                  << " device=" << item.device() << " dtype=" << item.dtype()
+                  << " shape=" << item.sizes();
       }
     }
   }

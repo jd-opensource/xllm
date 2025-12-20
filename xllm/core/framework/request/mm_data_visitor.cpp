@@ -17,7 +17,43 @@ limitations under the License.
 
 #include <absl/strings/match.h>
 
+#include <numeric>
+
 namespace xllm {
+
+namespace {
+std::pair<int32_t, int32_t> compute_emb_range(int32_t start_pos,
+                                              int32_t end_pos,
+                                              const torch::Tensor& mask) {
+  if (!mask.defined() || mask.numel() == 0) {
+    return {start_pos, end_pos};
+  }
+  auto mask_cpu = mask.to(torch::kCPU);
+  auto upto_start_pos =
+      mask_cpu.slice(/*dim*/ 0, /*start*/ 0, /*end*/ start_pos)
+          .sum()
+          .item<int32_t>();
+  auto upto_end_pos = mask_cpu.slice(/*dim*/ 0, /*start*/ 0, /*end*/ end_pos)
+                          .sum()
+                          .item<int32_t>();
+  return {upto_start_pos, upto_end_pos};
+}
+
+std::vector<int32_t> normalize_to_per_seq_lens(
+    const std::vector<int32_t>& seq_lens) {
+#if defined(USE_NPU) || defined(USE_MUSA)
+  return seq_lens;
+#else
+  // Other backends pass cumulative sequence lengths.
+  std::vector<int32_t> per_seq_lens;
+  per_seq_lens.reserve(seq_lens.empty() ? 0 : seq_lens.size() - 1);
+  for (size_t i = 1; i < seq_lens.size(); ++i) {
+    per_seq_lens.push_back(seq_lens[i] - seq_lens[i - 1]);
+  }
+  return per_seq_lens;
+#endif
+}
+}  // namespace
 
 bool CollectItemTensorVisitor::visit(MMDataItem& item) {
   for (const auto& pair : item.data()) {
@@ -74,7 +110,6 @@ bool EncoderInputGatherVisitor::visit(MMDataItem& item) {
 
   for (const auto& [key, value] : item.data()) {
     if (absl::StartsWith(key, filter_prefix_)) continue;
-
     auto& tar = datas_[key];
     if (std::holds_alternative<torch::Tensor>(value)) {
       tar.push_back(std::get<torch::Tensor>(value));
@@ -103,30 +138,23 @@ bool EncoderInputGatherVisitor::finish(MMBatchData& mm_data) {
 bool EncoderOutputScatterVisitor::visit(MMDataItem& item) {
   if (item.is_embedded()) return true;
 
-  std::string prefix;
   int32_t* idx = nullptr;
 
   if (item.type() == MMType::IMAGE) {
-    prefix = "image|";
     idx = &image_idx;
   } else if (item.type() == MMType::VIDEO) {
-    prefix = "video|";
     idx = &video_idx;
   } else if (item.type() == MMType::AUDIO) {
-    prefix = "audio|";
     idx = &audio_idx;
   } else {
     LOG(FATAL) << " mm data item type invalid, type is " << item.type();
     return true;
   }
 
-  for (const auto& [key, value] : data_) {
-    const auto& vec = std::get<std::vector<torch::Tensor>>(value);
-    if (absl::StartsWith(key, prefix)) {
-      std::string name = key.substr(prefix.length());
-      item.add(name, vec[*idx]);
-    }
-  }
+  const std::string embedding_key = get_embedding_key(item.type());
+  const auto& vec =
+      std::get<std::vector<torch::Tensor>>(data_.at(embedding_key));
+  item.add(embedding_key, vec[*idx]);
   ++(*idx);
   return true;
 }
@@ -151,20 +179,90 @@ bool EncoderOutputScatterVisitor::finish() const {
   return true;
 }
 
+EncoderEmbeddingGatherVisitor::EncoderEmbeddingGatherVisitor(
+    const torch::Device& device,
+    uint32_t mm_type,
+    const std::vector<int32_t>& seq_lens,
+    const std::vector<int32_t>& scheduled_seq_lens)
+    : device_(device),
+      per_seq_context_lens_(normalize_to_per_seq_lens(seq_lens)),
+      per_seq_scheduled_lens_(normalize_to_per_seq_lens(scheduled_seq_lens)),
+      per_seq_scheduled_offsets_(per_seq_scheduled_lens_.size(), 0),
+      total_scheduled_tokens_(std::accumulate(per_seq_scheduled_lens_.begin(),
+                                              per_seq_scheduled_lens_.end(),
+                                              0)) {
+  if (per_seq_scheduled_lens_.size() > 1) {
+    std::partial_sum(per_seq_scheduled_lens_.begin(),
+                     per_seq_scheduled_lens_.end() - 1,
+                     per_seq_scheduled_offsets_.begin() + 1);
+  }
+  if (mm_type & MMType::IMAGE) {
+    image_mask_ = torch::zeros({total_scheduled_tokens_},
+                               torch::dtype(torch::kBool).device(device_));
+  }
+  if (mm_type & MMType::VIDEO) {
+    video_mask_ = torch::zeros({total_scheduled_tokens_},
+                               torch::dtype(torch::kBool).device(device_));
+  }
+  if (mm_type & MMType::AUDIO) {
+    audio_mask_ = torch::zeros({total_scheduled_tokens_},
+                               torch::dtype(torch::kBool).device(device_));
+  }
+}
+
 bool EncoderEmbeddingGatherVisitor::visit(MMDataItem& item) {
   const auto& state = item.state();
 
-  int modality_tokens = state.token_pos().length;
-  uint32_t cached_token_num = state.prefix_cache().cached_token_num;
-  auto mask = torch::ones({modality_tokens}, torch::dtype(torch::kBool));
-  mask.index({torch::indexing::Slice(0, cached_token_num)}) = false;
-  for (auto& [key, value] : item.mutable_data()) {
-    auto& emb = std::get<torch::Tensor>(value);
-    emb = safe_to(emb, device_, true);
-    if (absl::StartsWith(key, gather_prefix_)) {
-      datas_[key].push_back(emb);
-    }
+  int32_t seq_index = item.seq_index();
+  CHECK_GE(seq_index, 0);
+
+  auto token_pos = item.state().token_pos();
+  int32_t start_pos = state.schedule_data().start_pos;
+  int32_t end_pos = state.schedule_data().end_pos;
+  // start_pos / end_pos select the scheduled subrange inside this multimodal
+  // item's token span in the prompt. Not every token in that subrange is a real
+  // multimodal token, so mm_token_mask is used to filter out non-multimodal
+  // positions when slicing multimodal embeddings.
+  auto [emb_start, emb_end] =
+      compute_emb_range(start_pos, end_pos, state.mm_token_mask());
+  int32_t schedule_tokens_num = per_seq_scheduled_lens_[seq_index];
+  int32_t context_tokens_num = per_seq_context_lens_[seq_index];
+
+  int32_t computed_tokens_num = context_tokens_num - schedule_tokens_num;
+  int32_t req_start_idx_ = per_seq_scheduled_offsets_[seq_index];
+  int32_t req_start_pos =
+      req_start_idx_ + token_pos.offset - computed_tokens_num + start_pos;
+  int32_t req_end_pos =
+      req_start_idx_ + token_pos.offset - computed_tokens_num + end_pos;
+
+  if (item.type() == MMType::IMAGE) {
+    image_mask_.slice(/*dim*/ 0,
+                      /*start*/ req_start_pos,
+                      /*end*/ req_end_pos) =
+        state.mm_token_mask().slice(
+            /*dim*/ 0, /*start*/ start_pos, /*end*/ end_pos);
+  } else if (item.type() == MMType::VIDEO) {
+    video_mask_.slice(/*dim*/ 0,
+                      /*start*/ req_start_pos,
+                      /*end*/ req_end_pos) =
+        state.mm_token_mask().slice(
+            /*dim*/ 0, /*start*/ start_pos, /*end*/ end_pos);
+  } else if (item.type() == MMType::AUDIO) {
+    audio_mask_.slice(/*dim*/ 0,
+                      /*start*/ req_start_pos,
+                      /*end*/ req_end_pos) =
+        state.mm_token_mask().slice(
+            /*dim*/ 0, /*start*/ start_pos, /*end*/ end_pos);
   }
+  const std::string key = get_embedding_key(item.type());
+  auto emb = item.get<torch::Tensor>(key);
+  if (!emb.has_value()) {
+    LOG(ERROR) << "embedding not found for key: " << key;
+    return false;
+  }
+  torch::Tensor embedding = safe_to(emb.value(), device_, true);
+  datas_[key].push_back(
+      embedding.slice(/*dim*/ 0, /*start*/ emb_start, /*end*/ emb_end));
   return true;
 }
 
@@ -179,7 +277,38 @@ bool EncoderEmbeddingGatherVisitor::finish(MMBatchData& mm_data) {
       return false;
     }
   }
+  // mask for merge multimodal embeddings into text.
+  if (image_mask_.defined()) {
+    data["image|mask"] = image_mask_;
+  }
+  if (video_mask_.defined()) {
+    data["video|mask"] = video_mask_;
+  }
+  if (audio_mask_.defined()) {
+    data["audio|mask"] = audio_mask_;
+  }
   mm_data.replace(data);
+  return true;
+}
+
+bool UpdateMMItemScheduleStateVisitor::visit(MMDataItem& item) {
+  auto& schedule_data = item.mutable_state().mutable_schedule_data();
+  auto& token_pos = item.state().token_pos();
+  int32_t mm_end_idx = token_pos.offset + token_pos.length - 1;
+  int32_t schedule_token_num = q_seq_len_;
+  if (mm_end_idx < computed_token_num_) {
+    return true;
+  }
+  if (token_pos.offset >= computed_token_num_ + schedule_token_num) {
+    return true;
+  }
+  schedule_data.start_pos = std::max(computed_token_num_ - token_pos.offset, 0);
+  schedule_data.end_pos =
+      std::min(computed_token_num_ - token_pos.offset + schedule_token_num,
+               token_pos.length);
+  item.set_seq_index(seq_idx_);
+  scheduled_type_ |= item.type();
+  mm_data_items_.push_back(item);
   return true;
 }
 
