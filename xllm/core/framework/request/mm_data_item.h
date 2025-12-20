@@ -92,7 +92,6 @@ class MMDataItem {
 
   const MMItemState& state() const { return state_; }
   MMItemState& mutable_state() { return state_; }
-
   const MMMetadata& metadata() const { return metadata_; }
   void debug_print() const;
 

@@ -188,4 +188,25 @@ bool EncoderEmbeddingGatherVisitor::finish(MMBatchData& mm_data) {
   return true;
 }
 
+bool UpdateMMItemCachedStateVisitor::visit(MMDataItem& item) {
+  auto& cache = item.mutable_state().mutable_prefix_cache();
+  auto& token_pos = item.state().token_pos();
+  uint32_t mm_end_idx = token_pos.offset + token_pos.length - 1;
+
+  if (last_matched_token_index_ == n_tokens_ - 1) {
+    last_matched_token_index_ = last_matched_token_index_ - block_size_;
+  }
+  if (token_pos.offset > last_matched_token_index_) {
+    return false;
+  } else if (mm_end_idx <= last_matched_token_index_) {
+    cache.cached_token_num = token_pos.length;
+  } else {
+    cache.cached_token_num =
+        (last_matched_token_index_ > token_pos.offset)
+            ? (last_matched_token_index_ - token_pos.offset + 1)
+            : 0;
+  }
+  return true;
+}
+
 }  // namespace xllm

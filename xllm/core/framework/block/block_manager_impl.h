@@ -37,11 +37,13 @@ class BlockManagerImpl : public BlockManager {
 
   // allocate shared blocks when enable prefix cache
   std::vector<Block> allocate_shared(
+      Sequence* sequence,
       const Slice<int32_t>& tokens_ids,
       const Slice<Block>& existed_shared_blocks = {}) override;
 
   // cache blocks when enable prefix cache
-  void cache(const Slice<int32_t>& token_ids,
+  void cache(Sequence* sequence,
+             const Slice<int32_t>& token_ids,
              std::vector<Block>& blocks) override;
   void cache(const std::vector<Block>& blocks) override;
 
