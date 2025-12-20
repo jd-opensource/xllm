@@ -44,6 +44,7 @@ void VlmExecutorImpl::process_mm_data(ModelInputParams& params,
                                       const torch::Device& device,
                                       const torch::Tensor& tokens) {
   auto& mm_data = params.mm_data;
+
   EncoderInputGatherVisitor input_gather;
   mm_data.foreach (input_gather);
   CHECK(input_gather.finish(mm_data));
@@ -54,7 +55,8 @@ void VlmExecutorImpl::process_mm_data(ModelInputParams& params,
   mm_data.foreach (scatter);
   CHECK(scatter.finish());
 
-  EncoderEmbeddingGatherVisitor gather(device);
+  EncoderEmbeddingGatherVisitor gather(
+      device, params.kv_seq_lens_vec, params.q_seq_lens_vec);
   mm_data.foreach (gather);
   CHECK(gather.finish(mm_data));
 
@@ -66,7 +68,6 @@ ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
                                  std::vector<KVCache>& kv_caches,
                                  const ModelInputParams& params) {
   torch::NoGradGuard no_grad;
-
   process_mm_data(
       const_cast<ModelInputParams&>(params), model_, device_, tokens);
 

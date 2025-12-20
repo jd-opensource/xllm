@@ -123,12 +123,26 @@ bool MMData::foreach (MMDataItem::IVisitor& v) {
 
   auto& vec = items<MMItemVec>();
   for (auto& item : vec) {
-    if (!v.visit(item)) {
+    if (!v.visit(item, seq_index_)) {
       return false;
     }
   }
   return true;
 }
+
+// bool MMData::foreach (MMDataItem::IVisitor& v, int32_t seq_index) {
+//   if (!valid()) return false;
+
+//   if (!hold<MMItemVec>()) return false;
+
+//   auto& vec = items<MMItemVec>();
+//   for (auto& item : vec) {
+//     if (!v.visit(item, seq_index)) {
+//       return false;
+//     }
+//   }
+//   return true;
+// }
 
 bool MMData::foreach (MMDictItem::IVisitor& v) {
   if (!valid()) return false;

@@ -19,6 +19,25 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+std::pair<int32_t, int32_t> compute_emb_range(int32_t start_pos,
+                                              int32_t end_pos,
+                                              const torch::Tensor& mask) {
+  if (!mask.defined() || mask.numel() == 0) {
+    return {start_pos, end_pos};
+  }
+  auto mask_cpu = mask.to(torch::kCPU);
+  auto upto_start_pos =
+      mask_cpu.slice(/*dim*/ 0, /*start*/ 0, /*end*/ start_pos)
+          .sum()
+          .item<int32_t>();
+  auto upto_end_pos = mask_cpu.slice(/*dim*/ 0, /*start*/ 0, /*end*/ end_pos)
+                          .sum()
+                          .item<int32_t>();
+  return {upto_start_pos, upto_end_pos};
+}
+}  // namespace
+
 bool CollectItemTensorVisitor::visit(MMDataItem& item) {
   for (const auto& pair : item.data()) {
     const auto& key = pair.first;
@@ -70,13 +89,11 @@ bool CollectMMDataTensorVisitor::visit(MMData& data) {
 }
 
 bool EncoderInputGatherVisitor::visit(MMDataItem& item) {
-  if (item.state().prefix_complete_cached()) return true;
-
+  if (!item.state().is_scheduling()) return true;
   if (item.is_embedded()) return true;
 
   for (const auto& [key, value] : item.data()) {
     if (absl::StartsWith(key, filter_prefix_)) continue;
-
     auto& tar = datas_[key];
     if (std::holds_alternative<torch::Tensor>(value)) {
       tar.push_back(std::get<torch::Tensor>(value));
@@ -103,8 +120,7 @@ bool EncoderInputGatherVisitor::finish(MMBatchData& mm_data) {
 }
 
 bool EncoderOutputScatterVisitor::visit(MMDataItem& item) {
-  if (item.state().prefix_complete_cached()) return true;
-
+  if (!item.state().is_scheduling()) return true;
   if (item.is_embedded()) return true;
 
   std::string prefix;
@@ -155,19 +171,50 @@ bool EncoderOutputScatterVisitor::finish() const {
   return true;
 }
 
-bool EncoderEmbeddingGatherVisitor::visit(MMDataItem& item) {
+bool EncoderEmbeddingGatherVisitor::visit(MMDataItem& item, int32_t seq_index) {
   const auto& state = item.state();
-  if (state.prefix_complete_cached()) return true;
+  LOG(INFO) << "visit ====================== " << state.is_scheduling();
+  if (!state.is_scheduling()) return true;
 
-  int modality_tokens = state.token_pos().length;
-  uint32_t cached_token_num = state.prefix_cache().cached_token_num;
-  auto mask = torch::ones({modality_tokens}, torch::dtype(torch::kBool));
-  mask.index({torch::indexing::Slice(0, cached_token_num)}) = false;
+  auto token_pos = item.state().token_pos();
+  int32_t start_pos = state.schedule_data().start_pos;
+  int32_t end_pos = state.schedule_data().end_pos;
+  auto [emb_start, emb_end] =
+      compute_emb_range(start_pos, end_pos, state.mm_token_mask());
+  int32_t schedule_tokens_num = q_seq_lens_[seq_index];
+
+  int32_t computed_tokens_num = seq_lens_[seq_index] - schedule_tokens_num;
+  int32_t req_start_idx_ = req_start_idx_vec_[seq_index];
+  int32_t req_start_pos =
+      req_start_idx_ + token_pos.offset - computed_tokens_num + start_pos;
+  int32_t req_end_pos =
+      req_start_idx_ + token_pos.offset - computed_tokens_num + end_pos;
+
+  if (item.type() == MMType::IMAGE) {
+    image_mask_.slice(/*dim*/ 0,
+                      /*start*/ req_start_pos,
+                      /*end*/ req_end_pos) =
+        state.mm_token_mask().slice(
+            /*dim*/ 0, /*start*/ start_pos, /*end*/ end_pos);
+  } else if (item.type() == MMType::VIDEO) {
+    video_mask_.slice(/*dim*/ 0,
+                      /*start*/ req_start_pos,
+                      /*end*/ req_end_pos) =
+        state.mm_token_mask().slice(
+            /*dim*/ 0, /*start*/ start_pos, /*end*/ end_pos);
+  } else if (item.type() == MMType::AUDIO) {
+    audio_mask_.slice(/*dim*/ 0,
+                      /*start*/ req_start_pos,
+                      /*end*/ req_end_pos) =
+        state.mm_token_mask().slice(
+            /*dim*/ 0, /*start*/ start_pos, /*end*/ end_pos);
+  }
   for (auto& [key, value] : item.mutable_data()) {
     auto& emb = std::get<torch::Tensor>(value);
-    emb = safe_to(emb, device_, true);
     if (absl::StartsWith(key, gather_prefix_)) {
-      datas_[key].push_back(emb.index({mask}));
+      emb = safe_to(emb, device_, true);
+      datas_[key].push_back(
+          emb.slice(/*dim*/ 0, /*start*/ emb_start, /*end*/ emb_end));
     }
   }
   return true;
@@ -184,7 +231,31 @@ bool EncoderEmbeddingGatherVisitor::finish(MMBatchData& mm_data) {
       return false;
     }
   }
+  // mask for merge multimodal embeddings into text.
+  data["image|mask"] = image_mask_;
+  data["video|mask"] = video_mask_;
+  data["audio|mask"] = audio_mask_;
   mm_data.replace(data);
+  return true;
+}
+
+bool UpdateMMItemScheduleStateVisitor::visit(MMDataItem& item) {
+  auto& schedule_data = item.mutable_state().mutable_schedule_data();
+  auto& token_pos = item.state().token_pos();
+  int32_t mm_end_idx = token_pos.offset + token_pos.length - 1;
+
+  int32_t schedule_token_num = q_seq_len_;
+  if (mm_end_idx < computed_token_num_) {
+    return true;
+  }
+  if (token_pos.offset >= computed_token_num_ + schedule_token_num) {
+    return true;
+  }
+  schedule_data.start_pos = std::max(computed_token_num_ - token_pos.offset, 0);
+  schedule_data.end_pos =
+      std::min(computed_token_num_ - token_pos.offset + schedule_token_num,
+               token_pos.length);
+  mm_data_items_.push_back(item);
   return true;
 }
 
