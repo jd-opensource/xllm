@@ -199,7 +199,8 @@ void HierarchyBlockManagerPool::allocate_host_shared(Sequence* sequence) {
   if (options_.enable_prefix_cache()) {
     int32_t dp_rank = BlockManagerPool::get_dp_rank(sequence);
     std::vector<Block> shared_blocks =
-        host_block_managers_[dp_rank]->allocate_shared(sequence->tokens());
+        host_block_managers_[dp_rank]->allocate_shared(sequence,
+                                                       sequence->tokens());
     sequence->add_shared_host_kv_blocks(std::move(shared_blocks));
   }
 }
@@ -216,7 +217,7 @@ void HierarchyBlockManagerPool::prefetch_from_storage(
     int32_t dp_rank = BlockManagerPool::get_dp_rank(prefill_sequence.get());
     std::vector<Block> shared_blocks =
         host_block_managers_[dp_rank]->allocate_shared(
-            prefill_sequence->tokens());
+            prefill_sequence.get(), prefill_sequence->tokens());
     prefill_sequence->add_shared_host_kv_blocks(std::move(shared_blocks));
 
     // round down to the nearest block number

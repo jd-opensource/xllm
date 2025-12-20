@@ -170,7 +170,7 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
                                            src_ptr + group_encoder_seq_len);
         }
         // Collect sparse_embedding
-        auto mm_data = sequence->get_mm_data();
+        auto mm_data = sequence->mm_data();
         auto sparse_embedding_optional =
             mm_data.get<torch::Tensor>(Sequence::ENCODER_SPARSE_EMBEDDING_NAME);
         if (sparse_embedding_optional.has_value()) {

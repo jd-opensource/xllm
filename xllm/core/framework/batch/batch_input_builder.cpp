@@ -337,7 +337,11 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   if (use_mrope_) {
     const auto& args = *args_;
     MPositionHelper helper(*sequence, args);
-    state.mrope_positions_vec.emplace_back(helper.get_positions());
+    const auto& whole_positions = helper.get_positions();
+    auto position = (sequence->stage() == SequenceStage::DECODE)
+                        ? whole_positions
+                        : whole_positions.slice(1, n_kv_cache_tokens);
+    state.mrope_positions_vec.push_back(position);
   }
 
   // Process each token

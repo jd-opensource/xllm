@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/torch.h>
+
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -66,5 +68,8 @@ struct FixedStringKeyEqual {
                         sizeof(left.data)) == 0;
   }
 };
+
+Murmur3Key hash_tensor(const torch::Tensor& tensor);
+Murmur3Key hash_string(const std::string& str);
 
 }  // namespace xllm

@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "request/sequence.h"
 
 namespace xllm {
 
@@ -56,6 +57,7 @@ void murmur_hash3(const uint8_t* pre_hash_value,
 }
 
 std::vector<Block> PrefixCache::match(
+    Sequence* sequence,
     const Slice<int32_t>& token_ids,
     const Slice<Block>& existed_shared_blocks) {
   // allign tokens to block boundary
@@ -118,11 +120,16 @@ std::vector<Block> PrefixCache::match(
   return blocks;
 }
 
-size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
+size_t PrefixCache::insert(Sequence* sequence,
+                           const Slice<int32_t>& token_ids,
                            std::vector<Block>& blocks,
                            size_t existed_shared_blocks_num) {
   std::vector<Murmur3Key> insert_keys;
-  return insert(token_ids, blocks, existed_shared_blocks_num, &insert_keys);
+  return insert(sequence,
+                token_ids,
+                blocks,
+                existed_shared_blocks_num,
+                &insert_keys);
 }
 
 size_t PrefixCache::insert(const std::vector<Block>& blocks) {
@@ -140,7 +147,8 @@ size_t PrefixCache::evict(size_t n_blocks) {
   return evict(n_blocks, &evict_keys);
 }
 
-size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
+size_t PrefixCache::insert(Sequence* sequence,
+                           const Slice<int32_t>& token_ids,
                            std::vector<Block>& blocks,
                            size_t existed_shared_blocks_num,
                            std::vector<Murmur3Key>* insert_keys) {

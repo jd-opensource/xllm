@@ -18,6 +18,7 @@ limitations under the License.
 #include <absl/strings/match.h>
 
 #include "framework/model/model_args.h"
+#include "framework/request/mm_batch_data.h"
 #include "framework/request/sequence.h"
 
 namespace xllm {
@@ -46,7 +47,8 @@ std::vector<std::tuple<std::string, int, int>> groupByTokenType(
 torch::Tensor MPositionHelper::get_positions() {
   // if (seq_.is_chunked_prefill_stage()) {
   if (seq_.kv_state().kv_cache_tokens_num() < seq_.num_prompt_tokens()) {
-    auto& mm_data = seq_.get_mm_data();
+    auto& data = seq_.mm_data();
+    MMBatchData mm_data({data});
 
     torch::Tensor image_grid_thw;
     if (auto res = mm_data.get<torch::Tensor>("image_grid_thw"))

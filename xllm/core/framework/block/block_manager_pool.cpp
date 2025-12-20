@@ -24,7 +24,6 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     : options_(options) {
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
   block_managers_.reserve(dp_size);
-
   BlockManager::Options npu_options;
   npu_options.num_blocks(options_.num_blocks())
       .block_size(options_.block_size())
@@ -32,7 +31,8 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.host_num_blocks() > 0
                                ? false
-                               : options_.enable_cache_upload());
+                               : options_.enable_cache_upload())
+      .enable_mm_prefix_cache(options_.enable_mm_prefix_cache());
 
   for (int32_t i = 0; i < dp_size; ++i) {
     if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
@@ -184,7 +184,7 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
     // If the sequence holds shared_blocks, the hash values of these blocks do
     // not need to be recalculated and can be reused directly.
     shared_blocks = block_managers_[dp_rank]->allocate_shared(
-        sequence->tokens(), existed_shared_blocks);
+        sequence, sequence->tokens(), existed_shared_blocks);
 
     if (!shared_blocks.empty()) {
       sequence->add_kv_blocks(shared_blocks);
@@ -250,8 +250,8 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
     // If the sequence holds shared_blocks, the hash values of these blocks do
     // not need to be recalculated and can be reused directly.
     std::vector<Block> shared_blocks =
-        block_managers_[dp_rank]->allocate_shared(sequence->tokens(),
-                                                  existed_shared_blocks);
+        block_managers_[dp_rank]->allocate_shared(
+            sequence, sequence->tokens(), existed_shared_blocks);
     sequence->add_shared_kv_blocks(std::move(shared_blocks));
   }
 }
@@ -261,8 +261,10 @@ void BlockManagerPool::cache(Sequence* sequence) {
   const auto token_ids = sequence->cached_tokens();
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
   auto existed_shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
-  block_managers_[dp_rank]->cache(
-      token_ids, *blocks, existed_shared_blocks_num);
+  block_managers_[dp_rank]->cache(sequence,
+                                  token_ids,
+                                  *blocks,
+                                  existed_shared_blocks_num);
 }
 
 void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {

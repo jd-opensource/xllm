@@ -15,9 +15,10 @@ class PrefixCacheWithUpload final : public PrefixCache {
   // insert the token ids and blocks into the prefix tree
   // and set hash key to the corresponding block
   // return the length of new inserted tokens
-  size_t insert(const Slice<int32_t>& token_ids,
+  size_t insert(Sequence* sequence,
+                const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,
-                size_t existed_shared_blocks_num) override;
+                size_t existed_shared_blocks_num = 0) override;
 
   // insert the blocks with hash key into the prefix tree
   size_t insert(const std::vector<Block>& blocks) override;

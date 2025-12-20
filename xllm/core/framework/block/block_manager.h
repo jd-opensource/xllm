@@ -45,6 +45,7 @@ class BlockManager {
     PROPERTY(int32_t, block_size) = 0;
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
+    PROPERTY(bool, enable_mm_prefix_cache) = false;
     PROPERTY(bool, enable_cache_upload) = false;
   };
 
@@ -56,10 +57,12 @@ class BlockManager {
   virtual std::vector<Block> allocate(size_t num_blocks) = 0;
 
   virtual std::vector<Block> allocate_shared(
+      Sequence* sequence,
       const Slice<int32_t>& tokens_ids,
       const Slice<Block>& existed_shared_blocks = {}) = 0;
 
-  virtual void cache(const Slice<int32_t>& token_ids,
+  virtual void cache(Sequence* sequence,
+                     const Slice<int32_t>& token_ids,
                      std::vector<Block>& blocks,
                      size_t existed_shared_blocks_num = 0) = 0;
   virtual void cache(const std::vector<Block>& blocks) = 0;
