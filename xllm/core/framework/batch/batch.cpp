@@ -53,10 +53,10 @@ void Batch::add(Sequence* sequence, uint32_t allowed_max_token) {
   if (input_embedding.defined())
     input_embeddings_vec_.emplace_back(input_embedding);
 
-  const auto& mm_data = sequence->get_mm_data();
+  const auto& mm_data = sequence->mm_data();
   //  if (sequence->is_chunked_prefill_stage() &&  mm_data.valid())
   // TODO:Compatible With Chunked Prefill
-  if ((sequence->stage() == SequenceStage::PREFILL) && mm_data.valid()) {
+  if ((sequence->stage() != SequenceStage::DECODE) && mm_data.valid()) {
     mm_data_vec_.emplace_back(mm_data);
   }
   update_forward_type(sequence);
@@ -314,9 +314,8 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
     }
     CHECK_LT(output_idx, num_seqs);
 
-    // mm embed task
-    if (raw_output.mm_embeddings.size() > 0) {
-      int64_t n_images = seq->get_mm_data().size();
+    if (raw_output.mm_embeddings.size() > 0) {  // mm embed task
+      int64_t n_images = seq->mm_data().size();
       if (n_images > 0) {
         std::vector<torch::Tensor> seq_mm_embeddings;
         seq_mm_embeddings.reserve(n_images);

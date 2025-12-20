@@ -19,7 +19,8 @@ void test_basic_operation(BlockManagerImpl* block_manager,
   std::vector<int32_t> token_ids = {1, 2, 3, 4, 5, 6, 7, 8, 9};
   Slice<int32_t> slice_token_ids(token_ids);
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
 
     EXPECT_EQ(block_matched.size(), 0);
   }
@@ -28,19 +29,21 @@ void test_basic_operation(BlockManagerImpl* block_manager,
   {
     std::vector<Block> token_blocks = block_manager->allocate(n_blocks);
 
-    prefix_cache->insert(slice_token_ids, token_blocks);
+    prefix_cache->insert(/*sequence*/ nullptr, slice_token_ids, token_blocks);
   }
 
   EXPECT_EQ(prefix_cache->num_blocks(), n_blocks);
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks);
   }
 
   {
     auto block_matched =
-        prefix_cache->match(slice_token_ids.slice(block_size, 2 * block_size));
+        prefix_cache->match(/*sequence*/ nullptr,
+                            slice_token_ids.slice(block_size, 2 * block_size));
     EXPECT_EQ(block_matched.size(), 0);
   }
 
@@ -49,13 +52,14 @@ void test_basic_operation(BlockManagerImpl* block_manager,
   EXPECT_EQ(prefix_cache->num_blocks(), n_blocks - 1);
 
   {
-    auto block_matched =
-        prefix_cache->match(slice_token_ids.slice(0, block_size));
+    auto block_matched = prefix_cache->match(
+        /*sequence*/ nullptr, slice_token_ids.slice(0, block_size));
     EXPECT_EQ(block_matched.size(), 1);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids.slice(block_size));
+    auto block_matched = prefix_cache->match(/*sequence*/ nullptr,
+                                             slice_token_ids.slice(block_size));
     EXPECT_EQ(block_matched.size(), 0);
   }
 }
@@ -83,7 +87,8 @@ void test_insert_operation(BlockManagerImpl* block_manager,
   Slice<int32_t> slice_token_ids(token_ids);
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
 
     EXPECT_EQ(block_matched.size(), 0);
   }
@@ -93,13 +98,14 @@ void test_insert_operation(BlockManagerImpl* block_manager,
   {
     std::vector<Block> token_blocks = block_manager->allocate(n_blocks);
 
-    prefix_cache->insert(slice_token_ids, token_blocks);
+    prefix_cache->insert(/*sequence*/ nullptr, slice_token_ids, token_blocks);
 
     EXPECT_EQ(prefix_cache->num_blocks(), n_blocks);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks);
   }
 
@@ -108,7 +114,8 @@ void test_insert_operation(BlockManagerImpl* block_manager,
   Slice<int32_t> slice_token_ids_1(token_ids_1);
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids_1);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids_1);
 
     EXPECT_EQ(block_matched.size(), 0);
   }
@@ -118,18 +125,21 @@ void test_insert_operation(BlockManagerImpl* block_manager,
   {
     std::vector<Block> token_blocks_1 = block_manager->allocate(n_blocks);
 
-    prefix_cache->insert(slice_token_ids_1, token_blocks_1);
+    prefix_cache->insert(
+        /*sequence*/ nullptr, slice_token_ids_1, token_blocks_1);
 
     EXPECT_EQ(prefix_cache->num_blocks(), 2 * n_blocks);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids_1);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids_1);
     EXPECT_EQ(block_matched.size(), n_blocks);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks);
   }
 
@@ -137,12 +147,14 @@ void test_insert_operation(BlockManagerImpl* block_manager,
   EXPECT_EQ(prefix_cache->num_blocks(), 2 * n_blocks - 1);
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids_1);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids_1);
     EXPECT_EQ(block_matched.size(), n_blocks - 1);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks);
   }
 
@@ -150,21 +162,24 @@ void test_insert_operation(BlockManagerImpl* block_manager,
   EXPECT_EQ(prefix_cache->num_blocks(), 2 * n_blocks - 2);
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids_1);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids_1);
     EXPECT_EQ(block_matched.size(), 0);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks);
 
-    prefix_cache->insert(slice_token_ids, block_matched);
+    prefix_cache->insert(/*sequence*/ nullptr, slice_token_ids, block_matched);
   }
 
   EXPECT_EQ(prefix_cache->num_blocks(), n_blocks);
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks);
   }
 
@@ -172,12 +187,14 @@ void test_insert_operation(BlockManagerImpl* block_manager,
   EXPECT_EQ(prefix_cache->num_blocks(), n_blocks - 1);
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids_1);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids_1);
     EXPECT_EQ(block_matched.size(), 0);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks - 1);
   }
 }
@@ -208,7 +225,8 @@ void test_evict_operation(BlockManagerImpl* block_manager,
   Slice<int32_t> slice_token_ids(token_ids);
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
 
     EXPECT_EQ(block_matched.size(), 0);
   }
@@ -218,13 +236,14 @@ void test_evict_operation(BlockManagerImpl* block_manager,
   {
     std::vector<Block> token_blocks = block_manager->allocate(n_blocks);
 
-    prefix_cache->insert(slice_token_ids, token_blocks);
+    prefix_cache->insert(/*sequence*/ nullptr, slice_token_ids, token_blocks);
 
     EXPECT_EQ(prefix_cache->num_blocks(), n_blocks);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks);
   }
 
@@ -237,20 +256,22 @@ void test_evict_operation(BlockManagerImpl* block_manager,
             block_manager->num_total_blocks());
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), 0);
   }
 
   {
     std::vector<Block> token_blocks = block_manager->allocate(n_blocks);
 
-    prefix_cache->insert(slice_token_ids, token_blocks);
+    prefix_cache->insert(/*sequence*/ nullptr, slice_token_ids, token_blocks);
 
     EXPECT_EQ(prefix_cache->num_blocks(), n_blocks);
   }
 
   {
-    auto block_matched = prefix_cache->match(slice_token_ids);
+    auto block_matched =
+        prefix_cache->match(/*sequence*/ nullptr, slice_token_ids);
     EXPECT_EQ(block_matched.size(), n_blocks);
   }
 }
