@@ -176,6 +176,7 @@ class MMData {
   }
 
   bool foreach (MMDataItem::IVisitor& v);
+  bool foreach (MMDataItem::IVisitor& v, int32_t mm_data_index);
   bool foreach (MMDictItem::IVisitor& v);
 
   bool foreach (IItemVisitor& v);

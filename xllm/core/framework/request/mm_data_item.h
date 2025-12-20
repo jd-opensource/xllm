@@ -39,7 +39,10 @@ class MMDataItem {
   class IVisitor {
    public:
     virtual ~IVisitor() = default;
-    virtual bool visit(MMDataItem& item) = 0;
+    virtual bool visit(MMDataItem& item) { return true; };
+    virtual bool visit(MMDataItem& item, int32_t mm_data_index) {
+      return true;
+    };
   };
 
  public:
@@ -92,7 +95,6 @@ class MMDataItem {
 
   const MMItemState& state() const { return state_; }
   MMItemState& mutable_state() { return state_; }
-
   const MMMetadata& metadata() const { return metadata_; }
   void debug_print() const;
 

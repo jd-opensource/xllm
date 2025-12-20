@@ -73,6 +73,14 @@ class MMBatchData {
   }
 
   template <typename T>
+  bool foreach_with_index(T& v) {
+    for (int32_t i = 0; i < mm_datas_.size(); i++) {
+      if (!mm_datas_[i].foreach (v, i)) return false;
+    }
+    return true;
+  }
+
+  template <typename T>
   bool foreach (T& v) {
     for (auto& data : mm_datas_) {
       if (!data.foreach (v)) return false;

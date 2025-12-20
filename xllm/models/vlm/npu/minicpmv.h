@@ -96,22 +96,46 @@ class MiniCPMInputProcessor : public InputProcessor {
     prompt = new_prompt;
   }
   void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override {
-    uint32_t global_mm_index = 0;
-    uint32_t offset = 0;
-    uint32_t length = 0;
+    int32_t global_mm_index = 0;
+    int32_t offset = 0;
     auto& mm_items = mm_data.items<MMItemVec>();
-    auto start = prompt.begin();
-    while (true) {
-      auto image_start_it = std::find(start, prompt.end(), im_start_id_);
-      auto image_end_it = std::find(start, prompt.end(), im_end_id_);
-      if (image_start_it == prompt.end()) {
-        break;
+    bool in_image = false;
+    std::unordered_map<int32_t, int32_t> freq;
+    std::vector<int32_t> span_tokens;
+    size_t tokens_num = prompt.size();
+    for (size_t idx = 0; idx < tokens_num; ++idx) {
+      auto token = prompt[idx];
+      if (token == im_start_id_) {
+        in_image = true;
+        offset = static_cast<int32_t>(idx) + 1;
+        freq.clear();
+        span_tokens.clear();
+        continue;
       }
-      offset = std::distance(prompt.begin(), image_start_it);
-      length = std::distance(image_start_it + 1, image_end_it);
-      auto& item = mm_items[global_mm_index++];
-      item.mutable_state().mutable_token_pos() = {offset + 1, length};
-      start = std::next(image_end_it);
+      if (token == im_end_id_) {
+        if (!in_image) continue;
+        in_image = false;
+        int32_t length = static_cast<int32_t>(span_tokens.size());
+        auto& item = mm_items[global_mm_index++];
+        item.mutable_state().mutable_token_pos() = {offset, length};
+        if (length == 0) continue;
+        std::vector<uint8_t> mask_vec;
+        mask_vec.reserve(length);
+        for (const auto token_id : span_tokens) {
+          mask_vec.push_back(static_cast<uint8_t>(token_id == unk_id_));
+        }
+        auto mask =
+            torch::from_blob(
+                mask_vec.data(),
+                {static_cast<int64_t>(length)},
+                torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU))
+                .clone();
+        item.mutable_state().mutable_mm_token_mask() = mask;
+        continue;
+      }
+      if (!in_image) continue;
+      span_tokens.push_back(token);
+      ++freq[token];
     }
   }
 
@@ -204,6 +228,7 @@ class MiniCPMInputProcessor : public InputProcessor {
 
   const int im_start_id_ = 151659;
   const int im_end_id_ = 151658;
+  const int unk_id_ = 128244;
 
   bool slice_mode_;
   bool use_image_id_;
@@ -1183,7 +1208,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     std::vector<int64_t> image_tokens_vec(
         num_slices.data_ptr<int64_t>(),
         num_slices.data_ptr<int64_t>() + num_slices.numel());
-    multimodal_embeds["image|embedding"] =
+    multimodal_embeds["image|embedding|image"] =
         image_embedding.split(image_tokens_vec, 0 /*dim*/);
 
     return multimodal_embeds;
