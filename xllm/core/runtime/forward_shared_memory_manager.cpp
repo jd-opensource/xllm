@@ -191,11 +191,14 @@ inline size_t get_mm_item_size(const MMDataItem& mm_item) {
   total += get_mm_dict_size(mm_item.data());  // dict
 
   // token_pos
-  total += type_size<uint32_t> * 2;
+  total += type_size<int32_t> * 2;
 
-  // prefix_cache
+  // mm_token_mask
+  total += get_tensor_size(mm_item.state().mm_token_mask());
+
+  // schedule_data
   total += XXH3_128BITS_HASH_VALUE_LEN;
-  total += type_size<uint32_t>;
+  total += type_size<int32_t> * 2;
 
   return total;
 }
@@ -224,6 +227,7 @@ size_t get_sampling_params_size(const SamplingParameters& params) {
 inline size_t get_mm_data_size(const MMData& mm_data) {
   size_t total = 0;
   total += type_size<uint32_t>;  //  mm_type
+  total += type_size<int32_t>;   //  seq_index
   if (mm_data.hold<MMItemVec>()) {
     total += type_size<size_t>;  // num of mm_items
     const auto& mm_items = mm_data.items<MMItemVec>();
@@ -621,15 +625,20 @@ inline void write_mm_item(char*& buffer, const MMDataItem& item) {
   write_data(buffer, state.token_pos().offset);
   write_data(buffer, state.token_pos().length);
 
-  // write prefix_cache
-  memcpy(buffer, state.prefix_cache().key.data, XXH3_128BITS_HASH_VALUE_LEN);
+  // write mm_token_mask
+  write_tensor(buffer, state.mm_token_mask());
+
+  // write schedule_data
+  memcpy(buffer, state.schedule_data().key.data, XXH3_128BITS_HASH_VALUE_LEN);
   buffer += XXH3_128BITS_HASH_VALUE_LEN;
-  write_data(buffer, state.prefix_cache().cached_token_num);
+  write_data(buffer, state.schedule_data().start_pos);
+  write_data(buffer, state.schedule_data().end_pos);
 }
 
 inline void write_mm_data_items(char*& buffer, const MMData& mm_data) {
   const auto& mm_items = mm_data.items<MMItemVec>();
   write_data(buffer, mm_data.type());
+  write_data(buffer, mm_data.seq_index());
   write_data(buffer, mm_items.size());
   for (const auto& mm_item : mm_items) {
     write_mm_item(buffer, mm_item);
@@ -639,6 +648,7 @@ inline void write_mm_data_items(char*& buffer, const MMData& mm_data) {
 inline void write_mm_data_dict(char*& buffer, const MMData& mm_data) {
   const auto& mm_dict = mm_data.items<MMDict>();
   write_data(buffer, mm_data.type());
+  write_data(buffer, mm_data.seq_index());
   write_mm_dict(buffer, mm_dict);
 }
 
@@ -1070,14 +1080,17 @@ inline void read_mm_item(const char*& buffer,
   read_data(buffer, state.mutable_token_pos().offset, device_buffer);
   read_data(buffer, state.mutable_token_pos().length, device_buffer);
 
-  // read prefix_cache
-  std::memcpy(state.mutable_prefix_cache().key.data,
+  // read mm_token_mask
+  read_tensor(buffer, state.mutable_mm_token_mask(), device_buffer);
+
+  // read schedule_data
+  std::memcpy(state.mutable_schedule_data().key.data,
               buffer,
               XXH3_128BITS_HASH_VALUE_LEN);
   buffer += XXH3_128BITS_HASH_VALUE_LEN;
   safe_advance_buffer(device_buffer, XXH3_128BITS_HASH_VALUE_LEN);
-  read_data(
-      buffer, state.mutable_prefix_cache().cached_token_num, device_buffer);
+  read_data(buffer, state.mutable_schedule_data().start_pos, device_buffer);
+  read_data(buffer, state.mutable_schedule_data().end_pos, device_buffer);
 }
 
 inline void read_mm_data_dict(const char*& buffer,
@@ -1085,10 +1098,13 @@ inline void read_mm_data_dict(const char*& buffer,
                               const char*& device_buffer) {
   uint32_t mm_type;
   read_data(buffer, mm_type, device_buffer);
+  int32_t seq_index;
+  read_data(buffer, seq_index, device_buffer);
   MMDict mm_dict;
   read_mm_dict(buffer, mm_dict, device_buffer);
   MMType ty{static_cast<MMType::Value>(mm_type)};
   mm_data = MMData(ty, mm_dict);
+  mm_data.set_seq_index(seq_index);
 }
 
 inline void read_mm_data_items(const char*& buffer,
@@ -1096,6 +1112,8 @@ inline void read_mm_data_items(const char*& buffer,
                                const char*& device_buffer) {
   uint32_t mm_type;
   read_data(buffer, mm_type, device_buffer);
+  int32_t seq_index;
+  read_data(buffer, seq_index, device_buffer);
   size_t mm_items_num;
   read_data(buffer, mm_items_num, device_buffer);
   MMItemVec mm_items;
@@ -1107,6 +1125,7 @@ inline void read_mm_data_items(const char*& buffer,
   }
   MMType ty{static_cast<MMType::Value>(mm_type)};
   mm_data = MMData(ty, std::move(mm_items));
+  mm_data.set_seq_index(seq_index);
 }
 
 inline void read_mm_batch_data(const char*& buffer,

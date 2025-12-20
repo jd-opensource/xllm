@@ -91,12 +91,14 @@ void EmbeddingManager::deallocate(const Slice<Block>& blocks) {
 }
 
 std::vector<Block> EmbeddingManager::allocate_shared(
-    const Slice<int32_t>& /*tokens_ids*/,
+    Sequence* /*sequence*/,
+    const Slice<int32_t>& /*token_ids*/,
     const Slice<Block>& /*existed_shared_blocks*/) {
   return {};
 }
 
-void EmbeddingManager::cache(const Slice<int32_t>& /*token_ids*/,
+void EmbeddingManager::cache(Sequence* /*sequence*/,
+                             const Slice<int32_t>& /*token_ids*/,
                              std::vector<Block>& /*blocks*/,
                              size_t /*existed_shared_blocks_num*/) {}
 

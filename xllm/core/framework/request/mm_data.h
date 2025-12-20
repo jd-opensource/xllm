@@ -176,14 +176,18 @@ class MMData {
   }
 
   bool foreach (MMDataItem::IVisitor& v);
+  bool foreach_with_index(MMDataItem::IVisitor& v);
   bool foreach (MMDictItem::IVisitor& v);
 
   bool foreach (IItemVisitor& v);
+  void set_seq_index(int32_t index) { seq_index_ = index; }
+  int32_t seq_index() const { return seq_index_; }
   void debug_print() const;
 
  private:
   uint32_t type_ = MMType::NONE;
   MMItems items_;
+  int32_t seq_index_ = -1;
 };
 
 }  // namespace xllm
