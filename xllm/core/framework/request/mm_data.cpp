@@ -123,7 +123,7 @@ bool MMData::foreach (MMDataItem::IVisitor& v) {
 
   auto& vec = items<MMItemVec>();
   for (auto& item : vec) {
-    if (!v.visit(item)) {
+    if (!v.visit(item, seq_index_)) {
       return false;
     }
   }

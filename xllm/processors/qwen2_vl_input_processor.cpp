@@ -106,9 +106,9 @@ void Qwen2_5_VLInputProcessor::process(std::string& prompt,
 void Qwen2_5_VLInputProcessor::find_mm_spans(const std::vector<int>& prompt,
                                              MMData& mm_data) {
   auto start = prompt.begin();
-  uint32_t global_mm_index = 0;
-  uint32_t offset = 0;
-  uint32_t length = 0;
+  int32_t global_mm_index = 0;
+  int32_t offset = 0;
+  int32_t length = 0;
   auto& mm_items = mm_data.items<MMItemVec>();
   while (true) {
     auto vision_start_it =
@@ -121,10 +121,13 @@ void Qwen2_5_VLInputProcessor::find_mm_spans(const std::vector<int>& prompt,
     length = std::distance(vision_start_it + 1, vision_end_it);
 
     auto& item = mm_items[global_mm_index];
-    if (*(vision_start_it + 1) == image_token_id_) {
+    auto next_token_id = *(vision_start_it + 1);
+    if (next_token_id == image_token_id_ || next_token_id == video_token_id_) {
       item.mutable_state().mutable_token_pos() = {offset + 1, length};
-    } else if (*(vision_start_it + 1) == video_token_id_) {
-      item.mutable_state().mutable_token_pos() = {offset + 1, length};
+      auto mask = torch::ones(
+          {length},
+          torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+      item.mutable_state().mutable_mm_token_mask() = mask;
     }
     global_mm_index++;
     start = std::next(vision_end_it);

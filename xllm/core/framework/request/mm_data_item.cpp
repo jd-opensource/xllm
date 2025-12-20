@@ -50,8 +50,12 @@ void MMDataItem::get(const MMKey& key, std::vector<torch::Tensor>& vec) const {
 }
 
 void MMDataItem::debug_print() const {
-  LOG(INFO) << "mm data item debug print, type:" << type_;
+  LOG(INFO) << "mm item state debug ============= ";
+  LOG(INFO) << " offset: " << state_.token_pos().offset
+            << " length: " << state_.token_pos().length;
 
+  LOG(INFO) << " schedule start_pos: " << state_.schedule_data().start_pos
+            << " end_pos: " << state_.schedule_data().end_pos;
   for (const auto& pair : data_) {
     if (std::holds_alternative<torch::Tensor>(pair.second)) {
       torch::Tensor item = std::get<torch::Tensor>(pair.second);

@@ -52,22 +52,25 @@ ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
                                  std::vector<KVCache>& kv_caches,
                                  const ModelInputParams& params) {
   torch::NoGradGuard no_grad;
-  auto& mm_data = params.mm_data;
+  auto& mutable_params = const_cast<ModelInputParams&>(params);
+  auto& mm_data = mutable_params.mm_data;
+
   EncoderInputGatherVisitor input_gather;
   mm_data.foreach (input_gather);
   CHECK(input_gather.finish(mm_data));
   mm_data.to(device_);
 
-  auto embedding = encode(params);
+  auto embedding = encode(mutable_params);
   EncoderOutputScatterVisitor scatter(embedding);
   mm_data.foreach (scatter);
   CHECK(scatter.finish());
 
-  EncoderEmbeddingGatherVisitor gather(device_);
+  EncoderEmbeddingGatherVisitor gather(
+      device_, mutable_params.kv_seq_lens_vec, mutable_params.q_seq_lens_vec);
   mm_data.foreach (gather);
   CHECK(gather.finish(mm_data));
 
-  params.input_embedding = model_->get_input_embeddings(tokens, params);
+  mutable_params.input_embedding = model_->get_input_embeddings(tokens, params);
 
   if (llm_executor_) {
     return llm_executor_->run(tokens, positions, kv_caches, params);
