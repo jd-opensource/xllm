@@ -78,11 +78,8 @@ struct ModelInputParams {
     params.embedding_ids = std::move(embedding_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
-    params.kv_cache_tokens_nums_host = std::vector<int>(kv_cache_tokens_nums.data_ptr<int>(),
-                            kv_cache_tokens_nums.data_ptr<int>() +
-                                kv_cache_tokens_nums.numel());
-
-    params.kv_cache_tokens_nums = safe_to(kv_cache_tokens_nums,device);
+    params.kv_cache_tokens_nums_host = std::move(kv_cache_tokens_nums_host);
+    params.kv_cache_tokens_nums = safe_to(kv_cache_tokens_nums, device);
     params.history_compressed_kv = safe_to(history_compressed_kv, device);
     params.history_k_rope = safe_to(history_k_rope, device);
     params.ring_cur_seqlen = safe_to(ring_cur_seqlen, device);
@@ -213,7 +210,7 @@ struct ModelInputParams {
   torch::Tensor expert_load_data;
 
   torch::Tensor kv_cache_tokens_nums;
-  std::vector<int>  kv_cache_tokens_nums_host;
+  std::vector<int> kv_cache_tokens_nums_host;
   torch::Tensor history_compressed_kv;
   torch::Tensor history_k_rope;
   torch::Tensor ring_cur_seqlen;
