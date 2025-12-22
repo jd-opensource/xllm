@@ -127,13 +127,15 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.loraEnableGMM = false;
   param.packQuantType = {1, 1};
   param.linearQuantType = {0, -1, -1, 0, 0, -1, 0};
-  param.linearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
+
+  param.linearTransposeType = {static_cast<int>(TransposeType::NOT_TRANSPOSE),
                                static_cast<int>(TransposeType::INVALID),
                                static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::TRANSPOSE),
-                               static_cast<int>(TransposeType::TRANSPOSE),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
                                static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::TRANSPOSE)};
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE)};
+
   param.kvQuant = false;
   param.quantGroupSize = 0;
   param.rmsNormEps = args.rms_norm_eps();
@@ -251,9 +253,11 @@ void NpuQwen2DecoderLayerImpl::merge_loaded_weights() {
   auto new_q_weight = torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
                                   at_weight_tensors_[IN_K_WEIGHT],
                                   at_weight_tensors_[IN_V_WEIGHT]},
-                                 0);
+                                 0)
+                          .transpose(0, 1);
 
-  at_weight_tensors_[IN_Q_WEIGHT] = new_q_weight;
+  at_weight_tensors_[IN_Q_WEIGHT] =
+      at_npu::native::npu_format_cast(new_q_weight.contiguous(), 29);
 
   at_weight_tensors_[IN_K_WEIGHT] = torch::zeros({1}).to(device_);
   at_weight_tensors_[IN_V_WEIGHT] = torch::zeros({1}).to(device_);
@@ -267,26 +271,22 @@ void NpuQwen2DecoderLayerImpl::merge_loaded_weights() {
   at_weight_tensors_[IN_K_BIAS] = torch::zeros({1}).to(device_);
   at_weight_tensors_[IN_V_BIAS] = torch::zeros({1}).to(device_);
 
-  TransposeType transpose_type =
-      check_transpose(at_weight_tensors_[IN_MLP_W2_WEIGHT]);
-  int transpose_value = static_cast<int>(transpose_type);
-  prefill_param_.linearTransposeType[4] = transpose_value;
-  decode_param_.linearTransposeType[4] = transpose_value;
-  if (transpose_type == TransposeType::TRANSPOSE) {
-    auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                                      at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                                     0);
-    at_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
-  } else {
-    auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                                      at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                                     0)
-                              .transpose(0, 1);
-    at_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
-  }
+  at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT] = at_npu::native::npu_format_cast(
+      at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1).contiguous(),
+      29);
+
+  auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
+                                    at_weight_tensors_[IN_MLP_W1_WEIGHT]},
+                                   0)
+                            .transpose(0, 1);
+
+  at_weight_tensors_[IN_MLP_W2_WEIGHT] =
+      at_npu::native::npu_format_cast(new_mlp_weight.contiguous(), 29);
 
   at_weight_tensors_[IN_MLP_W1_WEIGHT] = torch::zeros({1}).to(device_);
 
+  at_weight_tensors_[IN_MLP_CPROJ_WEIGHT] = at_npu::native::npu_format_cast(
+      at_weight_tensors_[IN_MLP_CPROJ_WEIGHT].transpose(0, 1).contiguous(), 29);
   c10_npu::NPUCachingAllocator::emptyCache();
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =

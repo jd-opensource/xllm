@@ -194,7 +194,14 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
   param.loraEnableGMM = false;
 
-  param.linearTransposeType = {1, -1, -1, 1, 1, -1, 1};
+  param.linearTransposeType = {static_cast<int>(TransposeType::NOT_TRANSPOSE),
+                               static_cast<int>(TransposeType::INVALID),
+                               static_cast<int>(TransposeType::INVALID),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
+                               static_cast<int>(TransposeType::INVALID),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE)};
+
   param.quantGroupSize = 0;
   param.normEps = args.rms_norm_eps();
   param.numAttentionHeadsPerRank = args.n_heads() / parallel_args.world_size();
@@ -374,18 +381,25 @@ void NpuQwen3DecoderLayerImpl::merge_loaded_weights() {
     }
   }
 
+  auto new_q_weight = torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
+                                  at_weight_tensors_[IN_K_WEIGHT],
+                                  at_weight_tensors_[IN_V_WEIGHT]},
+                                 0)
+                          .transpose(0, 1);
   at_weight_tensors_[IN_Q_WEIGHT] =
-      torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
-                  at_weight_tensors_[IN_K_WEIGHT],
-                  at_weight_tensors_[IN_V_WEIGHT]},
-                 0)
-          .contiguous();
+      at_npu::native::npu_format_cast(new_q_weight.contiguous(), 29);
+  at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT] = at_npu::native::npu_format_cast(
+      at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1).contiguous(),
+      29);
 
+  auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
+                                    at_weight_tensors_[IN_MLP_W1_WEIGHT]},
+                                   0)
+                            .transpose(0, 1);
   at_weight_tensors_[IN_MLP_W2_WEIGHT] =
-      torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                  at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                 0)
-          .contiguous();
+      at_npu::native::npu_format_cast(new_mlp_weight.contiguous(), 29);
+  at_weight_tensors_[IN_MLP_CPROJ_WEIGHT] = at_npu::native::npu_format_cast(
+      at_weight_tensors_[IN_MLP_CPROJ_WEIGHT].transpose(0, 1).contiguous(), 29);
 
   for (auto idx :
        {IN_MLP_W1_WEIGHT, IN_K_WEIGHT, IN_V_WEIGHT, IN_K_BIAS, IN_V_BIAS}) {
