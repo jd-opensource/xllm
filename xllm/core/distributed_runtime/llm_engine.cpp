@@ -266,6 +266,18 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   kv_cache_cap.slot_size = slot_size;
   kv_cache_cap.index_slot_size = index_slot_size;
   kv_cache_cap.n_layers = args_.n_layers();
+#if !defined(USE_NPU)
+  // this adoption is because the allocation of kv cache is based on
+  //  the number of layers, and the draft engine is using the same model as the
+  //  target engine.
+  // so we need to override the number of layers for the draft engine.
+  if (options_.is_draft_engine()) {
+    if ((args_.model_type() == "deepseek_v3" ||
+         args_.model_type() == "deepseek_v32")) {
+      kv_cache_cap.n_layers = args_.num_nextn_predict_layers();
+    }
+  }
+#endif
 
   if (!FLAGS_enable_continuous_kvcache) {
     // compute kv cache n_blocks
@@ -273,15 +285,15 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     const int64_t block_size_in_bytes =
         block_size * (slot_size + index_slot_size);
     kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                            (args_.n_layers() * block_size_in_bytes);
+                            (kv_cache_cap.n_layers * block_size_in_bytes);
     CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
   } else {
     int32_t n_pages =
         kv_cache_cap.cache_size_in_bytes / FLAGS_phy_page_granularity_size;
     if (FLAGS_enable_mla) {
-      n_pages -= n_pages % (args_.n_layers());
+      n_pages -= n_pages % (kv_cache_cap.n_layers);
     } else {
-      n_pages -= n_pages % (2 * args_.n_layers());
+      n_pages -= n_pages % (2 * kv_cache_cap.n_layers);
     }
     kv_cache_cap.n_pages = n_pages;
     CHECK_GT(kv_cache_cap.n_pages, 0) << "no n_pages for kv cache";

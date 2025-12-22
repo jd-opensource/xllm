@@ -185,6 +185,10 @@ class WorkerImpl {
 
   void init_hierarchy_kv_cache_transfer();
 
+  // Get the effective number of layers based on whether this is a spec draft
+  // model
+  int64_t get_num_layers() const;
+
  protected:
   // runtime options
   runtime::Options options_;
