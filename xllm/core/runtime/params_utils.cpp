@@ -217,6 +217,10 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.q_seq_lens = torch::tensor(q_seq_lens, tensor_options);
   input_params.kv_cache_tokens_nums =
       torch::tensor(kv_cache_tokens_nums, tensor_options);
+  input_params.kv_cache_tokens_nums_host =
+      std::vector<int>(input_params.kv_cache_tokens_nums.data_ptr<int>(),
+                       input_params.kv_cache_tokens_nums.data_ptr<int>() +
+                           input_params.kv_cache_tokens_nums.numel());
   input_params.kv_seq_lens_vec = std::move(seq_lens);
   input_params.q_seq_lens_vec = std::move(q_seq_lens);
 
@@ -245,10 +249,12 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
 
   // input_params.ring_cur_seqlen_host = ring_cur_seqlen;
   // input_params.ring_cache_seqlen_host = ring_cache_seqlen;
-  // input_params.history_compressed_kv = torch::tensor(history_compressed_kv, tensor_options);
-  // input_params.history_k_rope = torch::tensor(history_k_rope, tensor_options);
-  // input_params.ring_cur_seqlen = torch::tensor(ring_cur_seqlen, tensor_options);
-  // input_params.ring_cache_seqlen = torch::tensor(ring_cache_seqlen, tensor_options);
+  // input_params.history_compressed_kv = torch::tensor(history_compressed_kv,
+  // tensor_options); input_params.history_k_rope =
+  // torch::tensor(history_k_rope, tensor_options); input_params.ring_cur_seqlen
+  // = torch::tensor(ring_cur_seqlen, tensor_options);
+  // input_params.ring_cache_seqlen = torch::tensor(ring_cache_seqlen,
+  // tensor_options);
 
   if (pb_forward_input->embeds().size() > 0) {
     const int32_t rows = pb_forward_input->embeds().size();
