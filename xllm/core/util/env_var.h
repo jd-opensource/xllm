@@ -39,5 +39,13 @@ std::string get_string_env(const std::string& name);
 // insufficient.
 int64_t get_process_group_test_timeout_seconds();
 
+// Check if the speculative acceptance rate should be fixed.
+// NOTE: This variable is for performance debugging only, it will
+// influence the model accuracy and should not be used in production.
+// Returns the fixed acceptance rate if the XLLM_FIX_SPECULATIVE_ACCEPTANCE_RATE
+// environment variable is set to a valid float value, -1.0 otherwise. This is
+// used to control whether to fix the speculative acceptance rate.
+double get_fix_speculative_acceptance_rate();
+
 }  // namespace util
 }  // namespace xllm
