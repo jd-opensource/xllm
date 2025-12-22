@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "framework/kv_cache/embedding_allocator.h"
+#include "framework/sampling/rejection_sampler.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache/spec_kv_cache_transfer.h"
 #endif
@@ -153,5 +154,10 @@ class SpeculativeWorkerImpl : public WorkerImpl {
 #if defined(USE_NPU)
   std::shared_ptr<SpecKVCacheTransfer> kv_cache_transfer_;
 #endif
+
+  // performance debug for fixing the speculative acceptance rate
+  // NOTE: This is for performance debugging only, it will
+  // influence the model accuracy and should not be used in production.
+  std::shared_ptr<RejectionSamplerRateController> rate_controller_;
 };
 }  // namespace xllm

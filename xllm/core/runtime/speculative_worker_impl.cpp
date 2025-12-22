@@ -18,7 +18,6 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/request/mm_data.h"
-#include "framework/sampling/rejection_sampler.h"
 #include "util/env_var.h"
 #include "util/pretty_print.h"
 #include "util/slice.h"
@@ -168,6 +167,16 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
   runtime_options.num_decoding_tokens(1).num_speculative_tokens(0);
   draft_impl_ =
       std::make_unique<LLMWorkerImpl>(parallel_args, device, runtime_options);
+
+  // performance debug for fixing the speculative acceptance rate
+  // NOTE: This is for performance debugging only, it will
+  // influence the model accuracy and should not be used in production.
+  double fixed_acceptance_rate =
+      xllm::util::get_fix_speculative_acceptance_rate();
+  if (fixed_acceptance_rate >= 0.0) {
+    rate_controller_ =
+        std::make_shared<RejectionSamplerRateController>(fixed_acceptance_rate);
+  }
 }
 
 bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
@@ -650,7 +659,8 @@ SampleOutput SpeculativeWorkerImpl::validate(
                                          sampling_params.all_random_sample,
                                          sampling_params.all_greedy_sample,
                                          target_output.logprobs,
-                                         target_output.max_top_logprobs);
+                                         target_output.max_top_logprobs,
+                                         rate_controller_);
 
   // get the accepted tokens
   SampleOutput sample_output =

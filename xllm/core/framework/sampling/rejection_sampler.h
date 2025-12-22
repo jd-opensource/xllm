@@ -18,9 +18,57 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch/types.h>
 
+#include <random>
+
 #include "sampling_params.h"
 
 namespace xllm {
+
+// Provide a default placeholder token ID
+#ifndef PLACEHOLDER_TOKEN_ID
+#define PLACEHOLDER_TOKEN_ID -1
+#endif
+
+class RejectionSamplerRateController {
+ public:
+  explicit RejectionSamplerRateController(double fixed_acceptance_rate);
+
+  // Core filtering function, decides whether to accept a batch based on target
+  // acceptance rate
+  torch::Tensor FilterWithAcceptanceRate(const torch::Tensor& token_ids);
+
+ private:
+  // Reset internal state (call when the target acceptance rate changes
+  // significantly)
+  void ResetState(double new_rate);
+
+  // Compute the final acceptance rate after PID and error correction
+  double CalculateAdjustedRate(double target, double error);
+  size_t window_size_;
+
+  // History state (using circular buffer logic)
+  std::vector<int> history_buffer_;
+  size_t history_idx_;
+  long window_sum_;
+
+  // PID controller state
+  std::vector<double> error_buffer_;
+  size_t error_idx_;
+  double pid_adj_;
+
+  // Global statistics and error state
+  double cumulative_err_;
+  double last_target_;
+  long total_batches_;
+  long accepted_batches_;
+
+  // Random number generator
+  std::mt19937 gen_;
+  std::uniform_real_distribution<double> dist_;
+
+  // acceptance rate
+  double fixed_acceptance_rate_;
+};
 
 class RejectionSampler final {
  public:
@@ -28,7 +76,9 @@ class RejectionSampler final {
                    bool all_random_sample,
                    bool all_greedy_sample,
                    bool logprobs,
-                   int64_t max_top_logprobs);
+                   int64_t max_top_logprobs,
+                   std::shared_ptr<RejectionSamplerRateController>
+                       rate_controller = nullptr);
 
   // operator() allows us to use the module as a function.
   template <typename... Args>
@@ -77,6 +127,9 @@ class RejectionSampler final {
   torch::Tensor do_sample_;
   bool all_random_sample_ = true;
   bool all_greedy_sample_ = true;
+
+  // rate controller for fixing the speculative acceptance rate
+  std::shared_ptr<RejectionSamplerRateController> rate_controller_;
 };
 
 }  // namespace xllm

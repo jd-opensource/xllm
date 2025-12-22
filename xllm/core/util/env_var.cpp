@@ -62,6 +62,23 @@ std::string get_string_env(const std::string& name) {
   return std::string(val);
 }
 
+double get_double_env(const std::string& key, double defaultValue) {
+  const char* val = std::getenv(key.c_str());
+  if (val == nullptr) {
+    return defaultValue;
+  }
+  char* endptr = nullptr;
+  double result = std::strtod(val, &endptr);
+  // Check if conversion was successful (endptr points to end of string or valid
+  // terminator)
+  if (endptr == val || *endptr != '\0') {
+    LOG(WARNING) << "Invalid value for " << key << ": " << val
+                 << ". Must be a valid double. Using default " << defaultValue;
+    return defaultValue;
+  }
+  return result;
+}
+
 int64_t get_process_group_test_timeout_seconds() {
   // Default timeout is 4 seconds, but can be overridden via environment
   // variable to accommodate multi-node multi-device communication scenarios
@@ -70,6 +87,23 @@ int64_t get_process_group_test_timeout_seconds() {
   constexpr const char* kTimeoutEnvVar =
       "XLLM_PROCESS_GROUP_ASYNC_TIMEOUT_SECONDS";
   return get_int_env(kTimeoutEnvVar, kDefaultTimeoutSeconds);
+}
+
+double get_fix_speculative_acceptance_rate() {
+  // Default is -1.0 to disable fixing the speculative acceptance rate.
+  // Set XLLM_FIX_SPECULATIVE_ACCEPTANCE_RATE to a valid float value to fix the
+  // speculative acceptance rate.
+  constexpr double kDefaultValue = -1.0;
+  constexpr const char* kAcceptanceRateEnvVar =
+      "XLLM_FIX_SPECULATIVE_ACCEPTANCE_RATE";
+  double value = get_double_env(kAcceptanceRateEnvVar, kDefaultValue);
+  // Ensure that if set, it is between 0 and 1
+  if (value != kDefaultValue && (value < 0.0 || value > 1.0)) {
+    LOG(WARNING) << "Invalid value for " << kAcceptanceRateEnvVar << ": "
+                 << value << ". Must be in [0, 1]. Using default (-1)";
+    return kDefaultValue;
+  }
+  return value;
 }
 
 }  // namespace util
