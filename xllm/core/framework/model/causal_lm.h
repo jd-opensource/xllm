@@ -20,9 +20,6 @@ limitations under the License.
 #include "graph/types.h"
 #include "layers/npu/npu_lm_head_impl.h"
 #include "layers/npu/npu_word_embedding_impl.h"
-#else
-#include "layers/common/lm_head.h"
-#include "layers/common/word_embedding.h"
 #endif
 // clang-format on
 #include <c10/core/Device.h>
@@ -34,13 +31,14 @@ limitations under the License.
 #include "core/framework/model_loader.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
+#include "layers/common/lm_head.h"
+#include "layers/common/word_embedding.h"
 #include "model_args.h"
 #include "model_input_params.h"
 #include "model_output.h"
 
 namespace xllm {
 
-#if !defined(USE_NPU)
 namespace detail {
 template <typename T, typename = void>
 struct has_get_lm_head : std::false_type {};
@@ -77,7 +75,6 @@ struct has_set_word_embedding<
     std::void_t<decltype(std::declval<T>()->set_word_embedding(
         std::declval<layer::WordEmbedding&>()))>> : std::true_type {};
 }  // namespace detail
-#endif
 
 class CausalLM : public torch::nn::Module {
  public:
@@ -114,7 +111,7 @@ class CausalLM : public torch::nn::Module {
   virtual void set_npu_lm_head(layer::NpuLmHead& head) = 0;
   virtual layer::NpuWordEmbedding get_npu_word_embedding() = 0;
   virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) = 0;
-#else
+#endif
   virtual layer::LmHead get_lm_head() {
     NOT_IMPLEMENTED();
     return nullptr;
@@ -127,7 +124,6 @@ class CausalLM : public torch::nn::Module {
   virtual void set_word_embedding(layer::WordEmbedding& embedding) {
     NOT_IMPLEMENTED();
   }
-#endif
 };
 
 template <typename Model>
@@ -177,7 +173,7 @@ class CausalLMImpl : public CausalLM {
   void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) override {
     model_->set_npu_word_embedding(embedding);
   }
-#else
+#endif
   layer::LmHead get_lm_head() override {
     if constexpr (detail::has_get_lm_head<Model>::value) {
       return model_->get_lm_head();
@@ -209,7 +205,6 @@ class CausalLMImpl : public CausalLM {
       CausalLM::set_word_embedding(embedding);
     }
   }
-#endif
 
   torch::Device device() const override { return options_.device(); }
 

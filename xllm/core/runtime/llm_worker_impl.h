@@ -59,7 +59,7 @@ class LLMWorkerImpl : public WorkerImpl {
     model_->set_npu_word_embedding(embedding);
   };
 
-#else
+#endif
   layer::LmHead get_lm_head() { return model_->get_lm_head(); };
 
   void set_lm_head(layer::LmHead& head) { model_->set_lm_head(head); };
@@ -71,8 +71,6 @@ class LLMWorkerImpl : public WorkerImpl {
   void set_word_embedding(layer::WordEmbedding& embedding) {
     model_->set_word_embedding(embedding);
   };
-
-#endif
 
  private:
   std::unique_ptr<BeamSearcher> beam_searcher_;
