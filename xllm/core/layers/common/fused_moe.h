@@ -137,6 +137,12 @@ class FusedMoEImpl : public torch::nn::Module {
 
   void load_e_score_correction_bias(const StateDict& state_dict);
   void load_experts(const StateDict& state_dict);
+  // create the group gemm output tensor with the workspace
+  torch::Tensor create_group_gemm_output(const torch::Tensor& a,
+                                         const torch::Tensor& b,
+                                         const torch::Tensor& group_list,
+                                         torch::ScalarType dtype,
+                                         torch::Tensor& workspace);
 };
 TORCH_MODULE(FusedMoE);
 
