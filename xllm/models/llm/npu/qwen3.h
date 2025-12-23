@@ -15,16 +15,16 @@ limitations under the License.
 
 #pragma once
 
-#include "core/layers/qwen3_decoder_layer.h"
+#include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
 namespace xllm {
 
 class QWen3DecoderLayerImpl
-    : public LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer> {
+    : public LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer> {
  public:
   QWen3DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer>(context) {}
+      : LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer>(context) {}
 };
 TORCH_MODULE(QWen3DecoderLayer);
 
@@ -42,10 +42,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    norm_ = register_module("norm", layer::RMSNorm(context));
-    embed_tokens_ =
-        register_module("embed_tokens", layer::WordEmbedding(context));
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
+    npu_embed_tokens_ =
+        register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
+    atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         128,
         model_args.max_position_embeddings(),
@@ -95,7 +95,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
     } else {
-      h = embed_tokens_(tokens, 0);
+      h = npu_embed_tokens_(tokens, 0);
     }
     if (use_deepstack) {
       deep_stacks = input_params.deep_stacks;  // [num_deepstack, hidden_size]

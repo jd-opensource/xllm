@@ -30,7 +30,7 @@ namespace layer {
 
 const uint64_t WEIGHT_COUNT_PER_LAYER = 18;
 
-void Qwen3VisionEncoderLayerImpl::param_from_args(
+void NpuQwen3VisionEncoderLayerImpl::param_from_args(
     atb_speed::qwen::VisionEncoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -50,7 +50,7 @@ void Qwen3VisionEncoderLayerImpl::param_from_args(
   param.MLPActivationType = atb::infer::ActivationType::ACTIVATION_GELU;
 }
 
-Qwen3VisionEncoderLayerImpl::Qwen3VisionEncoderLayerImpl(
+NpuQwen3VisionEncoderLayerImpl::NpuQwen3VisionEncoderLayerImpl(
     const ModelContext& context)
     : BaseLayer(context) {
   auto model_args = context.get_model_args();
@@ -67,7 +67,7 @@ Qwen3VisionEncoderLayerImpl::Qwen3VisionEncoderLayerImpl(
                                                        context);
 }
 
-void Qwen3VisionEncoderLayerImpl::merge_loaded_weights() {
+void NpuQwen3VisionEncoderLayerImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
@@ -79,14 +79,14 @@ void Qwen3VisionEncoderLayerImpl::merge_loaded_weights() {
   init_layer();
 }
 
-int64_t Qwen3VisionEncoderLayerImpl::init_layer() {
+int64_t NpuQwen3VisionEncoderLayerImpl::init_layer() {
   name_ = "qwen3_encoder_layer";
   model_name_ = "qwen3_vl";
   CHECK_OPERATION_STATUS_RETURN(init_node(encode_node_, encode_param_));
   return atb::NO_ERROR;
 }
 
-int64_t Qwen3VisionEncoderLayerImpl::init_node(
+int64_t NpuQwen3VisionEncoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::qwen::VisionEncoderLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -116,7 +116,7 @@ int64_t Qwen3VisionEncoderLayerImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor Qwen3VisionEncoderLayerImpl::forward(
+torch::Tensor NpuQwen3VisionEncoderLayerImpl::forward(
     torch::Tensor& x,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
@@ -143,7 +143,7 @@ torch::Tensor Qwen3VisionEncoderLayerImpl::forward(
   return x;
 }
 
-void Qwen3VisionEncoderLayerImpl::build_node_variant_pack(
+void NpuQwen3VisionEncoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,

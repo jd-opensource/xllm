@@ -23,10 +23,10 @@ limitations under the License.
 
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/npu/npu_lm_head_impl.h"
+#include "core/layers/npu/npu_qwen2_decoder_layer_impl.h"
+#include "core/layers/npu/npu_qwen2dot5_vision_encoder_layer_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
-#include "core/layers/qwen2_decoder_layer.h"
-#include "core/layers/qwen2dot5_vision_encode_layer.h"
 #include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
@@ -149,7 +149,7 @@ class Qwen2_5_VisionBlockImpl : public torch::nn::Module {
   Qwen2_5_VisionBlockImpl(const ModelContext& context) {
     // register submodules
     encoder_layer_ = register_module(
-        "encoder_layer", layer::Qwen2dot5VisionEncoderLayer(context));
+        "encoder_layer", layer::NpuQwen2dot5VisionEncoderLayer(context));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -180,7 +180,7 @@ class Qwen2_5_VisionBlockImpl : public torch::nn::Module {
   void merge_loaded_weights() { encoder_layer_->merge_loaded_weights(); }
 
  private:
-  layer::Qwen2dot5VisionEncoderLayer encoder_layer_{nullptr};
+  layer::NpuQwen2dot5VisionEncoderLayer encoder_layer_{nullptr};
 };
 TORCH_MODULE(Qwen2_5_VisionBlock);
 
@@ -288,7 +288,7 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
     hidden_size_ =
         context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
 
-    ln_q_ = register_module("ln_q", layer::RMSNorm(context));
+    ln_q_ = register_module("ln_q", layer::NpuRMSNorm(context));
 
     auto cpl = torch::nn::Linear(
         torch::nn::LinearOptions(hidden_size_, hidden_size_).bias(true));
@@ -362,7 +362,7 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
  private:
   int64_t hidden_size_;
 
-  layer::RMSNorm ln_q_{nullptr};
+  layer::NpuRMSNorm ln_q_{nullptr};
   torch::nn::Sequential mlp_{nullptr};
   std::tuple<torch::nn::Linear, torch::nn::GELU, torch::nn::Linear> layers_ = {
       nullptr,
@@ -778,16 +778,19 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       language_model_->load_model(std::move(loader));
     }
   }
-
-  layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
-  void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
-
-  layer::WordEmbedding get_word_embedding() {
-    return language_model_->get_word_embedding();
+  layer::NpuLmHead get_npu_lm_head() {
+    return language_model_->get_npu_lm_head();
+  }
+  void set_npu_lm_head(layer::NpuLmHead& head) {
+    language_model_->set_npu_lm_head(head);
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    language_model_->set_word_embedding(word_embedding);
+  layer::NpuWordEmbedding get_npu_word_embedding() {
+    return language_model_->get_npu_word_embedding();
+  }
+
+  void set_npu_word_embedding(layer::NpuWordEmbedding& npu_word_embedding) {
+    language_model_->set_npu_word_embedding(npu_word_embedding);
   }
 
  private:

@@ -46,11 +46,11 @@ namespace layer {
 // Linear layer with column parallelism.
 // The linear layer is defined as Y = XA + b. A is parallelized along
 // its second dimension as A = [A_1, ..., A_p].
-class ColumnParallelLinearImpl : public BaseLayer {
+class NpuColumnParallelLinearImpl : public BaseLayer {
  public:
-  ColumnParallelLinearImpl(const ModelContext& context);
+  NpuColumnParallelLinearImpl(const ModelContext& context);
 
-  ~ColumnParallelLinearImpl() {};
+  ~NpuColumnParallelLinearImpl() override = default;
 
   virtual void merge_loaded_weights() override;
 
@@ -79,7 +79,7 @@ class ColumnParallelLinearImpl : public BaseLayer {
 
   atb_speed::common::LinearParallelParam linear_param_;
 };
-TORCH_MODULE(ColumnParallelLinear);
+TORCH_MODULE(NpuColumnParallelLinear);
 
 }  // namespace layer
 }  // namespace xllm

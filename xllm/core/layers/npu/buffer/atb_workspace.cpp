@@ -30,7 +30,7 @@ AtbWorkspace::AtbWorkspace(at::Device device) {
   }
 }
 
-AtbWorkspace::~AtbWorkspace() {}
+AtbWorkspace::~AtbWorkspace() = default;
 
 void* AtbWorkspace::get_workspace_buffer(uint64_t bufferSize) {
   int32_t device_id = 0;

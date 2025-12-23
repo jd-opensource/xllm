@@ -188,10 +188,24 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
 
   if (draft_impl_->get_status() == WorkerImpl::Status::LOADED) {
     // Deepseek MTP
+#if defined(USE_NPU)
+    if (FLAGS_npu_kernel_backend != "TORCH") {
+      auto head = impl_->get_npu_lm_head();
+      draft_impl_->set_npu_lm_head(head);
+      auto word_embedding = impl_->get_npu_word_embedding();
+      draft_impl_->set_npu_word_embedding(word_embedding);
+    } else {
+      // TODO: Support TORCH backend via torch_npu encapsulation in the future.
+      // Currently, it is explicitly disabled.
+      LOG(FATAL)
+          << "SpeculativeWorkerImpl::init_model not support TORCH backend";
+    }
+#else
     auto head = impl_->get_lm_head();
     draft_impl_->set_lm_head(head);
     auto word_embedding = impl_->get_word_embedding();
     draft_impl_->set_word_embedding(word_embedding);
+#endif
   }
   return result;
 }

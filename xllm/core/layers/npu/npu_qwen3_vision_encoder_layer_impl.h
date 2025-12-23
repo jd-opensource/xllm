@@ -44,11 +44,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class Qwen3VisionEncoderLayerImpl : public BaseLayer {
+class NpuQwen3VisionEncoderLayerImpl : public BaseLayer {
  public:
-  explicit Qwen3VisionEncoderLayerImpl(const ModelContext& context);
+  explicit NpuQwen3VisionEncoderLayerImpl(const ModelContext& context);
 
-  ~Qwen3VisionEncoderLayerImpl() {};
+  ~NpuQwen3VisionEncoderLayerImpl() override = default;
 
   // void load_state_dict(const StateDict& state_dict) override;
 
@@ -121,6 +121,7 @@ class Qwen3VisionEncoderLayerImpl : public BaseLayer {
   std::vector<torch::Tensor> qkv_bias;
   int device_id_;
 };
+TORCH_MODULE(NpuQwen3VisionEncoderLayer);
 
 }  // namespace layer
 }  // namespace xllm

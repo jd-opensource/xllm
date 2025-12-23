@@ -39,7 +39,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   explicit DeepseekV2DecoderLayerImpl(const ModelContext& context,
                                       int32_t layer_id);
 
-  ~DeepseekV2DecoderLayerImpl() {};
+  ~DeepseekV2DecoderLayerImpl() override = default;
 
   void load_state_dict(const StateDict& state_dict);
 

@@ -32,12 +32,12 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class Glm4MoeDecoderImpl : public BaseLayer {
+class NpuGlm4MoeDecoderImpl : public BaseLayer {
  public:
-  explicit Glm4MoeDecoderImpl(const ModelContext& context,
-                              const int32_t layer_id);
+  explicit NpuGlm4MoeDecoderImpl(const ModelContext& context,
+                                 const int32_t layer_id);
 
-  ~Glm4MoeDecoderImpl() {};
+  ~NpuGlm4MoeDecoderImpl() override = default;
 
   void merge_loaded_weights();
 
@@ -137,18 +137,7 @@ class Glm4MoeDecoderImpl : public BaseLayer {
   torch::Tensor at_start_expert_id_;
   torch::Tensor at_in_device_expert_count_;
 };
-
-class Glm4MoeDecoder : public torch::nn::ModuleHolder<Glm4MoeDecoderImpl> {
- public:
-  using torch::nn::ModuleHolder<Glm4MoeDecoderImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Glm4MoeDecoderImpl;
-
-  Glm4MoeDecoder(const ModelContext& context, int32_t layer_id);
-};
-
-std::shared_ptr<Glm4MoeDecoderImpl> create_glm4_moe_decoder_layer(
-    const ModelContext& context,
-    int32_t layer_id);
+TORCH_MODULE(NpuGlm4MoeDecoder);
 
 std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,
                                           int32_t dp_local_tp_size,

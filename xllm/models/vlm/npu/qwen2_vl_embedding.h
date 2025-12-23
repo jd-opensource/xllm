@@ -106,15 +106,19 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
     // }
   }
 
-  layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
-  void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
-
-  layer::WordEmbedding get_word_embedding() {
-    return language_model_->get_word_embedding();
+  layer::NpuLmHead get_npu_lm_head() {
+    return language_model_->get_npu_lm_head();
+  }
+  void set_npu_lm_head(layer::NpuLmHead& head) {
+    language_model_->set_npu_lm_head(head);
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    language_model_->set_word_embedding(word_embedding);
+  layer::NpuWordEmbedding get_npu_word_embedding() {
+    return language_model_->get_npu_word_embedding();
+  }
+
+  void set_npu_word_embedding(layer::NpuWordEmbedding& npu_word_embedding) {
+    language_model_->set_npu_word_embedding(npu_word_embedding);
   }
 
  private:
@@ -167,13 +171,17 @@ class EmbeddingVLMImpl<xllm::Qwen2_VLForEmbedding> : public EmbeddingVLM {
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
   // Delegate head/embedding accessors to underlying model implementation.
-  layer::LmHead get_lm_head() override { return model_->get_lm_head(); }
-  void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); }
-  layer::WordEmbedding get_word_embedding() override {
-    return model_->get_word_embedding();
+  layer::NpuLmHead get_npu_lm_head() override {
+    return model_->get_npu_lm_head();
   }
-  void set_word_embedding(layer::WordEmbedding& embedding) override {
-    model_->set_word_embedding(embedding);
+  void set_npu_lm_head(layer::NpuLmHead& head) override {
+    model_->set_npu_lm_head(head);
+  }
+  layer::NpuWordEmbedding get_npu_word_embedding() override {
+    return model_->get_npu_word_embedding();
+  }
+  void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) override {
+    model_->set_npu_word_embedding(embedding);
   }
 
  private:

@@ -20,13 +20,14 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-void RMSNormImpl::param_from_args(atb::infer::RmsNormParam& param,
-                                  const ModelArgs& args) {
+void NpuRMSNormImpl::param_from_args(atb::infer::RmsNormParam& param,
+                                     const ModelArgs& args) {
   param.layerType = atb::infer::RmsNormParam::RmsNormType::RMS_NORM_NORM;
   param.normParam.epsilon = args.rms_norm_eps();
 }
 
-RMSNormImpl::RMSNormImpl(const ModelContext& context) : BaseLayer(context) {
+NpuRMSNormImpl::NpuRMSNormImpl(const ModelContext& context)
+    : BaseLayer(context) {
   param_from_args(norm_param_, context.get_model_args());
 
   // at_weight_tensors_.resize(1);
@@ -35,14 +36,14 @@ RMSNormImpl::RMSNormImpl(const ModelContext& context) : BaseLayer(context) {
                                             context);
 }
 
-void RMSNormImpl::merge_loaded_weights() {
+void NpuRMSNormImpl::merge_loaded_weights() {
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   atb_weight_tensors_[0] =
       atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
   init_layer();
 }
 
-int64_t RMSNormImpl::init_layer() {
+int64_t NpuRMSNormImpl::init_layer() {
   name_ = "rms_norm_layer";
   model_name_ = "llm";
   CHECK_OPERATION_STATUS_RETURN(init_node(norm_node_, norm_param_));
@@ -50,8 +51,8 @@ int64_t RMSNormImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t RMSNormImpl::init_node(atb_speed::Model::Node& node,
-                               atb::infer::RmsNormParam& param) {
+int64_t NpuRMSNormImpl::init_node(atb_speed::Model::Node& node,
+                                  atb::infer::RmsNormParam& param) {
   atb::Operation* operation = nullptr;
   atb::Status atbStatus = atb::CreateOperation(param, &operation);
   if (atbStatus != atb::NO_ERROR) {
@@ -79,7 +80,7 @@ int64_t RMSNormImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor RMSNormImpl::forward(torch::Tensor& x, int nodeId) {
+torch::Tensor NpuRMSNormImpl::forward(torch::Tensor& x, int nodeId) {
   atb::Status st;
 
   build_node_variant_pack(norm_node_, x);
@@ -90,8 +91,8 @@ torch::Tensor RMSNormImpl::forward(torch::Tensor& x, int nodeId) {
   return x;
 }
 
-void RMSNormImpl::build_node_variant_pack(atb_speed::Model::Node& node,
-                                          torch::Tensor& x) {
+void NpuRMSNormImpl::build_node_variant_pack(atb_speed::Model::Node& node,
+                                             torch::Tensor& x) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
 
   node.variantPack.inTensors.at(0) = internal_tensors_;

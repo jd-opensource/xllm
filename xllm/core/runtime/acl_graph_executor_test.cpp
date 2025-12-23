@@ -33,8 +33,8 @@ limitations under the License.
 #include "core/framework/request/sequence.h"
 #include "core/framework/request/stopping_checker.h"
 #include "core/framework/sampling/sampling_params.h"
-#include "core/layers/lm_head.h"
-#include "core/layers/word_embedding.h"
+#include "core/layers/npu/npu_lm_head_impl.h"
+#include "core/layers/npu/npu_word_embedding_impl.h"
 #include "runtime/options.h"
 
 // Global test environment for ACL graph executor tests
@@ -230,21 +230,21 @@ class SimpleCausalLM : public CausalLM {
     // Simple implementation for testing
   }
 
-  layer::LmHead get_lm_head() override {
+  layer::NpuLmHead get_npu_lm_head() override {
     // Simple implementation for testing
-    return layer::LmHead(nullptr);
+    return layer::NpuLmHead(nullptr);
   }
 
-  void set_lm_head(layer::LmHead& head) override {
+  void set_npu_lm_head(layer::NpuLmHead& head) override {
     // Simple implementation for testing
   }
 
-  layer::WordEmbedding get_word_embedding() override {
+  layer::NpuWordEmbedding get_npu_word_embedding() override {
     // Simple implementation for testing
-    return layer::WordEmbedding(nullptr);
+    return layer::NpuWordEmbedding(nullptr);
   }
 
-  void set_word_embedding(layer::WordEmbedding& embedding) override {
+  void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) override {
     // Simple implementation for testing
   }
 

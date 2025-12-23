@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/multi_head_attention.h"
-#include "core/layers/siglip_encoder_layer.h"
+#include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
 #include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
@@ -718,7 +718,7 @@ class Idefics2EncoderImpl : public torch::nn::Module {
           i >= model_args.max_window_layers()) {
         sliding_window = model_args.sliding_window();
       }
-      auto block = layer::SiglipEncoderLayer(context);
+      auto block = layer::NpuSiglipEncoderLayer(context);
       layers_.push_back(block);
       blocks_->push_back(block);
     }
@@ -749,7 +749,7 @@ class Idefics2EncoderImpl : public torch::nn::Module {
   }
 
  private:
-  std::vector<layer::SiglipEncoderLayer> layers_;
+  std::vector<layer::NpuSiglipEncoderLayer> layers_;
   torch::nn::ModuleList blocks_{nullptr};
 };
 TORCH_MODULE(Idefics2Encoder);
@@ -1250,16 +1250,19 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     vpm_->verify_loaded_weights("vpm.");
   }
 
-  layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
-
-  void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
-
-  layer::WordEmbedding get_word_embedding() {
-    return language_model_->get_word_embedding();
+  layer::NpuLmHead get_npu_lm_head() {
+    return language_model_->get_npu_lm_head();
+  }
+  void set_npu_lm_head(layer::NpuLmHead& head) {
+    language_model_->set_npu_lm_head(head);
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    language_model_->set_word_embedding(word_embedding);
+  layer::NpuWordEmbedding get_npu_word_embedding() {
+    return language_model_->get_npu_word_embedding();
+  }
+
+  void set_npu_word_embedding(layer::NpuWordEmbedding& npu_word_embedding) {
+    language_model_->set_npu_word_embedding(npu_word_embedding);
   }
 
  private:

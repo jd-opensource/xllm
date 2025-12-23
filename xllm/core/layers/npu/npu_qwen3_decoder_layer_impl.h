@@ -43,11 +43,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class Qwen3DecoderLayerImpl : public BaseLayer {
+class NpuQwen3DecoderLayerImpl : public BaseLayer {
  public:
-  explicit Qwen3DecoderLayerImpl(const ModelContext& context);
+  explicit NpuQwen3DecoderLayerImpl(const ModelContext& context);
 
-  ~Qwen3DecoderLayerImpl() {};
+  ~NpuQwen3DecoderLayerImpl() override = default;
 
   virtual void merge_loaded_weights() override;
 
@@ -109,6 +109,7 @@ class Qwen3DecoderLayerImpl : public BaseLayer {
   std::vector<std::shared_ptr<std::vector<int>>> prefill_vector_storage_;
   std::vector<std::shared_ptr<std::vector<int>>> decode_vector_storage_;
 };
+TORCH_MODULE(NpuQwen3DecoderLayer);
 
 }  // namespace layer
 }  // namespace xllm

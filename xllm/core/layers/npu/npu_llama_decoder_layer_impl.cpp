@@ -31,7 +31,7 @@ namespace layer {
 
 const uint64_t WEIGHT_COUNT_PER_LAYER = 50;
 
-LlamaDecoderLayerImpl::LlamaDecoderLayerImpl(const ModelContext& context)
+NpuLlamaDecoderLayerImpl::NpuLlamaDecoderLayerImpl(const ModelContext& context)
     : BaseLayer(context) {
   param_from_args(prefill_param_,
                   context.get_model_args(),
@@ -57,7 +57,7 @@ LlamaDecoderLayerImpl::LlamaDecoderLayerImpl(const ModelContext& context)
 }
 
 // fix param
-void LlamaDecoderLayerImpl::param_from_args(
+void NpuLlamaDecoderLayerImpl::param_from_args(
     atb_speed::llama::LlamaLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -93,7 +93,7 @@ void LlamaDecoderLayerImpl::param_from_args(
   // param.enableLogN = false;
 }
 
-void LlamaDecoderLayerImpl::merge_loaded_weights() {
+void NpuLlamaDecoderLayerImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
 
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
@@ -106,7 +106,7 @@ void LlamaDecoderLayerImpl::merge_loaded_weights() {
   init_layer();
 }
 
-int64_t LlamaDecoderLayerImpl::init_layer() {
+int64_t NpuLlamaDecoderLayerImpl::init_layer() {
   init_attn_mask();
   name_ = "llama_decoder_layer";
   model_name_ = "llama";
@@ -116,7 +116,7 @@ int64_t LlamaDecoderLayerImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t LlamaDecoderLayerImpl::init_attn_mask() {
+int64_t NpuLlamaDecoderLayerImpl::init_attn_mask() {
   torch::Dtype dtype =
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
@@ -124,7 +124,7 @@ int64_t LlamaDecoderLayerImpl::init_attn_mask() {
   return atb::NO_ERROR;
 }
 
-int64_t LlamaDecoderLayerImpl::init_node(
+int64_t NpuLlamaDecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::llama::LlamaLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -156,13 +156,13 @@ int64_t LlamaDecoderLayerImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor LlamaDecoderLayerImpl::forward(torch::Tensor& x,
-                                             torch::Tensor& cos_pos,
-                                             torch::Tensor& sin_pos,
-                                             torch::Tensor& attn_mask,
-                                             KVCache& kv_cache,
-                                             ModelInputParams& input_params,
-                                             int node_id) {
+torch::Tensor NpuLlamaDecoderLayerImpl::forward(torch::Tensor& x,
+                                                torch::Tensor& cos_pos,
+                                                torch::Tensor& sin_pos,
+                                                torch::Tensor& attn_mask,
+                                                KVCache& kv_cache,
+                                                ModelInputParams& input_params,
+                                                int node_id) {
   atb::Status st;
 
   if (!input_params.batch_forward_type.is_decode()) {
@@ -195,7 +195,7 @@ torch::Tensor LlamaDecoderLayerImpl::forward(torch::Tensor& x,
   return at_placeholder_;
 }
 
-void LlamaDecoderLayerImpl::build_node_variant_pack(
+void NpuLlamaDecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,

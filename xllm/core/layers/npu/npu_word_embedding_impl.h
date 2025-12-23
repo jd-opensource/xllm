@@ -41,11 +41,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class WordEmbeddingImpl : public BaseLayer {
+class NpuWordEmbeddingImpl : public BaseLayer {
  public:
-  explicit WordEmbeddingImpl(const ModelContext& context);
+  explicit NpuWordEmbeddingImpl(const ModelContext& context);
 
-  ~WordEmbeddingImpl() {};
+  ~NpuWordEmbeddingImpl() override = default;
 
   void merge_loaded_weights() override;
 
@@ -71,6 +71,7 @@ class WordEmbeddingImpl : public BaseLayer {
   atb_speed::common::WordEmbeddingParam embedding_param_;
   atb::Tensor internalTensors;
 };
+TORCH_MODULE(NpuWordEmbedding);
 
 }  // namespace layer
 }  // namespace xllm

@@ -22,7 +22,7 @@ DECLARE_string(communication_backend);
 namespace xllm {
 namespace layer {
 
-void WordEmbeddingImpl::param_from_args(
+void NpuWordEmbeddingImpl::param_from_args(
     atb_speed::common::WordEmbeddingParam& param,
     const xllm::ModelArgs& args,
     const xllm::ParallelArgs& parallel_args) {
@@ -51,7 +51,7 @@ void WordEmbeddingImpl::param_from_args(
   }
 }
 
-WordEmbeddingImpl::WordEmbeddingImpl(const ModelContext& context)
+NpuWordEmbeddingImpl::NpuWordEmbeddingImpl(const ModelContext& context)
     : BaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
@@ -64,21 +64,21 @@ WordEmbeddingImpl::WordEmbeddingImpl(const ModelContext& context)
   loader_ = std::make_unique<WordEmbeddingLoader>(1, context);
 }
 
-void WordEmbeddingImpl::merge_loaded_weights() {
+void NpuWordEmbeddingImpl::merge_loaded_weights() {
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   atb_weight_tensors_[0] =
       atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
   init_layer();
 }
 
-int64_t WordEmbeddingImpl::init_layer() {
+int64_t NpuWordEmbeddingImpl::init_layer() {
   BaseLayer::name_ = "word_embedding_layer";
   modelName_ = "llm";
   CHECK_OPERATION_STATUS_RETURN(init_node(embedding_node_, embedding_param_));
   return atb::NO_ERROR;
 }
 
-int64_t WordEmbeddingImpl::init_node(
+int64_t NpuWordEmbeddingImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::common::WordEmbeddingParam& param) {
   atb::Operation* operation = nullptr;
@@ -105,7 +105,8 @@ int64_t WordEmbeddingImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor WordEmbeddingImpl::forward(const torch::Tensor& x, int nodeId) {
+torch::Tensor NpuWordEmbeddingImpl::forward(const torch::Tensor& x,
+                                            int nodeId) {
   atb::Status st;
   // std::cout<<"x:"<<x<<std::endl;
   build_node_variant_pack(embedding_node_, x);
@@ -115,8 +116,8 @@ torch::Tensor WordEmbeddingImpl::forward(const torch::Tensor& x, int nodeId) {
   return atOutTensors_.at(0);
 }
 
-void WordEmbeddingImpl::build_node_variant_pack(atb_speed::Model::Node& node,
-                                                const torch::Tensor& x) {
+void NpuWordEmbeddingImpl::build_node_variant_pack(atb_speed::Model::Node& node,
+                                                   const torch::Tensor& x) {
   internalTensors = atb_speed::Utils::AtTensor2Tensor(x);
   // node.outTensors[0] = &internalTensors;
 

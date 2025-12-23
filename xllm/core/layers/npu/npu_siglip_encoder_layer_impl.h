@@ -27,16 +27,16 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class SiglipEncoderLayerUpImpl : public BaseLayer {
+class NpuSiglipEncoderLayerUpImpl : public BaseLayer {
  public:
-  SiglipEncoderLayerUpImpl(const ModelContext& context,
-                           const std::string& prefix = "");
+  NpuSiglipEncoderLayerUpImpl(const ModelContext& context,
+                              const std::string& prefix = "");
 
-  ~SiglipEncoderLayerUpImpl() {};
+  ~NpuSiglipEncoderLayerUpImpl() override = default;
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 
-  torch::Tensor forward(torch::Tensor& x);
+  torch::Tensor forward(const torch::Tensor& x);
 
  private:
   void build_graph(const std::string& prefix = "");
@@ -50,25 +50,14 @@ class SiglipEncoderLayerUpImpl : public BaseLayer {
 
   std::string prefix_;
 };
-
-class NpuSiglipEncoderLayerUp
-    : public torch::nn::ModuleHolder<SiglipEncoderLayerUpImpl> {
- public:
-  using torch::nn::ModuleHolder<SiglipEncoderLayerUpImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = SiglipEncoderLayerUpImpl;
-
-  NpuSiglipEncoderLayerUp(const ModelContext& context,
-                          const std::string& prefix = "")
-      : ModuleHolder(
-            std::make_shared<SiglipEncoderLayerUpImpl>(context, prefix)) {}
-};
+TORCH_MODULE(NpuSiglipEncoderLayerUp);
 
 class NpuSiglipEncoderLayerDownImpl : public BaseLayer {
  public:
   NpuSiglipEncoderLayerDownImpl(const ModelContext& context,
                                 const std::string& prefix = "");
 
-  ~NpuSiglipEncoderLayerDownImpl() {};
+  ~NpuSiglipEncoderLayerDownImpl() override = default;
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 
@@ -86,31 +75,20 @@ class NpuSiglipEncoderLayerDownImpl : public BaseLayer {
   ModelArgs model_args_;
   torch::TensorOptions options_;
 };
+TORCH_MODULE(NpuSiglipEncoderLayerDown);
 
-class NpuSiglipEncoderLayerDown
-    : public torch::nn::ModuleHolder<NpuSiglipEncoderLayerDownImpl> {
+class NpuSiglipEncoderLayerImpl : public BaseLayer {
  public:
-  using torch::nn::ModuleHolder<NpuSiglipEncoderLayerDownImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = NpuSiglipEncoderLayerDownImpl;
+  NpuSiglipEncoderLayerImpl(const ModelContext& context,
+                            const std::string& prefix = "");
 
-  NpuSiglipEncoderLayerDown(const ModelContext& context,
-                            const std::string& prefix = "")
-      : ModuleHolder(
-            std::make_shared<NpuSiglipEncoderLayerDownImpl>(context, prefix)) {}
-};
-
-class SiglipEncoderLayerImpl : public BaseLayer {
- public:
-  SiglipEncoderLayerImpl(const ModelContext& context,
-                         const std::string& prefix = "");
-
-  ~SiglipEncoderLayerImpl() {};
+  ~NpuSiglipEncoderLayerImpl() override = default;
 
   virtual void load_state_dict(const StateDict& state_dict) override;
 
   void verify_loaded_weights(const std::string& weight_str) const {};
 
-  torch::Tensor forward(torch::Tensor& x);
+  torch::Tensor forward(const torch::Tensor& x);
 
  private:
   std::string prefix_;
@@ -121,6 +99,7 @@ class SiglipEncoderLayerImpl : public BaseLayer {
   NpuSiglipEncoderLayerUp up_{nullptr};
   NpuSiglipEncoderLayerDown down_{nullptr};
 };
+TORCH_MODULE(NpuSiglipEncoderLayer);
 
 }  // namespace layer
 }  // namespace xllm

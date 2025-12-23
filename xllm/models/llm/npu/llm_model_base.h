@@ -29,10 +29,11 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
-#include "core/layers/lm_head.h"
 #include "core/layers/npu/npu_block_copy_impl.h"
+#include "core/layers/npu/npu_lm_head_impl.h"
+#include "core/layers/npu/npu_pos_embedding_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
-#include "core/layers/pos_embedding.h"
+#include "core/layers/npu/npu_word_embedding_impl.h"
 #include "models/model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
@@ -44,7 +45,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
   LlmDecoderLayerImplBase(const ModelContext& context) {
     // register submodules
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
-    block_copy_ = register_module("block_copy", layer::BlockCopy(context));
+    block_copy_ = register_module("block_copy", layer::NpuBlockCopy(context));
   }
 
   virtual torch::Tensor forward(torch::Tensor& x,
@@ -92,7 +93,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 
  private:
   DecoderType decoder_layer_{nullptr};
-  layer::BlockCopy block_copy_{nullptr};
+  layer::NpuBlockCopy block_copy_{nullptr};
 };
 
 template <typename DecoderLayerType>
@@ -108,7 +109,7 @@ class LlmModelImplBase : public torch::nn::Module {
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
-    return embed_tokens_(input_ids, 0);
+    return npu_embed_tokens_(input_ids, 0);
   }
 
   // tokens: [num_tokens]
@@ -127,7 +128,7 @@ class LlmModelImplBase : public torch::nn::Module {
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
     } else {
-      h = embed_tokens_(tokens, 0);
+      h = npu_embed_tokens_(tokens, 0);
     }
 
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
@@ -226,7 +227,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
   // load the weight from the checkpoint
   virtual void load_state_dict(const StateDict& state_dict) {
-    embed_tokens_->load_state_dict(
+    npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
 
     // call each layer's load_state_dict function
@@ -238,7 +239,7 @@ class LlmModelImplBase : public torch::nn::Module {
   }
 
   virtual void verify_loaded_weights(const std::string& prefix) const {
-    embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
+    npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
 
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
@@ -248,7 +249,7 @@ class LlmModelImplBase : public torch::nn::Module {
   }
 
   virtual void merge_loaded_weights() {
-    embed_tokens_->merge_loaded_weights();
+    npu_embed_tokens_->merge_loaded_weights();
 
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
@@ -256,10 +257,13 @@ class LlmModelImplBase : public torch::nn::Module {
     norm_->merge_loaded_weights();
   }
 
-  virtual layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
+  virtual layer::NpuWordEmbedding get_npu_word_embedding() {
+    return npu_embed_tokens_;
+  }
 
-  virtual void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    embed_tokens_ = word_embedding;
+  virtual void set_npu_word_embedding(
+      layer::NpuWordEmbedding& npu_word_embedding) {
+    npu_embed_tokens_ = npu_word_embedding;
   }
 
  protected:
@@ -270,13 +274,13 @@ class LlmModelImplBase : public torch::nn::Module {
   int device_id = 0;
   layer::AttentionMask attn_mask_;
   int dp_rank_ = 0;
-  layer::PosEmbedding atb_pos_emb_{nullptr};
+  layer::NpuPosEmbedding atb_pos_emb_{nullptr};
 
   std::vector<int64_t> mrope_section_;
   // test
   //  ParallelEmbedding embed_tokens_{nullptr};
-  layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RMSNorm norm_{nullptr};
+  layer::NpuWordEmbedding npu_embed_tokens_{nullptr};
+  layer::NpuRMSNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
@@ -296,7 +300,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     // register submodules
     model_ = register_module("model", LlmModelType(context));
 
-    lm_head_ = register_module("lm_head", layer::LmHead(context));
+    npu_lm_head_ = register_module("npu_lm_head", layer::NpuLmHead(context));
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -320,7 +324,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
                                const torch::Tensor& seleted_idxes) {
     // select tokens if provided
     auto h = hidden_states;
-    return lm_head_(hidden_states, seleted_idxes, 0);
+    return npu_lm_head_(hidden_states, seleted_idxes, 0);
   }
 
   virtual void load_model(
@@ -329,20 +333,21 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     for (const auto& state_dict : loader->get_state_dicts()) {
       model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
       if (tie_word_embeddings) {
-        lm_head_->load_state_dict(
+        npu_lm_head_->load_state_dict(
             state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
       } else {
-        lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
+        npu_lm_head_->load_state_dict(
+            state_dict->get_dict_with_prefix("lm_head."));
       }
     }
 
     // verify
     model_->verify_loaded_weights(prefix);
-    lm_head_->verify_loaded_weights("lm_head.");
+    npu_lm_head_->verify_loaded_weights("lm_head.");
 
     model_->merge_loaded_weights();
     // test
-    lm_head_->merge_loaded_weights();
+    npu_lm_head_->merge_loaded_weights();
   }
 
   virtual void prepare_expert_weight(int32_t layer_id,
@@ -351,16 +356,17 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-  virtual layer::LmHead get_lm_head() { return lm_head_; }
+  virtual layer::NpuLmHead get_npu_lm_head() { return npu_lm_head_; }
 
-  virtual void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
+  virtual void set_npu_lm_head(layer::NpuLmHead& head) { npu_lm_head_ = head; }
 
-  virtual layer::WordEmbedding get_word_embedding() {
-    return model_->get_word_embedding();
+  virtual layer::NpuWordEmbedding get_npu_word_embedding() {
+    return model_->get_npu_word_embedding();
   }
 
-  virtual void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    model_->set_word_embedding(word_embedding);
+  virtual void set_npu_word_embedding(
+      layer::NpuWordEmbedding& npu_word_embedding) {
+    model_->set_npu_word_embedding(npu_word_embedding);
   }
 
  protected:
@@ -369,7 +375,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   int device_id = 0;
   bool tie_word_embeddings{false};
   // test
-  layer::LmHead lm_head_{nullptr};
+  layer::NpuLmHead npu_lm_head_{nullptr};
 };
 
 }  // namespace xllm

@@ -26,8 +26,8 @@ namespace layer {
 
 static uint64_t WEIGHT_COUNT_PER_LAYER = 68;
 
-Glm4MoeDecoderImpl::Glm4MoeDecoderImpl(const ModelContext& context,
-                                       const int32_t layer_id)
+NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
+                                             const int32_t layer_id)
     : BaseLayer(context),
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
@@ -61,7 +61,7 @@ Glm4MoeDecoderImpl::Glm4MoeDecoderImpl(const ModelContext& context,
   initialize_tensors(options);
 }
 
-void Glm4MoeDecoderImpl::initialize_tensors(
+void NpuGlm4MoeDecoderImpl::initialize_tensors(
     const torch::TensorOptions& options) {
   // initializ placeholder
 
@@ -84,10 +84,11 @@ void Glm4MoeDecoderImpl::initialize_tensors(
   initialize_weight_tensors(options);
 }
 
-void Glm4MoeDecoderImpl::param_from_args(atb_speed::moe::MoeLayerParam& param,
-                                         const ModelArgs& args,
-                                         const ParallelArgs& parallel_args,
-                                         bool is_prefill) {
+void NpuGlm4MoeDecoderImpl::param_from_args(
+    atb_speed::moe::MoeLayerParam& param,
+    const ModelArgs& args,
+    const ParallelArgs& parallel_args,
+    bool is_prefill) {
   initialize_basic_parameters(param, args, parallel_args, is_prefill);
   initialize_attention_parameters(param, args, parallel_args);
   initialize_mlp_parameters(param, args, parallel_args);
@@ -95,7 +96,7 @@ void Glm4MoeDecoderImpl::param_from_args(atb_speed::moe::MoeLayerParam& param,
   initialize_quantization_parameters(param);
 }
 
-void Glm4MoeDecoderImpl::initialize_weight_tensors(
+void NpuGlm4MoeDecoderImpl::initialize_weight_tensors(
     const torch::TensorOptions& options) {
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
@@ -103,7 +104,7 @@ void Glm4MoeDecoderImpl::initialize_weight_tensors(
   }
 }
 
-void Glm4MoeDecoderImpl::initialize_basic_parameters(
+void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
     atb_speed::moe::MoeLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -159,7 +160,7 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
   // param.worldSize = parallel_args.world_size();
 }
 
-void Glm4MoeDecoderImpl::initialize_attention_parameters(
+void NpuGlm4MoeDecoderImpl::initialize_attention_parameters(
     atb_speed::moe::MoeLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -168,7 +169,7 @@ void Glm4MoeDecoderImpl::initialize_attention_parameters(
   // param.enableKvQuantLayer = false;  // TODO
 }
 
-void Glm4MoeDecoderImpl::initialize_mlp_parameters(
+void NpuGlm4MoeDecoderImpl::initialize_mlp_parameters(
     atb_speed::moe::MoeLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -202,7 +203,7 @@ void Glm4MoeDecoderImpl::initialize_mlp_parameters(
   param.enableCVOverlap = false;  // TODO
 }
 
-void Glm4MoeDecoderImpl::initialize_parallel_parameters(
+void NpuGlm4MoeDecoderImpl::initialize_parallel_parameters(
     atb_speed::moe::MoeLayerParam& param,
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = dp_local_tp_size_;
@@ -218,7 +219,7 @@ void Glm4MoeDecoderImpl::initialize_parallel_parameters(
   param.maxDecodeDpTokenSize = 0;  // TODO
 }
 
-void Glm4MoeDecoderImpl::initialize_quantization_parameters(
+void NpuGlm4MoeDecoderImpl::initialize_quantization_parameters(
     atb_speed::moe::MoeLayerParam& param) {
   if (quantize_type_.empty()) {
     param.packQuantType = {static_cast<int>(PackType::ALL_FP),
@@ -284,7 +285,7 @@ void Glm4MoeDecoderImpl::initialize_quantization_parameters(
   }
 }
 
-void Glm4MoeDecoderImpl::merge_loaded_weights() {
+void NpuGlm4MoeDecoderImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
@@ -295,7 +296,7 @@ void Glm4MoeDecoderImpl::merge_loaded_weights() {
   init_layer();
 }
 
-int64_t Glm4MoeDecoderImpl::init_layer() {
+int64_t NpuGlm4MoeDecoderImpl::init_layer() {
   BaseLayer::name_ = "glm4_moe_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "Glm4_Moe";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
@@ -304,8 +305,8 @@ int64_t Glm4MoeDecoderImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t Glm4MoeDecoderImpl::init_node(atb_speed::Model::Node& node,
-                                      atb_speed::moe::MoeLayerParam& param) {
+int64_t NpuGlm4MoeDecoderImpl::init_node(atb_speed::Model::Node& node,
+                                         atb_speed::moe::MoeLayerParam& param) {
   atb::Operation* operation = nullptr;
   atb_speed::glm::MoeDecoderLayer<atb::infer::RmsNormParam> decoder_layer(
       param);
@@ -336,16 +337,17 @@ int64_t Glm4MoeDecoderImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor Glm4MoeDecoderImpl::forward(torch::Tensor& x,
-                                          torch::Tensor& cos_pos,
-                                          torch::Tensor& sin_pos,
-                                          torch::Tensor& attn_mask,
-                                          KVCache& kv_cache,
-                                          const ModelInputParams& input_params,
-                                          torch::Tensor& expert_array,
-                                          aclrtEvent* event,
-                                          std::atomic<bool>* event_flag,
-                                          int node_id) {
+torch::Tensor NpuGlm4MoeDecoderImpl::forward(
+    torch::Tensor& x,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    torch::Tensor& attn_mask,
+    KVCache& kv_cache,
+    const ModelInputParams& input_params,
+    torch::Tensor& expert_array,
+    aclrtEvent* event,
+    std::atomic<bool>* event_flag,
+    int node_id) {
   atb::Status st;
   if (!input_params.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
@@ -378,7 +380,7 @@ torch::Tensor Glm4MoeDecoderImpl::forward(torch::Tensor& x,
   return tensor_placeholder_;
 }
 
-void Glm4MoeDecoderImpl::build_node_variant_pack(
+void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,
@@ -474,16 +476,6 @@ void Glm4MoeDecoderImpl::build_node_variant_pack(
   }
 
   node.variantPack.outTensors.at(0) = internal_tensor_;
-}
-
-Glm4MoeDecoder::Glm4MoeDecoder(const ModelContext& context,
-                               const int32_t layer_id)
-    : ModuleHolder(create_glm4_moe_decoder_layer(context, layer_id)) {}
-
-std::shared_ptr<Glm4MoeDecoderImpl> create_glm4_moe_decoder_layer(
-    const ModelContext& context,
-    int32_t layer_id) {
-  return std::make_shared<Glm4MoeDecoderImpl>(context, layer_id);
 }
 
 }  // namespace layer

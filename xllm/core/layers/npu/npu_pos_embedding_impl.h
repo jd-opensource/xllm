@@ -44,11 +44,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class RotaryEmbeddingImpl : public BaseLayer {
+class NpuRotaryEmbeddingImpl : public BaseLayer {
  public:
-  explicit RotaryEmbeddingImpl(const ModelContext& context);
+  explicit NpuRotaryEmbeddingImpl(const ModelContext& context);
 
-  ~RotaryEmbeddingImpl() {};
+  ~NpuRotaryEmbeddingImpl() override = default;
 
   torch::Tensor forward(const torch::Tensor& cos_sin_pos,
                         const torch::Tensor& position,
@@ -69,6 +69,15 @@ class RotaryEmbeddingImpl : public BaseLayer {
   torch::Tensor inv_freq;
   atb::Tensor internal_cos_sin_pos;
   atb::Tensor internal_position;
+};
+
+class NpuPosEmbedding : public torch::nn::ModuleHolder<NpuRotaryEmbeddingImpl> {
+ public:
+  using torch::nn::ModuleHolder<NpuRotaryEmbeddingImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = NpuRotaryEmbeddingImpl;
+
+  NpuPosEmbedding(const ModelContext& context)
+      : ModuleHolder(std::make_shared<NpuRotaryEmbeddingImpl>(context)) {}
 };
 
 }  // namespace layer

@@ -27,7 +27,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/siglip_encoder_layer.h"
+#include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
 #include "dit_linear.h"
 #include "models/model_registry.h"
 #include "processors/clip_image_processor.h"

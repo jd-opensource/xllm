@@ -16,7 +16,7 @@ limitations under the License.
 
 #pragma once
 
-#include "core/layers/qwen2_decoder_layer.h"
+#include "core/layers/npu/npu_qwen2_decoder_layer_impl.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "llm_model_base.h"
 
@@ -26,10 +26,10 @@ limitations under the License.
 namespace xllm {
 
 class QWen2DecoderLayerImpl
-    : public LlmDecoderLayerImplBase<layer::Qwen2DecoderLayer> {
+    : public LlmDecoderLayerImplBase<layer::NpuQwen2DecoderLayer> {
  public:
   QWen2DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::Qwen2DecoderLayer>(context) {}
+      : LlmDecoderLayerImplBase<layer::NpuQwen2DecoderLayer>(context) {}
 };
 TORCH_MODULE(QWen2DecoderLayer);
 
@@ -47,10 +47,10 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    norm_ = register_module("norm", layer::RMSNorm(context));
-    embed_tokens_ =
-        register_module("embed_tokens", layer::WordEmbedding(context));
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
+    npu_embed_tokens_ =
+        register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
+    atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         model_args.hidden_size() / model_args.n_heads(),
         model_args.max_position_embeddings(),

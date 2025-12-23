@@ -48,7 +48,7 @@ AtbBuffer::AtbBuffer(uint64_t buffer_size, at::Device device)
   }
 }
 
-AtbBuffer::~AtbBuffer() {}
+AtbBuffer::~AtbBuffer() = default;
 
 void* AtbBuffer::get_buffer(uint64_t buffer_size) {
   if (buffer_size <= buffer_size_) {

@@ -72,16 +72,17 @@ class LlmForEmbeddingImplBase : public torch::nn::Module {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-  virtual layer::LmHead get_lm_head() { return lm_head_; }
+  virtual layer::NpuLmHead get_npu_lm_head() { return npu_lm_head_; }
 
-  virtual void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
+  virtual void set_npu_lm_head(layer::NpuLmHead& head) { npu_lm_head_ = head; }
 
-  virtual layer::WordEmbedding get_word_embedding() {
-    return model_->get_word_embedding();
+  virtual layer::NpuWordEmbedding get_npu_word_embedding() {
+    return model_->get_npu_word_embedding();
   }
 
-  virtual void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    model_->set_word_embedding(word_embedding);
+  virtual void set_npu_word_embedding(
+      layer::NpuWordEmbedding& npu_word_embedding) {
+    model_->set_npu_word_embedding(npu_word_embedding);
   }
 
  protected:
@@ -89,8 +90,7 @@ class LlmForEmbeddingImplBase : public torch::nn::Module {
   LlmModelType model_{nullptr};
   int device_id = 0;
   bool tie_word_embeddings{false};
-  // test
-  layer::LmHead lm_head_{nullptr};
+  layer::NpuLmHead npu_lm_head_{nullptr};
 };
 
 }  // namespace xllm

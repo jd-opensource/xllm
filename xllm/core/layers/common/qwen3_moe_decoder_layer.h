@@ -37,7 +37,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
   explicit Qwen3MoeDecoderLayerImpl(const ModelContext& context,
                                     int32_t layer_id);
 
-  ~Qwen3MoeDecoderLayerImpl() {};
+  ~Qwen3MoeDecoderLayerImpl() override = default;
 
   void load_state_dict(const StateDict& state_dict);
 

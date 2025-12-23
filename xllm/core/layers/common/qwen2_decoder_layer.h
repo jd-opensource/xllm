@@ -44,7 +44,7 @@ class Qwen2DecoderLayerImpl : public torch::nn::Module {
  public:
   explicit Qwen2DecoderLayerImpl(const ModelContext& context);
 
-  ~Qwen2DecoderLayerImpl() {};
+  ~Qwen2DecoderLayerImpl() override = default;
 
   void load_state_dict(const StateDict& state_dict);
 

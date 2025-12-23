@@ -43,11 +43,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class LlamaDecoderLayerImpl : public BaseLayer {
+class NpuLlamaDecoderLayerImpl : public BaseLayer {
  public:
-  explicit LlamaDecoderLayerImpl(const ModelContext& context);
+  explicit NpuLlamaDecoderLayerImpl(const ModelContext& context);
 
-  ~LlamaDecoderLayerImpl() {};
+  ~NpuLlamaDecoderLayerImpl() override = default;
 
   virtual void merge_loaded_weights() override;
 
@@ -96,6 +96,7 @@ class LlamaDecoderLayerImpl : public BaseLayer {
 
   int device_id_;
 };
+TORCH_MODULE(NpuLlamaDecoderLayer);
 
 }  // namespace layer
 }  // namespace xllm
