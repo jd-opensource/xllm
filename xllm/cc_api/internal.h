@@ -70,6 +70,7 @@ RequestParams transfer_request_params(
   xllm_request_params.stop = request_params.stop;
   xllm_request_params.stop_token_ids = request_params.stop_token_ids;
   xllm_request_params.beam_width = request_params.beam_width;
+  xllm_request_params.top_logprobs = request_params.top_logprobs;
 
   return xllm_request_params;
 }
@@ -189,6 +190,7 @@ XLLM_Response handle_inference_request(LLMCore* llm_core,
   std::string request_id = xllm_request_params.request_id.empty()
                                ? generate_request_id()
                                : xllm_request_params.request_id;
+  xllm_request_params.request_id = request_id;
   int64_t created_time = absl::ToUnixSeconds(absl::Now());
 
   try {

@@ -37,7 +37,7 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
   // Whether to enable multi-head latent attention
   bool enable_mla = false;
 
-  bool disable_chunked_prefill = false;
+  bool disable_chunked_prefill = true;
 
   bool disable_prefix_cache = false;
 
@@ -129,6 +129,8 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
 
   // The mode of kv cache transfer(e.g. PUSH, PULL)
   std::string kv_cache_transfer_mode = "PUSH";
+
+  std::string log_dir;
 
   // draft hf model path to the model file
   std::optional<std::string> draft_model = std::nullopt;

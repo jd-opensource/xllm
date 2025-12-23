@@ -98,4 +98,39 @@ inline bool operator==(const Slice<T>& lhs, const Slice<T>& rhs) {
           std::equal(lhs.begin(), lhs.end(), rhs.begin()));
 }
 
+template <typename T>
+inline std::ostream& operator<<(std::ostream& os, const Slice<T>& slice) {
+  os << "Slice<" << typeid(T).name() << ">("
+     << "data=" << static_cast<const void*>(slice.data()) << ", "
+     << "size=" << slice.size() << "): [";
+
+  if (slice.empty()) {
+    os << "]";
+    return os;
+  }
+
+  constexpr size_t kMaxPrintElements = 10;
+  size_t print_count = std::min(slice.size(), kMaxPrintElements);
+
+  for (size_t i = 0; i < print_count; ++i) {
+    if (i > 0) {
+      os << ", ";
+    }
+
+    if constexpr (std::is_same_v<T, char>) {
+      os << "\"" << std::string(slice.data() + i, 1) << "\"";
+    } else if constexpr (std::is_pointer_v<T>) {
+      os << static_cast<const void*>(slice[i]);
+    } else {
+      os << slice[i];
+    }
+  }
+
+  if (slice.size() > kMaxPrintElements) {
+    os << ", ... (" << slice.size() - kMaxPrintElements << " more elements)";
+  }
+
+  os << "]";
+  return os;
+}
 }  // namespace xllm

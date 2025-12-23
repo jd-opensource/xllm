@@ -18,13 +18,38 @@ limitations under the License.
 #include <folly/Unit.h>
 #include <folly/experimental/coro/Timeout.h>
 #include <folly/futures/Future.h>
+#include <gflags/gflags.h>
 #include <glog/logging.h>
+#include <pthread.h>
 
+#include <atomic>
 #include <exception>
 
 #include "internal.h"
 
 namespace xllm {
+namespace {
+static std::atomic<bool> g_glog_inited = false;
+static pthread_mutex_t g_log_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void InitGlog(const std::string& log_dir) {
+  pthread_mutex_lock(&g_log_init_mutex);
+  if (!g_glog_inited) {
+    google::InitGoogleLogging("xllm");
+    google::SetLogDestination(google::INFO,
+                              (log_dir + "/xllm.log.INFO.").c_str());
+    google::SetLogDestination(google::WARNING,
+                              (log_dir + "/xllm.log.WARNING.").c_str());
+    google::SetLogDestination(google::ERROR,
+                              (log_dir + "/xllm.log.ERROR.").c_str());
+    google::SetStderrLogging(google::FATAL);
+
+    g_glog_inited = true;
+  }
+  pthread_mutex_unlock(&g_log_init_mutex);
+}
+}  // namespace
+
 LLM::LLM() = default;
 LLM::~LLM() {
   if (nullptr != llm_core_) {
@@ -36,6 +61,10 @@ LLM::~LLM() {
 bool LLM::Initialize(const std::string& model_path,
                      const std::string& devices,
                      const XLLM_InitLLMOptions& init_options) {
+  if (!init_options.log_dir.empty()) {
+    InitGlog(init_options.log_dir);
+  }
+
   if (!std::filesystem::exists(model_path)) {
     LOG(ERROR) << "model path[" << model_path << "] does not exist";
     return false;
