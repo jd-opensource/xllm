@@ -103,7 +103,7 @@ void APIService::Completions(::google::protobuf::RpcController* controller,
       const_cast<proto::CompletionRequest*>(request),
       response,
       arena != nullptr);
-  if (FLAGS_backend == "llm" || FLAGS_backend == "vlm") {
+  if (FLAGS_backend == "llm") {
     completion_service_impl_->process_async(call);
   } else if (FLAGS_backend == "rec") {
     rec_completion_service_impl_->process_async(call);
@@ -143,7 +143,7 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
 
   std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
       ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
-  if (FLAGS_backend == "llm" || FLAGS_backend == "vlm") {
+  if (FLAGS_backend == "llm") {
     completion_service_impl_->process_async(call);
   } else if (FLAGS_backend == "rec") {
     rec_completion_service_impl_->process_async(call);
