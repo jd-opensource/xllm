@@ -37,9 +37,9 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
   // Whether to enable multi-head latent attention
   bool enable_mla = false;
 
-  bool disable_chunked_prefill = true;
+  bool enable_chunked_prefill = false;
 
-  bool disable_prefix_cache = false;
+  bool enable_prefix_cache = false;
 
   // Whether to enable disaggregated prefill and decode execution
   bool enable_disagg_pd = false;

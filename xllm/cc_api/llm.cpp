@@ -18,7 +18,6 @@ limitations under the License.
 #include <folly/Unit.h>
 #include <folly/experimental/coro/Timeout.h>
 #include <folly/futures/Future.h>
-#include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <pthread.h>
 
@@ -81,7 +80,7 @@ bool LLM::Initialize(const std::string& model_path,
         .block_size(init_options.block_size)
         .max_cache_size(init_options.max_cache_size)
         .max_memory_utilization(init_options.max_memory_utilization)
-        .enable_prefix_cache(!init_options.disable_prefix_cache)
+        .enable_prefix_cache(init_options.enable_prefix_cache)
         .max_tokens_per_batch(init_options.max_tokens_per_batch)
         .max_seqs_per_batch(init_options.max_seqs_per_batch)
         .max_tokens_per_chunk_for_prefill(
@@ -92,7 +91,7 @@ bool LLM::Initialize(const std::string& model_path,
         .rank_tablefile(init_options.rank_tablefile)
         .expert_parallel_degree(init_options.expert_parallel_degree)
         .enable_mla(init_options.enable_mla)
-        .enable_chunked_prefill(!init_options.disable_chunked_prefill)
+        .enable_chunked_prefill(init_options.enable_chunked_prefill)
         .master_node_addr(init_options.master_node_addr)
         .device_ip(init_options.device_ip)
         .transfer_listen_port(init_options.transfer_listen_port)
