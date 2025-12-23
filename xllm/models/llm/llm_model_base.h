@@ -106,7 +106,7 @@ class LlmModelImplBase : public torch::nn::Module {
         state_dict.get_dict_with_prefix("embed_tokens."));
 
     // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
+    for (size_t i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
@@ -121,6 +121,7 @@ class LlmModelImplBase : public torch::nn::Module {
 
  protected:
   torch::Tensor cos_sin_;
+  int32_t max_seq_len_ = 0;
   std::vector<int64_t> mrope_section_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};

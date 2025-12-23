@@ -588,6 +588,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   // init model, create model executor
   bool status = this->init_model(context_);
   if (!status) {
+    LOG(ERROR) << "init_model failed";
     return false;
   }
 

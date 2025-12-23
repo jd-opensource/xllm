@@ -33,8 +33,9 @@ void apply_rotary(torch::Tensor& q,
 
   const int64_t rotary_dim = last_dim / 2;
   auto cos_sin_split = cos_sin.chunk(2, /*dim=*/-1);
-  auto cos = cos_sin_split[0].view({1, -1, 1, rotary_dim});
-  auto sin = cos_sin_split[1].view({1, -1, 1, rotary_dim});
+  // Ensure tensors are contiguous for NPU operations
+  auto cos = cos_sin_split[0].contiguous().view({1, -1, 1, rotary_dim});
+  auto sin = cos_sin_split[1].contiguous().view({1, -1, 1, rotary_dim});
 
   q = q.view({1, q.size(0), -1, rotary_dim});
   k = k.view({1, k.size(0), -1, rotary_dim});

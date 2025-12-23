@@ -310,6 +310,9 @@ else()
 endif()
 
 if(USE_NPU)
+  # USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph
+  # capture. This variable may be removed in the future.
+  # add_definitions(-DUSE_NPU_TORCH)
   add_definitions(-DUSE_NPU)
   add_definitions(-DBUILD_LIBTORCH)
   add_definitions(-DTORCH_SETCUSTOMHANDLER=ON)

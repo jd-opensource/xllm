@@ -516,10 +516,17 @@ DEFINE_bool(
     "Whether to decode both audio and video when the input is a video.");
 
 #if defined(USE_NPU)
-DEFINE_string(
-    npu_kernel_backend,
-    "ATB",
-    "NPU kernel backend. Supported options: ATB, TORCH. Default is ATB.");
+
+// USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph
+// capture. This variable may be removed in the future.
+DEFINE_string(npu_kernel_backend,
+#if defined(USE_NPU_TORCH)
+              "TORCH",
+#else
+              "ATB",
+#endif
+              "NPU kernel backend. Supported options: ATB, TORCH.");
+
 #endif
 
 // --- multi-step decode config ---
