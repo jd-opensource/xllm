@@ -220,6 +220,24 @@ message ForwardInput {
   int32 batch_forward_type = 39;
   MMData mm_data = 40;
   repeated int32 q_cu_seq_lens = 41;
+
+  // step-level decode metadata 
+  int32 beam_width = 42;
+  int32 current_round = 43;
+  // decode kv cache shape planned by engine: [batch_size * max_token_per_req, n_kv_heads, head_dim]
+  repeated int64 shared_kv_shape = 44;
+    int32 total_round = 51;
+    repeated int32  decode_seq_lens = 52;
+    repeated int32  decode_q_seq_lens = 53;
+    repeated int32  decode_positions_vec = 54;
+
+  // optional decode-only sampling meta
+  repeated RequestSamplingParam decode_sampling_params = 45;
+  repeated int32 decode_selected_token_idxes = 46;
+  repeated int32 decode_sample_idxes = 47;
+  repeated UniqueTokenIds decode_unique_token_ids_vec = 48;
+  repeated UniqueTokenCounts decode_unique_token_counts_vec = 49;
+  repeated int32 decode_unique_token_lens_vec = 50;
 }
 
  message BatchedForwardInputs {
@@ -252,6 +270,9 @@ message ForwardOutput {
   repeated int32 src_seq_idxes = 5;
   repeated int32 out_tokens = 6;
   repeated float out_logprobs = 7;
+  // batch-level beam output
+  // flattened 2D: row-major
+  repeated int32 beam_sequence_group = 8;
 }
 
 // master create Collective service

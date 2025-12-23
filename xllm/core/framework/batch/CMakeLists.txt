@@ -10,12 +10,14 @@ cc_library(
     batch.h
     batch_factory.h
     batch_input_builder.h
+    multi_step_batch_input_builder.h
     mposition.h
   SRCS 
     dit_batch.cpp
     batch.cpp
     batch_factory.cpp
     batch_input_builder.cpp
+    multi_step_batch_input_builder.cpp
     mposition.cpp
     beam_search.h
   DEPS

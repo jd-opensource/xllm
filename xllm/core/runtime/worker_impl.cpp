@@ -400,7 +400,77 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 #endif
 
+#if defined(USE_NPU)
+  // step-level decode shared cache: allocate/attach by step_uid metadata
+  if (FLAGS_max_decode_rounds > 0) {
+    bool is_prefill =
+        processed_input.input_params.global_empty_kv_cache ? true : false;
+    // VLOG(1) << "worker impl is_prefill: " << is_prefill;
+    if (!is_prefill || FLAGS_max_decode_rounds > 0) {
+      auto& mip = processed_input.input_params;
+      int32_t beam_width = processed_input.beam_width;
+      int32_t current_round = processed_input.current_round;
+      int32_t total_round = processed_input.total_round;
+      const auto& shape = processed_input.shared_kv_shape;
+
+      if (shape.size() == 3) {
+        int64_t num_tokens = shape[0];
+        int64_t head_num = shape[1];
+        int64_t head_dim = shape[2];
+        auto fp_options = torch::TensorOptions().dtype(dtype_).device(device_);
+        int32_t num_layers = context_.get_model_args().n_layers();
+        mip.shared_k_caches.clear();
+        mip.shared_v_caches.clear();
+        mip.shared_k_caches.reserve(num_layers);
+        mip.shared_v_caches.reserve(num_layers);
+        for (int32_t layer_id = 0; layer_id < num_layers; ++layer_id) {
+          mip.shared_k_caches.emplace_back(
+              torch::zeros({num_tokens, head_num, head_dim}, fp_options));
+          mip.shared_v_caches.emplace_back(
+              torch::zeros({num_tokens, head_num, head_dim}, fp_options));
+        }
+      }
+      // scalar metadata tensors (int32 on device)
+      {
+        auto int_options =
+            torch::TensorOptions().dtype(torch::kInt32).device(device_);
+        mip.beam_width_tensor = torch::tensor({beam_width}, int_options);
+        mip.current_round_tensor_list.clear();
+        for (int r = 0; r < total_round; ++r) {
+          mip.current_round_tensor_list.push_back(
+              torch::tensor({r}, int_options));
+        }
+
+        // beam batch-level tensors are constructed in WorkerService
+      }
+      {
+        auto int_options =
+            torch::TensorOptions().dtype(torch::kInt32).device(device_);
+        const auto& dec_pos = processed_input.decode_positions_vec;
+        mip.decode_positions_tensor_list.clear();
+        if (!dec_pos.empty() && beam_width > 0 && total_round > 1) {
+          const int32_t n = static_cast<int32_t>(dec_pos.size());
+          for (int j = 0; j < total_round - 1; ++j) {
+            std::vector<int32_t> buf;
+            buf.reserve(static_cast<size_t>(n * beam_width));
+            for (int i = 0; i < n; ++i) {
+              const int32_t base = dec_pos[i] + j;
+              for (int b = 0; b < beam_width; ++b) {
+                buf.push_back(base);
+              }
+            }
+            mip.decode_positions_tensor_list.push_back(
+                torch::tensor(buf, int_options));
+          }
+        }
+      }
+    }
+  }
+#endif
+
   processed_input.sampling_params = input.sampling_params.to(device_, dtype_);
+  processed_input.decoder_sampling_params =
+      input.decoder_sampling_params.to(device_, dtype_);
   if (input.acc_logprob.defined()) {
     processed_input.acc_logprob =
         input.acc_logprob.to(torch::kFloat32).to(device_);

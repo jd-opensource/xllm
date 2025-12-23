@@ -15,9 +15,11 @@ cc_library(
     base_executor_impl.h
     dit_executor.h
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.h>
+    $<$<BOOL:${USE_NPU}>:acl_graph_executor_rec_impl.h>
     worker.h
     worker_impl.h
     llm_worker_impl.h
+    qwen_rec_worker_impl.h
     vlm_worker_impl.h
     dit_worker.h
     embed_worker_impl.h
@@ -31,9 +33,11 @@ cc_library(
     base_executor_impl.cpp
     dit_executor.cpp
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.cpp>
+    $<$<BOOL:${USE_NPU}>:acl_graph_executor_rec_impl.cpp>
     worker.cpp
     worker_impl.cpp
     llm_worker_impl.cpp
+    qwen_rec_worker_impl.cpp
     vlm_worker_impl.cpp
     dit_worker.cpp
     embed_worker_impl.cpp

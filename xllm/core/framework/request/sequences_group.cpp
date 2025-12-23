@@ -17,8 +17,10 @@ limitations under the License.
 
 #include <unordered_set>
 
+#include "core/common/global_flags.h"
 #include "framework/batch/beam_search.h"
 #include "util/blocking_counter.h"
+#include "util/slice.h"
 
 namespace xllm {
 
@@ -91,6 +93,18 @@ bool SequencesGroup::expand_sequences(bool share_prefix) {
 void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
                                       const Tokenizer& tokenizer,
                                       ThreadPool* thread_pool) {
+  if (FLAGS_max_decode_rounds > 0) {
+    if (check_beam_search() && sequences_.size() == 1) {
+      auto* base = sequences_[0].get();
+      if (base->has_beam_result()) {
+        return generate_multi_round_output(outputs, tokenizer, *base);
+      } else {
+        LOG(ERROR) << "SequencesGroup::generate_outputs, beam search is not "
+                      "enabled, but has beam result";
+      }
+    }
+  }
+  // here
   if (sequence_params_.streaming) {
     for (auto& seq : sequences_) {
       outputs.push_back(std::move(seq->generate_output()));
@@ -175,6 +189,32 @@ void SequencesGroup::process_beam_search() {
     return;
   }
 
+  if (FLAGS_max_decode_rounds > 0) {
+    if (sequences_.size() == 1) {
+      auto* base = sequences_[0].get();
+      if (base->has_beam_result()) {
+        int32_t bw = base->beam_width_cached();
+        int32_t rounds = base->total_rounds_cached();
+        const auto& flat2d = base->beam_seq_group_flat();
+        const auto& last_lps = base->beam_last_logprobs();
+        std::vector<std::unique_ptr<Sequence>> result;
+        result.reserve(static_cast<size_t>(bw));
+        for (int b = 0; b < bw; ++b) {
+          auto cloned = std::make_unique<Sequence>(*base);
+          int last = std::max(0, rounds - 1);
+          Token new_token(flat2d[b][last]);
+          if (static_cast<size_t>(b) < last_lps.size()) {
+            new_token.logprob = last_lps[b];
+          }
+          cloned->append_token(new_token);
+          result.emplace_back(std::move(cloned));
+        }
+        sequences_.swap(result);
+        return;
+      }
+    }
+  }
+
   size_t beam_width = sequence_params_.sampling_param->beam_width;
   size_t seq_size = sequences_.size();
   size_t topk = sequence_params_.sampling_param->top_logprobs;
@@ -185,7 +225,8 @@ void SequencesGroup::process_beam_search() {
     result.reserve(num_candidates);
 
     int32_t last_token_idx = sequences_[0]->num_tokens() - 1;
-    size_t k = std::min(topk, beam_width);
+    size_t k =
+        FLAGS_max_decode_rounds > 0 ? beam_width : std::min(topk, beam_width);
     for (size_t i = 0; i < seq_size; i++) {
       std::unique_ptr<Sequence>& seq = sequences_[i];
       auto src_blocks = seq->kv_state().kv_blocks();
@@ -296,6 +337,50 @@ void SequencesGroup::finish() {
   for (auto& sequence : sequences_) {
     sequence->finish();
   }
+}
+
+void SequencesGroup::generate_multi_round_output(
+    std::vector<SequenceOutput>& outputs,
+    const Tokenizer& tokenizer,
+    const Sequence& base) {
+  VLOG(1) << "[debug] generate_multi_round_output, bw: "
+          << base.beam_width_cached()
+          << ", total_rounds: " << base.total_rounds_cached()
+          << ", flat.size(): " << base.beam_seq_group_flat().size()
+          << ", last_logprobs.size(): " << base.beam_last_logprobs().size();
+  size_t bw = static_cast<size_t>(base.beam_width_cached());
+  const auto& last_lps = base.beam_last_logprobs();
+  std::vector<std::pair<float, size_t>> rank;
+  rank.reserve(bw);
+  for (size_t b = 0; b < bw; ++b) {
+    float lp = (b < last_lps.size()) ? last_lps[b] : 0.0f;
+    rank.emplace_back(lp, b);
+  }
+  std::sort(rank.begin(), rank.end(), [](const auto& l, const auto& r) {
+    return l.first < r.first;
+  });
+
+  const auto& flat2d = base.beam_seq_group_flat();
+  size_t rounds = static_cast<size_t>(base.total_rounds_cached());
+  outputs.reserve(bw);
+  for (size_t i = 0; i < bw; ++i) {
+    size_t b = rank[i].second;
+    int last = std::max(0, static_cast<int>(rounds) - 1);
+    std::vector<int32_t> gen_ids(flat2d[b].begin(), flat2d[b].end());
+    SequenceOutput out;
+    out.index = i;
+    out.text = tokenizer.decode(Slice<int32_t>{gen_ids.data(), gen_ids.size()},
+                                sequence_params_.skip_special_tokens);
+    out.token_ids = std::move(gen_ids);
+    auto fr = base.finish_reason().to_string();
+    if (fr.has_value()) {
+      out.finish_reason = fr.value();
+    }
+    VLOG(1) << "[debug] index " << i << ", text: " << out.text;
+    outputs.push_back(std::move(out));
+  }
+  VLOG(1) << "[debug] generate_multi_round_output, outputs.size(): "
+          << outputs.size();
 }
 
 }  // namespace xllm

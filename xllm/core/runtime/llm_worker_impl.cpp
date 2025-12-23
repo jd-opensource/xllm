@@ -38,6 +38,13 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
+#include "util/utils.h"
+#if defined(USE_NPU)
+#include <tuple>
+
+#include "kernels/npu/xllm_ops/beam_search_group.h"
+#include "kernels/npu/xllm_ops/cache_select.h"
+#endif
 
 namespace xllm {
 
