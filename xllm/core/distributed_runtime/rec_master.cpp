@@ -19,9 +19,14 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <pybind11/pybind11.h>
+#include <torch/torch.h>
+
+#include <unordered_set>
 
 #include "common/macros.h"
 #include "common/metrics.h"
+#include "common/types.h"
+#include "framework/request/mm_data.h"
 #include "models/model_registry.h"
 #include "rec_engine.h"
 #include "runtime/xservice_client.h"
@@ -32,6 +37,182 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+
+constexpr int32_t kDefaultPlaceholderToken = 20152019;
+
+RecType get_rec_type(const ModelArgs& model_args) {
+  const auto& model_type = model_args.model_type();
+  if (model_type == "onerec") {
+    return RecType::kOneRec;
+  }
+  if (model_type == "qwen2" || model_type == "qwen3") {
+    return RecType::kLlmRec;
+  }
+  return RecType::kNone;
+}
+
+bool process_onerec_inputs(
+    const std::optional<std::vector<int>>& prompt_tokens,
+    const std::optional<std::vector<proto::InferInputTensor>>& input_tensors,
+    std::vector<int32_t>* local_prompt_tokens,
+    MMData* processed_mm_data,
+    OutputCallback callback) {
+  if (prompt_tokens.has_value() && input_tensors.has_value()) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "prompt_tokens and input_tensors cannot both be set");
+    return false;
+  }
+
+  if (prompt_tokens.has_value()) {
+    local_prompt_tokens->assign(prompt_tokens.value().begin(),
+                                prompt_tokens.value().end());
+  }
+
+  if (input_tensors.has_value()) {
+    MMDict mm_dict;
+    mm_dict.reserve(input_tensors->size());
+    for (const auto& tensor : input_tensors.value()) {
+      mm_dict[tensor.name()] =
+          util::convert_rec_tensor_to_torch(tensor).to(torch::kBFloat16);
+    }
+    *processed_mm_data = MMData(MMType::EMBEDDING, mm_dict);
+  }
+
+  if (local_prompt_tokens->empty() && !processed_mm_data->valid()) {
+    CALLBACK_WITH_ERROR(
+        StatusCode::INVALID_ARGUMENT,
+        "Rec model requires prompt_tokens or input_tensors to be provided");
+    return false;
+  }
+
+  return true;
+}
+
+bool process_llmrec_raw_inputs(
+    std::optional<std::vector<int>> input_tokens,
+    std::optional<std::vector<int>> input_indices,
+    std::optional<std::vector<std::vector<float>>> input_embedding,
+    const ModelArgs& model_args,
+    std::vector<int32_t>* local_prompt_tokens,
+    MMData* processed_mm_data,
+    OutputCallback callback) {
+  std::vector<int32_t> local_input_tokens;
+  std::vector<int32_t> local_input_indices;
+  torch::Tensor input_tokens_tensor;
+  torch::Tensor input_indices_tensor;
+  torch::Tensor input_embedding_tensor;
+  int64_t embedding_rows = 0;
+
+  if (input_tokens.has_value()) {
+    const auto& tokens = input_tokens.value();
+    local_input_tokens.reserve(tokens.size());
+    for (const auto token : tokens) {
+      local_input_tokens.push_back(static_cast<int32_t>(token));
+    }
+    if (!local_input_tokens.empty()) {
+      input_tokens_tensor =
+          torch::from_blob(local_input_tokens.data(),
+                           {static_cast<int64_t>(local_input_tokens.size())},
+                           torch::dtype(torch::kInt32).device(torch::kCPU))
+              .clone();
+      processed_mm_data->add(
+          MMType::EMBEDDING, LLM_REC_INPUT_TOKENS, input_tokens_tensor);
+      local_prompt_tokens->assign(local_input_tokens.begin(),
+                                  local_input_tokens.end());
+    }
+  }
+
+  if (input_indices.has_value()) {
+    if (!input_tokens.has_value()) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "LLMRec input indices require input tokens");
+      return false;
+    }
+    const auto& indices = input_indices.value();
+    local_input_indices.reserve(indices.size());
+    for (const auto index : indices) {
+      local_input_indices.push_back(static_cast<int32_t>(index));
+    }
+    if (local_input_indices.size() != local_input_tokens.size()) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "LLMRec input indices size does not match input tokens");
+      return false;
+    }
+    if (!local_input_indices.empty()) {
+      input_indices_tensor =
+          torch::from_blob(local_input_indices.data(),
+                           {static_cast<int64_t>(local_input_indices.size())},
+                           torch::dtype(torch::kInt32).device(torch::kCPU))
+              .clone();
+      processed_mm_data->add(
+          MMType::EMBEDDING, LLM_REC_INPUT_INDICES, input_indices_tensor);
+    }
+  }
+
+  if (input_embedding.has_value()) {
+    const auto& embedding_vec = input_embedding.value();
+    if (embedding_vec.empty()) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "LLMRec input embedding is empty");
+      return false;
+    }
+    const int64_t rows = static_cast<int64_t>(embedding_vec.size());
+    const int64_t cols = static_cast<int64_t>(embedding_vec[0].size());
+    if (cols != model_args.hidden_size()) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "LLMRec input embedding has invalid hidden size");
+      return false;
+    }
+
+    std::vector<float> flat_data;
+    flat_data.reserve(static_cast<size_t>(rows * cols));
+    for (const auto& row : embedding_vec) {
+      flat_data.insert(flat_data.end(), row.begin(), row.end());
+    }
+    input_embedding_tensor =
+        torch::from_blob(flat_data.data(),
+                         {rows, cols},
+                         torch::dtype(torch::kFloat32).device(torch::kCPU))
+            .clone();
+    processed_mm_data->add(
+        MMType::EMBEDDING, LLM_REC_INPUT_EMBEDDING, input_embedding_tensor);
+    embedding_rows = rows;
+    local_prompt_tokens->insert(local_prompt_tokens->end(),
+                                static_cast<size_t>(embedding_rows),
+                                kDefaultPlaceholderToken);
+  }
+
+  if (!local_input_indices.empty()) {
+    const int64_t total_size =
+        static_cast<int64_t>(local_input_tokens.size()) + embedding_rows;
+    std::unordered_set<int32_t> seen;
+    seen.reserve(local_input_indices.size());
+    for (const auto index : local_input_indices) {
+      if (index < 0 || index >= total_size) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "LLMRec input indices contain invalid values");
+        return false;
+      }
+      if (!seen.insert(index).second) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "LLMRec input indices contain duplicate values");
+        return false;
+      }
+    }
+  }
+
+  if (local_prompt_tokens->empty()) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Prompt is empty");
+    return false;
+  }
+
+  return true;
+}
+
+}  // namespace
+
 RecMaster::RecMaster(const Options& options)
     : Master(options, EngineType::REC) {
   // Initialize with Rec engine type
@@ -39,6 +220,10 @@ RecMaster::RecMaster(const Options& options)
   CHECK(engine_->init());
 
   model_args_ = engine_->model_args();
+  rec_type_ = get_rec_type(model_args_);
+  if (rec_type_ == RecType::kNone) {
+    LOG(ERROR) << "Unsupported rec model_type: " << model_args_.model_type();
+  }
 
   bool enable_decode_response_to_service = false;
   if (options_.enable_service_routing()) {
@@ -71,7 +256,6 @@ RecMaster::RecMaster(const Options& options)
       .enable_decode_response_to_service(enable_decode_response_to_service);
   scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
 
-  // OmniRec model does not have a tokenizer
   chat_template_ = nullptr;
   tokenizer_ = nullptr;
   threadpool_ =
@@ -108,39 +292,83 @@ RecMaster::~RecMaster() {
 
 void RecMaster::handle_request(std::string prompt,
                                std::optional<std::vector<int>> prompt_tokens,
-                               std::optional<MMData> mm_data,
+                               std::optional<std::vector<proto::InferInputTensor>>
+                                   input_tensors,
                                RequestParams sp,
                                OutputCallback callback) {
-  // add one pending request
+  if (rec_type_ != RecType::kOneRec) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "OneRec should use onerec input interface");
+    return;
+  }
+  schedule_request(
+      std::move(sp),
+      std::move(callback),
+      [this,
+       prompt = std::move(prompt),
+       prompt_tokens = std::move(prompt_tokens),
+       input_tensors = std::move(input_tensors)](
+          const RequestParams& params,
+          OutputCallback cb) mutable {
+        return generate_request(std::move(prompt),
+                                std::move(prompt_tokens),
+                                std::move(input_tensors),
+                                params,
+                                std::move(cb));
+      });
+}
+
+void RecMaster::handle_request(
+    std::optional<std::vector<int>> input_tokens,
+    std::optional<std::vector<int>> input_indices,
+    std::optional<std::vector<std::vector<float>>> input_embedding,
+    RequestParams sp,
+    OutputCallback callback) {
+  if (rec_type_ != RecType::kLlmRec) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "LLMRec should use raw input interface");
+    return;
+  }
+  schedule_request(
+      std::move(sp),
+      std::move(callback),
+      [this,
+       input_tokens = std::move(input_tokens),
+       input_indices = std::move(input_indices),
+       input_embedding = std::move(input_embedding)](
+          const RequestParams& params,
+          OutputCallback cb) mutable {
+        return generate_request(std::move(input_tokens),
+                                std::move(input_indices),
+                                std::move(input_embedding),
+                                params,
+                                std::move(cb));
+      });
+}
+
+void RecMaster::schedule_request(RequestParams sp,
+                                 OutputCallback callback,
+                                 RequestBuilder build_request) {
   scheduler_->incr_pending_requests(1);
   auto cb = [callback = std::move(callback),
              scheduler = scheduler_.get()](const RequestOutput& output) {
     output.log_request_status();
     return callback(output);
   };
-  // add into the queue
   threadpool_->schedule([this,
-                         prompt = std::move(prompt),
-                         prompt_tokens = std::move(prompt_tokens),
-                         mm_data = std::move(mm_data),
                          sp = std::move(sp),
-                         callback = std::move(cb)]() mutable {
+                         callback = std::move(cb),
+                         build_request = std::move(build_request)]() mutable {
     AUTO_COUNTER(request_handling_latency_seconds_completion);
 
-    // remove the pending request after scheduling
     SCOPE_GUARD([this] { scheduler_->decr_pending_requests(); });
 
     Timer timer;
-    // verify the prompt
     if (!sp.verify_params(callback)) {
       return;
     }
 
-    auto request = generate_request(std::move(prompt),
-                                    std::move(prompt_tokens),
-                                    std::move(mm_data),
-                                    sp,
-                                    callback);
+    auto request = build_request(sp, std::move(callback));
     if (!request) {
       return;
     }
@@ -155,40 +383,97 @@ void RecMaster::handle_request(std::string prompt,
 std::shared_ptr<Request> RecMaster::generate_request(
     std::string prompt,
     std::optional<std::vector<int>> prompt_tokens,
-    std::optional<MMData> mm_data,
-    RequestParams sp,
+    std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+    const RequestParams& sp,
     OutputCallback callback) {
   // For Rec model, prompt is expected to be empty and prompt_tokens should
   // contain the actual data Skip prompt empty check as mentioned in
   // requirements
 
-  Timer timer;
-  std::vector<int> local_prompt_tokens;
-
-  if (prompt_tokens.has_value()) {
-    local_prompt_tokens = std::move(prompt_tokens.value());
-    LOG(INFO)
-        << "[Rec DEBUG] generate_request - received prompt_tokens.size(): "
-        << local_prompt_tokens.size()
-        << ", prompt.length(): " << prompt.length();
-  } else if (!mm_data.has_value()) {
-    // sparse LLM
-    LOG(ERROR) << "Rec model requires prompt_tokens/embedding to be provided";
+  if (rec_type_ == RecType::kNone) {
+    LOG(ERROR) << "Unsupported rec model_type: " << model_args_.model_type();
     CALLBACK_WITH_ERROR(
         StatusCode::INVALID_ARGUMENT,
-        "Rec model requires prompt_tokens/embedding to be provided");
+        std::string("Unsupported rec model_type: ") + model_args_.model_type());
+    return nullptr;
+  }
+
+  Timer timer;
+  std::vector<int32_t> local_prompt_tokens;
+  MMData processed_mm_data;
+  bool processed_ok = false;
+
+  if (rec_type_ == RecType::kOneRec) {
+    processed_ok = process_onerec_inputs(prompt_tokens,
+                                         input_tensors,
+                                         &local_prompt_tokens,
+                                         &processed_mm_data,
+                                         callback);
+  }
+
+  if (!processed_ok) {
     return nullptr;
   }
 
   COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
 
+  return build_request_common(std::move(prompt),
+                              std::move(local_prompt_tokens),
+                              std::move(processed_mm_data),
+                              sp,
+                              callback,
+                              rec_type_ == RecType::kLlmRec);
+}
+
+std::shared_ptr<Request> RecMaster::generate_request(
+    std::optional<std::vector<int>> input_tokens,
+    std::optional<std::vector<int>> input_indices,
+    std::optional<std::vector<std::vector<float>>> input_embedding,
+    const RequestParams& sp,
+    OutputCallback callback) {
+  if (rec_type_ != RecType::kLlmRec) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "LLMRec inputs require rec_type kLlmRec");
+    return nullptr;
+  }
+
+  Timer timer;
+  std::vector<int32_t> local_prompt_tokens;
+  MMData processed_mm_data;
+  if (!process_llmrec_raw_inputs(std::move(input_tokens),
+                                 std::move(input_indices),
+                                 std::move(input_embedding),
+                                 model_args_,
+                                 &local_prompt_tokens,
+                                 &processed_mm_data,
+                                 callback)) {
+    return nullptr;
+  }
+
+  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
+
+  return build_request_common(std::string(""),
+                              std::move(local_prompt_tokens),
+                              std::move(processed_mm_data),
+                              sp,
+                              callback,
+                              true);
+}
+
+std::shared_ptr<Request> RecMaster::build_request_common(
+    std::string prompt,
+    std::vector<int32_t> prompt_tokens,
+    MMData mm_data,
+    const RequestParams& sp,
+    OutputCallback callback,
+    bool build_stop_checker) {
   int32_t max_context_len = model_args_.max_position_embeddings();
   if (!options_.enable_chunked_prefill()) {
     max_context_len =
         std::min(max_context_len, options_.max_tokens_per_batch());
   }
-  if (local_prompt_tokens.size() >= max_context_len) {
-    LOG(ERROR) << "Prompt is too long: " << local_prompt_tokens.size();
+  if (prompt_tokens.size() >= max_context_len) {
+    LOG(ERROR) << "Prompt is too long: " << prompt_tokens.size();
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Prompt is too long");
     return nullptr;
   }
@@ -199,9 +484,7 @@ std::shared_ptr<Request> RecMaster::generate_request(
     max_tokens = kDefaultMaxTokens;
   }
 
-  // allocate enough capacity for prompt tokens, max tokens, and speculative
-  // tokens
-  size_t capacity = local_prompt_tokens.size() + max_tokens +
+  size_t capacity = prompt_tokens.size() + max_tokens +
                     options_.num_speculative_tokens() + /*bonus_token*/ 1;
   if (options_.enable_schedule_overlap()) {
     capacity += options_.num_speculative_tokens() + 1;
@@ -220,30 +503,55 @@ std::shared_ptr<Request> RecMaster::generate_request(
   sampling_param.is_embeddings = sp.is_embeddings;
   sampling_param.beam_width = sp.beam_width;
   if (best_of > sp.n) {
-    // enable logprobs for best_of to generate sequence logprob
     sampling_param.logprobs = true;
   }
-  // sampling_param.do_sample = sp.do_sample;
 
   bool stream = sp.streaming;
-  // results cannot be streamed when best_of != n
   if (best_of != sp.n) {
     stream = false;
   }
-  // std::unordered_set<int32_t> stop_tokens;
-  // std::vector<std::vector<int32_t>> stop_sequences;
-  // StoppingChecker stopping_checker(
-  //     max_tokens,
-  //     max_context_len - options_.num_speculative_tokens(),
-  //     ,
-  //     model_args_.eos_token_id(),
-  //     sp.ignore_eos,
-  //     std::move(stop_tokens),
-  //     std::move(stop_sequences));
+
   StoppingChecker stopping_checker;
+  if (build_stop_checker) {
+    std::unordered_set<int32_t> stop_tokens;
+    if (sp.stop_token_ids.has_value()) {
+      const auto& stop_token_ids = sp.stop_token_ids.value();
+      stop_tokens.insert(stop_token_ids.begin(), stop_token_ids.end());
+    } else {
+      stop_tokens = model_args_.stop_token_ids();
+    }
+
+    std::vector<std::vector<int32_t>> stop_sequences;
+    if (sp.stop.has_value()) {
+      if (!tokenizer_) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "Tokenizer is required for stop sequences");
+        return nullptr;
+      }
+      for (const auto& s : sp.stop.value()) {
+        std::vector<int> tmp_tokens;
+        if (!tokenizer_->encode(s, &tmp_tokens)) {
+          CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                              "Failed to encode stop sequence");
+          LOG(ERROR) << "Failed to encode stop sequence: " << s;
+          return nullptr;
+        }
+        stop_sequences.push_back(std::move(tmp_tokens));
+      }
+    }
+
+    stopping_checker = StoppingChecker(
+        max_tokens,
+        max_context_len - options_.num_speculative_tokens(),
+        model_args_.eos_token_id(),
+        sp.ignore_eos,
+        std::move(stop_tokens),
+        std::move(stop_sequences));
+  }
+
   RequestState req_state(std::move(prompt),
-                         std::move(local_prompt_tokens),
-                         mm_data.value_or(MMData{}),
+                         std::move(prompt_tokens),
+                         std::move(mm_data),
                          std::move(sampling_param),
                          std::move(stopping_checker),
                          capacity,
@@ -257,9 +565,8 @@ std::shared_ptr<Request> RecMaster::generate_request(
                          callback,
                          nullptr,
                          sp.decode_address);
-  // TODO. add following when next pr (add is_rec_model and bos_token_id to
-  // RequestState). req_state.is_rec_model = true; req_state.bos_token_id =
-  // model_args_.bos_token_id();
+  req_state.rec_type = rec_type_;
+  req_state.bos_token_id = model_args_.bos_token_id();
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,
                                            sp.x_request_time,

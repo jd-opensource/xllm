@@ -34,6 +34,85 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+constexpr size_t kDecoderBosTokenCount = 1;
+constexpr size_t kDecoderMaxTokenCount = 4;
+}  // namespace
+
+const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";
+const std::string Sequence::DECODER_CONTEXT_EMBEDDING_NAME =
+    "decoder_context_embedding";
+
+void Sequence::init_onerec_sequence(
+    const std::vector<int32_t>& prompt_token_ids,
+    torch::Tensor input_embedding) {
+  auto& onerec_state = onerec_state_.emplace();
+  if (!prompt_token_ids.empty()) {
+    onerec_state.encoder_tokens.assign(prompt_token_ids.begin(),
+                                       prompt_token_ids.end());
+    onerec_state.num_encoder_tokens = prompt_token_ids.size();
+  } else {
+    auto encoder_sparse_embedding =
+        mm_data_.get<torch::Tensor>(ENCODER_SPARSE_EMBEDDING_NAME);
+    CHECK(encoder_sparse_embedding.has_value())
+        << "encoder sparse embedding not found in mm_data";
+    onerec_state.num_encoder_tokens = encoder_sparse_embedding.value().size(0);
+  }
+
+  auto decoder_context_embedding =
+      mm_data_.get<torch::Tensor>(DECODER_CONTEXT_EMBEDDING_NAME);
+
+  size_t capacity = kDecoderMaxTokenCount;
+  if (decoder_context_embedding.has_value()) {
+    num_prompt_tokens_ = 0;
+    onerec_state.num_decoder_embeddings =
+        decoder_context_embedding.value().size(0);
+    capacity = onerec_state.num_decoder_embeddings + capacity -
+               kDecoderBosTokenCount;
+  } else {
+    num_prompt_tokens_ = kDecoderBosTokenCount;
+  }
+
+  tokens_.resize(capacity);
+  for (size_t i = 0; i < num_prompt_tokens_; ++i) {
+    tokens_[num_tokens_++] = sequence_params_.bos_token_id;
+    token_to_count_map_[sequence_params_.bos_token_id]++;
+  }
+  volatile_num_prompt_tokens_ = num_prompt_tokens_;
+  input_embedding_ = std::move(input_embedding);
+  cur_generated_token_idx_ = num_prompt_tokens_;
+  logprob_state_ = std::make_unique<LogprobState>(num_prompt_tokens_, capacity);
+}
+
+SequenceOutput Sequence::build_onerec_output(const Slice<int32_t>& ids,
+                                             size_t size,
+                                             SequenceOutput output) const {
+  output.token_ids = ids.slice(num_prompt_tokens_, size);
+  return output;
+}
+
+SequenceOutput Sequence::build_onerec_streaming_output(
+    const Slice<int32_t>& ids,
+    size_t size) const {
+  SequenceOutput output;
+  output.index = index_;
+  output.token_ids = ids.slice(num_prompt_tokens_, size);
+  return output;
+}
+
+SequenceOutput Sequence::generate_onerec_output(const Slice<int32_t>& ids,
+                                                size_t size) const {
+  SequenceOutput output;
+  output.index = index_;
+  if (output_embedding_.defined()) {
+    output.embedding = output_embedding_;
+  }
+  if (finish_reason_ != FinishReason::NONE) {
+    output.finish_reason = finish_reason_.to_string();
+  }
+  return build_onerec_output(ids, size, std::move(output));
+}
+
 Sequence::Sequence(size_t index,
                    const std::vector<int32_t>& prompt_token_ids,
                    torch::Tensor input_embedding,
@@ -45,7 +124,13 @@ Sequence::Sequence(size_t index,
       latest_generate_time_(absl::Now()),
       sequence_params_(seq_params),
       decoder_(std::move(decoder)),
+      rec_type_(seq_params.rec_type),
       termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
+  if (is_onerec_model()) {
+    init_onerec_sequence(prompt_token_ids, std::move(input_embedding));
+    return;
+  }
+
   CHECK(!prompt_token_ids.empty()) << "empty prompt token ids";
   auto capacity = sequence_params_.seq_capacity;
   CHECK_GT(capacity, prompt_token_ids.size()) << "capacity too small";
@@ -85,6 +170,8 @@ Sequence::Sequence(const Sequence& other)
       num_tokens_(other.num_tokens_),
       token_to_count_map_(other.token_to_count_map_),
       num_prompt_tokens_(other.num_prompt_tokens_),
+      onerec_state_(other.onerec_state_),
+      rec_type_(other.rec_type_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
       embedding_id_(other.embedding_id_),
       finished_(other.finished_),
@@ -103,8 +190,10 @@ void Sequence::append_token(const Token& token) {
   CHECK_LT(num_tokens_, tokens_.size())
       << "exceed the token capacity of the sequence";
   CHECK(!finished_) << "cannot append token to a finished sequence";
-  CHECK(kv_state_.kv_cache_tokens_num() > 0 && !is_chunked_prefill_stage())
-      << "cannot append token to a prefill sequence";
+  if (!is_onerec_model()) {
+    CHECK(kv_state_.kv_cache_tokens_num() > 0 && !is_chunked_prefill_stage())
+        << "cannot append token to a prefill sequence";
+  }
 
   if (!sequence_params_.enable_schedule_overlap) {
     // check if the token is the first token after the prompt
@@ -250,6 +339,10 @@ std::optional<SequenceOutput> Sequence::generate_streaming_output(
   AUTO_COUNTER(detokenization_latency_seconds_stream);
   const auto ids = Slice<int32_t>(tokens_, size);
 
+  if (is_onerec_model()) {
+    return build_onerec_streaming_output(ids, size);
+  }
+
   // record the start index of token ids
   const size_t start = decoder_.output_offset();
   auto delta = decoder_.decode(ids, tokenizer);
@@ -333,6 +426,19 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
     }
   }
 
+  if (is_onerec_model()) {
+    return generate_onerec_output(ids, size);
+  }
+
+  SequenceOutput output;
+  output.index = index_;
+  if (output_embedding_.defined()) {
+    output.embedding = output_embedding_;
+  }
+  if (finish_reason_ != FinishReason::NONE) {
+    output.finish_reason = finish_reason_.to_string();
+  }
+
   // record the start index of token ids
   const size_t start = decoder_.output_offset();
 
@@ -349,16 +455,7 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
     ss << decoder_.decode(ids.slice(0, end), tokenizer);
   }
 
-  SequenceOutput output;
-  output.index = index_;
   output.text = ss.str();
-  if (output_embedding_.defined()) {
-    output.embedding = output_embedding_;
-  }
-
-  if (finish_reason_ != FinishReason::NONE) {
-    output.finish_reason = finish_reason_.to_string();
-  }
 
   const size_t end = decoder_.output_offset();
   output.token_ids = ids.slice(start, end);
@@ -400,6 +497,10 @@ bool Sequence::finished() const {
   // return the cached finish status
   if (!finish_status_invalidated_) {
     return finished_;
+  }
+
+  if (is_onerec_model() && num_tokens_ == num_prompt_tokens_) {
+    return false;
   }
 
   // Embedding sequence never be finished until it updates its embeddings

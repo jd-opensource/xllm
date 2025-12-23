@@ -29,6 +29,7 @@ cc_library(
     sequence_kv_state.h
     sequences_group.h
     request_state.h
+    rec_type.h
     stopping_checker.h
     priority_comparator.h
   SRCS

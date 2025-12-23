@@ -56,6 +56,8 @@ void Request::create_sequences_group() {
   sequence_params.best_of = state_.best_of;
   sequence_params.streaming = state_.stream;
   sequence_params.enable_schedule_overlap = state_.enable_schedule_overlap;
+  sequence_params.rec_type = state_.rec_type;
+  sequence_params.bos_token_id = state_.bos_token_id;
   sequence_params.sampling_param = &(state_.sampling_param);
   sequence_params.stopping_checker = &(state_.stopping_checker);
   sequences_group_ = std::make_unique<SequencesGroup>(state_.prompt,

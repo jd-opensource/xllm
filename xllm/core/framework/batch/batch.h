@@ -75,7 +75,7 @@ class Batch {
 
   // get the number of sequences in the batch
   size_t size() const { return sequences_.size(); }
-  bool empty() const { return sequences_.empty(); }
+  bool empty() const { return sequences_.empty() && sequence_groups_.empty(); }
 
   Sequence* operator[](size_t i) { return sequences_[i]; }
 
@@ -83,6 +83,11 @@ class Batch {
   ForwardInput prepare_forward_input(uint32_t num_decoding_tokens,
                                      uint32_t min_decoding_bach_size,
                                      const ModelArgs& args);
+
+  ForwardInput prepare_rec_forward_input(uint32_t num_decoding_tokens,
+                                         uint32_t min_decoding_batch_size,
+                                         const ModelArgs& args,
+                                         ThreadPool* thread_pool = nullptr);
 
   // Convert Batch to pb type, which will be pass to remote worker.
   RawForwardInput prepare_forward_input(const ModelArgs& args,
@@ -128,12 +133,16 @@ class Batch {
                                  int token_idx,
                                  bool replace_fake_token);
 
+  void process_embedding_output(const torch::Tensor& output_embedding);
+
   void process_beam_search();
 
   std::map<uint32_t, uint32_t> cal_seq_exchange_index(
       std::vector<uint32_t>& kv_cache_tokens_num);
 
   void dp_balance_shuffle_seqs();
+
+  std::vector<Sequence*> get_sequences();
 
   std::vector<Sequence*> sequences_;
   std::vector<SequencesGroup*> sequence_groups_;

@@ -33,7 +33,6 @@ limitations under the License.
 #include "framework/request/sequence.h"
 
 namespace xllm {
-
 FixedStepsScheduler::FixedStepsScheduler(Engine* engine, const Options& options)
     : ContinuousScheduler(engine, options) {}
 
@@ -217,21 +216,12 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  // update the batch
-  // TODO. add following when next pr (use create_rec_batches).
-  // auto batches = BatchFactory::get_instance(options_.dp_size())
-  //                    ->create_rec_batches(
-  //                        running_requests_,
-  //                        running_sequences_,
-  //                        running_sequences_budgets_,
-  //                        kv_cache_manager_->get_swap_block_transfer_infos());
-  // TODO. delete this when next pr.
-  auto batches =
-      BatchFactory::get_instance(options_.dp_size())
-          ->create_batches(running_requests_,
-                           running_sequences_,
-                           running_sequences_budgets_,
-                           kv_cache_manager_->get_swap_block_transfer_infos());
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_rec_batches(
+                         running_requests_,
+                         running_sequences_,
+                         running_sequences_budgets_,
+                         kv_cache_manager_->get_swap_block_transfer_infos());
 
   // update metrics before returning
   if (!batches[0].empty()) {

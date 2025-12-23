@@ -16,12 +16,15 @@ limitations under the License.
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <thread>
 
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/model/model_args.h"
+#include "framework/request/rec_type.h"
 #include "master.h"
 #include "rec_engine.h"
+#include "rec.pb.h"
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/fixed_steps_scheduler.h"
 #include "util/threadpool.h"
@@ -37,24 +40,56 @@ class RecMaster : public Master {
   // completion/encode
   void handle_request(std::string prompt,
                       std::optional<std::vector<int>> prompt_tokens,
-                      std::optional<MMData> mm_data,
+                      std::optional<std::vector<proto::InferInputTensor>>
+                          input_tensors,
                       RequestParams sp,
                       OutputCallback callback);
+
+  void handle_request(
+      std::optional<std::vector<int>> input_tokens,
+      std::optional<std::vector<int>> input_indices,
+      std::optional<std::vector<std::vector<float>>> input_embedding,
+      RequestParams sp,
+      OutputCallback callback);
 
   // start the handling loop
   void run() override;
 
  private:
+  using RequestBuilder =
+      std::function<std::shared_ptr<Request>(const RequestParams&,
+                                             OutputCallback)>;
+
+  void schedule_request(RequestParams sp,
+                        OutputCallback callback,
+                        RequestBuilder build_request);
+
   std::shared_ptr<Request> generate_request(
       std::string prompt,
       std::optional<std::vector<int>> prompt_tokens,
-      std::optional<MMData> mm_data,
-      RequestParams sp,
+      std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+      const RequestParams& sp,
       OutputCallback callback);
+
+  std::shared_ptr<Request> generate_request(
+      std::optional<std::vector<int>> input_tokens,
+      std::optional<std::vector<int>> input_indices,
+      std::optional<std::vector<std::vector<float>>> input_embedding,
+      const RequestParams& sp,
+      OutputCallback callback);
+
+  std::shared_ptr<Request> build_request_common(
+      std::string prompt,
+      std::vector<int32_t> prompt_tokens,
+      MMData mm_data,
+      const RequestParams& sp,
+      OutputCallback callback,
+      bool build_stop_checker);
 
   std::unique_ptr<FixedStepsScheduler> scheduler_;
   // model args
   ModelArgs model_args_;
+  RecType rec_type_ = RecType::kNone;
   std::unique_ptr<ThreadPool> threadpool_;
   std::unique_ptr<Tokenizer> tokenizer_;
   // chat template instance
