@@ -622,6 +622,9 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
       input_params.block_tables =
           create_2d_tensor(block_tables_vec, torch::kInt).to(device_);
+      input_params.batch_forward_type = BatchForwardType::DECODE;
+    } else {
+      input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
     }
     input_params.decode_seq_range.second = input_params.num_sequences - 1;
 
