@@ -20,9 +20,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/common/global_flags.h"
-#include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"

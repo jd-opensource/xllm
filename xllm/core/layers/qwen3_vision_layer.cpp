@@ -13,22 +13,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-
-#include "config.h"
+#include "qwen3_vision_layer.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen2VisionEncoderLayer
-    : public torch::nn::ModuleHolder<Qwen2VisionEncoderLayerImpl> {
- public:
-  using torch::nn::ModuleHolder<Qwen2VisionEncoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen2VisionEncoderLayerImpl;
+Qwen3_VisionLayerImpl::Qwen3_VisionLayerImpl(const ModelContext& context)
+    : Qwen2_5_VisionLayerImpl(context, true) {}
 
-  Qwen2VisionEncoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<Qwen2VisionEncoderLayerImpl>(context)) {}
-};
+void Qwen3_VisionLayerImpl::load_state_dict(const StateDict& state_dict) {
+  attention_->load_state_dict(state_dict.get_dict_with_prefix("attn."));
+  mlp_->load_state_dict(
+      state_dict.get_dict_with_prefix("mlp."), {"linear_fc1."}, "linear_fc2.");
+  norm1_->load_state_dict(state_dict.get_dict_with_prefix("norm1."));
+  norm2_->load_state_dict(state_dict.get_dict_with_prefix("norm2."));
+}
 
 }  // namespace layer
 }  // namespace xllm

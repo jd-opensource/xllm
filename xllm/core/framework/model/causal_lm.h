@@ -21,8 +21,8 @@ limitations under the License.
 #include "layers/npu/npu_lm_head_impl.h"
 #include "layers/npu/npu_word_embedding_impl.h"
 #else
-#include "layers/lm_head.h"
-#include "layers/word_embedding.h"
+#include "layers/common/lm_head.h"
+#include "layers/common/word_embedding.h"
 #endif
 // clang-format on
 #include <c10/core/Device.h>
