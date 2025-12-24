@@ -187,6 +187,7 @@ def set_npu_envs():
         NPU_TOOLKIT_HOME+"/lib64/plugin/opskernel" + ":" + \
         NPU_TOOLKIT_HOME+"/lib64/plugin/nnengine" + ":" + \
         NPU_TOOLKIT_HOME+"/opp/built-in/op_impl/ai_core/tbe/op_tiling/lib/linux/"+arch + ":" + \
+        NPU_TOOLKIT_HOME+"/opp/vendors/xllm/op_api/lib" + ":" + \
         NPU_TOOLKIT_HOME+"/tools/aml/lib64" + ":" + \
         NPU_TOOLKIT_HOME+"/tools/aml/lib64/plugin" + ":" + \
         LD_LIBRARY_PATH
