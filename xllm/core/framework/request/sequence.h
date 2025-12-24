@@ -284,8 +284,7 @@ class Sequence final {
   }
 
   size_t encoder_seq_len() const {
-    return onerec_state_.has_value() ? onerec_state_->num_encoder_tokens
-                                     : 0;
+    return onerec_state_.has_value() ? onerec_state_->num_encoder_tokens : 0;
   }
 
   size_t num_decoder_embeddings() const {

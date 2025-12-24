@@ -67,8 +67,8 @@ void Sequence::init_onerec_sequence(
     num_prompt_tokens_ = 0;
     onerec_state.num_decoder_embeddings =
         decoder_context_embedding.value().size(0);
-    capacity = onerec_state.num_decoder_embeddings + capacity -
-               kDecoderBosTokenCount;
+    capacity =
+        onerec_state.num_decoder_embeddings + capacity - kDecoderBosTokenCount;
   } else {
     num_prompt_tokens_ = kDecoderBosTokenCount;
   }

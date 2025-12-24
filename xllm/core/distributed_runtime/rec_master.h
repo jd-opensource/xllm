@@ -23,8 +23,8 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/request/rec_type.h"
 #include "master.h"
-#include "rec_engine.h"
 #include "rec.pb.h"
+#include "rec_engine.h"
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/fixed_steps_scheduler.h"
 #include "util/threadpool.h"
@@ -38,12 +38,12 @@ class RecMaster : public Master {
 
   // handle a request, the engine will execute the request asynchronously
   // completion/encode
-  void handle_request(std::string prompt,
-                      std::optional<std::vector<int>> prompt_tokens,
-                      std::optional<std::vector<proto::InferInputTensor>>
-                          input_tensors,
-                      RequestParams sp,
-                      OutputCallback callback);
+  void handle_request(
+      std::string prompt,
+      std::optional<std::vector<int>> prompt_tokens,
+      std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+      RequestParams sp,
+      OutputCallback callback);
 
   void handle_request(
       std::optional<std::vector<int>> input_tokens,

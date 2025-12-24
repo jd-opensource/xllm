@@ -133,8 +133,6 @@ class Batch {
                                  int token_idx,
                                  bool replace_fake_token);
 
-  void process_embedding_output(const torch::Tensor& output_embedding);
-
   void process_beam_search();
 
   std::map<uint32_t, uint32_t> cal_seq_exchange_index(

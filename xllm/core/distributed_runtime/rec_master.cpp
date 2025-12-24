@@ -290,32 +290,30 @@ RecMaster::~RecMaster() {
   }
 }
 
-void RecMaster::handle_request(std::string prompt,
-                               std::optional<std::vector<int>> prompt_tokens,
-                               std::optional<std::vector<proto::InferInputTensor>>
-                                   input_tensors,
-                               RequestParams sp,
-                               OutputCallback callback) {
+void RecMaster::handle_request(
+    std::string prompt,
+    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+    RequestParams sp,
+    OutputCallback callback) {
   if (rec_type_ != RecType::kOneRec) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "OneRec should use onerec input interface");
     return;
   }
-  schedule_request(
-      std::move(sp),
-      std::move(callback),
-      [this,
-       prompt = std::move(prompt),
-       prompt_tokens = std::move(prompt_tokens),
-       input_tensors = std::move(input_tensors)](
-          const RequestParams& params,
-          OutputCallback cb) mutable {
-        return generate_request(std::move(prompt),
-                                std::move(prompt_tokens),
-                                std::move(input_tensors),
-                                params,
-                                std::move(cb));
-      });
+  schedule_request(std::move(sp),
+                   std::move(callback),
+                   [this,
+                    prompt = std::move(prompt),
+                    prompt_tokens = std::move(prompt_tokens),
+                    input_tensors = std::move(input_tensors)](
+                       const RequestParams& params, OutputCallback cb) mutable {
+                     return generate_request(std::move(prompt),
+                                             std::move(prompt_tokens),
+                                             std::move(input_tensors),
+                                             params,
+                                             std::move(cb));
+                   });
 }
 
 void RecMaster::handle_request(
@@ -329,21 +327,19 @@ void RecMaster::handle_request(
                         "LLMRec should use raw input interface");
     return;
   }
-  schedule_request(
-      std::move(sp),
-      std::move(callback),
-      [this,
-       input_tokens = std::move(input_tokens),
-       input_indices = std::move(input_indices),
-       input_embedding = std::move(input_embedding)](
-          const RequestParams& params,
-          OutputCallback cb) mutable {
-        return generate_request(std::move(input_tokens),
-                                std::move(input_indices),
-                                std::move(input_embedding),
-                                params,
-                                std::move(cb));
-      });
+  schedule_request(std::move(sp),
+                   std::move(callback),
+                   [this,
+                    input_tokens = std::move(input_tokens),
+                    input_indices = std::move(input_indices),
+                    input_embedding = std::move(input_embedding)](
+                       const RequestParams& params, OutputCallback cb) mutable {
+                     return generate_request(std::move(input_tokens),
+                                             std::move(input_indices),
+                                             std::move(input_embedding),
+                                             params,
+                                             std::move(cb));
+                   });
 }
 
 void RecMaster::schedule_request(RequestParams sp,
@@ -540,13 +536,13 @@ std::shared_ptr<Request> RecMaster::build_request_common(
       }
     }
 
-    stopping_checker = StoppingChecker(
-        max_tokens,
-        max_context_len - options_.num_speculative_tokens(),
-        model_args_.eos_token_id(),
-        sp.ignore_eos,
-        std::move(stop_tokens),
-        std::move(stop_sequences));
+    stopping_checker =
+        StoppingChecker(max_tokens,
+                        max_context_len - options_.num_speculative_tokens(),
+                        model_args_.eos_token_id(),
+                        sp.ignore_eos,
+                        std::move(stop_tokens),
+                        std::move(stop_sequences));
   }
 
   RequestState req_state(std::move(prompt),
