@@ -52,9 +52,8 @@ bool DensityComparator::operator()(const std::shared_ptr<Request>& a,
   auto& sequence_a = a->sequences()[0];
   auto& sequence_b = b->sequences()[0];
 
-  const double epsilon =
-      std::numeric_limits<double>::epsilon();  // Set an appropriate tolerance
-                                               // value
+  // Set an appropriate tolerance value
+  const double epsilon = std::numeric_limits<double>::epsilon();
   double density_a, density_b;
 
   if (sequence_a->stage() == SequenceStage::DECODE) {
@@ -85,9 +84,9 @@ bool SJFComparator::operator()(const std::shared_ptr<Request>& a,
   auto& sequence_a = a->sequences()[0];
   auto& sequence_b = b->sequences()[0];
 
-  const double epsilon =
-      std::numeric_limits<double>::epsilon();  // Set an appropriate tolerance
-                                               // value
+  // Set an appropriate tolerance value
+  const double epsilon = std::numeric_limits<double>::epsilon();
+
   double density_a, density_b;
 
   density_a = 1.0 / sequence_a->estimated_latency();
@@ -131,22 +130,51 @@ bool DecodeDensityComparator::operator()(
   return sequence_a->stage() < sequence_b->stage();
 }
 
+// decode-first, then density-first with anti-starve
+// used by UrgencyDensityComparator to avoid overly starvation
+bool DecodeDensityWithAntiStarveComparator::operator()(
+    const std::shared_ptr<Request>& a,
+    const std::shared_ptr<Request>& b) const {
+  auto& sequence_a = a->sequences()[0];
+  auto& sequence_b = b->sequences()[0];
+  if (sequence_a->stage() == SequenceStage::DECODE &&
+      sequence_b->stage() == SequenceStage::DECODE) {
+    return DensityComparator()(a, b);
+  } else if (sequence_a->stage() != SequenceStage::DECODE &&
+             sequence_b->stage() != SequenceStage::DECODE) {
+    // with anti-starve, and starved requests have higher priority and use
+    // deadline first and they better not interfere with decode stage
+    if (a->is_starved() && b->is_starved()) {
+      return DeadlineComparator()(a, b);
+    } else if (!a->is_starved() && !b->is_starved()) {
+      return DensityComparator()(a, b);
+    } else {
+      return a->is_starved() < b->is_starved();
+    }
+  } else {
+    return sequence_a->stage() < sequence_b->stage();
+  }
+}
+
 // Sort first by urgency, then sort URGENT requests in
 // DensityComparator and sort NORMAL requests in DeadlineComparator.
+// now defaultly used anti-starve and adopted for multi-priority request
+// scheduling
 bool UrgencyDensityComparator::operator()(
     const std::shared_ptr<Request>& a,
     const std::shared_ptr<Request>& b) const {
   if (a->urgency() == b->urgency()) {
     if (a->urgency() == Urgency::URGENT) {
-      return DensityComparator()(a, b);
+      // return DensityComparator()(a, b);
+      return DecodeDensityWithAntiStarveComparator()(a, b);
     }
     if (a->urgency() == Urgency::NORMAL) {
       return DeadlineComparator()(a, b);
     }
-    if (a->urgency() == Urgency::TIMEOUT) {
+    if (a->urgency() == Urgency::STARVED) {
       return DensityComparator()(a, b);
     }
-    return FCFSComparator()(a, b);
+    return DeadlineComparator()(a, b);
   }
   return a->urgency() < b->urgency();
 }
@@ -163,7 +191,7 @@ bool UrgencyPriorityComparator::operator()(
     if (a->urgency() == Urgency::NORMAL) {
       return DeadlineComparator()(a, b);
     }
-    if (a->urgency() == Urgency::TIMEOUT) {
+    if (a->urgency() == Urgency::STARVED) {
       return StrictPriorityComparator()(a, b);
     }
     return FCFSComparator()(a, b);
