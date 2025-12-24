@@ -171,17 +171,15 @@ double TimePredictor::get_constant_overhead() {
 int32_t TimePredictor::get_quadratic_root(int32_t prefix_length,
                                           double budget) {
   CHECK(is_prefill_) << "This function is only for prefill.";
-  double a = 0.0;
-  double b = 0.0;
-  double c = 0.0;
+  double a = 0.0, b = 0.0, c = 0.0;
   if (if_profile_prefix_) {
-    double a = coefficients_(1);
-    double b = coefficients_(2) + coefficients_(3) * prefix_length;
-    double c = coefficients_(4) * prefix_length - budget;
+    a = coefficients_(1);
+    b = coefficients_(2) + coefficients_(3) * prefix_length;
+    c = coefficients_(4) * prefix_length - budget;
   } else {
-    double a = coefficients_(1);
-    double b = coefficients_(2);
-    double c = -budget;
+    a = coefficients_(1);
+    b = coefficients_(2);
+    c = -budget;
   }
   double discriminant = b * b - 4 * a * c;
   if (discriminant < 0) {

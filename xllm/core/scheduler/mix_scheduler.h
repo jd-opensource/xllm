@@ -50,7 +50,7 @@ class MixScheduler : public ChunkedPrefillScheduler {
       size_t& remaining_seq_budget,
       size_t& num_preempted_requests,
       std::vector<Sequence*>& prefill_stage_sequences,
-      std::list<shared_ptr<Request>>& running_queue,
+      std::list<std::shared_ptr<Request>>& running_queue,
       bool& budget_exhausted,
       bool& blocks_exhausted);
 
