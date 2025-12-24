@@ -71,6 +71,9 @@ class SequencesGroup {
   void generate_outputs_parallel(std::vector<SequenceOutput>& outputs,
                                  const Tokenizer& tokenizer,
                                  ThreadPool* thread_pool = nullptr);
+  void generate_multi_round_output(std::vector<SequenceOutput>& outputs,
+                                   const Tokenizer& tokenizer,
+                                   const Sequence& base);
 
  private:
   const std::string& prompt_;                  // ref from request

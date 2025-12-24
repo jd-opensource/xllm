@@ -50,6 +50,7 @@ class LLMEngine : public Engine {
   virtual ~LLMEngine() = default;
 
   ForwardOutput step(std::vector<Batch>& batch) override;
+  ForwardOutput step_multi_round(std::vector<Batch>& batch);
 
   const runtime::Options& options() const { return options_; }
 

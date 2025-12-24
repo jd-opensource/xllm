@@ -318,6 +318,9 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   }
 
   uint32_t max_tokens = sp.max_tokens;
+  if (FLAGS_max_decode_rounds > 0) {
+    max_tokens = FLAGS_max_decode_rounds;
+  }
   if (max_tokens == 0) {
     const uint32_t kDefaultMaxTokens = 5120;
     max_tokens = kDefaultMaxTokens;
@@ -369,12 +372,12 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       stop_sequences.push_back(std::move(tmp_tokens));
     }
   }
-
+  bool ignore_eos = FLAGS_max_decode_rounds > 0 ? true : sp.ignore_eos;
   StoppingChecker stopping_checker(
       max_tokens,
       max_context_len - options_.num_speculative_tokens(),
       model_args_.eos_token_id(),
-      sp.ignore_eos,
+      ignore_eos,
       std::move(stop_tokens),
       std::move(stop_sequences));
 

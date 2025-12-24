@@ -136,7 +136,14 @@ class WorkerService : public proto::DistributeWorker {
             int32_t& prepared_layer_id,
             torch::Tensor& src_seq_idxes,
             torch::Tensor& out_tokens,
-            torch::Tensor& out_logprobs);
+            torch::Tensor& out_logprobs,
+            std::vector<int32_t>* beam_group_flat = nullptr,
+            bool* has_beam_group = nullptr);
+
+  void FillBeamGroup(const ForwardOutput& out,
+                     std::vector<int32_t>& beam_group_flat,
+                     bool& has_beam_group);
+
   DISALLOW_COPY_AND_ASSIGN(WorkerService);
 
  private:

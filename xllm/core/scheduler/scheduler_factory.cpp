@@ -29,6 +29,12 @@ namespace xllm {
 std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
     Engine* engine,
     ContinuousScheduler::Options options) {
+  // When using multi-round decode, use FixedStepsScheduler to run
+  // fixed-step scheduling for both prefill and decode.
+  if (FLAGS_max_decode_rounds > 0) {
+    return std::make_unique<FixedStepsScheduler>(engine, options);
+  }
+
   if (options.enable_disagg_pd()) {
     if (options.enable_pd_ooc()) {
       return std::make_unique<PDOOCScheduler>(engine, options);

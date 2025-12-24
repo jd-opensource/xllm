@@ -87,6 +87,9 @@ class Batch {
   // Convert Batch to pb type, which will be pass to remote worker.
   RawForwardInput prepare_forward_input(const ModelArgs& args,
                                         ThreadPool* thread_pool);
+  RawForwardInput prepare_multi_step_forward_input(
+      const ModelArgs& args,
+      ThreadPool* thread_pool = nullptr);
 
   // process output
   //
@@ -106,6 +109,12 @@ class Batch {
   // process output for beam search kernel
   void process_beam_search_output(const RawForwardOutput& raw_output,
                                   bool replace_fake_token);
+
+  // process output for xattention kernel
+  void process_decode_beam_search_output(const RawForwardOutput& raw_output,
+                                         bool replace_fake_token);
+
+  void process_beam_sequence_group(const RawForwardOutput& raw_output);
 
   // mark all sequence groups as finished (used by rec model multi-round
   // decoding)

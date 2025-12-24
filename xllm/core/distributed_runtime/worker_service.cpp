@@ -74,7 +74,9 @@ void WorkerService::step(ForwardInput& fwd_input,
                          int32_t& prepared_layer_id,
                          torch::Tensor& src_seq_idxes,
                          torch::Tensor& out_tokens,
-                         torch::Tensor& out_logprobs) {
+                         torch::Tensor& out_logprobs,
+                         std::vector<int32_t>* beam_group_flat,
+                         bool* has_beam_group) {
   // execute model
   auto future = worker_->step_async(fwd_input);
 
@@ -131,6 +133,10 @@ void WorkerService::step(ForwardInput& fwd_input,
                       true);
         }
         auto ret = stream_->synchronize();
+        if (beam_group_flat && has_beam_group) {
+          FillBeamGroup(
+              forward_outputs.value(), *beam_group_flat, *has_beam_group);
+        }
       }
     }
   } else {
@@ -527,6 +533,23 @@ void WorkerService::UnlinkCluster(::google::protobuf::RpcController* controller,
   return;
 }
 
+void WorkerService::FillBeamGroup(const ForwardOutput& out,
+                                  std::vector<int32_t>& beam_group_flat,
+                                  bool& has_beam_group) {
+  if (FLAGS_max_decode_rounds <= 0) {
+    return;
+  }
+  const auto& bsg =
+      safe_to(out.beam_sequence_group, torch::kCPU, /*pin_memory=*/true);
+  if (!bsg.defined()) {
+    return;
+  }
+  auto flat = bsg.flatten();
+  beam_group_flat.assign(flat.data_ptr<int32_t>(),
+                         flat.data_ptr<int32_t>() + flat.numel());
+  has_beam_group = true;
+}
+
 void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
                                  const proto::ForwardInput* pb_forward_input,
                                  proto::ForwardOutput* pb_forward_output,
@@ -554,6 +577,9 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
         torch::Tensor out_tokens;
         torch::Tensor out_logprobs;
 
+        std::vector<int32_t> beam_group_flat;
+        bool has_beam_group = false;
+
         step(forward_input,
              next_tokens,
              logprobs,
@@ -564,8 +590,10 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
              prepared_layer_id,
              src_seq_idxes,
              out_tokens,
-             out_logprobs);
-        // convert to proto output
+             out_logprobs,
+             &beam_group_flat,
+             &has_beam_group);
+
         forward_output_to_proto(next_tokens,
                                 logprobs,
                                 top_tokens,
@@ -577,6 +605,12 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
                                 out_tokens,
                                 out_logprobs,
                                 pb_forward_output);
+
+        if (has_beam_group && FLAGS_max_decode_rounds > 0) {
+          ADD_VECTOR_TO_PROTO(pb_forward_output->mutable_beam_sequence_group(),
+                              beam_group_flat);
+        }
+
         COUNTER_ADD(worker_service_latency_seconds, timer.elapsed_seconds());
       });
 }
@@ -642,6 +676,21 @@ void WorkerService::GetLastStepResult(
                                     out_tokens,
                                     out_logprobs,
                                     pb_forward_output);
+            // append batch-level beam output
+            if (FLAGS_max_decode_rounds > 0) {
+              const auto& bsg =
+                  safe_to(forward_outputs.value().beam_sequence_group,
+                          torch::kCPU,
+                          true);
+              if (bsg.defined()) {
+                auto flat = bsg.flatten();
+                std::vector<int32_t> flat_vec(
+                    flat.data_ptr<int32_t>(),
+                    flat.data_ptr<int32_t>() + flat.numel());
+                ADD_VECTOR_TO_PROTO(
+                    pb_forward_output->mutable_beam_sequence_group(), flat_vec);
+              }
+            }
           }
         }
       });

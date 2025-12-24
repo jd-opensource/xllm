@@ -25,6 +25,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch.h"
@@ -72,7 +73,9 @@ void FixedStepsScheduler::handle_prefill_requests(
              FLAGS_prefill_scheduling_memory_usage_threshold) {
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     if (request->finished() || request->cancelled()) {
-      // kv_cache_manager_->deallocate(request.get());
+      if (FLAGS_max_decode_rounds > 0) {
+        kv_cache_manager_->deallocate(request.get());
+      }
       //  release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
@@ -106,6 +109,14 @@ void FixedStepsScheduler::handle_prefill_requests(
           remaining_seq_budget < allocated_seqs + 1) {
         can_schedule = false;
         budget_exhausted = true;
+        break;
+      }
+
+      if (FLAGS_max_decode_rounds > 0 &&
+          !kv_cache_manager_->allocate(prefill_sequence.get())) {
+        can_schedule = false;
+        kv_cache_manager_->deallocate(prefill_sequence.get());
+        blocks_exhausted = true;
         break;
       }
 
@@ -188,7 +199,9 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
-      // kv_cache_manager_->deallocate(request.get());
+      if (FLAGS_max_decode_rounds > 0) {
+        kv_cache_manager_->deallocate(request.get());
+      }
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // finished request is set to nullptr

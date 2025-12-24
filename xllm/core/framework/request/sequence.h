@@ -181,7 +181,8 @@ class Sequence final {
   FinishReason finish_reason() const { return finish_reason_; }
   // check finish status, use cached value if not invalidated
   bool finished() const;
-  // mark sequence as finished (used by rec model multi-round decoding)
+  // mark sequence as finished (used by rec model multi-round decoding and qwen
+  // rec)
   void finish();
 
   // get the output of the sequence until the specified number of tokens,
@@ -267,6 +268,28 @@ class Sequence final {
 
   // get sequence id
   int32_t seq_id() const { return seq_id_; }
+
+  void set_beam_result(int32_t bw,
+                       int32_t total_rounds,
+                       const std::vector<std::vector<int32_t>>& flat,
+                       const std::vector<float>& last_logprobs) {
+    beam_width_cached_ = bw;
+    total_rounds_cached_ = total_rounds;
+    beam_seq_group_flat_ = flat;
+    beam_last_logprobs_ = last_logprobs;
+  }
+  bool has_beam_result() const {
+    return beam_width_cached_ > 0 && total_rounds_cached_ > 0 &&
+           !beam_seq_group_flat_.empty();
+  }
+  const std::vector<std::vector<int32_t>>& beam_seq_group_flat() const {
+    return beam_seq_group_flat_;
+  }
+  const std::vector<float>& beam_last_logprobs() const {
+    return beam_last_logprobs_;
+  }
+  int32_t beam_width_cached() const { return beam_width_cached_; }
+  int32_t total_rounds_cached() const { return total_rounds_cached_; }
 
   void set_cancel() { cancelled_.store(true, std::memory_order_relaxed); }
 
@@ -364,10 +387,18 @@ class Sequence final {
   std::atomic<bool> cancelled_{false};
 
   // kvcache store copy async result
+  std::optional<std::vector<folly::SemiFuture<uint32_t>>> futures_;
   std::shared_ptr<std::atomic<int32_t>> termination_flag_;
   std::vector<std::shared_ptr<std::atomic<uint32_t>>> prefetch_results_;
 
   Timer timer_;
+  // multi-round decode related variables
+  bool in_step_decode_round_ = false;
+
+  int32_t beam_width_cached_ = 0;
+  int32_t total_rounds_cached_ = 0;
+  std::vector<std::vector<int32_t>> beam_seq_group_flat_;
+  std::vector<float> beam_last_logprobs_;
   bool is_timeout_set_ = false;
 };
 

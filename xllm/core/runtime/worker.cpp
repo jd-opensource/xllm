@@ -32,6 +32,7 @@ limitations under the License.
 #include "runtime/embed_vlm_worker_impl.h"
 #include "runtime/embed_worker_impl.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/qwen_rec_worker_impl.h"
 #include "runtime/speculative_worker_impl.h"
 #include "runtime/vlm_worker_impl.h"
 #include "util/timer.h"
@@ -43,6 +44,8 @@ Worker::Worker(const ParallelArgs& parallel_args,
                WorkerType worker_type) {
   if (options.enable_speculative_decode()) {
     impl_ = new SpeculativeWorkerImpl(parallel_args, device, options);
+  } else if (FLAGS_max_decode_rounds > 0) {
+    impl_ = new QwenRecWorkerImpl(parallel_args, device, options);
   } else if (worker_type == WorkerType::LLM) {
     impl_ = new LLMWorkerImpl(parallel_args, device, options);
   } else if (worker_type == WorkerType::VLM) {

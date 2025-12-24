@@ -27,6 +27,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/common/global_flags.h"
 #include "core/common/metrics.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"

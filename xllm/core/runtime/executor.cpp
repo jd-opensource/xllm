@@ -23,6 +23,7 @@ limitations under the License.
 #include "runtime/base_executor_impl.h"
 #if defined(USE_NPU)
 #include "runtime/acl_graph_executor_impl.h"
+#include "runtime/acl_graph_executor_rec_impl.h"
 #endif
 #include "runtime/options.h"
 
@@ -34,9 +35,16 @@ Executor::Executor(CausalLM* model,
                    const runtime::Options& options) {
 #if defined(USE_NPU)
   if (FLAGS_enable_acl_graph && device.is_privateuseone()) {
-    LOG(INFO) << "Creating ACL Graph Executor for NPU device";
-    impl_ =
-        std::make_unique<AclGraphExecutorImpl>(model, args, device, options);
+    if (FLAGS_enable_beam_search_kernel && FLAGS_max_decode_rounds > 0) {
+      LOG(INFO) << "Creating ACL Graph Rec Executor for NPU device with "
+                   "beam-search kernel enabled";
+      impl_ = std::make_unique<AclGraphRecExecutorImpl>(
+          model, args, device, options);
+    } else {
+      LOG(INFO) << "Creating ACL Graph Executor for NPU device";
+      impl_ =
+          std::make_unique<AclGraphExecutorImpl>(model, args, device, options);
+    }
     return;
   }
 #endif
