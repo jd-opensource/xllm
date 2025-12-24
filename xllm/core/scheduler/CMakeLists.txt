@@ -56,3 +56,4 @@ cc_test(
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:nnopbase>
 )
+target_link_libraries(chunked_prefill_scheduler_test PRIVATE brpc-static OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb)

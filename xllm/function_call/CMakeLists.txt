@@ -46,6 +46,7 @@ function(add_detector_test TEST_NAME)
       GTest::gtest_main
       nlohmann_json::nlohmann_json
   )
+  target_link_libraries(${TEST_NAME} PRIVATE leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf brpc-static OpenSSL::SSL OpenSSL::Crypto)
 endfunction()
 
 add_detector_test(qwen25_detector_test)
@@ -53,4 +54,3 @@ add_detector_test(kimik2_detector_test)
 add_detector_test(deepseekv3_detector_test)
 add_detector_test(glm45_detector_test)
 add_detector_test(glm47_detector_test)
-

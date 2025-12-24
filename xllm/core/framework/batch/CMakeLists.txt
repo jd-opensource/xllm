@@ -43,8 +43,11 @@ cc_test(
 target_link_libraries(batch_test
                       PUBLIC
                       Python::Python
+                      brpc-static
+                      OpenSSL::SSL
+                      OpenSSL::Crypto
+                      leveldb::leveldb
                       $<$<BOOL:${USE_NPU}>:ascendcl>
                       $<$<BOOL:${USE_NPU}>:hccl>
                       $<$<BOOL:${USE_NPU}>:c_sec>
                       $<$<BOOL:${USE_NPU}>:nnopbase>)
-

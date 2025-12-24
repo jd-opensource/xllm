@@ -23,6 +23,7 @@ cc_test(
     torch
     GTest::gtest_main
 )
+target_link_libraries(layer_test PRIVATE leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf brpc-static OpenSSL::SSL OpenSSL::Crypto)
 
 # Add test for DeepEP
 # This test must exist individually, because it contains forked processes
@@ -43,3 +44,4 @@ cc_test(
     torch
     glog::glog
   )
+target_link_libraries(deep_ep_test PRIVATE leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf brpc-static OpenSSL::SSL OpenSSL::Crypto)

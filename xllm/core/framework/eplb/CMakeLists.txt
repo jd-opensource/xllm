@@ -45,4 +45,4 @@ cc_test(
     fmt::fmt
     GTest::gtest_main
 )
-
+target_link_libraries(eplb_policy_test PRIVATE brpc-static OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb)

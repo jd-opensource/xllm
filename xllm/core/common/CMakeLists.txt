@@ -64,7 +64,4 @@ cc_test(
     gflags::gflags
     glog::glog
 )
-target_link_libraries(common PRIVATE OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
-add_dependencies(common brpc-static)
-
-
+target_link_libraries(common PRIVATE brpc-static OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)

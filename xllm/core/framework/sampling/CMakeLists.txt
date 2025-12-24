@@ -40,7 +40,7 @@ cc_test(
     :sampler
     glog::glog
 )
-target_link_libraries(sampler_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
+target_link_libraries(sampler_test PRIVATE brpc-static OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
 target_link_libraries(sampler_test
                       PUBLIC
                       Python::Python
@@ -48,4 +48,3 @@ target_link_libraries(sampler_test
                       $<$<BOOL:${USE_NPU}>:hccl>
                       $<$<BOOL:${USE_NPU}>:c_sec>
                       $<$<BOOL:${USE_NPU}>:nnopbase>)
-add_dependencies(sampler_test brpc-static)
