@@ -19,23 +19,13 @@ limitations under the License.
 #include "core/layers/qwen2_decoder_layer.h"
 #include "llm_model_base.h"
 
-// QWen2 model compatible with huggingface weights
-// ref to:
-// https://github.com/huggingface/transformers/blob/v4.43.3/src/transformers/models/qwen2/modeling_qwen2.py
 namespace xllm {
 
-class QWen2DecoderLayerImpl
-    : public LlmDecoderLayerImplBase<layer::Qwen2DecoderLayer> {
- public:
-  QWen2DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::Qwen2DecoderLayer>(context) {}
-};
-TORCH_MODULE(QWen2DecoderLayer);
-
-class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
+class QWen2ModelImpl : public LlmModelImplBase<layer::Qwen2DecoderLayer> {
  public:
   QWen2ModelImpl(const ModelContext& context)
-      : LlmModelImplBase<QWen2DecoderLayer>("qwen2", context.get_model_args()) {
+      : LlmModelImplBase<layer::Qwen2DecoderLayer>("qwen2",
+                                                   context.get_model_args()) {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
@@ -53,7 +43,7 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
         register_module("embed_tokens", layer::WordEmbedding(context));
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto layer = QWen2DecoderLayer(context);
+      auto layer = layer::Qwen2DecoderLayer(context);
       layers_.push_back(layer);
     }
   }

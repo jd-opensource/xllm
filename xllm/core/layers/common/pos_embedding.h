@@ -15,19 +15,18 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include "rotary_embedding.h"
 
 namespace xllm {
 namespace layer {
 
-class LlamaDecoderLayer
-    : public torch::nn::ModuleHolder<LlamaDecoderLayerImpl> {
+class PosEmbedding : public torch::nn::ModuleHolder<RotaryEmbeddingImpl> {
  public:
-  using torch::nn::ModuleHolder<LlamaDecoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = LlamaDecoderLayerImpl;
+  using torch::nn::ModuleHolder<RotaryEmbeddingImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = RotaryEmbeddingImpl;
 
-  LlamaDecoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<LlamaDecoderLayerImpl>(context)) {}
+  PosEmbedding(const ModelContext& context)
+      : ModuleHolder(std::make_shared<RotaryEmbeddingImpl>(context)) {}
 };
 
 }  // namespace layer

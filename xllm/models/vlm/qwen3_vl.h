@@ -15,16 +15,8 @@ limitations under the License.
 
 #pragma once
 
-#include <c10/core/ScalarType.h>
-#include <glog/logging.h>
-#include <torch/torch.h>
-
-#include <unordered_map>
-
-#include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
-#include "core/layers/lm_head.h"
-#include "core/layers/qwen3_vision_encode_layer.h"
+#include "core/layers/common/lm_head.h"
+#include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/qwen3.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
@@ -32,8 +24,6 @@ limitations under the License.
 #include "qwen2_5_vl.h"
 
 namespace xllm {
-
-#define PrintTensor(tensor) print_tensor(tensor, #tensor, 10, true, false);
 
 class Qwen3_VisionPatchEmbedImpl : public torch::nn::Module {
  public:
@@ -90,41 +80,6 @@ class Qwen3_VisionPatchEmbedImpl : public torch::nn::Module {
   torch::nn::Linear proj_{nullptr};
 };
 TORCH_MODULE(Qwen3_VisionPatchEmbed);
-
-class Qwen3_VisionBlockImpl : public torch::nn::Module {
- public:
-  Qwen3_VisionBlockImpl(const ModelContext& context) {
-    // register submodules
-    encoder_layer_ = register_module("encoder_layer",
-                                     layer::Qwen3VisionEncoderLayer(context));
-  }
-
-  torch::Tensor forward(torch::Tensor& x,
-                        torch::Tensor& m_cos_pos,
-                        torch::Tensor& m_sin_pos,
-                        torch::Tensor& cu_seq_len,
-                        std::vector<int>& cu_seq_len_vec,
-                        ModelInputParams& input_params,
-                        int node_id) {
-    return encoder_layer_(x,
-                          m_cos_pos,
-                          m_sin_pos,
-                          cu_seq_len,
-                          cu_seq_len_vec,
-                          input_params,
-                          node_id);
-  }
-
-  // load the weight from the checkpoint
-  void load_state_dict(const StateDict& state_dict) {
-    // call each submodule's load_state_dict function
-    encoder_layer_->load_state_dict(state_dict);
-  }
-
- private:
-  layer::Qwen3VisionEncoderLayer encoder_layer_{nullptr};
-};
-TORCH_MODULE(Qwen3_VisionBlock);
 
 class Qwen3_VisionRotaryEmbeddingImpl : public torch::nn::Module {
  public:
@@ -340,7 +295,7 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     merger_ = register_module("merger", Qwen3_VisionPatchMerger(context));
 
     for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
-      auto layer = Qwen3_VisionBlock(context);
+      auto layer = layer::Qwen3_VisionLayer(context);
       layers_.push_back(layer);
     }
     for (int32_t idx = 0; idx < deepstack_visual_indexes_.size(); idx++) {
@@ -574,7 +529,7 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
   Qwen3_VisionRotaryEmbedding rotary_pos_emb_{nullptr};
   torch::nn::Embedding emb_{nullptr};
 
-  std::vector<Qwen3_VisionBlock> layers_;
+  std::vector<layer::Qwen3_VisionLayer> layers_;
 
   torch::nn::ModuleList deepstack_mergers_{nullptr};
   std::vector<Qwen3_VisionPatchMerger> deepstack_merger_layers_;

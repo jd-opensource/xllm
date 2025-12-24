@@ -16,12 +16,6 @@ limitations under the License.
 #pragma once
 
 #include <atb/atb_infer.h>
-#include <c10/core/ScalarType.h>
-#include <glog/logging.h>
-#include <torch/torch.h>
-
-#include <boost/algorithm/string.hpp>
-#include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"

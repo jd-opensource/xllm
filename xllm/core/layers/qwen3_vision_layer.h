@@ -14,20 +14,18 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-
-#include "config.h"
+#include "qwen2_5_vision_layer.h"
 
 namespace xllm {
 namespace layer {
 
-class PosEmbedding : public torch::nn::ModuleHolder<RotaryEmbeddingImpl> {
+class Qwen3_VisionLayerImpl : public Qwen2_5_VisionLayerImpl {
  public:
-  using torch::nn::ModuleHolder<RotaryEmbeddingImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = RotaryEmbeddingImpl;
+  Qwen3_VisionLayerImpl(const ModelContext& context);
 
-  PosEmbedding(const ModelContext& context)
-      : ModuleHolder(std::make_shared<RotaryEmbeddingImpl>(context)) {}
+  void load_state_dict(const StateDict& state_dict);
 };
+TORCH_MODULE(Qwen3_VisionLayer);
 
 }  // namespace layer
 }  // namespace xllm

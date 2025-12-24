@@ -20,18 +20,11 @@ limitations under the License.
 
 namespace xllm {
 
-class QWen3DecoderLayerImpl
-    : public LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer> {
- public:
-  QWen3DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer>(context) {}
-};
-TORCH_MODULE(QWen3DecoderLayer);
-
-class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
+class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
  public:
   QWen3ModelImpl(const ModelContext& context)
-      : LlmModelImplBase<QWen3DecoderLayer>("qwen3", context.get_model_args()) {
+      : LlmModelImplBase<layer::Qwen3DecoderLayer>("qwen3",
+                                                   context.get_model_args()) {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
@@ -48,7 +41,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto layer = QWen3DecoderLayer(context);
+      auto layer = layer::Qwen3DecoderLayer(context);
       layers_.push_back(layer);
     }
   }

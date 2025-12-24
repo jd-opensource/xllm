@@ -1,6 +1,11 @@
 include(cc_library)
 
-# Define the library
+if(USE_NPU)
+  include_directories(
+    ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
+  )
+endif()
+
 cc_library(
   NAME
     models
@@ -13,4 +18,6 @@ cc_library(
     :model
     :dit_cache
     :model_loader
+    :layers
+    $<$<BOOL:${USE_NPU}>:npu_layers>
 )

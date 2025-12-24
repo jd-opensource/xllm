@@ -9,6 +9,7 @@ cc_library(
   NAME
     npu_layers 
   HDRS
+    multi_head_attention.h
     npu_word_embedding_impl.h
     npu_pos_embedding_impl.h
     npu_lm_head_impl.h
@@ -53,6 +54,7 @@ cc_library(
     loader/qwen2_decoder_manual_loader.h
     loader/qwen3_decoder_manual_loader.h
   SRCS
+    multi_head_attention.cpp
     npu_word_embedding_impl.cpp
     npu_pos_embedding_impl.cpp
     npu_lm_head_impl.cpp

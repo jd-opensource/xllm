@@ -15,19 +15,18 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include "linear.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3VisionEncoderLayer
-    : public torch::nn::ModuleHolder<Qwen3VisionEncoderLayerImpl> {
+class LmHead : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
  public:
-  using torch::nn::ModuleHolder<Qwen3VisionEncoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen3VisionEncoderLayerImpl;
+  using torch::nn::ModuleHolder<ColumnParallelLinearImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = ColumnParallelLinearImpl;
 
-  Qwen3VisionEncoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<Qwen3VisionEncoderLayerImpl>(context)) {}
+  LmHead(const ModelContext& context)
+      : ModuleHolder(std::make_shared<ColumnParallelLinearImpl>(context)) {}
 };
 
 }  // namespace layer

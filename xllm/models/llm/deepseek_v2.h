@@ -21,48 +21,10 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/layers/deepseek_v2_decoder_layer.h"
+#include "core/layers/mlu/deepseek_v2_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
-// DeepSeek v2 compatible with huggingface weights
-// ref to:
-// https://github.com/vllm-project/vllm/blob/v0.6.6/vllm/model_executor/models/deepseek_v2.py
-
 namespace xllm {
-
-class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
- public:
-  DeepseekV2DecoderLayerImpl(const ModelContext& context,
-                             const int32_t layer_index) {
-    // register submodules
-    decoder_layer_ = register_module(
-        "decoder_layer", layer::DeepseekV2DecoderLayer(context, layer_index));
-  }
-
-  torch::Tensor forward(torch::Tensor& x,
-                        std::optional<torch::Tensor>& residual,
-                        torch::Tensor& positions,
-                        const layer::AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache,
-                        const ModelInputParams& input_params) {
-    return decoder_layer_(
-        x, residual, positions, attn_metadata, kv_cache, input_params);
-  }
-
-  void load_state_dict(const StateDict& state_dict) {
-    decoder_layer_->load_state_dict(state_dict);
-  }
-
-  virtual void prepare_expert_weight(int32_t layer_id,
-                                     const std::vector<int32_t>& expert_ids) {
-    return;
-  }
-  virtual void update_expert_weight(int32_t layer_id) { return; }
-
- private:
-  layer::DeepseekV2DecoderLayer decoder_layer_{nullptr};
-};
-TORCH_MODULE(DeepseekV2DecoderLayer);
 
 class DeepseekV2ModelImpl : public torch::nn::Module {
  public:
@@ -88,7 +50,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
     // create decoder layers
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto block = DeepseekV2DecoderLayer(context, i);
+      auto block = layer::DeepseekV2DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
     }
@@ -161,7 +123,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
  private:
   torch::nn::ModuleList blocks_{nullptr};
-  std::vector<DeepseekV2DecoderLayer> layers_;
+  std::vector<layer::DeepseekV2DecoderLayer> layers_;
   int32_t dp_rank_;
   int32_t rank_;
   int32_t dp_size_;
