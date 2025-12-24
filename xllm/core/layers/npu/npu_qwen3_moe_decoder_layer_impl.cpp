@@ -103,6 +103,8 @@ void Qwen3MoeDecoderLayerImpl::initialize_basic_parameters(
 
   param.enableSplitFuse =
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+  param.enableAclGraphPagedAttention = FLAGS_enable_acl_graph && !is_prefill;
+
   if (quantize_type_.empty()) {
     param.moeLinearTransposeType = std::vector<int>{1, 1, -1, 1};
   } else {
@@ -255,11 +257,11 @@ int64_t Qwen3MoeDecoderLayerImpl::init_node(
   atb_speed::qwen::MoeDecoderLayer(param, &operation);
   node.operation.reset(operation);
   if (node.operation == nullptr) {
-    LOG(ERROR) << "node.operation is null";
+    LOG(FATAL) << "node.operation is null";
     return -1;
   }
   if (node.operation->GetInputNum() < 1) {
-    LOG(ERROR) << "Can not resize number which is smaller than 1";
+    LOG(FATAL) << "Can not resize number which is smaller than 1";
     return -1;
   }
   node.inTensors.resize(node.operation->GetInputNum());
@@ -394,12 +396,20 @@ void Qwen3MoeDecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
   }
 
+  input_idx = WEIGHT_COUNT_PER_LAYER + 16;
   if (is_prefill &&
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 16) =
+    node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 16).hostData =
+    node.variantPack.inTensors.at(input_idx - 1).hostData =
         const_cast<int32_t*>(input_params.q_seq_lens_vec.data());
+  }
+
+  if (FLAGS_enable_acl_graph && !is_prefill &&
+      input_params.graph_buffer.tiling_data.defined()) {
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.graph_buffer.tiling_data);
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {

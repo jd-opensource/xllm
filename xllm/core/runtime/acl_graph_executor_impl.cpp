@@ -665,8 +665,11 @@ bool AclGraph::capture(CausalLM* model,
   }
   LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
             << " actual_num_tokens: " << actual_num_tokens << std::endl;
-  graph_.capture_begin();
 
+  // no mempool id, will create a new one; capture mode is thread local, allow
+  // other threads to execute synchronous operations
+  graph_.capture_begin(
+      {0, 0}, aclmdlRICaptureMode::ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL);
   // Execute forward pass - NPUGraph mempool manages temporary tensors
   auto forward_result =
       model->forward({persistent_param_.persistent_tokens(num_tokens_)},
