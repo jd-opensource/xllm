@@ -29,10 +29,10 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/common/lm_head.h"
 #include "core/layers/npu/npu_block_copy_impl.h"
+#include "core/layers/npu/npu_pos_embedding_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
-#include "core/layers/pos_embedding.h"
 #include "models/model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
@@ -270,13 +270,13 @@ class LlmModelImplBase : public torch::nn::Module {
   int device_id = 0;
   layer::AttentionMask attn_mask_;
   int dp_rank_ = 0;
-  layer::PosEmbedding atb_pos_emb_{nullptr};
+  layer::NpuRotaryEmbedding atb_pos_emb_{nullptr};
 
   std::vector<int64_t> mrope_section_;
   // test
   //  ParallelEmbedding embed_tokens_{nullptr};
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RMSNorm norm_{nullptr};
+  layer::NpuRMSNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast

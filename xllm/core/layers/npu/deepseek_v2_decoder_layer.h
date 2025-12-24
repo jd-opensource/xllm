@@ -15,20 +15,23 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include "core/framework/model_context.h"
+#include "npu_deepseek_v2_decoder_layer_impl.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen2dot5VisionEncoderLayer
-    : public torch::nn::ModuleHolder<Qwen2dot5VisionEncoderLayerImpl> {
+// DeepSeek V3.2 used different structure but
+// it is still compatible with DeepSeek V2.
+class DeepseekV2DecoderLayer
+    : public torch::nn::ModuleHolder<DeepseekV2DecoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<Qwen2dot5VisionEncoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen2dot5VisionEncoderLayerImpl;
+  using torch::nn::ModuleHolder<DeepseekV2DecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = DeepseekV2DecoderLayerImpl;
 
-  Qwen2dot5VisionEncoderLayer(const ModelContext& context)
+  DeepseekV2DecoderLayer(const ModelContext& context, const int32_t layer_id)
       : ModuleHolder(
-            std::make_shared<Qwen2dot5VisionEncoderLayerImpl>(context)) {}
+            std::make_shared<DeepseekV2DecoderLayerImpl>(context, layer_id)) {}
 };
 
 }  // namespace layer

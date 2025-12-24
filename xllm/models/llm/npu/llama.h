@@ -27,10 +27,10 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
-#include "core/layers/llama_decoder_layer.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/common/lm_head.h"
+#include "core/layers/common/word_embedding.h"
+#include "core/layers/npu/llama_decoder_layer.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
-#include "core/layers/word_embedding.h"
 #include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
@@ -115,7 +115,7 @@ class LlamaModelImpl : public torch::nn::Module {
     layers_.reserve(context.get_model_args().n_layers());
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    norm_ = register_module("norm", layer::RMSNorm(context));
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
 
     std::tie(cos_pos_, sin_pos_) =
         get_llama_rotary_embedding(128,
@@ -228,7 +228,7 @@ class LlamaModelImpl : public torch::nn::Module {
   int device_id_ = 0;
   layer::AttentionMask attn_mask_;
   layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RMSNorm norm_{nullptr};
+  layer::NpuRMSNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast

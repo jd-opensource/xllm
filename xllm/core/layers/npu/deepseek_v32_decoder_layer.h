@@ -15,17 +15,20 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include "npu_deepseek_v32_decoder_layer_impl.h"
 
 namespace xllm {
 namespace layer {
 
-class WordEmbedding : public torch::nn::ModuleHolder<WordEmbeddingImpl> {
+class DeepseekV32DecoderLayer
+    : public torch::nn::ModuleHolder<DeepseekV32DecoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<WordEmbeddingImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = WordEmbeddingImpl;
-  WordEmbedding(const ModelContext& context)
-      : ModuleHolder(std::make_shared<WordEmbeddingImpl>(context)) {}
+  using torch::nn::ModuleHolder<DeepseekV32DecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = DeepseekV32DecoderLayerImpl;
+
+  DeepseekV32DecoderLayer(const ModelContext& context, const int32_t layer_id)
+      : ModuleHolder(
+            std::make_shared<DeepseekV32DecoderLayerImpl>(context, layer_id)) {}
 };
 
 }  // namespace layer

@@ -28,12 +28,12 @@ limitations under the License.
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
-#include "core/layers/deepseek_v2_decoder_layer.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/common/lm_head.h"
+#include "core/layers/common/word_embedding.h"
+#include "core/layers/npu/deepseek_v2_decoder_layer.h"
+#include "core/layers/npu/npu_pos_embedding_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/rotary_embedding.h"
-#include "core/layers/pos_embedding.h"
-#include "core/layers/word_embedding.h"
 #include "models/model_registry.h"
 // DeepSeek v2 compatible with huggingface weights
 // ref to:
@@ -112,7 +112,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                                        model_args.rotary_dim(),
                                        /*interleaved=*/false,
                                        options);
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    atb_pos_emb_ = layer::NpuRotaryEmbedding(context);
 
     max_seq_len_ = model_args.max_position_embeddings();
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
@@ -126,7 +126,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    norm_ = register_module("norm", layer::RMSNorm(context));
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
     // dp_size_=4;
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
@@ -248,9 +248,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
   std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
-  layer::PosEmbedding atb_pos_emb_{nullptr};
+  layer::NpuRotaryEmbedding atb_pos_emb_{nullptr};
   layer::AttentionMask attn_mask_;
-  layer::RMSNorm norm_{nullptr};
+  layer::NpuRMSNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Model);
 

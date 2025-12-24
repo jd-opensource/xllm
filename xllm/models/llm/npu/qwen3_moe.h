@@ -21,7 +21,7 @@ limitations under the License.
 
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
-#include "core/layers/qwen3_moe_decoder_layer.h"
+#include "core/layers/npu/qwen3_moe_decoder_layer.h"
 #include "llm_model_base.h"
 
 namespace xllm {
@@ -133,12 +133,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         model_args.rope_theta(),
         options);
 
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    atb_pos_emb_ = layer::NpuRotaryEmbedding(context);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
-    norm_ = register_module("norm", layer::RMSNorm(context));
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
     mapping_data_ = parallel_args.mapping_data();
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
@@ -333,9 +333,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::AttentionMask attn_mask_;
-  layer::RMSNorm norm_{nullptr};
+  layer::NpuRMSNorm norm_{nullptr};
   torch::Tensor cos_sin_;
-  layer::PosEmbedding atb_pos_emb_{nullptr};
+  layer::NpuRotaryEmbedding atb_pos_emb_{nullptr};
   std::vector<int64_t> mrope_section_;
 };
 TORCH_MODULE(Qwen3MoeModel);

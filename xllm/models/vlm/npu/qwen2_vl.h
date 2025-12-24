@@ -23,9 +23,9 @@ limitations under the License.
 
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/common/lm_head.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
-#include "core/layers/qwen2_vision_encode_layer.h"
+#include "core/layers/npu/qwen2_vision_encode_layer.h"
 #include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"

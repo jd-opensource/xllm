@@ -5,7 +5,7 @@ include(cc_test)
 set(BASE_DEPS
   :common
   :flags
-  :layers
+  :common_layers
   :prefix_cache
   :block
   :processors

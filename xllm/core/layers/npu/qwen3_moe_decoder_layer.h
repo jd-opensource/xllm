@@ -15,18 +15,21 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include "core/framework/model_context.h"
+#include "npu_qwen3_moe_decoder_layer_impl.h"
 
 namespace xllm {
 namespace layer {
 
-class LmHead : public torch::nn::ModuleHolder<LmHeadImpl> {
+class Qwen3MoeDecoderLayer
+    : public torch::nn::ModuleHolder<Qwen3MoeDecoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<LmHeadImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = LmHeadImpl;
+  using torch::nn::ModuleHolder<Qwen3MoeDecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = Qwen3MoeDecoderLayerImpl;
 
-  LmHead(const ModelContext& context)
-      : ModuleHolder(std::make_shared<LmHeadImpl>(context)) {}
+  Qwen3MoeDecoderLayer(const ModelContext& context, int32_t layer_id)
+      : Qwen3MoeDecoderLayer(
+            std::make_shared<Qwen3MoeDecoderLayerImpl>(context, layer_id)) {}
 };
 
 }  // namespace layer

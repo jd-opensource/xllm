@@ -15,13 +15,31 @@ limitations under the License.
 
 #pragma once
 
-#include "qwen2_decoder_layer.h"
+#define UNIFY_CLASS_NAME(origin_name, target_name) \
+  namespace xllm {                                 \
+  namespace layer {                                \
+  using target_name = origin_name;                 \
+  }                                                \
+  }
+
+#if defined(USE_NPU)
+#include "layers/npu/npu_lm_head_impl.h"
+#else
+#include "linear.h"
+UNIFY_CLASS_NAME(ColumnParallelLinearImpl, LmHeadImpl)
+#endif
 
 namespace xllm {
 namespace layer {
 
-using Qwen3DecoderLayerImpl = Qwen2DecoderLayerImpl;
-TORCH_MODULE(Qwen3DecoderLayer);
+class LmHead : public torch::nn::ModuleHolder<LmHeadImpl> {
+ public:
+  using torch::nn::ModuleHolder<LmHeadImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = LmHeadImpl;
+
+  LmHead(const ModelContext& context)
+      : ModuleHolder(std::make_shared<LmHeadImpl>(context)) {}
+};
 
 }  // namespace layer
 }  // namespace xllm

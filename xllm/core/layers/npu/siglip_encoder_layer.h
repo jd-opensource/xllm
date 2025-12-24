@@ -15,19 +15,22 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include "core/framework/model_context.h"
+#include "npu_siglip_encoder_layer_impl.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3VisionEncoderLayer
-    : public torch::nn::ModuleHolder<Qwen3VisionEncoderLayerImpl> {
+class SiglipEncoderLayer
+    : public torch::nn::ModuleHolder<SiglipEncoderLayerImpl> {
  public:
-  using torch::nn::ModuleHolder<Qwen3VisionEncoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen3VisionEncoderLayerImpl;
+  using torch::nn::ModuleHolder<SiglipEncoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = SiglipEncoderLayerImpl;
 
-  Qwen3VisionEncoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<Qwen3VisionEncoderLayerImpl>(context)) {}
+  SiglipEncoderLayer(const ModelContext& context,
+                     const std::string& prefix = "")
+      : ModuleHolder(
+            std::make_shared<SiglipEncoderLayerImpl>(context, prefix)) {}
 };
 
 }  // namespace layer

@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include "core/layers/pos_embedding.h"
 #include "dit.h"
 #include "pipeline_flux_base.h"
 // pipeline_flux_fill compatible with huggingface weights

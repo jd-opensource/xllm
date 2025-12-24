@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/layers/common/rotary_embedding_util.h"
-#include "core/layers/glm4_decoder_layer.h"
+#include "core/layers/npu/glm4_decoder_layer.h"
 #include "llm_model_base.h"
 
 namespace xllm {
@@ -43,10 +43,10 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    norm_ = register_module("norm", layer::RMSNorm(context));
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    atb_pos_emb_ = layer::NpuRotaryEmbedding(context);
     cos_sin_ = layer::rotary::get_chatglm_rotary_embedding(
         64,
         model_args.max_position_embeddings(),

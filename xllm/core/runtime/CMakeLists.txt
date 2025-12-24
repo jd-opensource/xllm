@@ -56,7 +56,6 @@ cc_library(
     :request
     :state_dict
     :dit_cache
-    :layers
     :model
     :models
     :sampler
