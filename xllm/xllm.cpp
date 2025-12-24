@@ -36,10 +36,38 @@ limitations under the License.
 using namespace xllm;
 
 static std::atomic<uint32_t> signal_received{0};
+
+static std::unordered_set<std::string> deepseek_like_model_set = {
+    "deepseek_v2",
+    "deepseek_v3",
+    "deepseek_mtp",
+    "kimi_k2",
+};
+
 void shutdown_handler(int signal) {
   // TODO: gracefully shutdown the server
   LOG(WARNING) << "Received signal " << signal << ", stopping server...";
   exit(1);
+}
+
+std::string get_model_type(const std::filesystem::path& model_path) {
+  JsonReader reader;
+  // for llm, vlm and rec models, the config.json file is in the model path
+  std::filesystem::path config_json_path = model_path / "config.json";
+
+  if (std::filesystem::exists(config_json_path)) {
+    reader.parse(config_json_path);
+    std::string model_type = reader.value<std::string>("model_type").value();
+    if (model_type.empty()) {
+      LOG(FATAL) << "Please check config.json file in model path: "
+                 << model_path << ", it should contain model_type key.";
+    }
+    return model_type;
+  } else {
+    LOG(FATAL) << "Please check config.json or model_index.json file, one of "
+                  "them should exist in the model path: "
+               << model_path;
+  }
 }
 
 std::optional<std::vector<uint32_t>> parse_batch_sizes(
@@ -74,10 +102,10 @@ int run() {
     LOG(FATAL) << "Model path " << FLAGS_model << " does not exist.";
   }
 
+  std::filesystem::path model_path =
+      std::filesystem::path(FLAGS_model).lexically_normal();
   if (FLAGS_model_id.empty()) {
     // use last part of the path as model id
-    std::filesystem::path model_path =
-        std::filesystem::path(FLAGS_model).lexically_normal();
     if (model_path.has_filename()) {
       FLAGS_model_id = std::filesystem::path(FLAGS_model).filename();
     } else {
@@ -111,6 +139,17 @@ int run() {
   // max_tokens_per_batch
   if (FLAGS_max_tokens_per_chunk_for_prefill < 0) {
     FLAGS_max_tokens_per_chunk_for_prefill = FLAGS_max_tokens_per_batch;
+  }
+
+  // set enable_mla by model type
+  if (FLAGS_backend != "dit") {
+    std::string model_type = get_model_type(model_path);
+    if (deepseek_like_model_set.find(model_type) !=
+        deepseek_like_model_set.end()) {
+      FLAGS_enable_mla = true;
+    } else {
+      FLAGS_enable_mla = false;
+    }
   }
 
   // Create Master
@@ -201,8 +240,6 @@ int run() {
 
   // supported models
   std::vector<std::string> model_names = {FLAGS_model_id};
-  std::filesystem::path model_path =
-      std::filesystem::path(FLAGS_model).lexically_normal();
   std::string model_version;
   if (model_path.has_filename()) {
     model_version = std::filesystem::path(FLAGS_model).filename();
