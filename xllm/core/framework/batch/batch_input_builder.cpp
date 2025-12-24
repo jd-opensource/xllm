@@ -448,10 +448,18 @@ void BatchInputBuilder::setup_kv_cache_info(
   std::vector<uint64_t> u_block_ids;
   block_ids.reserve(blocks.size());
   int32_t block_size = 0;
+  auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
+  uint32_t push_size = 0;
+  if (transfer_kv_info.has_value()) {
+    push_size =
+        blocks.size() - transfer_kv_info.value().remote_blocks_ids.size();
+  }
   for (const auto& block : blocks) {
     block_size = block.size();
     block_ids.push_back(block.id());
-    u_block_ids.emplace_back(block.id());
+    if (block_ids.size() > push_size) {
+      u_block_ids.emplace_back(block.id());
+    }
     state.paged_kv_indices.push_back(block.id());
   }
   state.paged_kv_indptr.push_back(state.paged_kv_indptr.back() + blocks.size());
@@ -467,7 +475,6 @@ void BatchInputBuilder::setup_kv_cache_info(
     write_block_ids.insert(*iter);
   }
 
-  auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   if (transfer_kv_info.has_value()) {
     state.transfer_kv_infos.emplace_back(transfer_kv_info.value());
     state.transfer_kv_infos.back().local_blocks_ids = std::move(u_block_ids);
