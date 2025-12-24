@@ -33,7 +33,7 @@ limitations under the License.
 
 namespace xllm {
 
-enum class Urgency { URGENT = 2, TIMEOUT = 1, NORMAL = 0 };
+enum class Urgency { STARVED = 2, URGENT = 1, NORMAL = 0 };
 
 class Request : public RequestBase {
  public:
@@ -86,14 +86,20 @@ class Request : public RequestBase {
     auto& sequence = sequences()[0];
     // w/o first token buffer
     if (sequence->is_prefill_stage()) {
-      deadline_ms_ = ttlt_slo_ms();
+      deadline_ms_ = ttft_slo_ms();
     } else {
-      deadline_ms_ =
-          std::min(static_cast<int32_t>(
-                       sequence->time_to_first_token_latency_seconds() * 1000),
-                   ttlt_slo_ms()) +
-          (sequence->num_tokens() - sequence->num_prompt_tokens()) *
-              tpot_slo_ms();
+      // deadline_ms_ =
+      //     std::min(static_cast<int32_t>(
+      //                  sequence->time_to_first_token_latency_seconds() *
+      //                  1000),
+      //              ttft_slo_ms()) +
+      //     (sequence->num_tokens() - sequence->num_prompt_tokens()) *
+      //         tpot_slo_ms();
+
+      // only optimize for slo attainment
+      deadline_ms_ = sequence->time_to_first_token_latency_seconds() * 1000 +
+                     (sequence->num_tokens() - sequence->num_prompt_tokens()) *
+                         tpot_slo_ms();
     }
     // w/ first token buffer
     // deadline_ms_ = ttft_slo_ms_ + (sequence->num_tokens() -
@@ -137,6 +143,9 @@ class Request : public RequestBase {
   void set_urgency(Urgency urgency) { urgency_ = urgency; }
   Urgency urgency() const { return urgency_; }
 
+  void set_starved(bool starved) { starved_ = starved; }
+  bool is_starved() const { return starved_; }
+
   RequestState& state() { return state_; }
   void update_connection_status();
 
@@ -162,6 +171,8 @@ class Request : public RequestBase {
   int32_t deadline_ms_ = 0;
 
   Urgency urgency_ = Urgency::NORMAL;
+
+  bool starved_ = false;
 
  private:
   void create_sequences_group();

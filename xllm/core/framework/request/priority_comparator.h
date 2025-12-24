@@ -59,6 +59,11 @@ struct DecodeDeadlineComparator : public PriorityComparator {
                   const std::shared_ptr<Request>& b) const override;
 };
 
+struct DecodeDensityWithAntiStarveComparator : public PriorityComparator {
+  bool operator()(const std::shared_ptr<Request>& a,
+                  const std::shared_ptr<Request>& b) const override;
+};
+
 struct DecodeDensityComparator : public PriorityComparator {
   bool operator()(const std::shared_ptr<Request>& a,
                   const std::shared_ptr<Request>& b) const override;

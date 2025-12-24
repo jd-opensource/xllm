@@ -48,6 +48,7 @@ void MixScheduler::get_latency_budget_and_request_order(
         profile_manager_->predict_step_time(sequence.get(), false));
     request->set_elapsed_time_ms();
     request->set_deadline_ms();
+    request->set_starved(false);
   }
 
   auto constant_overhead = profile_manager_->get_constant_overhead();
@@ -74,14 +75,24 @@ void MixScheduler::get_latency_budget_and_request_order(
   }
   // determine latency budget
   // int32_t threshold = static_cast<int32_t>(4 * constant_overhead);
-  int32_t threshold = static_cast<int32_t>(0.65 * min_tpot);
-  latency_budget = std::max(min_remaining_time, threshold);
+  int32_t latency_budget_threshold = static_cast<int32_t>(0.65 * min_tpot);
+  latency_budget = std::max(min_remaining_time, latency_budget_threshold);
 
+  double starve_threshold = 1.0;
+  int32_t starve_unit_time = -min_tpot;
+  int32_t starve_time_threshold =
+      static_cast<int32_t>(starve_threshold * starve_unit_time);
+  double lambda = 1.0;
+  double load_judge_func =
+      total_exec_time * latency_budget / (latency_budget - constant_overhead);
   for (auto& request : running_queue) {  // determine urgency
     auto& sequence = request->sequences()[0];
-    if (request->get_remaining_time() <
-        total_exec_time * latency_budget /
-            (latency_budget - constant_overhead)) {
+    // aviod overly starvation
+    if (request->get_remaining_time() < starve_time_threshold) {
+      request->set_starved(true);
+    }
+
+    if (request->get_remaining_time() < lambda * load_judge_func) {
       request->set_urgency(Urgency::URGENT);
     } else {
       request->set_urgency(Urgency::NORMAL);
@@ -99,7 +110,7 @@ void MixScheduler::handle_running_queue_requests(
     size_t& remaining_seq_budget,
     size_t& num_preempted_requests,
     std::vector<Sequence*>& prefill_stage_sequences,
-    std::list<shared_ptr<Request>>& running_queue,
+    std::list<std::shared_ptr<Request>>& running_queue,
     bool& budget_exhausted,
     bool& blocks_exhausted) {
   if (running_queue.empty()) {

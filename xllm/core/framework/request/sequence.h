@@ -379,8 +379,8 @@ class Sequence final {
     size_t num_decoder_embeddings = 0;
     std::vector<int32_t> encoder_tokens;
   };
-  int32_t wait_time_ms_;
-  double estimated_latency_;
+  int32_t wait_time_ms_ = 0;
+  double estimated_latency_ = 0.0;
 
   // the index of the sequence in the request
   size_t index_ = 0;
