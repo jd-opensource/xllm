@@ -226,10 +226,10 @@ message ForwardInput {
   int32 current_round = 43;
   // decode kv cache shape planned by engine: [batch_size * max_token_per_req, n_kv_heads, head_dim]
   repeated int64 shared_kv_shape = 44;
-    int32 total_round = 51;
-    repeated int32  decode_seq_lens = 52;
-    repeated int32  decode_q_seq_lens = 53;
-    repeated int32  decode_positions_vec = 54;
+  int32 total_round = 51;
+  repeated int32  decode_seq_lens = 52;
+  repeated int32  decode_q_seq_lens = 53;
+  repeated int32  decode_positions_vec = 54;
 
   // optional decode-only sampling meta
   repeated RequestSamplingParam decode_sampling_params = 45;

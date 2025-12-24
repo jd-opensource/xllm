@@ -369,7 +369,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       .enable_prefix_cache(enable_prefix_cache)
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload())
-      .enable_kvcache_store(options_.enable_kvcache_store());
+      .enable_kvcache_store(enable_kvcache_store);
   if (options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store()) {
     kv_cache_manager_ =
         std::make_unique<HierarchyBlockManagerPool>(options, this, dp_size_);
@@ -719,11 +719,11 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
 
 ForwardOutput LLMEngine::step_multi_round(std::vector<Batch>& batch) {
   Timer timer;
-  DCHECK(dp_size_ == batch.size())
+  CHECK(dp_size_ == batch.size())
       << "Split DP batch failed with dp_size as " << dp_size_
       << " and actual batch size as " << batch.size() << ".";
   auto batched_raw_forward_inputs = prepare_inputs(batch);
-  DCHECK(dp_size_ == batched_raw_forward_inputs.size())
+  CHECK(dp_size_ == batched_raw_forward_inputs.size())
       << "The processed raw forward inputs size "
       << batched_raw_forward_inputs.size() << " is not equal to dp size "
       << dp_size_ << ".";

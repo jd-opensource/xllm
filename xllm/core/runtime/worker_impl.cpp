@@ -409,7 +409,6 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     if (!is_prefill || FLAGS_max_decode_rounds > 0) {
       auto& mip = processed_input.input_params;
       int32_t beam_width = processed_input.beam_width;
-      int32_t current_round = processed_input.current_round;
       int32_t total_round = processed_input.total_round;
       const auto& shape = processed_input.shared_kv_shape;
 

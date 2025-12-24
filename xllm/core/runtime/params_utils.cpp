@@ -318,12 +318,6 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.paged_kv_last_page_len =
       torch::tensor(paged_kv_last_page_len, tensor_options);
 
-  input_params.paged_kv_indptr = torch::tensor(paged_kv_indptr, tensor_options);
-  input_params.paged_kv_indices =
-      torch::tensor(paged_kv_indices, tensor_options);
-  input_params.paged_kv_last_page_len =
-      torch::tensor(paged_kv_last_page_len, tensor_options);
-
   input_params.new_cache_slots =
       torch::tensor(new_token_slot_ids, tensor_options);
 

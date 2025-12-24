@@ -329,14 +329,17 @@ ForwardInput MultiStepBatchInputBuilder::state_to_forward_input() {
   // Set shared_kv_shape if we have multi-step decode data
   if (!multi_step_state.decode_seq_lens.empty() && !sequences_.empty()) {
     // Set decode kv cache shape for step-level decode
-    // Format: [batch_size * beam_width, n_kv_heads, step_rounds, head_dim]
+    // Format: [num_tokens, n_kv_heads,head_dim]
     int64_t batch_size = static_cast<int64_t>(sequences_.size());
     int64_t step_rounds = static_cast<int64_t>(multi_step_state.total_steps);
 
     int64_t n_kv_heads =
         args_ ? args_->n_kv_heads().value_or(args_->n_heads()) : 0;
     int64_t head_dim = args_ ? args_->head_dim() : 0;
-
+    // TODO: Replace batch_size * FLAGS_max_token_per_req with a sum-style
+    //       aggregation along the batch axis, i.e. use the per-sequence
+    //       token budgets (e.g. from multi_step_state) to compute the
+    //       total num_tokens instead of a uniform upper bound.
     forward_input.shared_kv_shape = {
         batch_size * FLAGS_max_token_per_req, n_kv_heads, head_dim};
   }

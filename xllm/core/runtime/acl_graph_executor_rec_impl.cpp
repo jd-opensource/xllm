@@ -116,13 +116,11 @@ bool AclGraphRec::capture(CausalLM* model,
   aclrtSynchronizeStream(stream);
 
   // Use secondary stream for graph capture to avoid blocking main stream
-  bool need_restore_stream = false;
   if (c10_npu::getCurrentNPUStream(tensor_options.device().index()) ==
       c10_npu::getDefaultNPUStream(tensor_options.device().index())) {
     auto secondary_stream =
         c10_npu::getStreamFromPool(true, tensor_options.device().index());
     c10_npu::setCurrentNPUStream(secondary_stream);
-    need_restore_stream = true;
   }
 
   // Mark this thread as inside ACL graph capture so that NPU layers can align
@@ -139,10 +137,6 @@ bool AclGraphRec::capture(CausalLM* model,
   // Store result in persistent buffer owned by NPUGraph mempool
   hidden_states_ = forward_result;
   graph_.capture_end();
-  // if (need_restore_stream) {
-  //   c10_npu::setCurrentNPUStream(
-  //       c10_npu::getDefaultNPUStream(tensor_options.device().index()));
-  // }
 
   // Synchronize and test replay to verify graph capture
   aclrtSynchronizeStream(stream);

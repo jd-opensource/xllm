@@ -98,13 +98,7 @@ LLMMaster::LLMMaster(const Options& options)
       .max_global_tpot_ms(options_.max_global_tpot_ms())
       .server_idx(options_.server_idx())
       .prefetch_timeout(options_.prefetch_timeout());
-  if (FLAGS_max_decode_rounds > 0) {
-    // When using multi-round decode, use FixedStepsScheduler to run
-    // fixed-step scheduling for both prefill and decode.
-    scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
-  } else {
-    scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
-  }
+  scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {
     auto& instance_info = scheduler_->get_instance_info();
@@ -378,12 +372,12 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       stop_sequences.push_back(std::move(tmp_tokens));
     }
   }
-  bool ignore_eos = FLAGS_max_decode_rounds > 0;
+  bool ignore_eos = FLAGS_max_decode_rounds > 0 ? true : sp.ignore_eos;
   StoppingChecker stopping_checker(
       max_tokens,
       max_context_len - options_.num_speculative_tokens(),
       model_args_.eos_token_id(),
-      FLAGS_max_decode_rounds > 0 ? ignore_eos : sp.ignore_eos,
+      ignore_eos,
       std::move(stop_tokens),
       std::move(stop_sequences));
 
