@@ -90,9 +90,6 @@ struct ParallelArgs {
   // world size
   PROPERTY(int32_t, world_size) = 0;
 
-  ProcessGroup* process_group_ = nullptr;
-  ProcessGroup* dp_local_process_group_ = nullptr;
-
   // dp size
   PROPERTY(int32_t, dp_size) = 1;
 
@@ -112,6 +109,11 @@ struct ParallelArgs {
   // atb hccl dispatchAndCombineHcclComm
   PROPERTY(HcclComm, dispatchAndCombineHcclComm);
 #endif
+
+  // the following pointers are unique pointers from CollectiveCommunicator
+  //  So they are not owned by ParallelArgs.
+  ProcessGroup* process_group_ = nullptr;
+  ProcessGroup* dp_local_process_group_ = nullptr;
   ProcessGroup* tp_group_ = nullptr;
   ProcessGroup* moe_ep_group_ = nullptr;
   ProcessGroup* moe_tp_group_ = nullptr;
