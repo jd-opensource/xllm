@@ -45,7 +45,6 @@ cc_library(
     uuid.cpp
     shared_memory_manager.cpp
   DEPS
-    :request
     torch
     brpc
     nlohmann_json::nlohmann_json
@@ -60,8 +59,6 @@ cc_library(
     :platform
     SMHasherSupport
 )
-target_link_libraries(util PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-add_dependencies(util brpc-static)
 
 cc_test(
   NAME

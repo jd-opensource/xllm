@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "mm_data.h"
 #include "mm_type.h"
+#include "worker.pb.h"
 
 namespace xllm {
 
@@ -81,5 +82,11 @@ class MMBatchData {
 
   std::vector<MMData> mm_datas_;
 };
+
+bool mmdata_to_proto(const xllm::MMBatchData& cpp_mmdata,
+                     proto::MMData* pb_mmdata);
+
+bool proto_to_mmdata(const proto::MMData& pb_mmdata,
+                     xllm::MMBatchData* cpp_mmdata);
 
 }  // namespace xllm

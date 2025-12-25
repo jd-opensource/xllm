@@ -24,6 +24,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "common/metrics.h"
 #include "framework/model/model_input_params.h"
+#include "framework/request/mm_batch_data.h"
 #include "runtime/forward_params.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -323,7 +324,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   eplb_info.update_layer_id = pb_forward_input->eplb_info().update_layer_id();
 
   if (pb_forward_input->has_mm_data()) {
-    util::proto_to_mmdata(pb_forward_input->mm_data(), &input_params.mm_data);
+    proto_to_mmdata(pb_forward_input->mm_data(), &input_params.mm_data);
   }
 
   COUNTER_ADD(proto_latency_seconds_proto2i, timer.elapsed_seconds());
@@ -477,7 +478,7 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_cum_sum(), inputs.cum_sum);
 
   if (inputs.mm_data.valid()) {
-    util::mmdata_to_proto(inputs.mm_data, pb_forward_input->mutable_mm_data());
+    mmdata_to_proto(inputs.mm_data, pb_forward_input->mutable_mm_data());
   }
 
   COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());
