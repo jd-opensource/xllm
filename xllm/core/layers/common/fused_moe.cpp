@@ -39,8 +39,8 @@ torch::Tensor create_group_gemm_output(
                       target_options);
 }
 
-int get_dtype_size(torch::ScalarType dtype) {
-  return static_cast<int>(torch::elementSize(dtype));
+int32_t get_dtype_size(torch::ScalarType dtype) {
+  return static_cast<int32_t>(torch::elementSize(dtype));
 }
 
 }  // namespace
@@ -367,7 +367,7 @@ torch::Tensor FusedMoEImpl::select_experts(
       torch::Tensor dispatch_scale_slice =
           dispatch_send_token_tensor.slice(1, hidden_size_);
       torch::Tensor hidden_states_scale_bytes =
-          xllm::util::view_as_dtype(hidden_states_scale, torch::kInt8)
+          view_as_dtype(hidden_states_scale, torch::kInt8)
               .view_as(dispatch_scale_slice);
       dispatch_scale_slice.copy_(hidden_states_scale_bytes);
     }
@@ -383,7 +383,7 @@ torch::Tensor FusedMoEImpl::select_experts(
     if (enable_all2all_communication) {
       // use copy to place the output inside the dispatch buffer
       torch::Tensor dispatch_tensor =
-          xllm::util::view_as_dtype(expand_hidden_states, torch::kChar);
+          view_as_dtype(expand_hidden_states, torch::kChar);
       dispatch_send_token_tensor.copy_(dispatch_tensor);
     }
   }
@@ -472,15 +472,14 @@ torch::Tensor FusedMoEImpl::forward_experts(
     torch::ScalarType a_dtype =
         is_smoothquant_ ? torch::kInt8 : hidden_states_dtype;
     group_gemm_params.a =
-        xllm::util::view_as_dtype(expand_hidden_states, a_dtype)
-            .view({-1, hidden_size_});
+        view_as_dtype(expand_hidden_states, a_dtype).view({-1, hidden_size_});
     group_gemm_params.b = w13_;
     group_gemm_params.token_count = selected_expert_info.token_count_slice;
     if (is_smoothquant_) {
       torch::Tensor a_scale =
           selected_expert_info.input_scale.value().flatten();
       selected_expert_info.input_scale =
-          xllm::util::view_as_dtype(a_scale, torch::kFloat32);
+          view_as_dtype(a_scale, torch::kFloat32);
       group_gemm_params.a_scale = selected_expert_info.input_scale;
       group_gemm_params.b_scale = w13_scale_;
     }

@@ -26,6 +26,8 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "linear.h"
+#include "util/tensor_helper.h"
+
 namespace xllm {
 namespace layer {
 

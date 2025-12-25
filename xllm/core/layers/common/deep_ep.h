@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "framework/parallel_state/parallel_args.h"
+#include "util/tensor_helper.h"
 
 namespace xllm {
 namespace layer {
@@ -37,7 +38,6 @@ struct DeepEPParams {
   int64_t combine_token_size;
   int64_t max_num_tokens_per_rank;
   int64_t max_num_tokens_recv;
-  int64_t max_num_tokens_per_expert;
   torch::Tensor dispatch_recv_layout;
   torch::Tensor dispatch_recv_token_num;
 };

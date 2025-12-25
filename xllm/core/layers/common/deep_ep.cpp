@@ -19,7 +19,6 @@ limitations under the License.
 
 #include "framework/parallel_state/process_group.h"
 #include "kernels/ops_api.h"
-#include "util/utils.h"
 
 namespace {
 /**
@@ -287,7 +286,7 @@ torch::Tensor DeepEPImpl::combine_step(const torch::Tensor& input,
 
   // View send buffer with correct dtype structure
   gather_split_params.output_head =
-      xllm::util::view_as_dtype(combine_send_token_tensor_, dtype)
+      view_as_dtype(combine_send_token_tensor_, dtype)
           .view({deep_ep_params_.max_num_tokens_recv, -1});
   gather_split_params.output_tail = torch::Tensor();
 
@@ -311,7 +310,7 @@ torch::Tensor DeepEPImpl::combine_step(const torch::Tensor& input,
 
   // 4. Return formatted output
   int64_t recv_len = num_token_expand * hidden_size;
-  return xllm::util::view_as_dtype(combine_recv_token_tensor_, dtype)
+  return view_as_dtype(combine_recv_token_tensor_, dtype)
       .narrow(0, 0, recv_len)
       .view({num_token_expand, hidden_size});
 }
