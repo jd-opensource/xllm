@@ -2,6 +2,7 @@ include(cc_library)
 include(cc_binary)
 include(cc_test)
 
+
 cc_library(
   NAME
     runtime
@@ -12,6 +13,7 @@ cc_library(
     params_utils.h
     executor.h
     executor_impl.h
+    executor_impl_factory.h
     base_executor_impl.h
     dit_executor.h
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.h>
@@ -29,6 +31,7 @@ cc_library(
     forward_shared_memory_manager.h
   SRCS
     executor.cpp
+    executor_impl_factory.cpp
     base_executor_impl.cpp
     dit_executor.cpp
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.cpp>

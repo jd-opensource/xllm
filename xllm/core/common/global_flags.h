@@ -83,11 +83,7 @@ DECLARE_string(rank_tablefile);
 
 DECLARE_bool(enable_mla);
 
-DECLARE_bool(enable_acl_graph);
-
 DECLARE_int32(max_seq_len_for_graph_mode);
-
-DECLARE_bool(enable_acl_graph_no_padding);
 
 DECLARE_bool(enable_graph);
 

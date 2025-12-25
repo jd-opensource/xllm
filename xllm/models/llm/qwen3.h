@@ -45,7 +45,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
           model_args.max_position_embeddings(),
           model_args.rope_theta(),
           options);
-      use_mrope_ = true;
     }
 
     layers_.reserve(model_args.n_layers());
@@ -68,12 +67,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     return hidden_states;
   }
 
-  void apply_mrope(const torch::Tensor positions,
-                   torch::Tensor& cos,
-                   torch::Tensor& sin) override {
-    if (positions.dim() != 2) {
-      return;
-    }
+  std::pair<torch::Tensor, torch::Tensor> apply_mrope(
+      const torch::Tensor positions) override {
     auto target_cos_sin = cos_sin_.index({positions});
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
@@ -96,17 +91,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     };
     cos_pos = apply(cos_pos.reshape({positions.size(0), -1, cos_pos.size(1)}));
     sin_pos = apply(sin_pos.reshape({positions.size(0), -1, sin_pos.size(1)}));
-    if (cos.defined() && sin.defined()) {
-      CHECK_EQ(cos.sizes(), cos_pos.sizes());
-      CHECK_EQ(sin.sizes(), sin_pos.sizes());
-      cos.copy_(cos_pos);
-      sin.copy_(sin_pos);
-      cos_pos_ = cos;
-      sin_pos_ = sin;
-    } else {
-      cos_pos_ = cos_pos;
-      sin_pos_ = sin_pos;
-    }
+    return std::make_pair(cos_pos, sin_pos);
   }
 
   virtual torch::Tensor forward(torch::Tensor tokens,
@@ -132,17 +117,13 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     if (use_deepstack) {
       deep_stacks = input_params.deep_stacks;  // [num_deepstack, hidden_size]
     }
-    if (use_mrope_) {
-      torch::Tensor cos, sin;
-      apply_mrope(positions, cos, sin);
-    }
 
     auto& dp_token_nums = input_params_new.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     auto attn_metadata = layer::AttentionMetadata::build(input_params_new);
     if (positions.dim() == 2) {
-      attn_metadata.mrope_cos = std::move(cos_pos_);
-      attn_metadata.mrope_sin = std::move(sin_pos_);
+      std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
+          apply_mrope(positions);
     }
 
     std::optional<torch::Tensor> residual;
@@ -171,14 +152,6 @@ class QWen3ForCausalLMImpl : public LlmForCausalLMImplBase<QWen3Model> {
  public:
   QWen3ForCausalLMImpl(const ModelContext& context)
       : LlmForCausalLMImplBase<QWen3Model>(context) {}
-
-  void skip_mrope() override { model_->skip_mrope(); }
-
-  void apply_mrope(const torch::Tensor positions,
-                   torch::Tensor& cos_pos,
-                   torch::Tensor& sin_pos) override {
-    model_->apply_mrope(positions, cos_pos, sin_pos);
-  }
 };
 TORCH_MODULE(QWen3ForCausalLM);
 

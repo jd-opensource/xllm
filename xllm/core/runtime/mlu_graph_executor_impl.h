@@ -19,28 +19,13 @@ limitations under the License.
 #include <torch_mlu/csrc/framework/graphs/MLUGraph.h>
 
 #include "executor_impl.h"
+#include "executor_impl_factory.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
 #include "options.h"
 
 namespace xllm {
-
-class DPMetadata {
- public:
-  DPMetadata(int32_t num_tokens,
-             bool is_decode,
-             ProcessGroup* dp_group,
-             const torch::Device& device);
-  bool all_decode();
-  std::vector<int32_t> dp_tokens() { return dp_global_token_nums_; }
-
-  std::vector<int32_t> dp_global_token_nums_;
-  std::vector<bool> dp_is_decode_;
-  // gather_num: token_num, is_decode
-  int32_t gather_num_ = 2;
-};
-
 // Helper class to hold persistent parameters for graph execution
 // Multiple MluGraph instances can share the same GraphPersistentParam object
 class GraphPersistentParam {
@@ -113,7 +98,7 @@ class MluGraph {
 
   // Reference to persistent parameters (shared across multiple MluGraph
   // instances)
-  GraphPersistentParam* persistent_param_;
+  GraphPersistentParam* persistent_param_;  // not owned
   uint32_t padding_num_tokens_;
 };
 
@@ -129,9 +114,6 @@ class MluGraphExecutorImpl : public ExecutorImpl {
   ~MluGraphExecutorImpl() override = default;
 
   ForwardInput prepare_inputs(Batch& batch) override;
-  void prepare_dp_metadata(const torch::Tensor& tokens,
-                           const ModelInputParams& params,
-                           const ParallelArgs& parallel_args) override;
 
   // Execute model with graph optimization for decode phase
   torch::Tensor run(const torch::Tensor& tokens,
@@ -140,20 +122,15 @@ class MluGraphExecutorImpl : public ExecutorImpl {
                     const ModelInputParams& params) override;
 
  private:
-  CausalLM* model_;
+  CausalLM* model_;  // not owned
 
   ModelArgs args_;
   torch::Device device_;
   runtime::Options options_;
-  std::optional<torch::TensorOptions> tensor_options_;
   torch_mlu::MempoolId_t pool_;
 
   std::unordered_map<uint32_t, std::unique_ptr<MluGraph>> graphs_;
   std::unique_ptr<GraphPersistentParam> persistent_param_;
-
-  std::vector<int32_t> dp_global_token_nums_;
-
-  bool graph_mode_ = false;
 };
-
+REGISTER_EXECUTOR("mlu", MluGraphExecutorImpl);
 }  // namespace xllm

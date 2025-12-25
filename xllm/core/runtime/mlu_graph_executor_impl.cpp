@@ -40,28 +40,6 @@ uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
 
 namespace xllm {
 
-DPMetadata::DPMetadata(int32_t num_tokens,
-                       bool is_decode,
-                       ProcessGroup* dp_group,
-                       const torch::Device& device) {
-  int32_t dp_size = dp_group->world_size();
-  dp_global_token_nums_.reserve(dp_size);
-  dp_is_decode_.reserve(dp_size);
-  auto dp_tensor =
-      torch::tensor({num_tokens, int32_t(is_decode)}, torch::kInt).to(device);
-  auto output = parallel_state::gather(dp_tensor, dp_group, 0).cpu();
-  int32_t* data_ptr = output.data_ptr<int32_t>();
-  std::vector<int32_t> outputs(data_ptr, data_ptr + output.numel());
-  for (int i = 0; i < gather_num_ * dp_size; i += gather_num_) {
-    dp_global_token_nums_.push_back(outputs[i]);
-    dp_is_decode_.push_back(static_cast<bool>(outputs[i + 1]));
-  }
-}
-
-bool DPMetadata::all_decode() {
-  return std::count(dp_is_decode_.begin(), dp_is_decode_.end(), false) == 0;
-}
-
 GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const torch::Device& device,
                                            const runtime::Options& options)
@@ -93,8 +71,8 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   block_table_ =
       torch::zeros({max_tokens, max_num_blocks_per_req}, int_tensor_options);
   // Sequence length tensors with max_seqs
-  q_seq_lens_ = torch::zeros({max_seqs}, int_tensor_options);
-  kv_seq_lens_ = torch::zeros({max_seqs}, int_tensor_options);
+  q_seq_lens_ = torch::zeros({max_seqs + 1}, int_tensor_options);
+  kv_seq_lens_ = torch::zeros({max_seqs + 1}, int_tensor_options);
 }
 
 void GraphPersistentParam::init_params(const ModelInputParams& params,
@@ -228,32 +206,6 @@ ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
 }
 
-void MluGraphExecutorImpl::prepare_dp_metadata(
-    const torch::Tensor& tokens,
-    const ModelInputParams& params,
-    const ParallelArgs& parallel_args) {
-  int64_t actual_num_tokens = tokens.size(0);
-  // if dp, get_data_parallel_metadata
-  if (params.dp_global_token_nums.size() > 1) {
-    // TODO: dummy run: bool is_decode = params.batch_forward_type.is_decode();
-    bool is_decode =
-        ((params.q_max_seq_len == 1) && params.batch_forward_type.is_decode());
-    CHECK(parallel_args.dp_local_process_group_);
-    DPMetadata dp_metadata(actual_num_tokens,
-                           is_decode,
-                           parallel_args.dp_local_process_group_,
-                           device_);
-    graph_mode_ = dp_metadata.all_decode();
-    dp_global_token_nums_ = dp_metadata.dp_tokens();
-  } else {
-    graph_mode_ = params.batch_forward_type.is_decode();
-    if (params.batch_forward_type.is_decode() && params.q_max_seq_len != 1) {
-      LOG(WARNING) << "batch_forward_type is decode, but q_max_seq_len is: "
-                   << params.q_max_seq_len;
-    }
-  }
-}
-
 // Main execution method with graph optimization for decode phase
 // tokens: [num_decode_tokens]
 // positions: [num_decode_tokens] token pos in the sequence
@@ -263,23 +215,23 @@ torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
                                         std::vector<KVCache>& kv_caches,
                                         const ModelInputParams& params) {
   // If not in decode phase, use eager mode directly
-  if (!graph_mode_) {
+  bool graph_mode = params.batch_forward_type.is_decode();
+  int64_t actual_num_tokens = tokens.size(0);
+  if (params.dp_global_token_nums.size() > 1) {
+    actual_num_tokens = util::max(params.dp_global_token_nums);
+
+    auto& dp_is_decode = params.dp_is_decode;
+    graph_mode = std::find(dp_is_decode.begin(), dp_is_decode.end(), 0) ==
+                 dp_is_decode.end();
+    CHECK_EQ(dp_is_decode.size(), params.dp_global_token_nums.size());
+  }
+
+  if (!graph_mode) {
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
   }
 
-  int64_t actual_num_tokens = tokens.size(0);
-  if (dp_global_token_nums_.size() > 1) {
-    actual_num_tokens = util::max(dp_global_token_nums_);
-  }
   uint32_t padding_batch_size = get_bucket_num_tokens(actual_num_tokens);
-  if (persistent_param_->use_mrope_) {
-    model_->skip_mrope();
-    model_->apply_mrope(positions,
-                        persistent_param_->mrope_cos_,
-                        persistent_param_->mrope_sin_);
-  }
-
   if (auto it = graphs_.find(padding_batch_size); it != graphs_.end()) {
     MluGraph* cur_graph = (it->second).get();
     cur_graph->update_input_buffer(tokens, positions, params);

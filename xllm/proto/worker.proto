@@ -220,6 +220,7 @@ message ForwardInput {
   int32 batch_forward_type = 39;
   MMData mm_data = 40;
   repeated int32 q_cu_seq_lens = 41;
+  repeated int32 dp_is_decode = 42;
 }
 
  message BatchedForwardInputs {

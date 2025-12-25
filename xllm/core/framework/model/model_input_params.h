@@ -241,6 +241,7 @@ struct ModelInputParams {
 
     params.mm_data = mm_data.to(device);
     params.dp_global_token_nums = dp_global_token_nums;
+    params.dp_is_decode = dp_is_decode;
     params.embedding_ids = std::move(embedding_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
@@ -296,7 +297,7 @@ struct ModelInputParams {
     print_tensor(new_cache_slots, "ModelInputParams: new_cache_slots", 4);
     print_tensor(block_tables, "ModelInputParams: block_tables", 4);
     LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
-              << dp_global_token_nums;
+              << dp_global_token_nums << ", dp_is_decode: " << dp_is_decode;
 
     if (const auto* onerec = onerec_params()) {
       LOG(INFO) << "ModelInputParams: has rec_params";
@@ -363,6 +364,7 @@ struct ModelInputParams {
 
   // num tokens of all workers，mainly used for dp case
   std::vector<int32_t> dp_global_token_nums;
+  std::vector<int32_t> dp_is_decode;
   // whether the kv-cache is empty for all sequences,mainly used for dp case
   bool global_empty_kv_cache = true;
 

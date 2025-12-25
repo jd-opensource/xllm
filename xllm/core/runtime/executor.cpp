@@ -15,18 +15,7 @@ limitations under the License.
 
 #include "executor.h"
 
-#include <c10/core/TensorOptions.h>
-#include <glog/logging.h>
-
-#include "common/global_flags.h"
-#include "common/metrics.h"
-#include "runtime/base_executor_impl.h"
-#if defined(USE_NPU)
-#include "runtime/acl_graph_executor_impl.h"
-#elif defined(USE_MLU)
-#include "runtime/mlu_graph_executor_impl.h"
-#endif
-#include "runtime/options.h"
+#include "executor_impl_factory.h"
 
 namespace xllm {
 
@@ -34,32 +23,12 @@ Executor::Executor(CausalLM* model,
                    const ModelArgs& args,
                    const torch::Device& device,
                    const runtime::Options& options) {
-#if defined(USE_NPU)
-  if (FLAGS_enable_acl_graph && device.is_privateuseone()) {
-    LOG(INFO) << "Creating ACL Graph Executor for NPU device";
-    impl_ =
-        std::make_unique<AclGraphExecutorImpl>(model, args, device, options);
-    return;
-  }
-#elif defined(USE_MLU)
-  if (FLAGS_enable_graph) {
-    LOG(INFO) << "Creating Graph Executor for MLU device";
-    impl_ =
-        std::make_unique<MluGraphExecutorImpl>(model, args, device, options);
-    return;
-  }
-#endif
-  impl_ = std::make_unique<BaseExecutorImpl>(model, args, device, options);
+  impl_ = ExecutorImplFactory::get_instance().create_executor_impl(
+      model, args, device, options);
 }
 
 ForwardInput Executor::prepare_inputs(Batch& batch) {
   return impl_->prepare_inputs(batch);
-}
-
-void Executor::prepare_dp_metadata(const torch::Tensor& tokens,
-                                   const ModelInputParams& params,
-                                   const ParallelArgs& parallel_args) {
-  impl_->prepare_dp_metadata(tokens, params, parallel_args);
 }
 
 torch::Tensor Executor::forward(const torch::Tensor& tokens,

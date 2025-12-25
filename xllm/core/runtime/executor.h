@@ -17,10 +17,6 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include <cstdint>
-#include <memory>
-
-#include "common/macros.h"
 #include "framework/batch/batch.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
@@ -40,10 +36,6 @@ class Executor final {
   virtual ~Executor() = default;
 
   ForwardInput prepare_inputs(Batch& batch);
-
-  void prepare_dp_metadata(const torch::Tensor& tokens,
-                           const ModelInputParams& params,
-                           const ParallelArgs& parallel_args);
 
   // tokens: vector size is dp_size, each element is [num_tokens/dp_size]
   // positions: vector size is dp_size, each element is [num_tokens/dp_size]

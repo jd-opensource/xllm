@@ -168,6 +168,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> dp_global_token_nums =
       std::vector<int32_t>(pb_forward_input->dp_global_token_nums().begin(),
                            pb_forward_input->dp_global_token_nums().end());
+  std::vector<int32_t> dp_is_decode =
+      std::vector<int32_t>(pb_forward_input->dp_is_decode().begin(),
+                           pb_forward_input->dp_is_decode().end());
 
   // Create ForwardInput on cpu pinned memory here
   auto tensor_options = torch::TensorOptions()
@@ -211,6 +214,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::move(create_2d_tensor(block_tables_vec, torch::kInt));
 
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
+  input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
 
@@ -409,6 +413,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   pb_forward_input->set_num_sequences(inputs.num_sequences);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_global_token_nums(),
                       inputs.dp_global_token_nums);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_is_decode(),
+                      inputs.dp_is_decode);
   if (!inputs.transfer_kv_infos.empty()) {
     pb_forward_input->mutable_transfer_kv_infos()->Reserve(
         inputs.transfer_kv_infos.size());

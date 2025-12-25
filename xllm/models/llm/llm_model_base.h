@@ -83,11 +83,10 @@ class LlmModelImplBase : public torch::nn::Module {
     return embed_tokens_(input_ids);
   }
 
-  virtual void skip_mrope() { use_mrope_ = false; }
-
-  virtual void apply_mrope(const torch::Tensor positions,
-                           torch::Tensor& cos_pos,
-                           torch::Tensor& sin_pos) {}
+  virtual std::pair<torch::Tensor, torch::Tensor> apply_mrope(
+      const torch::Tensor positions) {
+    return std::make_pair(torch::Tensor(), torch::Tensor());
+  }
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
@@ -112,6 +111,10 @@ class LlmModelImplBase : public torch::nn::Module {
     auto& dp_token_nums = modified_input_params.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
+    if (positions.dim() == 2) {
+      std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
+          apply_mrope(positions);
+    }
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -147,12 +150,8 @@ class LlmModelImplBase : public torch::nn::Module {
 
  protected:
   torch::Tensor cos_sin_;
-  int max_seq_len_ = 0;
-  torch::Tensor cos_pos_;
-  torch::Tensor sin_pos_;
   int device_id = 0;
   int dp_rank_ = 0;
-  bool use_mrope_ = false;
 
   std::vector<int64_t> mrope_section_;
   layer::WordEmbedding embed_tokens_{nullptr};
@@ -237,12 +236,6 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   virtual void set_word_embedding(layer::WordEmbedding& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
-
-  virtual void skip_mrope() {}
-
-  virtual void apply_mrope(const torch::Tensor positions,
-                           torch::Tensor& cos_pos,
-                           torch::Tensor& sin_pos) {}
 
  protected:
   // parameter members, must be registered

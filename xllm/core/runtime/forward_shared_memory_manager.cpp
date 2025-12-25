@@ -143,6 +143,7 @@ INLINE size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   total += get_vector_size(input.q_seq_lens);
   total += get_vector_size(input.new_token_slot_ids);
   total += get_vector_size(input.dp_global_token_nums);
+  total += get_vector_size(input.dp_is_decode);
   total += get_vector_size(input.embedding_ids);
   total += get_vector_size(input.src_block_indices);
   total += get_vector_size(input.dst_block_indices);
@@ -581,6 +582,7 @@ INLINE void deserialize_raw_forward_input(
   read_eplb_info(buffer, input.eplb_info);
   read_2d_vector(buffer, input.m_positions_vec);
   read_mm_batch_data(buffer, input.mm_data);
+  read_vector(buffer, input.dp_is_decode);
 }
 
 INLINE void serialize_raw_forward_input(const RawForwardInput& input,
@@ -633,6 +635,7 @@ INLINE void serialize_raw_forward_input(const RawForwardInput& input,
   write_eplb_info(buffer, input.eplb_info);
   write_2d_vector(buffer, input.m_positions_vec);
   write_mm_batch_data(buffer, input.mm_data);
+  write_vector(buffer, input.dp_is_decode);
 }
 
 size_t calculate_raw_token_size(const RawToken& token) {
@@ -829,6 +832,7 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   input_params.q_max_seq_len = raw_input.q_max_seq_len;
   input_params.embedding_ids = std::move(raw_input.embedding_ids);
   input_params.dp_global_token_nums = std::move(raw_input.dp_global_token_nums);
+  input_params.dp_is_decode = std::move(raw_input.dp_is_decode);
 
   input_params.kv_seq_lens =
       torch::tensor(std::move(raw_input.seq_lens), tensor_options);

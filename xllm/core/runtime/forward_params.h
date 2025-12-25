@@ -175,6 +175,7 @@ struct RawForwardInput {
   int32_t num_sequences;
   // num tokens of all workers，mainly used for dp case
   std::vector<int32_t> dp_global_token_nums;
+  std::vector<int32_t> dp_is_decode;
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
   EplbInfo eplb_info;

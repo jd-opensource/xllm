@@ -100,9 +100,6 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     eplb_executor_->eplb_execute(input.eplb_info);
   }
 
-  model_executor_->prepare_dp_metadata(
-      input.token_ids, input.input_params, context_.get_parallel_args());
-
   // temporarily use [0], will be adapted in next pr
   // call model executor forward to get hidden states
   auto hidden_states = model_executor_->forward(
