@@ -15,6 +15,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:mspti_helper.h>
     options.h
     rate_limiter.h
+    rec_model_utils.h
     types.h
     device_monitor.h
     version_singleton.h
@@ -66,5 +67,4 @@ cc_test(
 )
 target_link_libraries(common PRIVATE OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
 add_dependencies(common brpc-static)
-
 
