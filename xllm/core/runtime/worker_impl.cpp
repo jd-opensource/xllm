@@ -654,6 +654,7 @@ int64_t WorkerImpl::get_active_activation_memory() {
 
 void WorkerImpl::init_hierarchy_kv_cache_transfer() {
   if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
+    CHECK(kv_caches_.size() > 0) << "kv_caches is not initialized.";
     HierarchyKVCacheTransfer::Options transfer_options;
     transfer_options
         .tp_rank(options_.dp_size() > 1

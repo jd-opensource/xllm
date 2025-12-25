@@ -44,6 +44,7 @@ class HierarchyKVCacheTransfer {
     PROPERTY(std::string, store_master_server_address) = "";
     PROPERTY(std::string, store_metadata_server) = "";
     PROPERTY(std::string, store_local_hostname) = "";
+    PROPERTY(bool, enable_direct_load_and_offload) = false;
   };
 
   HierarchyKVCacheTransfer(const Options& options,
@@ -63,15 +64,16 @@ class HierarchyKVCacheTransfer {
  private:
   void create_page_aligned_host_cache();
 
-  uint32_t offload_kv_blocks(
+  uint32_t offload_direct(
       const std::vector<BlockTransferInfo>& block_transfer_info);
+  uint32_t offload_via_host(
+      const std::vector<BlockTransferInfo>& block_transfer_info);
+  bool offload_to_host(Slice<BlockTransferInfo>& block_transfer_info);
 
-  bool d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info);
-  bool h2d_batch_copy(const uint64_t batch_id,
-                      Slice<BlockTransferInfo>& block_transfer_info);
-
-  uint32_t offload_to_store(Slice<BlockTransferInfo>& block_transfer_info);
-  uint32_t load_from_store(Slice<BlockTransferInfo>& block_transfer_info);
+  bool load_direct(const uint64_t batch_id,
+                   const std::vector<BlockTransferInfo>& block_transfer_info);
+  bool load_via_host(const uint64_t batch_id,
+                     const std::vector<BlockTransferInfo>& block_transfer_info);
 
  private:
   // options
@@ -80,9 +82,9 @@ class HierarchyKVCacheTransfer {
   Device device_;
 
   // working thread for data copy
-  std::unique_ptr<ThreadPool> h2d_threadpool_;
-  std::unique_ptr<ThreadPool> d2h_threadpool_;
-  // copy streams only can be used in h2d_threadpool_ and d2h_threadpool_
+  std::unique_ptr<ThreadPool> load_threadpool_;
+  std::unique_ptr<ThreadPool> offload_threadpool_;
+  // copy streams only can be used in load_threadpool_ and offload_threadpool_
   moodycamel::BlockingConcurrentQueue<std::unique_ptr<Stream>> copy_stream_;
 
   std::vector<xllm::KVCache>* kv_caches_ptr_;

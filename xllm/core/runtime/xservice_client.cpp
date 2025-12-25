@@ -350,6 +350,11 @@ void XServiceClient::heartbeat() {
         auto max_tbt = std::max_element(tbt.begin(), tbt.end());
         req.mutable_latency_metrics()->set_recent_max_tbt(*max_tbt);
       }
+      // TODO(kangmeng3): gpu_cache_usage_perc and max_tbt -> offload_batch;
+      auto offload_batch = std::stoi(getenv("OFFLOAD_BATCH"));
+      if (offload_batch != offload_batch_.load(std::memory_order_relaxed)) {
+        offload_batch_.store(offload_batch, std::memory_order_relaxed);
+      }
 
       xllm_service::proto::Status resp;
       {

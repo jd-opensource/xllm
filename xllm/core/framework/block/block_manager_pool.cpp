@@ -35,7 +35,8 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
                                : options_.enable_cache_upload());
 
   for (int32_t i = 0; i < dp_size; ++i) {
-    if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
+    if (options.enable_disagg_pd() || options_.enable_kvcache_store() ||
+        options_.host_num_blocks() > 0) {
       block_managers_.emplace_back(
           std::make_unique<ConcurrentBlockManagerImpl>(npu_options));
     } else {

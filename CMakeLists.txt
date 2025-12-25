@@ -9,6 +9,9 @@ add_compile_definitions(YLT_ENABLE_IBV)
 add_definitions(-DYLT_ENABLE_IBV)
 set(YLT_ENABLE_IBV ON)
 
+add_definitions(-DUSE_MEMFABRIC)
+add_definitions(-DBUILD_SHARED_LIBS=ON)
+
 if(DEVICE_ARCH STREQUAL "ARM")
     set(CMAKE_SYSTEM_PROCESSOR aarch64)
     set(RUST_TARGET aarch64-unknown-linux-gnu)

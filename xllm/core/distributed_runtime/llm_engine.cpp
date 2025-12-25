@@ -342,6 +342,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   BlockManagerPool::Options options;
   options.num_blocks(kv_cache_cap.n_blocks)
       .block_size(block_size)
+      .tp_size(dp_local_tp_size_)
       .host_num_blocks(kv_cache_cap.n_blocks * options_.host_blocks_factor())
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())

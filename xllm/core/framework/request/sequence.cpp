@@ -459,7 +459,8 @@ Slice<int32_t> Sequence::get_generated_tokens() const {
   return {tokens_.data(), 0};
 }
 
-bool Sequence::update_prefetch_result(uint32_t timeout, uint32_t& success_cnt) {
+bool Sequence::update_prefetch_result(const uint32_t timeout,
+                                      uint32_t& success_cnt) {
   if (prefetch_results_.empty()) {
     return true;
   }

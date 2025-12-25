@@ -353,6 +353,9 @@ void CommChannel::transfer_kv_blocks(
   done->promise = std::move(promise);
   stub_->TransferBlocks(
       &done->cntl, &pb_block_transfer_info, &done->response, done);
+  if (done->cntl.Failed()) {
+    LOG(ERROR) << "Fail: " << done->cntl.ErrorText();
+  }
 }
 
 void CommChannel::transfer_kv_blocks(

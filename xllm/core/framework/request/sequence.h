@@ -252,7 +252,7 @@ class Sequence final {
     return &prefetch_results_;
   }
 
-  bool update_prefetch_result(uint32_t timeout, uint32_t& success_cnt);
+  bool update_prefetch_result(const uint32_t timeout, uint32_t& success_cnt);
 
   void reset();
 
@@ -271,6 +271,11 @@ class Sequence final {
   void set_cancel() { cancelled_.store(true, std::memory_order_relaxed); }
 
   bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
+
+  void set_offload_batch(uint32_t offload_batch) {
+    offload_batch_ = offload_batch;
+  }
+  uint32_t get_offload_batch() { return offload_batch_; }
 
  private:
   // the index of the sequence in the request
@@ -369,6 +374,8 @@ class Sequence final {
 
   Timer timer_;
   bool is_timeout_set_ = false;
+
+  uint32_t offload_batch_ = UINT32_MAX;
 };
 
 }  // namespace xllm

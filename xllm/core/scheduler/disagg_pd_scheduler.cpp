@@ -758,6 +758,9 @@ bool DisaggPDScheduler::decode_recv_first_generation(
   // update latest_generate_time_ for sequence
   request->sequences()[0]->tbt(absl::Now());
 
+  request->sequences()[0]->set_offload_batch(
+      XServiceClient::get_instance()->get_offload_batch());
+
   request_queue_.write(request);
   return true;
 }

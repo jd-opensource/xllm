@@ -27,6 +27,7 @@ class BlockManagerPool : public KVCacheManager {
  public:
   struct Options {
     PROPERTY(uint32_t, num_blocks) = 0;
+    PROPERTY(uint32_t, tp_size) = 0;
     PROPERTY(uint32_t, host_num_blocks) = 0;
     PROPERTY(int32_t, block_size) = 0;
     PROPERTY(bool, enable_prefix_cache) = true;

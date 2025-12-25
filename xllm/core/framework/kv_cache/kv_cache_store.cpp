@@ -2,6 +2,7 @@
 #include "kv_cache_store.h"
 
 #include <Mooncake/mooncake-store/include/utils.h>
+#include <Mooncake/mooncake-transfer-engine/include/transport/ascend_transport/memfabric_transport/memfabric_api.h>
 #include <glog/logging.h>
 
 #include <string>
@@ -12,10 +13,10 @@
 namespace xllm {
 
 bool KVCacheStore::init(const StoreConfig& config,
-                        std::vector<xllm::KVCache>* host_kv_caches) {
+                        std::vector<xllm::KVCache>* kv_caches) {
   CHECK(!is_initialized_) << "KVCacheStore is initialized.";
   config_ = config;
-  host_kv_caches_ = host_kv_caches;
+  kv_caches_ = kv_caches;
   std::optional<std::string> device_names = std::nullopt;
   if (config_.protocol == "rdma") {
     if (getenv("DEVICE_NAMES")) {
@@ -26,6 +27,8 @@ bool KVCacheStore::init(const StoreConfig& config,
       config_.protocol = "tcp";
     }
   }
+
+  mooncake::MemFabricSmemDl::SetSmemTypeFlag(mooncake::SMEM_BM);
 
   auto client_opt = mooncake::Client::Create(config_.localhost_name,
                                              config_.metadata_server,
@@ -43,30 +46,61 @@ bool KVCacheStore::init(const StoreConfig& config,
   }
   client_ptr_ = client_opt.value();
 
-  auto k_cache = host_kv_caches_->at(0).get_k_cache();
-  k_cache_size_per_block_ = k_cache.numel() * k_cache.element_size();
-  LOG(INFO) << "key cache size per block: " << k_cache_size_per_block_;
-
-  auto v_cache = host_kv_caches_->at(0).get_v_cache();
-  if (v_cache.defined() && v_cache.numel() != 0) {
-    v_cache_size_per_block_ = v_cache.numel() * v_cache.element_size();
-    LOG(INFO) << "value cache size per block: " << v_cache_size_per_block_;
+  if (config_.protocol == "memfabric") {
+    std::pair<void*, size_t> segment = mooncake::MemFabricGetSegment();
+    auto mountRes = client_ptr_->MountSegment(segment.first, segment.second);
+    if (!mountRes.has_value()) {
+      LOG(FATAL) << "Failed to mount segment: " << toString(mountRes.error());
+    }
+    LOG(INFO) << "init bm success, dram{" << std::hex << segment.first << " "
+              << segment.second << "}";
   }
 
-  auto index_cache = host_kv_caches_->at(0).get_index_cache();
+  auto cache_cnt = 1;
+  auto k_cache = kv_caches_->at(0).get_k_cache();
+  if (config_.format == TensorFormat::LAYER_WISE) {
+    k_cache_size_per_slice_ = k_cache[0].numel() * k_cache.element_size();
+  } else {
+    k_cache_size_per_slice_ = k_cache.numel() * k_cache.element_size();
+  }
+  LOG(INFO) << "k cache shape: " << k_cache.sizes()
+            << ", size per slice: " << k_cache_size_per_slice_;
+
+  auto v_cache = kv_caches_->at(0).get_v_cache();
+  if (v_cache.defined() && v_cache.numel() != 0) {
+    if (config_.format == TensorFormat::LAYER_WISE) {
+      v_cache_size_per_slice_ = v_cache[0].numel() * v_cache.element_size();
+    } else {
+      v_cache_size_per_slice_ = v_cache.numel() * v_cache.element_size();
+    }
+    LOG(INFO) << "v cache shape: " << v_cache.sizes()
+              << ", size per slice: " << v_cache_size_per_slice_;
+    cache_cnt++;
+  }
+
+  auto index_cache = kv_caches_->at(0).get_index_cache();
   if (index_cache.defined() && index_cache.numel() != 0) {
-    index_cache_size_per_block_ =
-        index_cache.numel() * index_cache.element_size();
-    LOG(INFO) << "index cache size per block: " << index_cache_size_per_block_;
+    if (config_.format == TensorFormat::LAYER_WISE) {
+      index_cache_size_per_slice_ =
+          index_cache[0].numel() * index_cache.element_size();
+    } else {
+      index_cache_size_per_slice_ =
+          index_cache.numel() * index_cache.element_size();
+    }
+    LOG(INFO) << "index cache shape: " << index_cache.sizes()
+              << ", size per slice: " << index_cache_size_per_slice_;
+    cache_cnt++;
+  }
+
+  if (config_.format == TensorFormat::LAYER_WISE) {
+    LOG(INFO) << "slice cnt per block: " << cache_cnt * kv_caches_->size();
+  } else {
+    LOG(INFO) << "slice cnt per block: " << cache_cnt;
   }
 
   if (config_.protocol == "rdma") {
     if (config_.total_size > 0 && config_.tensor_data != nullptr) {
-      auto result = client_ptr_->RegisterLocalMemory(
-          config_.tensor_data, config_.total_size, "cpu:0", false, false);
-      if (!result.has_value()) {
-        LOG(ERROR) << "Failed to register local memory: "
-                   << toString(result.error());
+      if (!register_memory(config_.tensor_data, config_.total_size, "cpu:0")) {
         return false;
       }
     } else {
@@ -184,24 +218,65 @@ uint32_t KVCacheStore::batch_exist(std::vector<std::string>&& keys) {
 
 std::vector<mooncake::Slice> KVCacheStore::genarate_mooncake_slice(
     int32_t block_id) {
-  std::vector<mooncake::Slice> slice;
-  slice.reserve(3);
+  switch (config_.format) {
+    case TensorFormat::BLOCK_WISE: {
+      std::vector<mooncake::Slice> slice;
+      slice.reserve(3);
 
-  void* k_cache = host_kv_caches_->at(block_id).get_k_cache().data_ptr();
-  slice.emplace_back(mooncake::Slice{k_cache, k_cache_size_per_block_});
+      void* k_cache = kv_caches_->at(block_id).get_k_cache().data_ptr();
+      slice.emplace_back(mooncake::Slice{k_cache, k_cache_size_per_slice_});
 
-  if (v_cache_size_per_block_ != 0) {
-    void* v_cache = host_kv_caches_->at(block_id).get_v_cache().data_ptr();
-    slice.emplace_back(mooncake::Slice{v_cache, v_cache_size_per_block_});
+      if (v_cache_size_per_slice_ != 0) {
+        void* v_cache = kv_caches_->at(block_id).get_v_cache().data_ptr();
+        slice.emplace_back(mooncake::Slice{v_cache, v_cache_size_per_slice_});
+      }
+
+      if (index_cache_size_per_slice_ != 0) {
+        void* index_cache =
+            kv_caches_->at(block_id).get_index_cache().data_ptr();
+        slice.emplace_back(
+            mooncake::Slice{index_cache, index_cache_size_per_slice_});
+      }
+      return slice;
+    }
+    case TensorFormat::LAYER_WISE: {
+      std::vector<mooncake::Slice> slice;
+      slice.reserve(kv_caches_->size() * 3);
+      for (int i = 0; i < kv_caches_->size(); i++) {
+        void* k_cache = kv_caches_->at(i).get_k_cache()[block_id].data_ptr();
+        slice.emplace_back(mooncake::Slice{k_cache, k_cache_size_per_slice_});
+
+        if (v_cache_size_per_slice_ != 0) {
+          void* v_cache = kv_caches_->at(i).get_v_cache()[block_id].data_ptr();
+          slice.emplace_back(mooncake::Slice{v_cache, v_cache_size_per_slice_});
+        }
+
+        if (index_cache_size_per_slice_ != 0) {
+          void* index_cache =
+              kv_caches_->at(i).get_index_cache()[block_id].data_ptr();
+          slice.emplace_back(
+              mooncake::Slice{index_cache, index_cache_size_per_slice_});
+        }
+      }
+      return slice;
+    }
+    default:
+      LOG(FATAL) << "Unrecognized tensor format!";
+      break;
   }
+}
 
-  if (index_cache_size_per_block_ != 0) {
-    void* index_cache =
-        host_kv_caches_->at(block_id).get_index_cache().data_ptr();
-    slice.emplace_back(
-        mooncake::Slice{index_cache, index_cache_size_per_block_});
+bool KVCacheStore::register_memory(void* data,
+                                   size_t length,
+                                   std::string location) {
+  auto result =
+      client_ptr_->RegisterLocalMemory(data, length, location, false, false);
+  if (!result.has_value()) {
+    LOG(ERROR) << "Failed to register local memory: "
+               << toString(result.error());
+    return false;
   }
-  return slice;
+  return true;
 }
 
 }  // namespace xllm
