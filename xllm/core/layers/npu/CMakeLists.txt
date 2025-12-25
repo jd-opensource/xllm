@@ -1,6 +1,9 @@
 include(cc_library)
 include(cc_test)
 
+include_directories(
+  ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
+)
 
 cc_library(
   NAME

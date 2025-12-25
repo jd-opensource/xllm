@@ -24,6 +24,10 @@ void apply_rotary(torch::Tensor& q,
                   torch::Tensor& k,
                   const torch::Tensor& cos_sin_cache,
                   const torch::Tensor& positions) {
+  // FIXME: This computation of 'cos' and 'sin' should only be performed
+  // for the first layer (or if the cache is empty). For subsequent layers,
+  // the calculated 'cos' and 'sin' values from the first layer should be
+  // reused/cached to avoid redundant computation.
   auto cos_sin = cos_sin_cache.index_select(0, positions);
   int64_t last_dim = cos_sin.size(-1);
   auto cos_sin_vec = cos_sin.view({-1, 2, last_dim / 2})

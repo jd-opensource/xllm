@@ -18,12 +18,6 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <functional>
-
-#if defined(USE_MLU)
-#include "../mlu/attention.h"
-#elif defined(USE_CUDA)
-#include "../cuda/attention.h"
-#endif
 #include <optional>
 
 #include "dense_mlp.h"
@@ -35,6 +29,7 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/rms_norm.h"
+#include "platform_attention.h"
 #include "qwen2_attention.h"
 
 namespace xllm {

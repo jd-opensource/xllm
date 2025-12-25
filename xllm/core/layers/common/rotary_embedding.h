@@ -20,15 +20,9 @@ limitations under the License.
 
 #include <memory>
 
-#if defined(USE_MLU)
-#include "../mlu/attention.h"
-#elif defined(USE_CUDA)
-#include "../cuda/attention.h"
-#elif defined(USE_ILU)
-#include "../ilu/attention.h"
-#endif
 #include "core/framework/model_context.h"
 #include "framework/model/model_args.h"
+#include "platform_attention.h"
 #include "rotary_embedding_util.h"
 
 namespace xllm {

@@ -20,12 +20,16 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-AttentionMetadata AttentionMetadata::build(const ModelInputParams& params) {
-  return AttentionMetadata::build(params, "float");
+AttentionMetadata AttentionMetadata::build(
+    const ModelInputParams& params,
+    const std::optional<torch::Tensor>& attn_mask) {
+  return AttentionMetadata::build(params, "float", attn_mask);
 }
 
-AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
-                                           const std::string& compute_dtype) {
+AttentionMetadata AttentionMetadata::build(
+    const ModelInputParams& params,
+    const std::string& compute_dtype,
+    const std::optional<torch::Tensor>& attn_mask) {
   AttentionMetadata attn_metadata;
   attn_metadata.q_cu_seq_lens = params.q_seq_lens;
   attn_metadata.kv_cu_seq_lens = params.kv_seq_lens;
@@ -38,6 +42,14 @@ AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
   attn_metadata.paged_kv_indptr = params.paged_kv_indptr;
   attn_metadata.paged_kv_indices = params.paged_kv_indices;
   attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
+
+  // for npu
+  if (attn_mask.has_value()) {
+    attn_metadata.attn_mask = attn_mask.value();
+    // FIXME: The .to(kCPU) operation breaks ACL graph execution. The attention
+    // operator needs to be updated to handle this.
+    attn_metadata.seq_lens = params.kv_seq_lens.to(torch::kCPU);
+  }
 
   attn_metadata.is_chunked_prefill =
       params.batch_forward_type.is_chunked_prefill();
