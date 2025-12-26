@@ -384,6 +384,10 @@ DEFINE_string(store_local_hostname,
               "",
               "The local host name of the kv cache store client.");
 
+DEFINE_bool(enable_control_h2d_block_num,
+            false,
+            "Whether to control h2d copy block num.");
+
 // --- computation communication parallel config ---
 
 DEFINE_bool(

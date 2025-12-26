@@ -171,6 +171,8 @@ DECLARE_double(host_blocks_factor);
 
 DECLARE_bool(enable_kvcache_store);
 
+DECLARE_bool(enable_control_h2d_block_num);
+
 DECLARE_string(store_protocol);
 
 DECLARE_string(store_master_server_address);
