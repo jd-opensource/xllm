@@ -39,6 +39,7 @@ class WorkerType {
     ELM,   // Embedding LM
     EVLM,  // Embedding VLM
     REC,   // Rec
+    MMEVLM,  // Encoder Embedding VLM
   };
 
   constexpr WorkerType(Value v) : value_(v) {}
@@ -55,6 +56,8 @@ class WorkerType {
       value_ = EVLM;
     } else if (str == "REC") {
       value_ = REC;
+    } else if (str == "MMEVLM") {
+      value_ = MMEVLM;
     } else {
       value_ = INVALID;
     }
@@ -83,6 +86,8 @@ class WorkerType {
       return "EVLM";
     } else if (this->value_ == REC) {
       return "REC";
+    } else if (this->value_ == MMEVLM) {
+      return "MMEVLM";
     } else {
       return "INVALID";
     }
@@ -140,6 +145,8 @@ struct ForwardOutput {
   SampleOutput sample_output;
   torch::Tensor logits;
   torch::Tensor embedding;
+
+  std::vector<torch::Tensor> mm_embeddings;
 
   // for eplb, collect the tokens load of experts on each worker.
   torch::Tensor expert_load_data;
@@ -217,6 +224,8 @@ struct RawForwardOutput {
   std::vector<int32_t> src_seq_idxes;
   std::vector<int32_t> out_tokens;
   std::vector<float> out_logprobs;
+  // multimodal embedding output
+  std::vector<torch::Tensor> mm_embeddings;
 };
 
 struct BatchedForwardInputs {
