@@ -20,6 +20,8 @@ limitations under the License.
 #include <folly/futures/Future.h>
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include "core/common/types.h"
@@ -30,6 +32,7 @@ limitations under the License.
 #include "framework/block/block.h"
 #include "incremental_decoder.h"
 #include "mm_data.h"
+#include "rec_type.h"
 #include "request_output.h"
 #include "sequence_kv_state.h"
 #include "sequence_logprob_state.h"
@@ -72,6 +75,10 @@ struct SequenceParams {
 
   // enable_schedule_overlap or not. default = false.
   bool enable_schedule_overlap = false;
+
+  RecType rec_type = RecType::kNone;
+
+  int32_t bos_token_id = 0;
 
   // sampling params
   // reference from request
@@ -181,6 +188,8 @@ class Sequence final {
   FinishReason finish_reason() const { return finish_reason_; }
   // check finish status, use cached value if not invalidated
   bool finished() const;
+  // mark sequence as finished (used by rec model multi-round decoding)
+  void finish();
 
   // get the output of the sequence until the specified number of tokens,
   // returns nullopt if no delta text and not finished
@@ -243,14 +252,14 @@ class Sequence final {
       const Tokenizer& tokenizer,
       std::optional<std::vector<LogProb>>& out_logprobs);
 
-  std::shared_ptr<std::atomic<bool>> get_termination_flag() {
+  std::shared_ptr<std::atomic<int32_t>> get_termination_flag() {
     return termination_flag_;
   }
   std::vector<std::shared_ptr<std::atomic<uint32_t>>>* get_prefetch_results() {
     return &prefetch_results_;
   }
 
-  bool update_prefetch_result(uint32_t timeout);
+  bool update_prefetch_result(uint32_t timeout, uint32_t& success_cnt);
 
   void reset();
 
@@ -266,11 +275,56 @@ class Sequence final {
   // get sequence id
   int32_t seq_id() const { return seq_id_; }
 
+  const std::vector<int32_t>& encoder_tokens() const {
+    static const std::vector<int32_t> kEmpty;
+    if (!onerec_state_.has_value()) {
+      return kEmpty;
+    }
+    return onerec_state_->encoder_tokens;
+  }
+
+  size_t encoder_seq_len() const {
+    return onerec_state_.has_value() ? onerec_state_->num_encoder_tokens : 0;
+  }
+
+  size_t num_decoder_embeddings() const {
+    return onerec_state_.has_value() ? onerec_state_->num_decoder_embeddings
+                                     : 0;
+  }
+
+  RecType rec_type() const { return rec_type_; }
+
+  bool is_rec_request() const { return rec_type_ != RecType::kNone; }
+
+  bool is_onerec_model() const { return rec_type_ == RecType::kOneRec; }
+
+  static const std::string ENCODER_SPARSE_EMBEDDING_NAME;
+  static const std::string DECODER_CONTEXT_EMBEDDING_NAME;
+
   void set_cancel() { cancelled_.store(true, std::memory_order_relaxed); }
 
   bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
 
  private:
+  void init_onerec_sequence(const std::vector<int32_t>& prompt_token_ids,
+                            torch::Tensor input_embedding);
+
+  SequenceOutput build_onerec_output(const Slice<int32_t>& ids,
+                                     size_t size,
+                                     SequenceOutput output) const;
+
+  SequenceOutput build_onerec_streaming_output(const Slice<int32_t>& ids,
+                                               size_t size) const;
+
+  SequenceOutput generate_onerec_output(const Slice<int32_t>& ids,
+                                        size_t size) const;
+
+  struct OneRecState {
+    size_t num_encoder_tokens = 0;
+    size_t num_decoder_embeddings = 0;
+    std::vector<int32_t> encoder_tokens;
+  };
+
   // the index of the sequence in the request
   size_t index_ = 0;
 
@@ -317,6 +371,10 @@ class Sequence final {
   // the length of the prompt tokens
   size_t num_prompt_tokens_ = 0;
 
+  std::optional<OneRecState> onerec_state_;
+
+  RecType rec_type_ = RecType::kNone;
+
   // NOTE: MUST FIXME Later
   // record all tokens num in last turn when the request is
   // interrupted due to the lack of kv cache capacity.
@@ -362,7 +420,7 @@ class Sequence final {
   std::atomic<bool> cancelled_{false};
 
   // kvcache store copy async result
-  std::shared_ptr<std::atomic<bool>> termination_flag_;
+  std::shared_ptr<std::atomic<int32_t>> termination_flag_;
   std::vector<std::shared_ptr<std::atomic<uint32_t>>> prefetch_results_;
 
   Timer timer_;

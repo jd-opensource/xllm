@@ -31,7 +31,7 @@ DeepSeekV3Detector::DeepSeekV3Detector() : BaseFormatDetector() {
   func_detail_regex_ =
       "<｜tool▁call▁begin｜>(.*)<｜tool▁sep｜>(.*)\n```json\n(.*)\n```<"
       "｜tool▁call▁end｜>";
-  _last_arguments_ = "";
+  last_arguments_ = "";
   current_tool_id_ = -1;
 }
 
@@ -260,10 +260,10 @@ StreamingParseResult DeepSeekV3Detector::parse_streaming_increment(
         prev_tool_call_arr_[current_tool_id_]["arguments"] = "{}";
       } else {
         std::string argument_diff;
-        if (func_args_raw.length() > _last_arguments_.length() &&
-            func_args_raw.substr(0, _last_arguments_.length()) ==
-                _last_arguments_) {
-          argument_diff = func_args_raw.substr(_last_arguments_.length());
+        if (func_args_raw.length() > last_arguments_.length() &&
+            func_args_raw.substr(0, last_arguments_.length()) ==
+                last_arguments_) {
+          argument_diff = func_args_raw.substr(last_arguments_.length());
         } else {
           argument_diff = func_args_raw;
         }
@@ -271,11 +271,11 @@ StreamingParseResult DeepSeekV3Detector::parse_streaming_increment(
         if (!argument_diff.empty()) {
           calls.push_back(
               ToolCallItem(current_tool_id_, std::nullopt, argument_diff));
-          _last_arguments_ += argument_diff;
+          last_arguments_ += argument_diff;
           streamed_args_for_tool_[current_tool_id_] += argument_diff;
         }
 
-        if (_is_complete_json(func_args_raw)) {
+        if (is_complete_json(func_args_raw)) {
           try {
             nlohmann::json parsed_args = nlohmann::json::parse(func_args_raw);
             prev_tool_call_arr_[current_tool_id_]["arguments"] =
@@ -298,7 +298,7 @@ StreamingParseResult DeepSeekV3Detector::parse_streaming_increment(
 
           StreamingParseResult result("", calls);
           current_tool_id_++;
-          _last_arguments_.clear();
+          last_arguments_.clear();
           current_tool_name_sent_ = false;
           return result;
         }

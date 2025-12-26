@@ -24,6 +24,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "common/metrics.h"
 #include "framework/model/model_input_params.h"
+#include "framework/request/mm_batch_data.h"
 #include "runtime/forward_params.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -64,6 +65,8 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->q_seq_lens().begin(),
                            pb_forward_input->q_seq_lens().end());
   // aprint<int32_t>(q_seq_lens, "q_seq_lens", global_rank_);
+  std::vector<int32_t> q_cu_seq_lens(q_seq_lens.size());
+  std::partial_sum(q_seq_lens.begin(), q_seq_lens.end(), q_cu_seq_lens.begin());
   // for flashinfer
   std::vector<int32_t> paged_kv_indptr =
       std::vector<int32_t>(pb_forward_input->paged_kv_indptr().begin(),
@@ -165,6 +168,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> dp_global_token_nums =
       std::vector<int32_t>(pb_forward_input->dp_global_token_nums().begin(),
                            pb_forward_input->dp_global_token_nums().end());
+  std::vector<int32_t> dp_is_decode =
+      std::vector<int32_t>(pb_forward_input->dp_is_decode().begin(),
+                           pb_forward_input->dp_is_decode().end());
 
   // Create ForwardInput on cpu pinned memory here
   auto tensor_options = torch::TensorOptions()
@@ -190,6 +196,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.q_max_seq_len = pb_forward_input->q_max_seq_len();
   input_params.kv_seq_lens = torch::tensor(seq_lens, tensor_options);
   input_params.q_seq_lens = torch::tensor(q_seq_lens, tensor_options);
+  input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens, tensor_options);
   input_params.kv_seq_lens_vec = std::move(seq_lens);
   input_params.q_seq_lens_vec = std::move(q_seq_lens);
 
@@ -207,6 +214,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::move(create_2d_tensor(block_tables_vec, torch::kInt));
 
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
+  input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
 
@@ -320,7 +328,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   eplb_info.update_layer_id = pb_forward_input->eplb_info().update_layer_id();
 
   if (pb_forward_input->has_mm_data()) {
-    util::proto_to_mmdata(pb_forward_input->mm_data(), &input_params.mm_data);
+    proto_to_mmdata(pb_forward_input->mm_data(), &input_params.mm_data);
   }
 
   COUNTER_ADD(proto_latency_seconds_proto2i, timer.elapsed_seconds());
@@ -384,6 +392,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_seq_lens(), inputs.seq_lens);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_q_seq_lens(),
                       inputs.q_seq_lens);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_q_cu_seq_lens(),
+                      inputs.q_cu_seq_lens);
   // for flashinfer
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_paged_kv_indptr(),
                       inputs.paged_kv_indptr);
@@ -403,6 +413,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   pb_forward_input->set_num_sequences(inputs.num_sequences);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_global_token_nums(),
                       inputs.dp_global_token_nums);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_is_decode(),
+                      inputs.dp_is_decode);
   if (!inputs.transfer_kv_infos.empty()) {
     pb_forward_input->mutable_transfer_kv_infos()->Reserve(
         inputs.transfer_kv_infos.size());
@@ -472,7 +484,7 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_cum_sum(), inputs.cum_sum);
 
   if (inputs.mm_data.valid()) {
-    util::mmdata_to_proto(inputs.mm_data, pb_forward_input->mutable_mm_data());
+    mmdata_to_proto(inputs.mm_data, pb_forward_input->mutable_mm_data());
   }
 
   COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());
@@ -723,7 +735,6 @@ uint64_t proto_to_block_transfer_info(
         pb_block_transfer_info.transfer_infos(i).dst_block_id(),
         reinterpret_cast<const uint8_t*>(
             pb_block_transfer_info.transfer_infos(i).hash_key().data()),
-        pb_block_transfer_info.transfer_infos(i).hash_key().size(),
         TransferType(pb_block_transfer_info.transfer_type()));
   }
 
@@ -737,11 +748,6 @@ bool block_transfer_info_to_proto(
       block_transfer_info.size());
   auto transfer_type = block_transfer_info[0].transfer_type;
   for (const BlockTransferInfo info : block_transfer_info) {
-    if (info.hash_key == nullptr) {
-      LOG(ERROR) << "Convert to BlockTransferInfos fail, hash key is nullptr!";
-      return false;
-    }
-
     if (transfer_type != info.transfer_type) {
       LOG(ERROR) << "Convert to BlockTransferInfos fail, TransferType must be "
                     "same, but got "

@@ -17,10 +17,6 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include <cstdint>
-#include <memory>
-
-#include "common/macros.h"
 #include "framework/batch/batch.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"

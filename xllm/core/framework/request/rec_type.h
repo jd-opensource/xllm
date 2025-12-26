@@ -13,27 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "layer_utils.h"
+#pragma once
 
-#include "framework/parallel_state/parallel_state.h"
+#include <cstdint>
 
 namespace xllm {
-namespace layer {
 
-void update_dummy_run_input(int64_t dp_rank,
-                            torch::Tensor& positions,
-                            ModelInputParams& input_params) {
-  auto& dp_ranks = input_params.dp_global_token_nums;
-  bool is_dummy_run = dp_ranks[dp_rank] == 0;
-  for (size_t i = 0; i < dp_ranks.size(); i++) {
-    if (dp_ranks[i] == 0) {
-      dp_ranks[i] = 1;
-    }
-  }
-  if (is_dummy_run) {
-    positions = torch::tensor({1}).to(torch::kInt32).to(positions.device());
-  }
-}
+enum class RecType : uint8_t {
+  kNone = 0,
+  kOneRec = 1,
+  kLlmRec = 2,
+};
 
-}  // namespace layer
 }  // namespace xllm

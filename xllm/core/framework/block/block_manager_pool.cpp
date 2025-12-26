@@ -30,7 +30,9 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       .block_size(options_.block_size())
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_cache_upload(options_.enable_cache_upload());
+      .enable_cache_upload(options_.host_num_blocks() > 0
+                               ? false
+                               : options_.enable_cache_upload());
 
   for (int32_t i = 0; i < dp_size; ++i) {
     if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
@@ -221,7 +223,7 @@ void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {
 float BlockManagerPool::get_gpu_cache_usage_perc() const {
   float perc = 0.0;
   for (int32_t i = 0; i < block_managers_.size(); ++i) {
-    perc += block_managers_[i]->get_gpu_cache_usage_perc();
+    perc += block_managers_[i]->kv_cache_utilization();
   }
   return perc / block_managers_.size();
 }

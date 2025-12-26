@@ -17,8 +17,6 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "layer_utils.h"
-
 namespace xllm {
 namespace layer {
 

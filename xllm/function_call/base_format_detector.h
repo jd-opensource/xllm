@@ -38,8 +38,8 @@ class BaseFormatDetector {
   BaseFormatDetector(const BaseFormatDetector&) = delete;
   BaseFormatDetector& operator=(const BaseFormatDetector&) = delete;
 
-  std::unordered_map<std::string, int> get_tool_indices(
-      const std::vector<JsonTool>& tools);
+  std::unordered_map<std::string, int32_t> get_tool_indices(
+      const std::vector<JsonTool>& tools) const;
 
   std::vector<ToolCallItem> parse_base_json(const nlohmann::json& json_obj,
                                             const std::vector<JsonTool>& tools);
@@ -61,7 +61,7 @@ class BaseFormatDetector {
  protected:
   std::string buffer_;
 
-  int current_tool_id_;
+  int32_t current_tool_id_;
 
   bool current_tool_name_sent_;
 
@@ -69,10 +69,10 @@ class BaseFormatDetector {
   std::string eot_token_;
   std::string tool_call_separator_;
 
-  int _ends_with_partial_token(const std::string& buffer,
-                               const std::string& bot_token) const;
+  int32_t ends_with_partial_token(const std::string& buffer,
+                                  const std::string& bot_token) const;
 
-  std::unordered_map<std::string, int> tool_indices_;
+  std::unordered_map<std::string, int32_t> tool_indices_;
 };
 
 }  // namespace function_call

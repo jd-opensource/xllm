@@ -78,6 +78,9 @@ class Qwen3DecoderLayerImpl : public BaseLayer {
                                ModelInputParams& input_params,
                                bool is_prefill);
 
+  void initialize_parallel_parameters(atb_speed::qwen::QwenLayerParam& param,
+                                      const ParallelArgs& parallel_args);
+
   void initialize_quantization_parameters(
       atb_speed::qwen::QwenLayerParam& param);
 

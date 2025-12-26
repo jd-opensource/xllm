@@ -21,18 +21,20 @@ limitations under the License.
 #include "core/util/uuid.h"
 #include "deepseekv3_detector.h"
 #include "glm45_detector.h"
+#include "glm47_detector.h"
 #include "kimik2_detector.h"
 #include "qwen25_detector.h"
 namespace xllm {
 namespace function_call {
 
 const std::unordered_map<std::string, std::string>
-    FunctionCallParser::ToolCallParserEnum = {
+    FunctionCallParser::kToolCallParserMap = {
         {"qwen25", "qwen25"},
         {"qwen3", "qwen25"},
         {"kimi_k2", "kimi_k2"},
         {"deepseekv3", "deepseekv3"},
         {"glm45", "glm45"},
+        {"glm47", "glm47"},
         // TODO
         // {"llama3", "llama3"},
         // {"mistral", "mistral"},
@@ -49,7 +51,7 @@ FunctionCallParser::FunctionCallParser(const std::vector<JsonTool>& tools,
       << "Unsupported tool_call_parser: " << tool_call_parser
       << ". Supported parsers are: " << [this]() {
            std::string supported;
-           for (const auto& [key, value] : ToolCallParserEnum) {
+           for (const auto& [key, value] : kToolCallParserMap) {
              if (!supported.empty()) supported += ", ";
              supported += key;
            }
@@ -80,8 +82,8 @@ StreamingParseResult FunctionCallParser::parse_streaming_increment(
 
 std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
     const std::string& tool_call_parser) {
-  auto it = ToolCallParserEnum.find(tool_call_parser);
-  if (it == ToolCallParserEnum.end()) {
+  auto it = kToolCallParserMap.find(tool_call_parser);
+  if (it == kToolCallParserMap.end()) {
     return nullptr;
   }
 
@@ -99,6 +101,10 @@ std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
 
   if (it->second == "glm45") {
     return std::make_unique<Glm45Detector>();
+  }
+
+  if (it->second == "glm47") {
+    return std::make_unique<Glm47Detector>();
   }
 
   // if (tool_call_parser == "llama3") {

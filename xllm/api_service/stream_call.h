@@ -40,7 +40,7 @@ class StreamCall : public Call {
              ::google::protobuf::Closure* done,
              Request* request,
              Response* response,
-             bool use_arena = true)
+             bool use_arena = false)
       : Call(controller),
         done_(done),
         request_(request),
@@ -147,11 +147,11 @@ class StreamCall : public Call {
  private:
   ::google::protobuf::Closure* done_;
 
-  Request* request_;
-  Response* response_;
+  Request* request_ = nullptr;
+  Response* response_ = nullptr;
 
   bool stream_ = false;
-  bool use_arena_ = true;
+  bool use_arena_ = false;
   butil::intrusive_ptr<brpc::ProgressiveAttachment> pa_;
   butil::IOBuf io_buf_;
 
@@ -159,5 +159,14 @@ class StreamCall : public Call {
 
   int connection_status_ = 0;
 };
+
+template <typename T>
+struct is_stream_call : std::false_type {};
+
+template <typename... Args>
+struct is_stream_call<StreamCall<Args...>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_stream_call_v = is_stream_call<T>::value;
 
 }  // namespace xllm

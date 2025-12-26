@@ -23,6 +23,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "kv_cache.h"
 #include "platform/device.h"
+#include "util/blockingconcurrentqueue.h"
 #include "util/threadpool.h"
 
 #if defined(USE_NPU)

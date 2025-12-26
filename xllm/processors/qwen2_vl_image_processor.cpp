@@ -185,29 +185,24 @@ bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
 
 bool Qwen2VLImageProcessor::process_images(std::vector<torch::Tensor> images,
                                            MMData& mm_datas) {
-  std::vector<torch::Tensor> pixel_values;
-  std::vector<int64_t> grids;
+  torch::Tensor pixel_values;
+  torch::Tensor thw;
 
   for (const auto& img : images) {
-    if (!this->process_image(img, pixel_values, grids)) {
+    if (!this->process_image(img, pixel_values, thw)) {
       return false;
     }
+
+    auto& item = mm_datas.add(MMType::IMAGE);
+    item.set_data({{"pixel_values", pixel_values}, {"image_grid_thw", thw}});
   }
 
-  auto values = torch::cat(pixel_values);
-  auto thw = torch::tensor(grids);
-
-  thw = thw.clone().reshape({-1, 3});
-
-  mm_datas.add(MMType::IMAGE, "image_grid_thw", thw);
-  mm_datas.add(MMType::IMAGE, "pixel_values", values);
   return true;
 }
 
-bool Qwen2VLImageProcessor::process_image(
-    torch::Tensor image,
-    std::vector<torch::Tensor>& pixel_values,
-    std::vector<int64_t>& grids) {
+bool Qwen2VLImageProcessor::process_image(torch::Tensor image,
+                                          torch::Tensor& pixel_values,
+                                          torch::Tensor& thw) {
   auto shape = image.sizes();
 
   auto resized_height = shape[1];
@@ -270,8 +265,8 @@ bool Qwen2VLImageProcessor::process_image(
       {grid_t * grid_h * grid_w,
        channel * temporal_patch_size_ * patch_size_ * patch_size_});
 
-  pixel_values.emplace_back(patches);
-  grids.insert(grids.end(), {grid_t, grid_h, grid_w});
+  pixel_values = patches;
+  thw = torch::tensor({grid_t, grid_h, grid_w}).clone().reshape({-1, 3});
 
   return true;
 }
@@ -280,48 +275,39 @@ bool Qwen2VLImageProcessor::process_videos(
     std::vector<torch::Tensor> videos,
     std::vector<VideoMetadata> video_meta_list,
     MMData& mm_datas) {
-  std::vector<torch::Tensor> pixel_values;
-  std::vector<int64_t> grids;
+  torch::Tensor pixel_values;
+  torch::Tensor thw;
+
+  auto opts = torch::TensorOptions().dtype(torch::kFloat32);
 
   const size_t video_size = videos.size();
   for (size_t i = 0; i < video_size; ++i) {
     auto& vid = videos[i];
     auto& metadata = video_meta_list[i];
-    if (!this->process_video(vid, metadata, pixel_values, grids)) {
+    if (!this->process_video(vid, metadata, pixel_values, thw)) {
       return false;
     }
-  }
 
-  auto values = torch::cat(pixel_values);
-  auto thw = torch::tensor(grids).clone().reshape({-1, 3});
-
-  const size_t num_videos = videos.size();
-  std::vector<double> second_per_grid;
-  second_per_grid.reserve(num_videos);
-  for (size_t i = 0; i < num_videos; ++i) {
-    const auto& metadata = video_meta_list[i];
     double fps =
         metadata.sampled_fps > 0.0 ? metadata.sampled_fps : metadata.fps;
     double seconds_per_grid = static_cast<double>(temporal_patch_size_) / fps;
-    second_per_grid.push_back(seconds_per_grid);
+    auto second_per_grid_ts = torch::tensor({seconds_per_grid}, opts);
+
+    auto& item = mm_datas.add(MMType::VIDEO);
+    item.set_data({{"pixel_values_videos", pixel_values},
+                   {"video_grid_thw", thw},
+                   {"second_per_grid_ts", second_per_grid_ts}});
+
+    item.set_metadata(metadata);
   }
-  mm_datas.set_video_metadata(video_meta_list);
-
-  auto opts = torch::TensorOptions().dtype(torch::kFloat32);
-  auto second_per_grid_ts = torch::tensor(second_per_grid, opts);
-
-  mm_datas.add(MMType::VIDEO, "video_grid_thw", thw);
-  mm_datas.add(MMType::VIDEO, "pixel_values_videos", values);
-  mm_datas.add(MMType::VIDEO, "second_per_grid_ts", second_per_grid_ts);
 
   return true;
 }
 
-bool Qwen2VLImageProcessor::process_video(
-    torch::Tensor origin_video,
-    VideoMetadata& metadata,
-    std::vector<torch::Tensor>& pixel_values,
-    std::vector<int64_t>& grids) {
+bool Qwen2VLImageProcessor::process_video(torch::Tensor origin_video,
+                                          VideoMetadata& metadata,
+                                          torch::Tensor& pixel_values,
+                                          torch::Tensor& thw) {
   if (origin_video.dim() != 4) {
     LOG(FATAL) << "video must be TCHW";
   }
@@ -424,8 +410,9 @@ bool Qwen2VLImageProcessor::process_video(
       {grid_t * grid_h * grid_w,
        channel * temporal_patch_size_ * patch_size_ * patch_size_});
 
-  pixel_values.emplace_back(patches);
-  grids.insert(grids.end(), {grid_t, grid_h, grid_w});
+  pixel_values = patches;
+  thw = torch::tensor({grid_t, grid_h, grid_w}).clone().reshape({-1, 3});
+
   return true;
 }
 

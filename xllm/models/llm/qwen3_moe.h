@@ -15,19 +15,10 @@ limitations under the License.
 
 #pragma once
 
-#include <glog/logging.h>
-
-#include <boost/algorithm/string.hpp>
-
-#include "core/framework/model_context.h"
-#include "core/layers/common/layer_utils.h"
 #include "core/layers/qwen3_moe_decoder_layer.h"
 #include "llm_model_base.h"
 
 namespace xllm {
-
-using torch::indexing::None;
-using ISlice = torch::indexing::Slice;
 
 class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
  public:
@@ -102,39 +93,58 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
     mrope_section_ = model_args.rope_scaling_mrope_section();
-    blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
+
+    if (!mrope_section_.empty()) {
+      cos_sin_ = layer::rotary::get_concat_rotary_embedding(
+          128,
+          model_args.max_position_embeddings(),
+          model_args.rope_theta(),
+          options);
+    }
+
     // register submodules
-    device_ = options.device();
-    dtype_ = options.dtype().toScalarType();
-    num_speculative_tokens_ = model_args.num_speculative_tokens();
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-
-    cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        128,
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
-        options);
-
     norm_ = register_module("norm", layer::RMSNorm(context));
-    mapping_data_ = parallel_args.mapping_data();
-
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto block = Qwen3MoeDecoderLayer(context, i);
-      layers_.push_back(block);
-      blocks_->push_back(block);
+      auto layer = Qwen3MoeDecoderLayer(context, i);
+      layers_.push_back(layer);
     }
 
     dp_size_ = parallel_args.dp_size();
-    std::vector<int64_t> indices;
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
-    num_experts_per_tok_ = model_args.num_experts_per_tok();
-    for (int i = 0; i < parallel_args.world_size(); i += dp_local_tp_size_) {
-      indices.push_back(i);
-    }
+  }
+
+  std::pair<torch::Tensor, torch::Tensor> apply_mrope(
+      const torch::Tensor positions) {
+    auto target_cos_sin = cos_sin_.index({positions});
+    auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
+    auto cos_pos = target_cos_sin_chunks[0].contiguous();
+    auto sin_pos = target_cos_sin_chunks[1].contiguous();
+    auto apply = [this](torch::Tensor x) {
+      auto freqs_t = x[0].clone();
+      for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
+        int64_t offset = dim_idx;  // H -> offset=1, W -> offset=2
+        int64_t section_len = mrope_section_[dim_idx];
+        int64_t length = section_len * 3;
+
+        // indices: [offset, offset+3, offset+6, ..., < length]
+        auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
+        auto idx_second_half = torch::arange(offset, length, 3, torch::kLong);
+        auto idx_tensor =
+            torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
+        // freqs_t[..., idx] = freqs[dim_idx][..., idx]
+        auto src = x[dim_idx].index_select(-1, idx_tensor);
+        freqs_t.index_copy_(-1, idx_tensor, src);
+      }
+      return freqs_t;
+    };
+    cos_pos = apply(cos_pos.reshape({positions.size(0), -1, cos_pos.size(1)}));
+    sin_pos = apply(sin_pos.reshape({positions.size(0), -1, sin_pos.size(1)}));
+    return std::make_pair(cos_pos, sin_pos);
   }
 
   torch::Tensor deepstack_process(torch::Tensor hidden_states,
@@ -153,11 +163,14 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
+    ModelInputParams modified_input_params = input_params;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
-        positions = torch::tensor({0}).to(torch::kInt32).to(device_);
+        positions = torch::tensor({1}).to(torch::kInt32).to(device_);
       }
+      auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+      std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
     auto inputs_embeds = input_params.input_embedding;
     torch::Tensor h;
@@ -167,44 +180,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       h = embed_tokens_(tokens);
     }
 
-    auto target_cos_sin = cos_sin_.index({positions});
-    auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
-    auto cos_pos = target_cos_sin_chunks[0].contiguous();
-    auto sin_pos = target_cos_sin_chunks[1].contiguous();
-    if (positions.dim() == 2) {  // mrope
-      auto apply = [this](torch::Tensor x) {
-        // auto sections = mrope_section_;
-        auto freqs_t = x[0].clone();
-        for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
-          int64_t offset = dim_idx;  // H -> offset=1, W -> offset=2
-          int64_t section_len = mrope_section_[dim_idx];
-          int64_t length = section_len * 3;
-
-          // indices: [offset, offset+3, offset+6, ..., < length]
-          auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
-          auto idx_second_half = torch::arange(offset, length, 3, torch::kLong);
-          auto idx_tensor =
-              torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
-          // freqs_t[..., idx] = freqs[dim_idx][..., idx]
-          auto src = x[dim_idx].index_select(-1, idx_tensor);
-          freqs_t.index_copy_(-1, idx_tensor, src);
-        }
-        return freqs_t;
-      };
-      cos_pos = apply(cos_pos.reshape(
-          {positions.sizes().front(), -1, cos_pos.sizes().back()}));
-      sin_pos = apply(sin_pos.reshape(
-          {positions.sizes().front(), -1, sin_pos.sizes().back()}));
-    }
-
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();
-    ModelInputParams modified_input_params = input_params;
-    layer::update_dummy_run_input(dp_rank_, positions, modified_input_params);
     auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
     if (positions.dim() == 2) {
-      attn_metadata.mrope_cos = std::move(cos_pos);
-      attn_metadata.mrope_sin = std::move(sin_pos);
+      std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
+          apply_mrope(positions);
     }
 
     std::optional<torch::Tensor> residual;
@@ -246,17 +227,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   }
 
  private:
-  torch::nn::ModuleList blocks_{nullptr};
   std::vector<Qwen3MoeDecoderLayer> layers_;
   int32_t dp_rank_;
   int32_t rank_;
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
-  nlohmann::json mapping_data_;
-  int32_t num_experts_per_tok_;
-  int32_t num_speculative_tokens_ = 0;
-  at::Device device_;
-  torch::Dtype dtype_;
+  torch::Device device_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
   torch::Tensor cos_sin_;

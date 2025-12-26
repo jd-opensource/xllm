@@ -131,6 +131,51 @@ inline torch::Tensor safe_concat(const torch::Tensor& t1,
   }
 }
 
+inline bool safe_concat(const std::vector<torch::Tensor>& vec,
+                        torch::Tensor& tar,
+                        int64_t dim = 0) {
+  auto check = [](const std::vector<torch::Tensor>& vec, int64_t dim) {
+    if (vec.empty()) return false;
+
+    const auto& ref = vec[0];
+    if (!ref.defined()) return false;
+
+    const int64_t ndim = ref.dim();
+    if (ndim == 0) return false;
+
+    if (dim < 0) dim += ndim;
+
+    if (dim >= ndim) return false;
+
+    for (size_t i = 1; i < vec.size(); ++i) {
+      const auto& t = vec[i];
+      if (!t.defined()) {
+        return false;
+      }
+
+      if (t.dtype() != ref.dtype() || t.device() != ref.device() ||
+          t.dim() != ref.dim()) {
+        return false;
+      }
+
+      for (int64_t d = 0; d < ndim; ++d) {
+        if (d == dim) continue;
+        if (t.size(d) != ref.size(d)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  if (check(vec, dim)) {
+    tar = torch::cat(vec, dim);
+    return true;
+  } else {
+    return false;
+  }
+}
+
 // save torch tensor to .pt file as pickle format, which is same as torch.save
 // in python. .pt file can be loaded by torch.load in python. file_path must end
 // with ".pt".

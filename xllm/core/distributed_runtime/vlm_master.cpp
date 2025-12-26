@@ -204,9 +204,10 @@ void VLMMaster::handle_request(const std::vector<Message>& messages,
 
 void VLMMaster::handle_request(const std::vector<Message>& messages,
                                const RequestParams& sp,
+                               const std::string& payload,
                                OutputCallback callback) {
   static MMInputTransfer helper;
-  MMInput mm_inputs;
+  MMInput mm_inputs(payload);
   if (!helper.trans(messages, mm_inputs)) {
     LOG(ERROR) << "mm input helper trans failed.";
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,

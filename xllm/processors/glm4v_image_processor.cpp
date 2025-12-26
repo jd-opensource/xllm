@@ -268,29 +268,24 @@ bool Glm4VImageProcessor::process(const MMInput& inputs, MMData& datas) {
 
 bool Glm4VImageProcessor::process_images(std::vector<torch::Tensor> images,
                                          MMData& mm_datas) {
-  std::vector<torch::Tensor> pixel_values;
-  std::vector<int64_t> grids;
+  torch::Tensor pixel_values;
+  torch::Tensor thw;
 
   for (const auto& img : images) {
-    if (!this->process_image(img, pixel_values, grids)) {
+    if (!this->process_image(img, pixel_values, thw)) {
       return false;
     }
+
+    auto& item = mm_datas.add(MMType::IMAGE);
+    item.set_data({{"pixel_values", pixel_values}, {"image_grid_thw", thw}});
   }
-
-  auto values = torch::cat(pixel_values);
-  auto thw = torch::tensor(grids);
-
-  thw = thw.clone().reshape({-1, 3});
-  mm_datas.add(MMType::IMAGE, "image_grid_thw", thw);
-  mm_datas.add(MMType::IMAGE, "pixel_values", values);
 
   return true;
 }
 
-bool Glm4VImageProcessor::process_image(
-    torch::Tensor image,
-    std::vector<torch::Tensor>& pixel_values,
-    std::vector<int64_t>& grids) {
+bool Glm4VImageProcessor::process_image(torch::Tensor image,
+                                        torch::Tensor& pixel_values,
+                                        torch::Tensor& thw) {
   auto shape = image.sizes();
 
   auto resized_height = shape[1];
@@ -353,8 +348,8 @@ bool Glm4VImageProcessor::process_image(
       {grid_t * grid_h * grid_w,
        channel * temporal_patch_size_ * patch_size_ * patch_size_});
 
-  pixel_values.emplace_back(patches);
-  grids.insert(grids.end(), {grid_t, grid_h, grid_w});
+  pixel_values = patches;
+  thw = torch::tensor({grid_t, grid_h, grid_w}).clone().reshape({-1, 3});
 
   return true;
 }
@@ -363,33 +358,30 @@ bool Glm4VImageProcessor::process_videos(
     std::vector<torch::Tensor> videos,
     std::vector<VideoMetadata> video_meta_list,
     MMData& mm_datas) {
-  std::vector<torch::Tensor> pixel_values;
-  std::vector<int64_t> grids;
+  torch::Tensor pixel_values;
+  torch::Tensor thw;
 
   const size_t video_size = videos.size();
   for (size_t i = 0; i < video_size; ++i) {
     auto& vid = videos[i];
     auto& metadata = video_meta_list[i];
-    if (!this->process_video(vid, metadata, pixel_values, grids)) {
+    if (!this->process_video(vid, metadata, pixel_values, thw)) {
       return false;
     }
+
+    auto& item = mm_datas.add(MMType::VIDEO);
+    item.set_data(
+        {{"pixel_values_videos", pixel_values}, {"video_grid_thw", thw}});
+    item.set_metadata(metadata);
   }
-  mm_datas.set_video_metadata(video_meta_list);
-
-  auto values = torch::cat(pixel_values);
-  auto thw = torch::tensor(grids).clone().reshape({-1, 3});
-
-  mm_datas.add(MMType::VIDEO, "video_grid_thw", thw);
-  mm_datas.add(MMType::VIDEO, "pixel_values_videos", values);
 
   return true;
 }
 
-bool Glm4VImageProcessor::process_video(
-    torch::Tensor origin_video,
-    VideoMetadata& metadata,
-    std::vector<torch::Tensor>& pixel_values,
-    std::vector<int64_t>& grids) {
+bool Glm4VImageProcessor::process_video(torch::Tensor origin_video,
+                                        VideoMetadata& metadata,
+                                        torch::Tensor& pixel_values,
+                                        torch::Tensor& thw) {
   if (origin_video.dim() != 4) {
     LOG(FATAL) << "video must be TCHW";
   }
@@ -489,9 +481,9 @@ bool Glm4VImageProcessor::process_video(
                              channel * video_temporal_patch_size_ *
                                  video_patch_size_ * video_patch_size_});
 
-  pixel_values.emplace_back(patches);
+  pixel_values = patches;
+  thw = torch::tensor({grid_t, grid_h, grid_w}).clone().reshape({-1, 3});
 
-  grids.insert(grids.end(), {grid_t, grid_h, grid_w});
   return true;
 }
 

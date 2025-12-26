@@ -70,9 +70,7 @@ void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
     for (const auto& block : blocks) {
       // the block is not shared by other sequence
       if (block.is_valid() && block.ref_count() <= 2) {
-        auto origin_num_used_blocks =
-            num_used_blocks_.fetch_sub(1, std::memory_order_relaxed);
-        if (origin_num_used_blocks < 0) {
+        if (num_used_blocks_ == 0) {
           LOG(ERROR) << "num_used_blocks_==0 cannot fetch_sub for id:"
                      << block.id()
                      << ", total block size: " << num_total_blocks();
@@ -86,17 +84,12 @@ void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
           }
           LOG(FATAL) << error_msg;
         }
+        num_used_blocks_.fetch_sub(1, std::memory_order_relaxed);
       }
     }
   } else {
     num_used_blocks_.fetch_sub(blocks.size(), std::memory_order_relaxed);
   }
-}
-
-void BlockManagerImpl::deallocate(std::vector<Block>& blocks) {
-  Slice<Block> slice(blocks);
-  deallocate(slice);
-  blocks.clear();
 }
 
 bool BlockManagerImpl::has_enough_blocks(uint32_t num_blocks) {

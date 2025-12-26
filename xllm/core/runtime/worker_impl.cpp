@@ -100,6 +100,11 @@ bool WorkerImpl::allocate_kv_cache(
     value_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
         2);
+    if (enable_lighting_indexer) {
+      index_cache = at_npu::native::npu_format_cast(
+          torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_)),
+          2);
+    }
 #else
     key_cache =
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
@@ -326,11 +331,11 @@ WorkerImpl::estimate_kv_cache_capacity_async() {
 void WorkerImpl::update_last_step_output(
     const std::optional<ForwardOutput>& output) {
   if (output.value().sample_output.next_tokens.defined()) {
-    last_step_output_[last_step_output_idx_] = std::move(output.value());
+    last_step_output_ = std::move(output.value());
     last_step_output_valid_ = true;
   } else {
     if (FLAGS_enable_eplb) {
-      last_step_output_[last_step_output_idx_] = std::move(output.value());
+      last_step_output_ = std::move(output.value());
     }
     last_step_output_valid_ = false;
   }
@@ -339,16 +344,14 @@ void WorkerImpl::update_last_step_output(
 ForwardInput WorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
 #if defined(USE_A2)
-  xllm_ops::replace_token(
-      inputs.token_ids,
-      last_step_output_[last_step_output_idx_].sample_output.next_tokens);
+  xllm_ops::replace_token(inputs.token_ids,
+                          last_step_output_.sample_output.next_tokens);
 #else
   auto& flatten_tokens = inputs.token_ids;
   auto neg_mask = (flatten_tokens < 0);
   auto clamped_neg_indices = torch::clamp(-flatten_tokens, 0);
-  auto replacement =
-      last_step_output_[last_step_output_idx_].sample_output.next_tokens.index(
-          {clamped_neg_indices - 1});
+  auto replacement = last_step_output_.sample_output.next_tokens.index(
+      {clamped_neg_indices - 1});
   inputs.token_ids = torch::where(neg_mask, replacement, flatten_tokens);
 #endif
   return inputs;
@@ -446,18 +449,14 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
         if (is_driver() || FLAGS_enable_eplb) {
           std::unique_lock<std::mutex> lock(mtx_);
           cv_.wait(lock, [this] { return !is_recorded_; });
-          last_step_output_idx_ = (last_step_output_idx_ + 1) % 2;
           update_last_step_output(output);
           is_recorded_ = true;
           cv_.notify_one();
         } else {
-          last_step_output_idx_ = (last_step_output_idx_ + 1) % 2;
           update_last_step_output(output);
         }
       } else {
-        CHECK(!FLAGS_enable_eplb)
-            << "Step output must have value when enable eplb";
-        if (is_driver()) {
+        if (is_driver() || FLAGS_enable_eplb) {
           std::unique_lock<std::mutex> lock(mtx_);
           cv_.wait(lock, [this] { return !is_recorded_; });
           last_step_output_valid_ = false;
@@ -478,9 +477,7 @@ ForwardOutput WorkerImpl::get_last_step_result() {
   std::unique_lock<std::mutex> lock(mtx_);
   cv_.wait(lock, [this] { return is_recorded_; });
   if (last_step_output_valid_ || FLAGS_enable_eplb) {
-    output = last_step_output_[last_step_output_idx_];
-  } else {
-    LOG(ERROR) << "get_last_step_result none output.";
+    output = last_step_output_;
   }
   is_recorded_ = false;
   cv_.notify_one();

@@ -27,11 +27,8 @@ limitations under the License.
 #include "common/instance_name.h"
 #include "completion.pb.h"
 #include "core/distributed_runtime/llm_master.h"
-#include "core/framework/request/mm_data.h"
+#include "core/distributed_runtime/rec_master.h"
 #include "core/framework/request/request_output.h"
-// TODO. add following when next pr.
-// #include "core/runtime/rec_master.h"
-#include "core/util/utils.h"
 
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -89,9 +86,7 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
   // Add rec specific output tensors
   auto output_tensor = response.mutable_output_tensors()->Add();
   output_tensor->set_name("rec_result");
-  // TODO: add following when next pr.
-  // if (FLAGS_enable_constrained_decoding) {
-  if (true) {
+  if (FLAGS_enable_constrained_decoding) {
     output_tensor->set_datatype(proto::DataType::INT64);
     output_tensor->mutable_shape()->Add(req_output.outputs.size());
     output_tensor->mutable_shape()->Add(1);  // Single item per output
@@ -170,18 +165,15 @@ void RecCompletionServiceImpl::process_async_impl(
   }
 
   const auto& rpc_request_ref = call->request();
-  std::optional<MMData> mm_data = std::nullopt;
+  std::optional<std::vector<proto::InferInputTensor>> input_tensors =
+      std::nullopt;
   if (rpc_request_ref.input_tensors_size()) {
-    // HISTOGRAM_OBSERVE(rec_input_first_dim,
-    //                  rpc_request_ref.input_tensors(0).shape(0));
-
-    MMDict mm_dict;
+    std::vector<proto::InferInputTensor> tensors;
+    tensors.reserve(rpc_request_ref.input_tensors_size());
     for (int i = 0; i < rpc_request_ref.input_tensors_size(); ++i) {
-      const auto& tensor = rpc_request_ref.input_tensors(i);
-      mm_dict[tensor.name()] =
-          xllm::util::convert_rec_tensor_to_torch(tensor).to(torch::kBFloat16);
+      tensors.push_back(rpc_request_ref.input_tensors(i));
     }
-    mm_data = std::move(MMData(MMType::EMBEDDING, mm_dict));
+    input_tensors = std::move(tensors);
   }
 
   // schedule the request
@@ -190,11 +182,8 @@ void RecCompletionServiceImpl::process_async_impl(
   master_->handle_request(
       std::move(rpc_request_ref.prompt()),
       std::move(prompt_tokens),
-      // TODO. add following when next pr.
-      // std::move(mm_data),
+      std::move(input_tensors),
       std::move(request_params),
-      // TODO. delete this when next pr.
-      call.get(),
       [call,
        model,
        master = master_,

@@ -227,11 +227,8 @@ class WorkerImpl {
   std::unique_ptr<EplbExecutor> eplb_executor_;
 
   // params for enable_schedule_overlap case
-  // an output to store the result of last step.
-  // Use a double buffer to ensure there is no conflict
-  // between the step and output handling.
-  ForwardOutput last_step_output_[2];
-  int64_t last_step_output_idx_ = 0;
+  // an output to store the result of last step
+  ForwardOutput last_step_output_;
   bool last_step_output_valid_ = false;
   std::mutex mtx_;
   std::condition_variable cv_;

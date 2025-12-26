@@ -23,7 +23,7 @@ limitations under the License.
 
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
-#include "framework/request/mm_data.h"
+#include "framework/request/mm_batch_data.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 
@@ -38,6 +38,7 @@ class WorkerType {
     DIT,   // DIT
     ELM,   // Embedding LM
     EVLM,  // Embedding VLM
+    REC,   // Rec
   };
 
   constexpr WorkerType(Value v) : value_(v) {}
@@ -52,6 +53,8 @@ class WorkerType {
       value_ = ELM;
     } else if (str == "EVLM") {
       value_ = EVLM;
+    } else if (str == "REC") {
+      value_ = REC;
     } else {
       value_ = INVALID;
     }
@@ -78,6 +81,8 @@ class WorkerType {
       return "ELM";
     } else if (this->value_ == EVLM) {
       return "EVLM";
+    } else if (this->value_ == REC) {
+      return "REC";
     } else {
       return "INVALID";
     }
@@ -164,11 +169,13 @@ struct RawForwardInput {
   uint32_t q_max_seq_len;
   std::vector<int32_t> seq_lens;
   std::vector<int32_t> q_seq_lens;
+  std::vector<int32_t> q_cu_seq_lens;
   std::vector<int32_t> new_token_slot_ids;
   std::vector<std::vector<int32_t>> block_tables_vec;
   int32_t num_sequences;
   // num tokens of all workers，mainly used for dp case
   std::vector<int32_t> dp_global_token_nums;
+  std::vector<int32_t> dp_is_decode;
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
   EplbInfo eplb_info;
@@ -195,7 +202,7 @@ struct RawForwardInput {
   std::vector<int32_t> paged_kv_indices;        //[num_used_pages]
   std::vector<int32_t> paged_kv_last_page_len;  //[n_seq]
   // multimodal data
-  MMData mm_data;
+  MMBatchData mm_data;
 };
 
 struct RawSampleOutput {

@@ -23,141 +23,165 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "core/util/tensor_helper.h"
+#include "mm_data_item.h"
+#include "mm_type.h"
+
 namespace xllm {
 
-class MMType {
+namespace MMDictItem {
+class IVisitor {
  public:
-  enum Value : uint32_t {
-    NONE = 0,
-    IMAGE = 1 << 0,
-    VIDEO = 1 << 1,
-    AUDIO = 1 << 2,
-    EMBEDDING = 1 << 3
+  virtual ~IVisitor() = default;
+  virtual bool visit(const MMKey& key, MMValue& value) = 0;
+};
+}  // namespace MMDictItem
+
+class MMData {
+ public:
+  class IItemVisitor : public MMDataItem::IVisitor,
+                       public MMDictItem::IVisitor {
+   public:
+    virtual ~IItemVisitor() = default;
+
+    using MMDataItem::IVisitor::visit;
+    using MMDictItem::IVisitor::visit;
   };
 
-  MMType() = default;
-  MMType(Value v) : value(v) {}
-  operator Value() const { return value; }
-  explicit operator bool() const = delete;
+  class IVisitor {
+   public:
+    virtual ~IVisitor() = default;
+    virtual bool visit(MMData& data) = 0;
+  };
 
-  bool operator==(MMType rhs) const { return value == rhs.value; }
-  bool operator!=(MMType rhs) const { return value != rhs.value; }
+  using MMItemVec = std::vector<MMDataItem>;
+  using MMItems = std::variant<MMItemVec, MMDict>;
 
-  bool operator==(Value v) const { return value == v; }
-  bool operator!=(Value v) const { return value != v; }
-
-  std::optional<std::string> to_string();
-
- private:
-  Value value = Value::NONE;
-};
-
-struct VideoMetadata {
-  double fps = 0.0;              // original fps
-  int64_t total_num_frames = 0;  // original frames
-  double duration = 0.0;
-  double sampled_fps = 0.0;
-  torch::Tensor frame_indices;
-  std::vector<double> timestamps;
-};
-
-using MMKey = std::string;
-using MMValue = std::variant<torch::Tensor, std::vector<torch::Tensor>>;
-using MMDict = std::unordered_map<MMKey, MMValue>;
-
-struct MMData {
+ public:
   MMData() = default;
-  MMData(uint32_t ty, const MMDict& data) : ty_(ty), data_(std::move(data)) {}
+  MMData(uint32_t ty, const MMItemVec& items);
+  MMData(uint32_t ty, const MMDict& items);
 
   bool has(uint32_t type) const { return type & ty_ != 0; }
-  bool has(const MMKey& key) const {
-    if (!valid()) return false;
+  bool has(MMType type) const { return type & ty_ != 0; }
 
-    const auto& itor = data_.find(key);
-    if (itor != data_.end())
-      return true;
-    else
-      return false;
-  }
+  bool has(const MMKey& key) const;
+  bool valid() const { return ty_ != MMType::NONE; }
+
+  uint32_t type() const { return ty_; }
+  size_t size() const;
+
+  bool add(MMType type, const MMDataItem& item);
+  MMDataItem& add(MMType type);
+
+  void get(uint32_t type, std::vector<MMDataItem>& items) const;
+  void get(const MMKey& key, std::vector<torch::Tensor>& items) const;
 
   template <typename T>
-  bool add(uint32_t type, const MMKey& key, const T& value) {
-    const auto& itor = data_.find(key);
-    if (itor != data_.end()) return false;
+  bool add(MMType type, const MMKey& key, const T& value) {
+    if (!hold<MMDict>()) items_ = MMDict();
+
+    auto& dict = items<MMDict>();
+
+    const auto& itor = dict.find(key);
+    if (itor != dict.end()) return false;
 
     ty_ |= type;
-    data_.insert({key, value});
+    dict.insert({key, value});
     return true;
-  }
-
-  template <typename T>
-  bool update(uint32_t type, const MMKey& key, const T& value) {
-    const auto& itor = data_.find(key);
-    if (itor != data_.end()) {
-      // Key exists, update it
-      data_[key] = value;
-      ty_ |= type;
-      return true;
-    } else {
-      // Key doesn't exist, add it (same as add method)
-      ty_ |= type;
-      data_.insert({key, value});
-      return true;
-    }
   }
 
   template <typename T>
   std::optional<T> get(const MMKey& key) const {
     if (!valid()) return std::nullopt;
 
-    const auto& itor = data_.find(key);
-    if (itor != data_.end())
-      return std::get<T>(itor->second);
-    else
-      return std::nullopt;
-  }
+    if (hold<MMDict>()) {
+      auto& dict = items<MMDict>();
 
-  std::vector<torch::Tensor> get_tensor_vec(const MMKey& key) const {
-    if (!valid()) return {};
+      const auto& itor = dict.find(key);
+      if (itor != dict.end()) {
+        return std::get<T>(itor->second);
+      } else {
+        return std::nullopt;
+      }
+    } else if (hold<MMItemVec>()) {
+      auto& vec = items<MMItemVec>();
 
-    const auto& itor = data_.find(key);
-    if (itor == data_.end()) return {};
+      std::vector<torch::Tensor> lst;
+      for (const auto& item : vec) {
+        item.get(key, lst);
+      }
 
-    if (std::holds_alternative<torch::Tensor>(itor->second)) {
-      return {std::get<torch::Tensor>(itor->second)};
-    } else if (std::holds_alternative<std::vector<torch::Tensor>>(
-                   itor->second)) {
-      return std::get<std::vector<torch::Tensor>>(itor->second);
-    } else {
-      assert(0);
-      return {};
+      if (!lst.size()) {
+        return std::nullopt;
+      }
+
+      torch::Tensor ts;
+      bool res = safe_concat(lst, ts);
+
+      MMValue value;
+      if (res && std::is_same_v<T, std::vector<torch::Tensor>>) {
+        value = {ts};
+      } else if (res) {
+        value = ts;
+      } else {
+        value = lst;
+      }
+
+      return std::get<T>(value);
     }
   }
 
-  bool valid() const { return ty_ != MMType::NONE; }
+  template <typename T>
+  void set(uint32_t type, const T& item) {
+    ty_ = type;
+    items_ = item;
+  }
 
-  uint32_t type() const { return ty_; }
+  template <typename T>
+  const T& items() const {
+    return std::get<T>(items_);
+  }
 
-  const MMDict& data() const { return data_; }
+  template <typename T>
+  T& items() {
+    return std::get<T>(items_);
+  }
 
+  template <typename T>
+  bool hold() const {
+    if (std::holds_alternative<T>(items_)) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  template <typename T>
+  void get_metadata(MMType ty, std::vector<T>& metadatas) const {
+    if (!valid()) return;
+
+    if (!hold<MMItemVec>()) return;
+
+    const auto& item_vec = items<MMItemVec>();
+    for (const auto& item : item_vec) {
+      if (item.type() != ty) continue;
+
+      if (auto res = item.template get_metadata<T>()) {
+        metadatas.push_back(res.value());
+      }
+    }
+  }
+
+  bool foreach (MMDataItem::IVisitor& v);
+  bool foreach (MMDictItem::IVisitor& v);
+
+  bool foreach (IItemVisitor& v);
   void debug_print() const;
 
-  const std::vector<VideoMetadata>& get_video_metadata() const {
-    return video_metadata_;
-  }
-
-  void set_video_metadata(const std::vector<VideoMetadata>& meta) {
-    video_metadata_ = meta;
-  }
-
-  static MMData to(const MMData& mm_data, const torch::Device& device);
-  static MMData batch(const std::vector<MMData>& mm_datas);
-
-  uint32_t ty_ = MMType::NONE;
-  MMDict data_;
-
  private:
-  std::vector<VideoMetadata> video_metadata_;
+  uint32_t ty_ = MMType::NONE;
+  MMItems items_;
 };
 
 }  // namespace xllm

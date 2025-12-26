@@ -62,6 +62,9 @@ class SequencesGroup {
     return sequences_[0]->is_chunked_prefill_stage();
   }
 
+  // mark all sequences as finished (used by rec model multi-round decoding)
+  void finish();
+
  private:
   void add();
 

@@ -34,7 +34,7 @@ HierarchyBlockManagerPool::HierarchyBlockManagerPool(
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .num_blocks(options_.host_num_blocks())
-      .enable_cache_upload(false);
+      .enable_cache_upload(options_.enable_cache_upload());
 
   for (int32_t i = 0; i < dp_size; ++i) {
     if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
@@ -47,9 +47,7 @@ HierarchyBlockManagerPool::HierarchyBlockManagerPool(
   }
 
   load_block_transfer_infos_.resize(host_block_managers_.size());
-  offload_block_transfer_infos_.resize(host_block_managers_.size());
-  saved_host_blocks_.resize(host_block_managers_.size());
-  saved_device_blocks_.resize(host_block_managers_.size());
+  offload_block_pair_queues_.resize(host_block_managers_.size());
 }
 
 void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
@@ -61,26 +59,20 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
   auto* host_blocks = sequence->host_kv_state().mutable_kv_blocks();
 
-  if (blocks->size() == 0 || host_blocks->size() >= blocks->size()) {
+  if (blocks->size() == 0 || host_blocks->size() > blocks->size()) {
     return;
   }
 
   size_t cached_block_num =
       sequence->host_kv_state().kv_cache_tokens_num() / options_.block_size();
 
-  if (host_blocks->size() > 0) {
-    host_block_managers_[dp_rank]->cache(sequence->tokens(), *host_blocks);
-  }
-
   size_t needed_block_num =
       sequence->num_tokens() / options_.block_size() - host_blocks->size();
 
-  if (needed_block_num == 0) {
-    return;
+  if (needed_block_num != 0) {
+    sequence->host_kv_state().add_kv_blocks(
+        host_block_managers_[dp_rank]->allocate(needed_block_num));
   }
-
-  sequence->host_kv_state().add_kv_blocks(
-      host_block_managers_[dp_rank]->allocate(needed_block_num));
 
   for (size_t i = cached_block_num; i < host_blocks->size(); i++) {
     if (blocks->at(i).ref_count() != 2) {
@@ -88,17 +80,11 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
     }
 
     host_blocks->at(i).set_hash_value(blocks->at(i).get_immutable_hash_value());
-    saved_host_blocks_[dp_rank].emplace_back(std::move(host_blocks->at(i)));
-    saved_device_blocks_[dp_rank].emplace_back(std::move(blocks->at(i)));
-    offload_block_transfer_infos_[dp_rank].emplace_back(BlockTransferInfo(
-        saved_device_blocks_[dp_rank].back().id(),
-        saved_host_blocks_[dp_rank].back().id(),
-        saved_host_blocks_[dp_rank].back().get_immutable_hash_value(),
-        saved_host_blocks_[dp_rank].back().get_hash_value_len(),
-        TransferType::D2G));
+    auto block_pair = std::make_shared<OffloadBlockPair>(
+        std::move(blocks->at(i)), std::move(host_blocks->at(i)));
+    offload_block_pair_queues_[dp_rank].enqueue(std::move(block_pair));
   }
-  host_block_managers_[dp_rank]->cache(
-      *sequence->host_kv_state().mutable_kv_blocks());
+
   host_block_managers_[dp_rank]->deallocate(
       sequence->host_kv_state().kv_blocks());
 
@@ -162,12 +148,14 @@ void HierarchyBlockManagerPool::prefetch_from_storage(
             prefill_sequence->tokens());
     prefill_sequence->add_shared_host_kv_blocks(std::move(shared_blocks));
 
-    const size_t num_blocks = prefill_sequence->host_kv_state().num_kv_blocks();
     // round down to the nearest block number
-    const size_t block_size = options_.block_size();
+    size_t shared_blocks_num =
+        prefill_sequence->host_kv_state().shared_kv_blocks_num();
     const size_t num_additional_blocks =
-        prefill_sequence->num_tokens() / block_size - num_blocks;
-    if (num_additional_blocks <= 0) {
+        (prefill_sequence->num_tokens() + options_.block_size() - 1) /
+            options_.block_size() -
+        shared_blocks_num;
+    if (num_additional_blocks <= 1) {
       return;
     }
 
@@ -179,20 +167,19 @@ void HierarchyBlockManagerPool::prefetch_from_storage(
     prefill_sequence->host_kv_state().add_kv_blocks(host_blocks);
     PrefixCache::compute_hash_keys(
         prefill_sequence->tokens(),
-        *prefill_sequence->host_kv_state().mutable_kv_blocks());
+        *prefill_sequence->host_kv_state().mutable_kv_blocks(),
+        shared_blocks_num);
 
-    if (num_additional_blocks > 0) {
+    if (num_additional_blocks > 1) {
       const auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
       std::vector<BlockTransferInfo> block_transfer_infos;
       block_transfer_infos.reserve(num_additional_blocks);
-      for (int i = host_blocks.size() - num_additional_blocks;
-           i < host_blocks.size();
-           i++) {
-        block_transfer_infos.emplace_back(
-            BlockTransferInfo(-1,
-                              host_blocks[i].id(),
-                              host_blocks[i].get_immutable_hash_value(),
-                              TransferType::G2H));
+      for (int i = 0; i < num_additional_blocks - 1; i++) {
+        block_transfer_infos.emplace_back(BlockTransferInfo(
+            -1,
+            host_blocks[shared_blocks_num + i].id(),
+            host_blocks[shared_blocks_num + i].get_immutable_hash_value(),
+            TransferType::G2H));
       }
 
       engine_->prefetch_from_storage(prefill_sequence->dp_rank(),
@@ -212,8 +199,21 @@ bool HierarchyBlockManagerPool::update_prefetch_result(
 
   bool prefetch_result = true;
   for (auto& prefill_sequence : request->sequences()) {
-    prefetch_result &= prefill_sequence->update_prefetch_result(timeout);
+    uint32_t success_cnt = 0;
+    prefetch_result &=
+        prefill_sequence->update_prefetch_result(timeout, success_cnt);
+
+    if (prefetch_result && success_cnt > 0) {
+      int32_t dp_rank = BlockManagerPool::get_dp_rank(prefill_sequence.get());
+      auto host_blocks = prefill_sequence->host_kv_state().kv_blocks();
+      auto cached_blocks =
+          prefill_sequence->host_kv_state().shared_kv_blocks_num();
+
+      host_block_managers_[dp_rank]->cache(
+          host_blocks.slice(cached_blocks - success_cnt, cached_blocks));
+    }
   }
+
   return prefetch_result;
 }
 
@@ -235,36 +235,50 @@ void HierarchyBlockManagerPool::transfer_blocks(
   }
 
   // offload blocks from device to host and kvcache store
-  for (int i = 0; i < offload_block_transfer_infos_.size(); i++) {
-    if (!offload_block_transfer_infos_[i].empty()) {
-      folly::collectAll(std::move(engine_->transfer_kv_blocks(
-                            i, std::move(offload_block_transfer_infos_[i]))))
+  for (int i = 0; i < offload_block_pair_queues_.size(); i++) {
+    std::vector<BlockTransferInfo> transfer_infos;
+    std::vector<Block> src_blocks;
+    std::vector<Block> dst_blocks;
+
+    std::shared_ptr<OffloadBlockPair> block_pair;
+    while (offload_block_pair_queues_[i].try_dequeue(block_pair)) {
+      src_blocks.emplace_back(std::move(block_pair->src));
+      dst_blocks.emplace_back(std::move(block_pair->dst));
+      transfer_infos.emplace_back(
+          BlockTransferInfo(src_blocks.back().id(),
+                            dst_blocks.back().id(),
+                            dst_blocks.back().get_immutable_hash_value(),
+                            TransferType::D2G));
+      block_pair.reset();
+    }
+
+    if (!transfer_infos.empty()) {
+      folly::collectAll(
+          std::move(engine_->transfer_kv_blocks(i, std::move(transfer_infos))))
           .via(folly::getGlobalCPUExecutor())
-          .thenValue([host_blocks = std::move(saved_host_blocks_[i]),
-                      device_blocks = std::move(saved_device_blocks_[i]),
-                      host_block_mgr_ptr = host_block_managers_[i].get(),
-                      device_block_mgr_ptr = block_managers_[i].get()](
-                         std::vector<folly::Try<uint32_t>>&& results) {
+          .thenValue([device_blocks = std::move(src_blocks),
+                      host_blocks = std::move(dst_blocks),
+                      device_block_mgr_ptr = block_managers_[i].get(),
+                      host_block_mgr_ptr = host_block_managers_[i].get()](
+                         std::vector<folly::Try<uint32_t>>&& results) mutable {
             for (auto&& result : results) {
               if (result.value() != host_blocks.size()) {
                 LOG(FATAL) << "Offload copy fail, expected "
                            << host_blocks.size() << ", got " << result.value();
               }
             }
+
+            device_block_mgr_ptr->deallocate({device_blocks});
+            device_blocks.clear();
+
             host_block_mgr_ptr->cache(host_blocks);
             host_block_mgr_ptr->deallocate({host_blocks});
-            device_block_mgr_ptr->deallocate({device_blocks});
+            host_blocks.clear();
+
             return 0;
           });
     }
   }
-
-  offload_block_transfer_infos_.clear();
-  saved_host_blocks_.clear();
-  saved_device_blocks_.clear();
-  offload_block_transfer_infos_.resize(host_block_managers_.size());
-  saved_host_blocks_.resize(host_block_managers_.size());
-  saved_device_blocks_.resize(host_block_managers_.size());
 }
 
 void HierarchyBlockManagerPool::get_merged_kvcache_event(

@@ -20,7 +20,7 @@ limitations under the License.
 #include <opencv2/opencv.hpp>
 #include <string>
 
-#include "mm_data.h"
+#include "mm_type.h"
 
 namespace xllm {
 

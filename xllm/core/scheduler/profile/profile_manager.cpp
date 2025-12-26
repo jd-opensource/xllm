@@ -56,11 +56,13 @@ ProfileManager::ProfileManager(Engine* engine, const Options& options)
   // more profile here, such as token_budget profile and decode length
   // prediction.
 
+#if defined(USE_NPU)
   // Warmup ACL graph executor if enabled
-  if (FLAGS_enable_acl_graph) {
+  if (FLAGS_enable_graph) {
     LOG(INFO) << "Starting ACL graph warmup.";
     warmup_for_acl_graph();
   }
+#endif
 }
 
 // --------------------- for test only ---------------------------

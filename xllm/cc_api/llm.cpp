@@ -19,12 +19,36 @@ limitations under the License.
 #include <folly/experimental/coro/Timeout.h>
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
+#include <pthread.h>
 
+#include <atomic>
 #include <exception>
 
 #include "internal.h"
 
 namespace xllm {
+namespace {
+static std::atomic<bool> g_glog_inited = false;
+static pthread_mutex_t g_log_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void InitGlog(const std::string& log_dir) {
+  pthread_mutex_lock(&g_log_init_mutex);
+  if (!g_glog_inited) {
+    google::InitGoogleLogging("xllm");
+    google::SetLogDestination(google::INFO,
+                              (log_dir + "/xllm.log.INFO.").c_str());
+    google::SetLogDestination(google::WARNING,
+                              (log_dir + "/xllm.log.WARNING.").c_str());
+    google::SetLogDestination(google::ERROR,
+                              (log_dir + "/xllm.log.ERROR.").c_str());
+    google::SetStderrLogging(google::FATAL);
+
+    g_glog_inited = true;
+  }
+  pthread_mutex_unlock(&g_log_init_mutex);
+}
+}  // namespace
+
 LLM::LLM() = default;
 LLM::~LLM() {
   if (nullptr != llm_core_) {
@@ -36,6 +60,10 @@ LLM::~LLM() {
 bool LLM::Initialize(const std::string& model_path,
                      const std::string& devices,
                      const XLLM_InitLLMOptions& init_options) {
+  if (!init_options.log_dir.empty()) {
+    InitGlog(init_options.log_dir);
+  }
+
   if (!std::filesystem::exists(model_path)) {
     LOG(ERROR) << "model path[" << model_path << "] does not exist";
     return false;
@@ -52,7 +80,7 @@ bool LLM::Initialize(const std::string& model_path,
         .block_size(init_options.block_size)
         .max_cache_size(init_options.max_cache_size)
         .max_memory_utilization(init_options.max_memory_utilization)
-        .enable_prefix_cache(!init_options.disable_prefix_cache)
+        .enable_prefix_cache(init_options.enable_prefix_cache)
         .max_tokens_per_batch(init_options.max_tokens_per_batch)
         .max_seqs_per_batch(init_options.max_seqs_per_batch)
         .max_tokens_per_chunk_for_prefill(
@@ -63,7 +91,7 @@ bool LLM::Initialize(const std::string& model_path,
         .rank_tablefile(init_options.rank_tablefile)
         .expert_parallel_degree(init_options.expert_parallel_degree)
         .enable_mla(init_options.enable_mla)
-        .enable_chunked_prefill(!init_options.disable_chunked_prefill)
+        .enable_chunked_prefill(init_options.enable_chunked_prefill)
         .master_node_addr(init_options.master_node_addr)
         .device_ip(init_options.device_ip)
         .transfer_listen_port(init_options.transfer_listen_port)

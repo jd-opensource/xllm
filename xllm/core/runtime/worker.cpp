@@ -51,6 +51,11 @@ Worker::Worker(const ParallelArgs& parallel_args,
     impl_ = new EmbedWorkerImpl(parallel_args, device, options);
   } else if (worker_type == WorkerType::EVLM) {
     impl_ = new EmbedVLMWorkerImpl(parallel_args, device, options);
+  } else if (worker_type == WorkerType::REC) {
+    // TODO. add following when next pr (use RecWorkerImpl).
+    // impl_ = new RecWorkerImpl(parallel_args, device, options);
+    // TODO. delete this when next pr.
+    impl_ = new LLMWorkerImpl(parallel_args, device, options);
   } else {
     LOG(ERROR) << "Unknown worker type, please check logic";
   }

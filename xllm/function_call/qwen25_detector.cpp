@@ -152,7 +152,7 @@ StreamingParseResult Qwen25Detector::parse_streaming_increment(
       result.normal_text = cleaned_text;
     } else {
       // Check if buffer might contain partial end token at the end
-      int partial_match_len = _ends_with_partial_token(
+      int32_t partial_match_len = ends_with_partial_token(
           normal_text_buffer_, end_token_without_newline);
 
       if (partial_match_len > 0) {

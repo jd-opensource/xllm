@@ -292,4 +292,9 @@ struct EplbInfo {
 inline constexpr int REC_TOKEN_SIZE = 3;
 
 using RecTokenTriple = std::array<int32_t, REC_TOKEN_SIZE>;
+
+inline constexpr const char* LLM_REC_INPUT_TOKENS = "llm_rec_input_tokens";
+inline constexpr const char* LLM_REC_INPUT_INDICES = "llm_rec_input_indices";
+inline constexpr const char* LLM_REC_INPUT_EMBEDDING =
+    "llm_rec_input_embedding";
 }  // namespace xllm

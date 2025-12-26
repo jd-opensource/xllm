@@ -70,6 +70,7 @@ RequestParams transfer_request_params(
   xllm_request_params.stop = request_params.stop;
   xllm_request_params.stop_token_ids = request_params.stop_token_ids;
   xllm_request_params.beam_width = request_params.beam_width;
+  xllm_request_params.top_logprobs = request_params.top_logprobs;
 
   return xllm_request_params;
 }
@@ -189,10 +190,13 @@ XLLM_Response handle_inference_request(LLMCore* llm_core,
   std::string request_id = xllm_request_params.request_id.empty()
                                ? generate_request_id()
                                : xllm_request_params.request_id;
+  xllm_request_params.request_id = request_id;
   int64_t created_time = absl::ToUnixSeconds(absl::Now());
 
   try {
     auto promise_ptr = std::make_shared<folly::Promise<XLLM_Response>>();
+    auto weak_promise =
+        std::weak_ptr<folly::Promise<XLLM_Response>>(promise_ptr);
     auto future = promise_ptr->getSemiFuture();
 
     llm_core->master->handle_request(
@@ -200,17 +204,39 @@ XLLM_Response handle_inference_request(LLMCore* llm_core,
         std::nullopt,
         xllm_request_params,
         std::nullopt,
-        [model_id, request_id, created_time, interface_type, promise_ptr](
-            const RequestOutput& req_output) -> bool {
-          XLLM_Response response = build_success_response(
-              req_output, interface_type, request_id, created_time, model_id);
-          promise_ptr->setValue(response);
+        [model_id,
+         request_id,
+         created_time,
+         interface_type,
+         weak_promise,
+         timeout_ms](const RequestOutput& req_output) -> bool {
+          auto promise_ptr = weak_promise.lock();
+          if (!promise_ptr) {
+            return false;
+          }
+
+          try {
+            XLLM_Response response = build_success_response(
+                req_output, interface_type, request_id, created_time, model_id);
+            promise_ptr->setValue(std::move(response));
+          } catch (const folly::PromiseAlreadySatisfied& e) {
+            return false;
+          }
+
           return true;
         });
 
     return std::move(future)
         .via(llm_core->executor.get())
         .within(std::chrono::milliseconds(timeout_ms))
+        .thenTry([](folly::Try<XLLM_Response>&& result) {
+          if (result.hasValue()) {
+            return std::move(result).value();
+          } else {
+            result.throwIfFailed();
+            return XLLM_Response{};
+          }
+        })
         .get();
 
   } catch (const folly::FutureTimeout& e) {

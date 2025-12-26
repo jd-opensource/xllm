@@ -15,21 +15,17 @@ limitations under the License.
 
 #pragma once
 
-#include <gflags/gflags.h>
 #include <torch/torch.h>
 
 #include <string>
 #include <typeinfo>
 #include <vector>
 
-#include "core/common/global_flags.h"
 #include "core/common/interruption_bus.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/common/layer_utils.h"
 #include "core/layers/lm_head.h"
-#include "core/layers/pos_embedding.h"
 #include "models/model_registry.h"
 #if defined(USE_CUDA)
 #include "core/layers/cuda/attention.h"
@@ -87,6 +83,11 @@ class LlmModelImplBase : public torch::nn::Module {
     return embed_tokens_(input_ids);
   }
 
+  virtual std::pair<torch::Tensor, torch::Tensor> apply_mrope(
+      const torch::Tensor positions) {
+    return std::make_pair(torch::Tensor(), torch::Tensor());
+  }
+
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   virtual torch::Tensor forward(torch::Tensor tokens,
@@ -95,7 +96,7 @@ class LlmModelImplBase : public torch::nn::Module {
                                 const ModelInputParams& input_params) {
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
-      positions = torch::tensor({0}).to(torch::kInt32).to(tokens.device());
+      positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
     }
     auto inputs_embeds = input_params.input_embedding;
     // test
@@ -107,22 +108,25 @@ class LlmModelImplBase : public torch::nn::Module {
     }
 
     auto modified_input_params = input_params;
-    auto position = positions;
-    layer::update_dummy_run_input(dp_rank_, position, modified_input_params);
+    auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+    std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
+    if (positions.dim() == 2) {
+      std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
+          apply_mrope(positions);
+    }
 
-    torch::Tensor h_ret;
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h_ret = layer(h,
-                    residual,
-                    position,
-                    attn_metadata,
-                    kv_caches[i],
-                    modified_input_params);
+      h = layer(h,
+                residual,
+                positions,
+                attn_metadata,
+                kv_caches[i],
+                modified_input_params);
     }
-    return std::get<0>(norm_(h_ret, residual));
+    return std::get<0>(norm_(h, residual));
   }
 
   // load the weight from the checkpoint
@@ -146,19 +150,13 @@ class LlmModelImplBase : public torch::nn::Module {
 
  protected:
   torch::Tensor cos_sin_;
-  int max_seq_len_ = 0;
-  torch::Tensor cos_pos_;
-  torch::Tensor sin_pos_;
   int device_id = 0;
   int dp_rank_ = 0;
 
   std::vector<int64_t> mrope_section_;
-  // test
-  //  ParallelEmbedding embed_tokens_{nullptr};
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
 
-  torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
   std::vector<DecoderLayerType> layers_;
 

@@ -72,7 +72,9 @@ void batch_decode(torch::Tensor float_workspace_buffer,
                   double sm_scale,
                   torch::Tensor output,
                   std::optional<torch::Tensor>& output_lse,
-                  bool enable_cuda_graph);
+                  bool enable_cuda_graph,
+                  bool use_tensor_core,
+                  torch::Tensor kv_seq_lens);
 
 void rms_norm(torch::Tensor output,
               torch::Tensor input,

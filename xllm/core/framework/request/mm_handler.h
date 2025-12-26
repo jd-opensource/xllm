@@ -24,6 +24,7 @@ limitations under the License.
 namespace xllm {
 
 struct MMInputItem;
+struct MMPayload;
 struct MMInput;
 
 class MMHandlerBase {
@@ -31,13 +32,20 @@ class MMHandlerBase {
   MMHandlerBase() = default;
   virtual ~MMHandlerBase() = default;
 
-  bool process(const MMContent& content, MMInputItem& input);
+  bool process(const MMContent& content,
+               MMInputItem& input,
+               MMPayload& payload);
 
-  virtual bool load(const MMContent& content, MMInputItem& input) = 0;
+  virtual bool load(const MMContent& content,
+                    MMInputItem& input,
+                    MMPayload& payload) = 0;
+
   virtual bool decode(MMInputItem& input) = 0;
 
  protected:
-  bool load_from_dataurl(const std::string& url, std::string& data);
+  bool load_from_dataurl(const std::string& url,
+                         std::string& data,
+                         MMPayload& payload);
 
   bool load_from_local(const std::string& url, std::string& data);
 
@@ -52,7 +60,9 @@ class ImageHandler : public MMHandlerBase {
   ImageHandler() = default;
   ~ImageHandler() = default;
 
-  virtual bool load(const MMContent& content, MMInputItem& input) override;
+  virtual bool load(const MMContent& content,
+                    MMInputItem& input,
+                    MMPayload& payload) override;
   virtual bool decode(MMInputItem& input) override;
 
  private:
@@ -64,7 +74,9 @@ class VideoHandler : public MMHandlerBase {
   VideoHandler() = default;
   ~VideoHandler() = default;
 
-  virtual bool load(const MMContent& content, MMInputItem& input) override;
+  virtual bool load(const MMContent& content,
+                    MMInputItem& input,
+                    MMPayload& payload) override;
   virtual bool decode(MMInputItem& input) override;
 
  private:
@@ -78,7 +90,8 @@ class MMHandlerSet {
 
   bool process(const std::string& type,
                const MMContent& content,
-               MMInputItem& input);
+               MMInputItem& input,
+               MMPayload& payload);
 
  private:
   std::unordered_map<std::string, std::unique_ptr<MMHandlerBase>> handlers_;

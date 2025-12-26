@@ -40,6 +40,7 @@ cc_library(
   HDRS
     config.h
     deepseek_v2_decoder_layer.h
+    deepseek_v32_decoder_layer.h
     glm4_vision_encode_layer.h
     llama_decoder_layer.h
     common/multi_head_attention.h

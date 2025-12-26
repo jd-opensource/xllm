@@ -18,15 +18,130 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
+#include <variant>
+
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
 #include "framework/batch/batch_forward_type.h"
-#include "framework/request/mm_data.h"
+#include "framework/request/mm_batch_data.h"
 #include "npu_dp_ep_padding.h"
+#include "util/hash_util.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {
+
+struct OneRecModelInputParams {
+  enum class RecStage {
+    PREFILL,
+    DECODE,
+  };
+
+  RecStage rec_stage = RecStage::PREFILL;
+  bool is_hybrid_mode = false;
+  bool is_encoder_forward = false;
+  bool has_encoder_output = false;
+  std::vector<int32_t> encoder_seq_lens;
+  torch::Tensor encoder_seq_lens_tensor;
+  int32_t encoder_max_seq_len = 0;
+
+  bool is_first_prefill = true;
+  int32_t bs = 0;
+  int32_t group_width = 0;
+  int32_t seq_len = 0;
+  std::vector<std::vector<int32_t>> generated_tokens;
+  torch::Tensor encoder_sparse_embedding;
+  torch::Tensor decoder_context_embedding;
+
+  torch::Tensor cross_attn_kv_cu_seq_lens;
+  torch::Tensor cross_attn_new_cache_slots;
+  torch::Tensor cross_attn_block_tables;
+  std::vector<int> cross_attn_kv_cu_seq_lens_vec;
+
+  torch::Tensor encoder_token_ids;
+  torch::Tensor encoder_positions;
+
+  OneRecModelInputParams to(const c10::Device& device) const {
+    OneRecModelInputParams result = *this;
+
+    if (encoder_seq_lens_tensor.defined()) {
+      result.encoder_seq_lens_tensor = encoder_seq_lens_tensor.to(device);
+    }
+    if (encoder_sparse_embedding.defined()) {
+      result.encoder_sparse_embedding = encoder_sparse_embedding.to(device);
+    }
+    if (decoder_context_embedding.defined()) {
+      result.decoder_context_embedding = decoder_context_embedding.to(device);
+    }
+    if (cross_attn_kv_cu_seq_lens.defined()) {
+      result.cross_attn_kv_cu_seq_lens = cross_attn_kv_cu_seq_lens.to(device);
+    }
+    if (cross_attn_new_cache_slots.defined()) {
+      result.cross_attn_new_cache_slots = cross_attn_new_cache_slots.to(device);
+    }
+    if (cross_attn_block_tables.defined()) {
+      result.cross_attn_block_tables = cross_attn_block_tables.to(device);
+    }
+    if (encoder_token_ids.defined()) {
+      result.encoder_token_ids = encoder_token_ids.to(device);
+    }
+    if (encoder_positions.defined()) {
+      result.encoder_positions = encoder_positions.to(device);
+    }
+
+    return result;
+  }
+
+  void print() const {
+    LOG(INFO) << "OneRecModelInputParams:"
+              << " rec_stage: "
+              << (rec_stage == RecStage::PREFILL ? "PREFILL" : "DECODE")
+              << " is_hybrid_mode: " << is_hybrid_mode
+              << " is_encoder_forward: " << is_encoder_forward
+              << " has_encoder_output: " << has_encoder_output
+              << " encoder_max_seq_len: " << encoder_max_seq_len
+              << " is_first_prefill: " << is_first_prefill << " bs: " << bs
+              << " group_width: " << group_width << " seq_len: " << seq_len
+              << " encoder_seq_lens size: " << encoder_seq_lens.size()
+              << " cross_attn_kv_cu_seq_lens_vec size: "
+              << cross_attn_kv_cu_seq_lens_vec.size()
+              << " generated_tokens size: " << generated_tokens.size();
+    if (encoder_seq_lens_tensor.defined()) {
+      LOG(INFO) << " encoder_seq_lens_tensor shape: "
+                << encoder_seq_lens_tensor.sizes();
+    }
+    if (encoder_sparse_embedding.defined()) {
+      LOG(INFO) << " encoder_sparse_embedding shape: "
+                << encoder_sparse_embedding.sizes();
+    }
+    if (decoder_context_embedding.defined()) {
+      LOG(INFO) << " decoder_context_embedding shape: "
+                << decoder_context_embedding.sizes();
+    }
+    if (cross_attn_kv_cu_seq_lens.defined()) {
+      LOG(INFO) << " cross_attn_kv_cu_seq_lens shape: "
+                << cross_attn_kv_cu_seq_lens.sizes();
+    }
+    if (cross_attn_new_cache_slots.defined()) {
+      LOG(INFO) << " cross_attn_new_cache_slots shape: "
+                << cross_attn_new_cache_slots.sizes();
+    }
+    if (cross_attn_block_tables.defined()) {
+      LOG(INFO) << " cross_attn_block_tables shape: "
+                << cross_attn_block_tables.sizes();
+    }
+    if (encoder_token_ids.defined()) {
+      LOG(INFO) << " encoder_token_ids shape: " << encoder_token_ids.sizes();
+    }
+    if (encoder_positions.defined()) {
+      LOG(INFO) << " encoder_positions shape: " << encoder_positions.sizes();
+    }
+  }
+};
+
+using RecModelInputParams =
+    std::variant<std::monostate, OneRecModelInputParams>;
 
 enum class TransferType : uint8_t {
   G2H = 0,  // global memory(KVCache store) to host memory(DRAM)
@@ -38,47 +153,62 @@ enum class TransferType : uint8_t {
 struct BlockTransferInfo {
   int32_t src_block_id = -1;
   int32_t dst_block_id = -1;
-  uint8_t* hash_key = nullptr;
+  uint8_t hash_key[MURMUR_HASH3_VALUE_LEN];
   TransferType transfer_type;
-  uint32_t hash_key_len = -1;
 
   BlockTransferInfo(int32_t src_block_id, int32_t dst_block_id) {
     this->src_block_id = src_block_id;
     this->dst_block_id = dst_block_id;
   }
 
-  BlockTransferInfo(int32_t src_block_id,
-                    int32_t dst_block_id,
-                    const uint8_t* hash_key,
-                    TransferType transfer_type) {
-    this->src_block_id = src_block_id;
-    this->dst_block_id = dst_block_id;
-    this->hash_key = const_cast<uint8_t*>(hash_key);
-    this->transfer_type = transfer_type;
+  BlockTransferInfo(int32_t src_id,
+                    int32_t dst_id,
+                    const uint8_t* key,
+                    TransferType type)
+      : src_block_id(src_id), dst_block_id(dst_id), transfer_type(type) {
+    memcpy(hash_key, key, MURMUR_HASH3_VALUE_LEN);
   }
 
-  BlockTransferInfo(int32_t src_block_id,
-                    int32_t dst_block_id,
-                    const uint8_t* hash_key,
-                    uint32_t hash_key_len,
-                    TransferType transfer_type) {
-    this->src_block_id = src_block_id;
-    this->dst_block_id = dst_block_id;
-    this->hash_key = new uint8_t[hash_key_len];
-    memcpy(this->hash_key, hash_key, hash_key_len);
-    this->transfer_type = transfer_type;
+  BlockTransferInfo(const BlockTransferInfo& other)
+      : src_block_id(other.src_block_id),
+        dst_block_id(other.dst_block_id),
+        transfer_type(other.transfer_type) {
+    memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
   }
 
-  ~BlockTransferInfo() {
-    if (hash_key_len != -1 && hash_key != nullptr) {
-      delete[] hash_key;
-    }
+  BlockTransferInfo(BlockTransferInfo&& other)
+      : src_block_id(other.src_block_id),
+        dst_block_id(other.dst_block_id),
+        transfer_type(other.transfer_type) {
+    memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
+
+    other.src_block_id = -1;
+    other.dst_block_id = -1;
+  }
+
+  BlockTransferInfo& operator=(const BlockTransferInfo& other) {
+    src_block_id = other.src_block_id;
+    dst_block_id = other.dst_block_id;
+    transfer_type = other.transfer_type;
+    memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
+    return *this;
+  }
+
+  BlockTransferInfo& operator=(BlockTransferInfo&& other) {
+    src_block_id = other.src_block_id;
+    dst_block_id = other.dst_block_id;
+    transfer_type = other.transfer_type;
+    memcpy(hash_key, other.hash_key, MURMUR_HASH3_VALUE_LEN);
+
+    other.src_block_id = -1;
+    other.dst_block_id = -1;
+    return *this;
   }
 
   std::string to_string() const {
     std::string rt = ", has_key:";
     for (int i = 0; i < 16; i++) {
-      rt += std::to_string(int64_t(*(hash_key + i))) + " ";
+      rt += std::to_string(int64_t(hash_key[i])) + " ";
     }
     return std::to_string(src_block_id) + "->" + std::to_string(dst_block_id) +
            ", " + std::to_string(uint32_t(transfer_type)) + rt;
@@ -97,6 +227,7 @@ struct ModelInputParams {
 
     params.kv_seq_lens = safe_to(kv_seq_lens, device, true);
     params.q_seq_lens = safe_to(q_seq_lens, device, true);
+    params.q_cu_seq_lens = safe_to(q_cu_seq_lens, device, true);
 
     params.new_cache_slots = safe_to(new_cache_slots, device, true);
     params.block_tables = safe_to(block_tables, device, true);
@@ -108,8 +239,9 @@ struct ModelInputParams {
     params.deep_stacks = deep_stacks;
     params.visual_pos_masks = visual_pos_masks;
 
-    params.mm_data = MMData::to(mm_data, device);
+    params.mm_data = mm_data.to(device);
     params.dp_global_token_nums = dp_global_token_nums;
+    params.dp_is_decode = dp_is_decode;
     params.embedding_ids = std::move(embedding_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
@@ -142,6 +274,10 @@ struct ModelInputParams {
 
     params.batch_id = batch_id;
 
+    if (const auto* onerec = onerec_params()) {
+      params.rec_params = onerec->to(device);
+    }
+
     return params;
   }
 
@@ -157,10 +293,16 @@ struct ModelInputParams {
               << batch_forward_type.to_string();
     print_tensor(kv_seq_lens, "ModelInputParams: kv_seq_lens", 4);
     print_tensor(q_seq_lens, "ModelInputParams: q_seq_lens", 4);
+    print_tensor(q_cu_seq_lens, "ModelInputParams: q_cu_seq_lens", 4);
     print_tensor(new_cache_slots, "ModelInputParams: new_cache_slots", 4);
     print_tensor(block_tables, "ModelInputParams: block_tables", 4);
     LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
-              << dp_global_token_nums;
+              << dp_global_token_nums << ", dp_is_decode: " << dp_is_decode;
+
+    if (const auto* onerec = onerec_params()) {
+      LOG(INFO) << "ModelInputParams: has rec_params";
+      onerec->print();
+    }
   }
 
   int32_t get_q_seq_len(int32_t seq_idx) const {
@@ -195,6 +337,7 @@ struct ModelInputParams {
 
   torch::Tensor q_seq_lens;
   torch::Tensor kv_seq_lens;
+  torch::Tensor q_cu_seq_lens;
   std::vector<int> kv_seq_lens_vec;
   std::vector<int> q_seq_lens_vec;
 
@@ -212,7 +355,7 @@ struct ModelInputParams {
   mutable torch::Tensor input_embedding;
 
   // multimodal
-  MMData mm_data;
+  MMBatchData mm_data;
 
   // deep_stack for Qwen3-VL
   mutable std::vector<torch::Tensor> deep_stacks;
@@ -221,6 +364,7 @@ struct ModelInputParams {
 
   // num tokens of all workers，mainly used for dp case
   std::vector<int32_t> dp_global_token_nums;
+  std::vector<int32_t> dp_is_decode;
   // whether the kv-cache is empty for all sequences,mainly used for dp case
   bool global_empty_kv_cache = true;
 
@@ -274,6 +418,21 @@ struct ModelInputParams {
   torch::Tensor paged_kv_last_page_len;
 
   uint64_t batch_id;
+
+  RecModelInputParams rec_params;
+
+  const OneRecModelInputParams* onerec_params() const {
+    return std::get_if<OneRecModelInputParams>(&rec_params);
+  }
+
+  bool has_onerec_params() const { return onerec_params() != nullptr; }
+
+  OneRecModelInputParams& mutable_onerec_params() {
+    if (!has_onerec_params()) {
+      rec_params.emplace<OneRecModelInputParams>();
+    }
+    return std::get<OneRecModelInputParams>(rec_params);
+  }
 
   struct GraphBuffer {
     torch::Tensor attn_mask;

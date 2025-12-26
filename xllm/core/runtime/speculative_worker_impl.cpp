@@ -597,10 +597,10 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   if (!FLAGS_enable_atb_spec_kernel) {
     input_params.num_sequences = total_num_val_tokens;
     input_params.q_max_seq_len = 1;
-    input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+    input_params.batch_forward_type = BatchForwardType::DECODE;
   } else {
     input_params.q_max_seq_len = num_val_tokens;
-    input_params.batch_forward_type = BatchForwardType::DECODE;
+    input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
   }
   input_params.q_seq_lens_vec = std::move(q_seq_lens_vec);
   input_params.q_seq_lens =
@@ -707,21 +707,16 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
                                     positions.numel()};
   // Get the tokens generated in the last step (flattened for easier indexing)
-  torch::Tensor last_token_ids =
-      safe_to(last_step_output_[last_step_output_idx_]
-                  .sample_output.next_tokens.flatten(),
-              torch::kCPU);
+  torch::Tensor last_token_ids = safe_to(
+      last_step_output_.sample_output.next_tokens.flatten(), torch::kCPU);
   Slice<int64_t> last_tokens_ids_slice = {last_token_ids.data_ptr<int64_t>(),
                                           last_token_ids.numel()};
 
   // Determine how many tokens were decoded in the last step
   // If the output is 2D, it means multiple tokens were generated per sequence
   int32_t last_step_decode_num = 1;
-  if (last_step_output_[last_step_output_idx_]
-          .sample_output.next_tokens.dim() == 2) {
-    last_step_decode_num =
-        last_step_output_[last_step_output_idx_].sample_output.next_tokens.size(
-            1);
+  if (last_step_output_.sample_output.next_tokens.dim() == 2) {
+    last_step_decode_num = last_step_output_.sample_output.next_tokens.size(1);
   }
 
   Slice<int32_t> kv_seq_lens_slice = input_params.kv_seq_lens_vec;

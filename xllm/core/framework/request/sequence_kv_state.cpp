@@ -53,6 +53,11 @@ void KVCacheState::add_kv_blocks(const std::vector<Block>& new_blocks) {
   blocks_.insert(blocks_.end(), new_blocks.begin(), new_blocks.end());
 }
 
+void KVCacheState::incr_shared_kv_blocks_num(size_t num) {
+  CHECK(num_owned_shared_blocks_ + num <= num_kv_blocks());
+  num_owned_shared_blocks_ += num;
+}
+
 void KVCacheState::add_shared_kv_blocks(std::vector<Block>&& blocks,
                                         size_t current_total_num_tokens) {
   if (blocks.empty()) {

@@ -50,6 +50,9 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
   }
 
   brpc::ServerOptions options;
+  // TODO: enable arean message factory later.
+  // options.rpc_pb_message_factory =
+  //    brpc::GetArenaRpcPBMessageFactory<1024 * 1024, 1024 * 1024 * 128>();
   options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
   options.num_threads = FLAGS_num_threads;
   if (server_->Start(FLAGS_port, &options) != 0) {

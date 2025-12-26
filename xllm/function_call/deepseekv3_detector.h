@@ -42,7 +42,7 @@ class DeepSeekV3Detector : public BaseFormatDetector {
  private:
   std::string func_call_regex_;
   std::string func_detail_regex_;
-  std::string _last_arguments_;
+  std::string last_arguments_;
 
   std::string_view trim_whitespace(std::string_view str) const;
   std::vector<std::pair<size_t, size_t>> find_tool_call_ranges(

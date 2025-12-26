@@ -17,7 +17,6 @@ limitations under the License.
 #pragma once
 
 #include "core/layers/qwen2_decoder_layer.h"
-#include "layers/common/rotary_embedding_util.h"
 #include "llm_model_base.h"
 
 // QWen2 model compatible with huggingface weights
@@ -44,24 +43,47 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
     auto dp_local_tp_size =
         parallel_args.world_size() / parallel_args.dp_size();
     dp_rank_ = parallel_args.rank() / dp_local_tp_size;
+    if (!mrope_section_.empty()) {
+      cos_sin_ = layer::rotary::get_concat_rotary_embedding(
+          model_args.hidden_size() / model_args.n_heads(),
+          model_args.max_position_embeddings(),
+          model_args.rope_theta(),
+          options);
+    }
 
-    blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
     norm_ = register_module("norm", layer::RMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
 
-    cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        model_args.hidden_size() / model_args.n_heads(),
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
-        options);
-
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto block = QWen2DecoderLayer(context);
-      layers_.push_back(block);
-      blocks_->push_back(block);
+      auto layer = QWen2DecoderLayer(context);
+      layers_.push_back(layer);
     }
+  }
+  std::pair<torch::Tensor, torch::Tensor> apply_mrope(
+      const torch::Tensor positions) override {
+    auto target_cos_sin = cos_sin_.index({positions});
+    auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
+    auto cos_pos = target_cos_sin_chunks[0].contiguous();
+    auto sin_pos = target_cos_sin_chunks[1].contiguous();
+    auto apply = [this](torch::Tensor x) {
+      auto sections = mrope_section_;
+      sections.insert(sections.end(), sections.begin(), sections.end());
+
+      auto vec = x.split(sections, -1);
+      std::vector<torch::Tensor> selects;
+      selects.reserve(vec.size());
+
+      for (int64_t i = 0; i < vec.size(); ++i) {
+        auto m = vec[i];
+        selects.push_back(m[i % mrope_section_.size()]);
+      }
+      return torch::cat(selects, -1);
+    };
+    cos_pos = apply(cos_pos.reshape({positions.size(0), -1, cos_pos.size(-1)}));
+    sin_pos = apply(sin_pos.reshape({positions.size(0), -1, sin_pos.size(-1)}));
+    return std::make_pair(cos_pos, sin_pos);
   }
 };
 TORCH_MODULE(QWen2Model);

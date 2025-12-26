@@ -21,6 +21,7 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
+#include "executor_impl_factory.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
@@ -53,5 +54,5 @@ class BaseExecutorImpl : public ExecutorImpl {
   torch::Device device_;
   runtime::Options options_;
 };
-
+REGISTER_EXECUTOR("base", BaseExecutorImpl);
 }  // namespace xllm

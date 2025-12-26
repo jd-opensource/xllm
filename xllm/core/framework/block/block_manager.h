@@ -54,8 +54,6 @@ class BlockManager {
 
   virtual void deallocate(const Slice<Block>& blocks) = 0;
 
-  virtual void deallocate(std::vector<Block>& blocks) = 0;
-
   virtual std::vector<Block> allocate(size_t num_blocks) = 0;
 
   virtual std::vector<Block> allocate_shared(
@@ -68,7 +66,6 @@ class BlockManager {
 
   // get merged all dp rank KVCacheEvent
   virtual void get_merged_kvcache_event(KvCacheEvent* event) const = 0;
-  virtual float get_gpu_cache_usage_perc() const = 0;
 
   virtual size_t num_blocks_in_prefix_cache() const = 0;
   virtual size_t num_free_blocks() const = 0;

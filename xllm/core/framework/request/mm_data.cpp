@@ -19,120 +19,179 @@ limitations under the License.
 
 namespace xllm {
 
-std::optional<std::string> MMType::to_string() {
-  switch (value) {
-    case Value::NONE:
-      return std::nullopt;
-    case Value::IMAGE:
-      return "image";
-    case Value::VIDEO:
-      return "video";
-    case Value::AUDIO:
-      return "audio";
-    case Value::EMBEDDING:
-      return "embedding";
-    default:
-      LOG(WARNING) << "Unknown mm type: " << static_cast<int>(value);
+MMData::MMData(uint32_t ty, const MMItemVec& items)
+    : ty_(ty), items_(std::move(items)) {}
+
+MMData::MMData(uint32_t ty, const MMDict& items)
+    : ty_(ty), items_(std::move(items)) {}
+
+bool MMData::has(const MMKey& key) const {
+  if (!valid()) return false;
+
+  if (hold<MMDict>()) {
+    const auto& dict = items<MMDict>();
+    const auto& itor = dict.find(key);
+
+    return itor != dict.end();
+  } else if (hold<MMItemVec>()) {
+    const auto& vec = items<MMItemVec>();
+    for (const auto& item : vec) {
+      if (item.has(key)) {
+        return true;
+      }
+    }
+    return false;
   }
-  return std::nullopt;
+  return false;
+}
+
+size_t MMData::size() const {
+  if (!valid()) return 0;
+
+  if (std::holds_alternative<MMDict>(items_)) {
+    return std::get<MMDict>(items_).size();
+  } else if (std::holds_alternative<MMItemVec>(items_)) {
+    return std::get<MMItemVec>(items_).size();
+  }
+}
+
+bool MMData::add(MMType type, const MMDataItem& item) {
+  if (!hold<MMItemVec>()) items_ = MMItemVec();
+
+  auto& vec = items<MMItemVec>();
+
+  ty_ |= type;
+  vec.emplace_back(item);
+
+  return true;
+}
+
+MMDataItem& MMData::add(MMType type) {
+  if (!hold<MMItemVec>()) items_ = MMItemVec();
+
+  auto& vec = items<MMItemVec>();
+
+  ty_ |= type;
+  vec.emplace_back(type);
+
+  return vec.back();
+}
+
+void MMData::get(uint32_t type, MMItemVec& vec) const {
+  if (!valid()) return;
+
+  if (!hold<MMItemVec>()) return;
+
+  const auto& data = items<MMItemVec>();
+
+  for (const auto& item : data) {
+    if (item.type() & type) {
+      vec.emplace_back(item);
+    }
+  }
+}
+
+void MMData::get(const MMKey& key, std::vector<torch::Tensor>& vec) const {
+  if (!valid()) return;
+
+  if (hold<MMDict>()) {
+    const auto& dict = items<MMDict>();
+    const auto& itor = dict.find(key);
+
+    if (itor == dict.end()) return;
+
+    if (std::holds_alternative<torch::Tensor>(itor->second)) {
+      vec.push_back(std::get<torch::Tensor>(itor->second));
+    } else if (std::holds_alternative<std::vector<torch::Tensor>>(
+                   itor->second)) {
+      const auto& data = std::get<std::vector<torch::Tensor>>(itor->second);
+      vec.insert(vec.end(), data.begin(), data.end());
+    }
+  } else if (hold<MMItemVec>()) {
+    const auto& lst = items<MMItemVec>();
+    for (const auto& item : lst) {
+      item.get(key, vec);
+    }
+  }
+}
+
+bool MMData::foreach (MMDataItem::IVisitor& v) {
+  if (!valid()) return false;
+
+  if (!hold<MMItemVec>()) return false;
+
+  auto& vec = items<MMItemVec>();
+  for (auto& item : vec) {
+    if (!v.visit(item)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool MMData::foreach (MMDictItem::IVisitor& v) {
+  if (!valid()) return false;
+
+  if (!hold<MMDict>()) return false;
+
+  auto& dict = items<MMDict>();
+  for (auto& pair : dict) {
+    if (!v.visit(pair.first, pair.second)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool MMData::foreach (IItemVisitor& v) {
+  if (!valid()) return false;
+
+  if (hold<MMItemVec>()) {
+    auto& vec = items<MMItemVec>();
+    for (auto& item : vec) {
+      if (!v.visit(item)) {
+        return false;
+      }
+    }
+  } else if (hold<MMDict>()) {
+    auto& dict = items<MMDict>();
+    for (auto& pair : dict) {
+      if (!v.visit(pair.first, pair.second)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 void MMData::debug_print() const {
   LOG(INFO) << "mm data debug print, ty:" << ty_;
 
-  for (const auto& pair : data_) {
-    if (std::holds_alternative<torch::Tensor>(pair.second)) {
-      torch::Tensor item = std::get<torch::Tensor>(pair.second);
-      LOG(INFO) << " single tensor, key:" << pair.first
-                << " device:" << item.device() << " dtype:" << item.dtype()
-                << " shape:" << item.sizes();
-    } else if (std::holds_alternative<std::vector<torch::Tensor>>(
-                   pair.second)) {
-      const auto& lst = std::get<std::vector<torch::Tensor>>(pair.second);
-
-      for (const auto& item : lst) {
-        LOG(INFO) << " vector tensor, key:" << pair.first
+  if (hold<MMItemVec>()) {
+    const auto& vec = items<MMItemVec>();
+    for (const auto& item : vec) {
+      item.debug_print();
+    }
+  } else if (hold<MMDict>()) {
+    const auto& dict = items<MMDict>();
+    for (const auto& pair : dict) {
+      if (std::holds_alternative<torch::Tensor>(pair.second)) {
+        torch::Tensor item = std::get<torch::Tensor>(pair.second);
+        LOG(INFO) << " single tensor, key:" << pair.first
                   << " device:" << item.device() << " dtype:" << item.dtype()
                   << " shape:" << item.sizes();
-      }
-    } else {
-      assert(0);
-    }
-  }
-}
-
-MMData MMData::to(const MMData& mm_data, const torch::Device& device) {
-  MMDict dict;
-
-  for (const auto& pair : mm_data.data()) {
-    if (std::holds_alternative<torch::Tensor>(pair.second)) {
-      dict[pair.first] =
-          safe_to(std::get<torch::Tensor>(pair.second), device, true);
-    } else if (std::holds_alternative<std::vector<torch::Tensor>>(
-                   pair.second)) {
-      const auto& lst = std::get<std::vector<torch::Tensor>>(pair.second);
-
-      std::vector<torch::Tensor> vec;
-      vec.reserve(lst.size());
-
-      for (const auto& item : lst) {
-        vec.emplace_back(safe_to(item, device, true));
-      }
-
-      dict[pair.first] = vec;
-    } else {
-      assert(0);
-    }
-  }
-
-  return std::move(MMData(mm_data.type(), dict));
-}
-
-MMData MMData::batch(const std::vector<MMData>& mm_datas) {
-  uint32_t ty = 0;
-  std::unordered_map<MMKey, std::vector<torch::Tensor>> lists;
-
-  for (const auto& item : mm_datas) {
-    ty |= item.type();
-    for (const auto& pair : item.data()) {
-      if (std::holds_alternative<torch::Tensor>(pair.second)) {
-        lists[pair.first].emplace_back(std::get<torch::Tensor>(pair.second));
       } else if (std::holds_alternative<std::vector<torch::Tensor>>(
                      pair.second)) {
-        auto& tar = lists[pair.first];
         const auto& lst = std::get<std::vector<torch::Tensor>>(pair.second);
-        tar.insert(tar.end(), lst.begin(), lst.end());
-      } else {
-        assert(0);
+
+        for (const auto& item : lst) {
+          LOG(INFO) << " vector tensor, key:" << pair.first
+                    << " device:" << item.device() << " dtype:" << item.dtype()
+                    << " shape:" << item.sizes();
+        }
       }
     }
   }
-
-  auto check = [](const std::vector<torch::Tensor>& vec) {
-    if (vec.empty()) return false;
-
-    const int64_t ref_dim = vec[0].dim();
-    if (ref_dim == 0) return false;
-
-    const auto ref_shape = vec[0].sizes().slice(1);
-    for (size_t i = 1; i < vec.size(); ++i) {
-      if (vec[i].dim() != ref_dim || vec[i].sizes().slice(1) != ref_shape) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  MMDict dict;
-  for (const auto& pair : lists) {
-    if (check(pair.second)) {
-      dict[pair.first] = torch::cat(pair.second);
-    } else {
-      dict[pair.first] = std::move(pair.second);
-    }
-  }
-
-  return std::move(MMData(ty, dict));
 }
 
 }  // namespace xllm

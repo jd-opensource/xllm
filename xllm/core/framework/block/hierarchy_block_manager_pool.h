@@ -17,13 +17,31 @@ limitations under the License.
 
 #include "block_manager_pool.h"
 #include "distributed_runtime/engine.h"
+#include "util/blockingconcurrentqueue.h"
 
 namespace xllm {
 
 class Engine;
 
+struct OffloadBlockPair {
+  OffloadBlockPair(Block& s, Block& d) : src(s), dst(d) {}
+
+  OffloadBlockPair(Block&& s, Block&& d)
+      : src(std::move(s)), dst(std::move(d)) {}
+
+  OffloadBlockPair(Block& s) : src(s) {}
+
+  OffloadBlockPair(Block&& s) : src(std::move(s)) {}
+
+  Block src;
+  Block dst;
+};
+
 class HierarchyBlockManagerPool : public BlockManagerPool {
  public:
+  using OffloadBlockPairQueue =
+      moodycamel::BlockingConcurrentQueue<std::shared_ptr<OffloadBlockPair>>;
+
   explicit HierarchyBlockManagerPool(const BlockManagerPool::Options& options,
                                      Engine* engine,
                                      int32_t dp_size = 1);
@@ -51,9 +69,7 @@ class HierarchyBlockManagerPool : public BlockManagerPool {
 
   // BlockTransferInfo per step
   std::vector<std::vector<BlockTransferInfo>> load_block_transfer_infos_;
-  std::vector<std::vector<BlockTransferInfo>> offload_block_transfer_infos_;
-  std::vector<std::vector<Block>> saved_host_blocks_;
-  std::vector<std::vector<Block>> saved_device_blocks_;
+  std::vector<OffloadBlockPairQueue> offload_block_pair_queues_;
 };
 
 }  // namespace xllm

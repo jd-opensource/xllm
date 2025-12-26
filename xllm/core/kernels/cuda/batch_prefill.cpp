@@ -55,24 +55,25 @@ void batch_prefill(torch::Tensor float_workspace_buffer,
   const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
   const int64_t batch_size = qo_indptr_host.size(0) - 1;
 
-  auto plan_info = FunctionFactory::get_instance().prefill_plan_func(uri).call(
-      float_workspace_buffer,
-      int_workspace_buffer,
-      page_locked_int_workspace_buffer,
-      qo_indptr_host,
-      kv_cu_seq_lens_host,
-      kv_len_arr_host,
-      total_num_rows,
-      batch_size,
-      query.size(1),  // num_qo_heads
-      key.size(1),    // num_kv_heads
-      /*page_size=*/1,
-      enable_cuda_graph,
-      query.size(-1),  // head_dim_qk
-      value.size(-1),  // head_dim_vo
-      /*causal=*/true);
-
   if (backend == "fa2") {
+    auto plan_info =
+        FunctionFactory::get_instance().fa2_prefill_plan_func(uri).call(
+            float_workspace_buffer,
+            int_workspace_buffer,
+            page_locked_int_workspace_buffer,
+            qo_indptr_host,
+            kv_cu_seq_lens_host,
+            kv_len_arr_host,
+            total_num_rows,
+            batch_size,
+            query.size(1),  // num_qo_heads
+            key.size(1),    // num_kv_heads
+            /*page_size=*/1,
+            enable_cuda_graph,
+            query.size(-1),  // head_dim_qk
+            value.size(-1),  // head_dim_vo
+            /*causal=*/true);
+
     FunctionFactory::get_instance().fa2_prefill_ragged_run_func(uri).call(
         float_workspace_buffer,
         int_workspace_buffer,
@@ -100,6 +101,24 @@ void batch_prefill(torch::Tensor float_workspace_buffer,
         /*rope_rcp_theta=*/1.0 / 10000.0,
         /*token_pos_in_items_len=*/0);
   } else if (backend == "fa3") {
+    auto plan_info =
+        FunctionFactory::get_instance().fa3_prefill_plan_func(uri).call(
+            float_workspace_buffer,
+            int_workspace_buffer,
+            page_locked_int_workspace_buffer,
+            qo_indptr_host,
+            kv_cu_seq_lens_host,
+            kv_len_arr_host,
+            total_num_rows,
+            batch_size,
+            query.size(1),  // num_qo_heads
+            key.size(1),    // num_kv_heads
+            /*page_size=*/1,
+            enable_cuda_graph,
+            query.size(-1),  // head_dim_qk
+            value.size(-1),  // head_dim_vo
+            /*causal=*/true);
+
     FunctionFactory::get_instance().fa3_prefill_ragged_run_func(uri).call(
         float_workspace_buffer,
         int_workspace_buffer,

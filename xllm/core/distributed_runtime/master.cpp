@@ -34,6 +34,8 @@ limitations under the License.
 #include "llm_engine.h"
 #include "llm_master.h"
 #include "models/model_registry.h"
+#include "rec_engine.h"
+#include "rec_master.h"
 #include "speculative_engine.h"
 #include "util/device_name_utils.h"
 #include "util/scope_guard.h"
@@ -231,6 +233,35 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
       eng_options.device_ip(options_.device_ip().value());
     }
     engine_ = std::make_unique<LLMEngine>(eng_options);
+  } else if (type == EngineType::REC) {
+    options_.enable_schedule_overlap(false);
+    LOG(WARNING) << "Force to disable schedule overlap for REC model, not "
+                    "supported yet.";
+    runtime::Options eng_options;
+    eng_options.model_path(options_.model_path())
+        .devices(devices)
+        .backend(options_.backend())
+        .block_size(options_.block_size())
+        .max_cache_size(options_.max_cache_size())
+        .max_memory_utilization(options_.max_memory_utilization())
+        .enable_prefix_cache(options_.enable_prefix_cache())
+        .task_type(options_.task_type())
+        .enable_chunked_prefill(options_.enable_chunked_prefill())
+        .enable_offline_inference(options_.enable_offline_inference())
+        .spawn_worker_path(options_.spawn_worker_path())
+        .enable_shm(options_.enable_shm())
+        .is_local(options_.is_local())
+        .enable_schedule_overlap(options_.enable_schedule_overlap())
+        .master_node_addr(options_.master_node_addr())
+        .nnodes(options_.nnodes())
+        .node_rank(options_.node_rank())
+        .dp_size(options_.dp_size())
+        .ep_size(options_.ep_size())
+        .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .max_tokens_per_chunk_for_prefill(
+            options_.max_tokens_per_chunk_for_prefill());
+
+    engine_ = std::make_unique<RecEngine>(eng_options);
   } else {
     LOG(WARNING) << "Not supported llm engine type: "
                  << static_cast<size_t>(type);
@@ -246,6 +277,9 @@ std::unique_ptr<Master> create_master(const std::string& backend,
   } else if (backend == "dit") {
     LOG(INFO) << "creating dit master";
     return std::make_unique<DiTMaster>(options);
+  } else if (backend == "rec") {
+    LOG(INFO) << "creating rec master";
+    return std::make_unique<RecMaster>(options);
   } else {
     LOG(FATAL) << "Failed to create master, backend is" << backend;
     return nullptr;

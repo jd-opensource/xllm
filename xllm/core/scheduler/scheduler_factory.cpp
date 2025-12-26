@@ -19,6 +19,7 @@ limitations under the License.
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
 #include "scheduler/dit_scheduler.h"
+#include "scheduler/fixed_steps_scheduler.h"
 #include "scheduler/pd_ooc_scheduler.h"
 #include "scheduler/prefill_only_scheduler.h"
 #include "scheduler/zero_eviction_scheduler.h"
@@ -55,6 +56,12 @@ std::unique_ptr<DiTScheduler> create_dit_scheduler(
     DiTEngine* engine,
     DiTScheduler::Options options) {
   return std::make_unique<DiTDynamicBatchScheduler>(engine, options);
+}
+
+std::unique_ptr<FixedStepsScheduler> create_fixed_steps_scheduler(
+    Engine* engine,
+    ContinuousScheduler::Options options) {
+  return std::make_unique<FixedStepsScheduler>(engine, options);
 }
 
 }  // namespace xllm

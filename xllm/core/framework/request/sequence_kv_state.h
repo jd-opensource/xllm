@@ -36,6 +36,7 @@ class KVCacheState {
   void add_kv_blocks(const std::vector<Block>& new_blocks);
   void add_shared_kv_blocks(std::vector<Block>&& blocks,
                             size_t current_total_num_tokens);
+  void incr_shared_kv_blocks_num(size_t num);
 
   size_t current_max_tokens_capacity() const;
 

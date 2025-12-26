@@ -187,6 +187,7 @@ def set_npu_envs():
         NPU_TOOLKIT_HOME+"/lib64/plugin/opskernel" + ":" + \
         NPU_TOOLKIT_HOME+"/lib64/plugin/nnengine" + ":" + \
         NPU_TOOLKIT_HOME+"/opp/built-in/op_impl/ai_core/tbe/op_tiling/lib/linux/"+arch + ":" + \
+        NPU_TOOLKIT_HOME+"/opp/vendors/xllm/op_api/lib" + ":" + \
         NPU_TOOLKIT_HOME+"/tools/aml/lib64" + ":" + \
         NPU_TOOLKIT_HOME+"/tools/aml/lib64/plugin" + ":" + \
         LD_LIBRARY_PATH
@@ -376,15 +377,17 @@ class ExtBuild(build_ext):
             cmake_args += ["-DUSE_MLU=ON"]
             set_mlu_envs()
         elif self.device == "cuda":
-            cuda_architectures = "80;89;90"
+            torch_cuda_architectures = os.getenv("TORCH_CUDA_ARCH_LIST")
+            if not torch_cuda_architectures:
+                raise ValueError("Please set TORCH_CUDA_ARCH_LIST environment variable, e.g. export TORCH_CUDA_ARCH_LIST=\"8.0 8.9 9.0 10.0 12.0\"")
             cmake_args += ["-DUSE_CUDA=ON", 
-                           f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}"]
+                           f"-DTORCH_CUDA_ARCH_LIST={torch_cuda_architectures}"]
             set_cuda_envs()
         elif self.device == "ilu":
             cmake_args += ["-DUSE_ILU=ON"]
             set_ilu_envs()
         else:
-            raise ValueError("Please set --device to a2 or a3 or mlu or cuda.")
+            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu.")
 
         product = "xllm"
         if self.generate_so:

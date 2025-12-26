@@ -119,9 +119,9 @@ class JsonGenerator {
 std::string jsonToString(const json& value) { return value.dump(); }
 
 // Helper function to parse JSON string back to json
-json parseJsonString(const std::string& jsonStr) {
+json parse_json_string(const std::string& json_str) {
   try {
-    return json::parse(jsonStr);
+    return json::parse(json_str);
   } catch (const json::parse_error& e) {
     throw std::runtime_error("Failed to parse JSON: " + std::string(e.what()));
   }
@@ -143,24 +143,24 @@ class PartialJsonParserPropertyTest : public ::testing::Test {
 TEST_F(PartialJsonParserPropertyTest, TestFineJson) {
   for (int i = 0; i < FINE_JSON_EXAMPLES; ++i) {
     json originalJson = generator.generateJson();
-    std::string jsonString = jsonToString(originalJson);
+    std::string json_string = jsonToString(originalJson);
 
     try {
       // Parse with our parser
-      std::string result = ParseMalformedString(jsonString, ALL, false);
+      std::string result = parse_malformed_string(json_string, ALL, false);
 
       // Parse both original and result with standard JSON parser
-      json originalParsed = parseJsonString(jsonString);
-      json resultParsed = parseJsonString(result);
+      json original_parsed = parse_json_string(json_string);
+      json result_parsed = parse_json_string(result);
 
       // They should be equivalent
-      EXPECT_EQ(originalParsed, resultParsed)
-          << "Original: " << jsonString << "\nResult: " << result;
+      EXPECT_EQ(original_parsed, result_parsed)
+          << "Original: " << json_string << "\nResult: " << result;
 
     } catch (const std::exception& e) {
       // If our parser fails, the original should also be invalid JSON
       // This is acceptable for some edge cases
-      GTEST_SKIP() << "Skipping invalid JSON: " << jsonString
+      GTEST_SKIP() << "Skipping invalid JSON: " << json_string
                    << " Error: " << e.what();
     }
   }
@@ -170,36 +170,36 @@ TEST_F(PartialJsonParserPropertyTest, TestFineJson) {
 TEST_F(PartialJsonParserPropertyTest, TestPartialJson) {
   for (int i = 0; i < PARTIAL_JSON_EXAMPLES; ++i) {
     json originalJson = generator.generateJson();
-    std::string jsonString = jsonToString(originalJson);
+    std::string json_string = jsonToString(originalJson);
 
-    if (jsonString.empty()) continue;
+    if (json_string.empty()) continue;
 
     // Test various prefixes of the JSON string
-    int step = std::max(1, static_cast<int>(jsonString.length()) / 10);
-    for (size_t pos = 1; pos < jsonString.length(); pos += step) {
-      std::string partialJson = jsonString.substr(0, pos);
+    int step = std::max(1, static_cast<int>(json_string.length()) / 10);
+    for (size_t pos = 1; pos < json_string.length(); pos += step) {
+      std::string partial_json = json_string.substr(0, pos);
 
       // Skip if starts with '-' (known problematic case)
-      if (partialJson[0] == '-' && partialJson.length() == 1) {
+      if (partial_json[0] == '-' && partial_json.length() == 1) {
         continue;
       }
 
       try {
-        std::string result = ParseMalformedString(partialJson, ALL, false);
+        std::string result = parse_malformed_string(partial_json, ALL, false);
 
         // The result should be valid JSON
-        json resultParsed = parseJsonString(result);
+        json result_parsed = parse_json_string(result);
 
         // Basic sanity check: result should not be empty
         EXPECT_FALSE(result.empty())
-            << "Empty result for partial JSON: " << partialJson;
+            << "Empty result for partial JSON: " << partial_json;
 
       } catch (const MalformedJSONException& e) {
         // Some partial JSONs are expected to fail
         // This is acceptable behavior
         continue;
       } catch (const std::exception& e) {
-        FAIL() << "Unexpected exception for partial JSON: " << partialJson
+        FAIL() << "Unexpected exception for partial JSON: " << partial_json
                << " Error: " << e.what();
       }
     }
@@ -217,10 +217,10 @@ TEST_F(PartialJsonParserPropertyTest, TestKnownEdgeCases) {
       "   "  // Whitespace only
   };
 
-  for (const auto& testCase : shouldFail) {
-    EXPECT_THROW(ParseMalformedString(testCase, ALL, false),
+  for (const auto& test_case : shouldFail) {
+    EXPECT_THROW(parse_malformed_string(test_case, ALL, false),
                  MalformedJSONException)
-        << "Expected failure for: " << testCase;
+        << "Expected failure for: " << test_case;
   }
 }
 
@@ -232,7 +232,7 @@ TEST_F(PartialJsonParserPropertyTest, TestKnownSuccessCases) {
     TypeOptions options;
   };
 
-  std::vector<TestCase> testCases = {
+  std::vector<TestCase> test_cases = {
       {"[", "[]", ALL},
       {"[0.", "[0]", ALL},
       {"{\"key\": ", "{}", ALL},
@@ -241,15 +241,15 @@ TEST_F(PartialJsonParserPropertyTest, TestKnownSuccessCases) {
       {"[\"", "[\"\"]", static_cast<TypeOptions>(ARR | STR)},
       {"{\"foo\":\"bar", "{\"foo\":\"bar\"}", ALL}};
 
-  for (const auto& testCase : testCases) {
+  for (const auto& test_case : test_cases) {
     try {
       std::string result =
-          ParseMalformedString(testCase.input, testCase.options, false);
-      EXPECT_EQ(result, testCase.expected)
-          << "Input: " << testCase.input << " Expected: " << testCase.expected
+          parse_malformed_string(test_case.input, test_case.options, false);
+      EXPECT_EQ(result, test_case.expected)
+          << "Input: " << test_case.input << " Expected: " << test_case.expected
           << " Got: " << result;
     } catch (const std::exception& e) {
-      FAIL() << "Unexpected exception for input: " << testCase.input
+      FAIL() << "Unexpected exception for input: " << test_case.input
              << " Error: " << e.what();
     }
   }
@@ -263,7 +263,7 @@ TEST_F(PartialJsonParserPropertyTest, TestOptionRestrictions) {
     bool shouldSucceed;
   };
 
-  std::vector<TestCase> testCases = {
+  std::vector<TestCase> test_cases = {
       {"\"", STR, true},
       {"\"", static_cast<TypeOptions>(~STR), false},
       {"[", ARR, true},
@@ -275,18 +275,18 @@ TEST_F(PartialJsonParserPropertyTest, TestOptionRestrictions) {
       {"n", NULL_TYPE, true},
       {"n", static_cast<TypeOptions>(~NULL_TYPE), false}};
 
-  for (const auto& testCase : testCases) {
-    if (testCase.shouldSucceed) {
-      EXPECT_NO_THROW(
-          ParseMalformedString(testCase.input, testCase.allowedOptions, false))
-          << "Expected success for: " << testCase.input
-          << " with options: " << testCase.allowedOptions;
+  for (const auto& test_case : test_cases) {
+    if (test_case.shouldSucceed) {
+      EXPECT_NO_THROW(parse_malformed_string(
+          test_case.input, test_case.allowedOptions, false))
+          << "Expected success for: " << test_case.input
+          << " with options: " << test_case.allowedOptions;
     } else {
-      EXPECT_THROW(
-          ParseMalformedString(testCase.input, testCase.allowedOptions, false),
-          MalformedJSONException)
-          << "Expected failure for: " << testCase.input
-          << " with options: " << testCase.allowedOptions;
+      EXPECT_THROW(parse_malformed_string(
+                       test_case.input, test_case.allowedOptions, false),
+                   MalformedJSONException)
+          << "Expected failure for: " << test_case.input
+          << " with options: " << test_case.allowedOptions;
     }
   }
 }
@@ -297,11 +297,11 @@ TEST_F(PartialJsonParserPropertyTest, TestPerformance) {
 
   for (int i = 0; i < 1000; ++i) {
     json json = generator.generateJson(0, 2);  // Smaller depth for performance
-    std::string jsonString = jsonToString(json);
+    std::string json_string = jsonToString(json);
 
-    if (!jsonString.empty()) {
+    if (!json_string.empty()) {
       try {
-        ParseMalformedString(jsonString, ALL, false);
+        parse_malformed_string(json_string, ALL, false);
       } catch (const MalformedJSONException&) {
         // Expected for some cases
       }
@@ -325,14 +325,14 @@ TEST_F(PartialJsonParserPropertyTest, TestOptionConsistency) {
   for (const auto& input : testInputs) {
     // Test that ALL option works when individual options work
     bool individualSuccess = false;
-    std::string individualResult;
+    std::string individual_result;
 
     std::vector<TypeOptions> individualOptions = {
         STR, NUM, ARR, OBJ, NULL_TYPE, BOOL};
 
     for (auto option : individualOptions) {
       try {
-        individualResult = ParseMalformedString(input, option, false);
+        individual_result = parse_malformed_string(input, option, false);
         individualSuccess = true;
         break;
       } catch (const MalformedJSONException&) {
@@ -343,9 +343,9 @@ TEST_F(PartialJsonParserPropertyTest, TestOptionConsistency) {
     if (individualSuccess) {
       // ALL option should also succeed
       EXPECT_NO_THROW({
-        std::string allResult = ParseMalformedString(input, ALL, false);
+        std::string all_result = parse_malformed_string(input, ALL, false);
         // Results might differ, but both should be valid
-        EXPECT_FALSE(allResult.empty());
+        EXPECT_FALSE(all_result.empty());
       }) << "ALL option failed when individual option succeeded for: "
          << input;
     }

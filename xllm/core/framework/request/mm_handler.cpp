@@ -16,6 +16,7 @@ limitations under the License.
 #include "mm_handler.h"
 
 #include <butil/base64.h>
+#include <butil/strings/string_number_conversions.h>
 #include <glog/logging.h>
 
 #include "core/util/http_downloader.h"
@@ -24,8 +25,10 @@ limitations under the License.
 
 namespace xllm {
 
-bool MMHandlerBase::process(const MMContent& content, MMInputItem& input) {
-  if (!this->load(content, input)) {
+bool MMHandlerBase::process(const MMContent& content,
+                            MMInputItem& input,
+                            MMPayload& payload) {
+  if (!this->load(content, input, payload)) {
     LOG(ERROR) << " load mm data failed";
     return false;
   }
@@ -39,12 +42,33 @@ bool MMHandlerBase::process(const MMContent& content, MMInputItem& input) {
 }
 
 bool MMHandlerBase::load_from_dataurl(const std::string& url,
-                                      std::string& data) {
-  size_t pos = url.find_first_of(',');
+                                      std::string& raw_data,
+                                      MMPayload& payload) {
+  size_t pos = url.find_first_of(';');
   if (pos == std::string::npos) return false;
 
   butil::StringPiece sub(url, pos + 1);
-  return butil::Base64Decode(sub, &data);
+  pos = sub.find_first_of(',');
+  if (pos == std::string::npos) return false;
+
+  butil::StringPiece type(sub, 0, pos);
+  butil::StringPiece data(sub, pos + 1);
+
+  if (type == "base64") {
+    return butil::Base64Decode(data, &raw_data);
+  } else if (type == "binary") {
+    size_t len = 0;
+    bool res = butil::StringToSizeT(data, &len);
+    if (res) {
+      return payload.get(raw_data, len);
+    } else {
+      LOG(ERROR) << " data url is invalid, url is " << url;
+      return false;
+    }
+  } else {
+    LOG(ERROR) << " data url is invalid, url is " << url;
+    return false;
+  }
 }
 
 bool MMHandlerBase::load_from_local(const std::string& url, std::string& data) {
@@ -56,7 +80,9 @@ bool MMHandlerBase::load_from_http(const std::string& url, std::string& data) {
   return helper_.fetch_data(url, data);
 }
 
-bool ImageHandler::load(const MMContent& content, MMInputItem& input) {
+bool ImageHandler::load(const MMContent& content,
+                        MMInputItem& input,
+                        MMPayload& payload) {
   input.clear();
 
   const auto& image_url = content.image_url;
@@ -66,7 +92,7 @@ bool ImageHandler::load(const MMContent& content, MMInputItem& input) {
       0) {  // data url
 
     input.type_ = MMType::IMAGE;
-    return this->load_from_dataurl(url, input.raw_data_);
+    return this->load_from_dataurl(url, input.raw_data_, payload);
   } else if (url.compare(0, httpurl_prefix_.size(), httpurl_prefix_) ==
              0) {  // http url
 
@@ -83,7 +109,9 @@ bool ImageHandler::decode(MMInputItem& input) {
   return decoder.decode(input.raw_data_, input.decode_data_);
 }
 
-bool VideoHandler::load(const MMContent& content, MMInputItem& input) {
+bool VideoHandler::load(const MMContent& content,
+                        MMInputItem& input,
+                        MMPayload& payload) {
   input.clear();
 
   const auto& video_url = content.video_url;
@@ -93,7 +121,7 @@ bool VideoHandler::load(const MMContent& content, MMInputItem& input) {
       0) {  // data url
 
     input.type_ = MMType::VIDEO;
-    return this->load_from_dataurl(url, input.raw_data_);
+    return this->load_from_dataurl(url, input.raw_data_, payload);
   } else if (url.compare(0, httpurl_prefix_.size(), httpurl_prefix_) ==
              0) {  // http url
 
@@ -120,14 +148,15 @@ MMHandlerSet::~MMHandlerSet() {}
 
 bool MMHandlerSet::process(const std::string& type,
                            const MMContent& content,
-                           MMInputItem& input) {
+                           MMInputItem& input,
+                           MMPayload& payload) {
   auto itor = handlers_.find(type);
   if (itor == handlers_.end()) {
     return false;
   }
 
   auto& handler = itor->second;
-  return handler->process(content, input);
+  return handler->process(content, input, payload);
 }
 
 }  // namespace xllm

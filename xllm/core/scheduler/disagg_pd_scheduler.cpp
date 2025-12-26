@@ -267,6 +267,8 @@ bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
+  kv_cache_manager_->prefetch_from_storage(request);
+
   if (request->offline()) {
     // offline request, push to offline queue
     prefill_request_queue_offline_.enqueue(request);

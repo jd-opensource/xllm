@@ -35,47 +35,59 @@ size_t PrefixCacheWithUpload::insert(const Slice<int32_t>& token_ids,
                                      std::vector<Block>& blocks) {
   std::vector<Murmur3Key> insert_keys;
   auto n_tokens = PrefixCache::insert(token_ids, blocks, &insert_keys);
+  save_event_async(true, insert_keys);
+  return n_tokens;
+}
 
-  threadpool_.schedule([insert_keys = std::move(insert_keys), this]() {
-    auto front_ptr = this->db_kvcache_events_.get_front_value();
-    if (!front_ptr) {
-      LOG(INFO) << "Front DoubleBufferKvCacheEvent is nullptr!";
-      return;
-    }
-    if (!this->exited_.load()) {
-      for (const auto& hash_id : insert_keys) {
-        front_ptr->removed_cache.erase(hash_id);
-        front_ptr->stored_cache.insert(hash_id);
-      }
-    }
-  });
+size_t PrefixCacheWithUpload::insert(const std::vector<Block>& blocks) {
+  Slice<Block> slice(blocks);
+  return insert(slice);
+}
 
+size_t PrefixCacheWithUpload::insert(Slice<Block>& blocks) {
+  std::vector<Murmur3Key> insert_keys;
+  auto n_tokens = PrefixCache::insert(blocks, &insert_keys);
+  save_event_async(true, insert_keys);
   return n_tokens;
 }
 
 size_t PrefixCacheWithUpload::evict(size_t n_blocks) {
   std::vector<Murmur3Key> evict_keys;
   auto evict_count = PrefixCache::evict(n_blocks, &evict_keys);
+  save_event_async(false, evict_keys);
+  return evict_count;
+}
 
-  threadpool_.schedule([evict_keys = std::move(evict_keys), this]() {
+void PrefixCacheWithUpload::save_event_async(const bool is_insert,
+                                             std::vector<Murmur3Key>& keys) {
+  threadpool_.schedule([this, is_insert = is_insert, keys = std::move(keys)]() {
+    std::lock_guard<std::mutex> lock(this->mutex_);
     auto front_ptr = this->db_kvcache_events_.get_front_value();
     if (!front_ptr) {
       LOG(INFO) << "Front DoubleBufferKvCacheEvent is nullptr!";
       return;
     }
     if (!this->exited_.load()) {
-      for (const auto& hash_id : evict_keys) {
-        front_ptr->removed_cache.insert(hash_id);
-        front_ptr->stored_cache.erase(hash_id);
+      if (is_insert) {
+        for (const auto& key : keys) {
+          front_ptr->removed_cache.erase(key);
+          front_ptr->stored_cache.insert(key);
+        }
+      } else {
+        for (const auto& key : keys) {
+          front_ptr->removed_cache.insert(key);
+          front_ptr->stored_cache.erase(key);
+        }
       }
     }
   });
-
-  return evict_count;
 }
 
 KvCacheEvent* PrefixCacheWithUpload::get_upload_kvcache_events() {
-  db_kvcache_events_.swap();
+  {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    db_kvcache_events_.swap();
+  }
   if (!exited_.load()) {
     return db_kvcache_events_.get_back_value();
   } else {

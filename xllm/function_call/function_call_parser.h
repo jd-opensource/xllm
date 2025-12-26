@@ -29,7 +29,7 @@ namespace function_call {
 
 class FunctionCallParser {
  public:
-  static const std::unordered_map<std::string, std::string> ToolCallParserEnum;
+  static const std::unordered_map<std::string, std::string> kToolCallParserMap;
 
   FunctionCallParser(const std::vector<JsonTool>& tools,
                      const std::string& tool_call_parser);

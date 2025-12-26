@@ -30,12 +30,12 @@ BaseFormatDetector::BaseFormatDetector()
       eot_token_(""),
       tool_call_separator_(", ") {}
 
-std::unordered_map<std::string, int> BaseFormatDetector::get_tool_indices(
-    const std::vector<JsonTool>& tools) {
-  std::unordered_map<std::string, int> indices;
+std::unordered_map<std::string, int32_t> BaseFormatDetector::get_tool_indices(
+    const std::vector<JsonTool>& tools) const {
+  std::unordered_map<std::string, int32_t> indices;
   for (size_t i = 0; i < tools.size(); ++i) {
     if (!tools[i].function.name.empty()) {
-      indices[tools[i].function.name] = static_cast<int>(i);
+      indices[tools[i].function.name] = static_cast<int32_t>(i);
     } else {
       LOG(ERROR) << "Tool at index " << i
                  << " has empty function name, skipping";
@@ -111,7 +111,7 @@ std::vector<ToolCallItem> BaseFormatDetector::parse_base_json(
   return results;
 }
 
-int BaseFormatDetector::_ends_with_partial_token(
+int32_t BaseFormatDetector::ends_with_partial_token(
     const std::string& buffer,
     const std::string& bot_token) const {
   // Check if buffer ends with a partial bot_token.
@@ -119,8 +119,8 @@ int BaseFormatDetector::_ends_with_partial_token(
   // For some format, the bot_token is not a token in model's vocabulary, such
   // as
   // `[TOOL_CALLS] [` in Mistral.
-  for (int i = 1; i <= std::min(static_cast<int>(buffer.length()),
-                                static_cast<int>(bot_token.length()));
+  for (int32_t i = 1; i <= std::min(static_cast<int32_t>(buffer.length()),
+                                    static_cast<int32_t>(bot_token.length()));
        ++i) {
     if (bot_token.substr(0, i) == buffer.substr(buffer.length() - i)) {
       return i;
@@ -157,7 +157,7 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
   if (!(has_tool_call(current_text) ||
         (current_tool_id_ > 0 &&
          current_text.find(tool_call_separator_) == 0))) {
-    if (_ends_with_partial_token(buffer_, bot_token_) == 0) {
+    if (ends_with_partial_token(buffer_, bot_token_) == 0) {
       std::string normal_text = buffer_;
       buffer_.clear();
 
@@ -181,7 +181,7 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
       current_tool_name_sent_ ? Allow::ALL : (Allow::ALL & ~Allow::STR);
 
   try {
-    int start_idx = 0;
+    int32_t start_idx = 0;
 
     if (current_text.find(bot_token_) == 0) {
       start_idx = bot_token_.length();
@@ -193,14 +193,14 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
       start_idx = tool_call_separator_.length();
     }
 
-    if (start_idx >= static_cast<int>(current_text.length())) {
+    if (start_idx >= static_cast<int32_t>(current_text.length())) {
       return StreamingParseResult();
     }
 
     std::string json_part = current_text.substr(start_idx);
-    auto [obj, end_idx] = _partial_json_loads(json_part, flags);
+    auto [obj, end_idx] = partial_json_loads(json_part, flags);
 
-    bool is_current_complete = _is_complete_json(json_part.substr(0, end_idx));
+    bool is_current_complete = is_complete_json(json_part.substr(0, end_idx));
 
     if (obj.contains("name") && obj["name"].is_string()) {
       std::string tool_name = obj["name"].get<std::string>();
@@ -246,8 +246,8 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
           // If this is a subsequent tool, ensure streamed_args_for_tool is
           // large enough
           else if (current_tool_id_ >=
-                   static_cast<int>(streamed_args_for_tool_.size())) {
-            while (static_cast<int>(streamed_args_for_tool_.size()) <=
+                   static_cast<int32_t>(streamed_args_for_tool_.size())) {
+            while (static_cast<int32_t>(streamed_args_for_tool_.size()) <=
                    current_tool_id_) {
               streamed_args_for_tool_.push_back("");
             }
@@ -299,7 +299,7 @@ StreamingParseResult BaseFormatDetector::parse_streaming_increment(
             std::string prev_args_json = prev_args_it->second;
             if (cur_args_json != prev_args_json) {
               std::string prefix =
-                  _find_common_prefix(prev_args_json, cur_args_json);
+                  find_common_prefix(prev_args_json, cur_args_json);
               argument_diff = prefix.substr(sent);
             }
           }

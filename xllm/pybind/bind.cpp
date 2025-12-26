@@ -246,12 +246,9 @@ PYBIND11_MODULE(xllm_export, m) {
              }
              return py::none();
            })
-      .def_readwrite("ty", &MMData::ty_)
-      .def_readwrite("data", &MMData::data_)
       .def("__repr__", [](const MMData& self) {
         std::stringstream ss;
-        ss << "MMData(" << static_cast<int>(self.ty_) << ": "
-           << self.data_.size() << " items)";
+        ss << "MMData(" << self.type() << ": " << self.size() << " items)";
         return ss.str();
       });
 

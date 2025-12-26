@@ -26,7 +26,7 @@ limitations under the License.
  */
 
 std::string devices = "npu:0";
-std::string model_path = "/export/home/models/Qwen3-8B";
+std::string model_path = "/export/home/models/Qwen3-4B";
 
 int main(int argc, char** argv) {
   xllm::LLM llm_instance;
@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
 
   std::cout << "LLM init succefully." << std::endl;
 
-  const std::string model_name = "Qwen3-8B";
+  const std::string model_name = "Qwen3-4B";
 
   xllm::cc_api_test::run_completion_request(model_name, &llm_instance);
 

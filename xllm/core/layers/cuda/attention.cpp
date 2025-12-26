@@ -88,15 +88,12 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     attention_params.value = value;
     xllm::kernel::batch_prefill(attention_params);
   } else {
-    query = query.view({-1, 1, num_heads_, head_size_});
-    output = output.view({-1, 1, num_heads_, head_size_});
-
     attention_params.query = query;
     attention_params.output = output;
     attention_params.k_cache = k_cache;
     attention_params.v_cache = v_cache;
 
-    // for flashinfer
+    attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
     attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;
     attention_params.paged_kv_indices = attn_metadata.paged_kv_indices;
     attention_params.paged_kv_last_page_len =

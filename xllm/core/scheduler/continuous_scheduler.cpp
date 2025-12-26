@@ -27,6 +27,7 @@ limitations under the License.
 #include <memory>
 #include <sstream>
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch_factory.h"
@@ -37,14 +38,11 @@ limitations under the License.
 #include "util/utils.h"
 
 namespace xllm {
-namespace {
-constexpr size_t kRequestQueueSize = 100000;
-}  // namespace
 
 ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
     : options_(options),
       engine_(engine),
-      request_queue_(kRequestQueueSize),
+      request_queue_(FLAGS_request_queue_size),
       waiting_priority_queue_(create_comparator(options.priority_strategy())),
       waiting_priority_queue_offline_(
           create_comparator(options.priority_strategy())) {
@@ -190,8 +188,9 @@ void ContinuousScheduler::handle_prefill_requests(
   bool blocks_exhausted = false;
   while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 && latency_budget > estimate_latency) {
-    if (kv_cache_manager_->kv_cache_utilization() >=
-        FLAGS_prefill_scheduling_memory_usage_threshold) {
+    if (!options_.enable_disagg_pd() &&
+        kv_cache_manager_->kv_cache_utilization() >=
+            FLAGS_prefill_scheduling_memory_usage_threshold) {
       blocks_exhausted = true;
       break;
     }

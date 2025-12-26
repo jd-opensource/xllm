@@ -30,11 +30,6 @@ void ConcurrentBlockManagerImpl::deallocate(const Slice<Block>& blocks) {
   BlockManagerImpl::deallocate(blocks);
 }
 
-void ConcurrentBlockManagerImpl::deallocate(std::vector<Block>& blocks) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  BlockManagerImpl::deallocate(blocks);
-}
-
 std::vector<Block> ConcurrentBlockManagerImpl::allocate_shared(
     const Slice<int32_t>& tokens_ids,
     const Slice<Block>& existed_shared_blocks) {

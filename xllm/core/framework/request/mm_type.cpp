@@ -13,16 +13,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-#include "framework/model/model_input_params.h"
-#include "framework/parallel_state/parallel_args.h"
+#include "mm_type.h"
 
 namespace xllm {
-namespace layer {
 
-void update_dummy_run_input(int64_t dp_rank,
-                            torch::Tensor& positions,
-                            ModelInputParams& input_params);
+std::optional<std::string> MMType::to_string() {
+  switch (value) {
+    case Value::NONE:
+      return std::nullopt;
+    case Value::IMAGE:
+      return "image";
+    case Value::VIDEO:
+      return "video";
+    case Value::AUDIO:
+      return "audio";
+    case Value::EMBEDDING:
+      return "embedding";
+    default:
+      LOG(WARNING) << "Unknown mm type: " << static_cast<int>(value);
+  }
+  return std::nullopt;
+}
 
-}  // namespace layer
 }  // namespace xllm

@@ -16,7 +16,6 @@ cc_library(
     qwen3_moe_decoder_layer.h
     linear.h
     word_embedding_impl.h
-    layer_utils.h
     indexer.h
     deep_ep.h
     activation.h
@@ -34,7 +33,6 @@ cc_library(
     qwen3_moe_decoder_layer.cpp
     linear.cpp
     word_embedding_impl.cpp
-    layer_utils.cpp
     indexer.cpp
     deep_ep.cpp
     activation.cpp

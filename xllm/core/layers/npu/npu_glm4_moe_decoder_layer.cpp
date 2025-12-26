@@ -121,7 +121,7 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
 
   // not support MTP model yet
   param.enableAclGraph =
-      FLAGS_enable_acl_graph && !is_prefill && args.n_layers() > 1;
+      FLAGS_enable_graph && !is_prefill && args.n_layers() > 1;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}
@@ -460,7 +460,7 @@ void Glm4MoeDecoderImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
-  if (FLAGS_enable_acl_graph && !is_prefill &&
+  if (FLAGS_enable_graph && !is_prefill &&
       input_params.graph_buffer.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(

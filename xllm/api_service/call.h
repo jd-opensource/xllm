@@ -29,6 +29,8 @@ class Call {
   std::string get_x_request_id() { return x_request_id_; }
   std::string get_x_request_time() { return x_request_time_; }
 
+  bool get_binary_payload(std::string& payload);
+
   virtual bool is_disconnected() const = 0;
 
  protected:
