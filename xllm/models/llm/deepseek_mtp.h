@@ -157,15 +157,16 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
     // for dp, if tokens is empty, set tokens to 1 and positions to 0
+    ModelInputParams modified_input_params = input_params;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
-        positions = torch::tensor({0}).to(torch::kInt32).to(device_);
+        positions = torch::tensor({1}).to(torch::kInt32).to(device_);
       }
+      auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+      std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
 
-    ModelInputParams modified_input_params = input_params;
-    layer::update_dummy_run_input(dp_rank_, positions, modified_input_params);
     auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
     torch::Tensor hidden_states = embed_tokens_(tokens);
     // Mask out embeddings where positions == 0 (for MTP not needed at pos 0)
