@@ -137,7 +137,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   // round up to the nearest block number
   const size_t block_size = options_.block_size();
   const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
-  if (num_blocks_needed <= num_blocks) {
+  if (num_blocks_needed + 1 <= num_blocks) {
     return process_beam_search(sequence, /*need_swap*/ true);
   }
   process_beam_search(sequence);

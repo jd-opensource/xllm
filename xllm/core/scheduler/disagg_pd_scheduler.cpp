@@ -130,6 +130,10 @@ void DisaggPDScheduler::profile_ttft() {
   if (!options_.enable_chunked_prefill()) {
     max_context_len =
         std::min(max_context_len, options_.max_tokens_per_batch());
+    int32_t num_valid_blocks = kv_cache_manager_->num_blocks() - 1;// block 0 reserved for padding
+    int32_t block_size = kv_cache_manager_->block_size();
+    max_context_len =
+        std::min(max_context_len, num_valid_blocks * block_size);    
   }
 
   // warm up
@@ -154,11 +158,11 @@ void DisaggPDScheduler::profile_tpot() {
         std::min(max_context_len, options_.max_tokens_per_batch());
   }
 
-  int32_t num_blocks = kv_cache_manager_->num_blocks();
+  int32_t num_valid_blocks = kv_cache_manager_->num_blocks() - 1;// block 0 reserved for padding
   int32_t block_size = kv_cache_manager_->block_size();
   int32_t max_seqs_per_batch = options_.max_seqs_per_batch();
   int32_t request_blocks = max_context_len / block_size + 1;
-  int32_t max_batch_size = num_blocks / request_blocks;
+  int32_t max_batch_size = num_valid_blocks / request_blocks;
 
   // warm up
   profile_manager_->run_request(
@@ -168,7 +172,7 @@ void DisaggPDScheduler::profile_tpot() {
   // each loop iteration. Skip small token lengths to speed up profiling.
   for (int32_t token_length = max_context_len; token_length > 64;
        token_length >>= 1) {
-    max_batch_size = num_blocks / (token_length / block_size + 1);
+    max_batch_size = num_valid_blocks / ((token_length + block_size - 1) / block_size + 1);// batch_size * (ceil(token_length / block_size) + 1) <= num_valid_blocks
     int32_t current_max_batch_size = max_batch_size > max_seqs_per_batch
                                          ? max_seqs_per_batch
                                          : max_batch_size;
