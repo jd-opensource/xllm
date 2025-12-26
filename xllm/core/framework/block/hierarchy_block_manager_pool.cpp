@@ -101,6 +101,60 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
 }
 
 bool HierarchyBlockManagerPool::allocate(Sequence* sequence,
+                                         size_t num_tokens,
+                                         size_t max_copy_in_blocks_num) {
+  // set needed_kv_cache_tokens_num to overlap computation and data transfer
+  if (!BlockManagerPool::allocate(sequence, num_tokens)) {
+    return false;
+  }
+
+  if (sequence->host_kv_state().num_kv_blocks() == 0 &&
+      sequence->stage() != SequenceStage::DECODE) {
+    allocate_host_shared(sequence);
+  }
+
+  int32_t dp_rank = BlockManagerPool::get_dp_rank(sequence);
+  size_t hbm_cache_token_num = sequence->kv_state().kv_cache_tokens_num();
+  size_t host_cache_token_num = sequence->host_kv_state().kv_cache_tokens_num();
+  size_t max_can_copy_blocks_num =
+      host_cache_token_num > hbm_cache_token_num
+          ? host_cache_token_num / options_.block_size() -
+                hbm_cache_token_num / options_.block_size()
+          : 0;
+  if (max_copy_in_blocks_num > max_can_copy_blocks_num) {
+    // not enough blocks to copy, return false
+    LOG(ERROR) << "Not enough host blocks to copy, max_copy_in_blocks_num: "
+               << max_copy_in_blocks_num
+               << ", max_copy_blocks_num: " << max_copy_in_blocks_num;
+    max_copy_in_blocks_num = max_can_copy_blocks_num;
+  }
+  auto hbm_blocks = sequence->kv_state().kv_blocks();
+  auto host_blocks = sequence->host_kv_state().kv_blocks();
+  for (int i = hbm_cache_token_num / options_.block_size();
+       i <
+       max_copy_in_blocks_num + (hbm_cache_token_num / options_.block_size());
+       i++) {
+    load_block_transfer_infos_[dp_rank].emplace_back(
+        BlockTransferInfo(host_blocks[i].id(),
+                          hbm_blocks[i].id(),
+                          host_blocks[i].get_immutable_hash_value(),
+                          TransferType::H2D));
+  }
+
+  size_t target_hbm_cache_token_num =
+      max_copy_in_blocks_num == 0
+          ? hbm_cache_token_num
+          : (max_copy_in_blocks_num +
+             (hbm_cache_token_num / options_.block_size())) *
+                options_.block_size();
+
+  sequence->kv_state().incr_kv_cache_tokens_num(target_hbm_cache_token_num -
+                                                hbm_cache_token_num);
+
+  return true;
+}
+
+bool HierarchyBlockManagerPool::allocate(Sequence* sequence,
                                          size_t num_tokens) {
   if (!BlockManagerPool::allocate(sequence, num_tokens)) {
     return false;

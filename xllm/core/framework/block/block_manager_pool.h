@@ -42,6 +42,9 @@ class BlockManagerPool : public KVCacheManager {
   virtual bool allocate(Sequence* sequence) override;
   virtual bool allocate(std::vector<Sequence*>& sequences) override;
   virtual bool allocate(Sequence* sequence, size_t num_tokens) override;
+  virtual bool allocate(Sequence* sequence,
+                        size_t num_tokens,
+                        size_t needed_copy_in_blocks_num) override;
 
   // Try to allocate blocks with num_tokens,
   // return {} if not enough blocks
@@ -53,6 +56,8 @@ class BlockManagerPool : public KVCacheManager {
   virtual void deallocate(Request* request) override;
   virtual void deallocate(std::vector<Sequence*>& sequences) override;
   virtual void deallocate(Sequence* sequence) override;
+
+  void deallocate_without_cache(Sequence* sequence);
 
   virtual void allocate_shared(Sequence* sequence) override;
   virtual void cache(Sequence* sequence) override;

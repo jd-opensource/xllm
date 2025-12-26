@@ -163,6 +163,11 @@ class Sequence final {
                                   host_kv_state_.kv_cache_tokens_num());
   }
 
+  size_t kv_cache_tokens_num() const {
+    return std::max(kv_state_.kv_cache_tokens_num(),
+                    host_kv_state_.kv_cache_tokens_num());
+  }
+
   // add a new token id to the sequence and update the count
   // the token would be discarded if the sequence is still in prefill stage
   void append_token(const Token& token);

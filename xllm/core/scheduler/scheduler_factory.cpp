@@ -30,7 +30,7 @@ namespace xllm {
 std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
     Engine* engine,
     ContinuousScheduler::Options options) {
-  if (FLAGS_scheduler_strategy == "mix") {
+  if (FLAGS_use_mix_scheduler) {
     CHECK(options.enable_chunked_prefill())
         << "mix scheduler requires enabling chunked prefill";
     return std::make_unique<MixScheduler>(engine, options);

@@ -157,6 +157,14 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   return true;
 }
 
+bool BlockManagerPool::allocate(Sequence* sequence,
+                                size_t num_tokens,
+                                size_t needed_copy_in_blocks_num) {
+  LOG(FATAL)
+      << "allocate(Sequence* sequence, size_t num_tokens, size_t "
+         "needed_copy_in_blocks_num) is not implemented in BlockManagerPool.";
+}
+
 std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
                                               int32_t& dp_rank) {
   dp_rank = get_manager_with_max_free_blocks();
@@ -303,6 +311,15 @@ std::vector<size_t> BlockManagerPool::num_used_blocks() const {
 double BlockManagerPool::kv_cache_utilization() const {
   int32_t dp_rank = get_manager_with_max_free_blocks();
   return block_managers_[dp_rank]->kv_cache_utilization();
+}
+
+// currently use only for profile, which not need prefix cache.
+// If more often used in the future, can be integrated into deallocate function.
+void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
+  DCHECK(sequence != nullptr);
+  int32_t dp_rank = get_dp_rank(sequence);
+  block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+  sequence->reset();
 }
 
 }  // namespace xllm

@@ -51,9 +51,23 @@ class ProfileManager {
 
     PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
   };
+
+  struct CopyBlockProfile {
+    std::string model_name;
+    int block_size;
+    double slope;      // milliseconds per block
+    double intercept;  // milliseconds constant overhead
+    std::string note;
+  };
   ProfileManager(Engine* engine, const Options& options);
 
   int32_t get_token_budget();
+
+  int32_t get_max_copy_block_num(double latency_budget);
+
+  double predict_copy_blocks_time(size_t num_copy_blocks,
+                                  bool if_need_add_constant_term = true);
+
   // for single sequence
   double predict_step_time(int32_t length,
                            int32_t prefix_length = 0,
@@ -141,6 +155,13 @@ class ProfileManager {
                                     int32_t max_context_len,
                                     std::vector<int32_t>& token_length_vec,
                                     std::vector<int32_t>& prefix_length_vec);
+
+  static const std::vector<ProfileManager::CopyBlockProfile>&
+  get_copy_block_profile();
+
+  const ProfileManager::CopyBlockProfile* find_profile(
+      const std::string& model_name,
+      int block_size) const;
 
   std::unique_ptr<TimePredictor> prefill_time_predictor_;
   std::unique_ptr<TimePredictor> decode_time_predictor_;

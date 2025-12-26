@@ -42,6 +42,12 @@ class MixScheduler : public ChunkedPrefillScheduler {
 
   virtual bool if_queue_not_empty() override;
 
+  bool allocate_blocks_for(Sequence* sequence,
+                           size_t token_budget,
+                           size_t kv_cache_tokens_num,
+                           size_t needed_copy_blocks_num,
+                           size_t* current_step_handle_tokens);
+
  private:
   void handle_running_queue_requests(
       double& latency_budget,
@@ -58,8 +64,20 @@ class MixScheduler : public ChunkedPrefillScheduler {
       std::list<std::shared_ptr<Request>>& running_queue,
       double& latency_budget);
   int32_t get_max_chunk(Sequence* sequence,
+                        size_t num_tokens,
+                        size_t kv_cache_tokens_num,
                         int32_t latency_budget,
                         bool use_quadratic_formula = false);
+  size_t get_max_copy_block_num(
+      std::list<std::shared_ptr<Request>>& running_queue,
+      double& latency_budget);
+
+  size_t get_needed_copy_block_num(
+      std::vector<std::shared_ptr<Request>>& req_vec,
+      std::vector<size_t>& per_req_copy_block_num_vec,
+      double max_h2d_transfer_time,
+      double min_total_exec_time,
+      size_t max_h2d_block_num);
 };
 
 }  // namespace xllm

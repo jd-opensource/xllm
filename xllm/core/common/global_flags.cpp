@@ -171,6 +171,18 @@ DEFINE_int32(
     256,
     "Max decode token per sequence which used for ZeroEvictionScheduler.");
 
+DEFINE_string(priority_strategy,
+              "fcfs",
+              "Priority strategy for requests(e.g. fcfs, priority, deadline).");
+
+DEFINE_bool(use_mix_scheduler,
+            false,
+            "Use MixScheduler for handling prefill and decode uniformly.");
+
+DEFINE_bool(enable_online_preempt_offline,
+            true,
+            "Whether to enable online preempt offline.");
+
 // for rec, it's better to set to 100;
 DEFINE_int32(request_queue_size,
              100000,
@@ -330,20 +342,6 @@ DEFINE_double(heart_beat_interval, 0.5, "Heart beat interval.");
 
 DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
 
-// --- priority strategy config ---
-
-DEFINE_string(priority_strategy,
-              "fcfs",
-              "Priority strategy for requests(e.g. fcfs, priority, deadline).");
-
-DEFINE_string(scheduler_strategy,
-              "base",
-              "Scheduler strategy for requests(e.g. base, )");
-
-DEFINE_bool(enable_online_preempt_offline,
-            true,
-            "Whether to enable online preempt offline.");
-
 // --- kvcache store config ---
 
 DEFINE_uint32(prefetch_timeout,
@@ -378,6 +376,10 @@ DEFINE_string(store_metadata_server,
 DEFINE_string(store_local_hostname,
               "",
               "The local host name of the kv cache store client.");
+
+DEFINE_bool(enable_control_h2d_block_num,
+            false,
+            "Whether to control h2d copy block num.");
 
 // --- computation communication parallel config ---
 
