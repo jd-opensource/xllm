@@ -16,7 +16,7 @@ limitations under the License.
 #include "deepseek_v2_decoder_layer_impl.h"
 
 #include "common/global_flags.h"
-#include "layers/common/layer_utils.h"
+#include "layers/common/dp_utils.h"
 
 namespace xllm {
 namespace layer {

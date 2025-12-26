@@ -20,9 +20,9 @@ limitations under the License.
 #include <iomanip>
 
 #include "common/global_flags.h"
+#include "dp_utils.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
-#include "dp_utils.h"
 #include "util/utils.h"
 
 namespace {
@@ -126,12 +126,13 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
     }
     torch::ScalarType combine_dtype = options_.dtype().toScalarType();
     int64_t combine_token_size = hidden_size_ * get_dtype_size(combine_dtype);
-    int64_t max_token_num =
-        (1 + FLAGS_num_speculative_tokens) * FLAGS_max_seqs_per_batch * topk_;
-    CHECK(max_token_num % ep_size == 0)
-        << "max_token_num (" << max_token_num
-        << ") must be divisible by ep_size (" << ep_size << ")";
-    int64_t max_num_tokens_per_rank = max_token_num / ep_size;
+    // Ensure calculation base is at least ep_size
+    int64_t effective_seqs =
+        std::max((int64_t)FLAGS_max_seqs_per_batch, (int64_t)ep_size);
+    int64_t raw_token_num =
+        (1 + FLAGS_num_speculative_tokens) * effective_seqs * topk_;
+    // Round up to the nearest multiple of ep_size
+    int64_t max_num_tokens_per_rank = (raw_token_num + ep_size - 1) / ep_size;
 
     // make sure that all layers share the same deep ep instance
     //  so that the memory footprint is minimized
