@@ -49,6 +49,8 @@ class HierarchyBlockManagerPool : public BlockManagerPool {
 
   bool allocate(Sequence* sequence, size_t num_tokens) override;
 
+  void allocate_shared(Sequence* sequence) override;
+
   void deallocate(Sequence* sequence) override;
 
   void transfer_blocks(std::optional<std::vector<Batch>> batches) override;

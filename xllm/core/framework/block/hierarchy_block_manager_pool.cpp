@@ -124,6 +124,14 @@ bool HierarchyBlockManagerPool::allocate(Sequence* sequence,
   return true;
 }
 
+void HierarchyBlockManagerPool::allocate_shared(Sequence* sequence) {
+  BlockManagerPool::allocate_shared(sequence);
+  if (sequence->host_kv_state().num_kv_blocks() == 0 &&
+      sequence->stage() != SequenceStage::DECODE) {
+    allocate_host_shared(sequence);
+  }
+}
+
 void HierarchyBlockManagerPool::allocate_host_shared(Sequence* sequence) {
   if (options_.enable_prefix_cache()) {
     int32_t dp_rank = BlockManagerPool::get_dp_rank(sequence);
