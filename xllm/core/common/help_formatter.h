@@ -1,0 +1,127 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#pragma once
+
+#include <gflags/gflags.h>
+
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace xllm {
+
+class HelpFormatter {
+ private:
+  static inline const std::vector<
+      std::pair<std::string, std::vector<std::string>>>
+      FLAG_CATEGORIES = {
+          {"COMMON OPTIONS",
+           {"master_node_addr",
+            "host",
+            "port",
+            "model",
+            "devices",
+            "nnodes",
+            "node_rank",
+            "max_memory_utilization",
+            "max_tokens_per_batch",
+            "max_seqs_per_batch",
+            "enable_chunked_prefill",
+            "enable_schedule_overlap",
+            "enable_prefix_cache",
+            "communication_backend",
+            "block_size",
+            "task",
+            "max_cache_size"}},
+          {"MOE MODEL OPTIONS",
+           {"dp_size", "ep_size", "enable_mla", "expert_parallel_degree"}},
+          {"DISAGGREGATED PREFILL-DECODE OPTIONS",
+           {"enable_disagg_pd",
+            "disagg_pd_port",
+            "instance_role",
+            "kv_cache_transfer_mode",
+            "device_ip",
+            "transfer_listen_port"}},
+          {"MTP OPTIONS",
+           {"draft_model", "draft_devices", "num_speculative_tokens"}},
+          {"XLLM-SERVICE OPTIONS",
+           {"xservice_addr", "etcd_addr", "rank_tablefile"}},
+          {"OTHER OPTIONS",
+           {"max_concurrent_requests",
+            "model_id",
+            "num_request_handling_threads",
+            "num_response_handling_threads",
+            "prefill_scheduling_memory_usage_threshold"}},
+  };
+
+ public:
+  static std::string generate_help() {
+    std::ostringstream oss;
+
+    oss << "USAGE: xllm --model <PATH> [OPTIONS]\n\n";
+
+    oss << "REQUIRED OPTIONS:\n";
+    oss << "  --model <PATH>: Path to the model directory. This is "
+           "the only required flag.\n\n";
+
+    oss << "HELP OPTIONS:\n";
+    oss << "  -h, --help: Display this help message and exit.\n\n";
+
+    // Print flags by category
+    for (const auto& [category_name, flag_names] : FLAG_CATEGORIES) {
+      std::ostringstream category_oss;
+
+      for (const auto& flag_name : flag_names) {
+        google::CommandLineFlagInfo flag_info;
+        if (google::GetCommandLineFlagInfo(flag_name.c_str(), &flag_info)) {
+          category_oss << "  --" << flag_info.name;
+          if (!flag_info.description.empty()) {
+            category_oss << ": " << flag_info.description;
+          }
+          category_oss << "\n";
+        }
+      }
+
+      if (!category_oss.str().empty()) {
+        oss << category_name << ":\n";
+        oss << category_oss.str() << "\n";
+      }
+    }
+
+    oss << "For more information and all available options, visit:\n";
+    oss << "  https://github.com/jd-opensource/xllm/blob/main/xllm/core/common/"
+           "global_flags.cpp\n";
+    oss << "Documentation: "
+           "https://xllm.readthedocs.io/zh-cn/latest/cli_reference/\n";
+
+    return oss.str();
+  }
+
+  static void print_help() { std::cout << generate_help(); }
+
+  static void print_usage() {
+    std::cout << "USAGE: xllm --model <PATH> [OPTIONS]\n";
+    std::cout << "Try 'xllm --help' for more information.\n";
+  }
+
+  static void print_error(const std::string& error_msg) {
+    std::cerr << "Error: " << error_msg << "\n\n";
+    print_usage();
+  }
+};
+
+}  // namespace xllm

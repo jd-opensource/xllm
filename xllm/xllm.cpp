@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "api_service/api_service.h"
 #include "core/common/global_flags.h"
+#include "core/common/help_formatter.h"
 #include "core/common/instance_name.h"
 #include "core/common/metrics.h"
 #include "core/common/options.h"
@@ -278,11 +279,26 @@ int run() {
 }
 
 int main(int argc, char** argv) {
+  // Check for --help flag before parsing other flags
+  for (int i = 1; i < argc; ++i) {
+    std::string arg(argv[i]);
+    if (arg == "--help" || arg == "-h") {
+      HelpFormatter::print_help();
+      return 0;
+    }
+  }
+
   FLAGS_alsologtostderr = true;
   FLAGS_minloglevel = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
 
   google::InitGoogleLogging("xllm");
+
+  // Check if model path is provided
+  if (FLAGS_model.empty()) {
+    HelpFormatter::print_error("--model flag is required");
+    return 1;
+  }
 
   return run();
 }
