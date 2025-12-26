@@ -21,6 +21,7 @@ limitations under the License.
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include "core/common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
@@ -190,8 +191,12 @@ class GraphPersistentParam {
 // NPUGraph provides mempool to manage temporary tensors during forward pass
 class AclGraph {
  public:
-  explicit AclGraph(GraphPersistentParam& persistent_param)
-      : persistent_param_(persistent_param) {}
+  explicit AclGraph(GraphPersistentParam& persistent_param,
+                    c10::DeviceIndex device_index)
+      : persistent_param_(persistent_param), device_index_(device_index) {
+    // Initialize capture stream in constructor
+    initialize_capture_stream(device_index);
+  }
 
   // Capture computation graph for given bucket num_tokens
   bool capture(CausalLM* model,
@@ -218,6 +223,9 @@ class AclGraph {
   // Print graph held tensors for debugging
   void print_graph_tensors() const;
 
+  // Initialize capture stream if not already initialized
+  void initialize_capture_stream(c10::DeviceIndex device_index);
+
   // NPUGraph with mempool for managing temporary tensors during forward pass
   c10_npu::NPUGraph graph_;
   uint32_t num_tokens_;
@@ -225,6 +233,10 @@ class AclGraph {
   // Reference to persistent parameters (shared across multiple AclGraph
   // instances)
   GraphPersistentParam& persistent_param_;
+
+  // Cached capture stream, initialized on first capture
+  std::optional<c10_npu::NPUStream> capture_stream_;
+  c10::DeviceIndex device_index_;
 };
 
 // Executor implementation using ACL graph optimization

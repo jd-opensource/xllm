@@ -15,6 +15,7 @@ cc_library(
     base_executor_impl.h
     dit_executor.h
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.h>
+    $<$<BOOL:${USE_NPU}>:device_capture_lock.h>
     worker.h
     worker_impl.h
     llm_worker_impl.h
@@ -31,6 +32,7 @@ cc_library(
     base_executor_impl.cpp
     dit_executor.cpp
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.cpp>
+    $<$<BOOL:${USE_NPU}>:device_capture_lock.cpp>
     worker.cpp
     worker_impl.cpp
     llm_worker_impl.cpp

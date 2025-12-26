@@ -36,6 +36,7 @@ limitations under the License.
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "device_capture_lock.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_loader.h"
@@ -343,6 +344,16 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
 
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                              ForwardInput& processed_input) {
+#if defined(USE_NPU)
+  // Acquire device-level lock to prevent capture from executing simultaneously
+  // This ensures that synchronous operations in prepare_work_before_execute
+  // won't conflict with capture mode
+  if (FLAGS_enable_acl_graph) {
+    auto& capture_lock =
+        DeviceCaptureLock::getInstance().getLock(device_.index());
+    std::lock_guard<std::mutex> lock(capture_lock);
+  }
+#endif
   c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
 
   processed_input = input.to(device_, dtype_);
