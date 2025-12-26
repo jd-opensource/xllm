@@ -14,9 +14,9 @@ By implementing the ACLGraph functionality in the xLLM engine, we have achieved 
 
 ## Usage
 
-The aforementioned features have been implemented internally within the xLLM engine and are transparent to users. Users do not need to concern themselves with the internal implementation details and can directly enable the relevant functionality in applicable scenarios. Enable it via the gflags parameter `enable_aclgraph`. The parameter defaults to false. To enable it, set it to true in the xLLM service startup script, as shown in the example below:
+The aforementioned features have been implemented internally within the xLLM engine and are transparent to users. Users do not need to concern themselves with the internal implementation details and can directly enable the relevant functionality in applicable scenarios. Enable it via the gflags parameter `enable_graph`. The parameter defaults to false. To enable it, set it to true in the xLLM service startup script, as shown in the example below:
 ```shell
---enable_aclgraph=true
+--enable_graph=true
 ```
 
 ## Performance Impact

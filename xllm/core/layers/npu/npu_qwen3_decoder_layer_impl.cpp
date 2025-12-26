@@ -70,7 +70,7 @@ void Qwen3DecoderLayerImpl::param_from_args(
   param.enableIntraLayerAddNorm = true;
   param.enableInterLayerAddNorm = false;
   param.enablePreFetchWeight = FLAGS_enable_prefetch_weight;
-  param.enableAclGraphPagedAttention = FLAGS_enable_acl_graph && !isPrefill;
+  param.enableAclGraphPagedAttention = FLAGS_enable_graph && !isPrefill;
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
 
@@ -204,14 +204,8 @@ int64_t Qwen3DecoderLayerImpl::init_node(
   atb_speed::qwen::QwenDecoderLayer decoder_layer(param);
   decoder_layer.BuildGraph(&operation);
   node.operation.reset(operation);
-  if (node.operation == nullptr) {
-    LOG(FATAL) << "node.operation is null";
-    return -1;
-  }
-  if (node.operation->GetInputNum() < 1) {
-    LOG(FATAL) << "Can not resize number which is smaller than 1";
-    return -1;
-  }
+  CHECK_NOTNULL(node.operation);
+  CHECK_GT(node.operation->GetInputNum(), 0);
   node.inTensors.resize(node.operation->GetInputNum());
   node.outTensors.resize(1);
   size_t inTensorId = 1;
@@ -315,7 +309,7 @@ void Qwen3DecoderLayerImpl::build_node_variant_pack(
         input_params.q_seq_lens_vec.data();
   }
 
-  if (FLAGS_enable_acl_graph && !is_prefill &&
+  if (FLAGS_enable_graph && !is_prefill &&
       input_params.graph_buffer.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(
