@@ -340,6 +340,13 @@ void WorkerService::AllocateKVCacheWithTransfer(
     kv_cache_shape.emplace_back(
         std::vector<int64_t>(req->kv_cache_shape().value_shape().begin(),
                              req->kv_cache_shape().value_shape().end()));
+    // add index shape if exists
+    if (req->kv_cache_shape().index_shape_size() > 0) {
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>(req->kv_cache_shape().index_shape().begin(),
+                               req->kv_cache_shape().index_shape().end()));
+    }
+
     auto future = worker_->allocate_kv_cache_with_transfer_async(
         kv_cache_size, kv_cache_shape);
     bool status = std::move(future).get();
