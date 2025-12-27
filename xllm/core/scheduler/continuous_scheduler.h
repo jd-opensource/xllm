@@ -185,9 +185,6 @@ class ContinuousScheduler : public Scheduler {
   std::vector<int> last_batch_lengths_;
 
  protected:
-  // allocate actual token_num slots.
-  std::vector<Block> allocate_blocks_for(size_t token_num, int32_t& dp_rank);
-
   const Options options_;
 
   // the engine to run the batch

@@ -48,6 +48,8 @@ class BlockManagerPool : public KVCacheManager {
   virtual std::vector<Block> allocate(size_t num_tokens,
                                       int32_t& dp_rank) override;
 
+  virtual bool try_allocate(Sequence* sequence) override;
+
   virtual void deallocate(Request* request) override;
   virtual void deallocate(std::vector<Sequence*>& sequences) override;
   virtual void deallocate(Sequence* sequence) override;

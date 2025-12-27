@@ -165,6 +165,38 @@ std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
   return block_managers_[dp_rank]->allocate(num_blocks_needed);
 }
 
+bool BlockManagerPool::try_allocate(Sequence* sequence) {
+  int32_t dp_rank = get_dp_rank(sequence);
+
+  std::vector<Block> shared_blocks;
+  if (options_.enable_prefix_cache()) {
+    const auto& existed_shared_blocks = sequence->kv_state().kv_blocks().slice(
+        0, sequence->kv_state().shared_kv_blocks_num());
+    // If the sequence holds shared_blocks, the hash values of these blocks do
+    // not need to be recalculated and can be reused directly.
+    shared_blocks = block_managers_[dp_rank]->allocate_shared(
+        sequence->tokens(), existed_shared_blocks);
+  }
+  const size_t shared_num = shared_blocks.size();
+  const size_t block_size = options_.block_size();
+  size_t num_tokens = sequence->tokens().size() - shared_num * block_size;
+
+  const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
+
+  const auto blocks = block_managers_[dp_rank]->allocate(num_blocks_needed);
+  if (blocks.size() != num_blocks_needed) {
+    block_managers_[dp_rank]->deallocate(shared_blocks);
+    return false;
+  }
+
+  sequence->add_kv_blocks(std::move(shared_blocks));
+  sequence->add_kv_blocks(std::move(blocks));
+  sequence->kv_state().incr_kv_cache_tokens_num(sequence->tokens().size());
+  sequence->kv_state().incr_shared_kv_blocks_num(shared_num);
+
+  return true;
+}
+
 bool BlockManagerPool::process_beam_search(Sequence* sequence, bool need_swap) {
   if (!sequence->check_beam_search()) {
     return true;

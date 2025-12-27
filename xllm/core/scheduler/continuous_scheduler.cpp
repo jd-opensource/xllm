@@ -1032,11 +1032,6 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
   }
 }
 
-std::vector<Block> ContinuousScheduler::allocate_blocks_for(size_t token_num,
-                                                            int32_t& dp_rank) {
-  return kv_cache_manager_->allocate(token_num, dp_rank);
-}
-
 std::vector<int64_t> ContinuousScheduler::get_num_occupied_slots(
     std::vector<Sequence*>& sequences) const {
   std::vector<int64_t> num_occupied_slots(options_.dp_size());

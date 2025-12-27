@@ -1069,15 +1069,14 @@ std::vector<bool> DisaggPDScheduler::decode_send_stream_generations(
   return send_status;
 }
 
-std::vector<Block> DisaggPDScheduler::allocate_raw_blocks(int token_num,
-                                                          int32_t& dp_rank) {
+bool DisaggPDScheduler::try_allocate(Sequence* sequence) {
   // When the KV Cache usage reaches the threshold, prefill requests will no
   // longer be scheduled to avoid frequent preemption.
   if (kv_cache_manager_->kv_cache_utilization() <
       FLAGS_prefill_scheduling_memory_usage_threshold) {
-    return allocate_blocks_for(token_num, dp_rank);
+    return kv_cache_manager_->try_allocate(sequence);
   } else {
-    return {};
+    return false;
   }
 }
 

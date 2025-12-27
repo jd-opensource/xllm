@@ -47,6 +47,10 @@ class XTensorManagerPool final : public KVCacheManager {
     LOG(FATAL) << "allocate is not implemented for page manager pool";
   }
 
+  bool try_allocate(Sequence* sequence) override {
+    LOG(FATAL) << "try_allocate is not implemented for page manager pool";
+  }
+
   void allocate_shared(Sequence* sequence) override {
     LOG(FATAL) << "allocate_shared is not implemented for page manager pool";
   }

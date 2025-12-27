@@ -32,6 +32,7 @@ class KVCacheManager {
   virtual bool allocate(Sequence* sequence) = 0;
   virtual bool allocate(std::vector<Sequence*>& sequences) = 0;
   virtual bool allocate(Sequence* sequence, size_t num_tokens) = 0;
+  virtual bool try_allocate(Sequence* sequence) = 0;
 
   virtual void transfer_blocks(std::optional<std::vector<Batch>> batches) {
     return;
