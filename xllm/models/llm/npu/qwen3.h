@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include "core/layers/qwen3_decoder_layer.h"
+#include "core/layers/npu/qwen3_decoder_layer.h"
 #include "llm_model_base.h"
 
 namespace xllm {
@@ -42,10 +42,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    norm_ = register_module("norm", layer::RMSNorm(context));
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    atb_pos_emb_ = layer::NpuRotaryEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         128,
         model_args.max_position_embeddings(),

@@ -63,5 +63,6 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   RMSNorm post_norm_{nullptr};
 };
 
+TORCH_MODULE(DeepseekV2DecoderLayer);
 }  // namespace layer
 }  // namespace xllm

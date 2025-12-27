@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/common/lm_head.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "glm4v.h"
 #include "models/llm/npu/glm4_moe.h"

@@ -15,8 +15,6 @@ limitations under the License.
 
 #include "qwen3_moe_decoder_layer.h"
 
-#include <glog/logging.h>
-
 namespace xllm {
 namespace layer {
 

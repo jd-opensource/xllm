@@ -43,7 +43,7 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
 
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    atb_pos_emb_ = layer::NpuRotaryEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         64,
         model_args.max_position_embeddings(),
@@ -61,10 +61,11 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    eh_proj_ = register_module("eh_proj", layer::ColumnParallelLinear(context));
-    enorm_ = register_module("enorm", layer::RMSNorm(context));
-    hnorm_ = register_module("hnorm", layer::RMSNorm(context));
-    final_norm_ = register_module("final_norm", layer::RMSNorm(context));
+    eh_proj_ =
+        register_module("eh_proj", layer::NpuColumnParallelLinear(context));
+    enorm_ = register_module("enorm", layer::NpuRMSNorm(context));
+    hnorm_ = register_module("hnorm", layer::NpuRMSNorm(context));
+    final_norm_ = register_module("final_norm", layer::NpuRMSNorm(context));
 
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
@@ -233,11 +234,11 @@ class Glm4MoeMtpModelImpl : public torch::nn::Module {
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::AttentionMask attn_mask_;
   torch::Tensor cos_sin_;
-  layer::PosEmbedding atb_pos_emb_{nullptr};
-  layer::ColumnParallelLinear eh_proj_{nullptr};
-  layer::RMSNorm enorm_{nullptr};
-  layer::RMSNorm hnorm_{nullptr};
-  layer::RMSNorm final_norm_{nullptr};
+  layer::NpuRotaryEmbedding atb_pos_emb_{nullptr};
+  layer::NpuColumnParallelLinear eh_proj_{nullptr};
+  layer::NpuRMSNorm enorm_{nullptr};
+  layer::NpuRMSNorm hnorm_{nullptr};
+  layer::NpuRMSNorm final_norm_{nullptr};
 };
 TORCH_MODULE(Glm4MoeMtpModel);
 

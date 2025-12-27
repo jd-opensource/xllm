@@ -28,7 +28,6 @@ limitations under the License.
 #include "core/framework/request/dit_request_state.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
-#include "core/layers/pos_embedding.h"
 #include "flowmatch_euler_discrete_scheduler.h"
 #include "models/model_registry.h"
 #include "t5_encoder.h"

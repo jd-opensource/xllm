@@ -4,7 +4,6 @@ include(cc_test)
 # Define the base dependencies
 set(BASE_DEPS
   :common
-  :layers
   :kv_cache
   :prefix_cache
   :block

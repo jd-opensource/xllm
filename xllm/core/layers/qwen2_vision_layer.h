@@ -15,21 +15,17 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include "qwen2_5_vision_layer.h"
 
 namespace xllm {
 namespace layer {
 
-class DeepseekV32DecoderLayer
-    : public torch::nn::ModuleHolder<DeepseekV32DecoderLayerImpl> {
+class Qwen2_VisionLayerImpl : public Qwen2_5_VisionLayerImpl {
  public:
-  using torch::nn::ModuleHolder<DeepseekV32DecoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = DeepseekV32DecoderLayerImpl;
-
-  DeepseekV32DecoderLayer(const ModelContext& context, const int32_t layer_id)
-      : ModuleHolder(
-            std::make_shared<DeepseekV32DecoderLayerImpl>(context, layer_id)) {}
+  Qwen2_VisionLayerImpl(const ModelContext& context);
+  void load_state_dict(const StateDict& state_dict);
 };
+TORCH_MODULE(Qwen2_VisionLayer);
 
 }  // namespace layer
 }  // namespace xllm

@@ -15,13 +15,21 @@ limitations under the License.
 
 #pragma once
 
-#include "qwen2_decoder_layer.h"
+#include "core/framework/model_context.h"
+#include "npu_qwen3_decoder_layer_impl.h"
 
 namespace xllm {
 namespace layer {
 
-using Qwen3DecoderLayerImpl = Qwen2DecoderLayerImpl;
-TORCH_MODULE(Qwen3DecoderLayer);
+class Qwen3DecoderLayer
+    : public torch::nn::ModuleHolder<Qwen3DecoderLayerImpl> {
+ public:
+  using torch::nn::ModuleHolder<Qwen3DecoderLayerImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = Qwen3DecoderLayerImpl;
+
+  Qwen3DecoderLayer(const ModelContext& context)
+      : ModuleHolder(std::make_shared<Qwen3DecoderLayerImpl>(context)) {}
+};
 
 }  // namespace layer
 }  // namespace xllm

@@ -26,13 +26,13 @@ limitations under the License.
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
-#include "core/layers/deepseek_v2_decoder_layer.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/common/lm_head.h"
+#include "core/layers/common/word_embedding.h"
+#include "core/layers/npu/deepseek_v2_decoder_layer.h"
 #include "core/layers/npu/npu_column_parallel_linear_impl.h"
+#include "core/layers/npu/npu_pos_embedding_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/rotary_embedding.h"
-#include "core/layers/pos_embedding.h"
-#include "core/layers/word_embedding.h"
 #include "deepseek_v2.h"
 #include "framework/model/model_input_params.h"
 #include "models/model_registry.h"
@@ -63,7 +63,7 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
                                        model_args.rotary_dim(),
                                        /*interleaved=*/false,
                                        options);
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    atb_pos_emb_ = layer::NpuRotaryEmbedding(context);
 
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
       auto block = DeepseekV2DecoderLayer(context, i);
@@ -71,10 +71,11 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    eh_proj_ = register_module("eh_proj", layer::ColumnParallelLinear(context));
-    enorm_ = register_module("enorm", layer::RMSNorm(context));
-    hnorm_ = register_module("hnorm", layer::RMSNorm(context));
-    final_norm_ = register_module("final_norm", layer::RMSNorm(context));
+    eh_proj_ =
+        register_module("eh_proj", layer::NpuColumnParallelLinear(context));
+    enorm_ = register_module("enorm", layer::NpuRMSNorm(context));
+    hnorm_ = register_module("hnorm", layer::NpuRMSNorm(context));
+    final_norm_ = register_module("final_norm", layer::NpuRMSNorm(context));
 
     // dp_size_=4;
     dp_size_ = parallel_args.dp_size();
@@ -205,12 +206,12 @@ class DeepseekV2MtpModelImpl : public torch::nn::Module {
   at::Device device_;
   layer::WordEmbedding embed_tokens_{nullptr};
   std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
-  layer::PosEmbedding atb_pos_emb_{nullptr};
+  layer::NpuRotaryEmbedding atb_pos_emb_{nullptr};
   layer::AttentionMask attn_mask_;
-  layer::ColumnParallelLinear eh_proj_{nullptr};
-  layer::RMSNorm enorm_{nullptr};
-  layer::RMSNorm hnorm_{nullptr};
-  layer::RMSNorm final_norm_{nullptr};
+  layer::NpuColumnParallelLinear eh_proj_{nullptr};
+  layer::NpuRMSNorm enorm_{nullptr};
+  layer::NpuRMSNorm hnorm_{nullptr};
+  layer::NpuRMSNorm final_norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2MtpModel);
 

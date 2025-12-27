@@ -14,21 +14,17 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-
-#include "config.h"
+#include "qwen2_5_vision_layer.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen2VisionEncoderLayer
-    : public torch::nn::ModuleHolder<Qwen2VisionEncoderLayerImpl> {
+class Qwen3_VisionLayerImpl : public Qwen2_5_VisionLayerImpl {
  public:
-  using torch::nn::ModuleHolder<Qwen2VisionEncoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen2VisionEncoderLayerImpl;
-
-  Qwen2VisionEncoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<Qwen2VisionEncoderLayerImpl>(context)) {}
+  Qwen3_VisionLayerImpl(const ModelContext& context);
+  void load_state_dict(const StateDict& state_dict);
 };
+TORCH_MODULE(Qwen3_VisionLayer);
 
 }  // namespace layer
 }  // namespace xllm

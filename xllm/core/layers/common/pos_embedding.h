@@ -15,21 +15,22 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#if defined(USE_NPU)
+#include "layers/npu/npu_pos_embedding_impl.h"
+#else
+#include "rotary_embedding.h"
+#endif
 
 namespace xllm {
 namespace layer {
 
-class SiglipEncoderLayer
-    : public torch::nn::ModuleHolder<SiglipEncoderLayerImpl> {
+class PosEmbedding : public torch::nn::ModuleHolder<RotaryEmbeddingImpl> {
  public:
-  using torch::nn::ModuleHolder<SiglipEncoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = SiglipEncoderLayerImpl;
+  using torch::nn::ModuleHolder<RotaryEmbeddingImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = RotaryEmbeddingImpl;
 
-  SiglipEncoderLayer(const ModelContext& context,
-                     const std::string& prefix = "")
-      : ModuleHolder(
-            std::make_shared<SiglipEncoderLayerImpl>(context, prefix)) {}
+  PosEmbedding(const ModelContext& context)
+      : ModuleHolder(std::make_shared<RotaryEmbeddingImpl>(context)) {}
 };
 
 }  // namespace layer

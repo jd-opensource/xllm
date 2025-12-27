@@ -87,7 +87,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
 
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    atb_pos_emb_ = layer::NpuRotaryEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         64,
         model_args.max_position_embeddings(),
@@ -106,7 +106,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
       blocks_->push_back(block);
     }
 
-    norm_ = register_module("norm", layer::RMSNorm(context));
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
@@ -277,9 +277,9 @@ class Glm4MoeModelImpl : public torch::nn::Module {
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::AttentionMask attn_mask_;
-  layer::RMSNorm norm_{nullptr};
+  layer::NpuRMSNorm norm_{nullptr};
   torch::Tensor cos_sin_;
-  layer::PosEmbedding atb_pos_emb_{nullptr};
+  layer::NpuRotaryEmbedding atb_pos_emb_{nullptr};
 
   std::vector<int64_t> mrope_section_;
 };

@@ -29,8 +29,8 @@ limitations under the License.
 #include "core/framework/model_loader.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
-#include "layers/lm_head.h"
-#include "layers/word_embedding.h"
+#include "layers/common/lm_head.h"
+#include "layers/common/word_embedding.h"
 #include "model_args.h"
 #include "model_input_params.h"
 
