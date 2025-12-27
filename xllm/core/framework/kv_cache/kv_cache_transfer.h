@@ -119,6 +119,11 @@ class KVCacheTransfer {
       bool is_spec_draft) = 0;
 #endif
 
+  virtual std::vector<torch::Tensor> convert_to_torch_tensor(
+      const std::vector<int64_t>& dims,
+      const torch::ScalarType dtype,
+      const std::vector<uintptr_t>& addresses);
+
  protected:
   // working thread
   ThreadPool threadpool_;

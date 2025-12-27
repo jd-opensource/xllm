@@ -17,6 +17,10 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#if defined(USE_NPU)
+#include <torch_npu/csrc/core/npu/NPUFormat.h>
+#endif
+
 namespace xllm {
 
 folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
@@ -144,5 +148,41 @@ void KVCacheTransfer::merge_kv_blocks(
     }
   }
 }
+
+#if defined(USE_NPU)
+std::vector<torch::Tensor> KVCacheTransfer::convert_to_torch_tensor(
+    const std::vector<int64_t>& dims,
+    const torch::ScalarType dtype,
+    const std::vector<uintptr_t>& addresses) {
+  std::vector<torch::Tensor> torch_tensors;
+  c10::DeviceType device_type = c10::DeviceType::PrivateUse1;
+  torch::TensorOptions option =
+      torch::TensorOptions().dtype(dtype).device(device_type);
+
+  torch_tensors.reserve(addresses.size());
+  for (auto dev_addr : addresses) {
+    auto tensor = torch::empty({0}, option);
+    auto address = reinterpret_cast<void*>(dev_addr);
+    torch::DataPtr c10_data_ptr(
+        address, address, [](void*) {}, tensor.device());
+
+    size_t tensor_nbytes = at::detail::computeStorageNbytesContiguous(
+        dims, tensor.dtype().itemsize());
+    torch::Storage storage;
+    // get npu storage constructor from register and construct storage
+    auto fptr = c10::GetStorageImplCreate(device_type);
+    auto allocator = c10::GetAllocator(device_type);
+    storage = fptr(c10::StorageImpl::use_byte_size_t(), 0, allocator, true);
+    storage.unsafeGetStorageImpl()->set_nbytes(tensor_nbytes);
+    storage.set_data_ptr(std::move(c10_data_ptr));
+
+    tensor.set_(storage, 0, dims);
+    // cast npu format to nd
+    tensor = at_npu::native::npu_format_cast(tensor, 2);
+    torch_tensors.emplace_back(std::move(tensor));
+  }
+  return torch_tensors;
+}
+#endif
 
 }  // namespace xllm

@@ -56,3 +56,5 @@ cc_test(
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:nnopbase>
 )
+
+target_link_libraries(chunked_prefill_scheduler_test PRIVATE $<$<BOOL:${USE_NPU}>:c_sec>)
