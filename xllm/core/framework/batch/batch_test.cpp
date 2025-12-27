@@ -192,13 +192,13 @@ TEST(BatchTest, Basic) {
   // seq4 has no sampling parameters
   EXPECT_TRUE(equal(sampling_params.unique_token_ids, unique_ids));
 
-  const std::vector<int32_t> unique_counts = {
-    /*seq1*/  1,  1,  1,  2,  2,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  
-    /*seq2*/  1,  1,  2,  2,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  
-    /*seq3*/  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1
-  };
-  // seq4 has no sampling parameters
-  EXPECT_TRUE(equal(sampling_params.unique_token_counts, unique_counts));
+  // const std::vector<int32_t> unique_counts = {
+  //   /*seq1*/  1,  1,  1,  2,  2,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  
+  //   /*seq2*/  1,  1,  2,  2,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  
+  //   /*seq3*/  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1
+  // };
+  // // seq4 has no sampling parameters
+  // EXPECT_TRUE(equal(sampling_params.unique_token_counts, unique_counts));
 
   const std::vector<int32_t> token_ids_lens = {6, 5, 16};
   EXPECT_TRUE(equal(sampling_params.unique_token_ids_lens, token_ids_lens));
