@@ -48,7 +48,7 @@ Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context)
                                   model_args.hidden_act(),
                                   /*enable_result_reduction=*/true,
                                   quant_args,
-                                  parallel_args,
+                                  parallel_args.tp_group_,
                                   options));
 }
 

@@ -50,7 +50,7 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
       bool bias,
       bool gather_output,
       const QuantArgs& quant_args,
-      const ParallelArgs& parallel_args,
+      ProcessGroup* process_group,
       const torch::TensorOptions& options,
       const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs());
 
@@ -89,8 +89,8 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
   // whether to gather the output
   bool gather_output_;
   at::Device device_;
-  // parallel args
-  ParallelArgs parallel_args_;
+  // parallel process group
+  ProcessGroup* process_group_;
 
   // quantization args
   QuantArgs quant_args_;
@@ -167,7 +167,7 @@ class RowParallelLinearImpl : public torch::nn::Module {
       bool input_is_parallelized,
       bool enable_result_reduction,
       const QuantArgs& quant_args,
-      const ParallelArgs& parallel_args,
+      ProcessGroup* process_group,
       const torch::TensorOptions& options,
       const FusedLinearExtraArgs& linear_extra_args = FusedLinearExtraArgs());
 
@@ -199,8 +199,8 @@ class RowParallelLinearImpl : public torch::nn::Module {
   // whether to reduce the results
   bool enable_result_reduction_;
 
-  // parallel args
-  ParallelArgs parallel_args_;
+  // parallel process group
+  ProcessGroup* process_group_;
 
   int64_t rank_;
   int64_t world_size_;

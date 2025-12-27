@@ -32,9 +32,9 @@ namespace xllm {
 class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
  public:
   DeepseekMultiTokenPredictorLayerImpl(const ModelContext& context,
-                                       const int32_t layer_index) {
+                                       const int32_t layer_index)
+      : model_args_(context.get_model_args()) {
     auto options = context.get_tensor_options();
-    auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
 
     // register submodules
@@ -43,8 +43,8 @@ class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
     // no quantization for eh_proj
     eh_proj_ =
         register_module("eh_proj",
-                        layer::ReplicatedLinear(model_args.hidden_size() * 2,
-                                                model_args.hidden_size(),
+                        layer::ReplicatedLinear(model_args_.hidden_size() * 2,
+                                                model_args_.hidden_size(),
                                                 /*bias=*/false,
                                                 /*QuantArgs=*/QuantArgs(),
                                                 options));
@@ -62,6 +62,11 @@ class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
     auto enorm_out = std::get<0>(enorm_(embed));
 
     torch::Tensor embedding_data = input_params.input_embedding;
+    // for dummy data parallel run, we set a empty embedding
+    if (attn_metadata.is_dummy) {
+      embedding_data = torch::zeros({embed.size(0), model_args_.hidden_size()},
+                                    embed.options());
+    }
     CHECK(embedding_data.defined())
         << "embedding is not defined in input_params.input_embedding";
     torch::Tensor previous_hidden_states = embedding_data;
@@ -101,12 +106,15 @@ class DeepseekMultiTokenPredictorLayerImpl : public torch::nn::Module {
   layer::RMSNorm hnorm_{nullptr};
   layer::ReplicatedLinear eh_proj_{nullptr};
   layer::DeepseekV2DecoderLayer mtp_block_{nullptr};
+
+  ModelArgs model_args_;
 };
 TORCH_MODULE(DeepseekMultiTokenPredictorLayer);
 
 class DeepseekMTPModelImpl : public torch::nn::Module {
  public:
-  DeepseekMTPModelImpl(const ModelContext& context) {
+  DeepseekMTPModelImpl(const ModelContext& context)
+      : device_(context.get_tensor_options().device()) {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
@@ -148,7 +156,18 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
-    auto attn_metadata = layer::AttentionMetadata::build(input_params);
+    // for dp, if tokens is empty, set tokens to 1 and positions to 0
+    ModelInputParams modified_input_params = input_params;
+    if (dp_size_ > 1) {
+      if (tokens.sizes() == 0) {
+        tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
+        positions = torch::tensor({1}).to(torch::kInt32).to(device_);
+      }
+      auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+      std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
+    }
+
+    auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
     torch::Tensor hidden_states = embed_tokens_(tokens);
     // Mask out embeddings where positions == 0 (for MTP not needed at pos 0)
     auto mask = (positions == 0);  // bool tensor
@@ -166,7 +185,7 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
                             positions,
                             attn_metadata,
                             kv_caches[i],
-                            input_params);
+                            modified_input_params);
     }
     return std::get<0>(norm_(hidden_states, residual));
   }
@@ -202,6 +221,7 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
   int32_t rank_;
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
+  torch::Device device_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
 };

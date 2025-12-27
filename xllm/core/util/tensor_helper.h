@@ -188,4 +188,87 @@ inline void save_tensor_as_pickle(const torch::Tensor& tensor,
   CHECK(ofs.good()) << "Write failed to: " << file_path;
 }
 
+// Computes the new shape for tensor view casting between dtypes by bytes, for
+// use with from_blob.
+inline std::vector<int64_t> compute_view_shape(const torch::Tensor& src,
+                                               int64_t src_size,
+                                               int64_t target_size) {
+  std::vector<int64_t> new_sizes = src.sizes().vec();
+
+  if (src_size == target_size) {
+    // No size change, just return original shape
+    return new_sizes;
+  } else if (src_size > target_size) {
+    // Splitting: each element will be split into more elements of smaller dtype
+    // (e.g., BFloat16 -> char)
+    int64_t ratio = src_size / target_size;
+    if (new_sizes.empty()) {
+      // Scalar tensor: introduce new dimension of length ratio
+      new_sizes.push_back(ratio);
+    } else {
+      // For normal tensors: expand the last dimension accordingly
+      // e.g. [8, 2048] -> [8, 4096]
+      new_sizes.back() *= ratio;
+    }
+  } else {
+    // Merging: multiple small dtype elements become one larger dtype element
+    // (e.g., char -> BFloat16)
+    int64_t ratio = target_size / src_size;
+
+    // Ensure tensor is not scalar
+    CHECK(!new_sizes.empty()) << "Cannot merge views for a scalar tensor.";
+
+    int64_t last_dim = new_sizes.back();
+    // Last dim size must be divisible by merge ratio
+    CHECK(last_dim % ratio == 0)
+        << "Last dimension size (" << last_dim
+        << ") must be divisible by type ratio (" << ratio
+        << ") when viewing as a larger dtype.";
+    new_sizes.back() = last_dim / ratio;
+  }
+  return new_sizes;
+}
+
+// Simulates the Python tensor.view(dtype) functionality.
+// Reinterprets a raw byte tensor (usually uint8) as a tensor of the target data
+// type. Note: The input tensor must be contiguous in memory.
+inline torch::Tensor view_as_dtype(const torch::Tensor& src,
+                                   torch::ScalarType target_dtype) {
+  // If the source type already matches the target type, just return as is.
+  if (src.scalar_type() == target_dtype) {
+    return src;
+  }
+
+  // core constraint: require the input tensor to be contiguous for raw memory
+  // reinterpretation. use CHECK to enforce contiguity; if failed, the caller
+  // must ensure .contiguous() is called beforehand.
+  CHECK(src.is_contiguous())
+      << "view_as_dtype expects a contiguous tensor. Please call .contiguous() "
+         "before passing it in.";
+
+  // calculate the source and target element sizes in bytes.
+  int64_t src_element_size = src.element_size();
+  int64_t target_element_size = torch::elementSize(target_dtype);
+  std::vector<int64_t> new_shape =
+      compute_view_shape(src, src_element_size, target_element_size);
+
+  // we pass in a lambda, capture 'src' (by value, increase reference count)
+  // when the returned tensor is destroyed, this lambda will be called, thus
+  // releasing the reference to src. this makes the new tensor truly own the
+  // "share" of the underlying storage, like python's view is safe.
+  auto deleter = [src](void*) {
+    // this empty lambda just captures src, can keep the memory alive.
+    // src will automatically reduce reference count when the lambda is
+    // destroyed
+  };
+
+  // Create a zero-copy view on the same memory.
+  //    Notes:
+  //    - data_ptr() directly points to the src tensor's memory.
+  //    - The returned tensor does NOT own the memory.
+  //    - The src tensor's lifetime MUST cover the returned tensor.
+  return torch::from_blob(
+      src.data_ptr(), new_shape, deleter, src.options().dtype(target_dtype));
+}
+
 }  // namespace xllm

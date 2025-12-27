@@ -31,7 +31,7 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
                                /*bias=*/false,
                                /*gather_output=*/true,
                                QuantArgs{},
-                               context.get_parallel_args(),
+                               context.get_parallel_args().tp_group_,
                                context.get_tensor_options()) {}
 
 // Linear layer with column parallelism.
@@ -41,16 +41,16 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
     bool bias,
     bool gather_output,
     const QuantArgs& quant_args,
-    const ParallelArgs& parallel_args,
+    ProcessGroup* process_group,
     const torch::TensorOptions& options,
     const FusedLinearExtraArgs& linear_extra_args)
     : gather_output_(gather_output),
       quant_args_(quant_args),
-      parallel_args_(parallel_args),
+      process_group_(process_group),
       device_(options.device()),
       linear_extra_args_(linear_extra_args) {
-  rank_ = parallel_args_.tp_group_->rank();
-  world_size_ = parallel_args_.tp_group_->world_size();
+  rank_ = process_group_->rank();
+  world_size_ = process_group_->world_size();
   CHECK(out_features % world_size_ == 0)
       << "out_features " << out_features << " not divisible by world_size "
       << world_size_;
@@ -148,7 +148,7 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
   }
 
   if (world_size_ > 1 && gather_output_) {
-    output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
+    output = xllm::parallel_state::gather(output, process_group_);
   }
   return output;
 }
@@ -296,16 +296,16 @@ RowParallelLinearImpl::RowParallelLinearImpl(
     bool input_is_parallelized,
     bool enable_result_reduction,
     const QuantArgs& quant_args,
-    const ParallelArgs& parallel_args,
+    ProcessGroup* process_group,
     const torch::TensorOptions& options,
     const FusedLinearExtraArgs& linear_extra_args)
     : input_is_parallelized_(input_is_parallelized),
       enable_result_reduction_(enable_result_reduction),
       quant_args_(quant_args),
-      parallel_args_(parallel_args),
+      process_group_(process_group),
       linear_extra_args_(linear_extra_args) {
-  rank_ = parallel_args_.tp_group_->rank();
-  world_size_ = parallel_args_.tp_group_->world_size();
+  rank_ = process_group_->rank();
+  world_size_ = process_group_->world_size();
   CHECK(in_features % world_size_ == 0)
       << "in_features " << in_features << " not divisible by world_size "
       << world_size_;
@@ -343,7 +343,7 @@ RowParallelLinearImpl::RowParallelLinearImpl(
 
 torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
   if (!input_is_parallelized_) {
-    input = xllm::parallel_state::scatter(input, parallel_args_.tp_group_);
+    input = xllm::parallel_state::scatter(input, process_group_);
   }
 
   auto bias = (bias_.defined() && rank_ == 0)
@@ -400,7 +400,7 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     output = xllm::kernel::matmul(matmul_params);
   }
   if (enable_result_reduction_ && world_size_ > 1) {
-    output = xllm::parallel_state::reduce(output, parallel_args_.tp_group_);
+    output = xllm::parallel_state::reduce(output, process_group_);
   }
   return output;
 }

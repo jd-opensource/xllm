@@ -17,8 +17,13 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <iomanip>
+
+#include "common/global_flags.h"
+#include "dp_utils.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
+#include "util/utils.h"
 
 namespace {
 torch::Tensor create_group_gemm_output(
@@ -33,6 +38,11 @@ torch::Tensor create_group_gemm_output(
   return torch::empty({group_list.size(0), a.size(0), b.size(0)},
                       target_options);
 }
+
+int32_t get_dtype_size(torch::ScalarType dtype) {
+  return static_cast<int32_t>(torch::elementSize(dtype));
+}
+
 }  // namespace
 
 namespace xllm {
@@ -57,10 +67,12 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
                            const QuantArgs& quant_args,
                            const ParallelArgs& parallel_args,
                            const torch::TensorOptions& options)
-    : topk_(top_k),
+    : num_total_experts_(num_experts),
+      topk_(top_k),
       num_expert_group_(num_expert_group),
       topk_group_(topk_group),
       route_scale_(route_scale),
+      hidden_size_(hidden_size),
       n_shared_experts_(n_shared_experts),
       is_gated_(is_gated),
       has_score_bias_(has_score_bias),
@@ -97,6 +109,65 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
     is_smoothquant_ = false;
   }
 
+  // Deep EP initialization check
+  enable_deep_ep_ = FLAGS_expert_parallel_degree == 2 && ep_size > 1;
+  if (enable_deep_ep_) {
+    // for now, we only implement the deep ep for decode stage.
+    // so we will assume the max_token_num is limited to max_batch_size * (1+K)
+    // K is the number of speculative tokens.
+    int64_t dispatch_token_size;
+    if (quant_args.quant_method() == "smoothquant") {
+      // float32 is for the scale of the quantized input
+      dispatch_token_size = hidden_size_ * get_dtype_size(torch::kInt8) +
+                            get_dtype_size(torch::kFloat32);
+    } else {
+      dispatch_token_size =
+          hidden_size_ * get_dtype_size(options_.dtype().toScalarType());
+    }
+    torch::ScalarType combine_dtype = options_.dtype().toScalarType();
+    int64_t combine_token_size = hidden_size_ * get_dtype_size(combine_dtype);
+    // Ensure calculation base is at least ep_size
+    int64_t effective_seqs =
+        std::max((int64_t)FLAGS_max_seqs_per_batch, (int64_t)ep_size);
+    int64_t raw_token_num =
+        (1 + FLAGS_num_speculative_tokens) * effective_seqs * topk_;
+    // Round up to the nearest multiple of ep_size
+    int64_t max_num_tokens_per_rank = (raw_token_num + ep_size - 1) / ep_size;
+
+    // make sure that all layers share the same deep ep instance
+    //  so that the memory footprint is minimized
+    deep_ep_ = DeepEPManager::get_instance(dispatch_token_size,
+                                           combine_token_size,
+                                           max_num_tokens_per_rank,
+                                           num_experts,
+                                           parallel_args,
+                                           options_);
+
+    // obtain the buffer and parameters of deep ep
+    deep_ep_buffer_ = deep_ep_->get_buffer();
+    deep_ep_params_ = deep_ep_->get_params();
+
+    // intermediate buffer that can be initialized once
+    // we place these tensor here in order to speed up forward pass
+    int64_t n_tokens_recv = deep_ep_params_.max_num_tokens_recv;
+    int64_t token_bytes = is_smoothquant_
+                              ? get_dtype_size(torch::kInt8)
+                              : get_dtype_size(options_.dtype().toScalarType());
+    token_bytes = token_bytes * hidden_size_;
+    int64_t head_size = n_tokens_recv * token_bytes;
+    dispatch_recv_token_tensor_head_ =
+        deep_ep_buffer_.combine_send_token_tensor.narrow(0, 0, head_size)
+            .view({n_tokens_recv, token_bytes});
+    // input scale in smoothquant
+    if (is_smoothquant_) {
+      int64_t tail_size = n_tokens_recv * get_dtype_size(torch::kFloat32);
+      dispatch_recv_token_tensor_tail_ =
+          deep_ep_buffer_.combine_send_token_tensor
+              .narrow(0, head_size, tail_size)
+              .view({n_tokens_recv, -1});
+    }
+  }
+
   // calculate the number of experts per rank
   num_experts_per_rank_ = num_experts / ep_size;
   start_expert_id_ = ep_rank * num_experts_per_rank_;
@@ -110,13 +181,21 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
       "gate_proj",
       ReplicatedLinear(hidden_size, num_experts, false, quant_args, options));
   if (n_shared_experts_ > 0) {
-    /*
-    The shared_experts are usually implemented using the RowParallelLinear
-    layer. Typically, this output serves as the enable_result_reduction results
-    for the module. If only tensor parallelism is applied, immediate
-    reduction of the shared_experts output isn't necessary; instead, we perform
-    the reduction once at the end of the MoE operation.
-    */
+    ProcessGroup* shared_expert_pg;
+    if (enable_deep_ep_) {
+      // we use tp=1 for shared experts computation in deep ep mode
+      CHECK(parallel_args_.ep_size() == parallel_args_.world_size())
+          << "The computation of shared experts only supports ep_size equal to "
+             "world size for now";
+      shared_expert_pg = parallel_args.moe_tp_group_;
+    } else {
+      shared_expert_pg = parallel_args.process_group_;
+    }
+    // The shared experts computation can proceed in parallel with the
+    // final communication step during the MoE computation, as long as it
+    // remains independent of any communication operations. For optimal
+    // performance, ensure that the shared experts layer on each rank always
+    // maintains its own unique weights.
     shared_experts_ =
         register_module("shared_experts",
                         DenseMLP(hidden_size,
@@ -124,9 +203,9 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
                                  is_gated_,
                                  false,
                                  hidden_act_,
-                                 /*enable_result_reduction=*/false,
+                                 /*enable_result_reduction=*/true,
                                  quant_args,
-                                 parallel_args,
+                                 shared_expert_pg,
                                  options));
   }
 
@@ -147,9 +226,12 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
         torch::empty({num_experts_per_rank_, local_intermediate_size * 2},
                      fp_option),
         false);
+    // Note: We do not check enable_deep_ep_ here, since smooth quantization
+    // information may be needed even when deep EP mode is disabled. This allows
+    // retrieving quantization parameters for any subset of experts as required.
     input_smooth_ = register_parameter(
         "input_smooth",
-        torch::empty({num_experts_per_rank_, hidden_size}, fp_option),
+        torch::empty({num_total_experts_, hidden_size}, fp_option),
         false);
     w2_ = register_parameter(
         "w2",
@@ -186,7 +268,8 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
 torch::Tensor FusedMoEImpl::select_experts(
     const torch::Tensor& hidden_states_2d,
     const torch::Tensor& router_logits_2d,
-    SelectedExpertInfo& selected_expert_info) {
+    SelectedExpertInfo& selected_expert_info,
+    bool enable_all2all_communication) {
   // prepare the parameters for select_experts
   std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
   if (e_score_correction_bias_.defined()) {
@@ -216,38 +299,79 @@ torch::Tensor FusedMoEImpl::select_experts(
   torch::Tensor gather_idx;
   torch::Tensor combine_idx;
   torch::Tensor token_count;
-  torch::Tensor cusum_token_count;
+  std::optional<torch::Tensor> cusum_token_count;
   {
     xllm::kernel::MoeGenIdxParams moe_gen_idx_params;
     moe_gen_idx_params.expert_id = expert_id;
-    moe_gen_idx_params.expert_num = router_logits_2d.size(-1);
+    moe_gen_idx_params.expert_num = num_total_experts_;
     std::vector<torch::Tensor> output_vec =
         xllm::kernel::moe_gen_idx(moe_gen_idx_params);
     gather_idx = output_vec[0];
     combine_idx = output_vec[1];
     token_count = output_vec[2];
-    cusum_token_count = output_vec[3];
+    // during all2all communication, we do not need cusum_token_count in the
+    // following computation
+    if (enable_all2all_communication) {
+      cusum_token_count = std::nullopt;
+    } else {
+      cusum_token_count = output_vec[3];
+    }
   }
 
   // Step 3: expand and quantize input if needed
   torch::Tensor expand_hidden_states;
   torch::Tensor hidden_states_scale;
-  torch::Tensor token_count_slice =
-      token_count.slice(0, start_expert_id_, start_expert_id_ + expert_size);
+  torch::Tensor token_count_slice;
+  // all2all related variables
+  torch::Tensor dispatch_send_token_tensor;
+  // in all2all, the input is scattered, so there is no need to slice the token
+  // count, and we can use the dispatch buffer directly
+  if (enable_all2all_communication) {
+    token_count_slice = token_count;
+    int64_t num_token_expand = hidden_states_2d.size(0) * topk_;
+    int64_t dispatch_bytes =
+        num_token_expand * deep_ep_params_.dispatch_token_size;
+    dispatch_send_token_tensor =
+        deep_ep_buffer_.dispatch_send_token_tensor.slice(0, 0, dispatch_bytes)
+            .view({num_token_expand, deep_ep_params_.dispatch_token_size});
+  } else {
+    token_count_slice =
+        token_count.slice(0, start_expert_id_, start_expert_id_ + expert_size);
+  }
+
   if (is_smoothquant_) {
     xllm::kernel::ScaledQuantizeParams scaled_quantize_params;
     scaled_quantize_params.x = hidden_states_2d;
-    scaled_quantize_params.smooth = input_smooth_;
+    // use dispatch_send_token_tensor buffer for input
+    //  to reduce memory footprint
+    if (enable_all2all_communication) {
+      scaled_quantize_params.smooth = input_smooth_;
+      scaled_quantize_params.output =
+          dispatch_send_token_tensor.slice(1, 0, hidden_size_);
+    } else {
+      scaled_quantize_params.smooth = input_smooth_.slice(
+          0, start_expert_id_, start_expert_id_ + expert_size);
+      scaled_quantize_params.gather_index_start_position =
+          cusum_token_count.value().index({start_expert_id_}).unsqueeze(0);
+    }
     scaled_quantize_params.token_count = token_count_slice;
     scaled_quantize_params.gather_index = gather_idx;
-    scaled_quantize_params.gather_index_start_position =
-        cusum_token_count.index({start_expert_id_}).unsqueeze(0);
     scaled_quantize_params.act_mode = "none";
     scaled_quantize_params.active_coef = 1.0;
     scaled_quantize_params.is_gated = false;
     scaled_quantize_params.quant_type = torch::kChar;
     std::tie(expand_hidden_states, hidden_states_scale) =
         xllm::kernel::scaled_quantize(scaled_quantize_params);
+    if (enable_all2all_communication) {
+      // since view_as_dtype has not supported stride yet,
+      //  we need to copy the scale output to the dispatch buffer
+      torch::Tensor dispatch_scale_slice =
+          dispatch_send_token_tensor.slice(1, hidden_size_);
+      torch::Tensor hidden_states_scale_bytes =
+          view_as_dtype(hidden_states_scale, torch::kInt8)
+              .view_as(dispatch_scale_slice);
+      dispatch_scale_slice.copy_(hidden_states_scale_bytes);
+    }
   } else {
     xllm::kernel::MoeExpandInputParams moe_expand_input_params;
     moe_expand_input_params.input = hidden_states_2d;
@@ -257,6 +381,12 @@ torch::Tensor FusedMoEImpl::select_experts(
     moe_expand_input_params.expert_size = expert_size;
     expand_hidden_states =
         xllm::kernel::moe_expand_input(moe_expand_input_params);
+    if (enable_all2all_communication) {
+      // use copy to place the output inside the dispatch buffer
+      torch::Tensor dispatch_tensor =
+          view_as_dtype(expand_hidden_states, torch::kChar);
+      dispatch_send_token_tensor.copy_(dispatch_tensor);
+    }
   }
 
   // collect the selected tensor
@@ -271,10 +401,11 @@ torch::Tensor FusedMoEImpl::select_experts(
   return expand_hidden_states;
 }
 
-torch::Tensor FusedMoEImpl::forward_expert(
+torch::Tensor FusedMoEImpl::forward_experts(
     const torch::Tensor& hidden_states,
     const torch::Tensor& router_logits,
-    const std::optional<torch::Tensor>& shared_output) {
+    const std::optional<torch::Tensor>& shared_output,
+    bool enable_all2all_communication) {
   std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
   if (e_score_correction_bias_.defined()) {
     e_score_correction_bias = e_score_correction_bias_;
@@ -287,13 +418,48 @@ torch::Tensor FusedMoEImpl::forward_expert(
       hidden_states.reshape({-1, hidden_states.size(-1)});
   torch::Tensor router_logits_2d =
       router_logits.reshape({-1, router_logits.size(-1)});
-  int64_t group_gemm_max_dim = hidden_states_2d.size(0);
+  int64_t group_gemm_max_dim = enable_all2all_communication
+                                   ? deep_ep_params_.max_num_tokens_recv / topk_
+                                   : hidden_states_2d.size(0);
   int64_t expert_size = w13_.size(0);
 
   // Step 1-3: select experts
   SelectedExpertInfo selected_expert_info;
   torch::Tensor expand_hidden_states =
-      select_experts(hidden_states_2d, router_logits_2d, selected_expert_info);
+      select_experts(hidden_states_2d,
+                     router_logits_2d,
+                     selected_expert_info,
+                     enable_all2all_communication);
+
+  // Communciation Step 1: Dipatch
+  // intermediate outputs that are used both in dispatch and combine
+  torch::Tensor gather_by_rank_index;
+  torch::Tensor token_sum;
+  if (enable_all2all_communication) {
+    int64_t dispatch_token_num = hidden_states_2d.size(0) * topk_;
+
+    // 1. Dispatch Step: Generate layout and send data
+    deep_ep_->dispatch_step(dispatch_token_num,
+                            selected_expert_info.token_count_slice);
+
+    // 2. Process Result: Generate indices and unpack to computation buffer
+    // use the buffer during initialization for the output
+    expand_hidden_states = dispatch_recv_token_tensor_head_;
+    std::optional<torch::Tensor> output_tail = std::nullopt;
+    if (is_smoothquant_) {
+      output_tail = dispatch_recv_token_tensor_tail_;
+      // update selected_expert_info with the tail (input scale)
+      selected_expert_info.input_scale = output_tail;
+    }
+
+    DeepEPMetaResult deep_ep_meta = deep_ep_->process_dispatch_result(
+        num_experts_per_rank_, expand_hidden_states, output_tail);
+
+    // Extract metadata for subsequent steps
+    gather_by_rank_index = deep_ep_meta.gather_rank_index;
+    selected_expert_info.token_count_slice = deep_ep_meta.token_count_slice;
+    token_sum = deep_ep_meta.token_sum;
+  }
 
   // Step 4: group gemm 1
   torch::Tensor gemm1_out =
@@ -304,10 +470,17 @@ torch::Tensor FusedMoEImpl::forward_expert(
   // ensure the lifespan of these parameters via brace
   {
     xllm::kernel::GroupGemmParams group_gemm_params;
-    group_gemm_params.a = expand_hidden_states;
+    torch::ScalarType a_dtype =
+        is_smoothquant_ ? torch::kInt8 : hidden_states_dtype;
+    group_gemm_params.a =
+        view_as_dtype(expand_hidden_states, a_dtype).view({-1, hidden_size_});
     group_gemm_params.b = w13_;
     group_gemm_params.token_count = selected_expert_info.token_count_slice;
     if (is_smoothquant_) {
+      torch::Tensor a_scale =
+          selected_expert_info.input_scale.value().flatten();
+      selected_expert_info.input_scale =
+          view_as_dtype(a_scale, torch::kFloat32);
       group_gemm_params.a_scale = selected_expert_info.input_scale;
       group_gemm_params.b_scale = w13_scale_;
     }
@@ -382,6 +555,19 @@ torch::Tensor FusedMoEImpl::forward_expert(
     group_gemm_params.output = gemm2_out;
     gemm2_out = xllm::kernel::group_gemm(group_gemm_params);
   }
+
+  // Communciation Step 2: Combine
+  if (enable_all2all_communication) {
+    int64_t num_token_expand = hidden_states_2d.size(0) * topk_;
+    // Delegate pack, layout generation and combine to DeepEP
+    gemm2_out = deep_ep_->combine_step(gemm2_out,
+                                       gather_by_rank_index,
+                                       token_sum,
+                                       num_token_expand,
+                                       hidden_size_,
+                                       hidden_states_dtype);
+  }
+
   // After group gemm is finished, expand_hidden_states and input_scale are no
   // longer needed. We must explicitly release the memory.
   expand_hidden_states = torch::Tensor();
@@ -401,11 +587,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
     moe_combine_result_params.start_expert_id = start_expert_id_;
     moe_combine_result_params.expert_size = expert_size;
     moe_combine_result_params.bias = std::nullopt;
-    // make sure residual fits the requirements of moe_combine_result
-    if (shared_output.has_value()) {
-      moe_combine_result_params.residual =
-          shared_output.value().reshape({-1, shared_output.value().size(-1)});
-    }
+
     final_hidden_states =
         xllm::kernel::moe_combine_result(moe_combine_result_params);
   }
@@ -413,25 +595,50 @@ torch::Tensor FusedMoEImpl::forward_expert(
   // reshape the final hidden states to the original shape
   final_hidden_states = final_hidden_states.reshape(hidden_states_shape);
 
-  if (tp_pg_->world_size() > 1) {
-    final_hidden_states = parallel_state::reduce(final_hidden_states, tp_pg_);
+  // Communciation Step 3: All Gather / AllReduce
+  if (!enable_all2all_communication) {
+    // For standard Reduce: perform reductions first
+    // this tp group is either tp_group_ or moe_tp_group_ for general expert
+    // parallel
+    if (tp_pg_->world_size() > 1) {
+      final_hidden_states = parallel_state::reduce(final_hidden_states, tp_pg_);
+    }
+    if (parallel_args_.ep_size() > 1) {
+      final_hidden_states = parallel_state::reduce(
+          final_hidden_states, parallel_args_.moe_ep_group_);
+    }
   }
-  if (parallel_args_.ep_size() > 1) {
-    final_hidden_states = parallel_state::reduce(final_hidden_states,
-                                                 parallel_args_.moe_ep_group_);
+
+  // TODO: shared experts can be parallelized with the final communication step
+  // during moe computation for now we just perform a add operation to make sure
+  // the result is correct under any parallel config.
+  if (shared_output.has_value()) {
+    const auto& res = shared_output.value();
+    // reshape residual to match hidden states
+    final_hidden_states += res.reshape({-1, res.size(-1)});
   }
+
   return final_hidden_states;
 }
 
 torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
                                     const ModelInputParams& input_params) {
+  // we only support all2all communication for decode stage for now
+  bool enable_all2all_communication =
+      enable_deep_ep_ && input_params.batch_forward_type.is_decode();
+  bool is_dp_ep_parallel =
+      parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1;
+  // during all2all communication, the output has been
+  //  gathered and sliced by dispatch and combine steps,
+  //  so we do not need to gather input and slice output again
+  bool need_gather_and_slice =
+      is_dp_ep_parallel && !enable_all2all_communication;
+
   auto input = hidden_states;
-  bool need_slice = false;
-  if (parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1) {
+  if (need_gather_and_slice) {
     input = parallel_state::gather(input,
                                    parallel_args_.dp_local_process_group_,
                                    input_params.dp_global_token_nums);
-    need_slice = true;
   }
 
   std::optional<torch::Tensor> shared_output = std::nullopt;
@@ -439,16 +646,14 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
     shared_output = shared_experts_(input);
   }
   auto router_logits = gate_(input);
-  auto output = forward_expert(input, router_logits, shared_output);
 
-  if (need_slice) {
-    const auto& dp_tokens = input_params.dp_global_token_nums;
-    const int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
-    auto start =
-        std::accumulate(dp_tokens.begin(), dp_tokens.begin() + dp_rank, 0);
-    auto end = start + dp_tokens[dp_rank];
-    output = output.slice(0, start, end);
+  auto output = forward_experts(
+      input, router_logits, shared_output, enable_all2all_communication);
+
+  if (need_gather_and_slice) {
+    output = get_dp_local_slice(output, input_params, parallel_args_);
   }
+
   return output;
 }
 
@@ -464,11 +669,18 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   const int64_t world_size = tp_pg_->world_size();
   const int64_t start_expert_id = start_expert_id_;
   const int64_t num_experts_per_rank = num_experts_per_rank_;
+  const int64_t num_total_experts = num_total_experts_;
   std::vector<std::string> prefixes = {"gate_proj.", "up_proj."};
   if (is_smoothquant_) {
     LOAD_MOE_FUSED_WEIGHT("qweight", w1, w3, w13);
     LOAD_MOE_FUSED_WEIGHT("per_channel_scale", w1_scale, w3_scale, w13_scale);
-    LOAD_MOE_WEIGHT("up_proj.", "smooth", input_smooth, -1);
+    // When supporting DeepEP All2All mode,
+    // we need to load the complete set of expert weights corresponding to
+    // "up_proj.smooth". Note that even if deep EP mode is not enabled, it
+    // remains possible to retrieve the smooth quantization information for a
+    // subset of experts. Therefore, we intentionally do not check whether
+    // deep_ep_ is enabled in this case.
+    LOAD_MOE_ALL_EXPERT_WEIGHT("up_proj.", "smooth", input_smooth, -1);
     LOAD_MOE_WEIGHT("down_proj.", "qweight", w2, 1);
     LOAD_MOE_WEIGHT("down_proj.", "per_channel_scale", w2_scale, -1);
     LOAD_MOE_WEIGHT("down_proj.", "smooth", act_smooth, 0);

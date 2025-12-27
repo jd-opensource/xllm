@@ -649,7 +649,7 @@ TEST_F(DeepseekV2DecoderLayerTest,
   auto positions = torch::arange(
       0,
       batch_size * seq_len,
-      torch::TensorOptions().dtype(torch::kInt64).device(options_.device()));
+      torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 
   // Build minimal ModelInputParams for prefill
   ModelInputParams input_params;
@@ -793,7 +793,7 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
   auto positions = torch::arange(
       0,
       batch_size * seq_len,
-      torch::TensorOptions().dtype(torch::kInt64).device(options_.device()));
+      torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 
   // Build minimal ModelInputParams for prefill
   ModelInputParams input_params;
