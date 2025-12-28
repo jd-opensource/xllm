@@ -150,6 +150,12 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   if (params.has_max_sequence_length()) {
     generation_params.max_sequence_length = params.max_sequence_length();
   }
+  if (params.has_enable_cfg_renorm()) {
+    generation_params.enable_cfg_renorm = params.enable_cfg_renorm();
+  }
+  if (params.has_cfg_renorm_min()) {
+    generation_params.cfg_renorm_min = params.cfg_renorm_min();
+  }
 }
 
 bool DiTRequestParams::verify_params(

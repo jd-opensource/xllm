@@ -20,6 +20,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "core/platform/device.h"
 #include "core/util/utils.h"
 #include "flashinfer_workspace.h"
 #include "kernels/cuda/utils.h"
@@ -84,6 +85,14 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
   VLOG(kGraphExecutorLogVerboseLevel)
       << "update_plan_info: layer_id=" << plan_info->layer_id
       << ", enable_cuda_graph=" << enable_cuda_graph;
+  // Workspace tensors shared by both prefill and decode plan functions.
+  auto float_workspace_buffer = to_ffi_tensor(
+      FlashinferWorkspace::get_instance().get_float_workspace_buffer());
+  auto int_workspace_buffer = to_ffi_tensor(
+      FlashinferWorkspace::get_instance().get_int_workspace_buffer());
+  auto page_locked_int_workspace_buffer =
+      to_ffi_tensor(FlashinferWorkspace::get_instance()
+                        .get_page_locked_int_workspace_buffer());
   // 1. prefill plan info
   if (causal) {
     plan_info->uri =
@@ -111,28 +120,49 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
     // lifetime issues We must copy immediately because the TVM Array may become
     // invalid after the function returns Wrap the entire TVM call in try-catch
     // to handle any potential crashes
-    plan_info->plan_info = deep_copy_plan_info(
-        get_function(plan_info->uri, "plan")(
-            to_ffi_tensor(FlashinferWorkspace::get_instance()
-                              .get_float_workspace_buffer()),
-            to_ffi_tensor(
-                FlashinferWorkspace::get_instance().get_int_workspace_buffer()),
-            to_ffi_tensor(FlashinferWorkspace::get_instance()
-                              .get_page_locked_int_workspace_buffer()),
-            to_ffi_tensor(qo_indptr_host),
-            to_ffi_tensor(kv_cu_seq_lens_host),
-            to_ffi_tensor(kv_len_arr_host),
-            total_num_rows,
-            batch_size,
-            num_qo_heads,
-            num_kv_heads,
-            /*page_size=*/1,
-            enable_cuda_graph,
-            head_dim_qk,
-            head_dim_vo,
-            /*causal=*/true,
-            /*window_size_left=*/-1)
-            .cast<ffi::Array<int64_t>>());
+    auto plan_func = get_function(plan_info->uri, "plan");
+    // For sm90 architecture, the plan function doesn't accept
+    // fixed_split_size / disable_split_kv / num_colocated_ctas
+    ffi::Array<int64_t> plan_result =
+        Device::is_support_sm90a()
+            ? plan_func(float_workspace_buffer,
+                        int_workspace_buffer,
+                        page_locked_int_workspace_buffer,
+                        to_ffi_tensor(qo_indptr_host),
+                        to_ffi_tensor(kv_cu_seq_lens_host),
+                        to_ffi_tensor(kv_len_arr_host),
+                        total_num_rows,
+                        batch_size,
+                        num_qo_heads,
+                        num_kv_heads,
+                        /*page_size=*/1,
+                        enable_cuda_graph,
+                        head_dim_qk,
+                        head_dim_vo,
+                        /*causal=*/true,
+                        /*window_size_left=*/-1)
+                  .cast<ffi::Array<int64_t>>()
+            : plan_func(float_workspace_buffer,
+                        int_workspace_buffer,
+                        page_locked_int_workspace_buffer,
+                        to_ffi_tensor(qo_indptr_host),
+                        to_ffi_tensor(kv_cu_seq_lens_host),
+                        to_ffi_tensor(kv_len_arr_host),
+                        total_num_rows,
+                        batch_size,
+                        num_qo_heads,
+                        num_kv_heads,
+                        /*page_size=*/1,
+                        enable_cuda_graph,
+                        head_dim_qk,
+                        head_dim_vo,
+                        /*causal=*/true,
+                        /*window_size_left=*/-1,
+                        /*fixed_split_size=*/-1,
+                        /*disable_split_kv=*/false,
+                        /*num_colocated_ctas=*/0)
+                  .cast<ffi::Array<int64_t>>();
+    plan_info->plan_info = deep_copy_plan_info(plan_result);
   } else {
     // 2. decode plan info
     if (use_tensor_core) {
@@ -156,31 +186,28 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
           attn_meta.paged_kv_indptr.to(torch::kCPU);
       torch::Tensor kv_len_arr_host = attn_meta.kv_seq_lens.to(torch::kCPU);
 
-      plan_info->plan_info = deep_copy_plan_info(
-          get_function(plan_info->uri, "plan")(
-              to_ffi_tensor(FlashinferWorkspace::get_instance()
-                                .get_float_workspace_buffer()),
-              to_ffi_tensor(FlashinferWorkspace::get_instance()
-                                .get_int_workspace_buffer()),
-              to_ffi_tensor(FlashinferWorkspace::get_instance()
-                                .get_page_locked_int_workspace_buffer()),
-              to_ffi_tensor(qo_indptr_host),
-              to_ffi_tensor(paged_kv_indptr_host),
-              to_ffi_tensor(kv_len_arr_host),
-              batch_size,  // total_num_rows
-              batch_size,
-              num_qo_heads,  // num_qo_heads
-              num_kv_heads,  // num_kv_heads
-              block_size,    // block_size
-              enable_cuda_graph,
-              head_dim_qk,  // head_dim_qk
-              head_dim_vo,  // head_dim_vo
-              /*causal=*/false,
-              /*window_size_left=*/-1,
-              /*fixed_split_size=*/-1,
-              /*disable_split_kv=*/false,
-              /*num_colocated_ctas=*/0)
-              .cast<ffi::Array<int64_t>>());
+      plan_info->plan_info =
+          deep_copy_plan_info(get_function(plan_info->uri, "plan")(
+                                  float_workspace_buffer,
+                                  int_workspace_buffer,
+                                  page_locked_int_workspace_buffer,
+                                  to_ffi_tensor(qo_indptr_host),
+                                  to_ffi_tensor(paged_kv_indptr_host),
+                                  to_ffi_tensor(kv_len_arr_host),
+                                  batch_size,  // total_num_rows
+                                  batch_size,
+                                  num_qo_heads,  // num_qo_heads
+                                  num_kv_heads,  // num_kv_heads
+                                  block_size,    // block_size
+                                  enable_cuda_graph,
+                                  head_dim_qk,  // head_dim_qk
+                                  head_dim_vo,  // head_dim_vo
+                                  /*causal=*/false,
+                                  /*window_size_left=*/-1,
+                                  /*fixed_split_size=*/-1,
+                                  /*disable_split_kv=*/false,
+                                  /*num_colocated_ctas=*/0)
+                                  .cast<ffi::Array<int64_t>>());
     } else {
       plan_info->uri =
           get_batch_decode_uri(query_dtype,
@@ -201,27 +228,24 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
       torch::Tensor empty_kv_data =
           torch::empty({0}, torch::TensorOptions().dtype(key_dtype));
 
-      plan_info->plan_info = deep_copy_plan_info(
-          get_function(plan_info->uri, "plan")(
-              to_ffi_tensor(FlashinferWorkspace::get_instance()
-                                .get_float_workspace_buffer()),
-              to_ffi_tensor(FlashinferWorkspace::get_instance()
-                                .get_int_workspace_buffer()),
-              to_ffi_tensor(FlashinferWorkspace::get_instance()
-                                .get_page_locked_int_workspace_buffer()),
-              to_ffi_tensor(paged_kv_indptr_host),
-              batch_size,
-              num_qo_heads,
-              num_kv_heads,
-              block_size,
-              enable_cuda_graph,
-              window_size_left,
-              /*logits_soft_cap=*/0.0,
-              head_dim_qk,
-              head_dim_vo,
-              to_ffi_tensor(empty_q_data),
-              to_ffi_tensor(empty_kv_data))
-              .cast<ffi::Array<int64_t>>());
+      plan_info->plan_info =
+          deep_copy_plan_info(get_function(plan_info->uri, "plan")(
+                                  float_workspace_buffer,
+                                  int_workspace_buffer,
+                                  page_locked_int_workspace_buffer,
+                                  to_ffi_tensor(paged_kv_indptr_host),
+                                  batch_size,
+                                  num_qo_heads,
+                                  num_kv_heads,
+                                  block_size,
+                                  enable_cuda_graph,
+                                  window_size_left,
+                                  /*logits_soft_cap=*/0.0,
+                                  head_dim_qk,
+                                  head_dim_vo,
+                                  to_ffi_tensor(empty_q_data),
+                                  to_ffi_tensor(empty_kv_data))
+                                  .cast<ffi::Array<int64_t>>());
     }
   }
 }

@@ -64,12 +64,19 @@ std::string get_model_type(const std::filesystem::path& model_path) {
 
   if (std::filesystem::exists(config_json_path)) {
     reader.parse(config_json_path);
-    std::string model_type = reader.value<std::string>("model_type").value();
-    if (model_type.empty()) {
-      LOG(FATAL) << "Please check config.json file in model path: "
-                 << model_path << ", it should contain model_type key.";
+    // Prefer model_type (e.g. LLM/VLM); fall back to model_name for configs
+    // that only have model_name (e.g. LongCat-Image: {"model_name":
+    // "LongCat-Image"}).
+    auto model_type = reader.value<std::string>("model_type");
+    if (!model_type.has_value()) {
+      model_type = reader.value<std::string>("model_name");
     }
-    return model_type;
+    if (!model_type.has_value()) {
+      LOG(FATAL) << "Please check config.json file in model path: "
+                 << model_path
+                 << ", it should contain model_type or model_name key.";
+    }
+    return model_type.value();
   } else {
     LOG(FATAL) << "Please check config.json or model_index.json file, one of "
                   "them should exist in the model path: "

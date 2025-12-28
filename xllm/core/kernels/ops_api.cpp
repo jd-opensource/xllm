@@ -52,12 +52,54 @@ void apply_rotary(RotaryParams& params) {
       params.q, params.k, params.cos_sin, params.position_ids.value());
 #elif defined(USE_CUDA) || defined(USE_MUSA)
   bool is_neox = !params.interleaved;
+  torch::Tensor pos_ids;
+  torch::Tensor cos_sin;
 
-  auto pos_ids = params.position_ids.value().to(torch::kInt64);
-  auto cos_sin_vec = params.cos_sin.chunk(4, -1);
-  auto cos = cos_sin_vec[0];
-  auto sin = cos_sin_vec[2];
-  auto cos_sin = torch::cat({cos, sin}, -1);
+  if (params.position_ids.has_value()) {
+    pos_ids = params.position_ids.value().to(torch::kInt64);
+    auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+    auto cos = cos_sin_vec[0];
+    auto sin = cos_sin_vec[2];
+    cos_sin = torch::cat({cos, sin}, -1);
+  } else if (params.cu_query_lens.has_value()) {
+    auto cu = params.cu_query_lens.value().to(torch::kInt64);
+    CHECK(cu.numel() >= 2) << "apply_rotary (CUDA): cu_query_lens must have at "
+                              "least 2 elements when "
+                              "position_ids is not provided.";
+    int64_t seq_len = cu[1].item<int64_t>() - cu[0].item<int64_t>();
+    CHECK(seq_len > 0)
+        << "apply_rotary (CUDA): invalid sequence length inferred from "
+           "cu_query_lens when position_ids is not provided.";
+    pos_ids = torch::arange(seq_len,
+                            torch::TensorOptions()
+                                .dtype(torch::kInt64)
+                                .device(params.q.device()))
+                  .contiguous();
+
+    // MRoPE: use precomputed cos/sin [seq_len, head_dim]. Slice first
+    // head_dim/2 before cat so kernel gets in-head rotation pairs [seq_len,
+    // head_dim].
+    const bool use_mrope_precomputed =
+        params.cos.defined() && params.sin.defined() &&
+        params.cos.size(0) == static_cast<int64_t>(seq_len) &&
+        params.sin.size(0) == static_cast<int64_t>(seq_len);
+    if (use_mrope_precomputed) {
+      const int64_t head_dim = params.cos.size(-1);
+      const int64_t rot_half = head_dim / 2;
+      auto cos_sliced = params.cos.contiguous().slice(-1, 0, rot_half);
+      auto sin_sliced = params.sin.contiguous().slice(-1, 0, rot_half);
+      cos_sin = torch::cat({cos_sliced, sin_sliced}, -1);
+    } else {
+      auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+      auto cos = cos_sin_vec[0];
+      auto sin = cos_sin_vec[2];
+      cos_sin = torch::cat({cos, sin}, -1);
+    }
+  } else {
+    CHECK(false)
+        << "apply_rotary (CUDA): neither position_ids nor cu_query_lens "
+           "provided; cannot infer positions.";
+  }
 
   cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
 #elif defined(USE_ILU)
@@ -193,7 +235,8 @@ void batch_prefill(AttentionParams& params) {
                       params.scale,
                       params.output,
                       params.output_lse,
-                      params.attn_metadata.enable_cuda_graph);
+                      params.attn_metadata.enable_cuda_graph,
+                      params.mask);
 #elif defined(USE_ILU)
   ilu::batch_prefill(params.query,
                      params.key,

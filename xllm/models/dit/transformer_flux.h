@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -35,11 +35,13 @@ limitations under the License.
 #include "core/layers/common/rms_norm.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
+#if defined(USE_NPU)
 #include "torch_npu/csrc/aten/CustomFunctions.h"
+#endif
 
 namespace xllm {
-// DiT model compatible with huggingface weights
-// ref to:
+// FLUX/DiT transformer model compatible with Hugging Face weights.
+// Ref:
 // https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/transformers/transformer_flux.py
 inline torch::Tensor apply_rotary_emb(const torch::Tensor& x,
                                       const torch::Tensor& freqs_cis,
@@ -55,7 +57,85 @@ inline torch::Tensor apply_rotary_emb(const torch::Tensor& x,
     sin = freqs_cis[1].unsqueeze(0).unsqueeze(2);  // [1, 6542, 1, 128]
   }
 
+#if defined(USE_NPU)
   return at_npu::native::custom_ops::npu_rotary_mul(x, cos, sin, "interleave");
+#elif defined(USE_CUDA)
+  std::vector<int64_t> reshape_shape;
+  for (int64_t i = 0; i < x.dim() - 1; ++i) {
+    reshape_shape.push_back(x.size(i));
+  }
+  reshape_shape.push_back(-1);
+  reshape_shape.push_back(2);
+  torch::Tensor reshaped = x.reshape(reshape_shape);
+  torch::Tensor x_real = reshaped.select(-1, 0);
+  torch::Tensor x_imag = reshaped.select(-1, 1);
+  // x_rotated = [-x_imag, x_real]
+  torch::Tensor neg_x_imag = -x_imag;
+  auto x_rotated = torch::stack({neg_x_imag, x_real}, -1).flatten(3);
+  return (x.to(torch::kFloat32) * cos.to(torch::kFloat32) +
+          x_rotated.to(torch::kFloat32) * sin.to(torch::kFloat32))
+      .to(x.dtype());
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+// Helper function for rotary position embedding
+torch::Tensor get_1d_rotary_pos_embed(
+    int64_t dim,
+    const torch::Tensor& pos,
+    float theta = 10000.0,
+    bool use_real = false,
+    float linear_factor = 1.0,
+    float ntk_factor = 1.0,
+    bool repeat_interleave_real = true,
+    torch::Dtype freqs_dtype = torch::kFloat32) {
+  CHECK_EQ(dim % 2, 0) << "Dimension must be even";
+
+  torch::Tensor pos_tensor = pos;
+  if (pos.dim() == 0) {
+    pos_tensor = torch::arange(pos.item<int64_t>(), pos.options());
+  }
+
+  theta = theta * ntk_factor;
+
+  auto freqs =
+      1.0 /
+      (torch::pow(
+           theta,
+           torch::arange(
+               0, dim, 2, torch::dtype(freqs_dtype).device(pos.device())) /
+               dim) *
+       linear_factor);  // [D/2]
+
+  auto tensors = {pos_tensor, freqs};
+
+  auto freqs_outer = torch::einsum("s,d->sd", tensors);  // [S, D/2]
+#if defined(USE_NPU)
+  freqs_outer = freqs_outer.to(torch::kFloat32);
+#endif
+  if (use_real && repeat_interleave_real) {
+    auto cos_vals = torch::cos(freqs_outer);  // [S, D/2]
+    auto sin_vals = torch::sin(freqs_outer);  // [S, D/2]
+
+    auto freqs_cos = cos_vals.transpose(-1, -2)
+                         .repeat_interleave(2, -2)
+                         .transpose(-1, -2)
+                         .to(torch::kFloat32);  // [S, D]
+
+    auto freqs_sin = sin_vals.transpose(-1, -2)
+                         .repeat_interleave(2, -2)
+                         .transpose(-1, -2)
+                         .to(torch::kFloat32);  // [S, D]
+    return torch::cat({freqs_cos.unsqueeze(0), freqs_sin.unsqueeze(0)},
+                      0);  // [2, S, D]
+  }
+  // This case should not happen in practice, but required for compilation
+  LOG(FATAL) << "get_1d_rotary_pos_embed returned empty tensor, which should "
+                "not happen. use_real: "
+             << use_real
+             << " repeat_interleave_real: " << repeat_interleave_real;
+  return torch::Tensor();
 }
 
 class DiTRMSNormImpl : public torch::nn::Module {
@@ -166,6 +246,7 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     int64_t inner_dim = key.size(-1);
     int64_t attn_heads = heads_;
     int64_t head_dim = inner_dim / attn_heads;
+#if defined(USE_NPU)
     query = query.view({batch_size, -1, attn_heads, head_dim}).contiguous();
     key = key.view({batch_size, -1, attn_heads, head_dim}).contiguous();
     value = value.view({batch_size, -1, attn_heads, head_dim}).contiguous();
@@ -197,6 +278,23 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
     attn_output = attn_output.to(query.dtype());
     return attn_output.flatten(2);
+#else
+    query = query.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
+    key = key.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
+    value = value.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
+
+    // Apply Q/K normalization if enabled
+    if (norm_q_) query = std::get<0>(norm_q_->forward(query));
+    if (norm_k_) key = std::get<0>(norm_k_->forward(key));
+    // Apply rotary positional embedding
+    query = apply_rotary_emb(query, image_rotary_emb);
+    key = apply_rotary_emb(key, image_rotary_emb);
+    // Compute scaled dot-product attention (no mask, no dropout)
+    torch::Tensor attn_output = torch::scaled_dot_product_attention(
+        query, key, value, torch::nullopt, 0.0, false);
+    attn_output = attn_output.to(query.dtype());
+    return attn_output.transpose(1, 2).flatten(2);
+#endif
   }
 
   void load_state_dict(const StateDict& state_dict) {
@@ -337,6 +435,7 @@ class FluxAttentionImpl : public torch::nn::Module {
       query1 = apply_rotary_emb(query1, image_rotary_emb, false);
       key1 = apply_rotary_emb(key1, image_rotary_emb, false);
     }
+#if defined(USE_NPU)
     // torch::Tensor attn_output = torch::scaled_dot_product_attention(
     //     query1, key1, value1, torch::nullopt, 0.0, false);
     int64_t head_num_ = query1.size(2);
@@ -357,6 +456,17 @@ class FluxAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
 
     attn_output = attn_output.reshape({batch_size, -1, attn_heads * head_dim});
+#else
+    // SDPA expects (B, H, S, D); our query1/key1/value1 are (B, S, H, D).
+    // Transpose to match diffusers dispatch_attention_fn (permute 0,2,1,3).
+    query1 = query1.transpose(1, 2);
+    key1 = key1.transpose(1, 2);
+    value1 = value1.transpose(1, 2);
+    torch::Tensor attn_output = torch::scaled_dot_product_attention(
+        query1, key1, value1, torch::nullopt, 0.0, false);
+    attn_output = attn_output.transpose(1, 2).reshape(
+        {batch_size, -1, attn_heads * head_dim});
+#endif
     attn_output = attn_output.to(query.dtype());
 
     int64_t encoder_length = encoder_hidden_states_reshaped.size(1);

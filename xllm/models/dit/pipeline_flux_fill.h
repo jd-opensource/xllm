@@ -14,8 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include "dit.h"
 #include "pipeline_flux_base.h"
+#include "transformer_flux.h"
 // pipeline_flux_fill compatible with huggingface weights
 // ref to:
 // https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/flux/pipeline_flux_fill.py

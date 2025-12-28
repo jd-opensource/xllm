@@ -25,6 +25,67 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+namespace {
+
+// Eager causal + padding attention fallback when custom mask is used (e.g.
+// LongCat text encoder). FlashInfer's custom mask path gives wrong token-0
+// output; this path matches diffusers.
+std::tuple<torch::Tensor, std::optional<torch::Tensor>>
+run_eager_causal_padded_attention(const torch::Tensor& query,
+                                  const torch::Tensor& key,
+                                  const torch::Tensor& value,
+                                  const torch::Tensor& attn_mask_1d,
+                                  float scale,
+                                  int64_t num_heads,
+                                  int64_t num_kv_heads,
+                                  int64_t head_size) {
+  torch::Tensor m = attn_mask_1d;
+  if (m.device() != query.device()) {
+    m = m.to(query.device());
+  }
+  if (!m.is_floating_point()) {
+    m = m.to(torch::kFloat32);
+  }
+  int64_t T = query.size(0);
+  CHECK_EQ(m.size(0), T) << "[eager attention] mask length " << m.size(0)
+                         << " != query seq len " << T;
+  auto device = query.device();
+  auto causal = torch::tril(torch::ones(
+      {T, T}, torch::TensorOptions().dtype(torch::kFloat32).device(device)));
+  auto pad2d = m.unsqueeze(0).expand({T, T});
+  auto combined = (causal * pad2d).to(torch::kFloat32);
+  const float mask_val = -std::numeric_limits<float>::infinity();
+  auto add_mask = torch::where(combined > 0.5f,
+                               torch::zeros_like(combined),
+                               torch::full_like(combined, mask_val));
+  int64_t g = num_heads / num_kv_heads;
+  // [T,K,D] -> [T,K,D,1] -> [T,K,D,g] -> permute to [T,K,g,D] -> [T,K*g,D].
+  // Head h = kv_head k, replicate r: h = k*g + r; each head gets full D
+  // dims.
+  auto Kg = key.unsqueeze(3).expand({-1, -1, -1, g});
+  auto Vg = value.unsqueeze(3).expand({-1, -1, -1, g});
+  torch::Tensor Kr =
+      Kg.permute({0, 1, 3, 2}).reshape({-1, num_heads, head_size});
+  torch::Tensor Vr =
+      Vg.permute({0, 1, 3, 2}).reshape({-1, num_heads, head_size});
+  auto Qf = query.to(torch::kFloat32);
+  auto Kf = Kr.to(torch::kFloat32);
+  // scores[t,h,j] = sum_d Q[t,h,d]*K[j,h,d]. Use
+  // (T,H,1,D)*(1,H,T,D)->(T,H,T,D)->sum(-1).
+  auto Kf_1HTD = Kf.permute({1, 0, 2}).unsqueeze(0);  // [1, H, T, D]
+  auto scores = (Qf.unsqueeze(2) * Kf_1HTD).sum(-1) * scale;
+  scores = scores + add_mask.unsqueeze(1);
+  // Match diffusers: softmax in float32, cast attn to query dtype; attn @ V
+  // in bf16.
+  auto attn =
+      torch::softmax(scores.to(torch::kFloat32), -1).to(query.scalar_type());
+  auto out = torch::einsum("thj,jhd->thd", {attn, Vr}).contiguous();
+  auto result = out.view({-1, num_heads * head_size});
+  return {result, std::nullopt};
+}
+
+}  // namespace
+
 FlashInferAttentionImpl::FlashInferAttentionImpl(int64_t num_heads,
                                                  int64_t head_size,
                                                  float scale,
@@ -57,15 +118,25 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
   torch::Tensor k_cache = kv_cache.get_k_cache();
   torch::Tensor v_cache = kv_cache.get_v_cache();
 
+  // Get block_size from k_cache if defined and has proper dimensions,
+  // otherwise use a default value (for prefill without KV cache, e.g., LongCat)
+  int64_t block_size = 1;  // Default value when KV cache is not initialized
+  if (k_cache.defined() && k_cache.dim() >= 2) {
+    block_size = k_cache.size(1);
+  }
+
   // maybe we need to update shared attn state before execute attention,
   // currently we update flashinfer step_wise_attn_state_ at layer 0.
   bool causal = attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
 
+  // Check if attention_mask is provided
+  bool use_custom_mask = attn_metadata.attn_mask.defined();
+
   std::string backend = xllm::kernel::cuda::determine_attention_backend(
       /*pos_encoding_mode=*/0,
       /*use_fp16_qk_reduction=*/false,
-      /*use_custom_mask=*/false,
-      /*causal=*/causal);
+      use_custom_mask,
+      causal);
 
   // NOTE: we only support "fa2" backend for BatchPrefillWithPagedKvcacheKernel
   // for flashinfer v0.6.2, because it would cause performance degradation if
@@ -81,31 +152,34 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
     VLOG(kGraphExecutorLogVerboseLevel)
         << "no need to update plan_info for CUDA graph";
   } else {
-    flashinfer::update_plan_info(
-        attn_metadata.plan_info,
-        backend,
-        attn_metadata,
-        query.scalar_type(),
-        key.scalar_type(),
-        output.scalar_type(),
-        head_size_,
-        head_size_,
-        num_heads_,
-        num_kv_heads_,
-        /*block_size=*/k_cache.size(1),
-        /*window_size_left=*/sliding_window_,
-        /*enable_cuda_graph=*/attn_metadata.enable_cuda_graph,
-        /*causal=*/causal,
-        /*use_tensor_core=*/decode_use_tensor_core_);
+    flashinfer::update_plan_info(attn_metadata.plan_info,
+                                 backend,
+                                 attn_metadata,
+                                 query.scalar_type(),
+                                 key.scalar_type(),
+                                 output.scalar_type(),
+                                 head_size_,
+                                 head_size_,
+                                 num_heads_,
+                                 num_kv_heads_,
+                                 block_size,
+                                 sliding_window_,
+                                 attn_metadata.enable_cuda_graph,
+                                 causal,
+                                 decode_use_tensor_core_);
   }
 
-  xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
-  reshape_paged_cache_params.key = key;
-  reshape_paged_cache_params.value = value;
-  reshape_paged_cache_params.k_cache = k_cache;
-  reshape_paged_cache_params.v_cache = v_cache;
-  reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
-  xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+  // Only reshape and store to cache if k_cache is properly initialized
+  // For prefill without KV cache (e.g., LongCat text encoding), skip this step
+  if (k_cache.defined() && k_cache.dim() >= 2) {
+    xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
+    reshape_paged_cache_params.key = key;
+    reshape_paged_cache_params.value = value;
+    reshape_paged_cache_params.k_cache = k_cache;
+    reshape_paged_cache_params.v_cache = v_cache;
+    reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
+    xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+  }
 
   xllm::kernel::AttentionParams attention_params(attn_metadata);
   attention_params.query = query;
@@ -126,12 +200,30 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
           .get_page_locked_int_workspace_buffer();
   attention_params.use_tensor_core = decode_use_tensor_core_;
 
+  // Pass attention_mask if provided (use_custom_mask implies
+  // attn_mask.defined())
+  if (use_custom_mask) {
+    attention_params.mask = attn_metadata.attn_mask;
+  }
+
   // TODO: support chunked prefill
   CHECK(!attn_metadata.is_chunked_prefill)
       << "chunked prefill is not supported";
   if (attn_metadata.is_prefill) {
     attention_params.key = key;
     attention_params.value = value;
+    if (use_custom_mask) {
+      auto [result, _] =
+          run_eager_causal_padded_attention(query,
+                                            key,
+                                            value,
+                                            attn_metadata.attn_mask,
+                                            scale_,
+                                            num_heads_,
+                                            num_kv_heads_,
+                                            head_size_);
+      return {result, output_lse};
+    }
     xllm::kernel::batch_prefill(attention_params);
   } else {
     attention_params.query = query;

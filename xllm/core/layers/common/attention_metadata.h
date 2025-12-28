@@ -108,9 +108,11 @@ struct AttentionMetadata {
   torch::Tensor unshared_v_cache;
   torch::Tensor step_tensor;
 
+  // custom attention mask
+  torch::Tensor attn_mask;
+
 #if defined(USE_NPU)
   // for npu
-  torch::Tensor attn_mask;
   torch::Tensor kv_seq_lens_host;
   // For ACL graph execution - tiling data for CustomPagedAttention.
   // If defined, use this instead of kv_seq_lens_host to avoid .to(kCPU)
