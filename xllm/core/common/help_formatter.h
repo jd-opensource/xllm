@@ -24,50 +24,70 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+
+const std::pair<std::string, std::vector<std::string>> kCommonOptions = {
+    "COMMON OPTIONS",
+    {"master_node_addr",
+     "host",
+     "port",
+     "model",
+     "devices",
+     "nnodes",
+     "node_rank",
+     "max_memory_utilization",
+     "max_tokens_per_batch",
+     "max_seqs_per_batch",
+     "enable_chunked_prefill",
+     "enable_schedule_overlap",
+     "enable_prefix_cache",
+     "communication_backend",
+     "block_size",
+     "task",
+     "max_cache_size"}};
+
+const std::pair<std::string, std::vector<std::string>> kMoeModelOptions = {
+    "MOE MODEL OPTIONS",
+    {"dp_size", "ep_size", "enable_mla", "expert_parallel_degree"}};
+
+const std::pair<std::string, std::vector<std::string>>
+    kDisaggregatedPrefillDecodeOptions = {
+        "DISAGGREGATED PREFILL-DECODE OPTIONS",
+        {"enable_disagg_pd",
+         "disagg_pd_port",
+         "instance_role",
+         "kv_cache_transfer_mode",
+         "device_ip",
+         "transfer_listen_port"}};
+
+const std::pair<std::string, std::vector<std::string>> kMtpOptions = {
+    "MTP OPTIONS",
+    {"draft_model", "draft_devices", "num_speculative_tokens"}};
+
+const std::pair<std::string, std::vector<std::string>> kXllmServiceOptions = {
+    "XLLM-SERVICE OPTIONS",
+    {"xservice_addr", "etcd_addr", "rank_tablefile"}};
+
+const std::pair<std::string, std::vector<std::string>> kOtherOptions = {
+    "OTHER OPTIONS",
+    {"max_concurrent_requests",
+     "model_id",
+     "num_request_handling_threads",
+     "num_response_handling_threads",
+     "prefill_scheduling_memory_usage_threshold"}};
+
+const std::vector<std::pair<std::string, std::vector<std::string>>>
+    kFlagCategories = {kCommonOptions,
+                       kMoeModelOptions,
+                       kDisaggregatedPrefillDecodeOptions,
+                       kMtpOptions,
+                       kXllmServiceOptions,
+                       kOtherOptions};
+
+}  // namespace
+
 class HelpFormatter {
  private:
-  static inline const std::vector<
-      std::pair<std::string, std::vector<std::string>>>
-      FLAG_CATEGORIES = {
-          {"COMMON OPTIONS",
-           {"master_node_addr",
-            "host",
-            "port",
-            "model",
-            "devices",
-            "nnodes",
-            "node_rank",
-            "max_memory_utilization",
-            "max_tokens_per_batch",
-            "max_seqs_per_batch",
-            "enable_chunked_prefill",
-            "enable_schedule_overlap",
-            "enable_prefix_cache",
-            "communication_backend",
-            "block_size",
-            "task",
-            "max_cache_size"}},
-          {"MOE MODEL OPTIONS",
-           {"dp_size", "ep_size", "enable_mla", "expert_parallel_degree"}},
-          {"DISAGGREGATED PREFILL-DECODE OPTIONS",
-           {"enable_disagg_pd",
-            "disagg_pd_port",
-            "instance_role",
-            "kv_cache_transfer_mode",
-            "device_ip",
-            "transfer_listen_port"}},
-          {"MTP OPTIONS",
-           {"draft_model", "draft_devices", "num_speculative_tokens"}},
-          {"XLLM-SERVICE OPTIONS",
-           {"xservice_addr", "etcd_addr", "rank_tablefile"}},
-          {"OTHER OPTIONS",
-           {"max_concurrent_requests",
-            "model_id",
-            "num_request_handling_threads",
-            "num_response_handling_threads",
-            "prefill_scheduling_memory_usage_threshold"}},
-  };
-
  public:
   static std::string generate_help() {
     std::ostringstream oss;
@@ -82,7 +102,7 @@ class HelpFormatter {
     oss << "  -h, --help: Display this help message and exit.\n\n";
 
     // Print flags by category
-    for (const auto& [category_name, flag_names] : FLAG_CATEGORIES) {
+    for (const auto& [category_name, flag_names] : kFlagCategories) {
       std::ostringstream category_oss;
 
       for (const auto& flag_name : flag_names) {
