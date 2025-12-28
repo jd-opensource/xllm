@@ -35,7 +35,9 @@ limitations under the License.
 #include "core/layers/common/rms_norm.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
+#if defined(USE_NPU)
 #include "torch_npu/csrc/aten/CustomFunctions.h"
+#endif
 
 namespace xllm {
 // DiT model compatible with huggingface weights
@@ -55,7 +57,25 @@ inline torch::Tensor apply_rotary_emb(const torch::Tensor& x,
     sin = freqs_cis[1].unsqueeze(0).unsqueeze(2);  // [1, 6542, 1, 128]
   }
 
+#if defined(USE_NPU)
   return at_npu::native::custom_ops::npu_rotary_mul(x, cos, sin, "interleave");
+#else
+  std::vector<int64_t> reshape_shape;
+  for (int64_t i = 0; i < x.dim() - 1; ++i) {
+    reshape_shape.push_back(x.size(i));
+  }
+  reshape_shape.push_back(-1);
+  reshape_shape.push_back(2);
+  torch::Tensor reshaped = x.reshape(reshape_shape);
+  torch::Tensor x_real = reshaped.select(-1, 0);
+  torch::Tensor x_imag = reshaped.select(-1, 1);
+  // x_rotated = [-x_imag, x_real]
+  torch::Tensor neg_x_imag = -x_imag;
+  auto x_rotated = torch::stack({neg_x_imag, x_real}, -1).flatten(3);
+  return (x.to(torch::kFloat32) * cos.to(torch::kFloat32) +
+          x_rotated.to(torch::kFloat32) * sin.to(torch::kFloat32))
+      .to(x.dtype());
+#endif
 }
 
 class DiTRMSNormImpl : public torch::nn::Module {
@@ -166,6 +186,7 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     int64_t inner_dim = key.size(-1);
     int64_t attn_heads = heads_;
     int64_t head_dim = inner_dim / attn_heads;
+#if defined(USE_NPU)
     query = query.view({batch_size, -1, attn_heads, head_dim}).contiguous();
     key = key.view({batch_size, -1, attn_heads, head_dim}).contiguous();
     value = value.view({batch_size, -1, attn_heads, head_dim}).contiguous();
@@ -197,6 +218,23 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
     attn_output = attn_output.to(query.dtype());
     return attn_output.flatten(2);
+#else
+    query = query.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
+    key = key.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
+    value = value.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
+
+    // Apply Q/K normalization if enabled
+    if (norm_q_) query = std::get<0>(norm_q_->forward(query));
+    if (norm_k_) key = std::get<0>(norm_k_->forward(key));
+    // Apply rotary positional embedding
+    query = apply_rotary_emb(query, image_rotary_emb);
+    key = apply_rotary_emb(key, image_rotary_emb);
+    // Compute scaled dot-product attention (no mask, no dropout)
+    torch::Tensor attn_output = torch::scaled_dot_product_attention(
+        query, key, value, torch::nullopt, 0.0, false);
+    attn_output = attn_output.to(query.dtype());
+    return attn_output.transpose(1, 2).flatten(2);
+#endif
   }
 
   void load_state_dict(const StateDict& state_dict) {
@@ -337,6 +375,7 @@ class FluxAttentionImpl : public torch::nn::Module {
       query1 = apply_rotary_emb(query1, image_rotary_emb, false);
       key1 = apply_rotary_emb(key1, image_rotary_emb, false);
     }
+#if defined(USE_NPU)
     // torch::Tensor attn_output = torch::scaled_dot_product_attention(
     //     query1, key1, value1, torch::nullopt, 0.0, false);
     int64_t head_num_ = query1.size(2);
@@ -357,6 +396,17 @@ class FluxAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
 
     attn_output = attn_output.reshape({batch_size, -1, attn_heads * head_dim});
+#else
+    // SDPA expects (B, H, S, D); our query1/key1/value1 are (B, S, H, D).
+    // Transpose to match diffusers dispatch_attention_fn (permute 0,2,1,3).
+    query1 = query1.transpose(1, 2);
+    key1 = key1.transpose(1, 2);
+    value1 = value1.transpose(1, 2);
+    torch::Tensor attn_output = torch::scaled_dot_product_attention(
+        query1, key1, value1, torch::nullopt, 0.0, false);
+    attn_output = attn_output.transpose(1, 2).reshape(
+        {batch_size, -1, attn_heads * head_dim});
+#endif
     attn_output = attn_output.to(query.dtype());
 
     int64_t encoder_length = encoder_hidden_states_reshaped.size(1);
@@ -1395,6 +1445,433 @@ REGISTER_MODEL_ARGS(FluxTransformer2DModel, [&] {
   LOAD_ARG_OR(joint_attention_dim, "joint_attention_dim", 4096);
   LOAD_ARG_OR(pooled_projection_dim, "pooled_projection_dim", 768);
   LOAD_ARG_OR(guidance_embeds, "guidance_embeds", true);
+  LOAD_ARG_OR(
+      axes_dims_rope, "axes_dims_rope", (std::vector<int64_t>{16, 56, 56}));
+});
+
+// LongCat-Image Transformer Model
+// Ref:
+// https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/transformers/transformer_longcat_image.py
+
+class LongCatImageTimestepEmbeddingsImpl : public torch::nn::Module {
+ public:
+  explicit LongCatImageTimestepEmbeddingsImpl(const ModelContext& context)
+      : options_(context.get_tensor_options()) {
+    time_proj_ = Timesteps(context);
+    timestep_embedder_ = TimestepEmbedding(context);
+  }
+
+  torch::Tensor forward(const torch::Tensor& timestep) {
+    auto timesteps_proj = time_proj_->forward(timestep);
+    auto timesteps_emb = timestep_embedder_->forward(timesteps_proj);
+    return timesteps_emb;
+  }
+
+  void load_state_dict(const StateDict& state_dict) {
+    timestep_embedder_->load_state_dict(
+        state_dict.get_dict_with_prefix("timestep_embedder."));
+  }
+
+  void verify_loaded_weights(const std::string& prefix) const {
+    timestep_embedder_->verify_loaded_weights(prefix + "timestep_embedder.");
+  }
+
+ private:
+  Timesteps time_proj_{nullptr};
+  TimestepEmbedding timestep_embedder_{nullptr};
+  torch::TensorOptions options_;
+};
+TORCH_MODULE(LongCatImageTimestepEmbeddings);
+
+class LongCatImageSingleTransformerBlockImpl : public torch::nn::Module {
+ public:
+  explicit LongCatImageSingleTransformerBlockImpl(const ModelContext& context)
+      : options_(context.get_tensor_options()) {
+    auto model_args = context.get_model_args();
+    auto num_attention_heads = model_args.n_heads();
+    auto attention_head_dim = model_args.head_dim();
+    auto dim = num_attention_heads * attention_head_dim;
+    mlp_hidden_dim_ = dim * 4;  // mlp_ratio = 4.0
+
+    norm_ = register_module("norm", AdaLayerNormZeroSingle(context));
+    proj_mlp_ = register_module(
+        "proj_mlp",
+        layer::AddMatmul(dim, mlp_hidden_dim_, /*with_bias=*/true, options_));
+    act_mlp_ =
+        register_module("act_mlp",
+                        torch::nn::Functional(
+                            std::function<torch::Tensor(const torch::Tensor&)>(
+                                [](const torch::Tensor& x) {
+                                  return torch::gelu(x, "tanh");
+                                })));
+    proj_out_ = register_module(
+        "proj_out",
+        layer::AddMatmul(
+            dim + mlp_hidden_dim_, dim, /*with_bias=*/true, options_));
+    attn_ = register_module("attn", FluxSingleAttention(context));
+  }
+
+  std::tuple<torch::Tensor, torch::Tensor> forward(
+      const torch::Tensor& hidden_states,
+      const torch::Tensor& encoder_hidden_states,
+      const torch::Tensor& temb,
+      const torch::Tensor& image_rotary_emb = torch::Tensor()) {
+    int64_t text_seq_len = encoder_hidden_states.size(1);
+    auto concat_hidden_states =
+        torch::cat({encoder_hidden_states, hidden_states}, 1);
+    auto residual = concat_hidden_states;
+    auto [norm_hidden_states, gate] = norm_(concat_hidden_states, temb);
+    auto mlp_hidden_states = act_mlp_(proj_mlp_(norm_hidden_states));
+    auto attn_output = attn_->forward(norm_hidden_states, image_rotary_emb);
+    auto hidden_states_cat = torch::cat({attn_output, mlp_hidden_states}, 2);
+    auto out = proj_out_(hidden_states_cat);
+    out = gate.unsqueeze(1) * out;
+    out = residual + out;
+    if (out.scalar_type() == torch::kFloat16) {
+      out = torch::clamp(out, -65504.0f, 65504.0f);
+    }
+    auto encoder_hidden_states_out = out.slice(1, 0, text_seq_len);
+    auto hidden_states_out = out.slice(1, text_seq_len);
+    return std::make_tuple(encoder_hidden_states_out, hidden_states_out);
+  }
+
+  void load_state_dict(const StateDict& state_dict) {
+    attn_->load_state_dict(state_dict.get_dict_with_prefix("attn."));
+    norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
+    proj_mlp_->load_state_dict(state_dict.get_dict_with_prefix("proj_mlp."));
+    proj_out_->load_state_dict(state_dict.get_dict_with_prefix("proj_out."));
+  }
+
+  void verify_loaded_weights(const std::string& prefix) {
+    attn_->verify_loaded_weights(prefix + "attn.");
+    norm_->verify_loaded_weights(prefix + "norm.");
+    proj_mlp_->verify_loaded_weights(prefix + "proj_mlp.");
+    proj_out_->verify_loaded_weights(prefix + "proj_out.");
+  }
+
+ private:
+  AdaLayerNormZeroSingle norm_{nullptr};
+  layer::AddMatmul proj_mlp_{nullptr};
+  layer::AddMatmul proj_out_{nullptr};
+  torch::nn::Functional act_mlp_{nullptr};
+  FluxSingleAttention attn_{nullptr};
+  int64_t mlp_hidden_dim_;
+  torch::TensorOptions options_;
+};
+TORCH_MODULE(LongCatImageSingleTransformerBlock);
+
+// LongCatImageTransformerBlock can reuse FluxTransformerBlock since the
+// interface is identical
+using LongCatImageTransformerBlock = FluxTransformerBlock;
+
+// Helper function for rotary position embedding (needed by
+// LongCatImagePosEmbed)
+inline torch::Tensor get_1d_rotary_pos_embed(
+    int64_t dim,
+    const torch::Tensor& pos,
+    float theta = 10000.0,
+    bool use_real = false,
+    float linear_factor = 1.0,
+    float ntk_factor = 1.0,
+    bool repeat_interleave_real = true,
+    torch::Dtype freqs_dtype = torch::kFloat32) {
+  CHECK_EQ(dim % 2, 0) << "Dimension must be even";
+
+  torch::Tensor pos_tensor = pos;
+  if (pos.dim() == 0) {
+    pos_tensor = torch::arange(pos.item<int64_t>(), pos.options());
+  }
+
+  theta = theta * ntk_factor;
+
+  auto freqs =
+      1.0 /
+      (torch::pow(
+           theta,
+           torch::arange(
+               0, dim, 2, torch::dtype(freqs_dtype).device(pos.device())) /
+               dim) *
+       linear_factor);  // [D/2]
+
+  auto tensors = {pos_tensor, freqs};
+
+  auto freqs_outer = torch::einsum("s,d->sd", tensors);  // [S, D/2]
+  freqs_outer = freqs_outer.to(torch::kFloat32);
+
+  if (use_real && repeat_interleave_real) {
+    auto cos_vals = torch::cos(freqs_outer);  // [S, D/2]
+    auto sin_vals = torch::sin(freqs_outer);  // [S, D/2]
+
+    auto freqs_cos = cos_vals.transpose(-1, -2)
+                         .repeat_interleave(2, -2)
+                         .transpose(-1, -2)
+                         .to(torch::kFloat32);  // [S, D]
+
+    auto freqs_sin = sin_vals.transpose(-1, -2)
+                         .repeat_interleave(2, -2)
+                         .transpose(-1, -2)
+                         .to(torch::kFloat32);  // [S, D]
+    return torch::cat({freqs_cos.unsqueeze(0), freqs_sin.unsqueeze(0)},
+                      0);  // [2, S, D]
+  }
+  CHECK(false) << "get_1d_rotary_pos_embed returned empty tensor, which should "
+                  "not happen. use_real and repeat_interleave_real must be "
+                  "true. But now use_real: "
+               << use_real
+               << " repeat_interleave_real: " << repeat_interleave_real << ".";
+  return torch::Tensor();
+}
+
+// LongCatImagePosEmbed - similar to FluxPosEmbed but defined here to avoid
+// dependency on pipeline_flux_base.h
+class LongCatImagePosEmbedImpl : public torch::nn::Module {
+ public:
+  LongCatImagePosEmbedImpl(int64_t theta, std::vector<int64_t> axes_dim) {
+    theta_ = theta;
+    axes_dim_ = axes_dim;
+  }
+
+  std::pair<torch::Tensor, torch::Tensor> forward_cache(
+      const torch::Tensor& txt_ids,
+      const torch::Tensor& img_ids,
+      int64_t height = -1,
+      int64_t width = -1) {
+    auto seq_len = txt_ids.size(0);
+
+    // recompute the cache if height or width changes
+    if (height != cached_image_height_ || width != cached_image_width_ ||
+        seq_len != max_seq_len_) {
+      torch::Tensor ids = torch::cat({txt_ids, img_ids}, 0);
+      cached_image_height_ = height;
+      cached_image_width_ = width;
+      max_seq_len_ = seq_len;
+      auto [cos, sin] = forward(ids);
+      freqs_cos_cache_ = std::move(cos);
+      freqs_sin_cache_ = std::move(sin);
+    }
+    return {freqs_cos_cache_, freqs_sin_cache_};
+  }
+
+  std::pair<torch::Tensor, torch::Tensor> forward(const torch::Tensor& ids) {
+    int64_t n_axes = ids.size(-1);
+    std::vector<torch::Tensor> cos_out, sin_out;
+    auto pos = ids.to(torch::kFloat32);
+    torch::Dtype freqs_dtype = torch::kFloat64;
+    for (int64_t i = 0; i < n_axes; ++i) {
+      auto pos_slice = pos.select(-1, i);
+      auto result = get_1d_rotary_pos_embed(axes_dim_[i],
+                                            pos_slice,
+                                            static_cast<float>(theta_),
+                                            true,  // use_real
+                                            1.0f,  // linear_factor
+                                            1.0f,  // ntk_factor
+                                            true,  // repeat_interleave_real
+                                            freqs_dtype);
+      auto cos = result[0];
+      auto sin = result[1];
+      cos_out.push_back(cos);
+      sin_out.push_back(sin);
+    }
+
+    auto freqs_cos = torch::cat(cos_out, -1);
+    auto freqs_sin = torch::cat(sin_out, -1);
+    return {freqs_cos, freqs_sin};
+  }
+
+ private:
+  int64_t theta_;
+  std::vector<int64_t> axes_dim_;
+  torch::Tensor freqs_cos_cache_;
+  torch::Tensor freqs_sin_cache_;
+  int64_t max_seq_len_ = -1;
+  int64_t cached_image_height_ = -1;
+  int64_t cached_image_width_ = -1;
+};
+TORCH_MODULE(LongCatImagePosEmbed);
+
+class LongCatImageTransformer2DModelImpl : public torch::nn::Module {
+ public:
+  explicit LongCatImageTransformer2DModelImpl(const ModelContext& context)
+      : options_(context.get_tensor_options()) {
+    auto model_args = context.get_model_args();
+    auto num_attention_heads = model_args.n_heads();
+    auto attention_head_dim = model_args.head_dim();
+    auto inner_dim = num_attention_heads * attention_head_dim;
+    auto joint_attention_dim = model_args.joint_attention_dim();
+    auto axes_dims_rope = model_args.axes_dims_rope();
+    auto num_layers = model_args.num_layers();
+    auto num_single_layers = model_args.num_single_layers();
+    auto patch_size = model_args.mm_patch_size();
+    in_channels_ = model_args.in_channels();
+    out_channels_ = model_args.out_channels();
+
+    pos_embed_ =
+        register_module("pos_embed",
+                        LongCatImagePosEmbed(
+                            10000, axes_dims_rope));  // ROPE_SCALE_BASE = 10000
+    time_embed_ =
+        register_module("time_embed", LongCatImageTimestepEmbeddings(context));
+    context_embedder_ = register_module(
+        "context_embedder",
+        layer::AddMatmul(
+            joint_attention_dim, inner_dim, /*with_bias=*/true, options_));
+    x_embedder_ = register_module(
+        "x_embedder",
+        layer::AddMatmul(
+            in_channels_, inner_dim, /*with_bias=*/true, options_));
+
+    transformer_blocks_ =
+        register_module("transformer_blocks", torch::nn::ModuleList());
+    transformer_block_layers_.reserve(num_layers);
+    for (int64_t i = 0; i < num_layers; ++i) {
+      auto block = LongCatImageTransformerBlock(context);
+      transformer_blocks_->push_back(block);
+      transformer_block_layers_.push_back(block);
+    }
+
+    single_transformer_blocks_ =
+        register_module("single_transformer_blocks", torch::nn::ModuleList());
+    single_transformer_block_layers_.reserve(num_single_layers);
+    for (int64_t i = 0; i < num_single_layers; ++i) {
+      auto block = LongCatImageSingleTransformerBlock(context);
+      single_transformer_blocks_->push_back(block);
+      single_transformer_block_layers_.push_back(block);
+    }
+
+    norm_out_ = register_module("norm_out", AdaLayerNormContinuous(context));
+    proj_out_ = register_module(
+        "proj_out",
+        layer::AddMatmul(inner_dim,
+                         patch_size * patch_size * out_channels_,
+                         /*with_bias=*/true,
+                         options_));
+  }
+
+  torch::Tensor forward(const torch::Tensor& hidden_states_input,
+                        const torch::Tensor& encoder_hidden_states_input,
+                        const torch::Tensor& timestep,
+                        const torch::Tensor& image_rotary_emb) {
+    torch::Tensor hidden_states = x_embedder_->forward(hidden_states_input);
+    auto timestep_scaled = timestep.to(hidden_states.dtype()) * 1000.0f;
+    torch::Tensor temb = time_embed_->forward(timestep_scaled);
+    torch::Tensor encoder_hidden_states =
+        context_embedder_->forward(encoder_hidden_states_input);
+
+    for (int64_t i = 0; i < transformer_block_layers_.size(); ++i) {
+      auto block = transformer_block_layers_[i];
+      auto [new_hidden, new_encoder_hidden] = block->forward(
+          hidden_states, encoder_hidden_states, temb, image_rotary_emb);
+      hidden_states = new_hidden;
+      encoder_hidden_states = new_encoder_hidden;
+    }
+
+    for (int64_t i = 0; i < single_transformer_block_layers_.size(); ++i) {
+      auto block = single_transformer_block_layers_[i];
+      // Block returns (encoder, hidden) per diffusers
+      // LongCatImageSingleTransformerBlock.
+      auto [new_encoder_hidden, new_hidden] = block->forward(
+          hidden_states, encoder_hidden_states, temb, image_rotary_emb);
+      hidden_states = new_hidden;
+      encoder_hidden_states = new_encoder_hidden;
+    }
+
+    auto output_hidden = norm_out_(hidden_states, temb);
+    return proj_out_(output_hidden);
+  }
+
+  // Forward method with step_idx for cache separation (used for CFG)
+  // Note: LongCatImageTransformer2DModel doesn't use cache, so step_idx is
+  // ignored But we keep this signature for consistency and future cache support
+  torch::Tensor forward(const torch::Tensor& hidden_states_input,
+                        const torch::Tensor& encoder_hidden_states_input,
+                        const torch::Tensor& timestep,
+                        const torch::Tensor& image_rotary_emb,
+                        int64_t step_idx) {
+    // For LongCatImageTransformer2DModel, we don't use cache, so step_idx is
+    // ignored But we keep this signature for consistency with
+    // FluxTransformer2DModel
+    return forward(hidden_states_input,
+                   encoder_hidden_states_input,
+                   timestep,
+                   image_rotary_emb);
+  }
+
+  void load_model(std::unique_ptr<DiTFolderLoader> loader) {
+    for (const auto& state_dict : loader->get_state_dicts()) {
+      context_embedder_->load_state_dict(
+          state_dict->get_dict_with_prefix("context_embedder."));
+      x_embedder_->load_state_dict(
+          state_dict->get_dict_with_prefix("x_embedder."));
+      time_embed_->load_state_dict(
+          state_dict->get_dict_with_prefix("time_embed."));
+      for (int64_t i = 0; i < transformer_block_layers_.size(); ++i) {
+        auto block = transformer_block_layers_[i];
+        block->load_state_dict(state_dict->get_dict_with_prefix(
+            "transformer_blocks." + std::to_string(i) + "."));
+      }
+      for (int64_t i = 0; i < single_transformer_block_layers_.size(); ++i) {
+        auto block = single_transformer_block_layers_[i];
+        block->load_state_dict(state_dict->get_dict_with_prefix(
+            "single_transformer_blocks." + std::to_string(i) + "."));
+      }
+      norm_out_->load_state_dict(state_dict->get_dict_with_prefix("norm_out."));
+      proj_out_->load_state_dict(state_dict->get_dict_with_prefix("proj_out."));
+    }
+  }
+
+  void verify_loaded_weights(const std::string& prefix) {
+    context_embedder_->verify_loaded_weights(prefix + "context_embedder.");
+    x_embedder_->verify_loaded_weights(prefix + "x_embedder.");
+    time_embed_->verify_loaded_weights(prefix + "time_embed.");
+    for (int64_t i = 0; i < transformer_block_layers_.size(); ++i) {
+      auto block = transformer_block_layers_[i];
+      block->verify_loaded_weights(prefix + "transformer_blocks." +
+                                   std::to_string(i) + ".");
+    }
+    for (int64_t i = 0; i < single_transformer_block_layers_.size(); ++i) {
+      auto block = single_transformer_block_layers_[i];
+      block->verify_loaded_weights(prefix + "single_transformer_blocks." +
+                                   std::to_string(i) + ".");
+    }
+    norm_out_->verify_loaded_weights(prefix + "norm_out.");
+    proj_out_->verify_loaded_weights(prefix + "proj_out.");
+  }
+
+  int64_t in_channels() { return in_channels_; }
+
+ private:
+  LongCatImagePosEmbed pos_embed_{nullptr};
+  LongCatImageTimestepEmbeddings time_embed_{nullptr};
+  layer::AddMatmul context_embedder_{nullptr};
+  layer::AddMatmul x_embedder_{nullptr};
+  torch::nn::ModuleList transformer_blocks_{nullptr};
+  std::vector<LongCatImageTransformerBlock> transformer_block_layers_;
+  torch::nn::ModuleList single_transformer_blocks_{nullptr};
+  std::vector<LongCatImageSingleTransformerBlock>
+      single_transformer_block_layers_;
+  AdaLayerNormContinuous norm_out_{nullptr};
+  layer::AddMatmul proj_out_{nullptr};
+  int64_t in_channels_;
+  int64_t out_channels_;
+  torch::TensorOptions options_;
+};
+TORCH_MODULE(LongCatImageTransformer2DModel);
+
+REGISTER_MODEL_ARGS(LongCatImageTransformer2DModel, [&] {
+  LOAD_ARG_OR(dtype, "dtype", "bfloat16");
+  LOAD_ARG_OR(mm_patch_size, "patch_size", 1);
+  LOAD_ARG_OR(in_channels, "in_channels", 64);
+  LOAD_ARG_OR(out_channels, "out_channels", 64);
+  LOAD_ARG_OR(num_layers, "num_layers", 19);
+  LOAD_ARG_OR(num_single_layers, "num_single_layers", 38);
+  LOAD_ARG_OR(head_dim, "attention_head_dim", 128);
+  LOAD_ARG_OR(n_heads, "num_attention_heads", 24);
+  LOAD_ARG_OR(joint_attention_dim,
+              "joint_attention_dim",
+              3584);  // LongCat-Image specific
+  LOAD_ARG_OR(pooled_projection_dim,
+              "pooled_projection_dim",
+              3584);  // LongCat-Image specific
   LOAD_ARG_OR(
       axes_dims_rope, "axes_dims_rope", (std::vector<int64_t>{16, 56, 56}));
 });

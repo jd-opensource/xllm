@@ -26,30 +26,22 @@ limitations under the License.
 #include "core/framework/tokenizer/tokenizer_args.h"
 #include "model_loader.h"
 namespace xllm {
-class DiTFolderLoader {
+class DiTFolderLoader : public ModelLoader {
  public:
   DiTFolderLoader(const std::string& folder_path,
                   const std::string& component_name,
                   const std::string& model_type);
 
-  std::unique_ptr<Tokenizer> tokenizer() const;
-  const ModelArgs& model_args() const { return args_; }
-  const QuantArgs& quant_args() const { return quant_args_; }
-  const TokenizerArgs& tokenizer_args() const { return tokenizer_args_; }
-  std::vector<std::unique_ptr<StateDict>>& get_state_dicts();
-  std::string model_weights_path() const { return model_weights_path_; }
+  std::unique_ptr<Tokenizer> tokenizer() const override;
+  std::vector<std::unique_ptr<StateDict>>& get_state_dicts() override;
+  std::string model_weights_path() const override {
+    return model_weights_path_;
+  }
 
  private:
   bool load_args(const std::string& model_weights_path);
   bool load_model_args(const std::string& model_weights_path);
   bool load_tokenizer_args(const std::string& model_weights_path);
-
-  // model args
-  ModelArgs args_;
-  // quantization args
-  QuantArgs quant_args_;
-  // tokenizer args
-  TokenizerArgs tokenizer_args_;
 
   std::string model_weights_path_;
 

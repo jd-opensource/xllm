@@ -77,8 +77,20 @@ message Parameters {
   // Array of sigma values for noise scheduling
   // repeated float sigmas = 9;
 
+  // Enable CFG renormalization for improved stability
+  optional bool enable_cfg_renorm = 10;
+
+  // Minimum value for CFG renorm scale
+  optional float cfg_renorm_min = 11;
+
+  // Image height in pixels
+  optional int32 height = 12;
+
+  // Image width in pixels
+  optional int32 width = 13;
+
   // Output type, either "base64" or "url"
-  // optional string output_type = 10;
+  // optional string output_type = 14;
 }
 
 // Request structure for image generation tasks using FLUX models
