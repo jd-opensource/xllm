@@ -89,6 +89,38 @@ std::vector<std::unique_ptr<StateDict>>& HFModelLoader::get_state_dicts() {
   return state_dicts_;
 }
 
+int64_t HFModelLoader::get_total_weight_size() const {
+  // find the index json file
+  std::string index_json_path;
+  for (const auto& entry :
+       std::filesystem::directory_iterator(model_weights_path_)) {
+    if (absl::EndsWith(entry.path().string(), ".index.json")) {
+      index_json_path = entry.path().string();
+      break;
+    }
+  }
+
+  if (index_json_path.empty()) {
+    LOG(WARNING) << "Failed to find .index.json file in "
+                 << model_weights_path_;
+    return 0;
+  }
+
+  JsonReader reader;
+  if (!reader.parse(index_json_path)) {
+    LOG(ERROR) << "Failed to parse json file " << index_json_path;
+    return 0;
+  }
+
+  auto total_size = reader.value<int64_t>("metadata.total_size");
+  if (!total_size.has_value()) {
+    LOG(WARNING) << "Failed to find metadata.total_size in " << index_json_path;
+    return 0;
+  }
+
+  return total_size.value();
+}
+
 bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
   if (!tokenizer_args_.vocab_file().empty()) {
     std::filesystem::path path = model_weights_path;
