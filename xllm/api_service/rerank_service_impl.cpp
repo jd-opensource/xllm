@@ -78,16 +78,20 @@ void RerankServiceImpl::process_async_impl(std::shared_ptr<RerankCall> call) {
   size_t doc_size = documents.size() - 1;
   std::string query = documents[doc_size];
   auto query_embed = req_outputs[doc_size].outputs[0].embeddings.value();
-  auto query_tensor = torch::from_blob(
-      query_embed.data(), {query_embed.size()}, torch::kFloat32);
+  auto query_tensor =
+      torch::from_blob(query_embed.data(),
+                       {static_cast<int64_t>(query_embed.size())},
+                       torch::kFloat32);
 
   std::vector<RerankRequestOutput> rerank_outputs;
   rerank_outputs.reserve(doc_size);
   for (size_t i = 0; i < doc_size; ++i) {
     if (req_outputs[i].outputs[0].embeddings.has_value()) {
       auto doc_embed = req_outputs[i].outputs[0].embeddings.value();
-      auto doc_tensor = torch::from_blob(
-          doc_embed.data(), {doc_embed.size()}, torch::kFloat32);
+      auto doc_tensor =
+          torch::from_blob(doc_embed.data(),
+                           {static_cast<int64_t>(doc_embed.size())},
+                           torch::kFloat32);
       auto score =
           torch::cosine_similarity(query_tensor, doc_tensor, 0).item<float>();
       rerank_outputs.emplace_back(i, documents[i], score);

@@ -130,6 +130,7 @@ class MMData {
 
       return std::get<T>(value);
     }
+    return std::nullopt;
   }
 
   template <typename T>

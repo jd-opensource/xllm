@@ -940,10 +940,10 @@ std::vector<bool> DisaggPDScheduler::decode_send_stream_generations(
         std::vector<RequestOutput> o;
         o.emplace_back(outputs[i]);
         per_outputs[req_stub] = std::move(o);
-        per_outputs_idx[req_stub] = {i};
+        per_outputs_idx[req_stub] = {static_cast<int>(i)};
       } else {
         per_outputs[req_stub].emplace_back(std::move(outputs[i]));
-        per_outputs_idx[req_stub].emplace_back(i);
+        per_outputs_idx[req_stub].emplace_back(static_cast<int>(i));
       }
     }
   }

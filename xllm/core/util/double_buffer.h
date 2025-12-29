@@ -62,7 +62,7 @@ class DoubleBuffer {
 
  private:
   uint32_t front_index() const {
-    return index_.load(std::memory_order_release);
+    return index_.load(std::memory_order_acquire);
   }
 
   uint32_t back_index() const { return 1 - front_index(); }

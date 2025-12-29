@@ -13,8 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>

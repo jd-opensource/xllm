@@ -124,6 +124,12 @@ torch::Tensor get_1d_rotary_pos_embed(
     return torch::cat({freqs_cos.unsqueeze(0), freqs_sin.unsqueeze(0)},
                       0);  // [2, S, D]
   }
+  // This case should not happen in practice, but required for compilation
+  LOG(FATAL) << "get_1d_rotary_pos_embed returned empty tensor, which should "
+                "not happen. use_real: "
+             << use_real
+             << " repeat_interleave_real: " << repeat_interleave_real;
+  return torch::Tensor();
 }
 
 class FluxPosEmbedImpl : public torch::nn::Module {

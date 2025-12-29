@@ -56,3 +56,5 @@ compile_commands.json
 
 # local files
 /local
+/logs
+/log

@@ -22,8 +22,6 @@ limitations under the License.
 #include "core/util/net.h"
 #include "util/utils.h"
 
-#define INLINE __attribute__((inline))
-
 #if defined(__GNUC__)
 static inline bool(likely)(bool x) { return __builtin_expect((x), true); }
 static inline bool(unlikely)(bool x) { return __builtin_expect((x), false); }
@@ -49,16 +47,16 @@ constexpr size_t swap_block_info_fixed_size() {
   return type_size<int32_t> * 2;  // src_block_id + dst_block_id
 }
 
-INLINE size_t get_string_size(const std::string& str) {
+inline size_t get_string_size(const std::string& str) {
   return type_size<uint64_t> + str.size();
 }
 
 template <typename T>
-INLINE size_t get_vector_size(const std::vector<T>& vec) {
+inline size_t get_vector_size(const std::vector<T>& vec) {
   return type_size<uint64_t> + vec.size() * type_size<T>;
 }
 
-INLINE size_t get_tensor_size(const torch::Tensor& tensor) {
+inline size_t get_tensor_size(const torch::Tensor& tensor) {
   uint64_t size = type_size<uint64_t>;             // ndim
   size += type_size<uint64_t> * tensor.dim();      // shape
   size += type_size<int8_t>;                       // dtype
@@ -68,7 +66,7 @@ INLINE size_t get_tensor_size(const torch::Tensor& tensor) {
 }
 
 template <typename T>
-INLINE size_t get_2d_vector_size(const std::vector<std::vector<T>>& vec2d) {
+inline size_t get_2d_vector_size(const std::vector<std::vector<T>>& vec2d) {
   size_t size = type_size<uint64_t>;
   for (const auto& vec : vec2d) {
     size += get_vector_size(vec);
@@ -76,7 +74,7 @@ INLINE size_t get_2d_vector_size(const std::vector<std::vector<T>>& vec2d) {
   return size;
 }
 
-INLINE size_t get_instance_info_size(const InstanceInfo& info) {
+inline size_t get_instance_info_size(const InstanceInfo& info) {
   size_t size = get_string_size(info.name) + get_string_size(info.rpc_address) +
                 get_string_size(info.type);
 
@@ -97,7 +95,7 @@ INLINE size_t get_instance_info_size(const InstanceInfo& info) {
   return size;
 }
 
-INLINE size_t get_transfer_kv_info_size(const TransferKVInfo& info) {
+inline size_t get_transfer_kv_info_size(const TransferKVInfo& info) {
   return get_string_size(info.request_id) +
          get_vector_size(info.local_blocks_ids) +
          get_vector_size(info.remote_blocks_ids) +
@@ -105,13 +103,13 @@ INLINE size_t get_transfer_kv_info_size(const TransferKVInfo& info) {
          + get_instance_info_size(info.remote_instance_info);
 }
 
-INLINE size_t get_eplb_info_size(const EplbInfo& info) {
+inline size_t get_eplb_info_size(const EplbInfo& info) {
   return type_size<int32_t>  // prepare_layer_id
          + get_vector_size(info.expert_ids) +
          type_size<int32_t>;  // update_layer_id
 }
 
-INLINE size_t get_mm_batch_data_size(const MMBatchData& mm_data) {
+inline size_t get_mm_batch_data_size(const MMBatchData& mm_data) {
   size_t total = 0;
   auto& data = mm_data.data();
   total += type_size<size_t> + type_size<uint32_t>;  // mm_dict size + mm_type
@@ -130,7 +128,7 @@ INLINE size_t get_mm_batch_data_size(const MMBatchData& mm_data) {
   return total;
 }
 
-INLINE size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
+inline size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   size_t total = 0;
 
   const auto* vec1d = &input.flatten_tokens_vec;
@@ -182,12 +180,12 @@ INLINE size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
 }
 
 template <typename T>
-INLINE void write_data(char*& buffer, const T& data) {
+inline void write_data(char*& buffer, const T& data) {
   *reinterpret_cast<T*>(buffer) = data;
   buffer += type_size<T>;
 }
 
-INLINE void write_string(char*& buffer, const std::string& str) {
+inline void write_string(char*& buffer, const std::string& str) {
   const uint64_t len = str.size();
   write_data(buffer, len);
   if (len > 0) {
@@ -196,7 +194,7 @@ INLINE void write_string(char*& buffer, const std::string& str) {
   }
 }
 
-INLINE void write_tensor(char*& buffer, const torch::Tensor& tensor) {
+inline void write_tensor(char*& buffer, const torch::Tensor& tensor) {
   auto contig_tensor = tensor.cpu().contiguous();
   // write dtype
   const int8_t tensor_dtype = static_cast<int8_t>(contig_tensor.scalar_type());
@@ -219,7 +217,7 @@ INLINE void write_tensor(char*& buffer, const torch::Tensor& tensor) {
   }
 }
 
-INLINE void write_sampling_param(char*& buffer,
+inline void write_sampling_param(char*& buffer,
                                  const RequestSamplingParam& param) {
   char* ptr = buffer;
   *reinterpret_cast<float*>(ptr) = param.frequency_penalty;
@@ -248,7 +246,7 @@ INLINE void write_sampling_param(char*& buffer,
 }
 
 template <typename T>
-INLINE void write_vector(char*& buffer, const std::vector<T>& vec) {
+inline void write_vector(char*& buffer, const std::vector<T>& vec) {
   const uint64_t size = vec.size();
   write_data(buffer, size);
   if (size > 0) {
@@ -259,7 +257,7 @@ INLINE void write_vector(char*& buffer, const std::vector<T>& vec) {
 }
 
 template <typename T>
-INLINE void write_2d_vector(char*& buffer,
+inline void write_2d_vector(char*& buffer,
                             const std::vector<std::vector<T>>& vec2d) {
   write_data(buffer, (uint64_t)vec2d.size());
   for (const auto& vec : vec2d) {
@@ -267,7 +265,7 @@ INLINE void write_2d_vector(char*& buffer,
   }
 }
 
-INLINE void write_instance_info(char*& buffer, const InstanceInfo& info) {
+inline void write_instance_info(char*& buffer, const InstanceInfo& info) {
   write_string(buffer, info.name);
   write_string(buffer, info.rpc_address);
   write_string(buffer, info.type);
@@ -293,7 +291,7 @@ INLINE void write_instance_info(char*& buffer, const InstanceInfo& info) {
   }
 }
 
-INLINE void write_transfer_kv_info(char*& buffer, const TransferKVInfo& info) {
+inline void write_transfer_kv_info(char*& buffer, const TransferKVInfo& info) {
   write_string(buffer, info.request_id);
   write_vector(buffer, info.local_blocks_ids);
   write_vector(buffer, info.remote_blocks_ids);
@@ -301,13 +299,13 @@ INLINE void write_transfer_kv_info(char*& buffer, const TransferKVInfo& info) {
   write_instance_info(buffer, info.remote_instance_info);
 }
 
-INLINE void write_eplb_info(char*& buffer, const EplbInfo& info) {
+inline void write_eplb_info(char*& buffer, const EplbInfo& info) {
   write_data(buffer, info.prepare_layer_id);
   write_vector(buffer, info.expert_ids);
   write_data(buffer, info.update_layer_id);
 }
 
-INLINE void write_swap_blocks(char*& buffer,
+inline void write_swap_blocks(char*& buffer,
                               const std::vector<BlockTransferInfo>& blocks) {
   write_data(buffer, (uint64_t)blocks.size());
 
@@ -318,7 +316,7 @@ INLINE void write_swap_blocks(char*& buffer,
   }
 }
 
-INLINE void write_mm_batch_data(char*& buffer, const MMBatchData& mm_data) {
+inline void write_mm_batch_data(char*& buffer, const MMBatchData& mm_data) {
   auto& mm_dict = mm_data.data();
   // size
   size_t size = mm_dict.size();
@@ -348,12 +346,12 @@ INLINE void write_mm_batch_data(char*& buffer, const MMBatchData& mm_data) {
 }
 
 template <typename T>
-INLINE void read_data(const char*& buffer, T& data) {
+inline void read_data(const char*& buffer, T& data) {
   data = *reinterpret_cast<const T*>(buffer);
   buffer += type_size<T>;
 }
 
-INLINE void read_string(const char*& buffer, std::string& str) {
+inline void read_string(const char*& buffer, std::string& str) {
   uint64_t len;
   read_data(buffer, len);
   if (len > 0) {
@@ -364,7 +362,7 @@ INLINE void read_string(const char*& buffer, std::string& str) {
   }
 }
 
-INLINE void read_tensor(const char*& buffer, torch::Tensor& tensor) {
+inline void read_tensor(const char*& buffer, torch::Tensor& tensor) {
   // read dtype
   int8_t tensor_dtype;
   read_data(buffer, tensor_dtype);
@@ -393,7 +391,7 @@ INLINE void read_tensor(const char*& buffer, torch::Tensor& tensor) {
 }
 
 template <typename T>
-INLINE void read_vector(const char*& buffer, std::vector<T>& vec) {
+inline void read_vector(const char*& buffer, std::vector<T>& vec) {
   uint64_t size;
   read_data(buffer, size);
   vec.resize(size);
@@ -405,7 +403,7 @@ INLINE void read_vector(const char*& buffer, std::vector<T>& vec) {
 }
 
 template <typename T>
-INLINE void read_2d_vector(const char*& buffer,
+inline void read_2d_vector(const char*& buffer,
                            std::vector<std::vector<T>>& vec2d) {
   uint64_t size;
   read_data(buffer, size);
@@ -415,7 +413,7 @@ INLINE void read_2d_vector(const char*& buffer,
   }
 }
 
-INLINE void read_sampling_param(const char*& buffer,
+inline void read_sampling_param(const char*& buffer,
                                 RequestSamplingParam& param) {
   const char* ptr = buffer;
   param.frequency_penalty = *reinterpret_cast<const float*>(ptr);
@@ -443,7 +441,7 @@ INLINE void read_sampling_param(const char*& buffer,
   buffer = ptr;
 }
 
-INLINE void read_instance_info(const char*& buffer, InstanceInfo& info) {
+inline void read_instance_info(const char*& buffer, InstanceInfo& info) {
   read_string(buffer, info.name);
   read_string(buffer, info.rpc_address);
   read_string(buffer, info.type);
@@ -472,7 +470,7 @@ INLINE void read_instance_info(const char*& buffer, InstanceInfo& info) {
   }
 }
 
-INLINE void read_transfer_kv_info(const char*& buffer, TransferKVInfo& info) {
+inline void read_transfer_kv_info(const char*& buffer, TransferKVInfo& info) {
   read_string(buffer, info.request_id);
   read_vector(buffer, info.local_blocks_ids);
   read_vector(buffer, info.remote_blocks_ids);
@@ -480,13 +478,13 @@ INLINE void read_transfer_kv_info(const char*& buffer, TransferKVInfo& info) {
   read_instance_info(buffer, info.remote_instance_info);
 }
 
-INLINE void read_eplb_info(const char*& buffer, EplbInfo& info) {
+inline void read_eplb_info(const char*& buffer, EplbInfo& info) {
   read_data(buffer, info.prepare_layer_id);
   read_vector(buffer, info.expert_ids);
   read_data(buffer, info.update_layer_id);
 }
 
-INLINE void read_swap_blocks(const char*& buffer,
+inline void read_swap_blocks(const char*& buffer,
                              std::vector<BlockTransferInfo>& blocks) {
   uint64_t size;
   read_data(buffer, size);
@@ -497,7 +495,7 @@ INLINE void read_swap_blocks(const char*& buffer,
   }
 }
 
-INLINE void read_mm_batch_data(const char*& buffer, MMBatchData& mm_data) {
+inline void read_mm_batch_data(const char*& buffer, MMBatchData& mm_data) {
   size_t size;
   read_data(buffer, size);
   uint32_t mm_type;
@@ -524,7 +522,7 @@ INLINE void read_mm_batch_data(const char*& buffer, MMBatchData& mm_data) {
   mm_data = std::move(MMBatchData(mm_type, mm_dict));
 }
 
-INLINE void deserialize_raw_forward_input(
+inline void deserialize_raw_forward_input(
     const char*& buffer,
     RawForwardInput& input,
     std::vector<RequestSamplingParam>& tmp_sampling_params) {
@@ -585,7 +583,7 @@ INLINE void deserialize_raw_forward_input(
   read_vector(buffer, input.dp_is_decode);
 }
 
-INLINE void serialize_raw_forward_input(const RawForwardInput& input,
+inline void serialize_raw_forward_input(const RawForwardInput& input,
                                         char*& buffer) {
   write_vector(buffer, input.flatten_tokens_vec);
   write_vector(buffer, input.flatten_positions_vec);

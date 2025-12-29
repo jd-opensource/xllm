@@ -111,8 +111,9 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerClient::step_async(
 
 folly::SemiFuture<std::optional<RawForwardOutput>> WorkerClient::step_async(
     const RawForwardInput& inputs) {
-  LOG(ERROR) << "Worker Method step_async with RawForwardInput param is "
+  LOG(FATAL) << "Worker Method step_async with RawForwardInput param is "
                 "UnImplemented.";
+  return folly::makeSemiFuture(std::optional<RawForwardOutput>(std::nullopt));
 }
 
 folly::SemiFuture<folly::Unit> WorkerClient::process_group_test_async() {
@@ -163,6 +164,7 @@ folly::SemiFuture<uint32_t> WorkerClient::transfer_kv_blocks(
   LOG(FATAL) << "WorkerClient Method transfer_kv_blocks with return "
                 "folly::SemiFuture<uint32_t> is "
                 "UnImplemented.";
+  return folly::makeSemiFuture(uint32_t(0));
 }
 
 void WorkerClient::prefetch_from_storage(
@@ -181,7 +183,9 @@ void WorkerClient::transfer_kv_blocks(
 const torch::Device& WorkerClient::device() const { return worker_->device(); }
 
 folly::SemiFuture<std::optional<RawForwardOutput>>
-WorkerClient::get_last_step_result_async() {}
+WorkerClient::get_last_step_result_async() {
+  return folly::makeSemiFuture(std::optional<RawForwardOutput>(std::nullopt));
+}
 
 folly::SemiFuture<std::optional<ForwardOutput>>
 WorkerClient::get_last_step_result_single_process_async() {

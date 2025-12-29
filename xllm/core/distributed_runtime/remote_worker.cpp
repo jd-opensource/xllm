@@ -136,11 +136,13 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
 }
 
 ForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
-  LOG(ERROR) << "RemoteWorker Method prepare_inputs is UnImplemented.";
+  LOG(FATAL) << "RemoteWorker Method prepare_inputs is UnImplemented.";
+  return {};
 }
 
 std::optional<ForwardOutput> RemoteWorker::step(const ForwardInput& inputs) {
-  LOG(ERROR) << "RemoteWorker Method step is UnImplemented.";
+  LOG(FATAL) << "RemoteWorker Method step is UnImplemented.";
+  return std::nullopt;
 }
 
 folly::SemiFuture<std::tuple<int64_t, int64_t>>
@@ -163,8 +165,9 @@ RemoteWorker::estimate_kv_cache_capacity_async() {
 
 folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
     const ForwardInput& inputs) {
-  LOG(ERROR) << "RemoteWorker Method step_async with "
+  LOG(FATAL) << "RemoteWorker Method step_async with "
                 "ForwardInput param is UnImplemented.";
+  return folly::makeSemiFuture(std::optional<ForwardOutput>(std::nullopt));
 }
 
 folly::SemiFuture<std::optional<RawForwardOutput>> RemoteWorker::step_async(
@@ -326,7 +329,8 @@ void RemoteWorker::prefetch_from_storage(
 }
 
 const torch::Device& RemoteWorker::device() const {
-  LOG(ERROR) << "RemoteWorker Method device is UnImplemented.";
+  LOG(FATAL) << "RemoteWorker Method device is UnImplemented.";
+  return device_;
 }
 
 folly::SemiFuture<std::optional<RawForwardOutput>>

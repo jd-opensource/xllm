@@ -30,7 +30,14 @@ limitations under the License.
 #include "core/framework/request/request_output.h"
 #include "core/util/utils.h"
 
+#ifdef likely
+#undef likely
+#endif
 #define likely(x) __builtin_expect(!!(x), 1)
+
+#ifdef unlikely
+#undef unlikely
+#endif
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
 namespace xllm {

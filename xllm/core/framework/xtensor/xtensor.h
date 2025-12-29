@@ -51,7 +51,12 @@ class XTensor final {
 
   VirPtr get_vir_ptr(int32_t seq_id) const {
     CHECK(base_ptr_) << "Base pointer is not initialized";
+#if defined(USE_NPU)
+    return reinterpret_cast<VirPtr>(static_cast<char*>(base_ptr_) +
+                                    seq_id * buffer_size_per_seq_);
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
     return reinterpret_cast<VirPtr>(base_ptr_ + seq_id * buffer_size_per_seq_);
+#endif
   }
 
   const Options& options() const { return options_; }

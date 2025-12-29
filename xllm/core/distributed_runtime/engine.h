@@ -85,6 +85,7 @@ class Engine {
       const uint32_t dp_rank,
       const std::vector<BlockTransferInfo>& block_transfer_info) {
     LOG(FATAL) << " transfer_kv_blocks is not implemented!";
+    return {};
   };
 
   virtual void transfer_kv_blocks(
@@ -120,6 +121,7 @@ class Engine {
                             const std::vector<uint16_t>& ports,
                             const int32_t src_dp_size) {
     LOG(FATAL) << " link_cluster is notimplemented!";
+    return false;
   };
 
   virtual bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
@@ -128,6 +130,7 @@ class Engine {
                               const std::vector<uint16_t>& ports,
                               const int32_t dp_size) {
     LOG(FATAL) << " unlink_cluster is notimplemented!";
+    return false;
   };
 
   struct KVCacheCapacity {

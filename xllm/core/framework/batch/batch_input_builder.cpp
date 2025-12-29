@@ -637,7 +637,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
     for (int64_t idx = 0; idx < m_positions.size(0); ++idx) {
       torch::Tensor position = m_positions[idx];
       Slice<int32_t> position_slice = {position.data_ptr<int32_t>(),
-                                       position.size(0)};
+                                       static_cast<size_t>(position.size(0))};
       raw_forward_input.m_positions_vec.push_back(position_slice);
     }
   }

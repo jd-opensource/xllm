@@ -107,7 +107,7 @@ atb::Status BaseLayer::execute_node(atb_speed::Model::Node& node,
     node.workspace = work_space_->get_workspace_buffer(node.workspaceSize);
   }
 
-  run_task_func_(name_ + std::to_string(node_id), [=]() {
+  run_task_func_(name_ + std::to_string(node_id), [=, this]() {
     return execute_plan(
         node, name_ + std::to_string(node_id), event, event_flag);
   });
