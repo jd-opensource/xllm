@@ -453,8 +453,8 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
   // update dp_global_token_nums and global_empty_kv_cache
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
+    batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
     batched_inputs[dp_rank].global_empty_kv_cache = global_empty_kv_cache;
-    batched_inputs[dp_rank].dp_is_decode = std::move(dp_is_decode);
   }
 
   return batched_inputs;

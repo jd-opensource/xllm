@@ -77,7 +77,6 @@ class MRotaryEmbeddingImpl : public RotaryEmbeddingImpl {
                const AttentionMetadata& attn_metadata);
 
  private:
-  bool interleaved_;
   std::vector<int64_t> mrope_section_;
   torch::Tensor mrope_cu_seq_lens_;
 };
