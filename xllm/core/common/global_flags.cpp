@@ -19,7 +19,10 @@ limitations under the License.
 
 #include "brpc/reloadable_flags.h"
 
-// NOTE: related flags should be placed together.
+// NOTE:
+// 1. related flags should be placed together.
+// 2. when adding new flags, plz add the flag name to the appropriate
+//    category in help_formatter.h so it appears in the help output.
 
 // --- xllm service config ---
 

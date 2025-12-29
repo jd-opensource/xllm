@@ -26,49 +26,49 @@ namespace xllm {
 
 namespace {
 
-const std::pair<std::string, std::vector<std::string>> kCommonOptions = {
-    "COMMON OPTIONS",
-    {"master_node_addr",
-     "host",
-     "port",
-     "model",
-     "devices",
-     "nnodes",
-     "node_rank",
-     "max_memory_utilization",
-     "max_tokens_per_batch",
-     "max_seqs_per_batch",
-     "enable_chunked_prefill",
-     "enable_schedule_overlap",
-     "enable_prefix_cache",
-     "communication_backend",
-     "block_size",
-     "task",
-     "max_cache_size"}};
+using OptionCategory = std::pair<std::string, std::vector<std::string>>;
 
-const std::pair<std::string, std::vector<std::string>> kMoeModelOptions = {
+const OptionCategory kCommonOptions = {"COMMON OPTIONS",
+                                       {"master_node_addr",
+                                        "host",
+                                        "port",
+                                        "model",
+                                        "devices",
+                                        "nnodes",
+                                        "node_rank",
+                                        "max_memory_utilization",
+                                        "max_tokens_per_batch",
+                                        "max_seqs_per_batch",
+                                        "enable_chunked_prefill",
+                                        "enable_schedule_overlap",
+                                        "enable_prefix_cache",
+                                        "communication_backend",
+                                        "block_size",
+                                        "task",
+                                        "max_cache_size"}};
+
+const OptionCategory kMoeModelOptions = {
     "MOE MODEL OPTIONS",
     {"dp_size", "ep_size", "enable_mla", "expert_parallel_degree"}};
 
-const std::pair<std::string, std::vector<std::string>>
-    kDisaggregatedPrefillDecodeOptions = {
-        "DISAGGREGATED PREFILL-DECODE OPTIONS",
-        {"enable_disagg_pd",
-         "disagg_pd_port",
-         "instance_role",
-         "kv_cache_transfer_mode",
-         "device_ip",
-         "transfer_listen_port"}};
+const OptionCategory kDisaggregatedPrefillDecodeOptions = {
+    "DISAGGREGATED PREFILL-DECODE OPTIONS",
+    {"enable_disagg_pd",
+     "disagg_pd_port",
+     "instance_role",
+     "kv_cache_transfer_mode",
+     "device_ip",
+     "transfer_listen_port"}};
 
-const std::pair<std::string, std::vector<std::string>> kMtpOptions = {
+const OptionCategory kMtpOptions = {
     "MTP OPTIONS",
     {"draft_model", "draft_devices", "num_speculative_tokens"}};
 
-const std::pair<std::string, std::vector<std::string>> kXllmServiceOptions = {
+const OptionCategory kXllmServiceOptions = {
     "XLLM-SERVICE OPTIONS",
     {"xservice_addr", "etcd_addr", "rank_tablefile"}};
 
-const std::pair<std::string, std::vector<std::string>> kOtherOptions = {
+const OptionCategory kOtherOptions = {
     "OTHER OPTIONS",
     {"max_concurrent_requests",
      "model_id",
@@ -76,13 +76,13 @@ const std::pair<std::string, std::vector<std::string>> kOtherOptions = {
      "num_response_handling_threads",
      "prefill_scheduling_memory_usage_threshold"}};
 
-const std::vector<std::pair<std::string, std::vector<std::string>>>
-    kFlagCategories = {kCommonOptions,
-                       kMoeModelOptions,
-                       kDisaggregatedPrefillDecodeOptions,
-                       kMtpOptions,
-                       kXllmServiceOptions,
-                       kOtherOptions};
+const std::vector<OptionCategory> kOptionCategories = {
+    kCommonOptions,
+    kMoeModelOptions,
+    kDisaggregatedPrefillDecodeOptions,
+    kMtpOptions,
+    kXllmServiceOptions,
+    kOtherOptions};
 
 }  // namespace
 
@@ -101,16 +101,16 @@ class HelpFormatter {
     oss << "HELP OPTIONS:\n";
     oss << "  -h, --help: Display this help message and exit.\n\n";
 
-    // Print flags by category
-    for (const auto& [category_name, flag_names] : kFlagCategories) {
+    // Print flags(options) by category
+    for (const auto& [category_name, option_names] : kOptionCategories) {
       std::ostringstream category_oss;
 
-      for (const auto& flag_name : flag_names) {
-        google::CommandLineFlagInfo flag_info;
-        if (google::GetCommandLineFlagInfo(flag_name.c_str(), &flag_info)) {
-          category_oss << "  --" << flag_info.name;
-          if (!flag_info.description.empty()) {
-            category_oss << ": " << flag_info.description;
+      for (const auto& option_name : option_names) {
+        google::CommandLineFlagInfo option_info;
+        if (google::GetCommandLineFlagInfo(option_name.c_str(), &option_info)) {
+          category_oss << "  --" << option_info.name;
+          if (!option_info.description.empty()) {
+            category_oss << ": " << option_info.description;
           }
           category_oss << "\n";
         }
