@@ -69,9 +69,9 @@ struct TestParams {
 int run_reduce_scatter_test_child(const TestParams& params) {
   try {
     // Set device
-    torch::Device device(Device::type_torch(), params.device_index);
-    xllm::Device xllm_device(device);
+    xllm::Device xllm_device(params.device_index);
     xllm_device.set_device();
+    torch::Device device = xllm_device.unwrap();
 
     // Create ProcessGroup
     auto process_group = create_test_process_group(
@@ -267,7 +267,7 @@ class ReduceScatterMultiDeviceTest : public ::testing::Test {
       }
     }
 
-    ASSERT_TRUE(all_passed) << "One or more child processes failed";
+    CHECK(all_passed) << "One or more child processes failed";
   }
 
   int32_t world_size_;
