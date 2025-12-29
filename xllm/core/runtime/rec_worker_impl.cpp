@@ -77,8 +77,13 @@ void RecWorkerImpl::LlmRecWorkPipeline::prepare_work_before_execute(
            "set.";
 
     layer::WordEmbedding word_embedding = worker_.get_word_embedding();
+#if defined(USE_NPU)
     torch::Tensor input_tokens_embedding =
         word_embedding(input_tokens_tensor, 0);
+#else
+    torch::Tensor input_tokens_embedding =
+        word_embedding->forward(input_tokens_tensor);
+#endif
 
     if (input_embedding.defined()) {
       torch::Tensor input_indices_cpu =
