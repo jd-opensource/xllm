@@ -18,13 +18,18 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "common/device_monitor.h"
 #include "common/metrics.h"
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_loader.h"
+#include "models/model_registry.h"
 #include "util/env_var.h"
 #include "util/timer.h"
 
@@ -32,6 +37,11 @@ namespace xllm {
 
 RecWorkerImpl::LlmRecWorkPipeline::LlmRecWorkPipeline(RecWorkerImpl& worker)
     : worker_(worker) {}
+
+bool RecWorkerImpl::LlmRecWorkPipeline::create_model(RecWorkerImpl& worker,
+                                                     ModelContext& context) {
+  return worker.LLMWorkerImpl::init_model(context);
+}
 
 ForwardInput RecWorkerImpl::LlmRecWorkPipeline::prepare_inputs(Batch& batch) {
   return worker_.WorkerImpl::prepare_inputs(batch);
@@ -41,67 +51,8 @@ void RecWorkerImpl::LlmRecWorkPipeline::prepare_work_before_execute(
     const ForwardInput& inputs,
     ForwardInput& processed_inputs) {
   worker_.WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
-
-  if (!inputs.input_params.mm_data.valid()) {
-    return;
-  }
-
-  torch::Tensor input_embedding;
-  torch::Tensor input_tokens_tensor;
-  torch::Tensor input_indices_tensor;
-
-  const auto& mm_data = inputs.input_params.mm_data;
-  const auto& processed_mm_data = processed_inputs.input_params.mm_data;
-
-  if (auto res = processed_mm_data.get<torch::Tensor>(LLM_REC_INPUT_TOKENS)) {
-    input_tokens_tensor = res.value();
-  }
-
-  // Input indices are generated on host side.
-  if (auto res = mm_data.get<torch::Tensor>(LLM_REC_INPUT_INDICES)) {
-    input_indices_tensor = res.value();
-  }
-
-  if (auto res =
-          processed_mm_data.get<torch::Tensor>(LLM_REC_INPUT_EMBEDDING)) {
-    input_embedding = res.value();
-  }
-
-  if (input_embedding.defined()) {
-    input_embedding = input_embedding.to(worker_.dtype());
-  }
-
-  if (input_indices_tensor.defined()) {
-    CHECK(input_tokens_tensor.defined())
-        << "LLM_REC_INPUT_TOKENS is required when LLM_REC_INPUT_INDICES is "
-           "set.";
-
-#if defined(USE_NPU)
-    layer::NpuWordEmbedding npu_word_embedding =
-        worker_.get_npu_word_embedding();
-    torch::Tensor input_tokens_embedding =
-        npu_word_embedding(input_tokens_tensor, 0);
-#else
-    layer::WordEmbedding word_embedding = worker_.get_word_embedding();
-    torch::Tensor input_tokens_embedding = word_embedding(input_tokens_tensor);
-#endif
-
-    if (input_embedding.defined()) {
-      torch::Tensor input_indices_cpu =
-          input_indices_tensor.to(torch::kCPU).to(torch::kInt64).contiguous();
-      const auto* input_indices_ptr = input_indices_cpu.data_ptr<int64_t>();
-      std::vector<int64_t> input_indices(
-          input_indices_ptr, input_indices_ptr + input_indices_cpu.numel());
-
-      processed_inputs.input_params.input_embedding =
-          worker_.merge_embeddings_by_indices(
-              input_tokens_embedding, input_embedding, input_indices);
-    } else {
-      processed_inputs.input_params.input_embedding = input_tokens_embedding;
-    }
-  } else if (input_embedding.defined()) {
-    processed_inputs.input_params.input_embedding = input_embedding;
-  }
+  // LlmRecDefault (pure qwen3) does not process mm_data.
+  // For mm_data processing, use LlmRecWithMmDataWorkPipeline.
 }
 
 std::optional<ForwardOutput> RecWorkerImpl::LlmRecWorkPipeline::step(
@@ -111,6 +62,13 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecWorkPipeline::step(
 
 RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(RecWorkerImpl& worker)
     : worker_(worker) {}
+
+bool RecWorkerImpl::OneRecWorkPipeline::create_model(RecWorkerImpl& worker,
+                                                     ModelContext& context) {
+  // OneRec also uses LLM model for now, can be extended to create_rec_model
+  // later
+  return worker.LLMWorkerImpl::init_model(context);
+}
 
 ForwardInput RecWorkerImpl::OneRecWorkPipeline::prepare_inputs(Batch& batch) {
   ThreadPool* thread_pool = worker_.input_builder_thread_pool_
@@ -227,6 +185,98 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
   return output;
 }
 
+// ============================================================
+// LlmRecWithMmDataWorkPipeline Implementation (qwen3 with embedding)
+// ============================================================
+
+RecWorkerImpl::LlmRecWithMmDataWorkPipeline::LlmRecWithMmDataWorkPipeline(
+    RecWorkerImpl& worker)
+    : worker_(worker) {}
+
+bool RecWorkerImpl::LlmRecWithMmDataWorkPipeline::create_model(
+    RecWorkerImpl& worker,
+    ModelContext& context) {
+  return worker.LLMWorkerImpl::init_model(context);
+}
+
+ForwardInput RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_inputs(
+    Batch& batch) {
+  return worker_.WorkerImpl::prepare_inputs(batch);
+}
+
+void RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_work_before_execute(
+    const ForwardInput& inputs,
+    ForwardInput& processed_inputs) {
+  worker_.WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
+
+  if (!inputs.input_params.mm_data.valid()) {
+    return;
+  }
+
+  torch::Tensor input_embedding;
+  torch::Tensor input_tokens_tensor;
+  torch::Tensor input_indices_tensor;
+
+  const auto& mm_data = inputs.input_params.mm_data;
+  const auto& processed_mm_data = processed_inputs.input_params.mm_data;
+
+  if (auto res = processed_mm_data.get<torch::Tensor>(LLM_REC_INPUT_TOKENS)) {
+    input_tokens_tensor = res.value();
+  }
+
+  // Input indices are generated on host side.
+  if (auto res = mm_data.get<torch::Tensor>(LLM_REC_INPUT_INDICES)) {
+    input_indices_tensor = res.value();
+  }
+
+  if (auto res =
+          processed_mm_data.get<torch::Tensor>(LLM_REC_INPUT_EMBEDDING)) {
+    input_embedding = res.value();
+  }
+
+  if (input_embedding.defined()) {
+    input_embedding = input_embedding.to(worker_.dtype());
+  }
+
+  if (input_indices_tensor.defined()) {
+    CHECK(input_tokens_tensor.defined())
+        << "LLM_REC_INPUT_TOKENS is required when LLM_REC_INPUT_INDICES is "
+           "set.";
+
+#if defined(USE_NPU)
+    layer::NpuWordEmbedding npu_word_embedding =
+        worker_.get_npu_word_embedding();
+    torch::Tensor input_tokens_embedding =
+        npu_word_embedding(input_tokens_tensor, 0);
+#else
+    layer::WordEmbedding word_embedding = worker_.get_word_embedding();
+    torch::Tensor input_tokens_embedding =
+        word_embedding->forward(input_tokens_tensor);
+#endif
+
+    if (input_embedding.defined()) {
+      torch::Tensor input_indices_cpu =
+          input_indices_tensor.to(torch::kCPU).to(torch::kInt64).contiguous();
+      const auto* input_indices_ptr = input_indices_cpu.data_ptr<int64_t>();
+      std::vector<int64_t> input_indices(
+          input_indices_ptr, input_indices_ptr + input_indices_cpu.numel());
+
+      processed_inputs.input_params.input_embedding =
+          worker_.merge_embeddings_by_indices(
+              input_tokens_embedding, input_embedding, input_indices);
+    } else {
+      processed_inputs.input_params.input_embedding = input_tokens_embedding;
+    }
+  } else if (input_embedding.defined()) {
+    processed_inputs.input_params.input_embedding = input_embedding;
+  }
+}
+
+std::optional<ForwardOutput> RecWorkerImpl::LlmRecWithMmDataWorkPipeline::step(
+    const ForwardInput& input) {
+  return worker_.LLMWorkerImpl::step(input);
+}
+
 RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
@@ -242,23 +292,17 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
 }
 
 bool RecWorkerImpl::init_model(ModelContext& context) {
-  const bool ok = LLMWorkerImpl::init_model(context);
-  if (!ok) {
-    return false;
-  }
-
   const auto& model_type = context.get_model_args().model_type();
   rec_model_kind_ = get_rec_model_kind(model_type);
   CHECK(rec_model_kind_ != RecModelKind::kNone)
       << "Unsupported rec model_type: " << model_type;
 
-  if (rec_model_kind_ == RecModelKind::kLlmRec) {
-    work_pipeline_ = std::make_unique<LlmRecWorkPipeline>(*this);
-  } else if (rec_model_kind_ == RecModelKind::kOneRec) {
-    work_pipeline_ = std::make_unique<OneRecWorkPipeline>(*this);
-  }
+  // Create work pipeline first
+  auto pipeline_type = get_rec_pipeline_type(rec_model_kind_);
+  work_pipeline_ = create_pipeline(pipeline_type, *this);
 
-  return true;
+  // Let pipeline create model
+  return work_pipeline_->create_model(*this, context);
 }
 
 ForwardInput RecWorkerImpl::prepare_inputs(Batch& batch) {
@@ -317,6 +361,26 @@ torch::Tensor RecWorkerImpl::merge_embeddings_by_indices(
 std::optional<ForwardOutput> RecWorkerImpl::step(const ForwardInput& input) {
   CHECK(work_pipeline_ != nullptr) << "RecWorkerImpl is not initialized.";
   return work_pipeline_->step(input);
+}
+
+// ============================================================
+// RecWorkerImpl pipeline factory (static method)
+// ============================================================
+std::unique_ptr<RecWorkerImpl::RecWorkPipeline> RecWorkerImpl::create_pipeline(
+    RecPipelineType type,
+    RecWorkerImpl& worker) {
+  switch (type) {
+    case RecPipelineType::kLlmRecDefault:
+      return std::make_unique<LlmRecWorkPipeline>(worker);
+    case RecPipelineType::kLlmRecWithMmData:
+      return std::make_unique<LlmRecWithMmDataWorkPipeline>(worker);
+    case RecPipelineType::kOneRecDefault:
+      return std::make_unique<OneRecWorkPipeline>(worker);
+    default:
+      LOG(FATAL) << "Unknown RecWorkerImpl pipeline type: "
+                 << static_cast<int>(type);
+      return nullptr;
+  }
 }
 
 }  // namespace xllm

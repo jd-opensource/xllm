@@ -56,6 +56,8 @@ class Batch {
 
   void update_forward_type(Sequence* sequence);
 
+  void refresh_forward_type();
+
   void set_swap_block_transfer_infos(
       std::vector<BlockTransferInfo>* swap_block_transfer_infos) {
     swap_block_transfer_infos_ = swap_block_transfer_infos;
@@ -112,9 +114,14 @@ class Batch {
   void process_beam_search_output(const RawForwardOutput& raw_output,
                                   bool replace_fake_token);
 
-  // mark all sequence groups as finished (used by rec model multi-round
-  // decoding)
+  // mark all sequences as finished (used by rec model multi-round decoding)
   void finish();
+
+  // Refresh sequences_ from sequence_groups_ after beam search processing.
+  // This is needed for RecEngine because SequencesGroup::process_beam_search()
+  // replaces its internal sequences_, invalidating pointers in
+  // Batch::sequences_.
+  void refresh_sequences_from_groups();
 
   const std::vector<uint32_t>& get_allowed_max_tokens() const {
     return allowed_max_tokens_;

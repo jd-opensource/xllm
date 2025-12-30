@@ -60,23 +60,78 @@ class RecMaster : public Master {
       std::function<std::shared_ptr<Request>(const RequestParams&,
                                              OutputCallback)>;
 
+  // ============================================================
+  // RecMasterPipeline: Abstract base class for request processing
+  // ============================================================
+  class RecMasterPipeline {
+   public:
+    explicit RecMasterPipeline(RecMaster& master) : master_(master) {}
+    virtual ~RecMasterPipeline() = default;
+
+    // For prompt-based input (OneRec and LlmRec without mm_data)
+    virtual std::shared_ptr<Request> generate_request(
+        std::string prompt,
+        std::optional<std::vector<int>> prompt_tokens,
+        std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+        const RequestParams& sp,
+        OutputCallback callback);
+
+    // For raw input (LlmRec with mm_data)
+    virtual std::shared_ptr<Request> generate_request(
+        std::optional<std::vector<int>> input_tokens,
+        std::optional<std::vector<int>> input_indices,
+        std::optional<std::vector<std::vector<float>>> input_embedding,
+        const RequestParams& sp,
+        OutputCallback callback);
+
+   protected:
+    RecMaster& master_;
+  };
+
+  // LlmRecMasterPipeline - pure qwen3 (prompt-based, no mm_data)
+  class LlmRecMasterPipeline final : public RecMasterPipeline {
+   public:
+    explicit LlmRecMasterPipeline(RecMaster& master);
+    std::shared_ptr<Request> generate_request(
+        std::string prompt,
+        std::optional<std::vector<int>> prompt_tokens,
+        std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+        const RequestParams& sp,
+        OutputCallback callback) override;
+  };
+
+  // LlmRecWithMmDataMasterPipeline - qwen3 with embedding (raw input)
+  class LlmRecWithMmDataMasterPipeline final : public RecMasterPipeline {
+   public:
+    explicit LlmRecWithMmDataMasterPipeline(RecMaster& master);
+    std::shared_ptr<Request> generate_request(
+        std::optional<std::vector<int>> input_tokens,
+        std::optional<std::vector<int>> input_indices,
+        std::optional<std::vector<std::vector<float>>> input_embedding,
+        const RequestParams& sp,
+        OutputCallback callback) override;
+  };
+
+  // OneRecMasterPipeline - OneRec (prompt-based with input_tensors)
+  class OneRecMasterPipeline final : public RecMasterPipeline {
+   public:
+    explicit OneRecMasterPipeline(RecMaster& master);
+    std::shared_ptr<Request> generate_request(
+        std::string prompt,
+        std::optional<std::vector<int>> prompt_tokens,
+        std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+        const RequestParams& sp,
+        OutputCallback callback) override;
+  };
+
+  // Factory method to create pipeline (can access private classes)
+  static std::unique_ptr<RecMasterPipeline> create_pipeline(
+      RecPipelineType type,
+      RecMaster& master);
+
   void schedule_request(RequestParams sp,
                         OutputCallback callback,
                         RequestBuilder build_request);
-
-  std::shared_ptr<Request> generate_request(
-      std::string prompt,
-      std::optional<std::vector<int>> prompt_tokens,
-      std::optional<std::vector<proto::InferInputTensor>> input_tensors,
-      const RequestParams& sp,
-      OutputCallback callback);
-
-  std::shared_ptr<Request> generate_request(
-      std::optional<std::vector<int>> input_tokens,
-      std::optional<std::vector<int>> input_indices,
-      std::optional<std::vector<std::vector<float>>> input_embedding,
-      const RequestParams& sp,
-      OutputCallback callback);
 
   std::shared_ptr<Request> build_request_common(
       std::string prompt,
@@ -85,6 +140,10 @@ class RecMaster : public Master {
       const RequestParams& sp,
       OutputCallback callback,
       bool build_stop_checker);
+
+  // Pipeline instances
+  std::unique_ptr<RecMasterPipeline> pipeline_;
+  std::unique_ptr<RecMasterPipeline> mm_data_pipeline_;
 
   std::unique_ptr<FixedStepsScheduler> scheduler_;
   // model args

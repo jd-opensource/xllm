@@ -27,6 +27,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "common/types.h"
 #include "framework/batch/batch.h"
+#include "framework/batch/batch_factory.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "runtime/xservice_client.h"
@@ -48,6 +49,29 @@ class FixedStepsScheduler final : public ContinuousScheduler {
   void step(const absl::Duration& timeout) override;
 
  private:
+  // Scheduler pipeline for different rec types
+  class SchedulerPipeline {
+   public:
+    virtual ~SchedulerPipeline() = default;
+    virtual std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
+                                              BatchFactory* batch_factory) = 0;
+    virtual bool requires_kv_cache() const = 0;
+  };
+
+  class LlmRecSchedulerPipeline final : public SchedulerPipeline {
+   public:
+    std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
+                                      BatchFactory* batch_factory) override;
+    bool requires_kv_cache() const override { return true; }
+  };
+
+  class OneRecSchedulerPipeline final : public SchedulerPipeline {
+   public:
+    std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
+                                      BatchFactory* batch_factory) override;
+    bool requires_kv_cache() const override { return false; }
+  };
+
   std::vector<Batch> schedule_request(const absl::Duration& timeout);
 
   // build a batch of requests from the priority queue
@@ -57,6 +81,9 @@ class FixedStepsScheduler final : public ContinuousScheduler {
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
       std::vector<std::shared_ptr<Request>>& finished_requests);
+
+  // Lazy-initialized pipeline
+  std::unique_ptr<SchedulerPipeline> scheduler_pipeline_;
 };
 
 }  // namespace xllm

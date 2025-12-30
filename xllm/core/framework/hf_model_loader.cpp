@@ -25,6 +25,7 @@ limitations under the License.
 #include <filesystem>
 #include <vector>
 
+#include "core/common/rec_model_utils.h"
 #include "core/common/version_singleton.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
@@ -56,8 +57,7 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
 
   threadpool_ = std::make_unique<ThreadPool>(32);
-
-  if (FLAGS_backend == "rec") {
+  if (FLAGS_backend == "rec" && is_onerec_model_type(args_.model_type())) {
     CHECK(load_rec_vocab(model_weights_path))
         << "Failed to load rec content from " << model_weights_path;
   }

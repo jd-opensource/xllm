@@ -215,7 +215,8 @@ WorkerServer::WorkerServer(int local_worker_idx,
   server_name_.append(std::to_string(options.server_idx()));
 
   if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM ||
-      worker_type == WorkerType::VLM || worker_type == WorkerType::EVLM) {
+      worker_type == WorkerType::VLM || worker_type == WorkerType::EVLM ||
+      worker_type == WorkerType::REC) {
     if (use_spawn_worker) {
       // start worker in a spawn process(for offline inference worker.)
       create_spawn_server(local_worker_idx,

@@ -31,12 +31,13 @@ limitations under the License.
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
 #include "core/util/tensor_helper.h"
+#include "rec_type.h"
 
 namespace xllm {
 
 namespace {
 constexpr size_t kDecoderBosTokenCount = 1;
-constexpr size_t kDecoderMaxTokenCount = 4;
+constexpr size_t kDecoderMaxTokenCount = kRecTotalSteps + kDecoderBosTokenCount;
 }  // namespace
 
 const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";

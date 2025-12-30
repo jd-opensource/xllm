@@ -130,6 +130,8 @@ void DistManager::setup_multi_node_workers(
   } else if (model_backend == "vlm") {
     worker_type = (options.task_type() == "generate") ? WorkerType::VLM
                                                       : WorkerType::EVLM;
+  } else if (model_backend == "rec") {
+    worker_type = WorkerType::REC;
   } else {
     LOG(ERROR) << "Unsupported " << model_backend << " in multi-node.";
   }

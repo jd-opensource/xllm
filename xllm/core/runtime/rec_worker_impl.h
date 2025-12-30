@@ -24,6 +24,7 @@ limitations under the License.
 
 #include "common/rec_model_utils.h"
 #include "runtime/llm_worker_impl.h"
+#include "util/threadpool.h"
 
 namespace xllm {
 
@@ -32,8 +33,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
   RecWorkerImpl(const ParallelArgs& parallel_args,
                 const torch::Device& device,
                 const runtime::Options& options);
-
-  ~RecWorkerImpl() override = default;
 
   bool init_model(ModelContext& context) override;
 
@@ -52,6 +51,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
    public:
     virtual ~RecWorkPipeline() = default;
 
+    virtual bool create_model(RecWorkerImpl& worker, ModelContext& context) = 0;
+
     virtual ForwardInput prepare_inputs(Batch& batch) = 0;
 
     virtual void prepare_work_before_execute(
@@ -64,6 +65,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
   class LlmRecWorkPipeline final : public RecWorkPipeline {
    public:
     explicit LlmRecWorkPipeline(RecWorkerImpl& worker);
+
+    bool create_model(RecWorkerImpl& worker, ModelContext& context) override;
 
     ForwardInput prepare_inputs(Batch& batch) override;
 
@@ -80,6 +83,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
    public:
     explicit OneRecWorkPipeline(RecWorkerImpl& worker);
 
+    bool create_model(RecWorkerImpl& worker, ModelContext& context) override;
+
     ForwardInput prepare_inputs(Batch& batch) override;
 
     void prepare_work_before_execute(const ForwardInput& inputs,
@@ -90,6 +95,28 @@ class RecWorkerImpl : public LLMWorkerImpl {
    private:
     RecWorkerImpl& worker_;
   };
+
+  class LlmRecWithMmDataWorkPipeline final : public RecWorkPipeline {
+   public:
+    explicit LlmRecWithMmDataWorkPipeline(RecWorkerImpl& worker);
+
+    bool create_model(RecWorkerImpl& worker, ModelContext& context) override;
+
+    ForwardInput prepare_inputs(Batch& batch) override;
+
+    void prepare_work_before_execute(const ForwardInput& inputs,
+                                     ForwardInput& processed_inputs) override;
+
+    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+
+   private:
+    RecWorkerImpl& worker_;
+  };
+
+  // Factory method to create pipeline (can access private classes)
+  static std::unique_ptr<RecWorkPipeline> create_pipeline(
+      RecPipelineType type,
+      RecWorkerImpl& worker);
 
   torch::Tensor merge_embeddings_by_indices(
       const torch::Tensor& input_tokens_embedding,

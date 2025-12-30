@@ -216,6 +216,177 @@ bool process_llmrec_raw_inputs(
 
 }  // namespace
 
+// ============================================================
+// RecMasterPipeline base class default implementations
+// ============================================================
+std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
+    std::string /*prompt*/,
+    std::optional<std::vector<int>> /*prompt_tokens*/,
+    std::optional<std::vector<proto::InferInputTensor>> /*input_tensors*/,
+    const RequestParams& /*sp*/,
+    OutputCallback callback) {
+  CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                      "This pipeline does not support prompt-based input");
+  return nullptr;
+}
+
+std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
+    std::optional<std::vector<int>> /*input_tokens*/,
+    std::optional<std::vector<int>> /*input_indices*/,
+    std::optional<std::vector<std::vector<float>>> /*input_embedding*/,
+    const RequestParams& /*sp*/,
+    OutputCallback callback) {
+  CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                      "This pipeline does not support raw input");
+  return nullptr;
+}
+
+// ============================================================
+// LlmRecMasterPipeline implementation (pure qwen3, no mm_data)
+// ============================================================
+RecMaster::LlmRecMasterPipeline::LlmRecMasterPipeline(RecMaster& master)
+    : RecMasterPipeline(master) {}
+
+std::shared_ptr<Request> RecMaster::LlmRecMasterPipeline::generate_request(
+    std::string prompt,
+    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<proto::InferInputTensor>> /*input_tensors*/,
+    const RequestParams& sp,
+    OutputCallback callback) {
+  Timer timer;
+  std::vector<int32_t> local_prompt_tokens;
+  MMData processed_mm_data;
+
+  // LlmRec without mm_data: use prompt_tokens or tokenize prompt string
+  if (prompt_tokens.has_value()) {
+    local_prompt_tokens.assign(prompt_tokens.value().begin(),
+                               prompt_tokens.value().end());
+  } else if (!prompt.empty()) {
+    // Tokenize prompt string if prompt_tokens not provided
+    if (!master_.tokenizer_) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "Tokenizer is required for prompt-based input");
+      return nullptr;
+    }
+    std::vector<int> tmp_tokens;
+    if (!master_.tokenizer_->encode(
+            prompt, &tmp_tokens, sp.add_special_tokens)) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "Failed to tokenize prompt");
+      return nullptr;
+    }
+    local_prompt_tokens.assign(tmp_tokens.begin(), tmp_tokens.end());
+  }
+
+  if (local_prompt_tokens.empty()) {
+    CALLBACK_WITH_ERROR(
+        StatusCode::INVALID_ARGUMENT,
+        "LlmRec requires prompt or prompt_tokens to be provided");
+    return nullptr;
+  }
+
+  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
+
+  return master_.build_request_common(std::move(prompt),
+                                      std::move(local_prompt_tokens),
+                                      std::move(processed_mm_data),
+                                      sp,
+                                      callback,
+                                      /*build_stop_checker=*/true);
+}
+
+// ============================================================
+// LlmRecWithMmDataMasterPipeline implementation (qwen3 with embedding)
+// ============================================================
+RecMaster::LlmRecWithMmDataMasterPipeline::LlmRecWithMmDataMasterPipeline(
+    RecMaster& master)
+    : RecMasterPipeline(master) {}
+
+std::shared_ptr<Request>
+RecMaster::LlmRecWithMmDataMasterPipeline::generate_request(
+    std::optional<std::vector<int>> input_tokens,
+    std::optional<std::vector<int>> input_indices,
+    std::optional<std::vector<std::vector<float>>> input_embedding,
+    const RequestParams& sp,
+    OutputCallback callback) {
+  Timer timer;
+  std::vector<int32_t> local_prompt_tokens;
+  MMData processed_mm_data;
+
+  if (!process_llmrec_raw_inputs(std::move(input_tokens),
+                                 std::move(input_indices),
+                                 std::move(input_embedding),
+                                 master_.model_args_,
+                                 &local_prompt_tokens,
+                                 &processed_mm_data,
+                                 callback)) {
+    return nullptr;
+  }
+
+  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
+
+  return master_.build_request_common(std::string(""),
+                                      std::move(local_prompt_tokens),
+                                      std::move(processed_mm_data),
+                                      sp,
+                                      callback,
+                                      /*build_stop_checker=*/true);
+}
+
+// ============================================================
+// OneRecMasterPipeline implementation (OneRec with input_tensors)
+// ============================================================
+RecMaster::OneRecMasterPipeline::OneRecMasterPipeline(RecMaster& master)
+    : RecMasterPipeline(master) {}
+
+std::shared_ptr<Request> RecMaster::OneRecMasterPipeline::generate_request(
+    std::string prompt,
+    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+    const RequestParams& sp,
+    OutputCallback callback) {
+  Timer timer;
+  std::vector<int32_t> local_prompt_tokens;
+  MMData processed_mm_data;
+
+  if (!process_onerec_inputs(prompt_tokens,
+                             input_tensors,
+                             &local_prompt_tokens,
+                             &processed_mm_data,
+                             callback)) {
+    return nullptr;
+  }
+
+  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
+
+  return master_.build_request_common(std::move(prompt),
+                                      std::move(local_prompt_tokens),
+                                      std::move(processed_mm_data),
+                                      sp,
+                                      callback,
+                                      /*build_stop_checker=*/false);
+}
+
+// ============================================================
+// RecMaster pipeline factory (static method)
+// ============================================================
+std::unique_ptr<RecMaster::RecMasterPipeline> RecMaster::create_pipeline(
+    RecPipelineType type,
+    RecMaster& master) {
+  switch (type) {
+    case RecPipelineType::kLlmRecDefault:
+      return std::make_unique<LlmRecMasterPipeline>(master);
+    case RecPipelineType::kLlmRecWithMmData:
+      return std::make_unique<LlmRecWithMmDataMasterPipeline>(master);
+    case RecPipelineType::kOneRecDefault:
+      return std::make_unique<OneRecMasterPipeline>(master);
+    default:
+      LOG(FATAL) << "Unknown RecMaster pipeline type: "
+                 << static_cast<int>(type);
+      return nullptr;
+  }
+}
+
 RecMaster::RecMaster(const Options& options)
     : Master(options, EngineType::REC) {
   // Initialize with Rec engine type
@@ -260,9 +431,25 @@ RecMaster::RecMaster(const Options& options)
   scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
 
   chat_template_ = nullptr;
-  tokenizer_ = nullptr;
+  // Initialize tokenizer for LlmRec (Qwen3) to support prompt string input
+  if (rec_type_ == RecType::kLlmRec) {
+    tokenizer_ = engine_->tokenizer()->clone();
+  } else {
+    tokenizer_ = nullptr;
+  }
   threadpool_ =
       std::make_unique<ThreadPool>(options_.num_request_handling_threads());
+
+  // Create pipelines based on rec_type
+  auto rec_model_kind = get_rec_model_kind(model_args_.model_type());
+  auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
+  pipeline_ = create_pipeline(pipeline_type, *this);
+
+  // For LlmRec, also create mm_data pipeline for raw input interface
+  if (rec_type_ == RecType::kLlmRec) {
+    mm_data_pipeline_ =
+        create_pipeline(RecPipelineType::kLlmRecWithMmData, *this);
+  }
 }
 
 void RecMaster::run() {
@@ -299,9 +486,10 @@ void RecMaster::handle_request(
     std::optional<std::vector<proto::InferInputTensor>> input_tensors,
     RequestParams sp,
     OutputCallback callback) {
-  if (rec_type_ != RecType::kOneRec) {
+  // This interface supports both OneRec and LlmRec (qwen3 without mm_data)
+  if (rec_type_ != RecType::kOneRec && rec_type_ != RecType::kLlmRec) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "OneRec should use onerec input interface");
+                        "Unsupported rec type for this interface");
     return;
   }
   schedule_request(std::move(sp),
@@ -311,11 +499,12 @@ void RecMaster::handle_request(
                     prompt_tokens = std::move(prompt_tokens),
                     input_tensors = std::move(input_tensors)](
                        const RequestParams& params, OutputCallback cb) mutable {
-                     return generate_request(std::move(prompt),
-                                             std::move(prompt_tokens),
-                                             std::move(input_tensors),
-                                             params,
-                                             std::move(cb));
+                     return pipeline_->generate_request(
+                         std::move(prompt),
+                         std::move(prompt_tokens),
+                         std::move(input_tensors),
+                         params,
+                         std::move(cb));
                    });
 }
 
@@ -337,11 +526,12 @@ void RecMaster::handle_request(
                     input_indices = std::move(input_indices),
                     input_embedding = std::move(input_embedding)](
                        const RequestParams& params, OutputCallback cb) mutable {
-                     return generate_request(std::move(input_tokens),
-                                             std::move(input_indices),
-                                             std::move(input_embedding),
-                                             params,
-                                             std::move(cb));
+                     return mm_data_pipeline_->generate_request(
+                         std::move(input_tokens),
+                         std::move(input_indices),
+                         std::move(input_embedding),
+                         params,
+                         std::move(cb));
                    });
 }
 
@@ -377,86 +567,6 @@ void RecMaster::schedule_request(RequestParams sp,
                           "No available resources to schedule request");
     }
   });
-}
-
-std::shared_ptr<Request> RecMaster::generate_request(
-    std::string prompt,
-    std::optional<std::vector<int>> prompt_tokens,
-    std::optional<std::vector<proto::InferInputTensor>> input_tensors,
-    const RequestParams& sp,
-    OutputCallback callback) {
-  // For Rec model, prompt is expected to be empty and prompt_tokens should
-  // contain the actual data Skip prompt empty check as mentioned in
-  // requirements
-
-  if (rec_type_ == RecType::kNone) {
-    LOG(ERROR) << "Unsupported rec model_type: " << model_args_.model_type();
-    CALLBACK_WITH_ERROR(
-        StatusCode::INVALID_ARGUMENT,
-        std::string("Unsupported rec model_type: ") + model_args_.model_type());
-    return nullptr;
-  }
-
-  Timer timer;
-  std::vector<int32_t> local_prompt_tokens;
-  MMData processed_mm_data;
-  bool processed_ok = false;
-
-  if (rec_type_ == RecType::kOneRec) {
-    processed_ok = process_onerec_inputs(prompt_tokens,
-                                         input_tensors,
-                                         &local_prompt_tokens,
-                                         &processed_mm_data,
-                                         callback);
-  }
-
-  if (!processed_ok) {
-    return nullptr;
-  }
-
-  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
-
-  return build_request_common(std::move(prompt),
-                              std::move(local_prompt_tokens),
-                              std::move(processed_mm_data),
-                              sp,
-                              callback,
-                              rec_type_ == RecType::kLlmRec);
-}
-
-std::shared_ptr<Request> RecMaster::generate_request(
-    std::optional<std::vector<int>> input_tokens,
-    std::optional<std::vector<int>> input_indices,
-    std::optional<std::vector<std::vector<float>>> input_embedding,
-    const RequestParams& sp,
-    OutputCallback callback) {
-  if (rec_type_ != RecType::kLlmRec) {
-    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "LLMRec inputs require rec_type kLlmRec");
-    return nullptr;
-  }
-
-  Timer timer;
-  std::vector<int32_t> local_prompt_tokens;
-  MMData processed_mm_data;
-  if (!process_llmrec_raw_inputs(std::move(input_tokens),
-                                 std::move(input_indices),
-                                 std::move(input_embedding),
-                                 model_args_,
-                                 &local_prompt_tokens,
-                                 &processed_mm_data,
-                                 callback)) {
-    return nullptr;
-  }
-
-  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
-
-  return build_request_common(std::string(""),
-                              std::move(local_prompt_tokens),
-                              std::move(processed_mm_data),
-                              sp,
-                              callback,
-                              true);
 }
 
 std::shared_ptr<Request> RecMaster::build_request_common(

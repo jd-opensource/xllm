@@ -88,6 +88,14 @@ void Batch::update_forward_type(Sequence* sequence) {
   }
 }
 
+void Batch::refresh_forward_type() {
+  batch_forward_type_ = BatchForwardType();
+  const auto sequences = get_sequences();
+  for (auto* sequence : sequences) {
+    update_forward_type(sequence);
+  }
+}
+
 void Batch::add(const std::vector<Sequence*>& sequences) {
   for (auto* sequence : sequences) {
     add(sequence);
@@ -148,6 +156,22 @@ std::vector<Sequence*> Batch::get_sequences() {
     }
   }
   return result;
+}
+
+void Batch::refresh_sequences_from_groups() {
+  if (sequence_groups_.empty()) {
+    return;
+  }
+  sequences_.clear();
+  allowed_max_tokens_.clear();
+  for (auto* seq_group : sequence_groups_) {
+    const auto& sequences = seq_group->sequences();
+    for (const auto& seq_ptr : sequences) {
+      sequences_.push_back(seq_ptr.get());
+      // Use max value as default budget for beam search sequences
+      allowed_max_tokens_.push_back(std::numeric_limits<uint32_t>::max());
+    }
+  }
 }
 
 void Batch::dp_balance_shuffle_seqs() {
@@ -474,9 +498,13 @@ void Batch::process_beam_search_output(const RawForwardOutput& raw_output,
 }
 
 void Batch::finish() {
-  // Finish all sequence groups
   for (auto* sequence_group : sequence_groups_) {
     sequence_group->finish();
+  }
+
+  const auto sequences = get_sequences();
+  for (auto* sequence : sequences) {
+    sequence->finish();
   }
 }
 }  // namespace xllm

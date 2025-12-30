@@ -21,11 +21,13 @@ limitations under the License.
 #include <folly/Unit.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <memory>
 
 #include "common/metrics.h"
+#include "core/common/global_flags.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch.h"
 #include "framework/batch/batch_factory.h"
@@ -70,8 +72,12 @@ void FixedStepsScheduler::handle_prefill_requests(
          kv_cache_manager_->kv_cache_utilization() <
              FLAGS_prefill_scheduling_memory_usage_threshold) {
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
+    const bool requires_kv_cache =
+        request->state().rec_type == RecType::kLlmRec;
     if (request->finished() || request->cancelled()) {
-      // kv_cache_manager_->deallocate(request.get());
+      if (requires_kv_cache) {
+        kv_cache_manager_->deallocate(request.get());
+      }
       //  release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
@@ -100,12 +106,24 @@ void FixedStepsScheduler::handle_prefill_requests(
         continue;
       }
 
+      if (!requires_kv_cache && prefill_sequence->dp_rank() < 0) {
+        prefill_sequence->set_dp_rank(0);
+      }
+
       size_t num_tokens = prefill_sequence->num_need_compute_tokens();
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
         can_schedule = false;
         budget_exhausted = true;
         break;
+      }
+
+      if (requires_kv_cache) {
+        if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+          can_schedule = false;
+          blocks_exhausted = true;
+          break;
+        }
       }
 
       prefill_sequences_budget.emplace_back(num_tokens);
@@ -116,8 +134,9 @@ void FixedStepsScheduler::handle_prefill_requests(
 
     if (!can_schedule) {
       for (auto& seq : prefill_sequences) {
-        // release shared blocks
-        kv_cache_manager_->deallocate(seq);
+        if (requires_kv_cache) {
+          kv_cache_manager_->deallocate(seq);
+        }
       }
       break;
     }
@@ -216,12 +235,30 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     response_processor_->process_completed_requests(finished_requests);
   }
 
-  auto batches = BatchFactory::get_instance(options_.dp_size())
-                     ->create_rec_batches(
-                         running_requests_,
-                         running_sequences_,
-                         running_sequences_budgets_,
-                         kv_cache_manager_->get_swap_block_transfer_infos());
+  auto* batch_factory = BatchFactory::get_instance(options_.dp_size());
+
+  // Lazy initialize pipeline on first batch with requests
+  if (!scheduler_pipeline_ && !running_requests_.empty()) {
+    auto rec_type = running_requests_[0]->state().rec_type;
+    if (rec_type == RecType::kLlmRec) {
+      scheduler_pipeline_ = std::make_unique<LlmRecSchedulerPipeline>();
+    } else {
+      scheduler_pipeline_ = std::make_unique<OneRecSchedulerPipeline>();
+    }
+  }
+
+  // Use pipeline to create batches
+  std::vector<Batch> batches;
+  if (scheduler_pipeline_) {
+    batches = scheduler_pipeline_->create_batches(*this, batch_factory);
+  } else {
+    // Fallback for empty requests
+    batches = batch_factory->create_rec_batches(
+        running_requests_,
+        running_sequences_,
+        running_sequences_budgets_,
+        kv_cache_manager_->get_swap_block_transfer_infos());
+  }
 
   // update metrics before returning
   if (!batches[0].empty()) {
@@ -247,21 +284,21 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     GAUGE_SET(num_free_blocks, kv_cache_manager_->num_free_blocks().size());
     GAUGE_SET(num_used_blocks, kv_cache_manager_->num_used_blocks().size());
   }
+
   return batches;
 }
 
 std::vector<Batch> FixedStepsScheduler::schedule_request(
     const absl::Duration& timeout) {
   const auto deadline = absl::Now() + timeout;
-  std::vector<Batch> batch;
+  std::vector<Batch> batches;
   while (true) {
-    batch = prepare_batch();
-    bool all_empty =
-        std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
-          return one_batch.empty();
-        });
+    batches = prepare_batch();
+    bool all_empty = std::all_of(batches.begin(),
+                                 batches.end(),
+                                 [](const Batch& b) { return b.empty(); });
     if (!all_empty) {
-      return batch;
+      return batches;
     }
     const auto now = absl::Now();
     if (now > deadline) {
@@ -273,8 +310,8 @@ std::vector<Batch> FixedStepsScheduler::schedule_request(
         std::min(absl::Milliseconds(kStepSleepTimeMs), deadline - now);
     absl::SleepFor(time_to_sleep);
   }
-  // return an empty batch
-  return batch;
+  // return an empty result
+  return batches;
 }
 
 // step the scheduler forward by one step
@@ -282,20 +319,41 @@ std::vector<Batch> FixedStepsScheduler::schedule_request(
 void FixedStepsScheduler::step(const absl::Duration& timeout) {
   if (!options_.enable_schedule_overlap()) {
     // get a new batch of requests
-    std::vector<Batch> batch = schedule_request(timeout);
-    bool all_empty =
-        std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
-          return one_batch.empty();
-        });
+    std::vector<Batch> batches = schedule_request(timeout);
+    bool all_empty = std::all_of(batches.begin(),
+                                 batches.end(),
+                                 [](const Batch& b) { return b.empty(); });
     if (all_empty) {
       return;
     }
-    engine_->step(batch);
+
+    engine_->step(batches);
     kv_cache_manager_->reset_transfer_infos();
   } else {
     LOG(ERROR) << "FixedStepsScheduler::step() not supported with "
                   "enable_schedule_overlap";
   }
+}
+
+// Pipeline implementations
+std::vector<Batch> FixedStepsScheduler::LlmRecSchedulerPipeline::create_batches(
+    FixedStepsScheduler& scheduler,
+    BatchFactory* batch_factory) {
+  return batch_factory->create_batches(
+      scheduler.running_requests_,
+      scheduler.running_sequences_,
+      scheduler.running_sequences_budgets_,
+      scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
+}
+
+std::vector<Batch> FixedStepsScheduler::OneRecSchedulerPipeline::create_batches(
+    FixedStepsScheduler& scheduler,
+    BatchFactory* batch_factory) {
+  return batch_factory->create_rec_batches(
+      scheduler.running_requests_,
+      scheduler.running_sequences_,
+      scheduler.running_sequences_budgets_,
+      scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
 }
 
 }  // namespace xllm
