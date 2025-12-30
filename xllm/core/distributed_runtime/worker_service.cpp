@@ -153,11 +153,11 @@ void WorkerService::create_polling_shm_thread(
       [this,
        input_shm_manager = std::move(input_shm_manager),
        output_shm_manager = std::move(output_shm_manager)]() mutable {
+        device_.set_device();
         Timer timer;
         while (true) {
           ForwardInput fwd_input;
-          std::vector<ForwardInput> inputs;
-          input_shm_manager->raw_input_read(inputs);
+          input_shm_manager->raw_input_read(fwd_input, device_);
           timer.reset();
           // model output variables
           torch::Tensor next_tokens;
@@ -172,8 +172,6 @@ void WorkerService::create_polling_shm_thread(
           torch::Tensor src_seq_idxes;
           torch::Tensor out_tokens;
           torch::Tensor out_logprobs;
-
-          fwd_input = std::move(inputs[0]);
 
           step(fwd_input,
                next_tokens,

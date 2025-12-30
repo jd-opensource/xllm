@@ -68,10 +68,8 @@ struct SamplingParameters {
 
     params.sample_idxes = safe_to(sample_idxes, device, true);
     params.do_sample = safe_to(do_sample, device, true);
-    if (params.do_sample.defined()) {
-      params.all_random_sample = params.do_sample.all().item<bool>();
-      params.all_greedy_sample = !params.do_sample.any().item<bool>();
-    }
+    params.all_random_sample = all_random_sample;
+    params.all_greedy_sample = all_greedy_sample;
     params.logprobs = logprobs;
     params.max_top_logprobs = max_top_logprobs;
     params.is_embeddings = is_embeddings;

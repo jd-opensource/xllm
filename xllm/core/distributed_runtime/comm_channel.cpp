@@ -281,9 +281,9 @@ bool CommChannel::pull_kv_blocks(const uint64_t src_cluster_id,
 }
 
 void CommChannel::execute_model_async(
-    const std::vector<RawForwardInput>& inputs,
+    const RawForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
-  execute_model_with_brpc(inputs, promise);
+  execute_model_with_brpc(input, promise);
 }
 
 bool CommChannel::process_group_test() {
@@ -511,11 +511,11 @@ bool CommChannel::get_active_activation_memory_async(
 }
 
 bool CommChannel::execute_model_with_brpc(
-    const std::vector<RawForwardInput>& inputs,
+    const RawForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   // convert to proto::ForwardInput
   proto::ForwardInput pb_forward_input;
-  forward_input_to_proto(inputs[0], &pb_forward_input);
+  forward_input_to_proto(input, &pb_forward_input);
 
   // call ExecuteModel with callback
   auto done = new ExecuteModelClosure();
