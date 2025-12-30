@@ -28,10 +28,10 @@ limitations under the License.
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
+#include "core/layers/common/rotary_embedding_util.h"
 #include "core/layers/deepseek_v2_decoder_layer.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
-#include "core/layers/npu/rotary_embedding.h"
 #include "core/layers/pos_embedding.h"
 #include "core/layers/word_embedding.h"
 #include "models/model_registry.h"
@@ -108,11 +108,23 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    pos_emb_ = create_rotary_embedding(model_args,
-                                       model_args.rotary_dim(),
-                                       /*interleaved=*/false,
-                                       options);
+
     atb_pos_emb_ = layer::PosEmbedding(context);
+    cos_sin_ = layer::rotary::get_deepseek_rotary_embedding(
+        model_args.qk_rope_head_dim(),
+        model_args.qk_rope_head_dim(),
+        model_args.max_position_embeddings(),
+        model_args.rope_scaling_original_max_position_embeddings(),
+        model_args.rope_theta(),
+        /*interleaved*/ false,
+        model_args.rope_scaling_factor(),
+        model_args.rope_extrapolation_factor(),
+        model_args.rope_scaling_attn_factor(),
+        model_args.rope_scaling_beta_fast(),
+        model_args.rope_scaling_beta_slow(),
+        model_args.rope_scaling_mscale(),
+        model_args.rope_scaling_mscale_all_dim(),
+        options);
 
     max_seq_len_ = model_args.max_position_embeddings();
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
@@ -127,7 +139,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     }
 
     norm_ = register_module("norm", layer::RMSNorm(context));
-    // dp_size_=4;
+
     dp_size_ = parallel_args.dp_size();
     std::vector<int64_t> indices;
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
@@ -152,7 +164,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     }
 
     auto h = embed_tokens_(tokens, 0);
-    auto cos_sin = atb_pos_emb_(pos_emb_->get_cos_sin_cache(), positions, 0);
+    auto cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto cos_sin_chunks = cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = cos_sin_chunks[0].contiguous();
     auto sin_pos = cos_sin_chunks[1].contiguous();
@@ -247,7 +259,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   at::Device device_;
   torch::Dtype dtype_;
   layer::WordEmbedding embed_tokens_{nullptr};
-  std::shared_ptr<RotaryEmbedding> pos_emb_{nullptr};
+  torch::Tensor cos_sin_;
   layer::PosEmbedding atb_pos_emb_{nullptr};
   layer::AttentionMask attn_mask_;
   layer::RMSNorm norm_{nullptr};

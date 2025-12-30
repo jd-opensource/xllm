@@ -320,6 +320,40 @@ torch::Tensor get_chatglm_rotary_embedding(
   return compute_rotary_embedding(dim, seq_len, rope_theta, options, false);
 }
 
+torch::Tensor get_deepseek_rotary_embedding(
+    int64_t head_size,
+    int64_t rotary_dim,
+    int64_t max_position_embeddings,
+    int64_t rope_scaling_original_max_position_embeddings,
+    int64_t rope_theta,
+    bool interleaved,
+    float scaling_factor,
+    float extrapolation_factor,
+    float attn_factor,
+    float beta_fast,
+    float beta_slow,
+    float mscale,
+    float mscale_all_dim,
+    const torch::TensorOptions& options) {
+  auto inv_freq = apply_deepseek_yarn_rope_scaling(
+      scaling_factor,
+      extrapolation_factor,
+      beta_fast,
+      beta_slow,
+      rotary_dim,
+      rope_theta,
+      rope_scaling_original_max_position_embeddings);
+  auto cos_sin = compute_cos_sin_cache(rotary_dim,
+                                       max_position_embeddings,
+                                       interleaved,
+                                       scaling_factor,
+                                       attn_factor,
+                                       mscale,
+                                       mscale_all_dim,
+                                       inv_freq,
+                                       options);
+  return cos_sin;
+}
 }  // namespace rotary
 }  // namespace layer
 }  // namespace xllm
