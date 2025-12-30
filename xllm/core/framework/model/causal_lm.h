@@ -103,22 +103,10 @@ class CausalLM : public torch::nn::Module {
   virtual const torch::TensorOptions& options() const = 0;
 
   // MTP-specific interface.
-  virtual layer::LmHead get_lm_head() {
-    LOG(FATAL)
-        << "Method 'get_lm_head' is not implemented/supported by this model.";
-  }
-  virtual void set_lm_head(layer::LmHead& head) {
-    LOG(FATAL)
-        << "Method 'set_lm_head' is not implemented/supported by this model.";
-  }
-  virtual layer::WordEmbedding get_word_embedding() {
-    LOG(FATAL) << "Method 'get_word_embedding' is not implemented/supported by "
-                  "this model.";
-  }
-  virtual void set_word_embedding(layer::WordEmbedding& embedding) {
-    LOG(FATAL) << "Method 'set_word_embedding' is not implemented/supported by "
-                  "this model.";
-  }
+  virtual layer::LmHead get_lm_head() = 0;
+  virtual void set_lm_head(layer::LmHead& head) = 0;
+  virtual layer::WordEmbedding get_word_embedding() = 0;
+  virtual void set_word_embedding(layer::WordEmbedding& embedding) = 0;
 };
 
 template <typename Model>

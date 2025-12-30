@@ -79,7 +79,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                               /*input_is_parallelized=*/true,
                                               /*enable_result_reduction=*/true,
                                               quant_args,
-                                              parallel_args,
+                                              parallel_args.tp_group_,
                                               options));
 
   // 3. RMSNorm

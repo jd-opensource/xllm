@@ -45,6 +45,11 @@ class XTensorManagerPool final : public KVCacheManager {
 
   std::vector<Block> allocate(size_t num_tokens, int32_t& dp_rank) override {
     LOG(FATAL) << "allocate is not implemented for page manager pool";
+    return {};
+  }
+
+  bool try_allocate(Sequence* sequence) override {
+    LOG(FATAL) << "try_allocate is not implemented for page manager pool";
   }
 
   void allocate_shared(Sequence* sequence) override {
@@ -55,6 +60,7 @@ class XTensorManagerPool final : public KVCacheManager {
       override {
     LOG(FATAL) << "get_swap_block_transfer_infos is not implemented for page "
                   "manager pool";
+    return nullptr;
   }
 
   void reset_transfer_infos() override {
@@ -64,23 +70,28 @@ class XTensorManagerPool final : public KVCacheManager {
 
   uint32_t num_blocks() const override {
     LOG(FATAL) << "num_blocks is not implemented for page manager pool";
+    return 0;
   }
 
   int32_t block_size() const override {
     LOG(FATAL) << "block_size is not implemented for page manager pool";
+    return 0;
   }
 
   std::vector<size_t> num_blocks_in_prefix_cache() const override {
     LOG(FATAL) << "num_blocks_in_prefix_cache is not implemented for page "
                   "manager pool";
+    return {};
   }
 
   std::vector<size_t> num_free_blocks() const override {
     LOG(FATAL) << "num_free_blocks is not implemented for page manager pool";
+    return {};
   }
 
   std::vector<size_t> num_used_blocks() const override {
     LOG(FATAL) << "num_used_blocks is not implemented for page manager pool";
+    return {};
   }
 
  private:

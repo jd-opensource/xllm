@@ -46,10 +46,10 @@ DEFINE_int32(max_reconnect_count,
 
 DEFINE_int32(num_threads, 8, "Number of threads to process requests.");
 
-DEFINE_int32(
-    max_concurrent_requests,
-    0,
-    "Maximum number of concurrent requests the xllm service can handle.");
+DEFINE_int32(max_concurrent_requests,
+             200,
+             "Maximum number of concurrent requests the xllm service can "
+             "handle. If set to 0, there is no limit.");
 
 BRPC_VALIDATE_GFLAG(max_concurrent_requests, brpc::NonNegativeInteger);
 
@@ -130,18 +130,18 @@ DEFINE_int64(max_cache_size,
              "cache size is caculated by available memory.");
 
 DEFINE_double(max_memory_utilization,
-              0.9,
+              0.8,
               "The fraction of GPU memory to be used for model inference, "
               "including model weights and kv cache.");
 
 // --- scheduler config ---
 
-DEFINE_int32(max_tokens_per_batch, 20480, "Max number of tokens per batch.");
+DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
 
 DEFINE_int32(max_seqs_per_batch, 1024, "Max number of sequences per batch.");
 
 DEFINE_bool(enable_schedule_overlap,
-            true,
+            false,
             "Whether to enable schedule overlap.");
 
 DEFINE_double(prefill_scheduling_memory_usage_threshold,

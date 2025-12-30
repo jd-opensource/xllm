@@ -86,6 +86,21 @@ void ProcessGroup::allgather(const torch::Tensor& input,
   pg_->allgather(output_tensors, input_tensors)->wait();
 }
 
+void ProcessGroup::reduce_scatter(const torch::Tensor& input,
+                                  torch::Tensor& output) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  // make sure input is contiguous
+  CHECK(input.is_contiguous()) << "input is not contiguous.";
+  std::vector<torch::Tensor> input_tensors = {input};
+  std::vector<torch::Tensor> output_tensors = {output};
+
+  c10d::ReduceScatterOptions opts;
+  // we use reduce operation SUM for reduce_scatter for default.
+  opts.reduceOp = c10d::ReduceOp::SUM;
+  pg_->reduce_scatter_tensor_coalesced(output_tensors, input_tensors, opts)
+      ->wait();
+}
+
 std::unique_ptr<ProcessGroup> create_process_group(
     int32_t rank,
     int32_t world_size,

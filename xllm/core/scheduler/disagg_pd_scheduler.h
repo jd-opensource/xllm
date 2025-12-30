@@ -75,8 +75,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
       int32_t src_dp_size,
       int32_t src_dp_rank);
 
-  // decode allocate blocks for request prompt when receive from prefill.
-  std::vector<Block> allocate_raw_blocks(int token_num, int32_t& dp_rank);
+  // decode allocate blocks with prefix cache.
+  bool try_allocate(Sequence* sequence);
   // decode-3: decode send response to prefill
   virtual bool decode_send_stream_generation(const RequestOutput& output);
   virtual std::vector<bool> decode_send_stream_generations(

@@ -685,7 +685,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
     if (expert_load_data_flattened.defined()) {
       Slice<int64_t> expert_load_data_flattened_slice = {
           expert_load_data_flattened.data_ptr<int64_t>(),
-          expert_load_data_flattened.size(0)};
+          static_cast<size_t>(expert_load_data_flattened.size(0))};
       ADD_VECTOR_TO_PROTO(pb_forward_output->mutable_expert_load_data(),
                           expert_load_data_flattened_slice);
     }

@@ -409,8 +409,9 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
   if (sequence_params_.sampling_param->is_embeddings) {
     SequenceOutput output;
     output.index = index_;
-    Slice<float> embedding_slice = {output_embedding_.data_ptr<float>(),
-                                    output_embedding_.size(0)};
+    Slice<float> embedding_slice = {
+        output_embedding_.data_ptr<float>(),
+        static_cast<size_t>(output_embedding_.size(0))};
     output.embeddings = embedding_slice;
     return output;
   }

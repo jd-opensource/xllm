@@ -453,10 +453,18 @@ void BatchInputBuilder::setup_kv_cache_info(
   std::vector<uint64_t> u_block_ids;
   block_ids.reserve(blocks.size());
   int32_t block_size = 0;
+  auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
+  uint32_t push_size = 0;
+  if (transfer_kv_info.has_value()) {
+    push_size =
+        blocks.size() - transfer_kv_info.value().remote_blocks_ids.size();
+  }
   for (const auto& block : blocks) {
     block_size = block.size();
-    block_ids.emplace_back(block.id());
-    u_block_ids.emplace_back(block.id());
+    block_ids.push_back(block.id());
+    if (block_ids.size() > push_size) {
+      u_block_ids.emplace_back(block.id());
+    }
     state.paged_kv_indices.push_back(block.id());
   }
   state.paged_kv_indptr.push_back(state.paged_kv_indptr.back() + blocks.size());
@@ -472,7 +480,6 @@ void BatchInputBuilder::setup_kv_cache_info(
     write_block_ids.insert(*iter);
   }
 
-  auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   if (transfer_kv_info.has_value()) {
     state.transfer_kv_infos.emplace_back(transfer_kv_info.value());
     state.transfer_kv_infos.back().local_blocks_ids = std::move(u_block_ids);
@@ -644,7 +651,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
     for (int64_t idx = 0; idx < m_positions.size(0); ++idx) {
       torch::Tensor position = m_positions[idx];
       Slice<int32_t> position_slice = {position.data_ptr<int32_t>(),
-                                       position.size(0)};
+                                       static_cast<size_t>(position.size(0))};
       raw_forward_input.m_positions_vec.push_back(position_slice);
     }
   }

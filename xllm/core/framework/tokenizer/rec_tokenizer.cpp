@@ -31,12 +31,8 @@ RecTokenizer::RecTokenizer(const std::string_view& dir_path,
 
 bool RecTokenizer::encode(int64_t item_id,
                           std::vector<int32_t>* token_ids) const {
-  if (!VersionSingleton<RecVocabDict>::GetInstance(model_version_)
-           ->get_tokens_by_item(item_id, token_ids)) {
-    return false;
-  }
-
-  return true;
+  return VersionSingleton<RecVocabDict>::GetInstance(model_version_)
+      ->get_tokens_by_item(item_id, token_ids);
 }
 
 bool RecTokenizer::decode(const Slice<int32_t>& token_ids,
@@ -47,12 +43,8 @@ bool RecTokenizer::decode(const Slice<int32_t>& token_ids,
   RecTokenTriple rec_token_triple;
   std::copy(token_ids.begin(), token_ids.end(), rec_token_triple.begin());
 
-  if (!VersionSingleton<RecVocabDict>::GetInstance(model_version_)
-           ->get_items_by_tokens(rec_token_triple, item_ids)) {
-    return false;
-  }
-
-  return true;
+  return VersionSingleton<RecVocabDict>::GetInstance(model_version_)
+      ->get_items_by_tokens(rec_token_triple, item_ids);
 }
 
 size_t RecTokenizer::vocab_size() const {

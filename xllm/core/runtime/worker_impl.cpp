@@ -36,6 +36,9 @@ limitations under the License.
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#if defined(USE_NPU)
+#include "platform/npu/device_capture_lock.h"
+#endif
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_loader.h"
@@ -352,6 +355,24 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
 
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                              ForwardInput& processed_input) {
+#if defined(USE_NPU)
+  // Without device_capture_lock, ACL graph capture will be interrupted by the
+  // synchronization H2D of data update streams asynchronously scheduled by
+  // other threads, even if the capture and synchronization streams are not the
+  // same, and even if capture_mode is set to
+  // ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL.
+  // The possible reason is that ACL graph capture may use additional auxiliary
+  // streams, and these auxiliary streams might be the same as the
+  // asynchronously scheduled data update streams.
+
+  std::optional<std::unique_lock<std::mutex>> lock_guard;
+  if (FLAGS_enable_graph) {
+    auto& capture_lock =
+        ::xllm::npu::DeviceCaptureLock::get_instance().get_lock(
+            device_.index());
+    lock_guard.emplace(capture_lock);
+  }
+#endif
   c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
 
   processed_input = input.to(device_, dtype_);

@@ -34,6 +34,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
 #include "core/util/utils.h"
+#include "platform/npu/device_capture_lock.h"
 
 // ATB includes
 #include <atb/atb_infer.h>
@@ -654,34 +655,50 @@ bool AclGraph::capture(CausalLM* model,
   // Synchronize stream to ensure all data is copied to graph persistent buffers
   aclrtSynchronizeStream(stream);
 
-  // Use secondary stream for graph capture to avoid blocking main stream
+  // Acquire device-level lock to prevent prepare_work_before_execute from
+  // executing simultaneously, which would trigger synchronous operations
+  // that conflict with capture mode
+  auto device_idx = tensor_options.device().index();
+
+  // Use cached capture stream for graph capture
+  // capture_stream_ is initialized in constructor
   bool need_restore_stream = false;
-  if (c10_npu::getCurrentNPUStream(tensor_options.device().index()) ==
-      c10_npu::getDefaultNPUStream(tensor_options.device().index())) {
-    auto secondary_stream =
-        c10_npu::getStreamFromPool(true, tensor_options.device().index());
-    c10_npu::setCurrentNPUStream(secondary_stream);
-    need_restore_stream = true;
+
+  // capture lock scope
+  {
+    auto& capture_lock =
+        ::xllm::npu::DeviceCaptureLock::get_instance().get_lock(device_idx);
+    std::lock_guard<std::mutex> lock_guard(capture_lock);
+
+    if (c10_npu::getCurrentNPUStream(device_idx) ==
+        c10_npu::getDefaultNPUStream(device_idx)) {
+      c10_npu::setCurrentNPUStream(capture_stream_.value());
+      aclrtSynchronizeStream(capture_stream_.value().stream());
+      need_restore_stream = true;
+    }
+    LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
+              << ", actual_num_tokens: " << actual_num_tokens;
+
+    // no mempool id, will create a new one; capture mode is thread local, allow
+    // other threads to execute synchronous operations
+    graph_.capture_begin(
+        {0, 0}, aclmdlRICaptureMode::ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL);
+    // Execute forward pass - NPUGraph mempool manages temporary tensors
+    auto forward_result =
+        model->forward({persistent_param_.persistent_tokens(num_tokens_)},
+                       {persistent_param_.persistent_positions(num_tokens_)},
+                       kv_cache,
+                       {graph_params});
+
+    // Store result in persistent buffer owned by NPUGraph mempool
+    persistent_param_.set_hidden_states(forward_result);
+    graph_.capture_end();
+    // Lock is automatically released here when lock goes out of scope
+    if (need_restore_stream) {
+      c10_npu::setCurrentNPUStream(
+          c10_npu::getDefaultNPUStream(tensor_options.device().index()));
+    }
   }
-  LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
-            << " actual_num_tokens: " << actual_num_tokens << std::endl;
-  graph_.capture_begin();
-
-  // Execute forward pass - NPUGraph mempool manages temporary tensors
-  auto forward_result =
-      model->forward({persistent_param_.persistent_tokens(num_tokens_)},
-                     {persistent_param_.persistent_positions(num_tokens_)},
-                     kv_cache,
-                     {graph_params});
-
-  // Store result in persistent buffer owned by NPUGraph mempool
-  persistent_param_.set_hidden_states(forward_result);
-  graph_.capture_end();
-  if (need_restore_stream) {
-    c10_npu::setCurrentNPUStream(
-        c10_npu::getDefaultNPUStream(tensor_options.device().index()));
-  }
-
   // Synchronize and test replay to verify graph capture
   aclrtSynchronizeStream(stream);
 
@@ -689,6 +706,18 @@ bool AclGraph::capture(CausalLM* model,
 
   // aclrtSynchronizeStream(stream);
   return true;
+}
+
+void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
+  // Get a secondary stream from high-priority pool for graph capture.
+  // This is required because NPUGraph::capture_begin() enforces that capture
+  // must be performed on a non-default stream (see
+  // torch_npu/csrc/core/npu/NPUGraph.cpp:159).
+  capture_stream_ = c10_npu::getStreamFromPool(true, device_index);
+  device_index_ = device_index;
+  LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
+            << ", id: " << capture_stream_.value().id()
+            << ", device_index: " << device_index;
 }
 
 torch::Tensor AclGraph::replay(const torch::Tensor& tokens,
@@ -799,7 +828,7 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   }
 
   // Graph doesn't exist for this bucket num_tokens, try to create it lazily
-  auto graph = std::make_unique<AclGraph>(*persistent_param_);
+  auto graph = std::make_unique<AclGraph>(*persistent_param_, device_.index());
   VLOG(50) << "AclGraphExecutorImpl::run() in capture mode";
   bool capture_success = graph->capture(model_,
                                         args_,

@@ -63,7 +63,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                                      false,
                                                      false,
                                                      quant_args,
-                                                     parallel_args,
+                                                     parallel_args.tp_group_,
                                                      options));
   } else {
     q_proj_ = register_module("q_proj",
@@ -72,7 +72,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                                    false,
                                                    false,
                                                    quant_args,
-                                                   parallel_args,
+                                                   parallel_args.tp_group_,
                                                    options));
   }
 
@@ -92,7 +92,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                            false,
                            false,
                            QuantArgs(),
-                           parallel_args,
+                           parallel_args.tp_group_,
                            options));
 
   auto kv_b_proj_weight = kv_b_proj_->weight();
@@ -156,7 +156,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                               true,
                                               /*reduce=*/false,
                                               quant_args,
-                                              parallel_args,
+                                              parallel_args.tp_group_,
                                               options));
 }
 
@@ -197,7 +197,11 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   auto v_input = latent_cache.slice(-1, 0, kv_lora_rank_);
   auto k_input = latent_cache;
   auto k_input_slice = k_input.slice(-1, 0, kv_lora_rank_);
-  k_input_slice = std::get<0>(kv_a_layernorm_(k_input_slice));
+  // pass the output address so that the output can be written to the address
+  // directly
+  k_input_slice = std::get<0>(kv_a_layernorm_(v_input,
+                                              /*residual=*/std::nullopt,
+                                              k_input_slice));
   k_input = k_input.unsqueeze(1);
   auto k_pe = k_input.slice(-1, kv_lora_rank_);
 
@@ -216,31 +220,36 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   v_input = v_input.view({v_input.size(0), -1});
 
   // reshape_paged_cache before attn
-  if (only_prefill) {
-    auto key = k_input.unsqueeze(1);
-    torch::Tensor k_cache = kv_cache.get_k_cache();
-    xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
-    reshape_paged_cache_params.key = key;
-    reshape_paged_cache_params.k_cache = k_cache;
-    reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
-    xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
-  }
+  // since the reshape_paged_cache and indexer_ does not involve any
+  // communication, we will skip them if it is dummy run in data parallel
+  AttentionMetadata attn_indexer_metadata = attn_metadata;
+  if (!attn_metadata.is_dummy) {
+    if (only_prefill) {
+      auto key = k_input.unsqueeze(1);
+      torch::Tensor k_cache = kv_cache.get_k_cache();
+      xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
+      reshape_paged_cache_params.key = key;
+      reshape_paged_cache_params.k_cache = k_cache;
+      reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
+      xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+    }
 
-  // indexer and update index params for attn
-  auto attn_indexer_metadata = attn_metadata;
-  attn_indexer_metadata.compute_dtype = "half";
-  if (enable_lighting_indexer_) {
-    auto index_cache = kv_cache.get_index_cache();
-    auto [new_block_tables, new_context_lens] = indexer_(hidden_states,
-                                                         qr,
-                                                         positions,
-                                                         index_cache,
-                                                         attn_metadata,
-                                                         only_prefill,
-                                                         std::nullopt);
-    attn_indexer_metadata.block_table = new_block_tables;
-    attn_indexer_metadata.kv_seq_lens = new_context_lens;
-    attn_indexer_metadata.max_seq_len = index_topk_;
+    // indexer and update index params for attn
+    attn_indexer_metadata = attn_metadata;
+    attn_indexer_metadata.compute_dtype = "half";
+    if (enable_lighting_indexer_) {
+      auto index_cache = kv_cache.get_index_cache();
+      auto [new_block_tables, new_context_lens] = indexer_(hidden_states,
+                                                           qr,
+                                                           positions,
+                                                           index_cache,
+                                                           attn_metadata,
+                                                           only_prefill,
+                                                           std::nullopt);
+      attn_indexer_metadata.block_table = new_block_tables;
+      attn_indexer_metadata.kv_seq_lens = new_context_lens;
+      attn_indexer_metadata.max_seq_len = index_topk_;
+    }
   }
 
   // mla forward

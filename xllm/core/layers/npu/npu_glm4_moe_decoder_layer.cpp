@@ -119,8 +119,8 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
   param.enableSplitFuse =
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
 
-  // not support MTP model yet
-  param.enableAclGraph =
+  // TODO(zhangminchao1@jd.com): not support MTP model yet
+  param.enableAclGraphPagedAttention =
       FLAGS_enable_graph && !is_prefill && args.n_layers() > 1;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())

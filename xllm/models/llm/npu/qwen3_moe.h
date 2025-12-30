@@ -219,30 +219,33 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
 
     torch::Tensor attn_mask;
-    max_seq_len_ = FLAGS_enable_chunked_prefill
-                       ? std::max(input_params.kv_max_seq_len, max_seq_len_)
-                       : 128;
-    if (FLAGS_enable_chunked_prefill) {
-      attn_mask = attn_mask_.get_attn_mask(
-          max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
+    // for chunked prefill, generate the attn mask.
+    if (!input_params.batch_forward_type.is_decode()) {
+      max_seq_len_ = FLAGS_enable_chunked_prefill
+                         ? std::max(input_params.kv_max_seq_len, max_seq_len_)
+                         : 128;
+      if (FLAGS_enable_chunked_prefill) {
+        attn_mask = attn_mask_.get_attn_mask(
+            max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
-      int batch_size = input_params.q_seq_lens_vec.size();
-      if (batch_size > 0) {
-        std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(batch_size);
+        int batch_size = input_params.q_seq_lens_vec.size();
+        if (batch_size > 0) {
+          std::vector<torch::Tensor> req_mask_vec;
+          req_mask_vec.reserve(batch_size);
 
-        for (int j = 0; j < batch_size; j++) {
-          int start =
-              input_params.kv_seq_lens_vec[j] - input_params.q_seq_lens_vec[j];
-          int end = input_params.kv_seq_lens_vec[j];
+          for (int j = 0; j < batch_size; j++) {
+            int start = input_params.kv_seq_lens_vec[j] -
+                        input_params.q_seq_lens_vec[j];
+            int end = input_params.kv_seq_lens_vec[j];
 
-          auto req_mask_slice = attn_mask.slice(0, start, end);
-          req_mask_vec.emplace_back(req_mask_slice);
+            auto req_mask_slice = attn_mask.slice(0, start, end);
+            req_mask_vec.emplace_back(req_mask_slice);
+          }
+          attn_mask = torch::cat(req_mask_vec, 0);
         }
-        attn_mask = torch::cat(req_mask_vec, 0);
+      } else if (input_params.global_empty_kv_cache) {
+        attn_mask = attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
       }
-    } else if (input_params.global_empty_kv_cache) {
-      attn_mask = attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();

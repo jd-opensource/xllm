@@ -69,6 +69,7 @@ cc_library(
     :xllm_server
     $<$<BOOL:${USE_NPU}>:xllm_ops>
     $<$<BOOL:${USE_NPU}>:atb_customize>
+    $<$<BOOL:${USE_NPU}>:platform_npu>
     :eplb
     glog::glog
     Folly::folly

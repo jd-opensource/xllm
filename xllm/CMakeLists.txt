@@ -3,6 +3,14 @@ include(cc_shared_library)
 
 include_directories(.)
 
+# Set warning-as-error for xllm code (third-party headers are marked as SYSTEM)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-Werror)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(-Wno-macro-redefined)
+  endif()
+endif()
+
 option(GENERATE_SO "Enable compile to generate .so" OFF)
 
 add_subdirectory(api_service)

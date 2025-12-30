@@ -88,7 +88,7 @@ torch::Tensor RecConstrainedDecoding::generate_mask(
   if (0 == token_size) {
     size_t sequence_num = generated_token_list.size();
     auto mask = first_token_mask_.unsqueeze(0);
-    return mask.repeat({sequence_num, 1});
+    return mask.repeat({static_cast<int64_t>(sequence_num), 1});
   }
 
   // Generate mask for non-first token
@@ -99,8 +99,9 @@ torch::Tensor RecConstrainedDecoding::generate_decode_mask(
     const std::vector<std::vector<int32_t>>& generated_token_list) {
   size_t sequence_num = generated_token_list.size();
   torch::TensorOptions options = torch::dtype(dtype_).device(device_);
-  auto mask =
-      torch::full({sequence_num, vocab_size_}, PRE_MASK_FACTOR, options);
+  auto mask = torch::full({static_cast<int64_t>(sequence_num), vocab_size_},
+                          PRE_MASK_FACTOR,
+                          options);
 
   std::mutex global_batch_mutex;
   std::vector<int64_t> global_batch_token_indices;

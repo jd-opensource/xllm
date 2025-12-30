@@ -70,6 +70,7 @@ void Qwen3DecoderLayerImpl::param_from_args(
   param.enableIntraLayerAddNorm = true;
   param.enableInterLayerAddNorm = false;
   param.enablePreFetchWeight = FLAGS_enable_prefetch_weight;
+  param.enableAclGraphPagedAttention = FLAGS_enable_graph && !isPrefill;
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
 
@@ -203,14 +204,8 @@ int64_t Qwen3DecoderLayerImpl::init_node(
   atb_speed::qwen::QwenDecoderLayer decoder_layer(param);
   decoder_layer.BuildGraph(&operation);
   node.operation.reset(operation);
-  if (node.operation == nullptr) {
-    LOG(ERROR) << "node.operation is null";
-    return -1;
-  }
-  if (node.operation->GetInputNum() < 1) {
-    LOG(ERROR) << "Can not resize number which is smaller than 1";
-    return -1;
-  }
+  CHECK_NOTNULL(node.operation);
+  CHECK_GT(node.operation->GetInputNum(), 0);
   node.inTensors.resize(node.operation->GetInputNum());
   node.outTensors.resize(1);
   size_t inTensorId = 1;
@@ -304,12 +299,21 @@ void Qwen3DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+
+  int32_t input_idx = WEIGHT_COUNT_PER_LAYER + 11;
   if (is_prefill &&
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
+    node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
+    node.variantPack.inTensors.at(input_idx - 1).hostData =
         input_params.q_seq_lens_vec.data();
+  }
+
+  if (FLAGS_enable_graph && !is_prefill &&
+      input_params.graph_buffer.tiling_data.defined()) {
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.graph_buffer.tiling_data);
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {

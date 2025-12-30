@@ -31,7 +31,8 @@ class RMSNormImpl : public torch::nn::Module {
 
   std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
       torch::Tensor& input,
-      std::optional<torch::Tensor> residual = std::nullopt);
+      std::optional<torch::Tensor> residual = std::nullopt,
+      std::optional<torch::Tensor> inplace_output = std::nullopt);
 
   void set_layernorm_mode();
 

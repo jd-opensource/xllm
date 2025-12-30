@@ -15,9 +15,9 @@
 
 ## 使用方式
 
-上述功能已经在xLLM引擎内部进行了实现，对用户透明，用户无需关注内部实现细节，在适用的场景直接开启相关功能即可。通过gflags参数`enable_aclgraph`开启。参数默认为false，如需开启在xLLM的服务启动脚本中设置为true即可，示例如下：
+上述功能已经在xLLM引擎内部进行了实现，对用户透明，用户无需关注内部实现细节，在适用的场景直接开启相关功能即可。通过gflags参数`enable_graph`开启。参数默认为false，如需开启在xLLM的服务启动脚本中设置为true即可，示例如下：
 ```shell
---enable_aclgraph=true
+--enable_graph=true
 ```
 
 
