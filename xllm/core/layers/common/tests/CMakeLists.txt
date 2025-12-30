@@ -53,5 +53,5 @@ cc_test(
     GTest::gtest_main
     torch
     glog::glog
-  )
+)
 endif()

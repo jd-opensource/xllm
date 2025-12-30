@@ -1,3 +1,18 @@
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <sys/wait.h>
@@ -26,19 +41,19 @@ namespace layer {
 namespace test {
 
 // Special exit code definition for skipping test
-constexpr int EXIT_CODE_SKIP = 77;
+constexpr int32_t EXIT_CODE_SKIP = 77;
 
 // Helper function to create ProcessGroup
 std::unique_ptr<xllm::ProcessGroup> create_test_process_group(
-    int rank,
-    int world_size,
-    int port,
+    int32_t rank,
+    int32_t world_size,
+    int32_t port,
     const std::string& host,
     const torch::Device& device) {
-  return xllm::create_process_group(static_cast<int32_t>(rank),
-                                    static_cast<int32_t>(world_size),
-                                    static_cast<int32_t>(world_size),
-                                    static_cast<int32_t>(port),
+  return xllm::create_process_group(rank,
+                                    world_size,
+                                    world_size,
+                                    port,
                                     false,
                                     host,
                                     "deep_ep_test_group",
@@ -57,10 +72,10 @@ struct TestParams {
 };
 
 // Child process test function
-int run_deep_ep_test_child(TestParams params) {
+int32_t run_deep_ep_test_child(TestParams params) {
   try {
     // 1. Check devices
-    int dev_count = xllm::Device::device_count();
+    int32_t dev_count = xllm::Device::device_count();
     if (dev_count < params.world_size) {
       LOG(WARNING) << "Rank " << params.rank
                    << ": Insufficient devices. Skipping.";
@@ -77,10 +92,8 @@ int run_deep_ep_test_child(TestParams params) {
     auto process_group = create_test_process_group(
         params.rank, params.world_size, params.port, params.host, device);
 
-    if (!process_group) {
-      LOG(ERROR) << "Rank " << params.rank << ": Failed to create ProcessGroup";
-      return 1;
-    }
+    CHECK(process_group) << "Rank " << params.rank
+                         << ": Failed to create ProcessGroup";
 
     // 4. Create ParallelArgs
     ParallelArgs parallel_args(
@@ -129,7 +142,7 @@ int run_deep_ep_test_child(TestParams params) {
     torch::Tensor src_data = torch::zeros(
         {num_tokens_sent, hidden_dim},
         torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
-    for (int i = 0; i < num_tokens_sent; ++i) {
+    for (size_t i = 0; i < num_tokens_sent; ++i) {
       src_data[i].fill_(base_val + i);
     }
 
@@ -161,11 +174,9 @@ int run_deep_ep_test_child(TestParams params) {
     // Validate count
     torch::Tensor valid_token_num_cpu = meta.token_sum.to(torch::kCPU);
     int64_t received_count = valid_token_num_cpu.item<int64_t>();
-    if (received_count != 4) {
-      LOG(ERROR) << "Rank " << params.rank
-                 << ": Expected 4 received tokens, got " << received_count;
-      return 1;
-    }
+    CHECK_EQ(received_count, 4)
+        << "Rank " << params.rank << ": Expected 4 received tokens, got "
+        << received_count;
 
     // Step 4: Simulate Computation (on Float tensor)
     torch::Tensor expert_output = expert_input + 1.0f;
@@ -192,23 +203,15 @@ int run_deep_ep_test_child(TestParams params) {
     torch::Tensor final_cpu = final_output.to(torch::kCPU);
     auto final_acc = final_cpu.accessor<float, 2>();
 
-    bool all_match = true;
     for (int64_t i = 0; i < num_tokens_sent; ++i) {
       float expected_val = base_val + i + 1.0f;
       for (int64_t j = 0; j < hidden_dim; ++j) {
         float got = final_acc[i][j];
-        if (std::abs(got - expected_val) > 1e-4) {
-          all_match = false;
-          LOG(ERROR) << "Rank " << params.rank << " Verification Failed at ["
-                     << i << "][" << j << "]: Expected " << expected_val
-                     << ", Got " << got;
-          break;
-        }
+        CHECK(std::abs(got - expected_val) <= 1e-4)
+            << "Rank " << params.rank << " Verification Failed at [" << i
+            << "][" << j << "]: Expected " << expected_val << ", Got " << got;
       }
-      if (!all_match) break;
     }
-
-    if (!all_match) return 1;
 
     LOG(INFO) << "Rank " << params.rank << ": E2E Test Passed!";
     return 0;
@@ -247,7 +250,7 @@ class DeepEPMultiDeviceTest : public ::testing::Test {
         params.max_tokens = max_tokens_;
         params.num_experts = num_global_experts_;
 
-        int exit_code = run_deep_ep_test_child(params);
+        int32_t exit_code = run_deep_ep_test_child(params);
         _exit(exit_code);
       } else if (pid > 0) {
         child_pids.push_back(pid);
@@ -260,10 +263,10 @@ class DeepEPMultiDeviceTest : public ::testing::Test {
     bool any_skipped = false;
 
     for (size_t i = 0; i < child_pids.size(); ++i) {
-      int status;
+      int32_t status;
       waitpid(child_pids[i], &status, 0);
       if (WIFEXITED(status)) {
-        int exit_code = WEXITSTATUS(status);
+        int32_t exit_code = WEXITSTATUS(status);
         if (exit_code == EXIT_CODE_SKIP) {
           any_skipped = true;
         } else if (exit_code != 0) {
