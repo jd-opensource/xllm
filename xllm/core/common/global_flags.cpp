@@ -486,6 +486,11 @@ DEFINE_bool(enable_constrained_decoding,
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
 
+// --- multi model config ---
+DEFINE_bool(enable_manual_weights_management,
+            false,
+            "Whether to enable manual load weights.");
+
 #if defined(USE_NPU)
 DEFINE_string(
     npu_kernel_backend,

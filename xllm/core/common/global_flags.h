@@ -237,6 +237,7 @@ DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
 
+DECLARE_bool(enable_manual_weights_management);
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);
 #endif
