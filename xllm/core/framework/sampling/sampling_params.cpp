@@ -35,9 +35,6 @@ void SamplingParameters::init(
     const std::vector<int32_t>& unique_token_lens_vec) {
   CHECK_EQ(req_sampling_params.size(), selected_token_idxes.size());
   CHECK_GE(req_sampling_params.size(), sample_idxes.size());
-  CHECK_EQ(req_sampling_params.size(), unique_token_ids_vec.size());
-  CHECK_EQ(req_sampling_params.size(), unique_token_counts_vec.size());
-  CHECK_EQ(req_sampling_params.size(), unique_token_lens_vec.size());
 
   std::vector<float> frequency_penalties;
   std::vector<float> presence_penalties;
@@ -118,6 +115,9 @@ void SamplingParameters::init(
   this->selected_token_idxes =
       torch::tensor(selected_token_idxes, int_tensor_options);
   if (need_token_stats) {
+    CHECK_EQ(req_sampling_params.size(), unique_token_ids_vec.size());
+    CHECK_EQ(req_sampling_params.size(), unique_token_counts_vec.size());
+    CHECK_EQ(req_sampling_params.size(), unique_token_lens_vec.size());
     this->unique_token_ids =
         create_2d_tensor(unique_token_ids_vec, torch::kInt64);
     this->unique_token_counts =
