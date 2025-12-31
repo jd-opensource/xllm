@@ -330,6 +330,7 @@ const void* get_data_from_contents(const proto::TensorContents& contents,
                << typeid(T).name();
     return nullptr;
   }
+  return nullptr;
 }
 
 }  // namespace
@@ -568,11 +569,12 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
       break;
     case torch::kBFloat16: {
       // Need to convert bfloat16 to uint8_t for storage
-      auto bfloat16_ptr = torch_tensor.data_ptr<at::BFloat16>();
+      auto bfloat16_ptr = torch_tensor.data_ptr<torch::BFloat16>();
       uint8_t* uint8_ptr = reinterpret_cast<uint8_t*>(bfloat16_ptr);
       torch::Tensor uint8_tensor =
           torch::from_blob(uint8_ptr,
-                           {torch_tensor.numel() * sizeof(at::BFloat16)},
+                           {static_cast<int64_t>(torch_tensor.numel() *
+                                                 sizeof(torch::BFloat16))},
                            torch::dtype(torch::kUInt8));
       data_set_success = set_data_to_contents<uint8_t>(
           proto_contents, uint8_tensor, proto_datatype);
@@ -580,12 +582,12 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
     }
     case torch::kHalf: {
       // Need to convert float16 to uint8_t for storage
-      auto float16_ptr = torch_tensor.data_ptr<at::Half>();
+      auto float16_ptr = torch_tensor.data_ptr<torch::Half>();
       uint8_t* uint8_ptr = reinterpret_cast<uint8_t*>(float16_ptr);
-      torch::Tensor uint8_tensor =
-          torch::from_blob(uint8_ptr,
-                           {torch_tensor.numel() * sizeof(at::Half)},
-                           torch::dtype(torch::kUInt8));
+      torch::Tensor uint8_tensor = torch::from_blob(
+          uint8_ptr,
+          {static_cast<int64_t>(torch_tensor.numel() * sizeof(torch::Half))},
+          torch::dtype(torch::kUInt8));
       data_set_success = set_data_to_contents<uint8_t>(
           proto_contents, uint8_tensor, proto_datatype);
       break;
@@ -625,10 +627,10 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
     actual_count += proto_contents->bytes_contents().size();
   } else if (proto_datatype == "BF16") {
     actual_count = proto_contents->bytes_contents().size() /
-                   static_cast<size_t>(sizeof(at::BFloat16));
+                   static_cast<size_t>(sizeof(torch::BFloat16));
   } else if (proto_datatype == "FP16") {
     actual_count = proto_contents->bytes_contents().size() /
-                   static_cast<size_t>(sizeof(at::Half));
+                   static_cast<size_t>(sizeof(torch::Half));
   }
 
   if (actual_count != static_cast<size_t>(total_elements)) {

@@ -59,6 +59,13 @@ class JinjaChatTemplate {
  private:
   TokenizerArgs args_;
   std::unique_ptr<minja::chat_template> template_;
+  inline static const std::unordered_map<std::string, std::string>
+      type_to_modality_ = {{"video_url", "video"},
+                           {"image_url", "image"},
+                           {"audio_url", "audio"},
+                           {"image_embedding", "image"},
+                           {"video_embedding", "video"},
+                           {"audio_embedding", "audio"}};
 };
 
 }  // namespace xllm

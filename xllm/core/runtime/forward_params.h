@@ -24,6 +24,7 @@ limitations under the License.
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/mm_batch_data.h"
+#include "framework/request/mm_data.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 

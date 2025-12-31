@@ -37,6 +37,8 @@ class IVisitor {
 };
 }  // namespace MMDictItem
 
+using MMItemVec = std::vector<MMDataItem>;
+
 class MMData {
  public:
   class IItemVisitor : public MMDataItem::IVisitor,
@@ -54,7 +56,6 @@ class MMData {
     virtual bool visit(MMData& data) = 0;
   };
 
-  using MMItemVec = std::vector<MMDataItem>;
   using MMItems = std::variant<MMItemVec, MMDict>;
 
  public:
