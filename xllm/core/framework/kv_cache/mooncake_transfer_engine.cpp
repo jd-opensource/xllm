@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mooncake_te.h"
+#include "mooncake_transfer_engine.h"
 
 #include <acl/acl.h>
 #include <gflags/gflags.h>
@@ -26,7 +26,8 @@ limitations under the License.
 
 namespace xllm {
 
-MooncakeTe::MooncakeTe(const int32_t listen_port, const torch::Device& device)
+MooncakeTransferEngine::MooncakeTransferEngine(const int16_t listen_port,
+                                               const torch::Device& device)
     : listen_port_(listen_port), device_(device) {
   engine_ = std::make_unique<TransferEngine>(true);
 
@@ -53,7 +54,7 @@ MooncakeTe::MooncakeTe(const int32_t listen_port, const torch::Device& device)
   LOG(INFO) << "engine init success, hostname=" << hostname;
 }
 
-MooncakeTe::~MooncakeTe() {
+MooncakeTransferEngine::~MooncakeTransferEngine() {
   // free stub
   for (auto& pair : stub_map_) {
     delete pair.second;
@@ -67,8 +68,8 @@ MooncakeTe::~MooncakeTe() {
   }
 }
 
-std::string MooncakeTe::initialize() {
-  service_ = std::make_shared<MooncakeTeService>(this);
+std::string MooncakeTransferEngine::initialize() {
+  service_ = std::make_shared<MooncakeTransferEngineService>(this);
   if (server_.AddService(service_.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
       0) {
     LOG(ERROR) << "Failed to add service to server";
@@ -86,14 +87,14 @@ std::string MooncakeTe::initialize() {
 
   rpc_port_ = engine_->getRpcPort();
   addr_ = host_ip_ + ":" + std::to_string(rpc_port_);
-  LOG(INFO) << "MooncakeTe initialize success, addr_=" << addr_;
+  LOG(INFO) << "MooncakeTransferEngine initialize success, addr_=" << addr_;
 
   return addr_;
 }
 
-bool MooncakeTe::register_memory(std::vector<void*> addrs,
-                                 std::vector<size_t> lens,
-                                 int64_t size_per_block) {
+bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
+                                             std::vector<size_t> lens,
+                                             int64_t size_per_block) {
   int64_t num = addrs.size();
   num_layers_ = num / 2;
 
@@ -116,7 +117,8 @@ bool MooncakeTe::register_memory(std::vector<void*> addrs,
   return true;
 }
 
-proto::MooncakeTeService* MooncakeTe::create_rpc_channel(uint64_t cluster_id) {
+proto::MooncakeTransferEngineService*
+MooncakeTransferEngine::create_rpc_channel(uint64_t cluster_id) {
   auto it = stub_map_.find(cluster_id);
   if (it == stub_map_.end()) {
     auto [remote_ip, remote_port] = net::convert_uint64_to_ip_port(cluster_id);
@@ -133,8 +135,8 @@ proto::MooncakeTeService* MooncakeTe::create_rpc_channel(uint64_t cluster_id) {
       return nullptr;
     }
 
-    proto::MooncakeTeService_Stub* stub =
-        new proto::MooncakeTeService_Stub(channel);
+    proto::MooncakeTransferEngineService_Stub* stub =
+        new proto::MooncakeTransferEngineService_Stub(channel);
     stub_map_[cluster_id] = stub;
     return stub;
   }
@@ -142,8 +144,8 @@ proto::MooncakeTeService* MooncakeTe::create_rpc_channel(uint64_t cluster_id) {
   return it->second;
 }
 
-bool MooncakeTe::open_session(const uint64_t cluster_id,
-                              const std::string& remote_addr) {
+bool MooncakeTransferEngine::open_session(const uint64_t cluster_id,
+                                          const std::string& remote_addr) {
   LOG(INFO) << "open_session, cluster_id=" << cluster_id
             << ", remote_addr=" << remote_addr;
 
@@ -153,7 +155,7 @@ bool MooncakeTe::open_session(const uint64_t cluster_id,
   }
 
   if (cluster_id != 0) {
-    proto::MooncakeTeService* stub = create_rpc_channel(cluster_id);
+    proto::MooncakeTransferEngineService* stub = create_rpc_channel(cluster_id);
     if (!stub) {
       LOG(ERROR) << "create_rpc_channel failed";
       return false;
@@ -183,8 +185,8 @@ bool MooncakeTe::open_session(const uint64_t cluster_id,
   return true;
 }
 
-bool MooncakeTe::close_session(const uint64_t cluster_id,
-                               const std::string& remote_addr) {
+bool MooncakeTransferEngine::close_session(const uint64_t cluster_id,
+                                           const std::string& remote_addr) {
   LOG(INFO) << "close_session, cluster_id=" << cluster_id
             << ", remote_addr=" << remote_addr;
 
@@ -194,7 +196,7 @@ bool MooncakeTe::close_session(const uint64_t cluster_id,
   }
 
   if (cluster_id != 0) {
-    proto::MooncakeTeService* stub = create_rpc_channel(cluster_id);
+    proto::MooncakeTransferEngineService* stub = create_rpc_channel(cluster_id);
     if (!stub) {
       LOG(ERROR) << "create_rpc_channel failed";
       return false;
@@ -270,11 +272,12 @@ void merge_block_ids(const std::vector<uint64_t>& src_blocks,
   block_lengths.emplace_back(current_length);
 }
 
-bool MooncakeTe::move_memory_blocks(const std::string& remote_addr,
-                                    const std::vector<uint64_t>& src_blocks,
-                                    const std::vector<uint64_t>& dst_blocks,
-                                    const std::vector<int64_t>& layer_ids,
-                                    MoveOpcode move_opcode) {
+bool MooncakeTransferEngine::move_memory_blocks(
+    const std::string& remote_addr,
+    const std::vector<uint64_t>& src_blocks,
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<int64_t>& layer_ids,
+    MoveOpcode move_opcode) {
   auto it = handles_.find(remote_addr);
   if (it == handles_.end()) {
     LOG(ERROR) << "remote addr does not exist" << remote_addr;
@@ -398,10 +401,11 @@ bool MooncakeTe::move_memory_blocks(const std::string& remote_addr,
   return true;
 }
 
-bool MooncakeTe::pull_memory_blocks(const std::string& remote_addr,
-                                    const std::vector<uint64_t>& src_blocks,
-                                    const std::vector<uint64_t>& dst_blocks,
-                                    const std::vector<int64_t>& layer_ids) {
+bool MooncakeTransferEngine::pull_memory_blocks(
+    const std::string& remote_addr,
+    const std::vector<uint64_t>& src_blocks,
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<int64_t>& layer_ids) {
   auto ret = move_memory_blocks(
       remote_addr, src_blocks, dst_blocks, layer_ids, MoveOpcode::READ);
   if (!ret) {
@@ -412,10 +416,11 @@ bool MooncakeTe::pull_memory_blocks(const std::string& remote_addr,
   return true;
 }
 
-bool MooncakeTe::push_memory_blocks(const std::string& remote_addr,
-                                    const std::vector<uint64_t>& src_blocks,
-                                    const std::vector<uint64_t>& dst_blocks,
-                                    const std::vector<int64_t>& layer_ids) {
+bool MooncakeTransferEngine::push_memory_blocks(
+    const std::string& remote_addr,
+    const std::vector<uint64_t>& src_blocks,
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<int64_t>& layer_ids) {
   auto ret = move_memory_blocks(
       remote_addr, src_blocks, dst_blocks, layer_ids, MoveOpcode::WRITE);
   if (!ret) {
@@ -426,10 +431,11 @@ bool MooncakeTe::push_memory_blocks(const std::string& remote_addr,
   return true;
 }
 
-MooncakeTeService::MooncakeTeService(MooncakeTe* mooncake_te)
+MooncakeTransferEngineService::MooncakeTransferEngineService(
+    MooncakeTransferEngine* mooncake_te)
     : mooncake_te_(mooncake_te) {};
 
-void MooncakeTeService::OpenSession(
+void MooncakeTransferEngineService::OpenSession(
     ::google::protobuf::RpcController* controller,
     const proto::SessionInfo* request,
     proto::Status* response,
@@ -446,7 +452,7 @@ void MooncakeTeService::OpenSession(
   response->set_ok(result);
 }
 
-void MooncakeTeService::CloseSession(
+void MooncakeTransferEngineService::CloseSession(
     ::google::protobuf::RpcController* controller,
     const proto::SessionInfo* request,
     proto::Status* response,

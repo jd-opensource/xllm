@@ -16,16 +16,16 @@ limitations under the License.
 #pragma once
 
 #include "kv_cache_transfer.h"
-#include "mooncake_te.h"
+#include "mooncake_transfer_engine.h"
 
 namespace xllm {
 
-class MooncakeTeTransfer : public KVCacheTransfer {
+class MooncakeKVCacheTransfer : public KVCacheTransfer {
  public:
-  MooncakeTeTransfer(const int32_t device_id,
-                     const int32_t listen_port,
-                     const torch::Device& device);
-  virtual ~MooncakeTeTransfer() = default;
+  MooncakeKVCacheTransfer(const int32_t device_id,
+                          const int16_t listen_port,
+                          const torch::Device& device);
+  virtual ~MooncakeKVCacheTransfer() = default;
 
   virtual void initialize(int32_t device_id) override;
 
@@ -71,11 +71,11 @@ class MooncakeTeTransfer : public KVCacheTransfer {
  private:
   std::string addr_;
   uint64_t cluster_id_;
-  int32_t listen_port_;
+  int16_t listen_port_;
   int32_t device_id_;
   int64_t num_layers_;
 
-  std::unique_ptr<MooncakeTe> mooncake_te_;
+  std::unique_ptr<MooncakeTransferEngine> mooncake_te_;
 };
 
 }  // namespace xllm

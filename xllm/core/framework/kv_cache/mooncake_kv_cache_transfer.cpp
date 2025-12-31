@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mooncake_te_transfer.h"
+#include "mooncake_kv_cache_transfer.h"
 
 #include <glog/logging.h>
 
@@ -21,21 +21,21 @@ limitations under the License.
 
 namespace xllm {
 
-MooncakeTeTransfer::MooncakeTeTransfer(const int32_t device_id,
-                                       const int32_t listen_port,
-                                       const torch::Device& device)
+MooncakeKVCacheTransfer::MooncakeKVCacheTransfer(const int32_t device_id,
+                                                 const int16_t listen_port,
+                                                 const torch::Device& device)
     : device_id_(device_id), listen_port_(listen_port), KVCacheTransfer() {
   std::string instance_ip = net::get_local_ip_addr();
   cluster_id_ = net::convert_ip_port_to_uint64(instance_ip, listen_port_);
 
-  mooncake_te_ = std::make_unique<MooncakeTe>(listen_port_, device);
+  mooncake_te_ = std::make_unique<MooncakeTransferEngine>(listen_port_, device);
 }
 
-void MooncakeTeTransfer::initialize(int32_t device_id) {
+void MooncakeKVCacheTransfer::initialize(int32_t device_id) {
   addr_ = mooncake_te_->initialize();
 }
 
-void MooncakeTeTransfer::allocate_kv_cache(
+void MooncakeKVCacheTransfer::allocate_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
     const int64_t num_layers,
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
@@ -94,7 +94,7 @@ void MooncakeTeTransfer::allocate_kv_cache(
   }
 }
 
-void MooncakeTeTransfer::register_kv_cache(
+void MooncakeKVCacheTransfer::register_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
     torch::ScalarType dtype) {
@@ -131,10 +131,10 @@ void MooncakeTeTransfer::register_kv_cache(
   LOG(INFO) << "register_kv_cache success";
 }
 
-void MooncakeTeTransfer::get_cache_info(uint64_t& cluster_id,
-                                        std::string& addr,
-                                        int64_t& key_cache_id,
-                                        int64_t& value_cache_id) {
+void MooncakeKVCacheTransfer::get_cache_info(uint64_t& cluster_id,
+                                             std::string& addr,
+                                             int64_t& key_cache_id,
+                                             int64_t& value_cache_id) {
   cluster_id = cluster_id_;
   addr = addr_;
   key_cache_id = 0;
@@ -144,28 +144,28 @@ void MooncakeTeTransfer::get_cache_info(uint64_t& cluster_id,
             << ", addr=" << addr_;
 }
 
-bool MooncakeTeTransfer::link_cluster(const uint64_t cluster_id,
-                                      const std::string& remote_addr,
-                                      const std::string& device_ip,
-                                      const uint16_t port) {
+bool MooncakeKVCacheTransfer::link_cluster(const uint64_t cluster_id,
+                                           const std::string& remote_addr,
+                                           const std::string& device_ip,
+                                           const uint16_t port) {
   LOG(INFO) << "link_cluster, cluster_id=" << cluster_id
             << ", remote_addr=" << remote_addr;
 
   return mooncake_te_->open_session(cluster_id, remote_addr);
 }
 
-bool MooncakeTeTransfer::unlink_cluster(const uint64_t& cluster_id,
-                                        const std::string& remote_addr,
-                                        const std::string& device_ip,
-                                        const uint16_t port,
-                                        bool force_flag) {
+bool MooncakeKVCacheTransfer::unlink_cluster(const uint64_t& cluster_id,
+                                             const std::string& remote_addr,
+                                             const std::string& device_ip,
+                                             const uint16_t port,
+                                             bool force_flag) {
   LOG(INFO) << "unlink_cluster, cluster_id=" << cluster_id
             << ", remote_addr=" << remote_addr;
 
   return mooncake_te_->close_session(cluster_id, remote_addr);
 }
 
-bool MooncakeTeTransfer::pull_kv_blocks(
+bool MooncakeKVCacheTransfer::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
     const int64_t src_k_cache_id,
@@ -183,7 +183,7 @@ bool MooncakeTeTransfer::pull_kv_blocks(
   return true;
 }
 
-bool MooncakeTeTransfer::push_kv_blocks(
+bool MooncakeKVCacheTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     bool is_spec_draft) {

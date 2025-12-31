@@ -58,6 +58,7 @@ const OptionCategory kDisaggregatedPrefillDecodeOptions = {
      "instance_role",
      "kv_cache_transfer_mode",
      "device_ip",
+     "npu_phy_id",
      "transfer_listen_port"}};
 
 const OptionCategory kMtpOptions = {

@@ -11,7 +11,7 @@ message SessionInfo {
   string addr = 1;
 }
 
-service MooncakeTeService {
+service MooncakeTransferEngineService {
   rpc OpenSession(SessionInfo) returns (Status) {}
   rpc CloseSession(SessionInfo) returns (Status) {}
 }

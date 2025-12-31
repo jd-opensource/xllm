@@ -21,21 +21,22 @@ limitations under the License.
 
 #include <thread>
 
-#include "mooncake_te.pb.h"
+#include "mooncake_transfer_engine.pb.h"
 #include "platform/device.h"
 
 namespace xllm {
 
 using namespace mooncake;
 
-class MooncakeTeService;
+class MooncakeTransferEngineService;
 
-class MooncakeTe final {
+class MooncakeTransferEngine final {
  public:
   enum class MoveOpcode { READ = 0, WRITE = 1 };
 
-  MooncakeTe(const int32_t listen_port, const torch::Device& device);
-  virtual ~MooncakeTe();
+  MooncakeTransferEngine(const int16_t listen_port,
+                         const torch::Device& device);
+  virtual ~MooncakeTransferEngine();
 
   std::string initialize();
 
@@ -63,13 +64,13 @@ class MooncakeTe final {
 
   bool close_session(const uint64_t cluster_id, const std::string& remote_addr);
 
-  proto::MooncakeTeService* create_rpc_channel(uint64_t cluster_id);
+  proto::MooncakeTransferEngineService* create_rpc_channel(uint64_t cluster_id);
 
  private:
   std::string addr_;
   std::string host_ip_;
   int32_t rpc_port_;
-  int32_t listen_port_;
+  int16_t listen_port_;
   int64_t size_per_block_;
   int64_t num_layers_;
 
@@ -78,18 +79,20 @@ class MooncakeTe final {
   std::unordered_map<std::string, SegmentHandle> handles_;
 
   brpc::Server server_;
-  std::shared_ptr<MooncakeTeService> service_;
+  std::shared_ptr<MooncakeTransferEngineService> service_;
   bool has_initialized_ = false;
-  std::unordered_map<uint64_t, proto::MooncakeTeService_Stub*> stub_map_;
+  std::unordered_map<uint64_t, proto::MooncakeTransferEngineService_Stub*>
+      stub_map_;
 
   std::unique_ptr<TransferEngine> engine_;
 };
 
-class MooncakeTeService : public proto::MooncakeTeService {
+class MooncakeTransferEngineService
+    : public proto::MooncakeTransferEngineService {
  public:
-  MooncakeTeService(MooncakeTe* mooncake_te);
+  MooncakeTransferEngineService(MooncakeTransferEngine* mooncake_te);
 
-  virtual ~MooncakeTeService() = default;
+  virtual ~MooncakeTransferEngineService() = default;
 
   virtual void OpenSession(google::protobuf::RpcController* controller,
                            const proto::SessionInfo* request,
@@ -102,7 +105,7 @@ class MooncakeTeService : public proto::MooncakeTeService {
                             google::protobuf::Closure* done) override;
 
  private:
-  MooncakeTe* mooncake_te_;
+  MooncakeTransferEngine* mooncake_te_;
 };
 
 }  // namespace xllm

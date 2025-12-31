@@ -19,5 +19,5 @@ proto_library(
     xservice.proto
     image_generation.proto
     xtensor_manager.proto
-    mooncake_te.proto
+    mooncake_transfer_engine.proto
 )

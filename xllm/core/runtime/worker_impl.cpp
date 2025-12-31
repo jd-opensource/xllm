@@ -163,44 +163,25 @@ bool WorkerImpl::allocate_continuous_kv_cache(
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
-#if defined(USE_NPU)
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
   int32_t device_id = device_.index();
   // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
-
-  if (FLAGS_kv_cache_transfer_type == "LlmDataDist") {
-    kv_cache_transfer_ =
-        std::make_shared<LlmDataDistTransfer>(options_.device_ip().value(),
-                                              options_.transfer_listen_port(),
-                                              options_.instance_role());
-
-    kv_caches_.reserve(num_layers);
-
-    int32_t device_id = device_.index();
-    kv_cache_transfer_->initialize(device_id);
-    kv_cache_transfer_->allocate_kv_cache(
-        kv_caches_, num_layers, kv_cache_shape, dtype_);
-  } else if (FLAGS_kv_cache_transfer_type == "Mooncake") {
-    kv_cache_transfer_ = std::make_shared<MooncakeTeTransfer>(
-        device_id, options_.transfer_listen_port(), device_);
-
-    kv_cache_transfer_->initialize(device_id);
-
-    kv_cache_transfer_->allocate_kv_cache(
-        kv_caches_, num_layers, kv_cache_shape, dtype_);
-
-    kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
-  } else {
-    kv_cache_transfer_ = std::make_unique<HcclKVCacheTransfer>(
-        device_id, options_.transfer_listen_port());
-
-    allocate_kv_cache(kv_cache_shape);
-    kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
-  }
-#endif
+  kv_cache_transfer_ = KVCacheTransferFactory::create(
+      FLAGS_kv_cache_transfer_type,
+      options_.device_ip().value(),
+      options_.transfer_listen_port(),
+      options_.instance_role(),
+      device_,
+      kv_cache_shape,
+      dtype_,
+      kv_caches_,
+      num_layers,
+      [this](const std::vector<std::vector<int64_t>>& shape) {
+        this->allocate_kv_cache(shape);
+      });
 
   init_hierarchy_kv_cache_transfer();
 

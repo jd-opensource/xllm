@@ -613,17 +613,21 @@ def pre_build(device):
         script_path = os.path.dirname(os.path.abspath(__file__))
         mooncake_repo_path = os.path.join(script_path, "third_party/Mooncake")
         if device == "a2" or device == "a3":
-            if not apply_patch_safely("../custom_patch/Mooncake_ascend.patch", mooncake_repo_path):
-                exit(0)
+            if not apply_patch_safely("../custom_patch/Mooncake_npu.patch", mooncake_repo_path):
+                print("Failed to apply Mooncake_npu.patch!")
+                exit(1)
         else:
             if not apply_patch_safely("../custom_patch/Mooncake.patch", mooncake_repo_path):
-                exit(0)
+                print("Failed to apply Mooncake.patch!")
+                exit(1)
+
         cpprestsdk_repo_path = os.path.join(script_path, "third_party/cpprestsdk")
         if not apply_patch_safely("../custom_patch/cpprestsdk.patch", cpprestsdk_repo_path):
-            exit(0)
+            print("Failed to apply cpprestsdk.patch!")
+            exit(1)
         if not run_shell_command("sh third_party/dependencies.sh", cwd=script_path):
             print("❌ Failed to reset changes!")
-            exit(0)
+            exit(1)
             
 def parse_arguments():
     parser = argparse.ArgumentParser(

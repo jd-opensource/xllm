@@ -23,6 +23,7 @@ limitations under the License.
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
 #include "framework/parallel_state/parallel_args.h"
+#include "platform/device.h"
 #include "util/threadpool.h"
 
 namespace xllm {
@@ -119,14 +120,32 @@ class KVCacheTransfer {
       bool is_spec_draft) = 0;
 #endif
 
+#if defined(USE_NPU)
   virtual std::vector<torch::Tensor> convert_to_torch_tensor(
       const std::vector<int64_t>& dims,
       const torch::ScalarType dtype,
       const std::vector<uintptr_t>& addresses);
+#endif
 
  protected:
   // working thread
   ThreadPool threadpool_;
+};
+
+class KVCacheTransferFactory {
+ public:
+  static std::shared_ptr<KVCacheTransfer> create(
+      const std::string& transfer_type,
+      const std::string& device_ip,
+      uint16_t transfer_listen_port,
+      InstanceRole instance_role,
+      const Device& device,
+      const std::vector<std::vector<int64_t>>& kv_cache_shape,
+      torch::ScalarType dtype,
+      std::vector<xllm::KVCache>& kv_caches,
+      int64_t num_layers,
+      std::function<void(const std::vector<std::vector<int64_t>>&)>
+          allocate_kv_cache_func);
 };
 
 }  // namespace xllm
