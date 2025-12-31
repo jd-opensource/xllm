@@ -527,7 +527,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   auto& input_params = validate_input.input_params;
   torch::TensorOptions int_options = validate_input.token_ids.options();
 
-  const int32_t position_offset = enable_schedule_overlap() ? 1 : 0;
+  constexpr int32_t position_offset = 1;
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
   const int32_t num_sequences = input_params.num_sequences;
   const int32_t num_val_tokens = num_speculative_tokens + 1;
