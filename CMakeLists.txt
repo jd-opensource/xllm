@@ -33,20 +33,20 @@ if(USE_NPU)
     if(DEVICE_TYPE STREQUAL "USE_A3")
         message("downloading a3 arm xllm kernels")
         file(DOWNLOAD 
-            "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.5-Linux.a3.arm.rpm"
+            "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.7-Linux.a3.arm.rpm"
             "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
         )
     else()  
       if(DEVICE_ARCH STREQUAL "ARM")
           message("downloading a2 arm xllm_kernels")
           file(DOWNLOAD 
-              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.5-Linux.a2.arm.rpm"
+              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.7-Linux.a2.arm.rpm"
               "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
           )
       else()
           message("downloading a2 x86 xllm_kernels")
           file(DOWNLOAD 
-              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.5-Linux.a2.x86.rpm"
+              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.7.0/xllm_kernels-1.3.7-Linux.a2.x86.rpm"
               "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
           )
       endif()
@@ -329,6 +329,9 @@ if(USE_NPU)
       $ENV{NPU_HOME_PATH}/include
       $ENV{ATB_HOME_PATH}/include
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
+  )
+  # xllm_kernels - mark as system headers to suppress warnings from third-party code
+  include_directories(SYSTEM
       $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels/core/include
       $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels
       $ENV{XLLM_KERNELS_PATH}/include/
@@ -453,18 +456,33 @@ option(BUILD_TESTING "Build the testing tree." ON)
 # include current path
 list(APPEND COMMON_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
 list(APPEND COMMON_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/xllm/core)
-list(APPEND COMMON_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+# Note: third_party is not added to COMMON_INCLUDE_DIRS to avoid warnings
+# Individual third_party directories are added as SYSTEM headers below
 list(APPEND COMMON_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/etcd_cpp_apiv3)
 
-# brpc
+# brpc - mark as system headers to suppress warnings from third-party code
 set(BRPC_OUTPUT_DIR ${CMAKE_BINARY_DIR}/third_party/brpc/output)
-include_directories(${BRPC_OUTPUT_DIR}/include)
+include_directories(SYSTEM ${BRPC_OUTPUT_DIR}/include)
 link_directories(${BRPC_OUTPUT_DIR}/lib)
 
 if(USE_NPU)
-  # hccl_transfer
-  include_directories(third_party/hccl_transfer/hccl_transfer/include)
+  # hccl_transfer - mark as system headers to suppress warnings
+  include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/hccl_transfer/hccl_transfer/include)
 endif()
+
+# Mooncake - mark as system headers to suppress warnings from third-party code
+# Add third_party as SYSTEM to support #include <Mooncake/...> style includes
+# Use absolute path to ensure it works correctly
+include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Mooncake/mooncake-common/include)
+include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Mooncake/mooncake-transfer-engine/include)
+include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Mooncake/mooncake-store/include)
+
+# sentencepiece - mark as system headers to suppress warnings from third-party code
+# This must be added before add_subdirectory(third_party) to ensure it takes precedence
+include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sentencepiece)
+# Also add other commonly used third_party directories as system headers
+include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/minja)
 
 # add subdirectories
 add_subdirectory(xllm)

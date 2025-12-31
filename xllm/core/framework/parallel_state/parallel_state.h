@@ -27,7 +27,7 @@ std::optional<ParallelArgs> get_dp_attn_parallel_args(
 
 torch::Tensor gather(const torch::Tensor& input,
                      ProcessGroup* process_group,
-                     int dim = -1);
+                     int32_t dim = -1);
 
 torch::Tensor gather(const torch::Tensor& input,
                      ProcessGroup* process_group,
@@ -37,6 +37,9 @@ torch::Tensor all_gather_interleaved(const torch::Tensor& input,
                                      ProcessGroup* process_group);
 
 torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group);
+
+torch::Tensor reduce_scatter(const torch::Tensor& input,
+                             ProcessGroup* process_group);
 
 torch::Tensor scatter(torch::Tensor input,
                       ProcessGroup* process_group,

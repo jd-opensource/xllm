@@ -26,8 +26,9 @@ namespace layer {
 
 static const uint64_t WEIGHT_COUNT_PER_LAYER = 55;
 
-Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
-                                                   const int32_t layer_id)
+NpuQwen3MoeDecoderLayerImpl::NpuQwen3MoeDecoderLayerImpl(
+    const ModelContext& context,
+    const int32_t layer_id)
     : BaseLayer(context),
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
@@ -60,7 +61,7 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
   initialize_tensors(options);
 }
 
-void Qwen3MoeDecoderLayerImpl::initialize_tensors(
+void NpuQwen3MoeDecoderLayerImpl::initialize_tensors(
     const torch::TensorOptions& options) {
   // initializ placeholder
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
@@ -76,7 +77,7 @@ void Qwen3MoeDecoderLayerImpl::initialize_tensors(
   expert_group_ = torch::tensor({1}, torch::dtype(torch::kInt32)).to(device_);
 }
 
-void Qwen3MoeDecoderLayerImpl::param_from_args(
+void NpuQwen3MoeDecoderLayerImpl::param_from_args(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -88,7 +89,7 @@ void Qwen3MoeDecoderLayerImpl::param_from_args(
   initialize_quantization_parameters(param);
 }
 
-void Qwen3MoeDecoderLayerImpl::initialize_basic_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -103,6 +104,8 @@ void Qwen3MoeDecoderLayerImpl::initialize_basic_parameters(
 
   param.enableSplitFuse =
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+  param.enableAclGraphPagedAttention = FLAGS_enable_graph && !is_prefill;
+
   if (quantize_type_.empty()) {
     param.moeLinearTransposeType = std::vector<int>{1, 1, -1, 1};
   } else {
@@ -143,7 +146,7 @@ void Qwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   }
 }
 
-void Qwen3MoeDecoderLayerImpl::initialize_attention_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_attention_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -151,7 +154,7 @@ void Qwen3MoeDecoderLayerImpl::initialize_attention_parameters(
   param.enableKvQuantLayer = false;  // TODO
 }
 
-void Qwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -173,7 +176,7 @@ void Qwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
   param.enableCVOverlap = false;  // TODO
 }
 
-void Qwen3MoeDecoderLayerImpl::initialize_parallel_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_parallel_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = dp_local_tp_size_;
@@ -188,7 +191,7 @@ void Qwen3MoeDecoderLayerImpl::initialize_parallel_parameters(
   param.maxDecodeDpTokenSize = 0;  // TODO
 }
 
-void Qwen3MoeDecoderLayerImpl::initialize_quantization_parameters(
+void NpuQwen3MoeDecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param) {
   if (quantize_type_.empty()) {
     param.packQuantType = {static_cast<int>(PackType::ALL_FP),
@@ -228,7 +231,7 @@ void Qwen3MoeDecoderLayerImpl::initialize_quantization_parameters(
   }
 }
 
-void Qwen3MoeDecoderLayerImpl::merge_loaded_weights() {
+void NpuQwen3MoeDecoderLayerImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
@@ -239,7 +242,7 @@ void Qwen3MoeDecoderLayerImpl::merge_loaded_weights() {
   init_layer();
 }
 
-int64_t Qwen3MoeDecoderLayerImpl::init_layer() {
+int64_t NpuQwen3MoeDecoderLayerImpl::init_layer() {
   name_ = "qwen3_moe_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "Qwen3_Moe";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
@@ -248,20 +251,14 @@ int64_t Qwen3MoeDecoderLayerImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t Qwen3MoeDecoderLayerImpl::init_node(
+int64_t NpuQwen3MoeDecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::qwen::MoeDecoderLayerParam& param) {
   atb::Operation* operation = nullptr;
   atb_speed::qwen::MoeDecoderLayer(param, &operation);
   node.operation.reset(operation);
-  if (node.operation == nullptr) {
-    LOG(ERROR) << "node.operation is null";
-    return -1;
-  }
-  if (node.operation->GetInputNum() < 1) {
-    LOG(ERROR) << "Can not resize number which is smaller than 1";
-    return -1;
-  }
+  CHECK_NOTNULL(node.operation);
+  CHECK_GT(node.operation->GetInputNum(), 0);
   node.inTensors.resize(node.operation->GetInputNum());
   node.outTensors.resize(1);
   size_t inTensorId = 1;
@@ -279,7 +276,7 @@ int64_t Qwen3MoeDecoderLayerImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor Qwen3MoeDecoderLayerImpl::forward(
+torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     torch::Tensor& x,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
@@ -322,7 +319,7 @@ torch::Tensor Qwen3MoeDecoderLayerImpl::forward(
   return tensor_placeholder_;
 }
 
-void Qwen3MoeDecoderLayerImpl::build_node_variant_pack(
+void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,
@@ -394,12 +391,20 @@ void Qwen3MoeDecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
   }
 
+  input_idx = WEIGHT_COUNT_PER_LAYER + 16;
   if (is_prefill &&
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 16) =
+    node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 16).hostData =
+    node.variantPack.inTensors.at(input_idx - 1).hostData =
         const_cast<int32_t*>(input_params.q_seq_lens_vec.data());
+  }
+
+  if (FLAGS_enable_graph && !is_prefill &&
+      input_params.graph_buffer.tiling_data.defined()) {
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.graph_buffer.tiling_data);
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {

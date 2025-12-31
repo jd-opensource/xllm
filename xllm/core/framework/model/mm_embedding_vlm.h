@@ -64,10 +64,20 @@ class MMEmbeddingVLMImpl : public MMEmbeddingVLM {
     return;
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
+
+#if defined(USE_NPU)
+  virtual void set_npu_lm_head(layer::NpuLmHead& head) { return; }
+  virtual layer::NpuLmHead get_npu_lm_head() { return nullptr; }
+  virtual layer::NpuWordEmbedding get_npu_word_embedding() { return nullptr; }
+  virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) {
+    return;
+  }
+#else
   virtual void set_lm_head(layer::LmHead& head) { return; }
   virtual layer::LmHead get_lm_head() { return nullptr; }
   virtual layer::WordEmbedding get_word_embedding() { return nullptr; }
   virtual void set_word_embedding(layer::WordEmbedding& embedding) { return; }
+#endif
 
   void load_model(std::unique_ptr<ModelLoader> loader) override {
     model_->load_model(std::move(loader));

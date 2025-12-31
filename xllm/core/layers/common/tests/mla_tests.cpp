@@ -186,6 +186,7 @@ class DeepseekMLATest : public ::testing::Test {
     metadata.compute_dtype = "half";
     metadata.is_prefill = is_prefill;
     metadata.is_chunked_prefill = false;
+    metadata.is_dummy = false;
   }
 
   ModelArgs model_args_;

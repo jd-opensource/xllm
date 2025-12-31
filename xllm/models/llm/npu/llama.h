@@ -27,10 +27,8 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
-#include "core/layers/llama_decoder_layer.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/npu/npu_llama_decoder_layer_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
-#include "core/layers/word_embedding.h"
 #include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
 #include "xllm_kernels/core/include/atb_speed/log.h"
@@ -43,7 +41,7 @@ class LlamaDecoderLayerImpl : public torch::nn::Module {
   LlamaDecoderLayerImpl(const ModelContext& context) {
     // register submodules
     decoder_layer_ =
-        register_module("decoder_layer", layer::LlamaDecoderLayer(context));
+        register_module("decoder_layer", layer::NpuLlamaDecoderLayer(context));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -68,7 +66,7 @@ class LlamaDecoderLayerImpl : public torch::nn::Module {
   void merge_loaded_weights() { decoder_layer_->merge_loaded_weights(); }
 
  private:
-  layer::LlamaDecoderLayer decoder_layer_{nullptr};
+  layer::NpuLlamaDecoderLayer decoder_layer_{nullptr};
 };
 TORCH_MODULE(LlamaDecoderLayer);
 
@@ -113,9 +111,9 @@ class LlamaModelImpl : public torch::nn::Module {
     // register submodules
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(context.get_model_args().n_layers());
-    embed_tokens_ =
-        register_module("embed_tokens", layer::WordEmbedding(context));
-    norm_ = register_module("norm", layer::RMSNorm(context));
+    npu_embed_tokens_ =
+        register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
 
     std::tie(cos_pos_, sin_pos_) =
         get_llama_rotary_embedding(128,
@@ -145,9 +143,7 @@ class LlamaModelImpl : public torch::nn::Module {
                         torch::Tensor positions,
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
-    // test
-    torch::Tensor h = embed_tokens_(tokens, 0);
-    // auto h = embed_tokens_(tokens);
+    torch::Tensor h = npu_embed_tokens_(tokens, 0);
     auto cos_pos = cos_pos_.index_select(0, positions);
     auto sin_pos = sin_pos_.index_select(0, positions);
     ModelInputParams& input_params_new =
@@ -187,7 +183,7 @@ class LlamaModelImpl : public torch::nn::Module {
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) {
-    embed_tokens_->load_state_dict(
+    npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
     // call each layer's load_state_dict function
     for (int i = 0; i < layers_.size(); i++) {
@@ -198,7 +194,7 @@ class LlamaModelImpl : public torch::nn::Module {
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
+    npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
@@ -208,17 +204,19 @@ class LlamaModelImpl : public torch::nn::Module {
 
   void merge_loaded_weights() {
     // test
-    embed_tokens_->merge_loaded_weights();
+    npu_embed_tokens_->merge_loaded_weights();
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
   }
 
-  layer::WordEmbedding get_word_embedding() { return {embed_tokens_}; }
+  layer::NpuWordEmbedding get_npu_word_embedding() {
+    return {npu_embed_tokens_};
+  }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    embed_tokens_ = word_embedding;
+  void set_npu_word_embedding(layer::NpuWordEmbedding& npu_word_embedding) {
+    npu_embed_tokens_ = npu_word_embedding;
   }
 
  private:
@@ -227,8 +225,8 @@ class LlamaModelImpl : public torch::nn::Module {
   int max_seq_len_ = 0;
   int device_id_ = 0;
   layer::AttentionMask attn_mask_;
-  layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RMSNorm norm_{nullptr};
+  layer::NpuWordEmbedding npu_embed_tokens_{nullptr};
+  layer::NpuRMSNorm norm_{nullptr};
 
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
@@ -244,7 +242,7 @@ class LlamaForCausalLMImpl : public torch::nn::Module {
     // register submodules
     model_ = register_module("model", LlamaModel(context));
     device_id_ = options.device().index();
-    lm_head_ = register_module("lm_head", layer::LmHead(context));
+    npu_lm_head_ = register_module("lm_head", layer::NpuLmHead(context));
   }
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
@@ -261,21 +259,22 @@ class LlamaForCausalLMImpl : public torch::nn::Module {
   // returns: [num_tokens, vocab_size]
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
-    return lm_head_(hidden_states, seleted_idxes, 0);
+    return npu_lm_head_(hidden_states, seleted_idxes, 0);
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
     for (const auto& state_dict : loader->get_state_dicts()) {
       model_->load_state_dict(state_dict->get_dict_with_prefix("model."));
-      lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
+      npu_lm_head_->load_state_dict(
+          state_dict->get_dict_with_prefix("lm_head."));
     }
 
     // verify
     model_->verify_loaded_weights("model.");
-    lm_head_->verify_loaded_weights("lm_head.");
+    npu_lm_head_->verify_loaded_weights("lm_head.");
 
     model_->merge_loaded_weights();
-    lm_head_->merge_loaded_weights();
+    npu_lm_head_->merge_loaded_weights();
   }
 
   void prepare_expert_weight(int32_t layer_id,
@@ -284,23 +283,23 @@ class LlamaForCausalLMImpl : public torch::nn::Module {
   }
   void update_expert_weight(int32_t layer_id) { return; }
 
-  layer::LmHead get_lm_head() { return lm_head_; }
+  layer::NpuLmHead get_npu_lm_head() { return npu_lm_head_; }
 
-  void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
+  void set_npu_lm_head(layer::NpuLmHead& head) { npu_lm_head_ = head; }
 
-  layer::WordEmbedding get_word_embedding() {
-    return model_->get_word_embedding();
+  layer::NpuWordEmbedding get_npu_word_embedding() {
+    return model_->get_npu_word_embedding();
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    model_->set_word_embedding(word_embedding);
+  void set_npu_word_embedding(layer::NpuWordEmbedding& npu_word_embedding) {
+    model_->set_npu_word_embedding(npu_word_embedding);
   }
 
  private:
   // parameter members, must be registered
   LlamaModel model_{nullptr};
   int device_id_ = 0;
-  layer::LmHead lm_head_{nullptr};
+  layer::NpuLmHead npu_lm_head_{nullptr};
 };
 TORCH_MODULE(LlamaForCausalLM);
 

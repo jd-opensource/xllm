@@ -18,6 +18,11 @@ limitations under the License.
 // clang-format off
 #if defined(USE_NPU)
 #include "graph/types.h"
+#include "layers/npu/npu_lm_head_impl.h"
+#include "layers/npu/npu_word_embedding_impl.h"
+#else
+#include "layers/lm_head.h"
+#include "layers/word_embedding.h"
 #endif
 // clang-format on
 #include <c10/core/Device.h>
@@ -29,13 +34,12 @@ limitations under the License.
 #include "core/framework/model_loader.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
-#include "layers/lm_head.h"
-#include "layers/word_embedding.h"
 #include "model_args.h"
 #include "model_input_params.h"
 
 namespace xllm {
 
+#if !defined(USE_NPU)
 namespace detail {
 template <typename T, typename = void>
 struct has_get_lm_head : std::false_type {};
@@ -72,6 +76,7 @@ struct has_set_word_embedding<
     std::void_t<decltype(std::declval<T>()->set_word_embedding(
         std::declval<layer::WordEmbedding&>()))>> : std::true_type {};
 }  // namespace detail
+#endif
 
 class CausalLM : public torch::nn::Module {
  public:
@@ -103,6 +108,12 @@ class CausalLM : public torch::nn::Module {
   virtual const torch::TensorOptions& options() const = 0;
 
   // MTP-specific interface.
+#if defined(USE_NPU)
+  virtual layer::NpuLmHead get_npu_lm_head() = 0;
+  virtual void set_npu_lm_head(layer::NpuLmHead& head) = 0;
+  virtual layer::NpuWordEmbedding get_npu_word_embedding() = 0;
+  virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) = 0;
+#else
   virtual layer::LmHead get_lm_head() {
     LOG(FATAL)
         << "Method 'get_lm_head' is not implemented/supported by this model.";
@@ -119,6 +130,7 @@ class CausalLM : public torch::nn::Module {
     LOG(FATAL) << "Method 'set_word_embedding' is not implemented/supported by "
                   "this model.";
   }
+#endif
 };
 
 template <typename Model>
@@ -152,13 +164,30 @@ class CausalLMImpl : public CausalLM {
     return model_->update_expert_weight(layer_id);
   }
 
+#if defined(USE_NPU)
+  layer::NpuLmHead get_npu_lm_head() override {
+    return model_->get_npu_lm_head();
+  }
+
+  void set_npu_lm_head(layer::NpuLmHead& head) override {
+    model_->set_npu_lm_head(head);
+  }
+
+  layer::NpuWordEmbedding get_npu_word_embedding() override {
+    return model_->get_npu_word_embedding();
+  }
+
+  void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) override {
+    model_->set_npu_word_embedding(embedding);
+  }
+#else
   layer::LmHead get_lm_head() override {
     if constexpr (detail::has_get_lm_head<Model>::value) {
       return model_->get_lm_head();
     } else {
       return CausalLM::get_lm_head();
     }
-  };
+  }
 
   void set_lm_head(layer::LmHead& head) override {
     if constexpr (detail::has_set_lm_head<Model>::value) {
@@ -166,7 +195,7 @@ class CausalLMImpl : public CausalLM {
     } else {
       CausalLM::set_lm_head(head);
     }
-  };
+  }
 
   layer::WordEmbedding get_word_embedding() override {
     if constexpr (detail::has_get_word_embedding<Model>::value) {
@@ -174,7 +203,7 @@ class CausalLMImpl : public CausalLM {
     } else {
       return CausalLM::get_word_embedding();
     }
-  };
+  }
 
   void set_word_embedding(layer::WordEmbedding& embedding) override {
     if constexpr (detail::has_set_word_embedding<Model>::value) {
@@ -182,7 +211,8 @@ class CausalLMImpl : public CausalLM {
     } else {
       CausalLM::set_word_embedding(embedding);
     }
-  };
+  }
+#endif
 
   torch::Device device() const override { return options_.device(); }
 

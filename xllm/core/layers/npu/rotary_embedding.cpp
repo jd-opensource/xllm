@@ -82,7 +82,7 @@ std::tuple<torch::Tensor, torch::Tensor> apply_rotary_pos_emb(
 }  // namespace
 
 // create right instance based on params
-std::shared_ptr<RotaryEmbedding> create_rotary_embedding(
+std::shared_ptr<NpuRotaryEmbedding> create_rotary_embedding(
     const ModelArgs& args,
     int64_t rotary_dim,
     bool interleaved,

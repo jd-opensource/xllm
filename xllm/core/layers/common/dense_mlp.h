@@ -37,7 +37,7 @@ class DenseMLPImpl : public torch::nn::Module {
                const std::string& hidden_act,
                bool enable_result_reduction,
                const QuantArgs& quant_args,
-               const ParallelArgs& parallel_args,
+               ProcessGroup* process_group,
                const torch::TensorOptions& options);
 
   torch::Tensor forward(const torch::Tensor& hidden_states);
@@ -50,7 +50,7 @@ class DenseMLPImpl : public torch::nn::Module {
  private:
   bool is_gated_;
   int64_t intermediate_size_;
-  ParallelArgs parallel_args_;
+  ProcessGroup* process_group_;
   ColumnParallelLinear gate_up_proj_{nullptr};
   RowParallelLinear down_proj_{nullptr};
   Activation act_{nullptr};

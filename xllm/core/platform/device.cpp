@@ -83,6 +83,17 @@ Device::Device(const torch::Device& device) : device_(device) {
 #endif
 }
 
+Device::Device(const int32_t device_index)
+    : device_(torch::Device(type_torch(), device_index)) {
+#if defined(USE_CUDA)
+  static bool enable_pdl = support_pdl(device_index);
+  enable_pdl_ = enable_pdl;
+
+  static bool is_sm90a_supported = support_sm90a(device_index);
+  support_sm90a_ = is_sm90a_supported;
+#endif
+}
+
 Device::operator torch::Device() const { return unwrap(); }
 
 void Device::set_device() const {

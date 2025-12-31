@@ -48,7 +48,7 @@ AtbBuffer::AtbBuffer(uint64_t buffer_size, at::Device device)
   }
 }
 
-AtbBuffer::~AtbBuffer() {}
+AtbBuffer::~AtbBuffer() = default;
 
 void* AtbBuffer::get_buffer(uint64_t buffer_size) {
   if (buffer_size <= buffer_size_) {
@@ -67,7 +67,8 @@ void* AtbBuffer::get_buffer(uint64_t buffer_size) {
 
 torch::Tensor AtbBuffer::create_attensor(uint64_t buffer_size) const {
   at::Tensor newTensor = at_npu::native::empty_with_format(
-      at::IntArrayRef({KB_1, buffer_size / KB_1 + int(1)}),
+      at::IntArrayRef({static_cast<int64_t>(KB_1),
+                       static_cast<int64_t>(buffer_size / KB_1 + 1)}),
       options_,
       ACL_FORMAT_ND);
 

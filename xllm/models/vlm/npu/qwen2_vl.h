@@ -23,9 +23,9 @@ limitations under the License.
 
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/npu/npu_lm_head_impl.h"
+#include "core/layers/npu/npu_qwen2_vision_encoder_layer_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
-#include "core/layers/qwen2_vision_encode_layer.h"
 #include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
@@ -39,8 +39,8 @@ class Qwen2_VisionBlockImpl : public torch::nn::Module {
  public:
   Qwen2_VisionBlockImpl(const ModelContext& context) {
     // register submodules
-    encoder_layer_ = register_module("encoder_layer",
-                                     layer::Qwen2VisionEncoderLayer(context));
+    encoder_layer_ = register_module(
+        "encoder_layer", layer::NpuQwen2VisionEncoderLayer(context));
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -71,7 +71,7 @@ class Qwen2_VisionBlockImpl : public torch::nn::Module {
   void merge_loaded_weights() { encoder_layer_->merge_loaded_weights(); }
 
  private:
-  layer::Qwen2VisionEncoderLayer encoder_layer_{nullptr};
+  layer::NpuQwen2VisionEncoderLayer encoder_layer_{nullptr};
 };
 TORCH_MODULE(Qwen2_VisionBlock);
 
@@ -540,15 +540,19 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
     }
   }
 
-  layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
-  void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
-
-  layer::WordEmbedding get_word_embedding() {
-    return language_model_->get_word_embedding();
+  layer::NpuLmHead get_npu_lm_head() {
+    return language_model_->get_npu_lm_head();
+  }
+  void set_npu_lm_head(layer::NpuLmHead& head) {
+    language_model_->set_npu_lm_head(head);
   }
 
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    language_model_->set_word_embedding(word_embedding);
+  layer::NpuWordEmbedding get_npu_word_embedding() {
+    return language_model_->get_npu_word_embedding();
+  }
+
+  void set_npu_word_embedding(layer::NpuWordEmbedding& npu_word_embedding) {
+    language_model_->set_npu_word_embedding(npu_word_embedding);
   }
 
  private:

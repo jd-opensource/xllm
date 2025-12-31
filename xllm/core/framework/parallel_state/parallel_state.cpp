@@ -22,30 +22,6 @@ limitations under the License.
 #include "npu_process_group.h"
 #endif
 
-namespace {
-
-torch::Tensor remove_paddings_after_all_gather(
-    const torch::Tensor& input,
-    int64_t padding_to_token_num,
-    const std::vector<int>& token_num_list) {
-  std::vector<torch::Tensor> group_tensors;
-  int64_t offset = 0;
-  for (const auto& token_num : token_num_list) {
-    if (token_num != 0) {
-      auto tensor_slice = input.slice(0, offset, offset + token_num);
-      group_tensors.push_back(tensor_slice);
-    }
-    offset += padding_to_token_num;
-  }
-  if (group_tensors.size() == 1) {
-    return group_tensors[0];
-  }
-
-  return torch::cat(group_tensors).contiguous();
-}
-
-}  // namespace
-
 namespace xllm {
 namespace parallel_state {
 
@@ -73,7 +49,7 @@ std::optional<ParallelArgs> get_dp_attn_parallel_args(
 
 torch::Tensor gather(const torch::Tensor& input,
                      ProcessGroup* process_group,
-                     int dim) {
+                     int32_t dim) {
   if (!process_group) {
     return input;
   }
@@ -95,14 +71,11 @@ torch::Tensor gather(const torch::Tensor& input,
 torch::Tensor gather(const torch::Tensor& input,
                      ProcessGroup* process_group,
                      const std::vector<int32_t>& token_num_list) {
-  if (!process_group) {
-    return input;
-  }
+  if (!process_group) return input;
   const int32_t world_size = process_group->world_size();
   const int32_t rank = process_group->rank();
-  if (world_size == 1) {
-    return input;
-  }
+  if (world_size == 1) return input;
+
   CHECK_EQ(token_num_list.size(), world_size)
       << "token_num_list size " << token_num_list.size()
       << " does not match world_size " << world_size;
@@ -118,17 +91,46 @@ torch::Tensor gather(const torch::Tensor& input,
   }
 
   int32_t max_num_tokens = xllm::util::max(token_num_list);
+  auto options = input.options();
   int32_t num_padding = max_num_tokens - token_num_list[rank];
-  auto padded_input = input;
+  torch::Tensor padded_input = input;
+  // pad local input if needed
   if (num_padding > 0) {
     std::vector<int64_t> pad = {0, 0, 0, num_padding};
+    // Explicitly calling kConstant and value of 0 ensures consistency across
+    // platforms and versions.
     padded_input = torch::nn::functional::pad(
         input, torch::nn::functional::PadFuncOptions(pad));
   }
 
-  auto gathered_input = gather(padded_input, process_group, 0);
-  return remove_paddings_after_all_gather(
-      gathered_input, max_num_tokens, token_num_list);
+  // perform allgather
+  std::vector<torch::Tensor> gathered_tensors(world_size);
+  for (size_t i = 0; i < world_size; ++i)
+    gathered_tensors[i] = torch::empty_like(padded_input);
+  process_group->allgather(padded_input, gathered_tensors);
+
+  // zero-copy assembly (performance critical)
+  // directly allocate output tensor of the final size, avoiding huge
+  // intermediate tensors produced by cat.
+  int64_t total_tokens = xllm::util::sum(token_num_list);
+  auto out_shape = input.sizes().vec();
+  out_shape[0] = total_tokens;
+  torch::Tensor output = torch::empty(out_shape, options);
+
+  int64_t offset = 0;
+  for (size_t i = 0; i < world_size; ++i) {
+    int32_t valid_tokens = token_num_list[i];
+    if (valid_tokens > 0) {
+      // copy only the valid part of gathered_tensors[i] into the designated
+      // position in output. This avoids the inefficient process of cat followed
+      // by slice.
+      output.slice(0, offset, offset + valid_tokens)
+          .copy_(gathered_tensors[i].slice(0, 0, valid_tokens));
+      offset += valid_tokens;
+    }
+  }
+
+  return output;
 }
 
 torch::Tensor all_gather_interleaved(const torch::Tensor& input,
@@ -172,6 +174,60 @@ torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group) {
   }
   process_group->allreduce(input);
   return input;
+}
+
+torch::Tensor reduce_scatter(const torch::Tensor& input,
+                             ProcessGroup* process_group) {
+  // currently only support scatter_dim == 0
+  if (!process_group) return input;
+  const int32_t world_size = process_group->world_size();
+  if (world_size == 1) return input;
+
+  const int32_t rank = process_group->rank();
+  const int64_t original_dim_size = input.size(0);
+
+  // check if padding is needed
+  // round up to the nearest multiple of world_size: (N + W - 1) / W * W or N +
+  // (W - N%W)%W
+  int64_t remainder = original_dim_size % world_size;
+  int64_t target_size = (remainder == 0)
+                            ? original_dim_size
+                            : (original_dim_size + world_size - remainder);
+  int64_t num_padding = target_size - original_dim_size;
+  torch::Tensor padded_input = input;
+  if (num_padding > 0) {
+    std::vector<int64_t> pad = {0, 0, 0, num_padding};
+    // Explicitly calling kConstant and value of 0 ensures consistency across
+    // platforms and versions.
+    padded_input = torch::nn::functional::pad(
+        input, torch::nn::functional::PadFuncOptions(pad));
+  }
+
+  // prepare output tensor
+  // at this point, padded_input size along dim 0 is divisible by world_size
+  const int64_t padded_dim_size = padded_input.size(0);
+  const int64_t chunk_size = padded_dim_size / world_size;
+
+  auto output_shape = padded_input.sizes().vec();
+  output_shape[0] = chunk_size;
+  torch::Tensor output = torch::empty(output_shape, padded_input.options());
+
+  // perform reduce scatter operation
+  process_group->reduce_scatter(padded_input, output);
+
+  // remove padding
+  if (num_padding > 0) {
+    int64_t global_start = rank * chunk_size;
+    int64_t global_end = global_start + chunk_size;
+
+    if (global_start >= original_dim_size) {
+      return output.slice(0, 0, 0);
+    } else if (global_end > original_dim_size) {
+      return output.slice(0, 0, original_dim_size - global_start);
+    }
+  }
+
+  return output;
 }
 
 torch::Tensor scatter(torch::Tensor input,

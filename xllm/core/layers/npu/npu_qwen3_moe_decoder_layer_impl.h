@@ -37,12 +37,12 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class Qwen3MoeDecoderLayerImpl : public BaseLayer {
+class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
  public:
-  explicit Qwen3MoeDecoderLayerImpl(const ModelContext& context,
-                                    const int32_t layer_id);
+  explicit NpuQwen3MoeDecoderLayerImpl(const ModelContext& context,
+                                       const int32_t layer_id);
 
-  ~Qwen3MoeDecoderLayerImpl() {};
+  ~NpuQwen3MoeDecoderLayerImpl() override = default;
 
   virtual void merge_loaded_weights();
 
@@ -153,6 +153,7 @@ class Qwen3MoeDecoderLayerImpl : public BaseLayer {
   std::mutex shared_experts_mutex_;
   std::mutex experts_mutex_;
 };
+TORCH_MODULE(NpuQwen3MoeDecoderLayer);
 
 std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,
                                           int32_t dp_local_tp_size,

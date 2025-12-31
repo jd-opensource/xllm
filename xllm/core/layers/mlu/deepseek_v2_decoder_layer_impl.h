@@ -39,7 +39,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   explicit DeepseekV2DecoderLayerImpl(const ModelContext& context,
                                       int32_t layer_id);
 
-  ~DeepseekV2DecoderLayerImpl() {};
+  ~DeepseekV2DecoderLayerImpl() override = default;
 
   void load_state_dict(const StateDict& state_dict);
 
@@ -52,9 +52,9 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
 
  private:
   // parallel args
-  int64_t rank_;
-  int64_t world_size_;
   ParallelArgs parallel_args_;
+  bool enable_deep_ep_;
+  bool is_moe_layer_;
 
   DeepseekV2Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};

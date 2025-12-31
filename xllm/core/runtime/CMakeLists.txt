@@ -25,6 +25,7 @@ cc_library(
     dit_worker.h
     embed_worker_impl.h
     embed_vlm_worker_impl.h
+    rec_worker_impl.h
     worker_client.h
     xservice_client.h
     speculative_worker_impl.h
@@ -43,6 +44,7 @@ cc_library(
     dit_worker.cpp
     embed_worker_impl.cpp
     embed_vlm_worker_impl.cpp
+    rec_worker_impl.cpp
     worker_client.cpp
     xservice_client.cpp
     params_utils.cpp
@@ -67,6 +69,7 @@ cc_library(
     :xllm_server
     $<$<BOOL:${USE_NPU}>:xllm_ops>
     $<$<BOOL:${USE_NPU}>:atb_customize>
+    $<$<BOOL:${USE_NPU}>:platform_npu>
     :eplb
     glog::glog
     Folly::folly

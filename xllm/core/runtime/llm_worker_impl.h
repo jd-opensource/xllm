@@ -44,6 +44,22 @@ class LLMWorkerImpl : public WorkerImpl {
 
   std::optional<ForwardOutput> step(const ForwardInput& input) override;
 
+#if defined(USE_NPU)
+  layer::NpuLmHead get_npu_lm_head() { return model_->get_npu_lm_head(); };
+
+  void set_npu_lm_head(layer::NpuLmHead& head) {
+    model_->set_npu_lm_head(head);
+  };
+
+  layer::NpuWordEmbedding get_npu_word_embedding() {
+    return model_->get_npu_word_embedding();
+  };
+
+  void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) {
+    model_->set_npu_word_embedding(embedding);
+  };
+
+#else
   layer::LmHead get_lm_head() { return model_->get_lm_head(); };
 
   void set_lm_head(layer::LmHead& head) { model_->set_lm_head(head); };
@@ -55,6 +71,8 @@ class LLMWorkerImpl : public WorkerImpl {
   void set_word_embedding(layer::WordEmbedding& embedding) {
     model_->set_word_embedding(embedding);
   };
+
+#endif
 
  private:
   std::unique_ptr<BeamSearcher> beam_searcher_;

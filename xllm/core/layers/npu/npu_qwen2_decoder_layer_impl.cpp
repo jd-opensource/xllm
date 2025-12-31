@@ -32,7 +32,7 @@ namespace layer {
 
 const uint64_t WEIGHT_COUNT_PER_LAYER = 50;
 
-void Qwen2DecoderLayerImpl::param_from_args(
+void NpuQwen2DecoderLayerImpl::param_from_args(
     atb_speed::qwen::DecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
@@ -75,7 +75,7 @@ void Qwen2DecoderLayerImpl::param_from_args(
   param.enableLogN = false;
 }
 
-Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context)
+NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
     : BaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
@@ -99,7 +99,7 @@ Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context)
   initialize_quantization_parameters();
 }
 
-void Qwen2DecoderLayerImpl::initialize_linear_transpose_type() {
+void NpuQwen2DecoderLayerImpl::initialize_linear_transpose_type() {
   auto& at_host_weight_tensors = loader_->get_at_host_weight_tensors();
   TransposeType transpose_type =
       check_transpose(at_host_weight_tensors[IN_MLP_W2_WEIGHT]);
@@ -108,7 +108,7 @@ void Qwen2DecoderLayerImpl::initialize_linear_transpose_type() {
   decode_param_.linearTransposeType[4] = transpose_value;
 }
 
-void Qwen2DecoderLayerImpl::merge_loaded_weights() {
+void NpuQwen2DecoderLayerImpl::merge_loaded_weights() {
   initialize_linear_transpose_type();
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
@@ -121,7 +121,7 @@ void Qwen2DecoderLayerImpl::merge_loaded_weights() {
   init_layer();
 }
 
-void Qwen2DecoderLayerImpl::initialize_quantization_parameters() {
+void NpuQwen2DecoderLayerImpl::initialize_quantization_parameters() {
   if (quantize_type_ == "w8a8") {
     prefill_param_.packQuantType = {static_cast<int>(PackType::ALL_W8A8),
                                     static_cast<int>(PackType::ALL_W8A8)};
@@ -144,7 +144,7 @@ void Qwen2DecoderLayerImpl::initialize_quantization_parameters() {
   }
 }
 
-TransposeType Qwen2DecoderLayerImpl::check_transpose(at::Tensor& tensor) {
+TransposeType NpuQwen2DecoderLayerImpl::check_transpose(at::Tensor& tensor) {
   bool is_k_divisible = tensor.size(1) % 256 == 0;
   bool is_n_divisible = tensor.size(0) % 256 == 0;
 
@@ -155,7 +155,7 @@ TransposeType Qwen2DecoderLayerImpl::check_transpose(at::Tensor& tensor) {
   return TransposeType::TRANSPOSE;
 }
 
-int64_t Qwen2DecoderLayerImpl::init_layer() {
+int64_t NpuQwen2DecoderLayerImpl::init_layer() {
   init_attn_mask();
   name_ = "qwen2_decoder_layer";
   model_name_ = "qwen2";
@@ -165,7 +165,7 @@ int64_t Qwen2DecoderLayerImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t Qwen2DecoderLayerImpl::init_attn_mask() {
+int64_t NpuQwen2DecoderLayerImpl::init_attn_mask() {
   torch::Dtype dtype =
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
@@ -173,7 +173,7 @@ int64_t Qwen2DecoderLayerImpl::init_attn_mask() {
   return atb::NO_ERROR;
 }
 
-int64_t Qwen2DecoderLayerImpl::init_node(
+int64_t NpuQwen2DecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::qwen::DecoderLayerParam& param) {
   atb::Operation* operation = nullptr;
@@ -204,15 +204,15 @@ int64_t Qwen2DecoderLayerImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor Qwen2DecoderLayerImpl::forward(torch::Tensor& x,
-                                             torch::Tensor& cos_pos,
-                                             torch::Tensor& sin_pos,
-                                             torch::Tensor& attn_mask,
-                                             KVCache& kv_cache,
-                                             ModelInputParams& input_params,
-                                             aclrtEvent* event,
-                                             std::atomic<bool>* event_flag,
-                                             int node_id) {
+torch::Tensor NpuQwen2DecoderLayerImpl::forward(torch::Tensor& x,
+                                                torch::Tensor& cos_pos,
+                                                torch::Tensor& sin_pos,
+                                                torch::Tensor& attn_mask,
+                                                KVCache& kv_cache,
+                                                ModelInputParams& input_params,
+                                                aclrtEvent* event,
+                                                std::atomic<bool>* event_flag,
+                                                int node_id) {
   atb::Status st;
   if (!input_params.batch_forward_type.is_decode()) {
     // mstxRangeId id = mstxRangeStartA("prefill build variant", nullptr);
@@ -245,7 +245,7 @@ torch::Tensor Qwen2DecoderLayerImpl::forward(torch::Tensor& x,
   return at_placeholder_;
 }
 
-void Qwen2DecoderLayerImpl::build_node_variant_pack(
+void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,

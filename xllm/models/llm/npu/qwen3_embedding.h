@@ -73,14 +73,18 @@ class EmbeddingLMImpl<xllm::QWen3ForEmbedding> : public EmbeddingLM {
   }
   virtual void update_expert_weight(int32_t layer_id) { return; }
 
-  // Delegate head/embedding accessors to underlying model implementation.
-  layer::LmHead get_lm_head() override { return model_->get_lm_head(); }
-  void set_lm_head(layer::LmHead& head) override { model_->set_lm_head(head); }
-  layer::WordEmbedding get_word_embedding() override {
-    return model_->get_word_embedding();
+  layer::NpuWordEmbedding get_npu_word_embedding() override {
+    return model_->get_npu_word_embedding();
   }
-  void set_word_embedding(layer::WordEmbedding& embedding) override {
-    model_->set_word_embedding(embedding);
+  void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) override {
+    model_->set_npu_word_embedding(embedding);
+  }
+
+  layer::NpuLmHead get_npu_lm_head() override {
+    return model_->get_npu_lm_head();
+  }
+  void set_npu_lm_head(layer::NpuLmHead& head) override {
+    model_->set_npu_lm_head(head);
   }
 
  private:

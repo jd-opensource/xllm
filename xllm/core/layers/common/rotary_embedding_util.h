@@ -100,6 +100,22 @@ torch::Tensor get_chatglm_rotary_embedding(int64_t dim,
                                            double rope_theta,
                                            const torch::TensorOptions& options);
 
+torch::Tensor get_deepseek_rotary_embedding(
+    int64_t head_size,
+    int64_t rotary_dim,
+    int64_t max_position_embeddings,
+    int64_t rope_scaling_original_max_position_embeddings,
+    int64_t rope_theta,
+    bool interleaved,
+    float scaling_factor,
+    float extrapolation_factor,
+    float attn_factor,
+    float beta_fast,
+    float beta_slow,
+    float mscale,
+    float mscale_all_dim,
+    const torch::TensorOptions& options);
+
 }  // namespace rotary
 }  // namespace layer
 }  // namespace xllm

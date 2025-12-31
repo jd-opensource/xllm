@@ -102,13 +102,24 @@ void PhyPagePool::batch_map(VirPtr vir_ptr,
   size_t ptr_offset =
       (num_pages - num_new_pages) * FLAGS_phy_page_granularity_size;
 
-  VirPtr temp_vir_ptr = reinterpret_cast<VirPtr>(vir_ptr + ptr_offset);
+  VirPtr temp_vir_ptr =
+#if defined(USE_NPU)
+      reinterpret_cast<VirPtr>(static_cast<char*>(vir_ptr) + ptr_offset);
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+      reinterpret_cast<VirPtr>(vir_ptr + ptr_offset);
+#endif
 
   for (size_t j = num_new_pages; j > 0; --j) {
     uint32_t page_id = page_ids[num_pages - j];
     map(temp_vir_ptr, page_id, layer_idx);
-    temp_vir_ptr = reinterpret_cast<VirPtr>(temp_vir_ptr +
-                                            FLAGS_phy_page_granularity_size);
+    temp_vir_ptr =
+#if defined(USE_NPU)
+        reinterpret_cast<VirPtr>(static_cast<char*>(temp_vir_ptr) +
+                                 FLAGS_phy_page_granularity_size);
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+        reinterpret_cast<VirPtr>(temp_vir_ptr +
+                                 FLAGS_phy_page_granularity_size);
+#endif
   }
 }
 }  // namespace xllm

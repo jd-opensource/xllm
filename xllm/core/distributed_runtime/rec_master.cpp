@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "common/metrics.h"
+#include "common/rec_model_utils.h"
 #include "common/types.h"
 #include "framework/request/mm_data.h"
 #include "models/model_registry.h"
@@ -42,12 +43,14 @@ namespace {
 constexpr int32_t kDefaultPlaceholderToken = 20152019;
 
 RecType get_rec_type(const ModelArgs& model_args) {
-  const auto& model_type = model_args.model_type();
-  if (model_type == "onerec") {
-    return RecType::kOneRec;
-  }
-  if (model_type == "qwen2" || model_type == "qwen3") {
-    return RecType::kLlmRec;
+  const auto kind = get_rec_model_kind(model_args.model_type());
+  switch (kind) {
+    case RecModelKind::kOneRec:
+      return RecType::kOneRec;
+    case RecModelKind::kLlmRec:
+      return RecType::kLlmRec;
+    case RecModelKind::kNone:
+      return RecType::kNone;
   }
   return RecType::kNone;
 }

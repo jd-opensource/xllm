@@ -16,16 +16,16 @@ limitations under the License.
 #pragma once
 
 #include "core/layers/common/rotary_embedding_util.h"
-#include "core/layers/glm4_decoder_layer.h"
+#include "core/layers/npu/npu_glm4_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
 namespace xllm {
 
 class Glm4DecoderLayerImpl
-    : public LlmDecoderLayerImplBase<layer::Glm4DecoderLayer> {
+    : public LlmDecoderLayerImplBase<layer::NpuGlm4DecoderLayer> {
  public:
   Glm4DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::Glm4DecoderLayer>(context) {}
+      : LlmDecoderLayerImplBase<layer::NpuGlm4DecoderLayer>(context) {}
 };
 TORCH_MODULE(Glm4DecoderLayer);
 
@@ -43,10 +43,11 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    norm_ = register_module("norm", layer::RMSNorm(context));
-    embed_tokens_ =
-        register_module("embed_tokens", layer::WordEmbedding(context));
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
+    npu_embed_tokens_ =
+        register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
+
+    atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_chatglm_rotary_embedding(
         64,
         model_args.max_position_embeddings(),
@@ -80,7 +81,7 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
     } else {
-      h = embed_tokens_(tokens, 0);
+      h = npu_embed_tokens_(tokens, 0);
     }
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);

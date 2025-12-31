@@ -137,7 +137,7 @@ std::tuple<nlohmann::json, int32_t> partial_json_loads(
 
 bool is_complete_json(const std::string& input_str) {
   try {
-    nlohmann::json::parse(input_str);
+    [[maybe_unused]] auto parsed = nlohmann::json::parse(input_str);
     return true;
   } catch (const nlohmann::json::parse_error&) {
     return false;

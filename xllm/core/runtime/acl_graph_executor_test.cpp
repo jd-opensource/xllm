@@ -33,8 +33,8 @@ limitations under the License.
 #include "core/framework/request/sequence.h"
 #include "core/framework/request/stopping_checker.h"
 #include "core/framework/sampling/sampling_params.h"
-#include "core/layers/lm_head.h"
-#include "core/layers/word_embedding.h"
+#include "core/layers/npu/npu_lm_head_impl.h"
+#include "core/layers/npu/npu_word_embedding_impl.h"
 #include "runtime/options.h"
 
 // Global test environment for ACL graph executor tests
@@ -47,11 +47,20 @@ class AclGraphExecutorTestEnvironment : public ::testing::Environment {
 
     // Add any other global initialization here
     std::cout << "Global test environment setup completed" << std::endl;
+    int ret = aclrtSetDevice(0);
+    if (ret != 0) {
+      LOG(ERROR) << "ACL set device id: 0 failed, ret:" << ret;
+    }
+    torch_npu::init_npu("npu:0");
   }
 
   void TearDown() override {
     // Cleanup if needed
     google::ShutdownGoogleLogging();
+    torch_npu::finalize_npu();
+    aclrtResetDevice(0);
+    aclFinalize();
+    LOG(INFO) << "AclGraphExecutorTestEnvironment TearDown completed.";
   }
 };
 
@@ -230,21 +239,21 @@ class SimpleCausalLM : public CausalLM {
     // Simple implementation for testing
   }
 
-  layer::LmHead get_lm_head() override {
+  layer::NpuLmHead get_npu_lm_head() override {
     // Simple implementation for testing
-    return layer::LmHead(nullptr);
+    return layer::NpuLmHead(nullptr);
   }
 
-  void set_lm_head(layer::LmHead& head) override {
+  void set_npu_lm_head(layer::NpuLmHead& head) override {
     // Simple implementation for testing
   }
 
-  layer::WordEmbedding get_word_embedding() override {
+  layer::NpuWordEmbedding get_npu_word_embedding() override {
     // Simple implementation for testing
-    return layer::WordEmbedding(nullptr);
+    return layer::NpuWordEmbedding(nullptr);
   }
 
-  void set_word_embedding(layer::WordEmbedding& embedding) override {
+  void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) override {
     // Simple implementation for testing
   }
 
@@ -269,16 +278,11 @@ class AclGraphExecutorTest : public ::testing::Test {
   AclGraphExecutorTest() = default;
 
   void SetUp() override {
-    sequences_.reserve(100);
-    // Initialize NPU - follow the same pattern as worker_service.cpp
-    int device_id = 0;
-    int ret = aclrtSetDevice(device_id);
-    if (ret != 0) {
-      LOG(ERROR) << "ACL set device id: " << device_id
-                 << " failed, ret:" << ret;
+    if (initialized_) {
+      return;
     }
-    std::string device_name = "npu:" + std::to_string(device_id);
-    torch_npu::init_npu(device_name);
+    initialized_ = true;
+    sequences_.reserve(100);
 
     // Set up model args
     model_args_.model_type("test_model");
@@ -334,16 +338,15 @@ class AclGraphExecutorTest : public ::testing::Test {
     kv_caches_.push_back({kv_cache, kv_cache});
   }
 
-  void TearDown() override {
+  void TearDown() override { return; }
+
+  void reset() {
     for (auto& sequence : sequences_) {
       auto blocks = sequence.kv_state().kv_blocks();
       if (!blocks.empty()) {
         block_manager_->deallocate(blocks);
       }
     }
-    sequences_.clear();
-    model_.reset();
-    block_manager_.reset();
   }
 
   // Helper function to create a simple batch
@@ -370,7 +373,7 @@ class AclGraphExecutorTest : public ::testing::Test {
 
     return batch;
   }
-
+  bool initialized_ = false;
   ModelArgs model_args_;
   std::unique_ptr<torch::Device> device_;
   runtime::Options options_;

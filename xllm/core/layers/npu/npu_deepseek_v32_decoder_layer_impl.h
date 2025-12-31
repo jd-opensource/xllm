@@ -35,12 +35,12 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class DeepseekV32DecoderLayerImpl : public BaseLayer {
+class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
  public:
-  explicit DeepseekV32DecoderLayerImpl(const ModelContext& context,
-                                       const int32_t layer_id);
+  explicit NpuDeepseekV32DecoderLayerImpl(const ModelContext& context,
+                                          const int32_t layer_id);
 
-  ~DeepseekV32DecoderLayerImpl() {};
+  ~NpuDeepseekV32DecoderLayerImpl() {};
 
   virtual void merge_loaded_weights() override;
 
@@ -188,6 +188,7 @@ class DeepseekV32DecoderLayerImpl : public BaseLayer {
   torch::Tensor expert_routing_map_;
   torch::Tensor expert_routing_map_buffer_;
 };
+TORCH_MODULE(NpuDeepseekV32DecoderLayer);
 
 std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,
                                           int32_t dp_local_tp_size,

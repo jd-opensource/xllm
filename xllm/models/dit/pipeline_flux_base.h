@@ -28,7 +28,6 @@ limitations under the License.
 #include "core/framework/request/dit_request_state.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
-#include "core/layers/pos_embedding.h"
 #include "flowmatch_euler_discrete_scheduler.h"
 #include "models/model_registry.h"
 #include "t5_encoder.h"
@@ -124,6 +123,12 @@ torch::Tensor get_1d_rotary_pos_embed(
     return torch::cat({freqs_cos.unsqueeze(0), freqs_sin.unsqueeze(0)},
                       0);  // [2, S, D]
   }
+  // This case should not happen in practice, but required for compilation
+  LOG(FATAL) << "get_1d_rotary_pos_embed returned empty tensor, which should "
+                "not happen. use_real: "
+             << use_real
+             << " repeat_interleave_real: " << repeat_interleave_real;
+  return torch::Tensor();
 }
 
 class FluxPosEmbedImpl : public torch::nn::Module {

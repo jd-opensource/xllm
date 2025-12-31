@@ -39,11 +39,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class BlockCopyImpl : public BaseLayer {
+class NpuBlockCopyImpl : public BaseLayer {
  public:
-  explicit BlockCopyImpl(const ModelContext& context);
+  explicit NpuBlockCopyImpl(const ModelContext& context);
 
-  ~BlockCopyImpl() {};
+  ~NpuBlockCopyImpl() override = default;
 
   void load_state_dict(const StateDict& state_dict) {};
 
@@ -78,7 +78,7 @@ class BlockCopyImpl : public BaseLayer {
   atb::Tensor internal_dst_block_ids_tensors_;
   atb::Tensor internal_cum_sum_tensors_;
 };
-TORCH_MODULE(BlockCopy);
+TORCH_MODULE(NpuBlockCopy);
 
 }  // namespace layer
 }  // namespace xllm

@@ -53,6 +53,7 @@ size_t MMData::size() const {
   } else if (std::holds_alternative<MMItemVec>(items_)) {
     return std::get<MMItemVec>(items_).size();
   }
+  return 0;
 }
 
 bool MMData::add(MMType type, const MMDataItem& item) {

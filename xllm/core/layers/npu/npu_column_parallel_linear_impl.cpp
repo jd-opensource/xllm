@@ -18,7 +18,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-void ColumnParallelLinearImpl::param_from_args(
+void NpuColumnParallelLinearImpl::param_from_args(
     atb_speed::common::LinearParallelParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -41,7 +41,8 @@ void ColumnParallelLinearImpl::param_from_args(
   }
 }
 
-ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
+NpuColumnParallelLinearImpl::NpuColumnParallelLinearImpl(
+    const ModelContext& context)
     : BaseLayer(context) {
   param_from_args(
       linear_param_, context.get_model_args(), context.get_parallel_args());
@@ -55,7 +56,7 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
   loader_ = std::make_unique<ColumParallelLinearLoader>(1, context);
 }
 
-void ColumnParallelLinearImpl::merge_loaded_weights() {
+void NpuColumnParallelLinearImpl::merge_loaded_weights() {
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
 
   atb_weight_tensors_[0] =
@@ -63,7 +64,7 @@ void ColumnParallelLinearImpl::merge_loaded_weights() {
   init_layer();
 }
 
-int64_t ColumnParallelLinearImpl::init_layer() {
+int64_t NpuColumnParallelLinearImpl::init_layer() {
   name_ = "atb_parallel_linear_layer";
   model_name_ = "Atb Parallel Linear";
   CHECK_OPERATION_STATUS_RETURN(init_node(linear_node_, linear_param_));
@@ -71,7 +72,7 @@ int64_t ColumnParallelLinearImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t ColumnParallelLinearImpl::init_node(
+int64_t NpuColumnParallelLinearImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::common::LinearParallelParam& linearParam) {
   atb::Operation* operation = nullptr;
@@ -109,8 +110,8 @@ int64_t ColumnParallelLinearImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor ColumnParallelLinearImpl::forward(const torch::Tensor& input,
-                                                int nodeId) {
+torch::Tensor NpuColumnParallelLinearImpl::forward(const torch::Tensor& input,
+                                                   int nodeId) {
   atb::Status st;
   build_node_variant_pack(linear_node_, input);
   st = execute_node(linear_node_, nodeId);
@@ -120,7 +121,7 @@ torch::Tensor ColumnParallelLinearImpl::forward(const torch::Tensor& input,
   return at_out_tensors_.at(0);
 }
 
-void ColumnParallelLinearImpl::build_node_variant_pack(
+void NpuColumnParallelLinearImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     const torch::Tensor& input) {
   internal_input = atb_speed::Utils::AtTensor2Tensor(input);

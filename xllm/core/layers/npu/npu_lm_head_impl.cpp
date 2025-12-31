@@ -23,10 +23,10 @@ DECLARE_string(communication_backend);
 namespace xllm {
 namespace layer {
 
-void LmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
-                                 const ModelArgs& args,
-                                 const ParallelArgs& parallel_args,
-                                 bool isPrefill) {
+void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
+                                    const ModelArgs& args,
+                                    const ParallelArgs& parallel_args,
+                                    bool isPrefill) {
   param.unpadInputs = true;
   param.gatherAhead = isPrefill;
   param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
@@ -68,7 +68,7 @@ void LmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
   }
 }
 
-LmHeadImpl::LmHeadImpl(const ModelContext& context) : BaseLayer(context) {
+NpuLmHeadImpl::NpuLmHeadImpl(const ModelContext& context) : BaseLayer(context) {
   param_from_args(lm_head_param_prefill_,
                   context.get_model_args(),
                   context.get_parallel_args(),
@@ -93,14 +93,14 @@ LmHeadImpl::LmHeadImpl(const ModelContext& context) : BaseLayer(context) {
   loader_ = std::make_unique<LmHeadLoader>(1, context);
 }
 
-void LmHeadImpl::merge_loaded_weights() {
+void NpuLmHeadImpl::merge_loaded_weights() {
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   atb_weight_tensors_[0] =
       atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
   init_layer();
 }
 
-int64_t LmHeadImpl::init_layer() {
+int64_t NpuLmHeadImpl::init_layer() {
   BaseLayer::name_ = "lm_head_layer";
   model_name_ = "lm";
   CHECK_OPERATION_STATUS_RETURN(
@@ -111,8 +111,8 @@ int64_t LmHeadImpl::init_layer() {
   return atb::NO_ERROR;
 }
 
-int64_t LmHeadImpl::init_node(atb_speed::Model::Node& node,
-                              atb_speed::common::LmHeadParam& param) {
+int64_t NpuLmHeadImpl::init_node(atb_speed::Model::Node& node,
+                                 atb_speed::common::LmHeadParam& param) {
   atb::Operation* operation = nullptr;
   atb::Status atbStatus = atb_speed::common::LmHead(param, &operation);
   if (atbStatus != atb::NO_ERROR) {
@@ -140,9 +140,9 @@ int64_t LmHeadImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor LmHeadImpl::forward(const torch::Tensor& hidden_states,
-                                  const torch::Tensor& seleted_idxes,
-                                  int nodeId) {
+torch::Tensor NpuLmHeadImpl::forward(const torch::Tensor& hidden_states,
+                                     const torch::Tensor& seleted_idxes,
+                                     int nodeId) {
   atb::Status st;
   build_node_variant_pack(lm_head_node_prefill_, hidden_states, seleted_idxes);
   st = execute_node(lm_head_node_prefill_, nodeId);
@@ -151,9 +151,10 @@ torch::Tensor LmHeadImpl::forward(const torch::Tensor& hidden_states,
   return atOutTensors_[0];
 }
 
-void LmHeadImpl::build_node_variant_pack(atb_speed::Model::Node& node,
-                                         const torch::Tensor& hidden_states,
-                                         const torch::Tensor& seleted_idxes) {
+void NpuLmHeadImpl::build_node_variant_pack(
+    atb_speed::Model::Node& node,
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& seleted_idxes) {
   hidden_states_atb_ = atb_speed::Utils::AtTensor2Tensor(hidden_states);
   seleted_idxes_atb_ = atb_speed::Utils::AtTensor2Tensor(seleted_idxes);
   // node.outTensors[0] = &internalTensors;

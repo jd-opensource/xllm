@@ -15,16 +15,16 @@ limitations under the License.
 
 #pragma once
 
-#include "core/layers/qwen3_decoder_layer.h"
+#include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
 namespace xllm {
 
 class QWen3DecoderLayerImpl
-    : public LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer> {
+    : public LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer> {
  public:
   QWen3DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::Qwen3DecoderLayer>(context) {}
+      : LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer>(context) {}
 };
 TORCH_MODULE(QWen3DecoderLayer);
 
@@ -42,10 +42,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    norm_ = register_module("norm", layer::RMSNorm(context));
-    embed_tokens_ =
-        register_module("embed_tokens", layer::WordEmbedding(context));
-    atb_pos_emb_ = layer::PosEmbedding(context);
+    norm_ = register_module("norm", layer::NpuRMSNorm(context));
+    npu_embed_tokens_ =
+        register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
+    atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         128,
         model_args.max_position_embeddings(),
@@ -95,7 +95,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
     } else {
-      h = embed_tokens_(tokens, 0);
+      h = npu_embed_tokens_(tokens, 0);
     }
     if (use_deepstack) {
       deep_stacks = input_params.deep_stacks;  // [num_deepstack, hidden_size]
@@ -129,29 +129,29 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     }
 
     torch::Tensor attn_mask;
+    // for chunked prefill, generate the attn mask.
+    if (!input_params.batch_forward_type.is_decode()) {
+      max_seq_len_ = FLAGS_enable_chunked_prefill
+                         ? std::max(input_params.kv_max_seq_len, max_seq_len_)
+                         : 128;
+      attn_mask = attn_mask_.get_attn_mask(
+          max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
-    torch::Tensor max_of_seq = torch::max(input_params.kv_seq_lens);
-    max_seq_len_ = FLAGS_enable_chunked_prefill
-                       ? std::max(max_of_seq.item<int>(), max_seq_len_)
-                       : 128;
-    attn_mask = attn_mask_.get_attn_mask(
-        max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
+      if (FLAGS_enable_chunked_prefill) {
+        int batch_size = input_params.q_seq_lens_vec.size();
+        if (batch_size > 0) {
+          std::vector<torch::Tensor> req_mask_vec;
+          req_mask_vec.reserve(batch_size);
+          for (int j = 0; j < batch_size; j++) {
+            int start = input_params.kv_seq_lens_vec[j] -
+                        input_params.q_seq_lens_vec[j];
+            int end = input_params.kv_seq_lens_vec[j];
 
-    if (FLAGS_enable_chunked_prefill) {
-      int batch_size = input_params.q_seq_lens_vec.size();
-      if (batch_size > 0) {
-        std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(batch_size);
-
-        for (int j = 0; j < batch_size; j++) {
-          int start =
-              input_params.kv_seq_lens_vec[j] - input_params.q_seq_lens_vec[j];
-          int end = input_params.kv_seq_lens_vec[j];
-
-          auto req_mask_slice = attn_mask.slice(0, start, end);
-          req_mask_vec.emplace_back(req_mask_slice);
+            auto req_mask_slice = attn_mask.slice(0, start, end);
+            req_mask_vec.emplace_back(req_mask_slice);
+          }
+          attn_mask = torch::cat(req_mask_vec, 0);
         }
-        attn_mask = torch::cat(req_mask_vec, 0);
       }
     }
 

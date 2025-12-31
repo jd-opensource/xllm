@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "common/global_flags.h"
+
 namespace xllm {
 namespace layer {
 
@@ -26,6 +28,16 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
   const auto& options = context.get_tensor_options();
+
+  // Qwen3 only support deep ep all2all
+  //  when dp_size == ep_size && dp_size == world_size for now
+  bool enable_deep_ep = FLAGS_expert_parallel_degree == 2;
+  if (enable_deep_ep) {
+    CHECK_EQ(parallel_args.dp_size(), parallel_args.world_size())
+        << "Qwen3 MoE only support deep ep all2all when dp_size == world_size";
+    CHECK_EQ(parallel_args.dp_size(), parallel_args.ep_size())
+        << "Qwen3 MoE only support deep ep all2all when dp_size == ep_size";
+  }
 
   // Initialize attention layers
   attention_ = register_module("self_attn", Qwen2Attention(context));
@@ -74,7 +86,7 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
                                     model_args.hidden_act(),
                                     /*enable_result_reduction=*/true,
                                     quant_args,
-                                    parallel_args,
+                                    parallel_args.tp_group_,
                                     options));
   }
 }

@@ -37,7 +37,7 @@ class Qwen2_5_VisionLayerImpl : public torch::nn::Module {
   explicit Qwen2_5_VisionLayerImpl(const ModelContext& context,
                                    bool is_qwen3_style = false);
 
-  ~Qwen2_5_VisionLayerImpl() {};
+  ~Qwen2_5_VisionLayerImpl() override = default;
 
   void load_state_dict(const StateDict& state_dict);
 

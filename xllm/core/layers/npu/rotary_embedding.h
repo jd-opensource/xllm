@@ -29,9 +29,9 @@ limitations under the License.
 
 namespace xllm {
 
-class RotaryEmbedding : public torch::nn::Module {
+class NpuRotaryEmbedding : public torch::nn::Module {
  public:
-  ~RotaryEmbedding() override = default;
+  ~NpuRotaryEmbedding() override = default;
 
   // returns a tuple of query and key embeddings with the same shape as the
   // input query and key.
@@ -44,7 +44,7 @@ class RotaryEmbedding : public torch::nn::Module {
   virtual torch::Tensor get_cos_sin_cache() = 0;
 };
 
-class RotaryEmbeddingGeneric : public RotaryEmbedding {
+class RotaryEmbeddingGeneric : public NpuRotaryEmbedding {
  public:
   RotaryEmbeddingGeneric(int64_t rotary_dim,
                          int64_t max_position_embeddings,
@@ -69,7 +69,7 @@ class RotaryEmbeddingGeneric : public RotaryEmbedding {
   bool interleaved_ = false;
 };
 
-class RotaryEmbeddingDeepseekYarn : public RotaryEmbedding {
+class RotaryEmbeddingDeepseekYarn : public NpuRotaryEmbedding {
  public:
   RotaryEmbeddingDeepseekYarn(float scaling_factor,
                               int64_t rotary_dim,
@@ -96,7 +96,7 @@ class RotaryEmbeddingDeepseekYarn : public RotaryEmbedding {
 };
 
 // Rotary Embedding with Multimodal Sections.
-class MRotaryEmbedding : public RotaryEmbedding {
+class MRotaryEmbedding : public NpuRotaryEmbedding {
  public:
   MRotaryEmbedding(int64_t rotary_dim,
                    int64_t max_position_embeddings,
@@ -121,7 +121,7 @@ class MRotaryEmbedding : public RotaryEmbedding {
   std::vector<int64_t> mrope_section_;
 };
 
-std::shared_ptr<RotaryEmbedding> create_rotary_embedding(
+std::shared_ptr<NpuRotaryEmbedding> create_rotary_embedding(
     const ModelArgs& model_args,
     int64_t rotary_dim,
     bool interleaved,

@@ -28,6 +28,7 @@ namespace xllm {
 class Device {
  public:
   explicit Device(const torch::Device& device);
+  explicit Device(const int32_t device_index);
   ~Device() = default;
   operator torch::Device() const;
 

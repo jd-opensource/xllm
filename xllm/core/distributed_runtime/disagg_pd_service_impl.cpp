@@ -133,36 +133,22 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
   }
 
   for (auto& req : request->reqs()) {
-    // Try to allocate blocks for new requests
-    int32_t dp_rank = 0;
-    auto blocks = scheduler_->allocate_raw_blocks(req.tokens_num(), dp_rank);
     auto resp = response->add_resps();
-    if (blocks.empty()) {
-      resp->set_req_id(req.req_id());
+    resp->set_req_id(req.req_id());
+
+    auto new_request = generate_request(req);
+    if (new_request == nullptr) {
+      resp->set_status_code(500);
+      continue;
+    }
+
+    auto& sequences = new_request->sequences();
+    Sequence* sequence = sequences[0].get();
+
+    if (!scheduler_->try_allocate(sequence)) {
       // FIXME: set status code
       resp->set_status_code(404);
     } else {
-      resp->set_req_id(req.req_id());
-
-      auto new_request = generate_request(req);
-      if (new_request == nullptr) {
-        resp->set_status_code(500);
-        continue;
-      }
-
-      resp->set_status_code(200);
-      for (auto& block : blocks) {
-        *(resp->mutable_blocks_ids()->Add()) = block.id();
-      }
-      resp->set_dp_rank(dp_rank);
-      for (auto& sequence : new_request->sequences()) {
-        sequence->set_dp_rank(dp_rank);
-        sequence->add_kv_blocks(blocks);
-        // prompt kv is computed in prefill instance,
-        // so we update these received kvs(tokens_num) here.
-        sequence->kv_state().incr_kv_cache_tokens_num(req.tokens_num());
-      }
-
       // push the request to scheduler request buffer
       bool success =
           scheduler_->decode_schedule(new_request, request->prefill_name());
@@ -172,6 +158,17 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
         // request and blocks are released in scheduler
         resp->set_status_code(500);
       }
+
+      auto dp_rank = sequence->dp_rank();
+      resp->set_dp_rank(dp_rank);
+
+      size_t shared_num = sequence->kv_state().shared_kv_blocks_num();
+      auto blocks = sequence->kv_state().kv_blocks();
+      for (size_t i = shared_num; i < blocks.size(); i++) {
+        *(resp->mutable_blocks_ids()->Add()) = blocks[i].id();
+      }
+
+      resp->set_status_code(200);
     }
   }
 }
