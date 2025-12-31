@@ -49,7 +49,8 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
     return torch::cat(tensors, 0);
   }
 
-  std::vector<torch::Tensor> encode(const ModelInputParams& input_params) {
+  MMDict encode(const ModelInputParams& input_params) {
+    torch::NoGradGuard no_grad;
     const auto& mm_data = input_params.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
@@ -70,7 +71,7 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
                 input_params);
     input_params.deep_stacks = deep_stacks;
 
-    std::vector<int32_t> image_sizes = get_images_size(image_grid_thw);
+    std::vector<int> image_sizes = get_images_size(image_grid_thw);
 
     std::vector<torch::Tensor> mm_embeddings;
     mm_embeddings.reserve(image_sizes.size());
@@ -91,8 +92,9 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
       token_start_idx += image_size;
     }
     CHECK(token_start_idx == image_embeds.size(0));
-
-    return mm_embeddings;
+    MMDict mm_embeds;
+    mm_embeds["image|embedding"] = mm_embeddings;
+    return mm_embeds;
   };
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
@@ -123,10 +125,14 @@ class MMEmbeddingVLMImpl<xllm::Qwen3_VLForMMEmbedding> : public MMEmbeddingVLM {
                      const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
-  std::vector<torch::Tensor> encode(
-      const ModelInputParams& input_params) override {
+  MMDict encode(const ModelInputParams& input_params) override {
     return model_->encode(input_params);
   };
+
+  torch::Tensor get_input_embeddings(const torch::Tensor& input_ids,
+                                     const ModelInputParams& input_params) {
+    return torch::Tensor{};
+  }
 
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& selected_idxes) {

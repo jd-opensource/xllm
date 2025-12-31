@@ -23,6 +23,7 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "mm_item_state.h"
 #include "mm_type.h"
 
 namespace xllm {
@@ -50,23 +51,27 @@ class MMDataItem {
   bool is_type(MMType type) const { return ty_ == type; }
 
   const MMDict& data() const { return data_; }
+  MMDict& mutable_data() { return data_; }
   void set_data(const MMDict& data) { data_ = std::move(data); }
 
   MMType type() const { return ty_; }
   bool has(const MMKey& key) const;
 
   void get(const MMKey& key, std::vector<torch::Tensor>& vec) const;
+  bool is_embedded() const { return has("embedding"); }
 
   template <typename T>
   std::optional<T> get(const MMKey& key) const {
     if (!valid()) return std::nullopt;
 
     const auto& itor = data_.find(key);
-    if (itor != data_.end()) {
-      return std::get<T>(itor->second);
-    } else {
-      return std::nullopt;
-    }
+    return itor != data_.end() ? std::get<T>(itor->second) : std::nullopt;
+  }
+
+  template <typename T>
+  bool add(const MMKey& key, const T& value) {
+    auto [iter, success] = data_.insert({key, value});
+    return success;
   }
 
   template <typename T>
@@ -85,13 +90,17 @@ class MMDataItem {
     metadata_ = meta;
   }
 
+  const MMItemState& state() const { return state_; }
+  MMItemState& mutable_state() { return state_; }
+
+  const MMMetadata& metadata() const { return metadata_; }
   void debug_print() const;
 
  private:
   MMType ty_ = MMType::NONE;
   MMDict data_;
-
   MMMetadata metadata_;
+  MMItemState state_;
 };
 
 }  // namespace xllm

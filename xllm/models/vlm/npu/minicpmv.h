@@ -94,6 +94,25 @@ class MiniCPMInputProcessor : public InputProcessor {
     new_prompt += text_chunks.back();
     prompt = new_prompt;
   }
+  void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override {
+    uint32_t global_mm_index = 0;
+    uint32_t offset = 0;
+    uint32_t length = 0;
+    auto& mm_items = mm_data.items<MMItemVec>();
+    auto start = prompt.begin();
+    while (true) {
+      auto image_start_it = std::find(start, prompt.end(), im_start_id_);
+      auto image_end_it = std::find(start, prompt.end(), im_end_id_);
+      if (image_start_it == prompt.end()) {
+        break;
+      }
+      offset = std::distance(prompt.begin(), image_start_it);
+      length = std::distance(image_start_it + 1, image_end_it);
+      auto& item = mm_items[global_mm_index++];
+      item.mutable_state().mutable_token_pos() = {offset + 1, length};
+      start = std::next(image_end_it);
+    }
+  }
 
  private:
   std::string get_image_id_placeholder(int idx) const {
@@ -181,6 +200,9 @@ class MiniCPMInputProcessor : public InputProcessor {
   const std::string unk_token_ = "<unk>";
   const std::string im_id_start_ = "<image_id>";
   const std::string im_id_end_ = "</image_id>";
+
+  const int im_start_id_ = 151659;
+  const int im_end_id_ = 151658;
 
   bool slice_mode_;
   bool use_image_id_;
@@ -952,9 +974,9 @@ class Idefics2VisionTransformerImpl : public torch::nn::Module {
 TORCH_MODULE(Idefics2VisionTransformer);
 
 struct MiniCPMVImageInputs {
-  torch::Tensor image_bounds;
   std::vector<torch::Tensor> data;
   torch::Tensor tgt_sizes;
+  torch::Tensor num_slices;
   std::string type;
 };
 
@@ -970,53 +992,25 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
 
     resampler_ = register_module("resampler", Resampler2_5(context));
 
-    if (!model_args_.image_embedding_mode()) {
-      language_model_ = register_module("model", QWen2ForCausalLM(context));
-      if (use_vision_adapter_)
-        mlp_ = register_module("mlp", VisionAdapterMLP(context));
-    }
+    language_model_ = register_module("model", QWen2ForCausalLM(context));
+    if (use_vision_adapter_)
+      mlp_ = register_module("mlp", VisionAdapterMLP(context));
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    torch::NoGradGuard no_grad;
+  void prepare_encoder_input(const ModelInputParams& input_params,
+                             std::optional<MiniCPMVImageInputs>& image_inputs) {
     const auto& mm_data = input_params.mm_data;
 
-    torch::Tensor image_embeds;
-    if (const auto& res = mm_data.get<torch::Tensor>("image_embeds"))
-      image_embeds = res.value();
-
     std::vector<torch::Tensor> pixel_values;
-    mm_data.get("pixel_values", pixel_values);
+    if (const auto& res =
+            mm_data.get<std::vector<torch::Tensor>>("pixel_values"))
+      pixel_values = res.value();
 
     torch::Tensor tgt_sizes;
     if (const auto& res = mm_data.get<torch::Tensor>("tgt_sizes"))
       tgt_sizes = res.value();
 
-    torch::Tensor image_embedding;
-    std::optional<MiniCPMVImageInputs> image_inputs;
-    if (image_embeds.defined()) {
-      image_inputs = generate_image_inputs({}, tokens, image_embeds, tgt_sizes);
-    } else if (pixel_values.size() > 0) {
-      image_inputs = generate_image_inputs(
-          pixel_values, tokens, torch::Tensor(), tgt_sizes);
-    }
-    image_embedding = get_vision_embedding(image_inputs);
-
-    if (model_args_.image_embedding_mode()) {
-      return image_embedding;
-    }
-
-    if (use_vision_adapter_ && image_embedding.defined()) {
-      image_embedding = mlp_(image_embedding);
-    }
-
-    input_params.input_embedding =
-        merge_text_vision_embeddings(tokens, image_inputs, image_embedding);
-
-    return language_model_(tokens, positions, kv_caches, input_params);
+    image_inputs = generate_image_inputs(pixel_values, tgt_sizes);
   }
 
   torch::Tensor get_image_bounds(
@@ -1057,36 +1051,20 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
   }
 
   std::optional<MiniCPMVImageInputs> parse_and_validate_inputs(
-      const torch::Tensor& input_ids,
       const std::vector<torch::Tensor>& pixel_values,
       const torch::Tensor& tgt_sizes,
-      const std::optional<torch::Tensor>& image_embeds = std::nullopt,
       const std::optional<int64_t>& im_start_id = std::nullopt,
       const std::optional<int64_t>& im_end_id = std::nullopt,
       const std::optional<int64_t>& slice_start_id = std::nullopt,
       const std::optional<int64_t>& slice_end_id = std::nullopt) {
-    // Case 1: Handle image_embeds if provided
-    if (image_embeds.has_value()) {
-      if (!im_start_id.has_value() || !im_end_id.has_value()) {
-        LOG(FATAL) << "im_start_id and im_end_id must be "
-                      "provided when using image_embeds.";
-      }
-
-      return MiniCPMVImageInputs{
-          .image_bounds = get_image_bounds(input_ids,
-                                           im_start_id.value(),
-                                           im_end_id.value(),
-                                           slice_start_id,
-                                           slice_end_id),
-          .data = {image_embeds.value()},  // Wrap in a vector
-          .tgt_sizes = torch::Tensor(),    // Empty tensor
-          .type = "image_embeds"};
-    }
-
     std::vector<torch::Tensor> pixel_value_flat;
     constexpr const int channel = 3;
-    for (const auto& item : pixel_values) {
-      auto vec = item.split(channel);
+    std::vector<int64_t> num_slices;
+    num_slices.reserve(pixel_values.size());
+
+    for (const auto& pixel_value : pixel_values) {
+      num_slices.push_back(pixel_value.size(0));
+      auto vec = pixel_value.split(channel);
       pixel_value_flat.insert(pixel_value_flat.end(), vec.begin(), vec.end());
     }
 
@@ -1098,30 +1076,18 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     }
 
     return MiniCPMVImageInputs{
-        .image_bounds = get_image_bounds(input_ids,
-                                         im_start_id.value(),
-                                         im_end_id.value(),
-                                         slice_start_id,
-                                         slice_end_id),
         .data = pixel_value_flat,
         .tgt_sizes = tgt_sizes,
+        .num_slices = torch::tensor(
+            num_slices, torch::TensorOptions().device(tgt_sizes.device())),
         .type = "pixel_values"};
   }
 
   std::optional<MiniCPMVImageInputs> generate_image_inputs(
       const std::vector<torch::Tensor>& pixel_values,
-      const torch::Tensor& tokens,
-      const torch::Tensor& inputs_embeds,
       const torch::Tensor& tgt_sizes = torch::Tensor()) {
-    torch::Device device = tokens.device();
-    std::optional<torch::Tensor> optional_image_embeds = std::nullopt;
-    if (inputs_embeds.defined()) {
-      optional_image_embeds = inputs_embeds;
-    }
-    auto image_inputs = parse_and_validate_inputs(tokens,
-                                                  pixel_values,
+    auto image_inputs = parse_and_validate_inputs(pixel_values,
                                                   tgt_sizes,
-                                                  optional_image_embeds,
                                                   im_start_id_val_,
                                                   im_end_id_val_,
                                                   slice_start_id_val_,
@@ -1130,37 +1096,17 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     return image_inputs;
   }
 
-  torch::Tensor get_vision_embedding(
-      const std::optional<MiniCPMVImageInputs>& image_inputs) {
-    if (!image_inputs.has_value()) {
-      return torch::Tensor();
-    }
-    const auto& inputs = image_inputs.value();
-    torch::Tensor vision_hidden_states;
-
-    if (inputs.type == "image_embeds") {
-      vision_hidden_states = inputs.data[0];
-    } else {
-      vision_hidden_states = get_vision_hidden_states(inputs);
-    }
-    return vision_hidden_states;
-  }
-
   torch::Tensor merge_text_vision_embeddings(
-      const torch::Tensor& tokens,
-      const std::optional<MiniCPMVImageInputs>& image_inputs,
-      torch::Tensor& vision_hidden_states) {
-    torch::Tensor llm_embedding = language_model_->get_input_embeddings(tokens);
-    if (!image_inputs.has_value()) {
+      torch::Tensor& inputs_embeds,
+      const torch::Tensor& vision_hidden_states,
+      torch::Tensor& image_bounds) {
+    torch::Tensor llm_embedding = inputs_embeds;
+    if (!vision_hidden_states.defined()) {
       return llm_embedding;
     }
-    const auto& inputs = image_inputs.value();
-    if (inputs.type == "image_embeds") {
-      vision_hidden_states = vision_hidden_states.to(llm_embedding.device())
-                                 .to(llm_embedding.dtype());
-    }
-    if (inputs.image_bounds.size(0) > 0) {
-      auto image_bounds = inputs.image_bounds.to(llm_embedding.device());
+
+    if (image_bounds.size(0) > 0) {
+      image_bounds = image_bounds.to(llm_embedding.device());
       std::vector<torch::Tensor> ranges;
 
       for (int64_t i = 0; i < image_bounds.size(0); ++i) {
@@ -1179,12 +1125,18 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     return llm_embedding;
   }
 
-  torch::Tensor get_vision_hidden_states(const MiniCPMVImageInputs& data) {
-    const auto& pixel_values = data.data;
-    auto tgt_sizes = data.tgt_sizes;
+  MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
+    std::optional<MiniCPMVImageInputs> image_inputs;
+    prepare_encoder_input(input_params, image_inputs);
+    MMDict multimodal_embeds;
+    if (!image_inputs.has_value()) {
+      return multimodal_embeds;
+    }
+    auto inputs = image_inputs.value();
+    const auto& pixel_values = inputs.data;
+    auto tgt_sizes = inputs.tgt_sizes;
 
     auto device = tgt_sizes.device();
-    // auto dtype = model_args_.dtype();
 
     std::vector<torch::Tensor> all_pixel_values_lst;
     for (const auto& tensor : pixel_values) {
@@ -1218,13 +1170,51 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
            torch::arange(0, num_true, torch::TensorOptions().device(device))},
           true);
     }
-
     auto vision_embedding =
         vpm_(all_pixel_values.to(options_), patch_attn_mask, tgt_sizes);
 
-    return resampler_(vision_embedding, tgt_sizes);
+    auto image_embedding = resampler_(vision_embedding, tgt_sizes);
+    if (use_vision_adapter_) {
+      image_embedding = mlp_(image_embedding);
+    }
+
+    auto num_slices = inputs.num_slices.to(torch::kLong);
+    std::vector<int64_t> image_tokens_vec(
+        num_slices.data_ptr<int64_t>(),
+        num_slices.data_ptr<int64_t>() + num_slices.numel());
+    multimodal_embeds["image|embedding"] =
+        image_embedding.split(image_tokens_vec, 0 /*dim*/);
+
+    return multimodal_embeds;
   }
 
+  torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
+                                     const ModelInputParams& input_params) {
+    const auto& mm_data = input_params.mm_data;
+    torch::Tensor multimodal_embeds;
+    if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
+      multimodal_embeds = emb.value();
+    }
+    auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
+    if (!multimodal_embeds.defined()) {
+      return inputs_embeds;
+    }
+    auto image_bounds = get_image_bounds(input_ids,
+                                         im_start_id_val_,
+                                         im_end_id_val_,
+                                         slice_start_id_val_,
+                                         slice_end_id_val_);
+    inputs_embeds = merge_text_vision_embeddings(
+        inputs_embeds, multimodal_embeds, image_bounds);
+    return inputs_embeds;
+  }
+  torch::Tensor forward(const torch::Tensor& tokens,
+                        const torch::Tensor& positions,
+                        std::vector<KVCache>& kv_caches,
+                        const ModelInputParams& input_params) {
+    auto emb = language_model_(tokens, positions, kv_caches, input_params);
+    return emb;
+  }
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
     return language_model_->logits(hidden_states, seleted_idxes);
@@ -1279,7 +1269,6 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
   bool use_vision_adapter_ = false;
   VisionAdapterMLP mlp_{nullptr};
   torch::TensorOptions options_;
-  int device_id = 0;
 };
 TORCH_MODULE(MiniCPMV2_6);
 

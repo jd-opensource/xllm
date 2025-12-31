@@ -17,19 +17,37 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
 #include <string>
+#include <vector>
 
-#include "core/framework/request/mm_data.h"
+#include "core/util/hash_util.h"
 
 namespace xllm {
 
-class InputProcessor {
- public:
-  virtual ~InputProcessor() = default;
-
-  virtual void process(std::string& prompt, const MMData& mm_data) = 0;
-  virtual void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) {
+struct MMItemState {
+  struct TokenPos {
+    uint32_t offset = 0;
+    uint32_t length = 0;
   };
+
+  struct PrefixCache {
+    Murmur3Key key;
+    uint32_t cached_token_num = 0;
+  };
+
+  const TokenPos& token_pos() const { return token_pos_; }
+  TokenPos& mutable_token_pos() { return token_pos_; }
+
+  const PrefixCache& prefix_cache() const { return prefix_cache_; }
+  PrefixCache& mutable_prefix_cache() { return prefix_cache_; }
+
+  bool prefix_cached() const;
+  bool prefix_complete_cached() const;
+
+ private:
+  TokenPos token_pos_;
+  PrefixCache prefix_cache_;
 };
 
 }  // namespace xllm

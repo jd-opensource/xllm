@@ -13,6 +13,7 @@ cc_library(
     mm_codec.h
     mm_data.h
     mm_data_item.h
+    mm_item_state.h
     mm_data_visitor.h
     mm_handler.h
     mm_embedding_handler.h
@@ -41,6 +42,7 @@ cc_library(
     mm_codec.cpp
     mm_data.cpp
     mm_data_item.cpp
+    mm_item_state.cpp
     mm_data_visitor.cpp
     mm_handler.cpp
     mm_embedding_handler.cpp

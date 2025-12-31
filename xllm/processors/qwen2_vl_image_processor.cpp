@@ -212,7 +212,12 @@ bool Qwen2VLImageProcessor::process_images_embedding(
   for (auto& output : images_embedding) {
     auto& item = mm_datas.add(MMType::IMAGE);
     MMDict data;
-    data["embedding"] = output.embedding;
+    const auto& embeds = output.embedding.chunk(/*chunks*/ 4, /*dim*/ 0);
+    data["embedding"] = embeds[0];
+    for (size_t i = 0; i < 3; ++i) {
+      data[std::string("embedding|deepstack_") + std::to_string(i)] =
+          embeds[i + 1];
+    }
     for (const auto& [key, value] : output.metadata) {
       data[key] = value;
     }

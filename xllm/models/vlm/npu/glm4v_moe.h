@@ -52,48 +52,9 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
         register_module("language_model", Glm4MoeForCausalLM(context));
   }
 
-  torch::Tensor get_input_embeddings(
-      torch::Tensor input_ids,
-      const std::optional<Glm4VImageInputs>& image_input,
-      const std::optional<Glm4VVideoInputs>& video_input,
-      const ModelInputParams& input_params) {
-    auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
-    if (image_input) {
-      // visual
-      auto image_embeds = visual_(image_input->pixel_values.to(options_),
-                                  image_input->image_grid_thw,
-                                  input_params);
-
-      // merge
-      auto is_multimodal = torch::isin(input_ids, model_args_.image_token_id());
-      input_params.visual_pos_masks = is_multimodal;
-      inputs_embeds.index_put_({is_multimodal}, image_embeds);
-    }
-    if (video_input) {
-      std::vector<torch::Tensor> temp_frames_hw;
-      for (int i = 0; i < video_input->video_grid_thw.size(0); ++i) {
-        auto t = video_input->video_grid_thw[i][0].item<int32_t>();
-        auto h = video_input->video_grid_thw[i][1].item<int32_t>();
-        auto w = video_input->video_grid_thw[i][2].item<int32_t>();
-        auto repeated_row =
-            torch::tensor({1, h, w}).unsqueeze(0).repeat({t, 1});
-        temp_frames_hw.push_back(repeated_row);
-      }
-      auto flatten_video_grid_thw = torch::cat(temp_frames_hw, 0);
-      auto video_embeds = visual_(video_input->pixel_values_videos.to(options_),
-                                  flatten_video_grid_thw,
-                                  input_params);
-      auto is_multimodal = torch::isin(input_ids, model_args_.image_token_id());
-      inputs_embeds.index_put_({is_multimodal}, video_embeds);
-    }
-    return inputs_embeds;
-  }
-
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    torch::NoGradGuard no_grad;
+  void prepare_encoder_input(const ModelInputParams& input_params,
+                             std::optional<Glm4VImageInputs>& image_inputs,
+                             std::optional<Glm4VVideoInputs>& video_inputs) {
     const auto& mm_data = input_params.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
@@ -111,21 +72,105 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
     if (const auto& res = mm_data.get<torch::Tensor>("video_grid_thw"))
       video_grid_thw = res.value();
 
-    std::optional<Glm4VImageInputs> image_inputs;
-    std::optional<Glm4VVideoInputs> video_inputs;
-
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Glm4VImageInputs{pixel_values, image_grid_thw};
 
-    if (pixel_values_videos.defined() && video_grid_thw.defined()) {
+    if (pixel_values_videos.defined() && video_grid_thw.defined())
       video_inputs = Glm4VVideoInputs{pixel_values_videos, video_grid_thw};
+  }
+
+  MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
+    std::optional<Glm4VImageInputs> image_input;
+    std::optional<Glm4VVideoInputs> video_input;
+    prepare_encoder_input(input_params, image_input, video_input);
+
+    auto merge_size = model_args_.mm_image_merge_size();
+    MMDict multimodal_embeds;
+    if (image_input) {
+      // visual
+      auto image_embeds = visual_(image_input->pixel_values.to(options_),
+                                  image_input->image_grid_thw,
+                                  input_params);
+      auto image_tokens =
+          (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
+              .cpu()
+              .contiguous()
+              .to(torch::kLong);
+
+      std::vector<int64_t> image_tokens_vec(
+          image_tokens.data_ptr<int64_t>(),
+          image_tokens.data_ptr<int64_t>() + image_tokens.numel());
+      multimodal_embeds["image|embedding"] =
+          image_embeds.split(image_tokens_vec, 0 /*dim*/);
     }
+    if (video_input) {
+      std::vector<torch::Tensor> temp_frames_hw;
+      for (int i = 0; i < video_input->video_grid_thw.size(0); ++i) {
+        auto t = video_input->video_grid_thw[i][0].item<int32_t>();
+        auto h = video_input->video_grid_thw[i][1].item<int32_t>();
+        auto w = video_input->video_grid_thw[i][2].item<int32_t>();
+        auto repeated_row =
+            torch::tensor({1, h, w}).unsqueeze(0).repeat({t, 1});
+        temp_frames_hw.push_back(repeated_row);
+      }
+      auto flatten_video_grid_thw = torch::cat(temp_frames_hw, 0);
+      // visual
+      auto video_embeds = visual_(video_input->pixel_values_videos.to(options_),
+                                  flatten_video_grid_thw,
+                                  input_params);
+      auto t = video_input->video_grid_thw.index({torch::indexing::Slice(), 0});
+      auto video_tokens =
+          ((video_input->video_grid_thw.prod(-1) / merge_size / merge_size) / t)
+              .contiguous()
+              .to(torch::kLong);
+      std::vector<int64_t> video_tokens_vec(
+          video_tokens.data_ptr<int64_t>(),
+          video_tokens.data_ptr<int64_t>() + video_tokens.numel());
 
-    auto inputs_embeds =
-        get_input_embeddings(tokens, image_inputs, video_inputs, input_params);
-    input_params.input_embedding = inputs_embeds;
+      multimodal_embeds["video|embedding"] =
+          video_embeds.split(video_tokens_vec, 0 /*dim*/);
+    }
+    return multimodal_embeds;
+  }
+
+  torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
+    auto special_token_ids =
+        torch::tensor({model_args_.image_token_id()},
+                      input_ids.options().dtype(torch::kInt64));
+    auto is_multimodal = torch::isin(input_ids, special_token_ids);
+    return is_multimodal;
+  }
+
+  torch::Tensor merge_multimodal_embeddings(
+      torch::Tensor inputs_embeds,
+      const torch::Tensor& multimodal_embeds,
+      const torch::Tensor& is_multimodal) {
+    inputs_embeds.index_put_({is_multimodal}, multimodal_embeds);
+    return inputs_embeds;
+  }
+
+  torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
+                                     const ModelInputParams& input_params) {
+    const auto& mm_data = input_params.mm_data;
+    torch::Tensor multimodal_embeds;
+    if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
+      multimodal_embeds = emb.value();
+    }
+    auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
+    if (!multimodal_embeds.defined()) {
+      return inputs_embeds;
+    }
+    auto is_multimodal = generate_multimodal_mask(input_ids);
+    inputs_embeds = merge_multimodal_embeddings(
+        inputs_embeds, multimodal_embeds, is_multimodal);
+    return inputs_embeds;
+  }
+
+  torch::Tensor forward(const torch::Tensor& tokens,
+                        const torch::Tensor& positions,
+                        std::vector<KVCache>& kv_caches,
+                        const ModelInputParams& input_params) {
     auto emb = language_model_(tokens, positions, kv_caches, input_params);
-
     return emb;
   }
 

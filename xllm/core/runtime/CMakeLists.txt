@@ -14,6 +14,7 @@ cc_library(
     executor.h
     executor_impl.h
     executor_impl_factory.h
+    vlm_executor_impl.h
     base_executor_impl.h
     dit_executor.h
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.h>
@@ -35,6 +36,7 @@ cc_library(
     executor.cpp
     executor_impl_factory.cpp
     base_executor_impl.cpp
+    vlm_executor_impl.cpp
     dit_executor.cpp
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.cpp>
     $<$<BOOL:${USE_MLU}>:mlu_graph_executor_impl.cpp>

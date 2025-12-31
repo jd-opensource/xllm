@@ -238,8 +238,7 @@ struct ModelInputParams {
 
     params.deep_stacks = deep_stacks;
     params.visual_pos_masks = visual_pos_masks;
-
-    params.mm_data = mm_data.to(device);
+    params.mm_data = MMBatchData::to(mm_data, device);
     params.dp_global_token_nums = dp_global_token_nums;
     params.dp_is_decode = dp_is_decode;
     params.embedding_ids = std::move(embedding_ids);
@@ -412,7 +411,7 @@ struct ModelInputParams {
   torch::Tensor cum_sum;
 
   // multimodal
-  MMBatchData mm_data;
+  mutable MMBatchData mm_data;
 
   // deep_stack for Qwen3-VL
   mutable std::vector<torch::Tensor> deep_stacks;

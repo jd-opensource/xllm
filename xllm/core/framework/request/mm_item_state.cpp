@@ -13,23 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
-
-#include <torch/torch.h>
-
-#include <string>
-
-#include "core/framework/request/mm_data.h"
+#include "mm_item_state.h"
 
 namespace xllm {
 
-class InputProcessor {
- public:
-  virtual ~InputProcessor() = default;
+bool MMItemState::prefix_cached() const {
+  return prefix_cache_.cached_token_num > 0;
+}
 
-  virtual void process(std::string& prompt, const MMData& mm_data) = 0;
-  virtual void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) {
-  };
-};
+bool MMItemState::prefix_complete_cached() const {
+  if (!prefix_cached()) {
+    return false;
+  }
+
+  return prefix_cache_.cached_token_num == token_pos_.length;
+}
 
 }  // namespace xllm

@@ -35,7 +35,6 @@ cc_library(
     env_var.cpp
     http_downloader.cpp
     # TODO. add following at next pr.
-    # hash_util.cpp
     json_reader.cpp
     net.cpp
     pretty_print.cpp

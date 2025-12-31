@@ -48,13 +48,7 @@ class VLMMaster : public Master {
 
   // completion
   void handle_request(const std::string& prompt,
-                      const MMData& mm_data,
-                      const RequestParams& sp,
-                      OutputCallback callback);
-
-  // chat
-  void handle_request(const std::vector<Message>& messages,
-                      const MMData& mm_data,
+                      MMData& mm_data,
                       const RequestParams& sp,
                       OutputCallback callback);
 
@@ -66,14 +60,13 @@ class VLMMaster : public Master {
 
   // batch completion
   void handle_batch_request(const std::vector<std::string>& prompts,
-                            const std::vector<MMData>& mm_datas,
+                            std::vector<MMData>& mm_datas,
                             const std::vector<RequestParams>& sps,
                             BatchOutputCallback callback);
 
   // batch chat
   void handle_batch_request(
       const std::vector<std::vector<Message>>& conversations,
-      const std::vector<MMData>& mm_datas,
       const std::vector<RequestParams>& sps,
       BatchOutputCallback callback);
 
@@ -87,16 +80,15 @@ class VLMMaster : public Master {
 
  private:
   using Task = folly::Function<void()>;
-  std::shared_ptr<Request> generate_request(std::string prompt,
-                                            const MMData& mm_data,
+  std::shared_ptr<Request> generate_request(std::string& prompt,
+                                            MMData& mm_data,
                                             const RequestParams& sp,
                                             OutputCallback callback);
 
   std::shared_ptr<Request> generate_request(
-
       const std::vector<Message>& messages,
-      const MMData& mm_data,
       const RequestParams& sp,
+      const std::string& payload,
       OutputCallback callback);
 
   std::unique_ptr<Scheduler> scheduler_;

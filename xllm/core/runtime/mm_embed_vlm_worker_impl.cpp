@@ -67,7 +67,14 @@ std::optional<ForwardOutput> MMEmbedVLMWorkerImpl::step(
 
   // call model executor forward to get hidden states
   MMEmbeddingVLM* em_model = dynamic_cast<MMEmbeddingVLM*>(model_.get());
-  auto mm_embeddings = em_model->encode(params);
+  auto encode_output = em_model->encode(params);
+  const auto it = encode_output.find("image|embedding");
+  if (it == encode_output.end() ||
+      !std::holds_alternative<std::vector<torch::Tensor>>(it->second)) {
+    LOG(ERROR) << "Invalid 'image|embedding' in encode output.";
+    return std::nullopt;
+  }
+  const auto& mm_embeddings = std::get<std::vector<torch::Tensor>>(it->second);
 
   ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
