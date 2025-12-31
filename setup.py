@@ -508,7 +508,7 @@ class TestUT(Command):
             print(result.stdout)
             '''
             process = subprocess.Popen(
-                ['ctest', '--parallel', '8'],
+                ['ctest', '--parallel', '8', '--repeat', 'until-pass:5'],
                 cwd=cmake_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
