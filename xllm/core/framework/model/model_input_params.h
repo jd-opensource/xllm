@@ -257,6 +257,7 @@ struct ModelInputParams {
     params.layer_synchronizer = layer_synchronizer;
 #endif
     params.expert_load_data = expert_load_data;
+    params.expert_array = expert_array;
 
     params.swap_blocks = std::move(swap_blocks);
 
@@ -401,6 +402,7 @@ struct ModelInputParams {
   DpEpPaddingData dp_ep_padding_data;
 
   torch::Tensor expert_load_data;
+  torch::Tensor expert_array;
 
   torch::Tensor kv_cache_tokens_nums;
   std::vector<int32_t> kv_cache_tokens_nums_host;

@@ -54,7 +54,6 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
                         torch::Tensor& attn_mask,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params,
-                        torch::Tensor& expert_array,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
@@ -104,7 +103,6 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
                                torch::Tensor& attn_mask,
                                KVCache& kv_cache,
                                const ModelInputParams& input_params,
-                               torch::Tensor& expert_array,
                                bool is_prefill);
 
   torch::Tensor block_tables_placeholder_;

@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 #include <gflags/gflags.h>
+#include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <string>
@@ -42,7 +43,10 @@ namespace xllm {
 template <typename DecoderType>
 class LlmDecoderLayerImplBase : public torch::nn::Module {
  public:
-  LlmDecoderLayerImplBase(const ModelContext& context) {
+  LlmDecoderLayerImplBase(const ModelContext& context,
+                          const int32_t layer_id = -1)
+      : layer_id_(layer_id) {
+    CHECK(layer_id_ >= 0) << "layer_id must be >= 0, but got " << layer_id_;
     // register submodules
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
     block_copy_ = register_module("block_copy", layer::NpuBlockCopy(context));
@@ -54,7 +58,6 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
                                 torch::Tensor& attn_mask,
                                 KVCache& kv_cache,
                                 ModelInputParams& input_params,
-                                int node_id,
                                 aclrtEvent* event,
                                 std::atomic<bool>* event_flag) {
     if (input_params.src_block_indices.numel() > 0) {
@@ -74,7 +77,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
                           input_params,
                           event,
                           event_flag,
-                          node_id);
+                          layer_id_);
   }
 
   virtual void verify_loaded_weights(const std::string& prefix) const {
@@ -94,6 +97,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
  private:
   DecoderType decoder_layer_{nullptr};
   layer::NpuBlockCopy block_copy_{nullptr};
+  int32_t layer_id_;
 };
 
 template <typename DecoderLayerType>
@@ -161,15 +165,11 @@ class LlmModelImplBase : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor attn_mask;
     if (model_type_ == "qwen2") {
-      max_seq_len_ = FLAGS_enable_chunked_prefill
-                         ? std::max(input_params.kv_max_seq_len, max_seq_len_)
-                         : 128;
+      int64_t max_seq_len =
+          FLAGS_enable_chunked_prefill ? input_params.kv_max_seq_len : 128;
       attn_mask = attn_mask_.get_attn_mask(
-          max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
+          max_seq_len, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
-      max_seq_len_ = FLAGS_enable_chunked_prefill
-                         ? std::max(input_params.kv_max_seq_len, max_seq_len_)
-                         : 128;
       if (FLAGS_enable_chunked_prefill) {
         int num_sequences = input_params.num_sequences;
         if (num_sequences > 0) {
@@ -180,7 +180,7 @@ class LlmModelImplBase : public torch::nn::Module {
             auto mask =
                 attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
                                            input_params.kv_seq_lens_vec[j],
-                                           max_seq_len_,
+                                           input_params.kv_max_seq_len,
                                            cos_pos.dtype().toScalarType(),
                                            cos_pos.device());
             req_mask_vec.emplace_back(mask);
@@ -189,7 +189,7 @@ class LlmModelImplBase : public torch::nn::Module {
         }
       } else {
         attn_mask = attn_mask_.get_attn_mask(
-            max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
+            128, cos_pos.dtype().toScalarType(), cos_pos.device());
       }
     }
 
@@ -207,7 +207,7 @@ class LlmModelImplBase : public torch::nn::Module {
       auto& layer = layers_[i];
 
       if (layer_forward_interrupted_) {
-        VLOG(1) << "Forward interrupted at layer: " << i;
+        LOG(INFO) << "Forward interrupted at layer: " << i;
         return torch::Tensor();
       }
 
@@ -217,7 +217,6 @@ class LlmModelImplBase : public torch::nn::Module {
             attn_mask,
             kv_caches[i],
             input_params_new,
-            i,
             event,
             event_flag);
     }
@@ -268,7 +267,6 @@ class LlmModelImplBase : public torch::nn::Module {
 
  protected:
   torch::Tensor cos_sin_;
-  int max_seq_len_ = 0;
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
   int device_id = 0;

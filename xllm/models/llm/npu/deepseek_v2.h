@@ -142,15 +142,10 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     norm_ = register_module("norm", layer::NpuRMSNorm(context));
 
     dp_size_ = parallel_args.dp_size();
-    std::vector<int64_t> indices;
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
-    mapping_data_ = parallel_args.mapping_data();
     num_experts_per_tok_ = model_args.num_experts_per_tok();
-    for (int i = 0; i < parallel_args.world_size(); i += dp_local_tp_size_) {
-      indices.push_back(i);
-    }
   }
 
   torch::Tensor forward(torch::Tensor tokens,
@@ -258,7 +253,6 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   int32_t rank_;
   int32_t dp_size_;
   int32_t dp_local_tp_size_;
-  nlohmann::json mapping_data_;
   int32_t num_experts_per_tok_;
   int32_t num_speculative_tokens_ = 0;
   at::Device device_;

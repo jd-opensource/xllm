@@ -43,7 +43,6 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                         torch::Tensor attn_mask,
                         KVCache& kv_cache,
                         const ModelInputParams& input_params,
-                        torch::Tensor expert_array,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr) {
     return decoder_layer_(x,
@@ -52,7 +51,6 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                           attn_mask,
                           kv_cache,
                           input_params,
-                          expert_array,
                           event,
                           event_flag);
   }
@@ -254,6 +252,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         0,
         input_length * num_experts_per_tok_,
         torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
+    ModelInputParams& input_params_new =
+        const_cast<ModelInputParams&>(input_params);
+    input_params_new.expert_array = expert_array;
+
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -272,7 +274,6 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
             attn_mask,
             kv_caches[i],
             input_params,
-            expert_array,
             event,
             event_flag);
       if (deep_stack_size && i < deep_stack_size) {

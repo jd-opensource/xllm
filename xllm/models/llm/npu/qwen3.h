@@ -23,8 +23,9 @@ namespace xllm {
 class QWen3DecoderLayerImpl
     : public LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer> {
  public:
-  QWen3DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer>(context) {}
+  QWen3DecoderLayerImpl(const ModelContext& context, const int32_t layer_id)
+      : LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer>(context,
+                                                             layer_id) {}
 };
 TORCH_MODULE(QWen3DecoderLayer);
 
@@ -61,7 +62,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
                                       /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto block = QWen3DecoderLayer(context);
+      auto block = QWen3DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
     }
@@ -82,8 +83,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
                                 std::vector<KVCache>& kv_caches,
                                 const ModelInputParams& input_params) {
     bool use_deepstack = input_params.deep_stacks.size() > 0;
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     std::vector<torch::Tensor> deep_stacks;
 
     if (tokens.numel() == 0) {
@@ -131,30 +130,32 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     torch::Tensor attn_mask;
     // for chunked prefill, generate the attn mask.
     if (!input_params.batch_forward_type.is_decode()) {
-      max_seq_len_ = FLAGS_enable_chunked_prefill
-                         ? std::max(input_params.kv_max_seq_len, max_seq_len_)
-                         : 128;
-      attn_mask = attn_mask_.get_attn_mask(
-          max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
-
       if (FLAGS_enable_chunked_prefill) {
-        int batch_size = input_params.q_seq_lens_vec.size();
-        if (batch_size > 0) {
+        int max_kv_seq = input_params.kv_max_seq_len;
+        int num_sequences = input_params.num_sequences;
+        if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;
-          req_mask_vec.reserve(batch_size);
-          for (int j = 0; j < batch_size; j++) {
-            int start = input_params.kv_seq_lens_vec[j] -
-                        input_params.q_seq_lens_vec[j];
-            int end = input_params.kv_seq_lens_vec[j];
+          req_mask_vec.reserve(num_sequences);
 
-            auto req_mask_slice = attn_mask.slice(0, start, end);
-            req_mask_vec.emplace_back(req_mask_slice);
+          for (int j = 0; j < num_sequences; j++) {
+            auto mask =
+                attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
+                                           input_params.kv_seq_lens_vec[j],
+                                           max_kv_seq,
+                                           cos_pos.dtype().toScalarType(),
+                                           cos_pos.device());
+            req_mask_vec.emplace_back(mask);
           }
           attn_mask = torch::cat(req_mask_vec, 0);
         }
+      } else {
+        attn_mask = attn_mask_.get_attn_mask(
+            128, cos_pos.dtype().toScalarType(), cos_pos.device());
       }
     }
 
+    ModelInputParams& input_params_new =
+        const_cast<ModelInputParams&>(input_params);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event{nullptr};
       std::atomic<bool>* event_flag{nullptr};
@@ -175,7 +176,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
             attn_mask,
             kv_caches[i],
             input_params_new,
-            i,
             event,
             event_flag);
       if (use_deepstack) {
