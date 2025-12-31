@@ -118,10 +118,14 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
     // Ensure calculation base is at least ep_size
     int64_t effective_seqs =
         std::max((int64_t)FLAGS_max_seqs_per_batch, (int64_t)ep_size);
-    int64_t raw_token_num =
+    // NOTE: FLAGS_max_seqs_per_batch represents the maximum total batch size,
+    // regardless of the dp size. To ensure robust scheduling and account
+    // for the worst-case scenario, we must guarantee that each rank is capable
+    // of handling the maximum possible number of tokens. Therefore, we define
+    // max_num_tokens_per_rank as the full maximum value, without dividing by
+    // either the rank count or the dp size.
+    int64_t max_num_tokens_per_rank =
         (1 + FLAGS_num_speculative_tokens) * effective_seqs * topk_;
-    // Round up to the nearest multiple of ep_size
-    int64_t max_num_tokens_per_rank = (raw_token_num + ep_size - 1) / ep_size;
 
     // make sure that all layers share the same deep ep instance
     //  so that the memory footprint is minimized
