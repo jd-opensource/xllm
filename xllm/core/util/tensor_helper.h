@@ -25,7 +25,7 @@ limitations under the License.
 namespace xllm {
 
 template <typename T>
-inline torch::Tensor create_2d_tensor(const std::vector<std::vector<T> >& vec,
+inline torch::Tensor create_2d_tensor(const std::vector<std::vector<T>>& vec,
                                       torch::ScalarType dtype) {
   if (vec.empty()) {
     return {};
@@ -49,6 +49,28 @@ inline torch::Tensor create_2d_tensor(const std::vector<std::vector<T> >& vec,
   }
   return tensor;
 };
+
+inline std::vector<std::vector<float>> tensor_to_2d_float_vector(
+    const torch::Tensor& tensor) {
+  CHECK_NE(tensor.numel(), 0);
+  CHECK_EQ(tensor.dim(), 2);
+
+  torch::Tensor torch_tensor = tensor.to(torch::kCPU).to(torch::kFloat32);
+
+  int64_t dim0 = torch_tensor.size(0);
+  int64_t dim1 = torch_tensor.size(1);
+  float* tensor_data = torch_tensor.contiguous().data_ptr<float>();
+
+  std::vector<std::vector<float>> float_vector;
+  float_vector.reserve(dim0);
+  for (int64_t i = 0; i < dim0; ++i) {
+    float* row_start = tensor_data + i * dim1;
+    std::vector<float> row(row_start, row_start + dim1);
+    float_vector.emplace_back(std::move(row));
+  }
+
+  return float_vector;
+}
 
 inline torch::Tensor safe_to(const torch::Tensor& t,
                              const torch::TensorOptions& options,
