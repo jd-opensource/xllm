@@ -70,8 +70,6 @@ bool CollectMMDataTensorVisitor::visit(MMData& data) {
 }
 
 bool EncoderInputGatherVisitor::visit(MMDataItem& item) {
-  if (item.state().prefix_complete_cached()) return true;
-
   if (item.is_embedded()) return true;
 
   for (const auto& [key, value] : item.data()) {
@@ -103,8 +101,6 @@ bool EncoderInputGatherVisitor::finish(MMBatchData& mm_data) {
 }
 
 bool EncoderOutputScatterVisitor::visit(MMDataItem& item) {
-  if (item.state().prefix_complete_cached()) return true;
-
   if (item.is_embedded()) return true;
 
   std::string prefix;
@@ -157,7 +153,6 @@ bool EncoderOutputScatterVisitor::finish() const {
 
 bool EncoderEmbeddingGatherVisitor::visit(MMDataItem& item) {
   const auto& state = item.state();
-  if (state.prefix_complete_cached()) return true;
 
   int modality_tokens = state.token_pos().length;
   uint32_t cached_token_num = state.prefix_cache().cached_token_num;
@@ -167,7 +162,7 @@ bool EncoderEmbeddingGatherVisitor::visit(MMDataItem& item) {
     auto& emb = std::get<torch::Tensor>(value);
     emb = safe_to(emb, device_, true);
     if (absl::StartsWith(key, gather_prefix_)) {
-      datas_[key].push_back(emb.index({mask}));
+      datas_[key].push_back(emb);
     }
   }
   return true;

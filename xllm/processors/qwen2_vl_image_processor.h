@@ -30,6 +30,21 @@ class Qwen2VLImageProcessor : public ImageProcessor {
 
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
 
+  using Size = std::pair<int, int>;
+  virtual std::optional<Size> smart_resize_image(int height,
+                                                 int width,
+                                                 int factor,
+                                                 int min_pixels,
+                                                 int max_pixels) const;
+
+  virtual std::optional<Size> smart_resize_video(int num_frames,
+                                                 int height,
+                                                 int width,
+                                                 int temporal_factor,
+                                                 int factor,
+                                                 int min_pixels,
+                                                 int max_pixels) const;
+
  private:
   bool process_images(std::vector<torch::Tensor> images, MMData& mm_datas);
   bool process_image(torch::Tensor image,
@@ -47,12 +62,12 @@ class Qwen2VLImageProcessor : public ImageProcessor {
                      VideoMetadata& metadata,
                      torch::Tensor& pixel_values,
                      torch::Tensor& thw);
-  torch::Tensor sample_frames(const VideoMetadata& metadata,
-                              int temporal_patch_size,
-                              int min_frames,
-                              int max_frames,
-                              int num_frames = -1,
-                              double set_fps = -1.0);
+  virtual torch::Tensor sample_frames(const VideoMetadata& metadata,
+                                      int temporal_patch_size,
+                                      int min_frames,
+                                      int max_frames,
+                                      int num_frames = -1,
+                                      double set_fps = -1.0);
 
  private:
   bool do_convert_rgb_ = true;

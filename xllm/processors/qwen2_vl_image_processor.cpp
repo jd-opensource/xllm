@@ -17,14 +17,13 @@ limitations under the License.
 
 namespace xllm {
 
-namespace {
-
-using Size = std::pair<int, int>;
-std::optional<Size> smart_resize(int height,
-                                 int width,
-                                 int factor = 28,
-                                 int min_pixels = 56 * 56,
-                                 int max_pixels = 14 * 14 * 4 * 1280) {
+std::optional<Qwen2VLImageProcessor::Size>
+Qwen2VLImageProcessor::smart_resize_image(int height,
+                                          int width,
+                                          int factor = 28,
+                                          int min_pixels = 56 * 56,
+                                          int max_pixels = 14 * 14 * 4 *
+                                                           1280) const {
   if (static_cast<double>(std::max(height, width)) / std::min(height, width) >
       200) {
     LOG(ERROR) << "Absolute aspect ratio must be smaller than 200";
@@ -58,8 +57,17 @@ std::optional<Size> smart_resize(int height,
 
   return std::make_pair(h_bar, w_bar);
 }
-}  // namespace
 
+std::optional<Qwen2VLImageProcessor::Size>
+Qwen2VLImageProcessor::smart_resize_video(int num_frames,
+                                          int height,
+                                          int width,
+                                          int temporal_factor,
+                                          int factor,
+                                          int min_pixels,
+                                          int max_pixels) const {
+  return smart_resize_image(height, width, factor, min_pixels, max_pixels);
+}
 torch::Tensor Qwen2VLImageProcessor::sample_frames(
     const VideoMetadata& metadata,
     int temporal_patch_size,
@@ -263,11 +271,11 @@ bool Qwen2VLImageProcessor::process_image(torch::Tensor image,
 
   // resize
   if (do_resize_) {
-    auto size = smart_resize(resized_height,
-                             resized_width,
-                             patch_size_ * merge_size_,
-                             min_pixels_,
-                             max_pixels_);
+    auto size = smart_resize_image(resized_height,
+                                   resized_width,
+                                   patch_size_ * merge_size_,
+                                   min_pixels_,
+                                   max_pixels_);
     // size_["shortest_edge"],
     // size_["longest_edge"]);
     if (!size) {
@@ -405,11 +413,13 @@ bool Qwen2VLImageProcessor::process_video(torch::Tensor origin_video,
   auto resized_width = shape[3];
 
   if (do_resize_) {
-    auto size = smart_resize(resized_height,
-                             resized_width,
-                             patch_size_ * merge_size_,
-                             size_["shortest_edge"],
-                             size_["longest_edge"]);
+    auto size = smart_resize_video(static_cast<int>(time_len),
+                                   resized_height,
+                                   resized_width,
+                                   temporal_patch_size_,
+                                   patch_size_ * merge_size_,
+                                   min_pixels_,
+                                   max_pixels_);
     if (!size) {
       return false;
     }
