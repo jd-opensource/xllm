@@ -20,8 +20,8 @@ limitations under the License.
 #include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/qwen3.h"
 #include "models/model_registry.h"
-#include "processors/qwen2_vl_image_processor.h"
-#include "processors/qwen2_vl_input_processor.h"
+#include "processors/qwen3_vl_image_processor.h"
+#include "processors/qwen3_vl_input_processor.h"
 #include "qwen2_5_vl.h"
 
 namespace xllm {
@@ -552,7 +552,6 @@ struct Qwen3_VLImageInputs {
 struct Qwen3_VLVideoInputs {
   torch::Tensor pixel_values_videos;
   torch::Tensor video_grid_thw;
-  torch::Tensor second_per_grid_ts;
 };
 
 class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
@@ -585,17 +584,11 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (const auto& res = mm_data.get<torch::Tensor>("video_grid_thw"))
       video_grid_thw = res.value();
 
-    torch::Tensor second_per_grid_ts;
-    if (const auto& res = mm_data.get<torch::Tensor>("second_per_grid_ts"))
-      second_per_grid_ts = res.value();
-
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Qwen3_VLImageInputs{pixel_values, image_grid_thw};
 
-    if (pixel_values_videos.defined() && video_grid_thw.defined() &&
-        second_per_grid_ts.defined())
-      video_inputs = Qwen3_VLVideoInputs{
-          pixel_values_videos, video_grid_thw, second_per_grid_ts};
+    if (pixel_values_videos.defined() && video_grid_thw.defined())
+      video_inputs = Qwen3_VLVideoInputs{pixel_values_videos, video_grid_thw};
   }
 
   MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
@@ -677,6 +670,7 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
         mm_data.get<torch::Tensor>("embedding|deepstack_2").value()};
     return deepstacks;
   }
+
   torch::Tensor merge_multimodal_embeddings(
       torch::Tensor inputs_embeds,
       const torch::Tensor& multimodal_embeds,
@@ -746,9 +740,9 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen3_VLForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(qwen3_vl, Qwen2_5_VLInputProcessor);
+REGISTER_INPUT_PROCESSOR(qwen3_vl, Qwen3_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_vl, Qwen3_VLForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen3_vl, Qwen2VLImageProcessor);
+REGISTER_IMAGE_PROCESSOR(qwen3_vl, Qwen3VLImageProcessor);
 
 REGISTER_MODEL_ARGS(qwen3_vl, [&] {
   // text config
