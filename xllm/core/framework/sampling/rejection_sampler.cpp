@@ -56,7 +56,7 @@ RejectionSamplerRateController::RejectionSamplerRateController(
       dist_(0.0, 1.0),
       fixed_acceptance_rate_(fixed_acceptance_rate) {}
 
-torch::Tensor RejectionSamplerRateController::FilterWithAcceptanceRate(
+torch::Tensor RejectionSamplerRateController::filter_with_acceptance_rate(
     const torch::Tensor& token_ids) {
   // Check parameters
   if (fixed_acceptance_rate_ < 0.0 || fixed_acceptance_rate_ > 1.0)
@@ -65,7 +65,7 @@ torch::Tensor RejectionSamplerRateController::FilterWithAcceptanceRate(
 
   // Reset state if target acceptance rate changed
   if (std::abs(last_target_ - fixed_acceptance_rate_) > 1e-6) {
-    ResetState(fixed_acceptance_rate_);
+    reset_state(fixed_acceptance_rate_);
   }
 
   // Update window statistics
@@ -109,7 +109,8 @@ torch::Tensor RejectionSamplerRateController::FilterWithAcceptanceRate(
   }
 
   // Get corrected acceptance rate
-  double adj_rate = CalculateAdjustedRate(fixed_acceptance_rate_, combined_err);
+  double adj_rate =
+      calculate_adjusted_rate(fixed_acceptance_rate_, combined_err);
 
   // Decide accept or reject this batch
   bool accept = dist_(gen_) < adj_rate;
@@ -138,14 +139,14 @@ torch::Tensor RejectionSamplerRateController::FilterWithAcceptanceRate(
   return out_tensor;
 }
 
-void RejectionSamplerRateController::ResetState(double new_rate) {
+void RejectionSamplerRateController::reset_state(double new_rate) {
   pid_adj_ = 0.0;
   std::fill(error_buffer_.begin(), error_buffer_.end(), 0.0);
   last_target_ = new_rate;
 }
 
-double RejectionSamplerRateController::CalculateAdjustedRate(double target,
-                                                             double error) {
+double RejectionSamplerRateController::calculate_adjusted_rate(double target,
+                                                               double error) {
   // 1. Nonlinear correction based on error magnitude
   double err_abs = std::abs(error);
   double factor = 1.0;
@@ -282,7 +283,7 @@ SampleOutput RejectionSampler::forward(const torch::Tensor& draft_token_ids,
   SampleOutput output;
   if (rate_controller_) {
     output.next_tokens =
-        rate_controller_->FilterWithAcceptanceRate(accepted_token_ids);
+        rate_controller_->filter_with_acceptance_rate(accepted_token_ids);
   } else {
     output.next_tokens = mask_out_rejected_tokens ? masked_accepted_token_ids
                                                   : accepted_token_ids;

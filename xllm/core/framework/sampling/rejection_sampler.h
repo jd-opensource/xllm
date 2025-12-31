@@ -35,15 +35,15 @@ class RejectionSamplerRateController {
 
   // Core filtering function, decides whether to accept a batch based on target
   // acceptance rate
-  torch::Tensor FilterWithAcceptanceRate(const torch::Tensor& token_ids);
+  torch::Tensor filter_with_acceptance_rate(const torch::Tensor& token_ids);
 
  private:
   // Reset internal state (call when the target acceptance rate changes
   // significantly)
-  void ResetState(double new_rate);
+  void reset_state(double new_rate);
 
   // Compute the final acceptance rate after PID and error correction
-  double CalculateAdjustedRate(double target, double error);
+  double calculate_adjusted_rate(double target, double error);
   size_t window_size_;
 
   // History state (using circular buffer logic)
