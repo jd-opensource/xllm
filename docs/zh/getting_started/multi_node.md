@@ -64,7 +64,7 @@ do
     --node_rank=$i  &
 done
 ```
-这里使用了两个节点，可以通过 `--nnodes=$NNODES` 和`--node_rank=$i`来设置。
+这里使用了两个节点，可以通过 `--nnodes=$NNODES` 和`--node_rank=$i`来设置。此脚本也可以用于单节点启动，只需令`NNODES=1`即可。
 同时可以通过 `ASCEND_RT_VISIBLE_DEVICES` 环境变量设置NPU Device。
 
 客户端测试命令与上一章[客户端调用](./single_node.md#客户端调用)相同。
