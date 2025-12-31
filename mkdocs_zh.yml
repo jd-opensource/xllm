@@ -192,8 +192,11 @@ nav:
         - getting_started/single_node.md
         - getting_started/multi_node.md
         - getting_started/disagg_pd.md
+        - getting_started/multi_machine.md
       - 多模态支持:
         - getting_started/start_vlm_service.md
+      - 离线服务:
+        - getting_started/offline_service.md
     - getting_started/scripts.md
   - 功能介绍:
     - 概览:
@@ -202,11 +205,10 @@ nav:
       - 运行时:
         - features/async_schedule.md
         - features/multi_streams.md
-      - 调度算法:
+      - 调度器:
         - features/continuous_scheduler.md
         - features/chunked_scheduler.md
         - features/zero_evict_scheduler.md
-        - features/prefix_cache.md
       - 分布式:
         - features/disagg_pd.md
       - 算子:
@@ -214,6 +216,7 @@ nav:
         - features/ppmatmul.md
         - features/topk_topP.md
       - KV存储管理:
+        - features/prefix_cache.md
         - features/global_kvcache.md
         - features/xtensor_memory.md
       - 多模态:

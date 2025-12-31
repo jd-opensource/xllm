@@ -1,4 +1,4 @@
-# Chunked Scheduler
+# ChunkedPrefill Scheduler
 
 ## Feature Introduction
 xLLM supports the chunked prefill scheduling strategy. Chunked prefill is a technique that optimizes large language model inference by splitting long prompts into smaller chunks for batch processing, rather than processing the entire prompt at once.

@@ -1,4 +1,4 @@
-# chunked调度器
+# ChunkedPrefill调度器
 
 ## 功能介绍
 xLLM支持chunked prefill调度策略。Chunked prefill是一种优化大语言模型推理的技术，将长prompt分割成多个较小的chunk进行分批处理，而不是一次性处理整个prompt。
