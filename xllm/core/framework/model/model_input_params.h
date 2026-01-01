@@ -245,6 +245,14 @@ struct ModelInputParams {
     params.embedding_ids = std::move(embedding_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
+    params.kv_cache_tokens_nums_host = std::move(kv_cache_tokens_nums_host);
+    params.kv_cache_tokens_nums = safe_to(kv_cache_tokens_nums, device);
+    params.history_compressed_kv = safe_to(history_compressed_kv, device);
+    params.history_k_rope = safe_to(history_k_rope, device);
+    params.ring_cur_seqlen = safe_to(ring_cur_seqlen, device);
+    params.ring_cur_seqlen_host = ring_cur_seqlen_host;
+    params.ring_cache_seqlen = safe_to(ring_cache_seqlen, device);
+    params.ring_cache_seqlen_host = ring_cache_seqlen_host;
 #if defined(USE_NPU)
     params.layer_synchronizer = layer_synchronizer;
 #endif
@@ -391,8 +399,17 @@ struct ModelInputParams {
 #endif
 
   DpEpPaddingData dp_ep_padding_data;
+
   torch::Tensor expert_load_data;
 
+  torch::Tensor kv_cache_tokens_nums;
+  std::vector<int32_t> kv_cache_tokens_nums_host;
+  torch::Tensor history_compressed_kv;
+  torch::Tensor history_k_rope;
+  torch::Tensor ring_cur_seqlen;
+  std::vector<int32_t> ring_cur_seqlen_host;
+  torch::Tensor ring_cache_seqlen;
+  std::vector<int32_t> ring_cache_seqlen_host;
   // new slot offsets for continuous kvcache
   // used to store kv-cache to right position
   // IntTensor: [n_tokens]

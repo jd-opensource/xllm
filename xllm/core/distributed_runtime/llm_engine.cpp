@@ -43,6 +43,9 @@ limitations under the License.
 
 namespace xllm {
 
+// Defines a npu memory alignment constant with 16-byte alignment
+constexpr int32_t NZ_ALIGNMENT = 16;
+
 LLMEngine::LLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
     : options_(options), dist_manager_(dist_manager) {
@@ -255,7 +258,21 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   int64_t slot_size = 0;
   int64_t index_slot_size = 0;
   if (FLAGS_enable_mla) {
+#if defined(USE_NPU)
+    if (FLAGS_enable_prefix_cache) {
+      slot_size =
+          dtype_size *
+          ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
+           (args_.qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT) *
+          NZ_ALIGNMENT;
+    } else {
+      slot_size =
+          dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+    }
+#else
     slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+#endif
+
   } else {
     slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   }
@@ -304,10 +321,30 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   std::vector<std::vector<int64_t>> kv_cache_shape;
   kv_cache_shape.reserve(2);
   if (FLAGS_enable_mla) {
+#if defined(USE_NPU)
+    if (FLAGS_enable_prefix_cache) {
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>{kv_cache_cap.n_blocks,
+                               (args_.kv_lora_rank() + 15) / 16,
+                               block_size,
+                               16});
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>{kv_cache_cap.n_blocks,
+                               (args_.qk_rope_head_dim() + 15) / 16,
+                               block_size,
+                               16});
+    } else {
+      kv_cache_shape.emplace_back(std::vector<int64_t>{
+          kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
+      kv_cache_shape.emplace_back(std::vector<int64_t>{
+          kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
+    }
+#else
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
+#endif
   } else {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});

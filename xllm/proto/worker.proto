@@ -221,6 +221,7 @@ message ForwardInput {
   MMData mm_data = 40;
   repeated int32 q_cu_seq_lens = 41;
   repeated int32 dp_is_decode = 42;
+  repeated int32 kv_cache_tokens_nums = 43;
 }
 
  message BatchedForwardInputs {
