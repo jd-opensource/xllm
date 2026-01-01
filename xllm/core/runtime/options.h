@@ -66,6 +66,8 @@ struct Options {
   // enable speculative decode
   PROPERTY(bool, enable_speculative_decode) = false;
 
+  PROPERTY(bool, is_draft_engine) = false;
+
   PROPERTY(int32_t, world_size) = 1;
 
   // task type, support 'generate' and 'embed' currently

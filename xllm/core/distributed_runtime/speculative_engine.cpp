@@ -45,7 +45,8 @@ SpeculativeEngine::SpeculativeEngine(const runtime::Options& options)
   // draft engine
   engine_options.model_path(options_.draft_model_path().value_or(""))
       .devices(options.draft_devices())
-      .num_decoding_tokens(1);
+      .num_decoding_tokens(1)
+      .is_draft_engine(true);
   draft_engine_ = std::make_unique<LLMEngine>(engine_options, dist_manager_);
 
   // check if llm and ssm are using the same device
@@ -148,11 +149,12 @@ bool SpeculativeEngine::allocate_kv_cache() {
   CHECK_GT(n_blocks, 0) << "no memory for kv cache";
 
   // allocate kv cache
-  Engine::KVCacheCapacity kv_cache_cap;
-  kv_cache_cap.n_blocks = n_blocks;
-  kv_cache_cap.cache_size_in_bytes = kv_cache_size;
-  return engine_->allocate_kv_cache(kv_cache_cap) &&
-         draft_engine_->allocate_kv_cache(kv_cache_cap);
+  target_kv_cache_cap.n_blocks = n_blocks;
+  target_kv_cache_cap.cache_size_in_bytes = kv_cache_size;
+  draft_kv_cache_cap.n_blocks = n_blocks;
+  draft_kv_cache_cap.cache_size_in_bytes = kv_cache_size;
+  return engine_->allocate_kv_cache(target_kv_cache_cap) &&
+         draft_engine_->allocate_kv_cache(draft_kv_cache_cap);
 }
 
 // TODO: support dp batches later
