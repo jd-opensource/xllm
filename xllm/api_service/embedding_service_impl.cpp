@@ -151,8 +151,7 @@ void MMEmbeddingServiceImpl::process_async_impl(
   }
   auto request_id = request_params.request_id;
 
-  std::string payload;
-  call->get_binary_payload(payload);
+  auto& payload = call->get_request_payload();
 
   // schedule the request
   master_->handle_request(

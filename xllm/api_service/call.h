@@ -29,7 +29,8 @@ class Call {
   std::string get_x_request_id() { return x_request_id_; }
   std::string get_x_request_time() { return x_request_time_; }
 
-  bool get_binary_payload(std::string& payload);
+  std::string& get_request_payload() { return request_payload_; }
+  void init_request_payload();
 
   virtual bool is_disconnected() const = 0;
 
@@ -41,6 +42,8 @@ class Call {
 
   std::string x_request_id_;
   std::string x_request_time_;
+
+  std::string request_payload_;
 };
 
 }  // namespace xllm

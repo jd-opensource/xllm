@@ -35,17 +35,17 @@ void Call::init() {
     x_request_time_ =
         *controller_->http_request().GetHeader("x-request-timems");
   }
+
+  init_request_payload();
 }
 
-bool Call::get_binary_payload(std::string& payload) {
-  payload.clear();
-
+void Call::init_request_payload() {
   const auto infer_content_len =
       controller_->http_request().GetHeader(kInferContentLength);
   const auto content_len =
       controller_->http_request().GetHeader(kContentLength);
 
-  if (infer_content_len == nullptr || content_len == nullptr) return false;
+  if (infer_content_len == nullptr || content_len == nullptr) return;
 
   auto infer_len = std::stoul(*infer_content_len);
   auto len = std::stoul(*content_len);
@@ -54,12 +54,11 @@ bool Call::get_binary_payload(std::string& payload) {
     LOG(ERROR) << " content length is invalid:"
                << " infer content len is " << infer_len
                << " , content length is " << len;
-    return false;
+    return;
   }
 
   controller_->request_attachment().copy_to(
-      &payload, len - infer_len, infer_len);
-  return true;
+      &request_payload_, len - infer_len, infer_len);
 }
 
 }  // namespace xllm
