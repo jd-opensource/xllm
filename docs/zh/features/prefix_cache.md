@@ -1,4 +1,4 @@
-# prefix cache 优化
+# Prefix Cache 优化
 
 ## 功能介绍
 xLLM支持prefix_cache匹配。prefix_cache基于mermer_hash，使用lru淘汰策略，提供更极致的匹配效率，同时提高prefix_cache命中率。

@@ -2,7 +2,7 @@
 
 To help users quickly launch xLLM for rapid inference on different models, we provide optimized startup configurations for various mainstream open-source large language models that we have tested experimentally:
 
-## Qwen2/3
+## Qwen2 / 3
 
 ```bash title="Qwen2/3 Startup Script" linenums="1" 
 export PYTHON_INCLUDE_PATH="$(python3 -c 'from sysconfig import get_paths; print(get_paths()["include"])')"
@@ -71,6 +71,7 @@ done
 For different model sizes, only modify the following parameters in the script: `MODEL_PATH: weight path`, `START_DEVICE: starting device`, `NNODES: number of local devices`, `WORLD_SIZE: total number of devices`.
 
 For random datasets generated based on ShareGPT, with input/output length limited to 2048 and TTFT limited to 50ms:
+
 | Model Name | Number of devices | Single device Throughput | 
 |:---------:|:---------:|:---------:|
 |Qwen3-0.6B|      1 | 2946.02 tokens/s|

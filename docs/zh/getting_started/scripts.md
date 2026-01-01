@@ -1,7 +1,7 @@
 # 启动脚本
 为了方便用户快速在不同模型上启动xLLM进行快速推理，我们提供我们实验测试中对于不同的主流开源大模型在大部分情况下较优的启动配置：
 
-## Qwen2/3
+## Qwen2 / 3
 
 ```bash title="Qwen2/3启动脚本" linenums="1" 
 export PYTHON_INCLUDE_PATH="$(python3 -c 'from sysconfig import get_paths; print(get_paths()["include"])')"
@@ -68,6 +68,7 @@ done
 ```
 对于不同大小的模型只需修改脚本里的以下参数：`MODEL_PATH:权重路径`，`START_DEVICE:起始卡`，`NNODES:本机卡数`，`WORLD_SIZE:总计卡数`。
 对于根据ShareGPT产生的随机数据集，限制输入输出长度为2048，限制TTFT为50ms时，
+
 | 模型名称 | 卡数 | 单卡吞吐量 | 
 |:---------:|:---------:|:---------:|
 |Qwen3-0.6B|      1 | 2946.02 tokens/s|

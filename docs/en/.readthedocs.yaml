@@ -11,7 +11,9 @@ build:
     python: "3.13"
   jobs:
     pre_build:
-      - cp -r docs/en/* docs/
+      # - cp -r docs/en/* docs/
+      - mv docs/en/* docs/
+      - rm -rf docs/zh/
       - find docs/ -name "*.md" -exec sed -i 's#../assets/#assets/#g' {} \;
 
 # Build documentation with Mkdocs

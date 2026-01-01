@@ -190,8 +190,11 @@ nav:
         - getting_started/single_node.md
         - getting_started/multi_node.md
         - getting_started/disagg_pd.md
+        - getting_started/multi_machine.md
       - Multimodal Support:
         - getting_started/start_vlm_service.md
+      - Offline Service:
+        - getting_started/offline_service.md
     - getting_started/scripts.md
   - Features:
     - Overview:
@@ -204,7 +207,6 @@ nav:
         - features/continuous_scheduler.md
         - features/chunked_scheduler.md
         - features/zero_evict_scheduler.md
-        - features/prefix_cache.md
       - Distributed:
         - features/disagg_pd.md
       - Operators:
@@ -212,6 +214,7 @@ nav:
         - features/ppmatmul.md
         - features/topk_topP.md
       - Memory Management:
+        - features/prefix_cache.md
         - features/global_kvcache.md
         - features/xtensor_memory.md
       - Multimodal:
@@ -225,49 +228,3 @@ nav:
         - ACLGraph: features/acl_graph.md
   - CLI Reference:
     - cli_reference.md
-
-
-# nav:
-#   - Home: en/index.md
-#   - Getting Started:
-#     - en/getting_started/compile.md
-#     - Quick Start:
-#       - Online Service: 
-#         - en/getting_started/single_node.md
-#         - en/getting_started/multi_node.md
-#         - en/getting_started/PD_disagg.md
-#       - Multimodal Support:
-#         - en/getting_started/start_vlm_service.md
-#     - en/getting_started/scripts.md
-#   - Features:
-#     - Overview:
-#       - en/features/overview.md
-#     - Feature List:
-#       - Runtime:
-#         - en/features/async_schedule.md
-#         - en/features/multi_streams.md
-#       - Scheduler:
-#         - en/features/continuous_scheduler.md
-#         - en/features/chunked_scheduler.md
-#         - en/features/zero_evict_scheduler.md
-#         - en/features/prefix_cache.md
-#       - Distributed:
-#         - en/features/disagg_pd.md
-#       - Operators:
-#         - en/features/groupgemm.md
-#         - en/features/ppmatmul.md
-#         - en/features/topk_topP.md
-#       - Memory Management:
-#         - en/features/global_kvcache.md
-#         - en/features/xtensor_memory.md
-#       - Multimodal:
-#         - en/features/multimodal.md
-#       - MoE Optimization:
-#         - en/features/moe_params.md
-#         - en/features/eplb.md
-#       - Advanced Guides:
-#         - Speculative Inference: en/features/mtp.md
-#         - EPLB: en/features/eplb.md
-#         - ACLGraph: en/features/acl_graph.md
-#   - CLI Reference:
-#     - en/cli_reference.md

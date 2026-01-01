@@ -1,4 +1,4 @@
-# zero_evict调度器
+# Zero Evict调度器
 
 ## 功能介绍
 xLLM支持zero_evict调度策略。zero_evict调度策略是一种尽可能减少请求淘汰率的调度算法，可以减少淘汰请求的prefill计算，减少TPOT。
