@@ -5,9 +5,16 @@ include_directories(.)
 
 # Set warning-as-error for xllm code (third-party headers are marked as SYSTEM)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  add_compile_options(-Werror)
+  add_compile_options(
+    $<$<COMPILE_LANGUAGE:CXX>:-Werror>
+    $<$<COMPILE_LANGUAGE:C>:-Werror>
+  )
+
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    add_compile_options(-Wno-macro-redefined)
+    add_compile_options(
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-macro-redefined>
+      $<$<COMPILE_LANGUAGE:C>:-Wno-macro-redefined>
+    )
   endif()
 endif()
 
