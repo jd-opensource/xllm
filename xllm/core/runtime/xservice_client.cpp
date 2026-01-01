@@ -62,6 +62,10 @@ bool XServiceClient::init(const std::string& etcd_addr,
                           const std::string& xservice_addr,
                           const std::string& instance_name,
                           const BlockManagerPool* block_manager_pool) {
+  if (initialize_done_) {
+    LOG(INFO) << "XServiceClient is already initialized, skipping.";
+    return true;
+  }
   if (!etcd_addr.empty()) {
     instance_name_ = instance_name;
     chan_options_.protocol = "http";
