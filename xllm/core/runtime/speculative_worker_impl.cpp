@@ -245,11 +245,6 @@ bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
                                                  kv_cache_shape);
     embedding_allocator_ = std::make_shared<EmbeddingAllocator>(
         kv_cache_shape[0][0], embedding_size_, dtype_);
-    kv_cache_transfer_->allocate_embedding(
-        embedding_allocator_,
-        {kv_cache_shape[0][0], embedding_size_},
-        dtype_,
-        device_);
   }
   return true;
 }
@@ -332,23 +327,8 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
         /*dim=*/0, input.sampling_params.selected_token_idxes);
     CHECK_EQ(embeddings.size(0), output.sample_output.next_tokens.size(0));
     embedding_allocator_->write(input.input_params.embedding_ids, embeddings);
-#if defined(USE_NPU)
-    if (kv_cache_transfer_) {
-      kv_cache_transfer_->copy_blocks(input.input_params.embedding_ids,
-                                      /*h2d*/ true);
-    }
-#endif
   }
   output.sample_output.embeddings = torch::Tensor();
-
-#if defined(USE_NPU)
-  if (options_.kv_cache_transfer_mode() == "PUSH" &&
-      !input.transfer_kv_infos.empty()) {
-    auto future = kv_cache_transfer_->push_kv_blocks_async(
-        input.transfer_kv_infos, context_.get_parallel_args(), nullptr, true);
-    auto out = std::move(future).get();
-  }
-#endif
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_) {
     return std::nullopt;
@@ -392,12 +372,6 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
   // More work need to support n-gram and native speculative decoding.
   ForwardInput draft_input = input;
   // get embedding cache
-#if defined(USE_NPU)
-  if (kv_cache_transfer_) {
-    kv_cache_transfer_->copy_blocks(input.input_params.embedding_ids,
-                                    /*h2d*/ false);
-  }
-#endif
   torch::Tensor embeddings =
       embedding_allocator_->read(draft_input.input_params.embedding_ids);
   draft_input.input_params.input_embedding = embeddings.to(device_);
@@ -456,18 +430,11 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
   embedding_allocator_->write_validate(input.input_params.embedding_ids,
                                        val_output.next_tokens.to(torch::kCPU),
                                        val_output.embeddings);
-#if defined(USE_NPU)
-  if (kv_cache_transfer_) {
-    kv_cache_transfer_->copy_blocks(input.input_params.embedding_ids,
-                                    /*h2d*/ true);
-  }
-#endif
-
-  val_output.embeddings = torch::Tensor();
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_) {
     return std::nullopt;
   }
+  val_output.embeddings = torch::Tensor();
   target_output.sample_output = val_output;
   return target_output;
 }
