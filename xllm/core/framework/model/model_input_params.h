@@ -330,10 +330,19 @@ struct ModelInputParams {
 
   // whether the kv-cache is empty for all sequences.
   bool empty_kv_cache = true;
+  // whether the kv-cache is empty for all sequences,mainly used for dp case
+  bool global_empty_kv_cache = true;
+
   BatchForwardType batch_forward_type;
 
   // total number of sequences in the batch
   int32_t num_sequences = 0;
+
+  // max length for qkv.
+  int32_t kv_max_seq_len = 0;
+  int32_t q_max_seq_len = 0;
+
+  uint64_t batch_id;
 
   torch::Tensor q_seq_lens;
   torch::Tensor kv_seq_lens;
@@ -341,66 +350,11 @@ struct ModelInputParams {
   std::vector<int> kv_seq_lens_vec;
   std::vector<int> q_seq_lens_vec;
 
-  // max length for qkv.
-  int32_t kv_max_seq_len = 0;
-  int32_t q_max_seq_len = 0;
-
   // IntTensor: [n_tokens]
   torch::Tensor new_cache_slots;
 
   // IntTensor: [n_seq, max_n_blocks]
   torch::Tensor block_tables;
-
-  // input embedding
-  mutable torch::Tensor input_embedding;
-
-  // multimodal
-  MMBatchData mm_data;
-
-  // deep_stack for Qwen3-VL
-  mutable std::vector<torch::Tensor> deep_stacks;
-  // visual pos mask for Qwen3-VL
-  mutable torch::Tensor visual_pos_masks;
-
-  // num tokens of all workers，mainly used for dp case
-  std::vector<int32_t> dp_global_token_nums;
-  std::vector<int32_t> dp_is_decode;
-  // whether the kv-cache is empty for all sequences,mainly used for dp case
-  bool global_empty_kv_cache = true;
-
-  // embedding ids of each sequence
-  std::vector<int32_t> embedding_ids;
-
-  // chunked prefill case of speculative decoding
-  // extra token ids for each sequence, and -1 for last chunk
-  std::vector<int32_t> extra_token_ids;
-
-  // swap
-  std::vector<BlockTransferInfo> swap_blocks;
-
-  // block copy kernel
-  torch::Tensor src_block_indices;
-  torch::Tensor dst_block_indices;
-  torch::Tensor cum_sum;
-
-#if defined(USE_NPU)
-  std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
-  uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
-  std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
-      nullptr;
-#endif
-
-  DpEpPaddingData dp_ep_padding_data;
-  torch::Tensor expert_load_data;
-
-  // new slot offsets for continuous kvcache
-  // used to store kv-cache to right position
-  // IntTensor: [n_tokens]
-  torch::Tensor new_cache_slot_offsets;
-
-  // kvcache offset of sequence in the xtensor for all layers
-  // IntTensor: [n_seq]
-  torch::Tensor kv_cache_start_offsets;
 
   // the indptr of the paged kv-cache
   // used in flashinfer
@@ -417,7 +371,54 @@ struct ModelInputParams {
   // IntTensor: [n_seq]
   torch::Tensor paged_kv_last_page_len;
 
-  uint64_t batch_id;
+  // new slot offsets for continuous kvcache
+  // used to store kv-cache to right position
+  // IntTensor: [n_tokens]
+  torch::Tensor new_cache_slot_offsets;
+
+  // kvcache offset of sequence in the xtensor for all layers
+  // IntTensor: [n_seq]
+  torch::Tensor kv_cache_start_offsets;
+
+  // input embedding
+  mutable torch::Tensor input_embedding;
+
+  // num tokens of all workers，mainly used for dp case
+  std::vector<int32_t> dp_global_token_nums;
+  std::vector<int32_t> dp_is_decode;
+
+  // embedding ids of each sequence
+  std::vector<int32_t> embedding_ids;
+
+  // chunked prefill case of speculative decoding
+  // extra token ids for each sequence, and -1 for last chunk
+  std::vector<int32_t> extra_token_ids;
+
+  // swap
+  std::vector<BlockTransferInfo> swap_blocks;
+
+  // block copy kernel
+  torch::Tensor src_block_indices;
+  torch::Tensor dst_block_indices;
+  torch::Tensor cum_sum;
+
+  // multimodal
+  MMBatchData mm_data;
+
+  // deep_stack for Qwen3-VL
+  mutable std::vector<torch::Tensor> deep_stacks;
+  // visual pos mask for Qwen3-VL
+  mutable torch::Tensor visual_pos_masks;
+
+#if defined(USE_NPU)
+  std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
+  uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
+  std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
+      nullptr;
+#endif
+
+  DpEpPaddingData dp_ep_padding_data;
+  torch::Tensor expert_load_data;
 
   RecModelInputParams rec_params;
 

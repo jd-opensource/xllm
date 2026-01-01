@@ -140,6 +140,10 @@ void SamplingParameters::init(
   this->logprobs = logprobs;
   this->max_top_logprobs = max_top_logprobs;
   this->is_embeddings = is_embeddings;
+  if (this->do_sample.defined()) {
+    this->all_random_sample = this->do_sample.all().item<bool>();
+    this->all_greedy_sample = !this->do_sample.any().item<bool>();
+  }
 }
 
 void SamplingParameters::concat(const SamplingParameters& param) {
