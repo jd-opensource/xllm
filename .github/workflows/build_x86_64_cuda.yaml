@@ -1,4 +1,4 @@
-name: xLLM Build x86_64 MLU
+name: xLLM Build x86_64 CUDA
 
 on: 
   workflow_dispatch:
@@ -34,7 +34,7 @@ on:
       - 'examples/generate.py'
 
 env:
-  JOBNAME: xllm-x86_64-mlu-cibuild-${{ github.run_id }}
+  JOBNAME: xllm-x86_64-cuda-cibuild-${{ github.run_id }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -118,5 +118,5 @@ jobs:
       if: ${{ success() }}
       timeout-minutes: 60
       run: |
-        chmod +x ./cibuild/build_mlu.sh
-        bash cibuild/build_mlu.sh 'pip install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple; python setup.py build --device mlu'
+        chmod +x ./cibuild/build_cuda.sh
+        bash cibuild/build_cuda.sh 'pip install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple; python setup.py build --device cuda'
