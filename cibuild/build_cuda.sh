@@ -1,14 +1,12 @@
 #!/bin/bash
-set -ex
+set -e
 
 function error() {
-  echo "Require build command, e.g. python setup.py build --device ilu"
+  echo "Require build command, e.g. python setup.py build --device cuda"
   exit 1
 }
 
-REGISTRY="registry.iluvatar.com.cn:10443/infra"
-COREX_VERSION="4.4.0.20251023"
-IMAGE="${REGISTRY}/xllm-builder:${COREX_VERSION}-ubuntu22.04-py310-xllm-x86_64"
+IMAGE="quay.io/jd_xllm/xllm-ai:xllm-dev-cuda-x86"
 
 RUN_OPTS=(
   --rm
@@ -16,8 +14,10 @@ RUN_OPTS=(
   --privileged
   --ipc=host
   --network=host
+  --pid=host
+  --shm-size '128gb'
   -v /export/home:/export/home
-  -v /export/home/ilu_vcpkg_cache:/root/.cache/vcpkg # cached vcpkg installed dir
+  -v /export/home/cuda_vcpkg_cache:/root/.cache/vcpkg # cached vcpkg installed dir
   -w /export/home
 )
 
