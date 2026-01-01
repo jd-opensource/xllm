@@ -255,9 +255,17 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
 
 void Batch::process_sample_output(const RawForwardOutput& raw_output,
                                   bool replace_fake_token) {
-  // if raw_output.outputs.size() value is 0,
-  // this means all sequences are in prefill stage status.
-  const int64_t num_seqs = raw_output.outputs.size();
+  int64_t num_seqs;
+  if (raw_output.mm_embeddings.size() > 0) {
+    // mm embed task
+    num_seqs = sequences_.size();
+  } else {
+    // generate or embed task
+    // if raw_output.outputs.size() value is 0,
+    // this means all sequences are in prefill stage status.
+    num_seqs = raw_output.outputs.size();
+  }
+  int64_t mm_embedding_idx = 0;
   int64_t output_idx = 0;
   const auto sequences = get_sequences();
   for (auto* seq : sequences) {
@@ -269,6 +277,26 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
       continue;
     }
     CHECK_LT(output_idx, num_seqs);
+
+    // mm embed task
+    if (raw_output.mm_embeddings.size() > 0) {
+      int64_t n_images = seq->get_mm_data().size();
+      if (n_images > 0) {
+        std::vector<torch::Tensor> seq_mm_embeddings;
+        seq_mm_embeddings.reserve(n_images);
+        for (int i = mm_embedding_idx; i < mm_embedding_idx + n_images; i++) {
+          CHECK_LT(i, raw_output.mm_embeddings.size());
+          seq_mm_embeddings.push_back(raw_output.mm_embeddings[i]);
+        }
+        seq->update_mm_embeddings(seq_mm_embeddings);
+        // we only support complete mm embedding in one iteration now
+        CHECK(seq->finished());
+
+        mm_embedding_idx += n_images;
+        output_idx++;
+        continue;
+      }
+    }
 
     const auto curr_idx = output_idx++;
     const RawSampleOutput raw_sam_output = raw_output.outputs[curr_idx];
