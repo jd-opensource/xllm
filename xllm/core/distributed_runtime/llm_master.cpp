@@ -307,6 +307,12 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
 
   int32_t max_context_len = model_args_.max_position_embeddings();
+  if (!model_args_.rope_scaling_rope_type().empty() &&
+      boost::iequals(model_args_.rope_scaling_rope_type(), "yarn")) {
+    max_context_len = static_cast<int32_t>(
+        model_args_.rope_scaling_original_max_position_embeddings() *
+        model_args_.rope_scaling_factor());
+  }
   if (!options_.enable_chunked_prefill()) {
     max_context_len =
         std::min(max_context_len, options_.max_tokens_per_batch());

@@ -39,6 +39,7 @@ torch::Tensor apply_deepseek_yarn_rope_scaling(float factor,
                                                int64_t rotary_dim,
                                                float theta,
                                                int64_t old_context_len);
+
 torch::Tensor compute_inv_freq(int64_t rotary_dim,
                                float rope_theta,
                                const torch::TensorOptions& options);
@@ -99,6 +100,19 @@ torch::Tensor get_chatglm_rotary_embedding(int64_t dim,
                                            int64_t seq_len,
                                            double rope_theta,
                                            const torch::TensorOptions& options);
+
+torch::Tensor get_yarn_rotary_embedding(
+    int64_t rotary_dim,
+    int64_t max_position_embeddings,
+    int64_t original_max_position_embeddings,
+    float rope_theta,
+    bool interleaved,
+    float scaling_factor,
+    const torch::TensorOptions& options,
+    float extrapolation_factor = 1.0f,
+    float attn_factor = 1.0f,
+    float beta_fast = 32.0f,
+    float beta_slow = 1.0f);
 
 torch::Tensor get_deepseek_rotary_embedding(
     int64_t head_size,

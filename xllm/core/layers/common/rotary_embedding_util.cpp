@@ -119,10 +119,18 @@ inline torch::Tensor create_cos_sin_tensor(
     bool interleaved,
     const torch::Tensor& inv_freq,
     const torch::TensorOptions& options) {
-  float mscale_ = static_cast<float>(
-      layer::rotary::yarn_get_mscale(scaling_factor, mscale) /
-      layer::rotary::yarn_get_mscale(scaling_factor, mscale_all_dim) *
-      attn_factor);
+  float mscale_;
+  if (mscale_all_dim > 0.0) {
+    // DeepSeek YaRN
+    mscale_ = static_cast<float>(
+        layer::rotary::yarn_get_mscale(scaling_factor, mscale) /
+        layer::rotary::yarn_get_mscale(scaling_factor, mscale_all_dim) *
+        attn_factor);
+  } else {
+    // Standard YaRN
+    mscale_ = static_cast<float>(
+        layer::rotary::yarn_get_mscale(scaling_factor, mscale) * attn_factor);
+  }
   // [max_position_embeddings]
   auto t = torch::arange(max_position_embeddings * scaling_factor);
   // [max_position_embeddings, rotary_dim/2]
@@ -243,6 +251,43 @@ torch::Tensor apply_deepseek_yarn_rope_scaling(float factor,
   torch::Tensor inv_freq = inv_freq_interpolation * (1 - inv_freq_mask) +
                            inv_freq_extrapolation * inv_freq_mask;
   return inv_freq;
+}
+
+torch::Tensor get_yarn_rotary_embedding(
+    int64_t rotary_dim,
+    int64_t max_position_embeddings,
+    int64_t original_max_position_embeddings,
+    float rope_theta,
+    bool interleaved,
+    float scaling_factor,
+    const torch::TensorOptions& options,
+    float extrapolation_factor,
+    float attn_factor,
+    float beta_fast,
+    float beta_slow) {
+  // Apply YaRN rope scaling to compute inverse frequencies
+  auto inv_freq =
+      apply_deepseek_yarn_rope_scaling(scaling_factor,
+                                       extrapolation_factor,
+                                       beta_fast,
+                                       beta_slow,
+                                       rotary_dim,
+                                       rope_theta,
+                                       original_max_position_embeddings);
+  constexpr float kYarnMscale = 1.0f;
+  constexpr float kYarnMscaleAllDim = 0.0f;
+
+  auto cos_sin = compute_cos_sin_cache(rotary_dim,
+                                       original_max_position_embeddings,
+                                       interleaved,
+                                       scaling_factor,
+                                       attn_factor,
+                                       kYarnMscale,
+                                       kYarnMscaleAllDim,
+                                       inv_freq,
+                                       options);
+
+  return cos_sin;
 }
 
 torch::Tensor compute_inv_freq(int64_t rotary_dim,

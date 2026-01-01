@@ -15,6 +15,9 @@ limitations under the License.
 
 #pragma once
 
+#include <boost/algorithm/string.hpp>
+
+#include "core/layers/common/rotary_embedding_util.h"
 #include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
@@ -46,16 +49,25 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
     atb_pos_emb_ = layer::NpuPosEmbedding(context);
-    cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        128,
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
-        options);
+
+    if (!model_args.rope_scaling_rope_type().empty() &&
+        boost::iequals(model_args.rope_scaling_rope_type(), "yarn")) {
+      cos_sin_ = layer::rotary::get_yarn_rotary_embedding(
+          128,
+          model_args.max_position_embeddings(),
+          model_args.rope_scaling_original_max_position_embeddings(),
+          model_args.rope_theta(),
+          false,
+          model_args.rope_scaling_factor(),
+          options);
+    } else {
+      cos_sin_ = layer::rotary::get_concat_rotary_embedding(
+          128,
+          model_args.max_position_embeddings(),
+          model_args.rope_theta(),
+          options);
+    }
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
-    // encode_attn_mask_ =
-    //   layer::AttentionMask(options.device(),
-    //   options.dtype()).get_attn_mask(2048, options.device(),
-    //   options.dtype());
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
@@ -229,6 +241,12 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
     return args->hidden_size() / args->n_heads();
   });
+
+  // YaRN RoPE scaling parameters
+  LOAD_ARG(rope_scaling_rope_type, "rope_scaling.rope_type");
+  LOAD_ARG(rope_scaling_factor, "rope_scaling.factor");
+  LOAD_ARG(rope_scaling_original_max_position_embeddings,
+           "rope_scaling.original_max_position_embeddings");
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
