@@ -25,6 +25,8 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.cpp>
     kv_cache_store.cpp
     hierarchy_kv_cache_transfer.cpp
+    $<$<BOOL:${USE_NPU}>:mooncake_transfer_engine.cpp>
+    $<$<BOOL:${USE_NPU}>:mooncake_kv_cache_transfer.cpp>
   DEPS
     :common
     $<$<BOOL:${USE_NPU}>:graph>

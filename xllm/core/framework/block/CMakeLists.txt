@@ -50,6 +50,6 @@ if(USE_NPU)
       GTest::gtest_main
   )
 
-  target_link_libraries(block_test PRIVATE OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
+  target_link_libraries(block_test PRIVATE OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf c_sec)
   add_dependencies(block_test brpc-static)
 endif()
