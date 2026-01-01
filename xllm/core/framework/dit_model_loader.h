@@ -43,6 +43,7 @@ class DiTFolderLoader {
   bool load_args(const std::string& model_weights_path);
   bool load_model_args(const std::string& model_weights_path);
   bool load_tokenizer_args(const std::string& model_weights_path);
+  bool load_image_preprocessor_args(const std::string& model_weights_path);
 
   // model args
   ModelArgs args_;

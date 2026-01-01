@@ -16,24 +16,13 @@ limitations under the License.
 
 #pragma once
 
-#include <atb/atb_infer.h>
-#include <c10/core/ScalarType.h>
 #include <torch/torch.h>
 
-#include <regex>
-#include <unordered_map>
-
-#include "core/framework/dit_model_loader.h"
-#include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
 #include "dit_linear.h"
 #include "models/model_registry.h"
-#include "processors/clip_image_processor.h"
 #include "processors/input_processor.h"
-#include "processors/pywarpper_image_processor.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
 // clip_text_model compatible with huggingface weights
