@@ -728,7 +728,9 @@ bool ChunkedPrefillScheduler::allocate_blocks_for(
   allocate_shared_blocks_for(sequence);
 
   // number of tokens in the kv cache, which are already processed
-  const size_t kv_cache_tokens_num = sequence->kv_state().kv_cache_tokens_num();
+  const size_t kv_cache_tokens_num =
+      std::max(sequence->kv_state().kv_cache_tokens_num(),
+               sequence->host_kv_state().kv_cache_tokens_num());
   // the total number tokens for the sequence can be handled till now.
   // there may some tokens can not be handled once when enable chunked prefill.
   size_t max_handle_num_tokens =

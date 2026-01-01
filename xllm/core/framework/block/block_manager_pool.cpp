@@ -130,7 +130,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
 
   // first try to allocate shared blocks
   if (sequence->kv_state().num_kv_blocks() == 0) {
-    allocate_shared(sequence);
+    BlockManagerPool::allocate_shared(sequence);
   }
 
   const size_t num_blocks = sequence->kv_state().num_kv_blocks();
