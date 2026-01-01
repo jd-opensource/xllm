@@ -14,6 +14,7 @@ cc_library(
     executor.h
     executor_impl.h
     executor_impl_factory.h
+    vlm_executor_impl.h
     base_executor_impl.h
     dit_executor.h
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.h>
@@ -26,6 +27,7 @@ cc_library(
     embed_worker_impl.h
     embed_vlm_worker_impl.h
     rec_worker_impl.h
+    mm_embed_vlm_worker_impl.h
     worker_client.h
     xservice_client.h
     speculative_worker_impl.h
@@ -34,6 +36,7 @@ cc_library(
     executor.cpp
     executor_impl_factory.cpp
     base_executor_impl.cpp
+    vlm_executor_impl.cpp
     dit_executor.cpp
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.cpp>
     $<$<BOOL:${USE_MLU}>:mlu_graph_executor_impl.cpp>
@@ -45,6 +48,7 @@ cc_library(
     embed_worker_impl.cpp
     embed_vlm_worker_impl.cpp
     rec_worker_impl.cpp
+    mm_embed_vlm_worker_impl.cpp
     worker_client.cpp
     xservice_client.cpp
     params_utils.cpp

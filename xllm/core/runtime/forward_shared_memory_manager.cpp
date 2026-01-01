@@ -109,11 +109,10 @@ inline size_t get_eplb_info_size(const EplbInfo& info) {
          type_size<int32_t>;  // update_layer_id
 }
 
-inline size_t get_mm_batch_data_size(const MMBatchData& mm_data) {
+inline size_t get_mm_dict_size(const MMDict& mm_dict) {
   size_t total = 0;
-  auto& data = mm_data.data();
-  total += type_size<size_t> + type_size<uint32_t>;  // mm_dict size + mm_type
-  for (auto& [mm_key, mm_value] : data) {
+  total += type_size<size_t>;  // mm_dict size
+  for (auto& [mm_key, mm_value] : mm_dict) {
     total += get_string_size(mm_key);
     total += type_size<int32_t>;  // num of tensors
     if (std::holds_alternative<torch::Tensor>(mm_value)) {
@@ -124,6 +123,49 @@ inline size_t get_mm_batch_data_size(const MMBatchData& mm_data) {
         total += get_tensor_size(tensor);
       }
     }
+  }
+  return total;
+}
+
+inline size_t get_mm_item_size(const MMDataItem& mm_item) {
+  size_t total = 0;
+
+  total += type_size<uint32_t>;               // type
+  total += get_mm_dict_size(mm_item.data());  // dict
+
+  // token_pos
+  total += type_size<uint32_t> * 2;
+
+  // prefix_cache
+  total += MURMUR_HASH3_VALUE_LEN;
+  total += type_size<uint32_t>;
+
+  return total;
+}
+
+inline size_t get_mm_data_size(const MMData& mm_data) {
+  size_t total = 0;
+  total += type_size<uint32_t>;  //  mm_type
+  if (mm_data.hold<MMItemVec>()) {
+    total += type_size<size_t>;  // num of mm_items
+    const auto& mm_items = mm_data.items<MMItemVec>();
+    for (const auto& mm_item : mm_items) {
+      total += get_mm_item_size(mm_item);
+    }
+  } else if (mm_data.hold<MMDict>()) {
+    total += get_mm_dict_size(mm_data.items<MMDict>());
+  }
+  return total;
+}
+
+inline size_t get_mm_batch_data_size(const MMBatchData& mm_data) {
+  const auto& vec = mm_data.mm_data_vec();
+
+  size_t total = 0;
+  total += type_size<size_t>;  // num of vec
+  total += type_size<bool>;    // is_mm_item
+  for (const auto& mm_data : vec) {
+    total += get_mm_data_size(mm_data);
   }
   return total;
 }
@@ -316,19 +358,22 @@ inline void write_swap_blocks(char*& buffer,
   }
 }
 
-inline void write_mm_batch_data(char*& buffer, const MMBatchData& mm_data) {
-  auto& mm_dict = mm_data.data();
+inline void write_vector_tensor(char*& buffer,
+                                const std::vector<torch::Tensor>& tensor_vec) {
+  int32_t tensor_num = tensor_vec.size();
+  write_data(buffer, tensor_num);
+  for (const auto& tensor : tensor_vec) {
+    write_tensor(buffer, tensor);
+  }
+}
+inline void write_mm_dict(char*& buffer, const MMDict& mm_dict) {
   // size
   size_t size = mm_dict.size();
   write_data(buffer, (size_t)size);
-  // mm_type
-  uint32_t mm_type = mm_data.type();
-  write_data(buffer, mm_type);
   // tensor num
   int32_t tensor_num = 1;
   for (auto& [mm_key, mm_value] : mm_dict) {
     write_string(buffer, mm_key);
-
     if (std::holds_alternative<torch::Tensor>(mm_value)) {
       tensor_num = 1;
       write_data(buffer, tensor_num);
@@ -342,6 +387,49 @@ inline void write_mm_batch_data(char*& buffer, const MMBatchData& mm_data) {
         write_tensor(buffer, tensor);
       }
     }
+  }
+}
+
+inline void write_mm_item(char*& buffer, const MMDataItem& item) {
+  write_data(buffer, item.type());
+  write_mm_dict(buffer, item.data());
+
+  const auto& state = item.state();
+  // write token_pos
+  write_data(buffer, state.token_pos().offset);
+  write_data(buffer, state.token_pos().length);
+
+  // write prefix_cache
+  memcpy(buffer, state.prefix_cache().key.data, MURMUR_HASH3_VALUE_LEN);
+  buffer += MURMUR_HASH3_VALUE_LEN;
+  write_data(buffer, state.prefix_cache().cached_token_num);
+}
+
+inline void write_mm_data_items(char*& buffer, const MMData& mm_data) {
+  const auto& mm_items = mm_data.items<MMItemVec>();
+  write_data(buffer, mm_data.type());
+  write_data(buffer, mm_items.size());
+  for (const auto& mm_item : mm_items) {
+    write_mm_item(buffer, mm_item);
+  }
+}
+
+inline void write_mm_data_dict(char*& buffer, const MMData& mm_data) {
+  const auto& mm_dict = mm_data.items<MMDict>();
+  write_data(buffer, mm_data.type());
+  write_mm_dict(buffer, mm_dict);
+}
+
+inline void write_mm_batch_data(char*& buffer, const MMBatchData& mm_data) {
+  const auto& vec = mm_data.mm_data_vec();
+  write_data(buffer, vec.size());
+
+  bool is_mm_item = vec.size() ? vec[0].hold<MMItemVec>() : true;
+  write_data(buffer, is_mm_item);
+  std::function<void(char*&, const MMData&)> write_mm_data =
+      is_mm_item ? write_mm_data_items : write_mm_data_dict;
+  for (const auto& mm_data : vec) {
+    write_mm_data(buffer, mm_data);
   }
 }
 
@@ -495,14 +583,20 @@ inline void read_swap_blocks(const char*& buffer,
   }
 }
 
-inline void read_mm_batch_data(const char*& buffer, MMBatchData& mm_data) {
+inline void read_vector_tensor(const char*& buffer,
+                               std::vector<torch::Tensor>& tensor_vec) {
+  int32_t tensor_num;
+  read_data(buffer, tensor_num);
+  tensor_vec.resize(tensor_num);
+  for (size_t i = 0; i < tensor_num; ++i) {
+    read_tensor(buffer, tensor_vec[i]);
+  }
+}
+
+inline void read_mm_dict(const char*& buffer, MMDict& mm_dict) {
   size_t size;
   read_data(buffer, size);
-  uint32_t mm_type;
-  read_data(buffer, mm_type);
   int32_t tensor_num;
-
-  MMDict mm_dict;
   while (size--) {
     std::string mm_key;
     read_string(buffer, mm_key);
@@ -519,7 +613,71 @@ inline void read_mm_batch_data(const char*& buffer, MMBatchData& mm_data) {
       mm_dict[mm_key] = tensor_vec;
     }
   }
-  mm_data = std::move(MMBatchData(mm_type, mm_dict));
+}
+
+inline void read_mm_item(const char*& buffer, MMDataItem& item) {
+  uint32_t type;
+  read_data(buffer, type);
+  MMDict dict;
+  read_mm_dict(buffer, dict);
+  auto mm_type_value = static_cast<MMType::Value>(type);
+  item = std::move(MMDataItem(mm_type_value, dict));
+  auto& state = item.mutable_state();
+
+  // read token_pos
+  read_data(buffer, state.mutable_token_pos().offset);
+  read_data(buffer, state.mutable_token_pos().length);
+
+  // read prefix_cache
+  std::memcpy(
+      state.mutable_prefix_cache().key.data, buffer, MURMUR_HASH3_VALUE_LEN);
+  buffer += MURMUR_HASH3_VALUE_LEN;
+  read_data(buffer, state.mutable_prefix_cache().cached_token_num);
+}
+
+inline void read_mm_data_dict(const char*& buffer, MMData& mm_data) {
+  uint32_t mm_type;
+  read_data(buffer, mm_type);
+  MMDict mm_dict;
+  read_mm_dict(buffer, mm_dict);
+  MMType ty{static_cast<MMType::Value>(mm_type)};
+  mm_data = MMData(ty, mm_dict);
+}
+
+inline void read_mm_data_items(const char*& buffer, MMData& mm_data) {
+  uint32_t mm_type;
+  read_data(buffer, mm_type);
+  size_t mm_items_num;
+  read_data(buffer, mm_items_num);
+  MMItemVec mm_items;
+  mm_items.reserve(mm_items_num);
+  MMDataItem mm_item(MMType::NONE);
+  for (size_t idx = 0; idx < mm_items_num; ++idx) {
+    read_mm_item(buffer, mm_item);
+    mm_items.push_back(std::move(mm_item));
+  }
+  MMType ty{static_cast<MMType::Value>(mm_type)};
+  mm_data = MMData(ty, std::move(mm_items));
+}
+
+inline void read_mm_batch_data(const char*& buffer,
+                               MMBatchData& batch_mm_data) {
+  std::vector<MMData> vec;
+
+  size_t mm_data_num;
+  read_data(buffer, mm_data_num);
+  bool is_mm_item;
+  read_data(buffer, is_mm_item);
+  vec.reserve(mm_data_num);
+  MMData mm_data;
+  std::function<void(const char*&, MMData&)> read_mm_data =
+      is_mm_item ? read_mm_data_items : read_mm_data_dict;
+  for (size_t i = 0; i < mm_data_num; ++i) {
+    read_mm_data(buffer, mm_data);
+    vec.push_back(std::move(mm_data));
+  }
+
+  batch_mm_data.batch(std::move(vec));
 }
 
 inline void deserialize_raw_forward_input(
@@ -735,6 +893,8 @@ void deserialize_raw_forward_output(const char* buffer,
   read_vector(buffer, output.expert_load_data);
 
   read_data(buffer, output.prepared_layer_id);
+
+  read_vector_tensor(buffer, output.mm_embeddings);
 }
 
 void serialize_raw_forward_output(const RawForwardOutput& output,
@@ -747,6 +907,8 @@ void serialize_raw_forward_output(const RawForwardOutput& output,
   write_vector(buffer, output.expert_load_data);
 
   write_data(buffer, output.prepared_layer_id);
+
+  write_vector_tensor(buffer, output.mm_embeddings);
 }
 
 ForwardSharedMemoryManager::ForwardSharedMemoryManager(const std::string& name,
@@ -863,6 +1025,7 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
       std::move(raw_input.kv_cache_start_offsets), tensor_options);
 
   input_params.mm_data = std::move(raw_input.mm_data);
+
   if (!raw_input.selected_token_idxes.empty()) {
     util::pad_2d_vector<int64_t>(raw_input.unique_token_ids_vec, 0);
     util::pad_2d_vector(raw_input.unique_token_counts_vec, 0);
@@ -915,17 +1078,19 @@ void ForwardSharedMemoryManager::raw_input_read(
   return;
 }
 
-void convert_tensor_to_raw_output(const torch::Tensor& next_tokens,
-                                  const torch::Tensor& logprobs,
-                                  const torch::Tensor& top_tokens,
-                                  const torch::Tensor& top_logprobs,
-                                  const torch::Tensor& embeddings,
-                                  const torch::Tensor& expert_load_data,
-                                  int32_t prepared_layer_id,
-                                  const torch::Tensor& src_seq_idxes,
-                                  const torch::Tensor& out_tokens,
-                                  const torch::Tensor& out_logprobs,
-                                  RawForwardOutput& raw_output) {
+void convert_tensor_to_raw_output(
+    const torch::Tensor& next_tokens,
+    const torch::Tensor& logprobs,
+    const torch::Tensor& top_tokens,
+    const torch::Tensor& top_logprobs,
+    const torch::Tensor& embeddings,
+    const std::vector<torch::Tensor>& mm_embeddings,
+    const torch::Tensor& expert_load_data,
+    int32_t prepared_layer_id,
+    const torch::Tensor& src_seq_idxes,
+    const torch::Tensor& out_tokens,
+    const torch::Tensor& out_logprobs,
+    RawForwardOutput& raw_output) {
   raw_output.prepared_layer_id = prepared_layer_id;
 
   if (FLAGS_enable_eplb) {
@@ -963,6 +1128,7 @@ void convert_tensor_to_raw_output(const torch::Tensor& next_tokens,
   }
 
   raw_output.outputs.reserve(num_seqs);
+  raw_output.mm_embeddings = mm_embeddings;
   for (int32_t output_idx = 0; output_idx < num_seqs; ++output_idx) {
     RawSampleOutput raw_sample_output;
 
@@ -1044,6 +1210,7 @@ bool ForwardSharedMemoryManager::raw_output_write(
     const torch::Tensor& top_tokens,
     const torch::Tensor& top_logprobs,
     const torch::Tensor& embeddings,
+    const std::vector<torch::Tensor>& mm_embeddings,
     const torch::Tensor& expert_load_data,
     int32_t prepared_layer_id,
     const torch::Tensor& src_seq_idxes,
@@ -1055,6 +1222,7 @@ bool ForwardSharedMemoryManager::raw_output_write(
                                top_tokens,
                                top_logprobs,
                                embeddings,
+                               mm_embeddings,
                                expert_load_data,
                                prepared_layer_id,
                                src_seq_idxes,

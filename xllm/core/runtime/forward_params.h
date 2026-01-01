@@ -24,6 +24,7 @@ limitations under the License.
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/mm_batch_data.h"
+#include "framework/request/mm_data.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 
@@ -33,12 +34,13 @@ class WorkerType {
  public:
   enum Value : int8_t {
     INVALID = 0,
-    LLM,   // LLM
-    VLM,   // VLM
-    DIT,   // DIT
-    ELM,   // Embedding LM
-    EVLM,  // Embedding VLM
-    REC,   // Rec
+    LLM,     // LLM
+    VLM,     // VLM
+    DIT,     // DIT
+    ELM,     // Embedding LM
+    EVLM,    // Embedding VLM
+    REC,     // Rec
+    MMEVLM,  // Encoder Embedding VLM
   };
 
   constexpr WorkerType(Value v) : value_(v) {}
@@ -55,6 +57,8 @@ class WorkerType {
       value_ = EVLM;
     } else if (str == "REC") {
       value_ = REC;
+    } else if (str == "MMEVLM") {
+      value_ = MMEVLM;
     } else {
       value_ = INVALID;
     }
@@ -83,6 +87,8 @@ class WorkerType {
       return "EVLM";
     } else if (this->value_ == REC) {
       return "REC";
+    } else if (this->value_ == MMEVLM) {
+      return "MMEVLM";
     } else {
       return "INVALID";
     }
@@ -140,6 +146,8 @@ struct ForwardOutput {
   SampleOutput sample_output;
   torch::Tensor logits;
   torch::Tensor embedding;
+
+  std::vector<torch::Tensor> mm_embeddings;
 
   // for eplb, collect the tokens load of experts on each worker.
   torch::Tensor expert_load_data;
@@ -217,6 +225,8 @@ struct RawForwardOutput {
   std::vector<int32_t> src_seq_idxes;
   std::vector<int32_t> out_tokens;
   std::vector<float> out_logprobs;
+  // multimodal embedding output
+  std::vector<torch::Tensor> mm_embeddings;
 };
 
 struct BatchedForwardInputs {

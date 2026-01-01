@@ -49,7 +49,7 @@ void MMBatchData::get(const MMKey& key, std::vector<torch::Tensor>& vec) const {
   }
 }
 
-MMBatchData MMBatchData::to(const torch::Device& device) const {
+void MMBatchData::to(const torch::Device& device) {
   MMDict dict;
 
   for (const auto& pair : data_) {
@@ -66,17 +66,22 @@ MMBatchData MMBatchData::to(const torch::Device& device) const {
       for (const auto& item : lst) {
         vec.emplace_back(safe_to(item, device, true));
       }
-
       dict[pair.first] = std::move(vec);
     }
   }
 
-  return MMBatchData(ty_, dict);
+  data_ = std::move(dict);
+}
+
+MMBatchData MMBatchData::to(const MMBatchData& mm_data,
+                            const torch::Device& device) {
+  MMBatchData new_mm_data = mm_data;
+  new_mm_data.to(device);
+  return new_mm_data;
 }
 
 void MMBatchData::batch(const std::vector<MMData>& mm_datas) {
   mm_datas_ = std::move(mm_datas);
-
   CollectMMDataTensorVisitor visitor;
   this->foreach (static_cast<MMData::IVisitor&>(visitor));
 
@@ -95,8 +100,13 @@ void MMBatchData::batch(const std::vector<MMData>& mm_datas) {
 }
 
 void MMBatchData::debug_print() const {
-  LOG(INFO) << "mm data debug print, ty:" << ty_;
-
+  LOG(INFO) << "mm batch data debug print, ty:" << ty_;
+  LOG(INFO) << "=============== mm batch vec data ================";
+  LOG(INFO) << "mm batch data vec count:" << mm_datas_.size();
+  for (const auto& mm_data : mm_datas_) {
+    mm_data.debug_print();
+  }
+  LOG(INFO) << "=============== mm batch data dict data ================";
   for (const auto& pair : data_) {
     if (std::holds_alternative<torch::Tensor>(pair.second)) {
       torch::Tensor item = std::get<torch::Tensor>(pair.second);

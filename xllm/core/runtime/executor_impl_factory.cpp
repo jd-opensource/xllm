@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "platform/device.h"
 #include "runtime/base_executor_impl.h"
+#include "runtime/vlm_executor_impl.h"
 #if defined(USE_NPU)
 #include "runtime/acl_graph_executor_impl.h"
 #elif defined(USE_MLU)
@@ -45,6 +46,9 @@ std::unique_ptr<ExecutorImpl> ExecutorImplFactory::create_executor_impl(
   if (FLAGS_enable_graph) {
     backend = Device::type_str();
     LOG(INFO) << "Creating Graph Executor for " << backend << " device";
+  }
+  if (options.backend() == "vlm") {
+    backend = "vlm";
   }
 
   auto it = creators_.find(backend);

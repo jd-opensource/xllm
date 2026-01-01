@@ -32,9 +32,6 @@ namespace xllm {
 class MMEmbeddingVLM : public CausalVLM {
  public:
   ~MMEmbeddingVLM() override = default;
-
-  virtual std::vector<torch::Tensor> encode(
-      const ModelInputParams& input_params) = 0;
 };
 
 template <typename Model>
@@ -43,14 +40,19 @@ class MMEmbeddingVLMImpl : public MMEmbeddingVLM {
   MMEmbeddingVLMImpl(Model model, const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
-  virtual std::vector<torch::Tensor> encode(
-      const ModelInputParams& input_params) override {
+  virtual MMDict encode(const ModelInputParams& input_params) override {
     return model_->encode(input_params);
   };
 
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& selected_idxes) {
     return torch::Tensor();
+  }
+
+  virtual torch::Tensor get_input_embeddings(
+      const torch::Tensor& input_ids,
+      const ModelInputParams& input_params) override {
+    return torch::Tensor{};
   }
 
   virtual torch::Tensor forward(const torch::Tensor& tokens,
