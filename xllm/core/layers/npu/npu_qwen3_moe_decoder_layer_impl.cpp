@@ -283,7 +283,6 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     const ModelInputParams& input_params,
-    torch::Tensor& expert_array,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     int node_id) {
@@ -296,7 +295,6 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
                             attn_mask,
                             kv_cache,
                             input_params,
-                            expert_array,
                             true);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
@@ -309,7 +307,6 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
                             /*attn_mask*/ tensor_placeholder_,
                             kv_cache,
                             input_params,
-                            expert_array,
                             false);
     st = execute_node(decode_node_, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
@@ -327,7 +324,6 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     const ModelInputParams& input_params,
-    torch::Tensor& expert_array,
     bool is_prefill) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   int32_t input_idx = 0;
@@ -335,7 +331,7 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
-      atb_speed::Utils::AtTensor2Tensor(expert_array);
+      atb_speed::Utils::AtTensor2Tensor(input_params.expert_array);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =

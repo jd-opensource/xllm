@@ -24,8 +24,9 @@ namespace xllm {
 class Glm4DecoderLayerImpl
     : public LlmDecoderLayerImplBase<layer::NpuGlm4DecoderLayer> {
  public:
-  Glm4DecoderLayerImpl(const ModelContext& context)
-      : LlmDecoderLayerImplBase<layer::NpuGlm4DecoderLayer>(context) {}
+  Glm4DecoderLayerImpl(const ModelContext& context, const int32_t layer_id)
+      : LlmDecoderLayerImplBase<layer::NpuGlm4DecoderLayer>(context, layer_id) {
+  }
 };
 TORCH_MODULE(Glm4DecoderLayer);
 
@@ -59,7 +60,7 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
                                       /*mask_value=*/mask_value);
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto block = Glm4DecoderLayer(context);
+      auto block = Glm4DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
     }
@@ -155,14 +156,12 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
       }
 
       auto& layer = layers_[i];
-
       layer(h,
             cos_pos,
             sin_pos,
             attn_mask,
             kv_caches[i],
             input_params_new,
-            i,
             event,
             event_flag);
     }
