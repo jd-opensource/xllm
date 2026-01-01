@@ -322,8 +322,6 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   // returns: [num_tokens, vocab_size]
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes) {
-    // select tokens if provided
-    auto h = hidden_states;
     return npu_lm_head_(hidden_states, seleted_idxes, 0);
   }
 

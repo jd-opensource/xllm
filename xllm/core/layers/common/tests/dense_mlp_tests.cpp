@@ -293,6 +293,7 @@ TEST_F(DenseMLPTest, Bfloat16LoadStateDictTest) {
   LOG(INFO) << "Bfloat16 mode test passed - output sum: " << output_sum;
 }
 
+#if !defined(USE_NPU)
 TEST_F(DenseMLPTest, SmoothquantLoadStateDictTest) {
   // Test loading weights into the MLP
   const int64_t batch_size = 16;
@@ -395,6 +396,6 @@ TEST_F(DenseMLPTest, SmoothquantPrecisionVerificationTest) {
   // expected values Uncomment the following line after setting the correct
   VerifyPrecision(output, 1e-3, 1e-4);
 }
-
+#endif
 }  // namespace layer
 }  // namespace xllm

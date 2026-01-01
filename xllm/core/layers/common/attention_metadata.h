@@ -24,10 +24,14 @@ namespace layer {
 
 struct AttentionMetadata {
  public:
-  static AttentionMetadata build(const ModelInputParams& params);
+  static AttentionMetadata build(
+      const ModelInputParams& params,
+      const std::optional<torch::Tensor>& attn_mask = std::nullopt);
 
-  static AttentionMetadata build(const ModelInputParams& params,
-                                 const std::string& compute_dtype);
+  static AttentionMetadata build(
+      const ModelInputParams& params,
+      const std::string& compute_dtype,
+      const std::optional<torch::Tensor>& attn_mask = std::nullopt);
 
   torch::Tensor q_cu_seq_lens;
   torch::Tensor kv_cu_seq_lens;
@@ -50,6 +54,10 @@ struct AttentionMetadata {
   torch::Tensor paged_kv_indptr;
   torch::Tensor paged_kv_indices;
   torch::Tensor paged_kv_last_page_len;
+
+  // for npu
+  torch::Tensor attn_mask;
+  torch::Tensor kv_seq_lens_host;
 };
 
 }  // namespace layer
