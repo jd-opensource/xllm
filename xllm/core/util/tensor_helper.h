@@ -114,6 +114,8 @@ inline void print_tensor(const torch::Tensor& tensor,
   }
 }
 
+#define PrintTensor(tensor) print_tensor(tensor, #tensor, 10, true, false);
+
 inline bool file_exists(const std::string& path) {
   std::ifstream file(path);
   return file.good();

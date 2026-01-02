@@ -14,13 +14,12 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
-#include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <string>
 #include <vector>
 
-#include "core/layers/deepseek_v2_decoder_layer.h"
+#include "core/layers/mlu/deepseek_v2_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
 // DeepSeek v2 compatible with huggingface weights

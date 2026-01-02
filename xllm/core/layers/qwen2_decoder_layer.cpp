@@ -15,8 +15,6 @@ limitations under the License.
 
 #include "qwen2_decoder_layer.h"
 
-#include <glog/logging.h>
-
 namespace xllm {
 namespace layer {
 

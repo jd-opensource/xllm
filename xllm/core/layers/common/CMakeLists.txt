@@ -4,38 +4,32 @@ cc_library(
   NAME
     common_layers
   HDRS
-    qwen2_attention.h
-    qwen2_vision_attention.h
+    $<$<NOT:$<BOOL:${USE_NPU}>>:qwen2_attention.h>
+    $<$<NOT:$<BOOL:${USE_NPU}>>:qwen2_vision_attention.h>
     rms_norm.h
     rotary_embedding.h
     rotary_embedding_util.h
     fused_moe.h
     dense_mlp.h
-    qwen2_decoder_layer.h
-    qwen2_5_vision_layer.h
-    qwen3_moe_decoder_layer.h
     linear.h
-    word_embedding_impl.h
-    indexer.h
-    deep_ep.h
+    $<$<NOT:$<BOOL:${USE_NPU}>>:word_embedding_impl.h>
+    $<$<NOT:$<BOOL:${USE_NPU}>>:indexer.h>
+    $<$<NOT:$<BOOL:${USE_NPU}>>:deep_ep.h>
     activation.h
     attention_metadata.h
     dp_utils.h
   SRCS
-    qwen2_attention.cpp
-    qwen2_vision_attention.cpp
+    $<$<NOT:$<BOOL:${USE_NPU}>>:qwen2_attention.cpp>
+    $<$<NOT:$<BOOL:${USE_NPU}>>:qwen2_vision_attention.cpp>
     rms_norm.cpp
     rotary_embedding.cpp
     rotary_embedding_util.cpp
     fused_moe.cpp
     dense_mlp.cpp
-    qwen2_decoder_layer.cpp
-    qwen2_5_vision_layer.cpp
-    qwen3_moe_decoder_layer.cpp
     linear.cpp
-    word_embedding_impl.cpp
-    indexer.cpp
-    deep_ep.cpp
+    $<$<NOT:$<BOOL:${USE_NPU}>>:word_embedding_impl.cpp>
+    $<$<NOT:$<BOOL:${USE_NPU}>>:indexer.cpp>
+    $<$<NOT:$<BOOL:${USE_NPU}>>:deep_ep.cpp>
     activation.cpp
     attention_metadata.cpp
     dp_utils.cpp
@@ -53,6 +47,11 @@ cc_library(
     gflags::gflags
     torch
     :platform
+    $<$<BOOL:${USE_MLU}>:mlu_layers>
+    $<$<BOOL:${USE_CUDA}>:cuda_layers>
+    $<$<BOOL:${USE_ILU}>:ilu_layers>
 )
 
+if(NOT USE_NPU)
 add_subdirectory(tests)
+endif()
