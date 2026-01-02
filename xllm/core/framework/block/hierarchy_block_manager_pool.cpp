@@ -217,23 +217,23 @@ bool HierarchyBlockManagerPool::update_prefetch_result(
   return prefetch_result;
 }
 
-void HierarchyBlockManagerPool::transfer_blocks(
-    std::optional<std::vector<Batch>> batches) {
-  if (batches.has_value()) {
-    // load blocks from host to device
-    for (int i = 0; i < batches->size(); i++) {
-      if (!load_block_transfer_infos_[i].empty()) {
-        batches->at(i).set_batch_id();
-        engine_->transfer_kv_blocks(i,
-                                    batches->at(i).batch_id(),
-                                    std::move(load_block_transfer_infos_[i]));
-      }
+void HierarchyBlockManagerPool::transfer_blocks(std::vector<Batch>& batches) {
+  // load blocks from host to device
+  for (size_t i = 0; i < batches.size(); i++) {
+    if (!load_block_transfer_infos_[i].empty()) {
+      batches[i].set_batch_id();
+      engine_->transfer_kv_blocks(
+          i, batches[i].batch_id(), std::move(load_block_transfer_infos_[i]));
     }
-
-    load_block_transfer_infos_.clear();
-    load_block_transfer_infos_.resize(host_block_managers_.size());
   }
 
+  load_block_transfer_infos_.clear();
+  load_block_transfer_infos_.resize(host_block_managers_.size());
+
+  transfer_blocks();
+}
+
+void HierarchyBlockManagerPool::transfer_blocks() {
   // offload blocks from device to host and kvcache store
   for (int i = 0; i < offload_block_pair_queues_.size(); i++) {
     std::vector<BlockTransferInfo> transfer_infos;

@@ -817,7 +817,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
     kv_cache_manager_->transfer_blocks(batches);
   } else {
-    kv_cache_manager_->transfer_blocks(std::nullopt);
+    kv_cache_manager_->transfer_blocks();
   }
 
   GAUGE_SET(num_pending_requests,
