@@ -46,11 +46,14 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
   void SetUp() override {
     FLAGS_enable_mla = true;  // Enable MLA for DeepSeek V2 attention
     // Base defaults from test helpers
-    model_args_ = test::CreateDefaultModelArgs();
+    model_args_ = test::create_default_model_args();
     // test w8a8 only for now
-    quant_args_ = test::CreateDefaultQuantArgs();
-    options_ = test::CreateDefaultTensorOptions();
-    parallel_args_ = test::CreateDefaultParallelArgs(mock_process_group_);
+    quant_args_ = test::create_default_quant_args();
+    options_ = torch::TensorOptions()
+                   .dtype(torch::kBFloat16)
+                   .device(Device::type_torch(), 0)
+                   .requires_grad(false);
+    parallel_args_ = test::create_default_parallel_args(mock_process_group_);
     // Fill additional DeepSeek V3 defaults
     model_args_.model_type() = "deepseek_v3";
     model_args_.dtype() = "";  // default empty
@@ -119,7 +122,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
   }
 
   // Collect registered child module names to verify module wiring
-  static std::unordered_set<std::string> GetChildModuleNames(
+  static std::unordered_set<std::string> get_child_module_names(
       const torch::nn::Module& module) {
     std::unordered_set<std::string> names;
     for (const auto& named_child : module.named_children()) {
@@ -128,37 +131,26 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     return names;
   }
 
-  // Helper function to create all-ones tensor
-  torch::Tensor CreateOnesTensor(const std::vector<int64_t>& shape) {
-    return test::CreateOnesTensor(shape, options_);
-  }
-
-  // Helper function to create all-ones tensor with specific values
-  torch::Tensor CreateFullTensor(const std::vector<int64_t>& shape,
-                                 float value) {
-    return test::CreateFullTensor(shape, value, options_);
-  }
-
   // Helper function to create custom input tensor for precision testing
-  torch::Tensor CreateCustomInput(const std::vector<int64_t>& shape,
-                                  const std::vector<float>& values) {
-    return test::CreateCustomInput(shape, values, options_);
+  torch::Tensor create_custom_input(const std::vector<int64_t>& shape,
+                                    const std::vector<float>& values) {
+    return test::create_custom_input(shape, values, options_);
   }
 
   // Helper function to set expected output for precision verification
-  void SetExpectedOutput(const std::vector<float>& expected_values) {
+  void set_expected_output(const std::vector<float>& expected_values) {
     expected_output_ = expected_values;
   }
 
   // Helper function to verify precision against expected output
-  void VerifyPrecision(const torch::Tensor& actual_output,
-                       double rtol = 1e-3,
-                       double atol = 1e-4) {
-    test::VerifyPrecision(actual_output, expected_output_, rtol, atol);
+  void verify_precision(const torch::Tensor& actual_output,
+                        double rtol = 1e-3,
+                        double atol = 1e-4) {
+    test::verify_precision(actual_output, expected_output_, rtol, atol);
   }
 
   // Create default test weights for decoder layer (w8a8 smoothquant format)
-  std::unordered_map<std::string, torch::Tensor> CreateDefaultTestWeights(
+  std::unordered_map<std::string, torch::Tensor> create_default_test_weights(
       int32_t layer_id,
       int64_t hidden_size,
       int64_t intermediate_size,
@@ -168,7 +160,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
 
     // Create input_layernorm weights (float32, not quantized)
     // Shape: [hidden_size]
-    auto input_norm_weight = CreateFullTensor({hidden_size}, 1.0f);
+    auto input_norm_weight = torch::full({hidden_size}, 1.0f, options_);
     weight_dict["input_layernorm.weight"] =
         input_norm_weight.to(torch::TensorOptions()
                                  .dtype(torch::kFloat32)
@@ -176,7 +168,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
 
     // Create post_attention_layernorm weights (float32, not quantized)
     // Shape: [hidden_size]
-    auto post_norm_weight = CreateFullTensor({hidden_size}, 1.0f);
+    auto post_norm_weight = torch::full({hidden_size}, 1.0f, options_);
     weight_dict["post_attention_layernorm.weight"] =
         post_norm_weight.to(torch::TensorOptions()
                                 .dtype(torch::kFloat32)
@@ -197,19 +189,19 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
       // Create gate weights (routing layer, not quantized)
       // Shape: [num_routed_experts, hidden_size]
       auto gate_weight =
-          CreateFullTensor({test_num_routed_experts, hidden_size}, 0.8f);
+          torch::full({test_num_routed_experts, hidden_size}, 0.8f, options_);
       weight_dict["mlp.gate.weight"] = gate_weight;
 
       // Create e_score_correction_bias if needed
       auto e_score_correction_bias =
-          CreateFullTensor({test_num_routed_experts}, 0.1f);
+          torch::full({test_num_routed_experts}, 0.1f, options_);
       weight_dict["mlp.gate.e_score_correction_bias"] = e_score_correction_bias;
 
       // Create shared experts weights if n_shared_experts > 0
       if (model_args_.n_shared_experts() > 0) {
         // gate_proj weights
-        auto shared_gate_weight =
-            CreateFullTensor({test_moe_intermediate_size, hidden_size}, 0.3f);
+        auto shared_gate_weight = torch::full(
+            {test_moe_intermediate_size, hidden_size}, 0.3f, options_);
         auto shared_gate_qweight = shared_gate_weight.to(torch::kInt8);
         auto shared_gate_scale = torch::full({test_moe_intermediate_size},
                                              0.1f,
@@ -223,8 +215,8 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                                                   .device(options_.device()));
 
         // up_proj weights
-        auto shared_up_weight =
-            CreateFullTensor({test_moe_intermediate_size, hidden_size}, 0.3f);
+        auto shared_up_weight = torch::full(
+            {test_moe_intermediate_size, hidden_size}, 0.3f, options_);
         auto shared_up_qweight = shared_up_weight.to(torch::kInt8);
         auto shared_up_scale = torch::full({test_moe_intermediate_size},
                                            0.1f,
@@ -238,8 +230,8 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                                                 .device(options_.device()));
 
         // down_proj weights
-        auto shared_down_weight =
-            CreateFullTensor({hidden_size, test_moe_intermediate_size}, 0.2f);
+        auto shared_down_weight = torch::full(
+            {hidden_size, test_moe_intermediate_size}, 0.2f, options_);
         auto shared_down_qweight = shared_down_weight.to(torch::kInt8);
         auto shared_down_scale = torch::full({hidden_size},
                                              0.1f,
@@ -275,8 +267,8 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
             "mlp.experts." + std::to_string(expert_id) + ".";
 
         // gate_proj weights
-        auto gate_proj_weight =
-            CreateFullTensor({test_moe_intermediate_size, hidden_size}, 0.5f);
+        auto gate_proj_weight = torch::full(
+            {test_moe_intermediate_size, hidden_size}, 0.5f, options_);
         auto gate_proj_qweight = gate_proj_weight.to(torch::kInt8);
         auto gate_proj_scale = torch::full({test_moe_intermediate_size},
                                            0.1f,
@@ -290,8 +282,8 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                                                 .device(options_.device()));
 
         // up_proj weights
-        auto up_proj_weight =
-            CreateFullTensor({test_moe_intermediate_size, hidden_size}, 0.5f);
+        auto up_proj_weight = torch::full(
+            {test_moe_intermediate_size, hidden_size}, 0.5f, options_);
         auto up_proj_qweight = up_proj_weight.to(torch::kInt8);
         auto up_proj_scale = torch::full({test_moe_intermediate_size},
                                          0.1f,
@@ -305,8 +297,8 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                                               .device(options_.device()));
 
         // down_proj weights
-        auto down_proj_weight =
-            CreateFullTensor({hidden_size, test_moe_intermediate_size}, 0.3f);
+        auto down_proj_weight = torch::full(
+            {hidden_size, test_moe_intermediate_size}, 0.3f, options_);
         auto down_proj_qweight = down_proj_weight.to(torch::kInt8);
         auto down_proj_scale = torch::full({hidden_size},
                                            0.1f,
@@ -337,7 +329,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
       // gate_proj weights (ColumnParallelLinear)
       // Shape: [intermediate_size, hidden_size]
       auto gate_weight =
-          CreateFullTensor({intermediate_size, hidden_size}, 5.0f);
+          torch::full({intermediate_size, hidden_size}, 5.0f, options_);
       auto gate_qweight = gate_weight.to(torch::kInt8);
       auto gate_scale = torch::full({intermediate_size},
                                     0.1f,
@@ -352,7 +344,8 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
 
       // up_proj weights (ColumnParallelLinear)
       // Shape: [intermediate_size, hidden_size]
-      auto up_weight = CreateFullTensor({intermediate_size, hidden_size}, 5.0f);
+      auto up_weight =
+          torch::full({intermediate_size, hidden_size}, 5.0f, options_);
       auto up_qweight = up_weight.to(torch::kInt8);
       auto up_scale = torch::full({intermediate_size},
                                   0.1f,
@@ -368,7 +361,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
       // down_proj weights (RowParallelLinear)
       // Shape: [hidden_size, intermediate_size]
       auto down_weight =
-          CreateFullTensor({hidden_size, intermediate_size}, 3.0f);
+          torch::full({hidden_size, intermediate_size}, 3.0f, options_);
       auto down_qweight = down_weight.to(torch::kInt8);
       auto down_scale = torch::full({hidden_size},
                                     0.1f,
@@ -406,7 +399,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     // Quantized weights (w8a8 smoothquant format)
     // o_proj weights
     auto o_proj_weight =
-        CreateFullTensor({hidden_size, num_heads * v_head_dim}, 1.0f);
+        torch::full({hidden_size, num_heads * v_head_dim}, 1.0f, options_);
     auto o_proj_qweight = o_proj_weight.to(torch::kInt8);
     auto o_proj_scale = torch::full({hidden_size},
                                     0.03f,
@@ -425,7 +418,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
 
     // q_b_proj weights
     auto q_b_proj_weight =
-        CreateFullTensor({num_heads * qk_head_dim, q_lora_rank}, 1.0f);
+        torch::full({num_heads * qk_head_dim, q_lora_rank}, 1.0f, options_);
     auto q_b_proj_qweight = q_b_proj_weight.to(torch::kInt8);
     auto q_b_proj_scale = torch::full({num_heads * qk_head_dim},
                                       0.03f,
@@ -445,36 +438,39 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     // Non-quantized weights (float32)
     // kv_b_proj.weight: [num_heads * (qk_nope_head_dim + v_head_dim),
     // kv_lora_rank]
-    auto kv_b_proj_weight = CreateFullTensor(
-        {num_heads * (qk_nope_head_dim + v_head_dim), kv_lora_rank}, 0.02f);
+    auto kv_b_proj_weight =
+        torch::full({num_heads * (qk_nope_head_dim + v_head_dim), kv_lora_rank},
+                    0.02f,
+                    options_);
     weight_dict["self_attn.kv_b_proj.weight"] =
         kv_b_proj_weight.to(torch::TensorOptions()
                                 .dtype(torch::kFloat32)
                                 .device(options_.device()));
 
     // kv_a_proj_with_mqa.weight: [kv_lora_rank + qk_rope_head_dim, hidden_size]
-    auto kv_a_proj_with_mqa_weight =
-        CreateFullTensor({kv_lora_rank + qk_rope_head_dim, hidden_size}, 0.02f);
+    auto kv_a_proj_with_mqa_weight = torch::full(
+        {kv_lora_rank + qk_rope_head_dim, hidden_size}, 0.02f, options_);
     weight_dict["self_attn.kv_a_proj_with_mqa.weight"] =
         kv_a_proj_with_mqa_weight.to(torch::TensorOptions()
                                          .dtype(torch::kFloat32)
                                          .device(options_.device()));
 
     // q_a_proj.weight: [q_lora_rank, hidden_size]
-    auto q_a_proj_weight = CreateFullTensor({q_lora_rank, hidden_size}, 0.02f);
+    auto q_a_proj_weight =
+        torch::full({q_lora_rank, hidden_size}, 0.02f, options_);
     weight_dict["self_attn.q_a_proj.weight"] =
         q_a_proj_weight.to(torch::TensorOptions()
                                .dtype(torch::kFloat32)
                                .device(options_.device()));
 
     // LayerNorm weights
-    auto kv_a_layernorm_weight = CreateFullTensor({kv_lora_rank}, 1.0f);
+    auto kv_a_layernorm_weight = torch::full({kv_lora_rank}, 1.0f, options_);
     weight_dict["self_attn.kv_a_layernorm.weight"] =
         kv_a_layernorm_weight.to(torch::TensorOptions()
                                      .dtype(torch::kFloat32)
                                      .device(options_.device()));
 
-    auto q_a_layernorm_weight = CreateFullTensor({q_lora_rank}, 1.0f);
+    auto q_a_layernorm_weight = torch::full({q_lora_rank}, 1.0f, options_);
     weight_dict["self_attn.q_a_layernorm.weight"] =
         q_a_layernorm_weight.to(torch::TensorOptions()
                                     .dtype(torch::kFloat32)
@@ -482,34 +478,35 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
 
     // Indexer weights (if enabled)
     if (model_args_.index_n_heads() > 0) {
-      auto indexer_k_norm_bias = CreateFullTensor({index_head_dim}, 0.0f);
+      auto indexer_k_norm_bias = torch::full({index_head_dim}, 0.0f, options_);
       weight_dict["self_attn.indexer.k_norm.bias"] =
           indexer_k_norm_bias.to(torch::TensorOptions()
                                      .dtype(torch::kFloat32)
                                      .device(options_.device()));
 
-      auto indexer_k_norm_weight = CreateFullTensor({index_head_dim}, 1.0f);
+      auto indexer_k_norm_weight =
+          torch::full({index_head_dim}, 1.0f, options_);
       weight_dict["self_attn.indexer.k_norm.weight"] =
           indexer_k_norm_weight.to(torch::TensorOptions()
                                        .dtype(torch::kFloat32)
                                        .device(options_.device()));
 
       auto indexer_weights_proj_weight =
-          CreateFullTensor({index_n_heads, hidden_size}, 0.02f);
+          torch::full({index_n_heads, hidden_size}, 0.02f, options_);
       weight_dict["self_attn.indexer.weights_proj.weight"] =
           indexer_weights_proj_weight.to(torch::TensorOptions()
                                              .dtype(torch::kFloat32)
                                              .device(options_.device()));
 
       auto indexer_wk_weight =
-          CreateFullTensor({index_head_dim, hidden_size}, 0.02f);
+          torch::full({index_head_dim, hidden_size}, 0.02f, options_);
       weight_dict["self_attn.indexer.wk.weight"] =
           indexer_wk_weight.to(torch::TensorOptions()
                                    .dtype(torch::kFloat32)
                                    .device(options_.device()));
 
-      auto indexer_wq_b_weight = CreateFullTensor(
-          {index_n_heads * index_head_dim, q_lora_rank}, 0.02f);
+      auto indexer_wq_b_weight = torch::full(
+          {index_n_heads * index_head_dim, q_lora_rank}, 0.02f, options_);
       weight_dict["self_attn.indexer.wq_b.weight"] =
           indexer_wq_b_weight.to(torch::TensorOptions()
                                      .dtype(torch::kFloat32)
@@ -523,7 +520,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
   }
 
   // Helper function to create test weights with custom dimensions
-  std::unordered_map<std::string, torch::Tensor> CreateTestWeights(
+  std::unordered_map<std::string, torch::Tensor> create_test_weights(
       int32_t layer_id,
       int64_t custom_hidden_size = -1,
       int64_t custom_intermediate_size = -1,
@@ -536,11 +533,11 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                                          ? custom_intermediate_size
                                          : model_args_.intermediate_size();
 
-    return CreateDefaultTestWeights(layer_id,
-                                    test_hidden_size,
-                                    test_intermediate_size,
-                                    custom_moe_intermediate_size,
-                                    custom_num_routed_experts);
+    return create_default_test_weights(layer_id,
+                                       test_hidden_size,
+                                       test_intermediate_size,
+                                       custom_moe_intermediate_size,
+                                       custom_num_routed_experts);
   }
 
   ModelArgs model_args_;
@@ -561,7 +558,7 @@ TEST_F(DeepseekV2DecoderLayerTest,
   auto decoder = torch::nn::ModuleHolder<DeepseekV2DecoderLayerImpl>(
       DeepseekV2DecoderLayerImpl(context_, layer_id));
 
-  auto child_names = GetChildModuleNames(*decoder);
+  auto child_names = get_child_module_names(*decoder);
   // Core components should be registered with these names (see implementation)
   EXPECT_TRUE(child_names.count("self_attn")) << "self_attn missing";
   EXPECT_TRUE(child_names.count("input_layernorm"))
@@ -578,7 +575,7 @@ TEST_F(DeepseekV2DecoderLayerTest,
   auto decoder = torch::nn::ModuleHolder<DeepseekV2DecoderLayerImpl>(
       DeepseekV2DecoderLayerImpl(context_, layer_id));
 
-  auto child_names = GetChildModuleNames(*decoder);
+  auto child_names = get_child_module_names(*decoder);
   EXPECT_TRUE(child_names.count("self_attn"));
   EXPECT_TRUE(child_names.count("input_layernorm"));
   EXPECT_TRUE(child_names.count("post_attention_layernorm"));
@@ -592,7 +589,7 @@ TEST_F(DeepseekV2DecoderLayerTest, LoadStateDictTest_DenseMLP) {
       DeepseekV2DecoderLayerImpl(context_, layer_id));
 
   // Create test weights
-  auto weight_dict = CreateTestWeights(layer_id);
+  auto weight_dict = create_test_weights(layer_id);
 
   // Load weights into the decoder
   StateDict state_dict(weight_dict);
@@ -607,7 +604,7 @@ TEST_F(DeepseekV2DecoderLayerTest, LoadStateDictTest_FusedMoE) {
       DeepseekV2DecoderLayerImpl(context_, layer_id));
 
   // Create test weights
-  auto weight_dict = CreateTestWeights(layer_id);
+  auto weight_dict = create_test_weights(layer_id);
 
   // Load weights into the decoder
   StateDict state_dict(weight_dict);
@@ -632,7 +629,7 @@ TEST_F(DeepseekV2DecoderLayerTest,
       DeepseekV2DecoderLayerImpl(context_, layer_id));
 
   // Create test weights with custom dimensions
-  auto weight_dict = CreateTestWeights(layer_id);
+  auto weight_dict = create_test_weights(layer_id);
 
   // Load weights into the decoder
   StateDict state_dict(weight_dict);
@@ -776,7 +773,7 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
       DeepseekV2DecoderLayerImpl(context_, layer_id));
 
   // Create test weights with custom dimensions
-  auto weight_dict = CreateTestWeights(layer_id);
+  auto weight_dict = create_test_weights(layer_id);
 
   // Load weights into the decoder
   StateDict state_dict(weight_dict);

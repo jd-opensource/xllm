@@ -34,21 +34,24 @@ class DeepseekMLATest : public ::testing::Test {
   void SetUp() override {
     FLAGS_enable_mla = true;
     // Initialize default model arguments for testing
-    model_args_ = CreateMLAModelArgs();
+    model_args_ = create_mla_model_args();
 
     // Initialize w8a8 quantization arguments
-    quant_args_ = test::CreateDefaultQuantArgs();
+    quant_args_ = test::create_default_quant_args();
 
     // Initialize tensor options
-    options_ = test::CreateDefaultTensorOptions();
+    options_ = torch::TensorOptions()
+                   .dtype(torch::kBFloat16)
+                   .device(Device::type_torch(), 0)
+                   .requires_grad(false);
 
     // Create mock ProcessGroup and initialize ParallelArgs
-    parallel_args_ = test::CreateDefaultParallelArgs(mock_process_group_);
+    parallel_args_ = test::create_default_parallel_args(mock_process_group_);
 
-    InitTestWeights();
+    init_test_weights();
   }
 
-  ModelArgs CreateMLAModelArgs() {
+  ModelArgs create_mla_model_args() {
     ModelArgs model_args;
     model_args.q_lora_rank() = 1536;
     model_args.kv_lora_rank() = 512;
@@ -84,7 +87,7 @@ class DeepseekMLATest : public ::testing::Test {
     // Clean up if needed
   }
 
-  void InitTestWeights() {
+  void init_test_weights() {
     int64_t q_lora_rank = model_args_.q_lora_rank();
     int64_t kv_lora_rank = model_args_.kv_lora_rank();
     int64_t qk_nope_head_dim = model_args_.qk_nope_head_dim();
@@ -143,12 +146,12 @@ class DeepseekMLATest : public ::testing::Test {
     }
   }
 
-  void PopulateAttentionMetadata(AttentionMetadata& metadata,
-                                 int64_t batch_size,
-                                 int64_t max_query_len,
-                                 int64_t max_seq_len,
-                                 bool is_prefill,
-                                 int64_t max_num_batched_tokens) {
+  void populate_attention_metadata(AttentionMetadata& metadata,
+                                   int64_t batch_size,
+                                   int64_t max_query_len,
+                                   int64_t max_seq_len,
+                                   bool is_prefill,
+                                   int64_t max_num_batched_tokens) {
     // Create q_cu_seq_lens tensor (cu_seq_q_lens)
     // shape = [batch_size + 1], typically [0, 4, 8, 12, ...] if max_query_len=4
     auto option_int = options_.dtype(torch::kInt32);
@@ -229,12 +232,12 @@ TEST_F(DeepseekMLATest, PrefillTest) {
 
   // Create metadata object and populate it
   AttentionMetadata metadata;
-  PopulateAttentionMetadata(metadata,
-                            batch_size,
-                            max_query_len,
-                            model_args_.max_position_embeddings(),
-                            /*is_prefill=*/true,
-                            num_tokens);
+  populate_attention_metadata(metadata,
+                              batch_size,
+                              max_query_len,
+                              model_args_.max_position_embeddings(),
+                              /*is_prefill=*/true,
+                              num_tokens);
   auto hidden_states = torch::full({num_tokens, hidden_size}, 0.05, options_);
   auto positions = torch::arange(max_query_len, options_.dtype(torch::kInt32))
                        .repeat({batch_size});
@@ -250,7 +253,7 @@ TEST_F(DeepseekMLATest, PrefillTest) {
       << output_sum;
 
   std::vector<float> result(output_cpu.numel(), 3.0312);
-  test::VerifyPrecision(output_cpu, result);
+  test::verify_precision(output_cpu, result);
   LOG(INFO) << "Prefill test passed - output avg: "
             << output_sum / output_cpu.numel();
 }
@@ -281,12 +284,12 @@ TEST_F(DeepseekMLATest, DecoderTest) {
 
   // Create metadata object and populate it
   AttentionMetadata metadata;
-  PopulateAttentionMetadata(metadata,
-                            batch_size,
-                            max_query_len,
-                            model_args_.max_position_embeddings(),
-                            /*is_prefill=*/false,
-                            num_tokens);
+  populate_attention_metadata(metadata,
+                              batch_size,
+                              max_query_len,
+                              model_args_.max_position_embeddings(),
+                              /*is_prefill=*/false,
+                              num_tokens);
   auto hidden_states = torch::full({num_tokens, hidden_size}, 0.05, options_);
   auto positions = torch::arange(max_query_len, options_.dtype(torch::kInt32))
                        .repeat({batch_size});
@@ -302,7 +305,7 @@ TEST_F(DeepseekMLATest, DecoderTest) {
       << output_sum;
 
   std::vector<float> result(output_cpu.numel(), 3.0312);
-  test::VerifyPrecision(output_cpu, result);
+  test::verify_precision(output_cpu, result);
   LOG(INFO) << "Decoder test passed - output avg: "
             << output_sum / output_cpu.numel();
 }

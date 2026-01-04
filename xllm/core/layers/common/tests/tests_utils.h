@@ -200,48 +200,31 @@ class MockProcessGroup : public xllm::ProcessGroup {
   }
 };
 
-// Helper function to create all-ones tensor
-torch::Tensor CreateOnesTensor(const std::vector<int64_t>& shape,
-                               const torch::TensorOptions& options);
-
-// Helper function to create full tensor with specific value
-torch::Tensor CreateFullTensor(const std::vector<int64_t>& shape,
-                               float value,
-                               const torch::TensorOptions& options);
-
 // Helper function to create custom input tensor for precision testing
-torch::Tensor CreateCustomInput(const std::vector<int64_t>& shape,
-                                const std::vector<float>& values,
-                                const torch::TensorOptions& options);
-
-// Helper function to create custom residual tensor for precision testing
-torch::Tensor CreateCustomResidual(const std::vector<int64_t>& shape,
-                                   const std::vector<float>& values,
-                                   const torch::TensorOptions& options);
+torch::Tensor create_custom_input(const std::vector<int64_t>& shape,
+                                  const std::vector<float>& values,
+                                  const torch::TensorOptions& options);
 
 // Helper function to verify tensor values are close to expected
-void VerifyTensorClose(const torch::Tensor& actual,
-                       const torch::Tensor& expected,
-                       double rtol = 1e-5,
-                       double atol = 1e-8);
+void verify_tensor_close(const torch::Tensor& actual,
+                         const torch::Tensor& expected,
+                         double rtol = 1e-5,
+                         double atol = 1e-8);
 
 // Helper function to verify precision against expected output
-void VerifyPrecision(const torch::Tensor& actual_output,
-                     const std::vector<float>& expected_values,
-                     double rtol = 1e-3,
-                     double atol = 1e-4);
+void verify_precision(const torch::Tensor& actual_output,
+                      const std::vector<float>& expected_values,
+                      double rtol = 1e-3,
+                      double atol = 1e-4);
 
 // Helper function to create default model arguments for testing
-ModelArgs CreateDefaultModelArgs();
+ModelArgs create_default_model_args();
 
 // Helper function to create default quantization arguments for testing
-QuantArgs CreateDefaultQuantArgs();
-
-// Helper function to create default tensor options for testing
-torch::TensorOptions CreateDefaultTensorOptions();
+QuantArgs create_default_quant_args();
 
 // Helper function to create default parallel arguments for testing
-ParallelArgs CreateDefaultParallelArgs(
+ParallelArgs create_default_parallel_args(
     std::unique_ptr<xllm::ProcessGroup>& mock_process_group);
 
 // create a tensor with a seeded random number generator (based on key and

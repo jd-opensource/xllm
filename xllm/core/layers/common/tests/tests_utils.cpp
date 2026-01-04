@@ -21,21 +21,10 @@ namespace xllm {
 namespace layer {
 namespace test {
 
-torch::Tensor CreateOnesTensor(const std::vector<int64_t>& shape,
-                               const torch::TensorOptions& options) {
-  return torch::ones(shape, options);
-}
-
-torch::Tensor CreateFullTensor(const std::vector<int64_t>& shape,
-                               float value,
-                               const torch::TensorOptions& options) {
-  return torch::full(shape, value, options);
-}
-
 // Supports both 2D and 3D input shapes
-torch::Tensor CreateCustomInput(const std::vector<int64_t>& shape,
-                                const std::vector<float>& values,
-                                const torch::TensorOptions& options) {
+torch::Tensor create_custom_input(const std::vector<int64_t>& shape,
+                                  const std::vector<float>& values,
+                                  const torch::TensorOptions& options) {
   // Only support 2D or 3D
   CHECK(shape.size() == 2 || shape.size() == 3) << "Shape must be 2D or 3D";
   int64_t numel = 1;
@@ -50,16 +39,10 @@ torch::Tensor CreateCustomInput(const std::vector<int64_t>& shape,
   return tensor;
 }
 
-torch::Tensor CreateCustomResidual(const std::vector<int64_t>& shape,
-                                   const std::vector<float>& values,
-                                   const torch::TensorOptions& options) {
-  return CreateCustomInput(shape, values, options);
-}
-
-void VerifyTensorClose(const torch::Tensor& actual,
-                       const torch::Tensor& expected,
-                       double rtol,
-                       double atol) {
+void verify_tensor_close(const torch::Tensor& actual,
+                         const torch::Tensor& expected,
+                         double rtol,
+                         double atol) {
   ASSERT_TRUE(actual.sizes() == expected.sizes())
       << "Tensor shapes don't match: actual=" << actual.sizes()
       << ", expected=" << expected.sizes();
@@ -75,10 +58,10 @@ void VerifyTensorClose(const torch::Tensor& actual,
       << "Tensors are not close enough. Max diff: " << max_diff;
 }
 
-void VerifyPrecision(const torch::Tensor& actual_output,
-                     const std::vector<float>& expected_values,
-                     double rtol,
-                     double atol) {
+void verify_precision(const torch::Tensor& actual_output,
+                      const std::vector<float>& expected_values,
+                      double rtol,
+                      double atol) {
   ASSERT_FALSE(expected_values.empty())
       << "Expected output not set. Call SetExpectedOutput() first.";
 
@@ -94,14 +77,14 @@ void VerifyPrecision(const torch::Tensor& actual_output,
       << ", actual tensor numel " << numel;
 
   // Create expected tensor from values and shape
-  auto expected_tensor =
-      CreateCustomInput(output_shape, expected_values, actual_output.options());
+  auto expected_tensor = create_custom_input(
+      output_shape, expected_values, actual_output.options());
 
   LOG(INFO) << "Verifying precision with rtol=" << rtol << ", atol=" << atol;
-  VerifyTensorClose(actual_output, expected_tensor, rtol, atol);
+  verify_tensor_close(actual_output, expected_tensor, rtol, atol);
 }
 
-ModelArgs CreateDefaultModelArgs() {
+ModelArgs create_default_model_args() {
   ModelArgs model_args;
   model_args.hidden_size() = 7168;
   model_args.intermediate_size() = 18432;
@@ -109,7 +92,7 @@ ModelArgs CreateDefaultModelArgs() {
   return model_args;
 }
 
-QuantArgs CreateDefaultQuantArgs() {
+QuantArgs create_default_quant_args() {
   QuantArgs quant_args;
   quant_args.quant_method() = "smoothquant";
   quant_args.bits() = 8;
@@ -117,14 +100,7 @@ QuantArgs CreateDefaultQuantArgs() {
   return quant_args;
 }
 
-torch::TensorOptions CreateDefaultTensorOptions() {
-  return torch::TensorOptions()
-      .dtype(torch::kBFloat16)
-      .device(Device::type_torch(), 0)
-      .requires_grad(false);
-}
-
-ParallelArgs CreateDefaultParallelArgs(
+ParallelArgs create_default_parallel_args(
     std::unique_ptr<xllm::ProcessGroup>& mock_process_group) {
   // Create mock ProcessGroup for MLU testing
   mock_process_group = std::make_unique<MockProcessGroup>(

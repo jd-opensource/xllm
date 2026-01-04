@@ -234,7 +234,7 @@ class DeepEPMultiDeviceTest : public ::testing::Test {
     num_global_experts_ = 4;
   }
 
-  void RunTest() {
+  void run_test() {
     std::vector<pid_t> child_pids;
 
     for (int32_t rank = 0; rank < world_size_; ++rank) {
@@ -294,7 +294,7 @@ class DeepEPMultiDeviceTest : public ::testing::Test {
   int64_t num_global_experts_;
 };
 
-TEST_F(DeepEPMultiDeviceTest, EndToEndFlow) { RunTest(); }
+TEST_F(DeepEPMultiDeviceTest, EndToEndFlow) { run_test(); }
 
 }  // namespace test
 }  // namespace layer

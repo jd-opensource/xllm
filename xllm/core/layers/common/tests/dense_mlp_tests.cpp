@@ -33,16 +33,19 @@ class DenseMLPTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Initialize default model arguments for testing
-    model_args_ = test::CreateDefaultModelArgs();
+    model_args_ = test::create_default_model_args();
 
     // Initialize w8a8 quantization arguments
-    quant_args_ = test::CreateDefaultQuantArgs();
+    quant_args_ = test::create_default_quant_args();
 
     // Initialize tensor options
-    options_ = test::CreateDefaultTensorOptions();
+    options_ = torch::TensorOptions()
+                   .dtype(torch::kBFloat16)
+                   .device(Device::type_torch(), 0)
+                   .requires_grad(false);
 
     // Create mock ProcessGroup and initialize ParallelArgs
-    parallel_args_ = test::CreateDefaultParallelArgs(mock_process_group_);
+    parallel_args_ = test::create_default_parallel_args(mock_process_group_);
 
     // Note: MLP will be created by individual test cases with their desired
     // dimensions
@@ -52,28 +55,18 @@ class DenseMLPTest : public ::testing::Test {
     // Clean up if needed
   }
 
-  // Helper function to create all-ones tensor
-  torch::Tensor CreateOnesTensor(const std::vector<int64_t>& shape) {
-    return test::CreateOnesTensor(shape, options_);
-  }
-
-  // Helper function to create all-ones tensor with specific values
-  torch::Tensor CreateFullTensor(const std::vector<int64_t>& shape,
-                                 float value) {
-    return test::CreateFullTensor(shape, value, options_);
-  }
-
-  std::unordered_map<std::string, torch::Tensor> CreateDefaultTestWeights(
+  std::unordered_map<std::string, torch::Tensor> create_default_test_weights(
       int64_t hidden_size,
       int64_t intermediate_size) {
     // Create test weights for gate_up_proj (gate + up projection)
     // Shape: [intermediate_size * 2, hidden_size]
     auto gate_up_weight =
-        CreateFullTensor({intermediate_size * 2, hidden_size}, 5.0f);
+        torch::full({intermediate_size * 2, hidden_size}, 5.0f, options_);
 
     // Create test weights for down_proj (down projection)
     // Shape: [hidden_size, intermediate_size] for RowParallelLinear
-    auto down_weight = CreateFullTensor({hidden_size, intermediate_size}, 3.0f);
+    auto down_weight =
+        torch::full({hidden_size, intermediate_size}, 3.0f, options_);
 
     // For w8a8 smoothquant, we need to create quantized weights and scales
     // Create qweight (int8 quantized weights)
@@ -166,7 +159,7 @@ class DenseMLPTest : public ::testing::Test {
   }
 
   // Helper function to create MLP with custom dimensions
-  DenseMLP CreateMLP(int64_t hidden_size, int64_t intermediate_size) {
+  DenseMLP create_mlp(int64_t hidden_size, int64_t intermediate_size) {
     // Create MLP with specified dimensions using the new constructor
     return DenseMLP(DenseMLPImpl(hidden_size,
                                  intermediate_size,
@@ -181,7 +174,7 @@ class DenseMLPTest : public ::testing::Test {
 
   // Helper function to create test weights for the MLP (w8a8 smoothquant
   // format)
-  std::unordered_map<std::string, torch::Tensor> CreateTestWeights(
+  std::unordered_map<std::string, torch::Tensor> create_test_weights(
       int64_t custom_hidden_size = -1,
       int64_t custom_intermediate_size = -1) {
     // Use custom sizes if provided, otherwise use model_args_ values
@@ -192,39 +185,34 @@ class DenseMLPTest : public ::testing::Test {
                                          ? custom_intermediate_size
                                          : model_args_.intermediate_size();
 
-    return CreateDefaultTestWeights(test_hidden_size, test_intermediate_size);
+    return create_default_test_weights(test_hidden_size,
+                                       test_intermediate_size);
   }
 
   // Helper function to verify tensor values are close to expected
-  void VerifyTensorClose(const torch::Tensor& actual,
-                         const torch::Tensor& expected,
-                         double rtol = 1e-5,
-                         double atol = 1e-8) {
-    test::VerifyTensorClose(actual, expected, rtol, atol);
+  void verify_tensor_close(const torch::Tensor& actual,
+                           const torch::Tensor& expected,
+                           double rtol = 1e-5,
+                           double atol = 1e-8) {
+    test::verify_tensor_close(actual, expected, rtol, atol);
   }
 
   // Helper function to create custom input tensor for precision testing
-  torch::Tensor CreateCustomInput(const std::vector<int64_t>& shape,
-                                  const std::vector<float>& values) {
-    return test::CreateCustomInput(shape, values, options_);
-  }
-
-  // Helper function to create custom residual tensor for precision testing
-  torch::Tensor CreateCustomResidual(const std::vector<int64_t>& shape,
-                                     const std::vector<float>& values) {
-    return test::CreateCustomResidual(shape, values, options_);
+  torch::Tensor create_custom_input(const std::vector<int64_t>& shape,
+                                    const std::vector<float>& values) {
+    return test::create_custom_input(shape, values, options_);
   }
 
   // Helper function to set expected output for precision verification
-  void SetExpectedOutput(const std::vector<float>& expected_values) {
+  void set_expected_output(const std::vector<float>& expected_values) {
     expected_output_ = expected_values;
   }
 
   // Helper function to verify precision against expected output
-  void VerifyPrecision(const torch::Tensor& actual_output,
-                       double rtol = 1e-3,
-                       double atol = 1e-4) {
-    test::VerifyPrecision(actual_output, expected_output_, rtol, atol);
+  void verify_precision(const torch::Tensor& actual_output,
+                        double rtol = 1e-3,
+                        double atol = 1e-4) {
+    test::verify_precision(actual_output, expected_output_, rtol, atol);
   }
 
   ModelArgs model_args_;
@@ -264,8 +252,9 @@ TEST_F(DenseMLPTest, Bfloat16LoadStateDictTest) {
 
   // For bfloat16 mode, we need regular weight tensors
   auto gate_up_weight =
-      CreateFullTensor({intermediate_size * 2, hidden_size}, 0.1f);
-  auto down_weight = CreateFullTensor({hidden_size, intermediate_size}, 0.1f);
+      torch::full({intermediate_size * 2, hidden_size}, 0.1f, options_);
+  auto down_weight =
+      torch::full({hidden_size, intermediate_size}, 0.1f, options_);
 
   weight_dict["gate_proj.weight"] =
       gate_up_weight.slice(0, 0, intermediate_size);
@@ -278,7 +267,7 @@ TEST_F(DenseMLPTest, Bfloat16LoadStateDictTest) {
   mlp->load_state_dict(state_dict);
 
   // Test forward pass
-  auto hidden_states = CreateOnesTensor({batch_size, hidden_size});
+  auto hidden_states = torch::ones({batch_size, hidden_size}, options_);
   auto output = mlp->forward(hidden_states);
 
   // Verify output shape
@@ -301,17 +290,17 @@ TEST_F(DenseMLPTest, SmoothquantLoadStateDictTest) {
   const int64_t intermediate_size = model_args_.intermediate_size();
 
   // Create MLP with default dimensions
-  auto mlp = CreateMLP(hidden_size, intermediate_size);
+  auto mlp = create_mlp(hidden_size, intermediate_size);
 
   // Create test weights and load them (using default model_args_ dimensions)
-  auto weight_dict = CreateTestWeights();
+  auto weight_dict = create_test_weights();
 
   // Load weights into the MLP
   StateDict state_dict(weight_dict);
   mlp->load_state_dict(state_dict);
 
   // Test forward pass with loaded weights
-  auto hidden_states = CreateOnesTensor({batch_size, hidden_size});
+  auto hidden_states = torch::ones({batch_size, hidden_size}, options_);
 
   LOG(INFO) << "Testing forward pass with loaded weights";
   auto output = mlp->forward(hidden_states);
@@ -338,11 +327,11 @@ TEST_F(DenseMLPTest, SmoothquantPrecisionVerificationTest) {
   const int64_t custom_intermediate_size = 9216;
 
   // Create custom MLP with smaller dimensions
-  auto custom_mlp = CreateMLP(custom_hidden_size, custom_intermediate_size);
+  auto custom_mlp = create_mlp(custom_hidden_size, custom_intermediate_size);
 
   // Create test weights and load them with custom dimensions
   auto weight_dict =
-      CreateTestWeights(custom_hidden_size, custom_intermediate_size);
+      create_test_weights(custom_hidden_size, custom_intermediate_size);
 
   // Load weights into the MLP
   StateDict state_dict(weight_dict);
@@ -363,7 +352,7 @@ TEST_F(DenseMLPTest, SmoothquantPrecisionVerificationTest) {
   }
 
   auto hidden_states =
-      CreateCustomInput({batch_size, custom_hidden_size}, input_values);
+      create_custom_input({batch_size, custom_hidden_size}, input_values);
 
   LOG(INFO) << "Testing precision verification with custom input (hidden_size="
             << custom_hidden_size << ")";
@@ -390,11 +379,11 @@ TEST_F(DenseMLPTest, SmoothquantPrecisionVerificationTest) {
     }
   }
 
-  SetExpectedOutput(expected_values);
+  set_expected_output(expected_values);
 
   // Note: The precision verification is commented out until you set the
   // expected values Uncomment the following line after setting the correct
-  VerifyPrecision(output, 1e-3, 1e-4);
+  verify_precision(output, 1e-3, 1e-4);
 }
 #endif
 }  // namespace layer

@@ -78,16 +78,19 @@ class IndexerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Initialize default model arguments for testing
-    model_args_ = test::CreateDefaultModelArgs();
+    model_args_ = test::create_default_model_args();
 
     // Initialize w8a8 quantization arguments
-    quant_args_ = test::CreateDefaultQuantArgs();
+    quant_args_ = test::create_default_quant_args();
 
     // Initialize tensor options
-    options_ = test::CreateDefaultTensorOptions();
+    options_ = torch::TensorOptions()
+                   .dtype(torch::kBFloat16)
+                   .device(Device::type_torch(), 0)
+                   .requires_grad(false);
 
     // Create mock ProcessGroup and initialize ParallelArgs
-    parallel_args_ = test::CreateDefaultParallelArgs(mock_process_group_);
+    parallel_args_ = test::create_default_parallel_args(mock_process_group_);
 
     // Note: Indexer will be created by individual test cases with their desired
     // dimensions
@@ -97,20 +100,9 @@ class IndexerTest : public ::testing::Test {
     // Clean up if needed
   }
 
-  // Helper function to create all-ones tensor
-  torch::Tensor CreateOnesTensor(const std::vector<int64_t>& shape) {
-    return test::CreateOnesTensor(shape, options_);
-  }
-
-  // Helper function to create all-ones tensor with specific values
-  torch::Tensor CreateFullTensor(const std::vector<int64_t>& shape,
-                                 float value) {
-    return test::CreateFullTensor(shape, value, options_);
-  }
-
   // Helper function to create test weights for the Indexer (w8a8 smoothquant
   // format)
-  std::unordered_map<std::string, torch::Tensor> CreateTestWeights(
+  std::unordered_map<std::string, torch::Tensor> create_test_weights(
       int64_t dim,
       int64_t index_n_heads,
       int64_t index_head_dim,
@@ -119,16 +111,17 @@ class IndexerTest : public ::testing::Test {
 
     // Create weights for wq_b (query projection with LoRA)
     // Shape: [n_heads * head_dim, q_lora_rank]
-    auto wq_b_weight =
-        CreateFullTensor({index_n_heads * index_head_dim, q_lora_rank}, 0.1f);
+    auto wq_b_weight = torch::full(
+        {index_n_heads * index_head_dim, q_lora_rank}, 0.1f, options_);
 
     // Create weights for wk (key projection)
     // Shape: [head_dim, dim]
-    auto wk_weight = CreateFullTensor({index_head_dim, dim}, 0.1f);
+    auto wk_weight = torch::full({index_head_dim, dim}, 0.1f, options_);
 
     // Create weights for weights_proj (weights projection)
     // Shape: [n_heads, dim]
-    auto weights_proj_weight = CreateFullTensor({index_n_heads, dim}, 0.1f);
+    auto weights_proj_weight =
+        torch::full({index_n_heads, dim}, 0.1f, options_);
 
     // Create StateDict with w8a8 smoothquant weights
     weight_dict["wq_b.weight"] = wq_b_weight;
@@ -145,12 +138,12 @@ class IndexerTest : public ::testing::Test {
   }
 
   // Helper function to populate AttentionMetadata for testing
-  void PopulateAttentionMetadata(AttentionMetadata& metadata,
-                                 int64_t batch_size,
-                                 int64_t max_query_len,
-                                 int64_t max_seq_len,
-                                 bool is_prefill,
-                                 int64_t max_num_batched_tokens) {
+  void populate_attention_metadata(AttentionMetadata& metadata,
+                                   int64_t batch_size,
+                                   int64_t max_query_len,
+                                   int64_t max_seq_len,
+                                   bool is_prefill,
+                                   int64_t max_num_batched_tokens) {
     // Create q_cu_seq_lens tensor (cu_seq_q_lens)
     // shape = [batch_size + 1], typically [0, 4, 8, 12, ...] if max_query_len=4
     metadata.q_cu_seq_lens = torch::arange(
@@ -205,46 +198,45 @@ class IndexerTest : public ::testing::Test {
   }
 
   // Helper function to create k_cache tensor
-  torch::Tensor CreateKCache(int64_t block_num,
-                             int64_t block_size,
-                             int64_t head_kv,
-                             int64_t head_dim,
-                             float value = 0.5f) {
-    return test::CreateFullTensor(
+  torch::Tensor create_k_cache(int64_t block_num,
+                               int64_t block_size,
+                               int64_t head_kv,
+                               int64_t head_dim,
+                               float value = 0.5f) {
+    return torch::full(
         {block_num, head_kv, block_size, head_dim}, value, options_);
   }
 
   // Helper function to verify tensor values are close to expected
-  void VerifyTensorClose(const torch::Tensor& actual,
-                         const torch::Tensor& expected,
-                         double rtol = 1e-5,
-                         double atol = 1e-8) {
-    test::VerifyTensorClose(actual, expected, rtol, atol);
+  void verify_tensor_close(const torch::Tensor& actual,
+                           const torch::Tensor& expected,
+                           double rtol = 1e-5,
+                           double atol = 1e-8) {
+    test::verify_tensor_close(actual, expected, rtol, atol);
   }
 
   // Helper function to create custom input tensor for precision testing
-  torch::Tensor CreateCustomInput(const std::vector<int64_t>& shape,
-                                  const std::vector<float>& values) {
-    return test::CreateCustomInput(shape, values, options_);
+  torch::Tensor create_custom_input(const std::vector<int64_t>& shape,
+                                    const std::vector<float>& values) {
+    return test::create_custom_input(shape, values, options_);
   }
 
   // Helper function to set expected output for precision verification
-  void SetExpectedOutput(const std::vector<float>& expected_values) {
+  void set_expected_output(const std::vector<float>& expected_values) {
     expected_output_ = expected_values;
   }
 
   // Helper function to verify precision against expected output
-  void VerifyPrecision(const torch::Tensor& actual_output,
-                       double rtol = 1e-3,
-                       double atol = 1e-4) {
-    test::VerifyPrecision(actual_output, expected_output_, rtol, atol);
+  void verify_precision(const torch::Tensor& actual_output,
+                        double rtol = 1e-3,
+                        double atol = 1e-4) {
+    test::verify_precision(actual_output, expected_output_, rtol, atol);
   }
 
   // Helper function to run Indexer test with configurable batch size, query
   // length and prefill mode
-  std::tuple<torch::Tensor, torch::Tensor> RunIndexerTest(int64_t batch_size,
-                                                          int64_t max_query_len,
-                                                          bool is_prefill) {
+  std::tuple<torch::Tensor, torch::Tensor>
+  run_indexer_test(int64_t batch_size, int64_t max_query_len, bool is_prefill) {
     // Fixed configuration parameters
     const int64_t dim = 7168;
     const int64_t index_n_heads = 64;
@@ -286,10 +278,11 @@ class IndexerTest : public ::testing::Test {
 
     // Create test weights
     std::unordered_map<std::string, torch::Tensor> weight_dict;
-    auto wq_b_weight =
-        CreateFullTensor({index_n_heads * index_head_dim, q_lora_rank}, 0.1f);
-    auto wk_weight = CreateFullTensor({index_head_dim, dim}, 0.1f);
-    auto weights_proj_weight = CreateFullTensor({index_n_heads, dim}, 0.1f);
+    auto wq_b_weight = torch::full(
+        {index_n_heads * index_head_dim, q_lora_rank}, 0.1f, options_);
+    auto wk_weight = torch::full({index_head_dim, dim}, 0.1f, options_);
+    auto weights_proj_weight =
+        torch::full({index_n_heads, dim}, 0.1f, options_);
 
     weight_dict["wq_b.weight"] = wq_b_weight;
     weight_dict["wk.weight"] = wk_weight;
@@ -299,8 +292,8 @@ class IndexerTest : public ::testing::Test {
     indexer->load_state_dict(state_dict);
 
     // Create test inputs
-    auto x = CreateOnesTensor({num_tokens, dim});
-    auto qr = CreateOnesTensor({num_tokens, q_lora_rank});
+    auto x = torch::ones({num_tokens, dim}, options_);
+    auto qr = torch::ones({num_tokens, q_lora_rank}, options_);
     // Generate positions: [0, 1, ..., max_query_len-1] repeated batch_size
     // times
     auto positions = torch::arange(max_query_len,
@@ -316,12 +309,12 @@ class IndexerTest : public ::testing::Test {
 
     // Create metadata object and populate it
     AttentionMetadata metadata;
-    PopulateAttentionMetadata(metadata,
-                              batch_size,
-                              max_query_len,
-                              max_position_embeddings,
-                              is_prefill,
-                              num_tokens);
+    populate_attention_metadata(metadata,
+                                batch_size,
+                                max_query_len,
+                                max_position_embeddings,
+                                is_prefill,
+                                num_tokens);
 
     // Test forward pass and return results
     return indexer->forward(x, qr, positions, k_cache, metadata, is_prefill);
@@ -351,7 +344,7 @@ TEST_F(IndexerTest, Bfloat16PrefillVerifyPrecision) {
 
   // Run the test using the encapsulated function
   auto [new_block_tables, new_context_lens] =
-      RunIndexerTest(batch_size, max_query_len, is_prefill);
+      run_indexer_test(batch_size, max_query_len, is_prefill);
 
   // Verify output shapes
   ASSERT_EQ(new_block_tables.sizes().size(), 2)
@@ -374,7 +367,7 @@ TEST_F(IndexerTest, Bfloat16PrefillVerifyPrecision) {
 
   // Run the test using the encapsulated function
   std::tie(new_block_tables, new_context_lens) =
-      RunIndexerTest(batch_size, max_query_len, is_prefill);
+      run_indexer_test(batch_size, max_query_len, is_prefill);
 
   // Verify output shapes
   ASSERT_EQ(new_block_tables.sizes().size(), 2)
@@ -400,7 +393,7 @@ TEST_F(IndexerTest, Bfloat16DecodeVerifyPrecision) {
 
   // Run the test using the encapsulated function
   auto [new_block_tables, new_context_lens] =
-      RunIndexerTest(batch_size, max_query_len, is_prefill);
+      run_indexer_test(batch_size, max_query_len, is_prefill);
 
   // Verify output shapes
   ASSERT_EQ(new_block_tables.sizes().size(), 2)

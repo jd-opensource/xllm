@@ -33,16 +33,19 @@ class FusedMoETest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Initialize default model arguments for testing
-    model_args_ = test::CreateDefaultModelArgs();
+    model_args_ = test::create_default_model_args();
 
     // Initialize w8a8 quantization arguments
-    quant_args_ = test::CreateDefaultQuantArgs();
+    quant_args_ = test::create_default_quant_args();
 
     // Initialize tensor options
-    options_ = test::CreateDefaultTensorOptions();
+    options_ = torch::TensorOptions()
+                   .dtype(torch::kBFloat16)
+                   .device(Device::type_torch(), 0)
+                   .requires_grad(false);
 
     // Create mock ProcessGroup and initialize ParallelArgs
-    parallel_args_ = test::CreateDefaultParallelArgs(mock_process_group_);
+    parallel_args_ = test::create_default_parallel_args(mock_process_group_);
 
     // Note: FusedMoE will be created by individual test cases with their
     // desired dimensions
@@ -52,24 +55,13 @@ class FusedMoETest : public ::testing::Test {
     // Clean up if needed
   }
 
-  // Helper function to create all-ones tensor
-  torch::Tensor CreateOnesTensor(const std::vector<int64_t>& shape) {
-    return test::CreateOnesTensor(shape, options_);
-  }
-
-  // Helper function to create all-ones tensor with specific values
-  torch::Tensor CreateFullTensor(const std::vector<int64_t>& shape,
-                                 float value) {
-    return test::CreateFullTensor(shape, value, options_);
-  }
-
   // Helper function to create router logits tensor
-  torch::Tensor CreateRouterLogits(const std::vector<int64_t>& shape,
-                                   const std::vector<float>& values) {
-    return test::CreateCustomInput(shape, values, options_);
+  torch::Tensor create_router_logits(const std::vector<int64_t>& shape,
+                                     const std::vector<float>& values) {
+    return test::create_custom_input(shape, values, options_);
   }
 
-  std::unordered_map<std::string, torch::Tensor> CreateDefaultTestWeights(
+  std::unordered_map<std::string, torch::Tensor> create_default_test_weights(
       int64_t num_experts,
       int64_t hidden_size,
       int64_t intermediate_size) {
@@ -82,7 +74,7 @@ class FusedMoETest : public ::testing::Test {
       // Create gate_proj weights (ColumnParallelLinear)
       // Shape: [intermediate_size, hidden_size]
       auto gate_weight =
-          CreateFullTensor({intermediate_size, hidden_size}, 2.0f);
+          torch::full({intermediate_size, hidden_size}, 2.0f, options_);
       auto gate_qweight = gate_weight.to(torch::kInt8);
       auto gate_scale = torch::full({intermediate_size},
                                     0.1f,
@@ -97,7 +89,8 @@ class FusedMoETest : public ::testing::Test {
 
       // Create up_proj weights (ColumnParallelLinear)
       // Shape: [intermediate_size, hidden_size]
-      auto up_weight = CreateFullTensor({intermediate_size, hidden_size}, 2.0f);
+      auto up_weight =
+          torch::full({intermediate_size, hidden_size}, 2.0f, options_);
       auto up_qweight = up_weight.to(torch::kInt8);
       auto up_scale = torch::full({intermediate_size},
                                   0.1f,
@@ -113,7 +106,7 @@ class FusedMoETest : public ::testing::Test {
       // Create down_proj weights (RowParallelLinear)
       // Shape: [hidden_size, intermediate_size]
       auto down_weight =
-          CreateFullTensor({hidden_size, intermediate_size}, 3.0f);
+          torch::full({hidden_size, intermediate_size}, 3.0f, options_);
       auto down_qweight = down_weight.to(torch::kInt8);
       auto down_scale = torch::full({hidden_size},
                                     0.1f,
@@ -142,12 +135,12 @@ class FusedMoETest : public ::testing::Test {
     }
 
     // gate weight generation
-    auto gate_weight = CreateFullTensor({num_experts, hidden_size}, 5.0f);
-    auto e_score_correction_bias = CreateFullTensor({num_experts}, 0.1f);
+    auto gate_weight = torch::full({num_experts, hidden_size}, 5.0f, options_);
+    auto e_score_correction_bias = torch::full({num_experts}, 0.1f, options_);
 
     // Create shared experts weights
     auto shared_expert_up_weight =
-        CreateFullTensor({intermediate_size, hidden_size}, 1.5f);
+        torch::full({intermediate_size, hidden_size}, 1.5f, options_);
     auto shared_expert_up_qweight = shared_expert_up_weight.to(torch::kInt8);
     auto shared_expert_up_scale = torch::full({intermediate_size},
                                               0.1f,
@@ -160,7 +153,7 @@ class FusedMoETest : public ::testing::Test {
                                                    .dtype(torch::kFloat32)
                                                    .device(options_.device()));
     auto shared_expert_down_weight =
-        CreateFullTensor({hidden_size, intermediate_size}, 1.3f);
+        torch::full({hidden_size, intermediate_size}, 1.3f, options_);
     auto shared_expert_down_qweight =
         shared_expert_down_weight.to(torch::kInt8);
     auto shared_expert_down_scale = torch::full({hidden_size},
@@ -199,22 +192,22 @@ class FusedMoETest : public ::testing::Test {
   }
 
   // Helper function to create FusedMoE with custom dimensions
-  FusedMoE CreateFusedMoE(int64_t num_experts,
-                          int64_t top_k,
-                          int64_t num_expert_group,
-                          int64_t topk_group,
-                          double route_scale,
-                          int64_t hidden_size,
-                          int64_t intermediate_size,
-                          int64_t n_shared_experts = 1,
-                          bool is_gated = true,
-                          bool has_score_bias = false,
-                          bool has_bias = false,
-                          bool skip_bias_add = false,
-                          int64_t renormalize = 0,
-                          const std::string& hidden_act = "silu",
-                          const std::string& scoring_func = "sigmoid",
-                          const std::string& topk_method = "noaux_tc") {
+  FusedMoE create_fused_moe(int64_t num_experts,
+                            int64_t top_k,
+                            int64_t num_expert_group,
+                            int64_t topk_group,
+                            double route_scale,
+                            int64_t hidden_size,
+                            int64_t intermediate_size,
+                            int64_t n_shared_experts = 1,
+                            bool is_gated = true,
+                            bool has_score_bias = false,
+                            bool has_bias = false,
+                            bool skip_bias_add = false,
+                            int64_t renormalize = 0,
+                            const std::string& hidden_act = "silu",
+                            const std::string& scoring_func = "sigmoid",
+                            const std::string& topk_method = "noaux_tc") {
     return FusedMoE(FusedMoEImpl(num_experts,
                                  top_k,
                                  num_expert_group,
@@ -238,7 +231,7 @@ class FusedMoETest : public ::testing::Test {
 
   // Helper function to create test weights for the FusedMoE (w8a8 smoothquant
   // format)
-  std::unordered_map<std::string, torch::Tensor> CreateTestWeights(
+  std::unordered_map<std::string, torch::Tensor> create_test_weights(
       int64_t num_experts,
       int64_t custom_hidden_size = -1,
       int64_t custom_intermediate_size = -1) {
@@ -250,40 +243,34 @@ class FusedMoETest : public ::testing::Test {
                                          ? custom_intermediate_size
                                          : model_args_.intermediate_size();
 
-    return CreateDefaultTestWeights(
+    return create_default_test_weights(
         num_experts, test_hidden_size, test_intermediate_size);
   }
 
   // Helper function to verify tensor values are close to expected
-  void VerifyTensorClose(const torch::Tensor& actual,
-                         const torch::Tensor& expected,
-                         double rtol = 1e-5,
-                         double atol = 1e-8) {
-    test::VerifyTensorClose(actual, expected, rtol, atol);
+  void verify_tensor_close(const torch::Tensor& actual,
+                           const torch::Tensor& expected,
+                           double rtol = 1e-5,
+                           double atol = 1e-8) {
+    test::verify_tensor_close(actual, expected, rtol, atol);
   }
 
   // Helper function to create custom input tensor for precision testing
-  torch::Tensor CreateCustomInput(const std::vector<int64_t>& shape,
-                                  const std::vector<float>& values) {
-    return test::CreateCustomInput(shape, values, options_);
-  }
-
-  // Helper function to create custom residual tensor for precision testing
-  torch::Tensor CreateCustomResidual(const std::vector<int64_t>& shape,
-                                     const std::vector<float>& values) {
-    return test::CreateCustomResidual(shape, values, options_);
+  torch::Tensor create_custom_input(const std::vector<int64_t>& shape,
+                                    const std::vector<float>& values) {
+    return test::create_custom_input(shape, values, options_);
   }
 
   // Helper function to set expected output for precision verification
-  void SetExpectedOutput(const std::vector<float>& expected_values) {
+  void set_expected_output(const std::vector<float>& expected_values) {
     expected_output_ = expected_values;
   }
 
   // Helper function to verify precision against expected output
-  void VerifyPrecision(const torch::Tensor& actual_output,
-                       double rtol = 1e-3,
-                       double atol = 1e-4) {
-    test::VerifyPrecision(actual_output, expected_output_, rtol, atol);
+  void verify_precision(const torch::Tensor& actual_output,
+                        double rtol = 1e-3,
+                        double atol = 1e-4) {
+    test::verify_precision(actual_output, expected_output_, rtol, atol);
   }
 
   ModelArgs model_args_;
@@ -317,30 +304,30 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
   const int64_t n_shared_experts = 1;
 
   // Create FusedMoE with default dimensions
-  auto fused_moe = CreateFusedMoE(num_experts,
-                                  top_k,
-                                  num_expert_group,
-                                  topk_group,
-                                  route_scale,
-                                  hidden_size,
-                                  intermediate_size,
-                                  n_shared_experts,
-                                  gated,
-                                  has_score_bias,
-                                  has_bias,
-                                  skip_bias_add,
-                                  renormalize);
+  auto fused_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    n_shared_experts,
+                                    gated,
+                                    has_score_bias,
+                                    has_bias,
+                                    skip_bias_add,
+                                    renormalize);
 
   // Create test weights and load them
   auto weight_dict =
-      CreateTestWeights(num_experts, hidden_size, intermediate_size);
+      create_test_weights(num_experts, hidden_size, intermediate_size);
 
   // Load weights into the FusedMoE
   StateDict state_dict(weight_dict);
   fused_moe->load_state_dict(state_dict);
 
   // Create input tensors
-  auto hidden_states = CreateCustomInput(
+  auto hidden_states = create_custom_input(
       {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
 
@@ -353,8 +340,8 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
     }
   }
   auto router_logits =
-      CreateRouterLogits({batch_size * seq_len, num_experts}, router_values);
-  auto score_bias = CreateFullTensor({num_experts}, 0.1f);
+      create_router_logits({batch_size * seq_len, num_experts}, router_values);
+  auto score_bias = torch::full({num_experts}, 0.1f, options_);
   auto output =
       fused_moe->forward_experts(hidden_states,
                                  router_logits,
@@ -393,30 +380,30 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   const int64_t n_shared_experts = 1;
 
   // Create FusedMoE with default dimensions
-  auto fused_moe = CreateFusedMoE(num_experts,
-                                  top_k,
-                                  num_expert_group,
-                                  topk_group,
-                                  route_scale,
-                                  hidden_size,
-                                  intermediate_size,
-                                  n_shared_experts,
-                                  gated,
-                                  has_score_bias,
-                                  has_bias,
-                                  skip_bias_add,
-                                  renormalize);
+  auto fused_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    n_shared_experts,
+                                    gated,
+                                    has_score_bias,
+                                    has_bias,
+                                    skip_bias_add,
+                                    renormalize);
 
   // Create test weights and load them
   auto weight_dict =
-      CreateTestWeights(num_experts, hidden_size, intermediate_size);
+      create_test_weights(num_experts, hidden_size, intermediate_size);
 
   // Load weights into the FusedMoE
   StateDict state_dict(weight_dict);
   fused_moe->load_state_dict(state_dict);
 
   // Create input tensors
-  auto hidden_states = CreateCustomInput(
+  auto hidden_states = create_custom_input(
       {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
 
@@ -430,7 +417,7 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   }
   // use custom logits and residual tensor for precision verification
   auto router_logits =
-      CreateRouterLogits({batch_size * seq_len, num_experts}, router_values);
+      create_router_logits({batch_size * seq_len, num_experts}, router_values);
   auto output =
       fused_moe->forward_experts(hidden_states,
                                  router_logits,
@@ -459,12 +446,12 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
     }
   }
 
-  SetExpectedOutput(expected_values);
+  set_expected_output(expected_values);
 
   // Note: The precision verification is commented out until you set the
   // expected values. Uncomment the following line after setting the correct
   // expected values
-  VerifyPrecision(output, 1e-3, 1e-4);
+  verify_precision(output, 1e-3, 1e-4);
 }
 
 }  // namespace layer
