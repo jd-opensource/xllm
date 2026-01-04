@@ -47,15 +47,13 @@ class RemoteWorker : public WorkerClient {
   bool wait_for_server_ready(const std::string& server_address);
 
   virtual bool init_model(const std::string& model_weights_path,
-                          int32_t random_seed) override;
+                          int32_t random_seed,
+                          int32_t master_status) override;
 
   virtual std::tuple<int64_t, int64_t> estimate_kv_cache_capacity() override;
 
   virtual bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
-
-  virtual bool allocate_continuous_kv_cache(
-      const std::vector<XTensor::Options>& options) override;
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -89,7 +87,8 @@ class RemoteWorker : public WorkerClient {
 
   virtual folly::SemiFuture<bool> init_model_async(
       const std::string& model_weights_path,
-      int32_t random_seed) override;
+      int32_t random_seed,
+      int32_t master_status) override;
 
   virtual folly::SemiFuture<std::tuple<int64_t, int64_t>>
   estimate_kv_cache_capacity_async() override;
@@ -97,12 +96,8 @@ class RemoteWorker : public WorkerClient {
   virtual folly::SemiFuture<bool> allocate_kv_cache_async(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 
-  virtual folly::SemiFuture<bool> allocate_continuous_kv_cache_async(
-      const std::vector<XTensor::Options>& options) override;
-
   virtual folly::SemiFuture<bool> allocate_kv_cache_with_transfer_async(
-      const uint64_t kv_cache_size,
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+      const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
@@ -148,6 +143,10 @@ class RemoteWorker : public WorkerClient {
 
   // Get worker global rank
   int32_t global_rank() const { return global_rank_; }
+
+  virtual folly::SemiFuture<bool> sleep_async(int32_t master_status) override;
+
+  virtual folly::SemiFuture<bool> wakeup_async(int32_t master_status) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RemoteWorker);

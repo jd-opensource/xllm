@@ -38,7 +38,10 @@ class BaseLoader {
   virtual void verify_loaded_weights() const {};
   virtual void verify_loaded_weights(const std::string& prefix) const {};
   virtual void merge_loaded_weights() {};
+  virtual void merge_and_move_pinned_host() {};
   virtual void resize_experts_weights(int num_of_device_experts) {};
+  virtual void free_weights() {};
+  virtual void reload_weights() {};
 
   torch::Dtype string2dtype(const std::string& dtype_str);
 

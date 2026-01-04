@@ -164,6 +164,7 @@ CompletionServiceImpl::CompletionServiceImpl(
     const std::vector<std::string>& models)
     : APIServiceImpl(models), master_(master) {
   CHECK(master_ != nullptr);
+  model_to_master_[models[0]] = master;
 }
 
 // complete_async for brpc
@@ -176,12 +177,28 @@ void CompletionServiceImpl::process_async_impl(
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
+  auto master = model_to_master_[model];
 
-  // Check if the request is being rate-limited.
-  if (unlikely(master_->get_rate_limiter()->is_limited())) {
-    call->finish_with_error(
-        StatusCode::RESOURCE_EXHAUSTED,
-        "The number of concurrent requests has reached the limit.");
+  // Check if the request is being rate-limited or model is sleeping.
+  // is_limited() returns true if sleeping or rate-limited.
+  if (unlikely(master->get_rate_limiter()->is_limited())) {
+    if (master->get_rate_limiter()->is_sleeping()) {
+      call->finish_with_error(StatusCode::UNAVAILABLE,
+                              "Model is currently in sleep state.");
+    } else {
+      call->finish_with_error(
+          StatusCode::RESOURCE_EXHAUSTED,
+          "The number of concurrent requests has reached the limit.");
+    }
+    return;
+  }
+
+  // Check if master is in sleep state.
+  if (master->get_master_status() == LIGHT_SLEEP ||
+      master->get_master_status() == DEEP_SLEEP) {
+    master->get_rate_limiter()->decrease_one_request();
+    call->finish_with_error(StatusCode::UNAVAILABLE,
+                            "Model is currently in sleep state.");
     return;
   }
 
@@ -206,14 +223,14 @@ void CompletionServiceImpl::process_async_impl(
   auto saved_streaming = request_params.streaming;
   auto saved_request_id = request_params.request_id;
   // schedule the request
-  master_->handle_request(
+  master->handle_request(
       std::move(rpc_request.prompt()),
       std::move(prompt_tokens),
       std::move(request_params),
       call.get(),
       [call,
        model,
-       master = master_,
+       master = master,
        stream = std::move(saved_streaming),
        include_usage = include_usage,
        request_id = std::move(saved_request_id),

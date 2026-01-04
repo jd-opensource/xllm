@@ -97,6 +97,7 @@ cc_test(
   SRCS
     acl_graph_executor_test.cpp
   DEPS
+    :xllm_server
     :runtime
     :model_loader
     :batch

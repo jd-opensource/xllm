@@ -63,6 +63,7 @@ cc_library(
     absl::flat_hash_set
     :parallel_state
     :collective_service
+    :xtensor
 )
 
 cc_library(

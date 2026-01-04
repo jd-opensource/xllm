@@ -43,7 +43,7 @@ namespace xllm {
 
 VLMMaster::VLMMaster(const Options& options)
     : Master(options, EngineType::VLM) {
-  CHECK(engine_->init());
+  CHECK(engine_->init(master_status_));
 
   model_args_ = engine_->model_args();
 

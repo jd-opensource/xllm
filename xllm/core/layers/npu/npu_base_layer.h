@@ -137,8 +137,39 @@ class BaseLayer : public torch::nn::Module {
   virtual void merge_loaded_weights() {
     if (loader_) {
       loader_->merge_loaded_weights();
+      auto& at_weight_tensors = loader_->get_at_weight_tensors();
+      for (int i = 0; i < atb_weight_tensors_.size(); i++) {
+        atb_weight_tensors_[i] =
+            atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
+      }
+      c10_npu::NPUCachingAllocator::emptyCache();
+      init_layer();
     }
-    init_layer();
+  };
+
+  virtual void free_weights() {
+    if (loader_) {
+      loader_->free_weights();
+    }
+  };
+
+  virtual void reload_weights() {
+    if (loader_) {
+      c10_npu::NPUCachingAllocator::emptyCache();
+      loader_->reload_weights();
+      auto& at_weight_tensors = loader_->get_at_weight_tensors();
+      for (int i = 0; i < atb_weight_tensors_.size(); i++) {
+        atb_weight_tensors_[i] =
+            atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
+      }
+    }
+  };
+
+  virtual void merge_and_move_pinned_host() {
+    if (loader_) {
+      loader_->merge_and_move_pinned_host();
+      init_layer();
+    }
   };
 
   virtual int64_t init_layer() { return 0; };
@@ -165,9 +196,6 @@ class BaseLayer : public torch::nn::Module {
 
   void correct_tensor_dtype(torch::Tensor& tensor,
                             const std::string& tensorName);
-
- protected:
-  atb::Tensor XTensor2Tensor(const std::shared_ptr<xllm::XTensor>& xtensor);
 
  protected:
   std::unique_ptr<BaseLoader> loader_ = nullptr;

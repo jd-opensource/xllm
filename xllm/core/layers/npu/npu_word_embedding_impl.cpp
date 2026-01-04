@@ -61,14 +61,12 @@ NpuWordEmbeddingImpl::NpuWordEmbeddingImpl(const ModelContext& context)
   atb_weight_tensors_.resize(1);
   atOutTensors_.resize(1);
   dtype_ = c10::typeMetaToScalarType(options.dtype());
-  loader_ = std::make_unique<WordEmbeddingLoader>(1, context);
-}
 
-void NpuWordEmbeddingImpl::merge_loaded_weights() {
-  auto& at_weight_tensors = loader_->get_at_weight_tensors();
-  atb_weight_tensors_[0] =
-      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
-  init_layer();
+  if (FLAGS_enable_xtensor) {
+    loader_ = std::make_unique<WordEmbeddingManualLoader>(1, context);
+  } else {
+    loader_ = std::make_unique<WordEmbeddingLoader>(1, context);
+  }
 }
 
 int64_t NpuWordEmbeddingImpl::init_layer() {

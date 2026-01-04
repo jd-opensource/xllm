@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package xllm.proto;
+option cc_enable_arenas = true;
+option cc_generic_services = true;
+
+import "common.proto";
+
+// Request for KV tensor mapping with model_id and offsets
+message KvTensorRequest {
+  string model_id = 1;
+  repeated uint64 offsets = 2;
+}
+
+// Response for memory info query
+// Returns 0 for both fields on failure
+message MemoryInfoResponse {
+  int64 available_memory = 1;  // Available memory in bytes
+  int64 total_memory = 2;      // Total memory in bytes
+}
+
+// Request for initializing PhyPagePool
+message InitPhyPagePoolRequest {
+  int64 num_pages = 1;  // Number of physical pages to allocate
+}
+
+// Request for weight tensor mapping
+message WeightTensorRequest {
+  string model_id = 1;
+  int64 num_pages = 2;  // Number of physical pages (aligned from weight size)
+}
+
+// Request for model operations (unmap_weight)
+message ModelRequest {
+  string model_id = 1;
+}
+
+// XTensorDist service for distributed XTensor mapping operations
+service XTensorDist {
+  rpc Hello (Status) returns (Status);
+  
+  // Memory info query (called before init to get available memory)
+  rpc GetMemoryInfo (Status) returns (MemoryInfoResponse);
+  
+  // Initialize PhyPagePool with specified number of pages
+  rpc InitPhyPagePool (InitPhyPagePoolRequest) returns (Status);
+  
+  // KV tensor operations (partial mapping by offsets)
+  // KV XTensor is created on first map if not exists
+  // Size = PhyPagePool::num_total() * page_size
+  rpc MapToKvTensors (KvTensorRequest) returns (Status);
+  rpc UnmapFromKvTensors (KvTensorRequest) returns (Status);
+  
+  // Weight tensor operations (full tensor mapping)
+  // CreateWeightTensor: only create XTensor without mapping physical pages
+  // MapWeightTensor: create XTensor (if not exists) and map all physical pages
+  rpc CreateWeightTensor (WeightTensorRequest) returns (Status);
+  rpc MapWeightTensor (WeightTensorRequest) returns (Status);
+  rpc UnmapWeightTensor (ModelRequest) returns (Status);
+}

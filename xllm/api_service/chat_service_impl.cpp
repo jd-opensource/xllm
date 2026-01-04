@@ -612,10 +612,11 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   const auto& rpc_request = call->request();
   // check if model is supported
   const auto& model = rpc_request.model();
-  if (!models_.contains(model)) {
+  if (unlikely(!models_.contains(model))) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
+  auto master = model_to_master_[model];
 
   // Route to RecMaster if configured
   if (rec_master_) {
@@ -624,12 +625,17 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   }
 
   // LLMMaster path (existing logic)
-  // Check if the request is being rate-limited.
-  CHECK(master_ != nullptr);
-  if (master_->get_rate_limiter()->is_limited()) {
-    call->finish_with_error(
-        StatusCode::RESOURCE_EXHAUSTED,
-        "The number of concurrent requests has reached the limit.");
+  // Check if the request is being rate-limited or model is sleeping.
+  // is_limited() returns true if sleeping or rate-limited.
+  if (unlikely(master->get_rate_limiter()->is_limited())) {
+    if (master->get_rate_limiter()->is_sleeping()) {
+      call->finish_with_error(StatusCode::UNAVAILABLE,
+                              "Model is currently in sleep state.");
+    } else {
+      call->finish_with_error(
+          StatusCode::RESOURCE_EXHAUSTED,
+          "The number of concurrent requests has reached the limit.");
+    }
     return;
   }
 
@@ -697,14 +703,14 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   auto saved_streaming = request_params.streaming;
   auto saved_request_id = request_params.request_id;
 
-  master_->handle_request(
+  master->handle_request(
       std::move(messages),
       std::move(prompt_tokens),
       std::move(request_params),
       call.get(),
       [call,
        model,
-       master = master_,
+       master = master,
        stream = std::move(saved_streaming),
        include_usage = include_usage,
        first_message_sent = std::unordered_set<size_t>(),

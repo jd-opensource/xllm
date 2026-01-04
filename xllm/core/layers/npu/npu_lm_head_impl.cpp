@@ -90,14 +90,11 @@ NpuLmHeadImpl::NpuLmHeadImpl(const ModelContext& context) : BaseLayer(context) {
   torch_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(torch_placeholder_);
 
-  loader_ = std::make_unique<LmHeadLoader>(1, context);
-}
-
-void NpuLmHeadImpl::merge_loaded_weights() {
-  auto& at_weight_tensors = loader_->get_at_weight_tensors();
-  atb_weight_tensors_[0] =
-      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
-  init_layer();
+  if (FLAGS_enable_xtensor) {
+    loader_ = std::make_unique<LmHeadManualLoader>(1, context);
+  } else {
+    loader_ = std::make_unique<LmHeadLoader>(1, context);
+  }
 }
 
 int64_t NpuLmHeadImpl::init_layer() {

@@ -27,18 +27,9 @@ struct Options {
   // devices for xtensor manager pool
   PROPERTY(std::vector<torch::Device>, devices);
 
-  // num of layers
-  PROPERTY(int64_t, num_layers) = 0;
-
-  // total pages for xtensor manager
-  PROPERTY(int64_t, num_total_pages) = 0;
-
-  // key or value cache size in bytes per token
-  PROPERTY(int64_t, cache_size_per_token) = 0;
-
-  // Index ID for internal server ID, which must be set different values
-  // if the model supports multiple version or there are multiple models.
-  PROPERTY(int64_t, server_idx) = 0;
+  // Multi-node configuration
+  PROPERTY(int32_t, nnodes) = 1;
+  PROPERTY(int32_t, node_rank) = 0;
 };
 }  // namespace xtensor
 }  // namespace xllm

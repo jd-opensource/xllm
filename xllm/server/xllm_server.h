@@ -20,7 +20,7 @@ limitations under the License.
 #include "core/distributed_runtime/disagg_pd_service.h"
 #include "core/distributed_runtime/pd_ooc_service.h"
 #include "core/distributed_runtime/worker_service.h"
-#include "core/framework/xtensor/xtensor_manager_service.h"
+#include "core/framework/xtensor/xtensor_dist_service.h"
 
 namespace xllm {
 
@@ -36,7 +36,7 @@ class XllmServer final {
              const std::string& addr,
              const std::string& server_name);
   bool start(std::shared_ptr<WorkerService> service, const std::string& addr);
-  bool start(std::shared_ptr<XTensorManagerService> service,
+  bool start(std::shared_ptr<XTensorDistService> service,
              const std::string& addr);
 
   void run();

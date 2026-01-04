@@ -39,12 +39,13 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "platform/npu/device_capture_lock.h"
 #endif
+#include "core/distributed_runtime/master.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_loader.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
-#include "framework/xtensor/multi_layer_xtensor_transfer.h"
+#include "framework/xtensor/xtensor_allocator.h"
 #include "util/net.h"
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
@@ -116,77 +117,93 @@ bool WorkerImpl::allocate_kv_cache(
       context_.get_model_args().index_n_heads() > 0;
   kv_caches_.reserve(num_layers);
 
-  // Determine cache dtype based on quantization setting
-  torch::ScalarType cache_dtype = enable_kv_cache_quant ? torch::kInt8 : dtype_;
+  if (FLAGS_enable_xtensor) {
+    // XTensor mode: create xtensor-backed KV cache
+    auto& allocator = XTensorAllocator::get_instance();
+    const std::string& model_id = options_.model_id();
+    // Create K tensors for all layers
+    auto k_tensors = allocator.create_k_tensors(
+        model_id, kv_cache_shape[0], dtype_, num_layers);
+    // Create V tensors for all layers
+    auto v_tensors = allocator.create_v_tensors(
+        model_id, kv_cache_shape[1], dtype_, num_layers);
 
-  for (int64_t i = 0; i < num_layers; ++i) {
-    torch::Tensor key_cache, value_cache, index_cache;
-    torch::Tensor key_cache_scale, value_cache_scale;
+    for (int64_t i = 0; i < num_layers; ++i) {
+      auto k_tensor =
+          at_npu::native::npu_format_cast(k_tensors[i], ACL_FORMAT_ND);
+      auto v_tensor =
+          at_npu::native::npu_format_cast(v_tensors[i], ACL_FORMAT_ND);
+      kv_caches_.emplace_back(k_tensor, v_tensor);
+    }
+  } else {
+    // Original mode: create torch tensors with optional int8 kv quantization.
+    torch::ScalarType cache_dtype =
+        enable_kv_cache_quant ? torch::kInt8 : dtype_;
+    for (int64_t i = 0; i < num_layers; ++i) {
+      torch::Tensor key_cache, value_cache, index_cache;
+      torch::Tensor key_cache_scale, value_cache_scale;
 #if defined(USE_NPU)
-    aclFormat npu_format_type =
-        context_.get_model_args().model_type() == "deepseek_v3" &&
-                FLAGS_enable_prefix_cache
-            ? ACL_FORMAT_FRACTAL_NZ
-            : ACL_FORMAT_ND;
-    key_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape[0],
-                     torch::dtype(cache_dtype).device(device_)),
-        npu_format_type);
-    value_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape[1],
-                     torch::dtype(cache_dtype).device(device_)),
-        npu_format_type);
-    if (enable_lighting_indexer) {
-      index_cache = at_npu::native::npu_format_cast(
-          torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_)),
+      aclFormat npu_format_type =
+          context_.get_model_args().model_type() == "deepseek_v3" &&
+                  FLAGS_enable_prefix_cache
+              ? ACL_FORMAT_FRACTAL_NZ
+              : ACL_FORMAT_ND;
+      key_cache = at_npu::native::npu_format_cast(
+          torch::empty(kv_cache_shape[0], torch::dtype(cache_dtype).device(device_)),
           npu_format_type);
-    }
-#elif defined(USE_ILU) || defined(USE_MLU)
-    key_cache = torch::zeros(kv_cache_shape[0],
-                             torch::dtype(cache_dtype).device(device_));
-    if (!kv_cache_shape[1].empty()) {
-      value_cache = torch::zeros(kv_cache_shape[1],
-                                 torch::dtype(cache_dtype).device(device_));
-    }
-    if (enable_lighting_indexer) {
-      index_cache =
-          torch::zeros(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
-    }
-    // Allocate scale tensors for quantized KV cache
-    if (enable_kv_cache_quant) {
-      // Scale shape: [block_nums, num_kv_heads, block_size] (remove head_size
-      // dim)
-      std::vector<int64_t> key_scale_shape(kv_cache_shape[0].begin(),
-                                           kv_cache_shape[0].end() - 1);
-      key_cache_scale = torch::zeros(
-          key_scale_shape, torch::dtype(torch::kFloat32).device(device_));
-      if (!kv_cache_shape[1].empty()) {
-        std::vector<int64_t> value_scale_shape(kv_cache_shape[1].begin(),
-                                               kv_cache_shape[1].end() - 1);
-        value_cache_scale = torch::zeros(
-            value_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+      value_cache = at_npu::native::npu_format_cast(
+          torch::empty(kv_cache_shape[1], torch::dtype(cache_dtype).device(device_)),
+          npu_format_type);
+      if (enable_lighting_indexer) {
+        index_cache = at_npu::native::npu_format_cast(
+            torch::empty(kv_cache_shape[2],
+                         torch::dtype(dtype_).device(device_)),
+            npu_format_type);
       }
-    }
+#elif defined(USE_ILU) || defined(USE_MLU)
+      key_cache =
+          torch::zeros(kv_cache_shape[0], torch::dtype(cache_dtype).device(device_));
+      if (!kv_cache_shape[1].empty()) {
+        value_cache = torch::zeros(kv_cache_shape[1],
+                                   torch::dtype(cache_dtype).device(device_));
+      }
+      if (enable_lighting_indexer) {
+        index_cache = torch::zeros(kv_cache_shape[2],
+                                   torch::dtype(dtype_).device(device_));
+      }
+      if (enable_kv_cache_quant) {
+        std::vector<int64_t> key_scale_shape(kv_cache_shape[0].begin(),
+                                             kv_cache_shape[0].end() - 1);
+        key_cache_scale = torch::zeros(
+            key_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+        if (!kv_cache_shape[1].empty()) {
+          std::vector<int64_t> value_scale_shape(kv_cache_shape[1].begin(),
+                                                 kv_cache_shape[1].end() - 1);
+          value_cache_scale = torch::zeros(
+              value_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+        }
+      }
 #else
-    key_cache = torch::empty(kv_cache_shape[0],
-                             torch::dtype(cache_dtype).device(device_));
-    if (!kv_cache_shape[1].empty()) {
-      value_cache = torch::empty(kv_cache_shape[1],
-                                 torch::dtype(cache_dtype).device(device_));
-    }
-    if (enable_lighting_indexer) {
-      index_cache =
-          torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
-    }
+      key_cache =
+          torch::empty(kv_cache_shape[0], torch::dtype(cache_dtype).device(device_));
+      if (!kv_cache_shape[1].empty()) {
+        value_cache = torch::empty(kv_cache_shape[1],
+                                   torch::dtype(cache_dtype).device(device_));
+      }
+      if (enable_lighting_indexer) {
+        index_cache = torch::empty(kv_cache_shape[2],
+                                   torch::dtype(dtype_).device(device_));
+      }
 #endif
-    if (enable_kv_cache_quant) {
-      kv_caches_.emplace_back(key_cache,
-                              value_cache,
-                              index_cache,
-                              key_cache_scale,
-                              value_cache_scale);
-    } else {
-      kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+      if (enable_kv_cache_quant) {
+        kv_caches_.emplace_back(key_cache,
+                                value_cache,
+                                index_cache,
+                                key_cache_scale,
+                                value_cache_scale);
+      } else {
+        kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+      }
     }
   }
 
@@ -195,40 +212,7 @@ bool WorkerImpl::allocate_kv_cache(
   return true;
 }
 
-bool WorkerImpl::allocate_continuous_kv_cache(
-    const std::vector<XTensor::Options>& options) {
-  CHECK(model_ != nullptr) << "Model is not initialized.";
-  CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
-
-  // create a KVCache for each layer
-  const int64_t num_layers = context_.get_model_args().n_layers();
-  kv_caches_.reserve(num_layers);
-
-  std::shared_ptr<XTensor> key_xtensor;
-  std::shared_ptr<XTensor> value_xtensor;
-
-  std::vector<std::shared_ptr<XTensor>> key_xtensors(num_layers);
-  std::vector<std::shared_ptr<XTensor>> value_xtensors(num_layers);
-
-  for (int64_t i = 0; i < num_layers; ++i) {
-    key_xtensor = std::make_shared<XTensor>(options[0], dtype_);
-    key_xtensors[i] = key_xtensor;
-
-    value_xtensor = std::make_shared<XTensor>(options[1], dtype_);
-    value_xtensors[i] = value_xtensor;
-
-    kv_caches_.emplace_back(key_xtensor, value_xtensor);
-  }
-
-  MultiLayerXTensorTransfer::get_instance().set_multi_layer_xtensor(
-      key_xtensors, value_xtensors, device_);
-
-  status_ = Status::READY;
-  return true;
-}
-
 bool WorkerImpl::allocate_kv_cache_with_transfer(
-    uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
@@ -569,29 +553,58 @@ folly::SemiFuture<folly::Unit> WorkerImpl::process_group_test_async() {
   return future;
 }
 
-// initialize model, cache manager. async call
 folly::SemiFuture<bool> WorkerImpl::init_model_async(
     const std::string& model_weights_path,
-    int32_t random_seed) {
+    int32_t random_seed,
+    int32_t master_status) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this,
                         model_weights_path,
                         random_seed,
+                        master_status,
                         promise = std::move(promise)]() mutable {
-    auto status = this->init_model(model_weights_path, random_seed);
+    auto status =
+        this->init_model(model_weights_path, random_seed, master_status);
     promise.setValue(status);
   });
 
   return future;
 }
 
+bool WorkerImpl::sleep(int32_t master_status) {
+  // The memory for kvcache and model weights is released by page
+  // allocate; therefore, weights are only loaded into memory here for the light
+  // sleep scenario (if not loaded before).
+  if (master_status == LIGHT_SLEEP) {
+    auto model_loader = ModelLoader::create(model_weights_path_);
+    model_->lazy_load_model(std::move(model_loader));
+  } else if (master_status == DEEP_SLEEP) {
+    model_->free_model_weights();
+  }
+  return true;
+}
+
+bool WorkerImpl::wakeup(int32_t master_status) {
+  if (master_status == LIGHT_SLEEP) {
+    model_->reload_model_weights();
+  } else if (master_status == DEEP_SLEEP) {
+    auto model_loader = ModelLoader::create(model_weights_path_);
+    model_->load_model(std::move(model_loader));
+  }
+
+  return true;
+}
+
+// initialize model, cache manager. async call
 bool WorkerImpl::init_model(const std::string& model_weights_path,
-                            int32_t random_seed) {
+                            int32_t random_seed,
+                            int32_t master_status) {
   // set same random seed for all worker
   device_.set_seed(random_seed);
 
   auto model_loader = ModelLoader::create(model_weights_path);
+  model_weights_path_ = std::move(model_weights_path);
   auto tokenizer = model_loader->tokenizer();
   CHECK(tokenizer != nullptr);
 
@@ -638,6 +651,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   dtype_ = dtype;
   auto tensor_options = torch::dtype(dtype_).device(device_);
   context_ = ModelContext(parallel_args_, args, quant_args, tensor_options);
+  context_.set_model_id(options_.model_id());
 
   // init model, create model executor
   bool status = this->init_model(context_);
@@ -646,10 +660,15 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     return false;
   }
 
-  this->load_model(std::move(model_loader));
+  if (master_status == WAKEUP) {
+    this->load_model(std::move(model_loader));
+  } else if (master_status == LIGHT_SLEEP) {
+    this->lazy_load_model(std::move(model_loader));
+  }
 
   status_ = Status::LOADED;
   if (FLAGS_enable_eplb) {
+    // todo: support xtensor
     int32_t num_layers = args.n_layers() - args.first_k_dense_replace();
     int32_t num_device_experts =
         args.n_routed_experts() / context_.get_parallel_args().world_size() +
@@ -667,6 +686,11 @@ void WorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
   model_->load_model(std::move(loader));
 }
 
+void WorkerImpl::lazy_load_model(std::unique_ptr<ModelLoader> loader) {
+  CHECK(model_ != nullptr) << "Model is not initialized.";
+  model_->lazy_load_model(std::move(loader));
+}
+
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_async(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   folly::Promise<bool> promise;
@@ -679,14 +703,16 @@ folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_async(
   return future;
 }
 
-folly::SemiFuture<bool> WorkerImpl::allocate_continuous_kv_cache_async(
-    const std::vector<XTensor::Options>& options) {
+folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(
+    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, options, promise = std::move(promise)]() mutable {
-    const bool success = this->allocate_continuous_kv_cache(options);
-    promise.setValue(success);
-  });
+  threadpool_.schedule(
+      [this, &kv_cache_shape, promise = std::move(promise)]() mutable {
+        const bool success =
+            this->allocate_kv_cache_with_transfer(kv_cache_shape);
+        promise.setValue(success);
+      });
   return future;
 }
 
@@ -720,22 +746,6 @@ uint32_t WorkerImpl::transfer_kv_blocks(
     Slice<BlockTransferInfo>& block_transfer_info) {
   return hierarchy_kv_cache_transfer_->transfer_kv_blocks(batch_id,
                                                           block_transfer_info);
-}
-
-folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(
-    uint64_t kv_cache_size,
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
-  folly::Promise<bool> promise;
-  auto future = promise.getSemiFuture();
-  threadpool_.schedule([this,
-                        kv_cache_size,
-                        &kv_cache_shape,
-                        promise = std::move(promise)]() mutable {
-    const bool success =
-        this->allocate_kv_cache_with_transfer(kv_cache_size, kv_cache_shape);
-    promise.setValue(success);
-  });
-  return future;
 }
 
 int64_t WorkerImpl::get_active_activation_memory() {

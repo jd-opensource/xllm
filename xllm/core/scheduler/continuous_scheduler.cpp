@@ -48,11 +48,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
           create_comparator(options.priority_strategy())) {
   CHECK(engine_ != nullptr);
 
-  if (!FLAGS_enable_continuous_kvcache) {
-    kv_cache_manager_ = engine_->block_manager_pool();
-  } else {
-    kv_cache_manager_ = engine_->xtensor_manager_pool();
-  }
+  kv_cache_manager_ = engine_->block_manager_pool();
   CHECK(kv_cache_manager_ != nullptr);
 
   enable_prefix_cache_ = FLAGS_enable_prefix_cache;
@@ -569,9 +565,8 @@ void ContinuousScheduler::handle_abnormal_request(
           << "Running queue size is not 1, there maybe a bug of request "
              "preemption logic. running_queue_.size ="
           << running_queue_->size();
-      if (!FLAGS_enable_continuous_kvcache &&
-          (util::sum(kv_cache_manager_->num_used_blocks()) !=
-           request->total_num_blocks())) {
+      if (util::sum(kv_cache_manager_->num_used_blocks()) !=
+          request->total_num_blocks()) {
         // blocks_exhausted is true.
         // NOTE: consider dp > 1, here we need get all num blocks in use.
         // Total num blocks in use not equal request->total_num_blocks() means
@@ -840,12 +835,10 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
 
   GAUGE_SET(kv_cache_utilization_perc,
             kv_cache_manager_->kv_cache_utilization());
-  if (!FLAGS_enable_continuous_kvcache) {
-    GAUGE_SET(num_blocks_in_prefix_cache,
-              util::min(kv_cache_manager_->num_blocks_in_prefix_cache()));
-    GAUGE_SET(num_free_blocks, util::max(kv_cache_manager_->num_free_blocks()));
-    GAUGE_SET(num_used_blocks, util::min(kv_cache_manager_->num_used_blocks()));
-  }
+  GAUGE_SET(num_blocks_in_prefix_cache,
+            util::min(kv_cache_manager_->num_blocks_in_prefix_cache()));
+  GAUGE_SET(num_free_blocks, util::max(kv_cache_manager_->num_free_blocks()));
+  GAUGE_SET(num_used_blocks, util::min(kv_cache_manager_->num_used_blocks()));
   return batches;
 }
 
@@ -999,9 +992,7 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
   update_token_latency_metrics(to_be_processed_sequences);
 
   // update slot usage and activation metrics
-  if (!FLAGS_enable_continuous_kvcache) {
-    update_memory_metrics(to_be_processed_sequences);
-  }
+  update_memory_metrics(to_be_processed_sequences);
 
   std::vector<std::shared_ptr<Request>> stream_requests;
   // process request output in batch

@@ -19,6 +19,17 @@ message HttpRequest {
 message HttpResponse {
 };
 
+message RpcStatus {
+  bool status = 1;
+}
+
+message MasterInfos {
+  string model_id = 1;
+  string model_path = 2;
+  string master_node_addr = 3;
+  int32 master_status = 4;
+}
+
 service XllmAPIService {
   rpc Completions (CompletionRequest) returns (CompletionResponse);
   rpc CompletionsHttp (HttpRequest) returns (HttpResponse);
@@ -41,4 +52,13 @@ service XllmAPIService {
   rpc ModelVersionsHttp (HttpRequest) returns (HttpResponse);
 
   rpc AnthropicMessagesHttp (HttpRequest) returns (HttpResponse);
+
+  rpc ForkMaster (MasterInfos) returns (RpcStatus);
+  rpc ForkMasterHttp (HttpRequest) returns (HttpResponse);
+  
+  rpc Sleep (MasterInfos) returns (RpcStatus);
+  rpc SleepHttp (HttpRequest) returns (HttpResponse);
+
+  rpc Wakeup (MasterInfos) returns (RpcStatus);
+  rpc WakeupHttp (HttpRequest) returns (HttpResponse);
 };

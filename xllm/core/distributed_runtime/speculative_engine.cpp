@@ -63,8 +63,8 @@ SpeculativeEngine::SpeculativeEngine(const runtime::Options& options)
   }
 }
 
-bool SpeculativeEngine::init() {
-  if (!init_model()) {
+bool SpeculativeEngine::init(int32_t master_status) {
+  if (!init_model(master_status)) {
     return false;
   }
 
@@ -75,12 +75,11 @@ bool SpeculativeEngine::init() {
   return true;
 }
 
-bool SpeculativeEngine::init_model() {
-  if (!engine_->init_model()) {
+bool SpeculativeEngine::init_model(int32_t master_status) {
+  if (!engine_->init_model(master_status)) {
     return false;
   }
-
-  if (!draft_engine_->init_model()) {
+  if (!draft_engine_->init_model(master_status)) {
     return false;
   }
 

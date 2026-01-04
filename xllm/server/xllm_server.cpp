@@ -35,18 +35,30 @@ XllmServer::~XllmServer() {
 
 bool XllmServer::start(std::unique_ptr<APIService> service) {
   server_ = std::make_unique<brpc::Server>();
-  if (server_->AddService(service.get(),
-                          brpc::SERVER_DOESNT_OWN_SERVICE,
-                          "v1/completions => CompletionsHttp,"
-                          "v1/chat/completions => ChatCompletionsHttp,"
-                          "v1/embeddings => EmbeddingsHttp,"
-                          "v1/models => ModelsHttp,"
-                          "v1/image/generation => ImageGenerationHttp,"
-                          "v1/rerank => RerankHttp,"
-                          "v1/messages => AnthropicMessagesHttp,"
-                          "v2/repository/index => ModelVersionsHttp,") != 0) {
-    LOG(ERROR) << "Fail to add api service";
-    return false;
+  if (FLAGS_node_rank == 0) {
+    if (server_->AddService(service.get(),
+                            brpc::SERVER_DOESNT_OWN_SERVICE,
+                            "v1/completions => CompletionsHttp,"
+                            "v1/chat/completions => ChatCompletionsHttp,"
+                            "v1/embeddings => EmbeddingsHttp,"
+                            "v1/models => ModelsHttp,"
+                            "v1/image/generation => ImageGenerationHttp,"
+                            "v1/rerank => RerankHttp,"
+                            "v1/messages => AnthropicMessagesHttp,"
+                            "v2/repository/index => ModelVersionsHttp,"
+                            "fork_master => ForkMasterHttp,"
+                            "sleep => SleepHttp,"
+                            "wakeup => WakeupHttp") != 0) {
+      LOG(ERROR) << "Fail to add api service";
+      return false;
+    }
+  } else if (FLAGS_enable_xtensor) {
+    if (server_->AddService(service.get(),
+                            brpc::SERVER_DOESNT_OWN_SERVICE,
+                            "fork_master => ForkMasterHttp") != 0) {
+      LOG(ERROR) << "Fail to add api service";
+      return false;
+    }
   }
 
   brpc::ServerOptions options;
@@ -154,12 +166,12 @@ bool XllmServer::start(std::shared_ptr<WorkerService> service,
   return true;
 }
 
-bool XllmServer::start(std::shared_ptr<XTensorManagerService> service,
+bool XllmServer::start(std::shared_ptr<XTensorDistService> service,
                        const std::string& addr) {
   server_ = std::make_unique<brpc::Server>();
   if (server_->AddService(service.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
       0) {
-    LOG(ERROR) << "Fail to add DistributeXTensorManager service";
+    LOG(ERROR) << "Fail to add XTensorDist service";
     return false;
   }
 
@@ -168,11 +180,11 @@ bool XllmServer::start(std::shared_ptr<XTensorManagerService> service,
   options.num_threads = FLAGS_num_threads;
   listen_address_ = addr;
   if (server_->Start(addr.c_str(), &options) != 0) {
-    LOG(ERROR) << "Failed to start distribute server on address: " << addr;
+    LOG(ERROR) << "Failed to start XTensorDist server on address: " << addr;
     return false;
   }
   listen_port_ = server_->listen_address().port;
-  LOG(INFO) << "DistributeXTensorManager started on address "
+  LOG(INFO) << "XTensorDist server started on address "
             << server_->listen_address()
             << ", idle_timeout_sec: " << FLAGS_rpc_idle_timeout_s
             << ", num_threads: " << FLAGS_num_threads;

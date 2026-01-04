@@ -50,7 +50,8 @@ DECLARE_bool(graceful_quit_on_sighup);
 
 namespace xllm {
 
-Master::Master(const Options& options, EngineType type) : options_(options) {
+Master::Master(const Options& options, EngineType type)
+    : options_(options), master_status_(options.master_status()) {
   LOG(INFO) << "Master init options: " << options.to_string();
 
   // Allow brpc receive SIGTREM and SIGINT signal.
@@ -226,7 +227,6 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .store_local_hostname(options_.store_local_hostname())
         .prefetch_bacth_size(options_.prefetch_bacth_size())
         .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
-        .enable_continuous_kvcache(options_.enable_continuous_kvcache())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
@@ -234,7 +234,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
         .is_local(options_.is_local())
         .server_idx(options_.server_idx())
-        .kv_cache_dtype(options_.kv_cache_dtype());
+        .kv_cache_dtype(options_.kv_cache_dtype())
+        .model_id(options_.model_id());
 
     if (options_.device_ip().has_value()) {
       eng_options.device_ip(options_.device_ip().value());
@@ -296,4 +297,35 @@ std::unique_ptr<Master> create_master(const std::string& backend,
   }
 }
 
+std::unique_ptr<Master> fork_master(Master* master, const Options& options) {
+  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
+  if (!FLAGS_enable_xtensor) {
+    LOG(WARNING) << "fork_master requires xtensor to be enabled";
+    return nullptr;
+  }
+
+  static uint64_t server_idx = 1;
+  CHECK(master != nullptr);
+
+  Options new_options = master->options();
+
+  if (!options.model_id().empty()) {
+    new_options.model_id() = options.model_id();
+  }
+  if (!options.model_path().empty()) {
+    new_options.model_path() = options.model_path();
+  }
+  new_options.master_node_addr() = options.master_node_addr();
+  new_options.server_idx() = server_idx++;
+  new_options.master_status() = options.master_status();
+  std::unique_ptr<Master> new_master;
+  if (new_options.node_rank() != 0) {
+    new_master = std::make_unique<LLMAssistantMaster>(new_options);
+  } else {
+    new_master = create_master(new_options.backend(), new_options);
+  }
+  new_master->run();
+
+  return new_master;
+}
 }  // namespace xllm

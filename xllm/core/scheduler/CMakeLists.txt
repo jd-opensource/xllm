@@ -55,8 +55,19 @@ cc_test(
     continuous_scheduler_test.cpp
   DEPS
     :scheduler
+    :xllm_server
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:nnopbase>
 )
 
-target_link_libraries(chunked_prefill_scheduler_test PRIVATE $<$<BOOL:${USE_NPU}>:c_sec>)
+target_link_libraries(chunked_prefill_scheduler_test
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>)
+
+# Use LINK_GROUP to resolve circular dependency between xtensor and xllm_server
+# This wraps the libraries in --start-group/--end-group
+target_link_libraries(chunked_prefill_scheduler_test PRIVATE
+  "$<LINK_GROUP:RESCAN,xtensor,xllm_server>")

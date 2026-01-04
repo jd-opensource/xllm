@@ -70,68 +70,39 @@ bool CommChannel::check_health() {
 
 bool CommChannel::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
-  proto::KVCacheShape shape;
-  shape.mutable_key_shape()->Reserve(kv_cache_shape[0].size());
-  shape.mutable_value_shape()->Reserve(kv_cache_shape[1].size());
+  proto::AllocateKVCacheRequest request;
+
+  auto* shape = request.mutable_kv_cache_shape();
+  shape->mutable_key_shape()->Reserve(kv_cache_shape[0].size());
+  shape->mutable_value_shape()->Reserve(kv_cache_shape[1].size());
 
   // add key shape
   for (size_t i = 0; i < kv_cache_shape[0].size(); ++i) {
-    shape.add_key_shape(kv_cache_shape[0][i]);
+    shape->add_key_shape(kv_cache_shape[0][i]);
   }
 
   // add value shape
   for (size_t i = 0; i < kv_cache_shape[1].size(); ++i) {
-    shape.add_value_shape(kv_cache_shape[1][i]);
+    shape->add_value_shape(kv_cache_shape[1][i]);
   }
 
   // add index shape if exists
   if (kv_cache_shape.size() > 2) {
-    shape.mutable_index_shape()->Reserve(kv_cache_shape[2].size());
+    shape->mutable_index_shape()->Reserve(kv_cache_shape[2].size());
     for (size_t i = 0; i < kv_cache_shape[2].size(); ++i) {
-      shape.add_index_shape(kv_cache_shape[2][i]);
+      shape->add_index_shape(kv_cache_shape[2][i]);
     }
   }
 
   proto::Status s;
   brpc::Controller cntl;
-  stub_->AllocateKVCache(&cntl, &shape, &s, nullptr);
+  stub_->AllocateKVCache(&cntl, &request, &s, nullptr);
 
   if (cntl.Failed() || !s.ok()) {
     LOG(ERROR) << "allocate_kv_cache failed: " << cntl.ErrorText();
     return false;
   }
 
-  return true;
-}
-
-bool CommChannel::allocate_continuous_kv_cache(
-    const std::vector<XTensor::Options>& options) {
-  proto::XTensorOptionsVec xtensor_options_vec;
-  xtensor_options_vec.mutable_key_options()->set_num_kv_heads(
-      options[0].num_kv_heads());
-  xtensor_options_vec.mutable_key_options()->set_head_size(
-      options[0].head_size());
-  xtensor_options_vec.mutable_key_options()->set_max_context_len(
-      options[0].max_context_len());
-  xtensor_options_vec.mutable_key_options()->set_max_seqs_per_batch(
-      options[0].max_seqs_per_batch());
-  xtensor_options_vec.mutable_value_options()->set_num_kv_heads(
-      options[1].num_kv_heads());
-  xtensor_options_vec.mutable_value_options()->set_head_size(
-      options[1].head_size());
-  xtensor_options_vec.mutable_value_options()->set_max_context_len(
-      options[1].max_context_len());
-  xtensor_options_vec.mutable_value_options()->set_max_seqs_per_batch(
-      options[1].max_seqs_per_batch());
-
-  proto::Status s;
-  brpc::Controller cntl;
-  stub_->AllocateContinuousKVCache(&cntl, &xtensor_options_vec, &s, nullptr);
-
-  if (cntl.Failed() || !s.ok()) {
-    LOG(ERROR) << "allocate_continuous_kv_cache failed: " << cntl.ErrorText();
-    return false;
-  }
   return true;
 }
 
@@ -229,11 +200,13 @@ bool CommChannel::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
 }
 
 bool CommChannel::init_model(const std::string& model_weights_path,
-                             int32_t random_seed) {
+                             int32_t random_seed,
+                             int32_t master_status) {
   proto::InitModelRequest request;
 
   request.set_model_weights_path(model_weights_path);
   request.set_random_seed(random_seed);
+  request.set_master_status(master_status);
   proto::Status response;
   brpc::Controller cntl;
   stub_->InitModel(&cntl, &request, &response, nullptr);
@@ -246,11 +219,13 @@ bool CommChannel::init_model(const std::string& model_weights_path,
 
 bool CommChannel::init_model_async(const std::string& model_weights_path,
                                    int32_t random_seed,
-                                   folly::Promise<bool>& promise) {
+                                   folly::Promise<bool>& promise,
+                                   int32_t master_status) {
   proto::InitModelRequest request;
 
   request.set_model_weights_path(model_weights_path);
   request.set_random_seed(random_seed);
+  request.set_master_status(master_status);
   auto done = new InitModelClosure();
   done->promise = std::move(promise);
   stub_->InitModel(&done->cntl, &request, &done->response, done);
@@ -317,10 +292,8 @@ bool CommChannel::process_group_test() {
 }
 
 bool CommChannel::allocate_kv_cache_with_transfer(
-    const uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
-  proto::AllocateKVCacheWithTransferRequest request;
-  request.set_kv_cache_size(kv_cache_size);
+  proto::AllocateKVCacheRequest request;
 
   auto* shape = request.mutable_kv_cache_shape();
   shape->mutable_key_shape()->Reserve(kv_cache_shape[0].size());
@@ -385,6 +358,34 @@ void CommChannel::transfer_kv_blocks(
   brpc::Controller cntl;
   proto::TransferStatus response;
   stub_->TransferBlocks(&cntl, &pb_block_transfer_info, &response, nullptr);
+}
+
+bool CommChannel::sleep(int32_t master_status) {
+  proto::SleepRequest req;
+  proto::Status s;
+  brpc::Controller cntl;
+
+  req.set_master_status(master_status);
+  stub_->Sleep(&cntl, &req, &s, nullptr);
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "Sleep failed: " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
+bool CommChannel::wakeup(int32_t master_status) {
+  proto::Status s;
+  brpc::Controller cntl;
+  proto::WakeupRequest req;
+
+  req.set_master_status(master_status);
+  stub_->Wakeup(&cntl, &req, &s, nullptr);
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "Wakeup failed: " << cntl.ErrorText();
+    return false;
+  }
+  return true;
 }
 
 class ClientStreamReceiver : public brpc::StreamInputHandler {

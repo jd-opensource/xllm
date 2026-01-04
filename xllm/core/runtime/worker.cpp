@@ -74,18 +74,14 @@ Worker::Worker(const ParallelArgs& parallel_args,
 Worker::~Worker() { delete impl_; }
 
 bool Worker::init_model(const std::string& model_weights_path,
-                        int32_t random_seed) {
-  return impl_->init_model(model_weights_path, random_seed);
+                        int32_t random_seed,
+                        int32_t master_status) {
+  return impl_->init_model(model_weights_path, random_seed, master_status);
 }
 
 bool Worker::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   return impl_->allocate_kv_cache(kv_cache_shape);
-}
-
-bool Worker::allocate_continuous_kv_cache(
-    const std::vector<XTensor::Options>& options) {
-  return impl_->allocate_continuous_kv_cache(options);
 }
 
 void Worker::get_device_info(std::string& device_ip, uint16_t& port) {
@@ -144,8 +140,10 @@ folly::SemiFuture<folly::Unit> Worker::process_group_test_async() {
 // initialize model, cache manager. async call
 folly::SemiFuture<bool> Worker::init_model_async(
     const std::string& model_weights_path,
-    int32_t random_seed) {
-  return impl_->init_model_async(model_weights_path, random_seed);
+    int32_t random_seed,
+    int32_t master_status) {
+  return impl_->init_model_async(
+      model_weights_path, random_seed, master_status);
 }
 
 folly::SemiFuture<bool> Worker::allocate_kv_cache_async(
@@ -153,16 +151,9 @@ folly::SemiFuture<bool> Worker::allocate_kv_cache_async(
   return impl_->allocate_kv_cache_async(kv_cache_shape);
 }
 
-folly::SemiFuture<bool> Worker::allocate_continuous_kv_cache_async(
-    const std::vector<XTensor::Options>& options) {
-  return impl_->allocate_continuous_kv_cache_async(options);
-}
-
 folly::SemiFuture<bool> Worker::allocate_kv_cache_with_transfer_async(
-    const uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
-  return impl_->allocate_kv_cache_with_transfer_async(kv_cache_size,
-                                                      kv_cache_shape);
+  return impl_->allocate_kv_cache_with_transfer_async(kv_cache_shape);
 }
 
 folly::SemiFuture<bool> Worker::pull_kv_blocks_async(
@@ -217,4 +208,11 @@ folly::SemiFuture<int64_t> Worker::get_active_activation_memory_async() {
   return future;
 }
 
+bool Worker::sleep(int32_t master_status) {
+  return impl_->sleep(master_status);
+}
+
+bool Worker::wakeup(int32_t master_status) {
+  return impl_->wakeup(master_status);
+}
 }  // namespace xllm

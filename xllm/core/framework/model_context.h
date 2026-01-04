@@ -22,6 +22,7 @@ limitations under the License.
 #endif
 
 #include <memory>
+#include <string>
 
 #include "core/framework/model/model_args.h"
 #include "core/framework/parallel_state/parallel_args.h"
@@ -86,11 +87,15 @@ class ModelContext {
     model_args_.image_embedding_mode() = image_embedding_mode;
   }
 
+  const std::string& get_model_id() const { return model_id_; }
+  void set_model_id(const std::string& model_id) { model_id_ = model_id; }
+
  private:
   // derive optimization config based on model args, quant args and other
   // factors
   void derive_optimization_config();
 
+  std::string model_id_;  // Model identifier for XTensor multi-model support
   ModelArgs model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_;

@@ -245,11 +245,6 @@ bool BlockCapacityGuard::if_accept_candidate_sequences(
 ZeroEvictionScheduler::ZeroEvictionScheduler(Engine* engine,
                                              const Options& options)
     : ContinuousScheduler(engine, options) {
-  if (FLAGS_enable_continuous_kvcache) {
-    LOG(FATAL)
-        << "ZeroEvictionScheduler is not supported for continuous kvcache";
-  }
-
   block_capacity_guard_ =
       std::make_unique<BlockCapacityGuard>(kv_cache_manager_);
 }
