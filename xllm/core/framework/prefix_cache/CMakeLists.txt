@@ -52,6 +52,7 @@ cc_binary(
   SRCS
     prefix_cache_benchmark.cpp
   DEPS
+    torch_python
     :kv_cache
     :prefix_cache
     :block

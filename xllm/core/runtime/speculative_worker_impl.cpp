@@ -158,11 +158,13 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(
 }
 
 bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
-                                       int32_t random_seed) {
-  // Base: only load target model
+                                       int32_t random_seed,
+                                       int32_t master_status) {
+  // Base class only loads the target model.
   bool result = true;
   if (impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {
-    result = impl_->WorkerImpl::init_model(model_weights_path, random_seed);
+    result = impl_->WorkerImpl::init_model(
+        model_weights_path, random_seed, master_status);
     if (result) {
       dtype_ = impl_->dtype();
       embedding_size_ = impl_->hidden_size();
@@ -180,9 +182,8 @@ bool SpeculativeWorkerImpl::allocate_kv_cache(
 
 #if defined(USE_NPU)
 bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
-    const uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
-  return impl_->allocate_kv_cache_with_transfer(kv_cache_size, kv_cache_shape);
+  return impl_->allocate_kv_cache_with_transfer(kv_cache_shape);
 }
 #endif
 

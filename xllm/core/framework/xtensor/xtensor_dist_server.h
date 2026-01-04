@@ -16,28 +16,30 @@ limitations under the License.
 #pragma once
 
 #include <brpc/server.h>
-#include <folly/futures/Future.h>
 #include <torch/torch.h>
 
+#include <atomic>
+#include <memory>
 #include <string>
 #include <thread>
 
 #include "common/macros.h"
 #include "options.h"
-#include "xtensor_manager.pb.h"
+#include "xtensor_dist.pb.h"
 
 namespace xllm {
-class XTensorManagerServer {
+
+class XTensorDistServer {
  public:
-  XTensorManagerServer(int local_xtensor_manager_idx,
-                       const std::string& master_node_addr,
-                       std::atomic<bool>& done,
-                       const torch::Device& d,
-                       const xtensor::Options& options);
-  virtual ~XTensorManagerServer();
+  XTensorDistServer(int local_rank,
+                    const std::string& master_node_addr,
+                    std::atomic<bool>& done,
+                    const torch::Device& device,
+                    const xtensor::Options& options);
+  ~XTensorDistServer();
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(XTensorManagerServer);
+  DISALLOW_COPY_AND_ASSIGN(XTensorDistServer);
 
   void create_server(const xtensor::Options& options,
                      std::atomic<bool>& done,
@@ -45,7 +47,6 @@ class XTensorManagerServer {
                      const torch::Device& device,
                      int world_size,
                      int global_rank,
-                     int32_t dp_size,
                      int local_rank);
 
   bool sync_master_node(const std::string& master_node_addr,
@@ -53,7 +54,8 @@ class XTensorManagerServer {
                         proto::CommUniqueIdList& uids);
 
  private:
-  std::unique_ptr<std::thread> xtensor_manager_thread_;
+  std::unique_ptr<std::thread> server_thread_;
   std::string server_name_;
 };
+
 }  // namespace xllm

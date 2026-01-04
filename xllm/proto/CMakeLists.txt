@@ -18,8 +18,8 @@ proto_library(
     xllm_service.proto
     xservice.proto
     image_generation.proto
-    xtensor_manager.proto
     mooncake_transfer_engine.proto
     embedding_data.proto
     anthropic.proto
+    xtensor_dist.proto
 )

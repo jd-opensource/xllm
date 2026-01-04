@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <unordered_map>
+
 #include "anthropic_service_impl.h"
 #include "chat_service_impl.h"
 #include "completion_service_impl.h"
@@ -105,9 +107,42 @@ class APIService : public proto::XllmAPIService {
                              proto::HttpResponse* response,
                              ::google::protobuf::Closure* done) override;
 
- private:
-  Master* master_;
+  void ForkMaster(::google::protobuf::RpcController* controller,
+                  const proto::MasterInfos* request,
+                  proto::RpcStatus* response,
+                  ::google::protobuf::Closure* done) override;
 
+  void ForkMasterHttp(::google::protobuf::RpcController* controller,
+                      const proto::HttpRequest* request,
+                      proto::HttpResponse* response,
+                      ::google::protobuf::Closure* done) override;
+
+  void Sleep(::google::protobuf::RpcController* controller,
+             const proto::MasterInfos* request,
+             proto::RpcStatus* response,
+             ::google::protobuf::Closure* done) override;
+
+  void SleepHttp(::google::protobuf::RpcController* controller,
+                 const proto::HttpRequest* request,
+                 proto::HttpResponse* response,
+                 ::google::protobuf::Closure* done) override;
+
+  void Wakeup(::google::protobuf::RpcController* controller,
+              const proto::MasterInfos* request,
+              proto::RpcStatus* response,
+              ::google::protobuf::Closure* done) override;
+
+  void WakeupHttp(::google::protobuf::RpcController* controller,
+                  const proto::HttpRequest* request,
+                  proto::HttpResponse* response,
+                  ::google::protobuf::Closure* done) override;
+
+ private:
+  bool ParseForkMasterRequest(const proto::MasterInfos* request,
+                              Options& options);
+
+  Master* master_;
+  std::unordered_map<std::string, Master*> masters_;
   std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;
   std::unique_ptr<CompletionServiceImpl> completion_service_impl_;
   std::unique_ptr<ChatServiceImpl> chat_service_impl_;

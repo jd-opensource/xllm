@@ -43,16 +43,19 @@ class Worker {
   ~Worker();
 
   // initialize model, cache manager. blocking call
-  bool init_model(const std::string& model_weights_path, int32_t random_seed);
+  bool init_model(const std::string& model_weights_path,
+                  int32_t random_seed,
+                  int32_t master_status);
+
+  bool sleep(int32_t master_status);
+
+  bool wakeup(int32_t master_status);
 
   std::tuple<int64_t, int64_t> estimate_kv_cache_capacity();
 
   // allocate kv cache. blocking call
   bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
-
-  bool allocate_continuous_kv_cache(
-      const std::vector<XTensor::Options>& options);
 
   void get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -81,7 +84,8 @@ class Worker {
   // initialize model, cache manager. async call
   folly::SemiFuture<bool> init_model_async(
       const std::string& model_weights_path,
-      int32_t random_seed);
+      int32_t random_seed,
+      int32_t master_status);
 
   folly::SemiFuture<std::tuple<int64_t, int64_t>>
   estimate_kv_cache_capacity_async();
@@ -90,12 +94,8 @@ class Worker {
   folly::SemiFuture<bool> allocate_kv_cache_async(
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
-  folly::SemiFuture<bool> allocate_continuous_kv_cache_async(
-      const std::vector<XTensor::Options>& options);
-
   // initialize kv cache with kv cache transfer. async call
   virtual folly::SemiFuture<bool> allocate_kv_cache_with_transfer_async(
-      const uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(

@@ -33,18 +33,14 @@ limitations under the License.
 namespace xllm {
 
 bool WorkerClient::init_model(const std::string& model_weights_path,
-                              int32_t random_seed) {
-  return worker_->init_model(model_weights_path, random_seed);
+                              int32_t random_seed,
+                              int32_t master_status) {
+  return worker_->init_model(model_weights_path, random_seed, master_status);
 }
 
 bool WorkerClient::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   return worker_->allocate_kv_cache(kv_cache_shape);
-}
-
-bool WorkerClient::allocate_continuous_kv_cache(
-    const std::vector<XTensor::Options>& options) {
-  return worker_->allocate_continuous_kv_cache(options);
 }
 
 void WorkerClient::get_device_info(std::string& device_ip, uint16_t& port) {
@@ -123,8 +119,10 @@ folly::SemiFuture<folly::Unit> WorkerClient::process_group_test_async() {
 // initialize model, cache manager. async call
 folly::SemiFuture<bool> WorkerClient::init_model_async(
     const std::string& model_weights_path,
-    int32_t random_seed) {
-  return worker_->init_model_async(model_weights_path, random_seed);
+    int32_t random_seed,
+    int32_t master_status) {
+  return worker_->init_model_async(
+      model_weights_path, random_seed, master_status);
 }
 
 folly::SemiFuture<bool> WorkerClient::allocate_kv_cache_async(
@@ -132,16 +130,9 @@ folly::SemiFuture<bool> WorkerClient::allocate_kv_cache_async(
   return worker_->allocate_kv_cache_async(kv_cache_shape);
 }
 
-folly::SemiFuture<bool> WorkerClient::allocate_continuous_kv_cache_async(
-    const std::vector<XTensor::Options>& options) {
-  return worker_->allocate_continuous_kv_cache_async(options);
-}
-
 folly::SemiFuture<bool> WorkerClient::allocate_kv_cache_with_transfer_async(
-    const uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
-  return worker_->allocate_kv_cache_with_transfer_async(kv_cache_size,
-                                                        kv_cache_shape);
+  return worker_->allocate_kv_cache_with_transfer_async(kv_cache_shape);
 }
 
 folly::SemiFuture<bool> WorkerClient::pull_kv_blocks_async(
@@ -178,6 +169,14 @@ void WorkerClient::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   NOT_IMPLEMENTED();
+}
+
+folly::SemiFuture<bool> WorkerClient::sleep_async(int32_t master_status) {
+  LOG(FATAL) << "WorkerClient Method sleep is UnImplemented.";
+}
+
+folly::SemiFuture<bool> WorkerClient::wakeup_async(int32_t master_status) {
+  LOG(FATAL) << "WorkerClient Method wakeup is UnImplemented.";
 }
 
 const torch::Device& WorkerClient::device() const { return worker_->device(); }

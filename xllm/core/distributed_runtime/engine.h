@@ -22,7 +22,6 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
-#include "framework/xtensor/xtensor_manager_pool.h"
 #include "runtime/options.h"
 
 namespace xllm {
@@ -30,7 +29,9 @@ class Engine {
  public:
   virtual ~Engine() = default;
 
-  virtual bool init() = 0;
+  virtual bool init() { return true; };
+
+  virtual bool init(int32_t master_status) { return true; };
 
   // execute model with batch input
   virtual ForwardOutput step(std::vector<Batch>& batch) = 0;
@@ -45,14 +46,6 @@ class Engine {
     auto p = reinterpret_cast<BlockManagerPool*>(kv_cache_manager_.get());
     if (!p) {
       LOG(FATAL) << "kv_cache_manager_ is not BlockManagerPool type!";
-    }
-    return p;
-  }
-
-  virtual XTensorManagerPool* xtensor_manager_pool() const {
-    auto p = reinterpret_cast<XTensorManagerPool*>(kv_cache_manager_.get());
-    if (!p) {
-      LOG(FATAL) << "kv_cache_manager_ is not XTensorManagerPool type!";
     }
     return p;
   }
@@ -131,6 +124,16 @@ class Engine {
                               const std::vector<uint16_t>& ports,
                               const int32_t dp_size) {
     NOT_IMPLEMENTED();
+    return false;
+  };
+
+  virtual bool sleep(int32_t master_status) {
+    LOG(FATAL) << " sleep is not implemented!";
+    return false;
+  };
+
+  virtual bool wakeup(int32_t master_status) {
+    LOG(FATAL) << " wakeup is not implemented!";
     return false;
   };
 

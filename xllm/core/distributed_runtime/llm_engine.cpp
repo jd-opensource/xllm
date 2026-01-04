@@ -35,7 +35,9 @@ limitations under the License.
 #include "framework/block/hierarchy_block_manager_pool.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
-#include "framework/xtensor/multi_layer_xtensor_transfer.h"
+#include "framework/xtensor/page_allocator.h"
+#include "framework/xtensor/phy_page_pool.h"
+#include "framework/xtensor/xtensor_allocator.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
@@ -130,8 +132,8 @@ void LLMEngine::process_group_test() {
 #endif
 }
 
-bool LLMEngine::init() {
-  if (!init_model()) {
+bool LLMEngine::init(int32_t master_status) {
+  if (!init_model(master_status)) {
     LOG(ERROR) << "Failed to init model from: " << options_.model_path();
     return false;
   }
@@ -145,17 +147,17 @@ bool LLMEngine::init() {
 
   auto kv_cache_cap = estimate_kv_cache_capacity();
 
-  if (!(FLAGS_enable_continuous_kvcache
-            ? allocate_continuous_kv_cache(kv_cache_cap)
-            : allocate_kv_cache(kv_cache_cap))) {
-    LOG(ERROR) << "Failed to initialize  kv cache";
+  if (!allocate_kv_cache(kv_cache_cap)) {
+    LOG(ERROR) << "Failed to initialize kv cache";
     return false;
+  } else {
+    LOG(INFO) << "Successfully initialized kv cache";
   }
 
   return true;
 }
 
-bool LLMEngine::init_model() {
+bool LLMEngine::init_model(int32_t master_status) {
   const std::string& model_path = options_.model_path();
   auto model_loader = ModelLoader::create(model_path);
   LOG(INFO) << "Initializing model from: " << model_path;
@@ -203,12 +205,70 @@ bool LLMEngine::init_model() {
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
   LOG(INFO) << "Initializing model with random seed: " << FLAGS_random_seed;
 
+  // Initialize PageAllocator if using XTensor mode (before using it)
+  if (FLAGS_enable_xtensor) {
+    auto& page_allocator = PageAllocator::get_instance();
+    if (!page_allocator.is_initialized()) {
+      auto& phy_pool = PhyPagePool::get_instance();
+      CHECK(phy_pool.is_initialized())
+          << "PhyPagePool must be initialized before PageAllocator";
+      size_t num_phy_pages = phy_pool.num_total();
+      page_allocator.init(num_phy_pages,
+                          dp_size_,
+                          /*enable_page_prealloc=*/true);
+    }
+
+    // Register model with model_id from options
+    // Each model has its own logical page_list but shares physical pages
+    const std::string& model_id = options_.model_id();
+    page_allocator.register_model(model_id, args_.n_layers(), master_status);
+
+    // Get total weight size and compute aligned num_pages
+    int64_t total_weight_size = model_loader->get_total_weight_size();
+    int64_t weight_size_per_tp = total_weight_size / dp_local_tp_size_;
+
+    size_t page_size = FLAGS_phy_page_granularity_size;
+    size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size;
+
+    LOG(INFO) << "XTensor weight allocation: total_weight_size="
+              << total_weight_size << ", tp_size=" << dp_local_tp_size_
+              << ", weight_size_per_tp=" << weight_size_per_tp
+              << ", num_pages=" << num_pages
+              << ", master_status=" << master_status;
+
+    if (master_status == WAKEUP) {
+      // Create xtensor and map physical pages
+      if (!page_allocator.alloc_weight_pages(model_id, num_pages)) {
+        LOG(ERROR) << "Failed to allocate weight pages";
+        return false;
+      }
+      LOG(INFO) << "master_status=0 (WAKEUP): Created xtensor, mapped weights, "
+                   "will load to device";
+    } else if (master_status == LIGHT_SLEEP || master_status == DEEP_SLEEP) {
+      // Add extra pages (same as alloc_weight_pages)
+      size_t total_pages = num_pages;
+      // Create weight xtensor on all workers without mapping physical pages
+      auto& allocator = XTensorAllocator::get_instance();
+      if (!allocator.broadcast_create_weight_tensor(model_id, total_pages)) {
+        LOG(ERROR) << "Failed to create weight tensor";
+        return false;
+      }
+      // Record num_pages for later wakeup (same as alloc_weight_pages would
+      // set)
+      page_allocator.set_weight_pages_count(model_id, total_pages);
+      LOG(INFO) << "master_status=" << master_status
+                << " (SLEEP): Created weight xtensor (no mapping), num_pages="
+                << total_pages;
+    }
+  }
+
   // init model for each worker in parallel
   // multiple workers, call async init
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
-    futures.push_back(worker->init_model_async(model_path, FLAGS_random_seed));
+    futures.push_back(
+        worker->init_model_async(model_path, FLAGS_random_seed, master_status));
   }
   // wait for all futures to complete
   auto results = folly::collectAll(futures).get();
@@ -225,39 +285,53 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   const int64_t max_cache_size = options_.max_cache_size();
   const double max_memory_utilization = options_.max_memory_utilization();
 
-  std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
-  futures.reserve(worker_clients_num_);
-  for (auto& worker : worker_clients_) {
-    futures.push_back(worker->estimate_kv_cache_capacity_async());
-  }
-
   int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
-  auto results = folly::collectAll(futures).get();
-  for (size_t i = 0; i < results.size(); ++i) {
-    if (!results[i].hasValue()) {
-      LOG(ERROR) << "Failed to estimate kv cache capacity for worker: " << i;
-      continue;
+
+  if (FLAGS_enable_xtensor) {
+    // For xtensor mode, use PhyPagePool's total pages * page_size
+    auto& phy_pool = PhyPagePool::get_instance();
+    CHECK(phy_pool.is_initialized()) << "PhyPagePool not initialized";
+    cache_size_in_bytes = static_cast<int64_t>(phy_pool.num_total()) *
+                          FLAGS_phy_page_granularity_size;
+    LOG(INFO) << "XTensor mode: available memory from PhyPagePool: "
+              << readable_size(cache_size_in_bytes)
+              << " (pages: " << phy_pool.num_total()
+              << ", page_size: " << FLAGS_phy_page_granularity_size << ")";
+  } else {
+    // Original logic: query each worker for available memory
+    std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
+    futures.reserve(worker_clients_num_);
+    for (auto& worker : worker_clients_) {
+      futures.push_back(worker->estimate_kv_cache_capacity_async());
     }
 
-    auto [available_memory, total_memory] = results[i].value();
-    LOG(INFO) << "worker #" << i
-              << ": available memory: " << readable_size(available_memory)
-              << ", total memory: " << readable_size(total_memory)
-              << ". Using max_memory_utilization: " << max_memory_utilization
-              << ", max_cache_size: " << readable_size(max_cache_size);
-    GAUGE_SET(weight_size_in_kilobytes,
-              (total_memory - available_memory) / 1024);
-    GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
-    // apply memory cap from config if it is set
-    if (max_memory_utilization < 1.0) {
-      const int64_t buffer_memory =
-          total_memory * (1.0 - max_memory_utilization);
-      available_memory -= buffer_memory;
+    auto results = folly::collectAll(futures).get();
+    for (size_t i = 0; i < results.size(); ++i) {
+      if (!results[i].hasValue()) {
+        LOG(ERROR) << "Failed to estimate kv cache capacity for worker: " << i;
+        continue;
+      }
+
+      auto [available_memory, total_memory] = results[i].value();
+      LOG(INFO) << "worker #" << i
+                << ": available memory: " << readable_size(available_memory)
+                << ", total memory: " << readable_size(total_memory)
+                << ". Using max_memory_utilization: " << max_memory_utilization
+                << ", max_cache_size: " << readable_size(max_cache_size);
+      GAUGE_SET(weight_size_in_kilobytes,
+                (total_memory - available_memory) / 1024);
+      GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
+      // apply memory cap from config if it is set
+      if (max_memory_utilization < 1.0) {
+        const int64_t buffer_memory =
+            total_memory * (1.0 - max_memory_utilization);
+        available_memory -= buffer_memory;
+      }
+      if (max_cache_size > 0) {
+        available_memory = std::min(available_memory, max_cache_size);
+      }
+      cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
     }
-    if (max_cache_size > 0) {
-      available_memory = std::min(available_memory, max_cache_size);
-    }
-    cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
   }
 
   Engine::KVCacheCapacity kv_cache_cap;
@@ -318,7 +392,6 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   // => per token: n_kv_heads floats for K + n_kv_heads for V.
   // MLA: key scale [num_blocks, 1, block_size] => one float per token.
   if (enable_kv_cache_quant) {
-    const int32_t block_size = options_.block_size();
     if (FLAGS_enable_mla) {
       // MLA scale shape is [num_blocks, 1, block_size] -> one float per token
       scale_slot_size = sizeof(float);
@@ -344,27 +417,13 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 #endif
 
-  if (!FLAGS_enable_continuous_kvcache) {
-    // compute kv cache n_blocks
-    const int32_t block_size = options_.block_size();
-    // Include scale tensor overhead in block size calculation
-    const int64_t block_size_in_bytes =
-        block_size * (slot_size + index_slot_size) +
-        block_size * scale_slot_size;
-    kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                            (kv_cache_cap.n_layers * block_size_in_bytes);
-    CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
-  } else {
-    int32_t n_pages =
-        kv_cache_cap.cache_size_in_bytes / FLAGS_phy_page_granularity_size;
-    if (FLAGS_enable_mla) {
-      n_pages -= n_pages % (kv_cache_cap.n_layers);
-    } else {
-      n_pages -= n_pages % (2 * kv_cache_cap.n_layers);
-    }
-    kv_cache_cap.n_pages = n_pages;
-    CHECK_GT(kv_cache_cap.n_pages, 0) << "no n_pages for kv cache";
-  }
+  // compute kv cache n_blocks
+  const int32_t block_size = options_.block_size();
+  const int64_t block_size_in_bytes =
+      block_size * (slot_size + index_slot_size + scale_slot_size);
+  kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
+                          (kv_cache_cap.n_layers * block_size_in_bytes);
+  CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
   return kv_cache_cap;
 }
 
@@ -448,10 +507,16 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   options.num_blocks(kv_cache_cap.n_blocks)
       .block_size(block_size)
       .host_num_blocks(kv_cache_cap.n_blocks * options_.host_blocks_factor())
-      .enable_prefix_cache(options_.enable_prefix_cache())
+      .enable_prefix_cache(
+          FLAGS_enable_xtensor ? false : options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload())
-      .enable_kvcache_store(options_.enable_kvcache_store());
+      .enable_kvcache_store(options_.enable_kvcache_store())
+      .enable_xtensor(FLAGS_enable_xtensor)
+      .num_layers(args_.n_layers())
+      .slot_size(kv_cache_cap.slot_size)
+      .model_id(options_.model_id());
+
   if (options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store()) {
     kv_cache_manager_ =
         std::make_unique<HierarchyBlockManagerPool>(options, this, dp_size_);
@@ -473,8 +538,8 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       return false;
     }
     for (auto& worker : worker_clients_) {
-      futures.push_back(worker->allocate_kv_cache_with_transfer_async(
-          kv_cache_cap.cache_size_in_bytes, kv_cache_shape));
+      futures.push_back(
+          worker->allocate_kv_cache_with_transfer_async(kv_cache_shape));
     }
   }
   // wait for all futures to complete
@@ -484,75 +549,9 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       return false;
     }
   }
-  return true;
-}
+  // Post init for XTensor mode: reserve null block and start prealloc thread
+  kv_cache_manager_->post_init();
 
-bool LLMEngine::allocate_continuous_kv_cache(
-    const Engine::KVCacheCapacity& kv_cache_cap) {
-  LOG(INFO) << "kv cache capacity: "
-            << "bytes: " << kv_cache_cap.cache_size_in_bytes
-            << ", blocks: " << kv_cache_cap.n_blocks
-            << ", slot_size: " << kv_cache_cap.slot_size;
-
-  std::vector<XTensor::Options> xtensor_options_vec;
-  xtensor_options_vec.reserve(2);
-  // int64_t head_dim = head_dim_;
-  // if (options_.enable_mla()) {
-  //   head_dim = args_.kv_lora_rank() + args_.qk_rope_head_dim();
-  // }
-
-  XTensor::Options k_xtensor_options;
-  XTensor::Options v_xtensor_options;
-  k_xtensor_options.num_kv_heads(n_local_kv_heads_)
-      .max_context_len(args_.max_position_embeddings())
-      .max_seqs_per_batch(options_.max_seqs_per_batch());
-  v_xtensor_options.num_kv_heads(n_local_kv_heads_)
-      .max_context_len(args_.max_position_embeddings())
-      .max_seqs_per_batch(options_.max_seqs_per_batch());
-  if (FLAGS_enable_mla) {
-    k_xtensor_options.head_size(args_.kv_lora_rank());
-    v_xtensor_options.head_size(args_.qk_rope_head_dim());
-  } else {
-    k_xtensor_options.head_size(head_dim_);
-    v_xtensor_options.head_size(head_dim_);
-  }
-
-  xtensor_options_vec.emplace_back(k_xtensor_options);
-  xtensor_options_vec.emplace_back(v_xtensor_options);
-
-  std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(worker_clients_.size());
-  for (auto& worker : worker_clients_) {
-    futures.push_back(
-        worker->allocate_continuous_kv_cache_async(xtensor_options_vec));
-  }
-  // wait for all futures to complete
-  auto results = folly::collectAll(futures).get();
-  for (const auto& result : results) {
-    if (!result.value()) {
-      return false;
-    }
-  }
-
-  int64_t cache_size_per_token = 0;
-  if (FLAGS_enable_mla) {
-    cache_size_per_token =
-        args_.kv_lora_rank() * torch::scalarTypeToTypeMeta(dtype_).itemsize();
-  } else {
-    cache_size_per_token = kv_cache_cap.slot_size / 2;
-  }
-
-  FLAGS_cache_size_per_token = cache_size_per_token;
-
-  // init xtensor manager pool
-  xtensor::Options xtensor_manager_options;
-  xtensor_manager_options.devices(options_.devices())
-      .num_total_pages(kv_cache_cap.n_pages)
-      .num_layers(args_.n_layers())
-      .cache_size_per_token(cache_size_per_token)
-      .server_idx(options_.server_idx());
-  kv_cache_manager_ = std::make_unique<XTensorManagerPool>(
-      xtensor_manager_options, options_.dp_size());
   return true;
 }
 
@@ -1006,6 +1005,109 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
   }
 
   return batched_inputs;
+}
+
+bool LLMEngine::sleep(int32_t master_status) {
+  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
+  if (!FLAGS_enable_xtensor) {
+    LOG(WARNING) << "sleep requires FLAGS_enable_xtensor to be enabled";
+    return false;
+  }
+
+  LOG(INFO) << "Starting to sleep. Worker clients count: "
+            << worker_clients_num_;
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to sleep.";
+    return false;
+  }
+
+  // Put the model to sleep in PageAllocator
+  // This stops preallocation and releases physical pages
+  const std::string& model_id = options_.model_id();
+  auto& page_allocator = PageAllocator::get_instance();
+
+  // Release weight pages first
+  size_t weight_pages = page_allocator.get_weight_pages_allocated(model_id);
+  if (weight_pages > 0) {
+    page_allocator.free_weight_pages(model_id, weight_pages);
+    LOG(INFO) << "PageAllocator: released " << weight_pages
+              << " weight pages for model " << model_id;
+  }
+
+  // Then release KV cache pages
+  page_allocator.sleep_model(model_id);
+  LOG(INFO) << "PageAllocator: model " << model_id << " is now sleeping";
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->sleep_async(master_status));
+  }
+
+  auto results = folly::collectAll(futures).get();
+
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Sleep failed.";
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool LLMEngine::wakeup(int32_t master_status) {
+  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
+  if (!FLAGS_enable_xtensor) {
+    LOG(WARNING) << "wakeup requires FLAGS_enable_xtensor to be enabled";
+    return false;
+  }
+
+  LOG(INFO) << "Starting to wakeup. Worker clients count: "
+            << worker_clients_num_;
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to wakeup.";
+    return false;
+  }
+
+  // Wake up the model in PageAllocator
+  const std::string& model_id = options_.model_id();
+  auto& page_allocator = PageAllocator::get_instance();
+
+  // First wake up the model state (clears is_sleeping flag)
+  page_allocator.wakeup_model(model_id);
+  LOG(INFO) << "PageAllocator: model " << model_id << " is now awake";
+
+  // Re-map weight pages
+  size_t weight_pages = page_allocator.get_weight_pages_allocated(model_id);
+  if (weight_pages > 0) {
+    if (!page_allocator.alloc_weight_pages(model_id, weight_pages)) {
+      LOG(ERROR) << "Failed to re-allocate weight pages for model " << model_id;
+      return false;
+    }
+    LOG(INFO) << "PageAllocator: re-mapped " << weight_pages
+              << " weight pages for model " << model_id;
+  }
+
+  LOG(INFO) << "Waking up LLM engine.";
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->wakeup_async(master_status));
+  }
+
+  auto results = folly::collectAll(futures).get();
+
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Wakeup failed.";
+      return false;
+    }
+  }
+
+  return true;
 }
 
 }  // namespace xllm

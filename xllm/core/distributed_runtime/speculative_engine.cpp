@@ -75,8 +75,8 @@ SuffixSpeculativeEngine::SuffixSpeculativeEngine(
     const runtime::Options& options)
     : SpeculativeEngine(options, /*use_draft_engine=*/false) {}
 
-bool SpeculativeEngine::init() {
-  if (!init_model()) {
+bool SpeculativeEngine::init(int32_t master_status) {
+  if (!init_model(master_status)) {
     return false;
   }
 
@@ -87,15 +87,15 @@ bool SpeculativeEngine::init() {
   return true;
 }
 
-bool SpeculativeEngine::init_model() {
-  if (!engine_->init_model()) {
+bool SpeculativeEngine::init_model(int32_t master_status) {
+  if (!engine_->init_model(master_status)) {
     return false;
   }
 
   model_args_ = engine_->model_args();
 
   if (use_draft_engine_) {
-    if (!draft_engine_->init_model()) {
+    if (!draft_engine_->init_model(master_status)) {
       return false;
     }
 
