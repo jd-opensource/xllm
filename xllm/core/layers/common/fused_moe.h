@@ -78,9 +78,6 @@ class FusedMoEImpl : public torch::nn::Module {
                                SelectedExpertInfo& selected_expert_info,
                                bool enable_all2all_communication);
 
-  // check if the streams are initialized for the current device
-  void ensure_streams_initialized(const xllm::Device& current_device);
-
  private:
   int64_t num_total_experts_;
   int64_t topk_;

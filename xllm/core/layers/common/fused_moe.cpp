@@ -446,7 +446,7 @@ torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
     // update device record
     device_ = xllm::Device(hidden_states.device());
 
-    // cquire streams from the pool again
+    // acquire streams from the pool again
     routed_stream_ = device_.get_stream_from_pool();
     shared_stream_ = device_.get_stream_from_pool();
     stream_initialized_ = true;
@@ -798,9 +798,6 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
   load_e_score_correction_bias(state_dict.get_dict_with_prefix("gate."));
   load_experts(state_dict.get_dict_with_prefix("experts."));
 }
-
-void FusedMoEImpl::ensure_streams_initialized(
-    const xllm::Device& current_device) {}
 
 }  // namespace layer
 }  // namespace xllm
