@@ -335,14 +335,6 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   const auto& token_ids = sequence->tokens();
   const uint32_t n_tokens = token_ids.size();
 
-  // Prepare adjusted token counts for sampling
-  std::unordered_map<int32_t, int32_t> adjusted_token_to_count_map;
-  for (uint32_t j = n_kv_cache_tokens; j < seq_len; ++j) {
-    // skip prompt tokens except the last one
-    if (j + 1 < n_tokens) continue;
-    ++adjusted_token_to_count_map[token_ids[j]];
-  }
-
   // Handle MRope positions
   if (use_mrope_) {
     const auto& args = *args_;
@@ -362,8 +354,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     // Handle sampling for last tokens
     if (j + 1 < n_tokens) continue;
 
-    handle_sampling_parameters(
-        sequence, j, seq_len, adjusted_token_to_count_map, state_ptr);
+    handle_sampling_parameters(sequence, j, seq_len, state_ptr);
   }
 
   // Add extra token id
@@ -377,52 +368,36 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   }
 }
 
-void BatchInputBuilder::handle_sampling_parameters(
-    Sequence* sequence,
-    uint32_t token_position,
-    uint32_t seq_len,
-    std::unordered_map<int32_t, int32_t>& adjusted_token_to_count_map,
-    BuilderState* state_ptr) {
+void BatchInputBuilder::handle_sampling_parameters(Sequence* sequence,
+                                                   uint32_t token_position,
+                                                   uint32_t seq_len,
+                                                   BuilderState* state_ptr) {
   BuilderState& state = state_ptr ? *state_ptr : state_;
 
   // const auto token_ids = sequence->token_ids();
   const auto token_id = sequence->tokens()[token_position];
 
-  // Adjust token count
-  --adjusted_token_to_count_map[token_id];
-
   // Select token for sampling
-  state.selected_token_idxes.emplace_back(state.flatten_tokens_vec.size() - 1);
-  state.sampling_params.emplace_back(sequence->sampling_param());
+  state.selected_token_idxes.push_back(state.flatten_tokens_vec.size() - 1);
+  state.sampling_params.push_back(sequence->sampling_param());
+  state.sample_idxes.push_back(state.selected_token_idxes.size() - 1);
 
   // Process unique tokens
-  const auto& seq_token_counts = sequence->token_to_count_map();
-  auto& ids = state.unique_token_ids_vec.emplace_back();
-  auto& counts = state.unique_token_counts_vec.emplace_back();
+  if (need_unique_tokens_) {
+    const auto& seq_token_counts = sequence->token_to_count_map();
+    auto& ids = state.unique_token_ids_vec.emplace_back();
+    auto& counts = state.unique_token_counts_vec.emplace_back();
 
-  ids.reserve(seq_token_counts.size());
-  counts.reserve(seq_token_counts.size());
+    ids.reserve(seq_token_counts.size());
+    counts.reserve(seq_token_counts.size());
 
-  for (const auto& [token_id, count] : seq_token_counts) {
-    const auto it = adjusted_token_to_count_map.find(token_id);
-    const auto adjust_count =
-        (it != adjusted_token_to_count_map.end()) ? it->second : 0;
-
-    if (count > adjust_count) {
-      ids.emplace_back(token_id);
-      counts.emplace_back(count - adjust_count);
+    for (const auto& [token_id, count] : seq_token_counts) {
+      CHECK(count >= 0) << "token count should be greater than 0";
+      ids.push_back(token_id);
+      counts.push_back(count);
     }
-  }
 
-  state.unique_token_lens_vec.emplace_back(static_cast<int32_t>(ids.size()));
-
-  // Mark sample token if it's the last token
-  // TODO add test
-  // in chunked prefill condition, if allowed_max_token = 128, n_tokens=1000,
-  // n_kv_cache_tokens=256, q_seq_len = 128, seq_len=384
-  if (token_position == seq_len - 1) {
-    state.sample_idxes.emplace_back(
-        static_cast<int32_t>(state.selected_token_idxes.size() - 1));
+    state.unique_token_lens_vec.push_back(static_cast<int32_t>(ids.size()));
   }
 }
 

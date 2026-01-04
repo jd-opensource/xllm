@@ -124,12 +124,10 @@ class BatchInputBuilder {
                                     uint32_t n_kv_cache_tokens,
                                     uint32_t seq_len,
                                     BuilderState* state_ptr = nullptr);
-  void handle_sampling_parameters(
-      Sequence* sequence,
-      uint32_t token_position,
-      uint32_t seq_len,
-      std::unordered_map<int32_t, int32_t>& adjusted_counts,
-      BuilderState* state_ptr = nullptr);
+  void handle_sampling_parameters(Sequence* sequence,
+                                  uint32_t token_position,
+                                  uint32_t seq_len,
+                                  BuilderState* state_ptr = nullptr);
   void setup_kv_cache_info(
       Sequence* sequence,
       uint32_t n_kv_cache_tokens,
@@ -156,6 +154,7 @@ class BatchInputBuilder {
   // Configuration
   bool use_mrope_ = false;
   uint32_t num_sequences_ = 0;
+  bool need_unique_tokens_ = true;
 
   // copy in and out cache contents
   std::unordered_set<int32_t> write_block_ids_;
