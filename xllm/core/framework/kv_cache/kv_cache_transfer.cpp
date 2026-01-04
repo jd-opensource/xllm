@@ -214,7 +214,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 
     transfer->initialize(device_id);
     transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
-  } else if (FLAGS_kv_cache_transfer_type == "Mooncake") {
+  } else if (transfer_type == "Mooncake") {
     transfer = std::make_shared<MooncakeKVCacheTransfer>(
         device_id, transfer_listen_port, device);
 
@@ -223,7 +223,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);
   } else {
     transfer =
-        std::make_unique<HcclKVCacheTransfer>(device_id, transfer_listen_port);
+        std::make_shared<HcclKVCacheTransfer>(device_id, transfer_listen_port);
 
     allocate_kv_cache_func(kv_cache_shape);
     transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);

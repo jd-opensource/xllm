@@ -612,7 +612,7 @@ def pre_build(device):
     if os.path.exists("third_party/custom_patch"):
         script_path = os.path.dirname(os.path.abspath(__file__))
         mooncake_repo_path = os.path.join(script_path, "third_party/Mooncake")
-        if device == "a2" or device == "a3":
+        if device in ("a2", "a3"):
             if not apply_patch_safely("../custom_patch/Mooncake_npu.patch", mooncake_repo_path):
                 print("Failed to apply Mooncake_npu.patch!")
                 exit(1)

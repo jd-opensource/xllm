@@ -57,8 +57,10 @@ MooncakeTransferEngine::MooncakeTransferEngine(const int16_t listen_port,
 MooncakeTransferEngine::~MooncakeTransferEngine() {
   // free stub
   for (auto& pair : stub_map_) {
-    delete pair.second;
-    pair.second = nullptr;
+    if (pair.second) {
+      delete pair.second->channel();
+      delete pair.second;
+    }
   }
   stub_map_.clear();
 
@@ -230,6 +232,9 @@ void merge_block_ids(const std::vector<uint64_t>& src_blocks,
                      std::vector<uint64_t>& block_lengths) {
   // Create an index array and sort it based on the values of src blocks.
   size_t block_num = src_blocks.size();
+  if (block_num == 0) {
+    return;
+  }
   std::vector<uint64_t> indices(block_num);
   std::iota(indices.begin(), indices.end(), 0);
   std::sort(
