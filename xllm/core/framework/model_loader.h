@@ -42,6 +42,7 @@ class ModelLoader {
   virtual std::unique_ptr<Tokenizer> tokenizer() const = 0;
   virtual std::vector<std::unique_ptr<StateDict>>& get_state_dicts() = 0;
   virtual std::string model_weights_path() const = 0;
+  virtual int64_t get_total_weight_size() const { return 0; }
 
  protected:
   // model args

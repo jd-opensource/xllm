@@ -21,7 +21,6 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "framework/model/model_input_params.h"
-#include "framework/xtensor/xtensor.h"
 
 namespace xllm {
 class KVCache final {
@@ -31,8 +30,7 @@ class KVCache final {
   KVCache(torch::Tensor key_cache,
           torch::Tensor value_cache,
           torch::Tensor index_cache);
-  KVCache(std::shared_ptr<XTensor> key_xtensor,
-          std::shared_ptr<XTensor> value_xtensor);
+
   ~KVCache() = default;
 
   // TODO: pass in kv_shape and options instead
@@ -42,13 +40,8 @@ class KVCache final {
 
   std::vector<std::vector<int64_t>> get_shapes();
 
-  std::shared_ptr<XTensor> get_k_xtensor() const;
-  std::shared_ptr<XTensor> get_v_xtensor() const;
-
   bool empty() const {
-    return FLAGS_enable_continuous_kvcache
-               ? (key_xtensor_ == nullptr || value_xtensor_ == nullptr)
-               : (!key_cache_.defined() || !value_cache_.defined());
+    return !key_cache_.defined() || !value_cache_.defined();
   }
 
   void swap_blocks(torch::Tensor& src_tensor, torch::Tensor& dst_tensor);
@@ -57,10 +50,6 @@ class KVCache final {
   torch::Tensor key_cache_;
   torch::Tensor value_cache_;
   torch::Tensor index_cache_;
-
-  // for continuous kvcache
-  std::shared_ptr<XTensor> key_xtensor_;
-  std::shared_ptr<XTensor> value_xtensor_;
 };
 
 }  // namespace xllm

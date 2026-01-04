@@ -64,6 +64,14 @@ class DeepseekV32DecoderLayerImpl : public torch::nn::Module {
 
   void merge_loaded_weights() { decoder_layer_->merge_loaded_weights(); }
 
+  void merge_and_move_pinned_host() {
+    decoder_layer_->merge_and_move_pinned_host();
+  }
+
+  void offload_weights() { decoder_layer_->offload_weights(); }
+
+  void reload_weights() { decoder_layer_->reload_weights(); }
+
   void prepare_expert_weight(const std::vector<int32_t>& expert_list) {
     decoder_layer_->prepare_expert_weight(expert_list);
   }
@@ -213,6 +221,30 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
+  }
+
+  void merge_and_move_pinned_host() {
+    npu_embed_tokens_->merge_and_move_pinned_host();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->merge_and_move_pinned_host();
+    }
+    norm_->merge_and_move_pinned_host();
+  }
+
+  void offload_weights() {
+    npu_embed_tokens_->offload_weights();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->offload_weights();
+    }
+    norm_->offload_weights();
+  }
+
+  void reload_weights() {
+    npu_embed_tokens_->reload_weights();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights();
+    }
+    norm_->reload_weights();
   }
 
   void prepare_expert_weight(int32_t layer_id,

@@ -16,7 +16,11 @@ limitations under the License.
 #include "block_manager_pool.h"
 
 #include "block_manager_impl.h"
+#include "common/global_flags.h"
 #include "concurrent_block_manager_impl.h"
+#include "framework/xtensor/page_allocator.h"
+#include "framework/xtensor/phy_page_pool.h"
+#include "framework/xtensor/xtensor_block_manager_impl.h"
 
 namespace xllm {
 
@@ -25,8 +29,8 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
   block_managers_.reserve(dp_size);
 
-  BlockManager::Options npu_options;
-  npu_options.num_blocks(options_.num_blocks())
+  BlockManager::Options block_options;
+  block_options.num_blocks(options_.num_blocks())
       .block_size(options_.block_size())
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
@@ -35,12 +39,28 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
                                : options_.enable_cache_upload());
 
   for (int32_t i = 0; i < dp_size; ++i) {
-    if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
+    if (options_.enable_xtensor()) {
+      // Use XTensorBlockManagerImpl for xtensor mode
+      CHECK_GT(options_.num_layers(), 0)
+          << "num_layers must be set when enable_xtensor is true";
+      CHECK_GT(options_.slot_size(), 0)
+          << "slot_size must be set when enable_xtensor is true";
+      size_t page_size = FLAGS_phy_page_granularity_size;
+      size_t block_mem_size =
+          static_cast<size_t>(options_.block_size()) * options_.slot_size();
       block_managers_.emplace_back(
-          std::make_unique<ConcurrentBlockManagerImpl>(npu_options));
+          std::make_unique<XTensorBlockManagerImpl>(block_options,
+                                                    options_.num_layers(),
+                                                    block_mem_size,
+                                                    page_size,
+                                                    /*dp_rank=*/i,
+                                                    options_.model_id()));
+    } else if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
+      block_managers_.emplace_back(
+          std::make_unique<ConcurrentBlockManagerImpl>(block_options));
     } else {
       block_managers_.emplace_back(
-          std::make_unique<BlockManagerImpl>(npu_options));
+          std::make_unique<BlockManagerImpl>(block_options));
     }
   }
   reset_transfer_infos();
@@ -320,6 +340,24 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
   sequence->reset();
+}
+
+void BlockManagerPool::post_init() {
+  if (!options_.enable_xtensor()) {
+    return;
+  }
+
+  // Call post_init on each XTensorBlockManagerImpl to reserve null block
+  for (auto& manager : block_managers_) {
+    auto* xtensor_manager =
+        dynamic_cast<XTensorBlockManagerImpl*>(manager.get());
+    if (xtensor_manager) {
+      xtensor_manager->post_init();
+    }
+  }
+
+  // Start prealloc thread once (PageAllocator is shared by all managers)
+  PageAllocator::get_instance().start_prealloc_thread();
 }
 
 }  // namespace xllm

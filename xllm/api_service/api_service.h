@@ -99,9 +99,41 @@ class APIService : public proto::XllmAPIService {
                          proto::HttpResponse* response,
                          ::google::protobuf::Closure* done) override;
 
- private:
-  Master* master_;
+  void ForkMaster(::google::protobuf::RpcController* controller,
+                  const proto::MasterInfos* request,
+                  proto::RpcStatus* response,
+                  ::google::protobuf::Closure* done);
 
+  void ForkMasterHttp(::google::protobuf::RpcController* controller,
+                      const proto::HttpRequest* request,
+                      proto::HttpResponse* response,
+                      ::google::protobuf::Closure* done) override;
+
+  void Sleep(::google::protobuf::RpcController* controller,
+             const proto::MasterInfos* request,
+             proto::RpcStatus* response,
+             ::google::protobuf::Closure* done);
+
+  void SleepHttp(::google::protobuf::RpcController* controller,
+                 const proto::HttpRequest* request,
+                 proto::HttpResponse* response,
+                 ::google::protobuf::Closure* done);
+
+  void Wakeup(::google::protobuf::RpcController* controller,
+              const proto::MasterInfos* request,
+              proto::RpcStatus* response,
+              ::google::protobuf::Closure* done);
+
+  void WakeupHttp(::google::protobuf::RpcController* controller,
+                  const proto::HttpRequest* request,
+                  proto::HttpResponse* response,
+                  ::google::protobuf::Closure* done);
+
+ private:
+  bool ParseForkMasterRequest(const proto::MasterInfos* request,
+                              Options& options);
+  Master* master_;
+  std::unordered_map<std::string, Master*> masters_;
   std::unique_ptr<CompletionServiceImpl> completion_service_impl_;
   std::unique_ptr<ChatServiceImpl> chat_service_impl_;
   std::unique_ptr<MMChatServiceImpl> mm_chat_service_impl_;

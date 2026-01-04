@@ -87,8 +87,6 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
 #endif
   CHECK_EQ(ret, 0) << "Failed to create physical memory handle";
   FLAGS_phy_page_granularity_size = granularity_size;
-  LOG(INFO) << "Granularity size for physical page: " << granularity_size
-            << "Bytes";
 }
 
 void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {

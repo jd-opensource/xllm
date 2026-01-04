@@ -94,6 +94,8 @@ enum class StatusCode : uint8_t {
   DEADLINE_EXCEEDED = 4,
   // resource exhausted.
   RESOURCE_EXHAUSTED = 5,
+  // service unavailable (e.g., model is sleeping).
+  UNAVAILABLE = 6,
 };
 
 class Status final {

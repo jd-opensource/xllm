@@ -33,7 +33,7 @@ class SpeculativeEngine : public Engine {
 
   virtual ~SpeculativeEngine() = default;
 
-  bool init() override;
+  bool init(int32_t master_status) override;
 
   // step the engine forward
   ForwardOutput step(std::vector<Batch>& batch) override;
@@ -42,10 +42,6 @@ class SpeculativeEngine : public Engine {
 
   BlockManagerPool* block_manager_pool() const override {
     return engine_->block_manager_pool();
-  }
-
-  XTensorManagerPool* xtensor_manager_pool() const override {
-    return engine_->xtensor_manager_pool();
   }
 
   const ModelArgs& model_args() const override { return model_args_; }
@@ -91,7 +87,7 @@ class SpeculativeEngine : public Engine {
                       const int32_t dp_size) override;
 
  private:
-  bool init_model();
+  bool init_model(int32_t master_status);
 
   bool allocate_kv_cache();
 

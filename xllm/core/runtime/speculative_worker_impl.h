@@ -45,7 +45,8 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   };
 
   bool init_model(const std::string& model_weights_path,
-                  int32_t random_seed) override;
+                  int32_t random_seed,
+                  int32_t master_status) override;
 
   void get_device_info(std::string& device_ip, uint16_t& port) override {
     impl_->get_device_info(device_ip, port);
@@ -75,7 +76,6 @@ class SpeculativeWorkerImpl : public WorkerImpl {
 
 #if defined(USE_NPU)
   bool allocate_kv_cache_with_transfer(
-      const uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 #endif
 

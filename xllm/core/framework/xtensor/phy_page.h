@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
 #include <torch/torch.h>
 
 #include "platform/vmm_api.h"
