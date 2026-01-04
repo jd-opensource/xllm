@@ -203,7 +203,7 @@ std::unique_ptr<Stream> Device::get_stream_from_pool(const int32_t timeout) {
 
 std::unique_ptr<Stream> Device::current_stream() const {
 #if defined(USE_NPU)
-  auto current_s = c10_npu::getCurrentNPUStream(index()).stream();
+  auto current_s = c10_npu::getCurrentNPUStream(index());
 #elif defined(USE_MLU)
   auto current_s = torch_mlu::getCurrentMLUStream(index());
 #elif defined(USE_CUDA) || defined(USE_ILU)

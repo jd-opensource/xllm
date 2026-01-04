@@ -39,7 +39,7 @@ namespace xllm {
 
 class Stream {
  public:
-  Stream(const int32_t timeout = -1);
+  explicit Stream(const int32_t timeout = -1);
   ~Stream() = default;
 
   Stream(const Stream&) = delete;
@@ -48,11 +48,11 @@ class Stream {
   Stream& operator=(Stream&&) = default;
 
 #if defined(USE_NPU)
-  explicit Stream(c10_npu::NPUStream stream, const int32_t timeout = -1);
+  Stream(c10_npu::NPUStream stream, const int32_t timeout = -1);
 #elif defined(USE_MLU)
-  explicit Stream(torch_mlu::MLUStream stream, const int32_t timeout = -1);
+  Stream(torch_mlu::MLUStream stream, const int32_t timeout = -1);
 #elif defined(USE_CUDA) || defined(USE_ILU)
-  explicit Stream(c10::cuda::CUDAStream stream, const int32_t timeout = -1);
+  Stream(c10::cuda::CUDAStream stream, const int32_t timeout = -1);
 #endif
 
   int synchronize() const;
