@@ -59,22 +59,30 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
   auto* host_blocks = sequence->host_kv_state().mutable_kv_blocks();
 
-  if (blocks->size() == 0 || host_blocks->size() > blocks->size()) {
+  if (host_blocks->size() >= blocks->size()) {
+    host_block_managers_[dp_rank]->deallocate(
+        sequence->host_kv_state().kv_blocks());
+    block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+    sequence->reset();
     return;
   }
 
-  size_t cached_block_num =
+  size_t cached_host_block_num =
       sequence->host_kv_state().kv_cache_tokens_num() / options_.block_size();
+  size_t cached_device_block_num =
+      sequence->kv_state().kv_cache_tokens_num() / options_.block_size();
 
-  size_t needed_block_num =
-      sequence->num_tokens() / options_.block_size() - host_blocks->size();
+  size_t needed_block_num = cached_device_block_num > host_blocks->size()
+                                ? cached_device_block_num - host_blocks->size()
+                                : 0;
 
+  // allocate additional host blocks for copy
   if (needed_block_num != 0) {
     sequence->host_kv_state().add_kv_blocks(
         host_block_managers_[dp_rank]->allocate(needed_block_num));
   }
 
-  for (size_t i = cached_block_num; i < host_blocks->size(); i++) {
+  for (size_t i = cached_host_block_num; i < host_blocks->size(); i++) {
     if (blocks->at(i).ref_count() != 2) {
       continue;
     }
@@ -89,7 +97,6 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
       sequence->host_kv_state().kv_blocks());
 
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
-  // release the blocks after prefix cache insertion
   sequence->reset();
 }
 
