@@ -121,6 +121,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
       auto t = video_input->video_grid_thw.index({torch::indexing::Slice(), 0});
       auto video_tokens =
           ((video_input->video_grid_thw.prod(-1) / merge_size / merge_size) / t)
+              .cpu()
               .contiguous()
               .to(torch::kLong);
       std::vector<int64_t> video_tokens_vec(

@@ -163,15 +163,15 @@ bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
     std::vector<torch::Tensor> videos;
     std::vector<VideoMetadata> video_meta_list;
 
-    if (input_item.type_ == MMType::IMAGE) {
-      if (input_item.decode_data_.defined()) {
-        images.push_back(input_item.decode_data_);
+    if (input_item.type_ & MMType::IMAGE) {
+      if (input_item.decode_image_.defined()) {
+        images.push_back(input_item.decode_image_);
       } else if (input_item.embedding_.embedding.defined()) {
         images_embedding.push_back(input_item.embedding_);
       }
-    } else if (input_item.type_ == MMType::VIDEO) {
-      if (input_item.decode_data_.defined()) {
-        videos.push_back(input_item.decode_data_);
+    } else if (input_item.type_ & MMType::VIDEO) {
+      if (input_item.decode_video_.defined()) {
+        videos.push_back(input_item.decode_video_);
       }
       video_meta_list.push_back(input_item.video_meta_);
     }

@@ -107,7 +107,7 @@ bool ImageHandler::load(const MMContent& content,
 
 bool ImageHandler::decode(MMInputItem& input) {
   OpenCVImageDecoder decoder;
-  return decoder.decode(input.raw_data_, input.decode_data_);
+  return decoder.decode(input.raw_data_, input.decode_image_);
 }
 
 bool VideoHandler::load(const MMContent& content,
@@ -135,14 +135,51 @@ bool VideoHandler::load(const MMContent& content,
 }
 
 bool VideoHandler::decode(MMInputItem& input) {
+  FFmpegAudioDecoder audio_decoder;
+  if (audio_decoder.decode(
+          input.raw_data_, input.decode_audio_, input.audio_meta_)) {
+    input.type_ |= MMType::AUDIO;
+  }
+
   OpenCVVideoDecoder decoder;
-  return decoder.decode(input.raw_data_, input.decode_data_, input.video_meta_);
+  return decoder.decode(
+      input.raw_data_, input.decode_video_, input.video_meta_);
+}
+
+bool AudioHandler::load(const MMContent& content,
+                        MMInputItem& input,
+                        MMPayload& payload) {
+  input.clear();
+
+  const auto& audio_url = content.audio_url;
+  const auto& url = audio_url.url;
+
+  if (url.compare(0, dataurl_prefix_.size(), dataurl_prefix_) ==
+      0) {  // data url
+
+    input.type_ = MMType::AUDIO;
+    return this->load_from_dataurl(url, input.raw_data_, payload);
+  } else if (url.compare(0, httpurl_prefix_.size(), httpurl_prefix_) ==
+             0) {  // http url
+
+    input.type_ = MMType::AUDIO;
+    return this->load_from_http(url, input.raw_data_);
+  } else {
+    LOG(ERROR) << " audio url is invalid, url is " << url;
+    return false;
+  }
+}
+
+bool AudioHandler::decode(MMInputItem& input) {
+  FFmpegAudioDecoder decoder;
+  return decoder.decode(
+      input.raw_data_, input.decode_audio_, input.audio_meta_);
 }
 
 MMHandlerSet::MMHandlerSet() {
   handlers_["image_url"] = std::make_unique<ImageHandler>();
   handlers_["video_url"] = std::make_unique<VideoHandler>();
-  // handlers_["audio_url"] = std::make_unique<AudioHandler>();
+  handlers_["audio_url"] = std::make_unique<AudioHandler>();
   handlers_["image_embedding"] =
       std::make_unique<MMEmbeddingHandler>(MMType::IMAGE);
   handlers_["video_embedding"] =

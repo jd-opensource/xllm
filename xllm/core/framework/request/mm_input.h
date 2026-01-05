@@ -31,13 +31,27 @@ struct MMInputItem {
     raw_data_.clear();
   }
 
-  MMType type_ = MMType::NONE;
+  std::optional<torch::Tensor> get_decode_data(MMType type) const {
+    if (type == MMType::IMAGE)
+      return decode_image_;
+    else if (type == MMType::VIDEO)
+      return decode_video_;
+    else if (type == MMType::AUDIO)
+      return decode_audio_;
+    else
+      return std::nullopt;
+  }
+
+  uint32_t type_ = MMType::NONE;
 
   std::string raw_data_;  // binary
 
-  torch::Tensor decode_data_;  // image: rgb, [c,h,w], uint8
+  torch::Tensor decode_image_;  // image: rgb, [c,h,w], uint8
+  torch::Tensor decode_video_;  // video: rgb, [t,c,h,w], uint8
+  torch::Tensor decode_audio_;  // audio: mono, [t], float32
 
   VideoMetadata video_meta_;
+  AudioMetadata audio_meta_;
 
   EmbeddingOutput embedding_;
 };
@@ -95,8 +109,9 @@ struct MMInput {
     std::vector<torch::Tensor> vec;
 
     for (const auto& item : items_) {
-      if (item.type_ == type) {
-        vec.emplace_back(item.decode_data_);
+      if (item.type_ & type) {
+        auto t = item.get_decode_data(type);
+        if (t.has_value()) vec.emplace_back(*t);
       }
     }
     return std::move(vec);
@@ -106,7 +121,7 @@ struct MMInput {
     std::vector<VideoMetadata> metas;
     metas.reserve(items_.size());
     for (auto& item : items_) {
-      if (item.type_ == MMType::VIDEO) {
+      if (item.type_ & MMType::VIDEO) {
         metas.push_back(item.video_meta_);
       }
     }
