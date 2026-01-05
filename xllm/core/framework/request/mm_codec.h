@@ -43,13 +43,23 @@ class OpenCVImageEncoder {
   bool valid(const torch::Tensor& t);
 };
 
-class OpenCVVideoDecoder {
+class FFmpegVideoDecoder {
  public:
-  OpenCVVideoDecoder() = default;
-  ~OpenCVVideoDecoder() = default;
+  FFmpegVideoDecoder() = default;
+  ~FFmpegVideoDecoder() = default;
 
   bool decode(const std::string& raw_data,
               torch::Tensor& t,
               VideoMetadata& meta);
+};
+
+class FFmpegAudioDecoder {
+ public:
+  FFmpegAudioDecoder() = default;
+  ~FFmpegAudioDecoder() = default;
+
+  bool decode(const std::string& raw_data,
+              torch::Tensor& t,
+              AudioMetadata& meta);
 };
 }  // namespace xllm

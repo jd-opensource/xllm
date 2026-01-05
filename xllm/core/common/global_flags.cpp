@@ -496,6 +496,11 @@ DEFINE_bool(enable_constrained_decoding,
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
 
+DEFINE_bool(
+    use_audio_in_video,
+    false,
+    "Whether to decode both audio and video when the input is a video.");
+
 #if defined(USE_NPU)
 DEFINE_string(
     npu_kernel_backend,

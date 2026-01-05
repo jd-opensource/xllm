@@ -694,6 +694,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
                                   input_params);
       auto video_tokens =
           (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
+              .cpu()
               .contiguous()
               .to(torch::kLong);
       std::vector<int64_t> video_tokens_vec(
