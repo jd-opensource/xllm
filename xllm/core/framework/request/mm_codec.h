@@ -52,4 +52,14 @@ class OpenCVVideoDecoder {
               torch::Tensor& t,
               VideoMetadata& meta);
 };
+
+class FFmpegAudioDecoder {
+ public:
+  FFmpegAudioDecoder() = default;
+  ~FFmpegAudioDecoder() = default;
+
+  bool decode(const std::string& raw_data,
+              torch::Tensor& t,
+              AudioMetadata& meta);
+};
 }  // namespace xllm
