@@ -268,6 +268,14 @@ class Sequence final {
 
   bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
 
+  void handle_last_token() {
+    last_token_handled_.store(true, std::memory_order_relaxed);
+  }
+
+  bool last_token_handled() const {
+    return last_token_handled_.load(std::memory_order_relaxed);
+  }
+
  private:
   // the index of the sequence in the request
   size_t index_ = 0;
@@ -361,6 +369,9 @@ class Sequence final {
   std::optional<std::vector<folly::SemiFuture<uint32_t>>> futures_;
 
   std::atomic<bool> cancelled_{false};
+
+  // whether the last token is handled
+  std::atomic<bool> last_token_handled_{false};
 };
 
 }  // namespace xllm
