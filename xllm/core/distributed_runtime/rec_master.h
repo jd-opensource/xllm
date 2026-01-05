@@ -46,19 +46,21 @@ class RecMaster : public Master {
       RequestParams sp,
       OutputCallback callback);
 
+  // chat
+  // Only supported for LlmRec models.
+  void handle_request(
+      std::vector<Message> messages,
+      std::optional<std::vector<int>> prompt_tokens,
+      std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+      RequestParams sp,
+      OutputCallback callback);
+
   void handle_request(
       std::optional<std::vector<int>> input_tokens,
       std::optional<std::vector<int>> input_indices,
       std::optional<std::vector<std::vector<float>>> input_embedding,
       RequestParams sp,
       OutputCallback callback);
-
-  // chat
-  // Only supported for LlmRec models.
-  void handle_request(std::vector<Message> messages,
-                      std::optional<std::vector<int>> prompt_tokens,
-                      RequestParams sp,
-                      OutputCallback callback);
 
   // start the handling loop
   void run() override;

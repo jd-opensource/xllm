@@ -36,11 +36,15 @@ if(GENERATE_SO)
     NAME
       xllm
     HDRS
-      cc_api/llm.h
-      cc_api/types.h
-      cc_api/internal.h
+      c_api/llm.h
+      c_api/rec.h
+      c_api/default.h
+      c_api/types.h
+      c_api/internal/helper.h
     SRCS
-      cc_api/llm.cpp
+      c_api/internal/llm.cpp
+      c_api/internal/rec.cpp
+      c_api/internal/helper.cpp
     DEPS
       :flags
       :master

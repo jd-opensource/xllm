@@ -510,10 +510,12 @@ void RecMaster::handle_request(
                    });
 }
 
-void RecMaster::handle_request(std::vector<Message> messages,
-                               std::optional<std::vector<int>> prompt_tokens,
-                               RequestParams sp,
-                               OutputCallback callback) {
+void RecMaster::handle_request(
+    std::vector<Message> messages,
+    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+    RequestParams sp,
+    OutputCallback callback) {
   if (rec_type_ != RecType::kLlmRec) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Chat is only supported for LLMRec models");
@@ -546,12 +548,13 @@ void RecMaster::handle_request(std::vector<Message> messages,
                    std::move(callback),
                    [this,
                     prompt = std::move(prompt.value()),
-                    prompt_tokens = std::move(prompt_tokens)](
+                    prompt_tokens = std::move(prompt_tokens),
+                    input_tensors = std::move(input_tensors)](
                        const RequestParams& params, OutputCallback cb) mutable {
                      return pipeline_->generate_request(
                          std::move(prompt),
                          std::move(prompt_tokens),
-                         std::nullopt,
+                         std::move(input_tensors),
                          params,
                          std::move(cb));
                    });
