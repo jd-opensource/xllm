@@ -65,11 +65,7 @@ class NpuQwen2DecoderLayerImpl : public BaseLayer {
                         int node_id = 0);
 
  private:
-  TransposeType check_transpose(at::Tensor& tensor);
-
   void initialize_quantization_parameters();
-
-  void initialize_linear_transpose_type();
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                torch::Tensor& x,

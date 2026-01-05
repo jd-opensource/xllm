@@ -18,7 +18,7 @@ limitations under the License.
 #include <map>
 #include <vector>
 
-#include "base_loader.h"
+#include "core/layers/npu/npu_base_layer.h"
 
 namespace xllm {
 namespace layer {

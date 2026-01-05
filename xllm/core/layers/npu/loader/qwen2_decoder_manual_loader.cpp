@@ -211,12 +211,13 @@ void Qwen2DecoderManualLoader::merge_host_at_weights() {
     }
   }
 
-  auto new_q_weight = torch::cat({at_host_weight_tensors_[IN_Q_WEIGHT],
-                                  at_host_weight_tensors_[IN_K_WEIGHT],
-                                  at_host_weight_tensors_[IN_V_WEIGHT]},
-                                 0);
-
-  at_host_weight_tensors_[IN_Q_WEIGHT] = new_q_weight;
+  at_host_weight_tensors_[IN_Q_WEIGHT] =
+      torch::cat({at_host_weight_tensors_[IN_Q_WEIGHT],
+                  at_host_weight_tensors_[IN_K_WEIGHT],
+                  at_host_weight_tensors_[IN_V_WEIGHT]},
+                 0)
+          .transpose(0, 1)
+          .contiguous();
 
   at_host_weight_tensors_[IN_K_WEIGHT] =
       make_zero_like(at_host_weight_tensors_[IN_K_WEIGHT]);
@@ -234,36 +235,22 @@ void Qwen2DecoderManualLoader::merge_host_at_weights() {
   at_host_weight_tensors_[IN_V_BIAS] =
       make_zero_like(at_host_weight_tensors_[IN_V_BIAS]);
 
-  TransposeType transpose_type =
-      check_transpose(at_host_weight_tensors_[IN_MLP_W2_WEIGHT]);
-  if (transpose_type == TransposeType::TRANSPOSE) {
-    auto new_mlp_weight =
-        torch::cat({at_host_weight_tensors_[IN_MLP_W2_WEIGHT],
-                    at_host_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                   0);
-    at_host_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
-  } else {
-    auto new_mlp_weight =
-        torch::cat({at_host_weight_tensors_[IN_MLP_W2_WEIGHT],
-                    at_host_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                   0)
-            .transpose(0, 1);
-    at_host_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
-  }
+  at_host_weight_tensors_[IN_ATTENTION_OUT_WEIGHT] =
+      at_host_weight_tensors_[IN_ATTENTION_OUT_WEIGHT]
+          .transpose(0, 1)
+          .contiguous();
+
+  at_host_weight_tensors_[IN_MLP_W2_WEIGHT] =
+      torch::cat({at_host_weight_tensors_[IN_MLP_W2_WEIGHT],
+                  at_host_weight_tensors_[IN_MLP_W1_WEIGHT]},
+                 0)
+          .transpose(0, 1)
+          .contiguous();
 
   at_host_weight_tensors_[IN_MLP_W1_WEIGHT] =
       make_zero_like(at_host_weight_tensors_[IN_MLP_W1_WEIGHT]);
-}
-
-TransposeType Qwen2DecoderManualLoader::check_transpose(at::Tensor& tensor) {
-  bool is_k_divisible = tensor.size(1) % 256 == 0;
-  bool is_n_divisible = tensor.size(0) % 256 == 0;
-
-  if (!is_k_divisible && is_n_divisible) {
-    return TransposeType::NOT_TRANSPOSE;
-  }
-
-  return TransposeType::TRANSPOSE;
+  at_host_weight_tensors_[IN_MLP_CPROJ_WEIGHT] =
+      at_host_weight_tensors_[IN_MLP_CPROJ_WEIGHT].transpose(0, 1).contiguous();
 }
 
 void Qwen2DecoderManualLoader::verify_loaded_weights() const {
@@ -271,6 +258,14 @@ void Qwen2DecoderManualLoader::verify_loaded_weights() const {
     CHECK(at_host_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
+}
+
+bool Qwen2DecoderManualLoader::is_nz_format_tensor(int weight_index) {
+  if (weight_index == IN_Q_WEIGHT || weight_index == IN_ATTENTION_OUT_WEIGHT ||
+      weight_index == IN_MLP_W2_WEIGHT || weight_index == IN_MLP_CPROJ_WEIGHT) {
+    return true;
+  }
+  return false;
 }
 
 }  // namespace layer

@@ -55,7 +55,6 @@ void BaseManualLoader::init_weight_slices() {
   }
   size_t max_alignment = std::max(kHostAlignment, kDeviceAlignment);
   storage_size_ = AlignUp(offset, max_alignment);
-  // storage_size_ = offset;
 }
 
 void BaseManualLoader::copy_weights_to_pinned_host() {
@@ -121,14 +120,34 @@ void BaseManualLoader::copy_weights_to_device() {
     void* dst = static_cast<char*>(device_storage_) +
                 static_cast<ptrdiff_t>(slice.offset);
     auto host_tensor = at_host_weight_tensors_[i].contiguous();
-    auto err = aclrtMemcpy(dst,
-                           slice.bytes,
-                           host_tensor.data_ptr(),
-                           slice.bytes,
-                           ACL_MEMCPY_HOST_TO_DEVICE);
+    int err;
+    if (is_nz_format_tensor(i)) {
+      err = copy_host_nd_to_nz(host_tensor, dst, slice.bytes);
+    } else {
+      err = aclrtMemcpy(dst,
+                        slice.bytes,
+                        host_tensor.data_ptr(),
+                        slice.bytes,
+                        ACL_MEMCPY_HOST_TO_DEVICE);
+    }
     CHECK_EQ(err, ACL_SUCCESS) << "aclrtMemcpy failed for tensor index " << i;
     at_host_weight_tensors_[i] = at::Tensor();
   }
+}
+
+int BaseManualLoader::copy_host_nd_to_nz(torch::Tensor host_tensor,
+                                         void* dst_ptr,
+                                         uint64_t len) {
+  auto tmp_tensor = at_npu::native::npu_format_cast(host_tensor.to(device_),
+                                                    ACL_FORMAT_FRACTAL_NZ);
+  const void* src_ptr = tmp_tensor.data_ptr();
+  auto stream = c10_npu::getCurrentNPUStream();
+  auto err = aclrtMemcpyAsync(
+      dst_ptr, len, src_ptr, len, ACL_MEMCPY_DEVICE_TO_DEVICE, stream);
+  stream.synchronize();
+  tmp_tensor = torch::Tensor();
+
+  return err;
 }
 
 void BaseManualLoader::init_device_at_weights() {
@@ -139,8 +158,16 @@ void BaseManualLoader::init_device_at_weights() {
     }
     void* base = static_cast<char*>(device_storage_) +
                  static_cast<ptrdiff_t>(slice.offset);
-    at_weight_tensors_[i] = convert_to_torch_tensor(
-        slice.sizes, slice.dtype, reinterpret_cast<uintptr_t>(base));
+    if (is_nz_format_tensor(i)) {
+      at_weight_tensors_[i] =
+          convert_to_torch_tensor(slice.sizes,
+                                  slice.dtype,
+                                  reinterpret_cast<uintptr_t>(base),
+                                  ACL_FORMAT_FRACTAL_NZ);
+    } else {
+      at_weight_tensors_[i] = convert_to_torch_tensor(
+          slice.sizes, slice.dtype, reinterpret_cast<uintptr_t>(base));
+    }
   }
 }
 
@@ -196,8 +223,13 @@ torch::Tensor BaseManualLoader::convert_to_torch_tensor(
   storage.set_data_ptr(std::move(c10_data_ptr));
 
   tensor.set_(storage, 0, dims);
-  // cast npu format to nd
-  tensor = at_npu::native::npu_format_cast(tensor, acl_format);
+  // Notice: convert to NZ format forcefully, with the underlying data format
+  // guaranteed by the developer.
+  if (acl_format == ACL_FORMAT_FRACTAL_NZ) {
+    auto* tensor_storage = static_cast<torch_npu::NPUStorageImpl*>(
+        tensor.storage().unsafeGetStorageImpl());
+    tensor_storage->npu_desc_.npu_format_ = ACL_FORMAT_FRACTAL_NZ;
+  }
 
   return tensor;
 }

@@ -204,6 +204,14 @@ void Qwen3DecoderManualLoader::load_state_dict(const StateDict& state_dict) {
   }
 }
 
+bool Qwen3DecoderManualLoader::is_nz_format_tensor(int weight_index) {
+  if (weight_index == IN_Q_WEIGHT || weight_index == IN_ATTENTION_OUT_WEIGHT ||
+      weight_index == IN_MLP_W2_WEIGHT || weight_index == IN_MLP_CPROJ_WEIGHT) {
+    return true;
+  }
+  return false;
+}
+
 void Qwen3DecoderManualLoader::merge_loaded_weights() {
   merge_host_at_weights();
   init_weight_slices();
@@ -282,13 +290,23 @@ void Qwen3DecoderManualLoader::merge_host_at_weights() {
                   at_host_weight_tensors_[IN_K_WEIGHT],
                   at_host_weight_tensors_[IN_V_WEIGHT]},
                  0)
+          .transpose(0, 1)
+          .contiguous();
+
+  at_host_weight_tensors_[IN_ATTENTION_OUT_WEIGHT] =
+      at_host_weight_tensors_[IN_ATTENTION_OUT_WEIGHT]
+          .transpose(0, 1)
           .contiguous();
 
   at_host_weight_tensors_[IN_MLP_W2_WEIGHT] =
       torch::cat({at_host_weight_tensors_[IN_MLP_W2_WEIGHT],
                   at_host_weight_tensors_[IN_MLP_W1_WEIGHT]},
                  0)
+          .transpose(0, 1)
           .contiguous();
+
+  at_host_weight_tensors_[IN_MLP_CPROJ_WEIGHT] =
+      at_host_weight_tensors_[IN_MLP_CPROJ_WEIGHT].transpose(0, 1).contiguous();
 
   for (auto idx :
        {IN_MLP_W1_WEIGHT, IN_K_WEIGHT, IN_V_WEIGHT, IN_K_BIAS, IN_V_BIAS}) {

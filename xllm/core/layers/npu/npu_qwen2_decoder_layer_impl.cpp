@@ -48,13 +48,13 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.loraEnableGMM = false;
   param.packQuantType = {1, 1};
   param.linearQuantType = {0, -1, -1, 0, 0, -1, 0};
-  param.linearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
+  param.linearTransposeType = {static_cast<int>(TransposeType::NOT_TRANSPOSE),
                                static_cast<int>(TransposeType::INVALID),
                                static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::TRANSPOSE),
-                               static_cast<int>(TransposeType::TRANSPOSE),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
                                static_cast<int>(TransposeType::INVALID),
-                               static_cast<int>(TransposeType::TRANSPOSE)};
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE)};
   param.kvQuant = false;
   param.quantGroupSize = 0;
   param.rmsNormEps = args.rms_norm_eps();
@@ -99,17 +99,7 @@ NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
   initialize_quantization_parameters();
 }
 
-void NpuQwen2DecoderLayerImpl::initialize_linear_transpose_type() {
-  auto& at_host_weight_tensors = loader_->get_at_host_weight_tensors();
-  TransposeType transpose_type =
-      check_transpose(at_host_weight_tensors[IN_MLP_W2_WEIGHT]);
-  int transpose_value = static_cast<int>(transpose_type);
-  prefill_param_.linearTransposeType[4] = transpose_value;
-  decode_param_.linearTransposeType[4] = transpose_value;
-}
-
 void NpuQwen2DecoderLayerImpl::merge_loaded_weights() {
-  initialize_linear_transpose_type();
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
@@ -142,17 +132,6 @@ void NpuQwen2DecoderLayerImpl::initialize_quantization_parameters() {
                                      static_cast<int>(LinearType::INVALID),
                                      static_cast<int>(LinearType::FP)};
   }
-}
-
-TransposeType NpuQwen2DecoderLayerImpl::check_transpose(at::Tensor& tensor) {
-  bool is_k_divisible = tensor.size(1) % 256 == 0;
-  bool is_n_divisible = tensor.size(0) % 256 == 0;
-
-  if (!is_k_divisible && is_n_divisible) {
-    return TransposeType::NOT_TRANSPOSE;
-  }
-
-  return TransposeType::TRANSPOSE;
 }
 
 int64_t NpuQwen2DecoderLayerImpl::init_layer() {

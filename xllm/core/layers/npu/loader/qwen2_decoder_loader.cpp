@@ -191,9 +191,11 @@ void Qwen2DecoderLoader::merge_loaded_weights() {
   auto new_q_weight = torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
                                   at_weight_tensors_[IN_K_WEIGHT],
                                   at_weight_tensors_[IN_V_WEIGHT]},
-                                 0);
+                                 0)
+                          .transpose(0, 1);
 
-  at_weight_tensors_[IN_Q_WEIGHT] = new_q_weight;
+  at_weight_tensors_[IN_Q_WEIGHT] = at_npu::native::npu_format_cast(
+      new_q_weight.contiguous(), ACL_FORMAT_FRACTAL_NZ);
 
   at_weight_tensors_[IN_K_WEIGHT] = torch::zeros({1}).to(device_);
   at_weight_tensors_[IN_V_WEIGHT] = torch::zeros({1}).to(device_);
@@ -207,33 +209,22 @@ void Qwen2DecoderLoader::merge_loaded_weights() {
   at_weight_tensors_[IN_K_BIAS] = torch::zeros({1}).to(device_);
   at_weight_tensors_[IN_V_BIAS] = torch::zeros({1}).to(device_);
 
-  TransposeType transpose_type =
-      check_transpose(at_weight_tensors_[IN_MLP_W2_WEIGHT]);
-  if (transpose_type == TransposeType::TRANSPOSE) {
-    auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                                      at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                                     0);
-    at_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
-  } else {
-    auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                                      at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                                     0)
-                              .transpose(0, 1);
-    at_weight_tensors_[IN_MLP_W2_WEIGHT] = new_mlp_weight.contiguous();
-  }
+  at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT] = at_npu::native::npu_format_cast(
+      at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1).contiguous(),
+      ACL_FORMAT_FRACTAL_NZ);
+
+  auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
+                                    at_weight_tensors_[IN_MLP_W1_WEIGHT]},
+                                   0)
+                            .transpose(0, 1);
+
+  at_weight_tensors_[IN_MLP_W2_WEIGHT] = at_npu::native::npu_format_cast(
+      new_mlp_weight.contiguous(), ACL_FORMAT_FRACTAL_NZ);
 
   at_weight_tensors_[IN_MLP_W1_WEIGHT] = torch::zeros({1}).to(device_);
-}
-
-TransposeType Qwen2DecoderLoader::check_transpose(torch::Tensor& tensor) {
-  bool is_k_divisible = tensor.size(1) % 256 == 0;
-  bool is_n_divisible = tensor.size(0) % 256 == 0;
-
-  if (!is_k_divisible && is_n_divisible) {
-    return TransposeType::NOT_TRANSPOSE;
-  }
-
-  return TransposeType::TRANSPOSE;
+  at_weight_tensors_[IN_MLP_CPROJ_WEIGHT] = at_npu::native::npu_format_cast(
+      at_weight_tensors_[IN_MLP_CPROJ_WEIGHT].transpose(0, 1).contiguous(),
+      ACL_FORMAT_FRACTAL_NZ);
 }
 
 void Qwen2DecoderLoader::verify_loaded_weights() const {

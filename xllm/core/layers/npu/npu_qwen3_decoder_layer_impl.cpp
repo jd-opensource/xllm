@@ -50,7 +50,13 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
   param.loraEnableGMM = false;
 
-  param.linearTransposeType = {1, -1, -1, 1, 1, -1, 1};
+  param.linearTransposeType = {static_cast<int>(TransposeType::NOT_TRANSPOSE),
+                               static_cast<int>(TransposeType::INVALID),
+                               static_cast<int>(TransposeType::INVALID),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE),
+                               static_cast<int>(TransposeType::INVALID),
+                               static_cast<int>(TransposeType::NOT_TRANSPOSE)};
   param.quantGroupSize = 0;
   param.normEps = args.rms_norm_eps();
   param.numAttentionHeadsPerRank = args.n_heads() / parallel_args.world_size();

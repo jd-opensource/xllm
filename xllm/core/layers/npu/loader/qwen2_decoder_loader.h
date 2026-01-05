@@ -94,7 +94,6 @@ class Qwen2DecoderLoader : public BaseLoader {
 
  protected:
   int device_id_;
-  TransposeType check_transpose(torch::Tensor& tensor);
 };
 
 }  // namespace layer

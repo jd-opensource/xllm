@@ -33,6 +33,7 @@ class Qwen3DecoderManualLoader : public BaseManualLoader {
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
   void merge_loaded_weights() override;
+  bool is_nz_format_tensor(int weight_index) override;
 
  protected:
   void merge_host_at_weights();
