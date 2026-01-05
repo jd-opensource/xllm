@@ -105,7 +105,6 @@ void Qwen2dot5VisionEncoderLoader::load_state_dict(
       set_weight(state_dict, name, index);
     }
   }
-  get_weights_col_packed_qkv();
 }
 
 // tp spilt weight
