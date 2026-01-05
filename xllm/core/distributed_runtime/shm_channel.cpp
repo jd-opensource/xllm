@@ -44,12 +44,11 @@ ShmChannel::ShmChannel(int dp_group,
   LOG(INFO) << "Create output shared memory manager with name: " << name;
 }
 
-bool ShmChannel::execute_model_with_shm(
-    const std::vector<RawForwardInput>& inputs,
-    RawForwardOutput& raw_output) {
+bool ShmChannel::execute_model_with_shm(const RawForwardInput& input,
+                                        RawForwardOutput& raw_output) {
   // write to shared memory, then wait output.
   if (input_shm_manager_) {
-    int use_shm_ret = input_shm_manager_->raw_input_write(inputs);
+    int use_shm_ret = input_shm_manager_->raw_input_write(input);
     if (use_shm_ret < 0) {
       // fallback
       enable_shm_ = false;
@@ -63,17 +62,17 @@ bool ShmChannel::execute_model_with_shm(
 }
 
 void ShmChannel::execute_model_async(
-    const std::vector<RawForwardInput>& inputs,
+    const RawForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   if (enable_shm_) {
     // write to shared memory, then wait output.
     RawForwardOutput raw_output;
-    bool shm_success = execute_model_with_shm(inputs, raw_output);
+    bool shm_success = execute_model_with_shm(input, raw_output);
     if (shm_success) {
       promise.setValue(raw_output);
       return;
     }
   }
-  execute_model_with_brpc(inputs, promise);
+  execute_model_with_brpc(input, promise);
 }
 }  // namespace xllm

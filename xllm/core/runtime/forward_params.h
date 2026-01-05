@@ -103,6 +103,7 @@ struct ForwardInput {
     inputs.transfer_kv_infos = transfer_kv_infos;
     inputs.eplb_info = eplb_info;
     inputs.acc_logprob = safe_to(acc_logprob, device, true);
+    inputs.device_input_buffer = device_input_buffer;
     return inputs;
   }
 
@@ -122,11 +123,15 @@ struct ForwardInput {
   torch::Tensor positions;
   ModelInputParams input_params;
   SamplingParameters sampling_params;
+  // beam search kernel input
+  torch::Tensor acc_logprob;
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
   EplbInfo eplb_info;
-  // beam search kernel input
-  torch::Tensor acc_logprob;
+
+  // A tensor used to store all device-side input data, with other input tensors
+  // constructed based on the address and offset of this tensor.
+  torch::Tensor device_input_buffer;
 };
 
 // output after forward execution

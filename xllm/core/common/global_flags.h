@@ -217,6 +217,8 @@ DECLARE_string(reasoning_parser);
 
 DECLARE_bool(enable_shm);
 
+DECLARE_bool(use_contiguous_input_buffer);
+
 DECLARE_bool(enable_prefetch_weight);
 
 DECLARE_int32(flashinfer_workspace_buffer_size);

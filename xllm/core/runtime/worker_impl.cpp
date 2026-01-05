@@ -406,7 +406,9 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     prepare_mla_prefixcache_inputs(input_params);
   }
 
-  if (!context_.get_parallel_args().mapping_data().empty()) {
+  if (!context_.get_parallel_args().mapping_data().empty() &&
+      (context_.get_parallel_args().dp_size() > 1 ||
+       context_.get_parallel_args().ep_size() > 1)) {
     torch::Tensor token_size_per_dp_group =
         torch::tensor(processed_input.input_params.dp_global_token_nums,
                       torch::TensorOptions()
@@ -429,11 +431,6 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 #endif
 
-  processed_input.sampling_params = input.sampling_params.to(device_, dtype_);
-  if (input.acc_logprob.defined()) {
-    processed_input.acc_logprob =
-        input.acc_logprob.to(torch::kFloat32).to(device_);
-  }
   auto ret = prepare_stream_->synchronize();
 }
 

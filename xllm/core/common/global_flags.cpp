@@ -261,6 +261,15 @@ DEFINE_int32(nnodes, 1, "The number of multi-nodes.");
 
 DEFINE_int32(node_rank, 0, "The node rank.");
 
+DEFINE_bool(enable_shm,
+            false,
+            "Whether to enable shared memory for executing model.");
+
+DEFINE_bool(use_contiguous_input_buffer,
+            true,
+            "Whether to use contiguous device input buffer for executing "
+            "model. Currently only effective when enable_shm is true.");
+
 // --- disaggregated prefill and decode config ---
 
 DEFINE_string(xservice_addr, "", "XService server address.");
@@ -289,10 +298,6 @@ DEFINE_string(kv_cache_transfer_mode,
               "The mode of kv cache transfer(e.g. PUSH, PULL).");
 
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
-
-DEFINE_bool(enable_shm,
-            false,
-            "Whether to enable shared memory for executing model.");
 
 // --- function call config ---
 

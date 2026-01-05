@@ -660,8 +660,10 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.selected_token_idxes =
       std::move(state_.selected_token_idxes);
   raw_forward_input.sample_idxes = std::move(state_.sample_idxes);
+  util::pad_2d_vector<int64_t>(state_.unique_token_ids_vec, /*pad_value=*/0);
   raw_forward_input.unique_token_ids_vec =
       std::move(state_.unique_token_ids_vec);
+  util::pad_2d_vector(state_.unique_token_counts_vec, /*pad_value=*/0);
   raw_forward_input.unique_token_counts_vec =
       std::move(state_.unique_token_counts_vec);
   raw_forward_input.unique_token_lens_vec =
@@ -676,6 +678,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.kv_cache_tokens_nums);
 
   raw_forward_input.new_token_slot_ids = std::move(state_.new_token_slot_ids);
+  util::pad_2d_vector(state_.block_tables_vec, /*pad_value=*/0);
   raw_forward_input.block_tables_vec = std::move(state_.block_tables_vec);
   raw_forward_input.num_sequences = num_sequences_;
   // raw_forward_input.dp_global_token_nums = ;

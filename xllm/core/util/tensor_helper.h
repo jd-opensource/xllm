@@ -271,4 +271,53 @@ inline torch::Tensor view_as_dtype(const torch::Tensor& src,
       src.data_ptr(), new_shape, deleter, src.options().dtype(target_dtype));
 }
 
+template <typename T>
+constexpr torch::ScalarType get_scalar_type() {
+  if constexpr (std::is_same_v<T, float>) {
+    return torch::kFloat32;
+  } else if constexpr (std::is_same_v<T, double>) {
+    return torch::kFloat64;
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    return torch::kInt32;
+  } else if constexpr (std::is_same_v<T, int64_t>) {
+    return torch::kInt64;
+  } else if constexpr (std::is_same_v<T, uint8_t>) {
+    return torch::kUInt8;
+  } else if constexpr (std::is_same_v<T, int8_t>) {
+    return torch::kInt8;
+  } else if constexpr (std::is_same_v<T, bool>) {
+    return torch::kBool;
+  } else {
+    LOG(FATAL) << "Unsupported type for torch::ScalarType.";
+    return torch::kFloat32;
+  }
+}
+
+inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
+                                          const torch::ScalarType dtype,
+                                          const void* dev_addr) {
+  c10::DeviceType device_type = c10::DeviceType::PrivateUse1;
+  torch::TensorOptions option =
+      torch::TensorOptions().dtype(dtype).device(device_type);
+
+  auto tensor = torch::empty({0}, option);
+#if defined(USE_NPU)
+  auto address = const_cast<void*>(dev_addr);
+  torch::DataPtr c10_data_ptr(address, address, [](void*) {}, tensor.device());
+
+  size_t tensor_nbytes = at::detail::computeStorageNbytesContiguous(
+      dims, tensor.dtype().itemsize());
+  torch::Storage storage;
+  // get npu storage constructor from register and construct storage
+  auto fptr = c10::GetStorageImplCreate(device_type);
+  auto allocator = c10::GetAllocator(device_type);
+  storage = fptr(c10::StorageImpl::use_byte_size_t(), 0, allocator, true);
+  storage.unsafeGetStorageImpl()->set_nbytes(tensor_nbytes);
+  storage.set_data_ptr(std::move(c10_data_ptr));
+
+  tensor.set_(storage, 0, dims);
+#endif
+  return tensor;
+}
+
 }  // namespace xllm

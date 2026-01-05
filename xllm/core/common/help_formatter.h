@@ -42,6 +42,7 @@ const OptionCategory kCommonOptions = {"COMMON OPTIONS",
                                         "enable_chunked_prefill",
                                         "enable_schedule_overlap",
                                         "enable_prefix_cache",
+                                        "enable_shm",
                                         "communication_backend",
                                         "block_size",
                                         "task",
@@ -74,7 +75,8 @@ const OptionCategory kOtherOptions = {
      "model_id",
      "num_request_handling_threads",
      "num_response_handling_threads",
-     "prefill_scheduling_memory_usage_threshold"}};
+     "prefill_scheduling_memory_usage_threshold",
+     "use_contiguous_input_buffer"}};
 
 const std::vector<OptionCategory> kOptionCategories = {
     kCommonOptions,

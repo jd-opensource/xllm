@@ -29,11 +29,11 @@ class ShmChannel : public CommChannel {
   ~ShmChannel() = default;
 
   void execute_model_async(
-      const std::vector<RawForwardInput>& inputs,
+      const RawForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise) override;
 
  private:
-  bool execute_model_with_shm(const std::vector<RawForwardInput>& inputs,
+  bool execute_model_with_shm(const RawForwardInput& input,
                               RawForwardOutput& raw_output);
 
   bool enable_shm_ = false;
