@@ -119,6 +119,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     torch::Tensor hidden_states = embed_tokens_(tokens);
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
+      attn_metadata.plan_info->layer_id = i;
       auto& layer = layers_[i];
       hidden_states = layer(hidden_states,
                             residual,

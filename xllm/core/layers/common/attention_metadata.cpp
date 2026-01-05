@@ -38,6 +38,7 @@ AttentionMetadata AttentionMetadata::build(const ModelInputParams& params,
   attn_metadata.paged_kv_indptr = params.paged_kv_indptr;
   attn_metadata.paged_kv_indices = params.paged_kv_indices;
   attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
+  attn_metadata.plan_info = std::make_shared<PlanInfo>();
 
   attn_metadata.is_chunked_prefill = params.batch_forward_type.is_mixed();
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();

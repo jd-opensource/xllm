@@ -22,6 +22,12 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+struct PlanInfo {
+  int layer_id = -1;
+  torch::Tensor plan_info;
+  std::string uri;
+};
+
 struct AttentionMetadata {
  public:
   static AttentionMetadata build(const ModelInputParams& params);
@@ -50,6 +56,7 @@ struct AttentionMetadata {
   torch::Tensor paged_kv_indptr;
   torch::Tensor paged_kv_indices;
   torch::Tensor paged_kv_last_page_len;
+  std::shared_ptr<PlanInfo> plan_info;
 };
 
 }  // namespace layer

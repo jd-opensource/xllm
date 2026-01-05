@@ -179,6 +179,7 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < mtp_layers_.size(); i++) {
+      attn_metadata.plan_info->layer_id = i;
       auto& layer = mtp_layers_[i];
       hidden_states = layer(hidden_states,
                             residual,
