@@ -420,7 +420,7 @@ DEFINE_bool(enable_beam_search_kernel,
 DEFINE_string(reasoning_parser,
               "",
               "Specify the reasoning parser for handling reasoning "
-              "interactions(e.g. glm45, qwen3, deepseek-r1).");
+              "interactions(e.g. glm45, glm47, qwen3, deepseek-r1).");
 
 // --- qwen3 reranker config ---
 

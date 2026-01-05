@@ -41,6 +41,7 @@ DetectorRegistry::DetectorRegistry() {
           "deepseek-r1", "<think>", "</think>", true),
       REGISTER_DETECTOR("deepseek-v3", "<think>", "</think>"),
       REGISTER_DETECTOR("glm45", "<think>", "</think>"),
+      REGISTER_DETECTOR("glm47", "<think>", "</think>"),
       REGISTER_DETECTOR_DEFAULT_FORCE("kimi", "◁think▷", "◁/think▷", false),
       REGISTER_DETECTOR("qwen3", "<think>", "</think>"),
       REGISTER_DETECTOR_DEFAULT_FORCE(

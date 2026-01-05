@@ -325,7 +325,7 @@ bool get_enable_thinking_from_request(nlohmann::json& chat_template_kwargs,
     }
     return false;
   };
-  // qwen3 and glm45 use enable_thinking and deepseek-v3 uses thinking
+  // qwen3 and glm45/glm47 use enable_thinking and deepseek-v3 uses thinking
   bool enable_thinking =
       get_thinking("enable_thinking") || get_thinking("thinking");
 
