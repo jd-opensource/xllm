@@ -134,6 +134,13 @@ void Request::set_cancel() {
   }
 }
 
+void Request::handle_last_token() {
+  state_.handle_last_token_done = true;
+  for (const auto& seq : sequences()) {
+    seq->handle_last_token();
+  }
+}
+
 RequestOutput Request::generate_output(const Tokenizer& tokenizer,
                                        ThreadPool* thread_pool) {
   // summarize statistics for all sequences

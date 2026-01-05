@@ -67,7 +67,7 @@ class Request : public RequestBase {
   RequestOutput generate_output(const Tokenizer& tokenizer,
                                 ThreadPool* thread_pool = nullptr);
 
-  void handle_last_token() { state_.handle_last_token_done = true; }
+  void handle_last_token();
 
   bool last_token_handled() const { return state_.handle_last_token_done; }
 

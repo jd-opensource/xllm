@@ -307,6 +307,14 @@ class Sequence final {
 
   bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
 
+  void handle_last_token() {
+    last_token_handled_.store(true, std::memory_order_relaxed);
+  }
+
+  bool last_token_handled() const {
+    return last_token_handled_.load(std::memory_order_relaxed);
+  }
+
  private:
   void init_onerec_sequence(const std::vector<int32_t>& prompt_token_ids,
                             torch::Tensor input_embedding);
@@ -428,6 +436,9 @@ class Sequence final {
 
   Timer timer_;
   bool is_timeout_set_ = false;
+
+  // whether the last token is handled
+  std::atomic<bool> last_token_handled_{false};
 };
 
 }  // namespace xllm

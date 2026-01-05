@@ -1086,6 +1086,10 @@ void DisaggPDScheduler::update_token_latency_metrics(
 
   const auto now = absl::Now();
   for (Sequence* sequence : sequences) {
+    if (sequence->is_chunked_prefill_stage() ||
+        sequence->last_token_handled()) {
+      continue;
+    }
     int64_t tbt_milliseconds = sequence->tbt(now);
     if (sequence->is_first_token()) {
       HISTOGRAM_OBSERVE(time_to_first_token_latency_milliseconds,
