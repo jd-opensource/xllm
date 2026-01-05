@@ -85,16 +85,14 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen3MoeDecoderLayer);
 
-class Qwen3MoeModelImpl : public torch::nn::Module {
+class Qwen3MoeModelImpl : public LlmModelImplBase<Qwen3MoeDecoderLayer> {
  public:
   Qwen3MoeModelImpl(const ModelContext& context)
-      : device_(context.get_tensor_options().device()) {
-    auto options = context.get_tensor_options();
+      : LlmModelImplBase<Qwen3MoeDecoderLayer>("qwen3_moe",
+                                               context.get_model_args()) {
     auto model_args = context.get_model_args();
-    auto parallel_args = context.get_parallel_args();
-    mrope_section_ = model_args.rope_scaling_mrope_section();
+    auto options = context.get_tensor_options();
     layers_.reserve(model_args.n_layers());
-
     if (!mrope_section_.empty()) {
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           128,
@@ -111,15 +109,20 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       auto layer = Qwen3MoeDecoderLayer(context, i);
       layers_.push_back(layer);
     }
+  }
 
-    dp_size_ = parallel_args.dp_size();
-    dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
-    dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
-    rank_ = parallel_args.rank();
+  torch::Tensor deepstack_process(torch::Tensor hidden_states,
+                                  torch::Tensor visual_pos_masks,
+                                  torch::Tensor visual_embeds) {
+    visual_pos_masks = visual_pos_masks.to(hidden_states.device());
+    auto selected = hidden_states.index({visual_pos_masks});
+    auto local_this = selected + visual_embeds;
+    hidden_states.index_put_({visual_pos_masks}, local_this);
+    return hidden_states;
   }
 
   std::pair<torch::Tensor, torch::Tensor> apply_mrope(
-      const torch::Tensor positions) {
+      const torch::Tensor positions) override {
     auto target_cos_sin = cos_sin_.index({positions});
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
@@ -142,19 +145,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
       return freqs_t;
     };
-    cos_pos = apply(cos_pos.reshape({positions.size(0), -1, cos_pos.size(1)}));
-    sin_pos = apply(sin_pos.reshape({positions.size(0), -1, sin_pos.size(1)}));
+    cos_pos = apply(cos_pos.reshape({positions.size(0), -1, cos_pos.size(-1)}));
+    sin_pos = apply(sin_pos.reshape({positions.size(0), -1, sin_pos.size(-1)}));
     return std::make_pair(cos_pos, sin_pos);
-  }
-
-  torch::Tensor deepstack_process(torch::Tensor hidden_states,
-                                  torch::Tensor visual_pos_masks,
-                                  torch::Tensor visual_embeds) {
-    visual_pos_masks = visual_pos_masks.to(hidden_states.device());
-    auto selected = hidden_states.index({visual_pos_masks});
-    auto local_this = selected + visual_embeds;
-    hidden_states.index_put_({visual_pos_masks}, local_this);
-    return hidden_states;
   }
 
   // tokens: [num_tokens]
@@ -164,14 +157,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& input_params) {
     ModelInputParams modified_input_params = input_params;
-    if (dp_size_ > 1) {
-      if (tokens.sizes() == 0) {
-        tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
-        positions = torch::tensor({1}).to(torch::kInt32).to(device_);
-      }
-      auto& dp_token_nums = modified_input_params.dp_global_token_nums;
-      std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
+    if (tokens.numel() == 0) {
+      tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
+      positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
     }
+    auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+    std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     auto inputs_embeds = input_params.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
@@ -183,7 +174,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();
     auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
-    if (positions.dim() == 2) {
+    bool only_prefill =
+        (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
+    if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {
       std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
           apply_mrope(positions);
     }
@@ -204,105 +197,13 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
     return std::get<0>(norm_(h, residual));
   }
-
-  // load the weight from the checkpoint
-  void load_state_dict(const StateDict& state_dict) {
-    embed_tokens_->load_state_dict(
-        state_dict.get_dict_with_prefix("embed_tokens."));
-    // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
-      layers_[i]->load_state_dict(
-          state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
-    }
-    norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
-  }
-
-  layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
-
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    embed_tokens_ = word_embedding;
-  }
-  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
-    return embed_tokens_(input_ids);
-  }
-
- private:
-  std::vector<Qwen3MoeDecoderLayer> layers_;
-  int32_t dp_rank_;
-  int32_t rank_;
-  int32_t dp_size_;
-  int32_t dp_local_tp_size_;
-  torch::Device device_;
-  layer::WordEmbedding embed_tokens_{nullptr};
-  layer::RMSNorm norm_{nullptr};
-  torch::Tensor cos_sin_;
-  std::vector<int64_t> mrope_section_;
 };
 TORCH_MODULE(Qwen3MoeModel);
 
-class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
+class Qwen3MoeForCausalLMImpl : public LlmForCausalLMImplBase<Qwen3MoeModel> {
  public:
-  Qwen3MoeForCausalLMImpl(const ModelContext& context) {
-    model_ = register_module("model", Qwen3MoeModel(context));
-    lm_head_ = register_module("lm_head", layer::LmHead(context));
-  }
-
-  // tokens: [num_tokens]
-  // positions: [num_tokens] token pos in the sequence
-  // returns: [num_tokens, hidden_size]
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    return model_(tokens, positions, kv_caches, input_params);
-  }
-
-  // hidden_states: [num_tokens, hidden_size]
-  // seleted_idxes: [num_tokens]
-  // returns: [num_tokens, vocab_size]
-  torch::Tensor logits(const torch::Tensor& hidden_states,
-                       const torch::Tensor& seleted_idxes) {
-    // select tokens if provided
-    auto h = hidden_states;
-    if (seleted_idxes.defined()) {
-      h = h.index_select(/*dim=*/0, seleted_idxes);
-    }
-    return lm_head_(h);
-  }
-
-  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
-    return model_->get_input_embeddings(input_ids);
-  }
-
-  void load_model(std::unique_ptr<ModelLoader> loader,
-                  std::string prefix = "model." /*llm model weight prefix*/) {
-    for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
-      lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
-    }
-  }
-
-  virtual void prepare_expert_weight(int32_t layer_id,
-                                     const std::vector<int32_t>& expert_ids) {
-    return;
-  }
-  virtual void update_expert_weight(int32_t layer_id) { return; }
-
-  layer::LmHead get_lm_head() { return lm_head_; }
-
-  void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
-
-  layer::WordEmbedding get_word_embedding() {
-    return model_->get_word_embedding();
-  }
-
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    model_->set_word_embedding(word_embedding);
-  }
-
- private:
-  Qwen3MoeModel model_{nullptr};
-  layer::LmHead lm_head_{nullptr};
+  Qwen3MoeForCausalLMImpl(const ModelContext& context)
+      : LlmForCausalLMImplBase<Qwen3MoeModel>(context) {}
 };
 TORCH_MODULE(Qwen3MoeForCausalLM);
 

@@ -136,15 +136,6 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
     input_embeds_.slice(0, 0, params.input_embedding.size(0))
         .copy_(params.input_embedding, true);
   }
-  if (params.deep_stacks.size() > 0 && !params_.deep_stacks.empty()) {
-    CHECK_EQ(params_.deep_stacks.size(), params.deep_stacks.size());
-    for (size_t idx = 0; idx < params.deep_stacks.size(); idx++) {
-      params_.deep_stacks[idx].copy_(params.deep_stacks[idx], true);
-    }
-  }
-  if (params.visual_pos_masks.defined() && params_.visual_pos_masks.defined()) {
-    params_.visual_pos_masks.copy_(params.visual_pos_masks, true);
-  }
 }
 
 MluGraph::MluGraph(GraphPersistentParam* persistent_param,

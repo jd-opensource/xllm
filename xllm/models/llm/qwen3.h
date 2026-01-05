@@ -35,10 +35,6 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    auto parallel_args = context.get_parallel_args();
-    auto dp_local_tp_size =
-        parallel_args.world_size() / parallel_args.dp_size();
-    dp_rank_ = parallel_args.rank() / dp_local_tp_size;
     if (!mrope_section_.empty()) {
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           128,
@@ -89,8 +85,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
       return freqs_t;
     };
-    cos_pos = apply(cos_pos.reshape({positions.size(0), -1, cos_pos.size(1)}));
-    sin_pos = apply(sin_pos.reshape({positions.size(0), -1, sin_pos.size(1)}));
+    cos_pos = apply(cos_pos.reshape({positions.size(0), -1, cos_pos.size(-1)}));
+    sin_pos = apply(sin_pos.reshape({positions.size(0), -1, sin_pos.size(-1)}));
     return std::make_pair(cos_pos, sin_pos);
   }
 
@@ -121,7 +117,9 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     auto& dp_token_nums = input_params_new.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     auto attn_metadata = layer::AttentionMetadata::build(input_params_new);
-    if (positions.dim() == 2) {
+    bool only_prefill =
+        (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
+    if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {
       std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
           apply_mrope(positions);
     }

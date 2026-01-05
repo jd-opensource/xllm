@@ -39,10 +39,6 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    auto parallel_args = context.get_parallel_args();
-    auto dp_local_tp_size =
-        parallel_args.world_size() / parallel_args.dp_size();
-    dp_rank_ = parallel_args.rank() / dp_local_tp_size;
     if (!mrope_section_.empty()) {
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           model_args.hidden_size() / model_args.n_heads(),

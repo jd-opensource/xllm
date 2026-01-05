@@ -329,7 +329,6 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     rotary_pos_emb_ =
         register_module("rotary_pos_emb", Qwen3_VisionRotaryEmbedding(context));
 
-    blocks_ = register_module("blocks", torch::nn::ModuleList());
     deepstack_mergers_ =
         register_module("deepstack_mergers", torch::nn::ModuleList());
 
@@ -341,9 +340,8 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     merger_ = register_module("merger", Qwen3_VisionPatchMerger(context));
 
     for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
-      auto block = Qwen3_VisionBlock(context);
-      blocks_->push_back(block);
-      layers_.push_back(block);
+      auto layer = Qwen3_VisionBlock(context);
+      layers_.push_back(layer);
     }
     for (int32_t idx = 0; idx < deepstack_visual_indexes_.size(); idx++) {
       auto merger = Qwen3_VisionPatchMerger(context, true);
@@ -512,7 +510,7 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
         cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
     std::vector<torch::Tensor> deepstack_feature_lists;
     deepstack_feature_lists.reserve(deepstack_visual_indexes_.size());
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
+    for (int idx = 0; idx < layers_.size(); ++idx) {
       hidden_states = layers_[idx](hidden_states,
                                    m_cos,
                                    m_sin,
@@ -576,7 +574,6 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
   Qwen3_VisionRotaryEmbedding rotary_pos_emb_{nullptr};
   torch::nn::Embedding emb_{nullptr};
 
-  torch::nn::ModuleList blocks_{nullptr};
   std::vector<Qwen3_VisionBlock> layers_;
 
   torch::nn::ModuleList deepstack_mergers_{nullptr};

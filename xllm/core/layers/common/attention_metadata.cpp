@@ -51,7 +51,9 @@ AttentionMetadata AttentionMetadata::build(
     attn_metadata.kv_seq_lens_host = params.kv_seq_lens.to(torch::kCPU);
   }
 
-  attn_metadata.is_chunked_prefill = params.batch_forward_type.is_mixed();
+  attn_metadata.is_chunked_prefill =
+      params.batch_forward_type.is_mixed() ||
+      params.batch_forward_type.is_chunked_prefill();
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
   if (!attn_metadata.is_prefill || FLAGS_enable_mla) {
     attn_metadata.block_table = params.block_tables;

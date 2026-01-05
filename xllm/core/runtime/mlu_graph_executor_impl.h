@@ -52,8 +52,6 @@ class GraphPersistentParam {
   ModelInputParams params_;
   // mrope
   bool use_mrope_ = false;
-  torch::Tensor mrope_cos_;
-  torch::Tensor mrope_sin_;
   // output
   torch::Tensor output_;
 
@@ -67,8 +65,6 @@ class GraphPersistentParam {
 
   // for vl
   torch::Tensor input_embeds_;
-  torch::Tensor pixel_values_;
-  torch::Tensor image_grid_thw_;
 
   // for mtp model
   torch::Tensor embedding_;
@@ -123,7 +119,6 @@ class MluGraphExecutorImpl : public ExecutorImpl {
 
  private:
   CausalLM* model_;  // not owned
-
   ModelArgs args_;
   torch::Device device_;
   runtime::Options options_;
