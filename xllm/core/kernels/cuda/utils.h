@@ -15,11 +15,18 @@ limitations under the License.
 
 #pragma once
 
+#include <ATen/DynamicLibrary.h>
 #include <torch/torch.h>
 
 #include <string>
 
+#include "core/util/utils.h"
+
 namespace xllm::kernel::cuda {
+
+// torch tensor is only on cpu
+torch::Tensor get_cache_buffer(const int32_t seq_len,
+                               const torch::Device& device);
 
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #define DISPATCH_CASE_FLOATING_TYPES(...)              \

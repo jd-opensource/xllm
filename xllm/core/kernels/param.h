@@ -206,6 +206,8 @@ struct AttentionParams {
   torch::Tensor float_workspace_buffer;
   torch::Tensor int_workspace_buffer;
   torch::Tensor page_locked_int_workspace_buffer;
+  std::string uri;
+  torch::Tensor plan_info;
 
   bool enable_cuda_graph = false;
   // Whether to use tensor core for decode attention computation. Default: true.

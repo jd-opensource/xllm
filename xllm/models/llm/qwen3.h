@@ -128,6 +128,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
+      attn_metadata.plan_info->layer_id = i;
       auto& layer = layers_[i];
       h = layer(h,
                 residual,

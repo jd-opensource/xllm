@@ -153,7 +153,9 @@ void batch_prefill(AttentionParams& params) {
                      params.scale,
                      params.output);
 #elif defined(USE_CUDA)
-  cuda::batch_prefill(params.float_workspace_buffer,
+  cuda::batch_prefill(params.uri,
+                      params.plan_info,
+                      params.float_workspace_buffer,
                       params.int_workspace_buffer,
                       params.page_locked_int_workspace_buffer,
                       params.query,
@@ -223,7 +225,9 @@ void batch_decode(AttentionParams& params) {
                     params.seq_lens,
                     params.output);
 #elif defined(USE_CUDA)
-  cuda::batch_decode(params.float_workspace_buffer,
+  cuda::batch_decode(params.uri,
+                     params.plan_info,
+                     params.float_workspace_buffer,
                      params.int_workspace_buffer,
                      params.page_locked_int_workspace_buffer,
                      params.query,

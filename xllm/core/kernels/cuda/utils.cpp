@@ -112,4 +112,22 @@ std::string get_batch_decode_uri(torch::ScalarType dtype_q,
   return oss.str();
 }
 
+// torch tensor is only on cpu
+torch::Tensor get_cache_buffer(const int32_t seq_len,
+                               const torch::Device& device) {
+  static std::unordered_map<std::string, torch::Tensor> cache_buffer_map;
+  int32_t seq_len_pow2 = xllm::util::ceil_pow2(seq_len);
+
+  std::string key = std::string("range_") + std::to_string(seq_len_pow2);
+  auto it = cache_buffer_map.find(key);
+  if (it != cache_buffer_map.end()) {
+    return it->second.slice(0, 0, seq_len);
+  }
+
+  auto options = torch::TensorOptions().dtype(torch::kInt32).device(device);
+  torch::Tensor buffer = torch::arange(seq_len_pow2, options);
+  cache_buffer_map.insert(std::make_pair(key, buffer));
+  return buffer.slice(0, 0, seq_len);
+}
+
 }  // namespace xllm::kernel::cuda
