@@ -29,8 +29,8 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
 
 4. 以Qwen2-7B为例
     - 启动Prefill实例
-        ``` shell linenums="1" hl_lines="3 9 10"
-        ./xllm --model=Qwen2-7B-Instruct \
+        ```bash
+        /path/to/xllm --model=Qwen2-7B-Instruct \
                --port=8010 \
                --devices="npu:0" \
                --master_node_addr="127.0.0.1:18888" \
@@ -45,8 +45,8 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
                --nnodes=1
         ```
     - 启动Decode实例
-        ``` shell linenums="1" hl_lines="3 9 10"
-        ./xllm --model=Qwen2-7B-Instruct \
+        ```bash
+        /path/to/xllm --model=Qwen2-7B-Instruct \
                --port=8020 \
                --devices="npu:1" \
                --master_node_addr="127.0.0.1:18898" \

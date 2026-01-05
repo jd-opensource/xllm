@@ -58,8 +58,8 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
 Taking Qwen2-7B as an example:
 
 - Start Prefill Instance
-    ``` shell linenums="1" hl_lines="3 9 10"
-    ./xllm --model=path/to/Qwen2-7B-Instruct \
+    ```bash
+    /path/to/xllm --model=path/to/Qwen2-7B-Instruct \
            --port=8010 \
            --devices="npu:0" \
            --master_node_addr="127.0.0.1:18888" \
@@ -74,8 +74,8 @@ Taking Qwen2-7B as an example:
            --nnodes=1
     ```
 - Start Decode Instance 
-    ``` shell linenums="1" hl_lines="3 9 10"
-    ./xllm --model=path/to/Qwen2-7B-Instruct \
+    ```bash
+    /path/to/xllm --model=path/to/Qwen2-7B-Instruct \
            --port=8020 \
            --devices="npu:1" \
            --master_node_addr="127.0.0.1:18898" \

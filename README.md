@@ -79,108 +79,13 @@ limitations under the License. -->
 
 ---
 
-## 3. Code Architecture
-```
-├── xllm/
-|   : main source folder
-│   ├── api_service/               # code for api services
-│   ├── core/  
-│   │   : xllm core features folder
-│   │   ├── common/                
-│   │   ├── distributed_runtime/   # code for distributed and pd serving
-│   │   ├── framework/             # code for execution orchestration
-│   │   ├── kernels/               # adaption for npu kernels adaption
-│   │   ├── layers/                # model layers impl
-│   │   ├── platform/              # adaption for various platform
-│   │   ├── runtime/               # code for worker and executor
-│   │   ├── scheduler/             # code for batch and pd scheduler
-│   │   └── util/
-│   ├── function_call              # code for tool call parser
-│   ├── models/                    # models impl
-│   ├── processors/                # code for vlm pre-processing
-│   ├── proto/                     # communication protocol
-│   ├── pybind/                    # code for python bind
-|   └── server/                    # xLLM server
-├── examples/                      # examples of calling xLLM
-├── tools/                         # code for npu time generations
-└── xllm.cpp                       # entrypoint of xLLM
-```
+## 3. Quick Start
 
-Supported models list:
-- DeepSeek-V3/R1
-- DeepSeek-R1-Distill-Qwen
-- Kimi-k2
-- Llama2/3
-- MiniCPM-V
-- MiMo-VL
-- Qwen2/2.5/QwQ
-- Qwen2.5-VL
-- Qwen3 / Qwen3-MoE
-- Qwen3-VL / Qwen3-VL-MoE
-- GLM4.5 / GLM4.6 / GLM-4.6V / GLM-4.7
-- VLM-R1
-
----
-
-## 4. Quick Start
-#### Installation
-First, download the image we provide:
-```bash
-# A2 x86
-docker pull xllm/xllm-ai:xllm-dev-hb-rc2-x86
-# A2 arm
-docker pull xllm/xllm-ai:xllm-dev-hb-rc2-arm
-# A3 arm
-docker pull xllm/xllm-ai:xllm-dev-hc-rc2-arm
-# or
-# A2 x86
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-x86
-# A2 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-arm
-# A3 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hc-rc2-arm
-```
-Then create the corresponding container:
-```bash
-sudo docker run -it --ipc=host -u 0 --privileged --name mydocker --network=host  --device=/dev/davinci0  --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /var/queue_schedule:/var/queue_schedule -v /usr/local/Ascend/driver:/usr/local/Ascend/driver -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi -v /usr/local/sbin/:/usr/local/sbin/ -v /var/log/npu/conf/slog/slog.conf:/var/log/npu/conf/slog/slog.conf -v /var/log/npu/slog/:/var/log/npu/slog -v /export/home:/export/home -w /export/home -v ~/.ssh:/root/.ssh  -v /var/log/npu/profiling/:/var/log/npu/profiling -v /var/log/npu/dump/:/var/log/npu/dump -v /home/:/home/  -v /runtime/:/runtime/ -v /etc/hccn.conf:/etc/hccn.conf xllm/xllm-ai:xllm-dev-hb-rc2-x86
-```
-
-Install official repo and submodules：
-```bash
-git clone https://github.com/jd-opensource/xllm
-cd xllm 
-git submodule init
-git submodule update
-```
-The compilation depends on [vcpkg](https://github.com/microsoft/vcpkg). The Docker image already includes VCPKG_ROOT preconfigured. If you want to manually set it up, you can:
-```bash
-git clone https://gitcode.com/xLLM-AI/vcpkg.git
-cd vcpkg && git checkout ffc42e97c866ce9692f5c441394832b86548422c
-export VCPKG_ROOT=/your/path/to/vcpkg
-```
-
-#### Compilation
-When compiling, generate executable files `build/xllm/core/server/xllm` under `build/`:
-```bash
-python setup.py build
-```
-Or, compile directly using the following command to generate the whl package under `dist/`:
-```bash
-python setup.py bdist_wheel
-```
-
-#### Launch
-Run the following command to start xLLM engine: 
-```bash
-./build/xllm/core/server/xllm \    # launch xllm server
-    --model=/path/to/your/llm  \   # model path（to replace with your own path）
-    --port=9977 \                  # set service port to 9977
-    --max_memory_utilization 0.90  # set the maximal utilization of device memory
-```
+Please refer to [Quick Start](docs/en/getting_started/quick_start.md) for more details. Besides, please check the model support status at [Model Support List](docs/en/supported_models.md).
 
 --- 
 
-## 5. Contributing
+## 4. Contributing
 There are several ways you can contribute to xLLM:
 
 1. Reporting Issues (Bugs & Errors)
@@ -200,14 +105,14 @@ If you have problems about development, please check our document: **[Document](
 
 ---
 
-## 6. Community & Support
+## 5. Community & Support
 If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack. In addition, we have established official WeChat groups. You can access the following QR code to join. Welcome to contact us!
 
 <div align="center">
   <img src="docs/assets/wechat_qrcode.jpg" alt="qrcode3" width="50%" />
 </div>
 
-## 7. Acknowledgment
+## 6. Acknowledgment
 
 This project was made possible thanks to the following open-source projects:  
 - [ScaleLLM](https://github.com/vectorch-ai/ScaleLLM) - xLLM draws inspiration from ScaleLLM's graph construction method and references its runtime execution. 
@@ -217,6 +122,7 @@ This project was made possible thanks to the following open-source projects:
 - [safetensors](https://github.com/huggingface/safetensors) - xLLM relies on the C binding safetensors capability.
 - [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - Implement xLLM's C++ JSON parser with insights from Python and Go implementations.
 - [concurrentqueue](https://github.com/cameron314/concurrentqueue) - A fast multi-producer, multi-consumer lock-free concurrent queue for C++11.
+- [Flashinfer](https://github.com/flashinfer-ai/flashinfer) - High-performance NVIDIA GPU kernels.
 
 
 Thanks to the following collaborating university laboratories:
@@ -235,13 +141,13 @@ Thanks to all the following [developers](https://github.com/jd-opensource/xllm/g
 
 ---
 
-## 8. License
+## 7. License
 [Apache License](LICENSE)
 
 #### xLLM is provided by JD.com 
 #### Thanks for your Contributions!
 
-## 9. Citation
+## 8. Citation
 
 If you think this repository is helpful to you, welcome to cite us:
 ```
