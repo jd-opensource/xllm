@@ -171,11 +171,11 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
   // performance debug for fixing the speculative acceptance rate
   // NOTE: This is for performance debugging only, it will
   // influence the model accuracy and should not be used in production.
-  double fixed_acceptance_rate =
-      xllm::util::get_fix_speculative_acceptance_rate();
-  if (fixed_acceptance_rate >= 0.0) {
-    rate_controller_ =
-        std::make_shared<RejectionSamplerRateController>(fixed_acceptance_rate);
+  std::optional<double> fixed_acceptance_rate =
+      util::get_fix_speculative_acceptance_rate();
+  if (fixed_acceptance_rate.has_value()) {
+    rate_controller_ = std::make_shared<RejectionSamplerRateController>(
+        *fixed_acceptance_rate);
   }
 }
 

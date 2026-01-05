@@ -24,50 +24,36 @@ limitations under the License.
 
 namespace xllm {
 
-// Provide a default placeholder token ID
-#ifndef PLACEHOLDER_TOKEN_ID
-#define PLACEHOLDER_TOKEN_ID -1
-#endif
-
 class RejectionSamplerRateController {
  public:
   explicit RejectionSamplerRateController(double fixed_acceptance_rate);
 
-  // Core filtering function, decides whether to accept a batch based on target
-  // acceptance rate
+  // Core filtering function.
+  // Maintains the target acceptance rate using a cumulative drift correction.
   torch::Tensor filter_with_acceptance_rate(const torch::Tensor& token_ids);
 
  private:
-  // Reset internal state (call when the target acceptance rate changes
-  // significantly)
-  void reset_state(double new_rate);
+  // Placeholder value for rejected tokens
+  static constexpr int32_t kPlaceholderTokenId = -1;
 
-  // Compute the final acceptance rate after PID and error correction
-  double calculate_adjusted_rate(double target, double error);
-  size_t window_size_;
+  // Tolerance for detecting when the user changes the target rate
+  static constexpr double kTargetRateChangeTolerance = 1e-6;
 
-  // History state (using circular buffer logic)
-  std::vector<int> history_buffer_;
-  size_t history_idx_;
-  long window_sum_;
+  // Gain factor for drift correction (higher = faster correction, lower =
+  // smoother)
+  static constexpr double kDriftCorrectionGain = 0.1;
 
-  // PID controller state
-  std::vector<double> error_buffer_;
-  size_t error_idx_;
-  double pid_adj_;
-
-  // Global statistics and error state
-  double cumulative_err_;
-  double last_target_;
-  long total_batches_;
-  long accepted_batches_;
-
-  // Random number generator
-  std::mt19937 gen_;
-  std::uniform_real_distribution<double> dist_;
-
-  // acceptance rate
+  // Target configuration
   double fixed_acceptance_rate_;
+  double last_target_;
+
+  // Global statistics for long-term rate tracking
+  int64_t total_batches_ = 0;
+  int64_t accepted_batches_ = 0;
+
+  // Random number generator components
+  std::mt19937 gen_{std::random_device{}()};
+  std::uniform_real_distribution<double> dist_{0.0, 1.0};
 };
 
 class RejectionSampler final {

@@ -62,7 +62,7 @@ std::string get_string_env(const std::string& name) {
   return std::string(val);
 }
 
-double get_double_env(const std::string& key, double defaultValue) {
+double get_double_env(const std::string& key, double defaultValue = -1) {
   const char* val = std::getenv(key.c_str());
   if (val == nullptr) {
     return defaultValue;
@@ -89,21 +89,27 @@ int64_t get_process_group_test_timeout_seconds() {
   return get_int_env(kTimeoutEnvVar, kDefaultTimeoutSeconds);
 }
 
-double get_fix_speculative_acceptance_rate() {
-  // Default is -1.0 to disable fixing the speculative acceptance rate.
-  // Set XLLM_FIX_SPECULATIVE_ACCEPTANCE_RATE to a valid float value to fix the
-  // speculative acceptance rate.
-  constexpr double kDefaultValue = -1.0;
+std::optional<double> get_fix_speculative_acceptance_rate() {
+  // XLLM_FIX_SPECULATIVE_ACCEPTANCE_RATE:
+  // Defines a fixed acceptance rate for speculative decoding to simulate
+  // specific performance scenarios.
+  // Valid values are in the range [0.0, 1.0].
+  // If not set, or set to an invalid value, the fixed rate logic is disabled
+  // (returns std::nullopt).
   constexpr const char* kAcceptanceRateEnvVar =
       "XLLM_FIX_SPECULATIVE_ACCEPTANCE_RATE";
-  double value = get_double_env(kAcceptanceRateEnvVar, kDefaultValue);
-  // Ensure that if set, it is between 0 and 1
-  if (value != kDefaultValue && (value < 0.0 || value > 1.0)) {
-    LOG(WARNING) << "Invalid value for " << kAcceptanceRateEnvVar << ": "
-                 << value << ". Must be in [0, 1]. Using default (-1)";
-    return kDefaultValue;
+  double value = get_double_env(kAcceptanceRateEnvVar, -1.0);
+  if (value == -1.0) {
+    return std::nullopt;
   }
-  return value;
+  // Validate the range. It must be a probability between 0 and 1.
+  if (value < 0.0 || value > 1.0) {
+    LOG(WARNING) << "Warning: Invalid value for " << kAcceptanceRateEnvVar
+                 << ": " << value << ". Must be in [0, 1]. Ignoring setting."
+                 << std::endl;
+    return std::nullopt;
+  }
+  return std::make_optional(value);
 }
 
 }  // namespace util

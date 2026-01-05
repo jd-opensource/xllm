@@ -41,164 +41,52 @@ torch::Tensor index_select_2d(const torch::Tensor& input,
 
 RejectionSamplerRateController::RejectionSamplerRateController(
     double fixed_acceptance_rate)
-    : window_size_(1000),
-      history_buffer_(1000, 0),
-      history_idx_(0),
-      window_sum_(0),
-      error_buffer_(20, 0.0),
-      error_idx_(0),
-      pid_adj_(0.0),
-      cumulative_err_(0.0),
-      last_target_(-1.0),
-      total_batches_(0),
-      accepted_batches_(0),
-      gen_(std::random_device{}()),
-      dist_(0.0, 1.0),
-      fixed_acceptance_rate_(fixed_acceptance_rate) {}
+    : fixed_acceptance_rate_(fixed_acceptance_rate),
+      last_target_(fixed_acceptance_rate) {}
 
 torch::Tensor RejectionSamplerRateController::filter_with_acceptance_rate(
     const torch::Tensor& token_ids) {
-  // Check parameters
-  if (fixed_acceptance_rate_ < 0.0 || fixed_acceptance_rate_ > 1.0)
+  // Basic parameter validation
+  if (fixed_acceptance_rate_ < 0.0 || fixed_acceptance_rate_ > 1.0 ||
+      token_ids.size(0) == 0) {
     return token_ids.clone();
-  if (token_ids.size(0) == 0) return token_ids.clone();
-
-  // Reset state if target acceptance rate changed
-  if (std::abs(last_target_ - fixed_acceptance_rate_) > 1e-6) {
-    reset_state(fixed_acceptance_rate_);
   }
 
-  // Update window statistics
-  total_batches_++;
-  double global_rate =
-      (total_batches_ > 0)
-          ? static_cast<double>(accepted_batches_) / total_batches_
-          : 0.0;
-  window_sum_ -= history_buffer_[history_idx_];
-  history_buffer_[history_idx_] = 0;
-  double window_rate = static_cast<double>(window_sum_) / window_size_;
-
-  // Calculate combined error between observed and target rates
-  double batch_weight =
-      1.0 - std::exp(-static_cast<double>(total_batches_) / 30.0);
-  double win_weight =
-      std::min(static_cast<double>(window_size_) / 100.0, 0.9) * batch_weight;
-  double combined_err =
-      (1.0 - win_weight) * (global_rate - fixed_acceptance_rate_) +
-      win_weight * (window_rate - fixed_acceptance_rate_);
-
-  // PID controller for automatic correction
-  if (total_batches_ > 50) {
-    double curr_err = global_rate - fixed_acceptance_rate_;
-    error_buffer_[error_idx_] = curr_err;
-    double prev_err = error_buffer_[(error_idx_ + 19) % 20];
-    error_idx_ = (error_idx_ + 1) % 20;
-
-    double i_term =
-        std::accumulate(error_buffer_.begin(), error_buffer_.end(), 0.0);
-    double d_term = curr_err - prev_err;
-
-    // PID: kp=0.05, ki=0.001, kd=0.01
-    pid_adj_ = 0.05 * curr_err + 0.001 * i_term + 0.01 * d_term;
-
-    // Clamp adjustment
-    double limit =
-        0.02 +
-        0.03 * (1.0 - std::exp(-static_cast<double>(total_batches_) / 500.0));
-    pid_adj_ = std::clamp(pid_adj_, -limit, limit);
+  // Reset counters if the target rate has changed significantly
+  if (std::abs(last_target_ - fixed_acceptance_rate_) >
+      kTargetRateChangeTolerance) {
+    total_batches_ = 0;
+    accepted_batches_ = 0;
+    last_target_ = fixed_acceptance_rate_;
   }
 
-  // Get corrected acceptance rate
-  double adj_rate =
-      calculate_adjusted_rate(fixed_acceptance_rate_, combined_err);
+  // Calculate Drift: Difference between expected hits and actual hits
+  double expected_hits = total_batches_ * fixed_acceptance_rate_;
+  double drift = expected_hits - accepted_batches_;
 
-  // Decide accept or reject this batch
+  // Calculate adjusted probability
+  // If drift > 0 (we accepted too few), increase probability.
+  // The factor 0.1 acts as a gentle gain to correct long-term error.
+  double adj_rate = fixed_acceptance_rate_ + (drift * kDriftCorrectionGain);
+  adj_rate = std::clamp(adj_rate, 0.0, 1.0);
+
+  // Perform rejection sampling
   bool accept = dist_(gen_) < adj_rate;
 
-  torch::Tensor out_tensor = token_ids.clone();
+  // Update statistics
+  total_batches_++;
   if (accept) {
-    // Accept: keep as-is
     accepted_batches_++;
-    history_buffer_[history_idx_] = 1;
-    window_sum_ += 1;
-  } else {
-    // Reject: mask out tokens after the first (dimension 1)
-    out_tensor.slice(1, 1).fill_(PLACEHOLDER_TOKEN_ID);
   }
 
-  // Move window index forward
-  history_idx_ = (history_idx_ + 1) % window_size_;
-
-  // Update cumulative EMA error
-  double actual_rate = static_cast<double>(accepted_batches_) / total_batches_;
-  double alpha =
-      0.05 * std::exp(-static_cast<double>(total_batches_) / 200.0) + 0.01;
-  cumulative_err_ = alpha * (actual_rate - fixed_acceptance_rate_) +
-                    (1.0 - alpha) * cumulative_err_;
+  // Generate output
+  torch::Tensor out_tensor = token_ids.clone();
+  if (!accept) {
+    // Reject: Mask out tokens after the first one (dimension 1)
+    out_tensor.slice(1, 1).fill_(kPlaceholderTokenId);
+  }
 
   return out_tensor;
-}
-
-void RejectionSamplerRateController::reset_state(double new_rate) {
-  pid_adj_ = 0.0;
-  std::fill(error_buffer_.begin(), error_buffer_.end(), 0.0);
-  last_target_ = new_rate;
-}
-
-double RejectionSamplerRateController::calculate_adjusted_rate(double target,
-                                                               double error) {
-  // 1. Nonlinear correction based on error magnitude
-  double err_abs = std::abs(error);
-  double factor = 1.0;
-  if (err_abs > 0.0005) {
-    double strength = 2.0 + (1.0 - std::exp(-err_abs * 50.0)) * 1.5;
-    double sign = (error > 0) ? 1.0 : -1.0;
-    factor = 1.0 + (strength * err_abs * sign);
-  }
-
-  // 2. Apply PID adjustment
-  double rate_base = target * (factor == 0.0 ? 1.0 : 1.0 / factor);
-  double rate = std::clamp(rate_base - pid_adj_, 0.0, 1.0);
-
-  // 3. Edge cases and periodic force accept for low rate
-  if (target == 0.0) return 0.0;
-  if (target == 1.0) return 1.0;
-  if (target > 0 && target < 0.05) {
-    int period = static_cast<int>(1.0 / target);
-    if (total_batches_ % period == 0) return 1.0;
-  }
-
-  // 4. Gap correction to enforce long-term target
-  long target_accepted = std::llround(total_batches_ * target);
-  long gap = target_accepted - accepted_batches_;
-  long gap_threshold = std::max(1L, static_cast<long>(total_batches_ * 0.005));
-
-  if (std::abs(gap) >= gap_threshold) {
-    double gap_relative =
-        static_cast<double>(std::abs(gap)) / std::max(1L, total_batches_);
-    double importance = 1.0 - std::exp(-gap_relative * 50.0);
-    double strength =
-        0.2 + 0.8 * std::exp(-static_cast<double>(total_batches_) / 1000.0);
-    double boost = importance * strength;
-
-    if (gap > 0) {
-      // Need to accept more
-      rate = std::min(1.0, rate + (1.0 - rate) * boost);
-    } else {
-      // Need to reject more
-      rate = std::max(0.0, rate * (1.0 - boost));
-    }
-  }
-
-  // 5. Random noise to prevent local optima
-  if (rate > 0.01 && rate < 0.99 && total_batches_ > 100) {
-    double noise_amp =
-        0.01 * std::exp(-static_cast<double>(total_batches_) / 500.0);
-    double noise = (dist_(gen_) * 2.0 - 1.0) * noise_amp;
-    rate = std::clamp(rate + noise, 0.0, 1.0);
-  }
-
-  return rate;
 }
 
 RejectionSampler::RejectionSampler(
