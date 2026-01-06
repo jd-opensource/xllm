@@ -18,15 +18,15 @@ limitations under the License.
 
 namespace xllm {
 
-MMDataItem::MMDataItem(MMType ty) : ty_(ty) {}
+MMDataItem::MMDataItem(MMType type) : type_(type) {}
 
-MMDataItem::MMDataItem(MMType ty, const MMDict& data)
-    : ty_(ty), data_(std::move(data)) {}
+MMDataItem::MMDataItem(MMType type, const MMDict& data)
+    : type_(type), data_(std::move(data)) {}
 
-MMDataItem::MMDataItem(MMType ty,
+MMDataItem::MMDataItem(MMType type,
                        const MMDict& data,
                        const MMMetadata& metadata)
-    : ty_(ty), data_(std::move(data)), metadata_(std::move(metadata)) {}
+    : type_(type), data_(std::move(data)), metadata_(std::move(metadata)) {}
 
 bool MMDataItem::has(const MMKey& key) const {
   if (!valid()) return false;
@@ -50,7 +50,7 @@ void MMDataItem::get(const MMKey& key, std::vector<torch::Tensor>& vec) const {
 }
 
 void MMDataItem::debug_print() const {
-  LOG(INFO) << "mm data item debug print, ty:" << ty_;
+  LOG(INFO) << "mm data item debug print, type:" << type_;
 
   for (const auto& pair : data_) {
     if (std::holds_alternative<torch::Tensor>(pair.second)) {

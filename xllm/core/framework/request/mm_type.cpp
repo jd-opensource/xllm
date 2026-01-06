@@ -18,7 +18,7 @@ limitations under the License.
 namespace xllm {
 
 std::optional<std::string> MMType::to_string() {
-  switch (value) {
+  switch (value_) {
     case Value::NONE:
       return std::nullopt;
     case Value::IMAGE:
@@ -30,7 +30,7 @@ std::optional<std::string> MMType::to_string() {
     case Value::EMBEDDING:
       return "embedding";
     default:
-      LOG(WARNING) << "Unknown mm type: " << static_cast<int>(value);
+      LOG(WARNING) << "Unknown mm type: " << static_cast<int>(value_);
   }
   return std::nullopt;
 }

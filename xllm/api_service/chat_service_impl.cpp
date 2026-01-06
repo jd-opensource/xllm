@@ -869,7 +869,7 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
 
   std::vector<Message> messages;
-  if (!build_messages<MMChatCall>(
+  if (!mm_service_utils::build_messages<MMChatCall>(
           req_messages, messages, call, master_->get_image_limit())) {
     return;
   }

@@ -157,7 +157,7 @@ void MMEmbeddingServiceImpl::process_async_impl(
   auto& req_messages = rpc_request.messages();
 
   std::vector<Message> messages;
-  if (!build_messages<MMEmbeddingCall>(
+  if (!mm_service_utils::build_messages<MMEmbeddingCall>(
           req_messages, messages, call, master_->get_image_limit())) {
     return;
   }

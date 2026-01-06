@@ -47,8 +47,8 @@ class __attribute__((visibility("hidden"))) PyWrapperImpl {
 
     try {
       py::list py_lst;
-      for (const auto& item : inputs.items_) {
-        py_lst.append(py::bytes(item.raw_data_));
+      for (const auto& item : inputs.items()) {
+        py_lst.append(py::bytes(item.raw_data));
       }
 
       py::dict res = preprocess_(py_lst, FLAGS_model);

@@ -60,16 +60,16 @@ class MMData {
 
  public:
   MMData() = default;
-  MMData(uint32_t ty, const MMItemVec& items);
-  MMData(uint32_t ty, const MMDict& items);
+  MMData(uint32_t type, const MMItemVec& items);
+  MMData(uint32_t type, const MMDict& items);
 
-  bool has(uint32_t type) const { return type & ty_ != 0; }
-  bool has(MMType type) const { return type & ty_ != 0; }
+  bool has(uint32_t type) const { return type & type_ != 0; }
+  bool has(MMType type) const { return type & type_ != 0; }
 
   bool has(const MMKey& key) const;
-  bool valid() const { return ty_ != MMType::NONE; }
+  bool valid() const { return type_ != MMType::NONE; }
 
-  uint32_t type() const { return ty_; }
+  uint32_t type() const { return type_; }
   size_t size() const;
 
   bool add(MMType type, const MMDataItem& item);
@@ -87,7 +87,7 @@ class MMData {
     const auto& itor = dict.find(key);
     if (itor != dict.end()) return false;
 
-    ty_ |= type;
+    type_ |= type;
     dict.insert({key, value});
     return true;
   }
@@ -136,7 +136,7 @@ class MMData {
 
   template <typename T>
   void set(uint32_t type, const T& item) {
-    ty_ = type;
+    type_ = type;
     items_ = item;
   }
 
@@ -160,14 +160,14 @@ class MMData {
   }
 
   template <typename T>
-  void get_metadata(MMType ty, std::vector<T>& metadatas) const {
+  void get_metadata(MMType type, std::vector<T>& metadatas) const {
     if (!valid()) return;
 
     if (!hold<MMItemVec>()) return;
 
     const auto& item_vec = items<MMItemVec>();
     for (const auto& item : item_vec) {
-      if (item.type() != ty) continue;
+      if (item.type() != type) continue;
 
       if (auto res = item.template get_metadata<T>()) {
         metadatas.push_back(res.value());
@@ -182,7 +182,7 @@ class MMData {
   void debug_print() const;
 
  private:
-  uint32_t ty_ = MMType::NONE;
+  uint32_t type_ = MMType::NONE;
   MMItems items_;
 };
 

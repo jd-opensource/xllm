@@ -56,7 +56,7 @@ class CollectMMDataTensorVisitor : public MMData::IVisitor {
   bool visit(MMData& data) override;
 
  public:
-  uint32_t ty_ = MMType::NONE;
+  uint32_t type_ = MMType::NONE;
   std::unordered_map<MMKey, std::vector<torch::Tensor>> datas_;
 
   CollectItemTensorVisitor item_visitor_;

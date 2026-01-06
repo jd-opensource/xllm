@@ -98,8 +98,8 @@ MMEmbeddingHandler::MMEmbeddingHandler(MMType::Value mm_type)
 bool MMEmbeddingHandler::load(const MMContent& content,
                               MMInputItem& input,
                               MMPayload& payload) {
-  input.type_ = mm_type_;
-  if (!parse_embedding_output(content.embedding, payload, input.embedding_)) {
+  input.type = mm_type_;
+  if (!parse_embedding_output(content.embedding, payload, input.embedding)) {
     return false;
   }
 

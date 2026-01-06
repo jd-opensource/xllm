@@ -34,20 +34,20 @@ class MMType {
   };
 
   MMType() = default;
-  MMType(Value v) : value(v) {}
-  operator Value() const { return value; }
+  MMType(Value v) : value_(v) {}
+  operator Value() const { return value_; }
   explicit operator bool() const = delete;
 
-  bool operator==(MMType rhs) const { return value == rhs.value; }
-  bool operator!=(MMType rhs) const { return value != rhs.value; }
+  bool operator==(MMType rhs) const { return value_ == rhs.value_; }
+  bool operator!=(MMType rhs) const { return value_ != rhs.value_; }
 
-  bool operator==(Value v) const { return value == v; }
-  bool operator!=(Value v) const { return value != v; }
+  bool operator==(Value v) const { return value_ == v; }
+  bool operator!=(Value v) const { return value_ != v; }
 
   std::optional<std::string> to_string();
 
  private:
-  Value value = Value::NONE;
+  Value value_ = Value::NONE;
 };
 
 struct ImageMetadata {

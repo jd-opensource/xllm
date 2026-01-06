@@ -86,25 +86,16 @@ void Sequence::init_onerec_sequence(
   logprob_state_ = std::make_unique<LogprobState>(num_prompt_tokens_, capacity);
 }
 
-SequenceOutput Sequence::build_onerec_output(const Slice<int32_t>& ids,
-                                             size_t size,
-                                             SequenceOutput output) const {
-  output.token_ids = ids.slice(num_prompt_tokens_, size);
-  return output;
-}
-
-SequenceOutput Sequence::build_onerec_streaming_output(
-    const Slice<int32_t>& ids,
-    size_t size) const {
-  SequenceOutput output;
+void Sequence::generate_onerec_streaming_output(const Slice<int32_t>& ids,
+                                                size_t size,
+                                                SequenceOutput& output) const {
   output.index = index_;
   output.token_ids = ids.slice(num_prompt_tokens_, size);
-  return output;
 }
 
-SequenceOutput Sequence::generate_onerec_output(const Slice<int32_t>& ids,
-                                                size_t size) const {
-  SequenceOutput output;
+void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
+                                      size_t size,
+                                      SequenceOutput& output) const {
   output.index = index_;
   if (output_embedding_.defined()) {
     output.embedding = output_embedding_;
@@ -112,7 +103,7 @@ SequenceOutput Sequence::generate_onerec_output(const Slice<int32_t>& ids,
   if (finish_reason_ != FinishReason::NONE) {
     output.finish_reason = finish_reason_.to_string();
   }
-  return build_onerec_output(ids, size, std::move(output));
+  output.token_ids = ids.slice(num_prompt_tokens_, size);
 }
 
 Sequence::Sequence(size_t index,
@@ -126,7 +117,6 @@ Sequence::Sequence(size_t index,
       latest_generate_time_(absl::Now()),
       sequence_params_(seq_params),
       decoder_(std::move(decoder)),
-      rec_type_(seq_params.rec_type),
       termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
   if (is_onerec_model()) {
     init_onerec_sequence(prompt_token_ids, std::move(input_embedding));
@@ -183,7 +173,6 @@ Sequence::Sequence(const Sequence& other)
       token_to_count_map_(other.token_to_count_map_),
       num_prompt_tokens_(other.num_prompt_tokens_),
       onerec_state_(other.onerec_state_),
-      rec_type_(other.rec_type_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
       embedding_id_(other.embedding_id_),
       finished_(other.finished_),
@@ -371,8 +360,10 @@ std::optional<SequenceOutput> Sequence::generate_streaming_output(
   AUTO_COUNTER(detokenization_latency_seconds_stream);
   const auto ids = Slice<int32_t>(tokens_, size);
 
+  SequenceOutput output;
   if (is_onerec_model()) {
-    return build_onerec_streaming_output(ids, size);
+    generate_onerec_streaming_output(ids, size, output);
+    return output;
   }
 
   // record the start index of token ids
@@ -413,7 +404,6 @@ std::optional<SequenceOutput> Sequence::generate_streaming_output(
     return std::nullopt;
   }
 
-  SequenceOutput output;
   output.index = index_;
   output.text = std::move(delta);
 
@@ -434,39 +424,59 @@ SequenceOutput Sequence::generate_output() {
   return output;
 }
 
+SequenceOutputType Sequence::output_type() {
+  // EMBEDDINGS or MM_EMBEDDINGS
+  if (sequence_params_.sampling_param->is_embeddings) {
+    if (output_mm_embeddings_.size() > 0) {
+      return SequenceOutputType::MM_EMBEDDINGS;
+    }
+    return SequenceOutputType::EMBEDDINGS;
+  }
+  return SequenceOutputType::TOKENS;
+}
+
+void Sequence::generate_embeddings_output(SequenceOutput& output) {
+  output.index = index_;
+  Slice<float> embedding_slice = {
+      output_embedding_.data_ptr<float>(),
+      static_cast<size_t>(output_embedding_.size(0))};
+  output.embeddings = embedding_slice;
+}
+
+void Sequence::generate_mm_embeddings_output(SequenceOutput& output) {
+  output.index = index_;
+  std::vector<EmbeddingOutput> embedding_outputs;
+  embedding_outputs.reserve(output_mm_embeddings_.size());
+  std::unordered_map<MMKey, std::vector<torch::Tensor>> metadata;
+  CollectItemTensorVisitor visitor(metadata, {"pixel_values"});
+  mm_data_.foreach (visitor);
+  for (int i = 0; i < output_mm_embeddings_.size(); i++) {
+    const auto& output_mm_embedding = output_mm_embeddings_[i];
+    EmbeddingOutput embedding_output;
+    embedding_output.embedding = output_mm_embedding;
+    for (const auto& [key, value] : metadata) {
+      embedding_output.metadata[key] = value[i];
+    }
+    embedding_outputs.push_back(embedding_output);
+  };
+  output.mm_embeddings = embedding_outputs;
+}
+
 SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
   AUTO_COUNTER(detokenization_latency_seconds_non_stream);
 
-  // build embeddings for output
-  if (sequence_params_.sampling_param->is_embeddings &&
-      output_mm_embeddings_.size() > 0) {
-    SequenceOutput output;
-    output.index = index_;
-    std::vector<EmbeddingOutput> embedding_outputs;
-    embedding_outputs.reserve(output_mm_embeddings_.size());
-    std::unordered_map<MMKey, std::vector<torch::Tensor>> metadata;
-    CollectItemTensorVisitor visitor(metadata, {"pixel_values"});
-    mm_data_.foreach (visitor);
-    for (int i = 0; i < output_mm_embeddings_.size(); i++) {
-      const auto& output_mm_embedding = output_mm_embeddings_[i];
-      EmbeddingOutput embedding_output;
-      embedding_output.embedding = output_mm_embedding;
-      for (const auto& [key, value] : metadata) {
-        embedding_output.metadata[key] = value[i];
-      }
-      embedding_outputs.push_back(embedding_output);
-    };
-    output.mm_embeddings = embedding_outputs;
+  SequenceOutputType seq_output_type = output_type();
+
+  SequenceOutput output;
+  // 1. return mm embeddings for output
+  if (seq_output_type == SequenceOutputType::MM_EMBEDDINGS) {
+    generate_mm_embeddings_output(output);
     return output;
   }
 
-  if (sequence_params_.sampling_param->is_embeddings) {
-    SequenceOutput output;
-    output.index = index_;
-    Slice<float> embedding_slice = {
-        output_embedding_.data_ptr<float>(),
-        static_cast<size_t>(output_embedding_.size(0))};
-    output.embeddings = embedding_slice;
+  // 2. return embeddings for output
+  if (seq_output_type == SequenceOutputType::EMBEDDINGS) {
+    generate_embeddings_output(output);
     return output;
   }
 
@@ -481,11 +491,13 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
     }
   }
 
+  // 3. generate onerec output
   if (is_onerec_model()) {
-    return generate_onerec_output(ids, size);
+    generate_onerec_output(ids, size, output);
+    return output;
   }
 
-  SequenceOutput output;
+  // 4. generate tokens output
   output.index = index_;
   if (output_embedding_.defined()) {
     output.embedding = output_embedding_;
