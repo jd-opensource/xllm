@@ -23,20 +23,29 @@ limitations under the License.
 
 namespace xllm {
 
+class RecMaster;
+
 using ChatCall = StreamCall<proto::ChatRequest, proto::ChatResponse>;
 
 // a class to handle completion requests
 class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
  public:
+  // Constructor for LLM backend
   ChatServiceImpl(LLMMaster* master, const std::vector<std::string>& models);
+
+  // Constructor for Rec backend (LlmRec only, e.g., Qwen3)
+  ChatServiceImpl(RecMaster* master, const std::vector<std::string>& models);
 
   // brpc call_data needs to use shared_ptr
   void process_async_impl(std::shared_ptr<ChatCall> call);
 
  private:
+  void process_rec_chat_request(std::shared_ptr<ChatCall> call);
+
   DISALLOW_COPY_AND_ASSIGN(ChatServiceImpl);
 
   LLMMaster* master_ = nullptr;
+  RecMaster* rec_master_ = nullptr;
   const std::string tool_call_parser_format_;
   const std::string reasoning_parser_format_;
   bool is_force_reasoning_ = false;

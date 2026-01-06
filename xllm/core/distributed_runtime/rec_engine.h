@@ -99,6 +99,9 @@ class RecEngine : public Engine {
 
    private:
     std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);
+
+    // Get max tokens from batch for dynamic step control
+    size_t get_max_steps_from_batch(std::vector<Batch>& batches) const;
   };
 
   // ============================================================

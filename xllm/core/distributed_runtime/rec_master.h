@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <atomic>
 #include <functional>
+#include <optional>
 #include <thread>
 
 #include "framework/chat_template/jinja_chat_template.h"
@@ -52,8 +53,17 @@ class RecMaster : public Master {
       RequestParams sp,
       OutputCallback callback);
 
+  // chat
+  // Only supported for LlmRec models.
+  void handle_request(std::vector<Message> messages,
+                      std::optional<std::vector<int>> prompt_tokens,
+                      RequestParams sp,
+                      OutputCallback callback);
+
   // start the handling loop
   void run() override;
+
+  RecType rec_type() const { return rec_type_; }
 
  private:
   using RequestBuilder =

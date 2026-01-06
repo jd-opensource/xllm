@@ -441,7 +441,10 @@ ForwardOutput RecEngine::LlmRecEnginePipeline::step(
     return true;
   };
 
-  for (size_t step_idx = 0; step_idx < kRecTotalSteps; ++step_idx) {
+  // Get dynamic max steps from batch (based on max_tokens in requests)
+  const size_t max_steps = get_max_steps_from_batch(batches);
+
+  for (size_t step_idx = 0; step_idx < max_steps; ++step_idx) {
     if (!run_one_step(step_idx)) {
       break;
     }
@@ -468,6 +471,31 @@ RecEngine::LlmRecEnginePipeline::get_active_activation_memory() const {
     active_activation_memories.push_back(result.value());
   }
   return active_activation_memories;
+}
+
+size_t RecEngine::LlmRecEnginePipeline::get_max_steps_from_batch(
+    std::vector<Batch>& batches) const {
+  size_t max_steps = 0;
+  bool has_stopping_checker = false;
+  for (auto& batch : batches) {
+    // Use get_sequences() to handle both sequences_ and sequence_groups_
+    // This ensures compatibility with both LlmRec and OneRec scenarios
+    auto sequences = batch.get_sequences();
+    for (auto* seq : sequences) {
+      const auto* stopping_checker = seq->stopping_checker();
+      if (stopping_checker) {
+        has_stopping_checker = true;
+        max_steps =
+            std::max(max_steps, stopping_checker->get_max_generated_tokens());
+      }
+    }
+  }
+  // If has stopping_checker, use max_tokens from it;
+  // otherwise fall back to kRecDecodeSteps for OneRec compatibility
+  if (has_stopping_checker && max_steps > 0) {
+    return max_steps;
+  }
+  return kRecDecodeSteps;
 }
 
 // ============================================================

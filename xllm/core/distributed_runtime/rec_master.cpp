@@ -431,8 +431,10 @@ RecMaster::RecMaster(const Options& options)
   scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
 
   chat_template_ = nullptr;
-  // Initialize tokenizer for LlmRec (Qwen3) to support prompt string input
+  // Initialize chat template and tokenizer for LlmRec (Qwen3).
   if (rec_type_ == RecType::kLlmRec) {
+    chat_template_ =
+        std::make_unique<JinjaChatTemplate>(engine_->tokenizer_args());
     tokenizer_ = engine_->tokenizer()->clone();
   } else {
     tokenizer_ = nullptr;
@@ -503,6 +505,53 @@ void RecMaster::handle_request(
                          std::move(prompt),
                          std::move(prompt_tokens),
                          std::move(input_tensors),
+                         params,
+                         std::move(cb));
+                   });
+}
+
+void RecMaster::handle_request(std::vector<Message> messages,
+                               std::optional<std::vector<int>> prompt_tokens,
+                               RequestParams sp,
+                               OutputCallback callback) {
+  if (rec_type_ != RecType::kLlmRec) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "Chat is only supported for LLMRec models");
+    return;
+  }
+
+  if (!chat_template_) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "Chat template is not initialized");
+    return;
+  }
+
+  Timer timer;
+  std::optional<std::string> prompt;
+  if (sp.has_tools()) {
+    prompt = chat_template_->apply(messages, sp.tools, sp.chat_template_kwargs);
+  } else {
+    prompt = chat_template_->apply(messages, sp.chat_template_kwargs);
+  }
+
+  if (!prompt.has_value()) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "Failed to construct prompt from messages");
+    LOG(ERROR) << "Failed to construct prompt from messages";
+    return;
+  }
+  COUNTER_ADD(chat_template_latency_seconds, timer.elapsed_seconds());
+
+  schedule_request(std::move(sp),
+                   std::move(callback),
+                   [this,
+                    prompt = std::move(prompt.value()),
+                    prompt_tokens = std::move(prompt_tokens)](
+                       const RequestParams& params, OutputCallback cb) mutable {
+                     return pipeline_->generate_request(
+                         std::move(prompt),
+                         std::move(prompt_tokens),
+                         std::nullopt,
                          params,
                          std::move(cb));
                    });

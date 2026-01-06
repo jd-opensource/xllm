@@ -32,7 +32,9 @@ limitations under the License.
 #include "core/common/instance_name.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
+#include "core/distributed_runtime/rec_master.h"
 #include "core/distributed_runtime/vlm_master.h"
+#include "core/framework/request/rec_type.h"
 #include "core/framework/request/request_params.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
@@ -570,6 +572,126 @@ ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
   CHECK(master_ != nullptr);
 }
 
+ChatServiceImpl::ChatServiceImpl(RecMaster* master,
+                                 const std::vector<std::string>& models)
+    : APIServiceImpl(models),
+      rec_master_(master),
+      // RecMaster does not expose tool_call_parser/reasoning_parser options,
+      // and the current Rec scenario does not require these features.
+      tool_call_parser_format_(""),
+      reasoning_parser_format_("") {
+  CHECK(rec_master_ != nullptr);
+}
+
+void ChatServiceImpl::process_rec_chat_request(std::shared_ptr<ChatCall> call) {
+  CHECK(rec_master_ != nullptr);
+  const auto& rpc_request = call->request();
+  const auto& model = rpc_request.model();
+
+  if (rec_master_->rec_type() != RecType::kLlmRec) {
+    call->finish_with_error(StatusCode::INVALID_ARGUMENT,
+                            "Chat is only supported for LLMRec models");
+    return;
+  }
+
+  if (rec_master_->get_rate_limiter()->is_limited()) {
+    call->finish_with_error(
+        StatusCode::RESOURCE_EXHAUSTED,
+        "The number of concurrent requests has reached the limit.");
+    return;
+  }
+
+  RequestParams request_params(
+      rpc_request, call->get_x_request_id(), call->get_x_request_time());
+
+  // Build messages from rpc request (inline code, not extracted to helper)
+  std::vector<Message> messages;
+  messages.reserve(rpc_request.messages_size());
+  for (const auto& message : rpc_request.messages()) {
+    messages.emplace_back(message.role(), message.content());
+    auto& msg = messages.back();
+
+    if (message.has_tool_call_id()) {
+      msg.tool_call_id = message.tool_call_id();
+    }
+
+    if (message.has_reasoning_content()) {
+      msg.reasoning_content = message.reasoning_content();
+    }
+
+    if (message.tool_calls_size() > 0) {
+      Message::ToolCallVec tool_calls;
+      tool_calls.reserve(message.tool_calls_size());
+      for (const auto& tool_call : message.tool_calls()) {
+        tool_calls.emplace_back();
+        auto& tc = tool_calls.back();
+        tc.id = tool_call.id();
+        tc.type = tool_call.type();
+        tc.function.name = tool_call.function().name();
+        tc.function.arguments = tool_call.function().arguments();
+      }
+      msg.tool_calls = std::move(tool_calls);
+    }
+  }
+
+  bool include_usage = false;
+  if (rpc_request.has_stream_options()) {
+    include_usage = rpc_request.stream_options().include_usage();
+  }
+
+  // Parse prompt tokens from routing (inline code, not extracted to helper)
+  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
+  if (rpc_request.has_routing()) {
+    prompt_tokens = std::vector<int>{};
+    prompt_tokens->reserve(rpc_request.token_ids_size());
+    for (int i = 0; i < rpc_request.token_ids_size(); i++) {
+      prompt_tokens->emplace_back(rpc_request.token_ids(i));
+    }
+    request_params.decode_address = rpc_request.routing().decode_name();
+  }
+
+  auto saved_streaming = request_params.streaming;
+  auto saved_request_id = request_params.request_id;
+
+  rec_master_->handle_request(
+      std::move(messages),
+      std::move(prompt_tokens),
+      std::move(request_params),
+      [call,
+       model,
+       master = rec_master_,
+       stream = std::move(saved_streaming),
+       include_usage = include_usage,
+       first_message_sent = std::unordered_set<size_t>(),
+       request_id = std::move(saved_request_id),
+       created_time = absl::ToUnixSeconds(absl::Now())](
+          const RequestOutput& req_output) mutable -> bool {
+        if (req_output.status.has_value()) {
+          const auto& status = req_output.status.value();
+          if (!status.ok()) {
+            master->get_rate_limiter()->decrease_one_request();
+            return call->finish_with_error(status.code(), status.message());
+          }
+        }
+
+        if (req_output.finished || req_output.cancelled) {
+          master->get_rate_limiter()->decrease_one_request();
+        }
+
+        if (stream) {
+          return send_delta_to_client_brpc(call,
+                                           include_usage,
+                                           &first_message_sent,
+                                           request_id,
+                                           created_time,
+                                           model,
+                                           req_output);
+        }
+        return send_result_to_client_brpc(
+            call, request_id, created_time, model, req_output);
+      });
+}
+
 // chat_async for brpc
 void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   const auto& rpc_request = call->request();
@@ -580,7 +702,15 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     return;
   }
 
+  // Route to RecMaster if configured
+  if (rec_master_) {
+    process_rec_chat_request(call);
+    return;
+  }
+
+  // LLMMaster path (existing logic)
   // Check if the request is being rate-limited.
+  CHECK(master_ != nullptr);
   if (master_->get_rate_limiter()->is_limited()) {
     call->finish_with_error(
         StatusCode::RESOURCE_EXHAUSTED,

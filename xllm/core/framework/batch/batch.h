@@ -132,6 +132,10 @@ class Batch {
     return cal_seq_exchange_index(kv_cache_tokens_num);
   }
 
+  // Get all sequences from either sequences_ or sequence_groups_
+  // Used by RecEngine to access sequences for stopping checker evaluation
+  std::vector<Sequence*> get_sequences();
+
  private:
   bool update_sequence_state(Sequence* seq, bool replace_fake_token);
 
@@ -146,8 +150,6 @@ class Batch {
       std::vector<uint32_t>& kv_cache_tokens_num);
 
   void dp_balance_shuffle_seqs();
-
-  std::vector<Sequence*> get_sequences();
 
   std::vector<Sequence*> sequences_;
   std::vector<SequencesGroup*> sequence_groups_;

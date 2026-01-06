@@ -85,8 +85,11 @@ APIService::APIService(Master* master,
         std::make_unique<ImageGenerationServiceImpl>(
             dynamic_cast<DiTMaster*>(master), model_names);
   } else if (FLAGS_backend == "rec") {
-    rec_completion_service_impl_ = std::make_unique<RecCompletionServiceImpl>(
-        dynamic_cast<RecMaster*>(master), model_names);
+    auto rec_master = dynamic_cast<RecMaster*>(master);
+    rec_completion_service_impl_ =
+        std::make_unique<RecCompletionServiceImpl>(rec_master, model_names);
+    chat_service_impl_ =
+        std::make_unique<ChatServiceImpl>(rec_master, model_names);
   }
   models_service_impl_ =
       ServiceImplFactory<ModelsServiceImpl>::create_service_impl(
@@ -241,6 +244,10 @@ void APIService::ChatCompletionsHttp(
     CHECK(mm_chat_service_impl_) << " mm chat service is invalid.";
     ChatCompletionsImpl<MMChatCall, MMChatServiceImpl>(
         mm_chat_service_impl_, done_guard, ctrl, request, response);
+  } else if (FLAGS_backend == "rec") {
+    CHECK(chat_service_impl_) << " chat service is invalid.";
+    ChatCompletionsImpl<ChatCall, ChatServiceImpl>(
+        chat_service_impl_, done_guard, ctrl, request, response);
   }
 }
 

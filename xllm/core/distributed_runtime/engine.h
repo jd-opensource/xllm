@@ -78,7 +78,8 @@ class Engine {
                               const std::vector<uint64_t>& src_blocks,
                               const int32_t dst_dp_rank,
                               const std::vector<uint64_t>& dst_blocks) {
-    LOG(FATAL) << " pull_kv_blocks is notimplemented!";
+    LOG(FATAL) << " pull_kv_blocks is not implemented!";
+    return false;
   };
 
   virtual std::vector<folly::SemiFuture<uint32_t>> transfer_kv_blocks(
