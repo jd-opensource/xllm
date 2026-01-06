@@ -238,10 +238,7 @@ class WorkerImpl {
 
   InstanceRole instance_role_ = InstanceRole::DEFAULT;
 
-#if defined(USE_NPU)
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
-#endif
-
   std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
 
   bool is_spec_draft_ = false;

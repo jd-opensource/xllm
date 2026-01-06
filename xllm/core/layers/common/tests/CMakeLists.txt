@@ -25,6 +25,7 @@ cc_test(
     $<$<BOOL:${USE_NPU}>:atb>
     $<$<BOOL:${USE_NPU}>:atb_customize>
     $<$<BOOL:${USE_NPU}>:nnopbase>
+    $<$<BOOL:${USE_NPU}>:c_sec>
     glog::glog
     torch
     GTest::gtest_main
