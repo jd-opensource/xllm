@@ -34,9 +34,10 @@ limitations under the License.
 #include "core/util/json_reader.h"
 #include "core/util/net.h"
 #include "core/util/utils.h"
+#include "function_call/function_call_parser.h"
 #include "models/model_registry.h"
+#include "parser/reasoning_parser.h"
 #include "server/xllm_server_registry.h"
-
 using namespace xllm;
 
 static std::atomic<uint32_t> signal_received{0};
@@ -148,9 +149,9 @@ int run() {
     FLAGS_max_tokens_per_chunk_for_prefill = FLAGS_max_tokens_per_batch;
   }
 
+  std::string model_type = get_model_type(model_path);
   // set enable_mla by model type
   if (FLAGS_backend != "dit") {
-    std::string model_type = get_model_type(model_path);
     if (deepseek_like_model_set.find(model_type) !=
         deepseek_like_model_set.end()) {
       FLAGS_enable_mla = true;
@@ -158,6 +159,10 @@ int run() {
       FLAGS_enable_mla = false;
     }
   }
+  FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
+      FLAGS_tool_call_parser, model_type);
+  FLAGS_reasoning_parser =
+      ReasoningParser::get_parser_auto(FLAGS_reasoning_parser, model_type);
 
   // Create Master
   Options options;

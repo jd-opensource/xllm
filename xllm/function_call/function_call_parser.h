@@ -18,7 +18,6 @@ limitations under the License.
 #include <memory>
 #include <string>
 #include <tuple>
-#include <unordered_map>
 #include <vector>
 
 #include "base_format_detector.h"
@@ -29,8 +28,6 @@ namespace function_call {
 
 class FunctionCallParser {
  public:
-  static const std::unordered_map<std::string, std::string> kToolCallParserMap;
-
   FunctionCallParser(const std::vector<JsonTool>& tools,
                      const std::string& tool_call_parser);
 
@@ -53,6 +50,9 @@ class FunctionCallParser {
   // std::string& tool_choice);
 
   BaseFormatDetector* get_detector() const { return detector_.get(); }
+
+  static std::string get_parser_auto(const std::string& parser,
+                                     const std::string& model_type);
 
  private:
   std::unique_ptr<BaseFormatDetector> create_detector(

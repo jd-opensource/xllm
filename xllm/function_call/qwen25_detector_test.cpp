@@ -355,7 +355,7 @@ TEST_F(Qwen25DetectorTest, PerformanceWithManyToolCalls) {
 
 // Test basic streaming functionality
 TEST_F(Qwen25StreamingTest, BasicStreamingParsing) {
-  FunctionCallParser parser(tools_, "qwen3");
+  FunctionCallParser parser(tools_, "qwen25");
 
   // Simulate streaming chunks
   std::vector<std::string> chunks = {
@@ -398,7 +398,7 @@ TEST_F(Qwen25StreamingTest, BasicStreamingParsing) {
 
 // Test multiple tool calls streaming
 TEST_F(Qwen25StreamingTest, MultipleToolCallsStreaming) {
-  FunctionCallParser parser(tools_, "qwen3");
+  FunctionCallParser parser(tools_, "qwen25");
 
   // Simulate realistic token-level streaming chunks with multiple tool calls
   std::vector<std::string> chunks = {"Let",
@@ -493,7 +493,7 @@ TEST_F(Qwen25StreamingTest, MultipleToolCallsStreaming) {
 
 // Test partial token handling
 TEST_F(Qwen25StreamingTest, PartialTokenHandling) {
-  FunctionCallParser parser(tools_, "qwen3");
+  FunctionCallParser parser(tools_, "qwen25");
 
   // Simulate realistic partial tokens being streamed - testing edge cases where
   // tokens are split

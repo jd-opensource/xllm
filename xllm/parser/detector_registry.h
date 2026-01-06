@@ -23,30 +23,34 @@ limitations under the License.
 #include "parser/reasoning_detector.h"
 
 namespace xllm {
+
+using DetectorFactory =
+    std::function<std::unique_ptr<ReasoningDetector>(bool, bool)>;
 class DetectorRegistry {
  public:
-  using DetectorFactory =
-      std::function<std::unique_ptr<ReasoningDetector>(bool, bool)>;
-
-  static DetectorRegistry& getInstance() {
+  static DetectorRegistry& get_instance() {
     static DetectorRegistry instance;
     return instance;
   }
 
-  std::unique_ptr<ReasoningDetector> getDetector(const std::string& model_type,
-                                                 bool stream_reasoning,
-                                                 bool force_reasoning);
+  std::unique_ptr<ReasoningDetector> get_detector(const std::string& model_type,
+                                                  bool stream_reasoning,
+                                                  bool force_reasoning);
 
-  bool hasDetector(const std::string& model_type) const {
-    return factories_.find(model_type) != factories_.end();
-  }
+  bool has_detector(const std::string& parser_name) const;
+
+  std::string get_supported_parsers() const;
+
+  // Get the reasoning parser name for auto mode based on model_type
+  // Returns empty string if not found
+  std::string get_parser_name_by_model_type(
+      const std::string& model_type) const;
 
  private:
-  DetectorRegistry();
+  DetectorRegistry() = default;
+  ~DetectorRegistry() = default;
 
   DISALLOW_COPY_AND_ASSIGN(DetectorRegistry);
-
-  std::unordered_map<std::string, DetectorFactory> factories_;
 };
 
 }  // namespace xllm

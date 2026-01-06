@@ -34,6 +34,9 @@ class ReasoningParser {
   // Streaming call: incremental parsing
   ReasoningResult parse_stream_chunk(const std::string& chunk_text);
 
+  static std::string get_parser_auto(const std::string& parser,
+                                     const std::string& model_type);
+
  private:
   std::unique_ptr<ReasoningDetector> detector_;
 };

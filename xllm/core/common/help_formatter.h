@@ -50,7 +50,7 @@ const OptionCategory kCommonOptions = {"COMMON OPTIONS",
 
 const OptionCategory kMoeModelOptions = {
     "MOE MODEL OPTIONS",
-    {"dp_size", "ep_size", "enable_mla", "expert_parallel_degree"}};
+    {"dp_size", "ep_size", "expert_parallel_degree"}};
 
 const OptionCategory kDisaggregatedPrefillDecodeOptions = {
     "DISAGGREGATED PREFILL-DECODE OPTIONS",

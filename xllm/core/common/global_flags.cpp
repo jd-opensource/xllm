@@ -302,13 +302,6 @@ DEFINE_int32(npu_phy_id, -1, "npu phy id");
 
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 
-// --- function call config ---
-
-DEFINE_string(tool_call_parser,
-              "",
-              "Specify the parser for handling tool-call interactions(e.g. "
-              "qwen25, qwen3, kimi_k2, deepseekv3, glm45, glm47).");
-
 // --- speculative config ---
 
 DEFINE_int32(num_speculative_tokens, 0, "Number of speculative tokens.");
@@ -428,7 +421,14 @@ DEFINE_bool(enable_beam_search_kernel,
 DEFINE_string(reasoning_parser,
               "",
               "Specify the reasoning parser for handling reasoning "
-              "interactions(e.g. glm45, glm47, qwen3, deepseek-r1).");
+              "interactions(e.g. auto, glm45, glm47, qwen3, deepseek-r1).");
+
+// --- function call config ---
+
+DEFINE_string(tool_call_parser,
+              "",
+              "Specify the parser for handling tool-call interactions(e.g. "
+              "auto, qwen25, qwen3, kimi_k2, deepseekv3, glm45, glm47).");
 
 // --- qwen3 reranker config ---
 

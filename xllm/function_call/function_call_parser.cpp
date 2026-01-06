@@ -17,46 +17,101 @@ limitations under the License.
 
 #include <iostream>
 #include <stdexcept>
+#include <unordered_map>
 
+#include "absl/strings/str_join.h"
 #include "core/util/uuid.h"
 #include "deepseekv3_detector.h"
 #include "glm45_detector.h"
 #include "glm47_detector.h"
 #include "kimik2_detector.h"
 #include "qwen25_detector.h"
+
 namespace xllm {
 namespace function_call {
 
-const std::unordered_map<std::string, std::string>
-    FunctionCallParser::kToolCallParserMap = {
-        {"qwen25", "qwen25"},
-        {"qwen3", "qwen25"},
-        {"kimi_k2", "kimi_k2"},
-        {"deepseekv3", "deepseekv3"},
-        {"glm45", "glm45"},
-        {"glm47", "glm47"},
-        // TODO
-        // {"llama3", "llama3"},
-        // {"mistral", "mistral"},
-        // {"pythonic", "pythonic"},
-        // {"qwen3_coder", "qwen3_coder"},
-        // {"step3", "step3"},
+namespace {
+
+const std::unordered_map<std::string, std::vector<std::string>> auto_paser_map =
+    {
+        {"qwen25", {"qwen2", "qwen3"}},
+        {"kimi_k2", {"kimi_k2"}},
+        {"deepseekv3", {"deepseek_v3"}},
+        // GLM-4.5 and GLM-4.7 are not supported for tool call parser
+        // auto-selection
+        // {"glm45", {"glm4_moe"}},
+        // {"glm47", {"glm4_moe"}},
 };
+
+std::string get_auto_paser_map_supported() {
+  std::vector<std::string> keys;
+  for (const auto& [key, value] : auto_paser_map) {
+    for (const auto& v : value) {
+      keys.push_back(v);
+    }
+  }
+  return absl::StrJoin(keys, ", ");
+}
+
+const std::unordered_map<std::string,
+                         std::function<std::unique_ptr<BaseFormatDetector>()>>
+    detector_factories = {
+        {"qwen25", [] { return std::make_unique<Qwen25Detector>(); }},
+        {"kimi_k2", [] { return std::make_unique<KimiK2Detector>(); }},
+        {"deepseekv3", [] { return std::make_unique<DeepSeekV3Detector>(); }},
+        {"glm45", [] { return std::make_unique<Glm45Detector>(); }},
+        {"glm47", [] { return std::make_unique<Glm47Detector>(); }},
+};
+
+std::string get_supported_detector_factories() {
+  std::vector<std::string> keys;
+  for (const auto& [key, value] : detector_factories) {
+    keys.push_back(key);
+  }
+  return absl::StrJoin(keys, ", ");
+}
+
+}  // namespace
+
+std::string FunctionCallParser::get_parser_auto(const std::string& parser,
+                                                const std::string& model_type) {
+  if (parser.empty()) {
+    return "";
+  }
+  if (parser == "auto") {
+    // find the tool call parser that supports the model type
+    for (const auto& [key, value] : auto_paser_map) {
+      if (std::find(value.begin(), value.end(), model_type) != value.end()) {
+        LOG(INFO) << "Using tool call parser: " << key
+                  << " for model type: " << model_type;
+        return key;
+      }
+    }
+    LOG(FATAL) << "Unsupported model type for auto tool call parser: "
+               << model_type << ". Supported model types are: "
+               << get_auto_paser_map_supported();
+    return "";
+  } else {
+    // check if the tool call parser is supported
+    if (parser == "qwen2" || parser == "qwen3") {
+      return "qwen25";
+    }
+    if (detector_factories.find(parser) != detector_factories.end()) {
+      return parser;
+    }
+    LOG(FATAL) << "Unsupported tool call parser: " << parser
+               << ". Supported parsers are: "
+               << get_supported_detector_factories();
+    return "";
+  }
+}
 
 FunctionCallParser::FunctionCallParser(const std::vector<JsonTool>& tools,
                                        const std::string& tool_call_parser)
     : tools_(tools) {
   detector_ = create_detector(tool_call_parser);
   CHECK(detector_ != nullptr)
-      << "Unsupported tool_call_parser: " << tool_call_parser
-      << ". Supported parsers are: " << [this]() {
-           std::string supported;
-           for (const auto& [key, value] : kToolCallParserMap) {
-             if (!supported.empty()) supported += ", ";
-             supported += key;
-           }
-           return supported;
-         }();
+      << "Unsupported tool_call_parser: " << tool_call_parser;
 }
 
 bool FunctionCallParser::has_tool_call(const std::string& text) const {
@@ -82,38 +137,15 @@ StreamingParseResult FunctionCallParser::parse_streaming_increment(
 
 std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
     const std::string& tool_call_parser) {
-  auto it = kToolCallParserMap.find(tool_call_parser);
-  if (it == kToolCallParserMap.end()) {
+  if (tool_call_parser.empty()) {
     return nullptr;
   }
 
-  if (it->second == "qwen25") {
-    return std::make_unique<Qwen25Detector>();
+  auto it = detector_factories.find(tool_call_parser);
+  if (it != detector_factories.end()) {
+    return it->second();
   }
-
-  if (it->second == "kimi_k2") {
-    return std::make_unique<KimiK2Detector>();
-  }
-
-  if (it->second == "deepseekv3") {
-    return std::make_unique<DeepSeekV3Detector>();
-  }
-
-  if (it->second == "glm45") {
-    return std::make_unique<Glm45Detector>();
-  }
-
-  if (it->second == "glm47") {
-    return std::make_unique<Glm47Detector>();
-  }
-
-  // if (tool_call_parser == "llama3") {
-  //     return std::make_unique<Llama32Detector>();
-  // }
-  // if (tool_call_parser == "mistral") {
-  //     return std::make_unique<MistralDetector>();
-  // }
-
+  LOG(ERROR) << "Unsupported tool call parser: " << tool_call_parser;
   return nullptr;
 }
 
