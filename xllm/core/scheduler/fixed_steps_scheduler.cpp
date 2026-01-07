@@ -24,6 +24,7 @@ limitations under the License.
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <memory>
 
 #include "common/metrics.h"
@@ -67,13 +68,13 @@ void FixedStepsScheduler::handle_prefill_requests(
   // they may contian many sequences, so we should check here.
   bool budget_exhausted = false;
   bool blocks_exhausted = false;
+  const bool requires_kv_cache =
+      scheduler_pipeline_ && scheduler_pipeline_->requires_kv_cache();
   while (!waiting_priority_queue_.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 &&
          kv_cache_manager_->kv_cache_utilization() <
              FLAGS_prefill_scheduling_memory_usage_threshold) {
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
-    const bool requires_kv_cache =
-        request->state().rec_type == RecType::kLlmRec;
     if (request->finished() || request->cancelled()) {
       if (requires_kv_cache) {
         kv_cache_manager_->deallocate(request.get());
@@ -119,7 +120,8 @@ void FixedStepsScheduler::handle_prefill_requests(
       }
 
       if (requires_kv_cache) {
-        if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+        if (!scheduler_pipeline_->allocate_kv_cache(kv_cache_manager_,
+                                                    prefill_sequence.get())) {
           can_schedule = false;
           blocks_exhausted = true;
           break;
@@ -224,6 +226,16 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
   size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
   size_t num_preempted_requests = 0;
 
+  // Initialize pipeline before handle_prefill_requests for KV cache allocation
+  if (!scheduler_pipeline_ && !waiting_priority_queue_.empty()) {
+    auto rec_type = waiting_priority_queue_.top()->state().rec_type;
+    if (rec_type == RecType::kLlmRec) {
+      scheduler_pipeline_ = std::make_unique<LlmRecSchedulerPipeline>();
+    } else {
+      scheduler_pipeline_ = std::make_unique<OneRecSchedulerPipeline>();
+    }
+  }
+
   handle_prefill_requests(
       remaining_token_budget, remaining_seq_budget, finished_requests);
 
@@ -236,16 +248,6 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
   }
 
   auto* batch_factory = BatchFactory::get_instance(options_.dp_size());
-
-  // Lazy initialize pipeline on first batch with requests
-  if (!scheduler_pipeline_ && !running_requests_.empty()) {
-    auto rec_type = running_requests_[0]->state().rec_type;
-    if (rec_type == RecType::kLlmRec) {
-      scheduler_pipeline_ = std::make_unique<LlmRecSchedulerPipeline>();
-    } else {
-      scheduler_pipeline_ = std::make_unique<OneRecSchedulerPipeline>();
-    }
-  }
 
   // Use pipeline to create batches
   std::vector<Batch> batches;
@@ -344,6 +346,21 @@ std::vector<Batch> FixedStepsScheduler::LlmRecSchedulerPipeline::create_batches(
       scheduler.running_sequences_,
       scheduler.running_sequences_budgets_,
       scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
+}
+
+bool FixedStepsScheduler::LlmRecSchedulerPipeline::allocate_kv_cache(
+    KVCacheManager* kv_cache_manager,
+    Sequence* sequence) {
+  const size_t num_tokens = sequence->num_tokens();
+  const size_t max_generated_tokens =
+      sequence->stopping_checker()->get_max_generated_tokens();
+  // Overflow check to prevent undersized KV cache allocation
+  if (std::numeric_limits<size_t>::max() - num_tokens < max_generated_tokens) {
+    LOG(ERROR) << "Integer overflow detected in KV cache allocation";
+    return false;
+  }
+  return kv_cache_manager->allocate(sequence,
+                                    num_tokens + max_generated_tokens);
 }
 
 std::vector<Batch> FixedStepsScheduler::OneRecSchedulerPipeline::create_batches(

@@ -28,6 +28,7 @@ limitations under the License.
 #include "common/types.h"
 #include "framework/batch/batch.h"
 #include "framework/batch/batch_factory.h"
+#include "framework/block/block_manager_pool.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "runtime/xservice_client.h"
@@ -56,6 +57,9 @@ class FixedStepsScheduler final : public ContinuousScheduler {
     virtual std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
                                               BatchFactory* batch_factory) = 0;
     virtual bool requires_kv_cache() const = 0;
+    // Allocate KV cache for sequence, implemented by each pipeline
+    virtual bool allocate_kv_cache(KVCacheManager* kv_cache_manager,
+                                   Sequence* sequence) = 0;
   };
 
   class LlmRecSchedulerPipeline final : public SchedulerPipeline {
@@ -63,6 +67,8 @@ class FixedStepsScheduler final : public ContinuousScheduler {
     std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
                                       BatchFactory* batch_factory) override;
     bool requires_kv_cache() const override { return true; }
+    bool allocate_kv_cache(KVCacheManager* kv_cache_manager,
+                           Sequence* sequence) override;
   };
 
   class OneRecSchedulerPipeline final : public SchedulerPipeline {
@@ -70,6 +76,10 @@ class FixedStepsScheduler final : public ContinuousScheduler {
     std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
                                       BatchFactory* batch_factory) override;
     bool requires_kv_cache() const override { return false; }
+    bool allocate_kv_cache(KVCacheManager* /*kv_cache_manager*/,
+                           Sequence* /*sequence*/) override {
+      return true;
+    }
   };
 
   std::vector<Batch> schedule_request(const absl::Duration& timeout);
