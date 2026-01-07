@@ -119,3 +119,19 @@ target_link_options(acl_graph_executor_test PRIVATE
   "-Wl,--no-whole-archive")
 endif()
 
+if(USE_MLU)
+cc_test(
+  NAME
+    mlu_graph_executor_test
+  SRCS
+    mlu_graph_executor_test.cpp
+  DEPS
+    :runtime
+    :model_loader
+    :batch
+    :kv_cache
+    :platform
+    GTest::gtest_main
+    torch_mlu
+)
+endif()
