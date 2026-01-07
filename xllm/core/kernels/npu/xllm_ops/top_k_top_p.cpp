@@ -28,7 +28,7 @@ limitations under the License.
 #endif
 
 #include "acl/acl.h"
-#include "aclnn_apply_top_k_top_p.h"
+#include "aclnnop/aclnn_apply_top_k_top_p.h"
 #include "core/common/macros.h"
 #include "top_k_top_p.h"
 
