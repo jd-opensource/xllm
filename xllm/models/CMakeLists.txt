@@ -11,4 +11,6 @@ cc_library(
     model_registry.cpp
   DEPS
     :model
+    :dit_cache
+    :model_loader
 )

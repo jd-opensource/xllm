@@ -102,7 +102,9 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
 
 bool HierarchyBlockManagerPool::allocate(Sequence* sequence,
                                          size_t num_tokens) {
-  BlockManagerPool::allocate(sequence, num_tokens);
+  if (!BlockManagerPool::allocate(sequence, num_tokens)) {
+    return false;
+  }
 
   if (sequence->host_kv_state().num_kv_blocks() == 0 &&
       sequence->stage() != SequenceStage::DECODE) {
