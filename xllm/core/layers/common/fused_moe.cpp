@@ -84,8 +84,8 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
   // smoothquant check: If quant_method is not empty, only w8a8 smoothquant is
   // supported
   if (!quant_args.quant_method().empty()) {
-    if (quant_args.quant_method() != "smoothquant" || quant_args.bits() != 8 ||
-        !quant_args.activation_dynamic()) {
+    if (quant_args.quant_method() != kQuantMethodSmoothquant ||
+        quant_args.bits() != 8 || !quant_args.activation_dynamic()) {
       LOG(FATAL) << "FusedMoE only supports w8a8 smoothquant quantization when "
                     "quant_method is set. "
                  << "Got quant_method=" << quant_args.quant_method()
@@ -105,7 +105,7 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
     // so we will assume the max_token_num is limited to max_batch_size * (1+K)
     // K is the number of speculative tokens.
     int64_t dispatch_token_size;
-    if (quant_args.quant_method() == "smoothquant") {
+    if (quant_args.quant_method() == kQuantMethodSmoothquant) {
       // float32 is for the scale of the quantized input
       dispatch_token_size = hidden_size_ * get_dtype_size(torch::kInt8) +
                             get_dtype_size(torch::kFloat32);

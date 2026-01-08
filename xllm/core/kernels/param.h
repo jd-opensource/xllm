@@ -901,4 +901,42 @@ struct GatherSplitParams {
   torch::Tensor output_tail;
 };
 
+// FP8 scaled quantize parameters
+// Quantizes input tensor to FP8 e4m3 format with scale
+struct Fp8ScaledQuantizeParams {
+  // Input tensor. Shape: [M, K]. Dtype: float16, bfloat16.
+  torch::Tensor input;
+  // Optional output tensor. Shape: [M, K]. Dtype: float8_e4m3fn.
+  // If not provided, will be allocated automatically.
+  std::optional<torch::Tensor> output;
+  // Optional pre-computed scale for static quantization.
+  // Shape: scalar or [1]. If not provided, scale will be computed dynamically.
+  std::optional<torch::Tensor> scale;
+};
+
+// FP8 scaled matmul parameters for W8A8 quantization
+// Performs: c = (a @ b.T) with scales applied, following CUTLASS convention
+struct Fp8ScaledMatmulParams {
+  // Quantized input tensor A. Shape: [M, K]. Dtype: float8_e4m3fn.
+  torch::Tensor a;
+  // Quantized weight tensor B. Shape: [N, K] (will be transposed internally).
+  // Dtype: float8_e4m3fn.
+  torch::Tensor b;
+  // Scale for tensor A. Shape: scalar or [1].
+  torch::Tensor a_scale;
+  // Scale for tensor B. Shape: scalar or [1].
+  torch::Tensor b_scale;
+  // Optional bias tensor. Shape: [N].
+  std::optional<torch::Tensor> bias;
+  // Optional output tensor. Shape: [M, N].
+  // If not provided, will be allocated with output_dtype.
+  std::optional<torch::Tensor> output;
+  // Output data type. Typically float16 or bfloat16.
+  torch::ScalarType output_dtype;
+  // Optional original input shape (before flatten to 2D).
+  // If provided, output will be reshaped to match original input dimensions.
+  // E.g., input_shape = [batch, seq, hidden] -> output = [batch, seq, N]
+  std::optional<std::vector<int64_t>> input_shape;
+};
+
 }  // namespace xllm::kernel

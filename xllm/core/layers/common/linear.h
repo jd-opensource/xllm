@@ -84,6 +84,11 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
   DEFINE_WEIGHT(smooth);
   DEFINE_FUSED_WEIGHT(bias);
 
+  // FP8 quantization parameters
+  DEFINE_FUSED_WEIGHT(weight_scale);  // FP8 weight scale
+  DEFINE_FUSED_WEIGHT(
+      input_scale);  // FP8 input (activation) scale for static quantization
+
   int64_t rank_;
   int64_t world_size_;
   // whether to gather the output
@@ -109,7 +114,8 @@ class QKVParallelLinearImpl : public torch::nn::Module {
                         bool bias,
                         bool gather_output,
                         const ParallelArgs& parallel_args,
-                        const torch::TensorOptions& options);
+                        const torch::TensorOptions& options,
+                        const QuantArgs& quant_args = QuantArgs{});
 
   torch::Tensor forward(torch::Tensor input);
 
@@ -132,6 +138,11 @@ class QKVParallelLinearImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(weight);
   DEFINE_FUSED_WEIGHT(bias);
 
+  // FP8 quantization parameters
+  DEFINE_FUSED_WEIGHT(weight_scale);  // FP8 weight scale
+  DEFINE_FUSED_WEIGHT(
+      input_scale);  // FP8 input (activation) scale for static quantization
+
   int64_t rank_;
   int64_t world_size_;
   int64_t hidden_size_;
@@ -145,6 +156,9 @@ class QKVParallelLinearImpl : public torch::nn::Module {
   // parallel args
   ParallelArgs parallel_args_;
   torch::TensorOptions options_;
+  // quantization args
+  QuantArgs quant_args_;
+  at::ScalarType output_dtype_;
 };
 TORCH_MODULE(QKVParallelLinear);
 
@@ -192,6 +206,11 @@ class RowParallelLinearImpl : public torch::nn::Module {
   DEFINE_WEIGHT(per_channel_scale);
   DEFINE_WEIGHT(smooth);
   DEFINE_WEIGHT(bias);
+
+  // FP8 quantization parameters
+  DEFINE_WEIGHT(weight_scale);  // FP8 weight scale
+  DEFINE_WEIGHT(
+      input_scale);  // FP8 input (activation) scale for static quantization
 
   // whether the input is already parallelized
   bool input_is_parallelized_;

@@ -20,6 +20,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <optional>
+#include <tuple>
 
 #include "utils.h"
 
@@ -93,5 +94,36 @@ void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
 torch::Tensor matmul(torch::Tensor a,
                      torch::Tensor b,
                      std::optional<torch::Tensor> bias);
+
+void cutlass_scaled_mm(torch::Tensor& c,
+                       torch::Tensor const& a,
+                       torch::Tensor const& b,
+                       torch::Tensor const& a_scales,
+                       torch::Tensor const& b_scales,
+                       std::optional<torch::Tensor> const& bias);
+
+// Static scaled FP8 quantization
+// Quantizes input tensor to FP8 using a pre-computed scale factor
+void static_scaled_fp8_quant(torch::Tensor& out,           // [..., d]
+                             torch::Tensor const& input,   // [..., d]
+                             torch::Tensor const& scale);  // [1]
+
+// FP8 scaled quantize: quantizes input tensor to FP8 e4m3 format
+// Returns: (quantized_output, scale)
+std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
+    const torch::Tensor& input,
+    const std::optional<torch::Tensor>& output = std::nullopt,
+    const std::optional<torch::Tensor>& scale = std::nullopt);
+
+// FP8 scaled matmul for W8A8 quantization using CUTLASS kernels
+// Performs: c = (a @ b.T) with scales applied
+torch::Tensor fp8_scaled_matmul(
+    const torch::Tensor& a,
+    const torch::Tensor& b,
+    const torch::Tensor& a_scale,
+    const torch::Tensor& b_scale,
+    torch::ScalarType output_dtype,
+    const std::optional<torch::Tensor>& bias = std::nullopt,
+    const std::optional<torch::Tensor>& output = std::nullopt);
 
 }  // namespace xllm::kernel::cuda

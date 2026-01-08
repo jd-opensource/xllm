@@ -580,4 +580,37 @@ void gather_split(GatherSplitParams& params) {
 #endif
 }
 
+std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
+    Fp8ScaledQuantizeParams& params) {
+#if defined(USE_CUDA)
+  return cuda::fp8_scaled_quantize(params.input, params.output, params.scale);
+#else
+  LOG(FATAL) << "fp8_scaled_quantize is only supported on CUDA";
+  return std::make_tuple(torch::Tensor(), torch::Tensor());
+#endif
+}
+
+torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params) {
+#if defined(USE_CUDA)
+  auto out_2d = cuda::fp8_scaled_matmul(params.a,
+                                        params.b,
+                                        params.a_scale,
+                                        params.b_scale,
+                                        params.output_dtype,
+                                        params.bias,
+                                        params.output);
+
+  // Auto reshape output if original input shape is provided
+  if (params.input_shape.has_value()) {
+    auto out_shape = params.input_shape.value();
+    out_shape.back() = params.b.size(0);
+    return out_2d.view(out_shape);
+  }
+  return out_2d;
+#else
+  LOG(FATAL) << "fp8_scaled_matmul is only supported on CUDA";
+  return torch::Tensor();
+#endif
+}
+
 }  // namespace xllm::kernel

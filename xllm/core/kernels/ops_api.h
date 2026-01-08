@@ -78,4 +78,13 @@ void masked_indexer_select_paged_kv(MaskedIndexerSelectPagedKVParams& params);
 
 void gather_split(GatherSplitParams& params);
 
+// FP8 scaled quantize: quantizes input tensor to FP8 e4m3 format
+// Returns: (quantized_output, scale)
+std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
+    Fp8ScaledQuantizeParams& params);
+
+// FP8 scaled matmul for W8A8 quantization using CUTLASS kernels
+// Performs: c = (a @ b.T) with scales applied
+torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params);
+
 }  // namespace xllm::kernel
