@@ -23,6 +23,10 @@ limitations under the License.
 
 namespace xllm {
 
+// Quantization method identifiers
+static const std::string kQuantMethodFp8 = "fp8";
+static const std::string kQuantMethodSmoothquant = "smoothquant";
+
 struct QuantArgs {
   PROPERTY(std::string, quant_method);
 
