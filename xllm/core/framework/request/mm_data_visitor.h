@@ -98,6 +98,7 @@ class EncoderEmbeddingGatherVisitor : public MMDataItem::IVisitor {
  public:
   torch::Device device_;
   std::string gather_prefix_ = "embedding";
+  std::string deepstack_prefix_ = "deepstack";
   std::unordered_map<MMKey, std::vector<torch::Tensor>> datas_;
 };
 

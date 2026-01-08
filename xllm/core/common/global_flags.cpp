@@ -492,6 +492,12 @@ DEFINE_bool(enable_constrained_decoding,
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
 
+// --- qwen3omni audio processor config ---
+
+DEFINE_bool(use_audio_in_video,
+            false,
+            "Whether to extract audios from vidoes inputs");
+
 #if defined(USE_NPU)
 DEFINE_string(
     npu_kernel_backend,

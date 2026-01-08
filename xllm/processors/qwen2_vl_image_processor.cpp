@@ -129,6 +129,7 @@ torch::Tensor Qwen2VLImageProcessor::sample_frames(
 Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
   image_mean_ = args.mm_image_normalize_mean();
   image_std_ = args.mm_image_normalize_std();
+  has_feature_extractor_ = args.has_feature_extractor();
   if (args.mm_image_max_pixels() && args.mm_image_min_pixels()) {
     min_pixels_ = args.mm_image_min_pixels();
     max_pixels_ = args.mm_image_max_pixels();
@@ -163,17 +164,23 @@ bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
     std::vector<torch::Tensor> videos;
     std::vector<VideoMetadata> video_meta_list;
 
-    if (input_item.type == MMType::IMAGE) {
-      if (input_item.decode_data.defined()) {
-        images.push_back(input_item.decode_data);
-      } else if (input_item.embedding.embedding.defined()) {
-        images_embedding.push_back(input_item.embedding);
+    if (input_item.type_ & MMType::IMAGE) {
+      if (input_item.decode_image_.defined()) {
+        images.push_back(input_item.decode_image_);
+      } else if (input_item.embedding_.embedding.defined()) {
+        images_embedding.push_back(input_item.embedding_);
       }
-    } else if (input_item.type == MMType::VIDEO) {
-      if (input_item.decode_data.defined()) {
-        videos.push_back(input_item.decode_data);
+    } else if (input_item.type_ & MMType::VIDEO) {
+      if (input_item.decode_video_.defined()) {
+        videos.push_back(input_item.decode_video_);
       }
-      video_meta_list.push_back(input_item.video_meta);
+      video_meta_list.push_back(input_item.video_meta_);
+    } else if (input_item.type_ & MMType::AUDIO && has_feature_extractor_) {
+      // TODO: this is a placeholder for preserving the input order
+      // this would be used in audio processor later, should
+      // take care of the code when refactor
+      auto& item = datas.add(MMType::AUDIO);
+      continue;
     }
 
     if (images_embedding.empty() && images.empty() &&
