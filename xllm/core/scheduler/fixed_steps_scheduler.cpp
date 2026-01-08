@@ -28,6 +28,7 @@ limitations under the License.
 #include <memory>
 
 #include "common/metrics.h"
+#include "common/rec_model_utils.h"
 #include "core/common/global_flags.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch.h"
@@ -229,10 +230,31 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
   // Initialize pipeline before handle_prefill_requests for KV cache allocation
   if (!scheduler_pipeline_ && !waiting_priority_queue_.empty()) {
     auto rec_type = waiting_priority_queue_.top()->state().rec_type;
-    if (rec_type == RecType::kLlmRec) {
-      scheduler_pipeline_ = std::make_unique<LlmRecSchedulerPipeline>();
-    } else {
-      scheduler_pipeline_ = std::make_unique<OneRecSchedulerPipeline>();
+    // Convert RecType to RecModelKind, then get pipeline type
+    RecModelKind rec_model_kind = RecModelKind::kNone;
+    switch (rec_type) {
+      case RecType::kLlmRec:
+        rec_model_kind = RecModelKind::kLlmRec;
+        break;
+      case RecType::kOneRec:
+        rec_model_kind = RecModelKind::kOneRec;
+        break;
+      default:
+        rec_model_kind = RecModelKind::kNone;
+        break;
+    }
+    auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
+    switch (pipeline_type) {
+      case RecPipelineType::kLlmRecDefault:
+      case RecPipelineType::kLlmRecWithMmData:
+        scheduler_pipeline_ = std::make_unique<LlmRecSchedulerPipeline>();
+        break;
+      case RecPipelineType::kOneRecDefault:
+        scheduler_pipeline_ = std::make_unique<OneRecSchedulerPipeline>();
+        break;
+      default:
+        LOG(FATAL) << "Unknown FixedStepsScheduler pipeline type: "
+                   << static_cast<int>(pipeline_type);
     }
   }
 

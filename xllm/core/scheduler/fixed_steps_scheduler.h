@@ -28,7 +28,6 @@ limitations under the License.
 #include "common/types.h"
 #include "framework/batch/batch.h"
 #include "framework/batch/batch_factory.h"
-#include "framework/block/block_manager_pool.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "runtime/xservice_client.h"
