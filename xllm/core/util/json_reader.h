@@ -37,6 +37,13 @@ namespace xllm {
 //
 class JsonReader {
  public:
+  JsonReader() = default;
+
+  explicit JsonReader(nlohmann::json&& json_data)
+      : data_(std::move(json_data)) {}
+
+  JsonReader(const nlohmann::json& json_data) : data_(json_data) {}
+
   // parse the json file, return true if success
   bool parse(const std::string& json_file_path);
 
@@ -81,6 +88,23 @@ class JsonReader {
       return std::nullopt;
     }
     return data.get<T>();
+  }
+
+  std::optional<nlohmann::json> sub_json(const std::string& key) const {
+    const std::vector<std::string> keys = absl::StrSplit(key, '.');
+    const nlohmann::json* sub_data = &data_;
+    for (const auto& k : keys) {
+      if (sub_data->contains(k)) {
+        sub_data = &(*sub_data)[k];
+      } else {
+        return std::nullopt;
+      }
+    }
+
+    if (sub_data->is_null() || !sub_data->is_object()) {
+      return std::nullopt;
+    }
+    return *sub_data;
   }
 
   nlohmann::json data() const { return data_; }

@@ -30,6 +30,7 @@ cc_library(
     utils.h
     uuid.h
     shared_memory_manager.h
+    audio_utils.h
   SRCS
     device_name_utils.cpp
     env_var.cpp

@@ -38,6 +38,7 @@ class IVisitor {
 }  // namespace MMDictItem
 
 using MMItemVec = std::vector<MMDataItem>;
+using MMItemPtrVec = std::vector<MMDataItem*>;
 
 class MMData {
  public:
@@ -77,6 +78,7 @@ class MMData {
 
   void get(uint32_t type, std::vector<MMDataItem>& items) const;
   void get(const MMKey& key, std::vector<torch::Tensor>& items) const;
+  MMItemPtrVec* get(uint32_t type);
 
   template <typename T>
   bool add(MMType type, const MMKey& key, const T& value) {

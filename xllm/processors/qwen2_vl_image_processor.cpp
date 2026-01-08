@@ -129,6 +129,7 @@ torch::Tensor Qwen2VLImageProcessor::sample_frames(
 Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
   image_mean_ = args.mm_image_normalize_mean();
   image_std_ = args.mm_image_normalize_std();
+  has_feature_extractor_ = args.has_feature_extractor();
   if (args.mm_image_max_pixels() && args.mm_image_min_pixels()) {
     min_pixels_ = args.mm_image_min_pixels();
     max_pixels_ = args.mm_image_max_pixels();
@@ -162,8 +163,6 @@ bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
     std::vector<EmbeddingInput> images_embedding;
     std::vector<torch::Tensor> videos;
     std::vector<VideoMetadata> video_meta_list;
-    std::vector<torch::Tensor> audios;
-    std::vector<AudioMetadata> audio_meta_list;
 
     if (input_item.has_type(MMType::IMAGE)) {
       if (input_item.is_embedding()) {
@@ -172,18 +171,21 @@ bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
         images.push_back(input_item.decode_image);
       }
     }
+
+    // if video has audio, they will share the same mmdata item
     if (input_item.has_type(MMType::VIDEO)) {
       videos.push_back(input_item.decode_video);
       video_meta_list.push_back(input_item.video_meta);
-    }
-    if (input_item.has_type(MMType::AUDIO)) {
-      audios.push_back(input_item.decode_audio);
-      audio_meta_list.push_back(input_item.audio_meta);
+    } else if (input_item.has_type(MMType::AUDIO) && has_feature_extractor_) {
+      // if input has audio, a placeholder for preserving the input order
+      // will be created, this would be used in audio processor later,
+      // should take care of the code when refactor
+      auto& item = datas.add(MMType::AUDIO);
+      continue;
     }
 
     if (images_embedding.empty() && images.empty() &&
-        (videos.empty() || video_meta_list.empty()) &&
-        (audios.empty() || audio_meta_list.empty())) {
+        (videos.empty() || video_meta_list.empty())) {
       LOG(ERROR) << "no image/video/audio tensor or embedding found.";
       return false;
     }
