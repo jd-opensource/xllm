@@ -1,7 +1,7 @@
 include(cc_test)
 
 if(USE_MLU)
-	list(APPEND TEST_SRCS indexer_tests.cpp mla_tests.cpp deepseek_v2_decoder_layer_tests.cpp)
+	list(APPEND TEST_SRCS indexer_tests.cpp mla_tests.cpp deepseek_v2_decoder_layer_tests.cpp qwen2_attention_tests.cpp)
 endif()
 
 if(NOT USE_NPU)
