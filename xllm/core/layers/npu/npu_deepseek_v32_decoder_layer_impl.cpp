@@ -802,6 +802,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   int32_t input_idx = 0;
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
 
+  if (dp_size_ <= 1 && ep_size_ <= 1) {
+    dp_ep_padding.set_placeholder(tensor_placeholder_);
+  }
   // set micro batch 0 input part
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
