@@ -146,6 +146,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
 
  private:
   int32_t embedding_size_ = 0;
+  bool enable_fused_kernel_ = false;
 
   std::unique_ptr<LLMWorkerImpl> impl_;
   std::unique_ptr<LLMWorkerImpl> draft_impl_;

@@ -23,15 +23,31 @@ limitations under the License.
 
 #include <cstdint>
 
+#include "platform/device.h"
 #include "sampler.h"
 
 namespace xllm {
 
+namespace {
+// Helper function to get test device: MLU if available, otherwise CPU
+torch::Device GetTestDevice() {
+  std::string backend = Device::type_str();
+  if (backend == "mlu" && Device::device_count() > 0) {
+    return torch::Device(Device::type_torch(), 0);
+  }
+  return torch::Device(torch::kCPU);
+}
+
+// Helper function to get test tensor options with automatic device selection
+torch::TensorOptions GetTestOptions(torch::ScalarType dtype = torch::kFloat32) {
+  return torch::dtype(dtype).device(GetTestDevice());
+}
+}  // namespace
+
 TEST(RejectionSamplerTest, Basic) {
   // test with hand-crafted example
-  torch::ScalarType dtype(torch::kFloat32);
-  torch::Device device(torch::kCPU);
-  const auto options = torch::dtype(dtype).device(device);
+  const auto options = GetTestOptions(torch::kFloat32);
+  const auto device = GetTestDevice();
 
   // set random seed
   torch::manual_seed(100);
@@ -78,9 +94,7 @@ TEST(RejectionSamplerTest, Basic) {
 
 TEST(RejectionSamplerTest, Mask) {
   // test accepted mask
-  torch::ScalarType dtype(torch::kBool);
-  torch::Device device(torch::kCPU);
-  const auto options = torch::dtype(dtype).device(device);
+  const auto options = GetTestOptions(torch::kBool);
 
   // clang-format off
   auto accepted = torch::tensor({
@@ -101,9 +115,8 @@ TEST(RejectionSamplerTest, Mask) {
 }
 
 TEST(RejectionSamplerTest, Greedy) {
-  torch::ScalarType dtype(torch::kFloat32);
-  torch::Device device(torch::kCPU);
-  const auto options = torch::dtype(dtype).device(device);
+  const auto options = GetTestOptions(torch::kFloat32);
+  const auto device = GetTestDevice();
 
   int64_t batch_size = 2;
   int64_t n_speculative_tokens = 3;
@@ -144,9 +157,8 @@ TEST(RejectionSamplerTest, Greedy) {
 }
 
 TEST(RejectionSamplerTest, LogProbs) {
-  torch::ScalarType dtype(torch::kFloat32);
-  torch::Device device(torch::kCPU);
-  const auto options = torch::dtype(dtype).device(device);
+  const auto options = GetTestOptions(torch::kFloat32);
+  const auto device = GetTestDevice();
   const auto do_sample = torch::tensor({false, true, false, true}, device);
   const int64_t max_top_logprobs = 2;
   RejectionSampler sampler(do_sample,
@@ -198,9 +210,7 @@ TEST(RejectionSamplerTest, LogProbs) {
 }
 
 TEST(RejectionSamplerTest, Random) {
-  torch::ScalarType dtype(torch::kFloat32);
-  torch::Device device(torch::kCPU);
-  const auto options = torch::dtype(dtype).device(device);
+  const auto options = GetTestOptions(torch::kFloat32);
 
   // set random seed
   torch::manual_seed(100);
@@ -246,6 +256,125 @@ TEST(RejectionSamplerTest, Random) {
                               sample_prob,
                               /*rtol=*/1e-2,
                               /*atol=*/1e-3));
+}
+
+TEST(RejectionSamplerTest, RandomFused) {
+  // Skip test if not running on MLU backend
+  std::string backend = Device::type_str();
+  if (backend != "mlu") {
+    GTEST_SKIP() << "Skipping RandomFused test: fused kernel only available on "
+                    "MLU backend.";
+  }
+  if (Device::device_count() == 0) {
+    GTEST_SKIP() << "Skipping RandomFused test: no MLU devices available";
+  }
+
+  // Prepare random test data
+  torch::ScalarType dtype(torch::kFloat32);
+  torch::Device device(Device::type_torch(), 0);
+  const auto options = torch::dtype(dtype).device(device);
+  torch::manual_seed(100);
+
+  int64_t n_spec = 3;
+  int64_t vocab_size = 50;
+  int64_t num_samples = 1000;
+
+  auto target_prob_base = torch::randn({vocab_size}, options).softmax(-1);
+  auto target_probs =
+      target_prob_base.reshape({1, 1, -1}).repeat({num_samples, n_spec, 1});
+  auto draft_probs =
+      torch::randn({num_samples, n_spec, vocab_size}, options).softmax(-1);
+
+  // Sample draft tokens and bonus tokens
+  auto draft_token_ids = Sampler::random_sample(draft_probs);
+  auto bonus_token_ids = torch::randint(
+      0, vocab_size, {num_samples, 1}, options.dtype(torch::kInt64));
+
+  // Shared random tensor, used for acceptance check
+  auto uniform_rand = torch::rand(draft_token_ids.sizes(), options);
+
+  // Fused kernel output
+  auto [fused_output_unmasked, fused_output_masked] =
+      RejectionSampler::random_sample_fused(draft_token_ids,
+                                            draft_probs,
+                                            target_probs,
+                                            uniform_rand,
+                                            bonus_token_ids,
+                                            /*mask_out_rejected_tokens=*/true);
+
+  // Reference random_sample output
+  auto [ref_output_unmasked, ref_output_masked] =
+      RejectionSampler::random_sample(draft_token_ids,
+                                      draft_probs,
+                                      target_probs,
+                                      uniform_rand,
+                                      bonus_token_ids,
+                                      /*mask_out_rejected_tokens=*/true);
+
+  // Check output shape
+  EXPECT_EQ(fused_output_masked.size(0), num_samples);
+  EXPECT_EQ(fused_output_masked.size(1), n_spec + 1);
+
+  // Mask output should match exactly (same tokens should be accepted/rejected)
+  auto fused_mask = (fused_output_masked != -1);
+  auto ref_mask = (ref_output_masked != -1);
+  EXPECT_TRUE(torch::equal(fused_mask, ref_mask))
+      << "Mismatch in acceptance decision between Fused and Ref "
+         "implementation!";
+
+  // If a draft token is accepted, it must exactly match the input and the
+  // reference output
+  for (int j = 0; j < n_spec; ++j) {
+    auto current_col = fused_output_masked.slice(1, j, j + 1);
+    auto next_col = fused_output_masked.slice(1, j + 1, j + 2);
+    auto is_accepted_draft = (current_col != -1) & (next_col != -1);
+
+    if (is_accepted_draft.any().item<bool>()) {
+      auto fused_drafts = current_col.masked_select(is_accepted_draft);
+      auto input_drafts =
+          draft_token_ids.slice(1, j, j + 1).masked_select(is_accepted_draft);
+
+      EXPECT_TRUE(torch::equal(fused_drafts, input_drafts))
+          << "Fused kernel altered an accepted draft token at index " << j;
+
+      auto ref_drafts =
+          ref_output_masked.slice(1, j, j + 1).masked_select(is_accepted_draft);
+      EXPECT_TRUE(torch::equal(fused_drafts, ref_drafts))
+          << "Mismatch with Reference on accepted draft token at index " << j;
+    }
+  }
+
+  // Bonus token column should match input when all previous tokens accepted
+  auto last_col = fused_output_masked.slice(1, n_spec, n_spec + 1);
+  auto fully_accepted_mask = (last_col != -1);
+
+  if (fully_accepted_mask.any().item<bool>()) {
+    auto valid_bonus_out = last_col.masked_select(fully_accepted_mask);
+    auto valid_bonus_in = bonus_token_ids.masked_select(fully_accepted_mask);
+    EXPECT_TRUE(torch::equal(valid_bonus_out, valid_bonus_in))
+        << "Bonus token mismatch for fully accepted sequences";
+  } else {
+    LOG(INFO)
+        << "No fully accepted sequences in this batch, skipping bonus check.";
+  }
+
+  // After the first -1 in each row, all remaining values must be -1
+  auto cpu_output = fused_output_masked.to(torch::kCPU);
+  auto output_a = cpu_output.accessor<int64_t, 2>();
+
+  for (int i = 0; i < num_samples; ++i) {
+    bool rejected = false;
+    for (int j = 0; j < n_spec + 1; ++j) {
+      if (output_a[i][j] == -1) {
+        rejected = true;
+      } else {
+        if (rejected) {
+          ADD_FAILURE() << "Found valid token after -1 at row " << i << " col "
+                        << j;
+        }
+      }
+    }
+  }
 }
 
 }  // namespace xllm

@@ -25,6 +25,7 @@ limitations under the License.
 #include <cmath>
 #include <numeric>
 
+#include "kernels/ops_api.h"
 #include "sampler.h"
 
 namespace xllm {
@@ -95,12 +96,14 @@ RejectionSampler::RejectionSampler(
     bool all_greedy_sample,
     bool logprobs,
     int64_t max_top_logprobs,
-    std::shared_ptr<RejectionSamplerRateController> rate_controller)
+    std::shared_ptr<RejectionSamplerRateController> rate_controller,
+    bool enable_fused_kernel)
     : logprobs_(logprobs),
       max_top_logprobs_(max_top_logprobs),
       all_random_sample_(all_random_sample),
       all_greedy_sample_(all_greedy_sample),
-      rate_controller_(rate_controller) {
+      rate_controller_(rate_controller),
+      enable_fused_kernel_(enable_fused_kernel) {
   CHECK(do_sample.defined());
   // [batch_size, 1]
   do_sample_ = do_sample.unsqueeze_(/*dim=*/-1);
@@ -128,6 +131,20 @@ SampleOutput RejectionSampler::forward(const torch::Tensor& draft_token_ids,
   target_probs = target_probs.slice(
       /*dim=*/1, /*start=*/0, /*end=*/target_probs.size(1) - 1);
 
+  // Determine whether we need to restore rejected tokens.
+  // IMPORTANT: The fused kernel implementation only supports masking out
+  // rejected tokens,
+  //            and does not support restoring their original values. Only use
+  //            fused path if logprobs are NOT needed and
+  //            mask_out_rejected_tokens is true.
+  bool use_fused_kernel =
+      enable_fused_kernel_ && (!logprobs_ && mask_out_rejected_tokens);
+
+  // select the random sampler function based on the use_fused_kernel flag
+  auto random_sampler_func = use_fused_kernel
+                                 ? &RejectionSampler::random_sample_fused
+                                 : &RejectionSampler::random_sample;
+
   // [batch_size, n_speculative_tokens + 1]
   torch::Tensor accepted_token_ids;
   torch::Tensor masked_accepted_token_ids;
@@ -141,22 +158,23 @@ SampleOutput RejectionSampler::forward(const torch::Tensor& draft_token_ids,
     auto uniform_rand =
         torch::rand(draft_token_ids.sizes(), draft_probs.options());
     std::tie(accepted_token_ids, masked_accepted_token_ids) =
-        random_sample(draft_token_ids,
-                      draft_probs,
-                      target_probs,
-                      uniform_rand,
-                      bonus_token_ids,
-                      mask_out_rejected_tokens);
+        random_sampler_func(draft_token_ids,
+                            draft_probs,
+                            target_probs,
+                            uniform_rand,
+                            bonus_token_ids,
+                            mask_out_rejected_tokens);
   } else {
     auto uniform_rand =
         torch::rand(draft_token_ids.sizes(), draft_probs.options());
     // mixed sample, sample both then choose based on do_sample_
-    auto [random, masked_random] = random_sample(draft_token_ids,
-                                                 draft_probs,
-                                                 target_probs,
-                                                 uniform_rand,
-                                                 bonus_token_ids,
-                                                 mask_out_rejected_tokens);
+    auto [random, masked_random] =
+        random_sampler_func(draft_token_ids,
+                            draft_probs,
+                            target_probs,
+                            uniform_rand,
+                            bonus_token_ids,
+                            mask_out_rejected_tokens);
     auto [greedy, masked_greedy] = greedy_sample(draft_token_ids,
                                                  target_probs,
                                                  bonus_token_ids,
@@ -264,6 +282,69 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample(
                      -torch::ones_like(accepted_token_ids));
   }
   return {accepted_token_ids, masked_accepted_token_ids};
+}
+
+std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample_fused(
+    const torch::Tensor& draft_token_ids,
+    const torch::Tensor& draft_probs,
+    const torch::Tensor& target_probs,
+    const torch::Tensor& uniform_rand,
+    const torch::Tensor& bonus_token_ids,
+    bool mask_out_rejected_tokens) {
+  const auto device = draft_token_ids.device();
+  const int64_t batch_size = draft_token_ids.size(0);
+  const int64_t n_spec = draft_token_ids.size(1);
+  const int64_t vocab_size = target_probs.size(2);
+
+  // Prepare input Tensors and ensure they are contiguous where needed
+  // If draft_token_ids is already int32 and contiguous, no copy occurs
+  torch::Tensor draft_token_ids_int32 =
+      draft_token_ids.reshape({-1}).to(torch::kInt32).contiguous();
+  torch::Tensor bonus_token_ids_int32 =
+      bonus_token_ids.reshape({-1}).to(torch::kInt32).contiguous();
+
+  // Ensure large probability matrices are in the correct shape and contiguous
+  torch::Tensor draft_probs_flat =
+      draft_probs.reshape({-1, vocab_size}).contiguous();
+  torch::Tensor target_probs_flat =
+      target_probs.reshape({-1, vocab_size}).contiguous();
+  torch::Tensor uniform_rand_flat = uniform_rand.reshape({-1}).contiguous();
+
+  // Create auxiliary tensors directly on the target device to avoid unnecessary
+  // copies
+  torch::TensorOptions options_int32 =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+  torch::Tensor num_draft_tokens =
+      torch::full({batch_size}, n_spec, options_int32);
+  torch::Tensor cu_num_draft_tokens =
+      torch::arange(n_spec, (batch_size + 1) * n_spec, n_spec, options_int32);
+
+  // Always create recovery probability matrix here, as kernel requires it
+  torch::Tensor uniform_probs =
+      torch::rand_like(target_probs).reshape({-1, vocab_size}).contiguous();
+
+  // Call the fused kernel
+  kernel::RejectionSampleParams params;
+  params.draft_token_ids = draft_token_ids_int32;
+  params.num_draft_tokens = num_draft_tokens;
+  params.cu_num_draft_tokens = cu_num_draft_tokens;
+  params.draft_probs = draft_probs_flat;
+  params.target_probs = target_probs_flat;
+  params.bonus_token_ids = bonus_token_ids_int32;
+  params.uniform_rand = uniform_rand_flat;
+  params.uniform_probs = uniform_probs;
+  params.max_spec_len = n_spec;
+
+  // The result is flattened, and positions of rejected tokens are set to -1
+  torch::Tensor output_token_ids = kernel::rejection_sample(params);
+
+  // Reshape result to [batch, n_spec + 1]
+  torch::Tensor masked_result =
+      output_token_ids.reshape({batch_size, n_spec + 1}).to(torch::kInt64);
+
+  // When mask_out_rejected_tokens=true and logprobs_=false,
+  // we can safely return masked_result for both outputs.
+  return {masked_result, masked_result};
 }
 
 std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::greedy_sample(

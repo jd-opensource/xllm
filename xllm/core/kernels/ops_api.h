@@ -76,6 +76,8 @@ torch::Tensor apply_top_k_top_p(TopKPParams& params);
 
 torch::Tensor random_sample(RandomSampleParams& params);
 
+torch::Tensor rejection_sample(RejectionSampleParams& params);
+
 void masked_indexer_select_paged_kv(MaskedIndexerSelectPagedKVParams& params);
 
 void gather_split(GatherSplitParams& params);

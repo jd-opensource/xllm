@@ -218,6 +218,8 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
     // Sync context_ from impl_ for WorkerImpl::prepare_work_before_execute
     context_ = impl_->context_;
   }
+  // get the option to use fused kernel from target model
+  enable_fused_kernel_ = impl_->get_optimization_config().enable_fused_kernel;
   return result;
 }
 
@@ -669,7 +671,8 @@ SampleOutput SpeculativeWorkerImpl::validate(
                                          sampling_params.all_greedy_sample,
                                          target_output.logprobs,
                                          target_output.max_top_logprobs,
-                                         rate_controller_);
+                                         rate_controller_,
+                                         enable_fused_kernel_);
 
   // get the accepted tokens
   SampleOutput sample_output =
