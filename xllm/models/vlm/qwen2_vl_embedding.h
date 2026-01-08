@@ -168,14 +168,14 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
 TORCH_MODULE(Qwen2_VLForEmbedding);
 
 template <>
-class EmbeddingVLMImpl<xllm::Qwen2_VLForEmbedding> : public EmbeddingVLM {
+class EmbeddingVLMImpl<Qwen2_VLForEmbedding> : public EmbeddingVLM {
  public:
-  EmbeddingVLMImpl(xllm::Qwen2_VLForEmbedding model,
+  EmbeddingVLMImpl(Qwen2_VLForEmbedding model,
                    const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
   MMDict encode(const ModelInputParams& input_params) override {
-    return model_->encode(input_params);
+    return MMDict{};
   };
   torch::Tensor get_input_embeddings(const torch::Tensor& input_ids,
                                      const ModelInputParams& input_params) {
@@ -225,7 +225,7 @@ class EmbeddingVLMImpl<xllm::Qwen2_VLForEmbedding> : public EmbeddingVLM {
   }
 
  private:
-  xllm::Qwen2_VLForEmbedding model_;
+  Qwen2_VLForEmbedding model_;
   torch::TensorOptions options_;
 };
 

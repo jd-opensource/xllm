@@ -117,6 +117,7 @@ class CausalLM : public torch::nn::Module {
   virtual layer::LmHead get_lm_head() {
     LOG(FATAL)
         << "Method 'get_lm_head' is not implemented/supported by this model.";
+    return nullptr;
   }
   virtual void set_lm_head(layer::LmHead& head) {
     LOG(FATAL)
@@ -125,6 +126,7 @@ class CausalLM : public torch::nn::Module {
   virtual layer::WordEmbedding get_word_embedding() {
     LOG(FATAL) << "Method 'get_word_embedding' is not implemented/supported by "
                   "this model.";
+    return nullptr;
   }
   virtual void set_word_embedding(layer::WordEmbedding& embedding) {
     LOG(FATAL) << "Method 'set_word_embedding' is not implemented/supported by "
