@@ -30,6 +30,18 @@ limitations under the License.
 
 namespace xllm {
 
+// Internal optimization configuration.
+// This struct holds all optimization techniques that are automatically
+// determined from model and quantization arguments and other internal factors,
+// not set directly by users.
+struct OptimizationConfig {
+  // Enable use of fused computation kernels.
+  bool enable_fused_kernel = false;
+
+  // we can detailize this part later. for example:
+  // PROPERTY(bool, enable_fused_mlp_kernel) = false;
+};
+
 class ModelContext {
  public:
   ModelContext() : parallel_args_(1, 1, nullptr) {};
@@ -57,6 +69,10 @@ class ModelContext {
     return tensor_options_;
   }
 
+  const OptimizationConfig& get_optimization_config() const {
+    return optimization_config_;
+  }
+
 #if defined(USE_NPU)
   const atb::Context* get_atb_context() const { return context_; }
   std::shared_ptr<AtbWorkspace> get_atb_workspace() const {
@@ -69,10 +85,15 @@ class ModelContext {
   }
 
  private:
+  // derive optimization config based on model args, quant args and other
+  // factors
+  void derive_optimization_config();
+
   ModelArgs model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_;
   torch::TensorOptions tensor_options_;
+  OptimizationConfig optimization_config_;
 
 #if defined(USE_NPU)
   // used for npu atb

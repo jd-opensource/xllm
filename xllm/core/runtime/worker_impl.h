@@ -180,6 +180,10 @@ class WorkerImpl {
   // model context, includes model args, parallel args and date type etc.
   mutable ModelContext context_;
 
+  OptimizationConfig get_optimization_config() const {
+    return context_.get_optimization_config();
+  }
+
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
   // Only used for deepseek chunked prefill ops on npu device

@@ -16,6 +16,8 @@ limitations under the License.
 #include "core/framework/model_context.h"
 
 #include <torch/torch.h>
+
+#include "platform/device.h"
 #if defined(USE_NPU)
 #ifdef TORCH_HIGHER_THAN_PTA6
 // #include <torch_npu/csrc/core/npu/NPUFormat.h>
@@ -45,6 +47,7 @@ ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
   context_->SetAsyncTilingCopyStatus(true);
   atb_workspace_ = std::make_shared<AtbWorkspace>(tensor_options.device());
 #endif
+  derive_optimization_config();
 }
 
 #if defined(USE_NPU)
@@ -59,5 +62,16 @@ ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
       tensor_options_(tensor_options),
       context_(context) {}
 #endif
+
+void ModelContext::derive_optimization_config() {
+  // default disable fused kernel
+  optimization_config_.enable_fused_kernel = false;
+
+  // determine whether to enable fused kernel based on backend
+  std::string backend = Device::type_str();
+  if (backend == "mlu") {
+    optimization_config_.enable_fused_kernel = true;
+  }
+}
 
 }  // namespace xllm
