@@ -23,6 +23,20 @@ limitations under the License.
 
 namespace xllm {
 
+void DpEpPaddingData::set_placeholder(const torch::Tensor& placeholder) {
+  attn_padding_idx_ = placeholder;
+  attn_unpadding_idx_ = placeholder;
+  ffn_padding_idx_ = placeholder;
+  ffn_unpadding_idx_ = placeholder;
+  lm_head_skip_padding_token_indices_ = placeholder;
+  gather_prenorm_idx_ = placeholder;
+  padding_idx_ = placeholder;
+  un_padding_idx_ = placeholder;
+  dynamic_ep_idx_ = placeholder;
+  moe_idx_ = placeholder;
+  expert_array_ = placeholder;
+}
+
 DpEpPadding::DpEpPadding(torch::Tensor token_size_per_dp_group,
                          int32_t num_experts_per_tok,
                          const nlohmann::json& mapping_npu,
