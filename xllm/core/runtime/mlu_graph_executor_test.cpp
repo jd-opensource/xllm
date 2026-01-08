@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -86,7 +86,10 @@ class MluGraphExecutorTest : public ::testing::Test {
   ForwardInput prepare_inputs(int32_t batch_size, uint64_t seed) {
     Device device(tensor_options_.device());
     device.set_seed(seed);
-    int32_t num_blocks_per_req = 64;
+    const int64_t max_seq_len = model_args_.max_position_embeddings();
+    const uint32_t block_size = options_.block_size();
+    const int64_t num_blocks_per_req =
+        (max_seq_len + block_size - 1) / block_size + 1;
     auto int_tensor_options = tensor_options_.dtype(torch::kInt32);
     auto token_ids = torch::full({batch_size}, 1, int_tensor_options);
     auto positions = torch::full({batch_size}, 1, int_tensor_options);

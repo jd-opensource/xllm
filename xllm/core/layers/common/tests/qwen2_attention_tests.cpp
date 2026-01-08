@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -111,9 +111,12 @@ class Qwen2AttentionTest : public ::testing::Test {
       metadata.slot_mapping = torch::arange(0, batch_size, options_int);
     }
 
+    const uint32_t block_size = 16;
+    const int64_t num_blocks_per_req =
+        (max_seq_len + block_size - 1) / block_size + 1;
     metadata.kv_seq_lens = torch::full({batch_size}, seq_len, options_int);
     metadata.block_table =
-        torch::randint(0, 100, {batch_size, 512}, options_int);
+        torch::randint(0, 100, {batch_size, num_blocks_per_req}, options_int);
 
     metadata.max_query_len = is_prefill ? seq_len : 1;
     metadata.max_seq_len = max_seq_len;
@@ -156,7 +159,7 @@ TEST_F(Qwen2AttentionTest, PrefillTest) {
   xllm::Device device(options_.device());
   device.synchronize_default_stream();
 
-  ASSERT_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
+  CHECK_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
   std::vector<float> expected_values = {0.0917969,
                                         0.00613403,
@@ -195,7 +198,7 @@ TEST_F(Qwen2AttentionTest, DecodeTest) {
   xllm::Device device(options_.device());
   device.synchronize_default_stream();
 
-  ASSERT_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
+  CHECK_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
   std::vector<float> expected_values = {-0.000411987,
                                         0.000113487,
@@ -258,7 +261,7 @@ TEST_F(Qwen2AttentionTest, MixedSequenceLengthTest) {
   xllm::Device device(options_.device());
   device.synchronize_default_stream();
 
-  ASSERT_EQ(output.sizes(), torch::IntArrayRef({total_tokens, hidden_size}));
+  CHECK_EQ(output.sizes(), torch::IntArrayRef({total_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
   std::vector<float> expected_values = {0.0145264,
                                         0.0148315,
