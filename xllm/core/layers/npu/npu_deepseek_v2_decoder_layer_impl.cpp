@@ -783,8 +783,9 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
                             input_params_new,
                             true);
     st = execute_node(prefill_node_prefixcache_, node_id, event, event_flag);
-    LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute prefill layer fail, error code: " << st;
+    LOG_IF(FATAL, st != 0)
+        << model_name_
+        << "excute is_chunked_prefill layer fail, error code: " << st;
   } else if (input_params_new.batch_forward_type.is_prefill()) {
     build_node_variant_pack(prefill_node_,
                             x,
