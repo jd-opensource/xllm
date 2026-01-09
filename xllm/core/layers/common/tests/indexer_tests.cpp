@@ -416,16 +416,16 @@ TEST_F(IndexerTest, Bfloat16PrefillVerifyPrecision) {
       run_indexer_test(batch_size, max_query_len, is_prefill);
 
   // Verify output shapes
-  ASSERT_EQ(new_block_tables.sizes().size(), 2)
+  CHECK_EQ(new_block_tables.sizes().size(), 2)
       << "new_block_tables should be 2D tensor";
-  ASSERT_EQ(new_context_lens.sizes().size(), 1)
+  CHECK_EQ(new_context_lens.sizes().size(), 1)
       << "new_context_lens should be 1D tensor";
-  ASSERT_EQ(new_block_tables.size(0), num_tokens) << "Batch size should match";
-  ASSERT_EQ(new_block_tables.size(1), index_topk) << "Top-k should match";
+  CHECK_EQ(new_block_tables.size(0), num_tokens) << "Batch size should match";
+  CHECK_EQ(new_block_tables.size(1), index_topk) << "Top-k should match";
 
   // Verify that the first value in new_block_tables is 1 (calculated via vLLM
   // MLU)
-  ASSERT_EQ(new_block_tables.index({0, 0}).item<int64_t>(), 1)
+  EXPECT_EQ(new_block_tables.index({0, 0}).item<int64_t>(), 1)
       << "The first value in new_block_tables should be 1";
 
   // Test bfloat16 mode (non-quantized) - prefill phase
@@ -439,16 +439,16 @@ TEST_F(IndexerTest, Bfloat16PrefillVerifyPrecision) {
       run_indexer_test(batch_size, max_query_len, is_prefill);
 
   // Verify output shapes
-  ASSERT_EQ(new_block_tables.sizes().size(), 2)
+  CHECK_EQ(new_block_tables.sizes().size(), 2)
       << "new_block_tables should be 2D tensor";
-  ASSERT_EQ(new_context_lens.sizes().size(), 1)
+  CHECK_EQ(new_context_lens.sizes().size(), 1)
       << "new_context_lens should be 1D tensor";
-  ASSERT_EQ(new_block_tables.size(0), num_tokens) << "Batch size should match";
-  ASSERT_EQ(new_block_tables.size(1), index_topk) << "Top-k should match";
+  CHECK_EQ(new_block_tables.size(0), num_tokens) << "Batch size should match";
+  CHECK_EQ(new_block_tables.size(1), index_topk) << "Top-k should match";
 
   // Verify that the first value in new_block_tables is 1 (calculated via vLLM
   // MLU)
-  ASSERT_EQ(new_block_tables.index({0, 0}).item<int64_t>(), 1)
+  EXPECT_EQ(new_block_tables.index({0, 0}).item<int64_t>(), 1)
       << "The first value in new_block_tables should be 1";
 }
 
@@ -566,9 +566,9 @@ TEST_F(IndexerTest, Bfloat16ChunkedPrefillVerifyPrecision) {
 
   // Validations
   // Shape Verification
-  ASSERT_EQ(new_block_tables.dim(), 2);
-  ASSERT_EQ(new_block_tables.size(0), num_new_tokens);  // [batch * current_len]
-  ASSERT_EQ(new_block_tables.size(1), index_topk);
+  CHECK_EQ(new_block_tables.dim(), 2);
+  CHECK_EQ(new_block_tables.size(0), num_new_tokens);  // [batch * current_len]
+  CHECK_EQ(new_block_tables.size(1), index_topk);
 
   // Value Verification
   auto top1_indices = new_block_tables.index({torch::indexing::Slice(), 0})
@@ -582,9 +582,9 @@ TEST_F(IndexerTest, Bfloat16ChunkedPrefillVerifyPrecision) {
   // The expected value is calculated via vLLM MLU
   int64_t expected_sum = 12288;
   int64_t expected_max = 192;
-  ASSERT_EQ(top1_sum, expected_sum)
+  EXPECT_EQ(top1_sum, expected_sum)
       << "top-1 block index sum does not match ground truth";
-  ASSERT_EQ(top1_max, expected_max)
+  EXPECT_EQ(top1_max, expected_max)
       << "top-1 block index max does not match ground truth";
 }
 

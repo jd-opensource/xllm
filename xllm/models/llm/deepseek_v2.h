@@ -72,24 +72,6 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
 
-    // Check if prefix cache or chunked prefill is enabled for unsupported
-    // models
-    const std::string& model_type = model_args.model_type();
-    // deepseek_v32 has index_n_heads > 0 (default 64), while deepseek_v3 has 0
-    bool is_deepseek_v32 =
-        model_type == "deepseek_v3" && model_args.index_n_heads() > 0;
-    if (model_type == "deepseek_v2" ||
-        (model_type == "deepseek_v3" && !is_deepseek_v32)) {
-      // Note: Only deepseek_v32 supports prefix cache and chunked prefill at
-      // present.
-      CHECK(!FLAGS_enable_prefix_cache)
-          << "deepseek_v2 and deepseek_v3 have not supported "
-             "enable_prefix_cache yet. Please disable it.";
-      CHECK(!FLAGS_enable_chunked_prefill)
-          << "deepseek_v2 and deepseek_v3 have not supported "
-             "enable_chunked_prefill yet. Please disable it.";
-    }
-
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
 
@@ -194,7 +176,16 @@ class DeepseekV2ForCausalLMImpl
     : public LlmForCausalLMImplBase<DeepseekV2Model> {
  public:
   DeepseekV2ForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
+      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {
+    // Check if prefix cache or chunked prefill is enabled for unsupported
+    // models
+    CHECK(!FLAGS_enable_prefix_cache)
+        << "deepseek_v2 have not supported "
+           "enable_prefix_cache yet. Please disable it.";
+    CHECK(!FLAGS_enable_chunked_prefill)
+        << "deepseek_v2 have not supported "
+           "enable_chunked_prefill yet. Please disable it.";
+  }
 };
 TORCH_MODULE(DeepseekV2ForCausalLM);
 

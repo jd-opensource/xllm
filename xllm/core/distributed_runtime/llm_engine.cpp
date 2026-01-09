@@ -911,9 +911,21 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
   std::vector<int32_t> dp_is_decode(dp_size_, 0);
   bool global_empty_kv_cache = true;
 
-  // flags to detect mixed usage across DP ranks
+  // Flags to detect mixed forward type usage across data parallel ranks.
+  // These flags are set during the loop below to track whether different ranks
+  // have different forward types, which requires setting the global forward
+  // type to MIXED to ensure consistent processing across all ranks.
+
+  // Indicates if at least one DP rank has a DECODE forward type.
   bool has_decode = false;
-  bool has_prefill = false;  // Includes PREFILL and CHUNKED_PREFILL
+  // Indicates if at least one DP rank has a PREFILL or CHUNKED_PREFILL forward
+  // type (processing multiple tokens in parallel, typically used for initial
+  // prompt processing or chunked prompt handling).
+  bool has_prefill = false;
+  // Indicates if at least one DP rank already has a MIXED forward type
+  // (contains both decode and prefill operations within the same batch). If
+  // true, the global forward type must be set to MIXED regardless of other
+  // flags.
   bool has_mixed = false;
 
   // NOTE: when enable dp, we need to check the forward type of each batch
@@ -960,8 +972,9 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
     // If not mixed, use the detected uniform type
     global_forward_type = representative_type;
   } else {
-    // All empty
-    global_forward_type = BatchForwardType::EMPTY;
+    // this should never happen
+    LOG(FATAL)
+        << "All batch forward type are empty, which should never happen.";
   }
 
   // eplb related

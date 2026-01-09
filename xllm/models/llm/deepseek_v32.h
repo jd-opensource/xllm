@@ -18,8 +18,17 @@ limitations under the License.
 #include "deepseek_v2.h"
 
 namespace xllm {
+
+class DeepseekV32ForCausalLMImpl
+    : public LlmForCausalLMImplBase<DeepseekV2Model> {
+ public:
+  DeepseekV32ForCausalLMImpl(const ModelContext& context)
+      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
+};
+TORCH_MODULE(DeepseekV32ForCausalLM);
+
 // register the causal model
-REGISTER_CAUSAL_MODEL(deepseek_v32, DeepseekV2ForCausalLM);
+REGISTER_CAUSAL_MODEL(deepseek_v32, DeepseekV32ForCausalLM);
 // register the model args
 // example config:
 // https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json
