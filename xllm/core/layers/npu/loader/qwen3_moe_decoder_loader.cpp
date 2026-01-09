@@ -571,12 +571,25 @@ torch::Tensor Qwen3MoeDecoderLoader::merge_experts_weights(
 
 void Qwen3MoeDecoderLoader::merge_loaded_weights() {
   merge_experts_weights();
+
   at_weight_tensors_[IN_QKV_WEIGHT_0] =
       torch::cat({at_weight_tensors_[IN_QKV_WEIGHT_0],
                   at_weight_tensors_[IN_QKV_WEIGHT_1],
                   at_weight_tensors_[IN_QKV_WEIGHT_2]},
                  0)
           .contiguous();
+  /*
+  at_weight_tensors_[IN_QKV_WEIGHT_0] =
+      at_npu::native::npu_format_cast(
+         torch::cat({at_weight_tensors_[IN_QKV_WEIGHT_0],
+                   at_weight_tensors_[IN_QKV_WEIGHT_1],
+                   at_weight_tensors_[IN_QKV_WEIGHT_2]},
+                 0).transpose(0, 1).contiguous(), 29);
+
+  at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT] = at_npu::native::npu_format_cast(
+      at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1).contiguous(),
+      29);
+  */
   at_weight_tensors_[IN_QKV_WEIGHT_1] =
       torch::zeros({1}, torch::kFloat16).to(device_);
   at_weight_tensors_[IN_QKV_WEIGHT_2] =

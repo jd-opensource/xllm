@@ -259,4 +259,6 @@ DECLARE_bool(use_audio_in_video);
 
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);
+
+DECLARE_bool(enable_intralayer_addnorm);
 #endif

@@ -527,6 +527,11 @@ DEFINE_string(npu_kernel_backend,
 #endif
               "NPU kernel backend. Supported options: ATB, TORCH.");
 
+DEFINE_bool(
+    enable_intralayer_addnorm,
+    false,
+    "enable fused intralayer addnorm ops."
+);
 #endif
 
 // --- multi-step decode config ---
