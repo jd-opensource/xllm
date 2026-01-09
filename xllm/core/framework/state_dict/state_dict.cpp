@@ -114,7 +114,7 @@ void destroy_memory_mapping(MemoryMapping* mapping) {
     if (mapping->fd != -1) {
       close(mapping->fd);
     }
-    free(mapping);
+    delete mapping;
   }
 }
 }  // namespace
