@@ -301,6 +301,8 @@ DECLARE_uint32(rec_worker_max_concurrency);
 
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);
+
+DECLARE_bool(enable_intralayer_addnorm);
 #endif
 
 DECLARE_int32(health_check_interval_ms);

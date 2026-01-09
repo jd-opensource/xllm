@@ -75,6 +75,10 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_tensors(
   one_hot_ = torch::tensor({1}, torch::kInt32).to(device_);
   zero_hot_ = torch::tensor({0}, torch::kInt32).to(device_);
   expert_group_ = torch::tensor({1}, torch::dtype(torch::kInt32)).to(device_);
+  quant_add_norm_scaling_ =
+      torch::tensor({1}, torch::dtype(torch::kInt32)).to(device_);
+  quant_add_norm_offset_ =
+      torch::tensor({1}, torch::dtype(torch::kInt32)).to(device_);
 }
 
 void NpuQwen3MoeDecoderLayerImpl::param_from_args(
@@ -95,16 +99,24 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
     const ParallelArgs& parallel_args,
     bool is_prefill) {
   param.isFA = false;
-  param.isPrefill = is_prefill;
   param.isBF16 = args.dtype() == "bfloat16";
   param.enableSwiGLU = true;
+
+  // prefill only feature
+  param.isPrefill = is_prefill;
   param.enableLcoc = is_prefill;  // false;
-
-  param.mlpLinearTransposeType = {-1, -1, -1, -1};
-
   param.enableSplitFuse =
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+
+  // decode only feature
   param.enableAclGraphPagedAttention = FLAGS_enable_graph && !is_prefill;
+  
+  // Can be applied to prefill, but has not been tested yet
+  param.enableAclnnExternelAddRmsNorm = FLAGS_enable_intralayer_addnorm && !is_prefill;;
+  param.enableAclnnAddRmsNorm = !is_prefill;
+  param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
+
+  param.mlpLinearTransposeType = {-1, -1, -1, -1};
 
   if (quantize_type_.empty()) {
     param.moeLinearTransposeType = std::vector<int>{1, 1, -1, 1};
@@ -139,6 +151,7 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
 
   param.attnLinearTransposeType = {1, -1, -1, 1, -1, -1};
+  // param.attnLinearTransposeType = {0, -1, -1, 0, -1, -1};
   param.worldSize = parallel_args.world_size();
 
   if (is_prefill) {
@@ -167,7 +180,7 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
   param.enableFusedRouting = 1;
   param.numOfExperts = args.num_experts();
   param.maskStartIdx = 0;
-  param.routingMethod = "softMaxTopK";
+  param.routingMethod = "integratedSoftmaxTopK";  //"softMaxTopK";
 
   param.quantGroupSize = 0;
 
@@ -260,7 +273,7 @@ int64_t NpuQwen3MoeDecoderLayerImpl::init_node(
   CHECK_NOTNULL(node.operation);
   CHECK_GT(node.operation->GetInputNum(), 0);
   node.inTensors.resize(node.operation->GetInputNum());
-  node.outTensors.resize(1);
+  node.outTensors.resize(node.operation->GetOutputNum());
   size_t inTensorId = 1;
 
   for (size_t weightTensorId = 0; weightTensorId < WEIGHT_COUNT_PER_LAYER;
@@ -270,8 +283,8 @@ int64_t NpuQwen3MoeDecoderLayerImpl::init_node(
 
   node.variantPack.inTensors.reserve(node.inTensors.size());
   node.variantPack.inTensors.resize(node.inTensors.size());
-  node.variantPack.outTensors.reserve(1);
-  node.variantPack.outTensors.resize(1);
+  node.variantPack.outTensors.reserve(node.outTensors.size());
+  node.variantPack.outTensors.resize(node.outTensors.size());
 
   return atb::NO_ERROR;
 }
@@ -401,6 +414,22 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.graph_buffer.tiling_data);
+  }
+
+  if (input_params.batch_forward_type.is_decode() &&
+      FLAGS_enable_intralayer_addnorm) {  // TODO
+    // input
+    auto residual_tensor = input_params.residual_tensor;
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(residual_tensor);
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(quant_add_norm_scaling_);
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(quant_add_norm_offset_);
+
+    // output
+    auto residual_tensor_ = atb_speed::Utils::AtTensor2Tensor(residual_tensor);
+    node.variantPack.outTensors.at(1) = residual_tensor_;
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {

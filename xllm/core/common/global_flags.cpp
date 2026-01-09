@@ -618,7 +618,6 @@ DEFINE_uint32(rec_worker_max_concurrency,
               "equal to 1 means disable concurrent rec worker.");
 
 #if defined(USE_NPU)
-
 // USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph
 // capture. This variable may be removed in the future.
 DEFINE_string(npu_kernel_backend,
@@ -629,6 +628,11 @@ DEFINE_string(npu_kernel_backend,
 #endif
               "NPU kernel backend. Supported options: ATB, TORCH.");
 
+DEFINE_bool(
+    enable_intralayer_addnorm,
+    false,
+    "enable fused intralayer addnorm ops."
+);
 #endif
 
 // --- multi-step decode config ---
@@ -644,7 +648,6 @@ DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 DEFINE_int32(health_check_interval_ms,
              3000,
              "Worker health check interval in milliseconds.");
-
 DEFINE_bool(enable_xattention_one_stage,
             false,
             "Whether to force xattention one-stage decode for rec "
