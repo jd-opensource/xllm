@@ -240,6 +240,8 @@ void CompletionServiceImpl::process_async_impl(
           return send_delta_to_client_brpc(
               call, include_usage, request_id, created_time, model, req_output);
         }
+        // NOTE: maybe need to refactor along with service, currently for
+        // non-stream request in prefill instance, we send a virtual response
         return send_result_to_client_brpc(
             call, request_id, created_time, model, req_output);
       });

@@ -476,7 +476,9 @@ void DisaggPDScheduler::prefill_send_first_generation() {
   }
 
   std::vector<std::shared_ptr<Request>> requests;
+  std::vector<std::shared_ptr<Request>> non_stream_requests;
   requests.reserve(running_requests_.size());
+  non_stream_requests.reserve(running_requests_.size());
   {
     std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
     for (size_t i = 0; i < running_requests_.size(); ++i) {
@@ -494,10 +496,15 @@ void DisaggPDScheduler::prefill_send_first_generation() {
         next_thread_idx_ = (++next_thread_idx_) % kOutputThreadNum_;
         requests.emplace_back(request);
 
+        if (!request->state().stream) {
+          non_stream_requests.emplace_back(request);
+        }
         running_requests_[i] = nullptr;
       }
     }
   }
+  // call non_stream_request's callback in P instance when its prefill ends
+  response_processor_->process_completed_requests(non_stream_requests);
 
   // No prefill request needs to be transferred to decode.
   if (requests.size() == 0) {
