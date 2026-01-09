@@ -33,7 +33,8 @@ class XllmServer final {
   bool start(std::unique_ptr<DisaggPDService> disagg_pd_service);
   bool start(std::unique_ptr<PDOOCService> pd_ooc_service);
   bool start(std::shared_ptr<CollectiveService> service,
-             const std::string& addr);
+             const std::string& addr,
+             const std::string& server_name);
   bool start(std::shared_ptr<WorkerService> service, const std::string& addr);
   bool start(std::shared_ptr<XTensorManagerService> service,
              const std::string& addr);

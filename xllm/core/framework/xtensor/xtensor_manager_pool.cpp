@@ -92,7 +92,8 @@ void XTensorManagerPool::setup_multi_node_xtensor_managers(
       XllmServer* collective_server =
           ServerRegistry::get_instance().register_server(
               collective_server_name_);
-      if (!collective_server->start(collective_service, master_node_addr)) {
+      if (!collective_server->start(
+              collective_service, master_node_addr, collective_server_name_)) {
         LOG(ERROR) << "failed to start collective server on address: "
                    << master_node_addr;
         return;

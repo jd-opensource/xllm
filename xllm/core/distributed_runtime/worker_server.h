@@ -62,6 +62,8 @@ class WorkerServer {
       std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
       std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager);
 
+  void stop();
+
  private:
   DISALLOW_COPY_AND_ASSIGN(WorkerServer);
 

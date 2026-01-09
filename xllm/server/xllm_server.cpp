@@ -25,10 +25,11 @@ namespace xllm {
 XllmServer::XllmServer() { butil::AtExitManager exit_manager; }
 
 XllmServer::~XllmServer() {
+  stop();
+
   if (running_thread_ && running_thread_->joinable()) {
     running_thread_->join();
   }
-  stop();
 }
 
 bool XllmServer::start(std::unique_ptr<APIService> service) {
@@ -87,7 +88,7 @@ bool XllmServer::start(std::unique_ptr<DisaggPDService> service) {
 
   has_initialized_ = true;
   // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
-  server_->RunUntilAskedToQuit();
+  server_->Join();
   return true;
 }
 
@@ -105,23 +106,22 @@ bool XllmServer::start(std::unique_ptr<PDOOCService> service) {
 
   has_initialized_ = true;
   // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
-  server_->RunUntilAskedToQuit();
+  server_->Join();
   return true;
 }
 
 bool XllmServer::start(std::shared_ptr<CollectiveService> service,
-                       const std::string& addr) {
-  if (!create_server((google::protobuf::Service*)(service.get()),
-                     addr,
-                     -1,
-                     "Collective")) {
+                       const std::string& addr,
+                       const std::string& server_name) {
+  if (!create_server(
+          (google::protobuf::Service*)(service.get()), addr, -1, server_name)) {
     return false;
   }
 
   running_thread_ =
       std::make_unique<std::thread>([this, service = std::move(service)]() {
         has_initialized_ = true;
-        server_->RunUntilAskedToQuit();
+        server_->Join();
       });
 
   return true;
@@ -225,9 +225,12 @@ void XllmServer::run() {
   }
 
   has_initialized_ = true;
-  server_->RunUntilAskedToQuit();
+  server_->Join();
 }
 
-void XllmServer::stop() { return; }
+void XllmServer::stop() {
+  server_->Stop(0);
+  server_->Join();
+}
 
 }  // namespace xllm

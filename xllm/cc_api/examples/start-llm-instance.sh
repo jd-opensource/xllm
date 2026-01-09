@@ -2,6 +2,9 @@
 
 clear
 
+\rm -rf core.*
+cd build && make && cd ..
+
 # export ASDOPS_LOG_LEVEL=DEBUG
 # export ASDOPS_LOG_TO_STDOUT=1
 export ASCEND_RT_VISIBLE_DEVICES=12

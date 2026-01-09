@@ -233,7 +233,7 @@ XLLM_Response handle_inference_request(LLMCore* llm_core,
           if (result.hasValue()) {
             return std::move(result).value();
           } else {
-            result.throwIfFailed();
+            result.throwUnlessValue();
             return XLLM_Response{};
           }
         })

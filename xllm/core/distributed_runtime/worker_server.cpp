@@ -120,6 +120,15 @@ void WorkerServer::create_server(
   worker_server->run();
 }
 
+void WorkerServer::stop() {
+  auto worker_server = ServerRegistry::get_instance().get_server(server_name_);
+  if (worker_server) {
+    worker_server->stop();
+
+    ServerRegistry::get_instance().unregister_server(server_name_);
+  }
+}
+
 void WorkerServer::create_spawn_server(int local_rank,
                                        const std::string& master_node_addr,
                                        std::atomic<bool>& done,
@@ -306,6 +315,11 @@ bool WorkerServer::sync_master_node(const std::string& master_node_addr,
 }
 
 WorkerServer::~WorkerServer() {
+  auto worker_server = ServerRegistry::get_instance().get_server(server_name_);
+  if (worker_server != nullptr) {
+    worker_server->stop();
+  }
+
   if (worker_thread_->joinable()) {
     worker_thread_->join();
   }
@@ -315,12 +329,7 @@ WorkerServer::~WorkerServer() {
     posix_spawnattr_destroy(&spawn_attr_);
   }
 
-  auto worker_server = ServerRegistry::get_instance().get_server(server_name_);
-  if (worker_server != nullptr) {
-    worker_server->stop();
-
-    ServerRegistry::get_instance().unregister_server(server_name_);
-  }
+  ServerRegistry::get_instance().unregister_server(server_name_);
 }
 
 }  // namespace xllm
