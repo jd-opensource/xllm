@@ -120,6 +120,22 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
 #endif
 }
 
+void reshape_from_cache(ReshapeFromCacheParams& params) {
+#if defined(USE_MLU)
+  mlu::reshape_from_cache(params.key,
+                          params.value,
+                          params.key_cache,
+                          params.value_cache,
+                          params.context_lengths,
+                          params.max_context_len,
+                          params.context_seq_offset,
+                          params.block_tables,
+                          params.cache_seq_offset);
+#else
+  LOG(FATAL) << "reshape_from_cache not implemented";
+#endif
+}
+
 void batch_prefill(AttentionParams& params) {
 #if defined(USE_MLU)
   mlu::batch_prefill(params.query,

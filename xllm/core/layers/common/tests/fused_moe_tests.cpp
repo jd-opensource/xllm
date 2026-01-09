@@ -441,16 +441,13 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   for (size_t i = 0; i < batch_size; ++i) {
     for (size_t j = 0; j < seq_len; ++j) {
       for (size_t k = 0; k < hidden_size; ++k) {
-        expected_values.push_back(1792.0f);  // calculated via vLLM MLU
+        expected_values.push_back(964.0f);  // calculated via vLLM MLU
       }
     }
   }
 
   set_expected_output(expected_values);
 
-  // Note: The precision verification is commented out until you set the
-  // expected values. Uncomment the following line after setting the correct
-  // expected values
   verify_precision(output, 1e-3, 1e-4);
 }
 

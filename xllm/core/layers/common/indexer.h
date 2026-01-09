@@ -33,6 +33,25 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+// Context structure for passing runtime arguments to kernel
+struct IndexerRuntimeContext {
+  // kernel input tensors
+  torch::Tensor q;
+  torch::Tensor weights;
+  torch::Tensor k_cache_tensor;  // points to k (dense), k_full (gathered), or
+                                 // k_cache (paged)
+  std::optional<torch::Tensor> k_block_table;
+  // length information
+  std::optional<torch::Tensor> cu_seq_q_lens;
+  torch::Tensor cu_seq_k_lens;
+  torch::Tensor k_context_lens;
+  // output buffers
+  torch::Tensor new_block_tables;
+  torch::Tensor new_context_lens;
+  // temporary tensors ownership
+  torch::Tensor _storage_k_full;
+};
+
 class IndexerImpl : public torch::nn::Module {
  public:
   IndexerImpl() = default;
@@ -85,6 +104,15 @@ class IndexerImpl : public torch::nn::Module {
   // Helper function for rotation activation
   torch::Tensor rotate_activation(const torch::Tensor& input,
                                   const torch::Tensor& hadamard_matrix);
+  // Prepare runtime context for kernel
+  IndexerRuntimeContext prepare_runtime_context(
+      const torch::Tensor& k_current_dense,
+      torch::Tensor& k_cache_paged,
+      torch::Tensor& q,
+      torch::Tensor& weights,
+      const AttentionMetadata& attn_metadata,
+      bool is_prefill,
+      int64_t num_tokens);
 };
 
 TORCH_MODULE(Indexer);

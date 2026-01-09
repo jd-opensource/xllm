@@ -141,6 +141,51 @@ struct ReshapePagedCacheParams {
   bool direction = false;
 };
 
+// ReshapeFromCacheParams describes parameters for gathering and flattening
+// KV (Key/Value) cached data from a possibly paged or non-contiguous storage
+// format into a contiguous tensor.
+struct ReshapeFromCacheParams {
+  // Target tensor to store reshaped key values. Shape: [total_length, head_num,
+  // head_size]. Dtype: float32, float16, bfloat16, int8.
+  torch::Tensor key;
+  // Optional target tensor to store reshaped value values. If provided,
+  // value_cache must also be provided. Shape: [total_length, head_num,
+  // head_size]. Dtype: float32, float16, bfloat16, int8.
+  std::optional<torch::Tensor> value;
+  // Source tensor containing cached key values.
+  // Shape:
+  //   - Linear mode: [max_batch_size, head_num, cache_mem_len, head_size]
+  //   - Paged mode: [total_blocks, head_num, block_size, head_size]
+  // Dtype: float32, float16, bfloat16, int8.
+  torch::Tensor key_cache;
+  // Optional source tensor containing cached value values. If provided, value
+  // must also be provided. Shape:
+  //   - Linear mode: [max_batch_size, head_num, cache_mem_len, head_size]
+  //   - Paged mode: [total_blocks, head_num, block_size, head_size]
+  // Dtype: float32, float16, bfloat16, int8.
+  std::optional<torch::Tensor> value_cache;
+  // 1D tensor representing the lengths of each batch context.
+  // Shape: [batch_size]. Dtype: int32.
+  torch::Tensor context_lengths;
+  // Maximum context length that can be processed at once.
+  // Used for memory allocation and bounds checking.
+  int64_t max_context_len;
+  // Optional 1D tensor with per-context sequence offsets.
+  // If provided, applies a shift offset for each context's beginning location.
+  // Shape: [batch_size]. Dtype: int32. Default: None.
+  std::optional<torch::Tensor> context_seq_offset;
+  // Optional tensor containing the block indices for each batch.
+  // Shape:
+  //   - Linear mode: [batch_size, 1]
+  //   - Paged mode: [batch_size, max_blocks]
+  // Dtype: int32. Default: None (linear mode).
+  std::optional<torch::Tensor> block_tables;
+  // Optional 1D tensor representing the cache sequence offset for each batch.
+  // Used for slicing key and value cache starts in memory.
+  // Shape: [batch_size]. Dtype: int32. Default: None.
+  std::optional<torch::Tensor> cache_seq_offset;
+};
+
 // Attention parameters
 // Note: This struct is used by both batch_prefill (flash_attention) and
 // batch_decode (single_query_cached_kv_attn). Parameters are grouped by usage.

@@ -14,11 +14,13 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
+#include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <string>
 #include <vector>
 
+#include "core/common/global_flags.h"
 #include "core/layers/deepseek_v2_decoder_layer.h"
 #include "llm_model_base.h"
 
@@ -174,7 +176,16 @@ class DeepseekV2ForCausalLMImpl
     : public LlmForCausalLMImplBase<DeepseekV2Model> {
  public:
   DeepseekV2ForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
+      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {
+    // Check if prefix cache or chunked prefill is enabled for unsupported
+    // models
+    CHECK(!FLAGS_enable_prefix_cache)
+        << "deepseek_v2 have not supported "
+           "enable_prefix_cache yet. Please disable it.";
+    CHECK(!FLAGS_enable_chunked_prefill)
+        << "deepseek_v2 have not supported "
+           "enable_chunked_prefill yet. Please disable it.";
+  }
 };
 TORCH_MODULE(DeepseekV2ForCausalLM);
 

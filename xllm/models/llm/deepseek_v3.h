@@ -18,8 +18,26 @@ limitations under the License.
 #include "deepseek_v2.h"
 
 namespace xllm {
+
+class DeepseekV3ForCausalLMImpl
+    : public LlmForCausalLMImplBase<DeepseekV2Model> {
+ public:
+  DeepseekV3ForCausalLMImpl(const ModelContext& context)
+      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {
+    // Check if prefix cache or chunked prefill is enabled for unsupported
+    // models
+    CHECK(!FLAGS_enable_prefix_cache)
+        << "deepseek_v3 have not supported "
+           "enable_prefix_cache yet. Please disable it.";
+    CHECK(!FLAGS_enable_chunked_prefill)
+        << "deepseek_v3 have not supported "
+           "enable_chunked_prefill yet. Please disable it.";
+  }
+};
+TORCH_MODULE(DeepseekV3ForCausalLM);
+
 // register the causal model
-REGISTER_CAUSAL_MODEL(deepseek_v3, DeepseekV2ForCausalLM);
+REGISTER_CAUSAL_MODEL(deepseek_v3, DeepseekV3ForCausalLM);
 // register the model args
 // example config:
 // https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json
