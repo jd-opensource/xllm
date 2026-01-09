@@ -185,19 +185,15 @@ extra_javascript:
 
 nav:
   - 主页: index.md
-  - 开始使用:
-    - getting_started/compile.md
-    - 快速开始:
-      - 在线服务: 
-        - getting_started/single_node.md
-        - getting_started/multi_node.md
-        - getting_started/disagg_pd.md
-        - getting_started/multi_machine.md
-      - 多模态支持:
-        - getting_started/start_vlm_service.md
-      - 离线服务:
-        - getting_started/offline_service.md
-    - getting_started/scripts.md
+  - 用户指南:
+    - getting_started/quick_start.md
+    - supported_models.md
+    - getting_started/launch_xllm.md
+    - getting_started/disagg_pd.md
+    - getting_started/multi_machine.md
+    - 基本用法:
+      - getting_started/online_service.md
+      - getting_started/offline_service.md
   - 功能介绍:
     - 概览:
       - features/overview.md
