@@ -910,29 +910,10 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
   std::vector<int32_t> dp_global_token_nums(dp_size_);
   std::vector<int32_t> dp_is_decode(dp_size_, 0);
   bool global_empty_kv_cache = true;
-
-  // Flags to detect mixed forward type usage across data parallel ranks.
-  // These flags are set during the loop below to track whether different ranks
-  // have different forward types, which requires setting the global forward
-  // type to MIXED to ensure consistent processing across all ranks.
-
-  // Indicates if at least one DP rank has a DECODE forward type.
-  bool has_decode = false;
-  // Indicates if at least one DP rank has a PREFILL or CHUNKED_PREFILL forward
-  // type (processing multiple tokens in parallel, typically used for initial
-  // prompt processing or chunked prompt handling).
-  bool has_prefill = false;
-  // Indicates if at least one DP rank already has a MIXED forward type
-  // (contains both decode and prefill operations within the same batch). If
-  // true, the global forward type must be set to MIXED regardless of other
-  // flags.
-  bool has_mixed = false;
-
-  // NOTE: when enable dp, we need to check the forward type of each batch
+  // when enable dp, we need to check the forward type of each batch
   // and set the empty forward type of each batch to the same value as the first
-  // batch. We also need to make sure the forward type is MIXED for the scenario
-  // that some ranks are DECODE and some are PREFILL.
-  BatchForwardType representative_type = BatchForwardType::EMPTY;
+  // batch
+  BatchForwardType batch_forward_type;
 
   // build model input for every single micro batch
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
@@ -942,39 +923,12 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     global_empty_kv_cache =
         batched_inputs[dp_rank].empty_kv_cache && global_empty_kv_cache;
-    // detect forward types
-    auto& current_type = batched_inputs[dp_rank].batch_forward_type;
-    if (!current_type.is_empty()) {
-      // Keep one valid type handy in case we aren't mixed
-      if (representative_type.is_empty()) {
-        representative_type = current_type;
-      }
-      if (current_type.is_decode()) {
-        has_decode = true;
-      } else if (current_type.is_prefill() ||
-                 current_type.is_chunked_prefill()) {
-        has_prefill = true;
-      } else if (current_type.is_mixed()) {
-        has_mixed = true;
-      }
+    if (batch_forward_type.is_empty() &&
+        !batched_inputs[dp_rank].batch_forward_type.is_empty()) {
+      batch_forward_type = batched_inputs[dp_rank].batch_forward_type;
     }
-    dp_is_decode[dp_rank] =
-        current_type.is_decode() && batched_inputs[dp_rank].q_max_seq_len == 1;
-  }
-
-  // Determine the final Global Batch Forward Type
-  BatchForwardType global_forward_type;
-
-  if (has_mixed || (has_decode && has_prefill)) {
-    // If any rank is MIXED, or we have both DECODE and PREFILL across ranks
-    global_forward_type = BatchForwardType::MIXED;
-  } else if (!representative_type.is_empty()) {
-    // If not mixed, use the detected uniform type
-    global_forward_type = representative_type;
-  } else {
-    // this should never happen
-    LOG(FATAL)
-        << "All batch forward type are empty, which should never happen.";
+    dp_is_decode[dp_rank] = batch_forward_type.is_decode() &&
+                            batched_inputs[dp_rank].q_max_seq_len == 1;
   }
 
   // eplb related
@@ -991,9 +945,9 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
     if (FLAGS_enable_eplb) {
       batched_inputs[dp_rank].eplb_info = eplb_info;
     }
-    // force all inputs' type to the calculated global type.
-    // ensures consistent type across all ranks.
-    batched_inputs[dp_rank].batch_forward_type = global_forward_type;
+    if (batched_inputs[dp_rank].batch_forward_type.is_empty()) {
+      batched_inputs[dp_rank].batch_forward_type = batch_forward_type;
+    }
   }
 
   return batched_inputs;

@@ -723,7 +723,10 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
                                     const ModelInputParams& input_params) {
   // we only support all2all communication for decode stage for now
   bool enable_all2all_communication =
-      enable_deep_ep_ && input_params.batch_forward_type.is_decode();
+      enable_deep_ep_ && std::all_of(input_params.dp_is_decode.begin(),
+                                     input_params.dp_is_decode.end(),
+                                     [](int32_t val) { return val == 1; });
+
   bool is_dp_ep_parallel =
       parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1;
   // during all2all communication, the output has been
