@@ -259,7 +259,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     input_params_new.expert_array = expert_array;
-
+    if (FLAGS_enable_intralayer_addnorm) input_params_new.residual_tensor = torch::zeros_like(h);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -279,11 +279,13 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
             kv_caches[i],
             input_params,
             event,
-            event_flag);
+            event_flag);  // TODO: pxy
       if (deep_stack_size && i < deep_stack_size) {
         h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);
       }
     }
+
+    if (FLAGS_enable_intralayer_addnorm) h = h + input_params.residual_tensor;
     auto hidden_states = norm_(h, 0);
     return ModelOutput(hidden_states);
   }
