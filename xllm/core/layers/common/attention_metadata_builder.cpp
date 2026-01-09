@@ -64,6 +64,10 @@ AttentionMetadata AttentionMetadataBuilder::build(
   }
 
   attn_metadata.is_dummy = (params.q_max_seq_len == 0);
+  if (attn_metadata.is_dummy) {
+    attn_metadata.slot_mapping =
+        torch::tensor({1}, params.new_cache_slots.options());
+  }
 
   // Set is_causal: true for prefill (causal attention), false for decode
   // (non-causal) Default to true (causal) if not explicitly set

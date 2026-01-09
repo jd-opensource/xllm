@@ -28,7 +28,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
     const ModelArgs& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
-    const torch::TensorOptions& options)
+    const torch::TensorOptions& options,
+    bool use_fused_mla_qkv)
     : q_lora_rank_(args.q_lora_rank()),
       kv_lora_rank_(args.kv_lora_rank()),
       qk_nope_head_dim_(args.qk_nope_head_dim()),
@@ -36,7 +37,9 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
       enable_lighting_indexer_(args.index_n_heads() > 0),
       index_topk_(args.index_topk()),
       v_head_dim_(args.v_head_dim()),
-      use_fused_mla_qkv_(false) {
+      eps_(args.rms_norm_eps()),
+      interleaved_(true),
+      use_fused_mla_qkv_(use_fused_mla_qkv) {
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   int64_t hidden_size = args.hidden_size();
   int64_t num_heads = args.n_heads();
@@ -55,8 +58,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
         "q_a_proj",
         ReplicatedLinear(
             hidden_size, q_lora_rank_, false, QuantArgs(), options));
-    q_a_layernorm_ = register_module(
-        "q_a_layernorm", RMSNorm(q_lora_rank_, args.rms_norm_eps(), options));
+    q_a_layernorm_ =
+        register_module("q_a_layernorm", RMSNorm(q_lora_rank_, eps_, options));
     q_b_proj_ = register_module("q_b_proj",
                                 ColumnParallelLinear(q_lora_rank_,
                                                      num_heads * qk_head_dim_,
@@ -83,8 +86,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                        false,
                                        QuantArgs(),
                                        options));
-  kv_a_layernorm_ = register_module(
-      "kv_a_layernorm", RMSNorm(kv_lora_rank_, args.rms_norm_eps(), options));
+  kv_a_layernorm_ =
+      register_module("kv_a_layernorm", RMSNorm(kv_lora_rank_, eps_, options));
   kv_b_proj_ = register_module(
       "kv_b_proj",
       ColumnParallelLinear(kv_lora_rank_,
@@ -109,7 +112,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                           max_position_embeddings,
                           args.rope_scaling_original_max_position_embeddings(),
                           args.rope_theta(),
-                          /*interleaved*/ true,
+                          interleaved_,
                           args.rope_scaling_factor(),
                           args.rope_extrapolation_factor(),
                           args.rope_scaling_attn_factor(),
@@ -160,6 +163,122 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                               options));
 }
 
+void DeepseekV2AttentionImpl::decode_q_pre_base(
+    torch::Tensor& q,
+    torch::Tensor& qr,
+    torch::Tensor& q_input,
+    const torch::Tensor& positions,
+    const AttentionMetadata& attn_metadata) {
+  if (q_lora_rank_ > 0) {
+    auto q_a = std::get<0>(q_a_layernorm_(q));
+    qr = q_a;
+    q = q_b_proj_(q_a).view({-1, num_local_heads_, qk_head_dim_});
+  }
+
+  // get q_nope, q_pe
+  const int32_t dim = -1;
+  auto q_vec = q.split({qk_nope_head_dim_, qk_rope_head_dim_}, dim);
+  auto q_nope = q_vec[0];
+  auto q_pe = q_vec[1];
+  // bmm(q_nope, w_kc_)
+  auto q_nope_transposed = q_nope.transpose(0, 1);
+  auto q_input_slice = q_input.slice(dim, 0, kv_lora_rank_).transpose(0, 1);
+  torch::bmm_out(q_input_slice, q_nope_transposed, w_kc_);
+  torch::Tensor k_nope;
+  rotary_emb_(q_pe,
+              k_nope,
+              positions,
+              attn_metadata.q_cu_seq_lens,
+              attn_metadata.max_query_len,
+              attn_metadata.is_prefill);
+  q_input.slice(dim, kv_lora_rank_) = q_pe;
+}
+
+void DeepseekV2AttentionImpl::decode_kv_pre_base(
+    torch::Tensor& latent_cache,
+    const torch::Tensor& positions,
+    const AttentionMetadata& attn_metadata) {
+  auto v_input = latent_cache.slice(-1, 0, kv_lora_rank_);
+  // pass the output address so that the output can be written to the address
+  // directly
+  v_input = std::get<0>(kv_a_layernorm_(v_input,
+                                        /*residual=*/std::nullopt,
+                                        v_input));
+  auto k_pe = latent_cache.slice(-1, kv_lora_rank_).unsqueeze(1);
+  torch::Tensor k_nope;
+  rotary_emb_(k_pe,
+              k_nope,
+              positions,
+              attn_metadata.q_cu_seq_lens,
+              attn_metadata.max_query_len,
+              attn_metadata.is_prefill);
+}
+
+void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
+    torch::Tensor& q,
+    torch::Tensor& qr,
+    torch::Tensor& q_input,
+    torch::Tensor& latent_cache,
+    torch::Tensor& kv_cache,
+    const torch::Tensor& positions,
+    const AttentionMetadata& attn_metadata) {
+  // forward_decoder_fused_mla_q
+  // fused_mla_q: q_a_layernorm + q_b_proj + split + bmm + rotary_emb
+  if (q_lora_rank_ > 0) {
+    qr = torch::empty_like(q);
+    if (q.dim() == 2) {
+      q = q.unsqueeze(1);
+    }
+    q_input = q_input.view(
+        {q.size(0), q.size(1), q_input.size(-2), q_input.size(-1)});
+    kernel::FusedMlaQParams fused_mla_q_params;
+    fused_mla_q_params.q = q;
+    fused_mla_q_params.output = q_input;
+    fused_mla_q_params.output_norm = qr.view(q.sizes());
+    fused_mla_q_params.gamma = q_a_layernorm_->weight();
+    fused_mla_q_params.smooth_quant_scale = q_b_proj_->smooth();
+    fused_mla_q_params.weight_b = q_b_proj_->weight();
+    fused_mla_q_params.weight_b_scale = q_b_proj_->per_channel_scale();
+    fused_mla_q_params.weight_c = weight_c_;
+    fused_mla_q_params.sin = rotary_emb_->get_sin_cache();
+    fused_mla_q_params.cos = rotary_emb_->get_cos_cache();
+    fused_mla_q_params.position_id = positions;
+    fused_mla_q_params.quant_mode = "none";
+    fused_mla_q_params.eps = eps_;
+    fused_mla_q_params.interleaved = interleaved_;
+    kernel::fused_mla_q(fused_mla_q_params);
+  } else {
+    decode_q_pre_base(q, qr, q_input, positions, attn_metadata);
+  }
+
+  // forward_decoder_fused_mla_kv
+  // fused_mla_kv: kv_a_layernorm + rotary_emb + reshape_paged_cache
+  if (latent_cache.dim() == 2) {
+    latent_cache = latent_cache.unsqueeze(1);
+  }
+  int32_t batch = latent_cache.size(0);
+  int32_t seq = latent_cache.size(1);
+  int32_t head_num = 1;
+  latent_cache =
+      latent_cache.view({batch, seq, head_num, latent_cache.size(-1)});
+  kernel::FusedMlaKVParams fused_mla_kv_params;
+  fused_mla_kv_params.input_kv = latent_cache;
+  fused_mla_kv_params.sin = rotary_emb_->get_sin_cache();
+  fused_mla_kv_params.cos = rotary_emb_->get_cos_cache();
+  fused_mla_kv_params.position_id = positions;
+  fused_mla_kv_params.gamma = kv_a_layernorm_->weight();
+  fused_mla_kv_params.kv_cache = kv_cache;
+  fused_mla_kv_params.kv_cache_scale = std::nullopt;
+  fused_mla_kv_params.slot_mapping =
+      attn_metadata.slot_mapping.view({batch, seq});
+  fused_mla_kv_params.cache_bs_id = std::nullopt;
+  fused_mla_kv_params.cache_seq_offset = std::nullopt;
+  fused_mla_kv_params.quant_mode = "none";
+  fused_mla_kv_params.eps = eps_;
+  fused_mla_kv_params.interleaved = interleaved_;
+  kernel::fused_mla_kv(fused_mla_kv_params);
+}
+
 torch::Tensor DeepseekV2AttentionImpl::forward(
     const torch::Tensor& positions,
     const torch::Tensor& hidden_states,
@@ -172,49 +291,25 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   torch::Tensor q_input =
       torch::empty({q_len, num_local_heads_, kv_lora_rank_ + qk_rope_head_dim_},
                    hidden_states.options());
-
-  // get q, qr
+  bool enable_fused_qkv = use_fused_mla_qkv_ && !only_prefill;
   if (q_lora_rank_ > 0) {
-    auto q_a = q_a_proj_(hidden_states);
-    q_a = std::get<0>(q_a_layernorm_(q_a));
-    qr = q_a;
-    q = q_b_proj_(q_a).view({-1, num_local_heads_, qk_head_dim_});
+    q = q_a_proj_(hidden_states);
   } else {
     q = q_proj_(hidden_states).view({-1, num_local_heads_, qk_head_dim_});
   }
-
-  // get q_nope, q_pe
-  auto q_vec = q.split({qk_nope_head_dim_, qk_rope_head_dim_}, -1);
-  auto q_nope = q_vec[0];
-  auto q_pe = q_vec[1];
-  // bmm(q_nope, w_kc_)
-  auto q_nope_transposed = q_nope.transpose(0, 1);
-  auto q_input_slice = q_input.slice(-1, 0, kv_lora_rank_).transpose(0, 1);
-  torch::bmm_out(q_input_slice, q_nope_transposed, w_kc_);
-
-  // get k_nope, k_pe
   auto latent_cache = kv_a_proj_with_mqa_(hidden_states);
-  auto v_input = latent_cache.slice(-1, 0, kv_lora_rank_);
-  auto k_input = latent_cache;
-  auto k_input_slice = k_input.slice(-1, 0, kv_lora_rank_);
-  // pass the output address so that the output can be written to the address
-  // directly
-  k_input_slice = std::get<0>(kv_a_layernorm_(v_input,
-                                              /*residual=*/std::nullopt,
-                                              k_input_slice));
-  k_input = k_input.unsqueeze(1);
-  auto k_pe = k_input.slice(-1, kv_lora_rank_);
-
-  // rope(q_pe, k_pe)
-  rotary_emb_(q_pe,
-              k_pe,
-              positions,
-              attn_metadata.q_cu_seq_lens,
-              attn_metadata.max_query_len,
-              attn_metadata.is_prefill);
-  q_input.slice(-1, kv_lora_rank_) = q_pe;
+  auto k_cache = kv_cache.get_k_cache();
+  if (enable_fused_qkv) {
+    decode_qkv_pre_fused(
+        q, qr, q_input, latent_cache, k_cache, positions, attn_metadata);
+  } else {
+    decode_q_pre_base(q, qr, q_input, positions, attn_metadata);
+    decode_kv_pre_base(latent_cache, positions, attn_metadata);
+  }
 
   // reshape q,k,v
+  auto v_input = latent_cache.slice(-1, 0, kv_lora_rank_);
+  auto k_input = latent_cache;
   q_input = q_input.view({q_input.size(0), -1});
   k_input = k_input.view({k_input.size(0), -1});
   v_input = v_input.view({v_input.size(0), -1});
@@ -224,16 +319,15 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   // communication, we will skip them if it is dummy run in data parallel
   AttentionMetadata attn_indexer_metadata = attn_metadata;
   if (!attn_metadata.is_dummy) {
+    // mla prefill save cache before flashattn
     if (only_prefill) {
       auto key = k_input.unsqueeze(1);
-      torch::Tensor k_cache = kv_cache.get_k_cache();
       xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
       reshape_paged_cache_params.key = key;
       reshape_paged_cache_params.k_cache = k_cache;
       reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
       xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
     }
-
     // indexer and update index params for attn
     attn_indexer_metadata = attn_metadata;
     attn_indexer_metadata.compute_dtype = "half";
@@ -263,7 +357,6 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   auto attn_bmm_trans_out = attn_bmm_output.transpose(0, 1);
   torch::bmm_out(attn_bmm_trans_out, attn_output.transpose(0, 1), w_vc_);
   attn_output = attn_bmm_output.flatten(1, 2);
-
   // o_proj
   auto output = o_proj_(attn_output);
   return output;

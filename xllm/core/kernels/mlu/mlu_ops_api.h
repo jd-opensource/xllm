@@ -288,4 +288,35 @@ void gather_split(const torch::Tensor& input,
                   const torch::Tensor& output_head,
                   const torch::Tensor& output_tail);
 
+void fused_mla_q(const torch::Tensor& input,
+                 torch::Tensor& output,
+                 torch::Tensor& output_scale,
+                 const std::optional<torch::Tensor>& output_norm,
+                 const torch::Tensor& gamma,
+                 const std::optional<torch::Tensor>& smooth_quant_scale,
+                 const torch::Tensor& weight_b,
+                 const torch::Tensor& weight_b_scale,
+                 const torch::Tensor& weight_c,
+                 const torch::Tensor& sin,
+                 const torch::Tensor& cos,
+                 const torch::Tensor& position_id,
+                 const std::string& quant_mode,
+                 double eps,
+                 bool interleaved);
+
+void fused_mla_kv(const torch::Tensor& input_kv,
+                  const torch::Tensor& sin,
+                  const torch::Tensor& cos,
+                  const torch::Tensor& position_id,
+                  const torch::Tensor& gamma,
+                  const torch::Tensor& kv_cache,
+                  const std::optional<torch::Tensor>& kv_cache_scale,
+                  const std::optional<torch::Tensor>& slot_mapping,
+                  const std::optional<torch::Tensor>& cache_bs_id,
+                  const std::optional<torch::Tensor>& cache_seq_offset,
+                  const std::string& quant_mode,
+                  bool is_paged_cache,
+                  double eps,
+                  bool interleaved);
+
 }  // namespace xllm::kernel::mlu

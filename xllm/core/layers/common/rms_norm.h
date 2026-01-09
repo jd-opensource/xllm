@@ -38,6 +38,8 @@ class RMSNormImpl : public torch::nn::Module {
 
   void load_state_dict(const StateDict& state_dict);
 
+  torch::Tensor weight() const { return weight_; }
+
  private:
   DEFINE_WEIGHT(weight);
   DEFINE_WEIGHT(bias);

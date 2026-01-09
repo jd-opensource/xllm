@@ -69,8 +69,19 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
     stream << name() << " " << weight_.sizes() << " " << weight_.device();
   }
 
-  // return the weight (for testing)
-  torch::Tensor weight() const { return weight_; }
+  torch::Tensor weight() const {
+    if (qweight_is_loaded_) {
+      return qweight_;
+    }
+    return weight_;
+  }
+  torch::Tensor per_channel_scale() const { return per_channel_scale_; }
+  std::optional<torch::Tensor> smooth() const {
+    if (smooth_is_loaded_) {
+      return smooth_;
+    }
+    return std::nullopt;
+  }
 
   bool is_weight_loaded() const { return weight_is_loaded_; }
 

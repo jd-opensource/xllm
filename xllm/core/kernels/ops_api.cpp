@@ -622,4 +622,47 @@ void gather_split(GatherSplitParams& params) {
 #endif
 }
 
+void fused_mla_q(FusedMlaQParams& params) {
+#if defined(USE_MLU)
+  mlu::fused_mla_q(params.q,
+                   params.output,
+                   params.output_scale,
+                   params.output_norm,
+                   params.gamma,
+                   params.smooth_quant_scale,
+                   params.weight_b,
+                   params.weight_b_scale,
+                   params.weight_c,
+                   params.sin,
+                   params.cos,
+                   params.position_id,
+                   params.quant_mode,
+                   params.eps,
+                   params.interleaved);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+void fused_mla_kv(FusedMlaKVParams& params) {
+#if defined(USE_MLU)
+  mlu::fused_mla_kv(params.input_kv,
+                    params.sin,
+                    params.cos,
+                    params.position_id,
+                    params.gamma,
+                    params.kv_cache,
+                    params.kv_cache_scale,
+                    params.slot_mapping,
+                    params.cache_bs_id,
+                    params.cache_seq_offset,
+                    params.quant_mode,
+                    params.is_paged_cache,
+                    params.eps,
+                    params.interleaved);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 }  // namespace xllm::kernel

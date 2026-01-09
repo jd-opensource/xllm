@@ -82,4 +82,8 @@ void masked_indexer_select_paged_kv(MaskedIndexerSelectPagedKVParams& params);
 
 void gather_split(GatherSplitParams& params);
 
+void fused_mla_q(FusedMlaQParams& params);
+
+void fused_mla_kv(FusedMlaKVParams& params);
+
 }  // namespace xllm::kernel

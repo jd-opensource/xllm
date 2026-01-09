@@ -46,9 +46,11 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   }
 
   // Initialize attention layers
+  const bool use_fused_mla_qkv = true;
   attention_ = register_module(
       "self_attn",
-      DeepseekV2Attention(model_args, quant_args, parallel_args_, options));
+      DeepseekV2Attention(
+          model_args, quant_args, parallel_args_, options, use_fused_mla_qkv));
 
   // Initialize norm layers
   input_norm_ = register_module(

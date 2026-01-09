@@ -37,7 +37,8 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   DeepseekV2AttentionImpl(const ModelArgs& args,
                           const QuantArgs& quant_args,
                           const ParallelArgs& parallel_args,
-                          const torch::TensorOptions& options);
+                          const torch::TensorOptions& options,
+                          bool use_fused_mla_qkv);
 
   torch::Tensor forward(const torch::Tensor& positions,
                         const torch::Tensor& hidden_states,
@@ -47,10 +48,29 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict);
 
  private:
+  void decode_q_pre_base(torch::Tensor& q,
+                         torch::Tensor& qr,
+                         torch::Tensor& q_input,
+                         const torch::Tensor& positions,
+                         const AttentionMetadata& attn_metadata);
+  void decode_kv_pre_base(torch::Tensor& latent_cache,
+                          const torch::Tensor& positions,
+                          const AttentionMetadata& attn_metadata);
+  void decode_qkv_pre_fused(torch::Tensor& q,
+                            torch::Tensor& qr,
+                            torch::Tensor& q_input,
+                            torch::Tensor& latent_cache,
+                            torch::Tensor& kv_cache,
+                            const torch::Tensor& positions,
+                            const AttentionMetadata& attn_metadata);
+
+ private:
   bool is_per_token_smoothquant_ = false;
   bool use_fused_mla_qkv_ = false;
   bool enable_lighting_indexer_ = false;
   bool has_trans_ = false;
+  bool interleaved_ = false;
+  double eps_;
   int64_t num_local_heads_;
   int64_t qk_head_dim_;
   int64_t v_head_dim_;
