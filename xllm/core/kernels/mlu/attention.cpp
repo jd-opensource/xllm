@@ -27,6 +27,26 @@ void reshape_paged_cache(torch::Tensor& key,
       key, value, k_cache, v_cache, slot_mapping, direction);
 }
 
+void reshape_from_cache(torch::Tensor& key,
+                        const std::optional<torch::Tensor>& value,
+                        const torch::Tensor& key_cache,
+                        const std::optional<torch::Tensor>& value_cache,
+                        const torch::Tensor& context_lengths,
+                        const int64_t max_context_len,
+                        const std::optional<torch::Tensor>& context_seq_offset,
+                        const std::optional<torch::Tensor>& block_tables,
+                        const std::optional<torch::Tensor>& cache_seq_offset) {
+  tmo::torch_api::reshape_from_cache(key,
+                                     value,
+                                     key_cache,
+                                     value_cache,
+                                     context_lengths,
+                                     max_context_len,
+                                     context_seq_offset,
+                                     block_tables,
+                                     cache_seq_offset);
+}
+
 void batch_prefill(const torch::Tensor& query,
                    const torch::Tensor& key,
                    const torch::Tensor& value,

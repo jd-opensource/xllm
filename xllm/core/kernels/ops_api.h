@@ -30,6 +30,8 @@ void active(ActivationParams& params);
 
 void reshape_paged_cache(ReshapePagedCacheParams& params);
 
+void reshape_from_cache(ReshapeFromCacheParams& params);
+
 void batch_prefill(AttentionParams& params);
 
 void batch_decode(AttentionParams& params);

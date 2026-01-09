@@ -177,6 +177,91 @@ torch::Tensor IndexerImpl::rotate_activation(
   return hadamard_transform_ref(input, hadamard_matrix);
 }
 
+IndexerRuntimeContext IndexerImpl::prepare_runtime_context(
+    const torch::Tensor& k_current_dense,
+    torch::Tensor& k_cache_paged,
+    torch::Tensor& q,
+    torch::Tensor& weights,
+    const AttentionMetadata& attn_metadata,
+    bool is_prefill,
+    int64_t num_tokens) {
+  IndexerRuntimeContext ctx;
+  auto device = attn_metadata.block_table.device();
+
+  // Allocate context_lens buffer
+  ctx.new_context_lens = torch::empty(
+      {num_tokens}, torch::TensorOptions().dtype(torch::kInt32).device(device));
+
+  if (is_prefill) {
+    // Prefill: flatten Q and weights
+    ctx.q = q;
+    ctx.weights = weights;
+    ctx.cu_seq_q_lens = attn_metadata.q_cu_seq_lens;
+    ctx.k_block_table = std::nullopt;
+
+    ctx.new_block_tables = torch::empty(
+        {num_tokens, index_topk_},
+        torch::TensorOptions().dtype(torch::kInt32).device(device));
+
+    if (attn_metadata.is_chunked_prefill) {
+      // NOTE: the kv_cu_seq_lens should already include the history tokens
+      ctx.cu_seq_k_lens = attn_metadata.kv_cu_seq_lens;
+
+      // Allocate contiguous memory for gathered k
+      int64_t total_k_len = ctx.cu_seq_k_lens[-1].item<int64_t>();
+      ctx._storage_k_full = torch::empty(
+          {total_k_len, head_dim_},
+          torch::TensorOptions().dtype(k_cache_paged.dtype()).device(device));
+
+      // Calculate sequence lengths by diff of offsets
+      auto seq_lens = torch::diff(ctx.cu_seq_k_lens);
+      int64_t max_context_len = seq_lens.max().item<int64_t>();
+
+      ctx.k_context_lens = seq_lens;
+
+      // Gather k from cache
+      xllm::kernel::ReshapeFromCacheParams gather_params;
+      gather_params.key = ctx._storage_k_full.unsqueeze(1);
+      gather_params.value = std::nullopt;
+      gather_params.key_cache = k_cache_paged;
+      gather_params.value_cache = std::nullopt;
+      gather_params.context_lengths = seq_lens;
+      gather_params.max_context_len = max_context_len;
+      gather_params.block_tables = attn_metadata.block_table;
+      gather_params.context_seq_offset = std::nullopt;
+      gather_params.cache_seq_offset = std::nullopt;
+
+      xllm::kernel::reshape_from_cache(gather_params);
+      ctx.k_cache_tensor = ctx._storage_k_full;
+    } else {
+      // Standard prefill: k is dense
+      ctx.cu_seq_k_lens = attn_metadata.q_cu_seq_lens;
+      ctx.k_context_lens = attn_metadata.kv_seq_lens;
+      ctx.k_cache_tensor = k_current_dense;
+    }
+  } else {
+    // Decode mode
+    int64_t batch_size = attn_metadata.kv_seq_lens.size(0);
+    auto seq_len = num_tokens / batch_size;
+
+    // Reshape q and weights for decode
+    ctx.q = q.view({batch_size, seq_len, n_heads_, head_dim_});
+    ctx.weights = weights.view({batch_size, seq_len, n_heads_});
+
+    ctx.new_block_tables = torch::empty(
+        {batch_size, seq_len, index_topk_},
+        torch::TensorOptions().dtype(torch::kInt32).device(device));
+
+    ctx.cu_seq_q_lens = std::nullopt;
+    ctx.cu_seq_k_lens = attn_metadata.q_cu_seq_lens;
+    ctx.k_block_table = attn_metadata.block_table;
+    ctx.k_cache_tensor = k_cache_paged;
+    ctx.k_context_lens = attn_metadata.kv_seq_lens;
+  }
+
+  return ctx;
+}
+
 std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
     const torch::Tensor& x,
     const torch::Tensor& qr,
@@ -242,73 +327,39 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
 
   k = k_unsqueezed.squeeze(1);
+
   // Unified parameter setup for both prefill and decode modes
-  torch::Tensor k_cache_tensor;
-  std::optional<torch::Tensor> cu_seq_q_lens, k_block_table;
-  torch::Tensor new_block_tables;
-  int64_t batch_size = attn_metadata.kv_seq_lens.size(0);
-  torch::Tensor block_table = attn_metadata.block_table;
-  torch::Tensor cu_seq_k_lens = attn_metadata.q_cu_seq_lens;
-
-  if (is_prefill) {
-    // Prefill mode parameters
-    cu_seq_q_lens = attn_metadata.q_cu_seq_lens;
-    k_block_table = std::nullopt;
-    k_cache_tensor = k;
-
-    // Prefill output tensors
-    new_block_tables = torch::empty({num_tokens, index_topk_},
-                                    torch::TensorOptions()
-                                        .dtype(torch::kInt32)
-                                        .device(block_table.device()));
-  } else {
-    // Decode mode parameters
-    cu_seq_q_lens = std::nullopt;
-    k_block_table = block_table;
-    k_cache_tensor = k_cache;
-    auto seq_len = num_tokens / batch_size;
-
-    // Reshape tensors for decode mode
-    q = q.view({batch_size, seq_len, n_heads_, head_dim_});
-    weights = weights.view({batch_size, seq_len, n_heads_});
-
-    // Decode output tensors
-    new_block_tables = torch::empty({batch_size, seq_len, index_topk_},
-                                    torch::TensorOptions()
-                                        .dtype(torch::kInt32)
-                                        .device(block_table.device()));
-  }
-  auto new_context_lens = torch::empty(
-      {num_tokens},
-      torch::TensorOptions().dtype(torch::kInt32).device(block_table.device()));
+  IndexerRuntimeContext ctx = prepare_runtime_context(
+      k, k_cache, q, weights, attn_metadata, is_prefill, x.size(0));
 
   // Call masked indexer select paged kv
   kernel::MaskedIndexerSelectPagedKVParams params;
   params.is_prefill = is_prefill;
-  params.query = q;
-  params.cu_seq_q_lens = cu_seq_q_lens.value_or(torch::Tensor());
-  params.cu_seq_k_lens = cu_seq_k_lens;
+  params.query = ctx.q;
+  params.weights = ctx.weights;
+  params.k_cache = ctx.k_cache_tensor;
+  params.k_context_lens = ctx.k_context_lens;
+  params.k_cache_block_table = ctx.k_block_table.value_or(torch::Tensor());
+  params.kv_cache_block_table = attn_metadata.block_table;
+  params.cu_seq_q_lens = ctx.cu_seq_q_lens.value_or(torch::Tensor());
+  params.cu_seq_k_lens = ctx.cu_seq_k_lens;
   params.q_scale = torch::Tensor();  // empty tensor as q_scale
-  params.weights = weights;
   params.softmax_scale = softmax_scale_;
-  params.k_cache = k_cache_tensor;
-  params.k_context_lens = attn_metadata.kv_seq_lens;
-  params.k_cache_block_table = k_block_table.value_or(torch::Tensor());
   params.k_scale_cache = torch::Tensor();  // empty tensor as k_scale_cache
   params.index_topk = index_topk_;
-  params.kv_cache_block_table = block_table;
   params.kv_cache_block_size = 1;  // only support 1 for now
-  params.new_block_table = new_block_tables;
-  params.new_context_lens = new_context_lens;
+  params.new_block_table = ctx.new_block_tables;
+  params.new_context_lens = ctx.new_context_lens;
   params.quant_block_size = 128;  // only support 128 for now
 
   xllm::kernel::masked_indexer_select_paged_kv(params);
 
   if (!is_prefill) {
-    new_block_tables = new_block_tables.view({-1, new_block_tables.size(-1)});
+    ctx.new_block_tables =
+        ctx.new_block_tables.view({-1, ctx.new_block_tables.size(-1)});
   }
 
-  return {new_block_tables, new_context_lens};
+  return {ctx.new_block_tables, ctx.new_context_lens};
 }
 
 // load the weight from the checkpoint
