@@ -926,6 +926,9 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
     if (batch_forward_type.is_empty() &&
         !batched_inputs[dp_rank].batch_forward_type.is_empty()) {
       batch_forward_type = batched_inputs[dp_rank].batch_forward_type;
+      if (batch_forward_type.is_chunked_prefill()) {
+        batch_forward_type = BatchForwardType::PREFILL;
+      }
     }
     dp_is_decode[dp_rank] = batch_forward_type.is_decode() &&
                             batched_inputs[dp_rank].q_max_seq_len == 1;
