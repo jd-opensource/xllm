@@ -33,7 +33,8 @@ XLLM_REC_Handler* service_startup_hook() {
   // the default value(XLLM_INIT_REC_OPTIONS_DEFAULT) will be used
   XLLM_InitOptions init_options;
   xllm_rec_init_options_default(&init_options);
-  strcpy(init_options.log_dir, "/export/home/huheng7/log");
+  snprintf(
+      init_options.log_dir, sizeof(init_options.log_dir), "/export/xllm/log");
 
   bool ret = xllm_rec_initialize(
       rec_handler, model_path.c_str(), devices.c_str(), &init_options);

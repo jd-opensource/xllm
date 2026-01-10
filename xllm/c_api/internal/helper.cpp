@@ -240,10 +240,10 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
 
   if (inference_type == InferenceType::LLM_COMPLETIONS ||
       inference_type == InferenceType::REC_COMPLETIONS) {
-    strcpy(response->object, "text_completion");
+    snprintf(response->object, sizeof(response->object), "text_completion");
   } else if (inference_type == InferenceType::LLM_CHAT_COMPLETIONS ||
              inference_type == InferenceType::REC_CHAT_COMPLETIONS) {
-    strcpy(response->object, "chat.completion");
+    snprintf(response->object, sizeof(response->object), "chat.completion");
   }
 
   response->choices.entries_size = output.outputs.size();
@@ -267,7 +267,7 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
       choice.message = new XLLM_ChatMessage();
       CHECK(nullptr != choice.message);
 
-      strcpy(choice.message->role, "assistant");
+      snprintf(choice.message->role, sizeof(choice.message->role), "assistant");
       size_t text_len = seq_output.text.length();
       choice.message->content = new char[text_len + 1];
       CHECK(nullptr != choice.message->content);
