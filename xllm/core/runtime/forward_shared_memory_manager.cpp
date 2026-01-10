@@ -1527,7 +1527,7 @@ void ForwardSharedMemoryManager::raw_input_read(ForwardInput& input,
       last_version_ = control_ptr_->version;
       break;
     }
-    std::this_thread::sleep_for(std::chrono::nanoseconds(NUM_WAIT_NANOSECONDS));
+    std::this_thread::sleep_for(std::chrono::nanoseconds(kNumWaitNanoseconds));
   }
 
   const char* data_ptr =
@@ -1587,7 +1587,7 @@ void ForwardSharedMemoryManager::raw_output_read(RawForwardOutput& output) {
       last_version_ = control_ptr_->version;
       break;
     }
-    std::this_thread::sleep_for(std::chrono::nanoseconds(NUM_WAIT_NANOSECONDS));
+    std::this_thread::sleep_for(std::chrono::nanoseconds(kNumWaitNanoseconds));
   }
 
   const char* data_ptr =
