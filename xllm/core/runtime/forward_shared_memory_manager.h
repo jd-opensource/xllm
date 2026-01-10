@@ -19,11 +19,13 @@ limitations under the License.
 #include "params_utils.h"
 #include "util/shared_memory_manager.h"
 
-#define PB_INPUT_SHM_SIZE (1024 * 1024 * 1024)  // 1GB
-#define PB_OUTPUT_SHM_SIZE (128 * 1024 * 1024)  // 128MB
-#define NUM_WAIT_NANOSECONDS (1000)             // 1us
-
 namespace xllm {
+
+constexpr size_t kInputShmSize =
+    static_cast<size_t>(1024) * 1024 * 1024;  // 1GB
+constexpr size_t kOutputShmSize =
+    static_cast<size_t>(128) * 1024 * 1024;    // 128MB
+constexpr int64_t kNumWaitNanoseconds = 1000;  // 1us
 
 struct ControlMetadata {
   volatile uint64_t version;
@@ -85,7 +87,7 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
         break;
       }
       std::this_thread::sleep_for(
-          std::chrono::nanoseconds(NUM_WAIT_NANOSECONDS));
+          std::chrono::nanoseconds(kNumWaitNanoseconds));
     }
 
     auto metadata = reinterpret_cast<PbMetadata*>(metadata_addr_);
