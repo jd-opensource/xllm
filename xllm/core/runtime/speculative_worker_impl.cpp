@@ -204,10 +204,10 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
       auto word_embedding = impl_->get_npu_word_embedding();
       draft_impl_->set_npu_word_embedding(word_embedding);
     } else {
-      // TODO: Support TORCH backend via torch_npu encapsulation in the future.
-      // Currently, it is explicitly disabled.
-      LOG(FATAL)
-          << "SpeculativeWorkerImpl::init_model not support TORCH backend";
+      auto head = impl_->get_lm_head();
+      draft_impl_->set_lm_head(head);
+      auto word_embedding = impl_->get_word_embedding();
+      draft_impl_->set_word_embedding(word_embedding);
     }
 #else
     auto head = impl_->get_lm_head();

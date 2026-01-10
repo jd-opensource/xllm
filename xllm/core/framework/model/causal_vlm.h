@@ -93,7 +93,7 @@ class CausalVLMImpl : public CausalVLM {
   void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) override {
     model_->set_npu_word_embedding(embedding);
   }
-#else
+#endif
   layer::LmHead get_lm_head() override {
     if constexpr (detail::has_get_lm_head<Model>::value) {
       return model_->get_lm_head();
@@ -125,7 +125,6 @@ class CausalVLMImpl : public CausalVLM {
       CausalLM::set_word_embedding(embedding);
     }
   }
-#endif
 
   torch::Device device() const override { return options_.device(); }
 
