@@ -11,9 +11,6 @@ cc_library(
     rotary_embedding_util.h
     fused_moe.h
     dense_mlp.h
-    qwen2_decoder_layer.h
-    qwen2_5_vision_layer.h
-    qwen3_moe_decoder_layer.h
     linear.h
     word_embedding_impl.h
     indexer.h
@@ -29,9 +26,6 @@ cc_library(
     rotary_embedding_util.cpp
     fused_moe.cpp
     dense_mlp.cpp
-    qwen2_decoder_layer.cpp
-    qwen2_5_vision_layer.cpp
-    qwen3_moe_decoder_layer.cpp
     linear.cpp
     word_embedding_impl.cpp
     indexer.cpp
@@ -53,6 +47,10 @@ cc_library(
     gflags::gflags
     torch
     :platform
+    $<$<BOOL:${USE_MLU}>:mlu_layers>
+    $<$<BOOL:${USE_CUDA}>:cuda_layers>
+    $<$<BOOL:${USE_ILU}>:ilu_layers>
+    $<$<BOOL:${USE_NPU}>:npu_torch_layers>
 )
 
 add_subdirectory(tests)

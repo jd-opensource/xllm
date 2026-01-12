@@ -16,11 +16,6 @@ limitations under the License.
 #pragma once
 
 #include <atb/atb_infer.h>
-#include <c10/core/ScalarType.h>
-#include <glog/logging.h>
-#include <torch/torch.h>
-
-#include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
@@ -35,8 +30,6 @@ limitations under the License.
 #include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
-
-#define PrintTensor(tensor) print_tensor(tensor, #tensor, 10, true, false);
 
 class Qwen3_VisionPatchEmbedImpl : public torch::nn::Module {
  public:

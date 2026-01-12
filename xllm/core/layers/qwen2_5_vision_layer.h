@@ -19,42 +19,41 @@ limitations under the License.
 
 #include <functional>
 
-#include "dense_mlp.h"
-#include "framework/kv_cache/kv_cache.h"
+#include "common/dense_mlp.h"
+#include "common/qwen2_vision_attention.h"
+#include "common/rms_norm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "fused_moe.h"
-#include "layers/common/rms_norm.h"
-#include "qwen2_attention.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
+class Qwen2_5_VisionLayerImpl : public torch::nn::Module {
  public:
-  explicit Qwen3MoeDecoderLayerImpl(const ModelContext& context,
-                                    int32_t layer_id);
-
-  ~Qwen3MoeDecoderLayerImpl() override = default;
+  Qwen2_5_VisionLayerImpl(const ModelContext& context,
+                          bool is_qwen3_style = false);
 
   void load_state_dict(const StateDict& state_dict);
 
   torch::Tensor forward(torch::Tensor& x,
-                        std::optional<torch::Tensor>& residual,
-                        torch::Tensor& positions,
-                        const AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache,
-                        const ModelInputParams& input_params);
+                        torch::Tensor& m_cos_pos,
+                        torch::Tensor& m_sin_pos,
+                        torch::Tensor& cu_seq_len,
+                        std::vector<int32_t>& cu_seq_len_vec,
+                        ModelInputParams& input_params,
+                        int node_id);
 
- private:
-  Qwen2Attention attention_{nullptr};
+ protected:
+  Qwen2VisionAttention attention_{nullptr};
   DenseMLP mlp_{nullptr};
-  FusedMoE moe_mlp_{nullptr};
-  RMSNorm input_norm_{nullptr};
-  RMSNorm post_norm_{nullptr};
+  RMSNorm norm1_{nullptr};
+  RMSNorm norm2_{nullptr};
 };
+TORCH_MODULE(Qwen2_5_VisionLayer);
 
 }  // namespace layer
 }  // namespace xllm

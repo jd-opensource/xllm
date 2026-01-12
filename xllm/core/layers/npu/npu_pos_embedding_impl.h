@@ -70,6 +70,7 @@ class NpuRotaryEmbeddingImpl : public BaseLayer {
   atb::Tensor internal_cos_sin_pos;
   atb::Tensor internal_position;
 };
+TORCH_MODULE(NpuRotaryEmbedding);
 
 class NpuPosEmbedding : public torch::nn::ModuleHolder<NpuRotaryEmbeddingImpl> {
  public:

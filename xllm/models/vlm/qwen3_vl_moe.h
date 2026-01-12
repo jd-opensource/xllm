@@ -15,18 +15,8 @@ limitations under the License.
 
 #pragma once
 
-#include <c10/core/ScalarType.h>
-#include <glog/logging.h>
-#include <torch/torch.h>
-
-#include <boost/algorithm/string.hpp>
-#include <unordered_map>
-
-#include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
-#include "core/framework/model_context.h"
-#include "core/layers/lm_head.h"
-#include "core/layers/qwen3_vision_encode_layer.h"
+#include "core/layers/common/lm_head.h"
+#include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/qwen3_moe.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"

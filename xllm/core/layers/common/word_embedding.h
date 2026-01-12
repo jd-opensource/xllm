@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include "word_embedding_impl.h"
 
 namespace xllm {
 namespace layer {

@@ -20,7 +20,7 @@ limitations under the License.
 
 #include <memory>
 
-#include "attention.h"
+#include "attention_metadata.h"
 #include "core/framework/model_context.h"
 #include "framework/model/model_args.h"
 #include "rotary_embedding_util.h"

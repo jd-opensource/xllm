@@ -15,20 +15,46 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include <torch/torch.h>
+
+#include <optional>
+
+#include "common/dense_mlp.h"
+#include "common/qwen2_attention.h"
+#include "common/rms_norm.h"
+#include "framework/kv_cache/kv_cache.h"
+#include "framework/model/model_args.h"
+#include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
+#include "framework/parallel_state/parallel_args.h"
+#include "framework/quant_args.h"
+#include "framework/state_dict/state_dict.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen2DecoderLayer
-    : public torch::nn::ModuleHolder<Qwen2DecoderLayerImpl> {
+class Qwen2DecoderLayerImpl : public torch::nn::Module {
  public:
-  using torch::nn::ModuleHolder<Qwen2DecoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen2DecoderLayerImpl;
+  explicit Qwen2DecoderLayerImpl(const ModelContext& context);
 
-  Qwen2DecoderLayer(const ModelContext& context)
-      : ModuleHolder(std::make_shared<Qwen2DecoderLayerImpl>(context)) {}
+  void load_state_dict(const StateDict& state_dict);
+
+  torch::Tensor forward(torch::Tensor& x,
+                        std::optional<torch::Tensor>& residual,
+                        torch::Tensor& positions,
+                        const AttentionMetadata& attn_metadata,
+                        KVCache& kv_cache,
+                        const ModelInputParams& input_params);
+
+ private:
+  Qwen2Attention attention_{nullptr};
+  DenseMLP mlp_{nullptr};
+  RMSNorm input_norm_{nullptr};
+  RMSNorm post_norm_{nullptr};
+
+  ParallelArgs parallel_args_;
 };
+TORCH_MODULE(Qwen2DecoderLayer);
 
 }  // namespace layer
 }  // namespace xllm

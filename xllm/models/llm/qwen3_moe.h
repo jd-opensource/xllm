@@ -20,76 +20,12 @@ limitations under the License.
 
 namespace xllm {
 
-class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
- public:
-  Qwen3MoeDecoderLayerImpl(const ModelContext& context, const int32_t i) {
-    // register submodules
-    decoder_layer_ = register_module("decoder_layer",
-                                     layer::Qwen3MoeDecoderLayer(context, i));
-  }
-
-  torch::Tensor forward(torch::Tensor& x,
-                        std::optional<torch::Tensor>& residual,
-                        torch::Tensor& positions,
-                        const layer::AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache,
-                        const ModelInputParams& input_params) {
-    return decoder_layer_(
-        x, residual, positions, attn_metadata, kv_cache, input_params);
-  }
-
-  void load_state_dict(const StateDict& state_dict) {
-    auto experts_state_dict = state_dict.get_dict_with_prefix("mlp.experts.");
-    auto fused_gate_up = experts_state_dict.get_tensor("gate_up_proj");
-    auto fused_down = experts_state_dict.get_tensor("down_proj");
-
-    bool is_fused = fused_gate_up.defined() && fused_down.defined();
-
-    if (is_fused) {
-      torch::Tensor expert_gate_up = fused_gate_up;
-      torch::Tensor expert_down = fused_down;
-
-      const int num_experts = expert_gate_up.size(0);
-
-      auto chunks = expert_gate_up.chunk(2, /*dim=*/-1);
-      auto expert_gate = chunks[0].contiguous();
-      auto expert_up = chunks[1].contiguous();
-
-      std::unordered_map<std::string, torch::Tensor> out_state_dict;
-      for (const auto& [name, tensor] : state_dict) {
-        if (name.find("self_attn.") == 0 || name.find("mlp.gate.") == 0 ||
-            name.find("input_layernorm.") == 0 ||
-            name.find("post_attention_layernorm.") == 0) {
-          out_state_dict.emplace(name, tensor);
-        }
-      }
-
-      for (int i = 0; i < num_experts; ++i) {
-        auto gate_i = expert_gate[i].transpose(0, 1);
-        auto up_i = expert_up[i].transpose(0, 1);
-        auto down_i = expert_down[i].transpose(0, 1);
-
-        const std::string base = "mlp.experts." + std::to_string(i) + ".";
-        out_state_dict.emplace(base + "gate_proj.weight", gate_i);
-        out_state_dict.emplace(base + "up_proj.weight", up_i);
-        out_state_dict.emplace(base + "down_proj.weight", down_i);
-      }
-      decoder_layer_->load_state_dict(StateDict(std::move(out_state_dict)));
-    } else {
-      decoder_layer_->load_state_dict(state_dict);
-    }
-  }
-
- private:
-  layer::Qwen3MoeDecoderLayer decoder_layer_{nullptr};
-};
-TORCH_MODULE(Qwen3MoeDecoderLayer);
-
-class Qwen3MoeModelImpl : public LlmModelImplBase<Qwen3MoeDecoderLayer> {
+class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
  public:
   Qwen3MoeModelImpl(const ModelContext& context)
-      : LlmModelImplBase<Qwen3MoeDecoderLayer>("qwen3_moe",
-                                               context.get_model_args()) {
+      : LlmModelImplBase<layer::Qwen3MoeDecoderLayer>(
+            "qwen3_moe",
+            context.get_model_args()) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     layers_.reserve(model_args.n_layers());
@@ -106,7 +42,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<Qwen3MoeDecoderLayer> {
         register_module("embed_tokens", layer::WordEmbedding(context));
     norm_ = register_module("norm", layer::RMSNorm(context));
     for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto layer = Qwen3MoeDecoderLayer(context, i);
+      auto layer = layer::Qwen3MoeDecoderLayer(context, i);
       layers_.push_back(layer);
     }
   }

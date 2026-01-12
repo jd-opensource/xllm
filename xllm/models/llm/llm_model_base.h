@@ -18,54 +18,16 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <string>
-#include <typeinfo>
 #include <vector>
 
 #include "core/common/interruption_bus.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/lm_head.h"
+#include "core/layers/common/lm_head.h"
 #include "models/model_registry.h"
-#if defined(USE_CUDA)
-#include "core/layers/cuda/attention.h"
-#endif
-#if defined(USE_ILU)
-#include "core/layers/ilu/attention.h"
-#endif
-#if defined(USE_MLU)
-#include "core/layers/mlu/attention.h"
-#endif
 
 namespace xllm {
-
-template <typename DecoderType>
-class LlmDecoderLayerImplBase : public torch::nn::Module {
- public:
-  LlmDecoderLayerImplBase(const ModelContext& context) {
-    // register submodules
-    decoder_layer_ = register_module("decoder_layer", DecoderType(context));
-  }
-
-  virtual torch::Tensor forward(torch::Tensor& x,
-                                std::optional<torch::Tensor>& residual,
-                                torch::Tensor& positions,
-                                const layer::AttentionMetadata& attn_metadata,
-                                KVCache& kv_cache,
-                                const ModelInputParams& input_params) {
-    return decoder_layer_(
-        x, residual, positions, attn_metadata, kv_cache, input_params);
-  }
-
-  // load the weight from the checkpoint
-  virtual void load_state_dict(const StateDict& state_dict) {
-    // call each submodule's load_state_dict function
-    decoder_layer_->load_state_dict(state_dict);
-  }
-
- private:
-  DecoderType decoder_layer_{nullptr};
-};
 
 template <typename DecoderLayerType>
 class LlmModelImplBase : public torch::nn::Module {

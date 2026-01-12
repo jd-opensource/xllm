@@ -1,25 +1,6 @@
 include(cc_library)
 include(cc_test)
 
-# Define the base dependencies
-set(BASE_DEPS
-  :common
-  :flags
-  :layers
-  :prefix_cache
-  :block
-  :processors
-  :chat_template
-  glog::glog
-  torch
-  torch_python
-)
-
-if(USE_NPU)
-  list(APPEND BASE_DEPS :platform_npu)
-endif()
-
-# Define the library
 cc_library(
   NAME 
     model
@@ -36,9 +17,17 @@ cc_library(
   SRCS
     npu_dp_ep_padding.cpp
   DEPS
-    ${BASE_DEPS}
+    :common
+    :common_layers
+    $<$<BOOL:${USE_NPU}>:npu_layers>
+    :kv_cache
+    :processors
+    :chat_template
+    glog::glog
+    torch
+    torch_python
+    $<$<BOOL:${USE_NPU}>:platform_npu>
 )
-target_link_libraries(model PRIVATE :kv_cache)
 
 if(USE_NPU)
 cc_test(
@@ -47,7 +36,6 @@ cc_test(
     SRCS
       npu_dp_ep_padding_test.cpp
     DEPS
-      :flags
       :parallel_state
       torch
       model

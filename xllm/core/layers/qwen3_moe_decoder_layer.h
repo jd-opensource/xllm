@@ -15,21 +15,43 @@ limitations under the License.
 
 #pragma once
 
-#include "config.h"
+#include <torch/torch.h>
+
+#include "common/dense_mlp.h"
+#include "common/fused_moe.h"
+#include "common/qwen2_attention.h"
+#include "common/rms_norm.h"
+#include "framework/kv_cache/kv_cache.h"
+#include "framework/model/model_args.h"
+#include "framework/model/model_input_params.h"
+#include "framework/model_context.h"
+#include "framework/state_dict/state_dict.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3MoeDecoderLayer
-    : public torch::nn::ModuleHolder<Qwen3MoeDecoderLayerImpl> {
+class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
  public:
-  using torch::nn::ModuleHolder<Qwen3MoeDecoderLayerImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = Qwen3MoeDecoderLayerImpl;
+  explicit Qwen3MoeDecoderLayerImpl(const ModelContext& context,
+                                    int32_t layer_id);
 
-  Qwen3MoeDecoderLayer(const ModelContext& context, int32_t layer_id)
-      : Qwen3MoeDecoderLayer(
-            std::make_shared<Qwen3MoeDecoderLayerImpl>(context, layer_id)) {}
+  void load_state_dict(const StateDict& state_dict);
+
+  torch::Tensor forward(torch::Tensor& x,
+                        std::optional<torch::Tensor>& residual,
+                        torch::Tensor& positions,
+                        const AttentionMetadata& attn_metadata,
+                        KVCache& kv_cache,
+                        const ModelInputParams& input_params);
+
+ private:
+  Qwen2Attention attention_{nullptr};
+  DenseMLP mlp_{nullptr};
+  FusedMoE moe_mlp_{nullptr};
+  RMSNorm input_norm_{nullptr};
+  RMSNorm post_norm_{nullptr};
 };
+TORCH_MODULE(Qwen3MoeDecoderLayer);
 
 }  // namespace layer
 }  // namespace xllm
