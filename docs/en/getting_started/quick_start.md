@@ -83,7 +83,7 @@ sudo docker run -it \
 
 ## Build xllm
 
-If you download a release image, i.e., an image with a version number in the tag, you can skip this step because the release image comes with a pre-compiled xllm binary, located at `/usr/loacl/bin/xllm`.
+If you download a release image, i.e., an image with a version number in the tag, you can skip this step because the release image comes with a pre-compiled xllm binary, located at `/usr/local/bin/xllm`.
 
 Download xllm and dependencies:
 ```bash
