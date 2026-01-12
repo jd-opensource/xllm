@@ -177,6 +177,9 @@ class WorkerImpl {
 
   Status get_status() const { return status_; }
 
+  // model context, includes model args, parallel args and date type etc.
+  mutable ModelContext context_;
+
  private:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
   // Only used for deepseek chunked prefill ops on npu device
@@ -212,9 +215,6 @@ class WorkerImpl {
 
   // parallel args of current instance
   ParallelArgs parallel_args_;
-
-  // model context, includes model args, parallel args and date type etc.
-  mutable ModelContext context_;
 
   // kv caches
   std::vector<xllm::KVCache> kv_caches_;
