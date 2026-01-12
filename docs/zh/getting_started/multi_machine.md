@@ -66,7 +66,6 @@ rm -rf core.*
 
 source /usr/local/Ascend/ascend-toolkit/set_env.sh 
 source /usr/local/Ascend/nnal/atb/set_env.sh
-export ASCEND_RT_VISIBLE_DEVICES=0
 export HCCL_IF_BASE_PORT=43432  # HCCL 通信基础端口
 
 MODEL_PATH="/path/to/your/DeepSeek-R1"             # 模型路径
