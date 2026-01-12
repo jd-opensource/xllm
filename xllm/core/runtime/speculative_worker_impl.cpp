@@ -83,7 +83,7 @@ int32_t calculate_kv_len(const Slice<int32_t>& kv_seq_lens_slice,
                          int32_t offset) {
 #if defined(USE_NPU)
   return kv_seq_lens_slice[seq_id] + offset;
-#elif defined(USE_MLU) || defined(USE_CUDA)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
   return kv_seq_lens_slice[seq_id + 1] - kv_seq_lens_slice[seq_id] + offset;
 #endif
 }

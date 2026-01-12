@@ -35,15 +35,24 @@ void residual_layer_norm(torch::Tensor& input,
       at::TensorOptions().dtype(input.scalar_type()).device(input.device())));
   auto residual_ = residual.value_or(torch::zeros_like(input));
   std::optional<torch::Tensor> output_ = output;
-  infer::residual_layer_norm(input,
-                             residual_,
-                             weight,
-                             beta_,
-                             bias,
-                             output_,
-                             residual_out,
-                             1.0,
-                             eps,
-                             false);
+  infer::residual_rms_norm(input,
+                           residual_,
+                           weight,
+                           output_,
+                           residual_out,
+                           bias,
+                           /*alpha=*/1.0,
+                           eps,
+                           false);
+  residual_out = residual_;
 }
+
+void rms_norm(torch::Tensor& output,
+              torch::Tensor& input,
+              torch::Tensor& weight,
+              double eps) {
+  std::optional<torch::Tensor> fused_bias = std::nullopt;
+  infer::rms_norm(input, weight, output, fused_bias, eps);
+}
+
 }  // namespace xllm::kernel::ilu

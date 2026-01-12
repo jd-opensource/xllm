@@ -36,12 +36,6 @@ void reshape_paged_cache(torch::Tensor& key,
     value_token_stride = value_.stride(0);
   }
   slot_mapping = slot_mapping.to(at::kLong);
-  // translate kvcache shape from [n_blocks, block_size, n_heads, head_dim] to
-  // (num_blocks, num_heads, block_size, head_size)
-  key_cache = key_cache.permute({0, 2, 1, 3}).contiguous();
-  if (value_cache_.defined()) {
-    value_cache_ = value_cache_.permute({0, 2, 1, 3}).contiguous();
-  }
   infer::vllm_reshape_and_cache(key,
                                 value_,
                                 key_cache,
@@ -63,6 +57,7 @@ void batch_prefill(torch::Tensor& query,
                    const std::optional<torch::Tensor>& q_quant_scale,
                    const std::optional<torch::Tensor>& k_quant_scale,
                    const std::optional<torch::Tensor>& v_quant_scale,
+                   const std::optional<torch::Tensor>& block_tables,
                    int64_t max_query_len,
                    int64_t max_seq_len,
                    float scale,
@@ -78,24 +73,25 @@ void batch_prefill(torch::Tensor& query,
   auto q_quant_scale_ = q_quant_scale.value_or(torch::Tensor());
   auto k_quant_scale_ = k_quant_scale.value_or(torch::Tensor());
   auto v_quant_scale_ = v_quant_scale.value_or(torch::Tensor());
-
-  infer::ixinfer_flash_attn_unpad(query,
-                                  key,
-                                  value,
-                                  output,
-                                  q_cu_seq_lens_,
-                                  kv_cu_seq_lens_,
-                                  max_query_len,
-                                  max_seq_len,
-                                  is_causal,
-                                  window_size_left,
-                                  window_size_right,
-                                  static_cast<double>(scale),
-                                  softcap,
-                                  sqrt_alibi,
-                                  alibi_slope,
-                                  c10::nullopt,
-                                  output_lse);
+  auto block_tables_ = block_tables.value_or(torch::Tensor());
+  infer::ixinfer_flash_attn_unpad_with_block_tables(query,
+                                                    key,
+                                                    value,
+                                                    output,
+                                                    block_tables_,
+                                                    q_cu_seq_lens_,
+                                                    kv_cu_seq_lens_,
+                                                    max_query_len,
+                                                    max_seq_len,
+                                                    is_causal,
+                                                    window_size_left,
+                                                    window_size_right,
+                                                    static_cast<double>(scale),
+                                                    softcap,
+                                                    sqrt_alibi,
+                                                    alibi_slope,
+                                                    c10::nullopt,
+                                                    output_lse);
 }
 
 void batch_decode(torch::Tensor& query,
@@ -131,22 +127,20 @@ void batch_decode(torch::Tensor& query,
                         output.size(2),
                         output.size(3)})
                  .contiguous();
+    ;
   }
   auto v_cache_ = v_cache.value_or(torch::Tensor());
-  k_cache = k_cache.permute({0, 2, 1, 3}).contiguous();
-  v_cache_ = v_cache_.permute({0, 2, 1, 3}).contiguous();
   int64_t num_kv_heads = k_cache.size(1);
   int64_t page_block_size = k_cache.size(2);
   double softcap = 0.0;
   bool enable_cuda_graph = false;
   bool use_sqrt_alibi = false;
-  // check_tensor_contiguous(k_cache, query.dtype());
 
   infer::vllm_paged_attention(output,
                               query,
                               k_cache,
                               v_cache_,
-                              static_cast<int64_t>(num_kv_heads),
+                              num_kv_heads,
                               scale,
                               block_table,
                               seq_lens,
@@ -154,8 +148,8 @@ void batch_decode(torch::Tensor& query,
                               max_seq_len,
                               alibi_slope,
                               is_causal,
-                              window_size_left,
-                              window_size_right,
+                              (int32_t)window_size_left,
+                              (int32_t)window_size_right,
                               softcap,
                               enable_cuda_graph,
                               use_sqrt_alibi,

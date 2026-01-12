@@ -128,16 +128,11 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
   attention_params.compute_dtype = attn_metadata.compute_dtype;
   attention_params.max_query_len = attn_metadata.max_query_len;
 
-  // TODO: support chunked prefill
-  CHECK(!attn_metadata.is_chunked_prefill)
-      << "chunked prefill is not supported";
-
-  attention_params.key = key.view({-1, num_kv_heads_, head_size_});
-  attention_params.value = value.view({-1, num_kv_heads_, head_size_v});
-  attention_params.block_table = std::nullopt;
-
   attention_params.kv_cu_seq_lens = attn_metadata.kv_cu_seq_lens;
   attention_params.q_cu_seq_lens = attn_metadata.q_cu_seq_lens;
+  attention_params.key = k_cache;
+  attention_params.value = v_cache.value();
+  attention_params.block_table = attn_metadata.block_table;
   xllm::kernel::batch_prefill(attention_params);
 }
 
@@ -151,14 +146,14 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
   attention_params.query = query.view({-1, 1, num_heads_, head_size_});
   attention_params.output = output.view({-1, 1, num_heads_, head_size_v});
   attention_params.output_lse = std::nullopt;
-  attention_params.max_seq_len = attn_metadata.max_seq_len;
+  attention_params.max_seq_len =
+      attn_metadata.block_table.size(-1) * k_cache.size(2);
   attention_params.window_size_left = sliding_window_;
   attention_params.scale = scale_;
   attention_params.compute_dtype = attn_metadata.compute_dtype;
   attention_params.k_cache = k_cache;
   attention_params.v_cache = v_cache;
 
-  // for mlu
   attention_params.block_table = attn_metadata.block_table;
   attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
 

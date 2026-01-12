@@ -18,13 +18,14 @@ limitations under the License.
 #include "utils.h"
 
 namespace ixformer::infer {
-at::Tensor ixinfer_flash_attn_unpad(
-    at::Tensor& query,
-    at::Tensor& key,
-    at::Tensor& value,
-    at::Tensor& out,
-    at::Tensor& cu_seq_q,
-    at::Tensor& cu_seq_k,
+torch::Tensor ixinfer_flash_attn_unpad_with_block_tables(
+    torch::Tensor& query,
+    torch::Tensor& key_cache,
+    torch::Tensor& value_cache,
+    torch::Tensor& out,
+    torch::Tensor& block_tables,
+    torch::Tensor& cu_seq_q,
+    torch::Tensor& cu_seq_k,
     int64_t max_seq_q,
     int64_t max_seq_k,
     bool is_causal,
@@ -33,54 +34,61 @@ at::Tensor ixinfer_flash_attn_unpad(
     double scale,
     double softcap,
     bool sqrt_alibi,
-    const c10::optional<at::Tensor>& alibi_slopes,
-    const c10::optional<at::Tensor>& sinks,
-    c10::optional<at::Tensor>& lse);
+    const std::optional<torch::Tensor>& alibi_slopes,
+    const std::optional<torch::Tensor>& sinks,
+    std::optional<torch::Tensor>& lse);
 
-void silu_and_mul(at::Tensor& input, at::Tensor& output);
+void silu_and_mul(torch::Tensor& input, torch::Tensor& output);
 
-at::Tensor vllm_paged_attention(at::Tensor& out,
-                                at::Tensor& query,
-                                at::Tensor& key_cache,
-                                at::Tensor& value_cache,
-                                int64_t num_kv_heads,
-                                double scale,
-                                at::Tensor& block_tables,
-                                at::Tensor& context_lens,
-                                int64_t block_size,
-                                int64_t max_context_len,
-                                const c10::optional<at::Tensor>& alibi_slopes,
-                                bool causal,
-                                int window_left,
-                                int window_right,
-                                double softcap,
-                                bool enable_cuda_graph,
-                                bool use_sqrt_alibi,
-                                const c10::optional<at::Tensor>& sinks);
+torch::Tensor vllm_paged_attention(
+    torch::Tensor& out,
+    torch::Tensor& query,
+    torch::Tensor& key_cache,
+    torch::Tensor& value_cache,
+    int64_t num_kv_heads,
+    double scale,
+    torch::Tensor& block_tables,
+    torch::Tensor& context_lens,
+    int64_t block_size,
+    int64_t max_context_len,
+    const std::optional<torch::Tensor>& alibi_slopes,
+    bool causal,
+    int32_t window_left,
+    int32_t window_right,
+    double softcap,
+    bool enable_cuda_graph,
+    bool use_sqrt_alibi,
+    const std::optional<torch::Tensor>& sinks);
 
-void vllm_reshape_and_cache(at::Tensor& key,
-                            at::Tensor& value,
-                            at::Tensor& key_cache,
-                            at::Tensor& value_cache,
-                            at::Tensor& slot_mapping,
+void vllm_reshape_and_cache(torch::Tensor& key,
+                            torch::Tensor& value,
+                            torch::Tensor& key_cache,
+                            torch::Tensor& value_cache,
+                            torch::Tensor& slot_mapping,
                             int64_t key_token_stride,
                             int64_t value_token_stride);
 
-void vllm_rotary_embedding(at::Tensor& positions,
-                           at::Tensor& query,
-                           at::Tensor& key,
+void vllm_rotary_embedding(torch::Tensor& positions,
+                           torch::Tensor& query,
+                           torch::Tensor& key,
                            int64_t head_size,
-                           at::Tensor& cos_sin_cache,
+                           torch::Tensor& cos_sin_cache,
                            bool is_neox);
 
-void residual_layer_norm(at::Tensor& input,
-                         at::Tensor& residual,
-                         at::Tensor& weight,
-                         at::Tensor& bias,
-                         c10::optional<at::Tensor>& fused_bias,
-                         c10::optional<at::Tensor>& output,
-                         c10::optional<at::Tensor>& residual_output,
-                         double alpha,
-                         double eps,
-                         bool is_post);
+void residual_rms_norm(torch::Tensor& input,
+                       torch::Tensor& residual,
+                       torch::Tensor& weight,
+                       std::optional<torch::Tensor>& output,
+                       std::optional<torch::Tensor>& residual_output,
+                       std::optional<torch::Tensor>& fused_bias,
+                       double alpha,
+                       double eps,
+                       bool is_post);
+
+void rms_norm(torch::Tensor& input,
+              torch::Tensor& weight,
+              torch::Tensor& output,
+              std::optional<torch::Tensor>& fused_bias,
+              double eps);
+
 }  // namespace ixformer::infer

@@ -380,6 +380,11 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   }
 #endif
 
+#if defined(USE_ILU)
+  for (auto& shape : kv_cache_shape) {
+    std::swap(shape[1], shape[2]);
+  }
+#endif
   LOG(INFO) << "Initializing k cache with shape: [" << kv_cache_shape[0] << "]";
   LOG(INFO) << "Initializing v cache with shape: [" << kv_cache_shape[1] << "]";
   if (enable_lighting_indexer) {
