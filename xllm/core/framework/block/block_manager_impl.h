@@ -42,7 +42,8 @@ class BlockManagerImpl : public BlockManager {
 
   // cache blocks when enable prefix cache
   void cache(const Slice<int32_t>& token_ids,
-             std::vector<Block>& blocks) override;
+             std::vector<Block>& blocks,
+             size_t existed_shared_blocks_num = 0) override;
   void cache(const std::vector<Block>& blocks) override;
 
   void get_merged_kvcache_event(KvCacheEvent* event) const override;

@@ -248,7 +248,9 @@ void BlockManagerPool::cache(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
   const auto token_ids = sequence->cached_tokens();
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
-  block_managers_[dp_rank]->cache(token_ids, *blocks);
+  auto existed_shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
+  block_managers_[dp_rank]->cache(
+      token_ids, *blocks, existed_shared_blocks_num);
 }
 
 void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {
