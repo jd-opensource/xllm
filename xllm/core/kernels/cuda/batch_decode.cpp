@@ -13,8 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <glog/logging.h>
+
 #include <unordered_map>
 
+#include "core/common/global_flags.h"
 #include "cuda_ops_api.h"
 #include "function_factory.h"
 #include "utils.h"
@@ -38,12 +41,24 @@ void batch_decode(const std::string& uri,
                   std::optional<torch::Tensor>& output_lse,
                   bool enable_cuda_graph,
                   bool use_tensor_core,
-                  torch::Tensor kv_seq_lens) {
+                  torch::Tensor kv_seq_lens,
+                  std::optional<torch::Tensor> qo_indptr) {
+  VLOG(kGraphExecutorLogVerboseLevel) << "plan_info: " << plan_info;
   if (use_tensor_core) {
-    const int64_t batch_size = paged_kv_last_page_len.size(0);
-    torch::Tensor qo_indptr_host =
-        get_cache_buffer(batch_size + 1, torch::kCPU);
-    torch::Tensor qo_indptr = qo_indptr_host.to(torch::kCUDA);
+    torch::Tensor qo_indptr_to_use;
+    if (qo_indptr.has_value()) {
+      // Use provided qo_indptr from attn_metadata
+      // TODO: consturct qo_indptr in CUDA graph execution
+      qo_indptr_to_use = qo_indptr.value();
+      VLOG(kGraphExecutorLogVerboseLevel)
+          << "use provided qo_indptr in CUDA graph execution";
+    } else {
+      // Create qo_indptr if not provided (backward compatibility)
+      const int64_t batch_size = paged_kv_last_page_len.size(0);
+      torch::Tensor qo_indptr_host =
+          get_cache_buffer(batch_size + 1, torch::kCPU);
+      qo_indptr_to_use = qo_indptr_host.to(torch::kCUDA);
+    }
 
     FunctionFactory::get_instance().fa2_prefill_paged_run_func(uri).call(
         float_workspace_buffer,
@@ -52,7 +67,7 @@ void batch_decode(const std::string& uri,
         query,
         k_cache,
         v_cache,
-        qo_indptr,
+        qo_indptr_to_use,
         paged_kv_indptr,
         paged_kv_indices,
         paged_kv_last_page_len,

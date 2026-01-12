@@ -109,7 +109,12 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
 
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();
-    auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
+    if (!modified_input_params.attn_metadata) {
+      modified_input_params.attn_metadata =
+          std::make_shared<layer::AttentionMetadata>(
+              layer::AttentionMetadataBuilder::build(modified_input_params));
+    }
+    auto& attn_metadata = *(modified_input_params.attn_metadata);
     bool only_prefill =
         (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
     if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {

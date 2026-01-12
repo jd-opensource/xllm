@@ -17,9 +17,7 @@ limitations under the License.
 
 #include "layers/common/attention_metadata.h"
 
-namespace xllm {
-namespace layer {
-namespace flashinfer {
+namespace xllm::layer::flashinfer {
 
 void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                       const std::string& backend,
@@ -37,6 +35,4 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                       bool causal,
                       bool use_tensor_core);
 
-}  // namespace flashinfer
-}  // namespace layer
-}  // namespace xllm
+}  // namespace xllm::layer::flashinfer

@@ -57,6 +57,13 @@ xLLM uses gflags to manage service startup parameters. The specific parameter me
 | `num_speculative_tokens` | `int32` | 0 | Any integer, suggestion 1 or 2 | The number of tokens output by the MTP model per step. |  |
 
 
+## Graph Execution Related Parameters
+| Parameter Name | Type | Default Value | Other Values | Description | Notes |
+|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
+| `enable_graph` | `bool` | false | true | Whether to enable graph execution mode to optimize decode phase performance. Only applied during decode phase and does not take effect during prefill phase. Supports CUDA Graph (GPU), ACL Graph (NPU), and MLU Graph. | [Details](./features/acl_graph.md) |
+| `max_seq_len_for_graph_mode` | `int32` | 0 | Any integer greater than 0 | Maximum sequence length supported by graph execution mode. If 0, uses the model's maximum position embeddings length. |  |
+
+
 ## Parameters for Use with xLLM-service
 | Parameter Name | Type | Default Value | Other Values | Description | Notes |
 |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|

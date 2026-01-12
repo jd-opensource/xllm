@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <optional>
 #include <variant>
 
@@ -31,6 +32,9 @@ limitations under the License.
 #include "util/tensor_helper.h"
 
 namespace xllm {
+namespace layer {
+struct AttentionMetadata;
+}  // namespace layer
 
 struct OneRecModelInputParams {
   enum class RecStage {
@@ -451,6 +455,13 @@ struct ModelInputParams {
     torch::Tensor tiling_data;
   };
   GraphBuffer graph_buffer;
+
+  // Optional attention metadata, built by executor
+  // Using shared_ptr with forward declaration to avoid circular dependency
+  std::shared_ptr<layer::AttentionMetadata> attn_metadata;
+
+  // Flag for CUDA graph capture mode
+  bool enable_cuda_graph = false;
 };
 
 }  // namespace xllm

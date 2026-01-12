@@ -22,6 +22,8 @@ limitations under the License.
 #include "runtime/acl_graph_executor_impl.h"
 #elif defined(USE_MLU)
 #include "runtime/mlu_graph_executor_impl.h"
+#elif defined(USE_CUDA)
+#include "runtime/cuda_graph_executor_impl.h"
 #endif
 
 namespace xllm {

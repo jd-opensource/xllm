@@ -109,7 +109,12 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
 
     auto& dp_token_nums = input_params_new.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
-    auto attn_metadata = layer::AttentionMetadata::build(input_params_new);
+    if (!input_params_new.attn_metadata) {
+      input_params_new.attn_metadata =
+          std::make_shared<layer::AttentionMetadata>(
+              layer::AttentionMetadataBuilder::build(input_params_new));
+    }
+    auto& attn_metadata = *(input_params_new.attn_metadata);
     bool only_prefill =
         (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
     if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {

@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
+#include "layers/common/attention_metadata.h"
 namespace xllm {
 namespace layer {
 
@@ -137,7 +138,19 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   // 5. store k/v cache and do attention
   int32_t max_seqlen =
       *std::max_element(cu_seq_len_vec.begin(), cu_seq_len_vec.end());
-  xllm::kernel::AttentionParams attention_params;
+
+  // Create AttentionMetadata for AttentionParams
+  // Note: This is a special case where we manually create AttentionMetadata
+  // with the required fields for this vision attention layer
+  layer::AttentionMetadata attn_metadata;
+  attn_metadata.q_cu_seq_lens = cu_seq_len;
+  attn_metadata.kv_cu_seq_lens = cu_seq_len;
+  attn_metadata.max_query_len = max_seqlen;
+  attn_metadata.max_seq_len = max_seqlen;
+  attn_metadata.compute_dtype = "half";
+  attn_metadata.is_causal = false;
+
+  xllm::kernel::AttentionParams attention_params(attn_metadata);
   attention_params.query = q;
   attention_params.key = k;
   attention_params.value = v;
@@ -145,13 +158,6 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
 
   attention_params.window_size_left = -1;
   attention_params.scale = scale_;
-  attention_params.compute_dtype = "half";
-  attention_params.q_cu_seq_lens = cu_seq_len;
-  attention_params.kv_cu_seq_lens = cu_seq_len;
-  attention_params.max_query_len = max_seqlen;
-  attention_params.max_seq_len = max_seqlen;
-  attention_params.block_table = std::nullopt;
-  attention_params.is_causal = false;
   xllm::kernel::batch_prefill(attention_params);
 
   // context_layer = rearrange(output, "(b s) h d -> s b (h d)", b=batch_size)

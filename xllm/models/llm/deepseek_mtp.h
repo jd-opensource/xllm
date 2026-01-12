@@ -166,7 +166,12 @@ class DeepseekMTPModelImpl : public torch::nn::Module {
       std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
 
-    auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
+    if (!modified_input_params.attn_metadata) {
+      modified_input_params.attn_metadata =
+          std::make_shared<layer::AttentionMetadata>(
+              layer::AttentionMetadataBuilder::build(modified_input_params));
+    }
+    auto& attn_metadata = *(modified_input_params.attn_metadata);
     torch::Tensor hidden_states = embed_tokens_(tokens);
     // Mask out embeddings where positions == 0 (for MTP not needed at pos 0)
     auto mask = (positions == 0);  // bool tensor

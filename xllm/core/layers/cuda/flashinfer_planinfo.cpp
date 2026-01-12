@@ -15,14 +15,14 @@ limitations under the License.
 
 #include "flashinfer_planinfo.h"
 
+#include <glog/logging.h>
+
+#include "core/common/global_flags.h"
 #include "core/util/utils.h"
 #include "flashinfer_workspace.h"
 #include "kernels/cuda/function_factory.h"
 #include "kernels/cuda/utils.h"
-
-namespace xllm {
-namespace layer {
-namespace flashinfer {
+namespace xllm::layer::flashinfer {
 
 void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                       const std::string& backend,
@@ -42,6 +42,9 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
   CHECK(plan_info->layer_id != -1) << "Need to set layer_id to PlanInfo.";
   if (plan_info->layer_id != 0) return;
 
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "update_plan_info: layer_id=" << plan_info->layer_id
+      << ", enable_cuda_graph=" << enable_cuda_graph;
   // 1. prefill plan info
   if (causal) {
     plan_info->uri = kernel::cuda::get_batch_prefill_uri(
@@ -178,6 +181,4 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
   }
 }
 
-}  // namespace flashinfer
-}  // namespace layer
-}  // namespace xllm
+}  // namespace xllm::layer::flashinfer

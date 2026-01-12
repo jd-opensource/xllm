@@ -21,8 +21,8 @@ limitations under the License.
 
 #include "core/common/macros.h"
 
-namespace xllm {
-namespace layer {
+namespace xllm::layer::flashinfer {
+
 class FlashinferWorkspace {
  public:
   static FlashinferWorkspace& get_instance() {
@@ -46,5 +46,4 @@ class FlashinferWorkspace {
   torch::Tensor page_locked_int_workspace_buffer_;
 };
 
-}  // namespace layer
-}  // namespace xllm
+}  // namespace xllm::layer::flashinfer

@@ -121,7 +121,7 @@ class ProfileManager {
   void profile_token_budget();
 
   // Warmup ACL graph executor with prefill and decode requests
-  void warmup_for_acl_graph();
+  void warmup_for_graph();
 
   bool check_if_satisfy_slo(int32_t num_tokens, int32_t tpot_slo_ms);
 

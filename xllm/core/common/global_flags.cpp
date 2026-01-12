@@ -92,9 +92,13 @@ DEFINE_int32(max_seq_len_for_graph_mode,
              "Maximum number of tokens per sequence for graph execution. "
              "If 0, use model max_position_embeddings.");
 
-DEFINE_bool(enable_graph,
-            false,
-            "Whether to enable graph execution for decode phase.");
+DEFINE_bool(
+    enable_graph,
+    false,
+    "Whether to enable graph execution for decode phase. When enabled, "
+    "the engine uses graph mode (CUDA Graph for GPU, ACL Graph for NPU, "
+    "or MLU Graph) to optimize decode performance by reducing kernel "
+    "launch overhead and device idle time.");
 
 DEFINE_bool(enable_graph_no_padding,
             false,

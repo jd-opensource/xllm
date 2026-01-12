@@ -83,11 +83,13 @@ DECLARE_string(rank_tablefile);
 
 DECLARE_bool(enable_mla);
 
-DECLARE_int32(max_seq_len_for_graph_mode);
+constexpr int32_t kGraphExecutorLogVerboseLevel = 50;
 
 DECLARE_bool(enable_graph);
 
 DECLARE_bool(enable_graph_no_padding);
+
+DECLARE_int32(max_seq_len_for_graph_mode);
 
 DECLARE_bool(enable_chunked_prefill);
 

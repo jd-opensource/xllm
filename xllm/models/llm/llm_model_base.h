@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
+#include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/common/lm_head.h"
 #include "models/model_registry.h"
 
@@ -72,7 +73,12 @@ class LlmModelImplBase : public torch::nn::Module {
     auto modified_input_params = input_params;
     auto& dp_token_nums = modified_input_params.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
-    auto attn_metadata = layer::AttentionMetadata::build(modified_input_params);
+    if (!modified_input_params.attn_metadata) {
+      modified_input_params.attn_metadata =
+          std::make_shared<layer::AttentionMetadata>(
+              layer::AttentionMetadataBuilder::build(modified_input_params));
+    }
+    auto& attn_metadata = *(modified_input_params.attn_metadata);
     if (positions.dim() == 2) {
       std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
           apply_mrope(positions);

@@ -21,6 +21,10 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+namespace xllm::layer {
+struct AttentionMetadata;
+}  // namespace xllm::layer
+
 namespace xllm::kernel {
 
 // Note: add default values for optional parameters in the struct definition
@@ -190,6 +194,14 @@ struct ReshapeFromCacheParams {
 // Note: This struct is used by both batch_prefill (flash_attention) and
 // batch_decode (single_query_cached_kv_attn). Parameters are grouped by usage.
 struct AttentionParams {
+  // Constructor: requires AttentionMetadata to be provided
+  explicit AttentionParams(const layer::AttentionMetadata& attn_metadata)
+      : attn_metadata(attn_metadata) {}
+
+  // Batch-level attention metadata shared across all layers.
+  // Contains sequence lengths, paged KV cache indices, plan_info, etc.
+  const layer::AttentionMetadata& attn_metadata;
+
   // ========== Common parameters (used by both prefill and decode) ==========
   // Query tensor. Shape depends on mode:
   // - Prefill: 3D [total_tokens, num_heads, head_dim] (packed) or
@@ -218,19 +230,14 @@ struct AttentionParams {
   // Optional output quantization scale. Currently not supported (must be None).
   // Reserved for future use.
   std::optional<torch::Tensor> out_quant_scale;
-  // Optional block table for paged KV cache. Type: int32 or int64. Must be
-  // contiguous.
-  // - Prefill: 2D [batch, max_num_blocks_per_seq] (if used)
-  // - Decode: 2D [batch, max_num_blocks_per_seq] or
-  //           3D [batch, num_kv_heads, max_num_blocks_per_seq]
-  std::optional<torch::Tensor> block_table;
-  // Compute data type string. Must be "float", "half", or "bfloat16".
-  std::string compute_dtype;
-  // Maximum sequence length. Used for workspace allocation and attention
-  // computation.
-  // - Prefill: max_seq_len_kv
-  // - Decode: max_context_len
-  int64_t max_seq_len;
+  // Note: block_table, compute_dtype, and max_seq_len are now in attn_metadata
+#if defined(USE_ILU)
+  // Block-aligned maximum sequence length for ILU.
+  // Used to store the block-aligned max sequence length calculated from
+  // block_table and block_size. Value: block_table.size(-1) * block_size.
+  // Default: 0 (not set).
+  int64_t block_aligned_max_seq_len = 0;
+#endif
   // Left window size for sliding window attention. Must be >= 0.
   int64_t window_size_left;
   // Right window size for sliding window attention. Default: -1.
@@ -245,18 +252,12 @@ struct AttentionParams {
   torch::Tensor attn_mask;
 
   // ========== FlashInfer related parameters ==========
-  torch::Tensor paged_kv_indptr;
-  torch::Tensor paged_kv_indices;
-  torch::Tensor paged_kv_last_page_len;
+  // Note: paged_kv_indptr, paged_kv_indices, paged_kv_last_page_len, qo_indptr,
+  // uri, plan_info, enable_cuda_graph, and use_tensor_core are now in
+  // attn_metadata
   torch::Tensor float_workspace_buffer;
   torch::Tensor int_workspace_buffer;
   torch::Tensor page_locked_int_workspace_buffer;
-  std::string uri;
-  torch::Tensor plan_info;
-
-  bool enable_cuda_graph = false;
-  // Whether to use tensor core for decode attention computation. Default: true.
-  bool use_tensor_core = true;
 
   // ========== Prefill-specific parameters ==========
   // Key tensor. Shape: [num_tokens, num_kv_heads, head_dim_qk] (packed) or
@@ -271,22 +272,9 @@ struct AttentionParams {
   // block_table). If block_table provided, must be 4D. Must have same dim as
   // key.
   torch::Tensor value;
-  // Optional cumulative query sequence lengths. Type: int32.
-  // Shape: [batch + 1]. Required in packed mode (query is 3D). Must be
-  // contiguous.
-  std::optional<torch::Tensor> q_cu_seq_lens;
-  // Optional cumulative KV sequence lengths. Type: int32.
-  // Shape: [batch + 1]. Required in packed mode or when block_table has
-  // max_num_blocks_per_seq > 1. Must be contiguous.
-  std::optional<torch::Tensor> kv_cu_seq_lens;
-  // Query sequence lengths.Shape: [batch]. Type: int32. Must be contiguous.
-  // Represents the current query length for each sequence in the batch.
-  torch::Tensor q_seq_lens;
-  // KV sequence lengths tensor. Shape: [batch]. Type: int32. Must be
-  // contiguous. Represents the current context length for each sequence in the
-  // batch.
-  torch::Tensor kv_seq_lens;
-  // Optional attention bias tensor. Used for custom attention patterns.
+  // Note: q_cu_seq_lens, kv_cu_seq_lens, q_seq_lens, and kv_seq_lens are now in
+  // attn_metadata Optional attention bias tensor. Used for custom attention
+  // patterns.
   std::optional<torch::Tensor> attn_bias;
   // Optional key quantization scale tensor.
   // - 1D [1]: fp8 per-tensor quantization (requires q_quant_scale to be 1D)
@@ -297,10 +285,7 @@ struct AttentionParams {
   // - 1D [1]: fp8 per-tensor quantization (requires q_quant_scale to be 1D)
   // - 3D [batch, num_kv_heads, head_dim_vo]: sage per-channel quantization
   std::optional<torch::Tensor> v_quant_scale;
-  // Maximum query length. Used for workspace allocation in prefill.
-  int64_t max_query_len;
-  // Whether to apply causal mask. Default: true.
-  bool is_causal = true;
+  // Note: max_query_len and is_causal are now in attn_metadata
 
   // ========== Decode-specific parameters ==========
   // Key cache tensor in paged format. Shape: [num_blocks, num_kv_heads,

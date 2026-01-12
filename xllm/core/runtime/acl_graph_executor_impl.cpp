@@ -143,9 +143,10 @@ void GraphPersistentParam::update(const torch::Tensor& tokens,
       .copy_(tokens, /*non_blocking=*/true);
   persistent_positions_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(positions, /*non_blocking=*/true);
-  q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+  const int64_t actual_batch_size = params.num_sequences;
+  q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
       .copy_(params.q_seq_lens, /*non_blocking=*/true);
-  kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+  kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
       .copy_(params.kv_seq_lens, /*non_blocking=*/true);
   persistent_new_cache_slots_
       .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
@@ -153,7 +154,6 @@ void GraphPersistentParam::update(const torch::Tensor& tokens,
 
   // Copy block table data
   const int64_t actual_block_table_len = params.block_tables.size(1);
-  const int64_t actual_batch_size = params.num_sequences;
   auto slice_persistent_block_tables =
       persistent_block_tables_
           .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
@@ -263,122 +263,178 @@ constexpr uint32_t TILING_HEAD_SIZE = 44;
 namespace {
 void parse_pa_host_tiling_buffer(const uint32_t* hostTilingBuffer,
                                  uint64_t tilingBufferSize) {
-  VLOG(50) << "hostTilingBuffer.tilingBuffer: " << (void*)hostTilingBuffer;
-  VLOG(50) << "hostTilingBuffer.tilingBufferSize: " << tilingBufferSize;
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "hostTilingBuffer.tilingBuffer: " << (void*)hostTilingBuffer;
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "hostTilingBuffer.tilingBufferSize: " << tilingBufferSize;
   if (hostTilingBuffer == nullptr || tilingBufferSize == 0) {
-    VLOG(50) << "Invalid host tiling buffer!";
+    VLOG(kGraphExecutorLogVerboseLevel) << "Invalid host tiling buffer!";
     return;
   }
 
   uint32_t tilingParamSize = tilingBufferSize / sizeof(uint32_t);
-  VLOG(50) << "Total tiling param elements: " << tilingParamSize;
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "Total tiling param elements: " << tilingParamSize;
 
   // Parse header fields (TILING_HEAD_SIZE = 44)
-  VLOG(50) << "\n=== Tiling Header Fields ===";
-  VLOG(50) << "TILING_BATCH(tiling_head[0]): " << hostTilingBuffer[0];
-  VLOG(50) << "TILING_NUMHEADS(tiling_head[1]): " << hostTilingBuffer[1];
-  VLOG(50) << "TILING_HEADDIM(tiling_head[2]): " << hostTilingBuffer[2];
-  VLOG(50) << "TILING_NUMBLOKS(tiling_head[3]): " << hostTilingBuffer[3];
-  VLOG(50) << "TILING_BLOCKSIZE(tiling_head[4]): " << hostTilingBuffer[4];
-  VLOG(50) << "TILING_MAXBLOCKS(tiling_head[5]): " << hostTilingBuffer[5];
-  VLOG(50) << "TILING_TOR(tiling_head[6]): " << hostTilingBuffer[6];
-  VLOG(50) << "TILING_KVHEADS(tiling_head[7]): " << hostTilingBuffer[7];
-  VLOG(50) << "TILING_FORMER_BATCH(tiling_head[8]): " << hostTilingBuffer[8];
-  VLOG(50) << "TILING_FORMER_HEAD(tiling_head[9]): " << hostTilingBuffer[9];
-  VLOG(50) << "TILING_TAIL_BATCH(tiling_head[10]): " << hostTilingBuffer[10];
-  VLOG(50) << "TILING_TAIL_HEAD(tiling_head[11]): " << hostTilingBuffer[11];
-  VLOG(50) << "TILING_HEADNUM_MOVE(tiling_head[12]): " << hostTilingBuffer[12];
-  VLOG(50) << "TILING_MASK_MAX_LEN(tiling_head[13]): " << hostTilingBuffer[13];
-  VLOG(50) << "TILING_BATCH_STRIDE(tiling_head[14]): " << hostTilingBuffer[14];
-  VLOG(50) << "TILING_HEAD_STRIDE(tiling_head[15]): " << hostTilingBuffer[15];
-  VLOG(50) << "TILING_KEY(tiling_head[16]): " << hostTilingBuffer[16];
-  VLOG(50) << "TILING_HEADSIZE(tiling_head[17]): " << hostTilingBuffer[17];
-  VLOG(50) << "TILING_PARASIZE(tiling_head[18]): " << hostTilingBuffer[18];
-  VLOG(50) << "TILING_GROUPNUM(tiling_head[19]): " << hostTilingBuffer[19];
-  VLOG(50) << "TILING_FORMER_GROUP_MOVE(tiling_head[20]): "
-           << hostTilingBuffer[20];
-  VLOG(50) << "TILING_TAIL_GROUP_MOVE(tiling_head[21]): "
-           << hostTilingBuffer[21];
-  VLOG(50) << "TILING_MAX_KVSEQLEN(tiling_head[22]): " << hostTilingBuffer[22];
-  VLOG(50) << "TILING_KVSPLIT(tiling_head[23]): " << hostTilingBuffer[23];
-  VLOG(50) << "TILING_KVCORENUM(tiling_head[24]): " << hostTilingBuffer[24];
-  VLOG(50) << "TILING_BLOCKSIZE_CALC(tiling_head[25]): "
-           << hostTilingBuffer[25];
-  VLOG(50) << "TILING_TOTAL_BLOCK_NUM(tiling_head[26]): "
-           << hostTilingBuffer[26];
-  VLOG(50) << "TILING_PREFILL_BS(tiling_head[27]): " << hostTilingBuffer[27];
-  VLOG(50) << "TILING_DECODER_BS(tiling_head[28]): " << hostTilingBuffer[28];
-  VLOG(50) << "TILING_HEADDIM_V(tiling_head[29]): " << hostTilingBuffer[29];
-  VLOG(50) << "TILING_MODCOEF(tiling_head[30]): " << hostTilingBuffer[30];
-  VLOG(50) << "TILING_DIVCOEF(tiling_head[31]): " << hostTilingBuffer[31];
-  VLOG(50) << "TILING_QHEADORIGINAL(tiling_head[32]): " << hostTilingBuffer[32];
-  VLOG(50) << "TILING_COMPRESSHEAD(tiling_head[33]): " << hostTilingBuffer[33];
-  VLOG(50) << "TILING_QUANTYPE(tiling_head[34]): " << hostTilingBuffer[34];
-  VLOG(50) << "TILING_DATA_SHAPE_TYPE(tiling_head[35]): "
-           << hostTilingBuffer[35];
-  VLOG(50) << "TILING_SCALETYPE(tiling_head[36]): " << hostTilingBuffer[36];
-  VLOG(50) << "TILING_MASK_TYPE_ND(tiling_head[37]): " << hostTilingBuffer[37];
-  VLOG(50) << "TILING_HEADDIM_K_SPLIT(tiling_head[38]): "
-           << hostTilingBuffer[38];
-  VLOG(50) << "TILING_HEADDIM_V_SPLIT(tiling_head[39]): "
-           << hostTilingBuffer[39];
-  VLOG(50) << "TILING_HEADDIM_V_SPLIT_VECTOR_FORMER(tiling_head[40]): "
-           << hostTilingBuffer[40];
-  VLOG(50) << "TILING_HEADDIM_V_SPLIT_VECTOR_TAIL(tiling_head[41]): "
-           << hostTilingBuffer[41];
-  VLOG(50) << "TILING_MTP_HEAD_SPLIT_SIZE(tiling_head[42]): "
-           << hostTilingBuffer[42];
-  VLOG(50) << "TILING_MTP_HEAD_SPLIT_NUM(tiling_head[43]): "
-           << hostTilingBuffer[43];
+  VLOG(kGraphExecutorLogVerboseLevel) << "\n=== Tiling Header Fields ===";
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_BATCH(tiling_head[0]): " << hostTilingBuffer[0];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_NUMHEADS(tiling_head[1]): " << hostTilingBuffer[1];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEADDIM(tiling_head[2]): " << hostTilingBuffer[2];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_NUMBLOKS(tiling_head[3]): " << hostTilingBuffer[3];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_BLOCKSIZE(tiling_head[4]): " << hostTilingBuffer[4];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_MAXBLOCKS(tiling_head[5]): " << hostTilingBuffer[5];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_TOR(tiling_head[6]): " << hostTilingBuffer[6];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_KVHEADS(tiling_head[7]): " << hostTilingBuffer[7];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_FORMER_BATCH(tiling_head[8]): " << hostTilingBuffer[8];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_FORMER_HEAD(tiling_head[9]): " << hostTilingBuffer[9];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_TAIL_BATCH(tiling_head[10]): " << hostTilingBuffer[10];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_TAIL_HEAD(tiling_head[11]): " << hostTilingBuffer[11];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEADNUM_MOVE(tiling_head[12]): " << hostTilingBuffer[12];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_MASK_MAX_LEN(tiling_head[13]): " << hostTilingBuffer[13];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_BATCH_STRIDE(tiling_head[14]): " << hostTilingBuffer[14];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEAD_STRIDE(tiling_head[15]): " << hostTilingBuffer[15];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_KEY(tiling_head[16]): " << hostTilingBuffer[16];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEADSIZE(tiling_head[17]): " << hostTilingBuffer[17];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_PARASIZE(tiling_head[18]): " << hostTilingBuffer[18];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_GROUPNUM(tiling_head[19]): " << hostTilingBuffer[19];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_FORMER_GROUP_MOVE(tiling_head[20]): " << hostTilingBuffer[20];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_TAIL_GROUP_MOVE(tiling_head[21]): " << hostTilingBuffer[21];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_MAX_KVSEQLEN(tiling_head[22]): " << hostTilingBuffer[22];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_KVSPLIT(tiling_head[23]): " << hostTilingBuffer[23];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_KVCORENUM(tiling_head[24]): " << hostTilingBuffer[24];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_BLOCKSIZE_CALC(tiling_head[25]): " << hostTilingBuffer[25];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_TOTAL_BLOCK_NUM(tiling_head[26]): " << hostTilingBuffer[26];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_PREFILL_BS(tiling_head[27]): " << hostTilingBuffer[27];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_DECODER_BS(tiling_head[28]): " << hostTilingBuffer[28];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEADDIM_V(tiling_head[29]): " << hostTilingBuffer[29];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_MODCOEF(tiling_head[30]): " << hostTilingBuffer[30];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_DIVCOEF(tiling_head[31]): " << hostTilingBuffer[31];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_QHEADORIGINAL(tiling_head[32]): " << hostTilingBuffer[32];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_COMPRESSHEAD(tiling_head[33]): " << hostTilingBuffer[33];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_QUANTYPE(tiling_head[34]): " << hostTilingBuffer[34];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_DATA_SHAPE_TYPE(tiling_head[35]): " << hostTilingBuffer[35];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_SCALETYPE(tiling_head[36]): " << hostTilingBuffer[36];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_MASK_TYPE_ND(tiling_head[37]): " << hostTilingBuffer[37];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEADDIM_K_SPLIT(tiling_head[38]): " << hostTilingBuffer[38];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEADDIM_V_SPLIT(tiling_head[39]): " << hostTilingBuffer[39];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEADDIM_V_SPLIT_VECTOR_FORMER(tiling_head[40]): "
+      << hostTilingBuffer[40];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_HEADDIM_V_SPLIT_VECTOR_TAIL(tiling_head[41]): "
+      << hostTilingBuffer[41];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_MTP_HEAD_SPLIT_SIZE(tiling_head[42]): "
+      << hostTilingBuffer[42];
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "TILING_MTP_HEAD_SPLIT_NUM(tiling_head[43]): " << hostTilingBuffer[43];
 
   // Parse batch parameters
   if (tilingParamSize > TILING_HEAD_SIZE) {
     uint32_t batchCount = hostTilingBuffer[0];
-    VLOG(50) << "\n=== Batch Parameters ===";
-    VLOG(50) << "Number of batches: " << batchCount;
+    VLOG(kGraphExecutorLogVerboseLevel) << "\n=== Batch Parameters ===";
+    VLOG(kGraphExecutorLogVerboseLevel) << "Number of batches: " << batchCount;
     batchCount = std::min(batchCount, 20u);
 
     for (uint32_t batchIdx = 0; batchIdx < batchCount; ++batchIdx) {
       uint32_t offset = TILING_HEAD_SIZE + batchIdx * TILING_PARA_SIZE;
       if (offset + TILING_PARA_SIZE <= tilingParamSize) {
-        VLOG(50) << "\n--- Batch " << batchIdx << " ---";
-        VLOG(50) << "  qSeqLen(batch_tiling_param[0]): "
-                 << hostTilingBuffer[offset + 0];
-        VLOG(50) << "  kvSeqLen(batch_tiling_param[1]): "
-                 << hostTilingBuffer[offset + 1];
-        VLOG(50) << "  qSBlockTile(batch_tiling_param[2]): "
-                 << hostTilingBuffer[offset + 2];
-        VLOG(50) << "  blockSize(batch_tiling_param[3]): "
-                 << hostTilingBuffer[offset + 3];
-        VLOG(50) << "  addrQSeqOffset[high](batch_tiling_param[4]): "
-                 << hostTilingBuffer[offset + 4];
-        VLOG(50) << "  addrQSeqOffset[low](batch_tiling_param[5]): "
-                 << hostTilingBuffer[offset + 5];
-        VLOG(50) << "  addrOSeqOffset[high](batch_tiling_param[6]): "
-                 << hostTilingBuffer[offset + 6];
-        VLOG(50) << "  addrOSeqOffset[low](batch_tiling_param[7]): "
-                 << hostTilingBuffer[offset + 7];
-        VLOG(50) << "  seqIdx(batch_tiling_param[8]): "
-                 << hostTilingBuffer[offset + 8];
-        VLOG(50) << "  totalQBlkNum(batch_tiling_param[9]): "
-                 << hostTilingBuffer[offset + 9];
-        VLOG(50) << "  maskOffset[high](batch_tiling_param[10]): "
-                 << hostTilingBuffer[offset + 10];
-        VLOG(50) << "  addrLSeqOffset[high](batch_tiling_param[11]): "
-                 << hostTilingBuffer[offset + 11];
-        VLOG(50) << "  addrLSeqOffset[low](batch_tiling_param[12]): "
-                 << hostTilingBuffer[offset + 12];
-        VLOG(50) << "  maskOffset[low](batch_tiling_param[14]): "
-                 << hostTilingBuffer[offset + 14];
-        VLOG(50) << "  addrOFdSeqOffset[high](batch_tiling_param[15]): "
-                 << hostTilingBuffer[offset + 15];
-        VLOG(50) << "  addrOFdSeqOffset[low](batch_tiling_param[16]): "
-                 << hostTilingBuffer[offset + 16];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "\n--- Batch " << batchIdx << " ---";
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  qSeqLen(batch_tiling_param[0]): "
+            << hostTilingBuffer[offset + 0];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  kvSeqLen(batch_tiling_param[1]): "
+            << hostTilingBuffer[offset + 1];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  qSBlockTile(batch_tiling_param[2]): "
+            << hostTilingBuffer[offset + 2];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  blockSize(batch_tiling_param[3]): "
+            << hostTilingBuffer[offset + 3];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  addrQSeqOffset[high](batch_tiling_param[4]): "
+            << hostTilingBuffer[offset + 4];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  addrQSeqOffset[low](batch_tiling_param[5]): "
+            << hostTilingBuffer[offset + 5];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  addrOSeqOffset[high](batch_tiling_param[6]): "
+            << hostTilingBuffer[offset + 6];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  addrOSeqOffset[low](batch_tiling_param[7]): "
+            << hostTilingBuffer[offset + 7];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  seqIdx(batch_tiling_param[8]): "
+            << hostTilingBuffer[offset + 8];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  totalQBlkNum(batch_tiling_param[9]): "
+            << hostTilingBuffer[offset + 9];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  maskOffset[high](batch_tiling_param[10]): "
+            << hostTilingBuffer[offset + 10];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  addrLSeqOffset[high](batch_tiling_param[11]): "
+            << hostTilingBuffer[offset + 11];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  addrLSeqOffset[low](batch_tiling_param[12]): "
+            << hostTilingBuffer[offset + 12];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  maskOffset[low](batch_tiling_param[14]): "
+            << hostTilingBuffer[offset + 14];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  addrOFdSeqOffset[high](batch_tiling_param[15]): "
+            << hostTilingBuffer[offset + 15];
+        VLOG(kGraphExecutorLogVerboseLevel)
+            << "  addrOFdSeqOffset[low](batch_tiling_param[16]): "
+            << hostTilingBuffer[offset + 16];
       }
     }
   }
 
-  VLOG(50) << "\n=== End of Tiling Buffer Parse ===";
+  VLOG(kGraphExecutorLogVerboseLevel) << "\n=== End of Tiling Buffer Parse ===";
 }
 }  // namespace
 
@@ -465,7 +521,7 @@ void GraphPersistentParam::plan_paged_attention_tiling(
   CHECK_GT(tiling_buffer_info.tilingBufferSize, 0)
       << "Tiling buffer size is zero";
 
-  if (VLOG_IS_ON(50)) {
+  if (VLOG_IS_ON(kGraphExecutorLogVerboseLevel)) {
     parse_pa_host_tiling_buffer((uint32_t*)tiling_buffer_info.tilingBuffer,
                                 tiling_buffer_info.tilingBufferSize);
   }
@@ -782,8 +838,10 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
            << " q_max_seq_len: " << params_single.q_max_seq_len
            << " n_layers: " << args_.n_layers();
   // If not in decode phase, use eager mode directly without acl graph
+  // TODO: fix mtp model support.
   if (!in_decoding_phase || args_.n_layers() == 1) {
-    VLOG(50) << "AclGraphExecutorImpl::run() in eager mode";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "AclGraphExecutorImpl::run() in eager mode";
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
   }
@@ -815,14 +873,16 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   auto it = graphs_.find(bucket_num_tokens);
   if (it != graphs_.end()) {
     // Replay the existing graph
-    VLOG(50) << "AclGraphExecutorImpl::run() in replay mode";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "AclGraphExecutorImpl::run() in replay mode";
     return it->second->replay(
         tokens_tensor, positions_tensor, kv_caches, params_single);
   }
 
   // Graph doesn't exist for this bucket num_tokens, try to create it lazily
   auto graph = std::make_unique<AclGraph>(*persistent_param_, device_.index());
-  VLOG(50) << "AclGraphExecutorImpl::run() in capture mode";
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "AclGraphExecutorImpl::run() in capture mode";
   bool capture_success = graph->capture(model_,
                                         args_,
                                         options_,
@@ -853,19 +913,23 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
 }
 
 void AclGraph::print_graph_tensors() const {
-  VLOG(50) << "graph persistent_tokens_: "
-           << persistent_param_.persistent_tokens();
-  VLOG(50) << "graph persistent_positions_: "
-           << persistent_param_.persistent_positions();
-  VLOG(50) << "graph persistent_new_cache_slots_: "
-           << persistent_param_.persistent_new_cache_slots();
-  VLOG(50) << "graph q_seq_lens_: " << persistent_param_.q_seq_lens();
-  VLOG(50) << "graph kv_seq_lens_: " << persistent_param_.kv_seq_lens();
-  VLOG(50) << "graph persistent_block_tables_: "
-           << persistent_param_.persistent_block_tables();
-  VLOG(50) << "graph hidden_states_: " << persistent_param_.hidden_states();
-  // VLOG(50) << "graph persistent_mask_: " <<
-  // persistent_param_.persistent_mask();
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "graph persistent_tokens_: " << persistent_param_.persistent_tokens();
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "graph persistent_positions_: "
+      << persistent_param_.persistent_positions();
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "graph persistent_new_cache_slots_: "
+      << persistent_param_.persistent_new_cache_slots();
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "graph q_seq_lens_: " << persistent_param_.q_seq_lens();
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "graph kv_seq_lens_: " << persistent_param_.kv_seq_lens();
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "graph persistent_block_tables_: "
+      << persistent_param_.persistent_block_tables();
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "graph hidden_states_: " << persistent_param_.hidden_states();
 }
 
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]

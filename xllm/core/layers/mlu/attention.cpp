@@ -120,26 +120,18 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
                                     const std::optional<torch::Tensor>& v_cache,
                                     const AttentionMetadata& attn_metadata) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
-  xllm::kernel::AttentionParams attention_params;
+  xllm::kernel::AttentionParams attention_params(attn_metadata);
   attention_params.query = query.view({-1, num_heads_, head_size_});
   attention_params.output = output.view({-1, num_heads_, head_size_v});
   attention_params.window_size_left = sliding_window_;
   attention_params.scale = scale_;
-  attention_params.compute_dtype = attn_metadata.compute_dtype;
-
-  attention_params.q_cu_seq_lens = attn_metadata.q_cu_seq_lens;
-  attention_params.kv_cu_seq_lens = attn_metadata.kv_cu_seq_lens;
-  attention_params.max_query_len = attn_metadata.max_query_len;
-  attention_params.max_seq_len = attn_metadata.max_seq_len;
 
   if (attn_metadata.is_prefill) {
     attention_params.key = key.view({-1, num_kv_heads_, head_size_});
     attention_params.value = value.view({-1, num_kv_heads_, head_size_v});
-    attention_params.block_table = std::nullopt;
   } else if (attn_metadata.is_chunked_prefill) {
     attention_params.key = k_cache;
     attention_params.value = v_cache.value();
-    attention_params.block_table = attn_metadata.block_table;
   }
   xllm::kernel::batch_prefill(attention_params);
 }
@@ -150,20 +142,14 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
                                     const std::optional<torch::Tensor>& v_cache,
                                     const AttentionMetadata& attn_metadata) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
-  xllm::kernel::AttentionParams attention_params;
+  xllm::kernel::AttentionParams attention_params(attn_metadata);
   attention_params.query = query.view({-1, 1, num_heads_, head_size_});
   attention_params.output = output.view({-1, 1, num_heads_, head_size_v});
   attention_params.output_lse = std::nullopt;
-  attention_params.max_seq_len = attn_metadata.max_seq_len;
   attention_params.window_size_left = sliding_window_;
   attention_params.scale = scale_;
-  attention_params.compute_dtype = attn_metadata.compute_dtype;
   attention_params.k_cache = k_cache;
   attention_params.v_cache = v_cache;
-
-  // for mlu
-  attention_params.block_table = attn_metadata.block_table;
-  attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
 
   xllm::kernel::batch_decode(attention_params);
 }

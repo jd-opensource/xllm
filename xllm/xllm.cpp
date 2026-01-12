@@ -234,6 +234,7 @@ int run() {
       .enable_profile_kv_blocks(FLAGS_enable_profile_kv_blocks)
       .disable_ttft_profiling(FLAGS_disable_ttft_profiling)
       .enable_forward_interruption(FLAGS_enable_forward_interruption)
+      .enable_graph(FLAGS_enable_graph)
       .max_global_ttft_ms(FLAGS_max_global_ttft_ms)
       .max_global_tpot_ms(FLAGS_max_global_tpot_ms)
       .max_requests_per_batch(FLAGS_max_requests_per_batch)

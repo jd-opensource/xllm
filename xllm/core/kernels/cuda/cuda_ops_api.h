@@ -78,7 +78,8 @@ void batch_decode(const std::string& uri,
                   std::optional<torch::Tensor>& output_lse,
                   bool enable_cuda_graph,
                   bool use_tensor_core,
-                  torch::Tensor kv_seq_lens);
+                  torch::Tensor kv_seq_lens,
+                  std::optional<torch::Tensor> qo_indptr = std::nullopt);
 
 void rms_norm(torch::Tensor output,
               torch::Tensor input,

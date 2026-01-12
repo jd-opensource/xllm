@@ -19,6 +19,7 @@ cc_library(
     dit_executor.h
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.h>
     $<$<BOOL:${USE_MLU}>:mlu_graph_executor_impl.h>
+    $<$<BOOL:${USE_CUDA}>:cuda_graph_executor_impl.h>
     worker.h
     worker_impl.h
     llm_worker_impl.h
@@ -40,6 +41,7 @@ cc_library(
     dit_executor.cpp
     $<$<BOOL:${USE_NPU}>:acl_graph_executor_impl.cpp>
     $<$<BOOL:${USE_MLU}>:mlu_graph_executor_impl.cpp>
+    $<$<BOOL:${USE_CUDA}>:cuda_graph_executor_impl.cpp>
     worker.cpp
     worker_impl.cpp
     llm_worker_impl.cpp

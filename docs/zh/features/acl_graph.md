@@ -20,6 +20,11 @@
 --enable_graph=true
 ```
 
+**注意**：
+- 图执行模式仅用于decode阶段（逐个生成token），对prefill阶段不生效
+- 支持多种后端：CUDA Graph（GPU）、ACL Graph（NPU）、MLU Graph
+- 并非所有模型都支持该功能，请参考具体模型的文档
+
 
 ## 性能效果
 - 开启ACLGraph功能后，在Qwen3-0.6B和Qwen3-1.7B等模型上，decode阶段吞吐 **提升8%-10%**。

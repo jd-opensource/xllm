@@ -35,6 +35,7 @@ limitations under the License.
 #elif defined(USE_CUDA)
 #include "layers/cuda/attention.h"
 #endif
+#include "layers/common/attention_metadata_builder.h"
 #include "layers/common/tests/tests_utils.h"
 #include "platform/device.h"
 
@@ -703,7 +704,7 @@ TEST_F(DeepseekV2DecoderLayerTest,
   input_params = input_params.to(options_.device());
 
   // Build AttentionMetadata for prefill
-  auto attn_metadata = AttentionMetadata::build(input_params);
+  auto attn_metadata = AttentionMetadataBuilder::build(input_params);
 
   // Build KVCache with valid shapes
   // Reference: mla_tests.cpp - k_cache shape: [block_num, 1, 1,
@@ -847,7 +848,7 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
   input_params = input_params.to(options_.device());
 
   // Build AttentionMetadata for prefill
-  auto attn_metadata = AttentionMetadata::build(input_params);
+  auto attn_metadata = AttentionMetadataBuilder::build(input_params);
 
   // Build KVCache with valid shapes
   // Reference: mla_tests.cpp - k_cache shape: [block_num, 1, 1,

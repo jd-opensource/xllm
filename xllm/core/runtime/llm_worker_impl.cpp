@@ -48,7 +48,8 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
   device_.set_device();
 #if defined(USE_CUDA)
   // initialize flashinfer workspace
-  layer::FlashinferWorkspace::get_instance().initialize(device_);
+  ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
+      device_);
 #endif
 }
 

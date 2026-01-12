@@ -19,8 +19,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 
-namespace xllm {
-namespace layer {
+namespace xllm::layer::flashinfer {
 
 void FlashinferWorkspace::initialize(const torch::Device& device) {
   LOG(INFO) << "FlashinferWorkspace initialize on device: " << device;
@@ -46,5 +45,5 @@ torch::Tensor FlashinferWorkspace::get_int_workspace_buffer() {
 torch::Tensor FlashinferWorkspace::get_page_locked_int_workspace_buffer() {
   return page_locked_int_workspace_buffer_;
 }
-}  // namespace layer
-}  // namespace xllm
+
+}  // namespace xllm::layer::flashinfer

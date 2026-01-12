@@ -56,11 +56,11 @@ ProfileManager::ProfileManager(Engine* engine, const Options& options)
   // more profile here, such as token_budget profile and decode length
   // prediction.
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_CUDA)
   // Warmup ACL graph executor if enabled
   if (FLAGS_enable_graph) {
-    LOG(INFO) << "Starting ACL graph warmup.";
-    warmup_for_acl_graph();
+    LOG(INFO) << "Starting ACL Graph/CUDA Graph warmup.";
+    warmup_for_graph();
   }
 #endif
 }
@@ -675,8 +675,9 @@ void ProfileManager::generate_random_decode_batch(
   }
 }
 
-void ProfileManager::warmup_for_acl_graph() {
-  LOG(INFO) << "Starting ACL graph warmup with prefill and decode requests...";
+void ProfileManager::warmup_for_graph() {
+  LOG(INFO) << "Starting ACL Graph/CUDA Graph warmup with prefill and decode "
+               "requests...";
 
   auto& model_args = engine_->model_args();
   int32_t max_context_len = model_args.max_position_embeddings();
@@ -728,7 +729,7 @@ void ProfileManager::warmup_for_acl_graph() {
   // ========== Warmup Decode Requests ==========
   // confict with async_schedule, so skip for now
 
-  LOG(INFO) << "ACL graph warmup completed";
+  LOG(INFO) << "ACL Graph/CUDA Graph warmup completed";
 }
 
 }  // namespace xllm

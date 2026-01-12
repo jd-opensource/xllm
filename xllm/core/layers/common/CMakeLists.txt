@@ -17,6 +17,7 @@ cc_library(
     deep_ep.h
     activation.h
     attention_metadata.h
+    attention_metadata_builder.h
     dp_utils.h
   SRCS
     qwen2_attention.cpp
@@ -32,6 +33,7 @@ cc_library(
     deep_ep.cpp
     activation.cpp
     attention_metadata.cpp
+    attention_metadata_builder.cpp
     dp_utils.cpp
   DEPS
     "-Wl,--whole-archive"

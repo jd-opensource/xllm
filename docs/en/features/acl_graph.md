@@ -19,6 +19,11 @@ The aforementioned features have been implemented internally within the xLLM eng
 --enable_graph=true
 ```
 
+**Note**:
+- Graph execution mode is only applied during decode phase (generating tokens one at a time) and does not take effect during prefill phase
+- Supports multiple backends: CUDA Graph (GPU), ACL Graph (NPU), and MLU Graph
+- Not all models support this feature. Please refer to the specific model documentation
+
 ## Performance Impact
 - After enabling the ACLGraph function, the decode phase throughput **improves by 8%-10%** on models such as Qwen3-0.6B and Qwen3-1.7B.
 

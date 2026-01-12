@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "attention.h"
 
+#include "core/common/global_flags.h"
 #include "flashinfer_planinfo.h"
 #include "flashinfer_workspace.h"
 #include "kernels/cuda/function_factory.h"
@@ -59,26 +60,35 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   // maybe we need to update shared attn state before execute attention,
   // currently we update flashinfer step_wise_attn_state_ at layer 0.
   bool causal = attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
-  flashinfer::update_plan_info(
-      attn_metadata.plan_info,
-      causal ? xllm::kernel::cuda::determine_attention_backend(
-                   /*pos_encoding_mode=*/0,
-                   /*use_fp16_qk_reduction=*/false,
-                   /*use_custom_mask=*/false)
-             : "fa2",
-      attn_metadata,
-      query.scalar_type(),
-      key.scalar_type(),
-      output.scalar_type(),
-      head_size_,
-      head_size_,
-      num_heads_,
-      num_kv_heads_,
-      /*block_size*/ k_cache.size(1),
-      /*window_size_left*/ sliding_window_,
-      /*enable_cuda_graph*/ false,
-      /*causal*/ causal,
-      /*use_tensor_core*/ true);
+
+  if (attn_metadata.enable_cuda_graph) {
+    CHECK(attn_metadata.plan_info->plan_info.defined())
+        << "plan_info plan_info should not be null when enable_cuda_graph is "
+           "true";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "no need to update plan_info for CUDA graph";
+  } else {
+    flashinfer::update_plan_info(
+        attn_metadata.plan_info,
+        causal ? xllm::kernel::cuda::determine_attention_backend(
+                     /*pos_encoding_mode=*/0,
+                     /*use_fp16_qk_reduction=*/false,
+                     /*use_custom_mask=*/false)
+               : "fa2",
+        attn_metadata,
+        query.scalar_type(),
+        key.scalar_type(),
+        output.scalar_type(),
+        head_size_,
+        head_size_,
+        num_heads_,
+        num_kv_heads_,
+        /*block_size=*/k_cache.size(1),
+        /*window_size_left=*/sliding_window_,
+        /*enable_cuda_graph=*/attn_metadata.enable_cuda_graph,
+        /*causal=*/causal,
+        /*use_tensor_core=*/attn_metadata.use_tensor_core);
+  }
 
   xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
   reshape_paged_cache_params.key = key;
@@ -88,26 +98,23 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
   xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
 
-  xllm::kernel::AttentionParams attention_params;
+  xllm::kernel::AttentionParams attention_params(attn_metadata);
   attention_params.query = query;
   attention_params.output = output;
   attention_params.output_lse = output_lse;
   // attention_params.max_seq_len = attn_metadata.max_seq_len;
   attention_params.window_size_left = sliding_window_;
   attention_params.scale = scale_;
-  attention_params.compute_dtype = attn_metadata.compute_dtype;
   // for flashinfer
   attention_params.float_workspace_buffer =
-      FlashinferWorkspace::get_instance().get_float_workspace_buffer();
+      ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
+          .get_float_workspace_buffer();
   attention_params.int_workspace_buffer =
-      FlashinferWorkspace::get_instance().get_int_workspace_buffer();
+      ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
+          .get_int_workspace_buffer();
   attention_params.page_locked_int_workspace_buffer =
-      FlashinferWorkspace::get_instance()
+      ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
           .get_page_locked_int_workspace_buffer();
-  attention_params.kv_cu_seq_lens = attn_metadata.kv_cu_seq_lens;
-  attention_params.q_cu_seq_lens = attn_metadata.q_cu_seq_lens;
-  attention_params.uri = attn_metadata.plan_info->uri;
-  attention_params.plan_info = attn_metadata.plan_info->plan_info;
 
   // TODO: support chunked prefill
   CHECK(!attn_metadata.is_chunked_prefill)
@@ -121,12 +128,6 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     attention_params.output = output;
     attention_params.k_cache = k_cache;
     attention_params.v_cache = v_cache;
-
-    attention_params.kv_seq_lens = attn_metadata.kv_seq_lens;
-    attention_params.paged_kv_indptr = attn_metadata.paged_kv_indptr;
-    attention_params.paged_kv_indices = attn_metadata.paged_kv_indices;
-    attention_params.paged_kv_last_page_len =
-        attn_metadata.paged_kv_last_page_len;
 
     xllm::kernel::batch_decode(attention_params);
   }
