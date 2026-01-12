@@ -136,12 +136,12 @@ bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
 }
 
 ForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
-  LOG(FATAL) << "RemoteWorker Method prepare_inputs is UnImplemented.";
+  NOT_IMPLEMENTED();
   return {};
 }
 
 std::optional<ForwardOutput> RemoteWorker::step(const ForwardInput& inputs) {
-  LOG(FATAL) << "RemoteWorker Method step is UnImplemented.";
+  NOT_IMPLEMENTED();
   return std::nullopt;
 }
 
@@ -328,7 +328,7 @@ void RemoteWorker::prefetch_from_storage(
 }
 
 const torch::Device& RemoteWorker::device() const {
-  LOG(FATAL) << "RemoteWorker Method device is UnImplemented.";
+  NOT_IMPLEMENTED();
   return device_;
 }
 

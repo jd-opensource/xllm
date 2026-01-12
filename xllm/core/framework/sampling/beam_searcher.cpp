@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "beam_searcher.h"
 
+#include "common/macros.h"
+
 namespace xllm {
 BeamSearchOutput BeamSearcher::forward(
     const torch::Tensor& logprobs,
@@ -41,7 +43,7 @@ BeamSearchOutput BeamSearcher::forward(
   output.out_tokens = output.out_tokens.reshape({-1});
   return output;
 #else
-  LOG(FATAL) << "BeamSearcher is only implemented for NPU backend.";
+  NOT_IMPLEMENTED();
 #endif
 }
 }  // namespace xllm

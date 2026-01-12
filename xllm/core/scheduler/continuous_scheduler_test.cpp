@@ -19,17 +19,17 @@ class FakeTokenizer : public Tokenizer {
   bool encode(const std::string_view& text,
               std::vector<int32_t>* ids,
               bool add_special_tokens = true) const {
-    LOG(FATAL) << "Not implemented";
+    NOT_IMPLEMENTED();
   }
   std::string decode(const Slice<int32_t>& ids,
                      bool skip_special_tokens) const {
-    LOG(FATAL) << "Not implemented";
+    NOT_IMPLEMENTED();
   }
   std::optional<int32_t> token_to_id(const std::string_view& token) const {
-    LOG(FATAL) << "Not implemented";
+    NOT_IMPLEMENTED();
   }
-  std::string id_to_token(int32_t id) const { LOG(FATAL) << "Not implemented"; }
-  size_t vocab_size() const { LOG(FATAL) << "Not implemented"; }
+  std::string id_to_token(int32_t id) const { NOT_IMPLEMENTED(); }
+  size_t vocab_size() const { NOT_IMPLEMENTED(); }
   std::unique_ptr<Tokenizer> clone() const {
     return std::make_unique<FakeTokenizer>();
   }
@@ -45,22 +45,16 @@ class FakeEngine : public Engine {
     fake_tokenizer_ = std::make_unique<FakeTokenizer>();
     fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
   }
-  ForwardOutput step(std::vector<Batch>& batch) {
-    LOG(FATAL) << "Not implemented";
-  }
-  void update_last_step_result(std::vector<Batch>& batch) {
-    LOG(FATAL) << "Not implemented";
-  }
+  ForwardOutput step(std::vector<Batch>& batch) { NOT_IMPLEMENTED(); }
+  void update_last_step_result(std::vector<Batch>& batch) { NOT_IMPLEMENTED(); }
   const Tokenizer* tokenizer() const { return fake_tokenizer_.get(); }
   BlockManagerPool* block_manager_pool() const {
     return fake_block_manager_.get();
   }
-  const ModelArgs& model_args() const { LOG(FATAL) << "Not implemented"; }
-  const TokenizerArgs& tokenizer_args() const {
-    LOG(FATAL) << "Not implemented";
-  }
+  const ModelArgs& model_args() const { NOT_IMPLEMENTED(); }
+  const TokenizerArgs& tokenizer_args() const { NOT_IMPLEMENTED(); }
   std::vector<int64_t> get_active_activation_memory() const {
-    LOG(FATAL) << "Not implemented";
+    NOT_IMPLEMENTED();
   }
   bool init() override { return true; }
 
@@ -243,8 +237,8 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
   FLAGS_prefill_scheduling_memory_usage_threshold = 2;  // release threshold
 
   {
-    // 1. two offline decode requests then one online prefill request preempt
-    // them
+    // 1. two offline decode requests then one online prefill request
+    // preempt them
     auto engine = std::make_unique<FakeEngine>(block_num, block_size);
     auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
     BlockManagerPool* block_manager_pool = engine->block_manager_pool();
@@ -292,8 +286,8 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
     EXPECT_TRUE(util::max(block_manager_pool->num_free_blocks()) == 1);
   }
 
-  // 2. another case: longer online prefill request arrives, but can not evict
-  // offline because evicting offline is not enough
+  // 2. another case: longer online prefill request arrives, but can not
+  // evict offline because evicting offline is not enough
   {
     auto engine = std::make_unique<FakeEngine>(block_num, block_size);
     auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);

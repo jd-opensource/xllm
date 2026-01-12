@@ -57,7 +57,7 @@ class KVCacheTransfer {
       const int64_t num_layers,
       const std::vector<std::vector<int64_t>>& kv_cache_shape,
       torch::ScalarType dtype) {
-    LOG(FATAL) << "allocate_kv_cache_spec not implemented for KVCacheTransfer!";
+    NOT_IMPLEMENTED();
   };
 
   virtual void free_kv_cache() {};
