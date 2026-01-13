@@ -25,25 +25,6 @@ DisaggPDService::DisaggPDService(DisaggPDScheduler* scheduler, Engine* engine) {
       std::make_unique<DisaggPDServiceImpl>(scheduler, engine);
 }
 
-void DisaggPDService::Generation(::google::protobuf::RpcController* controller,
-                                 const proto::DisaggStreamGeneration* request,
-                                 proto::Status* response,
-                                 ::google::protobuf::Closure* done) {
-  // receive generations from Decode
-  brpc::ClosureGuard done_guard(done);
-  disagg_pd_service_impl_->prefill_recv_generation(request, response);
-}
-
-void DisaggPDService::Generations(
-    ::google::protobuf::RpcController* controller,
-    const proto::DisaggStreamGenerations* requests,
-    proto::StatusSet* responses,
-    ::google::protobuf::Closure* done) {
-  // receive generations from Decode
-  brpc::ClosureGuard done_guard(done);
-  disagg_pd_service_impl_->prefill_recv_generations(requests, responses);
-}
-
 void DisaggPDService::AddNewRequests(
     ::google::protobuf::RpcController* controller,
     const proto::DisaggRequests* request,

@@ -52,8 +52,6 @@ class DisaggPDScheduler : public ContinuousScheduler {
   virtual void dispatch_requests();
   // prefill-2: for prefill send first token to decode
   virtual void prefill_send_first_generation();
-  // prefill-3: for prefill receive stream generation from decode
-  virtual bool prefill_recv_generation(const RequestOutput& output);
 
   // decode-1: for decode recveive new request from prefill
   virtual bool decode_schedule(std::shared_ptr<Request>& request,
@@ -149,27 +147,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
   moodycamel::BlockingConcurrentQueue<std::shared_ptr<Request>>
       prefill_request_queue_offline_;
 
-  // for prefill save all remote requests
-  std::unordered_map<std::string, std::shared_ptr<Request>>
-      remote_requests_map_;
-  std::mutex remote_requests_map_mutex_;
-  using RequestPriorityQueue =
-      std::priority_queue<std::shared_ptr<Request>,
-                          std::vector<std::shared_ptr<Request>>,
-                          std::function<bool(const std::shared_ptr<Request>&,
-                                             const std::shared_ptr<Request>&)>>;
-
   // use threadpool to handle prefill-completed request
   ThreadPool prefill_threadpool_;
-
-  // use threadpool to handle all RequestOuputs queue
-  static constexpr size_t kOutputThreadNum_ = 128;  // magic num
-  size_t next_thread_idx_ = 0;
-  ThreadPool output_threadpools_[kOutputThreadNum_];
-  // keep the thread to handle request output
-  // A request will be handled in the same thread to guarantee the token's
-  // order.
-  std::unordered_map<std::string, size_t> remote_requests_output_thread_map_;
 
   // related decode instance name(ID) list
   std::vector<std::string> decode_inst_names_;
@@ -182,16 +161,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
       received_request_map_;
   std::mutex received_request_map_mutex_;
 
-  // for decode non-batch response, each request will allocate a thread to
-  // handle response. keep the thread to handle request output
-  std::unordered_map<std::string, size_t> received_request_output_thread_map_;
-
-  // for decode batch response, each prefill instance will allocate a thread to
-  // handle response. the requests from the same prefill will be handled in one
-  // thread.
-  std::unordered_map<proto::DisaggPDService_Stub*, size_t>
-      remote_prefill_thread_map_;
-  size_t next_prefill_thread_idx_ = 0;
+  // use threadpool to handle all stream ouputs
+  ThreadPool stream_output_threadpool_;
 
   // Lock for multi-threaded read-write latency metrics
   std::vector<int64_t> recent_ttft_;

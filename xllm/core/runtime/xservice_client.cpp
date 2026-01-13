@@ -418,22 +418,6 @@ std::vector<std::string> XServiceClient::get_static_prefill_list() {
   return std::vector<std::string>(resp.names().begin(), resp.names().end());
 }
 
-ServiceConfig XServiceClient::get_config() {
-  brpc::Controller cntl;
-  xllm_service::proto::Empty req;
-  xllm_service::proto::ServiceConfig resp;
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    xservice_stub_->GetConfig(&cntl, &req, &resp, nullptr);
-  }
-  if (cntl.Failed()) {
-    LOG(ERROR) << "Fail to get config from xservice server " << xservice_addr_
-               << ", error text: " << cntl.ErrorText();
-    return ServiceConfig(false);
-  }
-  return ServiceConfig(resp.enable_decode_response_to_service());
-}
-
 void XServiceClient::generations(const std::vector<RequestOutput>& outputs) {
   // response to xllm service to avoid the redirect cost.
   proto::DisaggStreamGenerations gens;

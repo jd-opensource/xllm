@@ -57,8 +57,6 @@ class PDOOCScheduler : public DisaggPDScheduler {
   void prefill_send_first_generation() override;
   // prefill-2b: for prefill send multiple tokens to decode
   void prefill_send_multi_generations();
-  // prefill-3: for prefill receive stream generation from decode
-  // bool prefill_recv_generation(const RequestOutput& output) override;
 
   // decode-1: for decode recveive new request from prefill
   bool decode_schedule(std::shared_ptr<Request>& request,
@@ -157,6 +155,11 @@ class PDOOCScheduler : public DisaggPDScheduler {
   vector<int> decode_step_global_batch_req_lens_;
   double decode_last_step_latency_ = 0;
   vector<int> last_decode_step_global_batch_req_lens_;
+
+  // for prefill save all remote requests
+  std::unordered_map<std::string, std::shared_ptr<Request>>
+      remote_requests_map_;
+  std::mutex remote_requests_map_mutex_;
 };
 
 }  // namespace xllm

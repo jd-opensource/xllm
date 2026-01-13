@@ -67,9 +67,6 @@ class ContinuousScheduler : public Scheduler {
 
     PROPERTY(bool, enable_pd_ooc) = false;
 
-    // enable decode response to service directly
-    PROPERTY(bool, enable_decode_response_to_service) = false;
-
     // for master service, current instance name(ID).
     PROPERTY(std::optional<std::string>, instance_name);
 

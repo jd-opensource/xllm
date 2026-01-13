@@ -27,18 +27,6 @@ class DisaggPDService : public proto::DisaggPDService {
   explicit DisaggPDService() {}
   virtual ~DisaggPDService() = default;
 
-  // for prefill recv decode response
-  void Generation(::google::protobuf::RpcController* controller,
-                  const proto::DisaggStreamGeneration* request,
-                  proto::Status* response,
-                  ::google::protobuf::Closure* done) override;
-
-  // for prefill recv decode response
-  void Generations(::google::protobuf::RpcController* controller,
-                   const proto::DisaggStreamGenerations* requests,
-                   proto::StatusSet* responses,
-                   ::google::protobuf::Closure* done) override;
-
   // for decode recv prefill request
   void AddNewRequests(::google::protobuf::RpcController* controller,
                       const proto::DisaggRequests* request,
