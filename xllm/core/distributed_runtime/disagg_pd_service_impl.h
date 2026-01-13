@@ -29,14 +29,6 @@ class DisaggPDServiceImpl {
   explicit DisaggPDServiceImpl(DisaggPDScheduler* scheduler, Engine* engine);
   ~DisaggPDServiceImpl() = default;
 
-  virtual bool prefill_recv_generation(
-      const proto::DisaggStreamGeneration* request,
-      proto::Status* response);
-
-  virtual void prefill_recv_generations(
-      const proto::DisaggStreamGenerations* requests,
-      proto::StatusSet* responses);
-
   virtual void decode_recv_new_requests(const proto::DisaggRequests* request,
                                         proto::DisaggResponses* response);
 

@@ -75,8 +75,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   response_processor_ = std::make_unique<AsyncResponseProcessor>(
       engine_->tokenizer(),
       options_.instance_role(),
-      options_.enable_schedule_overlap(),
-      options_.enable_decode_response_to_service());
+      options_.enable_schedule_overlap());
   create_running_queue(options);
   if (options_.enable_service_routing()) {
     XServiceClient::get_instance()->set_scheduler(this);

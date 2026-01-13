@@ -30,8 +30,7 @@ class AsyncResponseProcessor final {
  public:
   AsyncResponseProcessor(const Tokenizer* tokenizer,
                          const std::optional<InstanceRole>& role,
-                         bool enable_schedule_overlap,
-                         bool enable_decode_response_to_service);
+                         bool enable_schedule_overlap);
   virtual ~AsyncResponseProcessor() = default;
 
   void process_completed_request(std::shared_ptr<Request> request);
@@ -80,18 +79,6 @@ class AsyncResponseProcessor final {
   // prefill or xllm service, this will decrease rpc cost.
   // User can set the flag with env `ENABLE_PD_DECODE_BATCH_RESPONSE`
   bool enable_batch_response_ = false;
-
-  // when service receive all user requests
-  // and dispatch request to prefill instances.
-  // decode can response to prefill or to service directly.
-  // 1.
-  // service <--- prefill <--- decode
-  // 2.
-  // service      prefill      decode
-  //   ^                         |
-  //   |                         |
-  //   ---------------------------
-  bool enable_decode_response_to_service_ = false;
 };
 
 }  // namespace xllm

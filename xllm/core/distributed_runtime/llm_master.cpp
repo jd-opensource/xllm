@@ -53,7 +53,6 @@ LLMMaster::LLMMaster(const Options& options)
 
   model_args_ = engine_->model_args();
 
-  bool enable_decode_response_to_service = false;
   if (options_.enable_service_routing()) {
     XServiceClient* xservice_client = XServiceClient::get_instance();
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
@@ -63,9 +62,6 @@ LLMMaster::LLMMaster(const Options& options)
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }
-    auto service_config = xservice_client->get_config();
-    enable_decode_response_to_service =
-        service_config.enable_decode_response_to_service;
   }
 
   ContinuousScheduler::Options scheduler_options;
@@ -84,7 +80,6 @@ LLMMaster::LLMMaster(const Options& options)
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
       .enable_service_routing(options_.enable_service_routing())
-      .enable_decode_response_to_service(enable_decode_response_to_service)
       .priority_strategy(options_.priority_strategy())
       .enable_online_preempt_offline(options_.enable_online_preempt_offline())
       .enable_profile_step_time(options_.enable_profile_step_time())

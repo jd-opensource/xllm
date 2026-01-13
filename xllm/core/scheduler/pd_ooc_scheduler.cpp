@@ -902,9 +902,6 @@ void PDOOCScheduler::prefill_send_first_generation() {
               << "Two request has the same request_id, check the requests map.";
         }
         remote_requests_map_[request->request_id()] = request;
-        remote_requests_output_thread_map_[request->request_id()] =
-            next_thread_idx_;
-        next_thread_idx_ = (++next_thread_idx_) % kOutputThreadNum_;
         requests.emplace_back(request);
 
         running_requests_[i] = nullptr;
@@ -982,29 +979,20 @@ void PDOOCScheduler::prefill_send_first_generation() {
       proto::Status resp;
       brpc::Controller cntl;
       stub->FirstGeneration(&cntl, &gens, &resp, nullptr);
-      if (options_.enable_decode_response_to_service() || cntl.Failed() ||
-          !resp.ok()) {
-        if (cntl.Failed() || !resp.ok()) {
-          LOG(ERROR) << "Failed to send first generation, " << cntl.ErrorText()
-                     << ", staus: " << resp.ok();
-        }
-        {
-          std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
-          remote_requests_map_.erase(request->request_id());
-          remote_requests_output_thread_map_.erase(request->request_id());
-        }
-        {
-          std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
-          req_to_channel_map_.erase(request->request_id());
-        }
-        kv_cache_manager_->deallocate(request.get());
-      } else {
-        // release the memory for other requests.
-        // TODO: FIXME
-        // Here, we should decide whether to recycle the allocated blocks
-        // according to whether all the blocks have been transmitted or not.
-        kv_cache_manager_->deallocate(request.get());
+
+      if (cntl.Failed() || !resp.ok()) {
+        LOG(ERROR) << "Failed to send first generation, " << cntl.ErrorText()
+                   << ", staus: " << resp.ok();
       }
+      {
+        std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
+        remote_requests_map_.erase(request->request_id());
+      }
+      {
+        std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
+        req_to_channel_map_.erase(request->request_id());
+      }
+      kv_cache_manager_->deallocate(request.get());
     }
   });
 }
@@ -1031,21 +1019,11 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
       LOG(FATAL) << "Decode receive same request_id from prefill.";
     }
     received_request_map_[request->request_id()] = request;
-    received_request_output_thread_map_[request->request_id()] =
-        next_thread_idx_;
-    next_thread_idx_ = (++next_thread_idx_) % kOutputThreadNum_;
   }
 
   {
     std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
     req_to_channel_map_[request->request_id()] = stub;
-    // allocate response thread to prefill instance stub.
-    if (remote_prefill_thread_map_.find(stub) ==
-        remote_prefill_thread_map_.end()) {
-      remote_prefill_thread_map_[stub] = next_prefill_thread_idx_;
-      next_prefill_thread_idx_ =
-          (++next_prefill_thread_idx_) % kOutputThreadNum_;
-    }
   }
 
   if (request->offline()) {
@@ -1363,9 +1341,6 @@ void PDOOCScheduler::prefill_send_multi_generations() {
               << "Two request has the same request_id, check the requests map.";
         }
         remote_requests_map_[request->request_id()] = request;
-        remote_requests_output_thread_map_[request->request_id()] =
-            next_thread_idx_;
-        next_thread_idx_ = (++next_thread_idx_) % kOutputThreadNum_;
       }
     }
 
@@ -1424,26 +1399,19 @@ void PDOOCScheduler::prefill_send_multi_generations() {
       proto::Status resp;
       brpc::Controller cntl;
       stub->MultiGenerations(&cntl, &multi_reqs, &resp, nullptr);
-      if (options_.enable_decode_response_to_service() || cntl.Failed() ||
-          !resp.ok()) {
-        if (cntl.Failed() || !resp.ok()) {
-          LOG(ERROR) << "Failed to send multi generations, " << cntl.ErrorText()
-                     << ", status: " << resp.ok();
-        }
-        {
-          std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
-          remote_requests_map_.erase(request->request_id());
-          remote_requests_output_thread_map_.erase(request->request_id());
-        }
-        {
-          std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
-          req_to_channel_map_.erase(request->request_id());
-        }
-        kv_cache_manager_->deallocate(request.get());
-      } else {
-        // release the memory for other requests.
-        kv_cache_manager_->deallocate(request.get());
+      if (cntl.Failed() || !resp.ok()) {
+        LOG(ERROR) << "Failed to send multi generations, " << cntl.ErrorText()
+                   << ", status: " << resp.ok();
       }
+      {
+        std::lock_guard<std::mutex> lock(remote_requests_map_mutex_);
+        remote_requests_map_.erase(request->request_id());
+      }
+      {
+        std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
+        req_to_channel_map_.erase(request->request_id());
+      }
+      kv_cache_manager_->deallocate(request.get());
     }
   });
 }

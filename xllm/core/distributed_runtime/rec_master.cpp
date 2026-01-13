@@ -399,7 +399,6 @@ RecMaster::RecMaster(const Options& options)
     LOG(ERROR) << "Unsupported rec model_type: " << model_args_.model_type();
   }
 
-  bool enable_decode_response_to_service = false;
   if (options_.enable_service_routing()) {
     XServiceClient* xservice_client = XServiceClient::get_instance();
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
@@ -409,9 +408,6 @@ RecMaster::RecMaster(const Options& options)
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }
-    auto service_config = xservice_client->get_config();
-    enable_decode_response_to_service =
-        service_config.enable_decode_response_to_service;
   }
 
   ContinuousScheduler::Options scheduler_options;
@@ -426,8 +422,7 @@ RecMaster::RecMaster(const Options& options)
       .enable_chunked_prefill(options_.enable_chunked_prefill())
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
-      .enable_service_routing(options_.enable_service_routing())
-      .enable_decode_response_to_service(enable_decode_response_to_service);
+      .enable_service_routing(options_.enable_service_routing());
   scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
 
   chat_template_ = nullptr;

@@ -29,13 +29,6 @@ limitations under the License.
 #include "xservice.pb.h"
 namespace xllm {
 
-struct ServiceConfig {
-  ServiceConfig(bool decode_to_service)
-      : enable_decode_response_to_service(decode_to_service) {}
-
-  bool enable_decode_response_to_service = false;
-};
-
 class XServiceClient {
  public:
   static XServiceClient* get_instance() {
@@ -57,7 +50,6 @@ class XServiceClient {
   InstanceInfo get_instance_info(const std::string& instance_name);
   std::vector<std::string> get_static_decode_list();
   std::vector<std::string> get_static_prefill_list();
-  ServiceConfig get_config();
 
   // response generation tokens to xllm service
   void generations(const std::vector<RequestOutput>& outputs);
