@@ -24,9 +24,10 @@ limitations under the License.
 #elif defined(USE_ILU)
 #include "ilu/ilu_ops_api.h"
 #endif
-#include <glog/logging.h>
 
 #include <numeric>
+
+#include "common/macros.h"
 
 namespace xllm::kernel {
 
@@ -63,7 +64,7 @@ void apply_rotary(RotaryParams& params) {
                                         long_position_ids,
                                         params.interleaved);
 #else
-  LOG(FATAL) << "apply_rotary not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -84,7 +85,7 @@ void active(ActivationParams& params) {
 #elif defined(USE_ILU)
   ilu::act_and_mul(params.output, params.input, params.act_mode);
 #else
-  LOG(FATAL) << "active not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -116,7 +117,7 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
                            params.v_cache,
                            params.slot_mapping);
 #else
-  LOG(FATAL) << "reshape_paged_cache not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -132,7 +133,7 @@ void reshape_from_cache(ReshapeFromCacheParams& params) {
                           params.block_tables,
                           params.cache_seq_offset);
 #else
-  LOG(FATAL) << "reshape_from_cache not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -206,7 +207,7 @@ void batch_prefill(AttentionParams& params) {
                      params.compute_dtype,
                      params.return_lse);
 #else
-  LOG(FATAL) << "batch_prefill not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -282,7 +283,7 @@ void batch_decode(AttentionParams& params) {
                     params.is_causal,
                     params.kv_cache_quant_bit_size);
 #else
-  LOG(FATAL) << "batch_decode not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -331,7 +332,7 @@ void fused_layernorm(FusedLayerNormParams& params) {
                            params.residual_out,
                            params.eps);
 #else
-  LOG(FATAL) << "fused_layernorm not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -346,7 +347,7 @@ torch::Tensor matmul(MatmulParams& params) {
 #elif defined(USE_ILU)
   return ilu::matmul(params.a, params.b, params.bias);
 #else
-  LOG(FATAL) << "matmul not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -364,7 +365,7 @@ torch::Tensor group_gemm(GroupGemmParams& params) {
                          params.trans_b,
                          params.a_quant_bit);
 #else
-  LOG(FATAL) << "group_gemm not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -382,7 +383,7 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.route_scale,
                               params.e_score_correction_bias);
 #else
-  LOG(FATAL) << "moe_active_topk not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -390,7 +391,7 @@ std::vector<torch::Tensor> moe_gen_idx(MoeGenIdxParams& params) {
 #if defined(USE_MLU)
   return mlu::moe_gen_idx(params.expert_id, params.expert_num);
 #else
-  LOG(FATAL) << "moe_gen_idx not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -402,7 +403,7 @@ torch::Tensor moe_expand_input(MoeExpandInputParams& params) {
                                params.start_expert_id,
                                params.expert_size);
 #else
-  LOG(FATAL) << "moe_expand_input not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -417,7 +418,7 @@ torch::Tensor moe_combine_result(MoeCombineResultParams& params) {
                                  params.expert_size,
                                  params.bias);
 #else
-  LOG(FATAL) << "moe_combine_result not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -426,7 +427,7 @@ torch::Tensor moe_all2all_gen_send_layout(
 #if defined(USE_MLU)
   return mlu::moe_all2all_gen_send_layout(params.token_count, params.nrank);
 #else
-  LOG(FATAL) << "moe_all2all_gen_send_layout not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -436,7 +437,7 @@ std::vector<torch::Tensor> moe_all2all_gen_gather_index(
   return mlu::moe_all2all_gen_gather_index(
       params.token_num, params.pad_num, params.return_cusum_token_count);
 #else
-  LOG(FATAL) << "moe_all2all_gen_gather_index not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -450,7 +451,7 @@ std::vector<torch::Tensor> moe_all2all_create(MoeAll2AllCreateParams& params) {
                                  params.nrank,
                                  params.device);
 #else
-  LOG(FATAL) << "moe_all2all_create not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -458,7 +459,7 @@ void moe_all2all_init(MoeAll2AllInitParams& params) {
 #if defined(USE_MLU)
   mlu::moe_all2all_init(params.handle, params.all_exchange_info, params.device);
 #else
-  LOG(FATAL) << "moe_all2all_init not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -474,7 +475,7 @@ void moe_all2all_dispatch(MoeAll2AllDispatchParams& params) {
                             params.send_token,
                             params.recv_token);
 #else
-  LOG(FATAL) << "moe_all2all_dispatch not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -488,7 +489,7 @@ void moe_all2all_combine(MoeAll2AllCombineParams& params) {
                            params.send_token,
                            params.recv_token);
 #else
-  LOG(FATAL) << "moe_all2all_combine not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -496,7 +497,7 @@ void moe_all2all_destroy(MoeAll2AllDestroyParams& params) {
 #if defined(USE_MLU)
   mlu::moe_all2all_destroy(params.handle, params.device);
 #else
-  LOG(FATAL) << "moe_all2all_destroy not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -516,7 +517,7 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
                               params.is_gated,
                               params.quant_type);
 #else
-  LOG(FATAL) << "scaled_quantize not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -539,7 +540,7 @@ torch::Tensor scaled_matmul(ScaledMatmulParams& params) {
                             params.b_calib,
                             params.output);
 #else
-  LOG(FATAL) << "scaled_matmul not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -548,7 +549,7 @@ torch::Tensor apply_top_k_top_p(TopKPParams& params) {
   return mlu::apply_top_k_top_p(
       params.logits, params.temperatures, params.top_k, params.top_p);
 #else
-  LOG(FATAL) << "apply_top_k_top_p not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -556,7 +557,7 @@ torch::Tensor random_sample(RandomSampleParams& params) {
 #if defined(USE_MLU)
   return mlu::random_sample(params.logits);
 #else
-  LOG(FATAL) << "random_sample not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -580,7 +581,7 @@ void masked_indexer_select_paged_kv(MaskedIndexerSelectPagedKVParams& params) {
                                       params.new_context_lens,
                                       params.quant_block_size);
 #else
-  LOG(FATAL) << "masked_indexer_select_paged_kv not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -592,7 +593,7 @@ void gather_split(GatherSplitParams& params) {
                     params.output_head,
                     params.output_tail);
 #else
-  LOG(FATAL) << "gather_split not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 

@@ -171,13 +171,13 @@ void WorkerClient::prefetch_from_storage(
     const std::vector<BlockTransferInfo>& block_transfer_info,
     std::shared_ptr<std::atomic<int32_t>> flag,
     std::shared_ptr<std::atomic<uint32_t>> success_cnt) {
-  LOG(FATAL) << "WorkerClient Method prefetch_from_storage is UnImplemented.";
+  NOT_IMPLEMENTED();
 }
 
 void WorkerClient::transfer_kv_blocks(
     const uint64_t batch_id,
     const std::vector<BlockTransferInfo>& block_transfer_info) {
-  LOG(FATAL) << "WorkerClient Method transfer_kv_blocks is UnImplemented.";
+  NOT_IMPLEMENTED();
 }
 
 const torch::Device& WorkerClient::device() const { return worker_->device(); }

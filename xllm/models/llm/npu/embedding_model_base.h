@@ -47,8 +47,8 @@ class LlmForEmbeddingImplBase : public torch::nn::Module {
   // returns: [num_tokens, vocab_size]
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes) {
-    LOG(ERROR) << "logits() not implemented for Embedding Model!";
-    return torch::empty({0});
+    NOT_IMPLEMENTED();
+    return torch::Tensor();
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader,

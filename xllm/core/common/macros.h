@@ -70,4 +70,8 @@ namespace xllm {
     }                                            \
   } while (0)
 
+#define NOT_IMPLEMENTED()                            \
+  do {                                               \
+    LOG(FATAL) << __func__ << " is not implemented"; \
+  } while (0)
 }  // namespace xllm

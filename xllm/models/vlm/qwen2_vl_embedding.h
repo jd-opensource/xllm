@@ -130,8 +130,8 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
   }
 
   torch::Tensor logits(const torch::Tensor&, const torch::Tensor&) {
-    LOG(ERROR) << "logits() not implemented for Embedding Model!";
-    return torch::empty({0});
+    NOT_IMPLEMENTED();
+    return torch::Tensor();
   }
 
   torch::Device device() const { return options_.device(); }

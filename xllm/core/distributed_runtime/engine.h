@@ -78,14 +78,14 @@ class Engine {
                               const std::vector<uint64_t>& src_blocks,
                               const int32_t dst_dp_rank,
                               const std::vector<uint64_t>& dst_blocks) {
-    LOG(FATAL) << " pull_kv_blocks is not implemented!";
+    NOT_IMPLEMENTED();
     return false;
   };
 
   virtual std::vector<folly::SemiFuture<uint32_t>> transfer_kv_blocks(
       const uint32_t dp_rank,
       const std::vector<BlockTransferInfo>& block_transfer_info) {
-    LOG(FATAL) << " transfer_kv_blocks is not implemented!";
+    NOT_IMPLEMENTED();
     return {};
   };
 
@@ -93,7 +93,7 @@ class Engine {
       const uint32_t dp_rank,
       const uint64_t batch_id,
       const std::vector<BlockTransferInfo>& block_transfer_info) {
-    LOG(FATAL) << " transfer_kv_blocks is not implemented!";
+    NOT_IMPLEMENTED();
   };
 
   virtual void prefetch_from_storage(
@@ -101,19 +101,19 @@ class Engine {
       const std::vector<BlockTransferInfo>& block_transfer_info,
       std::shared_ptr<std::atomic<int32_t>> flag,
       std::vector<std::shared_ptr<std::atomic<uint32_t>>>* prefetch_results) {
-    LOG(FATAL) << " prefetch_from_storage is not implemented!";
+    NOT_IMPLEMENTED();
   };
 
   virtual void get_device_info(std::vector<std::string>& device_ips,
                                std::vector<uint16_t>& ports) {
-    LOG(FATAL) << " get_device_info is notimplemented!";
+    NOT_IMPLEMENTED();
   };
 
   virtual void get_cache_info(std::vector<uint64_t>& cluster_ids,
                               std::vector<std::string>& addrs,
                               std::vector<int64_t>& k_cache_ids,
                               std::vector<int64_t>& v_cache_ids) {
-    LOG(FATAL) << " get_cache_info is notimplemented!";
+    NOT_IMPLEMENTED();
   };
 
   virtual bool link_cluster(const std::vector<uint64_t>& cluster_ids,
@@ -121,7 +121,7 @@ class Engine {
                             const std::vector<std::string>& device_ips,
                             const std::vector<uint16_t>& ports,
                             const int32_t src_dp_size) {
-    LOG(FATAL) << " link_cluster is notimplemented!";
+    NOT_IMPLEMENTED();
     return false;
   };
 
@@ -130,7 +130,7 @@ class Engine {
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports,
                               const int32_t dp_size) {
-    LOG(FATAL) << " unlink_cluster is notimplemented!";
+    NOT_IMPLEMENTED();
     return false;
   };
 
