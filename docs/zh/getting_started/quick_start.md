@@ -83,7 +83,7 @@ sudo docker run -it \
 
 ## 编译xllm
 
-如果下载的是release镜像，即tag中带有版本号的镜像，可以跳过此步，因为release镜像自带编译好的xllm二进制文件，路径为`/usr/loacl/bin/xllm`。
+如果下载的是release镜像，即tag中带有版本号的镜像，可以跳过此步，因为release镜像自带编译好的xllm二进制文件，路径为`/usr/local/bin/xllm`。
 
 下载xllm及依赖
 ```bash
