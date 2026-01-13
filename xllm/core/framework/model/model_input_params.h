@@ -218,8 +218,6 @@ struct BlockTransferInfo {
 struct ModelInputParams {
   ModelInputParams to(const torch::Device& device) const {
     ModelInputParams params;
-    params.empty_kv_cache = empty_kv_cache;
-    params.global_empty_kv_cache = global_empty_kv_cache;
     params.batch_forward_type = batch_forward_type;
     params.num_sequences = num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
@@ -290,10 +288,9 @@ struct ModelInputParams {
   }
 
   void print() const {
-    LOG(INFO) << "ModelInputParams: empty_kv_cache is " << empty_kv_cache
-              << " , global_empty_kv_cache is " << global_empty_kv_cache
-              << " , num_sequences is " << num_sequences
-              << " , kv_max_seq_len is " << kv_max_seq_len
+    LOG(INFO) << "ModelInputParams: batch_forward_type is "
+              << batch_forward_type.to_string() << " , num_sequences is "
+              << num_sequences << " , kv_max_seq_len is " << kv_max_seq_len
               << " , q_max_seq_len is " << q_max_seq_len;
     LOG(INFO) << "ModelInputParams: kv_seq_lens_vec is " << kv_seq_lens_vec;
     LOG(INFO) << "ModelInputParams: q_seq_lens_vec is " << q_seq_lens_vec;
@@ -335,11 +332,6 @@ struct ModelInputParams {
 #endif
     return true;
   }
-
-  // whether the kv-cache is empty for all sequences.
-  bool empty_kv_cache = true;
-  // whether the kv-cache is empty for all sequences,mainly used for dp case
-  bool global_empty_kv_cache = true;
 
   BatchForwardType batch_forward_type;
 

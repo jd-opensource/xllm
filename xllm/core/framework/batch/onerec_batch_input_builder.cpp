@@ -603,8 +603,6 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
 
     // Set basic parameters simultaneously (not dependent on asynchronous tasks)
     input_params.num_sequences = num_sequences;
-    input_params.empty_kv_cache = true;
-    input_params.global_empty_kv_cache = true;
     input_params.kv_max_seq_len = seq_len + num_decoder_embeddings;
     input_params.q_max_seq_len = seq_len + num_decoder_embeddings;
     forward_input.positions = perf_cache.fixed_positions_tensor;
@@ -698,8 +696,6 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
 #endif
 
     input_params.num_sequences = num_sequences;
-    input_params.empty_kv_cache = true;
-    input_params.global_empty_kv_cache = true;
     input_params.kv_max_seq_len = seq_len + num_decoder_embeddings;
     input_params.q_max_seq_len = seq_len + num_decoder_embeddings;
 

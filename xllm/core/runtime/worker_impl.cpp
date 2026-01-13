@@ -419,7 +419,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                           .dtype(torch::kInt32)
                           .pinned_memory(true));
     bool is_prefill =
-        processed_input.input_params.global_empty_kv_cache ? true : false;
+        processed_input.input_params.batch_forward_type.is_prefill();
     DpEpPadding dp_ep_padding(token_size_per_dp_group,
                               context_.get_model_args().num_experts_per_tok(),
                               context_.get_parallel_args().mapping_data(),
@@ -457,7 +457,8 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       const auto output = this->step(input);
       promise.setValue(output);
     } else {
-      if (last_step_output_valid_ && !input.input_params.empty_kv_cache) {
+      if (last_step_output_valid_ &&
+          input.input_params.batch_forward_type.has_decode()) {
         // replace step i model input with true output of step i-1
         input = update_input_by_last_step_output(input);
       }

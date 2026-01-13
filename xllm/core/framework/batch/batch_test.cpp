@@ -145,7 +145,7 @@ TEST(BatchTest, Basic) {
 
   // check the input parameters
   const ModelInputParams& input_params = forward_input.input_params;
-  EXPECT_FALSE(input_params.empty_kv_cache);
+  EXPECT_TRUE(input_params.batch_forward_type.is_mixed());
   EXPECT_EQ(input_params.num_sequences, 4);
   EXPECT_EQ(input_params.q_max_seq_len, 9);
   EXPECT_EQ(input_params.kv_max_seq_len, 16);

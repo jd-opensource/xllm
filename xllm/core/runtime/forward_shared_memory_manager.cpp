@@ -236,8 +236,7 @@ size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   }
 
   // ModelInputParams
-  total += type_size<bool> * 2        // empty_kv_cache + global_empty_kv_cache
-           + type_size<int32_t>       // batch_forward_type
+  total += type_size<int32_t>         // batch_forward_type
            + type_size<int32_t>       // num_sequences
            + type_size<uint32_t> * 2  // kv_max_seq_len + q_max_seq_len
            + type_size<uint64_t>;     // batch_id
@@ -974,8 +973,6 @@ inline void deserialize_raw_forward_input(const char*& buffer,
 
   // input_params
   auto& input_params = forward_input.input_params;
-  read_data(buffer, input_params.empty_kv_cache, device_buffer);
-  read_data(buffer, input_params.global_empty_kv_cache, device_buffer);
   int32_t batch_forward_type;
   read_data(buffer, batch_forward_type, device_buffer);
   input_params.batch_forward_type = BatchForwardType(batch_forward_type);
@@ -1066,8 +1063,6 @@ inline void serialize_raw_forward_input(const RawForwardInput& input,
   }
 
   // ModelInputParams
-  write_data(buffer, input.empty_kv_cache);
-  write_data(buffer, input.global_empty_kv_cache);
   write_data(buffer, input.batch_forward_type.value());
   write_data(buffer, input.num_sequences);
   write_data(buffer, input.max_seq_len);
@@ -1275,8 +1270,6 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   }
 
   auto& input_params = forward_input.input_params;
-  input_params.empty_kv_cache = raw_input.empty_kv_cache;
-  input_params.global_empty_kv_cache = raw_input.global_empty_kv_cache;
   input_params.batch_forward_type = raw_input.batch_forward_type;
   input_params.num_sequences = raw_input.num_sequences;
   input_params.kv_max_seq_len = raw_input.max_seq_len;

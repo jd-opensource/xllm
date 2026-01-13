@@ -741,7 +741,7 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
   atb::Status st;
   ModelInputParams& input_params_new =
       const_cast<ModelInputParams&>(input_params);
-  if (input_params.global_empty_kv_cache) {
+  if (input_params.batch_forward_type.is_prefill()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,

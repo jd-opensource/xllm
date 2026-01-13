@@ -56,7 +56,6 @@ std::vector<Batch> BatchFactory::create_batches(
     // if dp enabled, each sequence is required to
     // dispatch to the same rank in the whole lifetime
     batches[sequence->dp_rank()].add(sequence, token_budget);
-    batches[sequence->dp_rank()].update_forward_type(sequence);
   }
 
   if (is_beam_search(running_requests)) {

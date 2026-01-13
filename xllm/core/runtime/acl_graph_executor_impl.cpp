@@ -777,16 +777,9 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const torch::Tensor& tokens_tensor = tokens;
   const torch::Tensor& positions_tensor = positions;
   const ModelInputParams& params_single = params;
-  // Identify decode phase using q_max_seq_len for precise detection
-  // Decode phase: all sequences have q_seq_len == 1 (generating one token at a
-  // time) Prefill phase: sequences have q_seq_len > 1 (processing multiple
-  // prompt tokens) We also check empty_kv_cache to ensure KV cache is not empty
-  // (not first forward pass)
-  const bool in_decoding_phase =
-      (params_single.q_max_seq_len == 1) && !params_single.empty_kv_cache;
+  const bool in_decoding_phase = params_single.batch_forward_type.is_decode();
   VLOG(50) << "in_decoding_phase: " << in_decoding_phase
            << " q_max_seq_len: " << params_single.q_max_seq_len
-           << " empty_kv_cache: " << params_single.empty_kv_cache
            << " n_layers: " << args_.n_layers();
   // If not in decode phase, use eager mode directly without acl graph
   if (!in_decoding_phase || args_.n_layers() == 1) {

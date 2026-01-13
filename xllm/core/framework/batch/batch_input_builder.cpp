@@ -199,7 +199,6 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.unique_token_lens_vec.insert(state_.unique_token_lens_vec.end(),
                                         state.unique_token_lens_vec.begin(),
                                         state.unique_token_lens_vec.end());
-    state_.empty_kv_cache = state_.empty_kv_cache && state.empty_kv_cache;
     state_.max_seq_len = std::max(state_.max_seq_len, state.max_seq_len);
     state_.q_max_seq_len = std::max(state_.q_max_seq_len, state.q_max_seq_len);
 #if defined(USE_NPU)
@@ -291,7 +290,6 @@ void BatchInputBuilder::process_single_sequence(
 
   // Update state
   int32_t offset = is_mtp_decode_ ? -1 : 0;
-  state.empty_kv_cache = state.empty_kv_cache && (n_kv_cache_tokens == 0);
   state.max_seq_len = std::max(state.max_seq_len, seq_len + offset);
   state.q_max_seq_len = std::max(state.q_max_seq_len, q_seq_len);
   state.kv_cache_tokens_nums.emplace_back(n_kv_cache_tokens);
@@ -494,7 +492,7 @@ void BatchInputBuilder::padding_decode_batch_size(
   if (num_sequences_ < min_decoding_batch_size) {
     const uint32_t n_tokens = state_.flatten_tokens_vec.size();
     // kv_cache is not empty in decoding phase
-    const bool in_decoding_phase = !state_.empty_kv_cache;
+    const bool in_decoding_phase = !state_.batch_forward_type.is_prefill();
     const bool same_num_decoding_tokens =
         state_.q_max_seq_len == num_decoding_tokens &&
         n_tokens == num_sequences_ * num_decoding_tokens;
@@ -547,7 +545,6 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
 
   auto& input_params = forward_input.input_params;
-  input_params.empty_kv_cache = state_.empty_kv_cache;
   input_params.batch_forward_type = state_.batch_forward_type;
   input_params.num_sequences = state_.block_tables_vec.size();
   input_params.kv_max_seq_len = state_.max_seq_len;
@@ -643,7 +640,6 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.unique_token_counts_vec);
   raw_forward_input.unique_token_lens_vec =
       std::move(state_.unique_token_lens_vec);
-  raw_forward_input.empty_kv_cache = state_.empty_kv_cache;
   raw_forward_input.batch_forward_type = state_.batch_forward_type;
   raw_forward_input.max_seq_len = state_.max_seq_len;
   raw_forward_input.q_max_seq_len = state_.q_max_seq_len;

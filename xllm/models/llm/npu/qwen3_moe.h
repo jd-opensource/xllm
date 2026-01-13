@@ -236,7 +236,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
           }
           attn_mask = torch::cat(req_mask_vec, 0);
         }
-      } else if (input_params.global_empty_kv_cache) {
+      } else if (input_params.batch_forward_type.is_prefill()) {
         attn_mask = attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
       }
     }

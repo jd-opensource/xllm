@@ -650,7 +650,7 @@ TEST_F(DeepseekV2DecoderLayerTest,
 
   // Build minimal ModelInputParams for prefill
   ModelInputParams input_params;
-  input_params.empty_kv_cache = true;
+  input_params.batch_forward_type = BatchForwardType::PREFILL;
   input_params.num_sequences = batch_size;
   input_params.q_max_seq_len = seq_len;
   input_params.kv_max_seq_len = batch_size * seq_len;
@@ -794,7 +794,7 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
 
   // Build minimal ModelInputParams for prefill
   ModelInputParams input_params;
-  input_params.empty_kv_cache = true;
+  input_params.batch_forward_type = BatchForwardType::PREFILL;
   input_params.num_sequences = batch_size;
   input_params.q_max_seq_len = seq_len;
   input_params.kv_max_seq_len = batch_size * seq_len;

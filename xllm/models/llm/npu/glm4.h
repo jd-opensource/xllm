@@ -131,16 +131,9 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       }
-    } else {
-      if (FLAGS_num_speculative_tokens == 0 ||
-          input_params.global_empty_kv_cache) {
-        attn_mask = attn_mask_.get_attn_mask(
-            128, cos_pos.dtype().toScalarType(), cos_pos.device());
-      } else {
-        attn_mask = attn_mask_.gen_free_mask(FLAGS_num_speculative_tokens + 1,
-                                             cos_pos.dtype().toScalarType(),
-                                             cos_pos.device());
-      }
+    } else if (input_params.batch_forward_type.is_prefill()) {
+      attn_mask = attn_mask_.get_attn_mask(
+          128, cos_pos.dtype().toScalarType(), cos_pos.device());
     }
 
     for (size_t i = 0; i < layers_.size(); i++) {

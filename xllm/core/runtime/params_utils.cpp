@@ -188,9 +188,6 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       torch::dtype(torch::kFloat32).device(torch::kCPU).pinned_memory(true));
 
   auto& input_params = forward_inputs.input_params;
-  input_params.empty_kv_cache = pb_forward_input->empty_kv_cache();
-  input_params.global_empty_kv_cache =
-      pb_forward_input->global_empty_kv_cache();
   input_params.batch_forward_type =
       BatchForwardType(pb_forward_input->batch_forward_type());
   input_params.num_sequences = block_tables_vec.size();
@@ -393,8 +390,6 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   }
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_unique_token_lens_vec(),
                       inputs.unique_token_lens_vec);
-  pb_forward_input->set_empty_kv_cache(inputs.empty_kv_cache);
-  pb_forward_input->set_global_empty_kv_cache(inputs.global_empty_kv_cache);
   pb_forward_input->set_batch_forward_type(inputs.batch_forward_type.value());
   pb_forward_input->set_max_seq_len(inputs.max_seq_len);
   pb_forward_input->set_q_max_seq_len(inputs.q_max_seq_len);

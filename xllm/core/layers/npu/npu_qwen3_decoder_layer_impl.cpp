@@ -240,8 +240,6 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                                                 int node_id) {
   atb::Status st;
   if (!input_params.batch_forward_type.is_decode()) {
-    // if (input_params.empty_kv_cache) {
-    // mstxRangeId id = mstxRangeStartA("prefill build variant", nullptr);
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -250,7 +248,6 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                             kv_cache,
                             input_params,
                             true);
-    // mstxRangeEnd(id);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute prefill layer fail, error code: " << st;

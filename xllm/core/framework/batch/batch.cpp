@@ -58,6 +58,7 @@ void Batch::add(Sequence* sequence, uint32_t allowed_max_token) {
   if ((sequence->stage() == SequenceStage::PREFILL) && mm_data.valid()) {
     mm_data_vec_.emplace_back(mm_data);
   }
+  update_forward_type(sequence);
 }
 
 void Batch::update_forward_type(Sequence* sequence) {

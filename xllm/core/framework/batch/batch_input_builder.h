@@ -79,7 +79,6 @@ class BatchInputBuilder {
 
     // Sequence metadata
     BatchForwardType batch_forward_type;
-    bool empty_kv_cache = true;
     uint32_t max_seq_len = 0;
     uint32_t q_max_seq_len = 0;
     // Tracking token counts in KV cache，only used for deepseek chunked prefill
