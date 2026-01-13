@@ -35,7 +35,8 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
                                : options_.enable_cache_upload());
 
   for (int32_t i = 0; i < dp_size; ++i) {
-    if (options.enable_disagg_pd() || options_.enable_kvcache_store()) {
+    if (options.enable_disagg_pd() || options_.enable_kvcache_store() ||
+        options_.host_num_blocks() > 0) {
       block_managers_.emplace_back(
           std::make_unique<ConcurrentBlockManagerImpl>(npu_options));
     } else {
@@ -177,7 +178,6 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
     // not need to be recalculated and can be reused directly.
     shared_blocks = block_managers_[dp_rank]->allocate_shared(
         sequence->tokens(), existed_shared_blocks);
-
     sequence->add_kv_blocks(shared_blocks);
     sequence->kv_state().incr_shared_kv_blocks_num(shared_blocks.size());
     shared_num = shared_blocks.size();

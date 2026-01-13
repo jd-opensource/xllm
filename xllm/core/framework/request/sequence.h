@@ -267,7 +267,7 @@ class Sequence final {
     return &prefetch_results_;
   }
 
-  bool update_prefetch_result(uint32_t timeout, uint32_t& success_cnt);
+  bool update_prefetch_result(const uint32_t timeout, uint32_t& success_cnt);
 
   void reset();
 
@@ -321,6 +321,11 @@ class Sequence final {
   bool last_token_handled() const {
     return last_token_handled_.load(std::memory_order_relaxed);
   }
+
+  void set_offload_batch(uint32_t offload_batch) {
+    offload_batch_ = offload_batch;
+  }
+  uint32_t get_offload_batch() { return offload_batch_; }
 
  private:
   SequenceOutputType output_type();
@@ -449,6 +454,8 @@ class Sequence final {
 
   // whether the last token is handled
   std::atomic<bool> last_token_handled_{false};
+
+  uint32_t offload_batch_ = UINT32_MAX;
 };
 
 }  // namespace xllm

@@ -22,7 +22,10 @@ cc_library(
     Boost::serialization
     SMHasherSupport
     torch
+    :kv_cache
 )
+
+ target_link_libraries(prefix_cache PRIVATE mooncake_store)
 
 
 if(USE_NPU)

@@ -27,7 +27,7 @@
 	url = https://gitcode.com/xLLM-AI/spdlog.git
 [submodule "third_party/Mooncake"]
 	path = third_party/Mooncake
-	url = https://gitcode.com/xLLM-AI/Mooncake.git
+	url = https://github.com/yrewzjs/Mooncake.git 
 [submodule "third_party/torch_npu_ops"]
 	path = third_party/torch_npu_ops
 	url = https://gitcode.com/xLLM-AI/torch_npu_ops.git

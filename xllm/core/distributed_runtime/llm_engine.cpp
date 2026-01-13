@@ -554,6 +554,9 @@ std::vector<folly::SemiFuture<uint32_t>> LLMEngine::transfer_kv_blocks(
   for (auto tp_rank = 0; tp_rank < dp_local_tp_size_; ++tp_rank) {
     futures.emplace_back(worker_clients_[tp_rank + dp_local_tp_size_ * dp_rank]
                              ->transfer_kv_blocks(block_transfer_info));
+    if (options_.enable_mla()) {
+      break;
+    }
   }
 
   return std::move(futures);
