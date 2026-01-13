@@ -215,6 +215,8 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
     auto word_embedding = impl_->get_word_embedding();
     draft_impl_->set_word_embedding(word_embedding);
 #endif
+    // Sync context_ from impl_ for WorkerImpl::prepare_work_before_execute
+    context_ = impl_->context_;
   }
   return result;
 }
@@ -277,6 +279,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_empty(
   if (!input.input_params.batch_forward_type.is_decode()) {
     auto output = impl_->step(input);
     auto draft_output = draft_impl_->step(input);
+    output->sample_output.embeddings = torch::Tensor();
     return output;
   } else {
     for (size_t i = 0; i < options_.num_speculative_tokens(); ++i) {
@@ -291,6 +294,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_empty(
 
     auto future = impl_->step_async(new_input);
     ForwardOutput output = std::move(future).get().value();
+    output.sample_output.embeddings = torch::Tensor();
     return output;
   }
 }
@@ -612,6 +616,11 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   // update the sampling_params
   update_sampling_params(
       validate_input.sampling_params, num_val_tokens, total_num_val_tokens);
+
+  // update dp_global_token_nums for dp/ep parallel
+  for (auto& it : input_params.dp_global_token_nums) {
+    it *= num_val_tokens;
+  }
 }
 
 SampleOutput SpeculativeWorkerImpl::validate(
