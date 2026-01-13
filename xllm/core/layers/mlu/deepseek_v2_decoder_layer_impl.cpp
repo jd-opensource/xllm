@@ -117,7 +117,7 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     const ModelInputParams& input_params) {
   // we only support all2all communcation for decode stage for now.
   bool enable_moe_all2all =
-      enable_deep_ep_ && input_params.batch_forward_type.is_decode();
+      enable_deep_ep_ && all_dp_ranks_are_decode(input_params);
   PaddingInfo pad_info;
 
   // Pre-attention norm

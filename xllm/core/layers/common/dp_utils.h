@@ -45,5 +45,8 @@ torch::Tensor get_dp_local_slice(const torch::Tensor& input,
                                  const ModelInputParams& params,
                                  const ParallelArgs& args);
 
+// check if all dp ranks are decode
+bool all_dp_ranks_are_decode(const ModelInputParams& params);
+
 }  // namespace layer
 }  // namespace xllm

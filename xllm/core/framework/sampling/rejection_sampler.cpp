@@ -320,8 +320,10 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample_fused(
       torch::arange(n_spec, (batch_size + 1) * n_spec, n_spec, options_int32);
 
   // Always create recovery probability matrix here, as kernel requires it
-  torch::Tensor uniform_probs =
-      torch::rand_like(target_probs).reshape({-1, vocab_size}).contiguous();
+  torch::Tensor uniform_probs = torch::empty_like(target_probs)
+                                    .exponential_()
+                                    .reshape({-1, vocab_size})
+                                    .contiguous();
 
   // Call the fused kernel
   kernel::RejectionSampleParams params;

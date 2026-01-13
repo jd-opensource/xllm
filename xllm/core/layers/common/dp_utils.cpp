@@ -89,5 +89,11 @@ torch::Tensor get_dp_local_slice(const torch::Tensor& input,
   return input.slice(0, start, end);
 }
 
+bool all_dp_ranks_are_decode(const ModelInputParams& params) {
+  return std::all_of(params.dp_is_decode.begin(),
+                     params.dp_is_decode.end(),
+                     [](int32_t val) { return val == 1; });
+}
+
 }  // namespace layer
 }  // namespace xllm
