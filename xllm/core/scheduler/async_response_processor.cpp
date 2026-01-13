@@ -34,13 +34,11 @@ namespace xllm {
 AsyncResponseProcessor::AsyncResponseProcessor(
     const Tokenizer* tokenizer,
     const std::optional<InstanceRole>& role,
-    bool enable_schedule_overlap,
-    bool enable_decode_response_to_service)
+    bool enable_schedule_overlap)
     : response_threadpool_(FLAGS_num_response_handling_threads),
       tokenizer_(tokenizer->clone()),
       role_(role.value_or(InstanceRole::DEFAULT)),
-      enable_schedule_overlap_(enable_schedule_overlap),
-      enable_decode_response_to_service_(enable_decode_response_to_service) {
+      enable_schedule_overlap_(enable_schedule_overlap) {
   if (role_ == InstanceRole::DECODE || role_ == InstanceRole::MIX) {
     enable_batch_response_ =
         util::get_bool_env("ENABLE_PD_DECODE_BATCH_RESPONSE", true);
@@ -76,10 +74,9 @@ void AsyncResponseProcessor::process_completed_request(
     RequestOutput req_output =
         request->generate_output(*tokenizer_, &generate_output_threadpool_);
 
-    if ((role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) &&
-        enable_decode_response_to_service_) {
+    if (role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) {
       // entering here means non-stream request's prefill stage ends in Disagg
-      // P/D mode and enable_decode_response_to_service
+      // P/D mode.
       req_output.finished = true;
     } else {
       request->log_statistic(end_2_end_latency_seconds);
@@ -215,10 +212,9 @@ void AsyncResponseProcessor::process_stream_request(
           req_output.outputs.push_back(std::move(seq_output.value()));
         }
       }
-      if ((role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) &&
-          enable_decode_response_to_service_) {
+      if (role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) {
         // stream request's prefill stage finishes in prefill instance in Disagg
-        // P/D mode and enable_decode_response_to_service_ = true.
+        // P/D mode.
         req_output.finished = true;
       }
       if (!request->state().output_func(req_output)) {

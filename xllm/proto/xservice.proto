@@ -69,17 +69,12 @@ message InstanceIDs {
   repeated string names = 1;
 }
 
-message ServiceConfig {
-  bool enable_decode_response_to_service = 1;
-}
-
 service XllmRpcService {
   rpc RegisterInstance(InstanceMetaInfo) returns (StatusCode) {}
   rpc GetInstanceInfo(InstanceID) returns (InstanceMetaInfo) {}
   rpc Heartbeat(HeartbeatRequest) returns (Status) {}
   rpc GetStaticDecodeList(InstanceID) returns (InstanceIDs) {}
   rpc GetStaticPrefillList(InstanceID) returns (InstanceIDs) {}
-  rpc GetConfig(Empty) returns (ServiceConfig) {}
   // xllm service receive response from decode instance directly in disagg pd mode.
   // This can eliminate the cost brought by forwarding through prefill.
   rpc Generations(xllm.proto.DisaggStreamGenerations) returns (xllm.proto.StatusSet) {}
