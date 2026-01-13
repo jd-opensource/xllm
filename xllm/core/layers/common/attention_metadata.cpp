@@ -60,6 +60,9 @@ AttentionMetadata AttentionMetadata::build(
     attn_metadata.block_table = params.block_tables;
     attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
   }
+#if defined(USE_ILU)
+  attn_metadata.block_table = params.block_tables;
+#endif
 
   attn_metadata.is_dummy = (params.q_max_seq_len == 0);
 

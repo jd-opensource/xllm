@@ -112,6 +112,17 @@ bool WorkerImpl::allocate_kv_cache(
           torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_)),
           npu_format_type);
     }
+#elif defined(USE_ILU)
+    key_cache =
+        torch::zeros(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
+    if (!kv_cache_shape[1].empty()) {
+      value_cache =
+          torch::zeros(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+    }
+    if (enable_lighting_indexer) {
+      index_cache =
+          torch::zeros(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
+    }
 #else
     key_cache =
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));

@@ -56,6 +56,10 @@ limitations under the License.
 #include "vlm/qwen2_vl_embedding.h"  // IWYU pragma: keep
 #include "vlm/qwen3_vl.h"            // IWYU pragma: keep
 #include "vlm/qwen3_vl_moe.h"        // IWYU pragma: keep
+#elif defined(USE_ILU)
+#include "llm/qwen2.h"      // IWYU pragma: keep
+#include "llm/qwen3.h"      // IWYU pragma: keep
+#include "llm/qwen3_moe.h"  // IWYU pragma: keep
 #else
 #include "llm/qwen2.h"               // IWYU pragma: keep
 #include "llm/qwen3.h"               // IWYU pragma: keep

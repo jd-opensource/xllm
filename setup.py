@@ -36,13 +36,11 @@ def get_device_type():
     import torch
 
     if torch.cuda.is_available():
-        return "cuda"
-
-    try:
-        import ixformer
-        return "ilu"
-    except ImportError:
-        pass
+        try:
+            import ixformer
+            return "ilu"
+        except ImportError:
+            return "cuda"
 
     try:
         import torch_mlu

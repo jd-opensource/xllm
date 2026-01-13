@@ -57,12 +57,13 @@ void apply_rotary(RotaryParams& params) {
 
   cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
 #elif defined(USE_ILU)
+  auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+  auto cos = cos_sin_vec[0];
+  auto sin = cos_sin_vec[2];
+  auto cos_sin = torch::cat({cos, sin}, -1);
   torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
-  ilu::apply_rope_pos_ids_cos_sin_cache(params.q,
-                                        params.k,
-                                        params.cos_sin,
-                                        long_position_ids,
-                                        params.interleaved);
+  ilu::apply_rope_pos_ids_cos_sin_cache(
+      params.q, params.k, cos_sin, long_position_ids, params.interleaved);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -198,6 +199,7 @@ void batch_prefill(AttentionParams& params) {
                      params.q_quant_scale,
                      params.k_quant_scale,
                      params.v_quant_scale,
+                     params.block_table,
                      params.max_query_len,
                      params.max_seq_len,
                      params.scale,
@@ -323,14 +325,18 @@ void fused_layernorm(FusedLayerNormParams& params) {
     cuda::rms_norm(params.output, params.input, params.weight, params.eps);
   }
 #elif defined(USE_ILU)
-  ilu::residual_layer_norm(params.input,
-                           params.output,
-                           params.residual,
-                           params.weight,
-                           params.beta,  // weight_bias
-                           params.bias,  // residual_bias
-                           params.residual_out,
-                           params.eps);
+  if (params.residual.has_value()) {
+    ilu::residual_layer_norm(params.input,
+                             params.output,
+                             params.residual,
+                             params.weight,
+                             params.beta,  // weight_bias
+                             params.bias,  // residual_bias
+                             params.residual_out,
+                             params.eps);
+  } else {
+    ilu::rms_norm(params.output, params.input, params.weight, params.eps);
+  }
 #else
   NOT_IMPLEMENTED();
 #endif
