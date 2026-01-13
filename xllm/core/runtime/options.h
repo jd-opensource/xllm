@@ -104,9 +104,6 @@ struct Options {
   // the max tokens per chunk for request in prefill stage.
   PROPERTY(int32_t, max_tokens_per_chunk_for_prefill);
 
-  // for master service, master server addr
-  PROPERTY(std::optional<std::string>, xservice_addr);
-
   // for master service, current instance name(ID).
   PROPERTY(std::optional<std::string>, instance_name);
 

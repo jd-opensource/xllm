@@ -195,7 +195,6 @@ int run() {
       .node_rank(FLAGS_node_rank)
       .dp_size(FLAGS_dp_size)
       .ep_size(FLAGS_ep_size)
-      .xservice_addr(FLAGS_xservice_addr)
       .instance_name(FLAGS_host + ":" + std::to_string(FLAGS_port))
       .enable_disagg_pd(FLAGS_enable_disagg_pd)
       .enable_pd_ooc(FLAGS_enable_pd_ooc)

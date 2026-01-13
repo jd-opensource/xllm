@@ -99,7 +99,6 @@ bool LLM::Initialize(const std::string& model_path,
         .node_rank(init_options.node_rank)
         .dp_size(init_options.dp_size)
         .ep_size(init_options.ep_size)
-        .xservice_addr(init_options.xservice_addr)
         .instance_name(init_options.instance_name)
         .enable_disagg_pd(init_options.enable_disagg_pd)
         .enable_schedule_overlap(init_options.enable_schedule_overlap)

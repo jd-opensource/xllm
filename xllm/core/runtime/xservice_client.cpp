@@ -59,77 +59,53 @@ bool check_instance_name(const std::string& name) {
 }  // namespace
 
 bool XServiceClient::init(const std::string& etcd_addr,
-                          const std::string& xservice_addr,
                           const std::string& instance_name,
                           const BlockManagerPool* block_manager_pool) {
-  if (!etcd_addr.empty()) {
-    instance_name_ = instance_name;
-    chan_options_.protocol = "http";
-    chan_options_.max_retry = 3;
-    chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
-
-    etcd_client_ = std::make_unique<EtcdClient>(etcd_addr);
-
-    while (!etcd_client_->get_master_service(ETCD_MASTER_SERVICE_KEY,
-                                             &xservice_addr_)) {
-      LOG(ERROR) << "Master service not set, wait 2s!";
-      sleep(2);
-    }
-
-    if (!check_instance_name(xservice_addr_)) {
-      LOG(FATAL) << "Invalid master service name format, now only support "
-                    "`ip:port` style.";
-      return false;
-    }
-
-    xservice_channel_ = std::make_unique<brpc::Channel>();
-    if (xservice_channel_->Init(xservice_addr_.c_str(), "", &chan_options_) !=
-        0) {
-      LOG(FATAL) << "Fail to initialize xsevrice channel to server "
-                 << xservice_addr_;
-      return false;
-    }
-    xservice_stub_ = std::make_unique<xllm_service::proto::XllmRpcService_Stub>(
-        xservice_channel_.get());
-
-    // heartbeat thread
-    heartbeat_thread_ =
-        std::make_unique<std::thread>(&XServiceClient::heartbeat, this);
-
-    auto func = std::bind(&XServiceClient::handle_master_service_watch,
-                          this,
-                          std::placeholders::_1);
-
-    etcd_client_->add_watch(ETCD_MASTER_SERVICE_KEY, func);
-
-    block_manager_pool_ = block_manager_pool;
-  } else {
-    if (xservice_addr.empty()) {
-      LOG(ERROR) << "xservice address is empty.";
-      return false;
-    }
-    xservice_addr_ = xservice_addr;
-    instance_name_ = instance_name;
-
-    chan_options_.protocol = "http";
-    chan_options_.max_retry = 3;
-    chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
-
-    xservice_channel_ = std::make_unique<brpc::Channel>();
-    if (xservice_channel_->Init(xservice_addr_.c_str(), "", &chan_options_) !=
-        0) {
-      LOG(FATAL) << "Fail to initialize xsevrice channel to server "
-                 << xservice_addr_;
-      return false;
-    }
-
-    xservice_stub_ = std::make_unique<xllm_service::proto::XllmRpcService_Stub>(
-        xservice_channel_.get());
-
-    // heartbeat thread
-    heartbeat_thread_ =
-        std::make_unique<std::thread>(&XServiceClient::heartbeat, this);
+  if (etcd_addr.empty()) {
+    LOG(ERROR) << "etcd_addr address is empty.";
+    return false;
   }
+
+  instance_name_ = instance_name;
+  chan_options_.protocol = "http";
+  chan_options_.max_retry = 3;
+  chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
+
+  etcd_client_ = std::make_unique<EtcdClient>(etcd_addr);
+
+  while (!etcd_client_->get_master_service(ETCD_MASTER_SERVICE_KEY,
+                                           &xservice_addr_)) {
+    LOG(ERROR) << "Master service not set, wait 2s!";
+    sleep(2);
+  }
+
+  if (!check_instance_name(xservice_addr_)) {
+    LOG(FATAL) << "Invalid master service name format, now only support "
+                  "`ip:port` style.";
+    return false;
+  }
+
+  xservice_channel_ = std::make_unique<brpc::Channel>();
+  if (xservice_channel_->Init(xservice_addr_.c_str(), "", &chan_options_) !=
+      0) {
+    LOG(FATAL) << "Fail to initialize xsevrice channel to server "
+               << xservice_addr_;
+    return false;
+  }
+  xservice_stub_ = std::make_unique<xllm_service::proto::XllmRpcService_Stub>(
+      xservice_channel_.get());
+
+  // heartbeat thread
+  heartbeat_thread_ =
+      std::make_unique<std::thread>(&XServiceClient::heartbeat, this);
+
+  auto func = std::bind(&XServiceClient::handle_master_service_watch,
+                        this,
+                        std::placeholders::_1);
+
+  etcd_client_->add_watch(ETCD_MASTER_SERVICE_KEY, func);
+
+  block_manager_pool_ = block_manager_pool;
 
   initialize_done_ = true;
   return true;
@@ -299,87 +275,65 @@ InstanceInfo XServiceClient::get_instance_info(
 }
 
 void XServiceClient::heartbeat() {
-  if (etcd_client_) {
-    KvCacheEvent event;
-    while (!exited_) {
-      event.clear();
-      std::this_thread::sleep_for(std::chrono::milliseconds(
-          static_cast<int64_t>(FLAGS_heart_beat_interval * 1000)));
-      if (!register_done_) continue;
-      if (block_manager_pool_ == nullptr || scheduler_ == nullptr) continue;
+  KvCacheEvent event;
+  while (!exited_) {
+    event.clear();
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int64_t>(FLAGS_heart_beat_interval * 1000)));
+    if (!register_done_) continue;
+    if (block_manager_pool_ == nullptr || scheduler_ == nullptr) continue;
 
-      brpc::Controller cntl;
-      xllm_service::proto::HeartbeatRequest req;
-      req.set_name(instance_name_);
-      if (block_manager_pool_->options().enable_prefix_cache()) {
-        block_manager_pool_->get_merged_kvcache_event(&event);
-        auto cache_event = req.mutable_cache_event();
-        if (event.stored_cache.size()) {
-          cache_event->mutable_stored_cache()->Reserve(
-              event.stored_cache.size());
-          for (auto& hash_key : event.stored_cache) {
-            cache_event->add_stored_cache(hash_key.data, sizeof(hash_key.data));
-          }
-        }
-
-        if (event.removed_cache.size()) {
-          cache_event->mutable_removed_cache()->Reserve(
-              event.removed_cache.size());
-          for (auto& hash_key : event.removed_cache) {
-            cache_event->add_removed_cache(hash_key.data,
-                                           sizeof(hash_key.data));
-          }
+    brpc::Controller cntl;
+    xllm_service::proto::HeartbeatRequest req;
+    req.set_name(instance_name_);
+    if (block_manager_pool_->options().enable_prefix_cache()) {
+      block_manager_pool_->get_merged_kvcache_event(&event);
+      auto cache_event = req.mutable_cache_event();
+      if (event.stored_cache.size()) {
+        cache_event->mutable_stored_cache()->Reserve(event.stored_cache.size());
+        for (auto& hash_key : event.stored_cache) {
+          cache_event->add_stored_cache(hash_key.data, sizeof(hash_key.data));
         }
       }
 
-      req.mutable_load_metrics()->set_gpu_cache_usage_perc(
-          block_manager_pool_->get_gpu_cache_usage_perc());
-
-      req.mutable_load_metrics()->set_waiting_requests_num(
-          scheduler_->get_waiting_requests_num());
-
-      std::vector<int64_t> ttft;
-      std::vector<int64_t> tbt;
-      scheduler_->get_latency_metrics(ttft, tbt);
-      if (!ttft.empty()) {
-        auto max_ttft = std::max_element(ttft.begin(), ttft.end());
-        req.mutable_latency_metrics()->set_recent_max_ttft(*max_ttft);
-      }
-
-      if (!tbt.empty()) {
-        auto max_tbt = std::max_element(tbt.begin(), tbt.end());
-        req.mutable_latency_metrics()->set_recent_max_tbt(*max_tbt);
-      }
-
-      xllm_service::proto::Status resp;
-      {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        xservice_stub_->Heartbeat(&cntl, &req, &resp, nullptr);
-      }
-      if (cntl.Failed()) {
-        LOG(ERROR) << "Failed to send heartbeat to xservice " << xservice_addr_
-                   << ", error msg is: " << cntl.ErrorText();
-      } else if (!resp.ok()) {
-        LOG(ERROR) << "Failed to send heartbeat to xservice " << xservice_addr_;
+      if (event.removed_cache.size()) {
+        cache_event->mutable_removed_cache()->Reserve(
+            event.removed_cache.size());
+        for (auto& hash_key : event.removed_cache) {
+          cache_event->add_removed_cache(hash_key.data, sizeof(hash_key.data));
+        }
       }
     }
-  } else {
-    while (!exited_) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(
-          static_cast<int64_t>(FLAGS_heart_beat_interval * 1000)));
-      if (!register_done_) continue;
 
-      brpc::Controller cntl;
-      xllm_service::proto::HeartbeatRequest req;
-      req.set_name(instance_name_);
-      xllm_service::proto::Status resp;
+    req.mutable_load_metrics()->set_gpu_cache_usage_perc(
+        block_manager_pool_->get_gpu_cache_usage_perc());
+
+    req.mutable_load_metrics()->set_waiting_requests_num(
+        scheduler_->get_waiting_requests_num());
+
+    std::vector<int64_t> ttft;
+    std::vector<int64_t> tbt;
+    scheduler_->get_latency_metrics(ttft, tbt);
+    if (!ttft.empty()) {
+      auto max_ttft = std::max_element(ttft.begin(), ttft.end());
+      req.mutable_latency_metrics()->set_recent_max_ttft(*max_ttft);
+    }
+
+    if (!tbt.empty()) {
+      auto max_tbt = std::max_element(tbt.begin(), tbt.end());
+      req.mutable_latency_metrics()->set_recent_max_tbt(*max_tbt);
+    }
+
+    xllm_service::proto::Status resp;
+    {
+      std::shared_lock<std::shared_mutex> lock(mutex_);
       xservice_stub_->Heartbeat(&cntl, &req, &resp, nullptr);
-      if (cntl.Failed()) {
-        LOG(ERROR) << "Failed to send heartbeat to xservice " << xservice_addr_
-                   << ", error msg is: " << cntl.ErrorText();
-      } else if (!resp.ok()) {
-        LOG(ERROR) << "Failed to send heartbeat to xservice " << xservice_addr_;
-      }
+    }
+    if (cntl.Failed()) {
+      LOG(ERROR) << "Failed to send heartbeat to xservice " << xservice_addr_
+                 << ", error msg is: " << cntl.ErrorText();
+    } else if (!resp.ok()) {
+      LOG(ERROR) << "Failed to send heartbeat to xservice " << xservice_addr_;
     }
   }
 }

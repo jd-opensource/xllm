@@ -402,7 +402,6 @@ RecMaster::RecMaster(const Options& options)
   if (options_.enable_service_routing()) {
     XServiceClient* xservice_client = XServiceClient::get_instance();
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
-                               options_.xservice_addr().value_or(""),
                                options_.instance_name().value_or(""),
                                engine_->block_manager_pool())) {
       LOG(FATAL) << "XServiceClient init fail!";
