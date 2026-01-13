@@ -37,9 +37,9 @@ limitations under the License.
 #include "framework/request/sequence.h"
 
 namespace xllm {
+
 FixedStepsScheduler::FixedStepsScheduler(Engine* engine, const Options& options)
     : ContinuousScheduler(engine, options) {}
-
 bool FixedStepsScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
@@ -222,41 +222,23 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
   running_sequences_.clear();
   running_sequences_budgets_.clear();
 
+  // Lazy initialize pipeline before handle_prefill_requests
+  // Because handle_prefill_requests accesses
+  // scheduler_pipeline_->requires_kv_cache(), we need to initialize it earlier.
+  // Initialize from waiting_priority_queue_ since running_requests_ was just
+  // cleared.
+  if (!scheduler_pipeline_ && !waiting_priority_queue_.empty()) {
+    const std::shared_ptr<Request>& sample_request =
+        waiting_priority_queue_.top();
+    auto rec_type = sample_request->state().rec_type;
+    bool is_pure_device = is_pure_device_mode();
+    scheduler_pipeline_ = create_scheduler_pipeline(rec_type, is_pure_device);
+  }
+
   // remaining budget for the current batch
   size_t remaining_token_budget = options_.max_tokens_per_batch();
   size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
   size_t num_preempted_requests = 0;
-
-  // Initialize pipeline before handle_prefill_requests for KV cache allocation
-  if (!scheduler_pipeline_ && !waiting_priority_queue_.empty()) {
-    auto rec_type = waiting_priority_queue_.top()->state().rec_type;
-    // Convert RecType to RecModelKind, then get pipeline type
-    RecModelKind rec_model_kind = RecModelKind::kNone;
-    switch (rec_type) {
-      case RecType::kLlmRec:
-        rec_model_kind = RecModelKind::kLlmRec;
-        break;
-      case RecType::kOneRec:
-        rec_model_kind = RecModelKind::kOneRec;
-        break;
-      default:
-        rec_model_kind = RecModelKind::kNone;
-        break;
-    }
-    auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
-    switch (pipeline_type) {
-      case RecPipelineType::kLlmRecDefault:
-      case RecPipelineType::kLlmRecWithMmData:
-        scheduler_pipeline_ = std::make_unique<LlmRecSchedulerPipeline>();
-        break;
-      case RecPipelineType::kOneRecDefault:
-        scheduler_pipeline_ = std::make_unique<OneRecSchedulerPipeline>();
-        break;
-      default:
-        LOG(FATAL) << "Unknown FixedStepsScheduler pipeline type: "
-                   << static_cast<int>(pipeline_type);
-    }
-  }
 
   handle_prefill_requests(
       remaining_token_budget, remaining_seq_budget, finished_requests);
@@ -393,6 +375,29 @@ std::vector<Batch> FixedStepsScheduler::OneRecSchedulerPipeline::create_batches(
       scheduler.running_sequences_,
       scheduler.running_sequences_budgets_,
       scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
+}
+
+std::vector<Batch>
+FixedStepsScheduler::PureDeviceSchedulerPipeline::create_batches(
+    FixedStepsScheduler& scheduler,
+    BatchFactory* batch_factory) {
+  return batch_factory->create_batches(
+      scheduler.running_requests_,
+      scheduler.running_sequences_,
+      scheduler.running_sequences_budgets_,
+      scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
+}
+
+std::unique_ptr<FixedStepsScheduler::SchedulerPipeline>
+FixedStepsScheduler::create_scheduler_pipeline(RecType rec_type,
+                                               bool is_pure_device) {
+  if (is_pure_device) {
+    return std::make_unique<PureDeviceSchedulerPipeline>();
+  }
+  if (rec_type == RecType::kLlmRec) {
+    return std::make_unique<LlmRecSchedulerPipeline>();
+  }
+  return std::make_unique<OneRecSchedulerPipeline>();
 }
 
 }  // namespace xllm

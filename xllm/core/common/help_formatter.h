@@ -62,6 +62,10 @@ const OptionCategory kDisaggregatedPrefillDecodeOptions = {
      "npu_phy_id",
      "transfer_listen_port"}};
 
+const OptionCategory kMultiStepDecodeOptions = {
+    "MULTI-STEP DECODE OPTIONS",
+    {"max_decode_rounds", "beam_width", "max_token_per_req"}};
+
 const OptionCategory kMtpOptions = {
     "MTP OPTIONS",
     {"draft_model", "draft_devices", "num_speculative_tokens"}};
@@ -83,6 +87,7 @@ const std::vector<OptionCategory> kOptionCategories = {
     kCommonOptions,
     kMoeModelOptions,
     kDisaggregatedPrefillDecodeOptions,
+    kMultiStepDecodeOptions,
     kMtpOptions,
     kXllmServiceOptions,
     kOtherOptions};

@@ -125,6 +125,28 @@ class RecEngine : public Engine {
     ForwardOutput get_model_output(const ForwardInput& model_inputs);
   };
 
+  // ============================================================
+  // PureDeviceEnginePipeline: kLlmRecPureDevicePipeline via local Worker
+  // For multi-round pure device inference (multi-round logic in worker)
+  // ============================================================
+  class PureDeviceEnginePipeline final : public RecEnginePipeline {
+   public:
+    explicit PureDeviceEnginePipeline(RecEngine& engine);
+
+    void setup_workers() override;
+    void process_group_test() override;
+    bool init_model_workers(const std::string& model_path) override;
+    int64_t estimate_min_available_memory() override;
+    bool allocate_kv_cache(
+        const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+    ForwardOutput step(std::vector<Batch>& batches) override;
+    std::vector<int64_t> get_active_activation_memory() const override;
+    size_t num_workers() const override;
+
+   private:
+    ForwardOutput get_model_output(const ForwardInput& model_inputs);
+  };
+
   // Factory method to create pipeline (can access private classes)
   static std::unique_ptr<RecEnginePipeline> create_pipeline(
       RecPipelineType type,

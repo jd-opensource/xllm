@@ -114,6 +114,8 @@ class Batch {
   void process_beam_search_output(const RawForwardOutput& raw_output,
                                   bool replace_fake_token);
 
+  void process_beam_sequence_group(const RawForwardOutput& raw_output);
+  void process_beam_sequence_group(const ForwardOutput& output);
   // mark all sequences as finished (used by rec model multi-round decoding)
   void finish();
 

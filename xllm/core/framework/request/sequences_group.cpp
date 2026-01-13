@@ -17,8 +17,11 @@ limitations under the License.
 
 #include <unordered_set>
 
+#include "common/global_flags.h"
+#include "core/common/rec_model_utils.h"
 #include "framework/batch/beam_search.h"
 #include "util/blocking_counter.h"
+#include "util/slice.h"
 
 namespace xllm {
 
@@ -91,6 +94,15 @@ bool SequencesGroup::expand_sequences(bool share_prefix) {
 void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
                                       const Tokenizer& tokenizer,
                                       ThreadPool* thread_pool) {
+  // Check for multi-round beam search results
+  if (is_pure_device_mode() && check_beam_search() && sequences_.size() == 1) {
+    auto* base = sequences_[0].get();
+    if (base->has_beam_result()) {
+      generate_multi_round_output(outputs, tokenizer, *base);
+      return;
+    }
+  }
+
   if (sequence_params_.streaming) {
     for (auto& seq : sequences_) {
       outputs.push_back(std::move(seq->generate_output()));
@@ -295,6 +307,46 @@ void SequencesGroup::process_beam_search() {
 void SequencesGroup::finish() {
   for (auto& sequence : sequences_) {
     sequence->finish();
+  }
+}
+
+void SequencesGroup::generate_multi_round_output(
+    std::vector<SequenceOutput>& outputs,
+    const Tokenizer& tokenizer,
+    const Sequence& base) {
+  size_t bw = static_cast<size_t>(base.beam_width_cached());
+  const auto& last_lps = base.beam_last_logprobs();
+
+  // Rank by logprob
+  std::vector<std::pair<float, size_t>> rank;
+  rank.reserve(bw);
+  for (size_t b = 0; b < bw; ++b) {
+    float lp = (b < last_lps.size()) ? last_lps[b] : 0.0f;
+    rank.emplace_back(lp, b);
+  }
+  std::sort(rank.begin(), rank.end(), [](const auto& l, const auto& r) {
+    return l.first > r.first;
+  });
+
+  const auto& flat2d = base.beam_seq_group_flat();
+  size_t rounds = static_cast<size_t>(base.total_rounds_cached());
+  outputs.reserve(bw);
+
+  for (size_t i = 0; i < bw; ++i) {
+    size_t b = rank[i].second;
+    std::vector<int32_t> gen_ids(flat2d[b].begin(), flat2d[b].end());
+
+    SequenceOutput out;
+    out.index = i;
+    out.text = tokenizer.decode(Slice<int32_t>{gen_ids.data(), gen_ids.size()},
+                                sequence_params_.skip_special_tokens);
+    out.token_ids = std::move(gen_ids);
+
+    auto fr = base.finish_reason().to_string();
+    if (fr.has_value()) {
+      out.finish_reason = fr.value();
+    }
+    outputs.push_back(std::move(out));
   }
 }
 
