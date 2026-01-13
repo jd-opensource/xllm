@@ -66,35 +66,25 @@ void AsyncResponseProcessor::process_completed_request(
   // to be destructed. To prevent the scenario where the request is recycled
   // before the response is fully returned to the xLLM service, the Output
   // object must be detached to avoid premature destruction.
-  OutputFunc callback = nullptr;
-  // TODO: Refine later
-  // For prefill instance in Disagg P/D mode.
-  if (role_ == InstanceRole::PREFILL && enable_decode_response_to_service_) {
-    callback = std::move(request->state().output_func);
-  }
-  auto runnable = [this, request = request, callback]() mutable {
+  auto runnable = [this, request = request]() mutable {
     AUTO_COUNTER(responsing_latency_seconds_non_stream);
-
-    // In overlap scenario, release callback before request be deleted
-    // (will be deleted in extra next step) to decrease total generate time
-    // cost.
-    if (callback == nullptr && enable_schedule_overlap_) {
-      callback = std::move(request->state().output_func);
-    }
 
     double end_2_end_latency_seconds = request->elapsed_seconds();
     // update the metrics for the request
     HISTOGRAM_OBSERVE(end_2_end_latency_milliseconds,
                       static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
-    request->log_statistic(end_2_end_latency_seconds);
+    RequestOutput req_output =
+        request->generate_output(*tokenizer_, &generate_output_threadpool_);
 
-    if (callback != nullptr) {
-      callback(
-          request->generate_output(*tokenizer_, &generate_output_threadpool_));
+    if ((role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) &&
+        enable_decode_response_to_service_) {
+      // entering here means non-stream request's prefill stage ends in Disagg
+      // P/D mode and enable_decode_response_to_service
+      req_output.finished = true;
     } else {
-      request->state().output_func(
-          request->generate_output(*tokenizer_, &generate_output_threadpool_));
+      request->log_statistic(end_2_end_latency_seconds);
     }
+    request->state().output_func(req_output);
   };
   if (request->state().response_thread_id < 0) {
     request->state().response_thread_id =
@@ -145,7 +135,7 @@ void AsyncResponseProcessor::batch_process_completed_requests(
     auto& request = requests[i];
     auto runnable = [counter,
                      this,
-                     request = request.get(),
+                     request = request,
                      request_output = &request_outputs[i]]() mutable {
       AUTO_COUNTER(responsing_latency_seconds_non_stream);
       double end_2_end_latency_seconds = request->elapsed_seconds();
@@ -207,17 +197,8 @@ void AsyncResponseProcessor::process_stream_request(
   if (!is_all_seqs_closed) {
     // output the delta text til the end of the sequence to the client
 
-    // NOTE: It serves the same purpose as the OutputFunc variable
-    // in the function `AsyncResponseProcessor::on_request_finish`.
-    OutputFunc callback = nullptr;
-    // TODO: Refine later
-    // For prefill instance in Disagg P/D mode.
-    if (role_ == InstanceRole::PREFILL && enable_decode_response_to_service_) {
-      callback = std::move(request->state().output_func);
-    }
     auto runnable = [request,
                      this,
-                     callback,
                      indexes = std::move(indexes),
                      num_tokens = std::move(num_tokens)]() {
       AUTO_COUNTER(responsing_latency_seconds_stream);
@@ -234,16 +215,15 @@ void AsyncResponseProcessor::process_stream_request(
           req_output.outputs.push_back(std::move(seq_output.value()));
         }
       }
-      if (callback != nullptr) {
-        if (!callback(req_output)) {
-          // cancel the request if on_stream returns false
-          request->set_cancel();
-        }
-      } else {
-        if (!request->state().output_func(req_output)) {
-          // cancel the request if on_stream returns false
-          request->set_cancel();
-        }
+      if ((role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) &&
+          enable_decode_response_to_service_) {
+        // stream request's prefill stage finishes in prefill instance in Disagg
+        // P/D mode and enable_decode_response_to_service_ = true.
+        req_output.finished = true;
+      }
+      if (!request->state().output_func(req_output)) {
+        // cancel the request if on_stream returns false
+        request->set_cancel();
       }
     };
     if (request->state().response_thread_id < 0) {

@@ -827,17 +827,16 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
                                            model,
                                            req_output,
                                            stream_parser);
-        } else {
-          return send_result_to_client_brpc(call,
-                                            request_id,
-                                            created_time,
-                                            model,
-                                            req_output,
-                                            tool_call_parser_format,
-                                            reasoning_parser_format,
-                                            is_force_reasoning,
-                                            json_tools);
         }
+        return send_result_to_client_brpc(call,
+                                          request_id,
+                                          created_time,
+                                          model,
+                                          req_output,
+                                          tool_call_parser_format,
+                                          reasoning_parser_format,
+                                          is_force_reasoning,
+                                          json_tools);
       });
 }
 
