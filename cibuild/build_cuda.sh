@@ -2,11 +2,11 @@
 set -e
 
 function error() {
-  echo "Require build command, e.g. python setup.py build --device mlu"
+  echo "Require build command, e.g. python setup.py build --device cuda"
   exit 1
 }
 
-IMAGE="cambricon-base/pytorch:v25.06.0-torch2.7.1-torchmlu1.27.2-ubuntu22.04-py310-xllm-x86"
+IMAGE="quay.io/jd_xllm/xllm-ai:xllm-dev-cuda-x86"
 
 RUN_OPTS=(
   --rm
@@ -17,8 +17,7 @@ RUN_OPTS=(
   --pid=host
   --shm-size '128gb'
   -v /export/home:/export/home
-  -v /usr/bin/cnmon:/usr/bin/cnmon
-  -v /export/home/mlu_vcpkg_cache:/root/.cache/vcpkg # cached vcpkg installed dir
+  -v /export/home/mlu_vcpkg_cache:/root/.cache/vcpkg # cuda and mlu vcpkg cache is same
   -w /export/home
 )
 

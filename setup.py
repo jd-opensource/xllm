@@ -110,12 +110,6 @@ def read_readme() -> str:
         return ""
 
 
-def read_requirements() -> List[str]:
-    file = join_path("cibuild/requirements.txt")
-    with open(file) as f:
-        return f.read().splitlines()
-
-
 def get_cmake_dir():
     plat_name = sysconfig.get_platform()
     python_version = sysconfig.get_python_version().replace(".", "")
@@ -904,5 +898,4 @@ if __name__ == "__main__":
             ],
         },
         python_requires=">=3.8",
-        #install_requires=read_requirements(),
     )

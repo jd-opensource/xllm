@@ -134,17 +134,6 @@ RUN if [[ -n "${GIT_HTTPS_MIRROR_PREFIX}" ]]; then \
       git config --global url."${GIT_HTTPS_MIRROR_PREFIX}".insteadOf https://; \
     fi
 
-# Install yalantinglibs
-ENV YALANTINGLIBS_VERSION=${YALANTINGLIBS_VERSION}
-RUN set -eux; \
-    git clone --depth 1 --branch "${YALANTINGLIBS_VERSION}" https://github.com/alibaba/yalantinglibs.git /workspace/yalantinglibs; \
-    cmake -S /workspace/yalantinglibs -B /workspace/yalantinglibs/build \
-      -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARK=OFF -DBUILD_UNIT_TESTS=OFF \
-      -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"; \
-    cmake --build /workspace/yalantinglibs/build -j"$(nproc)"; \
-    cmake --install /workspace/yalantinglibs/build; \
-    rm -rf /workspace/yalantinglibs
-
 # Install tvm-ffi
 RUN set -eux; \
     git clone --depth 1 --recurse-submodules https://github.com/apache/tvm-ffi.git /workspace/tvm-ffi; \
