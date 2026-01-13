@@ -582,7 +582,7 @@ torch::Tensor rejection_sample(RejectionSampleParams& params) {
                                params.uniform_probs,
                                params.max_spec_len);
 #else
-  LOG(FATAL) << "rejection_sample not implemented";
+  NOT_IMPLEMENTED();
 #endif
 }
 
