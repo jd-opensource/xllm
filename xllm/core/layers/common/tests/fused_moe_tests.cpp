@@ -152,6 +152,21 @@ class FusedMoETest : public ::testing::Test {
                                                torch::TensorOptions()
                                                    .dtype(torch::kFloat32)
                                                    .device(options_.device()));
+    auto shared_expert_gate_weight =
+        torch::full({intermediate_size, hidden_size}, 1.5f, options_);
+    auto shared_expert_gate_qweight =
+        shared_expert_gate_weight.to(torch::kInt8);
+    auto shared_expert_gate_scale = torch::full({intermediate_size},
+                                                0.1f,
+                                                torch::TensorOptions()
+                                                    .dtype(torch::kFloat32)
+                                                    .device(options_.device()));
+    auto shared_expert_gate_smooth =
+        torch::full({hidden_size},
+                    0.05f,
+                    torch::TensorOptions()
+                        .dtype(torch::kFloat32)
+                        .device(options_.device()));
     auto shared_expert_down_weight =
         torch::full({hidden_size, intermediate_size}, 1.3f, options_);
     auto shared_expert_down_qweight =
@@ -177,6 +192,11 @@ class FusedMoETest : public ::testing::Test {
     weight_dict["shared_experts.up_proj.per_channel_scale"] =
         shared_expert_up_scale;
     weight_dict["shared_experts.up_proj.smooth"] = shared_expert_up_smooth;
+    weight_dict["shared_experts.gate_proj.qweight"] =
+        shared_expert_gate_qweight;
+    weight_dict["shared_experts.gate_proj.per_channel_scale"] =
+        shared_expert_gate_scale;
+    weight_dict["shared_experts.gate_proj.smooth"] = shared_expert_gate_smooth;
     weight_dict["shared_experts.down_proj.qweight"] =
         shared_expert_down_qweight;
     weight_dict["shared_experts.down_proj.per_channel_scale"] =
@@ -441,7 +461,7 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   for (size_t i = 0; i < batch_size; ++i) {
     for (size_t j = 0; j < seq_len; ++j) {
       for (size_t k = 0; k < hidden_size; ++k) {
-        expected_values.push_back(964.0f);  // calculated via vLLM MLU
+        expected_values.push_back(992.0f);  // calculated via vLLM MLU
       }
     }
   }
