@@ -92,13 +92,13 @@ bool ImageHandler::load(const MMContent& content,
   if (url.compare(0, dataurl_prefix_.size(), dataurl_prefix_) ==
       0) {  // data url
 
-    input.type_ = MMType::IMAGE;
-    return this->load_from_dataurl(url, input.raw_data_, payload);
+    input.type = MMType::IMAGE;
+    return this->load_from_dataurl(url, input.raw_data, payload);
   } else if (url.compare(0, httpurl_prefix_.size(), httpurl_prefix_) ==
              0) {  // http url
 
-    input.type_ = MMType::IMAGE;
-    return this->load_from_http(url, input.raw_data_);
+    input.type = MMType::IMAGE;
+    return this->load_from_http(url, input.raw_data);
   } else {
     LOG(ERROR) << " image url is invalid, url is " << url;
     return false;
@@ -107,7 +107,7 @@ bool ImageHandler::load(const MMContent& content,
 
 bool ImageHandler::decode(MMInputItem& input) {
   OpenCVImageDecoder decoder;
-  return decoder.decode(input.raw_data_, input.decode_data_);
+  return decoder.decode(input.raw_data, input.decode_data);
 }
 
 bool VideoHandler::load(const MMContent& content,
@@ -121,13 +121,13 @@ bool VideoHandler::load(const MMContent& content,
   if (url.compare(0, dataurl_prefix_.size(), dataurl_prefix_) ==
       0) {  // data url
 
-    input.type_ = MMType::VIDEO;
-    return this->load_from_dataurl(url, input.raw_data_, payload);
+    input.type = MMType::VIDEO;
+    return this->load_from_dataurl(url, input.raw_data, payload);
   } else if (url.compare(0, httpurl_prefix_.size(), httpurl_prefix_) ==
              0) {  // http url
 
-    input.type_ = MMType::VIDEO;
-    return this->load_from_http(url, input.raw_data_);
+    input.type = MMType::VIDEO;
+    return this->load_from_http(url, input.raw_data);
   } else {
     LOG(ERROR) << " video url is invalid, url is " << url;
     return false;
@@ -136,7 +136,7 @@ bool VideoHandler::load(const MMContent& content,
 
 bool VideoHandler::decode(MMInputItem& input) {
   OpenCVVideoDecoder decoder;
-  return decoder.decode(input.raw_data_, input.decode_data_, input.video_meta_);
+  return decoder.decode(input.raw_data, input.decode_data, input.video_meta);
 }
 
 MMHandlerSet::MMHandlerSet() {

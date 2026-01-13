@@ -20,6 +20,7 @@ limitations under the License.
 #include "multimodal.pb.h"
 
 namespace xllm {
+namespace mm_service_utils {
 
 template <typename Call>
 bool build_messages(const google::protobuf::RepeatedPtrField<
@@ -81,4 +82,5 @@ bool build_messages(const google::protobuf::RepeatedPtrField<
   return true;
 };
 
+}  // namespace mm_service_utils
 }  // namespace xllm

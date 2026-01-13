@@ -33,12 +33,12 @@ class MMBatchData {
  public:
   MMBatchData() = default;
   MMBatchData(const std::vector<MMData>& datas);
-  MMBatchData(uint32_t ty, const MMDict& items);
+  MMBatchData(uint32_t type, const MMDict& items);
 
-  bool has(uint32_t type) const { return type & ty_ != 0; }
-  bool valid() const { return ty_ != MMType::NONE; }
+  bool has(uint32_t type) const { return type & type_ != 0; }
+  bool valid() const { return type_ != MMType::NONE; }
 
-  uint32_t type() const { return ty_; }
+  uint32_t type() const { return type_; }
   const MMDict& data() const { return data_; }
 
   bool has(const MMKey& key) const;
@@ -83,7 +83,7 @@ class MMBatchData {
   void debug_print() const;
 
  private:
-  uint32_t ty_ = MMType::NONE;
+  uint32_t type_ = MMType::NONE;
   MMDict data_;
   std::vector<MMData> mm_datas_;
 };

@@ -41,6 +41,12 @@ limitations under the License.
 
 namespace xllm {
 
+enum class SequenceOutputType : int8_t {
+  TOKENS = 0,
+  EMBEDDINGS = 1,
+  MM_EMBEDDINGS = 2,
+};
+
 enum class SequenceStage : int8_t {
   // Prefill without using kv cache.
   PREFILL = 0,
@@ -296,11 +302,10 @@ class Sequence final {
                                      : 0;
   }
 
-  RecType rec_type() const { return rec_type_; }
-
-  bool is_rec_request() const { return rec_type_ != RecType::kNone; }
-
-  bool is_onerec_model() const { return rec_type_ == RecType::kOneRec; }
+  RecType rec_type() const { return sequence_params_.rec_type; }
+  bool is_onerec_model() const {
+    return sequence_params_.rec_type == RecType::kOneRec;
+  }
 
   static const std::string ENCODER_SPARSE_EMBEDDING_NAME;
   static const std::string DECODER_CONTEXT_EMBEDDING_NAME;
@@ -318,18 +323,20 @@ class Sequence final {
   }
 
  private:
+  SequenceOutputType output_type();
+  void generate_embeddings_output(SequenceOutput& output);
+  void generate_mm_embeddings_output(SequenceOutput& output);
+
   void init_onerec_sequence(const std::vector<int32_t>& prompt_token_ids,
                             torch::Tensor input_embedding);
 
-  SequenceOutput build_onerec_output(const Slice<int32_t>& ids,
-                                     size_t size,
-                                     SequenceOutput output) const;
+  void generate_onerec_streaming_output(const Slice<int32_t>& ids,
+                                        size_t size,
+                                        SequenceOutput& output) const;
 
-  SequenceOutput build_onerec_streaming_output(const Slice<int32_t>& ids,
-                                               size_t size) const;
-
-  SequenceOutput generate_onerec_output(const Slice<int32_t>& ids,
-                                        size_t size) const;
+  void generate_onerec_output(const Slice<int32_t>& ids,
+                              size_t size,
+                              SequenceOutput& output) const;
 
   struct OneRecState {
     size_t num_encoder_tokens = 0;
@@ -388,8 +395,6 @@ class Sequence final {
   size_t num_prompt_tokens_ = 0;
 
   std::optional<OneRecState> onerec_state_;
-
-  RecType rec_type_ = RecType::kNone;
 
   // NOTE: MUST FIXME Later
   // record all tokens num in last turn when the request is

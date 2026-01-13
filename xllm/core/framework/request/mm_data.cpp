@@ -19,11 +19,11 @@ limitations under the License.
 
 namespace xllm {
 
-MMData::MMData(uint32_t ty, const MMItemVec& items)
-    : ty_(ty), items_(std::move(items)) {}
+MMData::MMData(uint32_t type, const MMItemVec& items)
+    : type_(type), items_(std::move(items)) {}
 
-MMData::MMData(uint32_t ty, const MMDict& items)
-    : ty_(ty), items_(std::move(items)) {}
+MMData::MMData(uint32_t type, const MMDict& items)
+    : type_(type), items_(std::move(items)) {}
 
 bool MMData::has(const MMKey& key) const {
   if (!valid()) return false;
@@ -61,7 +61,7 @@ bool MMData::add(MMType type, const MMDataItem& item) {
 
   auto& vec = items<MMItemVec>();
 
-  ty_ |= type;
+  type_ |= type;
   vec.emplace_back(item);
 
   return true;
@@ -72,7 +72,7 @@ MMDataItem& MMData::add(MMType type) {
 
   auto& vec = items<MMItemVec>();
 
-  ty_ |= type;
+  type_ |= type;
   vec.emplace_back(type);
 
   return vec.back();
@@ -166,7 +166,7 @@ bool MMData::foreach (IItemVisitor& v) {
 }
 
 void MMData::debug_print() const {
-  LOG(INFO) << "mm data debug print, ty:" << ty_;
+  LOG(INFO) << "mm data debug print, type:" << type_;
 
   if (hold<MMItemVec>()) {
     const auto& vec = items<MMItemVec>();

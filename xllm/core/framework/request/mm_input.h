@@ -27,49 +27,46 @@ namespace xllm {
 
 struct MMInputItem {
   void clear() {
-    type_ = MMType::NONE;
-    raw_data_.clear();
+    type = MMType::NONE;
+    raw_data.clear();
   }
 
-  MMType type_ = MMType::NONE;
-
-  std::string raw_data_;  // binary
-
-  torch::Tensor decode_data_;  // image: rgb, [c,h,w], uint8
-
-  VideoMetadata video_meta_;
-
-  EmbeddingOutput embedding_;
+  MMType type = MMType::NONE;
+  std::string raw_data;       // binary
+  torch::Tensor decode_data;  // image: rgb, [c,h,w], uint8
+  VideoMetadata video_meta;
+  EmbeddingOutput embedding;
 };
 
 struct MMPayload {
   MMPayload() = default;
   explicit MMPayload(const std::string& data, size_t offset = 0)
-      : data_(std::move(data)), offset_(offset) {}
+      : data(std::move(data)), offset(offset) {}
 
   bool get(std::string& value, size_t len) {
-    if (len == data_.size()) {
-      value = std::move(data_);
+    if (len == data.size()) {
+      value = std::move(data);
       return true;
     }
 
-    if (data_.size() - offset_ < len) {
+    if (data.size() - offset < len) {
       return false;
     }
 
-    value = data_.substr(offset_, len);
-    offset_ += len;
+    value = data.substr(offset, len);
+    offset += len;
 
     return true;
   }
 
-  std::string data_;
-  size_t offset_;
+  std::string data;
+  size_t offset;
 };
 
-struct MMInput {
+class MMInput {
+ public:
   MMInput() = default;
-  explicit MMInput(const std::string& payload) : payload_(payload) {}
+  explicit MMInput(const std::string& payload) : payload(std::move(payload)) {}
 
   bool empty() const { return items_.empty(); }
   void clear() { items_.clear(); }
@@ -87,16 +84,16 @@ struct MMInput {
 
   std::vector<MMInputItem>::const_iterator end() const { return items_.end(); }
 
-  void insert(const std::vector<MMInputItem>& items) {
-    items_.insert(items_.end(), items.begin(), items.end());
+  void insert(const std::vector<MMInputItem>& inputs) {
+    items_.insert(items_.end(), inputs.begin(), inputs.end());
   }
 
   std::vector<torch::Tensor> get_decode_data(MMType type) const {
     std::vector<torch::Tensor> vec;
 
     for (const auto& item : items_) {
-      if (item.type_ == type) {
-        vec.emplace_back(item.decode_data_);
+      if (item.type == type) {
+        vec.emplace_back(item.decode_data);
       }
     }
     return std::move(vec);
@@ -106,14 +103,16 @@ struct MMInput {
     std::vector<VideoMetadata> metas;
     metas.reserve(items_.size());
     for (auto& item : items_) {
-      if (item.type_ == MMType::VIDEO) {
-        metas.push_back(item.video_meta_);
+      if (item.type == MMType::VIDEO) {
+        metas.push_back(item.video_meta);
       }
     }
     return metas;
   }
 
-  MMPayload payload_;
+  MMPayload payload;
+
+ private:
   std::vector<MMInputItem> items_;
 };
 

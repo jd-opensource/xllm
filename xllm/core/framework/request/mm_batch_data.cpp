@@ -25,8 +25,8 @@ MMBatchData::MMBatchData(const std::vector<MMData>& datas) {
   this->batch(datas);
 }
 
-MMBatchData::MMBatchData(uint32_t ty, const MMDict& items)
-    : ty_(ty), data_(std::move(items)) {}
+MMBatchData::MMBatchData(uint32_t type, const MMDict& items)
+    : type_(type), data_(std::move(items)) {}
 
 bool MMBatchData::has(const MMKey& key) const {
   if (!valid()) return false;
@@ -95,18 +95,19 @@ void MMBatchData::batch(const std::vector<MMData>& mm_datas) {
     }
   }
 
-  ty_ = visitor.ty_;
+  type_ = visitor.type_;
   data_ = std::move(dict);
 }
 
 void MMBatchData::debug_print() const {
-  LOG(INFO) << "mm batch data debug print, ty:" << ty_;
+  LOG(INFO) << "mm batch data debug print, type:" << type_;
   LOG(INFO) << "=============== mm batch vec data ================";
   LOG(INFO) << "mm batch data vec count:" << mm_datas_.size();
   for (const auto& mm_data : mm_datas_) {
     mm_data.debug_print();
   }
   LOG(INFO) << "=============== mm batch data dict data ================";
+
   for (const auto& pair : data_) {
     if (std::holds_alternative<torch::Tensor>(pair.second)) {
       torch::Tensor item = std::get<torch::Tensor>(pair.second);

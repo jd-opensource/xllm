@@ -43,18 +43,18 @@ class MMDataItem {
   };
 
  public:
-  MMDataItem(MMType ty);
-  MMDataItem(MMType ty, const MMDict& data);
-  MMDataItem(MMType ty, const MMDict& data, const MMMetadata& metadata);
+  MMDataItem(MMType type);
+  MMDataItem(MMType type, const MMDict& data);
+  MMDataItem(MMType type, const MMDict& data, const MMMetadata& metadata);
 
-  bool valid() const { return ty_ != MMType::NONE; }
-  bool is_type(MMType type) const { return ty_ == type; }
+  bool valid() const { return type_ != MMType::NONE; }
+  bool is_type(MMType type) const { return type_ == type; }
 
   const MMDict& data() const { return data_; }
   MMDict& mutable_data() { return data_; }
   void set_data(const MMDict& data) { data_ = std::move(data); }
 
-  MMType type() const { return ty_; }
+  MMType type() const { return type_; }
   bool has(const MMKey& key) const;
 
   void get(const MMKey& key, std::vector<torch::Tensor>& vec) const;
@@ -97,7 +97,7 @@ class MMDataItem {
   void debug_print() const;
 
  private:
-  MMType ty_ = MMType::NONE;
+  MMType type_ = MMType::NONE;
   MMDict data_;
   MMMetadata metadata_;
   MMItemState state_;

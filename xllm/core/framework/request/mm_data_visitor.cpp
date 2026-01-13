@@ -64,7 +64,7 @@ bool CollectItemTensorVisitor::visit(const MMKey& key, MMValue& value) {
 }
 
 bool CollectMMDataTensorVisitor::visit(MMData& data) {
-  ty_ |= data.type();
+  type_ |= data.type();
   data.foreach (item_visitor_);
   return true;
 }
