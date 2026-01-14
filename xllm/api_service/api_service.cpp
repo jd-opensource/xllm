@@ -21,6 +21,7 @@ limitations under the License.
 #include <json2pb/pb_to_json.h>
 
 #include <nlohmann/json.hpp>
+#include <optional>
 
 #include "call.h"
 #include "chat.pb.h"
@@ -177,6 +178,7 @@ void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
 
 namespace {
 
+<<<<<<< HEAD
 size_t get_json_content_length(const brpc::Controller* ctrl) {
   const auto infer_content_len =
       ctrl->http_request().GetHeader(kInferContentLength);
@@ -191,6 +193,26 @@ size_t get_json_content_length(const brpc::Controller* ctrl) {
 
   LOG(ERROR) << "Content-Length header is missing.";
   return (size_t)-1L;
+=======
+std::optional<size_t> GetJsonContentLength(const brpc::Controller* ctrl) {
+  try {
+    const auto infer_content_len =
+        ctrl->http_request().GetHeader(kInferContentLength);
+    if (infer_content_len != nullptr) {
+      return std::stoul(*infer_content_len);
+    }
+
+    const auto content_len = ctrl->http_request().GetHeader(kContentLength);
+    if (content_len != nullptr) {
+      return std::stoul(*content_len);
+    }
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Invalid Content-Length header: " << e.what();
+    return std::nullopt;
+  }
+
+  return std::nullopt;
+>>>>>>> ac836e1 (fixbug: return HTTP 400/413 instead of crashing on invalid Content-Length header)
 }
 
 // Preprocess chat JSON to normalize array content to string.
@@ -284,9 +306,27 @@ void handle_chat_completions(std::unique_ptr<Service>& service,
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
 
+<<<<<<< HEAD
   auto content_len = get_json_content_length(ctrl);
   if (content_len == (size_t)-1L) {
     ctrl->SetFailed("Content-Length header is missing.");
+=======
+  auto content_len_opt = GetJsonContentLength(ctrl);
+  if (!content_len_opt.has_value()) {
+    ctrl->SetFailed("Missing or invalid Content-Length header");
+    ctrl->http_response().set_status_code(400);
+    LOG(WARNING) << "Missing or invalid Content-Length header, returning 400";
+    return;
+  }
+  auto content_len = content_len_opt.value();
+
+  const size_t kMaxBodySize = 10 * 1024 * 1024;  // 10MB
+  if (content_len > kMaxBodySize) {
+    ctrl->SetFailed("Payload too large");
+    ctrl->http_response().set_status_code(413);
+    LOG(WARNING) << "Request body size " << content_len << " exceeds limit of "
+                 << kMaxBodySize;
+>>>>>>> ac836e1 (fixbug: return HTTP 400/413 instead of crashing on invalid Content-Length header)
     return;
   }
 
