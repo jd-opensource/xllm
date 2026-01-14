@@ -20,6 +20,8 @@ limitations under the License.
 #include <json2pb/json_to_pb.h>
 #include <json2pb/pb_to_json.h>
 
+#include <optional>
+
 #include "call.h"
 #include "chat.pb.h"
 #include "common.pb.h"
@@ -172,20 +174,24 @@ void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
 
 namespace {
 
-size_t GetJsonContentLength(const brpc::Controller* ctrl) {
-  const auto infer_content_len =
-      ctrl->http_request().GetHeader(kInferContentLength);
-  if (infer_content_len != nullptr) {
-    return std::stoul(*infer_content_len);
+std::optional<size_t> GetJsonContentLength(const brpc::Controller* ctrl) {
+  try {
+    const auto infer_content_len =
+        ctrl->http_request().GetHeader(kInferContentLength);
+    if (infer_content_len != nullptr) {
+      return std::stoul(*infer_content_len);
+    }
+
+    const auto content_len = ctrl->http_request().GetHeader(kContentLength);
+    if (content_len != nullptr) {
+      return std::stoul(*content_len);
+    }
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Invalid Content-Length header: " << e.what();
+    return std::nullopt;
   }
 
-  const auto content_len = ctrl->http_request().GetHeader(kContentLength);
-  if (content_len != nullptr) {
-    return std::stoul(*content_len);
-  }
-
-  LOG(FATAL) << "Content-Length header is missing.";
-  return (size_t)-1L;
+  return std::nullopt;
 }
 
 template <typename ChatCall, typename Service>
@@ -200,7 +206,24 @@ void ChatCompletionsImpl(std::unique_ptr<Service>& service,
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
 
-  auto content_len = GetJsonContentLength(ctrl);
+  auto content_len_opt = GetJsonContentLength(ctrl);
+  if (!content_len_opt.has_value()) {
+    ctrl->SetFailed("Missing or invalid Content-Length header");
+    ctrl->http_response().set_status_code(400);
+    LOG(WARNING) << "Missing or invalid Content-Length header, returning 400";
+    return;
+  }
+  auto content_len = content_len_opt.value();
+
+  const size_t kMaxBodySize = 10 * 1024 * 1024;  // 10MB
+  if (content_len > kMaxBodySize) {
+    ctrl->SetFailed("Payload too large");
+    ctrl->http_response().set_status_code(413);
+    LOG(WARNING) << "Request body size " << content_len << " exceeds limit of "
+                 << kMaxBodySize;
+    return;
+  }
+
   std::string attachment;
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
