@@ -335,15 +335,16 @@ TEST_F(Glm47DetectorTest, StreamingParseBasicFunctionality) {
   std::string chunk2 = "<arg_key>city</arg_key><arg_value>";
   std::string chunk3 = "Beijing</arg_value></tool_call>";
 
-  // First chunk - should send tool name
+  // First chunk - function name not yet complete (no <arg_key> or </tool_call>)
+  // Should wait for more data to avoid sending partial names
   auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
-  EXPECT_EQ(result1.calls.size(), 1);
-  EXPECT_TRUE(result1.calls[0].name.has_value());
-  EXPECT_EQ(result1.calls[0].name.value(), "get_weather");
+  EXPECT_EQ(result1.calls.size(), 0);
 
-  // Second chunk - should stream partial JSON
+  // Second chunk - now we have <arg_key>, so function name is complete
   auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
-  EXPECT_GE(result2.calls.size(), 0);  // May have partial JSON output
+  EXPECT_EQ(result2.calls.size(), 1);
+  EXPECT_TRUE(result2.calls[0].name.has_value());
+  EXPECT_EQ(result2.calls[0].name.value(), "get_weather");
 
   // Third chunk - completes the tool call
   auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
@@ -362,14 +363,15 @@ TEST_F(Glm47DetectorTest, StreamingParseWithNormalText) {
   EXPECT_EQ(result1.normal_text, "Please check the weather ");
   EXPECT_EQ(result1.calls.size(), 0);
 
-  // Second chunk - tool call start, should send tool name
+  // Second chunk - tool call start, but function name not yet complete
+  // (no <arg_key> or </tool_call>), should wait for more data
   auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
-  EXPECT_EQ(result2.calls.size(), 1);
-  EXPECT_EQ(result2.calls[0].name.value(), "get_weather");
+  EXPECT_EQ(result2.calls.size(), 0);
 
-  // Third chunk - complete tool call
+  // Third chunk - now we have <arg_key>, function name is complete
   auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
-  EXPECT_GE(result3.calls.size(), 0);
+  EXPECT_GE(result3.calls.size(), 1);
+  EXPECT_EQ(result3.calls[0].name.value(), "get_weather");
 }
 
 // Test invalid JSON in arg values

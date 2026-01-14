@@ -519,8 +519,13 @@ StreamingParseResult Glm47Detector::parse_streaming_increment(
 
       // Send tool name first if not sent yet
       if (!current_tool_name_sent_) {
-        if (func_name.empty()) {
-          LOG(WARNING) << "func_name should not be empty";
+        // Only send function name when we're sure it's complete:
+        // - Either we have <arg_key> (arguments started)
+        // - Or we have </tool_call> (tool call ended with no args)
+        if (func_name.empty() ||
+            (func_args_raw.empty() && is_tool_end != eot_token_)) {
+          // Function name not yet complete, wait for more data
+          return StreamingParseResult("", {});
         }
         calls.push_back(ToolCallItem(current_tool_id_, func_name, ""));
         current_tool_name_sent_ = true;
