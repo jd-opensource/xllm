@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import io
 import os
 import re
@@ -9,7 +7,6 @@ import subprocess
 import sys
 import sysconfig
 from pathlib import Path
-from typing import List
 from jinja2 import Template
 import argparse
 
@@ -17,6 +14,8 @@ from distutils.core import Command
 from setuptools import Extension, setup, find_packages
 from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.command.build_ext import build_ext
+
+from env import get_cxx_abi, set_npu_envs, set_mlu_envs, set_cuda_envs, set_ilu_envs
 
 BUILD_TEST_FILE = True
 BUILD_EXPORT = True
@@ -59,18 +58,8 @@ def get_device_type():
     print("Unsupported device type, please install torch, torch_mlu or torch_npu")
     exit(1)
 
-
-def get_cxx_abi():
-    try:
-        import torch
-        return torch.compiled_with_cxx11_abi()
-    except ImportError:
-        return False
-
-
 def get_base_dir():
     return os.path.abspath(os.path.dirname(__file__))
-
 
 def join_path(*paths):
     return os.path.join(get_base_dir(), *paths)
@@ -99,20 +88,12 @@ def get_version():
         version += version_suffix
     return version
 
-
 def read_readme() -> str:
     p = join_path("README.md")
     if os.path.isfile(p):
         return io.open(p, "r", encoding="utf-8").read()
     else:
         return ""
-
-
-def read_requirements() -> List[str]:
-    file = join_path("cibuild/requirements.txt")
-    with open(file) as f:
-        return f.read().splitlines()
-
 
 def get_cmake_dir():
     plat_name = sysconfig.get_platform()
@@ -121,165 +102,12 @@ def get_cmake_dir():
     cmake_dir = Path(get_base_dir()) / "build" / dir_name
     cmake_dir.mkdir(parents=True, exist_ok=True)
     return cmake_dir
-
-
-def get_python_include_path():
-    try:
-        from sysconfig import get_paths
-        return get_paths()["include"]
-    except ImportError:
-        return None
-
-
-def get_torch_root_path():
-    try:
-        import torch
-        import os
-        return os.path.dirname(os.path.abspath(torch.__file__))
-    except ImportError:
-        return None
-
-def get_torch_mlu_root_path():
-    try:
-        import torch_mlu
-        import os
-        return os.path.dirname(os.path.abspath(torch_mlu.__file__))
-    except ImportError:
-        return None
-
-def get_ixformer_root_path():
-    try:
-        import ixformer
-        import os
-        return os.path.dirname(os.path.abspath(ixformer.__file__))
-    except ImportError:
-        return None
-
-def get_nccl_root_path():
-    try:
-        from nvidia import nccl
-        return str(Path(nccl.__file__).parent)
-    except ImportError:
-        return None
-
-def set_npu_envs():
-    PYTORCH_NPU_INSTALL_PATH = os.getenv("PYTORCH_NPU_INSTALL_PATH")
-    if not PYTORCH_NPU_INSTALL_PATH:
-        os.environ["PYTORCH_NPU_INSTALL_PATH"] = "/usr/local/libtorch_npu"
-
-    XLLM_KERNELS_PATH = os.getenv("XLLM_KERNELS_PATH")
-    if not XLLM_KERNELS_PATH:
-        os.environ["XLLM_KERNELS_PATH"] = "/usr/local/xllm_kernels"
-
-    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
-    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
-    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
-    os.environ["INSTALL_XLLM_KERNELS"] = "ON" if install_kernels else "OFF"
-    NPU_TOOLKIT_HOME = os.getenv("NPU_TOOLKIT_HOME")
-    if not NPU_TOOLKIT_HOME:
-        os.environ["NPU_TOOLKIT_HOME"] = "/usr/local/Ascend/ascend-toolkit/latest"
-        NPU_TOOLKIT_HOME = "/usr/local/Ascend/ascend-toolkit/latest"
-    LD_LIBRARY_PATH = os.getenv("LD_LIBRARY_PATH", "")
-    arch = platform.machine()
-    LD_LIBRARY_PATH = NPU_TOOLKIT_HOME+"/lib64" + ":" + \
-        NPU_TOOLKIT_HOME+"/lib64/plugin/opskernel" + ":" + \
-        NPU_TOOLKIT_HOME+"/lib64/plugin/nnengine" + ":" + \
-        NPU_TOOLKIT_HOME+"/opp/built-in/op_impl/ai_core/tbe/op_tiling/lib/linux/"+arch + ":" + \
-        NPU_TOOLKIT_HOME+"/opp/vendors/xllm/op_api/lib" + ":" + \
-        NPU_TOOLKIT_HOME+"/tools/aml/lib64" + ":" + \
-        NPU_TOOLKIT_HOME+"/tools/aml/lib64/plugin" + ":" + \
-        LD_LIBRARY_PATH
-    os.environ["LD_LIBRARY_PATH"] = LD_LIBRARY_PATH
-    PYTHONPATH = os.getenv("PYTHONPATH", "")
-    PYTHONPATH = NPU_TOOLKIT_HOME+"/python/site-packages" + ":" + \
-        NPU_TOOLKIT_HOME+"/opp/built-in/op_impl/ai_core/tbe" + ":" + \
-        PYTHONPATH
-    os.environ["PYTHONPATH"] = PYTHONPATH
-    PATH = os.getenv("PATH", "")
-    PATH = NPU_TOOLKIT_HOME+"/bin" + ":" + \
-        NPU_TOOLKIT_HOME+"/compiler/ccec_compiler/bin" + ":" + \
-        NPU_TOOLKIT_HOME+"/tools/ccec_compiler/bin" + ":" + \
-        PATH
-    os.environ["PATH"] = PATH
-    os.environ["ASCEND_AICPU_PATH"] = NPU_TOOLKIT_HOME
-    os.environ["ASCEND_OPP_PATH"] = NPU_TOOLKIT_HOME+"/opp"
-    os.environ["TOOLCHAIN_HOME"] = NPU_TOOLKIT_HOME+"/toolkit"
-    os.environ["NPU_HOME_PATH"] = NPU_TOOLKIT_HOME
-
-    ATB_PATH = os.getenv("ATB_PATH")
-    if not ATB_PATH:
-        os.environ["ATB_PATH"] = "/usr/local/Ascend/nnal/atb"
-        ATB_PATH = "/usr/local/Ascend/nnal/atb"
-
-
-    ATB_HOME_PATH = ATB_PATH+"/latest/atb/cxx_abi_"+str(get_cxx_abi())
-    LD_LIBRARY_PATH = os.getenv("LD_LIBRARY_PATH", "")
-    LD_LIBRARY_PATH = ATB_HOME_PATH+"/lib" + ":" + \
-        ATB_HOME_PATH+"/examples" + ":" + \
-        ATB_HOME_PATH+"/tests/atbopstest" + ":" + \
-        LD_LIBRARY_PATH
-    os.environ["LD_LIBRARY_PATH"] = LD_LIBRARY_PATH
-    PATH = os.getenv("PATH", "")
-    PATH = ATB_HOME_PATH+"/bin" + ":" + PATH
-    os.environ["PATH"] = PATH
-
-    os.environ["ATB_STREAM_SYNC_EVERY_KERNEL_ENABLE"] = "0"
-    os.environ["ATB_STREAM_SYNC_EVERY_RUNNER_ENABLE"] = "0"
-    os.environ["ATB_STREAM_SYNC_EVERY_OPERATION_ENABLE"] = "0"
-    os.environ["ATB_OPSRUNNER_SETUP_CACHE_ENABLE"] = "1"
-    os.environ["ATB_OPSRUNNER_KERNEL_CACHE_TYPE"] = "3"
-    os.environ["ATB_OPSRUNNER_KERNEL_CACHE_LOCAL_COUNT"] = "1"
-    os.environ["ATB_OPSRUNNER_KERNEL_CACHE_GLOABL_COUNT"] = "5"
-    os.environ["ATB_OPSRUNNER_KERNEL_CACHE_TILING_SIZE"] = "10240"
-    os.environ["ATB_WORKSPACE_MEM_ALLOC_ALG_TYPE"] = "1"
-    os.environ["ATB_WORKSPACE_MEM_ALLOC_GLOBAL"] = "0"
-    os.environ["ATB_COMPARE_TILING_EVERY_KERNEL"] = "0"
-    os.environ["ATB_HOST_TILING_BUFFER_BLOCK_NUM"] = "128"
-    os.environ["ATB_DEVICE_TILING_BUFFER_BLOCK_NUM"] = "32"
-    os.environ["ATB_SHARE_MEMORY_NAME_SUFFIX"] = ""
-    os.environ["ATB_LAUNCH_KERNEL_WITH_TILING"] = "1"
-    os.environ["ATB_MATMUL_SHUFFLE_K_ENABLE"] = "1"
-    os.environ["ATB_RUNNER_POOL_SIZE"] = "64"
-    os.environ["ASDOPS_HOME_PATH"] = ATB_HOME_PATH
-    os.environ["ASDOPS_MATMUL_PP_FLAG"] = "1"
-    os.environ["ASDOPS_LOG_LEVEL"] = "ERROR"
-    os.environ["ASDOPS_LOG_TO_STDOUT"] = "0"
-    os.environ["ASDOPS_LOG_TO_FILE"] = "1"
-    os.environ["ASDOPS_LOG_TO_FILE_FLUSH"] = "0"
-    os.environ["ASDOPS_LOG_TO_BOOST_TYPE"] = "atb"
-    os.environ["ASDOPS_LOG_PATH"] = "~"
-    os.environ["ASDOPS_TILING_PARSE_CACHE_DISABLE"] = "0"
-    os.environ["LCCL_DETERMINISTIC"] = "0"
-    os.environ["LCCL_PARALLEL"] = "0"
-
-
-def set_mlu_envs():
-    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
-    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
-    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
-    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
-    os.environ["PYTORCH_MLU_INSTALL_PATH"] = get_torch_mlu_root_path()
-    
-def set_cuda_envs():
-    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
-    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
-    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
-    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
-    os.environ["CUDA_TOOLKIT_ROOT_DIR"] = "/usr/local/cuda"
-
-def set_ilu_envs():
-    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
-    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
-    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
-    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
-    os.environ["IXFORMER_INSTALL_PATH"] = get_ixformer_root_path()
         
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
         super().__init__(name, sources=[])
         self.sourcedir = os.fspath(Path(sourcedir).resolve())
         self.path = path
-
 
 class ExtBuild(build_ext):
     user_options = build_ext.user_options + [
@@ -814,7 +642,6 @@ def parse_arguments():
         'test_name': args.test_name,
     }
 
-
 if __name__ == "__main__":
     config = parse_arguments()
 
@@ -860,8 +687,6 @@ if __name__ == "__main__":
             "Intended Audience :: Education",
             "Programming Language :: C++",
             "Programming Language :: Python :: 3 :: Only",
-            "Programming Language :: Python :: 3.8",
-            "Programming Language :: Python :: 3.9",
             "Programming Language :: Python :: 3.10",
             "Programming Language :: Python :: 3.11",
             "Programming Language :: Python :: 3.12",
@@ -904,6 +729,5 @@ if __name__ == "__main__":
                 'xllm = xllm.launch_xllm:launch_xllm'
             ],
         },
-        python_requires=">=3.8",
-        #install_requires=read_requirements(),
+        python_requires=">=3.10",
     )
