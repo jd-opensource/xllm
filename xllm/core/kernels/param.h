@@ -901,15 +901,15 @@ struct MaskedIndexerSelectPagedKVParams {
   torch::Tensor weights;
   // Key cache block table. Shape: [batch_num, k_cache_max_blkn]. Type: int32.
   // Must be contiguous.
-  torch::Tensor k_cache_block_table;
+  std::optional<torch::Tensor> k_cache_block_table;
   // Cumulative sequence lengths for queries. Type: int32. Must be contiguous.
   // Required in prefill mode, not used in decode mode.
-  torch::Tensor cu_seq_q_lens;
+  std::optional<torch::Tensor> cu_seq_q_lens;
   // Cumulative sequence lengths for keys.
-  torch::Tensor cu_seq_k_lens;
+  std::optional<torch::Tensor> cu_seq_k_lens;
   // Key context lengths tensor. Shape: [batch_num]. Type: int32. Must be
   // contiguous.
-  torch::Tensor k_context_lens;
+  std::optional<torch::Tensor> k_context_lens;
   // KV cache block table. Shape: [batch_num, kv_cache_max_blkn]. Type: int32.
   // Must be contiguous.
   torch::Tensor kv_cache_block_table;
@@ -925,11 +925,11 @@ struct MaskedIndexerSelectPagedKVParams {
   // Query quantization scale tensor. Must be contiguous.
   // - Required (numel > 0) when query dtype is int8 or fp8
   // - Must be empty (numel == 0) when query dtype is bfloat16 or half
-  torch::Tensor q_scale;
+  std::optional<torch::Tensor> q_scale;
   // Key cache quantization scale tensor. Must be contiguous.
   // - Required (numel > 0) when k_cache dtype is int8 or fp8
   // - Must be empty (numel == 0) when k_cache dtype is bfloat16 or half
-  torch::Tensor k_scale_cache;
+  std::optional<torch::Tensor> k_scale_cache;
   // New sparse block table output tensor. Must be contiguous.
   // - Prefill mode: 2D [total_seq_q, kv_cache_max_blkn]
   // - Decode mode: 3D [batch_num, seq_q, kv_cache_max_blkn]

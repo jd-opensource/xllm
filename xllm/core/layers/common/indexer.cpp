@@ -335,23 +335,22 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
 
   // Call masked indexer select paged kv
   kernel::MaskedIndexerSelectPagedKVParams params;
-  params.is_prefill = is_prefill;
   params.query = ctx.q;
-  params.weights = ctx.weights;
   params.k_cache = ctx.k_cache_tensor;
-  params.k_context_lens = ctx.k_context_lens;
-  params.k_cache_block_table = ctx.k_block_table.value_or(torch::Tensor());
+  params.weights = ctx.weights;
   params.kv_cache_block_table = attn_metadata.block_table;
-  params.cu_seq_q_lens = ctx.cu_seq_q_lens.value_or(torch::Tensor());
-  params.cu_seq_k_lens = ctx.cu_seq_k_lens;
-  params.q_scale = torch::Tensor();  // empty tensor as q_scale
+  params.cu_seq_q_lens = ctx.cu_seq_q_lens;
+  params.cu_seq_k_lens = ctx.k_context_lens;
+  params.k_context_lens = ctx.k_context_lens;
+  params.k_cache_block_table = ctx.k_block_table;
+  params.is_prefill = is_prefill;
   params.softmax_scale = softmax_scale_;
-  params.k_scale_cache = torch::Tensor();  // empty tensor as k_scale_cache
+  params.q_scale = std::nullopt;        // empty tensor as q_scale
+  params.k_scale_cache = std::nullopt;  // empty tensor as k_scale_cache
   params.index_topk = index_topk_;
   params.kv_cache_block_size = 1;  // only support 1 for now
   params.sparse_block_table = ctx.new_block_tables;
   params.sparse_context_lens = ctx.new_context_lens;
-  // params.quant_block_size = 128;  // only support 128 for now
 
   xllm::kernel::masked_indexer_select_paged_kv(params);
 
