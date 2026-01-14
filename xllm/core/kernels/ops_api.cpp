@@ -57,11 +57,17 @@ void apply_rotary(RotaryParams& params) {
   torch::Tensor cos_sin;
 
   if (params.position_ids.has_value()) {
+    // positions is already int64 on CUDA/MUSA (pre-converted in
+    // ForwardInput::to).
     pos_ids = params.position_ids.value().to(torch::kInt64);
-    auto cos_sin_vec = params.cos_sin.chunk(4, -1);
-    auto cos = cos_sin_vec[0];
-    auto sin = cos_sin_vec[2];
-    cos_sin = torch::cat({cos, sin}, -1);
+    if (params.precomputed_cos_sin.defined()) {
+      cos_sin = params.precomputed_cos_sin;
+    } else {
+      auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+      auto cos = cos_sin_vec[0];
+      auto sin = cos_sin_vec[2];
+      cos_sin = torch::cat({cos, sin}, -1);
+    }
   } else if (params.cu_query_lens.has_value()) {
     auto cu = params.cu_query_lens.value().to(torch::kInt64);
     CHECK(cu.numel() >= 2) << "apply_rotary (CUDA): cu_query_lens must have at "
@@ -90,6 +96,8 @@ void apply_rotary(RotaryParams& params) {
       auto cos_sliced = params.cos.contiguous().slice(-1, 0, rot_half);
       auto sin_sliced = params.sin.contiguous().slice(-1, 0, rot_half);
       cos_sin = torch::cat({cos_sliced, sin_sliced}, -1);
+    } else if (params.precomputed_cos_sin.defined()) {
+      cos_sin = params.precomputed_cos_sin;
     } else {
       auto cos_sin_vec = params.cos_sin.chunk(4, -1);
       auto cos = cos_sin_vec[0];
@@ -104,13 +112,17 @@ void apply_rotary(RotaryParams& params) {
 
   cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
 #elif defined(USE_ILU)
-  auto cos_sin_vec = params.cos_sin.chunk(4, -1);
-  auto cos = cos_sin_vec[0];
-  auto sin = cos_sin_vec[2];
-  auto cos_sin = torch::cat({cos, sin}, -1);
+  torch::Tensor ilu_cos_sin;
+  if (params.precomputed_cos_sin.defined()) {
+    ilu_cos_sin = params.precomputed_cos_sin;
+  } else {
+    auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+    ilu_cos_sin = torch::cat({cos_sin_vec[0], cos_sin_vec[2]}, -1);
+  }
+  // positions is already int64 on ILU (pre-converted in ForwardInput::to).
   torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
   ilu::apply_rope_pos_ids_cos_sin_cache(
-      params.q, params.k, cos_sin, long_position_ids, params.interleaved);
+      params.q, params.k, ilu_cos_sin, long_position_ids, params.interleaved);
 #else
   NOT_IMPLEMENTED();
 #endif
