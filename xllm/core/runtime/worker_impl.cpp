@@ -59,8 +59,6 @@ constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 constexpr uint32_t BATCH_COPY_MAX_SIZE = 4096;
 constexpr uint32_t TIMEOUT_S = 60;      // second
 constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
-constexpr int32_t FORMAT_ND = 2;
-constexpr int32_t FORMAT_NZ = 29;
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
@@ -99,8 +97,9 @@ bool WorkerImpl::allocate_kv_cache(
   for (int64_t i = 0; i < num_layers; ++i) {
     torch::Tensor key_cache, value_cache, index_cache;
 #if defined(USE_NPU)
-    int32_t npu_format_type =
-        FLAGS_enable_mla && FLAGS_enable_prefix_cache ? FORMAT_NZ : FORMAT_ND;
+    aclFormat npu_format_type = FLAGS_enable_mla && FLAGS_enable_prefix_cache
+                                    ? ACL_FORMAT_FRACTAL_NZ
+                                    : ACL_FORMAT_ND;
     key_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_)),
         npu_format_type);

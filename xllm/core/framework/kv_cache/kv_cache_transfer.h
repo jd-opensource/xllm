@@ -27,7 +27,6 @@ limitations under the License.
 #include "util/threadpool.h"
 
 namespace xllm {
-
 class KVCacheTransfer {
  public:
   struct KVCacheInfo {
@@ -122,7 +121,8 @@ class KVCacheTransfer {
   virtual std::vector<torch::Tensor> convert_to_torch_tensor(
       const std::vector<int64_t>& dims,
       const torch::ScalarType dtype,
-      const std::vector<uintptr_t>& addresses);
+      const std::vector<uintptr_t>& addresses,
+      const aclFormat format = ACL_FORMAT_ND);
 #endif
 
  protected:
