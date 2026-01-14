@@ -144,8 +144,58 @@ struct OneRecModelInputParams {
   }
 };
 
-using RecModelInputParams =
-    std::variant<std::monostate, OneRecModelInputParams>;
+// Parameters for LLM Rec pure device mode (multi-round decode with beam search)
+struct LlmRecPureDeviceParams {
+  // full kv caches provided by engine for step-level decode, per layer
+  std::vector<torch::Tensor> full_k_caches;
+  std::vector<torch::Tensor> full_v_caches;
+  std::vector<torch::Tensor> unshared_k_caches;
+  std::vector<torch::Tensor> unshared_v_caches;
+  torch::Tensor naive_block_table;
+  std::vector<torch::Tensor> decode_positions_tensor_list;
+  torch::Tensor preallocated_output;
+  // beam width for step-level decode
+  int32_t beam_width = 1;
+  // current round for step-level decode
+  int32_t current_round = 0;
+  int32_t total_round = 0;
+
+  LlmRecPureDeviceParams to(const torch::Device& device) const {
+    LlmRecPureDeviceParams result = *this;
+
+    result.full_k_caches.clear();
+    result.full_v_caches.clear();
+    for (const auto& t : full_k_caches) {
+      result.full_k_caches.push_back(safe_to(t, device));
+    }
+    for (const auto& t : full_v_caches) {
+      result.full_v_caches.push_back(safe_to(t, device));
+    }
+    result.unshared_k_caches.clear();
+    result.unshared_v_caches.clear();
+    for (const auto& t : unshared_k_caches) {
+      result.unshared_k_caches.push_back(safe_to(t, device));
+    }
+    for (const auto& t : unshared_v_caches) {
+      result.unshared_v_caches.push_back(safe_to(t, device));
+    }
+    if (naive_block_table.defined()) {
+      result.naive_block_table = safe_to(naive_block_table, device, true);
+    }
+    result.decode_positions_tensor_list.clear();
+    for (const auto& t : decode_positions_tensor_list) {
+      result.decode_positions_tensor_list.push_back(safe_to(t, device));
+    }
+    if (preallocated_output.defined()) {
+      result.preallocated_output = safe_to(preallocated_output, device);
+    }
+
+    return result;
+  }
+};
+
+using RecModelInputParams = std::
+    variant<std::monostate, OneRecModelInputParams, LlmRecPureDeviceParams>;
 
 enum class TransferType : uint8_t {
   G2H = 0,  // global memory(KVCache store) to host memory(DRAM)
@@ -226,6 +276,7 @@ struct ModelInputParams {
     params.num_sequences = num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
     params.q_max_seq_len = q_max_seq_len;
+    params.is_prefill = is_prefill;
 
     params.kv_seq_lens = safe_to(kv_seq_lens, device, true);
     params.q_seq_lens = safe_to(q_seq_lens, device, true);
@@ -284,8 +335,11 @@ struct ModelInputParams {
 
     params.batch_id = batch_id;
 
+    // rec_params device conversion for both OneRec and LLM-Rec variants
     if (const auto* onerec = onerec_params()) {
       params.rec_params = onerec->to(device);
+    } else if (const auto* llmrec = llmrec_params()) {
+      params.rec_params = llmrec->to(device);
     }
 
     return params;
@@ -309,8 +363,13 @@ struct ModelInputParams {
               << dp_global_token_nums << ", dp_is_decode: " << dp_is_decode;
 
     if (const auto* onerec = onerec_params()) {
-      LOG(INFO) << "ModelInputParams: has rec_params";
+      LOG(INFO) << "ModelInputParams: has onerec_params";
       onerec->print();
+    } else if (const auto* llmrec = llmrec_params()) {
+      LOG(INFO) << "ModelInputParams: has llm_rec_pure_device_params"
+                << ", beam_width=" << llmrec->beam_width
+                << ", current_round=" << llmrec->current_round
+                << ", total_round=" << llmrec->total_round;
     }
   }
 
@@ -336,6 +395,9 @@ struct ModelInputParams {
 #endif
     return true;
   }
+
+  // whether this pass is prefill stage
+  bool is_prefill = true;
 
   BatchForwardType batch_forward_type;
 
@@ -448,6 +510,20 @@ struct ModelInputParams {
       rec_params.emplace<OneRecModelInputParams>();
     }
     return std::get<OneRecModelInputParams>(rec_params);
+  }
+
+  // Accessors for LLM Rec pure device params inside rec_params variant
+  const LlmRecPureDeviceParams* llmrec_params() const {
+    return std::get_if<LlmRecPureDeviceParams>(&rec_params);
+  }
+
+  bool has_llmrec_params() const { return llmrec_params() != nullptr; }
+
+  LlmRecPureDeviceParams& mutable_llmrec_params() {
+    if (!has_llmrec_params()) {
+      rec_params.emplace<LlmRecPureDeviceParams>();
+    }
+    return std::get<LlmRecPureDeviceParams>(rec_params);
   }
 
   struct GraphBuffer {

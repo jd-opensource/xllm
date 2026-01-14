@@ -98,6 +98,18 @@ class WorkerType {
   Value value_;
 };
 
+// step-level decode metadata for pure-device multi-round.
+struct StepDecodeMeta {
+  int32_t beam_width = 1;
+  int32_t current_round = 0;
+  int32_t total_round = 0;
+  // Planned decode kv cache shape: [batch_size * beam_width, n_kv_heads,
+  // step_rounds, head_dim]
+  std::vector<int64_t> full_kv_shape;
+  // Flattened decode positions for each sequence.
+  std::vector<int32_t> decode_positions_vec;
+};
+
 // Inputs for forward execution
 struct ForwardInput {
   ForwardInput to(const torch::Device& device, torch::ScalarType dtype) const {
@@ -106,9 +118,11 @@ struct ForwardInput {
     inputs.positions = safe_to(positions, device, true);
     inputs.input_params = input_params.to(device);
     inputs.sampling_params = sampling_params.to(device, dtype);
+    inputs.decoder_sampling_params = decoder_sampling_params.to(device, dtype);
     inputs.transfer_kv_infos = transfer_kv_infos;
     inputs.eplb_info = eplb_info;
     inputs.acc_logprob = safe_to(acc_logprob, device, true);
+    inputs.step_decode = step_decode;
     inputs.device_input_buffer = device_input_buffer;
     return inputs;
   }
@@ -123,14 +137,25 @@ struct ForwardInput {
     LOG(INFO) << " params.do_sample " << sampling_params.do_sample;
   }
 
+  const StepDecodeMeta* step_meta() const {
+    return step_decode ? &(*step_decode) : nullptr;
+  }
+
+  bool has_step_meta() const { return step_decode.has_value(); }
+
   // flatten token ids
   torch::Tensor token_ids;
   // flatten positions
   torch::Tensor positions;
   ModelInputParams input_params;
   SamplingParameters sampling_params;
+  SamplingParameters decoder_sampling_params;
   // beam search kernel input
   torch::Tensor acc_logprob;
+
+  // step-level decode metadata
+  std::optional<StepDecodeMeta> step_decode;
+
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
   EplbInfo eplb_info;
@@ -159,6 +184,7 @@ struct ForwardOutput {
   int32_t prepared_layer_id;
 
   BeamSearchOutput beam_search_output;
+  torch::Tensor beam_sequence_group;
 };
 
 // Model input with raw data, which will be
@@ -227,6 +253,9 @@ struct RawForwardOutput {
   std::vector<int32_t> src_seq_idxes;
   std::vector<int32_t> out_tokens;
   std::vector<float> out_logprobs;
+
+  // batch-level beam output for rec pure device mode
+  std::vector<int32_t> beam_sequence_group;  // flattened 2D
   // multimodal embedding output
   std::vector<torch::Tensor> mm_embeddings;
 };

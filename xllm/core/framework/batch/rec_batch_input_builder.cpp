@@ -20,7 +20,9 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 
+#include "core/common/rec_model_utils.h"
 #include "onerec_batch_input_builder.h"
+#include "rec_pure_device_batch_input_builder.h"
 
 namespace xllm {
 
@@ -45,8 +47,22 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
           batch_id,
           args,
           thread_pool);
-    case RecType::kNone:
     case RecType::kLlmRec:
+      // Check if pure device mode is enabled
+      if (is_pure_device_mode()) {
+        return std::make_unique<RecPureDeviceBatchInputBuilder>(
+            sequence_groups,
+            allowed_max_tokens,
+            input_embeddings_vec,
+            mm_data_vec,
+            swap_block_transfer_infos,
+            batch_id,
+            args,
+            thread_pool);
+      }
+      // Fall through for non-pure-device LlmRec (not yet implemented)
+      break;
+    case RecType::kNone:
       break;
   }
 
