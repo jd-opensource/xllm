@@ -118,10 +118,15 @@ void LlmDataDistTransfer::allocate_kv_cache(
   }
 
   // convert memory addrs to torch tensors
-  auto k_torch_tensors =
-      convert_to_torch_tensor(kv_cache_shape[0], dtype, k_cache_.tensor_addrs);
-  auto v_torch_tensors =
-      convert_to_torch_tensor(kv_cache_shape[1], dtype, v_cache_.tensor_addrs);
+  aclFormat npu_format_type = FLAGS_enable_mla && FLAGS_enable_prefix_cache
+                                  ? ACL_FORMAT_FRACTAL_NZ
+                                  : ACL_FORMAT_ND;
+
+  auto k_torch_tensors = convert_to_torch_tensor(
+      kv_cache_shape[0], dtype, k_cache_.tensor_addrs, npu_format_type);
+  auto v_torch_tensors = convert_to_torch_tensor(
+      kv_cache_shape[1], dtype, v_cache_.tensor_addrs, npu_format_type);
+
   torch::Tensor key_cache, value_cache;
   for (int64_t i = 0; i < num_layers; ++i) {
     key_cache = k_torch_tensors[i];

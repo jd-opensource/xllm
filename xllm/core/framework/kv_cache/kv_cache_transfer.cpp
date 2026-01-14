@@ -157,7 +157,8 @@ void KVCacheTransfer::merge_kv_blocks(
 std::vector<torch::Tensor> KVCacheTransfer::convert_to_torch_tensor(
     const std::vector<int64_t>& dims,
     const torch::ScalarType dtype,
-    const std::vector<uintptr_t>& addresses) {
+    const std::vector<uintptr_t>& addresses,
+    const aclFormat format) {
   std::vector<torch::Tensor> torch_tensors;
   c10::DeviceType device_type = c10::DeviceType::PrivateUse1;
   torch::TensorOptions option =
@@ -181,8 +182,9 @@ std::vector<torch::Tensor> KVCacheTransfer::convert_to_torch_tensor(
     storage.set_data_ptr(std::move(c10_data_ptr));
 
     tensor.set_(storage, 0, dims);
-    // cast npu format to nd
-    tensor = at_npu::native::npu_format_cast(tensor, 2);
+    auto* tensor_storage = static_cast<torch_npu::NPUStorageImpl*>(
+        tensor.storage().unsafeGetStorageImpl());
+    tensor_storage->npu_desc_.npu_format_ = format;
     torch_tensors.emplace_back(std::move(tensor));
   }
   return torch_tensors;
