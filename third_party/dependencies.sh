@@ -9,6 +9,7 @@ NC="\033[0m" # No Color
 
 # Configuration
 REPO_ROOT=`pwd`
+INSTALL_PREFIX="${HOME}/.local/yalantinglibs"
 
 # Function to print section headers
 print_section() {
@@ -33,9 +34,13 @@ check_success() {
     fi
 }
 
-if [ $(id -u) -ne 0 ]; then
-	print_error "Require root permission, try sudo ./dependencies.sh"
+# Create install directory if it doesn't exist
+if [ ! -d "${INSTALL_PREFIX}" ]; then
+    mkdir -p "${INSTALL_PREFIX}"
+    check_success "Failed to create install directory: ${INSTALL_PREFIX}"
 fi
+
+echo -e "${YELLOW}Installing to: ${INSTALL_PREFIX}${NC}"
 
 
 # Install yalantinglibs
@@ -79,7 +84,7 @@ cd build
 check_success "Failed to change to build directory"
 
 echo "Configuring yalantinglibs..."
-cmake .. -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARK=OFF -DBUILD_UNIT_TESTS=OFF -DYLT_ENABLE_IBV=ON 
+cmake .. -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARK=OFF -DBUILD_UNIT_TESTS=OFF -DYLT_ENABLE_IBV=ON 
 check_success "Failed to configure yalantinglibs"
 
 echo "Building yalantinglibs (using $(nproc) cores)..."
@@ -90,7 +95,11 @@ echo "Installing yalantinglibs..."
 cmake --install .
 check_success "Failed to install yalantinglibs"
 
-sed -i '54s/target_link_libraries(${ylt_target_name} -libverbs)/target_link_libraries(${ylt_target_name} INTERFACE -libverbs)/' /usr/local/lib/cmake/yalantinglibs/config.cmake
+# Patch the config.cmake file
+CONFIG_FILE="${INSTALL_PREFIX}/lib/cmake/yalantinglibs/config.cmake"
+if [ -f "${CONFIG_FILE}" ]; then
+    sed -i '54s/target_link_libraries(${ylt_target_name} -libverbs)/target_link_libraries(${ylt_target_name} INTERFACE -libverbs)/' "${CONFIG_FILE}"
+    check_success "Failed to patch yalantinglibs config.cmake"
+fi
 
-print_success "yalantinglibs installed successfully"
-
+print_success "yalantinglibs installed successfully to ${INSTALL_PREFIX}"

@@ -742,9 +742,12 @@ def pre_build(device):
             print("Failed to apply cpprestsdk.patch!")
             exit(1)
         if not run_shell_command("sh third_party/dependencies.sh", cwd=script_path):
-            print("❌ Failed to reset changes!")
+            print("❌ Failed to install yalantinglibs!")
             exit(1)
-            
+        # export CMAKE_PREFIX_PATH to environment for yalantinglibs
+        os.environ["CMAKE_PREFIX_PATH"] = os.path.join(os.path.expanduser("~"), ".local")
+        print(f"✅ Export CMAKE_PREFIX_PATH to environment: {os.environ['CMAKE_PREFIX_PATH']}")
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description='Setup helper for building xllm',
