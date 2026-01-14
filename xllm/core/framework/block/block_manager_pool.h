@@ -33,6 +33,7 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(bool, enable_disagg_pd) = false;
     PROPERTY(bool, enable_cache_upload) = false;
     PROPERTY(bool, enable_kvcache_store) = false;
+    PROPERTY(bool, enable_mm_prefix_cache) = false;
   };
 
   explicit BlockManagerPool(const Options& options, int32_t dp_size = 1);
