@@ -32,9 +32,11 @@ PrefixCacheWithUpload::~PrefixCacheWithUpload() {
 }
 
 size_t PrefixCacheWithUpload::insert(const Slice<int32_t>& token_ids,
-                                     std::vector<Block>& blocks) {
+                                     std::vector<Block>& blocks,
+                                     size_t existed_shared_blocks_num) {
   std::vector<Murmur3Key> insert_keys;
-  auto n_tokens = PrefixCache::insert(token_ids, blocks, &insert_keys);
+  auto n_tokens = PrefixCache::insert(
+      token_ids, blocks, existed_shared_blocks_num, &insert_keys);
   save_event_async(true, insert_keys);
   return n_tokens;
 }

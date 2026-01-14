@@ -34,11 +34,10 @@ limitations under the License.
 #include "framework/prefix_cache/prefix_cache.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
-#include "scheduler/decode_priority_queue.h"
 #include "util/timer.h"
 
 namespace xllm {
-// class DecodePriorityQueue;
+
 class BlockManager {
  public:
   struct Options {
@@ -61,7 +60,8 @@ class BlockManager {
       const Slice<Block>& existed_shared_blocks = {}) = 0;
 
   virtual void cache(const Slice<int32_t>& token_ids,
-                     std::vector<Block>& blocks) = 0;
+                     std::vector<Block>& blocks,
+                     size_t existed_shared_blocks_num = 0) = 0;
   virtual void cache(const std::vector<Block>& blocks) = 0;
 
   // get merged all dp rank KVCacheEvent

@@ -119,9 +119,10 @@ std::vector<Block> PrefixCache::match(
 }
 
 size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
-                           std::vector<Block>& blocks) {
+                           std::vector<Block>& blocks,
+                           size_t existed_shared_blocks_num) {
   std::vector<Murmur3Key> insert_keys;
-  return insert(token_ids, blocks, &insert_keys);
+  return insert(token_ids, blocks, existed_shared_blocks_num, &insert_keys);
 }
 
 size_t PrefixCache::insert(const std::vector<Block>& blocks) {
@@ -141,6 +142,7 @@ size_t PrefixCache::evict(size_t n_blocks) {
 
 size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
                            std::vector<Block>& blocks,
+                           size_t existed_shared_blocks_num,
                            std::vector<Murmur3Key>* insert_keys) {
   const int64_t now = absl::ToUnixMicros(absl::Now());
   // allign tokens to block boundary
@@ -151,15 +153,20 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
   if (n_blocks == 0) {
     return 0;
   }
-
+  CHECK_GE(n_blocks, existed_shared_blocks_num);
   // truncate the token ids and blocks to boundary
 
   DNodeList node_list;
-  Murmur3Key token_hash_key;
+  Murmur3Key token_hash_key =
+      existed_shared_blocks_num == 0
+          ? Murmur3Key{}
+          : Murmur3Key{blocks[existed_shared_blocks_num - 1]
+                           .get_immutable_hash_value()};
 
-  uint32_t block_idx = 0;
+  uint32_t block_idx = existed_shared_blocks_num;
   insert_keys->reserve(n_blocks);
-  for (size_t i = 0; i < n_tokens; i += block_size_) {
+  for (size_t i = existed_shared_blocks_num * block_size_; i < n_tokens;
+       i += block_size_) {
     if (i == 0) {
       murmur_hash3(
           nullptr, token_ids.slice(i, i + block_size_), token_hash_key.data);
