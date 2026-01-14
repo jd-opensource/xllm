@@ -122,9 +122,6 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
   // The master address for multi-node distributed serving(e.g. 10.18.1.1:9999)
   std::string master_node_addr = "127.0.0.1:18899";
 
-  // XService server address
-  std::string xservice_addr = "";
-
   std::string instance_name = "";
 
   // The mode of kv cache transfer(e.g. PUSH, PULL)

@@ -36,7 +36,6 @@ class VLM:
         node_rank: int = 0,
         dp_size: int = 1,
         ep_size: int = 1,
-        xservice_addr: str = '',
         instance_name: str = '',
         enable_disagg_pd: bool = False,
         enable_schedule_overlap: bool = False,
@@ -86,7 +85,6 @@ class VLM:
         options.node_rank = node_rank
         options.dp_size = dp_size
         options.ep_size = ep_size
-        options.xservice_addr = xservice_addr
         options.instance_name = instance_name
         options.enable_disagg_pd = enable_disagg_pd
         options.enable_schedule_overlap = False
