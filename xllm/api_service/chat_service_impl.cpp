@@ -314,24 +314,33 @@ bool check_for_unstreamed_tool_args(
   return true;
 }
 
-bool get_enable_thinking_from_request(nlohmann::json& chat_template_kwargs,
-                                      std::string reasoning_parser_format) {
-  if (chat_template_kwargs.empty()) {
-    return false;
-  }
-  auto get_thinking = [&](const std::string& thinking_key) -> bool {
-    if (chat_template_kwargs.contains(thinking_key)) {
-      if (chat_template_kwargs[thinking_key].is_boolean()) {
-        return chat_template_kwargs[thinking_key];
-      }
-    }
-    return false;
-  };
-  // qwen3 and glm45/glm47 use enable_thinking and deepseek-v3 uses thinking
-  bool enable_thinking =
-      get_thinking("enable_thinking") || get_thinking("thinking");
+bool get_enable_thinking_from_request(
+    const nlohmann::json& chat_template_kwargs,
+    const std::string& reasoning_parser_format) {
+  // Default to true if reasoning_parser is configured
+  // This matches chat template defaults for models like glm47 that enable
+  // thinking by default
+  bool default_value = !reasoning_parser_format.empty();
 
-  return enable_thinking;
+  if (chat_template_kwargs.empty()) {
+    return default_value;
+  }
+
+  // Check for explicit enable_thinking or thinking setting
+  // qwen3 and glm45/glm47 use enable_thinking and deepseek-v3 uses thinking
+  if (chat_template_kwargs.contains("enable_thinking") ||
+      chat_template_kwargs.contains("thinking")) {
+    auto get_bool_val = [&](const char* key) {
+      auto it = chat_template_kwargs.find(key);
+      if (it != chat_template_kwargs.end() && it->is_boolean()) {
+        return it->get<bool>();
+      }
+      return false;
+    };
+    return get_bool_val("enable_thinking") || get_bool_val("thinking");
+  }
+
+  return default_value;
 }
 
 template <typename ChatCall>
