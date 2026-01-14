@@ -675,7 +675,8 @@ void ChatServiceImpl::process_rec_chat_request(std::shared_ptr<ChatCall> call) {
           }
         }
 
-        if (req_output.finished || req_output.cancelled) {
+        if (req_output.finished || req_output.cancelled ||
+            req_output.finished_on_prefill_instance) {
           master->get_rate_limiter()->decrease_one_request();
         }
 
@@ -815,7 +816,8 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
 
         // Reduce the number of concurrent requests when a request
         // is finished or canceled.
-        if (req_output.finished || req_output.cancelled) {
+        if (req_output.finished || req_output.cancelled ||
+            req_output.finished_on_prefill_instance) {
           master->get_rate_limiter()->decrease_one_request();
         }
 
@@ -910,7 +912,8 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
 
         // Reduce the number of concurrent requests when a request is finished
         // or canceled.
-        if (req_output.finished || req_output.cancelled) {
+        if (req_output.finished || req_output.cancelled ||
+            req_output.finished_on_prefill_instance) {
           master->get_rate_limiter()->decrease_one_request();
         }
 
