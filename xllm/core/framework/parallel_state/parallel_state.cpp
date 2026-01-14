@@ -16,6 +16,8 @@ limitations under the License.
 #include "parallel_state.h"
 
 #include "core/util/utils.h"
+#include "runtime/options.h"
+#include "util/net.h"
 
 #if defined(USE_NPU)
 #include "hccl/hccl.h"
@@ -279,6 +281,53 @@ std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(
 #else
   LOG(FATAL) << "non-NPU device is not supported";
 #endif
+}
+
+std::vector<std::unique_ptr<ProcessGroup>> create_local_process_groups(
+    const std::vector<torch::Device>& devices,
+    const runtime::Options& options) {
+  CHECK(!devices.empty()) << "devices should not be empty";
+  const int world_size = static_cast<int>(devices.size());
+
+  std::vector<std::unique_ptr<ProcessGroup>> process_groups;
+  process_groups.reserve(devices.size());
+
+#if defined(USE_NPU)
+  std::vector<HcclComm> comms(devices.size());
+  for (int i = 0; i < world_size; ++i) {
+    process_groups.emplace_back(std::make_unique<ProcessGroupImpl>(
+        /*rank=*/i, world_size, devices[i], comms[i]));
+  }
+#elif defined(USE_CUDA) || defined(USE_MLU) || defined(USE_ILU)
+  // For GPU: use create_process_group with localhost
+  // Parse port from options.master_node_addr() to support multiple instances
+  std::string host;
+  int port;
+
+  // Parse port from options.master_node_addr()
+  // Note: master_node_addr always has a default value (127.0.0.1:19888)
+  net::parse_host_port_from_addr(
+      options.master_node_addr().value(), host, port);
+
+  // Override host to localhost for local communication
+  host = "127.0.0.1";
+
+  for (int i = 0; i < world_size; ++i) {
+    process_groups.emplace_back(create_process_group(
+        /*rank=*/i,
+        /*world_size=*/world_size,
+        /*rank_size=*/world_size,
+        /*port=*/port,
+        /*trans=*/false,
+        host,
+        /*group_name=*/"local_tp_group",
+        devices[i]));
+  }
+#else
+  LOG(FATAL) << "Unsupported device type for create_local_process_groups";
+#endif
+
+  return process_groups;
 }
 
 }  // namespace parallel_state

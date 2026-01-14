@@ -143,6 +143,56 @@ struct OneRecModelInputParams {
 using RecModelInputParams =
     std::variant<std::monostate, OneRecModelInputParams>;
 
+// Parameters for LLM Rec pure device mode (multi-round decode with beam search)
+struct LlmRecPureDeviceParams {
+  // full kv caches provided by engine for step-level decode, per layer
+  std::vector<torch::Tensor> full_k_caches;
+  std::vector<torch::Tensor> full_v_caches;
+  std::vector<torch::Tensor> unshared_k_caches;
+  std::vector<torch::Tensor> unshared_v_caches;
+  torch::Tensor naive_block_table;
+  std::vector<torch::Tensor> decode_positions_tensor_list;
+  torch::Tensor preallocated_output;
+  // beam width for step-level decode
+  int32_t beam_width = 1;
+  // current round for step-level decode
+  int32_t current_round = 0;
+  int32_t total_round = 0;
+
+  LlmRecPureDeviceParams to(const torch::Device& device) const {
+    LlmRecPureDeviceParams result = *this;
+
+    result.full_k_caches.clear();
+    result.full_v_caches.clear();
+    for (const auto& t : full_k_caches) {
+      result.full_k_caches.push_back(safe_to(t, device));
+    }
+    for (const auto& t : full_v_caches) {
+      result.full_v_caches.push_back(safe_to(t, device));
+    }
+    result.unshared_k_caches.clear();
+    result.unshared_v_caches.clear();
+    for (const auto& t : unshared_k_caches) {
+      result.unshared_k_caches.push_back(safe_to(t, device));
+    }
+    for (const auto& t : unshared_v_caches) {
+      result.unshared_v_caches.push_back(safe_to(t, device));
+    }
+    if (naive_block_table.defined()) {
+      result.naive_block_table = safe_to(naive_block_table, device, true);
+    }
+    result.decode_positions_tensor_list.clear();
+    for (const auto& t : decode_positions_tensor_list) {
+      result.decode_positions_tensor_list.push_back(safe_to(t, device));
+    }
+    if (preallocated_output.defined()) {
+      result.preallocated_output = safe_to(preallocated_output, device);
+    }
+
+    return result;
+  }
+};
+
 enum class TransferType : uint8_t {
   G2H = 0,  // global memory(KVCache store) to host memory(DRAM)
   H2D = 1,  // host memory(DRAM) to device memory(HBM)
@@ -224,6 +274,7 @@ struct ModelInputParams {
     params.num_sequences = num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
     params.q_max_seq_len = q_max_seq_len;
+    params.is_prefill = is_prefill;
 
     params.kv_seq_lens = safe_to(kv_seq_lens, device, true);
     params.q_seq_lens = safe_to(q_seq_lens, device, true);
@@ -267,6 +318,9 @@ struct ModelInputParams {
     // params for continuous kvcache
     params.new_cache_slot_offsets = safe_to(new_cache_slot_offsets, device);
     params.kv_cache_start_offsets = safe_to(kv_cache_start_offsets, device);
+
+    // LLM Rec pure device params
+    params.llm_rec_pure_device_params = llm_rec_pure_device_params.to(device);
 
     // Copy graph_buffer to device
     // params.graph_buffer = safe_to(graph_buffer, device, true);
@@ -338,6 +392,9 @@ struct ModelInputParams {
 
   // whether the kv-cache is empty for all sequences.
   bool empty_kv_cache = true;
+
+  // whether this pass is prefill stage
+  bool is_prefill = true;
   // whether the kv-cache is empty for all sequences,mainly used for dp case
   bool global_empty_kv_cache = true;
 
@@ -459,6 +516,14 @@ struct ModelInputParams {
     torch::Tensor tiling_data;
   };
   GraphBuffer graph_buffer;
+
+  // Parameters for LLM Rec pure device mode (multi-round decode with beam
+  // search)
+  LlmRecPureDeviceParams llm_rec_pure_device_params;
+
+  // Model architecture parameters (used in step-level decode)
+  int32_t num_heads = 0;
+  int32_t head_dim = 0;
 };
 
 }  // namespace xllm

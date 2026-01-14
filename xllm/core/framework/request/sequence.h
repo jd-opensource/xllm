@@ -277,6 +277,29 @@ class Sequence final {
 
   bool check_need_unique_tokens() { return need_unique_tokens_; }
 
+  // Multi-round beam search result caching
+  void set_beam_result(int32_t bw,
+                       int32_t total_rounds,
+                       const std::vector<std::vector<int32_t>>& flat,
+                       const std::vector<float>& last_logprobs) {
+    beam_width_cached_ = bw;
+    total_rounds_cached_ = total_rounds;
+    beam_seq_group_flat_ = flat;
+    beam_last_logprobs_ = last_logprobs;
+  }
+  bool has_beam_result() const {
+    return beam_width_cached_ > 0 && total_rounds_cached_ > 0 &&
+           !beam_seq_group_flat_.empty();
+  }
+  const std::vector<std::vector<int32_t>>& beam_seq_group_flat() const {
+    return beam_seq_group_flat_;
+  }
+  const std::vector<float>& beam_last_logprobs() const {
+    return beam_last_logprobs_;
+  }
+  int32_t beam_width_cached() const { return beam_width_cached_; }
+  int32_t total_rounds_cached() const { return total_rounds_cached_; }
+
   LogprobState* logprob_state() { return logprob_state_.get(); }
 
   // set sequence id
@@ -449,6 +472,12 @@ class Sequence final {
 
   // whether the last token is handled
   std::atomic<bool> last_token_handled_{false};
+
+  // Multi-round beam search result caching
+  int32_t beam_width_cached_ = 0;
+  int32_t total_rounds_cached_ = 0;
+  std::vector<std::vector<int32_t>> beam_seq_group_flat_;
+  std::vector<float> beam_last_logprobs_;
 };
 
 }  // namespace xllm

@@ -24,11 +24,13 @@ limitations under the License.
 #include "batch_input_builder.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/common/rec_model_utils.h"
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
+#include "multi_step_batch_input_builder.h"
 #include "rec_batch_input_builder.h"
 #include "runtime/params_utils.h"
 #include "util/slice.h"
@@ -125,22 +127,24 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               uint32_t min_decoding_batch_size,
                                               const ModelArgs& args,
                                               ThreadPool* thread_pool) {
-  RecType rec_type = RecType::kNone;
-  if (!sequence_groups_.empty() && !sequence_groups_[0]->sequences().empty()) {
-    rec_type = sequence_groups_[0]->sequences()[0]->rec_type();
-  }
+  return prepare_multi_step_forward_input_forward(args, thread_pool);
+  // RecType rec_type = RecType::kNone;
+  // if (!sequence_groups_.empty() && !sequence_groups_[0]->sequences().empty())
+  // {
+  //   rec_type = sequence_groups_[0]->sequences()[0]->rec_type();
+  // }
 
-  auto builder = RecBatchInputBuilder::create(rec_type,
-                                              sequence_groups_,
-                                              allowed_max_tokens_,
-                                              input_embeddings_vec_,
-                                              mm_data_vec_,
-                                              swap_block_transfer_infos_,
-                                              batch_id_,
-                                              &args,
-                                              thread_pool);
-  return builder->build_rec_forward_input(num_decoding_tokens,
-                                          min_decoding_batch_size);
+  // auto builder = RecBatchInputBuilder::create(rec_type,
+  //                                             sequence_groups_,
+  //                                             allowed_max_tokens_,
+  //                                             input_embeddings_vec_,
+  //                                             mm_data_vec_,
+  //                                             swap_block_transfer_infos_,
+  //                                             batch_id_,
+  //                                             &args,
+  //                                             thread_pool);
+  // return builder->build_rec_forward_input(num_decoding_tokens,
+  //                                         min_decoding_batch_size);
 }
 
 std::vector<Sequence*> Batch::get_sequences() {
@@ -277,6 +281,22 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
   return builder.build_raw_forward_input();
 }
 
+ForwardInput Batch::prepare_multi_step_forward_input_forward(
+    const ModelArgs& args,
+    ThreadPool* thread_pool) {
+  dp_balance_shuffle_seqs();
+  MultiStepBatchInputBuilder builder(sequences_,
+                                     allowed_max_tokens_,
+                                     input_embeddings_vec_,
+                                     mm_data_vec_,
+                                     swap_block_transfer_infos_,
+                                     batch_id_,
+                                     &args,
+                                     batch_forward_type_,
+                                     thread_pool);
+  return builder.build_forward_input();
+}
+
 void Batch::process_sample_output(const RawForwardOutput& raw_output,
                                   bool replace_fake_token) {
   int64_t num_seqs;
@@ -351,6 +371,66 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
 
   if (!FLAGS_enable_schedule_overlap || replace_fake_token) {
     process_beam_search();
+  }
+}
+
+void Batch::process_beam_sequence_group(const ForwardOutput& output) {
+  if (!output.beam_sequence_group.defined() ||
+      output.beam_sequence_group.numel() == 0) {
+    return;
+  }
+
+  // Get sequences from either sequences_ or sequence_groups_
+  auto sequences = get_sequences();
+  if (sequences.empty()) {
+    return;
+  }
+
+  const int32_t beam_width = sequences[0]->sampling_param()->beam_width;
+  if (beam_width <= 1) {
+    return;
+  }
+  int32_t total_rounds = get_pure_device_decode_rounds();
+  size_t num_groups = sequence_groups_.size();
+  if (num_groups == 0) {
+    // Fallback: treat sequences_ as single group
+    num_groups = sequences.size();
+  }
+
+  // Tensor should already be on CPU (transferred in get_model_output)
+  auto seq_group_accessor = output.beam_sequence_group.accessor<int32_t, 3>();
+
+  // out_logprobs from beam_search_output, shape: [batch * beam_width]
+  // Tensor should already be on CPU (transferred in get_model_output)
+  bool has_logprobs = output.beam_search_output.out_logprobs.defined() &&
+                      output.beam_search_output.out_logprobs.numel() > 0;
+
+  for (size_t g = 0; g < num_groups; ++g) {
+    std::vector<std::vector<int32_t>> group_flat2d;
+    group_flat2d.reserve(static_cast<size_t>(beam_width));
+    std::vector<float> last_logprobs;
+    last_logprobs.reserve(static_cast<size_t>(beam_width));
+
+    for (int b = 0; b < beam_width; ++b) {
+      std::vector<int32_t> row_tokens;
+      row_tokens.reserve(static_cast<size_t>(total_rounds));
+      for (int c = 0; c < total_rounds; ++c) {
+        // Access [g][b][c]
+        row_tokens.push_back(seq_group_accessor[g][b][c]);
+      }
+      group_flat2d.emplace_back(std::move(row_tokens));
+      if (has_logprobs) {
+        // logprobs is flattened [batch * beam_width]
+        int logprob_idx = static_cast<int>(g) * beam_width + b;
+        last_logprobs.push_back(
+            output.beam_search_output.out_logprobs[logprob_idx].item<float>());
+      }
+    }
+    // Access sequence from sequence_groups_ if available
+    Sequence* seq = sequence_groups_.empty()
+                        ? sequences[g]
+                        : sequence_groups_[g]->sequences()[0].get();
+    seq->set_beam_result(beam_width, total_rounds, group_flat2d, last_logprobs);
   }
 }
 

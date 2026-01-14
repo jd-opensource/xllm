@@ -106,9 +106,16 @@ struct ForwardInput {
     inputs.positions = safe_to(positions, device, true);
     inputs.input_params = input_params.to(device);
     inputs.sampling_params = sampling_params.to(device, dtype);
+    inputs.decoder_sampling_params = decoder_sampling_params.to(device, dtype);
     inputs.transfer_kv_infos = transfer_kv_infos;
     inputs.eplb_info = eplb_info;
     inputs.acc_logprob = safe_to(acc_logprob, device, true);
+    // step-level metadata (non-tensor)
+    inputs.beam_width = beam_width;
+    inputs.current_round = current_round;
+    inputs.total_round = total_round;
+    inputs.full_kv_shape = full_kv_shape;
+    inputs.decode_positions_vec = decode_positions_vec;
     inputs.device_input_buffer = device_input_buffer;
     return inputs;
   }
@@ -129,8 +136,18 @@ struct ForwardInput {
   torch::Tensor positions;
   ModelInputParams input_params;
   SamplingParameters sampling_params;
+  SamplingParameters decoder_sampling_params;
   // beam search kernel input
   torch::Tensor acc_logprob;
+
+  std::vector<int32_t> decode_positions_vec;
+  // step-level decode metadata (scheme A)
+  int32_t beam_width = 1;
+  int32_t current_round = 0;
+  int32_t total_round = 0;
+  // decode kv cache shape planned by engine: [batch_size * beam_width,
+  // n_kv_heads, step_rounds, head_dim]
+  std::vector<int64_t> full_kv_shape;
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
   EplbInfo eplb_info;
@@ -159,6 +176,7 @@ struct ForwardOutput {
   int32_t prepared_layer_id;
 
   BeamSearchOutput beam_search_output;
+  torch::Tensor beam_sequence_group;
 };
 
 // Model input with raw data, which will be
@@ -172,6 +190,13 @@ struct RawForwardInput {
   std::vector<int32_t> sample_idxes;
   std::vector<std::vector<int64_t>> unique_token_ids_vec;
   std::vector<std::vector<int32_t>> unique_token_counts_vec;
+  // rec pure device params
+  std::vector<const RequestSamplingParam*> decode_sampling_params;
+  std::vector<int32_t> decode_selected_token_idxes;
+  std::vector<int32_t> decode_sample_idxes;
+  std::vector<std::vector<int64_t>> decode_unique_token_ids_vec;
+  std::vector<std::vector<int32_t>> decode_unique_token_counts_vec;
+  std::vector<int32_t> decode_unique_token_lens_vec;
   std::vector<int32_t> unique_token_lens_vec;
   bool empty_kv_cache = true;
   bool global_empty_kv_cache = true;
@@ -209,6 +234,12 @@ struct RawForwardInput {
   std::vector<int64_t> kv_cache_start_offsets;  //[n_seq]
   // beam search kernel input
   std::vector<float> acc_logprob_vec;
+  std::vector<int32_t> decode_positions_vec;
+  // rec pure device params
+  int32_t beam_width = 1;
+  int32_t current_round = 0;
+  int32_t total_round = 0;
+  std::vector<int64_t> full_kv_shape;
   // for flashinfer
   std::vector<int32_t> paged_kv_indptr;         //[n_seq + 1]
   std::vector<int32_t> paged_kv_indices;        //[num_used_pages]
@@ -229,6 +260,9 @@ struct RawForwardOutput {
   std::vector<int32_t> src_seq_idxes;
   std::vector<int32_t> out_tokens;
   std::vector<float> out_logprobs;
+
+  // batch-level beam output for rec pure device mode
+  std::vector<int32_t> beam_sequence_group;  // flattened 2D
   // multimodal embedding output
   std::vector<torch::Tensor> mm_embeddings;
 };

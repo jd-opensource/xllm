@@ -72,6 +72,11 @@ class SequencesGroup {
                                  const Tokenizer& tokenizer,
                                  ThreadPool* thread_pool = nullptr);
 
+  // Generate output for multi-round beam search
+  void generate_multi_round_output(std::vector<SequenceOutput>& outputs,
+                                   const Tokenizer& tokenizer,
+                                   const Sequence& base);
+
  private:
   const std::string& prompt_;                  // ref from request
   const std::vector<int32_t>& prompt_tokens_;  // ref from request
