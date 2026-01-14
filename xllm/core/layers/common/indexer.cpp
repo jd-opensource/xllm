@@ -340,7 +340,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   params.weights = ctx.weights;
   params.kv_cache_block_table = attn_metadata.block_table;
   params.cu_seq_q_lens = ctx.cu_seq_q_lens;
-  params.cu_seq_k_lens = ctx.k_context_lens;
+  params.cu_seq_k_lens = ctx.cu_seq_k_lens;
   params.k_context_lens = ctx.k_context_lens;
   params.k_cache_block_table = ctx.k_block_table;
   params.is_prefill = is_prefill;

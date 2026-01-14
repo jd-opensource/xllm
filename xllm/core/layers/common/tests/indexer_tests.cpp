@@ -153,9 +153,10 @@ class IndexerTest : public ::testing::Test {
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 
     // Create kv_cu_seq_lens tensor
-    // TODO: Define proper shape and values based on actual requirements
-    metadata.kv_cu_seq_lens = torch::zeros(
-        {batch_size + 1},
+    metadata.kv_cu_seq_lens = torch::arange(
+        0,
+        (batch_size + 1) * max_query_len,
+        max_query_len,
         torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
 
     // Create seq_lens tensor

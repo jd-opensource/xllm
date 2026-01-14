@@ -152,9 +152,11 @@ void masked_indexer_select_paged_kv(
     const std::optional<torch::Tensor>& k_scale_cache,
     const torch::Tensor& sparse_block_table,
     const torch::Tensor& sparse_context_lens) {
+  // Unsqueeze weights to 3D for compatibility modification
+  torch::Tensor weights_3d = weights.unsqueeze(-1);
   tmo::torch_api::masked_indexer_select_paged_kv(query,
                                                  k_cache,
-                                                 weights,
+                                                 weights_3d,
                                                  kv_cache_block_table,
                                                  cu_seq_q_lens,
                                                  cu_seq_k_lens,
