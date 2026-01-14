@@ -46,6 +46,9 @@ cc_library(
   DEPS
     torch
     brpc
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    leveldb::leveldb
     nlohmann_json::nlohmann_json
     glog::glog
     torch

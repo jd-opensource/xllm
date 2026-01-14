@@ -357,8 +357,6 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
 }
 
 void Batch::process_beam_sequence_group(const ForwardOutput& output) {
-  // TODO. uncomment this in next pr.
-  /*
   if (!output.beam_sequence_group.defined() ||
       output.beam_sequence_group.numel() == 0) {
     return;
@@ -416,7 +414,6 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
                         : sequence_groups_[g]->sequences()[0].get();
     seq->set_beam_result(beam_width, total_rounds, group_flat2d, last_logprobs);
   }
-  */
 }
 
 void Batch::process_sample_output(const SampleOutput& sample_output,
