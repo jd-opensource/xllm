@@ -30,7 +30,7 @@ namespace xllm {
 
 namespace {
 // Helper function to get test device: MLU if available, otherwise CPU
-torch::Device GetTestDevice() {
+torch::Device get_test_device() {
   std::string backend = Device::type_str();
   if (backend == "mlu" && Device::device_count() > 0) {
     return torch::Device(Device::type_torch(), 0);
@@ -39,15 +39,16 @@ torch::Device GetTestDevice() {
 }
 
 // Helper function to get test tensor options with automatic device selection
-torch::TensorOptions GetTestOptions(torch::ScalarType dtype = torch::kFloat32) {
-  return torch::dtype(dtype).device(GetTestDevice());
+torch::TensorOptions get_test_options(
+    torch::ScalarType dtype = torch::kFloat32) {
+  return torch::dtype(dtype).device(get_test_device());
 }
 }  // namespace
 
 TEST(RejectionSamplerTest, Basic) {
   // test with hand-crafted example
-  const auto options = GetTestOptions(torch::kFloat32);
-  const auto device = GetTestDevice();
+  const auto options = get_test_options(torch::kFloat32);
+  const auto device = get_test_device();
 
   // set random seed
   torch::manual_seed(100);
@@ -94,7 +95,7 @@ TEST(RejectionSamplerTest, Basic) {
 
 TEST(RejectionSamplerTest, Mask) {
   // test accepted mask
-  const auto options = GetTestOptions(torch::kBool);
+  const auto options = get_test_options(torch::kBool);
 
   // clang-format off
   auto accepted = torch::tensor({
@@ -115,8 +116,8 @@ TEST(RejectionSamplerTest, Mask) {
 }
 
 TEST(RejectionSamplerTest, Greedy) {
-  const auto options = GetTestOptions(torch::kFloat32);
-  const auto device = GetTestDevice();
+  const auto options = get_test_options(torch::kFloat32);
+  const auto device = get_test_device();
 
   int64_t batch_size = 2;
   int64_t n_speculative_tokens = 3;
@@ -157,8 +158,8 @@ TEST(RejectionSamplerTest, Greedy) {
 }
 
 TEST(RejectionSamplerTest, LogProbs) {
-  const auto options = GetTestOptions(torch::kFloat32);
-  const auto device = GetTestDevice();
+  const auto options = get_test_options(torch::kFloat32);
+  const auto device = get_test_device();
   const auto do_sample = torch::tensor({false, true, false, true}, device);
   const int64_t max_top_logprobs = 2;
   RejectionSampler sampler(do_sample,
@@ -210,7 +211,7 @@ TEST(RejectionSamplerTest, LogProbs) {
 }
 
 TEST(RejectionSamplerTest, Random) {
-  const auto options = GetTestOptions(torch::kFloat32);
+  const auto options = get_test_options(torch::kFloat32);
 
   // set random seed
   torch::manual_seed(100);

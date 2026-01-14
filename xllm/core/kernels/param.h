@@ -865,7 +865,7 @@ struct RejectionSampleParams {
   // Probability distributions of the draft model.
   // Shape: [total_draft_tokens, vocab_size].
   // Dtype: float32, float16, or bfloat16.
-  torch::Tensor draft_probs;
+  std::optional<torch::Tensor> draft_probs;
   // Probability distributions of the target model.
   // Shape: [total_draft_tokens, vocab_size].
   // Dtype: float32, float16, or bfloat16.
