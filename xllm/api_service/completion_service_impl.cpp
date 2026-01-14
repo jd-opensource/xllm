@@ -232,7 +232,8 @@ void CompletionServiceImpl::process_async_impl(
 
         // Reduce the number of concurrent requests when a request is finished
         // or canceled.
-        if (req_output.finished || req_output.cancelled) {
+        if (req_output.finished || req_output.cancelled ||
+            req_output.finished_on_prefill_instance) {
           master->get_rate_limiter()->decrease_one_request();
         }
 

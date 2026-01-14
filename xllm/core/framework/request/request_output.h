@@ -112,6 +112,10 @@ struct RequestOutput {
   // whether the request is finished.
   bool finished = false;
 
+  // whether the request is finished on prefill instance, only for stream
+  // request in Disagg P/D mode.
+  bool finished_on_prefill_instance = false;
+
   // whether the request is cancelled.
   bool cancelled = false;
 };

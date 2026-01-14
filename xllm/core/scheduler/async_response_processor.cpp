@@ -77,7 +77,7 @@ void AsyncResponseProcessor::process_completed_request(
     if (role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) {
       // entering here means non-stream request's prefill stage ends in Disagg
       // P/D mode.
-      req_output.finished = true;
+      req_output.finished_on_prefill_instance = true;
     } else {
       request->log_statistic(end_2_end_latency_seconds);
     }
@@ -215,7 +215,7 @@ void AsyncResponseProcessor::process_stream_request(
       if (role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) {
         // stream request's prefill stage finishes in prefill instance in Disagg
         // P/D mode.
-        req_output.finished = true;
+        req_output.finished_on_prefill_instance = true;
       }
       if (!request->state().output_func(req_output)) {
         // cancel the request if on_stream returns false
