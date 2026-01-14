@@ -377,4 +377,100 @@ TEST(RejectionSamplerTest, RandomFused) {
   }
 }
 
+TEST(RejectionSamplerTest, RandomFusedRecoveryDistribution) {
+  // Check MLU device
+  if (Device::type_str() != "mlu" || Device::device_count() == 0) {
+    GTEST_SKIP() << "Skipping test: MLU device required.";
+  }
+
+  torch::manual_seed(42);
+  torch::Device device(Device::type_torch(), 0);
+
+  // Keep vocab_size small for statistical verification
+  int64_t vocab_size = 4;
+  int64_t num_samples = 5000;
+  // Use n_spec > 1 to cover broadcasting/reshaping edge cases
+  int64_t n_spec = 2;
+
+  // Draft model confidently predicts index 0 (prob=1.0) for all tokens
+  auto draft_probs = torch::zeros({num_samples, n_spec, vocab_size},
+                                  torch::dtype(torch::kFloat32).device(device));
+  draft_probs.index_put_({"...", 0}, 1.0f);
+
+  // Define target probability distribution
+  auto target_prob_single =
+      torch::zeros({vocab_size}, torch::dtype(torch::kFloat32).device(device));
+  target_prob_single[0] = 0.1f;
+  target_prob_single[1] = 0.6f;
+  target_prob_single[2] = 0.2f;
+  target_prob_single[3] = 0.1f;
+
+  // Call contiguous() to avoid stride=0 error in kernel
+  auto target_probs = target_prob_single.reshape({1, 1, -1})
+                          .repeat({num_samples, n_spec, 1})
+                          .contiguous();
+
+  // Draft Token IDs set to 0, use kInt32 type
+  auto draft_token_ids = torch::zeros(
+      {num_samples, n_spec}, torch::dtype(torch::kInt32).device(device));
+  auto bonus_token_ids = torch::zeros(
+      {num_samples, 1}, torch::dtype(torch::kInt32).device(device));
+
+  // All drafts at index 0 are rejected (uniform_rand > target_prob /
+  // draft_prob)
+  auto uniform_rand = torch::full({num_samples, n_spec},
+                                  0.5f,
+                                  torch::dtype(torch::kFloat32).device(device));
+  // Run fused kernel and get output
+  auto [output, masked_output] =
+      RejectionSampler::random_sample_fused(draft_token_ids,
+                                            draft_probs,
+                                            target_probs,
+                                            uniform_rand,
+                                            bonus_token_ids,
+                                            /*mask_out_rejected_tokens=*/true);
+
+  // All drafts at index 0 are rejected, n_spec positions have identical
+  // distributions, analyze first column
+  auto recovered_tokens = output.slice(1, 0, 1).flatten().cpu();
+  std::vector<int64_t> counts(vocab_size, 0);
+  auto accessor = recovered_tokens.accessor<int64_t, 1>();
+  for (int i = 0; i < num_samples; ++i) {
+    int64_t token = accessor[i];
+    // Ensure generated token in legal range
+    CHECK_GE(token, 0) << "Generated token index cannot be negative!";
+    CHECK_LT(token, vocab_size)
+        << "Generated token index out of bounds (>= vocab_size)!";
+    counts[token]++;
+  }
+
+  // Token 0 should never appear: probability is clamped to 0
+  EXPECT_EQ(counts[0], 0)
+      << "Token 0 should have zero probability in recovery.";
+
+  // Calculate empirical probabilities
+  double total = static_cast<double>(num_samples);
+  double p1 = counts[1] / total;
+  double p2 = counts[2] / total;
+  double p3 = counts[3] / total;
+
+  LOG(INFO) << "[RandomFusedStats] Empirical Probs: "
+            << "P(1)=" << p1 << ", P(2)=" << p2 << ", P(3)=" << p3;
+
+  // Expected probabilities (normalized)
+  // Raw: [0, 0.6, 0.2, 0.1] => Normalized: [0, 0.666..., 0.222..., 0.111...]
+  double expected_p1 = 0.6 / 0.9;  // ~0.6667
+  double expected_p2 = 0.2 / 0.9;  // ~0.2222
+  double expected_p3 = 0.1 / 0.9;  // ~0.1111
+
+  // Tolerance 0.02 (2%), reasonable for 5000 samples
+  double tolerance = 0.02;
+  EXPECT_NEAR(p1, expected_p1, tolerance)
+      << "Distribution mismatch for Token 1";
+  EXPECT_NEAR(p2, expected_p2, tolerance)
+      << "Distribution mismatch for Token 2";
+  EXPECT_NEAR(p3, expected_p3, tolerance)
+      << "Distribution mismatch for Token 3";
+}
+
 }  // namespace xllm
