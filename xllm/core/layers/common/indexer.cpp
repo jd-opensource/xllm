@@ -349,9 +349,9 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   params.k_scale_cache = torch::Tensor();  // empty tensor as k_scale_cache
   params.index_topk = index_topk_;
   params.kv_cache_block_size = 1;  // only support 1 for now
-  params.new_block_table = ctx.new_block_tables;
-  params.new_context_lens = ctx.new_context_lens;
-  params.quant_block_size = 128;  // only support 128 for now
+  params.sparse_block_table = ctx.new_block_tables;
+  params.sparse_context_lens = ctx.new_context_lens;
+  // params.quant_block_size = 128;  // only support 128 for now
 
   xllm::kernel::masked_indexer_select_paged_kv(params);
 

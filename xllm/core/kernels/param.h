@@ -887,58 +887,56 @@ struct RejectionSampleParams {
 
 // Masked indexer select paged KV cache parameters
 struct MaskedIndexerSelectPagedKVParams {
-  // Whether this is prefill phase (true) or decode phase (false).
-  // Affects query shape and whether cu_seq_q_lens is used.
-  bool is_prefill;
   // Query tensor. Must have same dtype as k_cache (bfloat16, half, or int8).
   // - Prefill mode: 3D [total_seq_q, head_num, head_size], head_num must be 64
   // - Decode mode: 4D [batch_num, len_q, head_num, head_size], head_num must be
   // 64 Does not need to be contiguous
   torch::Tensor query;
+  // Key cache tensor in paged format. Shape: [num_blocks, 1, block_size,
+  // head_dim]. Dim(1) must be 1. Must be contiguous. Must have same dtype as
+  // query.
+  torch::Tensor k_cache;
+  // Attention weights tensor. Dtype must be bfloat16 or float32. Must be
+  // contiguous.
+  torch::Tensor weights;
+  // Key cache block table. Shape: [batch_num, k_cache_max_blkn]. Type: int32.
+  // Must be contiguous.
+  torch::Tensor k_cache_block_table;
   // Cumulative sequence lengths for queries. Type: int32. Must be contiguous.
   // Required in prefill mode, not used in decode mode.
   torch::Tensor cu_seq_q_lens;
   // Cumulative sequence lengths for keys.
   torch::Tensor cu_seq_k_lens;
+  // Key context lengths tensor. Shape: [batch_num]. Type: int32. Must be
+  // contiguous.
+  torch::Tensor k_context_lens;
+  // KV cache block table. Shape: [batch_num, kv_cache_max_blkn]. Type: int32.
+  // Must be contiguous.
+  torch::Tensor kv_cache_block_table;
+  // Whether this is prefill phase (true) or decode phase (false).
+  // Affects query shape and whether cu_seq_q_lens is used.
+  bool is_prefill;
+  // Number of top-k indices to select. Must be >= 0.
+  int64_t index_topk;
+  // KV cache block size. Must be 1.
+  int64_t kv_cache_block_size;
+  // Softmax scaling factor for attention computation.
+  double softmax_scale;
   // Query quantization scale tensor. Must be contiguous.
   // - Required (numel > 0) when query dtype is int8 or fp8
   // - Must be empty (numel == 0) when query dtype is bfloat16 or half
   torch::Tensor q_scale;
-  // Attention weights tensor. Dtype must be bfloat16 or float32. Must be
-  // contiguous.
-  torch::Tensor weights;
-  // Softmax scaling factor for attention computation.
-  double softmax_scale;
-  // Key cache tensor in paged format. Shape: [num_blocks, 1, block_size,
-  // head_dim]. Dim(1) must be 1. Must be contiguous. Must have same dtype as
-  // query.
-  torch::Tensor k_cache;
-  // Key context lengths tensor. Shape: [batch_num]. Type: int32. Must be
-  // contiguous.
-  torch::Tensor k_context_lens;
-  // Key cache block table. Shape: [batch_num, k_cache_max_blkn]. Type: int32.
-  // Must be contiguous.
-  torch::Tensor k_cache_block_table;
   // Key cache quantization scale tensor. Must be contiguous.
   // - Required (numel > 0) when k_cache dtype is int8 or fp8
   // - Must be empty (numel == 0) when k_cache dtype is bfloat16 or half
   torch::Tensor k_scale_cache;
-  // Number of top-k indices to select. Must be >= 0.
-  int64_t index_topk;
-  // KV cache block table. Shape: [batch_num, kv_cache_max_blkn]. Type: int32.
-  // Must be contiguous.
-  torch::Tensor kv_cache_block_table;
-  // KV cache block size. Must be 1.
-  int64_t kv_cache_block_size;
-  // New block table output tensor. Must be contiguous.
+  // New sparse block table output tensor. Must be contiguous.
   // - Prefill mode: 2D [total_seq_q, kv_cache_max_blkn]
   // - Decode mode: 3D [batch_num, seq_q, kv_cache_max_blkn]
-  torch::Tensor new_block_table;
-  // New context lengths output tensor. Shape: [batch_num] (prefill) or
+  torch::Tensor sparse_block_table;
+  // New sparse block table output tensor. Shape: [batch_num] (prefill) or
   // [batch_num] (decode). Type: int32. Must be contiguous.
-  torch::Tensor new_context_lens;
-  // Quantization block size. Must equal to head_size (query.size(-1)).
-  int64_t quant_block_size;
+  torch::Tensor sparse_context_lens;
 };
 
 struct GatherSplitParams {

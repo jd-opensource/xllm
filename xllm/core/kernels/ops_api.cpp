@@ -600,23 +600,22 @@ torch::Tensor rejection_sample(RejectionSampleParams& params) {
 
 void masked_indexer_select_paged_kv(MaskedIndexerSelectPagedKVParams& params) {
 #if defined(USE_MLU)
-  mlu::masked_indexer_select_paged_kv(params.is_prefill,
-                                      params.query,
+  mlu::masked_indexer_select_paged_kv(params.query,
+                                      params.k_cache,
+                                      params.weights,
+                                      params.k_cache_block_table,
                                       params.cu_seq_q_lens,
                                       params.cu_seq_k_lens,
-                                      params.q_scale,
-                                      params.weights,
-                                      params.softmax_scale,
-                                      params.k_cache,
                                       params.k_context_lens,
-                                      params.k_cache_block_table,
-                                      params.k_scale_cache,
-                                      params.index_topk,
                                       params.kv_cache_block_table,
+                                      params.is_prefill,
+                                      params.index_topk,
                                       params.kv_cache_block_size,
-                                      params.new_block_table,
-                                      params.new_context_lens,
-                                      params.quant_block_size);
+                                      params.softmax_scale,
+                                      params.q_scale,
+                                      params.k_scale_cache,
+                                      params.sparse_block_table,
+                                      params.sparse_context_lens);
 #else
   NOT_IMPLEMENTED();
 #endif
