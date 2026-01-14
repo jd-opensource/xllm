@@ -105,7 +105,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         .node_rank(xllm_init_options.node_rank)
         .dp_size(xllm_init_options.dp_size)
         .ep_size(xllm_init_options.ep_size)
-        .xservice_addr(xllm_init_options.xservice_addr)
         .instance_name(xllm_init_options.instance_name)
         .enable_disagg_pd(xllm_init_options.enable_disagg_pd)
         .enable_schedule_overlap(xllm_init_options.enable_schedule_overlap)
