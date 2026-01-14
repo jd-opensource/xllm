@@ -38,7 +38,6 @@ class XServiceClient {
 
   ~XServiceClient();
   bool init(const std::string& etcd_addr,
-            const std::string& xservice_addr,
             const std::string& instance_name = "",
             const BlockManagerPool* block_manager_pool = nullptr);
   void set_scheduler(Scheduler* scheduler);

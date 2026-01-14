@@ -67,7 +67,6 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("node_rank", &Options::node_rank_)
       .def_readwrite("dp_size", &Options::dp_size_)
       .def_readwrite("ep_size", &Options::ep_size_)
-      .def_readwrite("xservice_addr", &Options::xservice_addr_)
       .def_readwrite("instance_name", &Options::instance_name_)
       .def_readwrite("enable_disagg_pd", &Options::enable_disagg_pd_)
       .def_readwrite("enable_pd_ooc", &Options::enable_pd_ooc_)

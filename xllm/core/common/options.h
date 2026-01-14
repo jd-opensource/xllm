@@ -108,8 +108,6 @@ class Options {
 
   PROPERTY(int32_t, ep_size) = 1;
 
-  PROPERTY(std::optional<std::string>, xservice_addr);
-
   PROPERTY(std::optional<std::string>, instance_name);
 
   PROPERTY(bool, enable_disagg_pd) = false;

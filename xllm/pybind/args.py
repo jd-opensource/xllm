@@ -30,7 +30,6 @@ class ArgumentParser:
         self.parser.add_argument('--node_rank', type=int, default=0, help='The node rank.')
         self.parser.add_argument('--dp_size', type=int, default=1, help='Data parallel size for MLA attention.')
         self.parser.add_argument('--ep_size', type=int, default=1, help='Expert parallel size for MoE model.')
-        self.parser.add_argument('--xservice_addr', type=str, default='', help='xservice server address.')
         self.parser.add_argument('--instance_name', type=str, default='', help='instance name')
         self.parser.add_argument('--enable_disagg_pd', action='store_true', help='Enable disaggregated prefill and decode execution.')
         self.parser.add_argument('--enable_pd_ooc', action='store_true', help='Enable online-offline co-location in disaggregated prefill-decoding mode.')

@@ -272,8 +272,6 @@ DEFINE_bool(use_contiguous_input_buffer,
 
 // --- disaggregated prefill and decode config ---
 
-DEFINE_string(xservice_addr, "", "XService server address.");
-
 DEFINE_bool(enable_disagg_pd,
             false,
             "Whether to enable disaggregated prefill and decode execution.");
