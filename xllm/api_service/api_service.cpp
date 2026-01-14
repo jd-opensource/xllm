@@ -16,10 +16,10 @@ limitations under the License.
 #include "api_service.h"
 
 #include <glog/logging.h>
-#include <google/protobuf/util/json_util.h>
 #include <json2pb/json_to_pb.h>
 #include <json2pb/pb_to_json.h>
 
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
 
@@ -43,6 +43,62 @@ limitations under the License.
 namespace xllm {
 
 namespace {
+
+constexpr size_t kMaxBodySize = 10 * 1024 * 1024;  // 10MB
+
+std::optional<size_t> GetJsonContentLength(const brpc::Controller* ctrl) {
+  const auto* header_val = ctrl->http_request().GetHeader(kInferContentLength);
+  if (header_val == nullptr) {
+    header_val = ctrl->http_request().GetHeader(kContentLength);
+  }
+
+  if (header_val == nullptr) {
+    LOG(WARNING) << "Content-Length header is missing";
+    return std::nullopt;
+  }
+
+  try {
+    const long long length = std::stoll(*header_val);
+    if (length < 0) {
+      LOG(WARNING) << "Invalid negative Content-Length header: " << *header_val;
+      return std::nullopt;
+    }
+    if (static_cast<unsigned long long>(length) >
+        std::numeric_limits<size_t>::max()) {
+      LOG(WARNING) << "Content-Length exceeds size_t max: " << *header_val;
+      return std::nullopt;
+    }
+    return static_cast<size_t>(length);
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Invalid Content-Length header '" << *header_val
+                 << "': " << e.what();
+    return std::nullopt;
+  }
+}
+
+// Validates Content-Length header and checks against max body size.
+// Returns validated content length, or nullopt if validation fails
+// (also sets appropriate HTTP error response).
+std::optional<size_t> ValidateContentLength(brpc::Controller* ctrl) {
+  auto content_len_opt = GetJsonContentLength(ctrl);
+  if (!content_len_opt.has_value()) {
+    ctrl->SetFailed("Missing or invalid Content-Length header");
+    ctrl->http_response().set_status_code(400);
+    return std::nullopt;
+  }
+
+  auto content_len = content_len_opt.value();
+  if (content_len > kMaxBodySize) {
+    ctrl->SetFailed("Payload too large");
+    ctrl->http_response().set_status_code(413);
+    LOG(WARNING) << "Request body size " << content_len << " exceeds limit of "
+                 << kMaxBodySize;
+    return std::nullopt;
+  }
+
+  return content_len;
+}
+
 template <typename Call>
 google::protobuf::Arena* GetArenaWithCheck(
     const google::protobuf::Message* message) {
@@ -142,17 +198,25 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  auto content_len_opt = ValidateContentLength(ctrl);
+  if (!content_len_opt.has_value()) {
+    return;
+  }
+  auto content_len = content_len_opt.value();
+
   auto arena = GetArenaWithCheck<CompletionCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::CompletionRequest>(arena);
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<proto::CompletionResponse>(arena);
 
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string error;
   json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  butil::IOBuf body_buf;
+  ctrl->request_attachment().cutn(&body_buf, content_len);
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(body_buf);
   auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
@@ -177,43 +241,6 @@ void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
 }
 
 namespace {
-
-<<<<<<< HEAD
-size_t get_json_content_length(const brpc::Controller* ctrl) {
-  const auto infer_content_len =
-      ctrl->http_request().GetHeader(kInferContentLength);
-  if (infer_content_len != nullptr) {
-    return std::stoul(*infer_content_len);
-  }
-
-  const auto content_len = ctrl->http_request().GetHeader(kContentLength);
-  if (content_len != nullptr) {
-    return std::stoul(*content_len);
-  }
-
-  LOG(ERROR) << "Content-Length header is missing.";
-  return (size_t)-1L;
-=======
-std::optional<size_t> GetJsonContentLength(const brpc::Controller* ctrl) {
-  try {
-    const auto infer_content_len =
-        ctrl->http_request().GetHeader(kInferContentLength);
-    if (infer_content_len != nullptr) {
-      return std::stoul(*infer_content_len);
-    }
-
-    const auto content_len = ctrl->http_request().GetHeader(kContentLength);
-    if (content_len != nullptr) {
-      return std::stoul(*content_len);
-    }
-  } catch (const std::exception& e) {
-    LOG(WARNING) << "Invalid Content-Length header: " << e.what();
-    return std::nullopt;
-  }
-
-  return std::nullopt;
->>>>>>> ac836e1 (fixbug: return HTTP 400/413 instead of crashing on invalid Content-Length header)
-}
 
 // Preprocess chat JSON to normalize array content to string.
 // Returns Status with processed JSON on success, or error status on failure.
@@ -306,29 +333,11 @@ void handle_chat_completions(std::unique_ptr<Service>& service,
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
 
-<<<<<<< HEAD
-  auto content_len = get_json_content_length(ctrl);
-  if (content_len == (size_t)-1L) {
-    ctrl->SetFailed("Content-Length header is missing.");
-=======
-  auto content_len_opt = GetJsonContentLength(ctrl);
+  auto content_len_opt = ValidateContentLength(ctrl);
   if (!content_len_opt.has_value()) {
-    ctrl->SetFailed("Missing or invalid Content-Length header");
-    ctrl->http_response().set_status_code(400);
-    LOG(WARNING) << "Missing or invalid Content-Length header, returning 400";
     return;
   }
   auto content_len = content_len_opt.value();
-
-  const size_t kMaxBodySize = 10 * 1024 * 1024;  // 10MB
-  if (content_len > kMaxBodySize) {
-    ctrl->SetFailed("Payload too large");
-    ctrl->http_response().set_status_code(413);
-    LOG(WARNING) << "Request body size " << content_len << " exceeds limit of "
-                 << kMaxBodySize;
->>>>>>> ac836e1 (fixbug: return HTTP 400/413 instead of crashing on invalid Content-Length header)
-    return;
-  }
 
   std::string attachment;
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
@@ -411,6 +420,15 @@ void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
     LOG(ERROR) << "brpc request | respose | controller is null";
     return;
   }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  auto content_len_opt = ValidateContentLength(ctrl);
+  if (!content_len_opt.has_value()) {
+    return;
+  }
+  auto content_len = content_len_opt.value();
+
   auto arena = GetArenaWithCheck<EmbeddingCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<typename EmbeddingCall::ReqType>(
@@ -419,11 +437,11 @@ void handle_embedding_request(std::unique_ptr<Service>& embedding_service_impl_,
       google::protobuf::Arena::CreateMessage<typename EmbeddingCall::ResType>(
           arena);
 
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string error;
   json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  butil::IOBuf body_buf;
+  ctrl->request_attachment().cutn(&body_buf, content_len);
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(body_buf);
   auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
@@ -478,6 +496,14 @@ void APIService::ImageGenerationHttp(
     return;
   }
 
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  auto content_len_opt = ValidateContentLength(ctrl);
+  if (!content_len_opt.has_value()) {
+    return;
+  }
+  auto content_len = content_len_opt.value();
+
   auto arena = GetArenaWithCheck<ImageGenerationCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::ImageGenerationRequest>(
@@ -486,11 +512,11 @@ void APIService::ImageGenerationHttp(
       google::protobuf::Arena::CreateMessage<proto::ImageGenerationResponse>(
           arena);
 
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string error;
   json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  butil::IOBuf body_buf;
+  ctrl->request_attachment().cutn(&body_buf, content_len);
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(body_buf);
   auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
@@ -523,17 +549,25 @@ void APIService::RerankHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  auto content_len_opt = ValidateContentLength(ctrl);
+  if (!content_len_opt.has_value()) {
+    return;
+  }
+  auto content_len = content_len_opt.value();
+
   auto arena = GetArenaWithCheck<RerankCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::RerankRequest>(arena);
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<proto::RerankResponse>(arena);
 
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   std::string error;
   json2pb::Json2PbOptions options;
-  butil::IOBuf& buf = ctrl->request_attachment();
-  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  butil::IOBuf body_buf;
+  ctrl->request_attachment().cutn(&body_buf, content_len);
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(body_buf);
   auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
   if (!st) {
     ctrl->SetFailed(error);
