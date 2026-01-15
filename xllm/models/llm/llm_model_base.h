@@ -39,6 +39,12 @@ class LlmModelImplBase : public torch::nn::Module {
       this->layer_forward_interrupted_ = interrupted;
     });
     mrope_section_ = args.rope_scaling_mrope_section();
+#ifdef USE_MUSA
+    q_heads = args.n_heads();
+    kv_heads = args.n_kv_heads().value_or(args.n_heads());
+    q_head_dim = args.head_dim();
+    kv_head_dim = args.head_dim();
+#endif
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -113,6 +119,9 @@ class LlmModelImplBase : public torch::nn::Module {
 
  protected:
   torch::Tensor cos_sin_;
+#ifdef USE_MUSA
+  int32_t q_heads, kv_heads, q_head_dim, kv_head_dim;
+#endif
   std::vector<int64_t> mrope_section_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};

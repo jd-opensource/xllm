@@ -5,6 +5,7 @@ option(USE_NPU "Enable NPU support" OFF)
 option(USE_MLU "Enable MLU support" OFF)
 option(USE_ILU "Enable ILU support" OFF)
 option(USE_CUDA "Enable CUDA support" OFF)
+option(USE_MUSA "Enable MUSA support" OFF)
 add_compile_definitions(YLT_ENABLE_IBV)
 add_definitions(-DYLT_ENABLE_IBV)
 set(YLT_ENABLE_IBV ON)
@@ -226,11 +227,19 @@ else()
 endif()
 
 set(CPPREST_EXCLUDE_WEBSOCKETS ON CACHE BOOL "Exclude websockets functionality." FORCE)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-format-truncation")
+if(NOT USE_MUSA)
+ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-format-truncation")
+endif()
 
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 if(USE_CUDA)
   project("xllm" LANGUAGES C CXX CUDA)
   find_package(CUDAToolkit REQUIRED)
+elseif(USE_MUSA)
+  project("xllm" LANGUAGES C CXX MUSA)
+  add_definitions(
+        -Wno-c++11-narrowing
+      )
 else()
   project("xllm" LANGUAGES C CXX)
 endif()
@@ -372,6 +381,65 @@ if(USE_MLU)
   )
 endif()
 
+
+if(USE_MUSA)
+  add_definitions(-DUSE_MUSA)
+  add_compile_definitions(TORCH_CUDA=1)
+
+  if(NOT DEFINED MUSA_PATH)
+    set(MUSA_PATH /usr/local/musa)
+  endif()
+  list(APPEND CMAKE_MODULE_PATH "${MUSA_PATH}/cmake")
+  find_package(MUSA REQUIRED)
+
+  if(NOT DEFINED ENV{MTT_OPLIB_PATH})
+    set(ENV{MTT_OPLIB_PATH} /workspace/MTTOplib)
+  endif()
+
+  message(STATUS  "using MTT Oplib at: $ENV{MTT_OPLIB_PATH}")
+  set(MTTOplib_DIR $ENV{MTT_OPLIB_PATH}/cmake)
+  find_package(MTTOplib REQUIRED)
+
+  find_package(Python COMPONENTS Interpreter REQUIRED)
+  execute_process(
+    COMMAND
+      ${Python_EXECUTABLE} -c "
+import os
+os.environ[\"TORCH_DEVICE_BACKEND_AUTOLOAD\"] = \"0\"
+import torch, torch_musa
+print(torch_musa.core.cmake_prefix_path)"
+    OUTPUT_VARIABLE TORCH_MUSA_PYTHONPATH)
+  string(REGEX REPLACE "^(.+)\n$" "\\1" TORCH_MUSA_PYTHONPATH
+                       ${TORCH_MUSA_PYTHONPATH})
+  list(APPEND CMAKE_PREFIX_PATH ${TORCH_MUSA_PYTHONPATH})
+  find_package(TorchMusa REQUIRED CONFIG)
+  list(POP_BACK CMAKE_PREFIX_PATH)
+
+  find_package(MKL REQUIRED)
+
+  include_directories(
+      ${MUSA_INCLUDE_DIRS}
+      ${TorchMusa_INCLUDE_DIRS}
+      ${Python_SITELIB}/torch_musa_compiled/share/torch_musa_codegen
+
+      $ENV{PYTHON_INCLUDE_PATH}
+      $ENV{PYTORCH_INSTALL_PATH}/include
+      $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
+      ${MTTOplib_INCLUDE_DIRS}
+  )
+
+  link_directories(
+    ${MUSA_LIB_PATH}
+    $ENV{PYTHON_LIB_PATH}
+    $ENV{PYTORCH_INSTALL_PATH}/lib
+    ${TorchMusa_LIB_PATH}
+    ${MKL_LIB_PATH}
+
+    ${TorchMusa_INSTALL_PREFIX}/lib
+    )
+  set(MUSA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -O3)
+endif()
+
 if(USE_CUDA)
   message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
   add_definitions(-DUSE_CUDA)
@@ -483,6 +551,10 @@ include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Mooncake/moon
 include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sentencepiece)
 # Also add other commonly used third_party directories as system headers
 include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/minja)
+if(USE_MUSA)
+  set(CMAKE_MUSA_FLAGS_DEBUG "-g -std=gnu++20 -fPIC -mtgpu --offload-arch=mp_31")
+  set(CMAKE_MUSA_FLAGS_RELEASE "-O2 -DNDEBUG -std=gnu++20 -fPIC -mtgpu --offload-arch=mp_31")
+endif()
 
 # add subdirectories
 add_subdirectory(xllm)

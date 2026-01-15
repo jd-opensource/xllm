@@ -1,5 +1,9 @@
 include(cc_library)
 
+if(USE_MUSA)
+ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-format-truncation")
+endif()
+
 add_subdirectory(sentencepiece)
 add_subdirectory(minja)
 add_subdirectory(brpc)

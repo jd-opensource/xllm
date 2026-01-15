@@ -1,0 +1,401 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 047ae3e..b4ae201 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -16,7 +16,7 @@ option(WITH_STORE "build mooncake store library and sample code" ON)
+ option(WITH_P2P_STORE "build p2p store library and sample code" OFF)
+ option(WITH_RUST_EXAMPLE "build the Rust interface and sample code for the transfer engine" OFF)
+ 
+-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/pybind11)
++#add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/pybind11)
+ set(PYTHON_EXECUTABLE "python3")
+ execute_process(
+     COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print(sys.path[-1])"
+diff --git a/mooncake-store/CMakeLists.txt b/mooncake-store/CMakeLists.txt
+index 8483085..9d263dd 100644
+--- a/mooncake-store/CMakeLists.txt
++++ b/mooncake-store/CMakeLists.txt
+@@ -20,5 +20,7 @@ include_directories(
+ 
+ # Add subdirectories
+ add_subdirectory(src)
+-add_subdirectory(tests)
++if (BUILD_UNIT_TESTS)
++  add_subdirectory(tests)
++endif()
+ add_subdirectory(benchmarks)
+\ No newline at end of file
+diff --git a/mooncake-store/include/offset_allocator/offset_allocator.hpp b/mooncake-store/include/offset_allocator/offset_allocator.hpp
+index b6d55c8..2d80158 100644
+--- a/mooncake-store/include/offset_allocator/offset_allocator.hpp
++++ b/mooncake-store/include/offset_allocator/offset_allocator.hpp
+@@ -6,7 +6,7 @@
+ #include <optional>
+ #include <glog/logging.h>
+ 
+-#include "mutex.h"
++#include "../mutex.h"
+ 
+ namespace mooncake::offset_allocator {
+ typedef unsigned char uint8;
+diff --git a/mooncake-store/include/types.h b/mooncake-store/include/types.h
+index 077926b..b36862b 100644
+--- a/mooncake-store/include/types.h
++++ b/mooncake-store/include/types.h
+@@ -8,7 +8,10 @@
+ #include <unordered_map>
+ #include <vector>
+ 
+-#include "Slab.h"
++#include "cachelib_memory_allocator/Slab.h"
++namespace iguana {
++using std::contiguous_iterator;
++}
+ #include "ylt/struct_json/json_reader.h"
+ #include "ylt/struct_json/json_writer.h"
+ 
+diff --git a/mooncake-store/src/ha_helper.cpp b/mooncake-store/src/ha_helper.cpp
+index 796838a..8e72b80 100644
+--- a/mooncake-store/src/ha_helper.cpp
++++ b/mooncake-store/src/ha_helper.cpp
+@@ -1,3 +1,6 @@
++#pragma GCC push_options
++#pragma GCC optimize("O0")
++
+ #include "ha_helper.h"
+ #include "etcd_helper.h"
+ #include "rpc_service.h"
+@@ -174,4 +177,6 @@ MasterServiceSupervisor::~MasterServiceSupervisor() {
+     }
+ }
+ 
+-}  // namespace mooncake
+\ No newline at end of file
++}  // namespace mooncake
++
++#pragma GCC pop_options
+\ No newline at end of file
+diff --git a/mooncake-store/src/rpc_service.cpp b/mooncake-store/src/rpc_service.cpp
+index f515671..7a019b6 100644
+--- a/mooncake-store/src/rpc_service.cpp
++++ b/mooncake-store/src/rpc_service.cpp
+@@ -1,3 +1,6 @@
++#pragma GCC push_options
++#pragma GCC optimize("O0")
++
+ #include "rpc_service.h"
+ 
+ #include <ylt/struct_json/json_reader.h>
+@@ -571,4 +574,6 @@ void RegisterRpcService(
+         &wrapped_master_service);
+ }
+ 
+-}  // namespace mooncake
+\ No newline at end of file
++}  // namespace mooncake
++
++#pragma GCC pop_options
+\ No newline at end of file
+diff --git a/mooncake-store/src/utils.cpp b/mooncake-store/src/utils.cpp
+index 9678f57..f41eb10 100644
+--- a/mooncake-store/src/utils.cpp
++++ b/mooncake-store/src/utils.cpp
+@@ -1,6 +1,6 @@
+ #include "utils.h"
+ 
+-#include <Slab.h>
++#include "cachelib_memory_allocator/Slab.h"
+ #include <glog/logging.h>
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+diff --git a/mooncake-store/tests/CMakeLists.txt b/mooncake-store/tests/CMakeLists.txt
+index 421ed47..fc6f598 100644
+--- a/mooncake-store/tests/CMakeLists.txt
++++ b/mooncake-store/tests/CMakeLists.txt
+@@ -106,8 +106,8 @@ target_link_libraries(offset_allocator_test PUBLIC
+ )
+ add_test(NAME offset_allocator_test COMMAND offset_allocator_test)
+ 
+-add_executable(utils_test utils_test.cpp)
+-target_link_libraries(utils_test PUBLIC
++add_executable(mc_utils_test utils_test.cpp)
++target_link_libraries(mc_utils_test PUBLIC
+     mooncake_store
+     cachelib_memory_allocator
+     glog
+@@ -115,7 +115,7 @@ target_link_libraries(utils_test PUBLIC
+     gtest_main
+     pthread
+ )
+-add_test(NAME utils_test COMMAND utils_test)
++add_test(NAME mc_utils_test COMMAND mc_utils_test)
+ 
+ add_executable(client_buffer_test client_buffer_test.cpp)
+ target_link_libraries(client_buffer_test PUBLIC
+diff --git a/mooncake-transfer-engine/src/CMakeLists.txt b/mooncake-transfer-engine/src/CMakeLists.txt
+index 4f4c82e..a8a716f 100644
+--- a/mooncake-transfer-engine/src/CMakeLists.txt
++++ b/mooncake-transfer-engine/src/CMakeLists.txt
+@@ -45,6 +45,9 @@ if (USE_CUDA)
+   if (USE_NVMEOF)
+     target_link_libraries(transfer_engine PUBLIC nvmeof_transport cufile)
+   endif()
++elseif(USE_MUSA)
++  target_include_directories(transfer_engine PRIVATE /usr/local/musa/include)
++  target_link_libraries(transfer_engine PUBLIC musa musart rt)
+ endif()
+ 
+ if (USE_ASCEND)
+diff --git a/mooncake-transfer-engine/src/common/base/CMakeLists.txt b/mooncake-transfer-engine/src/common/base/CMakeLists.txt
+index de7e35d..5d44865 100644
+--- a/mooncake-transfer-engine/src/common/base/CMakeLists.txt
++++ b/mooncake-transfer-engine/src/common/base/CMakeLists.txt
+@@ -9,4 +9,5 @@ list(
+   ${CMAKE_CURRENT_LIST_DIR}/status.cpp)
+ 
+ # # Build all the source files of base dir into a static lib('base')
+-add_library(base STATIC ${SRC})
+\ No newline at end of file
++add_library(base STATIC ${SRC})
++target_link_libraries(base PRIVATE glog::glog)
+\ No newline at end of file
+diff --git a/mooncake-transfer-engine/src/memory_location.cpp b/mooncake-transfer-engine/src/memory_location.cpp
+index 6ade7c5..5646dae 100644
+--- a/mooncake-transfer-engine/src/memory_location.cpp
++++ b/mooncake-transfer-engine/src/memory_location.cpp
+@@ -16,6 +16,8 @@
+ 
+ #ifdef USE_CUDA
+ #include <cuda_runtime.h>
++#elif defined(USE_MUSA)
++#include <musa_runtime.h>
+ #endif
+ 
+ namespace mooncake {
+@@ -28,7 +30,11 @@ std::string genCpuNodeName(int node) {
+ }
+ 
+ std::string genGpuNodeName(int node) {
++#ifdef USE_MUSA
++    if (node >= 0) return "musa:" + std::to_string(node);
++#else
+     if (node >= 0) return "cuda:" + std::to_string(node);
++#endif
+     return kWildcardLocation;
+ }
+ 
+@@ -52,6 +58,22 @@ const std::vector<MemoryLocationEntry> getMemoryLocation(void *start,
+             {(uint64_t)start, len, genGpuNodeName(attributes.device)});
+         return entries;
+     }
++#elif defined(USE_MUSA)
++    musaPointerAttributes attributes;
++    musaError_t result;
++    result = musaPointerGetAttributes(&attributes, start);
++    if (result != musaSuccess) {
++        LOG(ERROR) << "musaPointerGetAttributes failed (Error code: " << result
++                   << " - " << musaGetErrorString(result) << ")" << std::endl;
++        entries.push_back({(uint64_t)start, len, kWildcardLocation});
++        return entries;
++    }
++
++    if (attributes.type == musaMemoryTypeDevice) {
++        entries.push_back(
++            {(uint64_t)start, len, genGpuNodeName(attributes.device)});
++        return entries;
++    }
+ #endif
+ 
+     // start and end address may not be page aligned.
+diff --git a/mooncake-transfer-engine/src/topology.cpp b/mooncake-transfer-engine/src/topology.cpp
+index f9e87ef..1c63103 100644
+--- a/mooncake-transfer-engine/src/topology.cpp
++++ b/mooncake-transfer-engine/src/topology.cpp
+@@ -23,7 +23,9 @@
+ #include <vector>
+ 
+ #ifdef USE_CUDA
+-#include <cuda_runtime.h>
++#include <musa_runtime.h>
++#elif defined(USE_MUSA)
++#include <musa_runtime.h>
+ #endif
+ 
+ #include <ctype.h>
+@@ -128,7 +130,7 @@ static std::vector<TopologyEntry> discoverCpuTopology(
+     return topology;
+ }
+ 
+-#ifdef USE_CUDA
++#if defined(USE_CUDA) || defined(USE_MUSA)
+ 
+ static int getPciDistance(const char *bus1, const char *bus2) {
+     char buf[PATH_MAX];
+@@ -164,15 +166,28 @@ static std::vector<TopologyEntry> discoverCudaTopology(
+     const std::vector<InfinibandDevice> &all_hca) {
+     std::vector<TopologyEntry> topology;
+     int device_count;
++#if defined(USE_MUSA)
++    if (musaGetDeviceCount(&device_count) != musaSuccess) {
++        device_count = 0;
++    }
++#else
+     if (cudaGetDeviceCount(&device_count) != cudaSuccess) {
+         device_count = 0;
+     }
++#endif
+     for (int i = 0; i < device_count; i++) {
+         char pci_bus_id[20];
++#if defined(USE_MUSA)
++        if (musaDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), i) !=
++            musaSuccess) {
++            continue;
++        }
++#else
+         if (cudaDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), i) !=
+             cudaSuccess) {
+             continue;
+         }
++#endif
+         for (char *ch = pci_bus_id; (*ch = tolower(*ch)); ch++);
+ 
+         std::vector<std::string> preferred_hca;
+@@ -204,10 +219,17 @@ static std::vector<TopologyEntry> discoverCudaTopology(
+                 avail_hca.push_back(hca.name);
+             }
+         }
++#if defined(USE_MUSA)
++        topology.push_back(
++            TopologyEntry{.name = "musa:" + std::to_string(i),
++                          .preferred_hca = std::move(preferred_hca),
++                          .avail_hca = std::move(avail_hca)});
++#else
+         topology.push_back(
+             TopologyEntry{.name = "cuda:" + std::to_string(i),
+                           .preferred_hca = std::move(preferred_hca),
+                           .avail_hca = std::move(avail_hca)});
++#endif
+     }
+     return topology;
+ }
+diff --git a/mooncake-transfer-engine/src/transport/nvlink_transport/CMakeLists.txt b/mooncake-transfer-engine/src/transport/nvlink_transport/CMakeLists.txt
+index 799bbe2..3031491 100644
+--- a/mooncake-transfer-engine/src/transport/nvlink_transport/CMakeLists.txt
++++ b/mooncake-transfer-engine/src/transport/nvlink_transport/CMakeLists.txt
+@@ -2,4 +2,8 @@ file(GLOB NVLINK_SOURCES "*.cpp")
+ 
+ 
+ add_library(nvlink_transport OBJECT ${NVLINK_SOURCES})
+-target_include_directories(nvlink_transport PUBLIC  CUDA::cudart "/usr/local/cuda/include")
++if (USE_CUDA)
++  target_include_directories(nvlink_transport PUBLIC  CUDA::cudart "/usr/local/cuda/include")
++elseif(USE_MUSA)
++  target_include_directories(nvlink_transport PUBLIC  CUDA::musart "/usr/local/musa/include")
++endif()
+diff --git a/mooncake-transfer-engine/src/transport/rdma_transport/rdma_context.cpp b/mooncake-transfer-engine/src/transport/rdma_transport/rdma_context.cpp
+index 41f20b2..9ebd1dd 100644
+--- a/mooncake-transfer-engine/src/transport/rdma_transport/rdma_context.cpp
++++ b/mooncake-transfer-engine/src/transport/rdma_transport/rdma_context.cpp
+@@ -16,6 +16,8 @@
+ 
+ #ifdef USE_CUDA
+ #include <cuda.h>
++#elif defined(USE_MUSA)
++#include <musa.h>
+ #endif
+ 
+ #include <fcntl.h>
+diff --git a/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt b/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt
+index 23fa1b4..7c6a0f0 100644
+--- a/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt
++++ b/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt
+@@ -1,4 +1,4 @@
+ file(GLOB TCP_SOURCES "*.cpp")
+ 
+ add_library(tcp_transport OBJECT ${TCP_SOURCES})
+-target_link_libraries(tcp_transport PRIVATE JsonCpp::JsonCpp yalantinglibs::yalantinglibs)
++target_link_libraries(tcp_transport PRIVATE JsonCpp::JsonCpp glog::glog yalantinglibs::yalantinglibs)
+diff --git a/mooncake-transfer-engine/src/transport/tcp_transport/tcp_transport.cpp b/mooncake-transfer-engine/src/transport/tcp_transport/tcp_transport.cpp
+index 71c2176..3223dff 100644
+--- a/mooncake-transfer-engine/src/transport/tcp_transport/tcp_transport.cpp
++++ b/mooncake-transfer-engine/src/transport/tcp_transport/tcp_transport.cpp
+@@ -33,6 +33,9 @@
+ #ifdef USE_CUDA
+ #include <cuda.h>
+ #include <cuda_runtime.h>
++#elif defined(USE_MUSA)
++#include <musa.h>
++#include <musa_runtime.h>
+ #endif
+ 
+ namespace mooncake {
+@@ -53,6 +56,14 @@ static bool isCudaMemory(void *addr) {
+     if (attributes.type == cudaMemoryTypeDevice) return true;
+     return false;
+ }
++#elif defined(USE_MUSA)
++static bool isCudaMemory(void *addr) {
++    musaPointerAttributes attributes;
++    auto status = musaPointerGetAttributes(&attributes, addr);
++    if (status != musaSuccess) return false;
++    if (attributes.type == musaMemoryTypeDevice) return true;
++    return false;
++}
+ #endif
+ 
+ struct Session : public std::enable_shared_from_this<Session> {
+@@ -151,7 +162,13 @@ struct Session : public std::enable_shared_from_this<Session> {
+         if (isCudaMemory(addr)) {
+             dram_buffer = new char[buffer_size];
+             cudaMemcpy(dram_buffer, addr + total_transferred_bytes_,
+-                       buffer_size, cudaMemcpyDefault);
++                       buffer_size, musaMemcpyDefault);
++        }
++#elif defined(USE_MUSA)
++        if (isCudaMemory(addr)) {
++            dram_buffer = new char[buffer_size];
++            musaMemcpy(dram_buffer, addr + total_transferred_bytes_,
++                       buffer_size, musaMemcpyDefault);
+         }
+ #endif
+ 
+@@ -159,7 +176,7 @@ struct Session : public std::enable_shared_from_this<Session> {
+             socket_, asio::buffer(dram_buffer, buffer_size),
+             [this, addr, dram_buffer, self](const asio::error_code &ec,
+                                             std::size_t transferred_bytes) {
+-#ifdef USE_CUDA
++#if defined(USE_CUDA) || defined(USE_MUSA)
+                 if (isCudaMemory(addr)) {
+                     delete[] dram_buffer;
+                 }
+@@ -198,7 +215,7 @@ struct Session : public std::enable_shared_from_this<Session> {
+ 
+         char *dram_buffer = addr + total_transferred_bytes_;
+ 
+-#ifdef USE_CUDA
++#if defined(USE_CUDA) || defined(USE_MUSA)
+         bool is_cuda_memory = isCudaMemory(addr);
+         if (is_cuda_memory) {
+             dram_buffer = new char[buffer_size];
+@@ -221,7 +238,7 @@ struct Session : public std::enable_shared_from_this<Session> {
+                         << total_transferred_bytes_
+                         << ", current transferred_bytes: " << transferred_bytes;
+                     if (on_finalize_) on_finalize_(TransferStatusEnum::FAILED);
+-#ifdef USE_CUDA
++#if defined(USE_CUDA) || defined(USE_MUSA)
+                     if (is_cuda_memory) delete[] dram_buffer;
+ #endif
+                     session_mutex_.unlock();
+@@ -229,7 +246,11 @@ struct Session : public std::enable_shared_from_this<Session> {
+                 }
+ #ifdef USE_CUDA
+                 cudaMemcpy(addr + total_transferred_bytes_, dram_buffer,
+-                           transferred_bytes, cudaMemcpyDefault);
++                           transferred_bytes, musaMemcpyDefault);
++                if (is_cuda_memory) delete[] dram_buffer;
++#elif defined(USE_MUSA)
++                musaMemcpy(addr + total_transferred_bytes_, dram_buffer,
++                           transferred_bytes, musaMemcpyDefault);
+                 if (is_cuda_memory) delete[] dram_buffer;
+ #endif
+                 total_transferred_bytes_ += transferred_bytes;

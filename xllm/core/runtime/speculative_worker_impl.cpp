@@ -83,7 +83,8 @@ int32_t calculate_kv_len(const Slice<int32_t>& kv_seq_lens_slice,
                          int32_t offset) {
 #if defined(USE_NPU)
   return kv_seq_lens_slice[seq_id] + offset;
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_MUSA)
   return kv_seq_lens_slice[seq_id + 1] - kv_seq_lens_slice[seq_id] + offset;
 #endif
 }
@@ -94,7 +95,7 @@ int32_t calculate_kv_len(const Slice<int32_t>& kv_seq_lens_slice,
 void append_seq_len(std::vector<int32_t>& vec, int32_t len) {
 #if defined(USE_NPU)
   vec.emplace_back(len);
-#elif defined(USE_MLU) || defined(USE_CUDA)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_MUSA)
   push_cumsum(vec, len);
 #endif
 }

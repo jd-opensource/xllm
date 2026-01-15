@@ -11,6 +11,7 @@ cc_library(
     process_group.h
     $<$<BOOL:${USE_NPU}>:npu_process_group.h>
     $<$<BOOL:${USE_MLU}>:mlu_process_group.h>
+    $<$<BOOL:${USE_MUSA}>:musa_process_group.h>
     $<$<BOOL:${USE_CUDA}>:cuda_process_group.h>
     $<$<BOOL:${USE_ILU}>:ilu_process_group.h>
     collective_communicator.h
@@ -24,6 +25,7 @@ cc_library(
     :common
     torch
     $<$<BOOL:${USE_MLU}>:torch_mlu>
+    $<$<BOOL:${USE_MUSA}>:torch_musa>
     $<$<BOOL:${USE_NPU}>:hccl>
     glog::glog
 )

@@ -178,7 +178,11 @@ void LLMMaster::handle_request(std::string prompt,
     AUTO_COUNTER(request_handling_latency_seconds_completion);
 
     // remove the pending request after scheduling
+#if defined(USE_MUSA)
+    xllm::ScopeGuard _temp_sg{[this] { scheduler_->decr_pending_requests(); }};
+#else
     SCOPE_GUARD([this] { scheduler_->decr_pending_requests(); });
+#endif
 
     Timer timer;
     // verify the prompt
@@ -220,7 +224,11 @@ void LLMMaster::handle_request(std::vector<Message> messages,
     AUTO_COUNTER(request_handling_latency_seconds_chat);
 
     // remove the pending request after scheduling
+#if defined(USE_MUSA)
+    xllm::ScopeGuard _temp_sg{[this] { scheduler_->decr_pending_requests(); }};
+#else
     SCOPE_GUARD([this] { scheduler_->decr_pending_requests(); });
+#endif
 
     // verify the prompt
     if (!sp.verify_params(callback)) {

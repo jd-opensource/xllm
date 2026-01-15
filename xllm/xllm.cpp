@@ -17,7 +17,9 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <pybind11/embed.h>
+#if !defined(USE_MUSA)
 #include <torch/torch.h>
+#endif
 
 #include <csignal>
 #include <filesystem>

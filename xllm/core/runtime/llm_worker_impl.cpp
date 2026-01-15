@@ -34,6 +34,8 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #if defined(USE_CUDA) || defined(USE_ILU)
 #include "layers/cuda/flashinfer_workspace.h"
+#elif defined(USE_MUSA)
+#include "layers/cuda/flashinfer_workspace.h"
 #endif
 #include "models/model_registry.h"
 #include "util/threadpool.h"
@@ -46,7 +48,7 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
                              const runtime::Options& options)
     : WorkerImpl(parallel_args, device, options) {
   device_.set_device();
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_MUSA)
   // initialize flashinfer workspace
   layer::FlashinferWorkspace::get_instance().initialize(device_);
 #endif

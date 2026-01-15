@@ -34,6 +34,8 @@ limitations under the License.
 #include "layers/mlu/deepseek_v2_decoder_layer_impl.h"
 #elif defined(USE_CUDA)
 #include "layers/cuda/attention.h"
+#elif defined(USE_MUSA)
+#include "layers/musa/attention.h"
 #endif
 #include "layers/common/tests/tests_utils.h"
 #include "platform/device.h"

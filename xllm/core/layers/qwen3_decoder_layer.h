@@ -15,12 +15,19 @@ limitations under the License.
 
 #pragma once
 
+#ifdef USE_MUSA
+#include "musa/musa_qwen3_decoder_layer_impl.h"
+#else
 #include "qwen2_decoder_layer.h"
+#endif
 
 namespace xllm {
 namespace layer {
-
+#ifdef USE_MUSA
+using Qwen3DecoderLayerImpl = MUSAQwen3DecoderImpl;
+#else
 using Qwen3DecoderLayerImpl = Qwen2DecoderLayerImpl;
+#endif
 TORCH_MODULE(Qwen3DecoderLayer);
 
 }  // namespace layer

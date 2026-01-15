@@ -51,6 +51,7 @@ cc_library(
     $<$<BOOL:${USE_CUDA}>:cuda_layers>
     $<$<BOOL:${USE_ILU}>:ilu_layers>
     $<$<BOOL:${USE_NPU}>:npu_torch_layers>
+    $<$<BOOL:${USE_MUSA}>:musa_layers>
 )
 
 add_subdirectory(tests)

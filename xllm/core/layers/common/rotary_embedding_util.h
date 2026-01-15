@@ -116,6 +116,12 @@ torch::Tensor get_deepseek_rotary_embedding(
     float mscale_all_dim,
     const torch::TensorOptions& options);
 
+torch::Tensor get_interleave_rotary_embedding(
+    int64_t dim,
+    int64_t seq_len,
+    double rope_theta,
+    const torch::TensorOptions& options);
+
 }  // namespace rotary
 }  // namespace layer
 }  // namespace xllm

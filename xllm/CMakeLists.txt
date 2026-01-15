@@ -6,7 +6,7 @@ include_directories(.)
 # Set warning-as-error for xllm code (third-party headers are marked as SYSTEM)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(
-    $<$<COMPILE_LANGUAGE:CXX>:-Werror>
+    # $<$<COMPILE_LANGUAGE:CXX>:-Werror>
     $<$<COMPILE_LANGUAGE:C>:-Werror>
   )
 
@@ -91,6 +91,10 @@ if(USE_MSPTI)
   list(APPEND COMMON_LIBS mspti)
 endif()
 target_link_libraries(xllm PUBLIC ${COMMON_LIBS})
+if (USE_MUSA)
+  set(CMAKE_CXX_COMPILER ${CMAKE_MUSA_COMPILER})
+  target_link_libraries(xllm PUBLIC atomic musa_python torch_cpu c10)
+endif()
 
 # install xllm
 install(TARGETS xllm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

@@ -42,6 +42,13 @@ def get_device_type():
         except ImportError:
             return "cuda"
 
+    
+    try:
+        import torch_musa
+        return "musa"
+    except ImportError:
+        pass
+
     try:
         import torch_mlu
         if torch.mlu.is_available():
@@ -155,6 +162,14 @@ def get_ixformer_root_path():
     except ImportError:
         return None
 
+def get_torch_musa_root_path():
+    try:
+        import torch_musa
+        import os
+        return os.path.dirname(os.path.abspath(torch_musa.__file__))
+    except ImportError:
+        return None
+
 def get_nccl_root_path():
     try:
         from nvidia import nccl
@@ -259,6 +274,14 @@ def set_mlu_envs():
     os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
     os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
     os.environ["PYTORCH_MLU_INSTALL_PATH"] = get_torch_mlu_root_path()
+
+def set_musa_envs():
+    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
+    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
+    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
+    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
+    os.environ["PYTORCH_MUSA_INSTALL_PATH"] = get_torch_musa_root_path()
+    os.environ["MUSA_TOOLKIT_ROOT_DIR"] = "/usr/local/musa"
     
 def set_cuda_envs():
     os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
@@ -284,7 +307,7 @@ class CMakeExtension(Extension):
 class ExtBuild(build_ext):
     user_options = build_ext.user_options + [
         ("base-dir=", None, "base directory of xLLM project"),
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda)"),
+        ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("install-xllm-kernels=", None, "install xllm_kernels RPM package (true/false)"),
         ("generate-so=", None, "generate so or binary"),
@@ -384,8 +407,13 @@ class ExtBuild(build_ext):
         elif self.device == "ilu":
             cmake_args += ["-DUSE_ILU=ON"]
             set_ilu_envs()
+        elif self.device == "musa":
+            cmake_args += ["-DUSE_MUSA=ON"]
+            set_musa_envs()
+            BUILD_TEST_FILE = False
+            # BUILD_EXPORT = False
         else:
-            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu.")
+            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu or musa.")
 
         product = "xllm"
         if self.generate_so:
@@ -519,7 +547,7 @@ class ExtBuildSingleTest(ExtBuild):
 
 class BuildDistWheel(bdist_wheel):
     user_options = bdist_wheel.user_options + [
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda)"),
+        ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
     ]
 
@@ -732,6 +760,10 @@ def pre_build(device):
             if not apply_patch_safely("../custom_patch/Mooncake_npu.patch", mooncake_repo_path):
                 print("Failed to apply Mooncake_npu.patch!")
                 exit(1)
+        elif device == "musa":
+            if not apply_patch_safely("../custom_patch/Mooncake_musa.patch", mooncake_repo_path):
+                print("Failed to apply Mooncake.patch!")
+                exit(1)
         else:
             if not apply_patch_safely("../custom_patch/Mooncake.patch", mooncake_repo_path):
                 print("Failed to apply Mooncake.patch!")
@@ -765,9 +797,9 @@ def parse_arguments():
     parser.add_argument(
         '--device',
         type=str.lower,
-        choices=['auto', 'a2', 'a3', 'mlu', 'cuda', 'ilu'],
+        choices=['auto', 'a2', 'a3', 'mlu', 'cuda', 'ilu', 'musa'],
         default='auto',
-        help='Device type: a2, a3, mlu, ilu or cuda (case-insensitive)'
+        help='Device type: a2, a3, mlu, ilu, cuda or musa (case-insensitive)'
     )
     
     parser.add_argument(

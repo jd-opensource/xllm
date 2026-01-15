@@ -28,6 +28,14 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
+#if defined(USE_MUSA)
+    cos_sin_ = layer::rotary::get_interleave_rotary_embedding(
+                   128,
+                   model_args.max_position_embeddings(),
+                   model_args.rope_theta(),
+                   options.dtype(torch::kFloat))
+                   .musa();
+#else
     if (!mrope_section_.empty()) {
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           128,
@@ -35,6 +43,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
           model_args.rope_theta(),
           options);
     }
+#endif
 
     layers_.reserve(model_args.n_layers());
     norm_ = register_module("norm", layer::RMSNorm(context));
@@ -110,12 +119,31 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     auto& dp_token_nums = input_params_new.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     auto attn_metadata = layer::AttentionMetadata::build(input_params_new);
+
+#if defined(USE_MUSA)
+    torch::Tensor& new_cache_slots = input_params_new.new_cache_slots;
+    // musa cache slots should be (block_id, id_in_block)
+    // todo: add this as an optional change to build input_params phase?
+    new_cache_slots = torch::stack(
+        {new_cache_slots.floor_divide(64), new_cache_slots.remainder(64)}, -1);
+    layer::AttentionMetadata::set_musa_metadata(
+        attn_metadata,
+        input_params_new.q_seq_lens_vec,
+        input_params_new.kv_seq_lens_vec,
+        q_heads,
+        kv_heads,
+        q_head_dim,
+        new_cache_slots,
+        64);
+    attn_metadata.mrope_cos = cos_sin_;
+#else
     bool only_prefill =
         (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
     if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {
       std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
           apply_mrope(positions);
     }
+#endif
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -135,6 +163,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
         }
       }
     }
+
     return std::get<0>(norm_(h, residual));
   }
 };

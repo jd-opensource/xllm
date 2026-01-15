@@ -34,6 +34,8 @@ limitations under the License.
 #include "framework/parallel_state/mlu_process_group.h"
 #elif defined(USE_CUDA)
 #include "framework/parallel_state/cuda_process_group.h"
+#elif defined(USE_MUSA)
+#include "framework/parallel_state/musa_process_group.h"
 #endif
 
 namespace xllm {

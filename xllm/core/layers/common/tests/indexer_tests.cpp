@@ -28,6 +28,8 @@ limitations under the License.
 #include "../../mlu/attention.h"
 #elif defined(USE_CUDA)
 #include "../../cuda/attention.h"
+#elif defined(USE_MUSA)
+#include "../../musa/attention.h"
 #endif
 #include "layers/common/indexer.h"
 #include "platform/device.h"
