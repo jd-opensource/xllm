@@ -20,12 +20,15 @@ limitations under the License.
 #include <json2pb/json_to_pb.h>
 #include <json2pb/pb_to_json.h>
 
+#include <nlohmann/json.hpp>
+
 #include "call.h"
 #include "chat.pb.h"
 #include "common.pb.h"
 #include "completion.pb.h"
 #include "core/common/constants.h"
 #include "core/common/metrics.h"
+#include "core/common/types.h"
 #include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/rec_master.h"
@@ -188,6 +191,85 @@ size_t GetJsonContentLength(const brpc::Controller* ctrl) {
   return (size_t)-1L;
 }
 
+// Preprocess chat JSON to normalize array content to string.
+// Returns Status with processed JSON on success, or error status on failure.
+std::pair<Status, std::string> PreprocessChatJson(std::string json_str) {
+  try {
+    auto json = nlohmann::json::parse(json_str);
+    if (!json.contains("messages") || !json["messages"].is_array()) {
+      return {Status(), std::move(json_str)};
+    }
+
+    bool modified = false;
+    for (auto& msg : json["messages"]) {
+      if (!msg.is_object()) {
+        return {Status(StatusCode::INVALID_ARGUMENT,
+                       "Message in 'messages' array must be an object."),
+                ""};
+      }
+      if (msg.contains("content") && msg["content"].is_array()) {
+        // Pre-calculate total size to avoid multiple reallocations
+        size_t total_size = 0;
+        size_t num_items = msg["content"].size();
+        for (const auto& item : msg["content"]) {
+          if (!item.is_object()) {
+            return {Status(StatusCode::INVALID_ARGUMENT,
+                           "Content array item must be an object."),
+                    ""};
+          }
+          if (!item.contains("type") || item["type"] != "text") {
+            return {Status(StatusCode::INVALID_ARGUMENT,
+                           "Non-text content requires multimodal endpoint"),
+                    ""};
+          }
+          if (!item.contains("text")) {
+            return {Status(StatusCode::INVALID_ARGUMENT,
+                           "Missing 'text' field for content item with type "
+                           "'text'."),
+                    ""};
+          }
+          if (!item["text"].is_string()) {
+            return {Status(StatusCode::INVALID_ARGUMENT,
+                           "Invalid 'text' field in content item: must be a "
+                           "string."),
+                    ""};
+          }
+          total_size += item["text"].get_ref<const std::string&>().size();
+        }
+        // Add space for newline separators
+        if (num_items > 1) {
+          total_size += num_items - 1;
+        }
+
+        // Reserve capacity once to avoid reallocations
+        std::string combined_text;
+        combined_text.reserve(total_size);
+        bool first = true;
+        for (const auto& item : msg["content"]) {
+          if (!first) {
+            combined_text += '\n';
+          }
+          combined_text += item["text"].get_ref<const std::string&>();
+          first = false;
+        }
+        msg["content"] = combined_text;
+        modified = true;
+      }
+    }
+    return modified ? std::make_pair(Status(), json.dump())
+                    : std::make_pair(Status(), std::move(json_str));
+  } catch (const nlohmann::json::exception& e) {
+    return {Status(StatusCode::INVALID_ARGUMENT,
+                   "Invalid JSON format: " + std::string(e.what())),
+            ""};
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Exception during JSON preprocessing: " << e.what();
+    return {Status(StatusCode::UNKNOWN,
+                   "Internal server error during JSON processing."),
+            ""};
+  }
+}
+
 template <typename ChatCall, typename Service>
 void ChatCompletionsImpl(std::unique_ptr<Service>& service,
                          xllm::ClosureGuard& guard,
@@ -204,10 +286,19 @@ void ChatCompletionsImpl(std::unique_ptr<Service>& service,
   std::string attachment;
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
+  auto [preprocess_status, processed_json] =
+      PreprocessChatJson(std::move(attachment));
+  if (!preprocess_status.ok()) {
+    ctrl->SetFailed(preprocess_status.message());
+    LOG(ERROR) << "Complex message preprocessing failed: "
+               << preprocess_status.message();
+    return;
+  }
+
   google::protobuf::util::JsonParseOptions options;
   options.ignore_unknown_fields = true;
-  auto status =
-      google::protobuf::util::JsonStringToMessage(attachment, req_pb, options);
+  auto status = google::protobuf::util::JsonStringToMessage(
+      processed_json, req_pb, options);
   if (!status.ok()) {
     ctrl->SetFailed(status.ToString());
     LOG(ERROR) << "parse json to proto failed: " << status.ToString();
