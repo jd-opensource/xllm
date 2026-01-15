@@ -692,4 +692,39 @@ void fused_mla_kv(FusedMlaKVParams& params) {
 #endif
 }
 
+void fused_indexer_q(FusedIndexerQParams& params) {
+#if defined(USE_MLU)
+  mlu::fused_indexer_q(params.input_q,
+                       params.output,
+                       params.output_scale,
+                       params.w_q,
+                       params.w_q_scale,
+                       params.hadamard_matrix,
+                       params.sin,
+                       params.cos,
+                       params.position_id,
+                       params.quant_mode);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+void fused_indexer_k(FusedIndexerKParams& params) {
+#if defined(USE_MLU)
+  mlu::fused_indexer_k(params.x,
+                       params.wk,
+                       params.wproj,
+                       params.sin_table,
+                       params.cos_table,
+                       params.position_id,
+                       params.slot_mapping,
+                       params.head_weights,
+                       params.k_cache,
+                       params.k_cache_scale,
+                       params.hadamard_matrix);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 }  // namespace xllm::kernel

@@ -1116,4 +1116,112 @@ struct FusedMlaKVParams {
   bool interleaved = true;
 };
 
+struct FusedIndexerQParams {
+  // The input tensor for query projection.
+  // Shape: (token_num, input_dim).
+  // Dtype: half, bfloat16.
+  torch::Tensor input_q;
+
+  // An output tensor to store the final result in-place.
+  // Shape: (token_num, head_num, head_size).
+  // Dtype: same as input_q, or int8 if output is quantized.
+  torch::Tensor output;
+
+  // Optional output tensor to store quantization scales.
+  // Shape: (token_num, head_num).
+  // Dtype: float32.
+  std::optional<torch::Tensor> output_scale;
+
+  // The weight tensor for query projection.
+  // Shape: (head_num, head_size, input_dim).
+  // Dtype: half, bfloat16.
+  torch::Tensor w_q;
+
+  // The scale tensor for the w_q weight, used for per-channel quantization.
+  // Shape: (head_num, head_size).
+  // Dtype: float32.
+  std::optional<torch::Tensor> w_q_scale;
+
+  // Optional weight tensor for the Hadamard transformation.
+  // Shape: (head_size, head_size).
+  // Dtype: same as input_q.
+  std::optional<torch::Tensor> hadamard_matrix;
+
+  // A pre-computed tensor containing sine values for RoPE.
+  // Shape: (rotary_seq, rotary_dim).
+  // Dtype: same as input_q.
+  torch::Tensor sin;
+
+  // A pre-computed tensor containing cosine values for RoPE.
+  // Shape: (rotary_seq, rotary_dim).
+  // Dtype: same as input_q.
+  torch::Tensor cos;
+
+  // A tensor indicating the position index for each token.
+  // Shape: (token_num).
+  // Dtype: int32.
+  torch::Tensor position_id;
+
+  // Quantization mode for the output.
+  // Supported values: "none", "dynamic_per_token".
+  std::string quant_mode = "none";
+};
+
+struct FusedIndexerKParams {
+  // The input tensor.
+  // Shape: (m, dim).
+  // Dtype: half, bfloat16.
+  torch::Tensor x;
+
+  // The weight tensor for K projection.
+  // Shape: (head_size, dim).
+  // Dtype: same as x.
+  torch::Tensor wk;
+
+  // The weight tensor for head projection.
+  // Shape: (head_num, dim).
+  // Dtype: same as x.
+  torch::Tensor wproj;
+
+  // A pre-computed tensor containing sine values for RoPE.
+  // Shape: (rotary_seq, rope_dim).
+  // Dtype: same as x.
+  torch::Tensor sin_table;
+
+  // A pre-computed tensor containing cosine values for RoPE.
+  // Shape: (rotary_seq, rope_dim).
+  // Dtype: same as x.
+  torch::Tensor cos_table;
+
+  // A tensor indicating the position index for each token.
+  // Shape: (m).
+  // Dtype: int32.
+  torch::Tensor position_id;
+
+  // A tensor mapping tokens to cache slots.
+  // Shape: (m).
+  // Dtype: int32.
+  torch::Tensor slot_mapping;
+
+  // The computed head weights tensor.
+  // Shape: (m, head_num).
+  // Dtype: same as x.
+  torch::Tensor head_weights;
+
+  // The K cache tensor.
+  // Shape: (block_num, 1, block_size, head_size).
+  // Dtype: half, bfloat16, int8.
+  torch::Tensor k_cache;
+
+  // Optional scale tensor for quantized K cache.
+  // Shape: (block_num, 1, block_size).
+  // Dtype: float32.
+  std::optional<torch::Tensor> k_cache_scale;
+
+  // Optional weight tensor for the Hadamard transformation.
+  // Shape: (head_size, head_size).
+  // Dtype: same as x.
+  std::optional<torch::Tensor> hadamard_matrix;
+};
+
 }  // namespace xllm::kernel

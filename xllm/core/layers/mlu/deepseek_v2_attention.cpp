@@ -136,6 +136,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                        qk_rope_head_dim_,
                                        args.index_topk(),
                                        q_lora_rank_,
+                                       use_fused_mla_qkv_,
                                        rotary_emb_,
                                        quant_args,
                                        parallel_args,

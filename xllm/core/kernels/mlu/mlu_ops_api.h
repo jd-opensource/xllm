@@ -319,4 +319,27 @@ void fused_mla_kv(const torch::Tensor& input_kv,
                   double eps,
                   bool interleaved);
 
+void fused_indexer_q(const torch::Tensor& input_q,
+                     torch::Tensor& output,
+                     const std::optional<torch::Tensor>& output_scale,
+                     const torch::Tensor& w_q,
+                     const std::optional<torch::Tensor>& w_q_scale,
+                     const std::optional<torch::Tensor>& hadamard_matrix,
+                     const torch::Tensor& sin,
+                     const torch::Tensor& cos,
+                     const torch::Tensor& position_id,
+                     const std::string& quant_mode);
+
+void fused_indexer_k(const torch::Tensor& x,
+                     const torch::Tensor& wk,
+                     const torch::Tensor& wproj,
+                     const torch::Tensor& sin_table,
+                     const torch::Tensor& cos_table,
+                     const torch::Tensor& position_id,
+                     const torch::Tensor& slot_mapping,
+                     const torch::Tensor& head_weights,
+                     const torch::Tensor& k_cache,
+                     const std::optional<torch::Tensor>& k_cache_scale,
+                     const std::optional<torch::Tensor>& hadamard_matrix);
+
 }  // namespace xllm::kernel::mlu

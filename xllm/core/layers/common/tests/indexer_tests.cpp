@@ -19,23 +19,18 @@ limitations under the License.
 
 #include <sstream>
 
+#include "../../mlu/attention.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#if defined(USE_MLU)
-#include "../../mlu/attention.h"
-#elif defined(USE_CUDA)
-#include "../../cuda/attention.h"
-#endif
 #include "layers/common/indexer.h"
 #include "platform/device.h"
 #include "tests_utils.h"
 
 namespace xllm {
 namespace layer {
-
 class MockDeepseekScalingRotaryEmbedding
     : public DeepseekScalingRotaryEmbedding {
  public:
@@ -77,119 +72,73 @@ class MockDeepseekScalingRotaryEmbedding
 class IndexerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    // Initialize default model arguments for testing
-    model_args_ = test::create_default_model_args();
-
-    // Initialize w8a8 quantization arguments
-    quant_args_ = test::create_default_quant_args();
-
-    // Initialize tensor options
+    torch::Device torch_device(Device::type_torch(), 0);
+    Device device(torch_device);
+    device.set_seed();
     options_ = torch::TensorOptions()
                    .dtype(torch::kBFloat16)
-                   .device(Device::type_torch(), 0)
+                   .device(torch_device)
                    .requires_grad(false);
+    int_option_ = options_.dtype(torch::kInt32);
 
-    // Create mock ProcessGroup and initialize ParallelArgs
     parallel_args_ = test::create_default_parallel_args(mock_process_group_);
-
-    // Note: Indexer will be created by individual test cases with their desired
-    // dimensions
   }
 
-  void TearDown() override {
-    // Clean up if needed
+  void TearDown() override {}
+
+  torch::Tensor create_random_tensor(const std::vector<int64_t>& shape,
+                                     float min_val = -1.0f,
+                                     float max_val = 1.0f) {
+    return torch::rand(shape, options_) * (max_val - min_val) + min_val;
   }
 
-  // Helper function to create test weights for the Indexer (w8a8 smoothquant
-  // format)
-  std::unordered_map<std::string, torch::Tensor> create_test_weights(
+  std::unordered_map<std::string, torch::Tensor> create_random_weights(
       int64_t dim,
       int64_t index_n_heads,
       int64_t index_head_dim,
       int64_t q_lora_rank) {
     std::unordered_map<std::string, torch::Tensor> weight_dict;
-
-    // Create weights for wq_b (query projection with LoRA)
-    // Shape: [n_heads * head_dim, q_lora_rank]
-    auto wq_b_weight = torch::full(
-        {index_n_heads * index_head_dim, q_lora_rank}, 0.1f, options_);
-
-    // Create weights for wk (key projection)
-    // Shape: [head_dim, dim]
-    auto wk_weight = torch::full({index_head_dim, dim}, 0.1f, options_);
-
-    // Create weights for weights_proj (weights projection)
-    // Shape: [n_heads, dim]
-    auto weights_proj_weight =
-        torch::full({index_n_heads, dim}, 0.1f, options_);
-
-    // Create StateDict with w8a8 smoothquant weights
-    weight_dict["wq_b.weight"] = wq_b_weight;
-    weight_dict["wk.weight"] = wk_weight;
-    weight_dict["weights_proj.weight"] = weights_proj_weight;
-
-    LOG(INFO) << "Test bfloat16 weights created successfully";
-    LOG(INFO) << "wq_b weight shape: " << weight_dict["wq_b.weight"].sizes();
-    LOG(INFO) << "wk weight shape: " << weight_dict["wk.weight"].sizes();
-    LOG(INFO) << "weights_proj weight shape: "
-              << weight_dict["weights_proj.weight"].sizes();
+    weight_dict["wq_b.weight"] = create_random_tensor(
+        {index_n_heads * index_head_dim, q_lora_rank}, -0.1f, 0.1f);
+    weight_dict["wk.weight"] =
+        create_random_tensor({index_head_dim, dim}, -0.1f, 0.1f);
+    weight_dict["weights_proj.weight"] =
+        create_random_tensor({index_n_heads, dim}, -0.1f, 0.1f);
 
     return weight_dict;
   }
 
-  // Helper function to populate AttentionMetadata for testing
   void populate_attention_metadata(AttentionMetadata& metadata,
                                    int64_t batch_size,
                                    int64_t max_query_len,
                                    int64_t max_seq_len,
                                    bool is_prefill,
-                                   int64_t max_num_batched_tokens) {
-    // Create q_cu_seq_lens tensor (cu_seq_q_lens)
-    // shape = [batch_size + 1], typically [0, 4, 8, 12, ...] if max_query_len=4
+                                   int64_t max_num_blocks_per_seq) {
+    // q_cu_seq_lens
     metadata.q_cu_seq_lens = torch::arange(
-        0,
-        (batch_size + 1) * max_query_len,
-        max_query_len,
-        torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
+        0, (batch_size + 1) * max_query_len, max_query_len, int_option_);
 
-    // Create kv_cu_seq_lens tensor
+    // kv_cu_seq_lens
     metadata.kv_cu_seq_lens = torch::arange(
-        0,
-        (batch_size + 1) * max_query_len,
-        max_query_len,
-        torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
+        0, (batch_size + 1) * max_query_len, max_query_len, int_option_);
 
-    // Create seq_lens tensor
-    // Shape: [batch_size]
-    metadata.kv_seq_lens = torch::full(
-        {batch_size},
-        max_query_len,
-        torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
+    metadata.kv_seq_lens =
+        torch::full({batch_size}, max_query_len, int_option_);
 
-    // Create block_table tensor directly assigned to metadata
-    metadata.block_table = torch::zeros(
-        {batch_size, max_num_batched_tokens},
-        torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
+    metadata.block_table =
+        torch::zeros({batch_size, max_num_blocks_per_seq}, int_option_);
 
-    // Fill each batch with consecutive numbers
     for (int64_t b = 0; b < batch_size; ++b) {
-      int64_t start_val = b * max_query_len + 1;
-      int64_t end_val = start_val + max_query_len;
-      // Generate sequence [start_val, ..., end_val-1]
-      auto seq = torch::arange(start_val,
-                               end_val,
-                               torch::TensorOptions()
-                                   .dtype(torch::kInt32)
-                                   .device(options_.device()));
+      auto seq = torch::arange(b * max_query_len + 1,
+                               b * max_query_len + 1 + max_query_len,
+                               int_option_);
       metadata.block_table[b].index_put_(
           {torch::indexing::Slice(0, max_query_len)}, seq);
     }
 
-    // Create slot_mapping tensor directly assigned to metadata
-    metadata.slot_mapping = torch::arange(
-        1,
-        batch_size * max_query_len + 1,
-        torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
+    // slot_mapping
+    metadata.slot_mapping =
+        torch::arange(1, batch_size * max_query_len + 1, int_option_);
 
     metadata.max_query_len = max_query_len;
     metadata.max_seq_len = max_seq_len;
@@ -198,63 +147,37 @@ class IndexerTest : public ::testing::Test {
     metadata.is_chunked_prefill = false;
   }
 
-  // Helper: Populate AttentionMetadata for chunked prefill
   void populate_chunked_attention_metadata(AttentionMetadata& metadata,
                                            int64_t batch_size,
                                            int64_t history_len,
                                            int64_t current_len,
                                            int64_t max_num_blocks_per_seq) {
-    auto device = options_.device();
     int64_t total_len = history_len + current_len;
 
-    // q_cu_seq_lens records cumulative query lengths for each batch (current
-    // tokens only) Shape: [0, current_len, 2*current_len, ...]
     metadata.q_cu_seq_lens = torch::arange(
-        0,
-        (batch_size + 1) * current_len,
-        current_len,
-        torch::TensorOptions().dtype(torch::kInt32).device(device));
+        0, (batch_size + 1) * current_len, current_len, int_option_);
 
-    // kv_cu_seq_lens records cumulative key lengths (history + current) for
-    // each batch Shape: [0, total_len, 2*total_len, ...]
-    metadata.kv_cu_seq_lens = torch::arange(
-        0,
-        (batch_size + 1) * total_len,
-        total_len,
-        torch::TensorOptions().dtype(torch::kInt32).device(device));
+    metadata.kv_cu_seq_lens =
+        torch::arange(0, (batch_size + 1) * total_len, total_len, int_option_);
 
-    // kv_seq_lens is the total sequence length (history + current) per batch
-    metadata.kv_seq_lens =
-        torch::full({batch_size},
-                    total_len,
-                    torch::TensorOptions().dtype(torch::kInt32).device(device));
+    metadata.kv_seq_lens = torch::full({batch_size}, total_len, int_option_);
 
-    // block_table maps blocks for each batch
-    metadata.block_table = torch::zeros(
-        {batch_size, max_num_blocks_per_seq},
-        torch::TensorOptions().dtype(torch::kInt32).device(device));
+    metadata.block_table =
+        torch::zeros({batch_size, max_num_blocks_per_seq}, int_option_);
 
-    // Fill block_table: assuming block_size = 1 (each token in separate block)
     for (int64_t b = 0; b < batch_size; ++b) {
-      auto seq_blocks = torch::arange(
-          b * total_len,
-          (b * total_len) + total_len,
-          torch::TensorOptions().dtype(torch::kInt32).device(device));
+      auto seq =
+          torch::arange(b * total_len, b * total_len + total_len, int_option_);
       metadata.block_table[b].index_put_({torch::indexing::Slice(0, total_len)},
-                                         seq_blocks);
+                                         seq);
     }
 
-    // slot_mapping specifies locations to write new keys (current part only,
-    // after history)
-    metadata.slot_mapping = torch::empty(
-        {batch_size * current_len},
-        torch::TensorOptions().dtype(torch::kInt32).device(device));
+    metadata.slot_mapping =
+        torch::empty({batch_size * current_len}, int_option_);
 
     for (int64_t b = 0; b < batch_size; ++b) {
       auto slots = torch::arange(
-          b * total_len + history_len,  // start after history
-          b * total_len + total_len,    // to the end of sequence
-          torch::TensorOptions().dtype(torch::kInt32).device(device));
+          b * total_len + history_len, b * total_len + total_len, int_option_);
       metadata.slot_mapping.index_put_(
           {torch::indexing::Slice(b * current_len, (b + 1) * current_len)},
           slots);
@@ -267,185 +190,134 @@ class IndexerTest : public ::testing::Test {
     metadata.is_chunked_prefill = true;
   }
 
-  // Helper function to create k_cache tensor
-  torch::Tensor create_k_cache(int64_t block_num,
-                               int64_t block_size,
-                               int64_t head_kv,
-                               int64_t head_dim,
-                               float value = 0.5f) {
-    return torch::full(
-        {block_num, head_kv, block_size, head_dim}, value, options_);
-  }
+  struct TestConfig {
+    int64_t dim = 7168;
+    int64_t index_n_heads = 64;
+    int64_t index_head_dim = 128;
+    int64_t qk_rope_head_dim = 64;
+    int64_t index_topk = 2048;
+    int64_t q_lora_rank = 1536;
+    int64_t max_position_embeddings = 8192;
+    int64_t rope_theta = 10000;
+    bool rope_interleaved = true;
+    int64_t head_kv = 1;
+    int64_t block_size = 1;
+    int64_t block_num = 10240;
+  };
 
-  // Helper function to verify tensor values are close to expected
-  void verify_tensor_close(const torch::Tensor& actual,
-                           const torch::Tensor& expected,
-                           double rtol = 1e-5,
-                           double atol = 1e-8) {
-    test::verify_tensor_close(actual, expected, rtol, atol);
-  }
+  struct TestInputs {
+    torch::Tensor x;
+    torch::Tensor qr;
+    torch::Tensor positions;
+    torch::Tensor k_cache;
+    std::unordered_map<std::string, torch::Tensor> weights;
+    AttentionMetadata metadata;
+  };
 
-  // Helper function to create custom input tensor for precision testing
-  torch::Tensor create_custom_input(const std::vector<int64_t>& shape,
-                                    const std::vector<float>& values) {
-    return test::create_custom_input(shape, values, options_);
-  }
+  TestInputs create_inputs(int64_t batch_size,
+                           int64_t max_query_len,
+                           bool is_prefill,
+                           bool chunked_prefill = false,
+                           int64_t history_len = 0) {
+    test_config_ = TestConfig();
+    rotary_emb_ = std::make_unique<MockDeepseekScalingRotaryEmbedding>(
+        test_config_.qk_rope_head_dim,
+        test_config_.max_position_embeddings,
+        test_config_.rope_theta,
+        test_config_.rope_interleaved,
+        options_);
 
-  // Helper function to set expected output for precision verification
-  void set_expected_output(const std::vector<float>& expected_values) {
-    expected_output_ = expected_values;
-  }
-
-  // Helper function to verify precision against expected output
-  void verify_precision(const torch::Tensor& actual_output,
-                        double rtol = 1e-3,
-                        double atol = 1e-4) {
-    test::verify_precision(actual_output, expected_output_, rtol, atol);
-  }
-
-  // Helper function to run Indexer test with configurable batch size, query
-  // length and prefill mode
-  std::tuple<torch::Tensor, torch::Tensor>
-  run_indexer_test(int64_t batch_size, int64_t max_query_len, bool is_prefill) {
-    // Fixed configuration parameters
-    const int64_t dim = 7168;
-    const int64_t index_n_heads = 64;
-    const int64_t index_head_dim = 128;
-    const int64_t qk_rope_head_dim = 64;
-    const int64_t index_topk = 2048;
-    const int64_t q_lora_rank = 1536;
-    const int64_t max_position_embeddings = 8192;
-    const int64_t rope_theta = 10000.0;
-    const bool rope_interleaved = true;
-
-    // Config for k cache
-    const int64_t head_kv = 1;
-    const int64_t block_size = 1;
-    const int64_t block_num = 10240;
-
+    TestInputs inputs;
     int64_t num_tokens = batch_size * max_query_len;
 
-    // Create non-quantized quant_args for bfloat16 mode
-    QuantArgs bfloat16_quant_args;  // Empty means no quantization
+    inputs.x =
+        create_random_tensor({num_tokens, test_config_.dim}, -1.0f, 1.0f);
+    inputs.qr = create_random_tensor(
+        {num_tokens, test_config_.q_lora_rank}, -1.0f, 1.0f);
 
-    std::unique_ptr<DeepseekScalingRotaryEmbedding> rotary_emb =
-        std::make_unique<MockDeepseekScalingRotaryEmbedding>(
-            qk_rope_head_dim,
-            max_position_embeddings,
-            rope_theta,
-            rope_interleaved,
-            options_);
-    auto indexer = Indexer(IndexerImpl(dim,
-                                       index_n_heads,
-                                       index_head_dim,
-                                       qk_rope_head_dim,
-                                       index_topk,
-                                       q_lora_rank,
-                                       *rotary_emb,
-                                       bfloat16_quant_args,
-                                       parallel_args_,
-                                       options_));
+    inputs.positions =
+        torch::randint(0, max_query_len, {num_tokens}, int_option_);
 
-    // Create test weights
-    std::unordered_map<std::string, torch::Tensor> weight_dict;
-    auto wq_b_weight = torch::full(
-        {index_n_heads * index_head_dim, q_lora_rank}, 0.1f, options_);
-    auto wk_weight = torch::full({index_head_dim, dim}, 0.1f, options_);
-    auto weights_proj_weight =
-        torch::full({index_n_heads, dim}, 0.1f, options_);
+    inputs.k_cache = create_random_tensor({test_config_.block_num,
+                                           test_config_.head_kv,
+                                           test_config_.block_size,
+                                           test_config_.index_head_dim},
+                                          -0.5f,
+                                          0.5f);
 
-    weight_dict["wq_b.weight"] = wq_b_weight;
-    weight_dict["wk.weight"] = wk_weight;
-    weight_dict["weights_proj.weight"] = weights_proj_weight;
+    inputs.weights = create_random_weights(test_config_.dim,
+                                           test_config_.index_n_heads,
+                                           test_config_.index_head_dim,
+                                           test_config_.q_lora_rank);
 
-    StateDict state_dict(weight_dict);
-    indexer->load_state_dict(state_dict);
-
-    // Create test inputs
-    auto x = torch::ones({num_tokens, dim}, options_);
-    auto qr = torch::ones({num_tokens, q_lora_rank}, options_);
-    // Generate positions: [0, 1, ..., max_query_len-1] repeated batch_size
-    // times
-    auto positions = torch::arange(max_query_len,
-                                   torch::TensorOptions()
-                                       .dtype(torch::kInt32)
-                                       .device(options_.device()))
-                         .repeat({batch_size});
-    auto k_cache =
-        torch::zeros({block_num, head_kv, block_size, index_head_dim},
-                     torch::TensorOptions()
-                         .dtype(torch::kBFloat16)
-                         .device(options_.device()));
-
-    // Create metadata object and populate it
-    AttentionMetadata metadata;
-    populate_attention_metadata(metadata,
-                                batch_size,
-                                max_query_len,
-                                max_position_embeddings,
-                                is_prefill,
-                                num_tokens);
-
-    // Test forward pass and return results
-    return indexer->forward(x, qr, positions, k_cache, metadata, is_prefill);
+    if (chunked_prefill) {
+      populate_chunked_attention_metadata(inputs.metadata,
+                                          batch_size,
+                                          history_len,
+                                          max_query_len,
+                                          history_len + max_query_len);
+    } else {
+      populate_attention_metadata(inputs.metadata,
+                                  batch_size,
+                                  max_query_len,
+                                  test_config_.max_position_embeddings,
+                                  is_prefill,
+                                  num_tokens);
+    }
+    return inputs;
   }
 
-  ModelArgs model_args_;
-  QuantArgs quant_args_;
+  std::tuple<torch::Tensor, torch::Tensor> run_indexer(TestInputs& inputs,
+                                                       bool is_prefill,
+                                                       bool use_fused_qk) {
+    StateDict state_dict(inputs.weights);
+    QuantArgs quant_args;
+    auto indexer = Indexer(IndexerImpl(test_config_.dim,
+                                       test_config_.index_n_heads,
+                                       test_config_.index_head_dim,
+                                       test_config_.qk_rope_head_dim,
+                                       test_config_.index_topk,
+                                       test_config_.q_lora_rank,
+                                       use_fused_qk,
+                                       *rotary_emb_,
+                                       quant_args,
+                                       parallel_args_,
+                                       options_));
+    indexer->load_state_dict(state_dict);
+    return indexer->forward(inputs.x,
+                            inputs.qr,
+                            inputs.positions,
+                            inputs.k_cache,
+                            inputs.metadata,
+                            is_prefill);
+  }
+
   ParallelArgs parallel_args_{0, 1, nullptr};
+  TestConfig test_config_;
   torch::TensorOptions options_;
-
-  // Helper to create a mock ProcessGroup for testing
+  torch::TensorOptions int_option_;
   std::unique_ptr<xllm::ProcessGroup> mock_process_group_;
-
-  // Expected output for precision verification
-  std::vector<float> expected_output_;
+  std::unique_ptr<DeepseekScalingRotaryEmbedding> rotary_emb_;
 };
 
-TEST_F(IndexerTest, Bfloat16PrefillVerifyPrecision) {
-  // Test bfloat16 mode (non-quantized) - prefill phase
-  // 4K test
+TEST_F(IndexerTest, PrefillBatch) {
+  LOG(INFO) << "Testing Prefill (Small Batch)";
   int64_t batch_size = 2;
   int64_t max_query_len = 4096;
   const bool is_prefill = true;
-  const int64_t index_topk = 2048;
-
+  const bool use_fused_qk = false;
   int64_t num_tokens = batch_size * max_query_len;
-
-  // Run the test using the encapsulated function
+  TestInputs inputs = create_inputs(batch_size, max_query_len, is_prefill);
   auto [new_block_tables, new_context_lens] =
-      run_indexer_test(batch_size, max_query_len, is_prefill);
+      run_indexer(inputs, is_prefill, use_fused_qk);
 
-  // Verify output shapes
-  CHECK_EQ(new_block_tables.sizes().size(), 2)
+  EXPECT_EQ(new_block_tables.sizes().size(), 2)
       << "new_block_tables should be 2D tensor";
-  CHECK_EQ(new_context_lens.sizes().size(), 1)
+  EXPECT_EQ(new_context_lens.sizes().size(), 1)
       << "new_context_lens should be 1D tensor";
-  CHECK_EQ(new_block_tables.size(0), num_tokens) << "Batch size should match";
-  CHECK_EQ(new_block_tables.size(1), index_topk) << "Top-k should match";
-
-  // Verify that the first value in new_block_tables is 1 (calculated via vLLM
-  // MLU)
-  EXPECT_EQ(new_block_tables.index({0, 0}).item<int64_t>(), 1)
-      << "The first value in new_block_tables should be 1";
-
-  // Test bfloat16 mode (non-quantized) - prefill phase
-  // 8K test
-  max_query_len = 8192;
-
-  num_tokens = batch_size * max_query_len;
-
-  // Run the test using the encapsulated function
-  std::tie(new_block_tables, new_context_lens) =
-      run_indexer_test(batch_size, max_query_len, is_prefill);
-
-  // Verify output shapes
-  CHECK_EQ(new_block_tables.sizes().size(), 2)
-      << "new_block_tables should be 2D tensor";
-  CHECK_EQ(new_context_lens.sizes().size(), 1)
-      << "new_context_lens should be 1D tensor";
-  CHECK_EQ(new_block_tables.size(0), num_tokens) << "Batch size should match";
-  CHECK_EQ(new_block_tables.size(1), index_topk) << "Top-k should match";
+  EXPECT_EQ(new_block_tables.size(0), num_tokens) << "Batch size should match";
+  EXPECT_EQ(new_block_tables.size(1), test_config_.index_topk)
+      << "Top-k should match";
 
   // Verify that the first value in new_block_tables is 1 (calculated via vLLM
   // MLU)
@@ -453,123 +325,25 @@ TEST_F(IndexerTest, Bfloat16PrefillVerifyPrecision) {
       << "The first value in new_block_tables should be 1";
 }
 
-TEST_F(IndexerTest, Bfloat16DecodeVerifyPrecision) {
-  // Test bfloat16 mode (non-quantized) - decode phase
-  const int64_t batch_size = 2048;
-  const int64_t max_query_len = 1;
-  const bool is_prefill = false;
-
-  int64_t num_tokens = batch_size * max_query_len;
-
-  // Run the test using the encapsulated function
-  auto [new_block_tables, new_context_lens] =
-      run_indexer_test(batch_size, max_query_len, is_prefill);
-
-  // Verify output shapes
-  ASSERT_EQ(new_block_tables.sizes().size(), 2)
-      << "new_block_tables should be 2D tensor";
-  ASSERT_EQ(new_context_lens.sizes().size(), 1)
-      << "new_context_lens should be 1D tensor";
-  ASSERT_EQ(new_block_tables.size(0), num_tokens) << "Batch size should match";
-  ASSERT_EQ(new_block_tables.size(1), 2048) << "Top-k should match";
-
-  // Verify that the first value in new_block_tables is 1 (calculated via vLLM
-  // MLU)
-  ASSERT_EQ(new_block_tables.index({0, 0}).item<int64_t>(), 1)
-      << "The first value in new_block_tables should be 1";
-  // Verify that all values in new_context_lens are 1
-  for (int64_t i = 0; i < new_context_lens.size(0); ++i) {
-    ASSERT_EQ(new_context_lens.index({i}).item<int64_t>(), 1)
-        << "All values in new_context_lens should be 1";
-  }
-}
-
-TEST_F(IndexerTest, Bfloat16ChunkedPrefillVerifyPrecision) {
-  // Test bfloat16 mode with Chunked Prefill
-  // Scenario: Batch=2, History=128, New=64
+TEST_F(IndexerTest, ChunkedPrefillBatch) {
+  LOG(INFO) << "Testing Chunked Prefill";
   const int64_t batch_size = 2;
   const int64_t history_len = 128;
   const int64_t current_len = 64;
-  const int64_t index_topk = 32;
-
-  const int64_t dim = 7168;
-  const int64_t index_n_heads = 64;
-  const int64_t index_head_dim = 128;
-  const int64_t qk_rope_head_dim = 64;
-  const int64_t q_lora_rank = 1536;
-
-  // Cache config
-  const int64_t head_kv = 1;
-  const int64_t block_size = 1;  // Simplify addressing
-  // Ensure enough blocks for (128+64)*2 tokens
-  const int64_t block_num = (history_len + current_len) * batch_size + 1024;
-
   int64_t num_new_tokens = batch_size * current_len;
-
-  // 1. Setup Model & Indexer
-  QuantArgs bfloat16_quant_args;
-  std::unique_ptr<DeepseekScalingRotaryEmbedding> rotary_emb =
-      std::make_unique<MockDeepseekScalingRotaryEmbedding>(
-          qk_rope_head_dim, 8192, 10000.0, true, options_);
-
-  auto indexer = Indexer(IndexerImpl(dim,
-                                     index_n_heads,
-                                     index_head_dim,
-                                     qk_rope_head_dim,
-                                     index_topk,
-                                     q_lora_rank,
-                                     *rotary_emb,
-                                     bfloat16_quant_args,
-                                     parallel_args_,
-                                     options_));
-
-  // Load weights
-  auto weight_dict =
-      create_test_weights(dim, index_n_heads, index_head_dim, q_lora_rank);
-  indexer->load_state_dict(StateDict(weight_dict));
-
-  // Prepare Inputs
-  auto x = torch::ones({num_new_tokens, dim}, options_);
-  auto qr = torch::ones({num_new_tokens, q_lora_rank}, options_);
-
-  auto positions =
-      torch::empty({num_new_tokens}, options_.dtype(torch::kInt32));
-  for (int b = 0; b < batch_size; ++b) {
-    auto seq_pos = torch::arange(
-        history_len, history_len + current_len, options_.dtype(torch::kInt32));
-    positions.index_put_(
-        {torch::indexing::Slice(b * current_len, (b + 1) * current_len)},
-        seq_pos);
-  }
-
-  // Prepare K-Cache and simulate History Data
-  auto k_cache = torch::zeros({block_num, head_kv, block_size, index_head_dim},
-                              options_.dtype(torch::kBFloat16));
-
-  for (int b = 0; b < batch_size; ++b) {
-    int64_t start_block = b * (history_len + current_len);
-    for (int i = 0; i < history_len; ++i) {
-      k_cache[start_block + i].fill_(0.5f);
-    }
-  }
-
-  // Prepare Metadata
-  AttentionMetadata metadata;
-  populate_chunked_attention_metadata(metadata,
-                                      batch_size,
-                                      history_len,
-                                      current_len,
-                                      history_len + current_len);
-
-  // Run Forward
-  auto [new_block_tables, new_context_lens] = indexer->forward(
-      x, qr, positions, k_cache, metadata, true /* is_prefill */);
+  const bool is_prefill = true;
+  const bool is_chunked = true;
+  const bool use_fused_qk = false;
+  TestInputs inputs = create_inputs(
+      batch_size, current_len, is_prefill, is_chunked, history_len);
+  auto [new_block_tables, new_context_lens] =
+      run_indexer(inputs, is_prefill, use_fused_qk);
 
   // Validations
   // Shape Verification
-  CHECK_EQ(new_block_tables.dim(), 2);
-  CHECK_EQ(new_block_tables.size(0), num_new_tokens);  // [batch * current_len]
-  CHECK_EQ(new_block_tables.size(1), index_topk);
+  EXPECT_EQ(new_block_tables.dim(), 2);
+  EXPECT_EQ(new_block_tables.size(0), num_new_tokens);  // [batch * current_len]
+  EXPECT_EQ(new_block_tables.size(1), test_config_.index_topk);
 
   // Value Verification
   auto top1_indices = new_block_tables.index({torch::indexing::Slice(), 0})
@@ -587,6 +361,63 @@ TEST_F(IndexerTest, Bfloat16ChunkedPrefillVerifyPrecision) {
       << "top-1 block index sum does not match ground truth";
   EXPECT_EQ(top1_max, expected_max)
       << "top-1 block index max does not match ground truth";
+}
+
+TEST_F(IndexerTest, CompareFusedVsNonFusedDecode) {
+  LOG(INFO) << "Testing Decode";
+  TestInputs inputs = create_inputs(128, 1, false);
+
+  auto [base_block_tables, base_context_lens] =
+      run_indexer(inputs, false, false);
+  auto [fused_block_tables, fused_context_lens] =
+      run_indexer(inputs, false, true);
+
+  auto fused_block_tables_slice = fused_block_tables.slice(1, 0, 1);
+  auto base_block_tables_slice = base_block_tables.slice(1, 0, 1);
+  test::verify_tensor_close(fused_context_lens.to(torch::kFloat32),
+                            base_context_lens.to(torch::kFloat32));
+  test::verify_tensor_close(fused_block_tables_slice.to(torch::kFloat32),
+                            base_block_tables_slice.to(torch::kFloat32));
+}
+
+TEST_F(IndexerTest, CompareFusedVsNonFusedMultipleRuns) {
+  LOG(INFO) << "Testing with multiple random seeds";
+
+  Device device(options_.device());
+  for (int i = 0; i < 3; ++i) {
+    LOG(INFO) << "Random seed iteration: " << i;
+    device.set_seed(i * 100);
+    TestInputs inputs = create_inputs(128, 1, false);
+
+    auto [base_block_tables, base_context_lens] =
+        run_indexer(inputs, false, false);
+    auto [fused_block_tables, fused_context_lens] =
+        run_indexer(inputs, false, true);
+
+    auto fused_block_tables_slice = fused_block_tables.slice(1, 0, 1);
+    auto base_block_tables_slice = base_block_tables.slice(1, 0, 1);
+    test::verify_tensor_close(fused_context_lens.to(torch::kFloat32),
+                              base_context_lens.to(torch::kFloat32));
+    test::verify_tensor_close(fused_block_tables_slice.to(torch::kFloat32),
+                              base_block_tables_slice.to(torch::kFloat32));
+  }
+}
+
+TEST_F(IndexerTest, CompareFusedVsNonFusedEdgeCaseSmall) {
+  LOG(INFO) << "Testing Edge Case (Very Small Input)";
+  TestInputs inputs = create_inputs(16, 1, false);
+
+  auto [base_block_tables, base_context_lens] =
+      run_indexer(inputs, false, false);
+  auto [fused_block_tables, fused_context_lens] =
+      run_indexer(inputs, false, true);
+
+  auto fused_block_tables_slice = fused_block_tables.slice(1, 0, 1);
+  auto base_block_tables_slice = base_block_tables.slice(1, 0, 1);
+  test::verify_tensor_close(fused_context_lens.to(torch::kFloat32),
+                            base_context_lens.to(torch::kFloat32));
+  test::verify_tensor_close(fused_block_tables_slice.to(torch::kFloat32),
+                            base_block_tables_slice.to(torch::kFloat32));
 }
 
 }  // namespace layer

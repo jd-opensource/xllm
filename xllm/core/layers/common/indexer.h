@@ -62,6 +62,7 @@ class IndexerImpl : public torch::nn::Module {
               int64_t qk_rope_head_dim,
               int64_t index_topk,
               int64_t q_lora_rank,
+              bool use_fused_qk,
               DeepseekScalingRotaryEmbedding& rotary_emb,
               const QuantArgs& quant_args,
               const ParallelArgs& parallel_args,
@@ -88,6 +89,7 @@ class IndexerImpl : public torch::nn::Module {
   int64_t q_lora_rank_;
   float softmax_scale_;
   float hadamard_transform_scale_;
+  bool use_fused_qk_;
 
   // Linear layers using ReplicatedLinear
   ReplicatedLinear wq_b_{nullptr};
@@ -104,6 +106,7 @@ class IndexerImpl : public torch::nn::Module {
   // Helper function for rotation activation
   torch::Tensor rotate_activation(const torch::Tensor& input,
                                   const torch::Tensor& hadamard_matrix);
+
   // Prepare runtime context for kernel
   IndexerRuntimeContext prepare_runtime_context(
       const torch::Tensor& k_current_dense,
@@ -119,6 +122,15 @@ class IndexerImpl : public torch::nn::Module {
                                      const AttentionMetadata& attn_metadata);
 
   std::tuple<torch::Tensor, torch::Tensor> preprocess_indexer_k(
+      const torch::Tensor& x,
+      const torch::Tensor& positions,
+      torch::Tensor& k_cache,
+      const AttentionMetadata& attn_metadata);
+
+  torch::Tensor preprocess_indexer_q_fused(const torch::Tensor& qr,
+                                           const torch::Tensor& positions);
+
+  torch::Tensor preprocess_indexer_k_fused(
       const torch::Tensor& x,
       const torch::Tensor& positions,
       torch::Tensor& k_cache,

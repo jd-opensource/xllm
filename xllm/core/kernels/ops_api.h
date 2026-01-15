@@ -86,4 +86,8 @@ void fused_mla_q(FusedMlaQParams& params);
 
 void fused_mla_kv(FusedMlaKVParams& params);
 
+void fused_indexer_q(FusedIndexerQParams& params);
+
+void fused_indexer_k(FusedIndexerKParams& params);
+
 }  // namespace xllm::kernel
