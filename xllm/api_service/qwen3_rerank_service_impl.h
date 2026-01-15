@@ -18,18 +18,16 @@ limitations under the License.
 #include "api_service/rerank_service_impl.h"
 
 namespace xllm {
-using RerankCall = NonStreamCall<proto::RerankRequest, proto::RerankResponse>;
 
-// a class to handle completion requests
 class Qwen3RerankServiceImpl final : public RerankServiceImpl {
  public:
   Qwen3RerankServiceImpl(LLMMaster* master,
                          const std::vector<std::string>& models);
 
-  // brpc call_data needs to use shared_ptr
   void process_async_impl(std::shared_ptr<RerankCall> call) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Qwen3RerankServiceImpl);
 };
+
 }  // namespace xllm
