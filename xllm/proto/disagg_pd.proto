@@ -5,7 +5,14 @@ package xllm.proto;
 option cc_generic_services = true;
 
 import "common.proto";
-import "xllm_service.proto";
+
+message ClusterInfos {
+  repeated uint64 cluster_ids = 1;
+  repeated string device_ips = 2;
+  repeated uint32 ports = 3;
+  int32 dp_size = 4;
+  repeated string addrs = 5;
+}
 
 // request from prefill to decode.
 // NOTE: maybe we should dispatch request to decod instance by xllm_service.
@@ -201,8 +208,6 @@ message DisaggGenerationsRequests {
 }
 
 service DisaggPDService {
-  rpc Generation(DisaggStreamGeneration) returns (Status) {}
-  rpc Generations(DisaggStreamGenerations) returns (StatusSet) {}
   rpc AddNewRequests(DisaggRequests) returns (DisaggResponses) {}
   rpc FirstGeneration(DisaggGenerationsRequests) returns (Status) {}
   rpc MultiGenerations(DisaggGenerationsRequests) returns (Status) {}

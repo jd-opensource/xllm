@@ -446,30 +446,6 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       std::move(prompt.value()), std::move(prompt_tokens), sp, call, callback);
 }
 
-void LLMMaster::get_cache_info(std::vector<uint64_t>& cluster_ids,
-                               std::vector<std::string>& addrs,
-                               std::vector<int64_t>& k_cache_ids,
-                               std::vector<int64_t>& v_cache_ids) {
-  engine_->get_cache_info(cluster_ids, addrs, k_cache_ids, v_cache_ids);
-}
-
-bool LLMMaster::link_cluster(const std::vector<uint64_t>& cluster_ids,
-                             const std::vector<std::string>& addrs,
-                             const std::vector<std::string>& device_ips,
-                             const std::vector<uint16_t>& ports,
-                             const int32_t dp_size) {
-  return engine_->link_cluster(cluster_ids, addrs, device_ips, ports, dp_size);
-}
-
-bool LLMMaster::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
-                               const std::vector<std::string>& addrs,
-                               const std::vector<std::string>& device_ips,
-                               const std::vector<uint16_t>& ports,
-                               const int32_t dp_size) {
-  return engine_->unlink_cluster(
-      cluster_ids, addrs, device_ips, ports, dp_size);
-}
-
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)
     : Master(options,
              options.draft_model_path().value_or("").empty()
