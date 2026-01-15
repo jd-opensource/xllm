@@ -8,7 +8,6 @@ cc_library(
     kv_cache
   HDRS
     embedding_allocator.h
-    $<$<BOOL:${USE_NPU}>:hccl_kv_cache_transfer.h>
     kv_cache.h
     kv_cache_event.h
     kv_cache_transfer.h
@@ -18,7 +17,6 @@ cc_library(
     hierarchy_kv_cache_transfer.h
   SRCS
     embedding_allocator.cpp
-    $<$<BOOL:${USE_NPU}>:hccl_kv_cache_transfer.cpp>
     kv_cache.cpp
     kv_cache_transfer.cpp
     $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.cpp>
@@ -31,7 +29,6 @@ cc_library(
     :common
     $<$<BOOL:${USE_NPU}>:graph>
     glog::glog
-    $<$<BOOL:${USE_NPU}>:hccl_transfer>
     $<$<BOOL:${USE_NPU}>:llm_datadist>
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>

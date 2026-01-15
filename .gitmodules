@@ -4,9 +4,6 @@
 [submodule "third_party/cpprestsdk"]
 	path = third_party/cpprestsdk
 	url = https://gitcode.com/xLLM-AI/cpprestsdk.git
-[submodule "third_party/hccl_transfer"]
-	path = third_party/hccl_transfer
-	url = https://gitcode.com/xLLM-AI/hccl_transfer.git
 [submodule "third_party/minja"]
 	path = third_party/minja
 	url = https://gitcode.com/xLLM-AI/minja.git
