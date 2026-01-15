@@ -15,7 +15,7 @@ from setuptools import Extension, setup, find_packages
 from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.command.build_ext import build_ext
 
-from env import get_cxx_abi, set_npu_envs, set_mlu_envs, set_cuda_envs, set_ilu_envs
+from env import get_cxx_abi, set_npu_envs, set_mlu_envs, set_cuda_envs, set_ilu_envs, set_musa_envs
 
 BUILD_TEST_FILE = True
 BUILD_EXPORT = True
@@ -40,6 +40,12 @@ def get_device_type():
             return "ilu"
         except ImportError:
             return "cuda"
+
+    try:
+        import torch_musa
+        return "musa"
+    except ImportError:
+        pass
 
     try:
         import torch_mlu
@@ -112,7 +118,7 @@ class CMakeExtension(Extension):
 class ExtBuild(build_ext):
     user_options = build_ext.user_options + [
         ("base-dir=", None, "base directory of xLLM project"),
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda)"),
+        ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("install-xllm-kernels=", None, "install xllm_kernels RPM package (true/false)"),
         ("generate-so=", None, "generate so or binary"),
@@ -212,8 +218,13 @@ class ExtBuild(build_ext):
         elif self.device == "ilu":
             cmake_args += ["-DUSE_ILU=ON"]
             set_ilu_envs()
+        elif self.device == "musa":
+            cmake_args += ["-DUSE_MUSA=ON"]
+            set_musa_envs()
+            global BUILD_TEST_FILE
+            BUILD_TEST_FILE = False
         else:
-            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu.")
+            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu or musa.")
 
         product = "xllm"
         if self.generate_so:
@@ -347,7 +358,7 @@ class ExtBuildSingleTest(ExtBuild):
 
 class BuildDistWheel(bdist_wheel):
     user_options = bdist_wheel.user_options + [
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda)"),
+        ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
     ]
 
@@ -593,9 +604,9 @@ def parse_arguments():
     parser.add_argument(
         '--device',
         type=str.lower,
-        choices=['auto', 'a2', 'a3', 'mlu', 'cuda', 'ilu'],
+        choices=['auto', 'a2', 'a3', 'mlu', 'cuda', 'ilu', 'musa'],
         default='auto',
-        help='Device type: a2, a3, mlu, ilu or cuda (case-insensitive)'
+        help='Device type: a2, a3, mlu, ilu, cuda or musa (case-insensitive)'
     )
     
     parser.add_argument(

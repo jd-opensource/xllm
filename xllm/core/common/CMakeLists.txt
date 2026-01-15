@@ -39,6 +39,7 @@ cc_library(
     cpprest
     etcd-cpp-api
     $<$<BOOL:${USE_MLU}>:torch_mlu>
+    $<$<BOOL:${USE_MUSA}>:torch_musa>
 )
 
 cc_library(
