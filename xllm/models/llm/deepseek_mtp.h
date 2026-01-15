@@ -30,13 +30,12 @@ limitations under the License.
 namespace xllm {
 
 class DeepseekMultiTokenPredictorLayerImpl
-    : public MtpDecoderLayerImplBase<xllm::layer::DeepseekV2DecoderLayer> {
+    : public MtpDecoderLayerImplBase<layer::DeepseekV2DecoderLayer> {
  public:
   DeepseekMultiTokenPredictorLayerImpl(const ModelContext& context,
                                        const int32_t layer_index)
-      : MtpDecoderLayerImplBase<xllm::layer::DeepseekV2DecoderLayer>(
-            context,
-            layer_index) {}
+      : MtpDecoderLayerImplBase<layer::DeepseekV2DecoderLayer>(context,
+                                                               layer_index) {}
 };
 TORCH_MODULE(DeepseekMultiTokenPredictorLayer);
 

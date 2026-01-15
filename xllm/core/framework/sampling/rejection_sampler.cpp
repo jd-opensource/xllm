@@ -300,12 +300,11 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample_fused(
   const int64_t n_spec = draft_token_ids.size(1);
   const int64_t vocab_size = target_probs.size(2);
 
-  // [Fix 1] 严格检查 Device 一致性
+  // Strictly check device consistency for bonus_token_ids and draft_token_ids
   CHECK_EQ(bonus_token_ids.device().type(), device.type())
       << "bonus_token_ids must be on the same device as draft_token_ids";
 
-  // [Fix 2] 处理 bonus_token_ids 为空或形状不对的情况
-  // 确保它至少有 batch_size 个元素
+  // Check that bonus_token_ids has at least batch_size elements
   CHECK_GE(bonus_token_ids.numel(), batch_size)
       << "bonus_token_ids numel (" << bonus_token_ids.numel()
       << ") is smaller than batch_size (" << batch_size << ")";
