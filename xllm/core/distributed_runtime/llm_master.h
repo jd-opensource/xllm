@@ -73,23 +73,6 @@ class LLMMaster : public Master {
   // this is a blocking call
   void generate();
 
-  void get_cache_info(std::vector<uint64_t>& cluster_ids,
-                      std::vector<std::string>& addrs,
-                      std::vector<int64_t>& k_cache_ids,
-                      std::vector<int64_t>& v_cache_ids);
-
-  bool link_cluster(const std::vector<uint64_t>& cluster_ids,
-                    const std::vector<std::string>& addrs,
-                    const std::vector<std::string>& device_ips,
-                    const std::vector<uint16_t>& ports,
-                    const int32_t dp_size);
-
-  bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
-                      const std::vector<std::string>& addrs,
-                      const std::vector<std::string>& device_ips,
-                      const std::vector<uint16_t>& ports,
-                      const int32_t dp_size);
-
  private:
   std::shared_ptr<Request> generate_request(
       std::string prompt,

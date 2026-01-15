@@ -122,15 +122,6 @@ PYBIND11_MODULE(xllm_export, m) {
       .def("generate",
            &LLMMaster::generate,
            py::call_guard<py::gil_scoped_release>())
-      .def("get_cache_info",
-           &LLMMaster::get_cache_info,
-           py::call_guard<py::gil_scoped_release>())
-      .def("link_cluster",
-           &LLMMaster::link_cluster,
-           py::call_guard<py::gil_scoped_release>())
-      .def("unlink_cluster",
-           &LLMMaster::unlink_cluster,
-           py::call_guard<py::gil_scoped_release>())
       .def("options",
            &LLMMaster::options,
            py::call_guard<py::gil_scoped_release>())
