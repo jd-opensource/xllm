@@ -11,7 +11,6 @@ add_subdirectory(etcd_cpp_apiv3)
 
 if(USE_NPU)
   add_subdirectory(spdlog)
-  add_subdirectory(hccl_transfer/hccl_transfer)
   add_subdirectory(torch_npu_ops)
 endif()
 add_subdirectory(Mooncake)
