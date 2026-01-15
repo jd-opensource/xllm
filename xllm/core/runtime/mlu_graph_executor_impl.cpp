@@ -210,10 +210,10 @@ ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
 // tokens: [num_decode_tokens]
 // positions: [num_decode_tokens] token pos in the sequence
 // returns: [num_decode_tokens, hidden_size]
-torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                        const torch::Tensor& positions,
-                                        std::vector<KVCache>& kv_caches,
-                                        const ModelInputParams& params) {
+ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
+                                      const torch::Tensor& positions,
+                                      std::vector<KVCache>& kv_caches,
+                                      const ModelInputParams& params) {
   // If not in decode phase, use eager mode directly
   bool graph_mode = params.batch_forward_type.is_decode();
   int64_t actual_num_tokens = tokens.size(0);
@@ -243,7 +243,7 @@ torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
     graph->capture(model_, kv_caches, pool_);
     graphs_[padding_batch_size] = std::move(graph);
   }
-  return persistent_param_->output_.slice(0, 0, tokens.size(0));
+  return ModelOutput(persistent_param_->output_.slice(0, 0, tokens.size(0)));
 }
 
 }  // namespace xllm

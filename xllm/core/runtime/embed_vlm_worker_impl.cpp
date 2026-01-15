@@ -67,8 +67,9 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   auto sampling_params = input.sampling_params.to(device_, dtype_);
 
   // call model executor forward to get hidden states
-  auto hidden_states = model_executor_->forward(
+  auto model_output = model_executor_->forward(
       flatten_tokens, flatten_positions, kv_caches_, params);
+  auto hidden_states = model_output.hidden_states;
 
   ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());

@@ -124,10 +124,10 @@ class SimpleCausalLM : public CausalLM {
     this->to(device);
   }
 
-  torch::Tensor forward_impl(const torch::Tensor& tokens,
-                             const torch::Tensor& positions,
-                             std::vector<KVCache>& kv_caches,
-                             const ModelInputParams& params) {
+  ModelOutput forward_impl(const torch::Tensor& tokens,
+                           const torch::Tensor& positions,
+                           std::vector<KVCache>& kv_caches,
+                           const ModelInputParams& params) {
     // Simple computation: token embedding + position embedding + linear layer
     // This creates temporary tensors that NPUGraph mempool will manage
     LOG(INFO) << "SimpleCausalLM forward_impl, tokens: " << tokens.sizes()
@@ -196,14 +196,14 @@ class SimpleCausalLM : public CausalLM {
       output = output + kv_embeddings_sum * block_scale_;
     }
 
-    return output;
+    return ModelOutput(output);
   }
 
   // Adapter method to match CausalLM base class interface
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& parameters) override {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& parameters) override {
     return forward_impl(tokens, positions, kv_caches, parameters);
   }
 
@@ -433,11 +433,13 @@ TEST_F(AclGraphExecutorTest, GraphExecutorVsEagerExecution) {
                                           kv_caches_,
                                           {forward_input.input_params});
   // Compare outputs - should be identical
-  EXPECT_TRUE(
-      torch::allclose(eager_output, graph_output, /*rtol=*/1e-5, /*atol=*/1e-6))
+  EXPECT_TRUE(torch::allclose(eager_output.hidden_states,
+                              graph_output.hidden_states,
+                              /*rtol=*/1e-5,
+                              /*atol=*/1e-6))
       << "Eager output:\n"
-      << eager_output << "\nGraph output:\n"
-      << graph_output;
+      << eager_output.hidden_states << "\nGraph output:\n"
+      << graph_output.hidden_states;
 }
 
 // Test that graph replay produces consistent results across multiple runs
@@ -468,10 +470,13 @@ TEST_F(AclGraphExecutorTest, GraphReplayConsistency) {
                                      {forward_input.input_params});
 
   // Compare outputs - should be identical
-  EXPECT_TRUE(torch::allclose(output1, output2, /*rtol=*/1e-5, /*atol=*/1e-6))
+  EXPECT_TRUE(torch::allclose(output1.hidden_states,
+                              output2.hidden_states,
+                              /*rtol=*/1e-5,
+                              /*atol=*/1e-6))
       << "First output:\n"
-      << output1 << "\nSecond output:\n"
-      << output2;
+      << output1.hidden_states << "\nSecond output:\n"
+      << output2.hidden_states;
 }
 
 // Test graph creation and execution with different batch sizes
@@ -527,9 +532,10 @@ TEST_F(AclGraphExecutorTest, DifferentBatchSizes) {
                                       {forward_input.input_params});
 
     // Verify output shape
-    EXPECT_EQ(output.size(0), batch_size * options_.num_decoding_tokens())
+    EXPECT_EQ(output.hidden_states.size(0),
+              batch_size * options_.num_decoding_tokens())
         << "Batch size: " << batch_size;
-    EXPECT_EQ(output.size(1), model_args_.hidden_size())
+    EXPECT_EQ(output.hidden_states.size(1), model_args_.hidden_size())
         << "Batch size: " << batch_size;
   }
 }
@@ -563,16 +569,19 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImpl) {
                                           {forward_input.input_params});
 
   // Compare outputs - should be identical
-  EXPECT_TRUE(
-      torch::allclose(npu_output, graph_output, /*rtol=*/1e-5, /*atol=*/1e-6))
+  EXPECT_TRUE(torch::allclose(npu_output.hidden_states,
+                              graph_output.hidden_states,
+                              /*rtol=*/1e-5,
+                              /*atol=*/1e-6))
       << "NPU Executor output:\n"
-      << npu_output << "\nACL Graph Executor output:\n"
-      << graph_output;
+      << npu_output.hidden_states << "\nACL Graph Executor output:\n"
+      << graph_output.hidden_states;
 
   // Verify output shapes are the same
-  EXPECT_EQ(npu_output.sizes(), graph_output.sizes())
-      << "Output shape mismatch: NPU=" << npu_output.sizes()
-      << ", Graph=" << graph_output.sizes();
+  EXPECT_EQ(npu_output.hidden_states.sizes(),
+            graph_output.hidden_states.sizes())
+      << "Output shape mismatch: NPU=" << npu_output.hidden_states.sizes()
+      << ", Graph=" << graph_output.hidden_states.sizes();
 }
 
 // Test multiple runs to verify consistency across different execution modes
@@ -613,28 +622,34 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImplMultipleRuns) {
                                             {forward_input.input_params});
 
     // Compare direct model output with NPU Executor output
-    EXPECT_TRUE(torch::allclose(
-        direct_output, npu_output, /*rtol=*/1e-5, /*atol=*/1e-6))
+    EXPECT_TRUE(torch::allclose(direct_output.hidden_states,
+                                npu_output.hidden_states,
+                                /*rtol=*/1e-5,
+                                /*atol=*/1e-6))
         << "Run " << i << " - Direct model vs NPU Executor mismatch:\n"
         << "Direct model output:\n"
-        << direct_output << "\nNPU Executor output:\n"
-        << npu_output;
+        << direct_output.hidden_states << "\nNPU Executor output:\n"
+        << npu_output.hidden_states;
 
     // Compare direct model output with ACL Graph Executor output
-    EXPECT_TRUE(torch::allclose(
-        direct_output, graph_output, /*rtol=*/1e-5, /*atol=*/1e-6))
+    EXPECT_TRUE(torch::allclose(direct_output.hidden_states,
+                                graph_output.hidden_states,
+                                /*rtol=*/1e-5,
+                                /*atol=*/1e-6))
         << "Run " << i << " - Direct model vs ACL Graph Executor mismatch:\n"
         << "Direct model output:\n"
-        << direct_output << "\nACL Graph Executor output:\n"
-        << graph_output;
+        << direct_output.hidden_states << "\nACL Graph Executor output:\n"
+        << graph_output.hidden_states;
 
     // Compare NPU Executor output with ACL Graph Executor output
-    EXPECT_TRUE(
-        torch::allclose(npu_output, graph_output, /*rtol=*/1e-5, /*atol=*/1e-6))
+    EXPECT_TRUE(torch::allclose(npu_output.hidden_states,
+                                graph_output.hidden_states,
+                                /*rtol=*/1e-5,
+                                /*atol=*/1e-6))
         << "Run " << i << " - NPU Executor vs ACL Graph Executor mismatch:\n"
         << "NPU Executor output:\n"
-        << npu_output << "\nACL Graph Executor output:\n"
-        << graph_output;
+        << npu_output.hidden_states << "\nACL Graph Executor output:\n"
+        << graph_output.hidden_states;
   }
 }
 

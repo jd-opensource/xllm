@@ -24,6 +24,7 @@ limitations under the License.
 
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/layers/lm_head.h"
 #include "core/layers/qwen3_vision_encode_layer.h"
@@ -71,10 +72,10 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
     const auto& mm_data = input_params.mm_data;
     torch::Tensor pixel_values;

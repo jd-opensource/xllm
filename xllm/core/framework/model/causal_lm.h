@@ -36,11 +36,11 @@ limitations under the License.
 #include "core/framework/state_dict/state_dict.h"
 #include "model_args.h"
 #include "model_input_params.h"
+#include "model_output.h"
 
 namespace xllm {
-
-#if !defined(USE_NPU)
 namespace detail {
+#if !defined(USE_NPU)
 template <typename T, typename = void>
 struct has_get_lm_head : std::false_type {};
 
@@ -75,8 +75,18 @@ struct has_set_word_embedding<
     T,
     std::void_t<decltype(std::declval<T>()->set_word_embedding(
         std::declval<layer::WordEmbedding&>()))>> : std::true_type {};
-}  // namespace detail
+
 #endif
+template <typename T, typename = void>
+struct has_get_hot_token_id : std::false_type {};
+
+template <typename T>
+struct has_get_hot_token_id<
+    T,
+    std::void_t<decltype(std::declval<T>()->get_hot_token_id())>>
+    : std::true_type {};
+
+}  // namespace detail
 
 class CausalLM : public torch::nn::Module {
  public:
@@ -85,10 +95,10 @@ class CausalLM : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens]
   // returns: [num_tokens, hidden_size]
-  virtual torch::Tensor forward(const torch::Tensor& tokens,
-                                const torch::Tensor& positions,
-                                std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& parameters) = 0;
+  virtual ModelOutput forward(const torch::Tensor& tokens,
+                              const torch::Tensor& positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ModelInputParams& parameters) = 0;
 
   // hidden_states: [num_tokens, hidden_size]
   // seleted_idxes: [num_tokens]
@@ -131,6 +141,11 @@ class CausalLM : public torch::nn::Module {
                   "this model.";
   }
 #endif
+  virtual torch::Tensor get_hot_token_id() {
+    LOG(FATAL) << "Method 'get_hot_token_id' is not implemented/supported by "
+                  "this model.";
+    return torch::Tensor();
+  }
 };
 
 template <typename Model>
@@ -139,10 +154,10 @@ class CausalLMImpl : public CausalLM {
   CausalLMImpl(Model model, const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& parameters) override {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& parameters) override {
     return model_->forward(tokens, positions, kv_caches, parameters);
   }
 
@@ -213,6 +228,14 @@ class CausalLMImpl : public CausalLM {
     }
   }
 #endif
+
+  torch::Tensor get_hot_token_id() override {
+    if constexpr (detail::has_get_hot_token_id<Model>::value) {
+      return model_->get_hot_token_id();
+    } else {
+      return CausalLM::get_hot_token_id();
+    }
+  }
 
   torch::Device device() const override { return options_.device(); }
 

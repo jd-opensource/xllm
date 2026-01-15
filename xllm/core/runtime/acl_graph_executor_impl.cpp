@@ -691,7 +691,7 @@ bool AclGraph::capture(CausalLM* model,
                        {graph_params});
 
     // Store result in persistent buffer owned by NPUGraph mempool
-    persistent_param_.set_hidden_states(forward_result);
+    persistent_param_.set_hidden_states(forward_result.hidden_states);
     graph_.capture_end();
     // Lock is automatically released here when lock goes out of scope
     if (need_restore_stream) {
@@ -769,10 +769,10 @@ ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
 // tokens: [num_decode_tokens]
 // positions: [num_decode_tokens] token pos in the sequence
 // returns: [num_decode_tokens, hidden_size]
-torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                        const torch::Tensor& positions,
-                                        std::vector<KVCache>& kv_caches,
-                                        const ModelInputParams& params) {
+ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
+                                      const torch::Tensor& positions,
+                                      std::vector<KVCache>& kv_caches,
+                                      const ModelInputParams& params) {
   // no mirco batch in decode phase
   const torch::Tensor& tokens_tensor = tokens;
   const torch::Tensor& positions_tensor = positions;
@@ -823,8 +823,9 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   if (it != graphs_.end()) {
     // Replay the existing graph
     VLOG(50) << "AclGraphExecutorImpl::run() in replay mode";
-    return it->second->replay(
+    auto hidden_states = it->second->replay(
         tokens_tensor, positions_tensor, kv_caches, params_single);
+    return ModelOutput(hidden_states);
   }
 
   // Graph doesn't exist for this bucket num_tokens, try to create it lazily
@@ -849,7 +850,7 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
 
     // Return the output from capture (no need to replay since capture
     // already executed)
-    return graphs_[bucket_num_tokens]->get_hidden_states(n_tokens);
+    return ModelOutput(graphs_[bucket_num_tokens]->get_hidden_states(n_tokens));
   }
 
   // Fallback to eager mode if capture fails

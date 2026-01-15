@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/model/model_output.h"
 #include "core/layers/common/rotary_embedding_util.h"
 #include "core/layers/npu/npu_glm4_decoder_layer_impl.h"
 #include "llm_model_base.h"
@@ -66,10 +67,10 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
     }
   }
 
-  virtual torch::Tensor forward(torch::Tensor tokens,
-                                torch::Tensor positions,
-                                std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& input_params) {
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ModelInputParams& input_params) override {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
 
@@ -152,7 +153,7 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
-        return torch::Tensor();
+        return ModelOutput();
       }
 
       auto& layer = layers_[i];
@@ -165,7 +166,7 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
             event,
             event_flag);
     }
-    return norm_(h, 0);
+    return ModelOutput(norm_(h, 0));
   }
 
  private:

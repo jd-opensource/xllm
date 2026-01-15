@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/model/embedding_vlm.h"
+#include "core/framework/model/model_output.h"
 #include "models/llm/qwen2.h"
 #include "models/vlm/qwen2_vl.h"
 
@@ -49,10 +50,10 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
     const auto& mm_data = input_params.mm_data;
     torch::Tensor pixel_values;
@@ -130,10 +131,10 @@ class EmbeddingVLMImpl<xllm::Qwen2_VLForEmbedding> : public EmbeddingVLM {
                    const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& parameters) override {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& parameters) override {
     return model_->forward(tokens, positions, kv_caches, parameters);
   }
 

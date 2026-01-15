@@ -25,6 +25,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
 #include "core/layers/npu/npu_llama_decoder_layer_impl.h"
@@ -139,10 +140,10 @@ class LlamaModelImpl : public torch::nn::Module {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  torch::Tensor forward(torch::Tensor tokens,
-                        torch::Tensor positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(torch::Tensor tokens,
+                      torch::Tensor positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     torch::Tensor h = npu_embed_tokens_(tokens, 0);
     auto cos_pos = cos_pos_.index_select(0, positions);
     auto sin_pos = sin_pos_.index_select(0, positions);
@@ -178,7 +179,7 @@ class LlamaModelImpl : public torch::nn::Module {
       layer(h, cos_pos, sin_pos, attn_mask, kv_caches[i], input_params_new, i);
     }
     h = norm_(h, 0);
-    return h;
+    return ModelOutput(h);
   }
 
   // load the weight from the checkpoint
@@ -247,10 +248,10 @@ class LlamaForCausalLMImpl : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     return model_(tokens, positions, kv_caches, input_params);
   }
 

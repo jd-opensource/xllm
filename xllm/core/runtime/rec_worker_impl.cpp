@@ -105,8 +105,9 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     if (!rec_params.is_first_prefill) {
       ModelInputParams decoder_params = input_params;
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
-      hidden_states = worker_.model_executor_->forward(
+      auto model_output = worker_.model_executor_->forward(
           input.token_ids, input.positions, worker_.kv_caches_, decoder_params);
+      hidden_states = model_output.hidden_states;
     } else {
       const bool has_sparse_embedding =
           rec_params.encoder_sparse_embedding.defined();
@@ -137,14 +138,16 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
 
       ModelInputParams decoder_params = input_params;
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
-      hidden_states = worker_.model_executor_->forward(
+      auto model_output = worker_.model_executor_->forward(
           input.token_ids, input.positions, worker_.kv_caches_, decoder_params);
+      hidden_states = model_output.hidden_states;
     }
   } else {
     ModelInputParams decoder_params = input_params;
     decoder_params.mutable_onerec_params().is_encoder_forward = false;
-    hidden_states = worker_.model_executor_->forward(
+    auto model_output = worker_.model_executor_->forward(
         input.token_ids, input.positions, worker_.kv_caches_, decoder_params);
+    hidden_states = model_output.hidden_states;
   }
 
   if (!hidden_states.defined()) {

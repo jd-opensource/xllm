@@ -15,7 +15,9 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/model/model_output.h"
 #include "core/layers/common/rotary_embedding_util.h"
+#include "core/layers/npu/npu_column_parallel_linear_impl.h"
 #include "glm4_moe.h"
 #include "mtp_model_base.h"
 

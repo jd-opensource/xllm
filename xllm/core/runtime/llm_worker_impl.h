@@ -74,6 +74,8 @@ class LLMWorkerImpl : public WorkerImpl {
 
 #endif
 
+  torch::Tensor get_hot_token_id() { return model_->get_hot_token_id(); };
+
  private:
   std::unique_ptr<BeamSearcher> beam_searcher_;
 };

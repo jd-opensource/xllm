@@ -20,12 +20,13 @@ limitations under the License.
 
 #include "base_manual_loader.h"
 #include "core/layers/npu/npu_base_layer.h"
+
 namespace xllm {
 namespace layer {
 
-class Qwen2DecoderManualLoader : public BaseManualLoader {
+class Eagle3DecoderManualLoader : public BaseManualLoader {
  public:
-  Qwen2DecoderManualLoader(uint64_t weight_count, const ModelContext& context);
+  Eagle3DecoderManualLoader(uint64_t weight_count, const ModelContext& context);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;

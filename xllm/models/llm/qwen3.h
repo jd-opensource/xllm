@@ -94,10 +94,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     return std::make_pair(cos_pos, sin_pos);
   }
 
-  virtual torch::Tensor forward(torch::Tensor tokens,
-                                torch::Tensor positions,
-                                std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& input_params) {
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ModelInputParams& input_params) override {
     bool use_deepstack = input_params.deep_stacks.size() > 0;
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
@@ -144,7 +144,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         }
       }
     }
-    return std::get<0>(norm_(h, residual));
+    return ModelOutput(norm_(h, residual));
   }
 };
 TORCH_MODULE(QWen3Model);

@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
@@ -66,6 +67,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       layers_.push_back(block);
       blocks_->push_back(block);
     }
+
+    // process the layers_to_capture_ for eagle3
+    layers_to_capture_ = {
+        2, model_args.n_layers() / 2, model_args.n_layers() - 3};
   }
 
   torch::Tensor deepstack_process(torch::Tensor hidden_states,
@@ -78,10 +83,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     return hidden_states;
   }
 
-  virtual torch::Tensor forward(torch::Tensor tokens,
-                                torch::Tensor positions,
-                                std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& input_params) {
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ModelInputParams& input_params) override {
     bool use_deepstack = input_params.deep_stacks.size() > 0;
     std::vector<torch::Tensor> deep_stacks;
 
@@ -156,6 +161,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
+    std::vector<torch::Tensor> aux_hidden_states_vec;
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event{nullptr};
       std::atomic<bool>* event_flag{nullptr};
@@ -165,10 +171,15 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
-        return torch::Tensor();
+        return ModelOutput();
       }
 
       auto& layer = layers_[i];
+
+      if (std::find(layers_to_capture_.begin(), layers_to_capture_.end(), i) !=
+          layers_to_capture_.end()) {
+        aux_hidden_states_vec.emplace_back(h.clone());
+      }
 
       layer(h,
             cos_pos,
@@ -185,11 +196,14 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         }
       }
     }
-    return norm_(h, 0);
+    auto aux_hidden_states = torch::cat(aux_hidden_states_vec, /*dim=*/1);
+    return ModelOutput(norm_(h, 0), torch::Tensor(), aux_hidden_states);
   }
 
  private:
   torch::Tensor viusal_pos_mask_;
+
+  std::vector<int64_t> layers_to_capture_;
 };
 TORCH_MODULE(QWen3Model);
 

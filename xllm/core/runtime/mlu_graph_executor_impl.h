@@ -116,10 +116,10 @@ class MluGraphExecutorImpl : public ExecutorImpl {
   ForwardInput prepare_inputs(Batch& batch) override;
 
   // Execute model with graph optimization for decode phase
-  torch::Tensor run(const torch::Tensor& tokens,
-                    const torch::Tensor& positions,
-                    std::vector<KVCache>& kv_caches,
-                    const ModelInputParams& params) override;
+  ModelOutput run(const torch::Tensor& tokens,
+                  const torch::Tensor& positions,
+                  std::vector<KVCache>& kv_caches,
+                  const ModelInputParams& params) override;
 
  private:
   CausalLM* model_;  // not owned

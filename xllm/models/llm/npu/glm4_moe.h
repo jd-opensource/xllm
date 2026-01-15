@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <boost/algorithm/string.hpp>
 
+#include "core/framework/model/model_output.h"
 #include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/npu_glm4_moe_decoder_layer.h"
@@ -123,10 +124,10 @@ class Glm4MoeModelImpl : public torch::nn::Module {
 
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
-  torch::Tensor forward(torch::Tensor tokens,
-                        torch::Tensor positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(torch::Tensor tokens,
+                      torch::Tensor positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
@@ -212,7 +213,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
-        return torch::Tensor();
+        return ModelOutput();
       }
 
       auto& layer = layers_[i];
@@ -225,7 +226,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
             event,
             event_flag);
     }
-    return norm_(h, 0);
+    return ModelOutput(norm_(h, 0));
   }
 
   // load the weight from the checkpoint
@@ -300,10 +301,10 @@ class Glm4MoeForCausalLMImpl : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     return model_(tokens, positions, kv_caches, input_params);
   }
 

@@ -102,8 +102,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
 
   // temporarily use [0], will be adapted in next pr
   // call model executor forward to get hidden states
-  auto hidden_states = model_executor_->forward(
+  auto model_output = model_executor_->forward(
       input.token_ids, input.positions, kv_caches_, input.input_params);
+  auto hidden_states = model_output.hidden_states;
   if (!hidden_states.defined()) {
     return std::nullopt;
   }
@@ -171,12 +172,17 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
   }
 
   if (options_.enable_speculative_decode()) {
+    torch::Tensor embeddings;
+    if (model_output.aux_hidden_states.defined()) {
+      embeddings = model_output.aux_hidden_states;
+    } else {
+      embeddings = hidden_states;
+    }
     if (!input.input_params.batch_forward_type.is_decode() && !is_spec_draft_) {
-      output.sample_output.embeddings = hidden_states;
-    } else if (sampling_params.selected_token_idxes.defined()) {
-      auto embeddings = hidden_states.index_select(
-          /*dim=*/0, sampling_params.selected_token_idxes);
       output.sample_output.embeddings = embeddings;
+    } else if (sampling_params.selected_token_idxes.defined()) {
+      output.sample_output.embeddings = embeddings.index_select(
+          /*dim=*/0, sampling_params.selected_token_idxes);
     }
   }
 

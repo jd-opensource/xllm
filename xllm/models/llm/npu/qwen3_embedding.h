@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "core/framework/model/embedding_lm.h"
+#include "core/framework/model/model_output.h"
 #include "embedding_model_base.h"
 #include "qwen3.h"
 
@@ -40,10 +41,10 @@ class EmbeddingLMImpl<xllm::QWen3ForEmbedding> : public EmbeddingLM {
                   const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& parameters) override {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& parameters) override {
     return model_->forward(tokens, positions, kv_caches, parameters);
   }
 

@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "common/macros.h"
-#include "framework/kv_cache/embedding_allocator.h"
+#include "framework/kv_cache/embedding_cache.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache/spec_kv_cache_transfer.h"
 #endif
@@ -149,9 +149,11 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   std::unique_ptr<LLMWorkerImpl> impl_;
   std::unique_ptr<LLMWorkerImpl> draft_impl_;
 
-  std::shared_ptr<EmbeddingAllocator> embedding_allocator_;
+  std::shared_ptr<EmbeddingCache> embedding_cache_;
 #if defined(USE_NPU)
   std::shared_ptr<SpecKVCacheTransfer> kv_cache_transfer_;
 #endif
+  // hot_token_id for draft-to-target token mapping
+  torch::Tensor hot_token_id_;
 };
 }  // namespace xllm

@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "npu_qwen2_decoder_layer_impl.h"
+#include "npu_eagle3_decoder_layer_impl.h"
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
@@ -30,11 +30,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-const uint64_t WEIGHT_COUNT_PER_LAYER = 50;
+const uint64_t WEIGHT_COUNT_PER_LAYER = 52;
 const int32_t IN_MLP_W2_WEIGHT = 32;
 
-void NpuQwen2DecoderLayerImpl::param_from_args(
-    atb_speed::qwen::DecoderLayerParam& param,
+void NpuEagle3DecoderLayerImpl::param_from_args(
+    atb_speed::eagle3::DecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
     bool isPrefill) {
@@ -47,6 +47,9 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
   param.supportLora = false;
   param.loraEnableGMM = false;
+  param.qkvHasBias = false;
+  param.selfAttnHasBias = false;
+
   param.packQuantType = {1, 1};
   param.linearQuantType = {0, -1, -1, 0, 0, -1, 0};
   param.linearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
@@ -61,7 +64,8 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.rmsNormEps = args.rms_norm_eps();
   param.worldSize = parallel_args.world_size();
   param.numAttentionHeadsPerRank = args.n_heads() / param.worldSize;
-  param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
+  // param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
+  param.hiddenSizePerAttentionHead = args.head_dim();
   param.enableIntraLayerAddNorm = false;
   param.enableInterLayerAddNorm = false;
   // param.numKeyValueHeadsPerRank = args.n_kv_heads();
@@ -76,7 +80,8 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.enableLogN = false;
 }
 
-NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
+NpuEagle3DecoderLayerImpl::NpuEagle3DecoderLayerImpl(
+    const ModelContext& context)
     : BaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
@@ -95,12 +100,12 @@ NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  loader_ = std::make_unique<Qwen2DecoderManualLoader>(WEIGHT_COUNT_PER_LAYER,
-                                                       context);
+  loader_ = std::make_unique<Eagle3DecoderManualLoader>(WEIGHT_COUNT_PER_LAYER,
+                                                        context);
   initialize_quantization_parameters();
 }
 
-void NpuQwen2DecoderLayerImpl::initialize_linear_transpose_type() {
+void NpuEagle3DecoderLayerImpl::initialize_linear_transpose_type() {
   auto& at_host_weight_tensors = loader_->get_at_host_weight_tensors();
   TransposeType transpose_type =
       check_transpose(at_host_weight_tensors[IN_MLP_W2_WEIGHT]);
@@ -109,7 +114,7 @@ void NpuQwen2DecoderLayerImpl::initialize_linear_transpose_type() {
   decode_param_.linearTransposeType[4] = transpose_value;
 }
 
-void NpuQwen2DecoderLayerImpl::merge_loaded_weights() {
+void NpuEagle3DecoderLayerImpl::merge_loaded_weights() {
   initialize_linear_transpose_type();
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
@@ -122,7 +127,7 @@ void NpuQwen2DecoderLayerImpl::merge_loaded_weights() {
   init_layer();
 }
 
-void NpuQwen2DecoderLayerImpl::initialize_quantization_parameters() {
+void NpuEagle3DecoderLayerImpl::initialize_quantization_parameters() {
   if (quantize_type_ == "w8a8") {
     prefill_param_.packQuantType = {static_cast<int>(PackType::ALL_W8A8),
                                     static_cast<int>(PackType::ALL_W8A8)};
@@ -145,7 +150,7 @@ void NpuQwen2DecoderLayerImpl::initialize_quantization_parameters() {
   }
 }
 
-TransposeType NpuQwen2DecoderLayerImpl::check_transpose(at::Tensor& tensor) {
+TransposeType NpuEagle3DecoderLayerImpl::check_transpose(at::Tensor& tensor) {
   bool is_k_divisible = tensor.size(1) % 256 == 0;
   bool is_n_divisible = tensor.size(0) % 256 == 0;
 
@@ -156,17 +161,17 @@ TransposeType NpuQwen2DecoderLayerImpl::check_transpose(at::Tensor& tensor) {
   return TransposeType::TRANSPOSE;
 }
 
-int64_t NpuQwen2DecoderLayerImpl::init_layer() {
+int64_t NpuEagle3DecoderLayerImpl::init_layer() {
   init_attn_mask();
-  name_ = "qwen2_decoder_layer";
-  model_name_ = "qwen2";
+  name_ = "eagle3_decoder_layer";
+  model_name_ = "eagle3";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
 
   return atb::NO_ERROR;
 }
 
-int64_t NpuQwen2DecoderLayerImpl::init_attn_mask() {
+int64_t NpuEagle3DecoderLayerImpl::init_attn_mask() {
   torch::Dtype dtype =
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
@@ -174,11 +179,11 @@ int64_t NpuQwen2DecoderLayerImpl::init_attn_mask() {
   return atb::NO_ERROR;
 }
 
-int64_t NpuQwen2DecoderLayerImpl::init_node(
+int64_t NpuEagle3DecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
-    atb_speed::qwen::DecoderLayerParam& param) {
+    atb_speed::eagle3::DecoderLayerParam& param) {
   atb::Operation* operation = nullptr;
-  atb_speed::qwen::DecoderLayer(param, &operation);
+  atb_speed::eagle3::DecoderLayer(param, &operation);
   node.operation.reset(operation);
   if (node.operation == nullptr) {
     LOG(ERROR) << "node.operation is null";
@@ -205,20 +210,23 @@ int64_t NpuQwen2DecoderLayerImpl::init_node(
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuQwen2DecoderLayerImpl::forward(torch::Tensor& x,
-                                                torch::Tensor& cos_pos,
-                                                torch::Tensor& sin_pos,
-                                                torch::Tensor& attn_mask,
-                                                KVCache& kv_cache,
-                                                ModelInputParams& input_params,
-                                                aclrtEvent* event,
-                                                std::atomic<bool>* event_flag,
-                                                int node_id) {
+torch::Tensor NpuEagle3DecoderLayerImpl::forward(
+    torch::Tensor& hidden_states,
+    torch::Tensor& hidden_states_extra,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    torch::Tensor& attn_mask,
+    KVCache& kv_cache,
+    ModelInputParams& input_params,
+    aclrtEvent* event,
+    std::atomic<bool>* event_flag,
+    int node_id) {
   atb::Status st;
   if (!input_params.batch_forward_type.is_decode()) {
     // mstxRangeId id = mstxRangeStartA("prefill build variant", nullptr);
     build_node_variant_pack(prefill_node_,
-                            x,
+                            hidden_states,
+                            hidden_states_extra,
                             cos_pos,
                             sin_pos,
                             attn_mask,
@@ -231,7 +239,8 @@ torch::Tensor NpuQwen2DecoderLayerImpl::forward(torch::Tensor& x,
                            << "excute prefill layer fail, error code: " << st;
   } else {
     build_node_variant_pack(decode_node_,
-                            x,
+                            hidden_states,
+                            hidden_states_extra,
                             cos_pos,
                             sin_pos,
                             decode_attn_mask_,
@@ -246,16 +255,19 @@ torch::Tensor NpuQwen2DecoderLayerImpl::forward(torch::Tensor& x,
   return at_placeholder_;
 }
 
-void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
+void NpuEagle3DecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
-    torch::Tensor& x,
+    torch::Tensor& hidden_states,
+    torch::Tensor& hidden_states_extra,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
     at::Tensor& attn_mask,
     KVCache& kv_cache,
     ModelInputParams& input_params,
     bool is_prefill) {
-  internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
+  internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(hidden_states);
+  internal_tensors_extra_ =
+      atb_speed::Utils::AtTensor2Tensor(hidden_states_extra);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
       atb_speed::Utils::AtTensor2Tensor(cos_pos);
@@ -279,10 +291,12 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
+      internal_tensors_extra_;
   if (is_prefill && FLAGS_enable_chunked_prefill) {
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12).hostData =
         input_params.q_seq_lens_vec.data();
   }
 

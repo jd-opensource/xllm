@@ -977,10 +977,10 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     }
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
     const auto& mm_data = input_params.mm_data;
 
@@ -1006,7 +1006,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     image_embedding = get_vision_embedding(image_inputs);
 
     if (model_args_.image_embedding_mode()) {
-      return image_embedding;
+      return ModelOutput(image_embedding);
     }
 
     if (use_vision_adapter_ && image_embedding.defined()) {

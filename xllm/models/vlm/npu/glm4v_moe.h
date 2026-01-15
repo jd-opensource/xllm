@@ -89,10 +89,10 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
     const auto& mm_data = input_params.mm_data;
     torch::Tensor pixel_values;
