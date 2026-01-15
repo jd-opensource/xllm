@@ -43,7 +43,8 @@ def get_device_type():
 
     try:
         import torch_musa
-        return "musa"
+        if torch.musa.is_available():
+            return "musa"
     except ImportError:
         pass
 
