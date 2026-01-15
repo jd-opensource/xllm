@@ -167,11 +167,11 @@ def set_ilu_envs():
     os.environ["IXFORMER_INSTALL_PATH"] = get_ixformer_root_path()
 
 def set_musa_envs():
-    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
-    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
-    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
-    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
+    set_common_envs()
     os.environ["PYTORCH_MUSA_INSTALL_PATH"] = get_torch_musa_root_path()
     import torch_musa
     os.environ["TORCH_MUSA_PYTHONPATH"] = torch_musa.core.cmake_prefix_path 
-    os.environ["MUSA_TOOLKIT_ROOT_DIR"] = os.environ["MUSA_HOME"]
+    musa_home = os.getenv("MUSA_HOME")
+    if not musa_home:
+        raise RuntimeError("MUSA_HOME environment variable must be set for MUSA builds.")
+    os.environ["MUSA_TOOLKIT_ROOT_DIR"] = musa_home
