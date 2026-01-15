@@ -53,6 +53,14 @@ def get_cuda_root_path():
     except ImportError:
         return None
     
+def get_torch_musa_root_path():
+    try:
+        import torch_musa
+        import os
+        return os.path.dirname(os.path.abspath(torch_musa.__file__))
+    except ImportError:
+        return None
+    
 def set_common_envs():
     os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
     os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
@@ -157,3 +165,13 @@ def set_cuda_envs():
 def set_ilu_envs():
     set_common_envs()
     os.environ["IXFORMER_INSTALL_PATH"] = get_ixformer_root_path()
+
+def set_musa_envs():
+    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
+    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
+    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
+    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
+    os.environ["PYTORCH_MUSA_INSTALL_PATH"] = get_torch_musa_root_path()
+    import torch_musa
+    os.environ["TORCH_MUSA_PYTHONPATH"] = torch_musa.core.cmake_prefix_path 
+    os.environ["MUSA_TOOLKIT_ROOT_DIR"] = os.environ["MUSA_HOME"]
