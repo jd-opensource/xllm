@@ -581,14 +581,6 @@ bool DisaggPDScheduler::decode_schedule(
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
-  proto::DisaggPDService_Stub* stub = create_rpc_channel(prefill_instance_name);
-  if (!stub) {
-    LOG(ERROR) << "Failed to create rpc channel for prefill instance: "
-               << prefill_instance_name;
-    kv_cache_manager_->deallocate(request.get());
-    return false;
-  }
-
   // TODO: check request_id, duplicate ids are not allowed
   {
     std::lock_guard<std::mutex> lock(received_request_map_mutex_);
