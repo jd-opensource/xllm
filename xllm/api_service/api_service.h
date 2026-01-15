@@ -94,21 +94,6 @@ class APIService : public proto::XllmAPIService {
                   proto::HttpResponse* response,
                   ::google::protobuf::Closure* done) override;
 
-  void GetCacheInfo(::google::protobuf::RpcController* controller,
-                    const proto::HttpRequest* request,
-                    proto::HttpResponse* response,
-                    ::google::protobuf::Closure* done) override;
-
-  void LinkCluster(::google::protobuf::RpcController* controller,
-                   const proto::HttpRequest* request,
-                   proto::HttpResponse* response,
-                   ::google::protobuf::Closure* done) override;
-
-  void UnlinkCluster(::google::protobuf::RpcController* controller,
-                     const proto::HttpRequest* request,
-                     proto::HttpResponse* response,
-                     ::google::protobuf::Closure* done) override;
-
   void ModelVersionsHttp(::google::protobuf::RpcController* controller,
                          const proto::HttpRequest* request,
                          proto::HttpResponse* response,

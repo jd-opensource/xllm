@@ -18,29 +18,6 @@ message HttpRequest {
 message HttpResponse {
 };
 
-message RpcStatus {
-  bool status = 1;
-}
-
-message CacheAddr {
-  repeated uint64 tensor_addrs = 1;
-}
-
-message GetCacheInfoResponse {
-  repeated uint64 cluster_ids = 1;
-  repeated int64 k_cache_ids = 2;
-  repeated int64 v_cache_ids = 3;
-  repeated string addrs = 4;
-}
-
-message ClusterInfos {
-  repeated uint64 cluster_ids = 1;
-  repeated string device_ips = 2;
-  repeated uint32 ports = 3;
-  int32 dp_size = 4;
-  repeated string addrs = 5;
-}
-
 service XllmAPIService {
   rpc Completions (CompletionRequest) returns (CompletionResponse);
   rpc CompletionsHttp (HttpRequest) returns (HttpResponse);
@@ -60,8 +37,5 @@ service XllmAPIService {
   rpc Models (ModelListRequest) returns (ModelListResponse);
   rpc ModelsHttp (HttpRequest) returns (HttpResponse);
 
-  rpc GetCacheInfo (HttpRequest) returns (HttpResponse);
-  rpc LinkCluster (HttpRequest) returns (HttpResponse);
-  rpc UnlinkCluster (HttpRequest) returns (HttpResponse);
   rpc ModelVersionsHttp (HttpRequest) returns (HttpResponse);
 };

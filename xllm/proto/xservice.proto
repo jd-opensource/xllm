@@ -22,10 +22,6 @@ enum InstanceType {
   MIX = 3;
 }
 
-message WorkerKVAddr {
-  repeated uint64 layer_addrs = 1;
-}
-
 message InstanceMetaInfo {
   // http server address currently
   string name = 1;
