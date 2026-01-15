@@ -209,8 +209,7 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
   std::lock_guard<std::mutex> lock(instance_channel_map_mutex_);
   auto it = instance_channel_map_.find(instance_name);
   if (it == instance_channel_map_.end()) {
-    LOG(WARNING) << "Failed to find channel to instance: " << instance_name
-                 << ", try to create channel now.";
+    LOG(INFO) << "Create rpc channel to instance: " << instance_name;
     // check prefill instance info
     if (!check_remote_instance_info(instance_name)) {
       LOG(ERROR) << "Check remote instance info failed, instance name: "
@@ -299,13 +298,24 @@ void DisaggPDScheduler::dispatch_requests() {
       break;
     }
 
+    if (request->state().decode_address.empty()) {
+      // No decode address provided to the prefill instance, just finish the
+      // request.
+      response_processor_->process_failed_request(
+          request,
+          {StatusCode::INVALID_ARGUMENT,
+           "No decode address provided to the prefill instance"});
+      continue;
+    }
+
     std::vector<std::shared_ptr<Request>> requests;
     requests.emplace_back(request);
-    std::string selected_instance = "";
-    proto::DisaggPDService_Stub* stub = nullptr;
-    if (!request->state().decode_address.empty() && requests.size() == 1) {
-      selected_instance = request->state().decode_address;
-      stub = create_rpc_channel(request->state().decode_address);
+    std::string selected_instance = request->state().decode_address;
+    proto::DisaggPDService_Stub* stub = create_rpc_channel(selected_instance);
+    if (stub == nullptr) {
+      response_processor_->process_failed_request(
+          request, {StatusCode::UNKNOWN, "Fail to create rpc channel"});
+      continue;
     }
 
     // NOTE: TODO: maybe we need to support batch disatch
@@ -313,33 +323,6 @@ void DisaggPDScheduler::dispatch_requests() {
     // currently we only support one request per dispatch.
 
     // TODO: try to get a batch request.
-
-    if (selected_instance.empty() && !stub) {
-      // get allocated decode instance list from Master
-      while (decode_inst_names_.empty()) {
-        decode_inst_names_ = xservice_client_->get_static_decode_list();
-        if (!decode_inst_names_.empty()) {
-          LOG(INFO) << "Get PD decode instance list: "
-                    << absl::StrJoin(decode_inst_names_, "; ");
-          break;
-        }
-        sleep(1);
-      }
-      // select a D instance use RR currently.
-      // TODO: use better decode selection strategy later. maybe different
-      // strategy for offline and online request. or implement in xllm service.
-      int try_decode_count = 0;
-      while (!stub) {
-        if (try_decode_count == decode_inst_names_.size()) {
-          LOG(FATAL) << "Can not connect to all decode instances.";
-        }
-        ++try_decode_count;
-        selected_instance = decode_inst_names_[current_decode_idx_];
-        current_decode_idx_ =
-            (++current_decode_idx_) % decode_inst_names_.size();
-        stub = create_rpc_channel(selected_instance);
-      }
-    }
 
     {
       std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
@@ -426,10 +409,22 @@ void DisaggPDScheduler::dispatch_requests() {
     // TODO: sync rpc here currently
     brpc::Controller cntl;
     stub->AddNewRequests(&cntl, &reqs, &resps, nullptr);
-    // TODO: error handler
-    // if (rpc failed) {
-    //  // push all request back to prefill_request_queue_
-    //}
+    if (cntl.Failed()) {
+      LOG(ERROR) << "Failed to add new requests to decode instance : "
+                 << selected_instance << ", error text : " << cntl.ErrorText();
+      for (auto& request : requests) {
+        response_processor_->process_failed_request(
+            request,
+            {StatusCode::UNKNOWN,
+             "Failed to add new requests to decode instance"});
+
+        {
+          std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
+          req_to_channel_map_.erase(request->request_id());
+        }
+      }
+      continue;
+    }
 
     // check reqs which can not dispatch to D instance,
     // and push back to prefill_request_queue_
@@ -564,8 +559,10 @@ void DisaggPDScheduler::prefill_send_first_generation() {
       stub->FirstGeneration(&cntl, &gens, &resp, nullptr);
 
       if (cntl.Failed() || !resp.ok()) {
-        LOG(ERROR) << "Failed to send first generation, " << cntl.ErrorText()
-                   << ", staus: " << resp.ok();
+        LOG(ERROR) << "Failed to send first generation to decode instance : "
+                   << request->state().decode_address
+                   << ", error text : " << cntl.ErrorText()
+                   << ", response status: " << resp.ok();
       }
 
       {
