@@ -100,10 +100,7 @@ class MtpModelImplBase : public torch::nn::Module {
     torch::Tensor input_embedding = input_params.input_embedding;
     if (input_embedding.defined()) {
       h = input_embedding;
-    } else {
-      LOG(WARNING) << "hnorm use embedding from tokens.";
     }
-
     torch::Tensor hnorm = hnorm_(h, 0);
     CHECK_EQ(enorm.dim(), hnorm.dim());
     CHECK_EQ(enorm.size(0), hnorm.size(0));
