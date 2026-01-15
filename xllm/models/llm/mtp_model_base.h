@@ -119,14 +119,12 @@ class MtpModelImplBase : public torch::nn::Module {
     mtp_start_layer_idx_ = model_args.n_layers();
     mtp_end_layer_idx_ =
         mtp_start_layer_idx_ + model_args.num_nextn_predict_layers();
-    blocks_ = register_module("layers", torch::nn::ModuleList());
     mtp_layers_.reserve(model_args.num_nextn_predict_layers());
 
     // create mtp layers
     for (int32_t i = mtp_start_layer_idx_; i < mtp_end_layer_idx_; ++i) {
       auto mtp_layer = DecoderLayerType(context, i);
       mtp_layers_.push_back(mtp_layer);
-      blocks_->push_back(mtp_layer);
     }
     embed_tokens_ =
         register_module("embed_tokens",
@@ -214,7 +212,6 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
  private:
-  torch::nn::ModuleList blocks_{nullptr};
   std::vector<DecoderLayerType> mtp_layers_;
   int32_t mtp_start_layer_idx_;
   int32_t mtp_end_layer_idx_;
