@@ -188,8 +188,12 @@ SampleOutput RejectionSampler::forward(const torch::Tensor& draft_token_ids,
 
   SampleOutput output;
   if (rate_controller_) {
+    // for debug purpose, we will provide the perfect speculation to the rate
+    // controller
+    torch::Tensor perfect_speculation =
+        torch::cat({draft_token_ids, bonus_token_ids}, /*dim=*/-1);
     output.next_tokens =
-        rate_controller_->filter_with_acceptance_rate(accepted_token_ids);
+        rate_controller_->filter_with_acceptance_rate(perfect_speculation);
   } else {
     output.next_tokens = mask_out_rejected_tokens ? masked_accepted_token_ids
                                                   : accepted_token_ids;
@@ -295,6 +299,16 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample_fused(
   const int64_t batch_size = draft_token_ids.size(0);
   const int64_t n_spec = draft_token_ids.size(1);
   const int64_t vocab_size = target_probs.size(2);
+
+  // [Fix 1] 严格检查 Device 一致性
+  CHECK_EQ(bonus_token_ids.device().type(), device.type())
+      << "bonus_token_ids must be on the same device as draft_token_ids";
+
+  // [Fix 2] 处理 bonus_token_ids 为空或形状不对的情况
+  // 确保它至少有 batch_size 个元素
+  CHECK_GE(bonus_token_ids.numel(), batch_size)
+      << "bonus_token_ids numel (" << bonus_token_ids.numel()
+      << ") is smaller than batch_size (" << batch_size << ")";
 
   // Prepare input Tensors and ensure they are contiguous where needed
   // If draft_token_ids is already int32 and contiguous, no copy occurs
