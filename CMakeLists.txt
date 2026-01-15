@@ -465,11 +465,6 @@ set(BRPC_OUTPUT_DIR ${CMAKE_BINARY_DIR}/third_party/brpc/output)
 include_directories(SYSTEM ${BRPC_OUTPUT_DIR}/include)
 link_directories(${BRPC_OUTPUT_DIR}/lib)
 
-if(USE_NPU)
-  # hccl_transfer - mark as system headers to suppress warnings
-  include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/hccl_transfer/hccl_transfer/include)
-endif()
-
 # Mooncake - mark as system headers to suppress warnings from third-party code
 # Add third_party as SYSTEM to support #include <Mooncake/...> style includes
 # Use absolute path to ensure it works correctly

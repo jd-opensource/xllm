@@ -20,7 +20,6 @@ limitations under the License.
 #if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 
-#include "hccl_kv_cache_transfer.h"
 #include "llm_data_dist_transfer.h"
 #include "mooncake_kv_cache_transfer.h"
 #endif
@@ -224,11 +223,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
     transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);
   } else {
-    transfer =
-        std::make_shared<HcclKVCacheTransfer>(device_id, transfer_listen_port);
-
-    allocate_kv_cache_func(kv_cache_shape);
-    transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);
+    LOG(FATAL) << "Unsupported KVCacheTransfer type : " << transfer_type;
   }
 #endif
 
