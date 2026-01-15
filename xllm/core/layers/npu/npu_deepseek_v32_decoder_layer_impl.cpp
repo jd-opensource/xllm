@@ -282,7 +282,7 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
 
   param.layerId = layer_id_;
   param.numHiddenLayers = args.n_layers();
-  param.enableIntraLayerAddNorm = false;
+  param.enableIntraLayerAddNorm = true;
   param.enableInterLayerAddNorm = false;
   if (quantize_type_ == "") {
     param.enableGMMSwigluQuant = false;
@@ -296,8 +296,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   } else {
     param.enableSpeculate = true;
   }
-  param.maskfree = true;                            // TODO
-  param.enableSwiGLUQuantForSharedExperts = false;  // TODO
+  param.maskfree = true;                           // TODO
+  param.enableSwiGLUQuantForSharedExperts = true;  // TODO
   num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
   qk_nope_head_dim_ = args.qk_nope_head_dim();
   v_head_dim_ = args.v_head_dim();
@@ -326,8 +326,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_attention_parameters(
     param.enableMlaPreprocess = false;
   }
 
-  param.enableFA3 = false;           // TODO
-  param.isNzCache = false;           // TODO
+  param.enableFA3 = false;  // TODO
+  // param.isNzCache = false;           // TODO
   param.enableKvQuantLayer = false;  // TODO
   param.index_head_dim = args.index_head_dim();
   param.index_n_heads = args.index_n_heads();

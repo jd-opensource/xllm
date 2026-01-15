@@ -666,7 +666,7 @@ void DeekseekV32DecoderLoader::merge_experts_weights() {
   // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
   //     at_npu::native::npu_format_cast(mlp_down_weight, 29);
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
+      at_npu::native::npu_format_cast(mlp_down_weight, 29).contiguous();
 #else
   // TODO: xllm ops's GMM need to support MTP.
   if (decode_isBF16_ && false) {
@@ -1010,6 +1010,7 @@ void DeekseekV32DecoderLoader::merge_loaded_weights() {
         torch::roll(at_weight_tensors_[IN_BLOCK_SPARSE_MOE_GATE_BIAS],
                     {-1 * ep_rank_ * num_experts_per_partition_},
                     {0})
+            .to(torch::kFloat32)
             .contiguous();
   }
   // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_SHARED_EXPERT] =
