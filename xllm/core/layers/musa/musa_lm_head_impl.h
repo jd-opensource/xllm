@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,20 +15,32 @@ limitations under the License.
 
 #pragma once
 
-#ifdef USE_MUSA
-#include "musa/musa_qwen3_decoder_layer_impl.h"
-#else
-#include "qwen2_decoder_layer.h"
-#endif
+#include <torch/torch.h>
+
+#include <cstdint>
+#include <vector>
+
+#include "framework/model_context.h"
+#include "framework/state_dict/state_dict.h"
+#include "framework/state_dict/utils.h"
 
 namespace xllm {
 namespace layer {
-#ifdef USE_MUSA
-using Qwen3DecoderLayerImpl = MUSAQwen3DecoderImpl;
-#else
-using Qwen3DecoderLayerImpl = Qwen2DecoderLayerImpl;
-#endif
-TORCH_MODULE(Qwen3DecoderLayer);
+class MUSALmHeadImpl : public torch::nn::Module {
+ public:
+  explicit MUSALmHeadImpl(const ModelContext& context);
 
+  ~MUSALmHeadImpl() {};
+
+  void load_state_dict(StateDict const& state_dict);
+
+  torch::Tensor forward(torch::Tensor const& input);
+
+ private:
+  int64_t hidden_size_;
+  int64_t vocab_size_;
+  torch::TensorOptions options_;
+  std::vector<torch::Tensor> weights_;
+};
 }  // namespace layer
 }  // namespace xllm

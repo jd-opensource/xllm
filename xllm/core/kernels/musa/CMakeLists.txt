@@ -8,7 +8,11 @@ file(GLOB_RECURSE MUSA_HEADER_FILES
 
 file(GLOB_RECURSE MUSA_SOURCE_FILES
   "${CMAKE_CURRENT_LIST_DIR}/*.cpp"
-  "${CMAKE_CURRENT_LIST_DIR}/../cuda/*.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/../cuda/activation.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/../cuda/norm.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/../cuda/reshape_paged_cache.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/../cuda/rope.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/../cuda/xattention/decoder_reshape_and_cache.cu"
   "${CMAKE_CURRENT_LIST_DIR}/../cuda/*.cpp"
 )
 

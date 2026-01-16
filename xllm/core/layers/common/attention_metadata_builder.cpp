@@ -116,4 +116,24 @@ AttentionMetadata AttentionMetadataBuilder::build(
   return attn_metadata;
 }
 
+#if defined(USE_MUSA)
+void AttentionMetadataBuilder::set_musa_metadata(
+    AttentionMetadata& attn_metadata,
+    std::vector<int32_t> const& q_seq_lens_vec,
+    std::vector<int32_t> const& kv_seq_lens_vec,
+    int32_t q_heads,
+    int32_t kv_heads,
+    int32_t q_head_dim,
+    torch::Tensor const& cache_mapping,
+    int32_t page_tokens) {
+  attn_metadata.amd = xllm_musa::AttnMetaData::build(q_seq_lens_vec,
+                                                     kv_seq_lens_vec,
+                                                     q_heads,
+                                                     kv_heads,
+                                                     q_head_dim,
+                                                     cache_mapping,
+                                                     page_tokens);
+}
+#endif
+
 }  // namespace xllm::layer

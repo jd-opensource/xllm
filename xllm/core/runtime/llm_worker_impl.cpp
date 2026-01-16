@@ -32,7 +32,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
-#if defined(USE_CUDA) || defined(USE_ILU)
+#if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
 #include "layers/cuda/flashinfer_workspace.h"
 #endif
 #include "models/model_registry.h"
@@ -46,7 +46,7 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
                              const runtime::Options& options)
     : WorkerImpl(parallel_args, device, options) {
   device_.set_device();
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_MUSA)
   // initialize flashinfer workspace
   ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
       device_);
