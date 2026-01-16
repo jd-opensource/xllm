@@ -25,7 +25,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "options.h"
 
-namespace xllm {
+namespace xllm::mlu {
 // Helper class to hold persistent parameters for graph execution
 // Multiple MluGraph instances can share the same GraphPersistentParam object
 class GraphPersistentParam {
@@ -128,4 +128,4 @@ class MluGraphExecutorImpl : public ExecutorImpl {
   std::unique_ptr<GraphPersistentParam> persistent_param_;
 };
 REGISTER_EXECUTOR("mlu", MluGraphExecutorImpl);
-}  // namespace xllm
+}  // namespace xllm::mlu

@@ -41,7 +41,7 @@ struct TilingBufferInfo;
 }
 }  // namespace atb
 
-namespace xllm {
+namespace xllm::npu {
 
 // Helper class to hold persistent parameters for graph execution
 // Multiple AclGraph instances can share the same GraphPersistentParam object
@@ -55,12 +55,18 @@ class GraphPersistentParam {
   ~GraphPersistentParam();
 
   // Update persistent tensors with new input data
-  void update(const torch::Tensor& tokens,
-              const torch::Tensor& k_cache,
-              const torch::Tensor& v_cache,
-              const torch::Tensor& positions,
-              const ModelInputParams& params,
-              uint32_t actual_num_tokens);
+  // If return_capture_params is true, returns a ModelInputParams with
+  // persistent buffer references. padded_num_tokens must be > 0 when
+  // return_capture_params is true, used for build new ModelInputParams for
+  // capture. If return_capture_params is false, only updates persistent buffers
+  // and returns std::nullopt.
+  std::optional<ModelInputParams> update(const torch::Tensor& tokens,
+                                         const torch::Tensor& k_cache,
+                                         const torch::Tensor& v_cache,
+                                         const torch::Tensor& positions,
+                                         const ModelInputParams& params,
+                                         uint32_t padded_num_token,
+                                         bool return_capture_params = false);
 
   // Getter methods for persistent tensors
   torch::Tensor persistent_tokens(uint32_t actual_tokens = 0) const {
@@ -168,6 +174,9 @@ class GraphPersistentParam {
 
   torch::Tensor q_seq_lens_;
   torch::Tensor kv_seq_lens_;
+
+  // for deepseekv3.2
+  torch::Tensor q_cu_seq_lens_;
 
   // for mtp model
   torch::Tensor persistent_embedding_;
@@ -279,4 +288,4 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   uint32_t get_bucket_num_tokens(uint32_t num_tokens) const;
 };
 REGISTER_EXECUTOR("npu", AclGraphExecutorImpl);
-}  // namespace xllm
+}  // namespace xllm::npu
