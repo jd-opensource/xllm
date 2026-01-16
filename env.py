@@ -170,8 +170,6 @@ def set_musa_envs():
     set_common_envs()
     os.environ["PYTORCH_MUSA_INSTALL_PATH"] = get_torch_musa_root_path()
     import torch_musa
-    os.environ["TORCH_MUSA_PYTHONPATH"] = torch_musa.core.cmake_prefix_path 
-    musa_home = os.getenv("MUSA_HOME")
-    if not musa_home:
-        raise RuntimeError("MUSA_HOME environment variable must be set for MUSA builds.")
-    os.environ["MUSA_TOOLKIT_ROOT_DIR"] = musa_home
+    from torch_musa.utils.musa_extension import MUSA_HOME
+    os.environ["TORCH_MUSA_PYTHONPATH"] = torch_musa.core.cmake_prefix_path
+    os.environ["MUSA_TOOLKIT_ROOT_DIR"] = MUSA_HOME
