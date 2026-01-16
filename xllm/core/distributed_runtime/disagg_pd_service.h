@@ -50,6 +50,16 @@ class DisaggPDService : public proto::DisaggPDService {
                               proto::Status* response,
                               ::google::protobuf::Closure* done) override;
 
+  virtual void LinkInstance(::google::protobuf::RpcController* controller,
+                            const proto::InstanceClusterInfo* request,
+                            proto::Status* response,
+                            ::google::protobuf::Closure* done) override;
+
+  virtual void UnlinkInstance(::google::protobuf::RpcController* controller,
+                              const proto::InstanceClusterInfo* request,
+                              proto::Status* response,
+                              ::google::protobuf::Closure* done) override;
+
  protected:
   std::unique_ptr<DisaggPDServiceImpl> disagg_pd_service_impl_;
 

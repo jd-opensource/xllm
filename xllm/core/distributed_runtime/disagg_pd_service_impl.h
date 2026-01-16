@@ -36,6 +36,12 @@ class DisaggPDServiceImpl {
       const proto::DisaggGenerationsRequests* request,
       proto::Status* response);
 
+  virtual void link_instance(const proto::InstanceClusterInfo* request,
+                             proto::Status* response);
+
+  virtual void unlink_instance(const proto::InstanceClusterInfo* request,
+                               proto::Status* response);
+
  protected:
   std::shared_ptr<Request> generate_request(const proto::DisaggRequest& req);
 

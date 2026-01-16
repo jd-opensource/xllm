@@ -120,6 +120,8 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
                          instance_info_.k_cache_ids,
                          instance_info_.v_cache_ids);
   instance_info_.dp_size = options_.dp_size();
+
+  engine->get_device_info(instance_info_.device_ips, instance_info_.ports);
 }
 
 void DisaggPDScheduler::profile_ttft() {
@@ -597,6 +599,9 @@ bool DisaggPDScheduler::decode_schedule(
       LOG(FATAL) << "Decode receive same request_id from prefill.";
     }
     received_request_map_[request->request_id()] = request;
+    instance_to_received_requests_map_[prefill_instance_name].insert(
+        request->request_id());
+    request_to_instance_map_[request->request_id()] = prefill_instance_name;
   }
 
   return true;
@@ -628,6 +633,12 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     }
     request = it->second;
     received_request_map_.erase(it);
+
+    auto inst_it = request_to_instance_map_.find(req_id);
+    if (inst_it != request_to_instance_map_.end()) {
+      instance_to_received_requests_map_[inst_it->second].erase(req_id);
+      request_to_instance_map_.erase(inst_it);
+    }
   }
 
   Token first_token(token_id);
@@ -752,11 +763,6 @@ void DisaggPDScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
   tbt = std::move(recent_tbt_);
 }
 
-bool DisaggPDScheduler::is_instance_linked(const std::string& instance_name) {
-  std::lock_guard<std::mutex> lock(linked_instances_mutex_);
-  return linked_instance_.count(instance_name) > 0;
-}
-
 bool DisaggPDScheduler::link_instance(
     const std::string& instance_name,
     const std::vector<uint64_t>& cluster_ids,
@@ -766,10 +772,43 @@ bool DisaggPDScheduler::link_instance(
     const int32_t dp_size) {
   std::lock_guard<std::mutex> lock(linked_instances_mutex_);
   if (!engine_->link_cluster(cluster_ids, addrs, device_ips, ports, dp_size)) {
-    LOG(ERROR) << "Link cluster failed!";
+    LOG(ERROR) << "Link instance failed, instance_name: " << instance_name;
     return false;
   }
+  LOG(INFO) << "Successfully linked instance, instance_name: " << instance_name;
   linked_instance_.emplace(instance_name);
+  return true;
+}
+
+bool DisaggPDScheduler::unlink_instance(
+    const std::string& instance_name,
+    const std::vector<uint64_t>& cluster_ids,
+    const std::vector<std::string>& addrs,
+    const std::vector<std::string>& device_ips,
+    const std::vector<uint16_t>& ports,
+    const int32_t dp_size) {
+  // Clear received requests from this instance
+  {
+    std::lock_guard<std::mutex> lock(received_request_map_mutex_);
+    auto it = instance_to_received_requests_map_.find(instance_name);
+    if (it != instance_to_received_requests_map_.end()) {
+      for (const auto& req_id : it->second) {
+        received_request_map_.erase(req_id);
+        request_to_instance_map_.erase(req_id);
+      }
+      instance_to_received_requests_map_.erase(it);
+    }
+  }
+
+  std::lock_guard<std::mutex> lock(linked_instances_mutex_);
+  if (!engine_->unlink_cluster(
+          cluster_ids, addrs, device_ips, ports, dp_size)) {
+    LOG(ERROR) << "Unlink instance failed, instance_name: " << instance_name;
+    return false;
+  }
+  LOG(INFO) << "Successfully unlinked instance, instance_name: "
+            << instance_name;
+  linked_instance_.erase(instance_name);
   return true;
 }
 

@@ -85,14 +85,19 @@ class DisaggPDScheduler : public ContinuousScheduler {
   void get_latency_metrics(std::vector<int64_t>& ttft,
                            std::vector<int64_t>& tbt);
 
-  bool is_instance_linked(const std::string& instance_name);
-
   bool link_instance(const std::string& instance_name,
                      const std::vector<uint64_t>& cluster_ids,
                      const std::vector<std::string>& addrs,
                      const std::vector<std::string>& device_ips,
                      const std::vector<uint16_t>& ports,
                      const int32_t dp_size);
+
+  bool unlink_instance(const std::string& instance_name,
+                       const std::vector<uint64_t>& cluster_ids,
+                       const std::vector<std::string>& addrs,
+                       const std::vector<std::string>& device_ips,
+                       const std::vector<uint16_t>& ports,
+                       const int32_t dp_size);
 
  protected:
   // Pre-execute prefill requests of different lengths at startup and obtain the
@@ -157,8 +162,17 @@ class DisaggPDScheduler : public ContinuousScheduler {
   int current_decode_idx_ = 0;
 
   // for decode
+  // request_id -> Request object
   std::unordered_map<std::string, std::shared_ptr<Request>>
       received_request_map_;
+  // prefill_instance_name -> set of request_ids.
+  // Used for bulk cleanup when a prefill instance is unlinked.
+  std::unordered_map<std::string, std::set<std::string>>
+      instance_to_received_requests_map_;
+  // request_id -> prefill_instance_name.
+  // Used to efficiently remove a request from
+  // instance_to_received_requests_map_ when the request is processed.
+  std::unordered_map<std::string, std::string> request_to_instance_map_;
   std::mutex received_request_map_mutex_;
 
   // use threadpool to handle all stream ouputs
