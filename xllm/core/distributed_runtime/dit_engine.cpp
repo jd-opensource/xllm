@@ -23,6 +23,9 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "runtime/worker.h"
+#if defined(USE_NPU)
+#include "torch_npu/csrc/core/npu/sys_ctrl/npu_sys_ctrl.h"
+#endif
 #include "util/env_var.h"
 #include "util/timer.h"
 
@@ -36,7 +39,18 @@ DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {
   for (const auto device : devices) {
     CHECK_EQ(device.type(), device_type)
         << "All devices should be the same type";
+    int currentDevId = device.index();
+#if defined(USE_NPU)
+    int ret = aclrtSetDevice(currentDevId);
+    if (ret != 0) {
+      LOG(ERROR) << "ACL set device id:" << currentDevId
+                 << " failed, ret:" << ret;
+    }
+#elif defined(USE_MLU)
+    // TODO(mlu): implement mlu set device
+#endif
   }
+
   if (devices.size() > 1) {
     // create a process group for each device if there are multiple gpus
     process_groups_ = parallel_state::create_npu_process_groups(devices);
@@ -61,15 +75,8 @@ DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {
     for (auto& worker : workers_) {
       futures.emplace_back(worker->process_group_test_async());
     }
-    // Wait for all futures to complete with a configurable timeout.
-    // The timeout can be adjusted via the
-    // XLLM_PROCESS_GROUP_ASYNC_TIMEOUT_SECONDS environment variable (default: 4
-    // seconds). This is particularly important in multi-node multi-device
-    // scenarios where network latency may require a longer timeout period.
-    const int timeout_seconds = util::get_process_group_test_timeout_seconds();
-    folly::collectAll(futures)
-        .within(std::chrono::seconds(timeout_seconds))
-        .get();
+    // wait up to 10 seconds for all futures to complete
+    folly::collectAll(futures).within(std::chrono::seconds(10)).get();
   }
 }
 
