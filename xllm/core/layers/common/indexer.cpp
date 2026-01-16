@@ -262,62 +262,42 @@ IndexerRuntimeContext IndexerImpl::prepare_runtime_context(
   return ctx;
 }
 
-std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
-    const torch::Tensor& x,
+torch::Tensor IndexerImpl::indexer_q_base(
     const torch::Tensor& qr,
     const torch::Tensor& positions,
-    torch::Tensor& k_cache,
-    const AttentionMetadata& attn_metadata,
-    bool is_prefill,
-    const std::optional<torch::Tensor>& mask) {
+    const AttentionMetadata& attn_metadata) {
   // Forward pass through wq_b
   auto q = wq_b_->forward(qr);
-  q = q.reshape({q.size(0), n_heads_, head_dim_});
-
-  // Forward pass through wk and normalize
-  auto k = wk_->forward(x);
-  k = k_norm_->forward(k);
-
-  // Split q and k into positional encoding and non-positional encoding parts
-  // (like Python)
-  auto q_split =
-      torch::split(q, {rope_head_dim_, head_dim_ - rope_head_dim_}, -1);
-  auto q_pe = q_split[0].contiguous();
-  auto q_nope = q_split[1].contiguous();
+  q = q.view({q.size(0), n_heads_, head_dim_});
+  auto q_pe = q.slice(-1, 0, rope_head_dim_);
   rotary_emb_->forward(q_pe,
                        positions,
                        attn_metadata.q_cu_seq_lens,
                        attn_metadata.max_query_len,
                        attn_metadata.is_prefill);
 
-  auto k_split =
-      torch::split(k, {rope_head_dim_, head_dim_ - rope_head_dim_}, -1);
-  auto k_pe = k_split[0].contiguous();
-  auto k_nope = k_split[1].contiguous();
+  // Apply rotation activation
+  q = rotate_activation(q, hadamard_matrix_);
+  return q;
+}
+
+std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::indexer_k_base(
+    const torch::Tensor& x,
+    const torch::Tensor& positions,
+    torch::Tensor& k_cache,
+    const AttentionMetadata& attn_metadata) {
+  // Forward pass through wk and normalize
+  auto k = wk_->forward(x);
+  k = k_norm_->forward(k);
 
   // Apply rotary embedding to positional parts only (like Python)
-  auto k_pe_unsqueezed = k_pe.unsqueeze(1);
-  rotary_emb_->forward(k_pe_unsqueezed,
+  auto k_pe = k.slice(-1, 0, rope_head_dim_).unsqueeze(1);
+  rotary_emb_->forward(k_pe,
                        positions,
                        attn_metadata.q_cu_seq_lens,
                        attn_metadata.max_query_len,
                        attn_metadata.is_prefill);
-  k_pe = k_pe_unsqueezed.squeeze(1);
-
-  // Reconstruct q and k
-  q_pe = q_pe.reshape({q_pe.size(0), n_heads_, rope_head_dim_});
-  q = torch::cat({q_pe, q_nope}, -1);
-  k = torch::cat({k_pe, k_nope}, -1);
-
-  // Apply rotation activation
-  q = rotate_activation(q, hadamard_matrix_);
   k = rotate_activation(k, hadamard_matrix_);
-
-  // Forward pass through weights projection
-  auto weights = weights_proj_->forward(x);
-
-  // kv_cache part
-  int64_t num_tokens = x.size(0);
 
   // Reshape paged cache
   auto k_unsqueezed = k.unsqueeze(1);
@@ -329,8 +309,24 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
   reshape_paged_cache_params.direction = false;
   xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
-
   k = k_unsqueezed.squeeze(1);
+
+  // Forward pass through weights projection
+  auto weights = weights_proj_->forward(x);
+
+  return {k, weights};
+}
+
+std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
+    const torch::Tensor& x,
+    const torch::Tensor& qr,
+    const torch::Tensor& positions,
+    torch::Tensor& k_cache,
+    const AttentionMetadata& attn_metadata,
+    bool is_prefill,
+    const std::optional<torch::Tensor>& mask) {
+  auto q = indexer_q_base(qr, positions, attn_metadata);
+  auto [k, weights] = indexer_k_base(x, positions, k_cache, attn_metadata);
 
   // Unified parameter setup for both prefill and decode modes
   IndexerRuntimeContext ctx = prepare_runtime_context(
