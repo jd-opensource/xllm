@@ -104,6 +104,12 @@ struct ForwardInput {
     ForwardInput inputs;
     inputs.token_ids = safe_to(token_ids, device, true);
     inputs.positions = safe_to(positions, device, true);
+    // Convert positions to int64 on CUDA to avoid repeated type conversions
+    // in rope kernels (CUDA kernel requires int64 for position indexing)
+    if (device.is_cuda() && inputs.positions.defined() &&
+        inputs.positions.scalar_type() != torch::kInt64) {
+      inputs.positions = inputs.positions.to(torch::kInt64);
+    }
     inputs.input_params = input_params.to(device);
     inputs.sampling_params = sampling_params.to(device, dtype);
     inputs.transfer_kv_infos = transfer_kv_infos;

@@ -48,13 +48,11 @@ void apply_rotary(RotaryParams& params) {
 #elif defined(USE_CUDA)
   bool is_neox = !params.interleaved;
 
-  auto pos_ids = params.position_ids.value().to(torch::kInt64);
-  auto cos_sin_vec = params.cos_sin.chunk(4, -1);
-  auto cos = cos_sin_vec[0];
-  auto sin = cos_sin_vec[2];
-  auto cos_sin = torch::cat({cos, sin}, -1);
-
-  cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
+  // position_ids is already int64 (converted in ForwardInput::to() for CUDA)
+  auto& pos_ids = params.position_ids.value();
+  // Use pre-computed CUDA cache directly, avoiding chunk/cat per layer
+  cuda::rotary_embedding(
+      pos_ids, params.q, params.k, params.cuda_cos_sin, is_neox);
 #elif defined(USE_ILU)
   torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
   ilu::apply_rope_pos_ids_cos_sin_cache(params.q,
@@ -577,6 +575,39 @@ void gather_split(GatherSplitParams& params) {
                     params.output_tail);
 #else
   LOG(FATAL) << "gather_split not implemented";
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
+    Fp8ScaledQuantizeParams& params) {
+#if defined(USE_CUDA)
+  return cuda::fp8_scaled_quantize(params.input, params.output, params.scale);
+#else
+  LOG(FATAL) << "fp8_scaled_quantize is only supported on CUDA";
+  return std::make_tuple(torch::Tensor(), torch::Tensor());
+#endif
+}
+
+torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params) {
+#if defined(USE_CUDA)
+  auto out_2d = cuda::fp8_scaled_matmul(params.a,
+                                        params.b,
+                                        params.a_scale,
+                                        params.b_scale,
+                                        params.output_dtype,
+                                        params.bias,
+                                        params.output);
+
+  // Auto reshape output if original input shape is provided
+  if (params.input_shape.has_value()) {
+    auto out_shape = params.input_shape.value();
+    out_shape.back() = params.b.size(0);
+    return out_2d.view(out_shape);
+  }
+  return out_2d;
+#else
+  LOG(FATAL) << "fp8_scaled_matmul is only supported on CUDA";
+  return torch::Tensor();
 #endif
 }
 
