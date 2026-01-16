@@ -25,17 +25,41 @@ limitations under the License.
 
 namespace xllm {
 
+using EmbeddingInput = EmbeddingOutput;
+
 struct MMInputItem {
   void clear() {
     type = MMType::NONE;
     raw_data.clear();
   }
 
-  MMType type = MMType::NONE;
-  std::string raw_data;       // binary
-  torch::Tensor decode_data;  // image: rgb, [c,h,w], uint8
+  std::optional<torch::Tensor> get_decode_data(MMType type_) const {
+    if (type_ == MMType::IMAGE) {
+      return decode_image;
+    } else if (type_ == MMType::VIDEO) {
+      return decode_video;
+    } else if (type_ == MMType::AUDIO) {
+      return decode_audio;
+    } else {
+      return std::nullopt;
+    }
+  }
+
+  uint32_t type = MMType::NONE;
+
+  bool has_type(MMType type_) const { return (type & type_) != 0; }
+
+  bool is_embedding() const { return embedding.embedding.defined(); }
+
+  std::string raw_data;  // binary
+
+  torch::Tensor decode_image;  // image: rgb, [c,h,w], uint8
+  torch::Tensor decode_video;  // video: rgb, [t,c,h,w], uint8
+  torch::Tensor decode_audio;  // audio: mono, [t], float32
+
   VideoMetadata video_meta;
-  EmbeddingOutput embedding;
+  AudioMetadata audio_meta;
+  EmbeddingInput embedding;
 };
 
 struct MMPayload {
@@ -92,8 +116,11 @@ class MMInput {
     std::vector<torch::Tensor> vec;
 
     for (const auto& item : items_) {
-      if (item.type == type) {
-        vec.emplace_back(item.decode_data);
+      if (item.has_type(type)) {
+        auto t = item.get_decode_data(type);
+        if (t) {
+          vec.emplace_back(*t);
+        }
       }
     }
     return std::move(vec);
@@ -103,7 +130,7 @@ class MMInput {
     std::vector<VideoMetadata> metas;
     metas.reserve(items_.size());
     for (auto& item : items_) {
-      if (item.type == MMType::VIDEO) {
+      if (item.has_type(MMType::VIDEO)) {
         metas.push_back(item.video_meta);
       }
     }

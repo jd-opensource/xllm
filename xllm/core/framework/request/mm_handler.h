@@ -83,6 +83,20 @@ class VideoHandler : public MMHandlerBase {
   std::string dataurl_prefix_{"data:video"};
 };
 
+class AudioHandler : public MMHandlerBase {
+ public:
+  AudioHandler() = default;
+  ~AudioHandler() = default;
+
+  virtual bool load(const MMContent& content,
+                    MMInputItem& input,
+                    MMPayload& payload) override;
+  virtual bool decode(MMInputItem& input) override;
+
+ private:
+  std::string dataurl_prefix_{"data:audio"};
+};
+
 class MMHandlerSet {
  public:
   MMHandlerSet();

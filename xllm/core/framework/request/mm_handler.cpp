@@ -19,6 +19,7 @@ limitations under the License.
 #include <butil/strings/string_number_conversions.h>
 #include <glog/logging.h>
 
+#include "common/global_flags.h"
 #include "core/util/http_downloader.h"
 #include "mm_codec.h"
 #include "mm_embedding_handler.h"
@@ -107,7 +108,7 @@ bool ImageHandler::load(const MMContent& content,
 
 bool ImageHandler::decode(MMInputItem& input) {
   OpenCVImageDecoder decoder;
-  return decoder.decode(input.raw_data, input.decode_data);
+  return decoder.decode(input.raw_data, input.decode_image);
 }
 
 bool VideoHandler::load(const MMContent& content,
@@ -135,14 +136,54 @@ bool VideoHandler::load(const MMContent& content,
 }
 
 bool VideoHandler::decode(MMInputItem& input) {
-  OpenCVVideoDecoder decoder;
-  return decoder.decode(input.raw_data, input.decode_data, input.video_meta);
+  if (FLAGS_use_audio_in_video) {
+    FFmpegAudioDecoder audio_decoder;
+    if (audio_decoder.decode(
+            input.raw_data, input.decode_audio, input.audio_meta)) {
+      input.type |= MMType::AUDIO;
+    } else {
+      LOG(ERROR) << "decode audio in video failed";
+      return false;
+    }
+  }
+
+  FFmpegVideoDecoder decoder;
+  return decoder.decode(input.raw_data, input.decode_video, input.video_meta);
+}
+
+bool AudioHandler::load(const MMContent& content,
+                        MMInputItem& input,
+                        MMPayload& payload) {
+  input.clear();
+
+  const auto& audio_url = content.audio_url;
+  const auto& url = audio_url.url;
+
+  if (url.compare(0, dataurl_prefix_.size(), dataurl_prefix_) ==
+      0) {  // data url
+
+    input.type = MMType::AUDIO;
+    return this->load_from_dataurl(url, input.raw_data, payload);
+  } else if (url.compare(0, httpurl_prefix_.size(), httpurl_prefix_) ==
+             0) {  // http url
+
+    input.type = MMType::AUDIO;
+    return this->load_from_http(url, input.raw_data);
+  } else {
+    LOG(ERROR) << " audio url is invalid, url is " << url;
+    return false;
+  }
+}
+
+bool AudioHandler::decode(MMInputItem& input) {
+  FFmpegAudioDecoder decoder;
+  return decoder.decode(input.raw_data, input.decode_audio, input.audio_meta);
 }
 
 MMHandlerSet::MMHandlerSet() {
   handlers_["image_url"] = std::make_unique<ImageHandler>();
   handlers_["video_url"] = std::make_unique<VideoHandler>();
-  // handlers_["audio_url"] = std::make_unique<AudioHandler>();
+  handlers_["audio_url"] = std::make_unique<AudioHandler>();
   handlers_["image_embedding"] =
       std::make_unique<MMEmbeddingHandler>(MMType::IMAGE);
   handlers_["video_embedding"] =
