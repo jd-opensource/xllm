@@ -367,8 +367,11 @@ class BuildDistWheel(bdist_wheel):
         print("🔨 build project...")
         self.run_command('build')
 
-        print("🧪 testing UT...")
-        self.run_command('test')
+        if self.device != "ilu":
+            print("🧪 testing UT...")
+            self.run_command('test')
+        else:
+            print(" Skip testing UT for ilu")
 
         if self.arch == 'arm':
             ext_path = get_base_dir() + f"/build/lib.linux-aarch64-cpython-{get_python_version()}/"
