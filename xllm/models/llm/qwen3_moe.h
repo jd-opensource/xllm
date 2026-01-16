@@ -65,6 +65,8 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
     auto apply = [this](torch::Tensor x) {
       auto freqs_t = x[0].clone();
+      int64_t half_dim = static_cast<int64_t>(freqs_t.size(-1) / 2);
+
       for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
         int64_t offset = dim_idx;  // H -> offset=1, W -> offset=2
         int64_t section_len = mrope_section_[dim_idx];
@@ -72,7 +74,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
 
         // indices: [offset, offset+3, offset+6, ..., < length]
         auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
-        auto idx_second_half = torch::arange(offset, length, 3, torch::kLong);
+        auto idx_second_half = torch::arange(offset + half_dim, length + half_dim, 3, torch::kLong);
         auto idx_tensor =
             torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
         // freqs_t[..., idx] = freqs[dim_idx][..., idx]
