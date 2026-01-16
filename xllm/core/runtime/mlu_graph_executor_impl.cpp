@@ -38,7 +38,7 @@ uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
 }
 }  // namespace
 
-namespace xllm {
+namespace xllm::mlu {
 
 GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const torch::Device& device,
@@ -237,4 +237,4 @@ torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   return persistent_param_->output_.slice(0, 0, tokens.size(0));
 }
 
-}  // namespace xllm
+}  // namespace xllm::mlu

@@ -77,7 +77,7 @@ class MluGraphExecutorTest : public ::testing::Test {
     options_.block_size(block_size);
 
     model_ = std::make_unique<MockCausalLM>(tensor_options_);
-    impl_ = std::make_unique<MluGraphExecutorImpl>(
+    impl_ = std::make_unique<::xllm::mlu::MluGraphExecutorImpl>(
         model_.get(), model_args_, device, options_);
     base_impl_ = std::make_unique<BaseExecutorImpl>(
         model_.get(), model_args_, device, options_);
@@ -123,7 +123,7 @@ class MluGraphExecutorTest : public ::testing::Test {
   runtime::Options options_;
   std::unique_ptr<CausalLM> model_;
   std::vector<KVCache> kv_caches_;
-  std::unique_ptr<MluGraphExecutorImpl> impl_;
+  std::unique_ptr<::xllm::mlu::MluGraphExecutorImpl> impl_;
   std::unique_ptr<BaseExecutorImpl> base_impl_;
 };
 

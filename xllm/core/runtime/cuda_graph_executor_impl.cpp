@@ -32,7 +32,7 @@ limitations under the License.
 #include "layers/common/attention_metadata_builder.h"
 #include "layers/cuda/flashinfer_planinfo.h"
 
-namespace xllm {
+namespace xllm::cuda {
 
 // CudaGraphPersistentParam implementation
 CudaGraphPersistentParam::CudaGraphPersistentParam(
@@ -581,4 +581,4 @@ uint32_t CudaGraphExecutorImpl::get_bucket_num_tokens(
   }
 }
 
-}  // namespace xllm
+}  // namespace xllm::cuda

@@ -32,7 +32,7 @@ limitations under the License.
 #include "executor_impl_factory.h"
 #include "options.h"
 
-namespace xllm {
+namespace xllm::cuda {
 
 // Helper class to hold persistent parameters for CUDA graph execution
 // Multiple CudaGraph instances can share the same CudaGraphPersistentParam
@@ -271,4 +271,4 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   uint32_t get_bucket_num_tokens(uint32_t num_tokens) const;
 };
 REGISTER_EXECUTOR("cuda", CudaGraphExecutorImpl);
-}  // namespace xllm
+}  // namespace xllm::cuda
