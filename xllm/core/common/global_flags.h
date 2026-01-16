@@ -241,6 +241,8 @@ DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
 
+DECLARE_bool(use_audio_in_video);
+
 // --- multi-step decode config ---
 
 DECLARE_int32(max_decode_rounds);

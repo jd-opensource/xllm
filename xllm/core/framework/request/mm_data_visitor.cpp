@@ -169,6 +169,9 @@ bool EncoderEmbeddingGatherVisitor::visit(MMDataItem& item) {
     if (absl::StartsWith(key, gather_prefix_)) {
       datas_[key].push_back(emb.index({mask}));
     }
+    if (absl::StartsWith(key, deepstack_prefix_)) {
+      datas_[key].push_back(emb);
+    }
   }
   return true;
 }
