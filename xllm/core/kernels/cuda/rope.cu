@@ -17,7 +17,6 @@ limitations under the License.
 #include <torch/all.h>
 
 #include "cuda_ops_api.h"
-#include "function_factory.h"
 
 // ref to:
 // https://github.com/vllm-project/vllm/blob/main/csrc/pos_encoding_kernels.cu

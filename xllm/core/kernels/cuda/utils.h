@@ -17,10 +17,17 @@ limitations under the License.
 
 #include <ATen/DynamicLibrary.h>
 #include <torch/torch.h>
+#include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/extra/module.h>
+#include <tvm/ffi/optional.h>
 
 #include <string>
+#include <tuple>
 
 #include "core/util/utils.h"
+
+namespace ffi = tvm::ffi;
 
 namespace xllm::kernel::cuda {
 
@@ -66,5 +73,14 @@ std::string get_batch_decode_uri(torch::ScalarType dtype_q,
                                  int64_t pos_encoding_mode,
                                  bool use_sliding_window,
                                  bool use_logits_soft_cap);
+
+std::tuple<torch::Tensor, double> split_scale_param(const torch::Tensor& scale);
+
+ffi::Tensor to_ffi_tensor(const torch::Tensor& torch_tensor);
+
+ffi::Module get_module(const std::string& uri);
+
+ffi::Function get_function(const std::string& uri,
+                           const std::string& func_name);
 
 }  // namespace xllm::kernel::cuda

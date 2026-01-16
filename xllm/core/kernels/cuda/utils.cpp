@@ -18,9 +18,12 @@ limitations under the License.
 #include <cuda_runtime.h>
 
 #include <cstdlib>
+#include <mutex>
+#include <unordered_map>
 
 #include "core/platform/device.h"
 #include "core/util/env_var.h"
+#include "dl_convertor.cpp"
 
 namespace {
 const std::unordered_map<torch::ScalarType, std::string_view>
@@ -130,4 +133,52 @@ torch::Tensor get_cache_buffer(const int32_t seq_len,
   return buffer.slice(0, 0, seq_len);
 }
 
+std::tuple<torch::Tensor, double> split_scale_param(
+    const torch::Tensor& scale) {
+  if (!scale.defined()) {
+    return std::make_tuple(torch::Tensor(), 1.0);
+  }
+
+  if (scale.dim() == 0) {
+    return std::make_tuple(torch::Tensor(), scale.item<double>());
+  }
+
+  return std::make_tuple(scale, 1.0);
+}
+
+ffi::Tensor to_ffi_tensor(const torch::Tensor& torch_tensor) {
+  if (!torch_tensor.defined()) {
+    std::runtime_error("torch_tensor is not defined");
+  }
+
+  if (torch_tensor.numel() == 0) {
+    std::runtime_error("torch_tensor is empty");
+  }
+
+  auto dlpack = toDLPackImpl<DLManagedTensorVersioned>(torch_tensor);
+  return ffi::Tensor::FromDLPackVersioned(dlpack);
+}
+
+ffi::Module get_module(const std::string& uri) {
+  std::string uri_path = path_to_uri_so_lib(uri);
+  return ffi::Module::LoadFromFile(uri_path);
+}
+
+ffi::Function get_function(const std::string& uri,
+                           const std::string& func_name) {
+  static std::unordered_map<std::string, ffi::Function> cache;
+  static std::mutex mtx;
+
+  std::string key = uri + "|" + func_name;
+
+  std::lock_guard<std::mutex> lock(mtx);
+  auto it = cache.find(key);
+  if (it != cache.end()) {
+    return it->second;
+  }
+
+  auto func = get_module(uri)->GetFunction(func_name).value();
+  cache[key] = func;
+  return func;
+}
 }  // namespace xllm::kernel::cuda

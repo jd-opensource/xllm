@@ -14,12 +14,11 @@ limitations under the License.
 ==============================================================================*/
 
 #include "cuda_ops_api.h"
-#include "function_factory.h"
 
 namespace xllm::kernel::cuda {
 
 void batch_prefill(const std::string& uri,
-                   torch::Tensor plan_info,
+                   ffi::Array<int64_t> plan_info,
                    torch::Tensor float_workspace_buffer,
                    torch::Tensor int_workspace_buffer,
                    torch::Tensor page_locked_int_workspace_buffer,
@@ -39,53 +38,66 @@ void batch_prefill(const std::string& uri,
                                   /*use_custom_mask=*/false);
 
   if (backend == "fa2") {
-    FunctionFactory::get_instance().fa2_prefill_ragged_run_func(uri).call(
-        float_workspace_buffer,
-        int_workspace_buffer,
+    get_function(uri, "ragged_run")(
+        to_ffi_tensor(float_workspace_buffer),
+        to_ffi_tensor(int_workspace_buffer),
         plan_info,
-        query,
-        key,
-        value,
-        q_cu_seq_lens,
-        kv_cu_seq_lens,
-        output,
-        output_lse,
+        to_ffi_tensor(query),
+        to_ffi_tensor(key),
+        to_ffi_tensor(value),
+        to_ffi_tensor(q_cu_seq_lens),
+        to_ffi_tensor(kv_cu_seq_lens),
+        to_ffi_tensor(output),
+        output_lse.has_value() ? to_ffi_tensor(output_lse.value())
+                               : ffi::Optional<ffi::Tensor>(),
         /*mask_mode_code=*/1,  // CAUSAL
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),
-        /*maybe_custom_mask=*/std::optional<torch::Tensor>(),
-        /*maybe_mask_indptr=*/std::optional<torch::Tensor>(),
-        /*maybe_alibi_slopes=*/std::optional<torch::Tensor>(),
-        /*maybe_prefix_len_ptr=*/std::optional<torch::Tensor>(),
-        /*maybe_token_pos_in_items_ptr=*/std::optional<torch::Tensor>(),
-        /*maybe_max_item_len_ptr=*/std::optional<torch::Tensor>(),
+        /*maybe_custom_mask=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_mask_indptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_alibi_slopes=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_prefix_len_ptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_token_pos_in_items_ptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_max_item_len_ptr=*/ffi::Optional<ffi::Tensor>(),
         /*logits_soft_cap=*/0.0,
         sm_scale,
         /*rope_rcp_scale=*/1.0,
         /*rope_rcp_theta=*/1.0 / 10000.0,
         /*token_pos_in_items_len=*/0);
   } else if (backend == "fa3") {
-    FunctionFactory::get_instance().fa3_prefill_ragged_run_func(uri).call(
-        float_workspace_buffer,
-        int_workspace_buffer,
+    // for fp8, append scale tensors
+    torch::Tensor q_scale = torch::Tensor();
+    torch::Tensor k_scale = torch::Tensor();
+    torch::Tensor v_scale = torch::Tensor();
+    torch::Tensor o_scale = torch::Tensor();
+
+    auto [scale_v_tensor, scale_v_scalar] = split_scale_param(v_scale);
+
+    get_function(uri, "ragged_run")(
+        to_ffi_tensor(float_workspace_buffer),
+        to_ffi_tensor(int_workspace_buffer),
         plan_info,
-        query,
-        key,
-        value,
-        q_cu_seq_lens,
-        kv_cu_seq_lens,
-        output,
-        output_lse,
+        to_ffi_tensor(query),
+        to_ffi_tensor(key),
+        to_ffi_tensor(value),
+        to_ffi_tensor(q_cu_seq_lens),
+        to_ffi_tensor(kv_cu_seq_lens),
+        to_ffi_tensor(output),
+        output_lse.has_value() ? to_ffi_tensor(output_lse.value())
+                               : ffi::Optional<ffi::Tensor>(),
         /*mask_mode_code=*/1,  // CAUSAL
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),
-        /*maybe_prefix_len_ptr=*/std::optional<torch::Tensor>(),
-        /*maybe_token_pos_in_items_ptr=*/std::optional<torch::Tensor>(),
-        /*maybe_max_item_len_ptr=*/std::optional<torch::Tensor>(),
+        /*maybe_prefix_len_ptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_token_pos_in_items_ptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_max_item_len_ptr=*/ffi::Optional<ffi::Tensor>(),
+        scale_v_tensor.defined() ? to_ffi_tensor(scale_v_tensor)
+                                 : ffi::Optional<ffi::Tensor>(),
         /*logits_soft_cap=*/0.0,
         sm_scale,
+        scale_v_scalar,
         /*token_pos_in_items_len=*/0);
   }
 }

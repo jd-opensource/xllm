@@ -17,7 +17,6 @@ limitations under the License.
 
 #include "flashinfer_planinfo.h"
 #include "flashinfer_workspace.h"
-#include "kernels/cuda/function_factory.h"
 #include "kernels/cuda/utils.h"
 #include "kernels/ops_api.h"
 
@@ -59,26 +58,26 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   // maybe we need to update shared attn state before execute attention,
   // currently we update flashinfer step_wise_attn_state_ at layer 0.
   bool causal = attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
-  flashinfer::update_plan_info(
-      attn_metadata.plan_info,
-      causal ? xllm::kernel::cuda::determine_attention_backend(
-                   /*pos_encoding_mode=*/0,
-                   /*use_fp16_qk_reduction=*/false,
-                   /*use_custom_mask=*/false)
-             : "fa2",
-      attn_metadata,
-      query.scalar_type(),
-      key.scalar_type(),
-      output.scalar_type(),
-      head_size_,
-      head_size_,
-      num_heads_,
-      num_kv_heads_,
-      /*block_size*/ k_cache.size(1),
-      /*window_size_left*/ sliding_window_,
-      /*enable_cuda_graph*/ false,
-      /*causal*/ causal,
-      /*use_tensor_core*/ true);
+  std::string backend = xllm::kernel::cuda::determine_attention_backend(
+      /*pos_encoding_mode=*/0,
+      /*use_fp16_qk_reduction=*/false,
+      /*use_custom_mask=*/false);
+
+  flashinfer::update_plan_info(attn_metadata.plan_info,
+                               backend,
+                               attn_metadata,
+                               query.scalar_type(),
+                               key.scalar_type(),
+                               output.scalar_type(),
+                               head_size_,
+                               head_size_,
+                               num_heads_,
+                               num_kv_heads_,
+                               /*block_size*/ k_cache.size(1),
+                               /*window_size_left*/ sliding_window_,
+                               /*enable_cuda_graph*/ false,
+                               /*causal*/ causal,
+                               /*use_tensor_core*/ true);
 
   xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
   reshape_paged_cache_params.key = key;
