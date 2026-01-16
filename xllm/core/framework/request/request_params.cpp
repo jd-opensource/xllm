@@ -285,12 +285,13 @@ void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
 
   // Parse tools from proto request
   if (request.tools_size() > 0) {
-    params.tools = parse_tools_from_proto(request.tools());
-
-    if (request.has_tool_choice()) {
-      params.tool_choice = request.tool_choice();
+    if (request.has_tool_choice() && request.tool_choice() == "none") {
+      // Don't pass tools to model when tool_choice is none
+      params.tool_choice = "none";
     } else {
-      params.tool_choice = "auto";
+      params.tools = parse_tools_from_proto(request.tools());
+      params.tool_choice =
+          request.has_tool_choice() ? request.tool_choice() : "auto";
     }
   }
 
