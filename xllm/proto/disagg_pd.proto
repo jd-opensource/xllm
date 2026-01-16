@@ -207,9 +207,20 @@ message DisaggGenerationsRequests {
   repeated DisaggGenerationsRequest multi_gens = 1;
 }
 
+message InstanceClusterInfo {
+  string instance_name = 1;
+  repeated uint64 cluster_ids = 2;
+  repeated string addrs = 3;
+  repeated string device_ips = 4;
+  repeated uint32 ports = 5;
+  int32 dp_size = 6;
+}
+
 service DisaggPDService {
   rpc AddNewRequests(DisaggRequests) returns (DisaggResponses) {}
   rpc FirstGeneration(DisaggGenerationsRequests) returns (Status) {}
   rpc MultiGenerations(DisaggGenerationsRequests) returns (Status) {}
   rpc SendPullSignal(PullSignal) returns (Status) {}
+  rpc LinkInstance(InstanceClusterInfo) returns (Status) {}
+  rpc UnlinkInstance(InstanceClusterInfo) returns (Status) {}
 }

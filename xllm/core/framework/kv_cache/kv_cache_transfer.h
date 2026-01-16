@@ -80,7 +80,7 @@ class KVCacheTransfer {
                               const std::string& remote_addr,
                               const std::string& device_ip,
                               const uint16_t port,
-                              bool force_flag = false) = 0;
+                              bool force_flag = true) = 0;
 
   virtual bool pull_kv_blocks(const uint64_t src_cluster_id,
                               const std::string& src_addr,

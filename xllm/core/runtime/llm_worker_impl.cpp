@@ -133,9 +133,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
       auto results =
           folly::collectAll(futures).within(std::chrono::seconds(60)).get();
       for (const auto& result : results) {
+        // TODO: Add error handling
         if (!result.value()) {
           LOG(ERROR) << "kv_cache_transfer_ failed";
-          return std::nullopt;
+          break;
         }
       }
     }
@@ -187,9 +188,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     auto results =
         folly::collectAll(futures).within(std::chrono::seconds(60)).get();
     for (const auto& result : results) {
+      // TODO: Add error handling
       if (!result.value()) {
         LOG(ERROR) << "kv_cache_transfer_ failed";
-        return std::nullopt;
+        break;
       }
     }
   }
