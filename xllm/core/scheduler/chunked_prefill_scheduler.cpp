@@ -56,7 +56,6 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
          remaining_token_budget > min_speculative_tokens_required_ &&
          latency_budget > estimate_latency && remaining_seq_budget > 0) {
     std::shared_ptr<Request> request(running_queue->top());
-    // TODO: check if request is timeout
 
     const size_t num_sequences = request->sequences().size();
     std::vector<Sequence*> candidate_sequences;
@@ -728,9 +727,7 @@ bool ChunkedPrefillScheduler::allocate_blocks_for(
   allocate_shared_blocks_for(sequence);
 
   // number of tokens in the kv cache, which are already processed
-  const size_t kv_cache_tokens_num =
-      std::max(sequence->kv_state().kv_cache_tokens_num(),
-               sequence->host_kv_state().kv_cache_tokens_num());
+  const size_t kv_cache_tokens_num = sequence->kv_cache_tokens_num();
   // the total number tokens for the sequence can be handled till now.
   // there may some tokens can not be handled once when enable chunked prefill.
   size_t max_handle_num_tokens =

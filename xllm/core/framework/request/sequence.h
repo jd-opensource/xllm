@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <absl/time/clock.h>
 #include <absl/time/time.h>
 #include <folly/futures/Future.h>
 
@@ -120,7 +121,7 @@ class Sequence final {
   bool is_chunked_prefill_stage() const {
     return stage() == SequenceStage::CHUNKED_PREFILL;
   }
-
+  bool is_prefill_stage() const { return stage() != SequenceStage::DECODE; }
   // get the sequence stage
   SequenceStage stage() const {
     if (kv_state_.kv_cache_tokens_num() <
@@ -160,6 +161,11 @@ class Sequence final {
   size_t num_need_compute_tokens() const {
     return num_tokens_ - std::max(kv_state_.kv_cache_tokens_num(),
                                   host_kv_state_.kv_cache_tokens_num());
+  }
+
+  size_t kv_cache_tokens_num() const {
+    return std::max(kv_state_.kv_cache_tokens_num(),
+                    host_kv_state_.kv_cache_tokens_num());
   }
 
   // add a new token id to the sequence and update the count
@@ -224,6 +230,13 @@ class Sequence final {
 
   // time between two tokens
   int64_t tbt(const absl::Time& now);
+
+  void set_wait_time_ms() {
+    wait_time_ms_ = static_cast<int32_t>(
+        absl::ToDoubleSeconds(absl::Now() - latest_generate_time_) * 1000);
+  }
+  int32_t get_wait_time_ms() const { return wait_time_ms_; }
+
   // set sequence ttft
   void set_time_to_first_token_latency_seconds(
       double time_to_first_token_latency_seconds) {
@@ -301,6 +314,11 @@ class Sequence final {
   int32_t total_rounds_cached() const { return total_rounds_cached_; }
 
   LogprobState* logprob_state() { return logprob_state_.get(); }
+  void set_estimated_latency(double estimated_latency) {
+    estimated_latency_ = estimated_latency;
+  }
+
+  double estimated_latency() const { return estimated_latency_; }
 
   // set sequence id
   void set_seq_id(int32_t seq_id) { seq_id_ = seq_id; }
@@ -366,6 +384,8 @@ class Sequence final {
     size_t num_decoder_embeddings = 0;
     std::vector<int32_t> encoder_tokens;
   };
+  int32_t wait_time_ms_ = 0;
+  double estimated_latency_ = 0.0;
 
   // the index of the sequence in the request
   size_t index_ = 0;
@@ -380,7 +400,7 @@ class Sequence final {
   absl::Time latest_generate_time_;
 
   // sequence ttft latency
-  double time_to_first_token_latency_seconds_;
+  double time_to_first_token_latency_seconds_ = 0.0;
 
   // whether the added token is the first generated token
   bool is_first_token_ = false;

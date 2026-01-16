@@ -108,7 +108,7 @@ bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
 }
 
 void ContinuousScheduler::create_running_queue(const Options& options) {
-  if (options.priority_strategy() == "FCFS") {
+  if (options.priority_strategy() == "fcfs") {
     running_queue_offline_ = std::make_unique<FCFSQueue>();
     running_queue_ = std::make_unique<FCFSQueue>();
   } else {
@@ -118,7 +118,10 @@ void ContinuousScheduler::create_running_queue(const Options& options) {
     } else if (options.priority_strategy() == "priority") {
       comparator = std::make_unique<StrictPriorityComparator>();
     } else {
-      LOG(FATAL) << "Unknown strategy: " << options.priority_strategy();
+      // using default FCFS
+      running_queue_offline_ = std::make_unique<FCFSQueue>();
+      running_queue_ = std::make_unique<FCFSQueue>();
+      return;
     }
     running_queue_ =
         std::make_unique<DynamicPriorityQueue>(std::move(comparator));
@@ -862,9 +865,7 @@ std::vector<Batch> ContinuousScheduler::schedule_request(
       return batch;
     }
 
-    if (!waiting_priority_queue_.empty() || !running_queue_->empty() ||
-        !waiting_priority_queue_offline_.empty() ||
-        !running_queue_offline_->empty()) {
+    if (if_queue_not_empty()) {
       continue;
     }
 

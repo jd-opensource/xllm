@@ -49,6 +49,11 @@ class HierarchyBlockManagerPool : public BlockManagerPool {
 
   bool allocate(Sequence* sequence, size_t num_tokens) override;
 
+  // control the copy in blocks num
+  bool allocate(Sequence* sequence,
+                size_t num_tokens,
+                size_t max_copy_in_blocks_num) override;
+
   void allocate_shared(Sequence* sequence) override;
 
   void deallocate(Sequence* sequence) override;

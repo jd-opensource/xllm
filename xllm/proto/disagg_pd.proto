@@ -61,8 +61,14 @@ message DisaggRequest {
   bool skip_special_tokens = 27;
   repeated int32 prompt_tokens = 28;
   bool offline = 29;
-  optional int32 slo_ms = 30;
+  optional int32 ttlt_slo_ms = 30;
   optional Priority priority = 31;
+  optional int32 ttft_slo_ms = 32;
+  optional int32 tpot_slo_ms = 33;
+  optional int32 tpot_priority_weight = 34;
+  optional int32 ttft_priority_weight = 35;
+  optional int32 ttlt_priority_weight = 36;
+  optional int32 priority_weight = 37;
 
 }
 
