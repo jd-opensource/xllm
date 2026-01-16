@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/common/lm_head.h"
+#include "core/layers/common/rms_norm.h"
 #include "models/model_registry.h"
 
 namespace xllm {
