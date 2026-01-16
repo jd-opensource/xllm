@@ -141,6 +141,10 @@ void reshape_from_cache(ReshapeFromCacheParams& params) {
 
 void batch_prefill(AttentionParams& params) {
 #if defined(USE_MLU)
+  std::optional<torch::Tensor> block_tables;
+  if (params.attn_metadata.is_chunked_prefill) {
+    block_tables = params.attn_metadata.block_table;
+  }
   mlu::batch_prefill(params.query,
                      params.key,
                      params.value,
@@ -154,7 +158,7 @@ void batch_prefill(AttentionParams& params) {
                      params.k_quant_scale,
                      params.v_quant_scale,
                      params.out_quant_scale,
-                     params.attn_metadata.block_table,
+                     block_tables,
                      params.attn_metadata.max_query_len,
                      params.attn_metadata.max_seq_len,
                      params.scale,
@@ -617,6 +621,49 @@ void gather_split(GatherSplitParams& params) {
                     params.valid_token_num,
                     params.output_head,
                     params.output_tail);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+void fused_mla_q(FusedMlaQParams& params) {
+#if defined(USE_MLU)
+  mlu::fused_mla_q(params.q,
+                   params.output,
+                   params.output_scale,
+                   params.output_norm,
+                   params.gamma,
+                   params.smooth_quant_scale,
+                   params.weight_b,
+                   params.weight_b_scale,
+                   params.weight_c,
+                   params.sin,
+                   params.cos,
+                   params.position_id,
+                   params.quant_mode,
+                   params.eps,
+                   params.interleaved);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+void fused_mla_kv(FusedMlaKVParams& params) {
+#if defined(USE_MLU)
+  mlu::fused_mla_kv(params.input_kv,
+                    params.sin,
+                    params.cos,
+                    params.position_id,
+                    params.gamma,
+                    params.kv_cache,
+                    params.kv_cache_scale,
+                    params.slot_mapping,
+                    params.cache_bs_id,
+                    params.cache_seq_offset,
+                    params.quant_mode,
+                    params.is_paged_cache,
+                    params.eps,
+                    params.interleaved);
 #else
   NOT_IMPLEMENTED();
 #endif

@@ -966,4 +966,156 @@ struct GatherSplitParams {
   torch::Tensor output_tail;
 };
 
+struct FusedMlaQParams {
+  // Query tensor for the MLA attention operation.
+  // Shape: (batch_size, sequence_length, input_size).
+  // Dtype: float16 or bfloat16.
+  torch::Tensor q;
+
+  // Output tensor for the fused MLA query operation.
+  // Shape: (batch_size, sequence_length, head_num, head_size).
+  // Dtype: same as q, int8, float8_e4m3fn.
+  torch::Tensor output;
+
+  // Output quantization scales for dynamic per-token quantization.
+  // Shape: (batch_size, sequence_length, head_num).
+  // Dtype: float32.
+  // Only used when quant_mode is "dynamic_per_token".
+  torch::Tensor output_scale;
+
+  // Intermediate RMSNorm result tensor.
+  // Shape: (batch_size, sequence_length, input_size).
+  // Dtype: same as q.
+  std::optional<torch::Tensor> output_norm;
+
+  // Scaling parameter for RMSNorm normalization.
+  // Shape: (input_size).
+  // Dtype: same as q.
+  torch::Tensor gamma;
+
+  // Smooth quantization scale for input tensor.
+  // Shape: (input_size) if provided.
+  // Dtype: float32.
+  // Optional: can be nullopt if smooth quantization is not used.
+  std::optional<torch::Tensor> smooth_quant_scale;
+
+  // Weight matrix for the first matmul operation in MLA.
+  // Shape: (head_num * (nope_dim + pe_dim), input_size).
+  // Dtype: int8, float8_e4m3fn.
+  torch::Tensor weight_b;
+
+  // Per-channel scale for weight_b quantization.
+  // Shape: (head_num * (nope_dim + pe_dim)).
+  // Dtype: float32.
+  torch::Tensor weight_b_scale;
+
+  // Weight matrix for the bmm operation in MLA.
+  // Shape: (head_num, kv_lora_rank, nope_dim).
+  // Dtype: same as q.
+  torch::Tensor weight_c;
+
+  // Sine values for rotary position embedding.
+  // Shape: (rotary_sequence_length, pe_dim).
+  // Dtype: same as q.
+  torch::Tensor sin;
+
+  // Cosine values for rotary position embedding.
+  // Shape: (rotary_sequence_length, pe_dim).
+  // Dtype: same as q.
+  torch::Tensor cos;
+
+  // Position IDs for rotary embedding.
+  // Shape: (batch_size).
+  // Dtype: int32.
+  torch::Tensor position_id;
+
+  // Quantization mode for the operation.
+  // Supported values: "none", "dynamic_per_token".
+  // Default: "none".
+  std::string quant_mode = "none";
+
+  // Epsilon value for RMSNorm numerical stability.
+  double eps = 1e-6;
+
+  // Rotary embedding mode flag.
+  // If true, apply cross rotary embedding (interleaved).
+  // If false, apply fold rotary embedding (non-interleaved).
+  bool interleaved = true;
+};
+
+struct FusedMlaKVParams {
+  // The input key-value tensor.
+  // Shape: (batch, seq, head_num, head_size).
+  // Dtype: half, bfloat16.
+  torch::Tensor input_kv;
+
+  // The rotary sin table tensor.
+  // Shape: (rotary_seq, rotary_dim).
+  // Dtype: same as input_kv.
+  torch::Tensor sin;
+
+  // The rotary cos table tensor.
+  // Shape: (rotary_seq, rotary_dim).
+  // Dtype: same as input_kv.
+  torch::Tensor cos;
+
+  // The rotary seq_len offset of each batch.
+  // Shape: (batch).
+  // Dtype: int32.
+  torch::Tensor position_id;
+
+  // The weight of RMSNorm normalization.
+  // Shape: (norm_dim).
+  // Dtype: same as input_kv.
+  torch::Tensor gamma;
+
+  // The cache tensor for key-value storage.
+  // Shape: (num_blocks, num_heads, block_size, head_size).
+  // Dtype: half, bfloat16, int8, float8_e4m3fn.
+  torch::Tensor kv_cache;
+
+  // Scale tensor for cache quantization.
+  // For static per-channel quantization: shape is (head_num, head_size) or
+  // (batch, head_num, head_size). For dynamic per-token quantization: shape is
+  // (num_blocks, head_num, block_size) and is an output tensor. Dtype: float32.
+  // Optional: only used when quant_mode is "static_per_channel" or
+  // "dynamic_per_token".
+  std::optional<torch::Tensor> kv_cache_scale;
+
+  // The slot mapping tensor for paged attention.
+  // Shape: (batch, seq).
+  // Dtype: int32.
+  // Optional: only required when is_paged_cache is true.
+  std::optional<torch::Tensor> slot_mapping;
+
+  // The batch index in the cache where the kv tensors will be placed.
+  // Shape: (batch).
+  // Dtype: int32.
+  // Optional: used for non-paged cache style.
+  std::optional<torch::Tensor> cache_bs_id;
+
+  // A 1D tensor representing the sequence offsets where the cache data starts
+  // for each batch. Shape: (batch). Dtype: int32. Optional: used for non-paged
+  // cache style.
+  std::optional<torch::Tensor> cache_seq_offset;
+
+  // Quantization mode for the operation.
+  // Supported values: "none", "static_per_channel", "dynamic_per_token".
+  std::string quant_mode = "none";
+
+  // Flag indicating the cache style.
+  // If true, uses paged cache style and slot_mapping must be provided.
+  // If false, uses linear cache style and cache_bs_id/cache_seq_offset may be
+  // used. Default: true.
+  bool is_paged_cache = true;
+
+  // Epsilon value for RMSNorm numerical stability.
+  double eps = 1e-6;
+
+  // Rotary embedding mode flag.
+  // If true, apply cross rotary embedding (interleaved).
+  // If false, apply fold rotary embedding (non-interleaved).
+  bool interleaved = true;
+};
+
 }  // namespace xllm::kernel

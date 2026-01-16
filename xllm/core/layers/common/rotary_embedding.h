@@ -102,8 +102,16 @@ class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
                bool is_prompt);
 
   torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
+  torch::Tensor get_sin_cache() { return sin_; }
+  torch::Tensor get_cos_cache() { return cos_; }
 
  private:
+  void apply_rotary(torch::Tensor& input,
+                    const std::optional<torch::Tensor>& position_ids,
+                    const torch::Tensor& cu_query_lens,
+                    int64_t max_query_len,
+                    bool discrete);
+
   int64_t head_size_;
   int64_t rotary_dim_;
   bool interleaved_;

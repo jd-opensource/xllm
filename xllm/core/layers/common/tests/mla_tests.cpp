@@ -28,10 +28,13 @@ limitations under the License.
 
 namespace xllm {
 namespace layer {
-
 class DeepseekMLATest : public ::testing::Test {
  protected:
   void SetUp() override {
+    torch::Device torch_device(Device::type_torch(), 0);
+    Device device(torch_device);
+    device.set_seed();
+
     FLAGS_enable_mla = true;
     // Initialize default model arguments for testing
     model_args_ = create_mla_model_args();
@@ -42,7 +45,7 @@ class DeepseekMLATest : public ::testing::Test {
     // Initialize tensor options
     options_ = torch::TensorOptions()
                    .dtype(torch::kBFloat16)
-                   .device(Device::type_torch(), 0)
+                   .device(torch_device)
                    .requires_grad(false);
 
     // Create mock ProcessGroup and initialize ParallelArgs
@@ -81,10 +84,6 @@ class DeepseekMLATest : public ::testing::Test {
     model_args.index_topk() = 2048;
 
     return model_args;
-  }
-
-  void TearDown() override {
-    // Clean up if needed
   }
 
   void init_test_weights() {
@@ -132,16 +131,17 @@ class DeepseekMLATest : public ::testing::Test {
          {q_lora_rank, hidden_size}},
     };
 
+    auto float_option = options_.dtype(torch::kFloat32);
     for (auto& [key, shape] : qweight_map) {
-      auto tensor = torch::full(shape, 1, options_.dtype(torch::kInt8));
+      auto tensor = torch::randint(-127, 128, shape, options_).to(torch::kInt8);
       weight_dict_.insert({key, tensor});
     }
     for (auto& [key, shape] : scale_map) {
-      auto tensor = torch::full(shape, 0.03, options_.dtype(torch::kFloat32));
+      auto tensor = torch::randn(shape, float_option) * 0.01 + 0.03;
       weight_dict_.insert({key, tensor});
     }
     for (auto& [key, shape] : weight_map) {
-      auto tensor = torch::full(shape, 0.02, options_);
+      auto tensor = torch::randn(shape, options_) * 0.01 + 0.02;
       weight_dict_.insert({key, tensor});
     }
   }
@@ -159,7 +159,6 @@ class DeepseekMLATest : public ::testing::Test {
         0, (batch_size + 1) * max_query_len, max_query_len, option_int);
 
     // Create kv_cu_seq_lens tensor
-    // TODO: Define proper shape and values based on actual requirements
     metadata.kv_cu_seq_lens = torch::zeros({batch_size + 1}, option_int);
 
     // Create seq_lens tensor
@@ -192,6 +191,37 @@ class DeepseekMLATest : public ::testing::Test {
     metadata.is_dummy = false;
   }
 
+  torch::Tensor run_single_test(bool use_fused_mla_qkv,
+                                int64_t batch_size,
+                                int64_t max_query_len,
+                                bool is_prefill,
+                                const torch::Tensor& hidden_states,
+                                const torch::Tensor& positions,
+                                KVCache& kv_cache) {
+    auto deepseek_mla = DeepseekV2Attention(
+        model_args_, quant_args_, parallel_args_, options_, use_fused_mla_qkv);
+
+    std::string prefix = "model.layers.0.self_attn.";
+    StateDict state_dict(weight_dict_, prefix);
+    deepseek_mla->load_state_dict(state_dict.get_dict_with_prefix(prefix));
+
+    // Create metadata object and populate it
+    AttentionMetadata metadata;
+    int64_t num_tokens = batch_size * max_query_len;
+    populate_attention_metadata(metadata,
+                                batch_size,
+                                max_query_len,
+                                model_args_.max_position_embeddings(),
+                                is_prefill,
+                                num_tokens);
+
+    auto output = deepseek_mla(positions, hidden_states, metadata, kv_cache);
+    xllm::Device device(options_.device());
+    device.synchronize_default_stream();
+
+    return output;
+  }
+
   ModelArgs model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_{0, 1, nullptr};
@@ -201,113 +231,136 @@ class DeepseekMLATest : public ::testing::Test {
   std::unique_ptr<xllm::ProcessGroup> mock_process_group_;
 
   std::unordered_map<std::string, torch::Tensor> weight_dict_;
-
-  // Expected output for precision verification
-  std::vector<float> expected_output_;
 };
 
-TEST_F(DeepseekMLATest, PrefillTest) {
-  auto deepseek_mla =
-      DeepseekV2Attention(model_args_, quant_args_, parallel_args_, options_);
-
-  std::string prefix = "model.layers.0.self_attn.";
-  StateDict state_dict(weight_dict_, prefix);
-  deepseek_mla->load_state_dict(state_dict.get_dict_with_prefix(prefix));
-
-  // Create input tensors
+TEST_F(DeepseekMLATest, PrefillTestRandomInput) {
   int64_t batch_size = 2;
   int64_t max_query_len = 5;
-  int64_t block_num = 100;
   int64_t num_tokens = batch_size * max_query_len;
   int64_t hidden_size = model_args_.hidden_size();
-  auto k_cache = torch::zeros(
-      {block_num,
-       1,
-       1,
-       model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()},
-      options_);
-  auto index_cache =
-      torch::zeros({block_num, 1, 1, model_args_.index_head_dim()}, options_);
-  KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
-  // Create metadata object and populate it
-  AttentionMetadata metadata;
-  populate_attention_metadata(metadata,
-                              batch_size,
-                              max_query_len,
-                              model_args_.max_position_embeddings(),
-                              /*is_prefill=*/true,
-                              num_tokens);
-  auto hidden_states = torch::full({num_tokens, hidden_size}, 0.05, options_);
+  auto hidden_states = torch::randn({num_tokens, hidden_size}, options_) * 0.02;
   auto positions = torch::arange(max_query_len, options_.dtype(torch::kInt32))
                        .repeat({batch_size});
-  auto output = deepseek_mla(positions, hidden_states, metadata, kv_cache);
-  xllm::Device device(options_.device());
-  device.synchronize_default_stream();
 
-  // Verify output is not all zeros (weights were loaded)
-  auto output_cpu = output.cpu();
-  auto output_sum = torch::sum(output_cpu).item<float>();
-  ASSERT_NE(output_sum, 0.0f)
-      << "Output should not be all zeros after loading weights, output_sum: "
-      << output_sum;
+  int64_t block_num = 100;
+  auto k_cache = torch::randn({block_num,
+                               1,
+                               1,
+                               model_args_.qk_rope_head_dim() +
+                                   model_args_.kv_lora_rank()},
+                              options_) *
+                 0.01;
+  auto index_cache =
+      torch::randn({block_num, 1, 1, model_args_.index_head_dim()}, options_) *
+      0.01;
+  KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
-  std::vector<float> result(output_cpu.numel(), 3.0312);
-  test::verify_precision(output_cpu, result);
-  LOG(INFO) << "Prefill test passed - output avg: "
-            << output_sum / output_cpu.numel();
+  auto output = run_single_test(false,
+                                batch_size,
+                                max_query_len,
+                                true,
+                                hidden_states,
+                                positions,
+                                kv_cache);
+
+  std::vector<float> results = {-0.292969,
+                                2.21875,
+                                0.103516,
+                                2.15625,
+                                1.20312,
+                                -0.589844,
+                                0.59375,
+                                -0.546875,
+                                2.53125,
+                                -0.871094};
+  auto slice_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
+  test::verify_precision(slice_output, results);
 }
 
-TEST_F(DeepseekMLATest, DecoderTest) {
-  auto deepseek_mla =
-      DeepseekV2Attention(model_args_, quant_args_, parallel_args_, options_);
-
-  std::string prefix = "model.layers.0.self_attn.";
-  StateDict state_dict(weight_dict_, prefix);
-  deepseek_mla->load_state_dict(state_dict.get_dict_with_prefix(prefix));
-
-  // Create input tensors
+TEST_F(DeepseekMLATest, DecoderTestRandomInput) {
   int64_t batch_size = 1;
   int64_t max_query_len = 1;
-  int64_t block_num = 100;
   int64_t num_tokens = batch_size * max_query_len;
   int64_t hidden_size = model_args_.hidden_size();
-  auto k_cache =
-      torch::ones({block_num,
-                   1,
-                   1,
-                   model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()},
-                  options_);
-  auto index_cache =
-      torch::ones({block_num, 1, 1, model_args_.index_head_dim()}, options_);
-  KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
-  // Create metadata object and populate it
-  AttentionMetadata metadata;
-  populate_attention_metadata(metadata,
-                              batch_size,
-                              max_query_len,
-                              model_args_.max_position_embeddings(),
-                              /*is_prefill=*/false,
-                              num_tokens);
-  auto hidden_states = torch::full({num_tokens, hidden_size}, 0.05, options_);
+  auto hidden_states = torch::randn({num_tokens, hidden_size}, options_) * 0.02;
   auto positions = torch::arange(max_query_len, options_.dtype(torch::kInt32))
                        .repeat({batch_size});
-  auto output = deepseek_mla(positions, hidden_states, metadata, kv_cache);
-  xllm::Device device(options_.device());
-  device.synchronize_default_stream();
 
-  // Verify output is not all zeros (weights were loaded)
-  auto output_cpu = output.cpu();
-  auto output_sum = torch::sum(output_cpu).item<float>();
-  ASSERT_NE(output_sum, 0.0f)
-      << "Output should not be all zeros after loading weights, output_sum: "
-      << output_sum;
+  int64_t block_num = 100;
+  auto k_cache = torch::randn({block_num,
+                               1,
+                               1,
+                               model_args_.qk_rope_head_dim() +
+                                   model_args_.kv_lora_rank()},
+                              options_) *
+                 0.01;
+  auto index_cache =
+      torch::randn({block_num, 1, 1, model_args_.index_head_dim()}, options_) *
+      0.01;
+  KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
-  std::vector<float> result(output_cpu.numel(), 3.0312);
-  test::verify_precision(output_cpu, result);
-  LOG(INFO) << "Decoder test passed - output avg: "
-            << output_sum / output_cpu.numel();
+  auto output_non_fused = run_single_test(false,
+                                          batch_size,
+                                          max_query_len,
+                                          false,
+                                          hidden_states,
+                                          positions,
+                                          kv_cache);
+  auto output_fused = run_single_test(true,
+                                      batch_size,
+                                      max_query_len,
+                                      false,
+                                      hidden_states,
+                                      positions,
+                                      kv_cache);
+  test::verify_tensor_close(output_fused, output_non_fused);
+}
+
+TEST_F(DeepseekMLATest, VariousBatchSizesTest) {
+  std::vector<int64_t> test_cases = {1, 2, 4, 8};
+  int32_t seq_len = 1;
+  for (const auto& batch_size : test_cases) {
+    LOG(INFO) << "Testing batch_size=" << batch_size << ", seq_len=" << seq_len;
+    int64_t num_tokens = batch_size * seq_len;
+    int64_t hidden_size = model_args_.hidden_size();
+    auto hidden_states =
+        torch::randn({num_tokens, hidden_size}, options_) * 0.02;
+    auto positions = torch::arange(seq_len, options_.dtype(torch::kInt32))
+                         .repeat({batch_size});
+
+    int64_t block_num = 100;
+    auto k_cache = torch::randn({block_num,
+                                 1,
+                                 1,
+                                 model_args_.qk_rope_head_dim() +
+                                     model_args_.kv_lora_rank()},
+                                options_) *
+                   0.01;
+    auto index_cache =
+        torch::randn({block_num, 1, 1, model_args_.index_head_dim()},
+                     options_) *
+        0.01;
+    KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
+
+    bool is_prefill = false;
+    auto output_fused = run_single_test(true,
+                                        batch_size,
+                                        seq_len,
+                                        is_prefill,
+                                        hidden_states,
+                                        positions,
+                                        kv_cache);
+    auto output_non_fused = run_single_test(false,
+                                            batch_size,
+                                            seq_len,
+                                            is_prefill,
+                                            hidden_states,
+                                            positions,
+                                            kv_cache);
+    test::verify_tensor_close(output_fused, output_non_fused);
+  }
 }
 
 }  // namespace layer

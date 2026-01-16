@@ -173,6 +173,39 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
 }
 
+void DeepseekScalingRotaryEmbeddingImpl::apply_rotary(
+    torch::Tensor& input,
+    const std::optional<torch::Tensor>& position_ids,
+    const torch::Tensor& cu_query_lens,
+    int64_t max_query_len,
+    bool discrete) {
+  const int32_t dim = -1;
+  auto input_rot = input.slice(dim, 0, rotary_dim_);
+  torch::Tensor input_pass;
+  if (rotary_dim_ < head_size_) {
+    input_pass = input.slice(dim, rotary_dim_, head_size_);
+  }
+
+  xllm::kernel::RotaryParams rotary_params;
+  rotary_params.q = input_rot;
+  rotary_params.sin = sin_;
+  rotary_params.cos = cos_;
+  rotary_params.cos_sin = cos_sin_cache_;
+  rotary_params.position_ids = position_ids;
+  rotary_params.cu_query_lens = cu_query_lens;
+  rotary_params.interleaved = interleaved_;
+  rotary_params.discrete = discrete;
+  rotary_params.max_query_len = max_query_len;
+  xllm::kernel::apply_rotary(rotary_params);
+  input_rot = rotary_params.q;
+
+  if (rotary_dim_ < head_size_) {
+    input = torch::cat({input_rot, input_pass}, dim);
+  } else {
+    input = input_rot;
+  }
+}
+
 void DeepseekScalingRotaryEmbeddingImpl::forward(
     torch::Tensor& q,
     torch::Tensor& k,
@@ -190,37 +223,9 @@ void DeepseekScalingRotaryEmbeddingImpl::forward(
     position_ids = positions;
     max_query_len = 1;
   }
-
-  auto q_rot = q.slice(-1, 0, rotary_dim_);
-  auto k_rot = k.slice(-1, 0, rotary_dim_);
-  torch::Tensor q_pass, k_pass;
-  if (rotary_dim_ < head_size_) {
-    q_pass = q.slice(-1, rotary_dim_, head_size_);
-    k_pass = k.slice(-1, rotary_dim_, head_size_);
-  }
-
-  xllm::kernel::RotaryParams rotary_params;
-  rotary_params.q = q_rot;
-  rotary_params.sin = sin_;
-  rotary_params.cos = cos_;
-  rotary_params.cos_sin = cos_sin_cache_;
-  rotary_params.position_ids = position_ids;
-  rotary_params.cu_query_lens = cu_query_lens;
-  rotary_params.interleaved = interleaved_;
-  rotary_params.discrete = discrete;
-  rotary_params.max_query_len = max_query_len;
-  xllm::kernel::apply_rotary(rotary_params);
-  q_rot = rotary_params.q;
-
-  rotary_params.q = k_rot;
-  xllm::kernel::apply_rotary(rotary_params);
-  k_rot = rotary_params.q;
-  if (rotary_dim_ < head_size_) {
-    q = torch::cat({q_rot, q_pass}, -1);
-    k = torch::cat({k_rot, k_pass}, -1);
-  } else {
-    q = q_rot;
-    k = k_rot;
+  apply_rotary(q, position_ids, cu_query_lens, max_query_len, discrete);
+  if (k.defined()) {
+    apply_rotary(k, position_ids, cu_query_lens, max_query_len, discrete);
   }
 }
 
