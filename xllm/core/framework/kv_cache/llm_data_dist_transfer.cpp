@@ -196,7 +196,8 @@ bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
     LOG(ERROR) << "LinkLlmClusters failed, ret = " << std::hex << ret;
     return false;
   }
-  LOG(INFO) << "LinkLlmClusters success.";
+  LOG(INFO) << "LinkLlmClusters success, ip : " << device_ip
+            << ", port : " << port;
   linked_cluster_ids.insert(cluster_id);
 
   return true;
@@ -219,6 +220,10 @@ bool LlmDataDistTransfer::unlink_cluster(const uint64_t& cluster_id,
     LOG(ERROR) << "UnlinkLlmClusters failed, ret = " << std::hex << ret;
     return false;
   }
+  LOG(INFO) << "UnlinkLlmClusters success, ip : " << remote_ip
+            << ", port : " << remote_port;
+  linked_cluster_ids.erase(cluster_id);
+
   return true;
 }
 
@@ -247,6 +252,7 @@ bool LlmDataDistTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     bool is_spec_draft) {
+  bool result = true;
   for (int64_t layer_index = 0; layer_index < num_layers_; ++layer_index) {
     // Wait for the KV cache computation of this layer to complete.
     layer_synchronizer->synchronize_layer(layer_index);
@@ -277,11 +283,11 @@ bool LlmDataDistTransfer::push_kv_blocks(
         LOG(ERROR) << "PushKvBlocks failed, layer = " << layer_index
                    << ", k_ret = " << std::hex << k_ret
                    << ", v_ret = " << std::hex << v_ret;
-        return false;
+        result = false;
       }
     }
   }
-  return true;
+  return result;
 }
 
 ClusterInfo LlmDataDistTransfer::create_cluster_info(

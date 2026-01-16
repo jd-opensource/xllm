@@ -125,108 +125,40 @@ XServiceClient::~XServiceClient() {
 std::string XServiceClient::get_instance_name() { return instance_name_; }
 
 void XServiceClient::register_instance(const InstanceInfo& instance_info) {
-  if (etcd_client_) {
-    std::string key_prefix = "";
-    if (InstanceRole(instance_info.type) == InstanceRole::DEFAULT) {
-      key_prefix =
-          ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DEFAULT];
-    } else if (InstanceRole(instance_info.type) == InstanceRole::PREFILL) {
-      key_prefix =
-          ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::PREFILL];
-    } else if (InstanceRole(instance_info.type) == InstanceRole::DECODE) {
-      key_prefix =
-          ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DECODE];
-    } else if (InstanceRole(instance_info.type) == InstanceRole::MIX) {
-      key_prefix = ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::MIX];
-    } else {
-      LOG(ERROR) << "Unsupported instance type: " << instance_info.type;
-      return;
-    }
-
-    int retry_cnt = 0;
-    while (!etcd_client_->register_instance(
-        key_prefix.append(instance_info.name),
-        instance_info.serialize_to_json().dump(),
-        FLAGS_etcd_ttl)) {
-      if (retry_cnt >= 30) {
-        LOG(FATAL) << "Register Instance to etcd faill!";
-        return;
-      }
-
-      LOG(ERROR) << "Register Instance faill, wait 2s!";
-      sleep(2);
-      retry_cnt++;
-    }
-
-    register_done_ = true;
-    LOG(INFO) << "Success register instance to etcd.";
+  std::string key_prefix = "";
+  if (InstanceRole(instance_info.type) == InstanceRole::DEFAULT) {
+    key_prefix =
+        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DEFAULT];
+  } else if (InstanceRole(instance_info.type) == InstanceRole::PREFILL) {
+    key_prefix =
+        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::PREFILL];
+  } else if (InstanceRole(instance_info.type) == InstanceRole::DECODE) {
+    key_prefix =
+        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DECODE];
+  } else if (InstanceRole(instance_info.type) == InstanceRole::MIX) {
+    key_prefix = ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::MIX];
   } else {
-    brpc::Controller cntl;
-    xllm_service::proto::InstanceMetaInfo req;
-    if (instance_info.name.empty()) {
-      LOG(ERROR) << "Required instance name, currently is empty.";
-      return;
-    }
-    // auto parsed_name = parse_instance_name(instance_info.name);
-    if (!check_instance_name(instance_info.name)) {
-      return;
-    }
-    if (!check_instance_name(instance_info.rpc_address)) {
-      return;
-    }
-    req.set_name(instance_info.name);
-    req.set_rpc_address(instance_info.rpc_address);
-    if (instance_info.type.empty()) {
-      LOG(WARNING)
-          << "Required instance type, support `default/prefill/decode`, "
-          << "currently is empty, we will use `default` type.";
-      req.set_type(xllm_service::proto::InstanceType::DEFAULT);
-    } else {
-      if (InstanceRole(instance_info.type) == InstanceRole::DEFAULT) {
-        req.set_type(xllm_service::proto::InstanceType::DEFAULT);
-      } else if (InstanceRole(instance_info.type) == InstanceRole::PREFILL) {
-        req.set_type(xllm_service::proto::InstanceType::PREFILL);
-      } else if (InstanceRole(instance_info.type) == InstanceRole::DECODE) {
-        req.set_type(xllm_service::proto::InstanceType::DECODE);
-      } else if (InstanceRole(instance_info.type) == InstanceRole::MIX) {
-        req.set_type(xllm_service::proto::InstanceType::MIX);
-      } else {
-        LOG(ERROR) << "Unsupported instance type: " << instance_info.type;
-        return;
-      }
-    }
-    // warp kv cache info
-    for (const auto& value : instance_info.cluster_ids) {
-      *req.mutable_cluster_ids()->Add() = value;
-    }
-    for (const auto& value : instance_info.addrs) {
-      *req.mutable_addrs()->Add() = value;
-    }
-    for (const auto& value : instance_info.k_cache_ids) {
-      *req.mutable_k_cache_ids()->Add() = value;
-    }
-    for (const auto& value : instance_info.v_cache_ids) {
-      *req.mutable_v_cache_ids()->Add() = value;
-    }
-    req.set_dp_size(instance_info.dp_size);
-
-    xllm_service::proto::StatusCode resp;
-    xservice_stub_->RegisterInstance(&cntl, &req, &resp, nullptr);
-    if (cntl.Failed()) {
-      LOG(ERROR) << "Fail to register instance to xservice server "
-                 << xservice_addr_ << ", error text: " << cntl.ErrorText();
-      return;
-    } else if (resp.status_code() != 0) {
-      LOG(ERROR) << "Fail to register instance to xservice server "
-                 << xservice_addr_ << ", error code: " << resp.status_code();
-      return;
-    } else {
-      register_done_ = true;
-      // instance_name_ = instance_info.name;
-      LOG(INFO) << "Success to register instance to xservice server "
-                << xservice_addr_;
-    }
+    LOG(ERROR) << "Unsupported instance type: " << instance_info.type;
+    return;
   }
+
+  int retry_cnt = 0;
+  while (
+      !etcd_client_->register_instance(key_prefix.append(instance_info.name),
+                                       instance_info.serialize_to_json().dump(),
+                                       FLAGS_etcd_ttl)) {
+    if (retry_cnt >= 30) {
+      LOG(FATAL) << "Register Instance to etcd faill!";
+      return;
+    }
+
+    LOG(ERROR) << "Register Instance faill, wait 2s!";
+    sleep(2);
+    retry_cnt++;
+  }
+
+  register_done_ = true;
+  LOG(INFO) << "Success register instance to etcd.";
 }
 
 InstanceInfo XServiceClient::get_instance_info(
@@ -270,6 +202,12 @@ InstanceInfo XServiceClient::get_instance_info(
     result.v_cache_ids.emplace_back(v_cache_id);
   }
   result.dp_size = resp.dp_size();
+  for (auto& ip : resp.device_ips()) {
+    result.device_ips.emplace_back(ip);
+  }
+  for (auto& port : resp.ports()) {
+    result.ports.emplace_back(port);
+  }
 
   return result;
 }

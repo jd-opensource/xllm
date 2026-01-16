@@ -62,4 +62,22 @@ void DisaggPDService::SendPullSignal(
   LOG(FATAL) << "SendPullSignal is not supported in DisaggPDService";
 }
 
+void DisaggPDService::LinkInstance(
+    ::google::protobuf::RpcController* controller,
+    const proto::InstanceClusterInfo* request,
+    proto::Status* response,
+    ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  disagg_pd_service_impl_->link_instance(request, response);
+}
+
+void DisaggPDService::UnlinkInstance(
+    ::google::protobuf::RpcController* controller,
+    const proto::InstanceClusterInfo* request,
+    proto::Status* response,
+    ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  disagg_pd_service_impl_->unlink_instance(request, response);
+}
+
 }  // namespace xllm

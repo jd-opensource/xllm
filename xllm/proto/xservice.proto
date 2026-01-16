@@ -33,6 +33,8 @@ message InstanceMetaInfo {
   repeated int64 v_cache_ids = 6;
   int32 dp_size = 7;
   repeated string addrs = 8;
+  repeated string device_ips = 9;
+  repeated uint32 ports = 10;
 }
 
 message KvCacheEvent {
