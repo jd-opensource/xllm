@@ -101,17 +101,19 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   param.isFA = false;
   param.isBF16 = args.dtype() == "bfloat16";
   param.enableSwiGLU = true;
+  param.isPrefill = is_prefill;
 
   // prefill only feature
-  param.isPrefill = is_prefill;
   param.enableLcoc = is_prefill;  // false;
   param.enableSplitFuse =
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
 
   // decode only feature
   param.enableAclGraphPagedAttention = FLAGS_enable_graph && !is_prefill;
-  
+  param.enableInitRoutingV3 = !is_prefill;
+
   // Can be applied to prefill, but has not been tested yet
+  param.enableFusedReducesumDiv = !is_prefill;
   param.enableAclnnExternelAddRmsNorm = FLAGS_enable_intralayer_addnorm && !is_prefill;;
   param.enableAclnnAddRmsNorm = !is_prefill;
   param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
@@ -342,6 +344,10 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   int32_t input_idx = 0;
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
 
+  LOG(INFO) << "VarriantPack.inTensor size is: "
+            << node.variantPack.inTensors.size()
+            << "; try to add inputs with size "
+            << WEIGHT_COUNT_PER_LAYER + 16;  // TODO: hard code now
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
       atb_speed::Utils::AtTensor2Tensor(input_params.expert_array);
@@ -440,6 +446,5 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
 
   node.variantPack.outTensors.at(0) = internal_tensor_;
 }
-
 }  // namespace layer
 }  // namespace xllm

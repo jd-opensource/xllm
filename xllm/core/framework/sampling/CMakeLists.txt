@@ -40,6 +40,7 @@ cc_test(
     :flags
     :sampler
     glog::glog
+    :state_dict
 )
 target_link_libraries(sampler_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb protobuf::libprotobuf)
 target_link_libraries(sampler_test
