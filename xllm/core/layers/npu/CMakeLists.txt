@@ -121,5 +121,6 @@ cc_library(
     spdlog::spdlog
     torch
     torch_npu
+    /usr/local/Ascend/ascend-toolkit/latest/lib64/libruntime.so
     xllm_kernels
 )
