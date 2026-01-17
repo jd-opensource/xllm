@@ -137,5 +137,7 @@ cc_library(
     torch
     torch_npu
     xllm_atb_layers
+    /usr/local/Ascend/ascend-toolkit/latest/lib64/libruntime.so
+    xllm_kernels
     nnopbase
 )
