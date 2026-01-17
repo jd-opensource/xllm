@@ -44,6 +44,10 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
                int64_t max_query_len,
                bool is_prompt);
 
+  const torch::Tensor& precomputed_cos_sin_cache() {
+    return precomputed_cos_sin_cache_;
+  }
+
  protected:
   bool interleaved_;
   torch::Tensor cos_sin_cache_;

@@ -113,4 +113,20 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_general(
 torch::Tensor air_log_softmax_last_dim(const torch::Tensor& input,
                                        const torch::Tensor& temperatures);
 
+void fused_qk_norm_rope(
+    torch::Tensor& qkv,   // Combined QKV tensor [num_tokens,
+                          // (num_heads_q+num_heads_k+num_heads_v)*head_dim]
+    int64_t num_heads_q,  // Number of query heads
+    int64_t num_heads_k,  // Number of key heads
+    int64_t num_heads_v,  // Number of value heads
+    int64_t head_dim,     // Dimension per head
+    double eps,           // Epsilon for RMS normalization
+    const torch::Tensor& q_weight,  // RMSNorm weights for query [head_dim]
+    const torch::Tensor& k_weight,  // RMSNorm weights for key [head_dim]
+    const torch::Tensor&
+        cos_sin_cache,  // Cos/sin cache [max_position, rotary_dim]
+    bool interleaved,   // Whether RoPE is applied in interleaved style
+    const torch::Tensor& position_ids  // Position IDs for RoPE [num_tokens]
+);
+
 }  // namespace xllm::kernel::cuda
