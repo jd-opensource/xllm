@@ -154,6 +154,16 @@ bool LLMEngine::init(int32_t master_status) {
     LOG(INFO) << "Successfully initialized kv cache";
   }
 
+  // If master_status is not WAKEUP, put the model to sleep after initialization
+  // This allows KV cache allocation to complete first, then releases resources
+  if (FLAGS_enable_xtensor && master_status != WAKEUP) {
+    const std::string& model_id = options_.model_id();
+    PageAllocator::get_instance().sleep_model(model_id);
+    LOG(INFO) << "Model " << model_id
+              << " put to sleep after init (master_status=" << master_status
+              << ")";
+  }
+
   return true;
 }
 
@@ -237,28 +247,18 @@ bool LLMEngine::init_model(int32_t master_status) {
               << ", master_status=" << master_status;
 
     if (master_status == WAKEUP) {
-      // Create xtensor and map physical pages
+      // Consume physical pages for weights (global xtensor handles mapping)
       if (!page_allocator.alloc_weight_pages(model_id, num_pages)) {
         LOG(ERROR) << "Failed to allocate weight pages";
         return false;
       }
-      LOG(INFO) << "master_status=0 (WAKEUP): Created xtensor, mapped weights, "
+      LOG(INFO) << "master_status=0 (WAKEUP): Allocated weight pages, "
                    "will load to device";
     } else if (master_status == LIGHT_SLEEP || master_status == DEEP_SLEEP) {
-      // Add extra pages (same as alloc_weight_pages)
-      size_t total_pages = num_pages;
-      // Create weight xtensor on all workers without mapping physical pages
-      auto& allocator = XTensorAllocator::get_instance();
-      if (!allocator.broadcast_create_weight_tensor(model_id, total_pages)) {
-        LOG(ERROR) << "Failed to create weight tensor";
-        return false;
-      }
-      // Record num_pages for later wakeup (same as alloc_weight_pages would
-      // set)
-      page_allocator.set_weight_pages_count(model_id, total_pages);
+      // Record num_pages for later wakeup
+      page_allocator.set_weight_pages_count(model_id, num_pages);
       LOG(INFO) << "master_status=" << master_status
-                << " (SLEEP): Created weight xtensor (no mapping), num_pages="
-                << total_pages;
+                << " (SLEEP): Recorded weight pages, num_pages=" << num_pages;
     }
   }
 
@@ -1079,14 +1079,14 @@ bool LLMEngine::wakeup(int32_t master_status) {
   page_allocator.wakeup_model(model_id);
   LOG(INFO) << "PageAllocator: model " << model_id << " is now awake";
 
-  // Re-map weight pages
+  // Re-allocate weight pages (global xtensor handles mapping)
   size_t weight_pages = page_allocator.get_weight_pages_allocated(model_id);
   if (weight_pages > 0) {
     if (!page_allocator.alloc_weight_pages(model_id, weight_pages)) {
       LOG(ERROR) << "Failed to re-allocate weight pages for model " << model_id;
       return false;
     }
-    LOG(INFO) << "PageAllocator: re-mapped " << weight_pages
+    LOG(INFO) << "PageAllocator: re-allocated " << weight_pages
               << " weight pages for model " << model_id;
   }
 
@@ -1106,6 +1106,7 @@ bool LLMEngine::wakeup(int32_t master_status) {
       return false;
     }
   }
+  LOG(INFO) << "Wakeup finished for LLM engine.";
 
   return true;
 }

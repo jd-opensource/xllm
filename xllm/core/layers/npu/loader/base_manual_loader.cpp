@@ -43,8 +43,11 @@ void BaseManualLoader::free_weights() { release_host_storage(); }
 
 void BaseManualLoader::reload_weights() {
   if (!device_storage_) {
-    LOG(ERROR) << "Device storage not allocated.";
-    return;
+    auto& allocator = XTensorAllocator::get_instance();
+    bool ok =
+        allocator.allocate_weight(model_id_, device_storage_, storage_size_);
+    CHECK(ok) << "Failed to allocate contiguous device storage size="
+              << storage_size_;
   }
   copy_weights_to_device_async();
   init_device_at_weights();
@@ -87,18 +90,19 @@ void BaseManualLoader::copy_weights_to_pinned_host() {
     if (!slice.bytes) {
       continue;
     }
-    auto host_tensor = at_host_weight_tensors_[i].to(torch::kCPU).contiguous();
     void* dst = static_cast<char*>(host_pinned_storage_) +
                 static_cast<ptrdiff_t>(slice.offset);
-    std::memcpy(dst, host_tensor.data_ptr(), slice.bytes);
-    at_host_weight_tensors_[i] = at::Tensor();
-  }
-  if (!device_storage_) {
-    auto& allocator = XTensorAllocator::get_instance();
-    bool ok =
-        allocator.allocate_weight(model_id_, device_storage_, storage_size_);
-    CHECK(ok) << "Failed to allocate contiguous device storage size="
-              << storage_size_;
+    auto host_tensor = at_host_weight_tensors_[i].to(torch::kCPU).contiguous();
+
+    if (is_nz_format_tensor(i)) {
+      int err = copy_host_nd_to_nz(
+          host_tensor, dst, slice.bytes, ACL_MEMCPY_DEVICE_TO_HOST);
+      CHECK_EQ(err, ACL_SUCCESS)
+          << "copy_host_nd_to_nz failed for tensor index " << i;
+    } else {
+      std::memcpy(dst, host_tensor.data_ptr(), slice.bytes);
+    }
+    at_host_weight_tensors_[i] = torch::zeros({1});
   }
 }
 
@@ -154,13 +158,13 @@ void BaseManualLoader::copy_weights_to_device() {
 
 int BaseManualLoader::copy_host_nd_to_nz(torch::Tensor host_tensor,
                                          void* dst_ptr,
-                                         uint64_t len) {
+                                         uint64_t len,
+                                         aclrtMemcpyKind kind) {
   auto tmp_tensor = at_npu::native::npu_format_cast(host_tensor.to(device_),
                                                     ACL_FORMAT_FRACTAL_NZ);
   const void* src_ptr = tmp_tensor.data_ptr();
   auto stream = c10_npu::getCurrentNPUStream();
-  auto err = aclrtMemcpyAsync(
-      dst_ptr, len, src_ptr, len, ACL_MEMCPY_DEVICE_TO_DEVICE, stream);
+  auto err = aclrtMemcpyAsync(dst_ptr, len, src_ptr, len, kind, stream);
   stream.synchronize();
   tmp_tensor = torch::Tensor();
 

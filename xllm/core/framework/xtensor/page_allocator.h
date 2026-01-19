@@ -148,6 +148,24 @@ class PageAllocator {
   // allocation)
   void set_weight_pages_count(const std::string& model_id, size_t num_pages);
 
+  // ============ Global XTensor Weight Allocation ============
+  // These methods use global xtensor for weight allocation,
+  // avoiding per-page RPC mapping overhead.
+
+  // Allocate weight from global xtensor
+  // Only consumes page count, no RPC mapping needed
+  // The actual mapping is done by
+  // XTensorAllocator::allocate_weight_from_global_xtensor model_id: which model
+  // this allocation is for num_pages: number of pages needed for weight Returns
+  // true if page count available and consumed
+  bool alloc_weight_pages_from_global_xtensor(const std::string& model_id,
+                                              size_t num_pages);
+
+  // Free weight pages from global xtensor (only updates page count)
+  // The actual memory is managed by GlobalXtensor
+  void free_weight_pages_from_global_xtensor(const std::string& model_id,
+                                             size_t num_pages);
+
   // Virtual page getters (for specific model and DP group)
   size_t get_num_free_virt_pages(const std::string& model_id,
                                  int32_t dp_rank) const;

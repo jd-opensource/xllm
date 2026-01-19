@@ -25,14 +25,16 @@ message InitPhyPagePoolRequest {
   int64 num_pages = 1;  // Number of physical pages to allocate
 }
 
-// Request for weight tensor mapping
-message WeightTensorRequest {
+// Request for allocating weight pages from GlobalXtensor
+message AllocWeightPagesRequest {
   string model_id = 1;
-  int64 num_pages = 2;  // Number of physical pages (aligned from weight size)
+  uint64 num_pages = 2;  // Number of pages to allocate
 }
 
-// Request for model operations (unmap_weight)
-message ModelRequest {
+// Response for weight pages allocation (just success/failure)
+
+// Request for freeing weight pages
+message FreeWeightPagesRequest {
   string model_id = 1;
 }
 
@@ -52,10 +54,7 @@ service XTensorDist {
   rpc MapToKvTensors (KvTensorRequest) returns (Status);
   rpc UnmapFromKvTensors (KvTensorRequest) returns (Status);
   
-  // Weight tensor operations (full tensor mapping)
-  // CreateWeightTensor: only create XTensor without mapping physical pages
-  // MapWeightTensor: create XTensor (if not exists) and map all physical pages
-  rpc CreateWeightTensor (WeightTensorRequest) returns (Status);
-  rpc MapWeightTensor (WeightTensorRequest) returns (Status);
-  rpc UnmapWeightTensor (ModelRequest) returns (Status);
+  // Weight pages allocation from GlobalXtensor
+  rpc AllocWeightPages (AllocWeightPagesRequest) returns (Status);
+  rpc FreeWeightPages (FreeWeightPagesRequest) returns (Status);
 }

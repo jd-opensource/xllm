@@ -10,6 +10,7 @@ cc_library(
     phy_page_pool.h
     virt_page.h
     page_allocator.h
+    global_xtensor.h
     xtensor.h
     xtensor_allocator.h
     xtensor_block_manager_impl.h
@@ -21,6 +22,7 @@ cc_library(
     phy_page_pool.cpp
     virt_page.cpp
     page_allocator.cpp
+    global_xtensor.cpp
     xtensor.cpp
     xtensor_allocator.cpp
     xtensor_block_manager_impl.cpp

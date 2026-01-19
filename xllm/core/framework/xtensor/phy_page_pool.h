@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -30,6 +31,7 @@ namespace xllm {
  *
  * This is a singleton class that:
  * - Pre-allocates physical pages during initialization
+ * - Each page has a unique page_id for tracking
  * - Provides get/put interface for XTensor to acquire/release physical pages
  * - Avoids runtime allocation overhead during map operations
  */
@@ -53,10 +55,19 @@ class PhyPagePool {
   // Returns nullptr if pool is empty
   std::unique_ptr<PhyPage> get();
 
-  // Get multiple physical pages from the pool in one lock
+  // Get multiple physical pages from the pool in one lock (left-to-right)
   // Returns empty vector if not enough pages available
   // If partial allocation fails, all acquired pages are returned to pool
   std::vector<std::unique_ptr<PhyPage>> batch_get(size_t count);
+
+  // Find and allocate contiguous pages from right side (for weight allocation)
+  // Returns the starting page_id of the contiguous segment, or -1 if not found
+  // The pages are marked as allocated but ownership remains in all_pages_
+  page_id_t allocate_contiguous_from_right(size_t count);
+
+  // Free pages that were allocated via allocate_contiguous_from_right
+  // page_ids: vector of page_ids to free
+  void free_weight_pages(const std::vector<page_id_t>& page_ids);
 
   // Put a physical page back to the pool
   void put(std::unique_ptr<PhyPage> page);
@@ -77,6 +88,12 @@ class PhyPagePool {
   // The returned pointer is owned by PhyPagePool, do not delete it
   PhyPage* get_zero_page();
 
+  // ============== Global XTensor Support ==============
+
+  // Get all pages as raw pointers for GlobalXtensor mapping
+  // Ownership remains with pool, pages are NOT marked as allocated
+  const std::vector<PhyPage*>& get_all_pages() const;
+
  private:
   PhyPagePool() = default;
   ~PhyPagePool() = default;
@@ -88,7 +105,19 @@ class PhyPagePool {
   size_t num_total_pages_ = 0;
 
   mutable std::mutex mtx_;
-  std::vector<std::unique_ptr<PhyPage>> free_pages_;
+  // All pages indexed by page_id (for jumbo xtensor)
+  // This owns the pages and provides O(1) lookup by page_id
+  std::vector<std::unique_ptr<PhyPage>> all_pages_;
+
+  // Raw pointers to all pages (for GlobalXtensor, filled once at init)
+  std::vector<PhyPage*> all_page_ptrs_;
+
+  // Free page indices (page_ids of pages available for allocation)
+  // For KV cache allocation, pages are taken from left to right.
+  std::deque<page_id_t> free_page_ids_;
+
+  // Track which pages are allocated (for segment management)
+  std::vector<bool> page_allocated_;
 
   // Zero page for initializing virtual memory (owned by pool)
   std::unique_ptr<PhyPage> zero_page_;
