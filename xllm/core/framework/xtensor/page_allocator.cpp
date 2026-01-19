@@ -85,11 +85,9 @@ bool PageAllocator::register_model(const std::string& model_id,
   state.num_total_virt_pages = num_total_phy_pages_ / num_layers / 2;
   // Each virt_page needs to map on all K and V XTensors
   state.phy_pages_per_virt_page = 2 * num_layers;
-  if (master_status == WAKEUP) {
-    state.is_sleeping = false;
-  } else {
-    state.is_sleeping = true;
-  }
+  // Always start with is_sleeping = false to allow KV cache allocation
+  // If sleeping is needed, call sleep_model after initialization
+  state.is_sleeping = false;
 
   // Initialize per-DP group page lists
   state.dp_group_pages.resize(dp_size_);
@@ -602,8 +600,7 @@ bool PageAllocator::alloc_weight_pages(const std::string& model_id,
     CHECK(initialized_) << "PageAllocator not initialized";
 
     ModelState& state = get_model_state(model_id);
-    // Allocate physical pages directly for weight tensor
-    // All-or-nothing: either allocate all requested pages or fail
+    // Check if enough pages available
     if (num_free_phy_pages_ < num_pages) {
       LOG(ERROR) << "Not enough physical pages for weight allocation: "
                  << "requested " << num_pages << ", available "
@@ -616,36 +613,30 @@ bool PageAllocator::alloc_weight_pages(const std::string& model_id,
     update_memory_usage();
   }
 
-  // Map weight tensor (full map)
-  try {
-    auto& allocator = XTensorAllocator::get_instance();
-    allocator.broadcast_map_weight_tensor(model_id, num_pages);
-  } catch (const std::exception& e) {
+  // Broadcast to all workers to allocate weight pages in GlobalXtensor
+  auto& allocator = XTensorAllocator::get_instance();
+  if (!allocator.broadcast_alloc_weight_pages(model_id, num_pages)) {
     // Rollback on failure
     std::lock_guard<std::mutex> lock(mtx_);
     num_free_phy_pages_ += num_pages;
-    ModelState& state = get_model_state(model_id);
-    state.weight_pages_allocated = 0;
+    get_model_state(model_id).weight_pages_allocated = 0;
     update_memory_usage();
-    LOG(ERROR) << "Failed to map weight tensor: " << e.what();
+    LOG(ERROR) << "Failed to broadcast alloc_weight_pages for model "
+               << model_id;
     return false;
   }
 
-  VLOG(1) << "Allocated and mapped " << num_pages
-          << " physical pages for weight tensor of model " << model_id;
+  LOG(INFO) << "Allocated " << num_pages
+            << " physical pages for weight (global xtensor) of model "
+            << model_id;
   return true;
 }
 
 void PageAllocator::free_weight_pages(const std::string& model_id,
                                       size_t num_pages) {
-  // Unmap weight tensor first (full unmap)
-  try {
-    auto& allocator = XTensorAllocator::get_instance();
-    allocator.broadcast_unmap_weight_tensor(model_id);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "Failed to unmap weight tensor: " << e.what();
-    // Continue to release pages anyway
-  }
+  // Broadcast to all workers to free weight pages in GlobalXtensor
+  auto& allocator = XTensorAllocator::get_instance();
+  allocator.broadcast_free_weight_pages(model_id);
 
   {
     std::lock_guard<std::mutex> lock(mtx_);
@@ -660,8 +651,9 @@ void PageAllocator::free_weight_pages(const std::string& model_id,
     cond_.notify_all();
   }
 
-  VLOG(1) << "Unmapped and freed " << num_pages
-          << " physical pages from weight tensor of model " << model_id;
+  LOG(INFO) << "Freed " << num_pages
+            << " physical pages from weight (global xtensor) of model "
+            << model_id;
 }
 
 size_t PageAllocator::get_num_free_virt_pages(const std::string& model_id,

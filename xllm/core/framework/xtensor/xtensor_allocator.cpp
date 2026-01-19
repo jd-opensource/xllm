@@ -30,6 +30,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/macros.h"
 #include "distributed_runtime/collective_service.h"
+#include "global_xtensor.h"
 #include "phy_page.h"
 #include "phy_page_pool.h"
 #include "platform/device.h"
@@ -348,76 +349,68 @@ bool XTensorAllocator::broadcast_unmap_from_kv_tensors(
   return true;
 }
 
-bool XTensorAllocator::broadcast_create_weight_tensor(
-    const std::string& model_id,
-    int64_t num_pages) {
+bool XTensorAllocator::broadcast_alloc_weight_pages(const std::string& model_id,
+                                                    size_t num_pages) {
   if (world_size_ <= 1) {
-    // Single process single GPU, just create locally
-    return create_weight_tensor(model_id, num_pages);
+    // Single process: allocate locally from PhyPagePool and record
+    auto& pool = PhyPagePool::get_instance();
+    page_id_t start_page = pool.allocate_contiguous_from_right(num_pages);
+    if (start_page < 0) {
+      LOG(ERROR) << "Failed to allocate " << num_pages
+                 << " weight pages locally";
+      return false;
+    }
+    record_weight_allocation(model_id, start_page, num_pages);
+    return true;
   }
 
-  // Broadcast to all workers via RPC asynchronously
+  // Broadcast to all workers via RPC
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(xtensor_dist_clients_.size());
   for (auto& client : xtensor_dist_clients_) {
-    futures.push_back(client->create_weight_tensor_async(model_id, num_pages));
+    futures.push_back(client->alloc_weight_pages_async(model_id, num_pages));
   }
 
   // Wait for all futures to complete
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
     if (!result.hasValue() || !result.value()) {
+      LOG(ERROR) << "broadcast_alloc_weight_pages failed for model "
+                 << model_id;
       return false;
     }
   }
+
+  LOG(INFO) << "broadcast_alloc_weight_pages success: model=" << model_id
+            << ", num_pages=" << num_pages;
   return true;
 }
 
-bool XTensorAllocator::broadcast_map_weight_tensor(const std::string& model_id,
-                                                   int64_t num_pages) {
-  if (world_size_ <= 1) {
-    // Single process single GPU, just map locally
-    return map_weight_tensor(model_id, num_pages);
-  }
-
-  // Broadcast to all workers via RPC asynchronously
-  std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(xtensor_dist_clients_.size());
-  for (auto& client : xtensor_dist_clients_) {
-    futures.push_back(client->map_weight_tensor_async(model_id, num_pages));
-  }
-
-  // Wait for all futures to complete
-  auto results = folly::collectAll(futures).get();
-  for (const auto& result : results) {
-    if (!result.hasValue() || !result.value()) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool XTensorAllocator::broadcast_unmap_weight_tensor(
+bool XTensorAllocator::broadcast_free_weight_pages(
     const std::string& model_id) {
   if (world_size_ <= 1) {
-    // Single process single GPU, just unmap locally
-    return unmap_weight_tensor(model_id);
+    // Single process: free locally
+    free_weight_from_global_xtensor(model_id);
+    return true;
   }
 
-  // Broadcast to all workers via RPC asynchronously
+  // Broadcast to all workers via RPC
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(xtensor_dist_clients_.size());
   for (auto& client : xtensor_dist_clients_) {
-    futures.push_back(client->unmap_weight_tensor_async(model_id));
+    futures.push_back(client->free_weight_pages_async(model_id));
   }
 
   // Wait for all futures to complete
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
     if (!result.hasValue() || !result.value()) {
+      LOG(ERROR) << "broadcast_free_weight_pages failed for model " << model_id;
       return false;
     }
   }
+
+  LOG(INFO) << "broadcast_free_weight_pages success: model=" << model_id;
   return true;
 }
 
@@ -551,64 +544,23 @@ bool XTensorAllocator::unmap_from_kv_tensors(
   return true;
 }
 
-// ============== Weight Tensor Interfaces ==============
+void XTensorAllocator::record_weight_allocation(const std::string& model_id,
+                                                page_id_t start_page_id,
+                                                size_t num_pages) {
+  std::lock_guard<std::mutex> lock(mtx_);
 
-bool XTensorAllocator::create_weight_tensor(const std::string& model_id,
-                                            int64_t num_pages) {
-  // Get or create model tensors entry
+  auto& global_xtensor = GlobalXtensor::get_instance();
+  void* base_ptr = global_xtensor.get_vaddr_by_page_id(start_page_id);
+
   auto& tensors = get_or_create_model_tensors(model_id);
+  tensors.weight_start_page_id = start_page_id;
+  tensors.weight_num_pages = num_pages;
+  tensors.weight_base_ptr = base_ptr;
+  tensors.weight_current_offset = 0;
 
-  // Create weight tensor if not exists (no physical page mapping)
-  if (!tensors.weight_tensor) {
-    size_t page_size = FLAGS_phy_page_granularity_size;
-    size_t size = num_pages * page_size;
-
-    // Get zero page from pool if not exists
-    if (!zero_page_) {
-      zero_page_ = PhyPagePool::get_instance().get_zero_page();
-    }
-
-    tensors.weight_tensor =
-        std::make_unique<XTensor>(size, torch::kByte, dev_, zero_page_);
-    tensors.weight_num_pages = num_pages;
-    LOG(INFO) << "Created weight XTensor for model " << model_id
-              << ": num_pages=" << num_pages << ", page_size=" << page_size
-              << ", total_size=" << size << " (no mapping)";
-  }
-
-  return true;
-}
-
-bool XTensorAllocator::map_weight_tensor(const std::string& model_id,
-                                         int64_t num_pages) {
-  std::lock_guard<std::mutex> lock(mtx_);
-
-  // Create weight tensor if not exists
-  if (!create_weight_tensor(model_id, num_pages)) {
-    return false;
-  }
-
-  auto* tensors = get_model_tensors(model_id);
-  CHECK(tensors && tensors->weight_tensor)
-      << "Weight tensor should exist after create_weight_tensor";
-
-  return tensors->weight_tensor->map_all();
-}
-
-bool XTensorAllocator::unmap_weight_tensor(const std::string& model_id) {
-  std::lock_guard<std::mutex> lock(mtx_);
-
-  auto* tensors = get_model_tensors(model_id);
-  if (!tensors) {
-    LOG(ERROR) << "Model " << model_id << " not found";
-    return false;
-  }
-
-  if (!tensors->weight_tensor) {
-    LOG(ERROR) << "Weight tensor not created for model " << model_id;
-    return false;
-  }
-  return tensors->weight_tensor->unmap_all();
+  LOG(INFO) << "XTensorAllocator: recorded weight allocation for model "
+            << model_id << ", start_page=" << start_page_id
+            << ", num_pages=" << num_pages << ", base_ptr=" << base_ptr;
 }
 
 bool XTensorAllocator::allocate_weight(const std::string& model_id,
@@ -617,17 +569,33 @@ bool XTensorAllocator::allocate_weight(const std::string& model_id,
   std::lock_guard<std::mutex> lock(mtx_);
 
   auto* tensors = get_model_tensors(model_id);
-  if (!tensors) {
-    LOG(ERROR) << "Model " << model_id << " not found";
+  if (!tensors || tensors->weight_base_ptr == nullptr) {
+    LOG(ERROR) << "No pre-allocated weight region for model " << model_id;
     return false;
   }
 
-  if (!tensors->weight_tensor) {
-    LOG(ERROR) << "Weight tensor not created for model " << model_id
-               << ", call map_weight_tensor first";
+  auto& global_xtensor = GlobalXtensor::get_instance();
+  size_t region_size = tensors->weight_num_pages * global_xtensor.page_size();
+
+  // Check if there's enough space in pre-allocated region
+  if (tensors->weight_current_offset + size > region_size) {
+    LOG(ERROR) << "Not enough space in weight region for model " << model_id
+               << ": requested " << size << ", available "
+               << (region_size - tensors->weight_current_offset);
     return false;
   }
-  return tensors->weight_tensor->allocate(ptr, size);
+
+  // Allocate from base + current offset
+  ptr = reinterpret_cast<void*>(
+      reinterpret_cast<uintptr_t>(tensors->weight_base_ptr) +
+      tensors->weight_current_offset);
+
+  tensors->weight_current_offset += size;
+
+  VLOG(1) << "XTensorAllocator: allocated " << size << " bytes for model "
+          << model_id << ", ptr=" << ptr;
+
+  return true;
 }
 
 // ============== Internal Helpers ==============
@@ -662,6 +630,40 @@ void XTensorAllocator::init_device_() {
   size_t chunk_sz = FLAGS_phy_page_granularity_size;
   LOG(INFO) << "Device initialized with granularity size: " << chunk_sz
             << " bytes";
+}
+
+size_t XTensorAllocator::free_weight_from_global_xtensor(
+    const std::string& model_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  auto* tensors = get_model_tensors(model_id);
+  if (!tensors || tensors->weight_num_pages == 0) {
+    LOG(WARNING) << "No weight allocation found for model " << model_id;
+    return 0;
+  }
+
+  size_t num_pages = tensors->weight_num_pages;
+  page_id_t start_page = tensors->weight_start_page_id;
+
+  // Build page_ids vector and free via PhyPagePool
+  std::vector<page_id_t> page_ids;
+  page_ids.reserve(num_pages);
+  for (size_t i = 0; i < num_pages; ++i) {
+    page_ids.push_back(start_page + static_cast<page_id_t>(i));
+  }
+
+  auto& pool = PhyPagePool::get_instance();
+  pool.free_weight_pages(page_ids);
+
+  // Clear weight allocation record
+  tensors->weight_start_page_id = -1;
+  tensors->weight_num_pages = 0;
+  tensors->weight_base_ptr = nullptr;
+  tensors->weight_current_offset = 0;
+
+  LOG(INFO) << "Freed " << num_pages << " weight pages for model " << model_id;
+
+  return num_pages;
 }
 
 }  // namespace xllm

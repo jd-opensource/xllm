@@ -66,7 +66,8 @@ class BaseManualLoader : public BaseLoader {
   void release_host_storage();
   int copy_host_nd_to_nz(torch::Tensor host_tensor,
                          void* dst_ptr,
-                         uint64_t len);
+                         uint64_t len,
+                         aclrtMemcpyKind kind = ACL_MEMCPY_DEVICE_TO_DEVICE);
   torch::Tensor convert_to_torch_tensor(const std::vector<int64_t>& dims,
                                         const torch::ScalarType dtype,
                                         const uintptr_t& dev_addr,

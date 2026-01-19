@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/device_monitor.h"
+#include "global_xtensor.h"
 #include "phy_page_pool.h"
 #include "platform/device.h"
 #include "xtensor_allocator.h"
@@ -171,62 +172,61 @@ void XTensorDistService::UnmapFromKvTensors(
   });
 }
 
-void XTensorDistService::CreateWeightTensor(
+void XTensorDistService::AllocWeightPages(
     ::google::protobuf::RpcController* controller,
-    const proto::WeightTensorRequest* request,
+    const proto::AllocWeightPagesRequest* request,
     proto::Status* response,
     ::google::protobuf::Closure* done) {
   threadpool_.schedule([this, request, response, done]() mutable {
     brpc::ClosureGuard done_guard(done);
 
     std::string model_id = request->model_id();
-    int64_t num_pages = request->num_pages();
-    LOG(INFO) << "CreateWeightTensor: global_rank=" << global_rank_
-              << ", model_id=" << model_id << ", num_pages=" << num_pages;
+    size_t num_pages = request->num_pages();
 
-    // Call XTensorAllocator to create weight tensor (no mapping)
+    LOG(INFO) << "AllocWeightPages: model_id=" << model_id
+              << ", num_pages=" << num_pages;
+
+    // Allocate contiguous pages from right in PhyPagePool
+    auto& pool = PhyPagePool::get_instance();
+    page_id_t start_page = pool.allocate_contiguous_from_right(num_pages);
+
+    if (start_page < 0) {
+      LOG(ERROR) << "Failed to allocate " << num_pages << " weight pages";
+      response->set_ok(false);
+      return;
+    }
+
+    // Record allocation in XTensorAllocator (gets base_ptr from GlobalXtensor)
     auto& allocator = XTensorAllocator::get_instance();
-    bool success = allocator.create_weight_tensor(model_id, num_pages);
-    response->set_ok(success);
+    allocator.record_weight_allocation(model_id, start_page, num_pages);
+
+    response->set_ok(true);
+
+    LOG(INFO) << "AllocWeightPages success: model_id=" << model_id
+              << ", start_page=" << start_page << ", num_pages=" << num_pages;
   });
 }
 
-void XTensorDistService::MapWeightTensor(
+void XTensorDistService::FreeWeightPages(
     ::google::protobuf::RpcController* controller,
-    const proto::WeightTensorRequest* request,
+    const proto::FreeWeightPagesRequest* request,
     proto::Status* response,
     ::google::protobuf::Closure* done) {
   threadpool_.schedule([this, request, response, done]() mutable {
     brpc::ClosureGuard done_guard(done);
 
     std::string model_id = request->model_id();
-    int64_t num_pages = request->num_pages();
-    LOG(INFO) << "MapWeightTensor: global_rank=" << global_rank_
-              << ", model_id=" << model_id << ", num_pages=" << num_pages;
 
-    // Call XTensorAllocator to map weight tensor
+    LOG(INFO) << "FreeWeightPages: model_id=" << model_id;
+
+    // Free weight pages via XTensorAllocator (frees pages in PhyPagePool)
     auto& allocator = XTensorAllocator::get_instance();
-    bool success = allocator.map_weight_tensor(model_id, num_pages);
-    response->set_ok(success);
-  });
-}
+    size_t num_freed = allocator.free_weight_from_global_xtensor(model_id);
 
-void XTensorDistService::UnmapWeightTensor(
-    ::google::protobuf::RpcController* controller,
-    const proto::ModelRequest* request,
-    proto::Status* response,
-    ::google::protobuf::Closure* done) {
-  threadpool_.schedule([this, request, response, done]() mutable {
-    brpc::ClosureGuard done_guard(done);
+    response->set_ok(num_freed > 0);
 
-    std::string model_id = request->model_id();
-    LOG(INFO) << "UnmapWeightTensor: global_rank=" << global_rank_
-              << ", model_id=" << model_id;
-
-    // Call XTensorAllocator to unmap weight tensor
-    auto& allocator = XTensorAllocator::get_instance();
-    bool success = allocator.unmap_weight_tensor(model_id);
-    response->set_ok(success);
+    LOG(INFO) << "FreeWeightPages: freed " << num_freed << " pages for model "
+              << model_id;
   });
 }
 

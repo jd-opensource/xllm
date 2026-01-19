@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <algorithm>
+
 namespace xllm {
 
 void PhyPagePool::init(const torch::Device& device, size_t num_pages) {
@@ -34,18 +36,26 @@ void PhyPagePool::init(const torch::Device& device, size_t num_pages) {
             << " physical pages on device " << device;
 
   // Pre-allocate zero page first (used by all XTensors for initialization)
-  zero_page_ = std::make_unique<PhyPage>(device_);
+  // Zero page has page_id = -1
+  zero_page_ = std::make_unique<PhyPage>(device_, -1);
 
-  // Pre-allocate all physical pages for data
-  free_pages_.reserve(num_pages);
+  // Pre-allocate all physical pages for data with unique page_ids
+  all_pages_.reserve(num_pages);
+  page_allocated_.resize(num_pages, false);
+
+  all_page_ptrs_.reserve(num_pages);
   for (size_t i = 0; i < num_pages; ++i) {
-    free_pages_.push_back(std::make_unique<PhyPage>(device_));
+    page_id_t page_id = static_cast<page_id_t>(i);
+    all_pages_.push_back(std::make_unique<PhyPage>(device_, page_id));
+    all_page_ptrs_.push_back(all_pages_.back().get());
+    free_page_ids_.push_back(page_id);
   }
 
   initialized_ = true;
 
   LOG(INFO) << "PhyPagePool: successfully pre-allocated " << num_pages
-            << " physical pages + 1 zero page";
+            << " physical pages (page_id 0-" << (num_pages - 1)
+            << ") + 1 zero page";
 }
 
 std::unique_ptr<PhyPage> PhyPagePool::get() {
@@ -53,15 +63,18 @@ std::unique_ptr<PhyPage> PhyPagePool::get() {
 
   CHECK(initialized_) << "PhyPagePool not initialized";
 
-  if (free_pages_.empty()) {
+  if (free_page_ids_.empty()) {
     LOG(WARNING) << "PhyPagePool: no free pages available";
     return nullptr;
   }
 
-  // LIFO: pop from back (O(1), cache-friendly)
-  auto page = std::move(free_pages_.back());
-  free_pages_.pop_back();
-  return page;
+  // FIFO: pop from front to allocate left-to-right
+  page_id_t page_id = free_page_ids_.front();
+  free_page_ids_.pop_front();
+  page_allocated_[page_id] = true;
+
+  // Move ownership to caller
+  return std::move(all_pages_[page_id]);
 }
 
 std::vector<std::unique_ptr<PhyPage>> PhyPagePool::batch_get(size_t count) {
@@ -73,19 +86,21 @@ std::vector<std::unique_ptr<PhyPage>> PhyPagePool::batch_get(size_t count) {
     return {};
   }
 
-  if (free_pages_.size() < count) {
+  if (free_page_ids_.size() < count) {
     LOG(WARNING) << "PhyPagePool: not enough free pages, requested " << count
-                 << ", available " << free_pages_.size();
+                 << ", available " << free_page_ids_.size();
     return {};
   }
 
   std::vector<std::unique_ptr<PhyPage>> result;
   result.reserve(count);
 
-  // LIFO: pop from back (O(1), cache-friendly)
+  // FIFO: pop from front to allocate left-to-right
   for (size_t i = 0; i < count; ++i) {
-    result.push_back(std::move(free_pages_.back()));
-    free_pages_.pop_back();
+    page_id_t page_id = free_page_ids_.front();
+    free_page_ids_.pop_front();
+    page_allocated_[page_id] = true;
+    result.push_back(std::move(all_pages_[page_id]));
   }
 
   return result;
@@ -104,7 +119,15 @@ void PhyPagePool::put(std::unique_ptr<PhyPage> page) {
   CHECK(page->device() == device_) << "Page device mismatch: expected "
                                    << device_ << ", got " << page->device();
 
-  free_pages_.push_back(std::move(page));
+  page_id_t page_id = page->page_id();
+  CHECK(page_id >= 0 && page_id < static_cast<page_id_t>(num_total_pages_))
+      << "Invalid page_id: " << page_id;
+
+  // Return ownership to pool
+  all_pages_[page_id] = std::move(page);
+  page_allocated_[page_id] = false;
+  // Use push_front to keep smaller page_ids at front for KV cache allocation
+  free_page_ids_.push_front(page_id);
 }
 
 void PhyPagePool::batch_put(std::vector<std::unique_ptr<PhyPage>>& pages) {
@@ -124,14 +147,100 @@ void PhyPagePool::batch_put(std::vector<std::unique_ptr<PhyPage>>& pages) {
     CHECK(page->device() == device_) << "Page device mismatch: expected "
                                      << device_ << ", got " << page->device();
 
-    free_pages_.push_back(std::move(page));
+    page_id_t page_id = page->page_id();
+    CHECK(page_id >= 0 && page_id < static_cast<page_id_t>(num_total_pages_))
+        << "Invalid page_id: " << page_id;
+
+    // Return ownership to pool
+    all_pages_[page_id] = std::move(page);
+    page_allocated_[page_id] = false;
+    // Use push_front to keep smaller page_ids at front for KV cache allocation
+    free_page_ids_.push_front(page_id);
   }
   pages.clear();
 }
 
+page_id_t PhyPagePool::allocate_contiguous_from_right(size_t count) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  CHECK(initialized_) << "PhyPagePool not initialized";
+
+  if (count == 0 || count > free_page_ids_.size()) {
+    return -1;
+  }
+
+  // Scan from right to left in page_allocated_ to find contiguous free segment
+  size_t run = 0;
+  page_id_t start_page = -1;
+
+  for (int64_t i = static_cast<int64_t>(num_total_pages_) - 1; i >= 0; --i) {
+    if (!page_allocated_[i]) {
+      run++;
+      if (run == count) {
+        start_page = static_cast<page_id_t>(i);
+        break;
+      }
+    } else {
+      run = 0;
+    }
+  }
+
+  if (start_page < 0) {
+    LOG(WARNING) << "PhyPagePool: cannot find " << count
+                 << " contiguous free pages from right";
+    return -1;
+  }
+
+  // Mark these pages as allocated
+  page_id_t end_page = start_page + static_cast<page_id_t>(count);
+  for (page_id_t page_id = start_page; page_id < end_page; ++page_id) {
+    page_allocated_[page_id] = true;
+  }
+
+  // Remove from free_page_ids_ in one pass - O(n)
+  auto new_end = std::remove_if(free_page_ids_.begin(),
+                                free_page_ids_.end(),
+                                [start_page, end_page](page_id_t id) {
+                                  return id >= start_page && id < end_page;
+                                });
+  free_page_ids_.erase(new_end, free_page_ids_.end());
+
+  LOG(INFO) << "PhyPagePool: allocated " << count
+            << " contiguous pages from right, start_page=" << start_page;
+
+  return start_page;
+}
+
+void PhyPagePool::free_weight_pages(const std::vector<page_id_t>& page_ids) {
+  if (page_ids.empty()) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  CHECK(initialized_) << "PhyPagePool not initialized";
+
+  for (page_id_t page_id : page_ids) {
+    CHECK(page_id >= 0 && page_id < static_cast<page_id_t>(num_total_pages_))
+        << "Invalid page_id: " << page_id;
+
+    if (!page_allocated_[page_id]) {
+      LOG(WARNING) << "PhyPagePool: page " << page_id
+                   << " is not allocated, skipping";
+      continue;
+    }
+
+    page_allocated_[page_id] = false;
+    // Push to back so large page_ids stay towards the right
+    free_page_ids_.push_back(page_id);
+  }
+
+  LOG(INFO) << "PhyPagePool: freed " << page_ids.size() << " weight pages";
+}
+
 size_t PhyPagePool::num_available() const {
   std::lock_guard<std::mutex> lock(mtx_);
-  return free_pages_.size();
+  return free_page_ids_.size();
 }
 
 PhyPage* PhyPagePool::get_zero_page() {
@@ -139,6 +248,13 @@ PhyPage* PhyPagePool::get_zero_page() {
   CHECK(initialized_) << "PhyPagePool not initialized";
   CHECK(zero_page_) << "Zero page not created";
   return zero_page_.get();
+}
+
+// ============== Global XTensor Support ==============
+
+const std::vector<PhyPage*>& PhyPagePool::get_all_pages() const {
+  CHECK(initialized_) << "PhyPagePool not initialized";
+  return all_page_ptrs_;
 }
 
 }  // namespace xllm

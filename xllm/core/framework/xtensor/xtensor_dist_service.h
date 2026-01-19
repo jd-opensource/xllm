@@ -62,22 +62,16 @@ class XTensorDistService : public proto::XTensorDist {
                           proto::Status* response,
                           ::google::protobuf::Closure* done) override;
 
-  // Weight tensor operations
-  // CreateWeightTensor: only create XTensor without mapping physical pages
-  void CreateWeightTensor(::google::protobuf::RpcController* controller,
-                          const proto::WeightTensorRequest* request,
-                          proto::Status* response,
-                          ::google::protobuf::Closure* done) override;
+  // Weight pages allocation from GlobalXtensor
+  void AllocWeightPages(::google::protobuf::RpcController* controller,
+                        const proto::AllocWeightPagesRequest* request,
+                        proto::Status* response,
+                        ::google::protobuf::Closure* done) override;
 
-  void MapWeightTensor(::google::protobuf::RpcController* controller,
-                       const proto::WeightTensorRequest* request,
+  void FreeWeightPages(::google::protobuf::RpcController* controller,
+                       const proto::FreeWeightPagesRequest* request,
                        proto::Status* response,
                        ::google::protobuf::Closure* done) override;
-
-  void UnmapWeightTensor(::google::protobuf::RpcController* controller,
-                         const proto::ModelRequest* request,
-                         proto::Status* response,
-                         ::google::protobuf::Closure* done) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(XTensorDistService);

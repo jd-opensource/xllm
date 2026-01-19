@@ -582,6 +582,16 @@ bool WorkerImpl::sleep(int32_t master_status) {
   } else if (master_status == DEEP_SLEEP) {
     model_->free_model_weights();
   }
+
+  // Release weight pages from GlobalXtensor
+  if (FLAGS_enable_xtensor) {
+    const std::string& model_id = options_.model_id();
+    auto& allocator = XTensorAllocator::get_instance();
+    size_t freed_pages = allocator.free_weight_from_global_xtensor(model_id);
+    LOG(INFO) << "Worker sleep: freed " << freed_pages
+              << " weight pages from GlobalXtensor for model " << model_id;
+  }
+
   return true;
 }
 

@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/common/options.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/master.h"
+#include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/xtensor_allocator.h"
 #include "core/util/device_name_utils.h"
@@ -303,6 +304,9 @@ int run() {
       LOG(FATAL) << "Failed to initialize PhyPagePool";
     }
     LOG(INFO) << "XTensor initialized with " << num_pages << " physical pages";
+
+    // Initialize GlobalXtensor for efficient weight allocation
+    GlobalXtensor::get_instance().init(devices[0]);
   }
 
   std::unique_ptr<Master> master;

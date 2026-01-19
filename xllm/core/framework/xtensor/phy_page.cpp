@@ -16,7 +16,8 @@ limitations under the License.
 #include "phy_page.h"
 
 namespace xllm {
-PhyPage::PhyPage(torch::Device device) : device_(device) {
+PhyPage::PhyPage(torch::Device device, page_id_t page_id)
+    : device_(device), page_id_(page_id) {
   int32_t device_id = device_.index();
 
   // create a physical memory handle for the device
