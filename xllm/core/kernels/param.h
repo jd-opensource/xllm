@@ -451,6 +451,11 @@ struct GroupGemmParams {
   // Quantization bit-width for input a.
   // Set -1 to disable quantization.
   int64_t a_quant_bit;
+  // ========== Torch ILU related parameters ==========
+  // Inverse mapping of gather_idx.
+  // Shape: [expand_token_num].
+  // Dtype: int32.
+  std::optional<torch::Tensor> combine_idx;
 };
 
 struct MoeActiveTopkParams {
@@ -521,6 +526,13 @@ struct MoeExpandInputParams {
   // Number of experts to process in this call.
   // Must be >= 0.
   int64_t expert_size;
+  // ========== Torch ILU related parameters ==========
+  // Inverse mapping of gather_idx.
+  // Shape: [expand_token_num].
+  // Dtype: int32.
+  torch::Tensor combine_idx;
+  // topk for moe
+  int topk;
 };
 
 struct MoeCombineResultParams {

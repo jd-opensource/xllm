@@ -36,7 +36,7 @@ void reshape_paged_cache(torch::Tensor& key,
     value_token_stride = value_.stride(0);
   }
   slot_mapping = slot_mapping.to(at::kLong);
-  infer::vllm_reshape_and_cache(key,
+  infer::xllm_reshape_and_cache(key,
                                 value_,
                                 key_cache,
                                 value_cache_,
@@ -57,7 +57,7 @@ void batch_prefill(torch::Tensor& query,
                    const std::optional<torch::Tensor>& q_quant_scale,
                    const std::optional<torch::Tensor>& k_quant_scale,
                    const std::optional<torch::Tensor>& v_quant_scale,
-                   const std::optional<torch::Tensor>& block_tables,
+                   const torch::Tensor& block_tables,
                    int64_t max_query_len,
                    int64_t max_seq_len,
                    float scale,
@@ -73,7 +73,7 @@ void batch_prefill(torch::Tensor& query,
   auto q_quant_scale_ = q_quant_scale.value_or(torch::Tensor());
   auto k_quant_scale_ = k_quant_scale.value_or(torch::Tensor());
   auto v_quant_scale_ = v_quant_scale.value_or(torch::Tensor());
-  auto block_tables_ = block_tables.value_or(torch::Tensor());
+  auto block_tables_ = block_tables;
   infer::ixinfer_flash_attn_unpad_with_block_tables(query,
                                                     key,
                                                     value,
@@ -136,7 +136,7 @@ void batch_decode(torch::Tensor& query,
   bool enable_cuda_graph = false;
   bool use_sqrt_alibi = false;
 
-  infer::vllm_paged_attention(output,
+  infer::xllm_paged_attention(output,
                               query,
                               k_cache,
                               v_cache_,

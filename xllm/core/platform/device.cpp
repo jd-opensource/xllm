@@ -153,8 +153,10 @@ std::string Device::type_str() {
   return "npu";
 #elif defined(USE_MLU)
   return "mlu";
-#elif defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_CUDA)
   return "cuda";
+#elif defined(USE_ILU)
+  return "ilu";
 #elif defined(USE_MUSA)
   return "musa";
 #endif

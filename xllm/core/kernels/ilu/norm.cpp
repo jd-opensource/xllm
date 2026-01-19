@@ -24,27 +24,20 @@ void residual_layer_norm(torch::Tensor& input,
                          torch::Tensor& output,
                          std::optional<torch::Tensor>& residual,
                          torch::Tensor& weight,
-                         std::optional<torch::Tensor>& beta,
                          std::optional<torch::Tensor>& bias,
                          std::optional<torch::Tensor>& residual_out,
                          double eps) {
-  torch::ScalarType scalar_type = input.scalar_type();
-  int hidden_size = weight.numel();
-  torch::Tensor beta_ = beta.value_or(at::zeros(
-      {hidden_size},
-      at::TensorOptions().dtype(input.scalar_type()).device(input.device())));
   auto residual_ = residual.value_or(torch::zeros_like(input));
-  std::optional<torch::Tensor> output_ = output;
+  torch::Tensor residual_out_ = residual_out.value_or(torch::zeros_like(input));
   infer::residual_rms_norm(input,
                            residual_,
                            weight,
-                           output_,
-                           residual_out,
+                           output,
+                           residual_out_,
                            bias,
                            /*alpha=*/1.0,
                            eps,
                            false);
-  residual_out = residual_;
 }
 
 void rms_norm(torch::Tensor& output,

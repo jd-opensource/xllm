@@ -51,7 +51,8 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& q,
   std::optional<torch::Tensor> position_ids;
   if (is_prompt) {
     discrete = false;
-    if (Device::type_str() == "cuda" || Device::type_str() == "npu") {
+    if (Device::type_str() == "cuda" || Device::type_str() == "npu" ||
+        Device::type_str() == "ilu") {
       position_ids = positions;
     }
   } else {

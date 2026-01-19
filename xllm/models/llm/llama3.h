@@ -13,19 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "ilu_ops_api.h"
-#include "utils.h"
+#pragma once
 
-namespace xllm::kernel::ilu {
+#include "llama.h"
 
-void apply_rope_pos_ids_cos_sin_cache(torch::Tensor& query,
-                                      torch::Tensor& key,
-                                      torch::Tensor& cos_sin_cache,
-                                      torch::Tensor& positions,
-                                      bool interleave) {
-  const int64_t head_size = cos_sin_cache.size(-1);
-  infer::xllm_rotary_embedding(
-      positions, query, key, head_size, cos_sin_cache, !interleave);
-}
-
-}  // namespace xllm::kernel::ilu
+namespace xllm {
+// register the causal model
+REGISTER_CAUSAL_MODEL(llama3, QWen3ForCausalLM);
+}  // namespace xllm
