@@ -22,13 +22,12 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/macros.h"
-#include "phy_page.h"
+#include "phy_page.h"  // Includes page_id_t definition
 #include "platform/vmm_api.h"
 
 namespace xllm {
 
-// Type definitions
-using page_id_t = int64_t;
+// Type definitions (page_id_t is defined in phy_page.h)
 using offset_t = page_id_t;
 
 /* NOTE: XTensorAllocator is thread-safe but XTensor is not. */

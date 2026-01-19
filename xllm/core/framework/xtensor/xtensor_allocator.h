@@ -41,15 +41,15 @@ struct ModelTensors {
   std::vector<std::unique_ptr<XTensor>> k_tensors;
   // V tensors: one tensor per layer (indexed by layer id)
   std::vector<std::unique_ptr<XTensor>> v_tensors;
-  // Weight tensor (one large tensor for all model weights)
-  std::unique_ptr<XTensor> weight_tensor;
-
   int64_t num_layers = 0;
   size_t kv_tensor_size_per_layer = 0;
-  // Weight tensor bump allocator offset
-  size_t weight_offset = 0;
-  // Number of pages for weight tensor
-  int64_t weight_num_pages = 0;
+
+  // ============== Weight Allocation (from GlobalXtensor) ==============
+  page_id_t weight_start_page_id =
+      -1;                            // Starting page ID of pre-allocated region
+  size_t weight_num_pages = 0;       // Number of pages pre-allocated
+  void* weight_base_ptr = nullptr;   // Base virtual address
+  size_t weight_current_offset = 0;  // Current allocation offset in bytes
 };
 
 /**
@@ -94,17 +94,21 @@ class XTensorAllocator {
   bool unmap_from_kv_tensors(const std::string& model_id,
                              const std::vector<offset_t>& offsets);
 
-  // ============== Weight Tensor Interfaces ==============
+  // ============== Weight Allocation Interfaces ==============
 
-  // Create weight tensor without mapping physical pages (for LIGHT_SLEEP mode)
-  bool create_weight_tensor(const std::string& model_id, int64_t num_pages);
+  // Record weight pre-allocation (called by RPC handler after PhyPagePool
+  // allocation)
+  void record_weight_allocation(const std::string& model_id,
+                                page_id_t start_page_id,
+                                size_t num_pages);
 
-  // Weight tensor operations (full tensor mapping)
-  bool map_weight_tensor(const std::string& model_id, int64_t num_pages);
-  bool unmap_weight_tensor(const std::string& model_id);
-
-  // Allocate a portion of the weight tensor for a specific layer/module
+  // Allocate from pre-allocated weight region (called by model loader)
+  // Increments offset within the pre-allocated region
   bool allocate_weight(const std::string& model_id, void*& ptr, size_t size);
+
+  // Free weight allocation (called by sleep)
+  // Returns the number of pages freed
+  size_t free_weight_from_global_xtensor(const std::string& model_id);
 
   // ============== Multi-node Setup ==============
 
@@ -127,12 +131,10 @@ class XTensorAllocator {
                                        int32_t dp_rank,
                                        const std::vector<offset_t>& offsets);
 
-  // Broadcast weight tensor create/map/unmap to all workers
-  bool broadcast_create_weight_tensor(const std::string& model_id,
-                                      int64_t num_pages);
-  bool broadcast_map_weight_tensor(const std::string& model_id,
-                                   int64_t num_pages);
-  bool broadcast_unmap_weight_tensor(const std::string& model_id);
+  // Broadcast weight pages allocation/free to all workers
+  bool broadcast_alloc_weight_pages(const std::string& model_id,
+                                    size_t num_pages);
+  bool broadcast_free_weight_pages(const std::string& model_id);
 
   // Get XTensor dist clients (for distributed operations)
   const std::vector<std::shared_ptr<XTensorDistClient>>&

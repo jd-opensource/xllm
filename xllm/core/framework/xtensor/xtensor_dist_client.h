@@ -62,17 +62,10 @@ class XTensorDistClient {
       const std::string& model_id,
       const std::vector<offset_t>& offsets);
 
-  // Weight tensor operations
-  // num_pages: number of physical pages (aligned up from weight size)
-  // create: only create XTensor without mapping physical pages
-  // map: create (if not exists) and map all physical pages
-  folly::SemiFuture<bool> create_weight_tensor_async(
-      const std::string& model_id,
-      int64_t num_pages);
-  folly::SemiFuture<bool> map_weight_tensor_async(const std::string& model_id,
-                                                  int64_t num_pages);
-  folly::SemiFuture<bool> unmap_weight_tensor_async(
-      const std::string& model_id);
+  // Weight pages allocation from GlobalXtensor
+  folly::SemiFuture<bool> alloc_weight_pages_async(const std::string& model_id,
+                                                   size_t num_pages);
+  folly::SemiFuture<bool> free_weight_pages_async(const std::string& model_id);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(XTensorDistClient);

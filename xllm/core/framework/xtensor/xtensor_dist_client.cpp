@@ -163,21 +163,21 @@ folly::SemiFuture<bool> XTensorDistClient::unmap_from_kv_tensors_async(
   return future;
 }
 
-folly::SemiFuture<bool> XTensorDistClient::create_weight_tensor_async(
+folly::SemiFuture<bool> XTensorDistClient::alloc_weight_pages_async(
     const std::string& model_id,
-    int64_t num_pages) {
+    size_t num_pages) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
       [this, model_id, num_pages, promise = std::move(promise)]() mutable {
-        proto::WeightTensorRequest req;
+        proto::AllocWeightPagesRequest req;
         req.set_model_id(model_id);
         req.set_num_pages(num_pages);
         proto::Status resp;
         brpc::Controller cntl;
-        stub_->CreateWeightTensor(&cntl, &req, &resp, nullptr);
+        stub_->AllocWeightPages(&cntl, &req, &resp, nullptr);
         if (cntl.Failed()) {
-          LOG(ERROR) << "CreateWeightTensor failed: " << cntl.ErrorText();
+          LOG(ERROR) << "AllocWeightPages failed: " << cntl.ErrorText();
           promise.setValue(false);
           return;
         }
@@ -186,42 +186,19 @@ folly::SemiFuture<bool> XTensorDistClient::create_weight_tensor_async(
   return future;
 }
 
-folly::SemiFuture<bool> XTensorDistClient::map_weight_tensor_async(
-    const std::string& model_id,
-    int64_t num_pages) {
-  folly::Promise<bool> promise;
-  auto future = promise.getSemiFuture();
-  threadpool_.schedule(
-      [this, model_id, num_pages, promise = std::move(promise)]() mutable {
-        proto::WeightTensorRequest req;
-        req.set_model_id(model_id);
-        req.set_num_pages(num_pages);
-        proto::Status resp;
-        brpc::Controller cntl;
-        stub_->MapWeightTensor(&cntl, &req, &resp, nullptr);
-        if (cntl.Failed()) {
-          LOG(ERROR) << "MapWeightTensor failed: " << cntl.ErrorText();
-          promise.setValue(false);
-          return;
-        }
-        promise.setValue(resp.ok());
-      });
-  return future;
-}
-
-folly::SemiFuture<bool> XTensorDistClient::unmap_weight_tensor_async(
+folly::SemiFuture<bool> XTensorDistClient::free_weight_pages_async(
     const std::string& model_id) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
       [this, model_id, promise = std::move(promise)]() mutable {
-        proto::ModelRequest req;
+        proto::FreeWeightPagesRequest req;
         req.set_model_id(model_id);
         proto::Status resp;
         brpc::Controller cntl;
-        stub_->UnmapWeightTensor(&cntl, &req, &resp, nullptr);
+        stub_->FreeWeightPages(&cntl, &req, &resp, nullptr);
         if (cntl.Failed()) {
-          LOG(ERROR) << "UnmapWeightTensor failed: " << cntl.ErrorText();
+          LOG(ERROR) << "FreeWeightPages failed: " << cntl.ErrorText();
           promise.setValue(false);
           return;
         }
