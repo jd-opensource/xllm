@@ -175,21 +175,22 @@ void DisaggPDServiceImpl::decode_recv_first_generation(
     std::vector<uint64_t> block_ids(gen.block_ids().begin(),
                                     gen.block_ids().end());
 
-    bool success =
-        scheduler_->decode_recv_first_generation(gen.req_id(),
-                                                 first_token.token_id(),
-                                                 first_token.has_logprob(),
-                                                 first_token.logprob(),
-                                                 std::move(top_tokens),
-                                                 std::move(top_logprobs),
-                                                 gen.kv_cache_transfer_mode(),
-                                                 std::move(cluster_ids),
-                                                 std::move(addrs),
-                                                 std::move(k_cache_ids),
-                                                 std::move(v_cache_ids),
-                                                 std::move(block_ids),
-                                                 gen.dp_size(),
-                                                 gen.dp_rank());
+    bool success = scheduler_->decode_recv_first_generation(
+        gen.req_id(),
+        first_token.token_id(),
+        first_token.has_logprob(),
+        first_token.logprob(),
+        first_token.time_to_first_token_latency_seconds(),
+        std::move(top_tokens),
+        std::move(top_logprobs),
+        gen.kv_cache_transfer_mode(),
+        std::move(cluster_ids),
+        std::move(addrs),
+        std::move(k_cache_ids),
+        std::move(v_cache_ids),
+        std::move(block_ids),
+        gen.dp_size(),
+        gen.dp_rank());
     if (!success) {
       response->set_ok(false);
       return;

@@ -188,6 +188,7 @@ message RemoteToken {
   float logprob = 3;
   repeated int64 top_tokens = 4;
   repeated float top_logprobs = 5;
+  double time_to_first_token_latency_seconds = 6;
 }
 
 message DisaggGenerationsRequest {

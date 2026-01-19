@@ -507,6 +507,8 @@ void DisaggPDScheduler::prefill_send_first_generation() {
         auto token = gen->mutable_tokens()->Add();
         token->set_token_id(
             request->sequences()[0]->first_token().value().token_id);
+        token->set_time_to_first_token_latency_seconds(
+            request->sequences()[0]->time_to_first_token_latency_seconds());
         if (request->sequences()[0]
                 ->first_token()
                 .value()
@@ -604,6 +606,7 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     int64_t token_id,
     bool has_logprob,
     float logprob,
+    double time_to_first_token_latency_seconds,
     std::vector<int64_t> top_tokens,
     std::vector<float> top_logprobs,
     const std::string& kv_cache_transfer_mode,
@@ -648,6 +651,14 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     request->sequences()[0]->enable_checking_prefill_token();
   }
 
+  // update latency metrics
+  request->sequences()[0]->set_time_to_first_token_latency_seconds(
+      time_to_first_token_latency_seconds);
+  // update latest_generate_time_ for sequence
+  request->sequences()[0]->tbt(
+      request->created_time() +
+      absl::Seconds(time_to_first_token_latency_seconds));
+
   // TODO: we only support one sequence for currently.
   if (enable_schedule_overlap()) {
     Token fake_token(-1);
@@ -677,9 +688,6 @@ bool DisaggPDScheduler::decode_recv_first_generation(
                             dst_dp_rank,
                             dst_block_ids);
   }
-
-  // update latest_generate_time_ for sequence
-  request->sequences()[0]->tbt(absl::Now());
 
   request_queue_.write(request);
   return true;

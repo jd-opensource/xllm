@@ -380,7 +380,7 @@ class Sequence final {
   absl::Time latest_generate_time_;
 
   // sequence ttft latency
-  double time_to_first_token_latency_seconds_;
+  double time_to_first_token_latency_seconds_ = 0.0;
 
   // whether the added token is the first generated token
   bool is_first_token_ = false;

@@ -62,6 +62,7 @@ class DisaggPDScheduler : public ContinuousScheduler {
       int64_t token_id,
       bool has_logprob,
       float logprob,
+      double time_to_first_token_latency_seconds,
       std::vector<int64_t> top_tokens,
       std::vector<float> top_logprobs,
       const std::string& kv_cache_transfer_mode,
