@@ -424,7 +424,7 @@ TEST_F(AclGraphExecutorTest, GraphExecutorVsEagerExecution) {
                                       kv_caches_,
                                       {forward_input.input_params});
   // Create ACL graph executor
-  auto graph_executor = std::make_unique<AclGraphExecutorImpl>(
+  auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
   // Test graph execution with NPUGraph mempool optimization
@@ -452,7 +452,7 @@ TEST_F(AclGraphExecutorTest, GraphReplayConsistency) {
   forward_input = forward_input.to(*device_, torch::kFloat32);
 
   // Create ACL graph executor
-  auto graph_executor = std::make_unique<AclGraphExecutorImpl>(
+  auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
   // First execution (should create graph with NPUGraph mempool)
@@ -517,8 +517,8 @@ TEST_F(AclGraphExecutorTest, DifferentBatchSizes) {
         options_.num_decoding_tokens(), 0, model_args_);
     forward_input = forward_input.to(*device_, torch::kFloat32);
     // Create ACL graph executor
-    auto graph_executor =
-        new AclGraphExecutorImpl(model_.get(), model_args_, *device_, options_);
+    auto graph_executor = new ::xllm::npu::AclGraphExecutorImpl(
+        model_.get(), model_args_, *device_, options_);
 
     // Test graph execution
     auto output = graph_executor->run({forward_input.token_ids},
@@ -554,7 +554,7 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImpl) {
                                       {forward_input.input_params});
 
   // Test ACL Graph Executor with NPUGraph mempool optimization
-  auto graph_executor = std::make_unique<AclGraphExecutorImpl>(
+  auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
   auto graph_output = graph_executor->run({forward_input.token_ids},
@@ -588,7 +588,7 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImplMultipleRuns) {
   // Create both executors
   auto npu_executor = std::make_unique<BaseExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
-  auto graph_executor = std::make_unique<AclGraphExecutorImpl>(
+  auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
   // Run multiple times and compare results
