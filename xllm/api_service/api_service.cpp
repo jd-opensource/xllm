@@ -19,6 +19,7 @@ limitations under the License.
 #include <json2pb/json_to_pb.h>
 #include <json2pb/pb_to_json.h>
 
+#include <charconv>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -44,6 +45,10 @@ namespace xllm {
 
 namespace {
 
+// Max request body size for API endpoints. 10MB accommodates typical LLM
+// requests including vision models with base64-encoded images. For larger
+// payloads, consider adjusting brpc's -max_body_size flag (default 64MB) which
+// acts as the first line of defense at the framework level.
 constexpr size_t kMaxBodySize = 10 * 1024 * 1024;  // 10MB
 
 std::optional<size_t> GetJsonContentLength(const brpc::Controller* ctrl) {
@@ -57,23 +62,21 @@ std::optional<size_t> GetJsonContentLength(const brpc::Controller* ctrl) {
     return std::nullopt;
   }
 
-  try {
-    const long long length = std::stoll(*header_val);
-    if (length < 0) {
-      LOG(WARNING) << "Invalid negative Content-Length header: " << *header_val;
-      return std::nullopt;
-    }
-    if (static_cast<unsigned long long>(length) >
-        std::numeric_limits<size_t>::max()) {
-      LOG(WARNING) << "Content-Length exceeds size_t max: " << *header_val;
-      return std::nullopt;
-    }
-    return static_cast<size_t>(length);
-  } catch (const std::exception& e) {
-    LOG(WARNING) << "Invalid Content-Length header '" << *header_val
-                 << "': " << e.what();
+  if (header_val->empty()) {
+    LOG(WARNING) << "Content-Length header is empty";
     return std::nullopt;
   }
+
+  size_t length = 0;
+  const auto* begin = header_val->data();
+  const auto* end = begin + header_val->size();
+  auto [ptr, ec] = std::from_chars(begin, end, length);
+  if (ec != std::errc{} || ptr != end) {
+    LOG(WARNING) << "Invalid Content-Length header: " << *header_val;
+    return std::nullopt;
+  }
+
+  return length;
 }
 
 // Validates Content-Length header and checks against max body size.
