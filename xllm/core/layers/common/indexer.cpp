@@ -284,6 +284,11 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
       torch::split(q, {rope_head_dim_, head_dim_ - rope_head_dim_}, -1);
   auto q_pe = q_split[0].contiguous();
   auto q_nope = q_split[1].contiguous();
+  rotary_emb_->forward(q_pe,
+                       positions,
+                       attn_metadata.q_cu_seq_lens,
+                       attn_metadata.max_query_len,
+                       attn_metadata.is_prefill);
 
   auto k_split =
       torch::split(k, {rope_head_dim_, head_dim_ - rope_head_dim_}, -1);
@@ -292,8 +297,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
 
   // Apply rotary embedding to positional parts only (like Python)
   auto k_pe_unsqueezed = k_pe.unsqueeze(1);
-  rotary_emb_->forward(q_pe,
-                       k_pe_unsqueezed,
+  rotary_emb_->forward(k_pe_unsqueezed,
                        positions,
                        attn_metadata.q_cu_seq_lens,
                        attn_metadata.max_query_len,

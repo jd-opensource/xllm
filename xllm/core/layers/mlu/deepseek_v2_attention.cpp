@@ -184,9 +184,7 @@ void DeepseekV2AttentionImpl::decode_q_pre_base(
   auto q_nope_transposed = q_nope.transpose(0, 1);
   auto q_input_slice = q_input.slice(dim, 0, kv_lora_rank_).transpose(0, 1);
   torch::bmm_out(q_input_slice, q_nope_transposed, w_kc_);
-  torch::Tensor k_nope;
   rotary_emb_(q_pe,
-              k_nope,
               positions,
               attn_metadata.q_cu_seq_lens,
               attn_metadata.max_query_len,
@@ -205,9 +203,7 @@ void DeepseekV2AttentionImpl::decode_kv_pre_base(
                                         /*residual=*/std::nullopt,
                                         v_input));
   auto k_pe = latent_cache.slice(-1, kv_lora_rank_).unsqueeze(1);
-  torch::Tensor k_nope;
   rotary_emb_(k_pe,
-              k_nope,
               positions,
               attn_metadata.q_cu_seq_lens,
               attn_metadata.max_query_len,

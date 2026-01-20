@@ -173,13 +173,23 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
 }
 
-void DeepseekScalingRotaryEmbeddingImpl::apply_rotary(
+void DeepseekScalingRotaryEmbeddingImpl::forward(
     torch::Tensor& input,
-    const std::optional<torch::Tensor>& position_ids,
+    const torch::Tensor& positions,
     const torch::Tensor& cu_query_lens,
     int64_t max_query_len,
-    bool discrete) {
+    bool is_prompt) {
   const int32_t dim = -1;
+  bool discrete;
+  std::optional<torch::Tensor> position_ids;
+  if (is_prompt) {
+    discrete = false;
+    position_ids = std::nullopt;
+  } else {
+    discrete = true;
+    position_ids = positions;
+    max_query_len = 1;
+  }
   auto input_rot = input.slice(dim, 0, rotary_dim_);
   torch::Tensor input_pass;
   if (rotary_dim_ < head_size_) {
@@ -203,29 +213,6 @@ void DeepseekScalingRotaryEmbeddingImpl::apply_rotary(
     input = torch::cat({input_rot, input_pass}, dim);
   } else {
     input = input_rot;
-  }
-}
-
-void DeepseekScalingRotaryEmbeddingImpl::forward(
-    torch::Tensor& q,
-    torch::Tensor& k,
-    const torch::Tensor& positions,
-    const torch::Tensor& cu_query_lens,
-    int64_t max_query_len,
-    bool is_prompt) {
-  bool discrete;
-  std::optional<torch::Tensor> position_ids;
-  if (is_prompt) {
-    discrete = false;
-    position_ids = std::nullopt;
-  } else {
-    discrete = true;
-    position_ids = positions;
-    max_query_len = 1;
-  }
-  apply_rotary(q, position_ids, cu_query_lens, max_query_len, discrete);
-  if (k.defined()) {
-    apply_rotary(k, position_ids, cu_query_lens, max_query_len, discrete);
   }
 }
 
