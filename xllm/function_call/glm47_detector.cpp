@@ -26,18 +26,6 @@ Glm47Detector::Glm47Detector() : BaseFormatDetector() {
   bot_token_ = "<tool_call>";
   eot_token_ = "</tool_call>";
 
-  // Regex patterns for GLM-4.7 format (compact, no newlines)
-  // Use [\s\S] instead of . to match any character including newlines
-  func_call_regex_ = std::regex("<tool_call>[\\s\\S]*?</tool_call>",
-                                std::regex_constants::ECMAScript);
-  func_detail_regex_ =
-      std::regex("<tool_call>([\\s\\S]*?)(<arg_key>[\\s\\S]*?)?</tool_call>",
-                 std::regex_constants::ECMAScript);
-  func_arg_regex_ = std::regex(
-      "<arg_key>([\\s\\S]*?)</arg_key>(?:\\n|\\s)*<arg_value>([\\s\\S]*?)</"
-      "arg_value>",
-      std::regex_constants::ECMAScript);
-
   last_arguments_ = "";
   streamed_raw_length_ = 0;
   reset_streaming_state();
@@ -51,6 +39,56 @@ void Glm47Detector::reset_streaming_state() {
   is_first_param_ = true;
   value_started_ = false;
   cached_value_type_ = "";
+  utf8_buffer_ = "";
+}
+
+std::pair<std::string, std::string> Glm47Detector::split_incomplete_utf8(
+    const std::string& str) const {
+  if (str.empty()) {
+    return {"", ""};
+  }
+
+  // Check from the end for incomplete UTF-8 sequences
+  size_t len = str.length();
+  size_t check_start = (len >= 3) ? (len - 3) : 0;
+
+  for (size_t i = len; i > check_start; --i) {
+    unsigned char byte = static_cast<unsigned char>(str[i - 1]);
+
+    // Check if this is the start of a multi-byte sequence
+    if ((byte & 0x80) == 0) {
+      // Single-byte character (0xxxxxxx), complete
+      return {str, ""};
+    } else if ((byte & 0xE0) == 0xC0) {
+      // Start of 2-byte sequence (110xxxxx)
+      size_t needed = 2;
+      size_t available = len - (i - 1);
+      if (available < needed) {
+        return {str.substr(0, i - 1), str.substr(i - 1)};
+      }
+      return {str, ""};
+    } else if ((byte & 0xF0) == 0xE0) {
+      // Start of 3-byte sequence (1110xxxx)
+      size_t needed = 3;
+      size_t available = len - (i - 1);
+      if (available < needed) {
+        return {str.substr(0, i - 1), str.substr(i - 1)};
+      }
+      return {str, ""};
+    } else if ((byte & 0xF8) == 0xF0) {
+      // Start of 4-byte sequence (11110xxx)
+      size_t needed = 4;
+      size_t available = len - (i - 1);
+      if (available < needed) {
+        return {str.substr(0, i - 1), str.substr(i - 1)};
+      }
+      return {str, ""};
+    }
+    // else: continuation byte (10xxxxxx), keep checking backwards
+  }
+
+  // All checked bytes are continuation bytes, entire string is incomplete
+  return {"", str};
 }
 
 std::string Glm47Detector::trim_whitespace(std::string_view str) const {
@@ -68,6 +106,90 @@ std::string Glm47Detector::trim_whitespace(std::string_view str) const {
 
 bool Glm47Detector::has_tool_call(const std::string& text) {
   return text.find(bot_token_) != std::string::npos;
+}
+
+std::vector<std::pair<size_t, size_t>> Glm47Detector::find_tool_call_ranges(
+    const std::string& text) const {
+  std::vector<std::pair<size_t, size_t>> ranges;
+  // Pre-allocate for typical case: most requests have 1-4 tool calls
+  ranges.reserve(4);
+
+  size_t search_pos = 0;
+  const size_t bot_len = bot_token_.length();
+  const size_t eot_len = eot_token_.length();
+
+  while (search_pos < text.length()) {
+    size_t start_pos = text.find(bot_token_, search_pos);
+    if (start_pos == std::string::npos) break;
+
+    size_t content_start = start_pos + bot_len;
+    size_t end_pos = text.find(eot_token_, content_start);
+    if (end_pos == std::string::npos) break;
+
+    ranges.emplace_back(content_start, end_pos);
+    search_pos = end_pos + eot_len;
+  }
+  return ranges;
+}
+
+std::pair<std::string, std::string> Glm47Detector::parse_tool_call_content(
+    const std::string& content) const {
+  const std::string arg_key_tag = "<arg_key>";
+  size_t arg_pos = content.find(arg_key_tag);
+
+  if (arg_pos == std::string::npos) {
+    // No arguments, entire content is function name
+    return {trim_whitespace(content), ""};
+  }
+
+  std::string func_name = trim_whitespace(content.substr(0, arg_pos));
+  std::string args_raw = content.substr(arg_pos);
+  return {func_name, args_raw};
+}
+
+std::vector<std::pair<std::string, std::string>>
+Glm47Detector::extract_argument_pairs(const std::string& args_raw) const {
+  std::vector<std::pair<std::string, std::string>> pairs;
+
+  const std::string key_open = "<arg_key>";
+  const std::string key_close = "</arg_key>";
+  const std::string val_open = "<arg_value>";
+  const std::string val_close = "</arg_value>";
+
+  size_t pos = 0;
+  while (pos < args_raw.length()) {
+    size_t key_start = args_raw.find(key_open, pos);
+    if (key_start == std::string::npos) break;
+    key_start += key_open.length();
+
+    size_t key_end = args_raw.find(key_close, key_start);
+    if (key_end == std::string::npos) break;
+
+    size_t val_start = args_raw.find(val_open, key_end);
+    if (val_start == std::string::npos) break;
+
+    // Check for an intervening key tag, which indicates a malformed pair where
+    // a key is missing its value.
+    size_t next_key_start =
+        args_raw.find(key_open, key_end + key_close.length());
+    if (next_key_start != std::string::npos && next_key_start < val_start) {
+      // Skip to the next key, as this one is missing a value.
+      pos = next_key_start;
+      continue;
+    }
+
+    val_start += val_open.length();
+
+    size_t val_end = args_raw.find(val_close, val_start);
+    if (val_end == std::string::npos) break;
+
+    std::string key = args_raw.substr(key_start, key_end - key_start);
+    std::string value = args_raw.substr(val_start, val_end - val_start);
+    pairs.emplace_back(key, value);
+
+    pos = val_end + val_close.length();
+  }
+  return pairs;
 }
 
 std::string Glm47Detector::get_argument_type(
@@ -217,42 +339,24 @@ StreamingParseResult Glm47Detector::detect_and_parse(
   std::vector<ToolCallItem> calls;
 
   try {
-    std::sregex_iterator iter(text.begin(), text.end(), func_call_regex_);
-    std::sregex_iterator end;
+    // Use string-based parsing instead of regex to avoid stack overflow
+    auto ranges = find_tool_call_ranges(text);
 
-    for (; iter != end; ++iter) {
-      std::smatch match = *iter;
-      std::string match_result = match.str();
+    for (const auto& range : ranges) {
+      std::string content =
+          text.substr(range.first, range.second - range.first);
+      auto [func_name, args_raw] = parse_tool_call_content(content);
+      auto pairs = extract_argument_pairs(args_raw);
 
-      // Parse function name and arguments
-      std::smatch func_detail;
-      if (std::regex_search(match_result, func_detail, func_detail_regex_)) {
-        std::string func_name = func_detail[1].str();
-        std::string func_args = func_detail[2].str();
+      auto arguments = parse_argument_pairs(pairs, func_name, tools);
 
-        // Parse arguments using regex
-        std::vector<std::pair<std::string, std::string>> pairs;
-        std::sregex_iterator arg_iter(
-            func_args.begin(), func_args.end(), func_arg_regex_);
-        std::sregex_iterator arg_end;
+      // Create JSON object for parse_base_json
+      nlohmann::json match_json;
+      match_json["name"] = func_name;
+      match_json["parameters"] = arguments;
 
-        for (; arg_iter != arg_end; ++arg_iter) {
-          std::smatch arg_match = *arg_iter;
-          if (arg_match.size() >= 3) {
-            pairs.emplace_back(arg_match[1].str(), arg_match[2].str());
-          }
-        }
-
-        auto arguments = parse_argument_pairs(pairs, func_name, tools);
-
-        // Create JSON object for parse_base_json
-        nlohmann::json match_json;
-        match_json["name"] = func_name;
-        match_json["parameters"] = arguments;
-
-        auto parsed_calls = parse_base_json(match_json, tools);
-        calls.insert(calls.end(), parsed_calls.begin(), parsed_calls.end());
-      }
+      auto parsed_calls = parse_base_json(match_json, tools);
+      calls.insert(calls.end(), parsed_calls.begin(), parsed_calls.end());
     }
 
     return StreamingParseResult(normal_text, calls);
@@ -364,13 +468,20 @@ std::string Glm47Detector::process_xml_to_json_streaming(
             cached_value_type_.empty() ? "string" : cached_value_type_;
 
         if (value_started_) {
-          // Output any remaining content
-          if (!final_value.empty()) {
+          // Output any remaining content (including buffered UTF-8 bytes)
+          std::string full_final = utf8_buffer_ + final_value;
+          utf8_buffer_ = "";
+          if (!full_final.empty()) {
             if (value_type == "string") {
-              std::string escaped = nlohmann::json(final_value).dump();
-              json_output += escaped.substr(1, escaped.size() - 2);
+              try {
+                std::string escaped = nlohmann::json(full_final).dump();
+                json_output += escaped.substr(1, escaped.size() - 2);
+              } catch (const std::exception& e) {
+                LOG(WARNING) << "Failed to escape final content: " << e.what();
+                json_output += full_final;
+              }
             } else {
-              json_output += final_value;
+              json_output += full_final;
             }
           }
           // Always output closing quote for string type when value was started
@@ -406,9 +517,28 @@ std::string Glm47Detector::process_xml_to_json_streaming(
               value_started_ = true;
             }
             if (!content.empty()) {
-              std::string escaped = nlohmann::json(content).dump();
-              json_output += escaped.substr(1, escaped.size() - 2);
-              current_value_ += content;
+              // Prepend any buffered UTF-8 bytes from previous chunk
+              std::string full_content = utf8_buffer_ + content;
+
+              // Split into complete UTF-8 and incomplete tail
+              auto [complete_utf8, incomplete_tail] =
+                  split_incomplete_utf8(full_content);
+
+              if (!complete_utf8.empty()) {
+                try {
+                  std::string escaped = nlohmann::json(complete_utf8).dump();
+                  json_output += escaped.substr(1, escaped.size() - 2);
+                  current_value_ += complete_utf8;
+                } catch (const std::exception& e) {
+                  // If JSON parsing still fails, log and output as-is
+                  LOG(WARNING) << "Failed to escape content: " << e.what();
+                  json_output += complete_utf8;
+                  current_value_ += complete_utf8;
+                }
+              }
+
+              // Buffer the incomplete UTF-8 tail for next chunk
+              utf8_buffer_ = incomplete_tail;
               xml_tag_buffer_ = "";
             }
           } else if (value_type == "number") {
@@ -486,133 +616,121 @@ StreamingParseResult Glm47Detector::parse_streaming_increment(
   std::vector<ToolCallItem> calls;
 
   try {
-    // Try to match a partial or complete tool call
-    std::regex partial_regex("<tool_call>(.*?)(<arg_key>.*?)?(</tool_call>|$)",
-                             std::regex_constants::ECMAScript);
-    std::smatch partial_match;
-
-    if (std::regex_search(current_text, partial_match, partial_regex)) {
-      std::string func_name = trim_whitespace(partial_match[1].str());
-      std::string func_args_raw = trim_whitespace(partial_match[2].str());
-      std::string is_tool_end = partial_match[3].str();
-
-      // Initialize state if this is the first tool call
-      if (current_tool_id_ == -1) {
-        current_tool_id_ = 0;
-        prev_tool_call_arr_.clear();
-        streamed_args_for_tool_.clear();
-        streamed_args_for_tool_.push_back("");
-        streamed_raw_length_ = 0;
-        current_tool_name_sent_ = false;
-        reset_streaming_state();
-      }
-
-      // Ensure we have enough entries in our tracking arrays
-      while (prev_tool_call_arr_.size() <=
-             static_cast<size_t>(current_tool_id_)) {
-        prev_tool_call_arr_.push_back({});
-      }
-      while (streamed_args_for_tool_.size() <=
-             static_cast<size_t>(current_tool_id_)) {
-        streamed_args_for_tool_.push_back("");
-      }
-
-      // Send tool name first if not sent yet
-      if (!current_tool_name_sent_) {
-        // Only send function name when we're sure it's complete:
-        // - Either we have <arg_key> (arguments started)
-        // - Or we have </tool_call> (tool call ended with no args)
-        if (func_name.empty() ||
-            (func_args_raw.empty() && is_tool_end != eot_token_)) {
-          // Function name not yet complete, wait for more data
-          return StreamingParseResult("", {});
-        }
-        calls.push_back(ToolCallItem(current_tool_id_, func_name, ""));
-        current_tool_name_sent_ = true;
-        streamed_raw_length_ = 0;
-        reset_streaming_state();
-        // Store the tool call info
-        prev_tool_call_arr_[current_tool_id_]["name"] = func_name;
-        prev_tool_call_arr_[current_tool_id_]["arguments"] = "";
-      } else {
-        // Process XML to JSON streaming
-        size_t current_raw_length = func_args_raw.size();
-
-        if (current_raw_length > streamed_raw_length_) {
-          // Get the new raw XML content
-          std::string raw_increment =
-              func_args_raw.substr(streamed_raw_length_);
-
-          // Convert XML increment to JSON increment using state machine
-          std::string json_increment =
-              process_xml_to_json_streaming(raw_increment, func_name, tools);
-
-          if (!json_increment.empty()) {
-            calls.push_back(
-                ToolCallItem(current_tool_id_, std::nullopt, json_increment));
-            last_arguments_ += json_increment;
-            streamed_args_for_tool_[current_tool_id_] += json_increment;
-          }
-
-          // Update the streamed length
-          streamed_raw_length_ = current_raw_length;
-        }
-
-        if (is_tool_end == eot_token_) {
-          if (is_first_param_) {
-            std::string empty_object = "{}";
-            calls.push_back(
-                ToolCallItem(current_tool_id_, std::nullopt, empty_object));
-            last_arguments_ += empty_object;
-          } else if (last_arguments_.empty() || last_arguments_.back() != '}') {
-            std::string closing_brace = "}";
-            calls.push_back(
-                ToolCallItem(current_tool_id_, std::nullopt, closing_brace));
-            last_arguments_ += closing_brace;
-            streamed_args_for_tool_[current_tool_id_] += closing_brace;
-          }
-
-          try {
-            std::sregex_iterator arg_iter(
-                func_args_raw.begin(), func_args_raw.end(), func_arg_regex_);
-            std::sregex_iterator arg_end;
-
-            std::vector<std::pair<std::string, std::string>> pairs;
-            for (; arg_iter != arg_end; ++arg_iter) {
-              std::smatch arg_match = *arg_iter;
-              if (arg_match.size() >= 3) {
-                pairs.emplace_back(arg_match[1].str(), arg_match[2].str());
-              }
-            }
-
-            if (!pairs.empty()) {
-              auto arguments = parse_argument_pairs(pairs, func_name, tools);
-              nlohmann::json args_json = arguments;
-              prev_tool_call_arr_[current_tool_id_]["arguments"] =
-                  args_json.dump();
-            }
-          } catch (const std::exception& e) {
-            LOG(WARNING) << "Failed to parse arguments: " << e.what();
-          }
-
-          // Remove the completed tool call from buffer
-          buffer_ = current_text.substr(partial_match.position(3) +
-                                        is_tool_end.length());
-
-          StreamingParseResult result("", calls);
-          current_tool_id_++;
-          last_arguments_ = "";
-          current_tool_name_sent_ = false;
-          streamed_raw_length_ = 0;
-          reset_streaming_state();
-          return result;
-        }
-      }
-
-      return StreamingParseResult("", calls);
+    // Use string-based parsing instead of regex to avoid stack overflow
+    size_t bot_pos = current_text.find(bot_token_);
+    if (bot_pos == std::string::npos) {
+      return StreamingParseResult("", {});
     }
 
-    return StreamingParseResult("", {});
+    size_t content_start = bot_pos + bot_token_.length();
+    size_t eot_pos = current_text.find(eot_token_, content_start);
+    bool is_tool_end_flag = (eot_pos != std::string::npos);
+
+    // Extract content (partial or complete)
+    std::string content =
+        is_tool_end_flag
+            ? current_text.substr(content_start, eot_pos - content_start)
+            : current_text.substr(content_start);
+
+    // Parse function name and args
+    auto [func_name, func_args_raw] = parse_tool_call_content(content);
+
+    // Initialize state if this is the first tool call
+    if (current_tool_id_ == -1) {
+      current_tool_id_ = 0;
+      prev_tool_call_arr_.clear();
+      streamed_args_for_tool_.clear();
+      streamed_args_for_tool_.push_back("");
+      streamed_raw_length_ = 0;
+      current_tool_name_sent_ = false;
+      reset_streaming_state();
+    }
+
+    // Ensure we have enough entries in our tracking arrays
+    while (prev_tool_call_arr_.size() <=
+           static_cast<size_t>(current_tool_id_)) {
+      prev_tool_call_arr_.push_back({});
+    }
+    while (streamed_args_for_tool_.size() <=
+           static_cast<size_t>(current_tool_id_)) {
+      streamed_args_for_tool_.push_back("");
+    }
+
+    // Send tool name first if not sent yet
+    if (!current_tool_name_sent_) {
+      // Only send function name when we're sure it's complete:
+      // - Either we have <arg_key> (arguments started)
+      // - Or we have </tool_call> (tool call ended with no args)
+      if (func_name.empty() || (func_args_raw.empty() && !is_tool_end_flag)) {
+        // Function name not yet complete, wait for more data
+        return StreamingParseResult("", {});
+      }
+      calls.push_back(ToolCallItem(current_tool_id_, func_name, ""));
+      current_tool_name_sent_ = true;
+      streamed_raw_length_ = 0;
+      reset_streaming_state();
+      // Store the tool call info
+      prev_tool_call_arr_[current_tool_id_]["name"] = func_name;
+      prev_tool_call_arr_[current_tool_id_]["arguments"] = "";
+    } else {
+      // Process XML to JSON streaming
+      size_t current_raw_length = func_args_raw.size();
+
+      if (current_raw_length > streamed_raw_length_) {
+        // Get the new raw XML content
+        std::string raw_increment = func_args_raw.substr(streamed_raw_length_);
+
+        // Convert XML increment to JSON increment using state machine
+        std::string json_increment =
+            process_xml_to_json_streaming(raw_increment, func_name, tools);
+
+        if (!json_increment.empty()) {
+          calls.push_back(
+              ToolCallItem(current_tool_id_, std::nullopt, json_increment));
+          last_arguments_ += json_increment;
+          streamed_args_for_tool_[current_tool_id_] += json_increment;
+        }
+
+        // Update the streamed length
+        streamed_raw_length_ = current_raw_length;
+      }
+
+      if (is_tool_end_flag) {
+        if (is_first_param_) {
+          std::string empty_object = "{}";
+          calls.push_back(
+              ToolCallItem(current_tool_id_, std::nullopt, empty_object));
+          last_arguments_ += empty_object;
+        } else if (last_arguments_.empty() || last_arguments_.back() != '}') {
+          std::string closing_brace = "}";
+          calls.push_back(
+              ToolCallItem(current_tool_id_, std::nullopt, closing_brace));
+          last_arguments_ += closing_brace;
+          streamed_args_for_tool_[current_tool_id_] += closing_brace;
+        }
+
+        // Use string-based argument extraction
+        auto pairs = extract_argument_pairs(func_args_raw);
+        if (!pairs.empty()) {
+          auto arguments = parse_argument_pairs(pairs, func_name, tools);
+          nlohmann::json args_json = arguments;
+          prev_tool_call_arr_[current_tool_id_]["arguments"] = args_json.dump();
+        }
+
+        // Remove the completed tool call from buffer
+        buffer_ = current_text.substr(eot_pos + eot_token_.length());
+
+        StreamingParseResult result("", calls);
+        current_tool_id_++;
+        last_arguments_ = "";
+        current_tool_name_sent_ = false;
+        streamed_raw_length_ = 0;
+        reset_streaming_state();
+        return result;
+      }
+    }
+
+    return StreamingParseResult("", calls);
 
   } catch (const std::exception& e) {
     LOG(ERROR) << "Error in parse_streaming_increment: " << e.what();

@@ -447,5 +447,138 @@ TEST_F(Glm47DetectorTest, PerformanceWithManyToolCalls) {
   }
 }
 
+// Regression test for issue #751: std::regex stack overflow on large payloads
+// The old regex implementation with [\s\S]*? pattern caused O(n) recursion
+// depth, leading to stack overflow on inputs larger than ~46KB (depending on
+// stack size). The fix uses string::find() and substr() for O(1) stack usage.
+TEST_F(Glm47DetectorTest, LargePayloadNoStackOverflow) {
+  // Create a tool that accepts large content
+  nlohmann::json write_params = {
+      {"type", "object"},
+      {"properties",
+       {{"filename", {{"type", "string"}, {"description", "Filename"}}},
+        {"content",
+         {{"type", "string"}, {"description", "Content to write"}}}}},
+      {"required", {"filename", "content"}}};
+
+  JsonFunction write_func("write_file", "Write content to file", write_params);
+  JsonTool write_tool("function", write_func);
+  std::vector<JsonTool> tools = {write_tool};
+
+  // Test with 50KB payload (larger than the ~46KB that caused stack overflow)
+  std::string large_content(50000, 'A');
+  std::string text =
+      "Test "
+      "<tool_call>write_file"
+      "<arg_key>filename</arg_key><arg_value>test.txt</arg_value>"
+      "<arg_key>content</arg_key><arg_value>" +
+      large_content +
+      "</arg_value>"
+      "</tool_call>";
+
+  // This would crash with stack overflow before the fix
+  auto result = detector_->detect_and_parse(text, tools);
+
+  EXPECT_EQ(result.normal_text, "Test");
+  ASSERT_EQ(result.calls.size(), 1);
+
+  const auto& call = result.calls[0];
+  EXPECT_EQ(call.name.value(), "write_file");
+
+  nlohmann::json params = nlohmann::json::parse(call.parameters);
+  EXPECT_EQ(params["filename"], "test.txt");
+  EXPECT_EQ(params["content"].get<std::string>().size(), 50000);
+}
+
+// Test with Chinese content to validate UTF-8 handling with large payloads
+TEST_F(Glm47DetectorTest, LargeChinesePayloadNoStackOverflow) {
+  nlohmann::json write_params = {
+      {"type", "object"},
+      {"properties",
+       {{"filename", {{"type", "string"}}}, {"content", {{"type", "string"}}}}},
+      {"required", {"filename", "content"}}};
+
+  JsonFunction write_func("write_file", "Write content to file", write_params);
+  JsonTool write_tool("function", write_func);
+  std::vector<JsonTool> tools = {write_tool};
+
+  // Generate ~50KB of Chinese content (each char is 3 bytes in UTF-8)
+  std::string chinese_char = "测";  // 3 bytes in UTF-8
+  std::string large_content;
+  large_content.reserve(50000);
+  for (int i = 0; i < 16667; ++i) {  // 16667 * 3 ≈ 50KB
+    large_content += chinese_char;
+  }
+
+  std::string text =
+      "<tool_call>write_file"
+      "<arg_key>filename</arg_key><arg_value>中文.txt</arg_value>"
+      "<arg_key>content</arg_key><arg_value>" +
+      large_content +
+      "</arg_value>"
+      "</tool_call>";
+
+  auto result = detector_->detect_and_parse(text, tools);
+
+  ASSERT_EQ(result.calls.size(), 1);
+  const auto& call = result.calls[0];
+  EXPECT_EQ(call.name.value(), "write_file");
+
+  nlohmann::json params = nlohmann::json::parse(call.parameters);
+  EXPECT_EQ(params["filename"], "中文.txt");
+  // Verify content length (each Chinese char is 3 bytes)
+  EXPECT_GE(params["content"].get<std::string>().size(), 49000);
+}
+
+// Test streaming with large payload
+TEST_F(Glm47DetectorTest, StreamingLargePayloadNoStackOverflow) {
+  nlohmann::json write_params = {
+      {"type", "object"},
+      {"properties", {{"content", {{"type", "string"}}}}},
+      {"required", {"content"}}};
+
+  JsonFunction write_func("write_file", "Write content", write_params);
+  JsonTool write_tool("function", write_func);
+  std::vector<JsonTool> tools = {write_tool};
+
+  // Build a large tool call incrementally (simulating streaming)
+  std::string large_content(20000, 'X');  // 20KB for streaming test
+  std::string full_text =
+      "<tool_call>write_file"
+      "<arg_key>content</arg_key><arg_value>" +
+      large_content +
+      "</arg_value>"
+      "</tool_call>";
+
+  // Simulate streaming by sending chunks
+  // Create fresh detector for streaming test
+  auto streaming_detector = std::make_unique<Glm47Detector>();
+  std::vector<StreamingParseResult> results;
+
+  size_t chunk_size = 1000;  // 1KB chunks
+  for (size_t i = 0; i < full_text.size(); i += chunk_size) {
+    std::string chunk = full_text.substr(i, chunk_size);
+    auto result = streaming_detector->parse_streaming_increment(chunk, tools);
+    results.push_back(result);
+  }
+
+  // Verify we got the function name and completed without crash
+  bool found_name = false;
+  bool found_args = false;
+  for (const auto& r : results) {
+    for (const auto& call : r.calls) {
+      if (call.name.has_value() && call.name.value() == "write_file") {
+        found_name = true;
+      }
+      if (!call.parameters.empty()) {
+        found_args = true;
+      }
+    }
+  }
+
+  EXPECT_TRUE(found_name);
+  EXPECT_TRUE(found_args);
+}
+
 }  // namespace function_call
 }  // namespace xllm

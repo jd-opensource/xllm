@@ -15,9 +15,9 @@ limitations under the License.
 
 #pragma once
 
-#include <regex>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "base_format_detector.h"
 
@@ -62,9 +62,15 @@ class Glm47Detector : public BaseFormatDetector {
       const std::vector<JsonTool>& tools) override;
 
  private:
-  std::regex func_call_regex_;
-  std::regex func_detail_regex_;
-  std::regex func_arg_regex_;
+  // String-based parsing helpers (replaces regex to avoid stack overflow)
+  std::vector<std::pair<size_t, size_t>> find_tool_call_ranges(
+      const std::string& text) const;
+
+  std::pair<std::string, std::string> parse_tool_call_content(
+      const std::string& content) const;
+
+  std::vector<std::pair<std::string, std::string>> extract_argument_pairs(
+      const std::string& args_raw) const;
 
   StreamState stream_state_;
   std::string current_key_;
@@ -75,6 +81,14 @@ class Glm47Detector : public BaseFormatDetector {
   std::string cached_value_type_;
   std::string last_arguments_;
   size_t streamed_raw_length_;
+
+  // UTF-8 buffer for handling incomplete multi-byte sequences in streaming
+  std::string utf8_buffer_;
+
+  // Split incomplete UTF-8 sequence from the end of input
+  // Returns: (complete_text, incomplete_bytes)
+  std::pair<std::string, std::string> split_incomplete_utf8(
+      const std::string& input) const;
 
   std::string trim_whitespace(std::string_view str) const;
 
