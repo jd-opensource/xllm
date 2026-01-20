@@ -262,7 +262,7 @@ IndexerRuntimeContext IndexerImpl::prepare_runtime_context(
   return ctx;
 }
 
-torch::Tensor IndexerImpl::indexer_q_base(
+torch::Tensor IndexerImpl::preprocess_indexer_q(
     const torch::Tensor& qr,
     const torch::Tensor& positions,
     const AttentionMetadata& attn_metadata) {
@@ -281,7 +281,7 @@ torch::Tensor IndexerImpl::indexer_q_base(
   return q;
 }
 
-std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::indexer_k_base(
+std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::preprocess_indexer_k(
     const torch::Tensor& x,
     const torch::Tensor& positions,
     torch::Tensor& k_cache,
@@ -325,8 +325,9 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
     const AttentionMetadata& attn_metadata,
     bool is_prefill,
     const std::optional<torch::Tensor>& mask) {
-  auto q = indexer_q_base(qr, positions, attn_metadata);
-  auto [k, weights] = indexer_k_base(x, positions, k_cache, attn_metadata);
+  auto q = preprocess_indexer_q(qr, positions, attn_metadata);
+  auto [k, weights] =
+      preprocess_indexer_k(x, positions, k_cache, attn_metadata);
 
   // Unified parameter setup for both prefill and decode modes
   IndexerRuntimeContext ctx = prepare_runtime_context(
