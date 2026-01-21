@@ -18,9 +18,9 @@ limitations under the License.
 #include <torch_npu/csrc/aten/NPUGeneratorImpl.h>
 #elif defined(USE_MLU)
 #include <cn_api.h>
-#include <torch_mlu/csrc/framework/core/device.h>
-#include <torch_mlu/csrc/framework/core/device_utils.h>
-#include <torch_mlu/csrc/framework/generator/generator_impl.h>
+#include <torch_mlu/csrc/include/framework/core/device.h>
+#include <torch_mlu/csrc/include/framework/core/device_utils.h>
+#include <torch_mlu/csrc/include/framework/generator/generator_impl.h>
 #elif defined(USE_CUDA) || defined(USE_ILU)
 #include <c10/cuda/CUDAStream.h>
 #include <cuda.h>

@@ -24,7 +24,7 @@ limitations under the License.
 #include "acl/acl.h"
 #include "kernels/npu/xllm_ops/replace_token.h"
 #elif defined(USE_MLU)
-#include <torch_mlu/csrc/framework/core/caching_allocator.h>
+#include <torch_mlu/csrc/include/framework/core/caching_allocator.h>
 #elif defined(USE_CUDA) || defined(USE_ILU)
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif

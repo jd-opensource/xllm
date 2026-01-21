@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <torch/torch.h>
-#include <torch_mlu/csrc/framework/graphs/MLUGraph.h>
+#include <torch_mlu/csrc/include/framework/graphs/MLUGraph.h>
 
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
