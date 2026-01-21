@@ -207,6 +207,11 @@ int64_t XTensorAllocator::init_phy_page_pools(double max_memory_utilization,
               << ", cache_size=" << cache_size << ", num_pages=" << num_pages;
 
     PhyPagePool::get_instance().init(dev_, num_pages);
+
+    // Initialize GlobalXtensor after PhyPagePool
+    GlobalXtensor::get_instance().init(dev_);
+    LOG(INFO) << "GlobalXtensor initialized (local)";
+
     return num_pages;
   }
 
@@ -664,6 +669,161 @@ size_t XTensorAllocator::free_weight_from_global_xtensor(
   LOG(INFO) << "Freed " << num_pages << " weight pages for model " << model_id;
 
   return num_pages;
+}
+
+// ============== PD Disaggregation Support (XTensor Mode) ==============
+
+std::pair<uint64_t, uint64_t> XTensorAllocator::get_global_offsets_for_block(
+    const std::string& model_id,
+    int64_t layer_id,
+    int64_t block_id,
+    size_t block_size) {
+  constexpr uint64_t INVALID_OFFSET = UINT64_MAX;
+
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  auto* tensors = get_model_tensors(model_id);
+  if (!tensors) {
+    LOG(ERROR) << "Model " << model_id << " not found for offset calculation";
+    return {INVALID_OFFSET, INVALID_OFFSET};
+  }
+
+  if (layer_id < 0 || layer_id >= tensors->num_layers) {
+    LOG(ERROR) << "Invalid layer_id " << layer_id << " for model " << model_id
+               << " (num_layers=" << tensors->num_layers << ")";
+    return {INVALID_OFFSET, INVALID_OFFSET};
+  }
+
+  if (tensors->k_tensors.empty() || tensors->v_tensors.empty()) {
+    LOG(ERROR) << "KV tensors not created for model " << model_id;
+    return {INVALID_OFFSET, INVALID_OFFSET};
+  }
+
+  auto& global_xtensor = GlobalXtensor::get_instance();
+  if (!global_xtensor.is_initialized()) {
+    LOG(ERROR) << "GlobalXtensor not initialized";
+    return {INVALID_OFFSET, INVALID_OFFSET};
+  }
+
+  // Calculate the offset within the XTensor for this block
+  // The offset must be aligned to page_size
+  size_t page_size = FLAGS_phy_page_granularity_size;
+  offset_t local_offset =
+      static_cast<offset_t>((block_id * block_size / page_size) * page_size);
+
+  // Get K tensor's physical page_id at this offset
+  auto* k_xtensor = tensors->k_tensors[layer_id].get();
+  page_id_t k_page_id = k_xtensor->get_phy_page_id(local_offset);
+  if (k_page_id < 0) {
+    LOG(ERROR) << "K cache block " << block_id << " at layer " << layer_id
+               << " is not mapped (local_offset=" << local_offset << ")";
+    return {INVALID_OFFSET, INVALID_OFFSET};
+  }
+
+  // Get V tensor's physical page_id at this offset
+  auto* v_xtensor = tensors->v_tensors[layer_id].get();
+  page_id_t v_page_id = v_xtensor->get_phy_page_id(local_offset);
+  if (v_page_id < 0) {
+    LOG(ERROR) << "V cache block " << block_id << " at layer " << layer_id
+               << " is not mapped (local_offset=" << local_offset << ")";
+    return {INVALID_OFFSET, INVALID_OFFSET};
+  }
+
+  // Calculate GlobalXtensor offsets using page_id
+  // GlobalXtensor offset = page_id * page_size + (block offset within page)
+  size_t offset_within_page = (block_id * block_size) % page_size;
+
+  uint64_t k_global_offset =
+      static_cast<uint64_t>(k_page_id) * page_size + offset_within_page;
+  uint64_t v_global_offset =
+      static_cast<uint64_t>(v_page_id) * page_size + offset_within_page;
+
+  VLOG(2) << "get_global_offsets_for_block: model=" << model_id
+          << ", layer=" << layer_id << ", block=" << block_id
+          << ", block_size=" << block_size << ", k_page_id=" << k_page_id
+          << ", v_page_id=" << v_page_id << ", k_offset=" << k_global_offset
+          << ", v_offset=" << v_global_offset;
+
+  return {k_global_offset, v_global_offset};
+}
+
+bool XTensorAllocator::get_xtensor_offsets(
+    int32_t dp_rank,
+    const std::string& model_id,
+    const std::vector<int32_t>& block_ids,
+    uint64_t block_size_bytes,
+    std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
+        layer_offsets) {
+  // The offsets of the xtensor in the same DP group as the master worker are
+  // identical, so there is no need to fetch them via RPC.
+  if (dp_rank == 0) {
+    // Get model tensors to determine num_layers
+    auto* tensors = get_model_tensors(model_id);
+    if (!tensors) {
+      LOG(ERROR) << "Model " << model_id << " not found for local calculation";
+      return false;
+    }
+
+    int64_t num_layers = tensors->num_layers;
+    layer_offsets.resize(num_layers);
+
+    for (int64_t layer_id = 0; layer_id < num_layers; ++layer_id) {
+      std::vector<uint64_t> k_offsets;
+      std::vector<uint64_t> v_offsets;
+      k_offsets.reserve(block_ids.size());
+      v_offsets.reserve(block_ids.size());
+
+      for (int32_t block_id : block_ids) {
+        auto [k_offset, v_offset] = get_global_offsets_for_block(
+            model_id, layer_id, block_id, block_size_bytes);
+        if (k_offset == UINT64_MAX || v_offset == UINT64_MAX) {
+          LOG(ERROR) << "Failed to get local offsets for block " << block_id
+                     << " at layer " << layer_id;
+          return false;
+        }
+        k_offsets.push_back(k_offset);
+        v_offsets.push_back(v_offset);
+      }
+      layer_offsets[layer_id] = {std::move(k_offsets), std::move(v_offsets)};
+    }
+
+    VLOG(1) << "get_xtensor_offsets (local): model_id=" << model_id
+            << ", num_blocks=" << block_ids.size()
+            << ", num_layers=" << num_layers;
+    return true;
+  }
+
+  if (dp_rank < 0 ||
+      dp_rank >= static_cast<int32_t>(dp_group_clients_.size())) {
+    LOG(ERROR) << "Invalid dp_rank: " << dp_rank
+               << ", dp_group_clients_.size()=" << dp_group_clients_.size();
+    return false;
+  }
+
+  const auto& clients = dp_group_clients_[dp_rank];
+  if (clients.empty()) {
+    LOG(ERROR) << "No clients in dp_group " << dp_rank;
+    return false;
+  }
+
+  // Call the first worker in the DP group (all workers in the same DP group
+  // should have the same physical page mapping)
+  auto& client = clients[0];
+  auto future =
+      client->get_xtensor_offsets_async(model_id, block_ids, block_size_bytes);
+
+  layer_offsets = std::move(future).get();
+  if (layer_offsets.empty()) {
+    LOG(ERROR) << "get_xtensor_offsets failed for dp_rank=" << dp_rank
+               << ", model_id=" << model_id;
+    return false;
+  }
+
+  VLOG(1) << "get_xtensor_offsets: dp_rank=" << dp_rank
+          << ", model_id=" << model_id << ", num_blocks=" << block_ids.size()
+          << ", num_layers=" << layer_offsets.size();
+
+  return true;
 }
 
 }  // namespace xllm

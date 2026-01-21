@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
+#include "core/distributed_runtime/master.h"
 #include "dist_manager.h"
 #include "engine.h"
 #include "framework/batch/batch.h"
@@ -38,7 +39,6 @@ limitations under the License.
 #include "runtime/worker_client.h"
 #include "runtime/xservice_client.h"
 #include "util/threadpool.h"
-
 namespace xllm {
 
 class LLMEngine : public Engine {
@@ -113,11 +113,19 @@ class LLMEngine : public Engine {
 
   bool wakeup(int32_t master_status) override;
 
+  // XTensor mode: get GlobalXtensor offsets for allocated blocks via RPC
+  // Calls worker in the specified DP group to compute offsets
+  bool get_xtensor_offsets_for_blocks(
+      int32_t dp_rank,
+      const std::vector<int32_t>& block_ids,
+      std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
+          layer_offsets) override;
+
  private:
   friend class SpeculativeEngine;
   // setup workers internal
   void setup_workers(const runtime::Options& options);
-  bool init_model(int32_t master_status);
+  bool init_model(int32_t master_status = WAKEUP);
   Engine::KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
   std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);

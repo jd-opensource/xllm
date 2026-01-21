@@ -116,9 +116,14 @@ void XTensorDistService::InitPhyPagePool(
     try {
       // Initialize PhyPagePool with specified number of pages
       PhyPagePool::get_instance().init(device_, num_pages);
+
+      // Initialize GlobalXtensor after PhyPagePool
+      GlobalXtensor::get_instance().init(device_);
+      LOG(INFO) << "GlobalXtensor initialized on worker " << global_rank_;
+
       response->set_ok(true);
     } catch (const std::exception& e) {
-      LOG(ERROR) << "Failed to init PhyPagePool: " << e.what();
+      LOG(ERROR) << "Failed to init PhyPagePool/GlobalXtensor: " << e.what();
       response->set_ok(false);
     }
   });
@@ -227,6 +232,65 @@ void XTensorDistService::FreeWeightPages(
 
     LOG(INFO) << "FreeWeightPages: freed " << num_freed << " pages for model "
               << model_id;
+  });
+}
+
+void XTensorDistService::GetXTensorOffsets(
+    ::google::protobuf::RpcController* controller,
+    const proto::GetXTensorOffsetsRequest* request,
+    proto::GetXTensorOffsetsResponse* response,
+    ::google::protobuf::Closure* done) {
+  threadpool_.schedule([this, request, response, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+
+    std::string model_id = request->model_id();
+    uint64_t block_size_bytes = request->block_size_bytes();
+
+    // Convert proto block_ids to vector
+    std::vector<int32_t> block_ids;
+    block_ids.reserve(request->block_ids_size());
+    for (int i = 0; i < request->block_ids_size(); ++i) {
+      block_ids.push_back(request->block_ids(i));
+    }
+
+    auto& allocator = XTensorAllocator::get_instance();
+    if (!allocator.is_initialized()) {
+      LOG(ERROR) << "XTensorAllocator not initialized on worker";
+      return;
+    }
+
+    // Get model tensors to determine number of layers
+    auto* tensors = allocator.get_model_tensors(model_id);
+    if (!tensors) {
+      LOG(ERROR) << "Model " << model_id << " not found in XTensorAllocator";
+      return;
+    }
+
+    int64_t num_layers = tensors->num_layers;
+
+    // Calculate offsets for each layer and each block
+    for (int64_t layer_id = 0; layer_id < num_layers; ++layer_id) {
+      auto* layer_offsets_proto = response->add_layer_offsets();
+
+      for (const auto& block_id : block_ids) {
+        auto [k_offset, v_offset] = allocator.get_global_offsets_for_block(
+            model_id, layer_id, block_id, block_size_bytes);
+
+        if (k_offset == UINT64_MAX || v_offset == UINT64_MAX) {
+          LOG(ERROR) << "Failed to get offsets for block " << block_id
+                     << " at layer " << layer_id << " for model " << model_id;
+          response->clear_layer_offsets();
+          return;
+        }
+
+        layer_offsets_proto->add_k_offsets(k_offset);
+        layer_offsets_proto->add_v_offsets(v_offset);
+      }
+    }
+
+    VLOG(1) << "GetXTensorOffsets: model_id=" << model_id
+            << ", num_blocks=" << block_ids.size()
+            << ", num_layers=" << num_layers;
   });
 }
 

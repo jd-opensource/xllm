@@ -46,7 +46,7 @@ class VLMEngine : public Engine {
 
   const runtime::Options& options() const { return options_; }
 
-  bool init(int32_t master_status) override;
+  bool init() override;
 
   void update_last_step_result(std::vector<Batch>& batch) override;
 
@@ -54,7 +54,7 @@ class VLMEngine : public Engine {
   std::vector<int64_t> get_active_activation_memory() const override;
 
  private:
-  bool init_model(int32_t master_status);
+  bool init_model();
   Engine::KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
   std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);

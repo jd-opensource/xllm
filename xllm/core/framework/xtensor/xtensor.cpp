@@ -219,6 +219,19 @@ torch::Tensor XTensor::to_torch_tensor() const {
   return to_torch_tensor(0, {num_elems});
 }
 
+page_id_t XTensor::get_phy_page_id(offset_t offset) const {
+  CHECK(offset % page_size_ == 0)
+      << "Offset not aligned to page size: " << offset;
+
+  page_id_t local_page_id = offset / page_size_;
+  auto it = mapping_.find(local_page_id);
+  if (it == mapping_.end()) {
+    // Not mapped, return -1
+    return -1;
+  }
+  return it->second->page_id();
+}
+
 torch::Tensor XTensor::to_torch_tensor(size_t offset,
                                        const std::vector<int64_t>& dims) const {
   uintptr_t addr = reinterpret_cast<uintptr_t>(vaddr_) + offset;

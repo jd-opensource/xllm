@@ -33,7 +33,7 @@ class SpeculativeEngine : public Engine {
 
   virtual ~SpeculativeEngine() = default;
 
-  bool init(int32_t master_status) override;
+  bool init() override;
 
   // step the engine forward
   ForwardOutput step(std::vector<Batch>& batch) override;
@@ -90,7 +90,7 @@ class SpeculativeEngine : public Engine {
   SpeculativeEngine(const runtime::Options& options, bool use_draft_engine);
 
  private:
-  bool init_model(int32_t master_status);
+  bool init_model();
 
   bool allocate_kv_cache();
 

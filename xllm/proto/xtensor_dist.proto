@@ -38,6 +38,25 @@ message FreeWeightPagesRequest {
   string model_id = 1;
 }
 
+// Request for getting XTensor offsets for KV cache blocks
+message GetXTensorOffsetsRequest {
+  string model_id = 1;
+  repeated int32 block_ids = 2;
+  uint64 block_size_bytes = 3;
+}
+
+// Per-layer K/V offsets for XTensor
+message XTensorLayerOffsetsProto {
+  repeated uint64 k_offsets = 1;
+  repeated uint64 v_offsets = 2;
+}
+
+// Response for XTensor offsets
+message GetXTensorOffsetsResponse {
+  // Per-layer offsets: layer_offsets[layer_id] contains K/V offsets for all blocks
+  repeated XTensorLayerOffsetsProto layer_offsets = 1;
+}
+
 // XTensorDist service for distributed XTensor mapping operations
 service XTensorDist {
   rpc Hello (Status) returns (Status);
@@ -57,4 +76,8 @@ service XTensorDist {
   // Weight pages allocation from GlobalXtensor
   rpc AllocWeightPages (AllocWeightPagesRequest) returns (Status);
   rpc FreeWeightPages (FreeWeightPagesRequest) returns (Status);
+  
+  // Get XTensor offsets for KV cache blocks (used in PD disaggregation)
+  // Returns GlobalXtensor offsets for each block at each layer
+  rpc GetXTensorOffsets (GetXTensorOffsetsRequest) returns (GetXTensorOffsetsResponse);
 }
