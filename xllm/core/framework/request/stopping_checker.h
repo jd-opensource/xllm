@@ -79,7 +79,7 @@ class StoppingChecker {
   size_t max_context_len_ = 0;
 
   // eos token id
-  int32_t eos_token_ = 0;
+  int32_t eos_token_ = -1;
 
   // ignore eos token or not
   bool ignore_eos_ = false;
