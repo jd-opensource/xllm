@@ -73,6 +73,12 @@ class XTensorDistService : public proto::XTensorDist {
                        proto::Status* response,
                        ::google::protobuf::Closure* done) override;
 
+  // Get XTensor offsets for KV cache blocks (used in PD disaggregation)
+  void GetXTensorOffsets(::google::protobuf::RpcController* controller,
+                         const proto::GetXTensorOffsetsRequest* request,
+                         proto::GetXTensorOffsetsResponse* response,
+                         ::google::protobuf::Closure* done) override;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(XTensorDistService);
 

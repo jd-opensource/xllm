@@ -126,12 +126,23 @@ inline size_t get_instance_info_size(const InstanceInfo& info) {
   return size;
 }
 
+inline size_t get_xtensor_layer_offsets_size(
+    const std::vector<XTensorLayerOffsets>& offsets) {
+  size_t total = type_size<uint64_t>;  // num_layers
+  for (const auto& layer : offsets) {
+    total +=
+        get_vector_size(layer.k_offsets) + get_vector_size(layer.v_offsets);
+  }
+  return total;
+}
+
 inline size_t get_transfer_kv_info_size(const TransferKVInfo& info) {
   return get_string_size(info.request_id) +
          get_vector_size(info.local_blocks_ids) +
          get_vector_size(info.remote_blocks_ids) +
          type_size<int32_t>  // dp_rank
-         + get_instance_info_size(info.remote_instance_info);
+         + get_instance_info_size(info.remote_instance_info) +
+         get_xtensor_layer_offsets_size(info.dst_xtensor_layer_offsets);
 }
 
 inline size_t get_eplb_info_size(const EplbInfo& info) {
@@ -458,12 +469,23 @@ inline void write_instance_info(char*& buffer, const InstanceInfo& info) {
   }
 }
 
+inline void write_xtensor_layer_offsets(
+    char*& buffer,
+    const std::vector<XTensorLayerOffsets>& offsets) {
+  write_data(buffer, (uint64_t)offsets.size());
+  for (const auto& layer : offsets) {
+    write_vector(buffer, layer.k_offsets);
+    write_vector(buffer, layer.v_offsets);
+  }
+}
+
 inline void write_transfer_kv_info(char*& buffer, const TransferKVInfo& info) {
   write_string(buffer, info.request_id);
   write_vector(buffer, info.local_blocks_ids);
   write_vector(buffer, info.remote_blocks_ids);
   write_data(buffer, info.dp_rank);
   write_instance_info(buffer, info.remote_instance_info);
+  write_xtensor_layer_offsets(buffer, info.dst_xtensor_layer_offsets);
 }
 
 inline void write_eplb_info(char*& buffer, const EplbInfo& info) {
@@ -813,12 +835,25 @@ inline void read_instance_info(const char*& buffer, InstanceInfo& info) {
   }
 }
 
+inline void read_xtensor_layer_offsets(
+    const char*& buffer,
+    std::vector<XTensorLayerOffsets>& offsets) {
+  uint64_t num_layers;
+  read_data(buffer, num_layers);
+  offsets.resize(num_layers);
+  for (auto& layer : offsets) {
+    read_vector(buffer, layer.k_offsets);
+    read_vector(buffer, layer.v_offsets);
+  }
+}
+
 inline void read_transfer_kv_info(const char*& buffer, TransferKVInfo& info) {
   read_string(buffer, info.request_id);
   read_vector(buffer, info.local_blocks_ids);
   read_vector(buffer, info.remote_blocks_ids);
   read_data(buffer, info.dp_rank);
   read_instance_info(buffer, info.remote_instance_info);
+  read_xtensor_layer_offsets(buffer, info.dst_xtensor_layer_offsets);
 }
 
 inline void read_eplb_info(const char*& buffer, EplbInfo& info) {

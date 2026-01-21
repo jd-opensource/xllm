@@ -97,7 +97,7 @@ bool WorkerImpl::allocate_kv_cache(
   kv_caches_.reserve(num_layers);
 
   if (FLAGS_enable_xtensor) {
-    // XTensor mode: create xtensor-backed KV cache
+    // XTensor mode: create xtensor-backed KV cache tensors.
     auto& allocator = XTensorAllocator::get_instance();
     const std::string& model_id = options_.model_id();
     // Create K tensors for all layers
@@ -108,10 +108,12 @@ bool WorkerImpl::allocate_kv_cache(
         model_id, kv_cache_shape[1], dtype_, num_layers);
 
     for (int64_t i = 0; i < num_layers; ++i) {
+#if defined(USE_NPU)
       auto k_tensor =
           at_npu::native::npu_format_cast(k_tensors[i], ACL_FORMAT_ND);
       auto v_tensor =
           at_npu::native::npu_format_cast(v_tensors[i], ACL_FORMAT_ND);
+#endif
       kv_caches_.emplace_back(k_tensor, v_tensor);
     }
   } else {
@@ -136,7 +138,7 @@ bool WorkerImpl::allocate_kv_cache(
                          torch::dtype(dtype_).device(device_)),
             npu_format_type);
       }
-#elif defined(USE_ILU)
+#else
       key_cache =
           torch::zeros(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
       if (!kv_cache_shape[1].empty()) {
@@ -145,17 +147,6 @@ bool WorkerImpl::allocate_kv_cache(
       }
       if (enable_lighting_indexer) {
         index_cache = torch::zeros(kv_cache_shape[2],
-                                   torch::dtype(dtype_).device(device_));
-      }
-#else
-      key_cache =
-          torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
-      if (!kv_cache_shape[1].empty()) {
-        value_cache = torch::empty(kv_cache_shape[1],
-                                   torch::dtype(dtype_).device(device_));
-      }
-      if (enable_lighting_indexer) {
-        index_cache = torch::empty(kv_cache_shape[2],
                                    torch::dtype(dtype_).device(device_));
       }
 #endif
@@ -189,7 +180,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       [this](const std::vector<std::vector<int64_t>>& shape) {
         this->allocate_kv_cache(shape);
       },
-      context_.get_model_args().model_type());
+      context_.get_model_args().model_type(),
+      options_.model_id());
 
   init_hierarchy_kv_cache_transfer();
 
@@ -526,23 +518,14 @@ folly::SemiFuture<bool> WorkerImpl::init_model_async(
 }
 
 bool WorkerImpl::sleep(int32_t master_status) {
-  // The memory for kvcache and model weights is released by page
-  // allocate; therefore, weights are only loaded into memory here for the light
-  // sleep scenario (if not loaded before).
+  // The memory for kvcache and model weights from hbm is released by xtensor;
   if (master_status == LIGHT_SLEEP) {
+    // only load model weights to host memory.
     auto model_loader = ModelLoader::create(model_weights_path_);
     model_->lazy_load_model(std::move(model_loader));
   } else if (master_status == DEEP_SLEEP) {
+    // only release model weights from host memory.
     model_->offload_model_weights();
-  }
-
-  // Release weight pages from GlobalXtensor
-  if (FLAGS_enable_xtensor) {
-    const std::string& model_id = options_.model_id();
-    auto& allocator = XTensorAllocator::get_instance();
-    size_t freed_pages = allocator.free_weight_from_global_xtensor(model_id);
-    LOG(INFO) << "Worker sleep: freed " << freed_pages
-              << " weight pages from GlobalXtensor for model " << model_id;
   }
 
   return true;
