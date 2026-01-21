@@ -45,7 +45,7 @@ limitations under the License.
 
 #include "pytorch/adapter/utils/utils.h"
 
-namespace xllm {
+namespace xllm::npu {
 
 // GraphPersistentParam implementation
 GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
@@ -132,28 +132,35 @@ GraphPersistentParam::~GraphPersistentParam() {
   }
 }
 
-void GraphPersistentParam::update(const torch::Tensor& tokens,
-                                  const torch::Tensor& k_cache,
-                                  const torch::Tensor& v_cache,
-                                  const torch::Tensor& positions,
-                                  const ModelInputParams& params,
-                                  uint32_t actual_num_tokens) {
+std::optional<ModelInputParams> GraphPersistentParam::update(
+    const torch::Tensor& tokens,
+    const torch::Tensor& k_cache,
+    const torch::Tensor& v_cache,
+    const torch::Tensor& positions,
+    const ModelInputParams& params,
+    uint32_t padded_num_tokens,
+    bool return_capture_params) {
+  CHECK_GT(padded_num_tokens, 0)
+      << "padded_num_tokens must be > 0 when return_capture_params is true";
+  const uint32_t actual_num_tokens = tokens.size(0);
+  const int64_t actual_batch_size = params.num_sequences;
+
   // Copy data from input parameters to persistent graph tensors
   persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(tokens, /*non_blocking=*/true);
   persistent_positions_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(positions, /*non_blocking=*/true);
-  q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+  q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
       .copy_(params.q_seq_lens, /*non_blocking=*/true);
-  kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+  kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
       .copy_(params.kv_seq_lens, /*non_blocking=*/true);
+
   persistent_new_cache_slots_
       .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(params.new_cache_slots, /*non_blocking=*/true);
 
   // Copy block table data
   const int64_t actual_block_table_len = params.block_tables.size(1);
-  const int64_t actual_batch_size = params.num_sequences;
   auto slice_persistent_block_tables =
       persistent_block_tables_
           .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
@@ -181,6 +188,18 @@ void GraphPersistentParam::update(const torch::Tensor& tokens,
         .slice(/*dim=*/0, /*start=*/0, /*end=*/embedding_tokens)
         .copy_(embedding, /*non_blocking=*/true);
   }
+  // Update q_cu_seq_lens only if params.q_cu_seq_lens is defined
+  if (params.q_cu_seq_lens.defined()) {
+    // Lazy initialization: if q_cu_seq_lens_ is not initialized, initialize it
+    if (q_cu_seq_lens_.numel() == 0) {
+      const int64_t max_seqs_per_batch = options_.max_seqs_per_batch();
+      q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
+                                    torch::dtype(torch::kInt).device(device_));
+    }
+    // Copy data
+    q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+        .copy_(params.q_cu_seq_lens, /*non_blocking=*/true);
+  }
 
   // Update attention mask only if needed
   if (need_update_attn_mask_) {
@@ -195,6 +214,54 @@ void GraphPersistentParam::update(const torch::Tensor& tokens,
     plan_paged_attention_tiling(
         tokens, k_cache, v_cache, persistent_block_tables_, params, stream);
   }
+
+  // Return ModelInputParams with persistent buffer references if requested
+  if (return_capture_params) {
+    std::optional<ModelInputParams> params_for_capture =
+        std::make_optional<ModelInputParams>(params);
+    // Set persistent buffers in params_for_capture
+    params_for_capture->kv_seq_lens = kv_seq_lens(padded_num_tokens);
+    params_for_capture->q_seq_lens = q_seq_lens(padded_num_tokens);
+    params_for_capture->kv_seq_lens_vec.resize(padded_num_tokens);
+    params_for_capture->q_seq_lens_vec.resize(padded_num_tokens);
+    // Copy actual values from original params
+    for (int i = 0; i < actual_batch_size; i++) {
+      params_for_capture->kv_seq_lens_vec[i] = params.kv_seq_lens_vec[i];
+      params_for_capture->q_seq_lens_vec[i] = params.q_seq_lens_vec[i];
+    }
+    // Fill padded positions with default values
+    for (int i = actual_batch_size; i < padded_num_tokens; i++) {
+      params_for_capture->kv_seq_lens_vec[i] = 1;
+      params_for_capture->q_seq_lens_vec[i] = 1;
+    }
+    params_for_capture->num_sequences = padded_num_tokens;
+    params_for_capture->batch_forward_type = BatchForwardType::DECODE;
+    params_for_capture->new_cache_slots =
+        persistent_new_cache_slots(padded_num_tokens);
+    params_for_capture->block_tables =
+        persistent_block_tables(padded_num_tokens);
+
+    // Only set attn_mask if need_update_attn_mask_ is true
+    if (need_update_attn_mask_) {
+      params_for_capture->graph_buffer.attn_mask =
+          persistent_mask(padded_num_tokens);
+    }
+    params_for_capture->graph_buffer.tiling_data = tiling_data();
+    // Set persistent embedding if available
+    if (params.input_embedding.defined()) {
+      params_for_capture->input_embedding =
+          persistent_embedding(padded_num_tokens);
+    }
+    // Set q_cu_seq_lens if available
+    if (params.q_cu_seq_lens.defined()) {
+      params_for_capture->q_cu_seq_lens =
+          q_cu_seq_lens_.slice(/*dim=*/0,
+                               /*start=*/0,
+                               /*end=*/actual_batch_size);
+    }
+    return params_for_capture;
+  }
+  return std::nullopt;
 }
 
 void GraphPersistentParam::initialize_paged_attention_plan_context(
@@ -613,44 +680,20 @@ bool AclGraph::capture(CausalLM* model,
   const torch::Tensor& k_cache = kv_cache[0].get_k_cache();
   const torch::Tensor& v_cache = kv_cache[0].get_v_cache();
   const uint32_t actual_num_tokens = tokens.size(0);
-  persistent_param_.update(
-      tokens, k_cache, v_cache, positions, params, actual_num_tokens);
-
-  // Create ModelInputParams using persistent buffers
-  ModelInputParams graph_params = params;
-  graph_params.kv_seq_lens = persistent_param_.kv_seq_lens(num_tokens_);
-  graph_params.q_seq_lens = persistent_param_.q_seq_lens(num_tokens_);
   CHECK_GE(num_tokens_, actual_num_tokens)
       << "num_tokens_ >= actual_num_tokens";
-  graph_params.kv_seq_lens_vec.resize(num_tokens_);
-  graph_params.q_seq_lens_vec.resize(num_tokens_);
-  for (int i = actual_num_tokens; i < num_tokens_; i++) {
-    graph_params.kv_seq_lens_vec[i] = 1;
-    graph_params.q_seq_lens_vec[i] = 1;
-  }
-  graph_params.num_sequences = num_tokens_;
-  graph_params.batch_forward_type = BatchForwardType::DECODE;
+  auto graph_params = persistent_param_.update(tokens,
+                                               k_cache,
+                                               v_cache,
+                                               positions,
+                                               params,
+                                               num_tokens_,
+                                               /*return_capture_params=*/true);
 
-  graph_params.new_cache_slots =
-      persistent_param_.persistent_new_cache_slots(num_tokens_);
-  graph_params.block_tables =
-      persistent_param_.persistent_block_tables(num_tokens_);
-  // Only set attn_mask if need_update_attn_mask_ is true
-  if (persistent_param_.need_update_attn_mask()) {
-    graph_params.graph_buffer.attn_mask =
-        persistent_param_.persistent_mask(num_tokens_);
-  }
-  graph_params.graph_buffer.tiling_data = persistent_param_.tiling_data();
-
-  // Set persistent embedding if available and original input has embedding
-  const auto& original_embedding = params.input_embedding;
-  if (original_embedding.defined()) {
-    torch::Tensor persistent_embedding =
-        persistent_param_.persistent_embedding(num_tokens_);
-    if (persistent_embedding.numel() > 0) {
-      graph_params.input_embedding = persistent_embedding;
-    }
-  }
+  // Use the returned ModelInputParams for graph capture
+  CHECK(graph_params.has_value())
+      << "update() should return ModelInputParams when "
+         "return_capture_params=true";
 
   // Synchronize stream to ensure all data is copied to graph persistent buffers
   aclrtSynchronizeStream(stream);
@@ -688,7 +731,7 @@ bool AclGraph::capture(CausalLM* model,
         model->forward({persistent_param_.persistent_tokens(num_tokens_)},
                        {persistent_param_.persistent_positions(num_tokens_)},
                        kv_cache,
-                       {graph_params});
+                       {graph_params.value()});
 
     // Store result in persistent buffer owned by NPUGraph mempool
     persistent_param_.set_hidden_states(forward_result);
@@ -732,8 +775,13 @@ torch::Tensor AclGraph::replay(const torch::Tensor& tokens,
   // Update persistent parameters with new input data
   const torch::Tensor& k_cache = kv_cache[0].get_k_cache();
   const torch::Tensor& v_cache = kv_cache[0].get_v_cache();
-  persistent_param_.update(
-      tokens, k_cache, v_cache, positions, params, actual_num_tokens);
+  persistent_param_.update(tokens,
+                           k_cache,
+                           v_cache,
+                           positions,
+                           params,
+                           num_tokens_,
+                           /*return_capture_params=*/false);
 
   // Replay captured graph - NPUGraph mempool reuses temporary tensors
   // Get current NPU stream from libtorch NPU API
@@ -895,4 +943,4 @@ uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
   }
 }
 
-}  // namespace xllm
+}  // namespace xllm::npu
