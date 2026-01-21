@@ -57,16 +57,6 @@ int32_t kv_cache_slot_id(int32_t position,
   return block_id * block_size + block_offset;
 }
 
-// Convert tensor to int64 for MLU platform (temp workaround)
-// MLU will support int32 for masked_scatter in the future
-torch::Tensor ensure_int64_for_certain_platform(torch::Tensor tensor) {
-#if defined(USE_MLU)
-  return tensor.to(torch::kInt64);
-#else
-  return tensor;
-#endif
-}
-
 // Push cumulative sum to vector (used for cumulative format)
 void push_cumsum(std::vector<int32_t>& vec, int32_t len) {
   if (vec.empty()) {
@@ -317,15 +307,13 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
 
   // prepare input for draft model
   auto& embeddings = output.sample_output.embeddings;
-  auto next_tokens = ensure_int64_for_certain_platform(
-      safe_to(output.sample_output.next_tokens, torch::kInt));
+  auto next_tokens = safe_to(output.sample_output.next_tokens, torch::kInt);
 
   if (embeddings.defined()) {
     prefill_input.input_params.input_embedding = embeddings.clone();
   }
   if (next_tokens.defined()) {
     auto& token_ids = prefill_input.token_ids;
-    token_ids = ensure_int64_for_certain_platform(token_ids);
     auto mask = (token_ids == -1);
     token_ids.masked_scatter_(mask, next_tokens);
   }
@@ -419,10 +407,10 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
 
   for (int i = 0; i < options_.num_speculative_tokens(); ++i) {
     ForwardOutput draft_output = draft_outputs[i];
-    auto next_tokens = ensure_int64_for_certain_platform(
-        safe_to(draft_output.sample_output.next_tokens, torch::kInt));
+    auto next_tokens =
+        safe_to(draft_output.sample_output.next_tokens, torch::kInt);
     auto& token_ids = validate_input.token_ids;
-    token_ids = ensure_int64_for_certain_platform(token_ids);
+    token_ids = token_ids;
     auto mask = (token_ids == -1 * (i + 1));
     token_ids.masked_scatter_(mask, next_tokens);
   }
