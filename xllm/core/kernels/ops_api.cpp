@@ -192,6 +192,10 @@ void batch_prefill(AttentionParams& params) {
                       params.output_lse,
                       params.attn_metadata.enable_cuda_graph);
 #elif defined(USE_ILU)
+  std::optional<torch::Tensor> block_tables;
+  if (params.attn_metadata.is_chunked_prefill) {
+    block_tables = params.attn_metadata.block_table;
+  }
   ilu::batch_prefill(params.query,
                      params.key,
                      params.value,
@@ -204,6 +208,7 @@ void batch_prefill(AttentionParams& params) {
                      params.q_quant_scale,
                      params.k_quant_scale,
                      params.v_quant_scale,
+                     block_tables,
                      params.attn_metadata.max_query_len,
                      params.attn_metadata.max_seq_len,
                      params.scale,
@@ -270,11 +275,14 @@ void batch_decode(AttentionParams& params) {
                          ? std::make_optional(params.attn_metadata.qo_indptr)
                          : std::nullopt);
 #elif defined(USE_ILU)
+  torch::Tensor block_tables, kv_seq_lens;
+  block_tables = params.attn_metadata.block_table;
+  kv_seq_lens = params.attn_metadata.kv_seq_lens;
   ilu::batch_decode(params.query,
                     params.k_cache,
                     params.output,
-                    params.attn_metadata.block_table,
-                    params.attn_metadata.kv_seq_lens,
+                    block_tables,
+                    kv_seq_lens,
                     params.v_cache,
                     params.output_lse,
                     params.q_quant_scale,
