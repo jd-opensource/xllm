@@ -84,7 +84,7 @@ struct ModelArgs {
   PROPERTY(int32_t, bos_token_id) = 0;
 
   // token id for end of sentence.
-  PROPERTY(int32_t, eos_token_id) = 0;
+  PROPERTY(int32_t, eos_token_id) = -1;
 
   // token id vector for end of sentence.
   PROPERTY(std::vector<int32_t>, eos_token_id_vec);
