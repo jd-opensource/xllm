@@ -304,9 +304,6 @@ int run() {
       LOG(FATAL) << "Failed to initialize PhyPagePool";
     }
     LOG(INFO) << "XTensor initialized with " << num_pages << " physical pages";
-
-    // Initialize GlobalXtensor for efficient weight allocation
-    GlobalXtensor::get_instance().init(devices[0]);
   }
 
   std::unique_ptr<Master> master;

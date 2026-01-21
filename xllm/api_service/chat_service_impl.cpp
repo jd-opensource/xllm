@@ -483,6 +483,8 @@ ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
       reasoning_parser_format_(
           master_->options().reasoning_parser().value_or("")) {
   CHECK(master_ != nullptr);
+  // Add initial master to the model map
+  llm_model_to_master_[models[0]] = master;
 }
 
 ChatServiceImpl::ChatServiceImpl(RecMaster* master,
@@ -616,7 +618,6 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
-  auto master = model_to_master_[model];
 
   // Route to RecMaster if configured
   if (rec_master_) {
@@ -624,6 +625,7 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     return;
   }
 
+  auto master = llm_model_to_master_[model];
   // LLMMaster path (existing logic)
   // Check if the request is being rate-limited or model is sleeping.
   // is_limited() returns true if sleeping or rate-limited.

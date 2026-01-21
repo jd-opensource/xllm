@@ -457,6 +457,25 @@ void DisaggPDScheduler::dispatch_requests() {
           info.dp_rank = resps.resps()[i].dp_rank();
           // TODO: remote_instances_info_ is not multi-thread safe.
           info.remote_instance_info = remote_instances_info_[selected_instance];
+
+          // XTensor mode: save destination offsets from D-node
+          const auto& resp = resps.resps()[i];
+          if (resp.xtensor_layer_offsets_size() > 0) {
+            info.dst_xtensor_layer_offsets.reserve(
+                resp.xtensor_layer_offsets_size());
+            for (const auto& layer_offsets : resp.xtensor_layer_offsets()) {
+              XTensorLayerOffsets layer;
+              layer.k_offsets.assign(layer_offsets.k_offsets().begin(),
+                                     layer_offsets.k_offsets().end());
+              layer.v_offsets.assign(layer_offsets.v_offsets().begin(),
+                                     layer_offsets.v_offsets().end());
+              info.dst_xtensor_layer_offsets.emplace_back(std::move(layer));
+            }
+            VLOG(1) << "Received XTensor offsets from D-node for request "
+                    << requests[i]->request_id()
+                    << ", num_layers=" << info.dst_xtensor_layer_offsets.size();
+          }
+
           sequence->kv_state().set_transfer_kv_info(std::move(info));
         }
 

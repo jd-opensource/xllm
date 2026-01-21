@@ -421,6 +421,111 @@ bool MooncakeTransferEngine::pull_memory_blocks(
   return true;
 }
 
+// === XTensor mode: transfer by GlobalXtensor offsets ===
+bool MooncakeTransferEngine::move_memory_by_global_offsets(
+    const std::string& remote_addr,
+    const std::vector<uint64_t>& src_offsets,
+    const std::vector<uint64_t>& dst_offsets,
+    size_t transfer_size,
+    MoveOpcode move_opcode) {
+  if (src_offsets.size() != dst_offsets.size()) {
+    LOG(ERROR) << "src_offsets and dst_offsets size mismatch: "
+               << src_offsets.size() << " vs " << dst_offsets.size();
+    return false;
+  }
+
+  auto it = handles_.find(remote_addr);
+  if (it == handles_.end()) {
+    LOG(ERROR) << "remote addr does not exist: " << remote_addr;
+    return false;
+  }
+
+  auto remote_handle = it->second;
+  std::shared_ptr<TransferMetadata::SegmentDesc> remote_segment_desc;
+  remote_segment_desc =
+      engine_->getMetadata()->getSegmentDescByID(remote_handle);
+  if (!remote_segment_desc) {
+    LOG(ERROR) << "remote_segment_desc is null";
+    return false;
+  }
+
+  std::shared_ptr<TransferMetadata::SegmentDesc> local_segment_desc;
+  local_segment_desc =
+      engine_->getMetadata()->getSegmentDescByID(LOCAL_SEGMENT_ID);
+  if (!local_segment_desc) {
+    LOG(ERROR) << "local_segment_desc is null";
+    return false;
+  }
+
+  // In XTensor mode, we only have one buffer (buffer[0]) which is GlobalXtensor
+  if (local_segment_desc->buffers.empty() ||
+      remote_segment_desc->buffers.empty()) {
+    LOG(ERROR) << "No buffers registered in XTensor mode";
+    return false;
+  }
+
+  char* local_base = (char*)(local_segment_desc->buffers[0].addr);
+  char* remote_base = (char*)(remote_segment_desc->buffers[0].addr);
+
+  TransferRequest::OpCode opcode;
+  if (move_opcode == MoveOpcode::WRITE) {
+    opcode = TransferRequest::WRITE;
+  } else {
+    opcode = TransferRequest::READ;
+  }
+
+  std::vector<TransferRequest> entries;
+  entries.reserve(src_offsets.size());
+
+  for (size_t i = 0; i < src_offsets.size(); ++i) {
+    TransferRequest entry;
+    entry.opcode = opcode;
+    entry.length = transfer_size;
+    entry.source = (void*)(local_base + src_offsets[i]);
+    entry.target_id = remote_handle;
+    entry.target_offset = (uint64_t)(remote_base + dst_offsets[i]);
+    entry.advise_retry_cnt = 0;
+    entries.push_back(entry);
+  }
+
+  auto batch_size = entries.size();
+  auto batch_id = engine_->allocateBatchID(batch_size);
+  mooncake::Status s = engine_->submitTransfer(batch_id, entries);
+  if (!s.ok()) {
+    LOG(ERROR) << "submit failed in move_memory_by_global_offsets";
+    engine_->freeBatchID(batch_id);
+    return false;
+  }
+
+  TransferStatus status;
+  bool completed = false;
+  while (!completed) {
+    s = engine_->getBatchTransferStatus(batch_id, status);
+    if (!s.ok()) {
+      LOG(ERROR) << "getBatchTransferStatus not ok";
+      completed = true;
+    }
+
+    if (status.s == TransferStatusEnum::COMPLETED) {
+      completed = true;
+    } else if (status.s == TransferStatusEnum::FAILED) {
+      LOG(ERROR) << "getBatchTransferStatus failed";
+      completed = true;
+    } else if (status.s == TransferStatusEnum::TIMEOUT) {
+      LOG(ERROR) << "Sync data transfer timeout";
+      completed = true;
+    }
+  }
+
+  s = engine_->freeBatchID(batch_id);
+  if (!s.ok()) {
+    LOG(ERROR) << "freeBatchID failed";
+    return false;
+  }
+
+  return true;
+}
+
 bool MooncakeTransferEngine::push_memory_blocks(
     const std::string& remote_addr,
     const std::vector<uint64_t>& src_blocks,

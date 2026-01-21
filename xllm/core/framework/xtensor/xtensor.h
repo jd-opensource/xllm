@@ -80,6 +80,12 @@ class XTensor {
   // Alias for vaddr() for backward compatibility
   inline VirPtr get_base_ptr() const noexcept { return vaddr_; }
 
+  // Get the global physical page_id for a given offset within this XTensor.
+  // Returns the page_id from PhyPagePool, or -1 if the offset is not mapped.
+  // This is used for PD disaggregation to convert block offsets to
+  // GlobalXtensor offsets.
+  page_id_t get_phy_page_id(offset_t offset) const;
+
  private:
   // Map a single physical page at the given offset
   bool map_phy_page_(PhyPage* page, offset_t offset);

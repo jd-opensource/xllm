@@ -7,6 +7,7 @@ option cc_generic_services = true;
 
 import "common.proto";
 import "tensor.proto";
+import "disagg_pd.proto";
 
 // NPU: HcclRootInfo
 message CommInfo {
@@ -113,6 +114,9 @@ message TransferKVInfo {
   repeated uint64 remote_blocks_ids = 3;
   int32 dp_rank = 4;
   InstanceInfo remote_instance_info = 5;
+  // XTensor mode: destination offsets from D-node (per-layer)
+  // Each XTensorLayerOffsets contains K/V offsets for all blocks at one layer
+  repeated XTensorLayerOffsets dst_xtensor_layer_offsets = 6;
 }
 
 message EplbInfo {

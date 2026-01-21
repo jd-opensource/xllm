@@ -1111,4 +1111,46 @@ bool LLMEngine::wakeup(int32_t master_status) {
   return true;
 }
 
+bool LLMEngine::get_xtensor_offsets_for_blocks(
+    int32_t dp_rank,
+    const std::vector<int32_t>& block_ids,
+    std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
+        layer_offsets) {
+  if (!FLAGS_enable_xtensor) {
+    return false;
+  }
+
+  const std::string& model_id = options_.model_id();
+
+  // Calculate block size in bytes: block_size * slot_size
+  // slot_size is stored in kv_cache_manager (BlockManagerPool)
+  auto* block_manager = block_manager_pool();
+  if (!block_manager) {
+    LOG(ERROR) << "BlockManagerPool not available";
+    return false;
+  }
+
+  // Note: Currently, xtensor only supports the traditional attention mechanism,
+  // meaning both K and V must be present and have identical shapes.
+  uint64_t block_size_bytes =
+      static_cast<uint64_t>(block_manager->options().slot_size()) *
+      options_.block_size() / 2;
+
+  // Use RPC to call worker in the specified DP group
+  auto& allocator = XTensorAllocator::get_instance();
+  bool success = allocator.get_xtensor_offsets(
+      dp_rank, model_id, block_ids, block_size_bytes, layer_offsets);
+
+  if (!success) {
+    LOG(ERROR) << "get_xtensor_offsets_for_blocks via RPC failed for dp_rank="
+               << dp_rank << ", model_id=" << model_id;
+    return false;
+  }
+
+  VLOG(1) << "get_xtensor_offsets_for_blocks: dp_rank=" << dp_rank
+          << ", num_blocks=" << block_ids.size()
+          << ", num_layers=" << layer_offsets.size();
+  return true;
+}
+
 }  // namespace xllm

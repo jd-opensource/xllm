@@ -137,6 +137,19 @@ class Engine {
     return false;
   };
 
+  // XTensor mode: get GlobalXtensor offsets for allocated blocks
+  // Returns per-layer K/V offsets for each block
+  // Output: offsets[layer_id] = {k_offsets, v_offsets}
+  // dp_rank: Target DP rank to query (offsets come from workers in that DP
+  // group)
+  virtual bool get_xtensor_offsets_for_blocks(
+      int32_t dp_rank,
+      const std::vector<int32_t>& block_ids,
+      std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
+          layer_offsets) {
+    return false;
+  };
+
   struct KVCacheCapacity {
     int64_t n_blocks = 0;
     int64_t n_pages = 0;  // for continuous kvcache

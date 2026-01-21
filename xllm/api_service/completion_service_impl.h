@@ -37,14 +37,14 @@ class CompletionServiceImpl final : public APIServiceImpl<CompletionCall> {
   void process_async_impl(std::shared_ptr<CompletionCall> call);
 
   void add_model_master(const std::string& model, LLMMaster* master) {
-    model_to_master_[model] = master;
+    llm_model_to_master_[model] = master;
     models_.insert(model);
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CompletionServiceImpl);
   LLMMaster* master_ = nullptr;
-  std::unordered_map<std::string, LLMMaster*> model_to_master_;
+  std::unordered_map<std::string, LLMMaster*> llm_model_to_master_;
 };
 
 }  // namespace xllm

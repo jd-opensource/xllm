@@ -145,6 +145,46 @@ class XTensorAllocator {
   // Get device
   const torch::Device& device() const { return dev_; }
 
+  // Get XTensor offsets for blocks via RPC (used by Engine in PD
+  // disaggregation) Calls worker in the specified DP group to compute offsets
+  // Parameters:
+  //   dp_rank: Target DP rank (which DP group to query)
+  //   model_id: Model identifier
+  //   block_ids: Block IDs to get offsets for
+  //   block_size_bytes: Size of each block in bytes
+  //   layer_offsets: Output, layer_offsets[layer_id] = {k_offsets, v_offsets}
+  // Returns: true on success
+  bool get_xtensor_offsets(
+      int32_t dp_rank,
+      const std::string& model_id,
+      const std::vector<int32_t>& block_ids,
+      uint64_t block_size_bytes,
+      std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
+          layer_offsets);
+
+  // ============== PD Disaggregation Support (XTensor Mode) ==============
+
+  // Convert a block_id to GlobalXtensor offsets for KV cache transfer.
+  // This is only used when FLAGS_enable_xtensor is true for PD disaggregation.
+  //
+  // Parameters:
+  //   model_id: Model identifier
+  //   layer_id: Layer index
+  //   block_id: Block ID within the KV cache
+  //   block_size: Size of each block in bytes
+  //
+  // Returns: {k_offset, v_offset} relative to GlobalXtensor base address,
+  //          or {UINT64_MAX, UINT64_MAX} on error.
+  std::pair<uint64_t, uint64_t> get_global_offsets_for_block(
+      const std::string& model_id,
+      int64_t layer_id,
+      int64_t block_id,
+      size_t block_size);
+
+  // Get model tensors (returns nullptr if not found)
+  // Public for XTensorDistService to access num_layers
+  ModelTensors* get_model_tensors(const std::string& model_id);
+
  private:
   XTensorAllocator() = default;
   ~XTensorAllocator();
@@ -153,9 +193,6 @@ class XTensorAllocator {
 
   // Get or create model tensors (auto-creates if not exists)
   ModelTensors& get_or_create_model_tensors(const std::string& model_id);
-
-  // Get model tensors (returns nullptr if not found)
-  ModelTensors* get_model_tensors(const std::string& model_id);
 
   // Create K/V tensors implementation (handles lock and validation)
   // name: "K", "V", or future types like "index"

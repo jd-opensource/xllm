@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <string>
+
 #include "kv_cache_transfer.h"
 #include "mooncake_transfer_engine.h"
 
@@ -69,15 +71,55 @@ class MooncakeKVCacheTransfer : public KVCacheTransfer {
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
       bool is_spec_draft) override;
 
+  // Set model_id for XTensor mode offset calculation
+  void set_model_id(const std::string& model_id) { model_id_ = model_id; }
+
  private:
+  // === KV cache allocation ===
+  void allocate_kv_cache_xtensor(
+      std::vector<xllm::KVCache>& kv_caches,
+      int64_t num_layers,
+      const std::vector<std::vector<int64_t>>& kv_cache_shape,
+      torch::ScalarType dtype);
+  void allocate_kv_cache_native(
+      std::vector<xllm::KVCache>& kv_caches,
+      int64_t num_layers,
+      const std::vector<std::vector<int64_t>>& kv_cache_shape,
+      torch::ScalarType dtype);
+
+  // === Original mode: register per-layer KV cache ===
+  void register_per_layer_kv_cache(
+      std::vector<xllm::KVCache>& kv_caches,
+      const std::vector<std::vector<int64_t>>& kv_cache_shape,
+      torch::ScalarType dtype);
+
+  // === XTensor mode: register entire GlobalXtensor ===
+  void register_global_xtensor(
+      const std::vector<std::vector<int64_t>>& kv_cache_shape,
+      torch::ScalarType dtype);
+
+  // === XTensor mode: transfer using GlobalXtensor offsets ===
+  bool pull_kv_blocks_xtensor_mode(const std::string& src_addr,
+                                   const std::vector<uint64_t>& src_blocks,
+                                   const std::vector<uint64_t>& dst_blocks);
+
+  bool push_kv_blocks_xtensor_mode(
+      std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
+      std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer);
+
   std::string addr_;
   uint64_t cluster_id_;
   int16_t listen_port_;
   int32_t device_id_;
   int64_t num_layers_;
   std::string model_type_;
+  int64_t size_per_block_ = 0;
+  std::string model_id_;
 
   std::unique_ptr<MooncakeTransferEngine> mooncake_te_;
+
+  // === XTensor mode state ===
+  bool is_global_xtensor_registered_ = false;
 };
 
 }  // namespace xllm
