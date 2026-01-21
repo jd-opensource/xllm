@@ -663,10 +663,9 @@ void DeekseekV32DecoderLoader::merge_experts_weights() {
       merge_experts_weights(experts_weights_["down_proj.weight"],
                             device_,
                             /*transpose=*/false);
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-  //     at_npu::native::npu_format_cast(mlp_down_weight, 29);
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_down_weight, 29).contiguous();
+      at_npu::native::npu_format_cast(mlp_down_weight, ACL_FORMAT_FRACTAL_NZ)
+          .contiguous();
 #else
   // TODO: xllm ops's GMM need to support MTP.
   if (decode_isBF16_ && false) {
