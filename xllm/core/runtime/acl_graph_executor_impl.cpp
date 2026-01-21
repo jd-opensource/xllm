@@ -210,9 +210,11 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     // Get current stream for tiling tensor update
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
 
-    // Update tiling tensor
-    plan_paged_attention_tiling(
-        tokens, k_cache, v_cache, persistent_block_tables_, params, stream);
+    // Update tiling tensor except deepseek V3.2
+    if (!params.q_cu_seq_lens.defined()) {
+      plan_paged_attention_tiling(
+          tokens, k_cache, v_cache, persistent_block_tables_, params, stream);
+    }
   }
 
   // Return ModelInputParams with persistent buffer references if requested
