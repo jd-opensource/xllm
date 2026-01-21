@@ -29,7 +29,7 @@ EmbeddingAllocator::EmbeddingAllocator(int32_t total_embeddings,
   CHECK_GT(total_embeddings, 0) << "No embeddings to allocate";
 
   embeddings_cache_tensor_ =
-      torch::empty({total_embeddings, embedding_dim}, dtype);
+      torch::zeros({total_embeddings, embedding_dim}, dtype);
   embeddings_cache_ = torch::unbind(embeddings_cache_tensor_, /*dim*/ 0);
   free_embeddings_.reserve(total_embeddings);
   for (int32_t i = 0; i < total_embeddings; ++i) {
