@@ -29,6 +29,7 @@ limitations under the License.
 #include "llm/npu/kimi_k2.h"                  // IWYU pragma: keep
 #include "llm/npu/llama.h"                    // IWYU pragma: keep
 #include "llm/npu/llama3.h"                   // IWYU pragma: keep
+#include "llm/npu/oxygen.h"                   // IWYU pragma: keep
 #include "llm/npu/qwen2.h"                    // IWYU pragma: keep
 #include "llm/npu/qwen3.h"                    // IWYU pragma: keep
 #include "llm/npu/qwen3_embedding.h"          // IWYU pragma: keep
@@ -36,6 +37,7 @@ limitations under the License.
 #include "vlm/npu/glm4v.h"                    // IWYU pragma: keep
 #include "vlm/npu/glm4v_moe.h"                // IWYU pragma: keep
 #include "vlm/npu/minicpmv.h"                 // IWYU pragma: keep
+#include "vlm/npu/oxygen_vlm.h"               // IWYU pragma: keep
 #include "vlm/npu/qwen2_5_vl.h"               // IWYU pragma: keep
 #include "vlm/npu/qwen2_5_vl_mm_embedding.h"  // IWYU pragma: keep
 #include "vlm/npu/qwen2_vl.h"                 // IWYU pragma: keep
