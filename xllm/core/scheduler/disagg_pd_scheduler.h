@@ -176,9 +176,6 @@ class DisaggPDScheduler : public ContinuousScheduler {
   std::unordered_map<std::string, std::string> request_to_instance_map_;
   std::mutex received_request_map_mutex_;
 
-  // use threadpool to handle all stream ouputs
-  ThreadPool stream_output_threadpool_;
-
   // Lock for multi-threaded read-write latency metrics
   std::vector<int64_t> recent_ttft_;
   std::vector<int64_t> recent_tbt_;

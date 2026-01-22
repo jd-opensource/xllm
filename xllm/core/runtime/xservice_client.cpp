@@ -310,7 +310,9 @@ std::vector<std::string> XServiceClient::get_static_prefill_list() {
   return std::vector<std::string>(resp.names().begin(), resp.names().end());
 }
 
-void XServiceClient::generations(const std::vector<RequestOutput>& outputs) {
+std::vector<bool> XServiceClient::generations(
+    const std::vector<RequestOutput>& outputs) {
+  std::vector<bool> results(outputs.size(), false);
   // response to xllm service to avoid the redirect cost.
   proto::DisaggStreamGenerations gens;
   for (auto& output : outputs) {
@@ -395,8 +397,18 @@ void XServiceClient::generations(const std::vector<RequestOutput>& outputs) {
   if (cntl.Failed()) {
     LOG(ERROR) << "Fail to response tokens to xservice server "
                << xservice_addr_ << ", error text: " << cntl.ErrorText();
+    return results;
   }
-  // handle error here
+  const auto& all_status = resp.all_status();
+  CHECK_EQ(all_status.size(), outputs.size())
+      << "The size of status set is not equal to the size of "
+         "outputs, status size: "
+      << all_status.size() << ", outputs size: " << outputs.size();
+  for (size_t i = 0; i < all_status.size(); ++i) {
+    const auto& status = all_status[i];
+    results[i] = status.ok();
+  }
+  return results;
 }
 
 void XServiceClient::handle_master_service_watch(

@@ -33,15 +33,31 @@ namespace xllm {
 
 AsyncResponseProcessor::AsyncResponseProcessor(
     const Tokenizer* tokenizer,
-    const std::optional<InstanceRole>& role,
-    bool enable_schedule_overlap)
+    const std::optional<InstanceRole>& role)
     : response_threadpool_(FLAGS_num_response_handling_threads),
       tokenizer_(tokenizer->clone()),
-      role_(role.value_or(InstanceRole::DEFAULT)),
-      enable_schedule_overlap_(enable_schedule_overlap) {
+      role_(role.value_or(InstanceRole::DEFAULT)) {
   if (role_ == InstanceRole::DECODE || role_ == InstanceRole::MIX) {
-    enable_batch_response_ =
-        util::get_bool_env("ENABLE_PD_DECODE_BATCH_RESPONSE", true);
+    enable_batch_response_ = true;
+  }
+}
+
+void AsyncResponseProcessor::process_failed_request(
+    std::shared_ptr<Request> request,
+    Status status) {
+  // schedule the response handling
+  auto runnable = [request = request, status = status]() {
+    request->log_error_statistic(status);
+    RequestOutput output;
+    output.status = status;
+    request->state().output_func(output);
+  };
+  if (request->state().response_thread_id < 0) {
+    request->state().response_thread_id =
+        response_threadpool_.schedule(runnable);
+  } else {
+    response_threadpool_.schedule_with_tid(runnable,
+                                           request->state().response_thread_id);
   }
 }
 
@@ -92,36 +108,6 @@ void AsyncResponseProcessor::process_completed_request(
   }
 }
 
-void AsyncResponseProcessor::process_failed_request(
-    std::shared_ptr<Request> request,
-    Status status) {
-  // schedule the response handling
-  auto runnable = [request = request, status = status]() {
-    request->log_error_statistic(status);
-    RequestOutput output;
-    output.status = status;
-    request->state().output_func(output);
-  };
-  if (request->state().response_thread_id < 0) {
-    request->state().response_thread_id =
-        response_threadpool_.schedule(runnable);
-  } else {
-    response_threadpool_.schedule_with_tid(runnable,
-                                           request->state().response_thread_id);
-  }
-}
-
-void AsyncResponseProcessor::process_completed_requests(
-    std::vector<std::shared_ptr<Request>>& requests) {
-  if (!enable_batch_response_) {
-    for (size_t i = 0; i < requests.size(); ++i) {
-      process_completed_request(std::move(requests[i]));
-    }
-  } else {
-    batch_process_completed_requests(requests);
-  }
-}
-
 void AsyncResponseProcessor::batch_process_completed_requests(
     std::vector<std::shared_ptr<Request>>& requests) {
   size_t requests_size = requests.size();
@@ -162,6 +148,19 @@ void AsyncResponseProcessor::batch_process_completed_requests(
         auto& resp_callback = requests[0]->state().outputs_func;
         resp_callback(request_outputs);
       });
+}
+
+// process non-stream requests
+void AsyncResponseProcessor::process_completed_requests(
+    std::vector<std::shared_ptr<Request>>& requests) {
+  if (!enable_batch_response_) {
+    for (size_t i = 0; i < requests.size(); ++i) {
+      process_completed_request(std::move(requests[i]));
+    }
+  } else {
+    // send request response to xllm service in batch through rpc
+    batch_process_completed_requests(requests);
+  }
 }
 
 void AsyncResponseProcessor::process_stream_request(
@@ -232,16 +231,8 @@ void AsyncResponseProcessor::process_stream_request(
   }
 }
 
-void AsyncResponseProcessor::process_stream_requests(
-    const std::vector<std::shared_ptr<Request>>& requests,
-    bool is_prefill) {
-  if (!enable_batch_response_ || is_prefill) {
-    for (auto& req : requests) {
-      process_stream_request(req);
-    }
-    return;
-  }
-
+void AsyncResponseProcessor::batch_process_stream_requests(
+    std::vector<std::shared_ptr<Request>>& requests) {
   size_t requests_size = requests.size();
   auto counter = new BlockingCounter(requests_size);
   std::vector<RequestOutput> request_outputs;
@@ -311,7 +302,6 @@ void AsyncResponseProcessor::process_stream_requests(
         auto& resp_callback = requests[0]->state().outputs_func;
         counter->wait();
         std::vector<bool> status_set = resp_callback(request_outputs);
-        assert(status_set.size() == requests.size());
         for (size_t i = 0; i < requests.size(); ++i) {
           if (!status_set[i]) {
             // cancel the request if on_stream returns false
@@ -319,6 +309,20 @@ void AsyncResponseProcessor::process_stream_requests(
           }
         }
       });
+}
+
+// process stream requests
+void AsyncResponseProcessor::process_stream_requests(
+    std::vector<std::shared_ptr<Request>>& requests,
+    bool is_prefill) {
+  if (!enable_batch_response_ || is_prefill) {
+    for (auto& req : requests) {
+      process_stream_request(req);
+    }
+  } else {
+    // send request response to xllm service in batch through rpc
+    batch_process_stream_requests(requests);
+  }
 }
 
 // for batch generate, wait all response done.

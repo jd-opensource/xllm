@@ -73,9 +73,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       std::make_unique<ProfileManager>(engine, profile_manager_options);
 
   response_processor_ = std::make_unique<AsyncResponseProcessor>(
-      engine_->tokenizer(),
-      options_.instance_role(),
-      options_.enable_schedule_overlap());
+      engine_->tokenizer(), options_.instance_role());
   create_running_queue(options);
   if (options_.enable_service_routing()) {
     XServiceClient::get_instance()->set_scheduler(this);

@@ -51,7 +51,7 @@ class XServiceClient {
   std::vector<std::string> get_static_prefill_list();
 
   // response generation tokens to xllm service
-  void generations(const std::vector<RequestOutput>& outputs);
+  std::vector<bool> generations(const std::vector<RequestOutput>& outputs);
 
  private:
   void handle_master_service_watch(const etcd::Response& response);

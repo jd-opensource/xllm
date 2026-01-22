@@ -696,29 +696,16 @@ bool DisaggPDScheduler::decode_recv_first_generation(
 bool DisaggPDScheduler::decode_send_stream_generation(
     const RequestOutput& output) {
   // response to xllm service to avoid the redirect cost.
-  stream_output_threadpool_.schedule(
-      [this, output = std::move(output)]() mutable {
-        xservice_client_->generations({output});
-        // TODO: error handler
-        // TODO: handle resp status
-      });
-  return true;
+  auto return_status = xservice_client_->generations({output});
+  CHECK_EQ(return_status.size(), 1)
+      << "return size of generations is not equal to 1";
+  return return_status[0];
 }
 
 std::vector<bool> DisaggPDScheduler::decode_send_stream_generations(
     const std::vector<RequestOutput>& outputs) {
-  std::vector<bool> send_status;
-  send_status.resize(outputs.size(), true);
-
   // response to xllm service to avoid the redirect cost.
-  stream_output_threadpool_.schedule(
-      [this, outputs = std::move(outputs)]() mutable {
-        xservice_client_->generations(outputs);
-        // TODO: error handler
-        // TODO: handle resp status
-      });
-
-  return send_status;
+  return xservice_client_->generations(outputs);
 }
 
 bool DisaggPDScheduler::try_allocate(Sequence* sequence) {
