@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,11 +43,11 @@ class AttentionImpl : public torch::nn::Module {
       KVCache& kv_cache);
 
  private:
-  int num_heads_;
-  int head_size_;
+  int32_t num_heads_;
+  int32_t head_size_;
   float scale_;
-  int num_kv_heads_;
-  int sliding_window_;
+  int32_t num_kv_heads_;
+  int32_t sliding_window_;
 };
 TORCH_MODULE(Attention);
 
