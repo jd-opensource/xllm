@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "absl/strings/str_join.h"
 #include "core/util/uuid.h"
+#include "deepseekv32_detector.h"
 #include "deepseekv3_detector.h"
 #include "glm45_detector.h"
 #include "glm47_detector.h"
@@ -37,10 +38,12 @@ const std::unordered_map<std::string, std::vector<std::string>> auto_paser_map =
         {"qwen25", {"qwen2", "qwen3"}},
         {"kimi_k2", {"kimi_k2"}},
         {"deepseekv3", {"deepseek_v3"}},
+        {"deepseekv32", {"deepseek_v32"}},
         // GLM-4.5 and GLM-4.7 are not supported for tool call parser
         // auto-selection
         // {"glm45", {"glm4_moe"}},
         // {"glm47", {"glm4_moe"}},
+
 };
 
 std::string get_auto_paser_map_supported() {
@@ -146,6 +149,7 @@ std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
     return it->second();
   }
   LOG(ERROR) << "Unsupported tool call parser: " << tool_call_parser;
+
   return nullptr;
 }
 

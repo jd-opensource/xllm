@@ -41,6 +41,7 @@ const std::unordered_map<std::string, std::string> auto_paser_map = {
     // {"deepseek_v3", "deepseek-v3"},
     // {"qwen3", "qwen3"},
     {"glm4_moe", "glm45"},
+    {"deepseek_v32", "deepseekv32"},
     {"kimi_k2", "kimi"},
     {"step3", "step3"},
 };

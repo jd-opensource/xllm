@@ -12,6 +12,7 @@ cc_library (
         qwen25_detector.h
         kimik2_detector.h
         deepseekv3_detector.h
+        deepseekv32_detector.h
         glm45_detector.h
         glm47_detector.h
         function_call_parser.h
@@ -22,6 +23,7 @@ cc_library (
         qwen25_detector.cpp
         kimik2_detector.cpp
         deepseekv3_detector.cpp
+        deepseekv32_detector.cpp
         glm45_detector.cpp
         glm47_detector.cpp
         function_call_parser.cpp
@@ -53,4 +55,5 @@ add_detector_test(kimik2_detector_test)
 add_detector_test(deepseekv3_detector_test)
 add_detector_test(glm45_detector_test)
 add_detector_test(glm47_detector_test)
+add_detector_test(deepseekv32_detector_test)
 
