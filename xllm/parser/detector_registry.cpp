@@ -39,6 +39,8 @@ DetectorRegistry::DetectorRegistry() {
   factories_ = {
       REGISTER_DETECTOR_DEFAULT_FORCE(
           "deepseek-r1", "<think>", "</think>", true),
+      REGISTER_DETECTOR_DEFAULT_FORCE(
+          "deepseek-v32", "<think>", "</think>", true),
       REGISTER_DETECTOR("deepseek-v3", "<think>", "</think>"),
       REGISTER_DETECTOR("glm45", "<think>", "</think>"),
       REGISTER_DETECTOR("glm47", "<think>", "</think>"),

@@ -24,7 +24,7 @@ REGISTER_CAUSAL_MODEL(deepseek_v32, DeepseekV2ForCausalLM);
 // example config:
 // https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json
 REGISTER_MODEL_ARGS(deepseek_v32, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "deepseek_v3");
+  LOAD_ARG_OR(model_type, "model_type", "deepseek_v32");
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(vocab_size, "vocab_size", 129280);
   LOAD_ARG_OR(hidden_size, "hidden_size", 7168);

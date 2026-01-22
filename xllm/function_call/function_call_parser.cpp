@@ -19,6 +19,7 @@ limitations under the License.
 #include <stdexcept>
 
 #include "core/util/uuid.h"
+#include "deepseekv32_detector.h"
 #include "deepseekv3_detector.h"
 #include "glm45_detector.h"
 #include "glm47_detector.h"
@@ -33,6 +34,7 @@ const std::unordered_map<std::string, std::string>
         {"qwen3", "qwen25"},
         {"kimi_k2", "kimi_k2"},
         {"deepseekv3", "deepseekv3"},
+        {"deepseekv32", "deepseekv32"},
         {"glm45", "glm45"},
         {"glm47", "glm47"},
         // TODO
@@ -97,6 +99,9 @@ std::unique_ptr<BaseFormatDetector> FunctionCallParser::create_detector(
 
   if (it->second == "deepseekv3") {
     return std::make_unique<DeepSeekV3Detector>();
+  }
+  if (it->second == "deepseekv32") {
+    return std::make_unique<DeepSeekV32Detector>();
   }
 
   if (it->second == "glm45") {
