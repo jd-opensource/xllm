@@ -70,14 +70,16 @@ void batch_decode(const std::string& uri,
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),
+        /*maybe_custom_mask=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_mask_indptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_alibi_slopes=*/ffi::Optional<ffi::Tensor>(),
         /*maybe_prefix_len_ptr=*/ffi::Optional<ffi::Tensor>(),
         /*maybe_token_pos_in_items_ptr=*/ffi::Optional<ffi::Tensor>(),
         /*maybe_max_item_len_ptr=*/ffi::Optional<ffi::Tensor>(),
-        scale_v_tensor.defined() ? to_ffi_tensor(scale_v_tensor)
-                                 : ffi::Optional<ffi::Tensor>(),
         /*logits_soft_cap=*/0.0,
         sm_scale,
-        scale_v_scalar,
+        /*rope_rcp_scale=*/1.0,
+        /*rope_rcp_theta=*/1.0 / 10000.0,
         /*token_pos_in_items_len=*/0);
   } else {
     get_function(uri, "run")(

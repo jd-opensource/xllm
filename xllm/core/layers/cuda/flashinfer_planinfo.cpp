@@ -167,7 +167,10 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
               head_dim_qk,  // head_dim_qk
               head_dim_vo,  // head_dim_vo
               /*causal=*/false,
-              /*window_size_left=*/-1)
+              /*window_size_left=*/-1,
+              /*fixed_split_size=*/-1,
+              /*disable_split_kv=*/false,
+              /*num_colocated_ctas=*/0)
               .cast<ffi::Array<int64_t>>());
     } else {
       plan_info->uri =

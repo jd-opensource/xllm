@@ -63,6 +63,13 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
       /*use_fp16_qk_reduction=*/false,
       /*use_custom_mask=*/false);
 
+  // NOTE: we only support "fa2" backend for BatchPrefillWithPagedKvcacheKernel
+  // for flashinfer v0.6.1, because it would cause performance degradation if
+  // using "fa3" backend.
+  if (!causal) {
+    backend = "fa2";
+  }
+
   flashinfer::update_plan_info(attn_metadata.plan_info,
                                backend,
                                attn_metadata,
