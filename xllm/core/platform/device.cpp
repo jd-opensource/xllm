@@ -24,6 +24,9 @@ limitations under the License.
 #elif defined(USE_CUDA) || defined(USE_ILU)
 #include <c10/cuda/CUDAStream.h>
 #include <cuda.h>
+#elif defined(USE_MUSA)
+#include <c10/musa/MUSAGuard.h>
+#include <musa.h>
 #endif
 
 namespace {
@@ -140,6 +143,8 @@ int Device::device_count() {
   return torch_mlu::device_count();
 #elif defined(USE_CUDA) || defined(USE_ILU)
   return c10::cuda::device_count();
+#elif defined(USE_MUSA)
+  return c10::musa::device_count();
 #endif
 }
 
@@ -150,11 +155,13 @@ std::string Device::type_str() {
   return "mlu";
 #elif defined(USE_CUDA) || defined(USE_ILU)
   return "cuda";
+#elif defined(USE_MUSA)
+  return "musa";
 #endif
 }
 
 torch::DeviceType Device::type_torch() {
-#if defined(USE_NPU) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_MLU) || defined(USE_MUSA)
   return torch::kPrivateUse1;
 #elif defined(USE_CUDA) || defined(USE_ILU)
   return torch::kCUDA;
@@ -208,6 +215,8 @@ std::unique_ptr<Stream> Device::current_stream() const {
   auto current_s = torch_mlu::getCurrentMLUStream(index());
 #elif defined(USE_CUDA) || defined(USE_ILU)
   auto current_s = c10::cuda::getCurrentCUDAStream(index());
+#elif defined(USE_MUSA)
+  auto current_s = c10::musa::getCurrentMUSAStream(index());
 #endif
   return std::make_unique<Stream>(current_s);
 }

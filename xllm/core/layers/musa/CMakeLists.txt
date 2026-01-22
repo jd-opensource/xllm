@@ -1,0 +1,19 @@
+include(cc_library)
+
+cc_library(
+  NAME
+    musa_layers
+  HDRS
+    attention.h
+  SRCS
+    attention.cpp
+  DEPS
+    "-Wl,--whole-archive"
+    "-Wl,--no-whole-archive"
+    kv_cache
+    state_dict
+    model
+    common
+    torch
+    torch_musa
+)

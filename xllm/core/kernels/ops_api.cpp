@@ -65,6 +65,8 @@ void apply_rotary(RotaryParams& params) {
   torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
   ilu::apply_rope_pos_ids_cos_sin_cache(
       params.q, params.k, cos_sin, long_position_ids, params.interleaved);
+#elif defined(USE_MUSA)
+
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -86,6 +88,8 @@ void active(ActivationParams& params) {
   cuda::act_and_mul(params.output, params.input, params.act_mode);
 #elif defined(USE_ILU)
   ilu::act_and_mul(params.output, params.input, params.act_mode);
+#elif defined(USE_MUSA)
+
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -118,6 +122,8 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
                            params.k_cache,
                            params.v_cache,
                            params.slot_mapping);
+#elif defined(USE_MUSA)
+
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -217,6 +223,8 @@ void batch_prefill(AttentionParams& params) {
                      params.window_size_right,
                      params.attn_metadata.compute_dtype,
                      params.return_lse);
+#elif defined(USE_MUSA)
+
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -299,6 +307,8 @@ void batch_decode(AttentionParams& params) {
                     params.return_lse,
                     params.attn_metadata.is_causal,
                     params.kv_cache_quant_bit_size);
+#elif defined(USE_MUSA)
+
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -321,6 +331,8 @@ void fused_layernorm(FusedLayerNormParams& params) {
                        params.store_output_before_norm,
                        params.store_output_after_norm,
                        params.dynamic_quant);
+#elif defined(USE_MUSA)
+
 #elif defined(USE_NPU)
   if (params.residual.has_value()) {
     std::tie(params.output, std::ignore, params.residual_out) =
@@ -352,6 +364,8 @@ void fused_layernorm(FusedLayerNormParams& params) {
   } else {
     ilu::rms_norm(params.output, params.input, params.weight, params.eps);
   }
+#elif defined(USE_MUSA)
+
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -367,6 +381,8 @@ torch::Tensor matmul(MatmulParams& params) {
   return cuda::matmul(params.a, params.b, params.bias);
 #elif defined(USE_ILU)
   return ilu::matmul(params.a, params.b, params.bias);
+#elif defined(USE_MUSA)
+  return torch::empty(1);
 #else
   NOT_IMPLEMENTED();
 #endif

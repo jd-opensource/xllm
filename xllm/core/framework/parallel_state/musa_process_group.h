@@ -15,14 +15,23 @@ limitations under the License.
 
 #pragma once
 
-#if defined(USE_MLU)
-#include "layers/mlu/attention.h"
-#elif defined(USE_NPU)
-#include "layers/npu_torch/attention.h"
-#elif defined(USE_CUDA)
-#include "layers/cuda/attention.h"
-#elif defined(USE_ILU)
-#include "layers/ilu/attention.h"
-#elif defined(USE_MUSA)
-#include "layers/musa/attention.h"
-#endif
+#include <torch_musa/csrc/distributed/ProcessGroupMCCL.h>
+
+#include "process_group.h"
+
+namespace xllm {
+
+class ProcessGroupImpl : public ProcessGroup {
+ public:
+  ProcessGroupImpl(int32_t global_rank,
+                   int32_t world_size,
+                   int32_t rank_size,
+                   int32_t port,
+                   bool trans,
+                   const std::string& host,
+                   const std::string& group_name,
+                   const torch::Device& device)
+      : ProcessGroup(device) {}
+};
+
+}  // namespace xllm

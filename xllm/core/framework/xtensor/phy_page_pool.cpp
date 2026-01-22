@@ -105,7 +105,8 @@ void PhyPagePool::batch_map(VirPtr vir_ptr,
   VirPtr temp_vir_ptr =
 #if defined(USE_NPU)
       reinterpret_cast<VirPtr>(static_cast<char*>(vir_ptr) + ptr_offset);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_MUSA)
       reinterpret_cast<VirPtr>(vir_ptr + ptr_offset);
 #endif
 
@@ -116,7 +117,8 @@ void PhyPagePool::batch_map(VirPtr vir_ptr,
 #if defined(USE_NPU)
         reinterpret_cast<VirPtr>(static_cast<char*>(temp_vir_ptr) +
                                  FLAGS_phy_page_granularity_size);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_MUSA)
         reinterpret_cast<VirPtr>(temp_vir_ptr +
                                  FLAGS_phy_page_granularity_size);
 #endif

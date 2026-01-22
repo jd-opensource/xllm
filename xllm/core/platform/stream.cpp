@@ -26,6 +26,9 @@ Stream::Stream(const int32_t timeout)
 #elif defined(USE_CUDA) || defined(USE_ILU)
 Stream::Stream(const int32_t timeout)
     : stream_(c10::cuda::getStreamFromPool()), timeout_(timeout) {}
+#elif defined(USE_MUSA)
+Stream::Stream(const int32_t timeout)
+    : stream_(c10::musa::getStreamFromPool()), timeout_(timeout) {}
 #endif
 
 #if defined(USE_NPU)
@@ -37,6 +40,9 @@ Stream::Stream(torch_mlu::MLUStream stream, const int32_t timeout)
 #elif defined(USE_CUDA) || defined(USE_ILU)
 Stream::Stream(c10::cuda::CUDAStream stream, const int32_t timeout)
     : stream_(stream), timeout_(timeout) {}
+#elif defined(USE_MUSA)
+Stream::Stream(c10::musa::MUSAStream stream, const int32_t timeout)
+    : stream_(stream), timeout_(timeout) {}
 #endif
 
 int Stream::synchronize() const {
@@ -45,17 +51,17 @@ int Stream::synchronize() const {
 #elif defined(USE_MLU)
   stream_.unwrap().synchronize();
   return 0;
-#elif defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
   stream_.synchronize();
   return 0;
 #else
-  LOG(FATAL)
-      << "Not supported backend, currently we support 'npu', 'cuda', 'mlu'.";
+  LOG(FATAL) << "Not supported backend, currently we support 'npu', 'cuda', "
+                "'mlu', 'musa'.";
 #endif
 }
 
 c10::StreamGuard Stream::set_stream_guard() const {
-#if defined(USE_CUDA) || defined(USE_ILU)
+#if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
   return c10::StreamGuard(stream_);
 #else
   return c10::StreamGuard(stream_.unwrap());

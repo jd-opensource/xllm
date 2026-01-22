@@ -13,16 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
+#include "musa_ops_api.h"
 
-#if defined(USE_MLU)
-#include "layers/mlu/attention.h"
-#elif defined(USE_NPU)
-#include "layers/npu_torch/attention.h"
-#elif defined(USE_CUDA)
-#include "layers/cuda/attention.h"
-#elif defined(USE_ILU)
-#include "layers/ilu/attention.h"
-#elif defined(USE_MUSA)
-#include "layers/musa/attention.h"
-#endif
+namespace xllm::kernel::musa {
+
+void reshape_paged_cache(
+    torch::Tensor slot_ids,   // [n_tokens]
+    torch::Tensor keys,       // [n_tokens, n_kv_heads, head_dim]
+    torch::Tensor values,     // [n_tokens, n_kv_heads, head_dim]
+    torch::Tensor key_cache,  // [n_blocks, block_size, n_heads, head_dim]
+    torch::Tensor value_cache) {
+  
+}
+
+}  // namespace xllm::kernel::musa
