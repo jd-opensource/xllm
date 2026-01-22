@@ -348,7 +348,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   params.q_scale = std::nullopt;        // empty tensor as q_scale
   params.k_scale_cache = std::nullopt;  // empty tensor as k_scale_cache
   params.index_topk = index_topk_;
-  params.kv_cache_block_size = 1;  // only support 1 for now
+  params.kv_cache_block_size = FLAGS_block_size;
   params.sparse_block_table = ctx.new_block_tables;
   params.sparse_context_lens = ctx.new_context_lens;
 

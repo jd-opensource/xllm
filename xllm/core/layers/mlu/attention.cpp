@@ -102,6 +102,14 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   }
 
   if (enable_lighting_indexer_ || !only_prefill) {
+    // This is a trick for better performance on extracting k cache on sparse
+    // attention
+    if (enable_lighting_indexer_ && k_cache.defined() && k_cache.dim() == 4 &&
+        k_cache.size(2) != 1) {
+      // we must explicitly make sure the k_cache is contiguous after reshaping
+      k_cache = k_cache.reshape({-1, k_cache.size(1), 1, k_cache.size(3)})
+                    .contiguous();
+    }
     decoder_forward(query, output, k_cache, v_cache, attn_metadata);
   } else {
     prefill_forward(query, key, value, output, k_cache, v_cache, attn_metadata);
