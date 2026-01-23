@@ -93,7 +93,7 @@ cc_library(
     proto::xllm_proto
 )
 
-target_link_libraries(worker_service PRIVATE brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf)
+target_link_libraries(worker_service PRIVATE brpc leveldb::leveldb protobuf::libprotobuf)
 
 cc_library(
   NAME 

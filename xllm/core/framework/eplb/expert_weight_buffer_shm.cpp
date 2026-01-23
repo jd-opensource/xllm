@@ -15,8 +15,6 @@ limitations under the License.
 
 #include "expert_weight_buffer_shm.h"
 
-#include <fmt/format.h>
-
 #include <cstring>
 #include <mutex>
 #include <thread>
