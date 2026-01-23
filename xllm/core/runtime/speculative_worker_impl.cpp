@@ -411,7 +411,6 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
     auto next_tokens =
         safe_to(draft_output.sample_output.next_tokens, torch::kInt);
     auto& token_ids = validate_input.token_ids;
-    token_ids = token_ids;
     auto mask = (token_ids == -1 * (i + 1));
     token_ids.masked_scatter_(mask, next_tokens);
   }

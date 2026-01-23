@@ -30,7 +30,7 @@ limitations under the License.
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
 #elif defined(USE_MLU)
-#include <torch_mlu/csrc/include/framework/core/MLUStream.h>
+#include <framework/core/MLUStream.h>
 #elif defined(USE_CUDA) || defined(USE_ILU)
 #include <c10/cuda/CUDAStream.h>
 #endif

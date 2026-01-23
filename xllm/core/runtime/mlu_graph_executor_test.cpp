@@ -13,10 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <framework/core/device.h>
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
-#include <torch_mlu/csrc/include/framework/core/device.h>
 
 #include <vector>
 

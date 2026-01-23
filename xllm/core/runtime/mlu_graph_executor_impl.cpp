@@ -16,7 +16,7 @@ limitations under the License.
 #include "mlu_graph_executor_impl.h"
 
 #include <cnrt.h>
-#include <torch_mlu/csrc/include/framework/core/stream_guard.h>
+#include <framework/core/stream_guard.h>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
