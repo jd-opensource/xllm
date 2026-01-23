@@ -48,47 +48,48 @@ std::pair<std::string, std::string> Glm47Detector::split_incomplete_utf8(
     return {"", ""};
   }
 
-  // Check from the end for incomplete UTF-8 sequences
   size_t len = str.length();
-  size_t check_start = (len >= 3) ? (len - 3) : 0;
 
-  for (size_t i = len; i > check_start; --i) {
-    unsigned char byte = static_cast<unsigned char>(str[i - 1]);
-
-    // Check if this is the start of a multi-byte sequence
-    if ((byte & 0x80) == 0) {
-      // Single-byte character (0xxxxxxx), complete
-      return {str, ""};
-    } else if ((byte & 0xE0) == 0xC0) {
-      // Start of 2-byte sequence (110xxxxx)
-      size_t needed = 2;
-      size_t available = len - (i - 1);
-      if (available < needed) {
-        return {str.substr(0, i - 1), str.substr(i - 1)};
-      }
-      return {str, ""};
-    } else if ((byte & 0xF0) == 0xE0) {
-      // Start of 3-byte sequence (1110xxxx)
-      size_t needed = 3;
-      size_t available = len - (i - 1);
-      if (available < needed) {
-        return {str.substr(0, i - 1), str.substr(i - 1)};
-      }
-      return {str, ""};
-    } else if ((byte & 0xF8) == 0xF0) {
-      // Start of 4-byte sequence (11110xxx)
-      size_t needed = 4;
-      size_t available = len - (i - 1);
-      if (available < needed) {
-        return {str.substr(0, i - 1), str.substr(i - 1)};
-      }
-      return {str, ""};
+  // Find the start of the last potential character by scanning backwards.
+  size_t start_pos = len;
+  for (size_t i = 1; i <= len && i <= 4; ++i) {
+    if ((static_cast<unsigned char>(str[len - i]) & 0xC0) != 0x80) {
+      start_pos = len - i;
+      break;
     }
-    // else: continuation byte (10xxxxxx), keep checking backwards
   }
 
-  // All checked bytes are continuation bytes, entire string is incomplete
-  return {"", str};
+  if (start_pos == len) {
+    // String ends with more than 3 continuation bytes, or is empty.
+    // This is invalid; do not buffer to prevent DoS via unbounded growth.
+    return {str, ""};
+  }
+
+  // Check the character starting at start_pos
+  const unsigned char start_byte = str[start_pos];
+  size_t needed;
+  if ((start_byte & 0x80) == 0) {
+    needed = 1;
+  } else if ((start_byte & 0xE0) == 0xC0) {
+    needed = 2;
+  } else if ((start_byte & 0xF0) == 0xE0) {
+    needed = 3;
+  } else if ((start_byte & 0xF8) == 0xF0) {
+    needed = 4;
+  } else {
+    // Invalid start byte. The fragment from start_pos is corrupt.
+    // Do not buffer to prevent DoS via unbounded growth.
+    return {str, ""};
+  }
+
+  const size_t available = len - start_pos;
+  if (available == needed) {
+    // The last character has the correct number of bytes. Assume it's complete.
+    return {str, ""};
+  } else {
+    // The last character is incomplete or has extra bytes. Treat as incomplete.
+    return {str.substr(0, start_pos), str.substr(start_pos)};
+  }
 }
 
 std::string Glm47Detector::trim_whitespace(std::string_view str) const {
@@ -477,8 +478,21 @@ std::string Glm47Detector::process_xml_to_json_streaming(
                 std::string escaped = nlohmann::json(full_final).dump();
                 json_output += escaped.substr(1, escaped.size() - 2);
               } catch (const std::exception& e) {
+                // If JSON parsing fails, log and output with JSON escaping
                 LOG(WARNING) << "Failed to escape final content: " << e.what();
-                json_output += full_final;
+                for (unsigned char c : full_final) {
+                  if (c == '"')
+                    json_output += "\\\"";
+                  else if (c == '\\')
+                    json_output += "\\\\";
+                  else if (c < 0x20) {
+                    // Escape control characters as \uXXXX
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    json_output += buf;
+                  } else
+                    json_output += static_cast<char>(c);
+                }
               }
             } else {
               json_output += full_final;
@@ -530,9 +544,22 @@ std::string Glm47Detector::process_xml_to_json_streaming(
                   json_output += escaped.substr(1, escaped.size() - 2);
                   current_value_ += complete_utf8;
                 } catch (const std::exception& e) {
-                  // If JSON parsing still fails, log and output as-is
+                  // If JSON parsing still fails, log and output with JSON
+                  // escaping
                   LOG(WARNING) << "Failed to escape content: " << e.what();
-                  json_output += complete_utf8;
+                  for (unsigned char c : complete_utf8) {
+                    if (c == '"')
+                      json_output += "\\\"";
+                    else if (c == '\\')
+                      json_output += "\\\\";
+                    else if (c < 0x20) {
+                      // Escape control characters as \uXXXX
+                      char buf[8];
+                      snprintf(buf, sizeof(buf), "\\u%04x", c);
+                      json_output += buf;
+                    } else
+                      json_output += static_cast<char>(c);
+                  }
                   current_value_ += complete_utf8;
                 }
               }
