@@ -46,7 +46,8 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   }
 
   // Initialize attention layers
-  const bool use_fused_mla_qkv = true;
+  const bool use_fused_mla_qkv =
+      context.get_optimization_config().enable_fused_mla_kernel;
   attention_ = register_module(
       "self_attn",
       DeepseekV2Attention(

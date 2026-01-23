@@ -65,12 +65,16 @@ ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
 
 void ModelContext::derive_optimization_config() {
   // default disable fused kernel
-  optimization_config_.enable_fused_kernel = false;
+  optimization_config_.enable_fused_spec_kernel = false;
+  optimization_config_.enable_fused_mla_kernel = false;
 
   // determine whether to enable fused kernel based on backend
   std::string backend = Device::type_str();
   if (backend == "mlu") {
-    optimization_config_.enable_fused_kernel = true;
+    // TODO: enable fused spec kernel for mlu backend
+    // The current implementation of fused spec kernel is not stable.
+    optimization_config_.enable_fused_spec_kernel = false;
+    optimization_config_.enable_fused_mla_kernel = true;
   }
 }
 

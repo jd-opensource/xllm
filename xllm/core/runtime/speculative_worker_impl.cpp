@@ -209,7 +209,8 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
     context_ = impl_->context_;
   }
   // get the option to use fused kernel from target model
-  enable_fused_kernel_ = impl_->get_optimization_config().enable_fused_kernel;
+  enable_fused_kernel_ =
+      impl_->get_optimization_config().enable_fused_spec_kernel;
   return result;
 }
 

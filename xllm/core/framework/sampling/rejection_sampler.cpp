@@ -321,7 +321,8 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample_fused(
       draft_probs.reshape({-1, vocab_size}).contiguous();
   torch::Tensor target_probs_flat =
       target_probs.reshape({-1, vocab_size}).contiguous();
-  torch::Tensor uniform_rand_flat = uniform_rand.reshape({-1}).contiguous();
+  torch::Tensor uniform_rand_flat =
+      uniform_rand.to(torch::kFloat32).flatten().contiguous();
 
   // Create auxiliary tensors directly on the target device to avoid unnecessary
   // copies
@@ -333,10 +334,10 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample_fused(
       torch::arange(n_spec, (batch_size + 1) * n_spec, n_spec, options_int32);
 
   // Always create recovery probability matrix here, as kernel requires it
-  torch::Tensor uniform_probs = torch::empty_like(target_probs)
-                                    .exponential_()
-                                    .reshape({-1, vocab_size})
-                                    .contiguous();
+  torch::Tensor uniform_probs =
+      torch::empty({batch_size * n_spec, vocab_size},
+                   target_probs.options().dtype(torch::kFloat32))
+          .exponential_();
 
   // Call the fused kernel
   kernel::RejectionSampleParams params;

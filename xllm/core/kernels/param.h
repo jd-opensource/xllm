@@ -918,7 +918,7 @@ struct MaskedIndexerSelectPagedKVParams {
   bool is_prefill;
   // Number of top-k indices to select. Must be >= 0.
   int64_t index_topk;
-  // KV cache block size. Must be 1.
+  // KV cache block size.
   int64_t kv_cache_block_size;
   // Softmax scaling factor for attention computation.
   double softmax_scale;
