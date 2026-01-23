@@ -45,12 +45,6 @@ namespace xllm {
 
 namespace {
 
-// Max request body size for API endpoints. 10MB accommodates typical LLM
-// requests including vision models with base64-encoded images. For larger
-// payloads, consider adjusting brpc's -max_body_size flag (default 64MB) which
-// acts as the first line of defense at the framework level.
-constexpr size_t kMaxBodySize = 10 * 1024 * 1024;  // 10MB
-
 std::optional<size_t> GetJsonContentLength(const brpc::Controller* ctrl) {
   const auto* header_val = ctrl->http_request().GetHeader(kInferContentLength);
   if (header_val == nullptr) {
@@ -79,9 +73,9 @@ std::optional<size_t> GetJsonContentLength(const brpc::Controller* ctrl) {
   return length;
 }
 
-// Validates Content-Length header and checks against max body size.
-// Returns validated content length, or nullopt if validation fails
-// (also sets appropriate HTTP error response).
+// Validates Content-Length header. Returns validated content length, or
+// nullopt if validation fails (also sets appropriate HTTP error response).
+// Note: brpc's -max_body_size flag provides payload size protection.
 std::optional<size_t> ValidateContentLength(brpc::Controller* ctrl) {
   auto content_len_opt = GetJsonContentLength(ctrl);
   if (!content_len_opt.has_value()) {
@@ -89,17 +83,7 @@ std::optional<size_t> ValidateContentLength(brpc::Controller* ctrl) {
     ctrl->http_response().set_status_code(400);
     return std::nullopt;
   }
-
-  auto content_len = content_len_opt.value();
-  if (content_len > kMaxBodySize) {
-    ctrl->SetFailed("Payload too large");
-    ctrl->http_response().set_status_code(413);
-    LOG(WARNING) << "Request body size " << content_len << " exceeds limit of "
-                 << kMaxBodySize;
-    return std::nullopt;
-  }
-
-  return content_len;
+  return content_len_opt.value();
 }
 
 template <typename Call>
