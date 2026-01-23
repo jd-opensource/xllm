@@ -78,7 +78,7 @@ else()
 endif()
 
 # link brpc
-target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb ZLIB::ZLIB protobuf::libprotobuf ${OpenCV_LIBS})
+target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb protobuf::libprotobuf ${OpenCV_LIBS})
 add_dependencies(xllm brpc-static)
 
 if(USE_NPU)

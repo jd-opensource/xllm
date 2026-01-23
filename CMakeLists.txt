@@ -101,7 +101,6 @@ endif()
 
 option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON)
 option(USE_CXX11_ABI "Use the new C++-11 ABI, which is not backwards compatible." OFF)
-option(USE_MANYLINUX "Build for manylinux" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -257,16 +256,13 @@ find_package(Boost REQUIRED)
 find_package(Boost REQUIRED COMPONENTS serialization)
 find_package(Threads REQUIRED)
 # find all dependencies from vcpkg
-find_package(fmt CONFIG REQUIRED GLOBAL)
 find_package(glog CONFIG REQUIRED)
 find_package(gflags CONFIG REQUIRED)
 find_package(leveldb CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(ZLIB REQUIRED)
 find_package(absl CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
-find_package(re2 CONFIG REQUIRED)
 find_package(folly CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
@@ -274,13 +270,6 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenCV CONFIG REQUIRED)
 find_package(Python COMPONENTS Development REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
-
-if (USE_MANYLINUX)
-  # manylinux doesn't ship Development.Embed
-  find_package(Python REQUIRED COMPONENTS Interpreter Development)
-else()
-  find_package(Python REQUIRED COMPONENTS Interpreter Development)
-endif()
 
 if (USE_CXX11_ABI)
   # only use jemalloc if using the new C++-11 ABI
