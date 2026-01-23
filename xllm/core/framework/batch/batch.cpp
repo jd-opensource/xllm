@@ -177,6 +177,7 @@ void Batch::refresh_sequences_from_groups() {
 }
 
 void Batch::dp_balance_shuffle_seqs() {
+#if defined(USE_NPU)
   // this shuffle operation is mainly used for npu with 24 cores
   // and specific mla op implementation
   const auto num_npu_cores = 24;  // npu cube core num
@@ -202,6 +203,15 @@ void Batch::dp_balance_shuffle_seqs() {
     sequences_ = std::move(balanced_sequences);
     allowed_max_tokens_ = std::move(balanced_allowed_max_tokens);
   }
+#else
+  // TODO: implement dp_balance_shuffle_seqs for non-npu devices
+  static bool warning = true;
+  if (warning) {
+    LOG(WARNING)
+        << "dp_balance_shuffle_seqs is not implemented for current device";
+    warning = false;
+  }
+#endif
 }
 
 std::map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(

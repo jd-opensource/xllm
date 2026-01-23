@@ -364,6 +364,8 @@ class Sequence final {
   }
 
  private:
+  void record_first_token(const Token& token);
+
   SequenceOutputType output_type();
   void generate_embeddings_output(SequenceOutput& output);
   void generate_mm_embeddings_output(SequenceOutput& output);

@@ -27,6 +27,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/common/global_flags.h"
 #include "core/common/metrics.h"
 #include "core/framework/request/mm_data_visitor.h"
 #include "core/framework/tokenizer/tokenizer.h"
@@ -187,6 +188,21 @@ Sequence::Sequence(const Sequence& other)
   logprob_state_ = std::make_unique<LogprobState>(*other.logprob_state_);
 }
 
+// The first token will be only used in disagg pd mode.
+void Sequence::record_first_token(const Token& token) {
+  if (!FLAGS_enable_disagg_pd || !is_first_token_) {
+    return;
+  }
+  RemoteToken t;
+  t.token_id = token.id;
+  if (token.logprob.has_value()) {
+    t.token_logprob = token.logprob.value();
+  }
+  t.token_top_tokens = token.top_tokens;
+  t.token_top_logprobs = token.top_logprobs;
+  first_token_ = std::move(t);
+}
+
 void Sequence::append_token(const Token& token) {
   CHECK_LT(num_tokens_, tokens_.size())
       << "exceed the token capacity of the sequence";
@@ -196,22 +212,14 @@ void Sequence::append_token(const Token& token) {
         << "cannot append token to a prefill sequence";
   }
 
+  // The real token was generated in function
+  // `Sequence::update_last_step_token` when enable_schedule_overlap.
+  // So here we only consider the case when we disable enable_schedule_overlap.
   if (!sequence_params_.enable_schedule_overlap) {
     // check if the token is the first token after the prompt
     is_first_token_ = num_tokens_ == num_prompt_tokens_;
   }
-
-  // TODO: not record in non-disagg pd mode.
-  if (is_first_token_) {
-    RemoteToken t;
-    t.token_id = token.id;
-    if (token.logprob.has_value()) {
-      t.token_logprob = token.logprob.value();
-    }
-    t.token_top_tokens = token.top_tokens;
-    t.token_top_logprobs = token.top_logprobs;
-    first_token_ = std::move(t);
-  }
+  record_first_token(token);
 
   // append the token id and update the token count
   const auto cur_idx = num_tokens_++;
@@ -239,22 +247,12 @@ void Sequence::append_token(const Token& token) {
 }
 
 void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
-  if (sequence_params_.enable_schedule_overlap) {
-    // check if the token is the first token after the prompt
-    is_first_token_ = cur_generated_token_idx_ == num_prompt_tokens_;
-  }
-
-  // TODO: not record in non-disagg pd mode.
-  if (is_first_token_) {
-    RemoteToken t;
-    t.token_id = token.id;
-    if (token.logprob.has_value()) {
-      t.token_logprob = token.logprob.value();
-    }
-    t.token_top_tokens = token.top_tokens;
-    t.token_top_logprobs = token.top_logprobs;
-    first_token_ = std::move(t);
-  }
+  CHECK(sequence_params_.enable_schedule_overlap)
+      << "update_last_step_token should only be called when "
+         "enable_schedule_overlap";
+  // check if the token is the first token
+  is_first_token_ = cur_generated_token_idx_ == num_prompt_tokens_;
+  record_first_token(token);
 
   // for mtp, currently only support multi-nodes task.
   if (token_offset > 0) {
@@ -284,16 +282,7 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
 
 void Sequence::update_token(size_t index, const Token& token) {
   // TODO: not record in non-disagg pd mode.
-  if (is_first_token_) {
-    RemoteToken t;
-    t.token_id = token.id;
-    if (token.logprob.has_value()) {
-      t.token_logprob = token.logprob.value();
-    }
-    t.token_top_tokens = token.top_tokens;
-    t.token_top_logprobs = token.top_logprobs;
-    first_token_ = std::move(t);
-  }
+  record_first_token(token);
 
   const int32_t origin_token_id = tokens_[index];
   const int32_t token_id = static_cast<int32_t>(token.id);
