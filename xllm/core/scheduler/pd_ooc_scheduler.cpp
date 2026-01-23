@@ -233,7 +233,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
     }
   }
 
-  if (options_.priority_strategy() == "FCFS") {
+  if (options_.priority_strategy() == "fcfs") {
     if (last_step_prefill_) {
       // insert all requests to the back of running_queue_
       // 1. last step is prefill step:
