@@ -41,6 +41,9 @@ limitations under the License.
 #include "options.h"
 #include "platform/device.h"
 #include "util/threadpool.h"
+#if defined(USE_NPU)
+#include "framework/kv_cache/mooncake_weight_transfer.h"
+#endif
 
 namespace xllm {
 
@@ -101,6 +104,10 @@ class WorkerImpl {
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports);
 
+  // D2D link for weight transfer
+  virtual bool link_d2d(const std::string& remote_addr);
+  virtual bool unlink_d2d(const std::string& remote_addr);
+
   // prepare input for execution
   virtual ForwardInput prepare_inputs(Batch& batch);
 
@@ -132,7 +139,7 @@ class WorkerImpl {
 
   virtual bool sleep(int32_t master_status);
 
-  virtual bool wakeup(int32_t master_status);
+  virtual bool wakeup(const WakeupOptions& options);
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       uint64_t src_cluster_id,
@@ -244,6 +251,10 @@ class WorkerImpl {
 
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
   std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
+
+#if defined(USE_NPU)
+  std::unique_ptr<MooncakeWeightTransfer> weight_transfer_;
+#endif
 
   bool is_spec_draft_ = false;
 

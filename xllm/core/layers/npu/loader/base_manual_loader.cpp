@@ -53,6 +53,14 @@ void BaseManualLoader::reload_weights() {
   init_device_at_weights();
 }
 
+void BaseManualLoader::reload_weights_from_device() {
+  if (!device_storage_) {
+    LOG(ERROR) << "device_storage_ is null, cannot reload weights from device.";
+    return;
+  }
+  init_device_at_weights();
+}
+
 void BaseManualLoader::init_weight_slices() {
   weight_slices_.resize(weight_count_);
   size_t offset = 0;

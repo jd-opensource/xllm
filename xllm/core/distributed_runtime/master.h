@@ -46,6 +46,16 @@ class Master {
 
   virtual bool wakeup() { return false; }
 
+  virtual bool wakeup(const WakeupOptions& options) { return false; }
+
+  virtual bool link_d2d(const std::vector<std::string>& device_ips) {
+    return false;
+  }
+
+  virtual bool unlink_d2d(const std::vector<std::string>& device_ips) {
+    return false;
+  }
+
   int32_t get_master_status() const { return master_status_; }
 
   void set_master_status(int32_t master_status) {

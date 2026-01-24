@@ -68,6 +68,14 @@ bool WorkerClient::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return worker_->unlink_cluster(cluster_ids, addrs, device_ips, ports);
 }
 
+bool WorkerClient::link_d2d(const std::string& remote_addr) {
+  return worker_->link_d2d(remote_addr);
+}
+
+bool WorkerClient::unlink_d2d(const std::string& remote_addr) {
+  return worker_->unlink_d2d(remote_addr);
+}
+
 std::tuple<int64_t, int64_t> WorkerClient::estimate_kv_cache_capacity() {
   return worker_->estimate_kv_cache_capacity();
 }
@@ -175,8 +183,9 @@ folly::SemiFuture<bool> WorkerClient::sleep_async(int32_t master_status) {
   LOG(FATAL) << "WorkerClient Method sleep is UnImplemented.";
 }
 
-folly::SemiFuture<bool> WorkerClient::wakeup_async(int32_t master_status) {
-  LOG(FATAL) << "WorkerClient Method wakeup is UnImplemented.";
+folly::SemiFuture<bool> WorkerClient::wakeup_async(
+    const WakeupOptions& options) {
+  return worker_->wakeup_async(options);
 }
 
 const torch::Device& WorkerClient::device() const { return worker_->device(); }

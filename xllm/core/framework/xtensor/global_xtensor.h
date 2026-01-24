@@ -19,7 +19,6 @@ limitations under the License.
 
 #include <cstddef>
 #include <cstdint>
-#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -59,6 +58,12 @@ class GlobalXtensor {
   size_t num_total_pages() const { return num_total_pages_; }
   size_t page_size() const { return page_size_; }
 
+  // Mooncake registration status (for idempotent registration)
+  bool is_mooncake_registered() const { return mooncake_registered_; }
+  void set_mooncake_registered(bool registered) {
+    mooncake_registered_ = registered;
+  }
+
  private:
   GlobalXtensor() = default;
   ~GlobalXtensor() = default;
@@ -69,6 +74,7 @@ class GlobalXtensor {
   bool map_all_pages(const std::vector<PhyPage*>& pages);
 
   bool initialized_ = false;
+  bool mooncake_registered_ = false;
   VirPtr vaddr_ = nullptr;
   size_t total_size_ = 0;
   size_t page_size_ = 0;
