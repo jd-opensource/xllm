@@ -134,6 +134,9 @@ class GraphPersistentParam {
   }
   bool need_update_attn_mask() const { return need_update_attn_mask_; }
   void set_need_update_attn_mask(bool value) { need_update_attn_mask_ = value; }
+  bool need_update_attention_plan() const {
+    return need_update_attention_plan_;
+  }
   torch::Tensor persistent_embedding(uint32_t actual_tokens = 0) const {
     if (actual_tokens > 0) {
       return persistent_embedding_.slice(
@@ -195,6 +198,9 @@ class GraphPersistentParam {
 
   // Flag indicating whether attention mask needs to be updated
   bool need_update_attn_mask_;
+  // Flag indicating whether attention plan needs to be updated based on model
+  // type
+  bool need_update_attention_plan_;
 };
 
 // ACL graph executor using libtorch NPUGraph for memory management
