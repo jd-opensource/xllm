@@ -953,10 +953,28 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  if (!master->wakeup()) {
-    LOG(ERROR) << "Failed to wakeup model " << req_pb->model_id();
-    ctrl->SetFailed("Failed to wakeup model");
-    return;
+  // Check if remote weight transfer is requested
+  if (req_pb->remote_addrs_size() > 0) {
+    WakeupOptions wakeup_options;
+    wakeup_options.remote_addrs.assign(req_pb->remote_addrs().begin(),
+                                       req_pb->remote_addrs().end());
+    wakeup_options.src_weight_offsets.reserve(
+        req_pb->src_weight_offsets().size());
+    for (auto offset : req_pb->src_weight_offsets()) {
+      wakeup_options.src_weight_offsets.push_back(offset);
+    }
+    if (!master->wakeup(wakeup_options)) {
+      LOG(ERROR) << "Failed to wakeup model " << req_pb->model_id()
+                 << " with remote weight transfer";
+      ctrl->SetFailed("Failed to wakeup model with remote weight transfer");
+      return;
+    }
+  } else {
+    if (!master->wakeup()) {
+      LOG(ERROR) << "Failed to wakeup model " << req_pb->model_id();
+      ctrl->SetFailed("Failed to wakeup model");
+      return;
+    }
   }
 
   // Restore rate limiter from sleeping state
@@ -969,6 +987,152 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
 
   master->set_master_status(WAKEUP);
   // Success: return HTTP 200 with empty body
+}
+
+void APIService::LinkD2D(::google::protobuf::RpcController* controller,
+                         const proto::D2DLinkRequest* request,
+                         proto::RpcStatus* response,
+                         ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  if (masters_.find(request->model_id()) == masters_.end()) {
+    LOG(ERROR) << "Master for model " << request->model_id() << " not found";
+    response->set_status(false);
+    return;
+  }
+
+  auto master = masters_[request->model_id()];
+  bool status = master->link_d2d(
+      {request->device_ips().begin(), request->device_ips().end()});
+  response->set_status(status);
+}
+
+void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
+                             const proto::HttpRequest* request,
+                             proto::HttpResponse* response,
+                             ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  auto arena = response->GetArena();
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::D2DLinkRequest>(arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  std::string error;
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+
+  if (masters_.find(req_pb->model_id()) == masters_.end()) {
+    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
+    ctrl->SetFailed("Master for model not found");
+    return;
+  }
+
+  auto master = masters_[req_pb->model_id()];
+  bool status = master->link_d2d(
+      {req_pb->device_ips().begin(), req_pb->device_ips().end()});
+  resp_pb->set_status(status);
+
+  json2pb::Pb2JsonOptions json_options;
+  json_options.bytes_to_base64 = false;
+  std::string err_msg;
+  butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
+  if (!json2pb::ProtoMessageToJson(
+          *resp_pb, &json_output, json_options, &err_msg)) {
+    LOG(ERROR) << "proto to json failed: " << err_msg;
+    return;
+  }
+}
+
+void APIService::UnlinkD2D(::google::protobuf::RpcController* controller,
+                           const proto::D2DLinkRequest* request,
+                           proto::RpcStatus* response,
+                           ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  if (masters_.find(request->model_id()) == masters_.end()) {
+    LOG(ERROR) << "Master for model " << request->model_id() << " not found";
+    response->set_status(false);
+    return;
+  }
+
+  auto master = masters_[request->model_id()];
+  bool status = master->unlink_d2d(
+      {request->device_ips().begin(), request->device_ips().end()});
+  response->set_status(status);
+}
+
+void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
+                               const proto::HttpRequest* request,
+                               proto::HttpResponse* response,
+                               ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  auto arena = response->GetArena();
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::D2DLinkRequest>(arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  std::string error;
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+
+  if (masters_.find(req_pb->model_id()) == masters_.end()) {
+    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
+    ctrl->SetFailed("Master for model not found");
+    return;
+  }
+
+  auto master = masters_[req_pb->model_id()];
+  bool status = master->unlink_d2d(
+      {req_pb->device_ips().begin(), req_pb->device_ips().end()});
+  resp_pb->set_status(status);
+
+  json2pb::Pb2JsonOptions json_options;
+  json_options.bytes_to_base64 = false;
+  std::string err_msg;
+  butil::IOBufAsZeroCopyOutputStream json_output(&ctrl->response_attachment());
+  if (!json2pb::ProtoMessageToJson(
+          *resp_pb, &json_output, json_options, &err_msg)) {
+    LOG(ERROR) << "proto to json failed: " << err_msg;
+    return;
+  }
 }
 
 }  // namespace xllm

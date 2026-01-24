@@ -44,6 +44,8 @@ class BaseManualLoader : public BaseLoader {
 
   virtual void reload_weights() override;
 
+  virtual void reload_weights_from_device() override;
+
  protected:
   struct WeightSlice {
     uint64_t offset = 0;

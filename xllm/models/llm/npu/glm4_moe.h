@@ -70,6 +70,10 @@ class Glm4MoeDecoderLayerImpl : public torch::nn::Module {
 
   void reload_weights() { decoder_layer_->reload_weights(); }
 
+  void reload_weights_from_device() {
+    decoder_layer_->reload_weights_from_device();
+  }
+
  private:
   layer::NpuGlm4MoeDecoder decoder_layer_{nullptr};
 };
@@ -282,6 +286,14 @@ class Glm4MoeModelImpl : public torch::nn::Module {
       layers_[i]->reload_weights();
     }
     norm_->reload_weights();
+  }
+
+  void reload_weights_from_device() {
+    npu_embed_tokens_->reload_weights_from_device();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights_from_device();
+    }
+    norm_->reload_weights_from_device();
   }
 
   layer::NpuWordEmbedding get_npu_word_embedding() { return npu_embed_tokens_; }

@@ -109,6 +109,14 @@ bool Worker::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return impl_->unlink_cluster(cluster_ids, addrs, device_ips, ports);
 }
 
+bool Worker::link_d2d(const std::string& remote_addr) {
+  return impl_->link_d2d(remote_addr);
+}
+
+bool Worker::unlink_d2d(const std::string& remote_addr) {
+  return impl_->unlink_d2d(remote_addr);
+}
+
 std::tuple<int64_t, int64_t> Worker::estimate_kv_cache_capacity() {
   return impl_->estimate_kv_cache_capacity();
 }
@@ -212,7 +220,16 @@ bool Worker::sleep(int32_t master_status) {
   return impl_->sleep(master_status);
 }
 
-bool Worker::wakeup(int32_t master_status) {
-  return impl_->wakeup(master_status);
+bool Worker::wakeup(const WakeupOptions& options) {
+  return impl_->wakeup(options);
+}
+
+folly::SemiFuture<bool> Worker::wakeup_async(const WakeupOptions& options) {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, options, promise = std::move(promise)]() mutable {
+    promise.setValue(this->wakeup(options));
+  });
+  return future;
 }
 }  // namespace xllm

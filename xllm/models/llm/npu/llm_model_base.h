@@ -104,6 +104,10 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 
   virtual void reload_weights() { decoder_layer_->reload_weights(); }
 
+  virtual void reload_weights_from_device() {
+    decoder_layer_->reload_weights_from_device();
+  }
+
  private:
   DecoderType decoder_layer_{nullptr};
   layer::NpuBlockCopy block_copy_{nullptr};
@@ -282,6 +286,14 @@ class LlmModelImplBase : public torch::nn::Module {
     norm_->reload_weights();
   }
 
+  virtual void reload_weights_from_device() {
+    npu_embed_tokens_->reload_weights_from_device();
+    for (int i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights_from_device();
+    }
+    norm_->reload_weights_from_device();
+  }
+
   virtual void merge_and_move_pinned_host() {
     // todo: word embed and norm need to be merged and moved to pinned host.
     npu_embed_tokens_->merge_and_move_pinned_host();
@@ -425,6 +437,11 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   virtual void reload_model_weights() {
     model_->reload_weights();
     npu_lm_head_->reload_weights();
+  }
+
+  virtual void reload_model_weights_from_device() {
+    model_->reload_weights_from_device();
+    npu_lm_head_->reload_weights_from_device();
   }
 
   virtual void prepare_expert_weight(int32_t layer_id,

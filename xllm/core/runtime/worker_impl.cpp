@@ -45,7 +45,11 @@ limitations under the License.
 #include "framework/model_loader.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
+#include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
+#if defined(USE_NPU)
+#include "framework/kv_cache/mooncake_weight_transfer.h"
+#endif
 #include "util/net.h"
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
@@ -81,6 +85,21 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   threadpool_.schedule([this]() mutable { device_.set_device(); });
   prepare_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
+
+#if defined(USE_NPU)
+  if (FLAGS_enable_xtensor) {
+    if (!weight_transfer_) {
+      weight_transfer_ = std::make_unique<MooncakeWeightTransfer>(
+          options_.transfer_listen_port(), device_.unwrap());
+    }
+    if (!weight_transfer_->initialize()) {
+      LOG(ERROR) << "Failed to initialize MooncakeWeightTransfer";
+    }
+    if (!weight_transfer_->register_global_xtensor()) {
+      LOG(ERROR) << "Failed to register GlobalXtensor";
+    }
+  }
+#endif
 }
 
 WorkerImpl::~WorkerImpl() = default;
@@ -316,6 +335,32 @@ bool WorkerImpl::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   }
 #endif
   return true;
+}
+
+bool WorkerImpl::link_d2d(const std::string& remote_addr) {
+#if defined(USE_NPU)
+  if (!weight_transfer_) {
+    LOG(ERROR) << "MooncakeWeightTransfer not initialized";
+    return false;
+  }
+  return weight_transfer_->link_d2d(remote_addr);
+#else
+  LOG(ERROR) << "link_d2d requires USE_NPU build";
+  return false;
+#endif
+}
+
+bool WorkerImpl::unlink_d2d(const std::string& remote_addr) {
+#if defined(USE_NPU)
+  if (!weight_transfer_) {
+    LOG(ERROR) << "MooncakeWeightTransfer not initialized";
+    return false;
+  }
+  return weight_transfer_->unlink_d2d(remote_addr);
+#else
+  LOG(ERROR) << "unlink_d2d requires USE_NPU build";
+  return false;
+#endif
 }
 
 std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
@@ -588,10 +633,68 @@ bool WorkerImpl::sleep(int32_t master_status) {
   return true;
 }
 
-bool WorkerImpl::wakeup(int32_t master_status) {
-  if (master_status == LIGHT_SLEEP) {
+bool WorkerImpl::wakeup(const WakeupOptions& options) {
+  if (!options.remote_addrs.empty()) {
+#if defined(USE_NPU)
+    if (options.src_weight_offsets.size() != options.remote_addrs.size()) {
+      LOG(ERROR) << "remote_addrs and src_weight_offsets size mismatch: "
+                 << options.remote_addrs.size() << " vs "
+                 << options.src_weight_offsets.size();
+      return false;
+    }
+
+    if (!FLAGS_enable_xtensor) {
+      LOG(ERROR) << "Remote weight wakeup requires FLAGS_enable_xtensor";
+      return false;
+    }
+
+    auto& allocator = XTensorAllocator::get_instance();
+    auto* tensors = allocator.get_model_tensors(options_.model_id());
+    if (!tensors || tensors->weight_base_ptr == nullptr ||
+        tensors->weight_num_pages == 0) {
+      LOG(ERROR) << "Weight region not initialized for model "
+                 << options_.model_id();
+      return false;
+    }
+
+    auto& global_xtensor = GlobalXtensor::get_instance();
+    if (!global_xtensor.is_initialized()) {
+      LOG(ERROR) << "GlobalXtensor not initialized";
+      return false;
+    }
+
+    uint64_t dst_offset =
+        reinterpret_cast<uintptr_t>(tensors->weight_base_ptr) -
+        reinterpret_cast<uintptr_t>(global_xtensor.base_vaddr());
+    size_t transfer_size =
+        tensors->weight_num_pages * global_xtensor.page_size();
+
+    if (!weight_transfer_) {
+      LOG(ERROR) << "MooncakeWeightTransfer not initialized";
+      return false;
+    }
+
+    for (size_t i = 0; i < options.remote_addrs.size(); ++i) {
+      if (!weight_transfer_->pull_weights(options.remote_addrs[i],
+                                          options.src_weight_offsets[i],
+                                          dst_offset,
+                                          transfer_size)) {
+        LOG(ERROR) << "Failed to pull remote weights from "
+                   << options.remote_addrs[i];
+        return false;
+      }
+    }
+
+    model_->reload_model_weights_from_device();
+    return true;
+#endif
+    LOG(ERROR) << "Remote weight wakeup requires USE_NPU build";
+    return false;
+  }
+
+  if (options.master_status == LIGHT_SLEEP) {
     model_->reload_model_weights();
-  } else if (master_status == DEEP_SLEEP) {
+  } else if (options.master_status == DEEP_SLEEP) {
     auto model_loader = ModelLoader::create(model_weights_path_);
     model_->load_model(std::move(model_loader));
   }

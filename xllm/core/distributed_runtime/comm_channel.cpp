@@ -199,6 +199,36 @@ bool CommChannel::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
+bool CommChannel::link_d2d(const std::string& remote_addr) {
+  proto::D2DLinkWorkerRequest req;
+  req.set_remote_addr(remote_addr);
+
+  proto::Status s;
+  brpc::Controller cntl;
+  stub_->LinkD2D(&cntl, &req, &s, nullptr);
+
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "LinkD2D failed: " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
+bool CommChannel::unlink_d2d(const std::string& remote_addr) {
+  proto::D2DLinkWorkerRequest req;
+  req.set_remote_addr(remote_addr);
+
+  proto::Status s;
+  brpc::Controller cntl;
+  stub_->UnlinkD2D(&cntl, &req, &s, nullptr);
+
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "UnlinkD2D failed: " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
 bool CommChannel::init_model(const std::string& model_weights_path,
                              int32_t random_seed,
                              int32_t master_status) {
@@ -374,12 +404,23 @@ bool CommChannel::sleep(int32_t master_status) {
   return true;
 }
 
-bool CommChannel::wakeup(int32_t master_status) {
+bool CommChannel::wakeup(const WakeupOptions& options) {
   proto::Status s;
   brpc::Controller cntl;
   proto::WakeupRequest req;
 
-  req.set_master_status(master_status);
+  req.set_master_status(options.master_status);
+  if (!options.remote_addrs.empty()) {
+    req.mutable_remote_addrs()->Assign(options.remote_addrs.begin(),
+                                       options.remote_addrs.end());
+  }
+  if (!options.src_weight_offsets.empty()) {
+    req.mutable_src_weight_offsets()->Reserve(
+        options.src_weight_offsets.size());
+    for (auto offset : options.src_weight_offsets) {
+      req.add_src_weight_offsets(offset);
+    }
+  }
   stub_->Wakeup(&cntl, &req, &s, nullptr);
   if (cntl.Failed() || !s.ok()) {
     LOG(ERROR) << "Wakeup failed: " << cntl.ErrorText();

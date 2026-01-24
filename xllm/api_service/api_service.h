@@ -137,6 +137,26 @@ class APIService : public proto::XllmAPIService {
                   proto::HttpResponse* response,
                   ::google::protobuf::Closure* done) override;
 
+  void LinkD2D(::google::protobuf::RpcController* controller,
+               const proto::D2DLinkRequest* request,
+               proto::RpcStatus* response,
+               ::google::protobuf::Closure* done) override;
+
+  void LinkD2DHttp(::google::protobuf::RpcController* controller,
+                   const proto::HttpRequest* request,
+                   proto::HttpResponse* response,
+                   ::google::protobuf::Closure* done) override;
+
+  void UnlinkD2D(::google::protobuf::RpcController* controller,
+                 const proto::D2DLinkRequest* request,
+                 proto::RpcStatus* response,
+                 ::google::protobuf::Closure* done) override;
+
+  void UnlinkD2DHttp(::google::protobuf::RpcController* controller,
+                     const proto::HttpRequest* request,
+                     proto::HttpResponse* response,
+                     ::google::protobuf::Closure* done) override;
+
  private:
   bool ParseForkMasterRequest(const proto::MasterInfos* request,
                               Options& options);

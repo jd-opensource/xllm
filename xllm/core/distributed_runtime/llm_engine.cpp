@@ -798,6 +798,74 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
+bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
+  if (device_ips.size() != worker_clients_num_) {
+    LOG(ERROR) << "device_ips size " << device_ips.size()
+               << " != worker_clients_num " << worker_clients_num_;
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
+    std::string remote_addr = device_ips[worker_rank];
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                remote_addr]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->link_d2d(remote_addr));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Link D2D failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool LLMEngine::unlink_d2d(const std::vector<std::string>& device_ips) {
+  if (device_ips.size() != worker_clients_num_) {
+    LOG(ERROR) << "device_ips size " << device_ips.size()
+               << " != worker_clients_num " << worker_clients_num_;
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
+    std::string remote_addr = device_ips[worker_rank];
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                remote_addr]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->unlink_d2d(remote_addr));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Unlink D2D failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
 ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   if (worker_clients_.empty()) {
     // empty worker, return
@@ -1057,7 +1125,7 @@ bool LLMEngine::sleep(int32_t master_status) {
   return true;
 }
 
-bool LLMEngine::wakeup(int32_t master_status) {
+bool LLMEngine::wakeup(const WakeupOptions& options) {
   // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
   if (!FLAGS_enable_xtensor) {
     LOG(WARNING) << "wakeup requires FLAGS_enable_xtensor to be enabled";
@@ -1090,12 +1158,13 @@ bool LLMEngine::wakeup(int32_t master_status) {
               << " weight pages for model " << model_id;
   }
 
-  LOG(INFO) << "Waking up LLM engine.";
+  LOG(INFO) << "Waking up LLM engine, remote_addrs.size()="
+            << options.remote_addrs.size();
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
 
   for (auto& worker : worker_clients_) {
-    futures.push_back(worker->wakeup_async(master_status));
+    futures.push_back(worker->wakeup_async(options));
   }
 
   auto results = folly::collectAll(futures).get();

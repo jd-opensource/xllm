@@ -107,11 +107,16 @@ class LLMEngine : public Engine {
                       const std::vector<uint16_t>& ports,
                       const int32_t dp_size) override;
 
+  // D2D link for weight transfer - each worker links to one remote addr
+  bool link_d2d(const std::vector<std::string>& device_ips) override;
+
+  bool unlink_d2d(const std::vector<std::string>& device_ips) override;
+
   std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; };
 
   bool sleep(int32_t master_status) override;
 
-  bool wakeup(int32_t master_status) override;
+  bool wakeup(const WakeupOptions& options) override;
 
   // XTensor mode: get GlobalXtensor offsets for allocated blocks via RPC
   // Calls worker in the specified DP group to compute offsets

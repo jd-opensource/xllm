@@ -99,6 +99,14 @@ bool RemoteWorker::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return channel_->unlink_cluster(cluster_ids, addrs, device_ips, ports);
 }
 
+bool RemoteWorker::link_d2d(const std::string& remote_addr) {
+  return channel_->link_d2d(remote_addr);
+}
+
+bool RemoteWorker::unlink_d2d(const std::string& remote_addr) {
+  return channel_->unlink_d2d(remote_addr);
+}
+
 bool RemoteWorker::init_model(const std::string& model_weights_path,
                               int32_t random_seed,
                               int32_t master_status) {
@@ -354,18 +362,18 @@ folly::SemiFuture<bool> RemoteWorker::sleep_async(int32_t master_status) {
   return future;
 }
 
-folly::SemiFuture<bool> RemoteWorker::wakeup_async(int32_t master_status) {
+folly::SemiFuture<bool> RemoteWorker::wakeup_async(
+    const WakeupOptions& options) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule(
-      [this, master_status, promise = std::move(promise)]() mutable {
-        if (!channel_->wakeup(master_status)) {
-          LOG(ERROR) << "Wakeup failed";
-          promise.setValue(false);
-        } else {
-          promise.setValue(true);
-        }
-      });
+  threadpool_.schedule([this, options, promise = std::move(promise)]() mutable {
+    if (!channel_->wakeup(options)) {
+      LOG(ERROR) << "Wakeup failed";
+      promise.setValue(false);
+    } else {
+      promise.setValue(true);
+    }
+  });
   return future;
 }
 

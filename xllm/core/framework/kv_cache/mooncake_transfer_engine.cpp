@@ -26,17 +26,46 @@ limitations under the License.
 
 namespace xllm {
 
-MooncakeTransferEngine::MooncakeTransferEngine(const int16_t listen_port,
-                                               const torch::Device& device)
-    : listen_port_(listen_port), device_(device) {
-  engine_ = std::make_unique<TransferEngine>(true);
+// ============================================================================
+// MooncakeTransferEngineCore (Singleton)
+// ============================================================================
 
+MooncakeTransferEngineCore::~MooncakeTransferEngineCore() {
+  // free stub
+  for (auto& pair : stub_map_) {
+    if (pair.second) {
+      delete pair.second->channel();
+      delete pair.second;
+    }
+  }
+  stub_map_.clear();
+
+  if (initialized_) {
+    server_.Stop(0);
+    server_.Join();
+  }
+}
+
+bool MooncakeTransferEngineCore::initialize(int16_t listen_port,
+                                            const torch::Device& device) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (initialized_) {
+    LOG(INFO) << "MooncakeTransferEngineCore already initialized, reusing";
+    return true;
+  }
+
+  listen_port_ = listen_port;
   host_ip_ = net::get_local_ip_addr();
 
-  device_.set_device();
-  device_.init_device_context();
+  // Create TransferEngine
+  engine_ = std::make_unique<TransferEngine>(true);
 
-  int32_t device_id = device_.index();
+  Device dev(device);
+  dev.set_device();
+  dev.init_device_context();
+
+  int32_t device_id = dev.index();
   std::string hostname;
   int32_t phy_id = FLAGS_npu_phy_id;
   if (phy_id != -1) {
@@ -49,78 +78,154 @@ MooncakeTransferEngine::MooncakeTransferEngine(const int16_t listen_port,
 
   if (engine_->init("P2PHANDSHAKE", hostname, "", 0)) {
     LOG(ERROR) << "engine init failed, hostname=" << hostname;
-  }
-
-  LOG(INFO) << "engine init success, hostname=" << hostname;
-}
-
-MooncakeTransferEngine::~MooncakeTransferEngine() {
-  // free stub
-  for (auto& pair : stub_map_) {
-    if (pair.second) {
-      delete pair.second->channel();
-      delete pair.second;
-    }
-  }
-  stub_map_.clear();
-
-  if (has_initialized_) {
-    server_.Stop(0);
-    server_.Join();
-  }
-}
-
-std::string MooncakeTransferEngine::initialize() {
-  service_ = std::make_shared<MooncakeTransferEngineService>(this);
-  if (server_.AddService(service_.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
-      0) {
-    LOG(ERROR) << "Failed to add service to server";
-    return "";
-  }
-
-  // Start the server.
-  brpc::ServerOptions options;
-  if (server_.Start(listen_port_, &options) != 0) {
-    LOG(ERROR) << "Fail to start Brpc rpc server";
-    return "";
-  }
-
-  has_initialized_ = true;
-
-  rpc_port_ = engine_->getRpcPort();
-  addr_ = host_ip_ + ":" + std::to_string(rpc_port_);
-  LOG(INFO) << "MooncakeTransferEngine initialize success, addr_=" << addr_;
-
-  return addr_;
-}
-
-bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
-                                             std::vector<size_t> lens,
-                                             int64_t size_per_block) {
-  int64_t num = addrs.size();
-  num_layers_ = num / 2;
-
-  std::vector<BufferEntry> buffers;
-  buffers.reserve(num);
-  for (size_t i = 0; i < num; i++) {
-    buffers.push_back(BufferEntry{(void*)addrs[i], lens[i]});
-  }
-
-  int ret = engine_->registerLocalMemoryBatch(buffers, kWildcardLocation);
-  if (ret) {
-    LOG(ERROR) << "registerLocalMemoryBatch failed, ret=" << ret;
     return false;
   }
 
-  size_per_block_ = size_per_block;
+  LOG(INFO) << "TransferEngine init success, hostname=" << hostname;
 
-  LOG(INFO) << "register_memory success, size_per_block_=" << size_per_block_;
+  // Create brpc service and server
+  service_ = std::make_shared<MooncakeTransferEngineService>();
+  if (server_.AddService(service_.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
+      0) {
+    LOG(ERROR) << "Failed to add service to server";
+    return false;
+  }
+
+  brpc::ServerOptions options;
+  if (server_.Start(listen_port_, &options) != 0) {
+    LOG(ERROR) << "Fail to start Brpc rpc server on port " << listen_port_;
+    return false;
+  }
+
+  rpc_port_ = engine_->getRpcPort();
+  addr_ = host_ip_ + ":" + std::to_string(rpc_port_);
+
+  initialized_ = true;
+  LOG(INFO) << "MooncakeTransferEngineCore initialize success, addr_=" << addr_;
 
   return true;
 }
 
-proto::MooncakeTransferEngineService*
-MooncakeTransferEngine::create_rpc_channel(uint64_t cluster_id) {
+bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
+                                              const std::string& remote_addr) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  LOG(INFO) << "open_session, cluster_id=" << cluster_id
+            << ", remote_addr=" << remote_addr;
+
+  auto it = handles_.find(remote_addr);
+  if (it != handles_.end()) {
+    // Session exists, just increment ref count
+    it->second.ref_count++;
+    LOG(INFO) << "Reusing existing session for " << remote_addr
+              << ", ref_count=" << it->second.ref_count;
+    return true;
+  }
+
+  if (cluster_id != 0) {
+    proto::MooncakeTransferEngineService_Stub* stub =
+        get_or_create_stub(cluster_id);
+    if (!stub) {
+      LOG(ERROR) << "create_rpc_channel failed";
+      return false;
+    }
+
+    proto::SessionInfo proto_session_info;
+    proto_session_info.set_addr(addr_);
+    proto::Status status;
+    brpc::Controller cntl;
+    stub->OpenSession(&cntl, &proto_session_info, &status, nullptr);
+    if (cntl.Failed() || !status.ok()) {
+      LOG(ERROR) << "OpenSession failed, " << cntl.ErrorText();
+      return false;
+    }
+
+    LOG(INFO) << "OpenSession RPC to " << remote_addr
+              << ", local_addr=" << addr_;
+    return true;
+  }
+
+  Transport::SegmentHandle handle;
+  handle = engine_->openSegment(remote_addr);
+  if (handle == (Transport::SegmentHandle)-1) {
+    LOG(ERROR) << "Fail to connect to " << remote_addr;
+    return false;
+  }
+
+  SessionInfo session_info;
+  session_info.handle = handle;
+  session_info.ref_count = 1;
+  handles_[remote_addr] = session_info;
+
+  LOG(INFO) << "Created new session for " << remote_addr << ", ref_count=1";
+
+  return true;
+}
+
+bool MooncakeTransferEngineCore::close_session(const uint64_t cluster_id,
+                                               const std::string& remote_addr) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  LOG(INFO) << "close_session, cluster_id=" << cluster_id
+            << ", remote_addr=" << remote_addr;
+
+  auto it = handles_.find(remote_addr);
+  if (it == handles_.end()) {
+    return true;
+  }
+
+  // Decrement ref count
+  it->second.ref_count--;
+  LOG(INFO) << "Decremented ref_count for " << remote_addr
+            << ", ref_count=" << it->second.ref_count;
+
+  // Only close when ref_count reaches 0
+  if (it->second.ref_count > 0) {
+    return true;
+  }
+
+  if (cluster_id != 0) {
+    proto::MooncakeTransferEngineService_Stub* stub =
+        get_or_create_stub(cluster_id);
+    if (!stub) {
+      LOG(ERROR) << "create_rpc_channel failed";
+      return false;
+    }
+
+    proto::SessionInfo proto_session_info;
+    proto_session_info.set_addr(addr_);
+
+    proto::Status status;
+    brpc::Controller cntl;
+    stub->CloseSession(&cntl, &proto_session_info, &status, nullptr);
+    if (cntl.Failed() || !status.ok()) {
+      LOG(ERROR) << "CloseSession failed, " << cntl.ErrorText();
+      return false;
+    }
+    return true;
+  }
+
+  engine_->closeSegment(it->second.handle);
+  handles_.erase(remote_addr);
+
+  LOG(INFO) << "Closed session for " << remote_addr;
+
+  return true;
+}
+
+SegmentHandle MooncakeTransferEngineCore::get_handle(
+    const std::string& remote_addr) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = handles_.find(remote_addr);
+  if (it == handles_.end()) {
+    return (SegmentHandle)-1;
+  }
+  return it->second.handle;
+}
+
+proto::MooncakeTransferEngineService_Stub*
+MooncakeTransferEngineCore::get_or_create_stub(uint64_t cluster_id) {
+  // Note: caller should hold mutex_ if needed
   auto it = stub_map_.find(cluster_id);
   if (it == stub_map_.end()) {
     auto [remote_ip, remote_port] = net::convert_uint64_to_ip_port(cluster_id);
@@ -146,81 +251,63 @@ MooncakeTransferEngine::create_rpc_channel(uint64_t cluster_id) {
   return it->second;
 }
 
-bool MooncakeTransferEngine::open_session(const uint64_t cluster_id,
-                                          const std::string& remote_addr) {
-  LOG(INFO) << "open_session, cluster_id=" << cluster_id
-            << ", remote_addr=" << remote_addr;
+// ============================================================================
+// MooncakeTransferEngine
+// ============================================================================
 
-  auto it = handles_.find(remote_addr);
-  if (it != handles_.end()) {
-    return true;
+MooncakeTransferEngine::MooncakeTransferEngine(const int16_t listen_port,
+                                               const torch::Device& device)
+    : listen_port_(listen_port),
+      device_(device),
+      core_(MooncakeTransferEngineCore::get_instance()) {}
+
+std::string MooncakeTransferEngine::initialize() {
+  if (!core_.initialize(listen_port_, device_)) {
+    LOG(ERROR) << "Failed to initialize MooncakeTransferEngineCore";
+    return "";
+  }
+  return core_.addr();
+}
+
+bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
+                                             std::vector<size_t> lens,
+                                             int64_t size_per_block) {
+  int64_t num = addrs.size();
+  num_layers_ = num / 2;
+
+  std::vector<BufferEntry> buffers;
+  buffers.reserve(num);
+  for (size_t i = 0; i < num; i++) {
+    buffers.push_back(BufferEntry{(void*)addrs[i], lens[i]});
   }
 
-  if (cluster_id != 0) {
-    proto::MooncakeTransferEngineService* stub = create_rpc_channel(cluster_id);
-    if (!stub) {
-      LOG(ERROR) << "create_rpc_channel failed";
-      return false;
-    }
-
-    proto::SessionInfo proto_session_info;
-    proto_session_info.set_addr(addr_);
-
-    proto::Status status;
-    brpc::Controller cntl;
-    stub->OpenSession(&cntl, &proto_session_info, &status, nullptr);
-    if (cntl.Failed() || !status.ok()) {
-      LOG(ERROR) << "OpenSession failed, " << cntl.ErrorText();
-      return false;
-    }
-  }
-
-  Transport::SegmentHandle handle;
-  handle = engine_->openSegment(remote_addr);
-  if (handle == (Transport::SegmentHandle)-1) {
-    LOG(ERROR) << "Fail to connect to " << remote_addr;
+  int ret =
+      core_.engine()->registerLocalMemoryBatch(buffers, kWildcardLocation);
+  if (ret) {
+    LOG(ERROR) << "registerLocalMemoryBatch failed, ret=" << ret;
     return false;
   }
 
-  handles_[remote_addr] = handle;
+  size_per_block_ = size_per_block;
+
+  LOG(INFO) << "register_memory success, size_per_block_=" << size_per_block_;
 
   return true;
 }
 
+proto::MooncakeTransferEngineService_Stub*
+MooncakeTransferEngine::create_rpc_channel(uint64_t cluster_id) {
+  return core_.get_or_create_stub(cluster_id);
+}
+
+bool MooncakeTransferEngine::open_session(const uint64_t cluster_id,
+                                          const std::string& remote_addr) {
+  return core_.open_session(cluster_id, remote_addr);
+}
+
 bool MooncakeTransferEngine::close_session(const uint64_t cluster_id,
                                            const std::string& remote_addr) {
-  LOG(INFO) << "close_session, cluster_id=" << cluster_id
-            << ", remote_addr=" << remote_addr;
-
-  auto it = handles_.find(remote_addr);
-  if (it == handles_.end()) {
-    return true;
-  }
-
-  if (cluster_id != 0) {
-    proto::MooncakeTransferEngineService* stub = create_rpc_channel(cluster_id);
-    if (!stub) {
-      LOG(ERROR) << "create_rpc_channel failed";
-      return false;
-    }
-
-    proto::SessionInfo proto_session_info;
-    proto_session_info.set_addr(addr_);
-
-    proto::Status status;
-    brpc::Controller cntl;
-    stub->CloseSession(&cntl, &proto_session_info, &status, nullptr);
-    if (cntl.Failed() || !status.ok()) {
-      LOG(ERROR) << "CloseSession failed, " << cntl.ErrorText();
-      return false;
-    }
-  }
-
-  engine_->closeSegment(it->second);
-
-  handles_.erase(remote_addr);
-
-  return true;
+  return core_.close_session(cluster_id, remote_addr);
 }
 
 // Merge the source and destination block ids into a single block when both are
@@ -283,16 +370,16 @@ bool MooncakeTransferEngine::move_memory_blocks(
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<int64_t>& layer_ids,
     MoveOpcode move_opcode) {
-  auto it = handles_.find(remote_addr);
-  if (it == handles_.end()) {
-    LOG(ERROR) << "remote addr does not exist" << remote_addr;
+  auto remote_handle = core_.get_handle(remote_addr);
+  if (remote_handle == (SegmentHandle)-1) {
+    LOG(ERROR) << "remote addr does not exist: " << remote_addr;
     return false;
   }
 
-  auto remote_handle = it->second;
+  auto* engine = core_.engine();
   std::shared_ptr<TransferMetadata::SegmentDesc> remote_segment_desc;
   remote_segment_desc =
-      engine_->getMetadata()->getSegmentDescByID(remote_handle);
+      engine->getMetadata()->getSegmentDescByID(remote_handle);
   if (!remote_segment_desc) {
     LOG(ERROR) << "remote_segment_desc is null";
     return false;
@@ -300,7 +387,7 @@ bool MooncakeTransferEngine::move_memory_blocks(
 
   std::shared_ptr<TransferMetadata::SegmentDesc> local_segment_desc;
   local_segment_desc =
-      engine_->getMetadata()->getSegmentDescByID(LOCAL_SEGMENT_ID);
+      engine->getMetadata()->getSegmentDescByID(LOCAL_SEGMENT_ID);
   if (!local_segment_desc) {
     LOG(ERROR) << "local_segment_desc is null";
     return false;
@@ -369,18 +456,18 @@ bool MooncakeTransferEngine::move_memory_blocks(
   }
 
   auto batch_size = entries.size();
-  auto batch_id = engine_->allocateBatchID(batch_size);
-  mooncake::Status s = engine_->submitTransfer(batch_id, entries);
+  auto batch_id = engine->allocateBatchID(batch_size);
+  mooncake::Status s = engine->submitTransfer(batch_id, entries);
   if (!s.ok()) {
     LOG(ERROR) << "submit failed";
-    engine_->freeBatchID(batch_id);
+    engine->freeBatchID(batch_id);
     return false;
   }
 
   TransferStatus status;
   bool completed = false;
   while (!completed) {
-    s = engine_->getBatchTransferStatus(batch_id, status);
+    s = engine->getBatchTransferStatus(batch_id, status);
     if (!s.ok()) {
       LOG(ERROR) << "getBatchTransferStatus not ok";
       completed = true;
@@ -397,7 +484,7 @@ bool MooncakeTransferEngine::move_memory_blocks(
     }
   }
 
-  s = engine_->freeBatchID(batch_id);
+  s = engine->freeBatchID(batch_id);
   if (!s.ok()) {
     LOG(ERROR) << "freeBatchID failed";
     return false;
@@ -406,44 +493,22 @@ bool MooncakeTransferEngine::move_memory_blocks(
   return true;
 }
 
-bool MooncakeTransferEngine::pull_memory_blocks(
-    const std::string& remote_addr,
-    const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks,
-    const std::vector<int64_t>& layer_ids) {
-  auto ret = move_memory_blocks(
-      remote_addr, src_blocks, dst_blocks, layer_ids, MoveOpcode::READ);
-  if (!ret) {
-    LOG(ERROR) << "Pull memory blocks failed, ret = " << ret;
-    return false;
-  }
-
-  return true;
-}
-
-// === XTensor mode: transfer by GlobalXtensor offsets ===
 bool MooncakeTransferEngine::move_memory_by_global_offsets(
     const std::string& remote_addr,
     const std::vector<uint64_t>& src_offsets,
     const std::vector<uint64_t>& dst_offsets,
     size_t transfer_size,
     MoveOpcode move_opcode) {
-  if (src_offsets.size() != dst_offsets.size()) {
-    LOG(ERROR) << "src_offsets and dst_offsets size mismatch: "
-               << src_offsets.size() << " vs " << dst_offsets.size();
-    return false;
-  }
-
-  auto it = handles_.find(remote_addr);
-  if (it == handles_.end()) {
+  auto remote_handle = core_.get_handle(remote_addr);
+  if (remote_handle == (SegmentHandle)-1) {
     LOG(ERROR) << "remote addr does not exist: " << remote_addr;
     return false;
   }
 
-  auto remote_handle = it->second;
+  auto* engine = core_.engine();
   std::shared_ptr<TransferMetadata::SegmentDesc> remote_segment_desc;
   remote_segment_desc =
-      engine_->getMetadata()->getSegmentDescByID(remote_handle);
+      engine->getMetadata()->getSegmentDescByID(remote_handle);
   if (!remote_segment_desc) {
     LOG(ERROR) << "remote_segment_desc is null";
     return false;
@@ -451,16 +516,16 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
 
   std::shared_ptr<TransferMetadata::SegmentDesc> local_segment_desc;
   local_segment_desc =
-      engine_->getMetadata()->getSegmentDescByID(LOCAL_SEGMENT_ID);
+      engine->getMetadata()->getSegmentDescByID(LOCAL_SEGMENT_ID);
   if (!local_segment_desc) {
     LOG(ERROR) << "local_segment_desc is null";
     return false;
   }
 
-  // In XTensor mode, we only have one buffer (buffer[0]) which is GlobalXtensor
+  // XTensor mode: use buffer[0] which is the GlobalXtensor
   if (local_segment_desc->buffers.empty() ||
       remote_segment_desc->buffers.empty()) {
-    LOG(ERROR) << "No buffers registered in XTensor mode";
+    LOG(ERROR) << "No buffers registered for XTensor mode";
     return false;
   }
 
@@ -489,18 +554,18 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
   }
 
   auto batch_size = entries.size();
-  auto batch_id = engine_->allocateBatchID(batch_size);
-  mooncake::Status s = engine_->submitTransfer(batch_id, entries);
+  auto batch_id = engine->allocateBatchID(batch_size);
+  mooncake::Status s = engine->submitTransfer(batch_id, entries);
   if (!s.ok()) {
     LOG(ERROR) << "submit failed in move_memory_by_global_offsets";
-    engine_->freeBatchID(batch_id);
+    engine->freeBatchID(batch_id);
     return false;
   }
 
   TransferStatus status;
   bool completed = false;
   while (!completed) {
-    s = engine_->getBatchTransferStatus(batch_id, status);
+    s = engine->getBatchTransferStatus(batch_id, status);
     if (!s.ok()) {
       LOG(ERROR) << "getBatchTransferStatus not ok";
       completed = true;
@@ -517,9 +582,24 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
     }
   }
 
-  s = engine_->freeBatchID(batch_id);
+  s = engine->freeBatchID(batch_id);
   if (!s.ok()) {
     LOG(ERROR) << "freeBatchID failed";
+    return false;
+  }
+
+  return true;
+}
+
+bool MooncakeTransferEngine::pull_memory_blocks(
+    const std::string& remote_addr,
+    const std::vector<uint64_t>& src_blocks,
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<int64_t>& layer_ids) {
+  auto ret = move_memory_blocks(
+      remote_addr, src_blocks, dst_blocks, layer_ids, MoveOpcode::READ);
+  if (!ret) {
+    LOG(ERROR) << "Pull memory blocks failed, ret = " << ret;
     return false;
   }
 
@@ -541,9 +621,9 @@ bool MooncakeTransferEngine::push_memory_blocks(
   return true;
 }
 
-MooncakeTransferEngineService::MooncakeTransferEngineService(
-    MooncakeTransferEngine* mooncake_te)
-    : mooncake_te_(mooncake_te) {};
+// ============================================================================
+// MooncakeTransferEngineService
+// ============================================================================
 
 void MooncakeTransferEngineService::OpenSession(
     ::google::protobuf::RpcController* controller,
@@ -552,12 +632,13 @@ void MooncakeTransferEngineService::OpenSession(
     ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
   if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | respose | controller is null";
+    LOG(ERROR) << "brpc request | response | controller is null";
     return;
   }
 
   std::string remote_addr(request->addr());
-  bool result = mooncake_te_->open_session(0, remote_addr);
+  bool result =
+      MooncakeTransferEngineCore::get_instance().open_session(0, remote_addr);
 
   response->set_ok(result);
 }
@@ -569,12 +650,13 @@ void MooncakeTransferEngineService::CloseSession(
     ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
   if (!request || !response || !controller) {
-    LOG(ERROR) << "brpc request | respose | controller is null";
+    LOG(ERROR) << "brpc request | response | controller is null";
     return;
   }
 
   std::string remote_addr(request->addr());
-  bool result = mooncake_te_->close_session(0, remote_addr);
+  bool result =
+      MooncakeTransferEngineCore::get_instance().close_session(0, remote_addr);
 
   response->set_ok(result);
 }

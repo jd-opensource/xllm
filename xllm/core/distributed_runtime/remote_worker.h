@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "comm_channel.h"
 #include "common/macros.h"
+#include "common/types.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
 #include "framework/model/model_args.h"
@@ -71,6 +72,10 @@ class RemoteWorker : public WorkerClient {
                               const std::vector<std::string>& addrs,
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports);
+
+  // D2D link for weight transfer
+  virtual bool link_d2d(const std::string& remote_addr) override;
+  virtual bool unlink_d2d(const std::string& remote_addr) override;
 
   virtual bool pull_kv_blocks(const uint64_t src_cluster_id,
                               const std::string& src_addr,
@@ -146,7 +151,8 @@ class RemoteWorker : public WorkerClient {
 
   virtual folly::SemiFuture<bool> sleep_async(int32_t master_status) override;
 
-  virtual folly::SemiFuture<bool> wakeup_async(int32_t master_status) override;
+  virtual folly::SemiFuture<bool> wakeup_async(
+      const WakeupOptions& options) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RemoteWorker);

@@ -310,6 +310,13 @@ inline constexpr int REC_TOKEN_SIZE = 3;
 
 using RecTokenTriple = std::array<int32_t, REC_TOKEN_SIZE>;
 
+// Options for remote weight wakeup
+struct WakeupOptions {
+  int32_t master_status = 0;
+  std::vector<std::string> remote_addrs;
+  std::vector<uint64_t> src_weight_offsets;
+};
+
 inline constexpr const char* LLM_REC_INPUT_TOKENS = "llm_rec_input_tokens";
 inline constexpr const char* LLM_REC_INPUT_INDICES = "llm_rec_input_indices";
 inline constexpr const char* LLM_REC_INPUT_EMBEDDING =

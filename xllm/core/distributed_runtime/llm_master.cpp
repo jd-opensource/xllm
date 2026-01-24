@@ -37,6 +37,7 @@ limitations under the License.
 #include "server/xllm_server_registry.h"
 #include "speculative_engine.h"
 #include "util/device_name_utils.h"
+#include "util/net.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
 
@@ -461,7 +462,25 @@ std::shared_ptr<Request> LLMMaster::generate_request(
 
 bool LLMMaster::sleep() { return engine_->sleep(master_status_); }
 
-bool LLMMaster::wakeup() { return engine_->wakeup(master_status_); }
+bool LLMMaster::wakeup() {
+  WakeupOptions options;
+  options.master_status = master_status_;
+  return engine_->wakeup(options);
+}
+
+bool LLMMaster::wakeup(const WakeupOptions& options) {
+  WakeupOptions opts = options;
+  opts.master_status = master_status_;
+  return engine_->wakeup(opts);
+}
+
+bool LLMMaster::link_d2d(const std::vector<std::string>& device_ips) {
+  return engine_->link_d2d(device_ips);
+}
+
+bool LLMMaster::unlink_d2d(const std::vector<std::string>& device_ips) {
+  return engine_->unlink_d2d(device_ips);
+}
 
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)
     : Master(options,

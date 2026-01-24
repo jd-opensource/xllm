@@ -256,14 +256,20 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     transfer->initialize(device_id);
     transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
   } else if (transfer_type == "Mooncake") {
-    auto mooncake_transfer = std::make_shared<MooncakeKVCacheTransfer>(
-        device_id, transfer_listen_port, device, model_type);
-
-    // For XTensor mode, set the model_id before allocate_kv_cache
-    if (FLAGS_enable_xtensor && !model_id.empty()) {
-      mooncake_transfer->set_model_id(model_id);
-      LOG(INFO) << "XTensor mode enabled for MooncakeKVCacheTransfer, model_id="
-                << model_id;
+    std::shared_ptr<MooncakeKVCacheTransferBase> mooncake_transfer;
+    if (FLAGS_enable_xtensor) {
+      auto xtensor_transfer = std::make_shared<MooncakeKVCacheTransferXTensor>(
+          device_id, transfer_listen_port, device);
+      if (!model_id.empty()) {
+        xtensor_transfer->set_model_id(model_id);
+        LOG(INFO)
+            << "XTensor mode enabled for MooncakeKVCacheTransfer, model_id="
+            << model_id;
+      }
+      mooncake_transfer = xtensor_transfer;
+    } else {
+      mooncake_transfer = std::make_shared<MooncakeKVCacheTransferNative>(
+          device_id, transfer_listen_port, device, model_type);
     }
 
     mooncake_transfer->initialize(device_id);

@@ -18,6 +18,7 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <torch/torch.h>
 
+#include "common/types.h"
 #include "forward_params.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
@@ -46,7 +47,7 @@ class WorkerClient {
 
   virtual folly::SemiFuture<bool> sleep_async(int32_t master_status);
 
-  virtual folly::SemiFuture<bool> wakeup_async(int32_t master_status);
+  virtual folly::SemiFuture<bool> wakeup_async(const WakeupOptions& options);
 
   virtual std::tuple<int64_t, int64_t> estimate_kv_cache_capacity();
 
@@ -70,6 +71,10 @@ class WorkerClient {
                               const std::vector<std::string>& addrs,
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports);
+
+  // D2D link for weight transfer
+  virtual bool link_d2d(const std::string& remote_addr);
+  virtual bool unlink_d2d(const std::string& remote_addr);
 
   virtual bool pull_kv_blocks(const uint64_t src_cluster_id,
                               const std::string& src_addr,

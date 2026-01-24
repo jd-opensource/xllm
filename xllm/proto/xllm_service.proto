@@ -28,6 +28,13 @@ message MasterInfos {
   string model_path = 2;
   string master_node_addr = 3;
   int32 master_status = 4;
+  repeated string remote_addrs = 5;       
+  repeated uint64 src_weight_offsets = 6; 
+}
+
+message D2DLinkRequest {
+  string model_id = 1;
+  repeated string device_ips = 2;
 }
 
 service XllmAPIService {
@@ -61,4 +68,10 @@ service XllmAPIService {
 
   rpc Wakeup (MasterInfos) returns (RpcStatus);
   rpc WakeupHttp (HttpRequest) returns (HttpResponse);
-};
+
+  rpc LinkD2D (D2DLinkRequest) returns (RpcStatus);
+  rpc LinkD2DHttp (HttpRequest) returns (HttpResponse);
+
+  rpc UnlinkD2D (D2DLinkRequest) returns (RpcStatus);
+  rpc UnlinkD2DHttp (HttpRequest) returns (HttpResponse);
+}; 
