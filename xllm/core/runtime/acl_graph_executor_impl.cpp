@@ -59,6 +59,10 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
       custom_pa_op_for_plan_(nullptr),
       stream_for_plan_(nullptr),
       need_update_attn_mask_(need_update_attn_mask) {
+  // Determine whether attention plan needs to be updated based on model type
+  // Future logic can be extended here for more complex model-specific behavior
+  need_update_attention_plan_ = (args.model_type() != "deepseek_v32");
+
   // Use max_tokens_per_batch for first dimension size
   // num_decode_tokens
   const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
@@ -210,8 +214,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     // Get current stream for tiling tensor update
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
 
-    // Update tiling tensor except deepseek V3.2
-    if (!params.q_cu_seq_lens.defined()) {
+    // Update tiling tensor based on model type
+    if (need_update_attention_plan_) {
       plan_paged_attention_tiling(
           tokens, k_cache, v_cache, persistent_block_tables_, params, stream);
     }
