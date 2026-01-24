@@ -10,14 +10,11 @@ ARG PYTHON_VERSION=3.11
 ARG CMAKE_VERSION=3.27.9
 
 ARG TORCH_VERSION=2.7.1
-ARG TORCHVISION_VERSION=0.22.1
-ARG TORCHAUDIO_VERSION=2.7.1
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0"
 
 ARG FLASHINFER_VERSION=0.3.1
 ARG FLASHINFER_CUDA_ARCH_LIST="8.0 8.9 9.0a 10.0a 12.0a"
-ARG YALANTINGLIBS_VERSION=0.5.5
 
 ARG GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 
@@ -41,8 +38,6 @@ ENV PYTHON_VERSION=${PYTHON_VERSION}
 ENV CMAKE_VERSION=${CMAKE_VERSION}
 
 ENV TORCH_VERSION=${TORCH_VERSION}
-ENV TORCHVISION_VERSION=${TORCHVISION_VERSION}
-ENV TORCHAUDIO_VERSION=${TORCHAUDIO_VERSION}
 ENV TORCH_INDEX_URL=${TORCH_INDEX_URL}
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 
@@ -58,10 +53,10 @@ RUN set -eux; \
     echo "tzdata tzdata/Areas select Asia" | debconf-set-selections; \
     echo "tzdata tzdata/Zones/Asia select Shanghai" | debconf-set-selections; \
     apt-get update -y && apt-get install -y --no-install-recommends \
-      ca-certificates gdb wget curl vim git zip bison build-essential \
-      libx11-dev libxft-dev libxext-dev \
+      ca-certificates gdb wget curl vim git zip unzip bison build-essential \
+      libx11-dev libxft-dev libxext-dev tar \
       autoconf automake libtool pkg-config \
-      libxi-dev libxtst-dev \
+      libxi-dev libxtst-dev ccache \
       libwayland-dev libxrandr-dev libxinerama-dev libxcursor-dev libepoxy-dev libgtk-3-dev \
     libnuma-dev libibverbs-dev nasm software-properties-common; \
     add-apt-repository ppa:deadsnakes/ppa -y; \
@@ -98,11 +93,7 @@ ENV UV_TOOL_BIN_DIR=/usr/local/bin
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 # Install python dependencies
 RUN set -eux; \
-    pip install \
-      "torch==${TORCH_VERSION}" \
-      "torchvision==${TORCHVISION_VERSION}" \
-      "torchaudio==${TORCHAUDIO_VERSION}" \
-    --index-url "${TORCH_INDEX_URL}"; \
+    pip install "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}"; \
     pip install uv ninja "numpy<2" nvshmem4py-cu12 nvidia-nvshmem-cu12 \
     aiohttp requests tqdm transformers
 
@@ -134,17 +125,6 @@ RUN if [[ -n "${GIT_HTTPS_MIRROR_PREFIX}" ]]; then \
       git config --global url."${GIT_HTTPS_MIRROR_PREFIX}".insteadOf https://; \
     fi
 
-# Install yalantinglibs
-ENV YALANTINGLIBS_VERSION=${YALANTINGLIBS_VERSION}
-RUN set -eux; \
-    git clone --depth 1 --branch "${YALANTINGLIBS_VERSION}" https://github.com/alibaba/yalantinglibs.git /workspace/yalantinglibs; \
-    cmake -S /workspace/yalantinglibs -B /workspace/yalantinglibs/build \
-      -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARK=OFF -DBUILD_UNIT_TESTS=OFF \
-      -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"; \
-    cmake --build /workspace/yalantinglibs/build -j"$(nproc)"; \
-    cmake --install /workspace/yalantinglibs/build; \
-    rm -rf /workspace/yalantinglibs
-
 # Install tvm-ffi
 RUN set -eux; \
     git clone --depth 1 --recurse-submodules https://github.com/apache/tvm-ffi.git /workspace/tvm-ffi; \
@@ -162,7 +142,8 @@ RUN set -eux; \
     cd /workspace/flashinfer; \
     uv venv --python ${PYTHON_VERSION} && source .venv/bin/activate; \
     uv pip install -v .; \
-    uv pip install "cuda-python==${CUDA_VERSION}" setuptools pillow "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}" --index-url "${TORCH_INDEX_URL}"; \
+    uv pip install "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}"; \
+    uv pip install "cuda-python==${CUDA_VERSION}" setuptools pillow; \
     python -m flashinfer.aot; \
     deactivate; \
     mv /workspace/flashinfer/aot-ops /flashinfer_ops; \
@@ -174,7 +155,7 @@ ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
 # Install VCPKG
 RUN set -eux; \
-    git clone --depth 1  https://github.com/microsoft/vcpkg.git /vcpkg
+    git clone https://github.com/microsoft/vcpkg.git /vcpkg
 
 ENV VCPKG_ROOT=/vcpkg
 
