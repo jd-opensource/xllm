@@ -19,6 +19,7 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <torch/torch.h>
 
+#include "common/types.h"
 #include "forward_params.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/embedding_lm.h"
@@ -49,7 +50,9 @@ class Worker {
 
   bool sleep(int32_t master_status);
 
-  bool wakeup(int32_t master_status);
+  bool wakeup(const WakeupOptions& options);
+
+  folly::SemiFuture<bool> wakeup_async(const WakeupOptions& options);
 
   std::tuple<int64_t, int64_t> estimate_kv_cache_capacity();
 
@@ -73,6 +76,10 @@ class Worker {
                       const std::vector<std::string>& addrs,
                       const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports);
+
+  // D2D link for weight transfer
+  bool link_d2d(const std::string& remote_addr);
+  bool unlink_d2d(const std::string& remote_addr);
 
   const bool is_driver();
 

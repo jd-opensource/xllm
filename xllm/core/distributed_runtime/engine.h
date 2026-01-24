@@ -127,12 +127,24 @@ class Engine {
     return false;
   };
 
+  // D2D link for weight transfer - each worker links to one remote addr
+  // device_ips: one ip per worker, in worker order
+  virtual bool link_d2d(const std::vector<std::string>& device_ips) {
+    NOT_IMPLEMENTED();
+    return false;
+  };
+
+  virtual bool unlink_d2d(const std::vector<std::string>& device_ips) {
+    NOT_IMPLEMENTED();
+    return false;
+  };
+
   virtual bool sleep(int32_t master_status) {
     LOG(FATAL) << " sleep is not implemented!";
     return false;
   };
 
-  virtual bool wakeup(int32_t master_status) {
+  virtual bool wakeup(const WakeupOptions& options) {
     LOG(FATAL) << " wakeup is not implemented!";
     return false;
   };

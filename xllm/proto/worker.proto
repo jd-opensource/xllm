@@ -45,6 +45,12 @@ message SleepRequest {
 
 message WakeupRequest {
   int32 master_status = 1;
+  repeated string remote_addrs = 2;     
+  repeated uint64 src_weight_offsets = 3;  
+}
+
+message D2DLinkWorkerRequest {
+  string remote_addr = 1; 
 }
 
 message PullKVCacheRequest {
@@ -272,6 +278,8 @@ service DistributeWorker {
   rpc GetCacheInfo(Empty) returns (CacheInfo) {}
   rpc LinkCluster(ClusterInfo) returns (Status) {}
   rpc UnlinkCluster(ClusterInfo) returns (Status) {}
+  rpc LinkD2D(D2DLinkWorkerRequest) returns (Status) {}
+  rpc UnlinkD2D(D2DLinkWorkerRequest) returns (Status) {}
   rpc ExecuteModel (ForwardInput) returns (ForwardOutput);
   rpc GetLastStepResult (Empty) returns (ForwardOutput);
   rpc GetActiveActivationMemory (Empty) returns (ActivationMemory);

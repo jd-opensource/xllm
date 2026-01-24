@@ -104,6 +104,16 @@ struct has_reload_model_weights<
     T,
     std::void_t<decltype(std::declval<T>()->reload_model_weights())>>
     : std::true_type {};
+
+template <typename T, typename = void>
+struct has_reload_model_weights_from_device : std::false_type {};
+
+template <typename T>
+struct has_reload_model_weights_from_device<
+    T,
+    std::void_t<
+        decltype(std::declval<T>()->reload_model_weights_from_device())>>
+    : std::true_type {};
 }  // namespace detail
 
 class CausalLM : public torch::nn::Module {
@@ -164,6 +174,8 @@ class CausalLM : public torch::nn::Module {
   virtual void offload_model_weights() { NOT_IMPLEMENTED(); }
 
   virtual void reload_model_weights() { NOT_IMPLEMENTED(); }
+
+  virtual void reload_model_weights_from_device() { NOT_IMPLEMENTED(); }
 };
 
 template <typename Model>
@@ -209,6 +221,14 @@ class CausalLMImpl : public CausalLM {
       model_->reload_model_weights();
     } else {
       CausalLM::reload_model_weights();
+    }
+  }
+
+  void reload_model_weights_from_device() override {
+    if constexpr (detail::has_reload_model_weights_from_device<Model>::value) {
+      model_->reload_model_weights_from_device();
+    } else {
+      CausalLM::reload_model_weights_from_device();
     }
   }
 
