@@ -589,6 +589,7 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
   });
 
   RequestState req_state(token_ids);
+  req_state.enable_schedule_overlap = options_.enable_schedule_overlap();
   auto request = std::make_shared<Request>(
       /*request_id=*/"",
       /*x_request_id=*/"",
