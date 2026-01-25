@@ -21,6 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "core/framework/model/model_output.h"
 #include "core/layers/mlu/deepseek_v2_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
@@ -65,10 +66,10 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     }
   }
 
-  torch::Tensor forward_native(torch::Tensor tokens,
-                               torch::Tensor positions,
-                               std::vector<KVCache>& kv_caches,
-                               const ModelInputParams& input_params) {
+  ModelOutput forward_native(torch::Tensor tokens,
+                             torch::Tensor positions,
+                             std::vector<KVCache>& kv_caches,
+                             const ModelInputParams& input_params) {
     // for dp, if tokens is empty, set tokens to 1 and positions to 0
     ModelInputParams modified_input_params = input_params;
     if (dp_size_ > 1) {
@@ -97,14 +98,15 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                             kv_caches[i],
                             modified_input_params);
     }
-    return std::get<0>(norm_(hidden_states, residual));
+    auto [h, res] = norm_(hidden_states, residual);
+    return ModelOutput(h, res);
   }
 
   // Provide batched signature to satisfy callers that pass vectors
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     return forward_native(tokens, positions, kv_caches, input_params);
   }
 

@@ -98,6 +98,9 @@ struct Options {
   // enable chunked prefill.
   PROPERTY(bool, enable_chunked_prefill) = true;
 
+  // enable returning aux_hidden_states in graph executor output.
+  PROPERTY(bool, enable_graph_aux_hidden_states) = false;
+
   // the max sequences limit of a batch.
   PROPERTY(int32_t, max_seqs_per_batch) = 256;
 

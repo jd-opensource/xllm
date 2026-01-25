@@ -24,6 +24,7 @@ limitations under the License.
 
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/layers/npu/multi_head_attention.h"
 #include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
@@ -1208,12 +1209,11 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
         inputs_embeds, multimodal_embeds, image_bounds);
     return inputs_embeds;
   }
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    auto emb = language_model_(tokens, positions, kv_caches, input_params);
-    return emb;
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
+    return language_model_(tokens, positions, kv_caches, input_params);
   }
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {

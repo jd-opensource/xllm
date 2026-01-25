@@ -25,6 +25,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model/model_output.h"
 #include "options.h"
 
 namespace xllm {
@@ -37,11 +38,11 @@ class ExecutorImpl {
 
   // tokens: vector size is dp_size, each element is [num_tokens/dp_size]
   // positions: vector size is dp_size, each element is [num_tokens/dp_size]
-  // token pos in the sequence returns: [num_tokens, hidden_size]
-  virtual torch::Tensor run(const torch::Tensor& tokens,
-                            const torch::Tensor& positions,
-                            std::vector<KVCache>& kv_caches,
-                            const ModelInputParams& params) = 0;
+  // token pos in the sequence returns: ModelOutput
+  virtual ModelOutput run(const torch::Tensor& tokens,
+                          const torch::Tensor& positions,
+                          std::vector<KVCache>& kv_caches,
+                          const ModelInputParams& params) = 0;
 };
 
 }  // namespace xllm

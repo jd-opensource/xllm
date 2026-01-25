@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "causal_vlm.h"
 #include "core/framework/kv_cache/kv_cache.h"
+#include "core/framework/model/model_output.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "model_args.h"
@@ -55,11 +56,11 @@ class MMEmbeddingVLMImpl : public MMEmbeddingVLM {
     return torch::Tensor{};
   }
 
-  virtual torch::Tensor forward(const torch::Tensor& tokens,
-                                const torch::Tensor& positions,
-                                std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& input_params) {
-    return torch::Tensor{};
+  virtual ModelOutput forward(const torch::Tensor& tokens,
+                              const torch::Tensor& positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ModelInputParams& input_params) {
+    return ModelOutput();
   }
   virtual void prepare_expert_weight(int32_t layer_id,
                                      const std::vector<int32_t>& expert_ids) {

@@ -122,6 +122,18 @@ class CudaGraphPersistentParam {
     }
     return persistent_embedding_;
   }
+  torch::Tensor aux_hidden_states(uint32_t actual_tokens) const {
+    if (!aux_hidden_states_.defined() || aux_hidden_states_.numel() == 0) {
+      return aux_hidden_states_;
+    }
+    if (actual_tokens > 0) {
+      return aux_hidden_states_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/actual_tokens);
+    }
+    return aux_hidden_states_;
+  }
+  // Setter for aux_hidden_states (for assignment)
+  void set_aux_hidden_states(const torch::Tensor& value);
   // FlashInfer decode mode parameters
   torch::Tensor persistent_paged_kv_indptr(uint32_t actual_batch_size) const {
     if (actual_batch_size > 0) {
@@ -167,6 +179,7 @@ class CudaGraphPersistentParam {
   torch::Tensor q_seq_lens_;
   torch::Tensor kv_seq_lens_;
   torch::Tensor persistent_embedding_;
+  torch::Tensor aux_hidden_states_;
 
   // FlashInfer decode mode parameters
   torch::Tensor persistent_paged_kv_indptr_;
@@ -200,10 +213,10 @@ class CudaGraph {
                const decltype(at::cuda::graph_pool_handle())& pool);
 
   // Replay captured graph with new input data
-  torch::Tensor replay(const torch::Tensor& tokens,
-                       const torch::Tensor& positions,
-                       std::vector<KVCache>& kv_cache,
-                       const ModelInputParams& params);
+  ModelOutput replay(const torch::Tensor& tokens,
+                     const torch::Tensor& positions,
+                     std::vector<KVCache>& kv_cache,
+                     const ModelInputParams& params);
 
   // Get the hidden states from the last capture
   torch::Tensor get_hidden_states(uint32_t actual_num_tokens) const {
@@ -243,10 +256,10 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   ForwardInput prepare_inputs(Batch& batch) override;
 
   // Execute model with graph optimization for decode phase
-  torch::Tensor run(const torch::Tensor& tokens,
-                    const torch::Tensor& positions,
-                    std::vector<KVCache>& kv_caches,
-                    const ModelInputParams& params) override;
+  ModelOutput run(const torch::Tensor& tokens,
+                  const torch::Tensor& positions,
+                  std::vector<KVCache>& kv_caches,
+                  const ModelInputParams& params) override;
 
  private:
   // not own

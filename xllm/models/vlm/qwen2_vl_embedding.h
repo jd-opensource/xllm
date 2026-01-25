@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/model/embedding_vlm.h"
+#include "core/framework/model/model_output.h"
 #include "models/llm/qwen2.h"
 #include "models/vlm/qwen2_vl.h"
 
@@ -110,12 +111,11 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
-    auto emb = language_model_(tokens, positions, kv_caches, input_params);
-    return emb;
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
+    return language_model_(tokens, positions, kv_caches, input_params);
   }
 
   torch::Tensor pooler(const torch::Tensor& hidden_states,
@@ -181,10 +181,10 @@ class EmbeddingVLMImpl<Qwen2_VLForEmbedding> : public EmbeddingVLM {
                                      const ModelInputParams& input_params) {
     return torch::Tensor{};
   }
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& parameters) override {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& parameters) override {
     return model_->forward(tokens, positions, kv_caches, parameters);
   }
 

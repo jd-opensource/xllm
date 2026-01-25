@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
@@ -78,10 +79,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     return hidden_states;
   }
 
-  virtual torch::Tensor forward(torch::Tensor tokens,
-                                torch::Tensor positions,
-                                std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& input_params) {
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ModelInputParams& input_params) {
     bool use_deepstack = input_params.deep_stacks.size() > 0;
     std::vector<torch::Tensor> deep_stacks;
 
@@ -175,7 +176,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
-        return torch::Tensor();
+        return ModelOutput();
       }
 
       auto& layer = layers_[i];
@@ -195,7 +196,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         }
       }
     }
-    return norm_(h, 0);
+    auto hidden_states = norm_(h, 0);
+    return ModelOutput(hidden_states);
   }
 
  private:

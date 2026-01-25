@@ -58,6 +58,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
 
   // output buffer
   output_ = torch::zeros({max_tokens, args.hidden_size()}, tensor_options);
+  // aux_hidden_states will be lazily initialized when needed
 
   // input buffers
   if (args.rope_scaling_mrope_section().empty()) {
@@ -157,8 +158,24 @@ void MluGraph::capture(CausalLM* model,
       persistent_param_->positions_.slice(slice_dim, 0, padding_num_tokens_),
       kv_cache,
       persistent_param_->params_);
-  persistent_param_->output_.slice(0, 0, forward_result.size(0))
-      .copy_(forward_result, true);
+  persistent_param_->output_.slice(0, 0, forward_result.hidden_states.size(0))
+      .copy_(forward_result.hidden_states, true);
+  // Note: aux_hidden_states capture is controlled by options in executor
+  // For now, always capture if available, filtering happens in executor::run()
+  if (forward_result.aux_hidden_states.defined()) {
+    if (persistent_param_->aux_hidden_states_.numel() == 0) {
+      // Lazy initialization
+      auto shape = forward_result.aux_hidden_states.sizes().vec();
+      shape[0] = persistent_param_->output_.size(0);
+      persistent_param_->aux_hidden_states_ =
+          torch::zeros(shape, persistent_param_->output_.options());
+    }
+    auto slice = persistent_param_->aux_hidden_states_.slice(
+        0, 0, forward_result.aux_hidden_states.size(0));
+    if (slice.sizes() == forward_result.aux_hidden_states.sizes()) {
+      slice.copy_(forward_result.aux_hidden_states, true);
+    }
+  }
   graph_.capture_end();
   torch_mlu::setCurrentMLUStream(prev_stream);
   torch_mlu::synchronize();
@@ -166,7 +183,13 @@ void MluGraph::capture(CausalLM* model,
   pool = graph_.pool();
 }
 
-void MluGraph::replay() { graph_.replay(); }
+ModelOutput MluGraph::replay() {
+  graph_.replay();
+  const uint32_t actual_tokens = padding_num_tokens_;
+  // Note: aux_hidden_states handling is done in MluGraphExecutorImpl::run()
+  // since replay() doesn't have access to options
+  return ModelOutput(persistent_param_->output_.slice(0, 0, actual_tokens));
+}
 
 void MluGraph::update_input_buffer(const torch::Tensor& tokens,
                                    const torch::Tensor& positions,
@@ -200,11 +223,11 @@ ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
 // Main execution method with graph optimization for decode phase
 // tokens: [num_decode_tokens]
 // positions: [num_decode_tokens] token pos in the sequence
-// returns: [num_decode_tokens, hidden_size]
-torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                        const torch::Tensor& positions,
-                                        std::vector<KVCache>& kv_caches,
-                                        const ModelInputParams& params) {
+// returns: ModelOutput
+ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
+                                      const torch::Tensor& positions,
+                                      std::vector<KVCache>& kv_caches,
+                                      const ModelInputParams& params) {
   // If not in decode phase, use eager mode directly
   bool graph_mode = params.batch_forward_type.is_decode();
   int64_t actual_num_tokens = tokens.size(0);
@@ -223,18 +246,42 @@ torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   }
 
   uint32_t padding_batch_size = get_bucket_num_tokens(actual_num_tokens);
+  const uint32_t actual_tokens = tokens.size(0);
   if (auto it = graphs_.find(padding_batch_size); it != graphs_.end()) {
     MluGraph* cur_graph = (it->second).get();
     cur_graph->update_input_buffer(tokens, positions, params);
-    cur_graph->replay();
+    auto result = cur_graph->replay();
+    // Return only the actual num_tokens portion
+    auto hidden_states = result.hidden_states.slice(0, 0, actual_tokens);
+    if (options_.enable_graph_aux_hidden_states()) {
+      auto aux_hidden_states =
+          persistent_param_->aux_hidden_states_.numel() > 0
+              ? persistent_param_->aux_hidden_states_.slice(0, 0, actual_tokens)
+              : torch::Tensor();
+      if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
+        return ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);
+      }
+    }
+    return ModelOutput(hidden_states);
   } else {
     std::unique_ptr<MluGraph> graph =
         std::make_unique<MluGraph>(persistent_param_.get(), padding_batch_size);
     graph->update_input_buffer(tokens, positions, params, true);
     graph->capture(model_, kv_caches, pool_);
     graphs_[padding_batch_size] = std::move(graph);
+    // Return the output from capture
+    auto hidden_states = persistent_param_->output_.slice(0, 0, actual_tokens);
+    if (options_.enable_graph_aux_hidden_states()) {
+      auto aux_hidden_states =
+          persistent_param_->aux_hidden_states_.numel() > 0
+              ? persistent_param_->aux_hidden_states_.slice(0, 0, actual_tokens)
+              : torch::Tensor();
+      if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
+        return ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);
+      }
+    }
+    return ModelOutput(hidden_states);
   }
-  return persistent_param_->output_.slice(0, 0, tokens.size(0));
 }
 
 }  // namespace xllm::mlu

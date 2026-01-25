@@ -58,13 +58,13 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
   Timer timer;
   // TODO guojinrong, to adapt multi stream parallel later
   // call model executor forward to get hidden states
-  auto hidden_states = model_executor_->forward(
+  auto model_output = model_executor_->forward(
       input.token_ids, input.positions, kv_caches_, input.input_params);
   auto& sampling_params = input.sampling_params;
   torch::Tensor logits;
   if (sampling_params.selected_token_idxes.defined()) {
-    logits =
-        model_->logits(hidden_states, sampling_params.selected_token_idxes);
+    logits = model_->logits(model_output.hidden_states,
+                            sampling_params.selected_token_idxes);
   }
 
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());

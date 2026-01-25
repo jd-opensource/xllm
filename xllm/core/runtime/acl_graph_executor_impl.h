@@ -144,6 +144,18 @@ class GraphPersistentParam {
     }
     return persistent_embedding_;
   }
+  torch::Tensor aux_hidden_states(uint32_t actual_tokens = 0) const {
+    if (!aux_hidden_states_.defined() || aux_hidden_states_.numel() == 0) {
+      return aux_hidden_states_;
+    }
+    if (actual_tokens > 0) {
+      return aux_hidden_states_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/actual_tokens);
+    }
+    return aux_hidden_states_;
+  }
+  // Setter for aux_hidden_states (for assignment)
+  void set_aux_hidden_states(const torch::Tensor& value);
 
  private:
   // Initialize tiling tensor
@@ -183,6 +195,9 @@ class GraphPersistentParam {
 
   // for mtp model
   torch::Tensor persistent_embedding_;
+
+  // ModelOutput fields
+  torch::Tensor aux_hidden_states_;
 
   // ATB context and operation for paged attention plan
   atb::Context* context_for_plan_;
@@ -225,10 +240,10 @@ class AclGraph {
                uint32_t bucket_num_tokens);
 
   // Replay captured graph with new input data
-  torch::Tensor replay(const torch::Tensor& tokens,
-                       const torch::Tensor& positions,
-                       std::vector<KVCache>& kv_cache,
-                       const ModelInputParams& params);
+  ModelOutput replay(const torch::Tensor& tokens,
+                     const torch::Tensor& positions,
+                     std::vector<KVCache>& kv_cache,
+                     const ModelInputParams& params);
 
   // Get the hidden states from the last capture
   torch::Tensor get_hidden_states(uint32_t actual_num_tokens = 0) const {
@@ -269,10 +284,10 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   ForwardInput prepare_inputs(Batch& batch) override;
 
   // Execute model with graph optimization for decode phase
-  torch::Tensor run(const torch::Tensor& tokens,
-                    const torch::Tensor& positions,
-                    std::vector<KVCache>& kv_caches,
-                    const ModelInputParams& params) override;
+  ModelOutput run(const torch::Tensor& tokens,
+                  const torch::Tensor& positions,
+                  std::vector<KVCache>& kv_caches,
+                  const ModelInputParams& params) override;
 
  private:
   // not own

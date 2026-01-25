@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/framework/block/block_manager_impl.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_args.h"
+#include "core/framework/model/model_output.h"
 #include "core/framework/model_loader.h"
 #include "core/framework/request/sequence.h"
 #include "core/framework/request/stopping_checker.h"
@@ -200,11 +201,12 @@ class SimpleCausalLM : public CausalLM {
   }
 
   // Adapter method to match CausalLM base class interface
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& parameters) override {
-    return forward_impl(tokens, positions, kv_caches, parameters);
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& parameters) override {
+    auto hidden_states = forward_impl(tokens, positions, kv_caches, parameters);
+    return ModelOutput(hidden_states);
   }
 
   const torch::TensorOptions& options() const override {
@@ -419,19 +421,21 @@ TEST_F(AclGraphExecutorTest, GraphExecutorVsEagerExecution) {
   std::cout << "forward_input.input_params.block_tables: "
             << forward_input.input_params.block_tables << std::endl;
   // Test eager execution (direct model forward)
-  auto eager_output = model_->forward({forward_input.token_ids},
-                                      {forward_input.positions},
-                                      kv_caches_,
-                                      {forward_input.input_params});
+  auto eager_model_output = model_->forward({forward_input.token_ids},
+                                            {forward_input.positions},
+                                            kv_caches_,
+                                            {forward_input.input_params});
+  auto eager_output = eager_model_output.hidden_states;
   // Create ACL graph executor
   auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
   // Test graph execution with NPUGraph mempool optimization
-  auto graph_output = graph_executor->run({forward_input.token_ids},
-                                          {forward_input.positions},
-                                          kv_caches_,
-                                          {forward_input.input_params});
+  auto graph_model_output = graph_executor->run({forward_input.token_ids},
+                                                {forward_input.positions},
+                                                kv_caches_,
+                                                {forward_input.input_params});
+  auto graph_output = graph_model_output.hidden_states;
   // Compare outputs - should be identical
   EXPECT_TRUE(
       torch::allclose(eager_output, graph_output, /*rtol=*/1e-5, /*atol=*/1e-6))
@@ -468,10 +472,13 @@ TEST_F(AclGraphExecutorTest, GraphReplayConsistency) {
                                      {forward_input.input_params});
 
   // Compare outputs - should be identical
-  EXPECT_TRUE(torch::allclose(output1, output2, /*rtol=*/1e-5, /*atol=*/1e-6))
+  EXPECT_TRUE(torch::allclose(output1.hidden_states,
+                              output2.hidden_states,
+                              /*rtol=*/1e-5,
+                              /*atol=*/1e-6))
       << "First output:\n"
-      << output1 << "\nSecond output:\n"
-      << output2;
+      << output1.hidden_states << "\nSecond output:\n"
+      << output2.hidden_states;
 }
 
 // Test graph creation and execution with different batch sizes
@@ -527,9 +534,10 @@ TEST_F(AclGraphExecutorTest, DifferentBatchSizes) {
                                       {forward_input.input_params});
 
     // Verify output shape
-    EXPECT_EQ(output.size(0), batch_size * options_.num_decoding_tokens())
+    EXPECT_EQ(output.hidden_states.size(0),
+              batch_size * options_.num_decoding_tokens())
         << "Batch size: " << batch_size;
-    EXPECT_EQ(output.size(1), model_args_.hidden_size())
+    EXPECT_EQ(output.hidden_states.size(1), model_args_.hidden_size())
         << "Batch size: " << batch_size;
   }
 }
@@ -548,19 +556,21 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImpl) {
   auto npu_executor = std::make_unique<BaseExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
-  auto npu_output = npu_executor->run({forward_input.token_ids},
-                                      {forward_input.positions},
-                                      kv_caches_,
-                                      {forward_input.input_params});
+  auto npu_model_output = npu_executor->run({forward_input.token_ids},
+                                            {forward_input.positions},
+                                            kv_caches_,
+                                            {forward_input.input_params});
+  auto npu_output = npu_model_output.hidden_states;
 
   // Test ACL Graph Executor with NPUGraph mempool optimization
   auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
       model_.get(), model_args_, *device_, options_);
 
-  auto graph_output = graph_executor->run({forward_input.token_ids},
-                                          {forward_input.positions},
-                                          kv_caches_,
-                                          {forward_input.input_params});
+  auto graph_model_output = graph_executor->run({forward_input.token_ids},
+                                                {forward_input.positions},
+                                                kv_caches_,
+                                                {forward_input.input_params});
+  auto graph_output = graph_model_output.hidden_states;
 
   // Compare outputs - should be identical
   EXPECT_TRUE(
@@ -595,22 +605,25 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImplMultipleRuns) {
   const int num_runs = 3;
   for (int i = 0; i < num_runs; ++i) {
     // Direct model forward call (baseline)
-    auto direct_output = model_->forward({forward_input.token_ids},
-                                         {forward_input.positions},
-                                         kv_caches_,
-                                         {forward_input.input_params});
+    auto direct_model_output = model_->forward({forward_input.token_ids},
+                                               {forward_input.positions},
+                                               kv_caches_,
+                                               {forward_input.input_params});
+    auto direct_output = direct_model_output.hidden_states;
 
     // NPU Executor run
-    auto npu_output = npu_executor->run({forward_input.token_ids},
-                                        {forward_input.positions},
-                                        kv_caches_,
-                                        {forward_input.input_params});
+    auto npu_model_output = npu_executor->run({forward_input.token_ids},
+                                              {forward_input.positions},
+                                              kv_caches_,
+                                              {forward_input.input_params});
+    auto npu_output = npu_model_output.hidden_states;
 
     // ACL Graph Executor run with NPUGraph mempool
-    auto graph_output = graph_executor->run({forward_input.token_ids},
-                                            {forward_input.positions},
-                                            kv_caches_,
-                                            {forward_input.input_params});
+    auto graph_model_output = graph_executor->run({forward_input.token_ids},
+                                                  {forward_input.positions},
+                                                  kv_caches_,
+                                                  {forward_input.input_params});
+    auto graph_output = graph_model_output.hidden_states;
 
     // Compare direct model output with NPU Executor output
     EXPECT_TRUE(torch::allclose(

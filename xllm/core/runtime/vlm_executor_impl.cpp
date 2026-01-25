@@ -39,10 +39,10 @@ MMDict VlmExecutorImpl::encode(const ModelInputParams& params) {
   return dynamic_cast<CausalVLM*>(model_)->encode(params);
 }
 
-torch::Tensor VlmExecutorImpl::run(const torch::Tensor& tokens,
-                                   const torch::Tensor& positions,
-                                   std::vector<KVCache>& kv_caches,
-                                   const ModelInputParams& params) {
+ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
+                                 const torch::Tensor& positions,
+                                 std::vector<KVCache>& kv_caches,
+                                 const ModelInputParams& params) {
   torch::NoGradGuard no_grad;
 
   auto& mm_data = params.mm_data;

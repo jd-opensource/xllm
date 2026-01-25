@@ -17,6 +17,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/model/model_output.h"
 #include "qwen2_5_vl.h"
 
 namespace xllm {
@@ -127,11 +128,11 @@ class MMEmbeddingVLMImpl<xllm::Qwen2_5_VLForMMEmbedding>
     return torch::Tensor();
   }
 
-  virtual torch::Tensor forward(const torch::Tensor& tokens,
-                                const torch::Tensor& positions,
-                                std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& input_params) {
-    return torch::Tensor{};
+  virtual ModelOutput forward(const torch::Tensor& tokens,
+                              const torch::Tensor& positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ModelInputParams& input_params) {
+    return ModelOutput();
   }
   virtual void prepare_expert_weight(int32_t layer_id,
                                      const std::vector<int32_t>& expert_ids) {

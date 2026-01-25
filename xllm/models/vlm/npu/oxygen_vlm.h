@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "glm4v.h"
 #include "models/llm/npu/oxygen.h"
@@ -161,10 +162,10 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     auto emb = language_model_(tokens, positions, kv_caches, input_params);
     return emb;
   }

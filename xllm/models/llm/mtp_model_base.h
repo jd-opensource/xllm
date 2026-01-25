@@ -145,11 +145,15 @@ class MtpModelImplBase : public torch::nn::Module {
     }
   }
 
+  torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
+    return embed_tokens_(input_ids);
+  }
+
   // Provide batched signature to satisfy callers that pass vectors
-  torch::Tensor forward(torch::Tensor tokens,
-                        torch::Tensor positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(torch::Tensor tokens,
+                      torch::Tensor positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     // for dp, if tokens is empty, set tokens to 1 and positions to 0
     ModelInputParams modified_input_params = input_params;
     if (dp_size_ > 1) {
@@ -186,7 +190,8 @@ class MtpModelImplBase : public torch::nn::Module {
                             kv_caches[i],
                             modified_input_params);
     }
-    return std::get<0>(norm_(hidden_states, residual));
+    auto [h_out, r_out] = norm_(hidden_states, residual);
+    return ModelOutput(h_out, r_out);
   }
 
   // load the weight from the checkpoint

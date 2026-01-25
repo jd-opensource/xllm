@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/framework/batch/batch.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_args.h"
+#include "core/framework/model/model_output.h"
 #include "mlu_graph_executor_impl.h"
 #include "platform/device.h"
 #include "runtime/options.h"
@@ -36,11 +37,12 @@ class MockCausalLM : public CausalLM {
     weight_ = register_parameter("weight", weight, false);
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& params) override {
-    return params.input_embedding.matmul(weight_);
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& params) override {
+    auto hidden_states = params.input_embedding.matmul(weight_);
+    return ModelOutput(hidden_states);
   }
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) override {
@@ -133,20 +135,23 @@ TEST_F(MluGraphExecutorTest, DifferentBatchSizes) {
   const std::vector<uint32_t> batch_sizes = {1, 3, 13, 21, 65};
   for (auto batch_size : batch_sizes) {
     auto forward_input = prepare_inputs(batch_size, 1);
-    auto eager_output = base_impl_->run({forward_input.token_ids},
-                                        {forward_input.positions},
-                                        kv_caches_,
-                                        {forward_input.input_params});
+    auto eager_model_output = base_impl_->run({forward_input.token_ids},
+                                              {forward_input.positions},
+                                              kv_caches_,
+                                              {forward_input.input_params});
+    auto eager_output = eager_model_output.hidden_states;
 
-    auto graph_output = impl_->run({forward_input.token_ids},
-                                   {forward_input.positions},
-                                   kv_caches_,
-                                   {forward_input.input_params});
+    auto graph_model_output = impl_->run({forward_input.token_ids},
+                                         {forward_input.positions},
+                                         kv_caches_,
+                                         {forward_input.input_params});
+    auto graph_output = graph_model_output.hidden_states;
 
-    auto replay_output = impl_->run({forward_input.token_ids},
-                                    {forward_input.positions},
-                                    kv_caches_,
-                                    {forward_input.input_params});
+    auto replay_model_output = impl_->run({forward_input.token_ids},
+                                          {forward_input.positions},
+                                          kv_caches_,
+                                          {forward_input.input_params});
+    auto replay_output = replay_model_output.hidden_states;
 
     CHECK_EQ(eager_output.sizes(), graph_output.sizes());
     CHECK_EQ(eager_output.sizes(), replay_output.sizes());
@@ -162,15 +167,17 @@ TEST_F(MluGraphExecutorTest, MluGraphExecutorVsBaseExecutorImplMultipleRuns) {
   int32_t batch_size = 5;
   int32_t seed = 42;
   auto forward_input = prepare_inputs(batch_size, seed);
-  auto eager_output = base_impl_->run({forward_input.token_ids},
-                                      {forward_input.positions},
-                                      kv_caches_,
-                                      {forward_input.input_params});
+  auto eager_model_output = base_impl_->run({forward_input.token_ids},
+                                            {forward_input.positions},
+                                            kv_caches_,
+                                            {forward_input.input_params});
+  auto eager_output = eager_model_output.hidden_states;
 
-  auto graph_output = impl_->run({forward_input.token_ids},
-                                 {forward_input.positions},
-                                 kv_caches_,
-                                 {forward_input.input_params});
+  auto graph_model_output = impl_->run({forward_input.token_ids},
+                                       {forward_input.positions},
+                                       kv_caches_,
+                                       {forward_input.input_params});
+  auto graph_output = graph_model_output.hidden_states;
 
   CHECK_EQ(eager_output.sizes(), graph_output.sizes());
   // Compare outputs - should be identical
@@ -187,15 +194,17 @@ TEST_F(MluGraphExecutorTest, MluGraphExecutorVsBaseExecutorImplMultipleRuns) {
                               1e-6));
 
   for (int i = 0; i < num_runs; ++i) {
-    auto base_output = base_impl_->run({base_forward_input.token_ids},
-                                       {base_forward_input.positions},
-                                       kv_caches_,
-                                       {base_forward_input.input_params});
+    auto base_model_output = base_impl_->run({base_forward_input.token_ids},
+                                             {base_forward_input.positions},
+                                             kv_caches_,
+                                             {base_forward_input.input_params});
+    auto base_output = base_model_output.hidden_states;
 
-    auto replay_output = impl_->run({replay_forward_input.token_ids},
-                                    {replay_forward_input.positions},
-                                    kv_caches_,
-                                    {replay_forward_input.input_params});
+    auto replay_model_output = impl_->run({replay_forward_input.token_ids},
+                                          {replay_forward_input.positions},
+                                          kv_caches_,
+                                          {replay_forward_input.input_params});
+    auto replay_output = replay_model_output.hidden_states;
     base_forward_input.input_params.input_embedding = base_output;
     replay_forward_input.input_params.input_embedding = replay_output;
     CHECK_EQ(base_output.sizes(), replay_output.sizes());

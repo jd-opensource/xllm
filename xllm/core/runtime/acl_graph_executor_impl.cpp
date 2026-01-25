@@ -136,6 +136,33 @@ GraphPersistentParam::~GraphPersistentParam() {
   }
 }
 
+void GraphPersistentParam::set_aux_hidden_states(const torch::Tensor& value) {
+  if (!value.defined()) {
+    return;
+  }
+  const uint32_t result_tokens = value.size(0);
+  if (aux_hidden_states_.numel() == 0) {
+    // Lazy initialization: create aux_hidden_states tensor if not already
+    // created
+    const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+    auto shape = value.sizes().vec();
+    shape[0] = max_tokens_per_batch;
+    torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
+    if (args_.dtype() == "float" || args_.dtype() == "float32") {
+      dtype = torch::kFloat32;
+    }
+    aux_hidden_states_ =
+        torch::zeros(shape, torch::dtype(dtype).device(device_));
+  }
+  // Slice to match the actual shape
+  auto slice =
+      aux_hidden_states_.slice(/*dim=*/0, /*start=*/0, /*end=*/result_tokens);
+  // Reshape slice if needed to match value shape
+  if (slice.sizes() == value.sizes()) {
+    slice.copy_(value, /*non_blocking=*/true);
+  }
+}
+
 std::optional<ModelInputParams> GraphPersistentParam::update(
     const torch::Tensor& tokens,
     const torch::Tensor& k_cache,
@@ -796,7 +823,11 @@ bool AclGraph::capture(CausalLM* model,
                        {graph_params.value()});
 
     // Store result in persistent buffer owned by NPUGraph mempool
-    persistent_param_.set_hidden_states(forward_result);
+    persistent_param_.set_hidden_states(forward_result.hidden_states);
+    if (options.enable_graph_aux_hidden_states() &&
+        forward_result.aux_hidden_states.defined()) {
+      persistent_param_.set_aux_hidden_states(forward_result.aux_hidden_states);
+    }
     graph_.capture_end();
     // Lock is automatically released here when lock goes out of scope
     if (need_restore_stream) {
@@ -825,10 +856,10 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
             << ", device_index: " << device_index;
 }
 
-torch::Tensor AclGraph::replay(const torch::Tensor& tokens,
-                               const torch::Tensor& positions,
-                               std::vector<KVCache>& kv_cache,
-                               const ModelInputParams& params) {
+ModelOutput AclGraph::replay(const torch::Tensor& tokens,
+                             const torch::Tensor& positions,
+                             std::vector<KVCache>& kv_cache,
+                             const ModelInputParams& params) {
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_LE(actual_num_tokens, num_tokens_)
       << "num_tokens mismatch: expected <= " << num_tokens_ << ", got "
@@ -856,8 +887,10 @@ torch::Tensor AclGraph::replay(const torch::Tensor& tokens,
   // CHECK_EQ(st, ACL_SUCCESS)
   // << "aclrtSynchronizeStream failed, error code: " << st;
 
-  // Return only the actual num_tokens portion of hidden states
-  return get_hidden_states(actual_num_tokens);
+  // Return the actual num_tokens portion of ModelOutput
+  // Note: aux_hidden_states handling is done in AclGraphExecutorImpl::run()
+  // since replay() doesn't have access to options
+  return ModelOutput(get_hidden_states(actual_num_tokens));
 }
 
 AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
@@ -879,10 +912,10 @@ ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
 // tokens: [num_decode_tokens]
 // positions: [num_decode_tokens] token pos in the sequence
 // returns: [num_decode_tokens, hidden_size]
-torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                        const torch::Tensor& positions,
-                                        std::vector<KVCache>& kv_caches,
-                                        const ModelInputParams& params) {
+ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
+                                      const torch::Tensor& positions,
+                                      std::vector<KVCache>& kv_caches,
+                                      const ModelInputParams& params) {
   // no mirco batch in decode phase
   const torch::Tensor& tokens_tensor = tokens;
   const torch::Tensor& positions_tensor = positions;
@@ -933,8 +966,17 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     // Replay the existing graph
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in replay mode";
-    return it->second->replay(
+    auto result = it->second->replay(
         tokens_tensor, positions_tensor, kv_caches, params_single);
+    // Handle aux_hidden_states based on options
+    if (options_.enable_graph_aux_hidden_states()) {
+      auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);
+      if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
+        return ModelOutput(
+            result.hidden_states, torch::Tensor(), aux_hidden_states);
+      }
+    }
+    return result;
   }
 
   // Graph doesn't exist for this bucket num_tokens, try to create it lazily
@@ -960,7 +1002,15 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
 
     // Return the output from capture (no need to replay since capture
     // already executed)
-    return graphs_[bucket_num_tokens]->get_hidden_states(n_tokens);
+    auto hidden_states =
+        graphs_[bucket_num_tokens]->get_hidden_states(n_tokens);
+    if (options_.enable_graph_aux_hidden_states()) {
+      auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);
+      if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
+        return ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);
+      }
+    }
+    return ModelOutput(hidden_states);
   }
 
   // Fallback to eager mode if capture fails

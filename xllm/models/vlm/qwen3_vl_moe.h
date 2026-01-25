@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/qwen3_moe.h"
@@ -149,13 +150,12 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  torch::Tensor forward(const torch::Tensor& tokens,
-                        const torch::Tensor& positions,
-                        std::vector<KVCache>& kv_caches,
-                        const ModelInputParams& input_params) {
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
     input_params.deep_stacks = std::move(get_deep_stacks(input_params));
-    auto emb = language_model_(tokens, positions, kv_caches, input_params);
-    return emb;
+    return language_model_(tokens, positions, kv_caches, input_params);
   }
 
   torch::Tensor logits(const torch::Tensor& hidden_states,

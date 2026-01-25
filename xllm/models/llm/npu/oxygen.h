@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+#include "core/framework/model/model_output.h"
 #include "core/layers/common/rotary_embedding_util.h"
 #include "llm_model_base.h"
 #include "qwen3.h"
@@ -24,10 +25,10 @@ class OxygenModelImpl : public QWen3ModelImpl {
  public:
   OxygenModelImpl(const ModelContext& context) : QWen3ModelImpl(context) {}
 
-  virtual torch::Tensor forward(torch::Tensor tokens,
-                                torch::Tensor positions,
-                                std::vector<KVCache>& kv_caches,
-                                const ModelInputParams& input_params) {
+  virtual ModelOutput forward(torch::Tensor tokens,
+                              torch::Tensor positions,
+                              std::vector<KVCache>& kv_caches,
+                              const ModelInputParams& input_params) {
     bool use_deepstack = input_params.deep_stacks.size() > 0;
     std::vector<torch::Tensor> deep_stacks;
 
@@ -109,7 +110,7 @@ class OxygenModelImpl : public QWen3ModelImpl {
         event_flag = input_params.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
-        return torch::Tensor();
+        return ModelOutput();
       }
 
       auto& layer = layers_[i];
@@ -129,7 +130,8 @@ class OxygenModelImpl : public QWen3ModelImpl {
         }
       }
     }
-    return norm_(h, 0);
+    auto hidden_states = norm_(h, 0);
+    return ModelOutput(hidden_states);
   }
 
  private:

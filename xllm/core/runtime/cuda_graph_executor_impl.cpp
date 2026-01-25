@@ -108,6 +108,35 @@ CudaGraphPersistentParam::CudaGraphPersistentParam(
   // q_seq_lens
   persistent_chunked_prefill_qo_indptr_ = torch::zeros(
       {max_seqs_per_batch + 1}, torch::dtype(torch::kInt).device(device));
+  // aux_hidden_states will be lazily initialized when needed
+}
+
+void CudaGraphPersistentParam::set_aux_hidden_states(
+    const torch::Tensor& value) {
+  if (!value.defined()) {
+    return;
+  }
+  const uint32_t result_tokens = value.size(0);
+  if (aux_hidden_states_.numel() == 0) {
+    // Lazy initialization: create aux_hidden_states tensor if not already
+    // created
+    const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+    auto shape = value.sizes().vec();
+    shape[0] = max_tokens_per_batch;
+    torch::ScalarType dtype = util::parse_dtype(args_.dtype(), device_);
+    if (args_.dtype() == "float" || args_.dtype() == "float32") {
+      dtype = torch::kFloat32;
+    }
+    aux_hidden_states_ =
+        torch::zeros(shape, torch::dtype(dtype).device(device_));
+  }
+  // Slice to match the actual shape
+  auto slice =
+      aux_hidden_states_.slice(/*dim=*/0, /*start=*/0, /*end=*/result_tokens);
+  // Reshape slice if needed to match value shape
+  if (slice.sizes() == value.sizes()) {
+    slice.copy_(value, /*non_blocking=*/true);
+  }
 }
 
 std::optional<ModelInputParams> CudaGraphPersistentParam::update(
@@ -408,7 +437,12 @@ bool CudaGraph::capture(CausalLM* model,
                      graph_params_opt.value());
 
   // Store result in persistent buffer
-  persistent_param_.set_hidden_states(forward_result);
+  persistent_param_.set_hidden_states(forward_result.hidden_states);
+  // Note: aux_hidden_states capture is controlled by options in executor
+  // For now, always capture if available, filtering happens in executor::run()
+  if (forward_result.aux_hidden_states.defined()) {
+    persistent_param_.set_aux_hidden_states(forward_result.aux_hidden_states);
+  }
 
   // End graph capture
   graph_.capture_end();
@@ -430,10 +464,10 @@ bool CudaGraph::capture(CausalLM* model,
   return true;
 }
 
-torch::Tensor CudaGraph::replay(const torch::Tensor& tokens,
-                                const torch::Tensor& positions,
-                                std::vector<KVCache>& kv_cache,
-                                const ModelInputParams& params) {
+ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
+                              const torch::Tensor& positions,
+                              std::vector<KVCache>& kv_cache,
+                              const ModelInputParams& params) {
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_LE(actual_num_tokens, padded_num_tokens_)
       << "num_tokens mismatch: expected <= " << padded_num_tokens_ << ", got "
@@ -453,8 +487,10 @@ torch::Tensor CudaGraph::replay(const torch::Tensor& tokens,
   // Replay captured graph
   graph_.replay();
 
-  // Return only the actual num_tokens portion of hidden states
-  return get_hidden_states(actual_num_tokens);
+  // Return the actual num_tokens portion of ModelOutput
+  // Note: aux_hidden_states handling is done in CudaGraphExecutorImpl::run()
+  // since replay() doesn't have access to options
+  return ModelOutput(get_hidden_states(actual_num_tokens));
 }
 
 // CudaGraphExecutorImpl implementation
@@ -477,10 +513,10 @@ ForwardInput CudaGraphExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
 }
 
-torch::Tensor CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
-                                         const torch::Tensor& positions,
-                                         std::vector<KVCache>& kv_caches,
-                                         const ModelInputParams& params) {
+ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
+                                       const torch::Tensor& positions,
+                                       std::vector<KVCache>& kv_caches,
+                                       const ModelInputParams& params) {
   // Only use CUDA graph in decode phase for performance optimization
   // Identify decode phase using q_max_seq_len for precise detection
   // Decode phase: all sequences have q_seq_len == 1 (generating one token at a
@@ -524,7 +560,16 @@ torch::Tensor CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
     // Replay the existing graph
     VLOG(kGraphExecutorLogVerboseLevel)
         << "CudaGraphExecutorImpl::run() in replay mode";
-    return it->second->replay(tokens, positions, kv_caches, params);
+    auto result = it->second->replay(tokens, positions, kv_caches, params);
+    // Handle aux_hidden_states based on options
+    if (options_.enable_graph_aux_hidden_states()) {
+      auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);
+      if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
+        return ModelOutput(
+            result.hidden_states, torch::Tensor(), aux_hidden_states);
+      }
+    }
+    return result;
   }
 
   // Graph doesn't exist for this bucket num_tokens, try to create it lazily
@@ -551,7 +596,15 @@ torch::Tensor CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
 
     // Return the output from capture (no need to replay since capture
     // already executed)
-    return graphs_[bucket_num_tokens]->get_hidden_states(n_tokens);
+    auto hidden_states =
+        graphs_[bucket_num_tokens]->get_hidden_states(n_tokens);
+    if (options_.enable_graph_aux_hidden_states()) {
+      auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);
+      if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
+        return ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);
+      }
+    }
+    return ModelOutput(hidden_states);
   }
 
   // Fallback to eager mode if capture fails
