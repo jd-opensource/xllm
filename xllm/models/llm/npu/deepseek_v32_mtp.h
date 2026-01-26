@@ -25,7 +25,7 @@ class DeepseekV32MtpModelImpl
     : public MtpModelImplBase<DeepseekV32DecoderLayer> {
  public:
   DeepseekV32MtpModelImpl(const ModelContext& context)
-      : MtpModelImplBase<DeepseekV32DecoderLayer>("deepseek_mtp", context) {
+      : MtpModelImplBase<DeepseekV32DecoderLayer>("deepseek_v32_mtp", context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -62,10 +62,10 @@ class DeepseekV32MtpForCausalLMImpl
 TORCH_MODULE(DeepseekV32MtpForCausalLM);
 
 // register the causal model
-REGISTER_CAUSAL_MODEL(deepseek_mtp, DeepseekV32MtpForCausalLM);
+REGISTER_CAUSAL_MODEL(deepseek_v32_mtp, DeepseekV32MtpForCausalLM);
 
-REGISTER_MODEL_ARGS(deepseek_mtp, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "deepseek_mtp");
+REGISTER_MODEL_ARGS(deepseek_v32_mtp, [&] {
+  LOAD_ARG_OR(model_type, "model_type", "deepseek_v32_mtp");
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(vocab_size, "vocab_size", 129280);
   LOAD_ARG_OR(hidden_size, "hidden_size", 7168);
