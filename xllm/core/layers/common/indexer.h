@@ -62,7 +62,7 @@ class IndexerImpl : public torch::nn::Module {
               int64_t qk_rope_head_dim,
               int64_t index_topk,
               int64_t q_lora_rank,
-              bool use_fused_qk,
+              bool enable_fused_qk,
               DeepseekScalingRotaryEmbedding& rotary_emb,
               const QuantArgs& quant_args,
               const ParallelArgs& parallel_args,
@@ -89,7 +89,7 @@ class IndexerImpl : public torch::nn::Module {
   int64_t q_lora_rank_;
   float softmax_scale_;
   float hadamard_transform_scale_;
-  bool use_fused_qk_;
+  bool enable_fused_qk_;
 
   // Linear layers using ReplicatedLinear
   ReplicatedLinear wq_b_{nullptr};

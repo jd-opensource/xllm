@@ -36,6 +36,7 @@ class DeepseekMLATest : public ::testing::Test {
     device.set_seed();
 
     FLAGS_enable_mla = true;
+    FLAGS_block_size = 1;
     // Initialize default model arguments for testing
     model_args_ = create_mla_model_args();
 

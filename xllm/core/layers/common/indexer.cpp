@@ -110,7 +110,7 @@ IndexerImpl::IndexerImpl(int64_t dim,
                          int64_t qk_rope_head_dim,
                          int64_t index_topk,
                          int64_t q_lora_rank,
-                         bool use_fused_qk,
+                         bool enable_fused_qk,
                          DeepseekScalingRotaryEmbedding& rotary_emb,
                          const QuantArgs& quant_args,
                          const ParallelArgs& parallel_args,
@@ -123,7 +123,7 @@ IndexerImpl::IndexerImpl(int64_t dim,
       q_lora_rank_(q_lora_rank),
       rotary_emb_(rotary_emb),
       softmax_scale_(std::pow(head_dim_, -0.5) * std::pow(n_heads_, -0.5)),
-      use_fused_qk_(use_fused_qk) {
+      enable_fused_qk_(enable_fused_qk) {
   // Note: The current Indexer implementation does not yet support quantization
   // or parallelization strategies. These features are planned for future
   // updates. For now, the entire indexer computation runs independently on each
@@ -376,7 +376,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
     bool is_prefill,
     const std::optional<torch::Tensor>& mask) {
   torch::Tensor q, k, weights;
-  if (!is_prefill && use_fused_qk_) {
+  if (!is_prefill && enable_fused_qk_) {
     q = preprocess_indexer_q_fused(qr, positions);
     weights = preprocess_indexer_k_fused(x, positions, k_cache, attn_metadata);
   } else {

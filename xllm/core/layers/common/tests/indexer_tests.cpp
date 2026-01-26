@@ -82,6 +82,7 @@ class IndexerTest : public ::testing::Test {
     int_option_ = options_.dtype(torch::kInt32);
 
     parallel_args_ = test::create_default_parallel_args(mock_process_group_);
+    FLAGS_block_size = 1;
   }
 
   void TearDown() override {}
@@ -269,7 +270,7 @@ class IndexerTest : public ::testing::Test {
 
   std::tuple<torch::Tensor, torch::Tensor> run_indexer(TestInputs& inputs,
                                                        bool is_prefill,
-                                                       bool use_fused_qk) {
+                                                       bool enable_fused_qk) {
     StateDict state_dict(inputs.weights);
     QuantArgs quant_args;
     auto indexer = Indexer(IndexerImpl(test_config_.dim,
@@ -278,7 +279,7 @@ class IndexerTest : public ::testing::Test {
                                        test_config_.qk_rope_head_dim,
                                        test_config_.index_topk,
                                        test_config_.q_lora_rank,
-                                       use_fused_qk,
+                                       enable_fused_qk,
                                        *rotary_emb_,
                                        quant_args,
                                        parallel_args_,
@@ -305,11 +306,11 @@ TEST_F(IndexerTest, PrefillBatch) {
   int64_t batch_size = 2;
   int64_t max_query_len = 4096;
   const bool is_prefill = true;
-  const bool use_fused_qk = false;
+  const bool enable_fused_qk = false;
   int64_t num_tokens = batch_size * max_query_len;
   TestInputs inputs = create_inputs(batch_size, max_query_len, is_prefill);
   auto [new_block_tables, new_context_lens] =
-      run_indexer(inputs, is_prefill, use_fused_qk);
+      run_indexer(inputs, is_prefill, enable_fused_qk);
 
   EXPECT_EQ(new_block_tables.sizes().size(), 2)
       << "new_block_tables should be 2D tensor";
@@ -333,11 +334,11 @@ TEST_F(IndexerTest, ChunkedPrefillBatch) {
   int64_t num_new_tokens = batch_size * current_len;
   const bool is_prefill = true;
   const bool is_chunked = true;
-  const bool use_fused_qk = false;
+  const bool enable_fused_qk = false;
   TestInputs inputs = create_inputs(
       batch_size, current_len, is_prefill, is_chunked, history_len);
   auto [new_block_tables, new_context_lens] =
-      run_indexer(inputs, is_prefill, use_fused_qk);
+      run_indexer(inputs, is_prefill, enable_fused_qk);
 
   // Validations
   // Shape Verification
