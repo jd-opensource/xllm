@@ -46,7 +46,8 @@ static std::unordered_set<std::string> deepseek_like_model_set = {
     "deepseek_v2",
     "deepseek_v3",
     "deepseek_v32",
-    "deepseek_mtp",
+    "deepseek_v3_mtp",
+    "deepseek_v32_mtp",
     "kimi_k2",
 };
 

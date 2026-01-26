@@ -19,20 +19,73 @@ MTP在推理加速方面具有以下核心功能：
 MTP技术为大语言模型的推理阶段提供了一种全新的效率优化方案，特别适合需要快速响应的实时应用场景，代表了语言模型推理优化的重要发展方向。
 
 !!! note "模型支持"
-    目前仅支持Deepseek的MTP结构，其余模型待后续支持。
+    目前支持以下模型的MTP结构导出：
+    - DeepSeek-V3 (输入 model_type: deepseek_v3, 导出 MTP model_type: deepseek_v3_mtp)
+    - DeepSeek-V3.2 (输入 model_type: deepseek_v3, 导出 MTP model_type: deepseek_v32_mtp)
+    - DeepSeek-R1 (输入 model_type: deepseek_v3, 导出 MTP model_type: deepseek_v3_mtp)
+    - GLM4 MoE (如 GLM-4.5-Air, 导出 MTP model_type: glm4_moe_mtp)
+    
+    注意：
+    - DeepSeek V3 和 R1 的输入 model_type 都是 "deepseek_v3"，导出的 MTP 模型 model_type 为 "deepseek_v3_mtp"
+    - DeepSeek V3.2 的输入 model_type 是 "deepseek_v3"（但可通过 index_head_dim 等字段自动识别），导出的 MTP 模型 model_type 为 "deepseek_v32_mtp"
 
 ## 使用示例
 
 ### 导出模型
+
+脚本会自动检测模型类型，也可以手动指定。
+
+#### DeepSeek-V3
 ```bash
-./tools/export_deepseek_mtp.py --input-dir /path/to/DeepSeek-V3 --output-dir /path/to/DeepSeek-V3-mtp
+python3 tools/export_mtp.py \
+    --input-dir /path/to/DeepSeek-V3 \
+    --output-dir /path/to/DeepSeek-V3-mtp
 ```
-输入模型参考: [Deepseek-V3](https://huggingface.co/deepseek-ai/DeepSeek-V3)
+
+#### DeepSeek-V3.2
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/DeepSeek-V3.2 \
+    --output-dir /path/to/DeepSeek-V3.2-mtp
+```
+
+#### DeepSeek-R1
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/DeepSeek-R1 \
+    --output-dir /path/to/DeepSeek-R1-mtp
+```
+
+#### GLM4 MoE
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/GLM-4.5-Air \
+    --output-dir /path/to/GLM-4.5-Air-mtp
+```
+
+#### 手动指定模型类型
+如果自动检测失败，可以手动指定模型类型：
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/model \
+    --output-dir /path/to/model-mtp \
+    --model-type deepseek_v3  # 可选: deepseek_v3 (用于V3/R1), deepseek_v32 (用于V3.2), glm4_moe
+```
+
+输入模型参考:
+- [DeepSeek-V3](https://huggingface.co/deepseek-ai/DeepSeek-V3)
+- [DeepSeek-V3.2](https://huggingface.co/deepseek-ai/DeepSeek-V3.2)
+- [DeepSeek-R1](https://huggingface.co/deepseek-ai/DeepSeek-R1)
+- [GLM-4.5-Air](https://huggingface.co/zai-org/GLM-4.5-Air)
 
 ### 启动脚本
+
+使用MTP进行推理时，需要同时指定主模型和草稿模型（MTP模型）。
+
+#### DeepSeek-V3/V3.2/R1 启动示例
 ```bash
 MODEL_PATH="/models/DeepSeek-V3"
-DRAFT_MODEL_PATH="/models/DeepSeek-V3-MTP"
+DRAFT_MODEL_PATH="/models/DeepSeek-V3-mtp"
 MASTER_NODE_ADDR="127.0.0.1:42123"
 START_PORT=13222
 START_DEVICE=0
@@ -65,6 +118,13 @@ do
     --node_rank=$i > $LOG_FILE 2>&1 &
   sleep 0.5
 done
+```
+
+#### GLM4 MoE 启动示例
+```bash
+MODEL_PATH="/models/GLM-4.5-Air"
+DRAFT_MODEL_PATH="/models/GLM-4.5-Air-mtp"
+# ... 其他配置相同
 ```
 
 # 性能数据

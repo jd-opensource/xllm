@@ -571,8 +571,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
         (args.model_type() == "deepseek_v3" ||
          args.model_type() == "deepseek_v32")) {
       LOG(INFO) << "Overriding draft model_type from " << args.model_type()
-                << " to deepseek_mtp for speculative decoding";
-      args.model_type("deepseek_mtp");
+                << " to deepseek_v3_mtp for speculative decoding";
+      args.model_type("deepseek_v3_mtp");
     }
   }
 #endif
@@ -747,7 +747,7 @@ int64_t WorkerImpl::get_num_layers() const {
     // for MTP draft models, the number of layers is the number of nextn predict
     // layers
     std::string model_type = context_.get_model_args().model_type();
-    if (model_type == "deepseek_mtp") {
+    if (model_type == "deepseek_v3_mtp") {
       num_layers = context_.get_model_args().num_nextn_predict_layers();
     }
   }

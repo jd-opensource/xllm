@@ -19,21 +19,73 @@ MTP offers the following core acceleration capabilities:
 MTP technology provides a novel efficiency optimization solution for LLM inference, particularly well-suited for real-time applications requiring rapid responses, representing an important direction in language model inference optimization.
 
 !!! note "Model Support"
-    Currently only supports Deepseek's MTP architecture. Support for other models will be added in future updates.
+    Currently supports MTP structure export for the following models:
+    - DeepSeek-V3 (input model_type: deepseek_v3, exported MTP model_type: deepseek_v3_mtp)
+    - DeepSeek-V3.2 (input model_type: deepseek_v3, exported MTP model_type: deepseek_v32_mtp)
+    - DeepSeek-R1 (input model_type: deepseek_v3, exported MTP model_type: deepseek_v3_mtp)
+    - GLM4 MoE (e.g., GLM-4.5-Air, exported MTP model_type: glm4_moe_mtp)
+    
+    Note:
+    - DeepSeek V3 and R1 both have input model_type "deepseek_v3", and the exported MTP model will have model_type "deepseek_v3_mtp"
+    - DeepSeek V3.2 has input model_type "deepseek_v3" (but can be auto-detected by index_head_dim fields), and the exported MTP model will have model_type "deepseek_v32_mtp"
 
 ## Usage Example
 
 ### Export Model
-```bash
-./tools/export_deepseek_mtp.py --input-dir /path/to/DeepSeek-V3 --output-dir /path/to/DeepSeek-V3-mtp
-```
-Input model reference:[Deepseek-V3](https://huggingface.co/deepseek-ai/DeepSeek-V3)
 
+The script will automatically detect the model type, or you can manually specify it.
+
+#### DeepSeek-V3
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/DeepSeek-V3 \
+    --output-dir /path/to/DeepSeek-V3-mtp
+```
+
+#### DeepSeek-V3.2
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/DeepSeek-V3.2 \
+    --output-dir /path/to/DeepSeek-V3.2-mtp
+```
+
+#### DeepSeek-R1
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/DeepSeek-R1 \
+    --output-dir /path/to/DeepSeek-R1-mtp
+```
+
+#### GLM4 MoE
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/GLM-4.5-Air \
+    --output-dir /path/to/GLM-4.5-Air-mtp
+```
+
+#### Manually Specify Model Type
+If auto-detection fails, you can manually specify the model type:
+```bash
+python3 tools/export_mtp.py \
+    --input-dir /path/to/model \
+    --output-dir /path/to/model-mtp \
+    --model-type deepseek_v3  # Options: deepseek_v3 (for V3/R1), deepseek_v32 (for V3.2), glm4_moe
+```
+
+Input model references:
+- [DeepSeek-V3](https://huggingface.co/deepseek-ai/DeepSeek-V3)
+- [DeepSeek-V3.2](https://huggingface.co/deepseek-ai/DeepSeek-V3.2)
+- [DeepSeek-R1](https://huggingface.co/deepseek-ai/DeepSeek-R1)
+- [GLM-4.5-Air](https://huggingface.co/zai-org/GLM-4.5-Air)
 
 ### Launch Script
+
+When using MTP for inference, you need to specify both the main model and the draft model (MTP model).
+
+#### DeepSeek-V3/V3.2/R1 Launch Example
 ```bash
 MODEL_PATH="/models/DeepSeek-V3"
-DRAFT_MODEL_PATH="/models/DeepSeek-V3-MTP"
+DRAFT_MODEL_PATH="/models/DeepSeek-V3-mtp"
 MASTER_NODE_ADDR="127.0.0.1:42123"
 START_PORT=13222
 START_DEVICE=0
@@ -67,6 +119,14 @@ do
   sleep 0.5
 done
 ```
+
+#### GLM4 MoE Launch Example
+```bash
+MODEL_PATH="/models/GLM-4.5-Air"
+DRAFT_MODEL_PATH="/models/GLM-4.5-Air-mtp"
+# ... same other configurations
+```
+
 # Performance Data
 Based on ShareGPT dataset with input length=2500, output length=1500, total requests=80.
 
