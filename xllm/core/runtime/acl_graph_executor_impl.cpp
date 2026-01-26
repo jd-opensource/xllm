@@ -918,7 +918,11 @@ torch::Tensor AclGraphExecutorImpl::run(const torch::Tensor& tokens,
 
   // Early return if conditions are not suitable for graph operations
   if (!capture_supported) {
-    LOG(FATAL) << "Not suitable for graph operations.";
+    LOG_FIRST_N(WARNING, 1)
+        << "Falling back to eager mode because kv_max_seq_len ("
+        << params_single.kv_max_seq_len << ") > max_seq_len (" << max_seq_len
+        << "). This message is logged only once. "
+        << "Monitor counter 'num_model_execution_total_eager' for frequency.";
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
   }
