@@ -53,6 +53,10 @@ class XServiceClient {
   // response generation tokens to xllm service
   void generations(const std::vector<RequestOutput>& outputs);
 
+  uint32_t get_offload_batch() {
+    return offload_batch_.load(std::memory_order_relaxed);
+  }
+
  private:
   void handle_master_service_watch(const etcd::Response& response);
 
@@ -74,6 +78,8 @@ class XServiceClient {
   std::unique_ptr<EtcdClient> etcd_client_;
   const BlockManagerPool* block_manager_pool_;  // not own
   Scheduler* scheduler_;                        // not own
+
+  std::atomic_uint32_t offload_batch_{UINT32_MAX};
 };
 
 }  // namespace xllm

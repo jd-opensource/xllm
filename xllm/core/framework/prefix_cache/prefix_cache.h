@@ -101,6 +101,8 @@ class PrefixCache {
                                     std::vector<Block>& blocks,
                                     const size_t cached_blocks = 0);
 
+  static uint32_t match_in_kvcache_store(const std::vector<uint8_t*>& keys);
+
  protected:
   size_t insert(const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,

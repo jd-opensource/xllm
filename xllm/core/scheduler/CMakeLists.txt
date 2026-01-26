@@ -52,6 +52,7 @@ cc_test(
     chunked_prefill_scheduler_test.cpp
     continuous_scheduler_test.cpp
   DEPS
+    :prefix_cache
     :scheduler
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:nnopbase>
