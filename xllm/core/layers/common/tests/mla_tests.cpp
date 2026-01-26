@@ -199,8 +199,14 @@ class DeepseekMLATest : public ::testing::Test {
                                 const torch::Tensor& hidden_states,
                                 const torch::Tensor& positions,
                                 KVCache& kv_cache) {
-    auto deepseek_mla = DeepseekV2Attention(
-        model_args_, quant_args_, parallel_args_, options_, use_fused_mla_qkv);
+    OptimizationConfig optimization_config;
+    optimization_config.enable_fused_mla_kernel = use_fused_mla_qkv;
+    optimization_config.enable_fused_indexer_qk = false;
+    auto deepseek_mla = DeepseekV2Attention(model_args_,
+                                            quant_args_,
+                                            parallel_args_,
+                                            options_,
+                                            optimization_config);
 
     std::string prefix = "model.layers.0.self_attn.";
     StateDict state_dict(weight_dict_, prefix);

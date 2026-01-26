@@ -150,13 +150,13 @@ IndexerImpl::IndexerImpl(int64_t dim,
                                                    quant_args,
                                                    options));
 
+  // the default eps is defined as 1e-6 in indexer implementation of
+  // DeepSeek-V3.2.
+  double default_eps = 1e-6;
   k_norm_ = register_module(
       "k_norm",
-      torch::nn::LayerNorm(torch::nn::LayerNormOptions({head_dim_})
-                               .eps(1e-6)
-                               .elementwise_affine(true)));
-  // set the device of k_norm_ to the same as the options
-  k_norm_->to(options.device());
+      RMSNorm(head_dim_, default_eps, options.dtype(torch::kFloat32)));
+  k_norm_->set_layernorm_mode();
 
   // Create hadamard matrix
   int64_t head_dim_padded = std::pow(2, std::ceil(std::log2(head_dim_)));
@@ -290,7 +290,11 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::preprocess_indexer_k(
     const AttentionMetadata& attn_metadata) {
   // Forward pass through wk and normalize
   auto k = wk_->forward(x);
-  k = k_norm_->forward(k);
+  auto k_dtype = k.dtype();
+  // follow the implementation of DeepSeek-V3.2,
+  // the k_norm is applied on the float32 tensor.
+  auto k_fp32 = k.to(torch::kFloat32);
+  k = std::get<0>(k_norm_->forward(k_fp32)).to(k_dtype);
 
   // Apply rotary embedding to positional parts only (like Python)
   auto k_pe = k.slice(-1, 0, rope_head_dim_).unsqueeze(1);
@@ -427,6 +431,7 @@ void IndexerImpl::load_state_dict(const StateDict& state_dict) {
   wk_->load_state_dict(state_dict.get_dict_with_prefix("wk."));
   weights_proj_->load_state_dict(
       state_dict.get_dict_with_prefix("weights_proj."));
+  k_norm_->load_state_dict(state_dict.get_dict_with_prefix("k_norm."));
 }
 
 }  // namespace layer

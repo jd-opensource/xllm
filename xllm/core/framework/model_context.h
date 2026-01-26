@@ -38,6 +38,7 @@ struct OptimizationConfig {
   // Enable use of fused computation kernels.
   bool enable_fused_spec_kernel = false;
   bool enable_fused_mla_kernel = false;
+  bool enable_fused_indexer_qk = false;
 
   // we can detailize this part later. for example:
   // PROPERTY(bool, enable_fused_mlp_kernel) = false;

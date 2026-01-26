@@ -38,7 +38,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                           const QuantArgs& quant_args,
                           const ParallelArgs& parallel_args,
                           const torch::TensorOptions& options,
-                          bool use_fused_mla_qkv);
+                          const OptimizationConfig& optimization_config);
 
   torch::Tensor forward(const torch::Tensor& positions,
                         const torch::Tensor& hidden_states,

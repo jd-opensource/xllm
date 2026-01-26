@@ -28,6 +28,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "linear.h"
+#include "rms_norm.h"
 #include "rotary_embedding.h"
 
 namespace xllm {
@@ -95,7 +96,7 @@ class IndexerImpl : public torch::nn::Module {
   ReplicatedLinear wq_b_{nullptr};
   ReplicatedLinear wk_{nullptr};
   ReplicatedLinear weights_proj_{nullptr};
-  torch::nn::LayerNorm k_norm_{nullptr};
+  RMSNorm k_norm_{nullptr};
 
   // Rotary embedding
   DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};

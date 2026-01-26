@@ -29,7 +29,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options,
-    bool use_fused_mla_qkv)
+    const OptimizationConfig& optimization_config)
     : q_lora_rank_(args.q_lora_rank()),
       kv_lora_rank_(args.kv_lora_rank()),
       qk_nope_head_dim_(args.qk_nope_head_dim()),
@@ -38,8 +38,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
       index_topk_(args.index_topk()),
       v_head_dim_(args.v_head_dim()),
       eps_(args.rms_norm_eps()),
-      interleaved_(true),
-      use_fused_mla_qkv_(use_fused_mla_qkv) {
+      interleaved_(true) {
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   int64_t hidden_size = args.hidden_size();
   int64_t num_heads = args.n_heads();
@@ -129,20 +128,22 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   }
 
   if (enable_lighting_indexer_) {
-    indexer_ = register_module("indexer",
-                               Indexer(hidden_size,
-                                       args.index_n_heads(),
-                                       args.index_head_dim(),
-                                       qk_rope_head_dim_,
-                                       args.index_topk(),
-                                       q_lora_rank_,
-                                       use_fused_mla_qkv_,
-                                       rotary_emb_,
-                                       quant_args,
-                                       parallel_args,
-                                       options));
+    indexer_ =
+        register_module("indexer",
+                        Indexer(hidden_size,
+                                args.index_n_heads(),
+                                args.index_head_dim(),
+                                qk_rope_head_dim_,
+                                args.index_topk(),
+                                q_lora_rank_,
+                                optimization_config.enable_fused_indexer_qk,
+                                rotary_emb_,
+                                quant_args,
+                                parallel_args,
+                                options));
   }
 
+  use_fused_mla_qkv_ = optimization_config.enable_fused_mla_kernel;
   attn_ = register_module("attn",
                           Attention(num_local_heads_,
                                     kv_lora_rank_ + qk_rope_head_dim_,

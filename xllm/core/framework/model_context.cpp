@@ -67,6 +67,7 @@ void ModelContext::derive_optimization_config() {
   // default disable fused kernel
   optimization_config_.enable_fused_spec_kernel = false;
   optimization_config_.enable_fused_mla_kernel = false;
+  optimization_config_.enable_fused_indexer_qk = false;
 
   // determine whether to enable fused kernel based on backend
   std::string backend = Device::type_str();
@@ -75,6 +76,10 @@ void ModelContext::derive_optimization_config() {
     // The current implementation of fused spec kernel is not stable.
     optimization_config_.enable_fused_spec_kernel = false;
     optimization_config_.enable_fused_mla_kernel = true;
+    // TODO: enable fused indexer qk for mlu backend
+    // The current implementation of fused indexer qk is missing the
+    //  weights and bias loading.
+    optimization_config_.enable_fused_indexer_qk = false;
   }
 }
 

@@ -87,10 +87,13 @@ class IndexerTest : public ::testing::Test {
 
   void TearDown() override {}
 
-  torch::Tensor create_random_tensor(const std::vector<int64_t>& shape,
-                                     float min_val = -1.0f,
-                                     float max_val = 1.0f) {
-    return torch::rand(shape, options_) * (max_val - min_val) + min_val;
+  torch::Tensor create_random_tensor(
+      const std::vector<int64_t>& shape,
+      float min_val = -1.0f,
+      float max_val = 1.0f,
+      c10::optional<torch::ScalarType> dtype = c10::nullopt) {
+    auto opts = dtype.has_value() ? options_.dtype(dtype.value()) : options_;
+    return torch::rand(shape, opts) * (max_val - min_val) + min_val;
   }
 
   std::unordered_map<std::string, torch::Tensor> create_random_weights(
@@ -105,6 +108,10 @@ class IndexerTest : public ::testing::Test {
         create_random_tensor({index_head_dim, dim}, -0.1f, 0.1f);
     weight_dict["weights_proj.weight"] =
         create_random_tensor({index_n_heads, dim}, -0.1f, 0.1f);
+    weight_dict["k_norm.weight"] =
+        create_random_tensor({index_head_dim}, -0.5f, 0.5f, torch::kFloat32);
+    weight_dict["k_norm.bias"] =
+        create_random_tensor({index_head_dim}, -0.5f, 0.5f, torch::kFloat32);
 
     return weight_dict;
   }
