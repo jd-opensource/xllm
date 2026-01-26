@@ -369,6 +369,16 @@ void SpeculativeWorkerImpl::prepare_prefill_inputs(
   }
   prefill_input.token_ids =
       torch::tensor(new_token_ids, prefill_input.positions.options());
+  // deepseek 3.2
+  std::vector<int32_t> q_cu_seq_lens_vec = {0};
+  for (int32_t i = 0; i < input_params.num_sequences; ++i) {
+    int32_t seq_len = input_params.get_q_seq_len(i);
+    q_cu_seq_lens_vec.push_back(q_cu_seq_lens_vec.back() + seq_len);
+  }
+  if (!q_cu_seq_lens_vec.empty()) {
+    q_cu_seq_lens_vec.erase(q_cu_seq_lens_vec.begin());
+  }
+  input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens_vec, torch::kInt);
 }
 
 std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
@@ -489,6 +499,16 @@ void SpeculativeWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
   input_params.kv_seq_lens_vec = kv_seq_lens_vec;
   input_params.kv_seq_lens = torch::tensor(kv_seq_lens_vec, int_options);
   input_params.new_cache_slots = torch::tensor(new_token_slot_ids, int_options);
+  // deepseek 3.2
+  std::vector<int32_t> q_cu_seq_lens_vec = {0};
+  for (int32_t i = 0; i < input_params.num_sequences; ++i) {
+    int32_t seq_len = input_params.get_q_seq_len(i);
+    q_cu_seq_lens_vec.push_back(q_cu_seq_lens_vec.back() + seq_len);
+  }
+  if (!q_cu_seq_lens_vec.empty()) {
+    q_cu_seq_lens_vec.erase(q_cu_seq_lens_vec.begin());
+  }
+  input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens_vec, torch::kInt);
 }
 
 void SpeculativeWorkerImpl::prepare_validate_inputs(
@@ -593,6 +613,16 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   input_params.q_seq_lens_vec = std::move(q_seq_lens_vec);
   input_params.q_seq_lens =
       torch::tensor(input_params.q_seq_lens_vec, int_options);
+  // deepseek 3.2
+  std::vector<int32_t> q_cu_seq_lens_vec = {0};
+  for (int32_t i = 0; i < input_params.num_sequences; ++i) {
+    int32_t seq_len = input_params.get_q_seq_len(i);
+    q_cu_seq_lens_vec.push_back(q_cu_seq_lens_vec.back() + seq_len);
+  }
+  if (!q_cu_seq_lens_vec.empty()) {
+    q_cu_seq_lens_vec.erase(q_cu_seq_lens_vec.begin());
+  }
+  input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens_vec, torch::kInt);
   input_params.kv_max_seq_len = kv_max_seq_len;
   input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
   input_params.kv_seq_lens =
@@ -784,6 +814,16 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
   input_params.kv_seq_lens =
       torch::tensor(input_params.kv_seq_lens_vec, int_options);
+  // deepseek 3.2
+  std::vector<int32_t> q_cu_seq_lens_vec = {0};
+  for (int32_t i = 0; i < input_params.num_sequences; ++i) {
+    int32_t seq_len = input_params.get_q_seq_len(i);
+    q_cu_seq_lens_vec.push_back(q_cu_seq_lens_vec.back() + seq_len);
+  }
+  if (!q_cu_seq_lens_vec.empty()) {
+    q_cu_seq_lens_vec.erase(q_cu_seq_lens_vec.begin());
+  }
+  input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens_vec, torch::kInt);
   input_params.new_cache_slots = torch::tensor(new_token_slot_ids, int_options);
 
   return new_inputs.to(device_, dtype_);
