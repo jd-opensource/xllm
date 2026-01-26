@@ -45,11 +45,11 @@ struct MMInputItem {
     }
   }
 
-  uint32_t type = MMType::NONE;
-
   bool has_type(MMType type_) const { return (type & type_) != 0; }
 
   bool is_embedding() const { return embedding.embedding.defined(); }
+
+  uint32_t type = MMType::NONE;
 
   std::string raw_data;  // binary
 
