@@ -48,6 +48,8 @@ struct ModelArgs {
   // attn head num
   PROPERTY(int64_t, n_heads) = 0;
 
+  PROPERTY(int64_t, actual_n_heads) = 0;
+
   // attn head num for key/value
   PROPERTY(std::optional<int64_t>, n_kv_heads);
 
