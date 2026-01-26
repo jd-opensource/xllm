@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,9 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "npu_glm4_moe_decoder_layer.h"
+#include "npu_glm4_moe_lite_decoder_layer.h"
+
+#include <gflags/gflags.h>
+
+#include <boost/algorithm/string.hpp>
+#include <utility>
 
 #include "common/global_flags.h"
+#include "layers/common/rotary_embedding_util.h"
 
 DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
@@ -24,16 +30,32 @@ DECLARE_int32(expert_parallel_degree);
 namespace xllm {
 namespace layer {
 
-static uint64_t WEIGHT_COUNT_PER_LAYER = 68;
-
-NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
-                                             const int32_t layer_id)
+NpuGlm4MoeDecoderLiteImpl::NpuGlm4MoeDecoderLiteImpl(
+    const ModelContext& context,
+    const int32_t layer_id)
     : BaseLayer(context),
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       num_speculative_tokens_(
           context.get_model_args().num_speculative_tokens()) {
   auto model_args = context.get_model_args();
+
+  if (boost::iequals(model_args.rope_scaling_rope_type(), "deepseek_yarn")) {
+    const float attn_scale =
+        model_args.attn_scalar().value_or(static_cast<float>(
+            model_args.qk_nope_head_dim() + model_args.qk_rope_head_dim()));
+    sm_scale_ = 1.0f / std::sqrt(attn_scale);
+    float mscale = layer::rotary::yarn_get_mscale(
+        model_args.rope_scaling_factor(),
+        model_args.rope_scaling_mscale_all_dim());
+    sm_scale_ = sm_scale_ * mscale * mscale;
+  } else if (boost::iequals(model_args.rope_scaling_rope_type(), "mrope")) {
+    sm_scale_ = std::pow(model_args.head_dim(), -0.5);
+  } else {
+    const float attn_scale = model_args.attn_scalar().value_or(
+        static_cast<float>(model_args.head_dim()));
+    sm_scale_ = 1.0f / std::sqrt(attn_scale);
+  }
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
 
@@ -46,22 +68,25 @@ NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
 
-  param_from_args(prefill_param_, model_args, parallel_args, true);
-  param_from_args(decode_param_, model_args, parallel_args, false);
+  // TODO PREFIX CACHE
+  // param_from_args(
+  //     prefill_param_prefixcache_, model_args, parallel_args, true, true);
+  param_from_args(prefill_param_, model_args, parallel_args, true, false);
+  param_from_args(decode_param_, model_args, parallel_args, false, false);
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   placeholder_vec_ = {1};
   device_id_ = options.device().index();
 
-  loader_ =
-      std::make_unique<Glm4MoeDecoderLoader>(WEIGHT_COUNT_PER_LAYER,
-                                             context,
-                                             layer_id_,
-                                             prefill_param_.firstKDenseReplace);
+  loader_ = std::make_unique<Glm4MoeDecoderLiteLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      layer_id_,
+      prefill_param_.firstKDenseReplace);
 
   initialize_tensors(options);
 }
 
-void NpuGlm4MoeDecoderImpl::initialize_tensors(
+void NpuGlm4MoeDecoderLiteImpl::initialize_tensors(
     const torch::TensorOptions& options) {
   // initializ placeholder
 
@@ -84,19 +109,23 @@ void NpuGlm4MoeDecoderImpl::initialize_tensors(
   initialize_weight_tensors(options);
 }
 
-void NpuGlm4MoeDecoderImpl::param_from_args(
+void NpuGlm4MoeDecoderLiteImpl::param_from_args(
     atb_speed::glm::MoeLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
-    bool is_prefill) {
-  initialize_basic_parameters(param, args, parallel_args, is_prefill);
+    bool is_prefill,
+    bool is_prefixcache) {
+  initialize_basic_parameters(
+      param, args, parallel_args, is_prefill, is_prefixcache);
   initialize_attention_parameters(param, args, parallel_args);
   initialize_mlp_parameters(param, args, parallel_args);
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
+  param.useMLA = true;
+  param.actual_headNum = args.actual_n_heads() / dp_local_tp_size_;
 }
 
-void NpuGlm4MoeDecoderImpl::initialize_weight_tensors(
+void NpuGlm4MoeDecoderLiteImpl::initialize_weight_tensors(
     const torch::TensorOptions& options) {
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
@@ -104,25 +133,31 @@ void NpuGlm4MoeDecoderImpl::initialize_weight_tensors(
   }
 }
 
-void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
+void NpuGlm4MoeDecoderLiteImpl::initialize_basic_parameters(
     atb_speed::glm::MoeLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args,
-    bool is_prefill) {
+    bool is_prefill,
+    bool is_prefixcache) {
   param.isFA = false;
+  param.enableFusedMLA = FLAGS_enable_prefix_cache;
   param.isPrefill = is_prefill;
   param.isBF16 = args.dtype() == "bfloat16";
+  param.enablePrefixCache =
+      is_prefill && FLAGS_enable_prefix_cache && is_prefixcache;
+  param.isNzCache = FLAGS_enable_prefix_cache;
   param.enableSwiGLU = true;
   param.enableLcoc = is_prefill;  // false;
 
+  param.attnLinearTransposeType = {1, 1, 1, 1, 1, 1};
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
   param.enableSplitFuse =
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
 
+  param.enableAclGraphPagedAttention = false;
   // TODO(zhangminchao1@jd.com): not support MTP model yet
-  param.enableAclGraphPagedAttention =
-      FLAGS_enable_graph && !is_prefill && args.n_layers() > 1;
+  //  FLAGS_enable_graph && !is_prefill && args.n_layers() > 1;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}
@@ -143,12 +178,10 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
   }
 
   param.enableSpeculate = false;                    // MTP
+  param.maskfree = true;                            // TODO
   param.enableSwiGLUQuantForSharedExperts = false;  // TODO
 
-  param.useQKNorm = args.use_qk_norm();
-  if (args.use_qk_norm()) {
-    WEIGHT_COUNT_PER_LAYER = 70;
-  }
+  param.useQKNorm = true;
   param.hiddenSizePerAttentionHead = args.head_dim();
   std::optional<long int> optionalValue = args.n_kv_heads();
   param.numKeyValueHeadsPerRank = std::max(
@@ -160,16 +193,36 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
   // param.worldSize = parallel_args.world_size();
 }
 
-void NpuGlm4MoeDecoderImpl::initialize_attention_parameters(
+void NpuGlm4MoeDecoderLiteImpl::initialize_attention_parameters(
     atb_speed::glm::MoeLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
+  param.qLoraRank = args.q_lora_rank();
+  // NOTE: The operation in this conditional is theoretically compatible with
+  // DeepSeek, but we add this specific check to ensure DeepSeek behavior
+  // remains unchanged
+  if (args.model_type() != "kimi_k2") {
+    param.headNum = args.n_heads();
+  }
+  param.qkNopeHeadDim = args.qk_nope_head_dim();
+  param.qkRopeHeadDim = args.qk_rope_head_dim();
+  param.kvLoraRank = args.kv_lora_rank();
+  param.softmaxScale = sm_scale_;
+  if (quantize_type_ == "w8a8_dynamic" && num_speculative_tokens_ == 0) {
+    param.enableMlaPreprocess = param.isBF16 ? false : true;
+  } else {
+    param.enableMlaPreprocess = false;
+  }
+
+  param.enableFA3 = false;           // TODO
+  param.enableKvQuantLayer = false;  // TODO
+
   param.linearHasBias = {true, false, false, false};
   // param.enableFA3 = false;           // TODO
   // param.enableKvQuantLayer = false;  // TODO
 }
 
-void NpuGlm4MoeDecoderImpl::initialize_mlp_parameters(
+void NpuGlm4MoeDecoderLiteImpl::initialize_mlp_parameters(
     atb_speed::glm::MoeLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
@@ -199,11 +252,12 @@ void NpuGlm4MoeDecoderImpl::initialize_mlp_parameters(
   // param.quantGroupSize = 0;
   param.enableInitQuant = false;
   param.enableSwigluQuant = false;
-  param.enableFusedTopk = false;
+  param.enableFusedTopk = true;
+
   param.enableCVOverlap = false;  // TODO
 }
 
-void NpuGlm4MoeDecoderImpl::initialize_parallel_parameters(
+void NpuGlm4MoeDecoderLiteImpl::initialize_parallel_parameters(
     atb_speed::glm::MoeLayerParam& param,
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = dp_local_tp_size_;
@@ -219,11 +273,17 @@ void NpuGlm4MoeDecoderImpl::initialize_parallel_parameters(
   param.maxDecodeDpTokenSize = 0;  // TODO
 }
 
-void NpuGlm4MoeDecoderImpl::initialize_quantization_parameters(
+void NpuGlm4MoeDecoderLiteImpl::initialize_quantization_parameters(
     atb_speed::glm::MoeLayerParam& param) {
   if (quantize_type_.empty()) {
     param.packQuantType = {static_cast<int>(PackType::ALL_FP),
                            static_cast<int>(PackType::ALL_FP)};
+    param.attnLinearQuantType = {static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP)};
     param.linearQuantType = {static_cast<int>(LinearType::FP),
                              static_cast<int>(LinearType::INVALID),
                              static_cast<int>(LinearType::INVALID),
@@ -253,6 +313,12 @@ void NpuGlm4MoeDecoderImpl::initialize_quantization_parameters(
     param.moePackQuantType = static_cast<int>(PackType::PACK_QUANT_UNDEFINED);
     param.packQuantType = {static_cast<int>(PackType::ALL_W8A8_ANTI),
                            static_cast<int>(PackType::ALL_W8A8_DYNAMIC_ANTI)};
+    param.attnLinearQuantType = {static_cast<int>(LinearType::INT),
+                                 static_cast<int>(LinearType::INT),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::FP),
+                                 static_cast<int>(LinearType::INT)};
     param.linearQuantType = {static_cast<int>(LinearType::INT),
                              static_cast<int>(LinearType::INVALID),
                              static_cast<int>(LinearType::INVALID),
@@ -285,7 +351,7 @@ void NpuGlm4MoeDecoderImpl::initialize_quantization_parameters(
   }
 }
 
-void NpuGlm4MoeDecoderImpl::merge_loaded_weights() {
+void NpuGlm4MoeDecoderLiteImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
   c10_npu::NPUCachingAllocator::emptyCache();
@@ -296,17 +362,18 @@ void NpuGlm4MoeDecoderImpl::merge_loaded_weights() {
   init_layer();
 }
 
-int64_t NpuGlm4MoeDecoderImpl::init_layer() {
-  BaseLayer::name_ = "glm4_moe_decoder_layer " + std::to_string(layer_id_);
-  model_name_ = "Glm4_Moe";
+int64_t NpuGlm4MoeDecoderLiteImpl::init_layer() {
+  BaseLayer::name_ = "glm4_moe_lite_decoder_layer " + std::to_string(layer_id_);
+  model_name_ = "Glm4_Moe_lite";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
 
   return atb::NO_ERROR;
 }
 
-int64_t NpuGlm4MoeDecoderImpl::init_node(atb_speed::Model::Node& node,
-                                         atb_speed::glm::MoeLayerParam& param) {
+int64_t NpuGlm4MoeDecoderLiteImpl::init_node(
+    atb_speed::Model::Node& node,
+    atb_speed::glm::MoeLayerParam& param) {
   atb::Operation* operation = nullptr;
   atb_speed::glm::MoeDecoderLayer<atb::infer::RmsNormParam> decoder_layer(
       param);
@@ -337,7 +404,7 @@ int64_t NpuGlm4MoeDecoderImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor NpuGlm4MoeDecoderImpl::forward(
+torch::Tensor NpuGlm4MoeDecoderLiteImpl::forward(
     torch::Tensor& x,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
@@ -377,7 +444,7 @@ torch::Tensor NpuGlm4MoeDecoderImpl::forward(
   return tensor_placeholder_;
 }
 
-void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
+void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
     torch::Tensor& cos_pos,
@@ -396,6 +463,7 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(sin_pos);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
       atb_speed::Utils::AtTensor2Tensor(attn_mask);
+
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 4) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_k_cache());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 5) =
@@ -413,28 +481,58 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
       atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
+
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
 
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.expert_array);
+  // ADD in_q_len
+  if (input_params.batch_forward_type.is_chunked_prefill()) {
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
+        atb_speed::Utils::AtTensor2Tensor(input_params.kv_cache_tokens_nums);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
+        const_cast<int32_t*>(input_params.kv_cache_tokens_nums_host.data());
+  } else {
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
+        atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
+        const_cast<int32_t*>(placeholder_vec_zero_.data());
+  }
+
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
-      atb_speed::Utils::AtTensor2Tensor(expert_group_);
+      atb_speed::Utils::AtTensor2Tensor(input_params.expert_array);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
-      atb_speed::Utils::AtTensor2Tensor(one_hot_);
+      atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
+      atb_speed::Utils::AtTensor2Tensor(one_hot_);
+  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 15) =
       atb_speed::Utils::AtTensor2Tensor(zero_hot_);
 
-  int32_t input_idx = WEIGHT_COUNT_PER_LAYER + 15;
+  int32_t input_idx = WEIGHT_COUNT_PER_LAYER + 16;
 
-  if (is_prefill &&
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+  // ADD prefix
+  if (input_params.batch_forward_type.is_chunked_prefill()) {
     node.variantPack.inTensors.at(input_idx) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(input_idx).hostData =
-        const_cast<int32_t*>(input_params.q_seq_lens_vec.data());
-    input_idx++;
+        atb_speed::Utils::AtTensor2Tensor(input_params.history_compressed_kv);
+    node.variantPack.inTensors.at(input_idx + 1) =
+        atb_speed::Utils::AtTensor2Tensor(input_params.history_k_rope);
+    node.variantPack.inTensors.at(input_idx + 2) =
+        atb_speed::Utils::AtTensor2Tensor(input_params.ring_cur_seqlen);
+    node.variantPack.inTensors.at(input_idx + 2).hostData =
+        const_cast<int32_t*>(input_params.ring_cur_seqlen_host.data());
+    node.variantPack.inTensors.at(input_idx + 3) =
+        atb_speed::Utils::AtTensor2Tensor(input_params.ring_cache_seqlen);
+    node.variantPack.inTensors.at(input_idx + 3).hostData =
+        const_cast<int32_t*>(input_params.ring_cache_seqlen_host.data());
   }
+
+  // if (is_prefill &&
+  //     (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+  //   node.variantPack.inTensors.at(input_idx) =
+  //       atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
+  //   node.variantPack.inTensors.at(input_idx).hostData =
+  //       const_cast<int32_t*>(input_params.q_seq_lens_vec.data());
+  //   input_idx++;
+  // }
 
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);

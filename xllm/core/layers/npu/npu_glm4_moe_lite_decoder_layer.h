@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,22 +22,24 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 
 #include "framework/model/model_args.h"
+#include "framework/model/model_input_params.h"
 #include "framework/model/npu_dp_ep_padding.h"
+#include "framework/model_context.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "loader/glm4_moe_decoder_loader.h"
+#include "loader/glm4_moe_lite_decoder_loader.h"
 #include "npu_base_layer.h"
 #include "xllm_kernels/models/glm/layer/moe_decoder_layer.h"
 
 namespace xllm {
 namespace layer {
 
-class NpuGlm4MoeDecoderImpl : public BaseLayer {
+class NpuGlm4MoeDecoderLiteImpl : public BaseLayer {
  public:
-  explicit NpuGlm4MoeDecoderImpl(const ModelContext& context,
-                                 const int32_t layer_id);
+  explicit NpuGlm4MoeDecoderLiteImpl(const ModelContext& context,
+                                     const int32_t layer_id);
 
-  ~NpuGlm4MoeDecoderImpl() override = default;
+  ~NpuGlm4MoeDecoderLiteImpl() override = default;
 
   void merge_loaded_weights();
 
@@ -67,12 +69,14 @@ class NpuGlm4MoeDecoderImpl : public BaseLayer {
   void param_from_args(atb_speed::glm::MoeLayerParam& param,
                        const ModelArgs& args,
                        const ParallelArgs& parallel_args,
-                       bool is_prefill);
+                       bool is_prefill,
+                       bool is_prefixcache);
 
   void initialize_basic_parameters(atb_speed::glm::MoeLayerParam& param,
                                    const ModelArgs& args,
                                    const ParallelArgs& parallel_args,
-                                   bool is_prefill);
+                                   bool is_prefill,
+                                   bool is_prefixcache);
 
   void initialize_attention_parameters(atb_speed::glm::MoeLayerParam& param,
                                        const ModelArgs& args,
@@ -114,6 +118,7 @@ class NpuGlm4MoeDecoderImpl : public BaseLayer {
   int32_t end_expert_id_;
   int32_t ep_rank_;
 
+  float sm_scale_;
   int32_t num_speculative_tokens_ = 0;
   atb_speed::glm::MoeLayerParam prefill_param_;
   atb_speed::glm::MoeLayerParam decode_param_;
@@ -135,7 +140,7 @@ class NpuGlm4MoeDecoderImpl : public BaseLayer {
   torch::Tensor at_start_expert_id_;
   torch::Tensor at_in_device_expert_count_;
 };
-TORCH_MODULE(NpuGlm4MoeDecoder);
+TORCH_MODULE(NpuGlm4MoeDecoderLite);
 
 std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,
                                           int32_t dp_local_tp_size,
