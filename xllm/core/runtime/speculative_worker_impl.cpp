@@ -593,6 +593,19 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   input_params.q_seq_lens_vec = std::move(q_seq_lens_vec);
   input_params.q_seq_lens =
       torch::tensor(input_params.q_seq_lens_vec, int_options);
+  // Rebuild q_cu_seq_lens to match the expanded q_seq_lens_vec size.
+  // The original q_cu_seq_lens from input has size=num_sequences, but after
+  // MTP validation expansion (when enable_atb_spec_kernel=false), we need
+  // size=total_num_val_tokens to match actual_batch_size.
+  if (!input_params.q_seq_lens_vec.empty()) {
+    std::vector<int32_t> q_cu_seq_lens(input_params.q_seq_lens_vec.size());
+    std::partial_sum(input_params.q_seq_lens_vec.begin(),
+                     input_params.q_seq_lens_vec.end(),
+                     q_cu_seq_lens.begin());
+    input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens, int_options);
+  } else {
+    input_params.q_cu_seq_lens = torch::Tensor();
+  }
   input_params.kv_max_seq_len = kv_max_seq_len;
   input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
   input_params.kv_seq_lens =
