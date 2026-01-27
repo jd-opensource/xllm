@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -140,7 +140,7 @@ class NpuGlm4MoeDecoderLiteImpl : public BaseLayer {
   torch::Tensor at_start_expert_id_;
   torch::Tensor at_in_device_expert_count_;
 };
-TORCH_MODULE(NpuGlm4MoeDecoderLite);
+TORCH_MODULE(NpuGlm4MoeDecoderLiteImpl);
 
 std::vector<torch::Tensor> get_dtp_inputs(torch::Tensor token_size_per_dp_group,
                                           int32_t dp_local_tp_size,

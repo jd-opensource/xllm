@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,8 +29,6 @@ DECLARE_int32(expert_parallel_degree);
 
 namespace xllm {
 namespace layer {
-
-static uint64_t WEIGHT_COUNT_PER_LAYER = 84;
 
 NpuGlm4MoeDecoderLiteImpl::NpuGlm4MoeDecoderLiteImpl(
     const ModelContext& context,

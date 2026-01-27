@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -265,7 +265,7 @@ static const std::map<int, int> WEIGHT_SHARD = {
     {IN_Q_B_WEIGHT, 0},
     {IN_Q_B_BIAS, 0},
     {IN_K_B_WEIGHT, 0},
-    {IN_K_B_WEIGHT, 0},
+    {IN_K_B_BIAS, 0},
     {IN_QKV_DENSE_WEIGHT, 1},
 
     {IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT, 0},
@@ -281,7 +281,7 @@ static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
     {IN_Q_B_DESCALE, 0},
     {IN_Q_B_OFFSET, 0},
     {IN_K_B_WEIGHT, 0},
-    {IN_K_B_WEIGHT, 0},
+    {IN_K_B_BIAS, 0},
     {IN_K_B_SCALE, 0},
     {IN_K_B_DESCALE, 0},
     {IN_K_B_OFFSET, 0},
@@ -319,7 +319,7 @@ Glm4MoeDecoderLiteLoader::Glm4MoeDecoderLiteLoader(
 
   tensor_placeholder_ = torch::zeros({1}).to(options);
 
-  weight_count_ = 84;
+  weight_count_ = WEIGHT_COUNT_PER_LAYER;
 
   at_weight_tensors_.resize(weight_count_);
 
@@ -400,7 +400,7 @@ void Glm4MoeDecoderLiteLoader::verify_loaded_weights() const {
         name == "mlp.gate.e_score_correction_bias") {
       continue;
     }
-    CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({0}))
+    CHECK(at_weight_tensors_[index].numel() != 0)
         << layer_id_ << "-weight is not loaded for " << name;
   }
 }
