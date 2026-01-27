@@ -129,6 +129,8 @@ void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   ret = cnMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
 #elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
+#elif defined(USE_MUSA)
+  ret = muMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
 #endif
   CHECK_EQ(ret, 0) << "Failed to create virtual memory handle";
 }
@@ -141,6 +143,8 @@ void release_phy_mem_handle(PhyMemHandle& phy_mem_handle) {
   ret = cnMemRelease(phy_mem_handle);
 #elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemRelease(phy_mem_handle);
+#elif defined(USE_MUSA)
+  ret = muMemRelease(phy_mem_handle);
 #endif
   CHECK_EQ(ret, 0) << "Failed to release physical memory handle";
 }
@@ -153,6 +157,8 @@ void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   ret = cnMemAddressFree(vir_ptr, aligned_size);
 #elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemAddressFree(vir_ptr, aligned_size);
+#elif defined(USE_MUSA)
+  ret = muMemAddressFree(vir_ptr, aligned_size);
 #endif
   CHECK_EQ(ret, 0) << "Failed to release virtual memory handle";
 }
@@ -183,6 +189,16 @@ void map(VirPtr& vir_ptr,
   accessDesc.location.id = device_id;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   ret = cuMemSetAccess(vir_ptr, granularity_size, &accessDesc, 1);
+#elif defined(USE_MUSA)
+  ret = muMemMap(vir_ptr, granularity_size, 0, phy_mem_handle, 0);
+  CHECK_EQ(ret, 0) << "Failed to map virtual memory to physical memory";
+
+  // Set access permissions on the mapped virtual address range
+  MUmemAccessDesc accessDesc = {};
+  accessDesc.location.type = MU_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = device_id;
+  accessDesc.flags = MU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  ret = muMemSetAccess(vir_ptr, granularity_size, &accessDesc, 1);
 #endif
   CHECK_EQ(ret, 0) << "Failed to set memory access permissions";
 }

@@ -23,6 +23,9 @@ limitations under the License.
 #include "cuda/cuda_ops_api.h"
 #elif defined(USE_ILU)
 #include "ilu/ilu_ops_api.h"
+#elif defined(USE_MUSA)
+#include "cuda/cuda_ops_api.h"
+#include "musa/musa_ops_api.h"
 #endif
 
 #include <numeric>
@@ -47,7 +50,7 @@ void apply_rotary(RotaryParams& params) {
 #elif defined(USE_NPU)
   npu::apply_rotary(
       params.q, params.k, params.cos_sin, params.position_ids.value());
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MUSA)
   bool is_neox = !params.interleaved;
 
   auto pos_ids = params.position_ids.value().to(torch::kInt64);
@@ -65,8 +68,6 @@ void apply_rotary(RotaryParams& params) {
   torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
   ilu::apply_rope_pos_ids_cos_sin_cache(
       params.q, params.k, cos_sin, long_position_ids, params.interleaved);
-#elif defined(USE_MUSA)
-
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -84,12 +85,10 @@ void active(ActivationParams& params) {
               params.expert_size);
 #elif defined(USE_NPU)
   params.output = npu::active(params.input, params.act_mode);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MUSA)
   cuda::act_and_mul(params.output, params.input, params.act_mode);
 #elif defined(USE_ILU)
   ilu::act_and_mul(params.output, params.input, params.act_mode);
-#elif defined(USE_MUSA)
-
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -109,7 +108,7 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
                            params.k_cache,
                            params.v_cache,
                            params.slot_mapping);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MUSA)
   cuda::reshape_paged_cache(params.slot_mapping,
                             params.key,
                             params.value.value_or(torch::Tensor()),
@@ -122,8 +121,6 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
                            params.k_cache,
                            params.v_cache,
                            params.slot_mapping);
-#elif defined(USE_MUSA)
-
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -181,7 +178,7 @@ void batch_prefill(AttentionParams& params) {
                      params.seq_lens,
                      params.scale,
                      params.output);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MUSA)
   cuda::batch_prefill(params.attn_metadata.plan_info->uri,
                       params.attn_metadata.plan_info->plan_info,
                       params.float_workspace_buffer,
@@ -219,8 +216,6 @@ void batch_prefill(AttentionParams& params) {
                      params.window_size_right,
                      params.attn_metadata.compute_dtype,
                      params.return_lse);
-#elif defined(USE_MUSA)
-
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -271,7 +266,7 @@ void batch_decode(AttentionParams& params) {
                       params.seq_lens,
                       params.output);
   }
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MUSA)
   cuda::batch_decode(params.attn_metadata.plan_info->uri,
                      params.attn_metadata.plan_info->plan_info,
                      params.float_workspace_buffer,
@@ -318,8 +313,6 @@ void batch_decode(AttentionParams& params) {
                     params.return_lse,
                     params.attn_metadata.is_causal,
                     params.kv_cache_quant_bit_size);
-#elif defined(USE_MUSA)
-
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -343,7 +336,21 @@ void fused_layernorm(FusedLayerNormParams& params) {
                        params.store_output_after_norm,
                        params.dynamic_quant);
 #elif defined(USE_MUSA)
-
+  musa::fused_layernorm(params.input,
+                        params.output,
+                        params.residual,
+                        params.weight,
+                        params.beta,
+                        params.bias,
+                        params.quant_scale,
+                        params.residual_out,
+                        params.smooth_quant_scale,
+                        params.normed_out,
+                        params.mode,
+                        params.eps,
+                        params.store_output_before_norm,
+                        params.store_output_after_norm,
+                        params.dynamic_quant);
 #elif defined(USE_NPU)
   if (params.residual.has_value()) {
     std::tie(params.output, std::ignore, params.residual_out) =
@@ -353,7 +360,7 @@ void fused_layernorm(FusedLayerNormParams& params) {
     params.output =
         npu::rms_norm(params.input, params.weight, params.eps, params.mode);
   }
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MUSA)
   if (params.residual.has_value()) {
     cuda::fused_add_rms_norm(
         params.input, params.residual.value(), params.weight, params.eps);
@@ -374,8 +381,6 @@ void fused_layernorm(FusedLayerNormParams& params) {
   } else {
     ilu::rms_norm(params.output, params.input, params.weight, params.eps);
   }
-#elif defined(USE_MUSA)
-
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -387,12 +392,10 @@ torch::Tensor matmul(MatmulParams& params) {
       params.a, params.b, params.bias, params.c, params.alpha, params.beta);
 #elif defined(USE_NPU)
   return npu::matmul(params.a, params.b, params.bias);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MUSA)
   return cuda::matmul(params.a, params.b, params.bias);
 #elif defined(USE_ILU)
   return ilu::matmul(params.a, params.b, params.bias);
-#elif defined(USE_MUSA)
-  return torch::empty(1);
 #else
   NOT_IMPLEMENTED();
 #endif

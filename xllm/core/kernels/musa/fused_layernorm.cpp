@@ -15,6 +15,13 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "ATen/Tensor.h"
+#include "MTTOplib/Ops.h"
+
 namespace xllm::kernel::musa {
 void fused_layernorm(const torch::Tensor& input,
                      torch::Tensor& output,
@@ -30,6 +37,8 @@ void fused_layernorm(const torch::Tensor& input,
                      double eps,
                      bool store_output_before_norm,
                      bool store_output_after_norm,
-                     bool dynamic_quant) {}
+                     bool dynamic_quant) {
+  xllm_musa::FusedRMSNorm(input, output, weight, eps);
+}
 
 }  // namespace xllm::kernel::musa
