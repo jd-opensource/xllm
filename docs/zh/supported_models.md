@@ -3,7 +3,7 @@
 ## LLM
 |                          |  NPU  | NVIDIA GPU |  MLU  |
 | ------------------------ | :---: | :--------: | :---: |
-| DeepSeek-V3/R1           |   ✅   |     ❌      |   ✅   |
+| DeepSeek-V3/R1/V3.1/V3.2 |   ✅   |     ❌      |   ✅   |
 | DeepSeek-R1-Distill-Qwen |   ✅   |     ❌      |   ❌   |
 | Qwen2/2.5/QwQ            |   ✅   |     ✅      |   ✅   |
 | Qwen3                    |   ✅   |     ✅      |   ✅   |
