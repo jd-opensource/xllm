@@ -21,30 +21,17 @@ limitations under the License.
 
 namespace xllm::kernel::musa {
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+#define DISPATCH_CASE_FLOATING_TYPES(...)              \
+  AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__)  \
+  AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
+#define DISPATCH_FLOATING_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(TYPE, NAME, DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
+// NOLINTEND(cppcoreguidelines-macro-usage)
+
 bool support_pdl();
 
 std::string path_to_uri_so_lib(const std::string& uri);
-
-std::string get_batch_prefill_uri(const std::string& backend,
-                                  torch::ScalarType dtype_q,
-                                  torch::ScalarType dtype_kv,
-                                  torch::ScalarType dtype_o,
-                                  torch::ScalarType dtype_idx,
-                                  int64_t head_dim_qk,
-                                  int64_t head_dim_vo,
-                                  int64_t pos_encoding_mode,
-                                  bool use_sliding_window,
-                                  bool use_logits_soft_cap,
-                                  bool use_fp16_qk_reduction);
-
-std::string get_batch_decode_uri(torch::ScalarType dtype_q,
-                                 torch::ScalarType dtype_kv,
-                                 torch::ScalarType dtype_o,
-                                 torch::ScalarType dtype_idx,
-                                 int64_t head_dim_qk,
-                                 int64_t head_dim_vo,
-                                 int64_t pos_encoding_mode,
-                                 bool use_sliding_window,
-                                 bool use_logits_soft_cap);
 
 }  // namespace xllm::kernel::musa

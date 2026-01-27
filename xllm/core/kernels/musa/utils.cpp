@@ -15,6 +15,12 @@ limitations under the License.
 
 #include "utils.h"
 
+#include <musa_runtime.h>
+
+#include <cstdlib>
+
+#include "core/util/env_var.h"
+
 namespace {
 const std::unordered_map<torch::ScalarType, std::string_view>
     filename_safe_dtype_map = {
@@ -40,33 +46,8 @@ namespace xllm::kernel::musa {
 bool support_pdl() { return false; }
 
 std::string path_to_uri_so_lib(const std::string& uri) {
-  return std::string("");
-}
-
-std::string get_batch_prefill_uri(const std::string& backend,
-                                  torch::ScalarType dtype_q,
-                                  torch::ScalarType dtype_kv,
-                                  torch::ScalarType dtype_o,
-                                  torch::ScalarType dtype_idx,
-                                  int64_t head_dim_qk,
-                                  int64_t head_dim_vo,
-                                  int64_t pos_encoding_mode,
-                                  bool use_sliding_window,
-                                  bool use_logits_soft_cap,
-                                  bool use_fp16_qk_reduction) {
-  return std::string("");
-}
-
-std::string get_batch_decode_uri(torch::ScalarType dtype_q,
-                                 torch::ScalarType dtype_kv,
-                                 torch::ScalarType dtype_o,
-                                 torch::ScalarType dtype_idx,
-                                 int64_t head_dim_qk,
-                                 int64_t head_dim_vo,
-                                 int64_t pos_encoding_mode,
-                                 bool use_sliding_window,
-                                 bool use_logits_soft_cap) {
-  return std::string("");
+  return util::get_string_env("FLASHINFER_OPS_PATH") + "/" + uri + "/" + uri +
+         ".so";
 }
 
 }  // namespace xllm::kernel::musa

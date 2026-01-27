@@ -84,6 +84,23 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
   accessDesc.location.id = device_id;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   ret = cuMemSetAccess(phy_mem_handle, granularity_size, &accessDesc, 1);
+#elif defined(USE_MUSA)
+  MUmemAllocationProp prop = {};
+  prop.type = MU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.location.type = MU_MEM_LOCATION_TYPE_DEVICE;
+  prop.location.id = device_id;
+  ret = muMemCreate(&phy_mem_handle, granularity_size, &prop, 0);
+
+  // get the recommended granularity size
+  ret = muMemGetAllocationGranularity(
+      &granularity_size, &prop, MU_MEM_ALLOC_GRANULARITY_RECOMMENDED);
+  CHECK_EQ(ret, 0) << "Failed to get allocation granularity";
+
+  MUmemAccessDesc accessDesc = {};
+  accessDesc.location.type = MU_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = device_id;
+  accessDesc.flags = MU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  ret = muMemSetAccess(phy_mem_handle, granularity_size, &accessDesc, 1);
 #endif
   CHECK_EQ(ret, 0) << "Failed to create physical memory handle";
   FLAGS_phy_page_granularity_size = granularity_size;
@@ -99,6 +116,8 @@ void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   ret = cnMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
 #elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
+#elif defined(USE_MUSA)
+  ret = muMemAddressReserve(&vir_ptr, aligned_size, 0, 0, 0);
 #endif
   CHECK_EQ(ret, 0) << "Failed to create virtual memory handle";
 }
@@ -111,6 +130,8 @@ void release_phy_mem_handle(PhyMemHandle& phy_mem_handle) {
   ret = cnMemRelease(phy_mem_handle);
 #elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemRelease(phy_mem_handle);
+#elif defined(USE_MUSA)
+  ret = muMemRelease(phy_mem_handle);
 #endif
   CHECK_EQ(ret, 0) << "Failed to release physical memory handle";
 }
@@ -123,6 +144,8 @@ void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
   ret = cnMemAddressFree(vir_ptr, aligned_size);
 #elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemAddressFree(vir_ptr, aligned_size);
+#elif defined(USE_MUSA)
+  ret = muMemAddressFree(vir_ptr, aligned_size);
 #endif
   CHECK_EQ(ret, 0) << "Failed to release virtual memory handle";
 }
@@ -138,6 +161,9 @@ void map(VirPtr& vir_ptr, PhyMemHandle& phy_mem_handle) {
 #elif defined(USE_CUDA) || defined(USE_ILU)
   ret =
       cuMemMap(vir_ptr, FLAGS_phy_page_granularity_size, 0, phy_mem_handle, 0);
+#elif defined(USE_MUSA)
+  ret =
+      muMemMap(vir_ptr, FLAGS_phy_page_granularity_size, 0, phy_mem_handle, 0);
 #endif
   CHECK_EQ(ret, 0) << "Failed to map virtual memory to physical memory";
 }
@@ -150,6 +176,8 @@ void unmap(VirPtr& vir_ptr, size_t aligned_size) {
   ret = cnMemUnmap(vir_ptr, aligned_size);
 #elif defined(USE_CUDA) || defined(USE_ILU)
   ret = cuMemUnmap(vir_ptr, aligned_size);
+#elif defined(USE_MUSA)
+  ret = muMemUnmap(vir_ptr, aligned_size);
 #endif
   CHECK_EQ(ret, 0) << "Failed to unmap virtual memory from physical memory";
 }
