@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <unordered_set>
 
 namespace xllm {
 
@@ -209,6 +210,58 @@ page_id_t PhyPagePool::allocate_contiguous_from_right(size_t count) {
             << " contiguous pages from right, start_page=" << start_page;
 
   return start_page;
+}
+
+std::vector<page_id_t> PhyPagePool::allocate_pages_from_right(size_t count) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  CHECK(initialized_) << "PhyPagePool not initialized";
+
+  if (count == 0 || count > free_page_ids_.size()) {
+    LOG(WARNING) << "PhyPagePool: not enough free pages for non-contiguous "
+                    "allocation, requested "
+                 << count << ", available " << free_page_ids_.size();
+    return {};
+  }
+
+  std::vector<page_id_t> result;
+  result.reserve(count);
+
+  // Scan from right to left to collect free pages (non-contiguous ok)
+  for (int64_t i = static_cast<int64_t>(num_total_pages_) - 1;
+       i >= 0 && result.size() < count;
+       --i) {
+    if (!page_allocated_[i]) {
+      result.push_back(static_cast<page_id_t>(i));
+    }
+  }
+
+  if (result.size() < count) {
+    LOG(WARNING) << "PhyPagePool: cannot find enough free pages from right, "
+                    "requested "
+                 << count << ", found " << result.size();
+    return {};
+  }
+
+  // Mark these pages as allocated
+  for (page_id_t page_id : result) {
+    page_allocated_[page_id] = true;
+  }
+
+  // Remove from free_page_ids_ in one pass - O(n)
+  std::unordered_set<page_id_t> allocated_set(result.begin(), result.end());
+  auto new_end =
+      std::remove_if(free_page_ids_.begin(),
+                     free_page_ids_.end(),
+                     [&allocated_set](page_id_t id) {
+                       return allocated_set.find(id) != allocated_set.end();
+                     });
+  free_page_ids_.erase(new_end, free_page_ids_.end());
+
+  LOG(INFO) << "PhyPagePool: allocated " << count
+            << " non-contiguous pages from right";
+
+  return result;
 }
 
 void PhyPagePool::free_weight_pages(const std::vector<page_id_t>& page_ids) {

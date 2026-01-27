@@ -359,13 +359,26 @@ bool XTensorAllocator::broadcast_alloc_weight_pages(const std::string& model_id,
   if (world_size_ <= 1) {
     // Single process: allocate locally from PhyPagePool and record
     auto& pool = PhyPagePool::get_instance();
+
+    // Try contiguous allocation first (from GlobalXtensor)
     page_id_t start_page = pool.allocate_contiguous_from_right(num_pages);
-    if (start_page < 0) {
+    if (start_page >= 0) {
+      record_weight_allocation(model_id, start_page, num_pages);
+      return true;
+    }
+
+    // Fallback: try non-contiguous allocation using XTensor
+    LOG(WARNING) << "Contiguous allocation failed for " << num_pages
+                 << " pages, trying non-contiguous fallback (XTensor)";
+
+    std::vector<page_id_t> page_ids = pool.allocate_pages_from_right(num_pages);
+    if (page_ids.empty()) {
       LOG(ERROR) << "Failed to allocate " << num_pages
-                 << " weight pages locally";
+                 << " weight pages (both contiguous and non-contiguous)";
       return false;
     }
-    record_weight_allocation(model_id, start_page, num_pages);
+
+    record_weight_fallback_allocation(model_id, page_ids);
     return true;
   }
 
@@ -562,10 +575,42 @@ void XTensorAllocator::record_weight_allocation(const std::string& model_id,
   tensors.weight_num_pages = num_pages;
   tensors.weight_base_ptr = base_ptr;
   tensors.weight_current_offset = 0;
+  tensors.using_weight_xtensor = false;
+  tensors.weight_xtensor.reset();
 
   LOG(INFO) << "XTensorAllocator: recorded weight allocation for model "
             << model_id << ", start_page=" << start_page_id
             << ", num_pages=" << num_pages << ", base_ptr=" << base_ptr;
+}
+
+void XTensorAllocator::record_weight_fallback_allocation(
+    const std::string& model_id,
+    const std::vector<page_id_t>& page_ids) {
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  auto& tensors = get_or_create_model_tensors(model_id);
+
+  // Create XTensor with the non-contiguous preallocated pages
+  tensors.weight_xtensor =
+      std::make_unique<XTensor>(page_ids, torch::kBFloat16, dev_);
+  if (tensors.weight_xtensor->vaddr() == nullptr) {
+    LOG(ERROR) << "XTensorAllocator: failed to create XTensor for model "
+               << model_id;
+    // Free pages on failure
+    PhyPagePool::get_instance().free_weight_pages(page_ids);
+    tensors.weight_xtensor.reset();
+    return;
+  }
+
+  tensors.using_weight_xtensor = true;
+  tensors.weight_num_pages = page_ids.size();
+  tensors.weight_base_ptr = tensors.weight_xtensor->vaddr();
+  tensors.weight_current_offset = 0;
+  tensors.weight_start_page_id = -1;  // Not applicable for non-contiguous
+
+  LOG(INFO) << "XTensorAllocator: recorded XTensor allocation for model "
+            << model_id << ", num_pages=" << page_ids.size()
+            << ", base_ptr=" << tensors.weight_base_ptr << " (fallback mode)";
 }
 
 bool XTensorAllocator::allocate_weight(const std::string& model_id,
@@ -579,6 +624,19 @@ bool XTensorAllocator::allocate_weight(const std::string& model_id,
     return false;
   }
 
+  // Use XTensor's allocate if in fallback mode
+  if (tensors->using_weight_xtensor && tensors->weight_xtensor) {
+    if (!tensors->weight_xtensor->allocate(ptr, size)) {
+      LOG(ERROR) << "XTensor::allocate failed for model " << model_id;
+      return false;
+    }
+    tensors->weight_current_offset = tensors->weight_xtensor->alloc_offset();
+    VLOG(1) << "XTensorAllocator: allocated " << size
+            << " bytes via XTensor for model " << model_id << ", ptr=" << ptr;
+    return true;
+  }
+
+  // Normal path: allocate from GlobalXtensor
   auto& global_xtensor = GlobalXtensor::get_instance();
   size_t region_size = tensors->weight_num_pages * global_xtensor.page_size();
 
@@ -648,25 +706,37 @@ size_t XTensorAllocator::free_weight_from_global_xtensor(
   }
 
   size_t num_pages = tensors->weight_num_pages;
-  page_id_t start_page = tensors->weight_start_page_id;
 
-  // Build page_ids vector and free via PhyPagePool
-  std::vector<page_id_t> page_ids;
-  page_ids.reserve(num_pages);
-  for (size_t i = 0; i < num_pages; ++i) {
-    page_ids.push_back(start_page + static_cast<page_id_t>(i));
+  // Handle XTensor fallback case
+  if (tensors->using_weight_xtensor && tensors->weight_xtensor) {
+    // XTensor's destructor will unmap and free pages
+    tensors->weight_xtensor.reset();
+    tensors->using_weight_xtensor = false;
+    LOG(INFO) << "Freed " << num_pages
+              << " weight pages (XTensor fallback) for model " << model_id;
+  } else {
+    // Normal path: free contiguous pages from GlobalXtensor
+    page_id_t start_page = tensors->weight_start_page_id;
+
+    // Build page_ids vector and free via PhyPagePool
+    std::vector<page_id_t> page_ids;
+    page_ids.reserve(num_pages);
+    for (size_t i = 0; i < num_pages; ++i) {
+      page_ids.push_back(start_page + static_cast<page_id_t>(i));
+    }
+
+    auto& pool = PhyPagePool::get_instance();
+    pool.free_weight_pages(page_ids);
+
+    LOG(INFO) << "Freed " << num_pages << " weight pages for model "
+              << model_id;
   }
-
-  auto& pool = PhyPagePool::get_instance();
-  pool.free_weight_pages(page_ids);
 
   // Clear weight allocation record
   tensors->weight_start_page_id = -1;
   tensors->weight_num_pages = 0;
   tensors->weight_base_ptr = nullptr;
   tensors->weight_current_offset = 0;
-
-  LOG(INFO) << "Freed " << num_pages << " weight pages for model " << model_id;
 
   return num_pages;
 }

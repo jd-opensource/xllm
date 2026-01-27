@@ -37,6 +37,14 @@ class XTensor {
           torch::Dtype dtype,
           torch::Device dev,
           PhyPage* zero_page);
+
+  // Constructor for weight tensor using pre-allocated page_ids (non-contiguous)
+  // page_ids: physical page IDs from PhyPagePool (allocated via
+  // allocate_pages_from_right)
+  XTensor(const std::vector<page_id_t>& page_ids,
+          torch::Dtype dtype,
+          torch::Device dev);
+
   ~XTensor();
 
   bool map(offset_t offset);
@@ -45,6 +53,14 @@ class XTensor {
   // Map/unmap all pages (for weight tensors)
   bool map_all();
   bool unmap_all();
+
+  // Map all pages using pre-allocated page_ids (for weight fallback)
+  // page_ids: physical page IDs to use
+  // Returns true on success
+  bool map_with_page_ids(const std::vector<page_id_t>& page_ids);
+
+  // Check if this XTensor uses pre-allocated pages (weight fallback mode)
+  bool is_using_preallocated_pages() const { return use_preallocated_pages_; }
 
   // Allocate a chunk of memory from this tensor (bump allocator style)
   // Used for weight tensors where each layer allocates its own portion.
@@ -103,6 +119,10 @@ class XTensor {
 
   // Bump allocator offset for weight allocation
   size_t alloc_offset_ = 0;
+
+  // For weight fallback mode: use pre-allocated pages from PhyPagePool
+  bool use_preallocated_pages_ = false;
+  std::vector<page_id_t> preallocated_page_ids_;  // Stored for cleanup
 };
 
 }  // namespace xllm
