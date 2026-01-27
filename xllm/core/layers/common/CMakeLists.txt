@@ -55,4 +55,6 @@ cc_library(
     :platform
 )
 
-add_subdirectory(tests)
+if(USE_MLU)
+  add_subdirectory(tests)
+endif()

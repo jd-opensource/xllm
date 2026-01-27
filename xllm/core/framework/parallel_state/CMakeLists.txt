@@ -47,4 +47,6 @@ if(USE_NPU)
   )
 endif()
 
-add_subdirectory(tests)
+if(USE_MLU)
+  add_subdirectory(tests)
+endif()
