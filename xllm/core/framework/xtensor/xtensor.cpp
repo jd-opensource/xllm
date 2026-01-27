@@ -55,8 +55,55 @@ XTensor::XTensor(size_t size,
   init_with_zero_();
 }
 
+XTensor::XTensor(const std::vector<page_id_t>& page_ids,
+                 torch::Dtype dtype,
+                 torch::Device dev)
+    : vaddr_(0),
+      size_(0),
+      page_size_(FLAGS_phy_page_granularity_size),
+      dtype_(dtype),
+      dev_(dev),
+      zero_page_(nullptr),
+      use_preallocated_pages_(true),
+      preallocated_page_ids_(page_ids) {
+  if (page_ids.empty()) {
+    LOG(ERROR) << "XTensor: empty page_ids for preallocated mode";
+    return;
+  }
+
+  size_ = page_ids.size() * page_size_;
+  vaddr_ = alloc_virtual_mem(size_);
+
+  if (!map_with_page_ids(page_ids)) {
+    LOG(ERROR) << "XTensor: failed to map preallocated pages";
+    vmm::release_vir_ptr(vaddr_, size_);
+    vaddr_ = nullptr;
+    size_ = 0;
+  }
+}
+
 XTensor::~XTensor() {
-  // Collect all physical pages to return in batch
+  if (use_preallocated_pages_) {
+    // Preallocated pages mode: unmap and free pages via free_weight_pages
+    if (vaddr_) {
+      for (size_t offset = 0; offset < size_; offset += page_size_) {
+        VirPtr addr = reinterpret_cast<VirPtr>(
+            reinterpret_cast<uintptr_t>(vaddr_) + offset);
+        vmm::unmap(addr, page_size_);
+      }
+      vmm::release_vir_ptr(vaddr_, size_);
+    }
+
+    // Free the preallocated pages back to PhyPagePool
+    if (!preallocated_page_ids_.empty()) {
+      PhyPagePool::get_instance().free_weight_pages(preallocated_page_ids_);
+      LOG(INFO) << "XTensor: freed " << preallocated_page_ids_.size()
+                << " preallocated weight pages";
+    }
+    return;
+  }
+
+  // Normal mode: return owned pages to pool
   std::vector<std::unique_ptr<PhyPage>> pages_to_return;
   pages_to_return.reserve(mapping_.size());
   for (auto& [page_id, page] : mapping_) {
@@ -161,6 +208,47 @@ bool XTensor::unmap_all() {
       }
     }
   }
+  return true;
+}
+
+bool XTensor::map_with_page_ids(const std::vector<page_id_t>& page_ids) {
+  auto& pool = PhyPagePool::get_instance();
+  const auto& all_pages = pool.get_all_pages();
+
+  for (size_t i = 0; i < page_ids.size(); ++i) {
+    page_id_t phy_page_id = page_ids[i];
+
+    if (phy_page_id < 0 ||
+        static_cast<size_t>(phy_page_id) >= all_pages.size()) {
+      LOG(ERROR) << "XTensor::map_with_page_ids: invalid page_id "
+                 << phy_page_id;
+      return false;
+    }
+
+    PhyPage* page = all_pages[phy_page_id];
+    if (page == nullptr) {
+      LOG(ERROR) << "XTensor::map_with_page_ids: null page at page_id "
+                 << phy_page_id;
+      return false;
+    }
+
+    // Map the physical page to the i-th position in virtual space
+    size_t offset = i * page_size_;
+    VirPtr vaddr =
+        reinterpret_cast<VirPtr>(reinterpret_cast<uintptr_t>(vaddr_) + offset);
+
+    // Unmap first (in case there's existing mapping), then map the physical
+    // page
+    vmm::unmap(vaddr, page_size_);
+    PhyMemHandle phy_handle = page->get_phy_handle();
+    vmm::map(vaddr, phy_handle);
+
+    // Note: we don't store in mapping_ since we don't own these pages
+    // They will be freed via free_weight_pages() in PhyPagePool
+  }
+
+  LOG(INFO) << "XTensor::map_with_page_ids: mapped " << page_ids.size()
+            << " preallocated pages";
   return true;
 }
 

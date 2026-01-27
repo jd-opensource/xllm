@@ -191,24 +191,35 @@ void XTensorDistService::AllocWeightPages(
     LOG(INFO) << "AllocWeightPages: model_id=" << model_id
               << ", num_pages=" << num_pages;
 
-    // Allocate contiguous pages from right in PhyPagePool
     auto& pool = PhyPagePool::get_instance();
-    page_id_t start_page = pool.allocate_contiguous_from_right(num_pages);
+    auto& allocator = XTensorAllocator::get_instance();
 
-    if (start_page < 0) {
-      LOG(ERROR) << "Failed to allocate " << num_pages << " weight pages";
+    // Try contiguous allocation first (from GlobalXtensor)
+    page_id_t start_page = pool.allocate_contiguous_from_right(num_pages);
+    if (start_page >= 0) {
+      allocator.record_weight_allocation(model_id, start_page, num_pages);
+      response->set_ok(true);
+      LOG(INFO) << "AllocWeightPages success: model_id=" << model_id
+                << ", start_page=" << start_page << ", num_pages=" << num_pages;
+      return;
+    }
+
+    // Fallback: try non-contiguous allocation using XTensor
+    LOG(WARNING) << "Contiguous allocation failed for " << num_pages
+                 << " pages, trying non-contiguous fallback (XTensor)";
+
+    std::vector<page_id_t> page_ids = pool.allocate_pages_from_right(num_pages);
+    if (page_ids.empty()) {
+      LOG(ERROR) << "Failed to allocate " << num_pages
+                 << " weight pages (both contiguous and non-contiguous)";
       response->set_ok(false);
       return;
     }
 
-    // Record allocation in XTensorAllocator (gets base_ptr from GlobalXtensor)
-    auto& allocator = XTensorAllocator::get_instance();
-    allocator.record_weight_allocation(model_id, start_page, num_pages);
-
+    allocator.record_weight_fallback_allocation(model_id, page_ids);
     response->set_ok(true);
-
-    LOG(INFO) << "AllocWeightPages success: model_id=" << model_id
-              << ", start_page=" << start_page << ", num_pages=" << num_pages;
+    LOG(INFO) << "AllocWeightPages success (fallback): model_id=" << model_id
+              << ", num_pages=" << num_pages;
   });
 }
 
