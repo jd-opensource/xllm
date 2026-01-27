@@ -50,6 +50,12 @@ struct ModelTensors {
   size_t weight_num_pages = 0;       // Number of pages pre-allocated
   void* weight_base_ptr = nullptr;   // Base virtual address
   size_t weight_current_offset = 0;  // Current allocation offset in bytes
+
+  // ============== Fallback Weight Allocation (XTensor with preallocated pages)
+  // ==============
+  // Used when contiguous allocation fails due to fragmentation
+  std::unique_ptr<XTensor> weight_xtensor;
+  bool using_weight_xtensor = false;  // True if using XTensor fallback
 };
 
 /**
@@ -101,6 +107,12 @@ class XTensorAllocator {
   void record_weight_allocation(const std::string& model_id,
                                 page_id_t start_page_id,
                                 size_t num_pages);
+
+  // Record weight allocation using fallback mode (non-contiguous pages)
+  // Used when contiguous allocation fails due to fragmentation
+  void record_weight_fallback_allocation(
+      const std::string& model_id,
+      const std::vector<page_id_t>& page_ids);
 
   // Allocate from pre-allocated weight region (called by model loader)
   // Increments offset within the pre-allocated region
