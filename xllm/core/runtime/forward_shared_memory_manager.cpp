@@ -1518,6 +1518,7 @@ void ForwardSharedMemoryManager::raw_input_read(ForwardInput& input,
   while (true) {
     if (control_ptr_->version != last_version_) {
       last_version_ = control_ptr_->version;
+      std::atomic_thread_fence(std::memory_order_acquire);
       break;
     }
     std::this_thread::sleep_for(std::chrono::nanoseconds(kNumWaitNanoseconds));
@@ -1578,6 +1579,7 @@ void ForwardSharedMemoryManager::raw_output_read(RawForwardOutput& output) {
   while (true) {
     if (control_ptr_->version != last_version_) {
       last_version_ = control_ptr_->version;
+      std::atomic_thread_fence(std::memory_order_acquire);
       break;
     }
     std::this_thread::sleep_for(std::chrono::nanoseconds(kNumWaitNanoseconds));
