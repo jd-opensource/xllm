@@ -1,10 +1,11 @@
 import importlib.util
 import os
 import xllm
-import sys
+import sysconfig
 
+# return the python version as a string like "310" or "311" etc
 def get_python_version():
-    return f"{sys.version_info.major}{sys.version_info.minor}"
+    return sysconfig.get_python_version().replace(".", "")
 
 install_path_x86 = os.path.dirname(xllm.__file__) + f"/xllm_export.cpython-{get_python_version()}-x86_64-linux-gnu.so"
 install_path_arm = os.path.dirname(xllm.__file__) + f"/xllm_export.cpython-{get_python_version()}-aarch64-linux-gnu.so"
