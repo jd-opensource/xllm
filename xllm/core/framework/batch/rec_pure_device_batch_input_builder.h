@@ -131,10 +131,6 @@ class RecPureDeviceBatchInputBuilder : public RecBatchInputBuilder {
     std::vector<torch::Tensor> step_mrope_positions_vec;
 
     // Pure device decode state buffers
-    // std::vector<int32_t> decode_flatten_tokens_vec;
-    // std::vector<int32_t> decode_flatten_positions_vec;
-    // std::vector<int32_t> decode_extra_token_ids;
-    // std::vector<int32_t> decode_embedding_ids;
     std::vector<int32_t> decode_selected_token_idxes;
     std::vector<const RequestSamplingParam*> decode_sampling_params;
     std::vector<std::vector<int64_t>> decode_unique_token_ids_vec;
