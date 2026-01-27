@@ -3,7 +3,8 @@
 ## LLM
 |                          |  NPU  | NVIDIA GPU |  MLU  |
 | ------------------------ | :---: | :--------: | :---: |
-| DeepSeek-V3/R1           |   ✅   |     ❌      |   ✅   |
+| DeepSeek-V3/R1/V3.1      |   ✅   |     ❌      |   ✅   |
+| DeepSeek-V3.2            |   ✅   |     ❌      |   ✅   |
 | DeepSeek-R1-Distill-Qwen |   ✅   |     ❌      |   ❌   |
 | Qwen2/2.5/QwQ            |   ✅   |     ✅      |   ✅   |
 | Qwen3                    |   ✅   |     ✅      |   ✅   |
@@ -25,13 +26,17 @@
 | GLM-4.6V     |   ✅   |     ❌      |   ❌   |
 | VLM-R1       |   ✅   |     ❌      |   ❌   |
 
+## Rerank
+|               |  NPU  | NVIDIA GPU |  MLU  |
+| ------------- | :---: | :--------: | :---: |
+|Qwen3-Reranker |   ✅  |     ❌      |   ❌   |
+
 
 ## DiT
-|     |  NPU  | NVIDIA GPU |  MLU  |
-| --- | :---: | :--------: | :---: |
-|     |       |            |       |
-|     |       |            |       |
-|     |       |            |       |
+|              |  NPU  | NVIDIA GPU |  MLU  |
+| ------------ | :---: | :--------:  | :---: |
+| Flux         |   ✅  |     ❌      |   ❌   |
+
 
 
 ## Rec
