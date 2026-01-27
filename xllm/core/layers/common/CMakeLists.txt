@@ -56,4 +56,6 @@ cc_library(
     $<$<BOOL:${USE_MUSA}>:musa_layers>
 )
 
-add_subdirectory(tests)
+if(USE_MLU)
+  add_subdirectory(tests)
+endif()
