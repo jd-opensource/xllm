@@ -236,10 +236,11 @@ bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
     const uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   if (impl_->get_status() == WorkerImpl::Status::LOADED) {
-    kv_cache_transfer_ =
-        std::make_shared<SpecKVCacheTransfer>(options_.device_ip().value(),
-                                              options_.transfer_listen_port(),
-                                              options_.instance_role());
+    kv_cache_transfer_ = std::make_shared<SpecKVCacheTransfer>(
+        options_.device_ip().value(),
+        options_.transfer_listen_port(),
+        options_.instance_role(),
+        context_.get_model_args().model_type());
 
     int32_t device_id = device_.index();
     kv_cache_transfer_->initialize(device_id);

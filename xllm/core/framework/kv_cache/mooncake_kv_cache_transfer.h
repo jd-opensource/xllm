@@ -24,7 +24,8 @@ class MooncakeKVCacheTransfer : public KVCacheTransfer {
  public:
   MooncakeKVCacheTransfer(const int32_t device_id,
                           const int16_t listen_port,
-                          const torch::Device& device);
+                          const torch::Device& device,
+                          const std::string& model_type = "");
   virtual ~MooncakeKVCacheTransfer() = default;
 
   virtual void initialize(int32_t device_id) override;
@@ -74,6 +75,7 @@ class MooncakeKVCacheTransfer : public KVCacheTransfer {
   int16_t listen_port_;
   int32_t device_id_;
   int64_t num_layers_;
+  std::string model_type_;
 
   std::unique_ptr<MooncakeTransferEngine> mooncake_te_;
 };

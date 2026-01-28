@@ -201,7 +201,8 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     std::vector<xllm::KVCache>& kv_caches,
     int64_t num_layers,
     std::function<void(const std::vector<std::vector<int64_t>>&)>
-        allocate_kv_cache_func) {
+        allocate_kv_cache_func,
+    const std::string& model_type) {
   std::shared_ptr<KVCacheTransfer> transfer;
 
   int32_t device_id = device.index();
@@ -209,7 +210,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 #if defined(USE_NPU)
   if (transfer_type == "LlmDataDist") {
     transfer = std::make_shared<LlmDataDistTransfer>(
-        device_ip, transfer_listen_port, instance_role);
+        device_ip, transfer_listen_port, instance_role, model_type);
 
     kv_caches.reserve(num_layers);
 
@@ -217,7 +218,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
   } else if (transfer_type == "Mooncake") {
     transfer = std::make_shared<MooncakeKVCacheTransfer>(
-        device_id, transfer_listen_port, device);
+        device_id, transfer_listen_port, device, model_type);
 
     transfer->initialize(device_id);
     transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);

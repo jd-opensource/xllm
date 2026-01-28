@@ -36,8 +36,12 @@ const std::map<torch::ScalarType, ge::DataType> kScalarTypeToDtype = {
 
 LlmDataDistTransfer::LlmDataDistTransfer(const std::string& device_ip,
                                          const uint16_t listen_port,
-                                         const InstanceRole& instance_role)
-    : device_ip_(device_ip), listen_port_(listen_port), KVCacheTransfer() {
+                                         const InstanceRole& instance_role,
+                                         const std::string& model_type)
+    : device_ip_(device_ip),
+      listen_port_(listen_port),
+      model_type_(model_type),
+      KVCacheTransfer() {
   LlmRole role;
   if (instance_role == InstanceRole::PREFILL) {
     LOG(INFO) << "Create LlmDataDistTransfer for prefill instance.";
@@ -118,9 +122,10 @@ void LlmDataDistTransfer::allocate_kv_cache(
   }
 
   // convert memory addrs to torch tensors
-  aclFormat npu_format_type = FLAGS_enable_mla && FLAGS_enable_prefix_cache
-                                  ? ACL_FORMAT_FRACTAL_NZ
-                                  : ACL_FORMAT_ND;
+  aclFormat npu_format_type =
+      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
+          ? ACL_FORMAT_FRACTAL_NZ
+          : ACL_FORMAT_ND;
 
   auto k_torch_tensors = convert_to_torch_tensor(
       kv_cache_shape[0], dtype, k_cache_.tensor_addrs, npu_format_type);

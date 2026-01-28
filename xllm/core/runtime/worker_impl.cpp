@@ -97,9 +97,11 @@ bool WorkerImpl::allocate_kv_cache(
   for (int64_t i = 0; i < num_layers; ++i) {
     torch::Tensor key_cache, value_cache, index_cache;
 #if defined(USE_NPU)
-    aclFormat npu_format_type = FLAGS_enable_mla && FLAGS_enable_prefix_cache
-                                    ? ACL_FORMAT_FRACTAL_NZ
-                                    : ACL_FORMAT_ND;
+    aclFormat npu_format_type =
+        context_.get_model_args().model_type() == "deepseek_v3" &&
+                FLAGS_enable_prefix_cache
+            ? ACL_FORMAT_FRACTAL_NZ
+            : ACL_FORMAT_ND;
     key_cache = at_npu::native::npu_format_cast(
         torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_)),
         npu_format_type);
@@ -195,7 +197,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       num_layers,
       [this](const std::vector<std::vector<int64_t>>& shape) {
         this->allocate_kv_cache(shape);
-      });
+      },
+      context_.get_model_args().model_type());
 
   init_hierarchy_kv_cache_transfer();
 

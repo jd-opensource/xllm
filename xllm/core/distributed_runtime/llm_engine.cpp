@@ -259,7 +259,7 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   int64_t index_slot_size = 0;
   if (FLAGS_enable_mla) {
 #if defined(USE_NPU)
-    if (FLAGS_enable_prefix_cache) {
+    if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       slot_size =
           dtype_size *
           ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
@@ -334,7 +334,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   kv_cache_shape.reserve(2);
   if (FLAGS_enable_mla) {
 #if defined(USE_NPU)
-    if (FLAGS_enable_prefix_cache) {
+    if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       kv_cache_shape.emplace_back(
           std::vector<int64_t>{kv_cache_cap.n_blocks,
                                (args_.kv_lora_rank() + 15) / 16,

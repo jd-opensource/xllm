@@ -143,7 +143,8 @@ class KVCacheTransferFactory {
       std::vector<xllm::KVCache>& kv_caches,
       int64_t num_layers,
       std::function<void(const std::vector<std::vector<int64_t>>&)>
-          allocate_kv_cache_func);
+          allocate_kv_cache_func,
+      const std::string& model_type = "");
 };
 
 }  // namespace xllm

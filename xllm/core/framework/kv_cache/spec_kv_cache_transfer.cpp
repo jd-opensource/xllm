@@ -44,8 +44,9 @@ const std::map<torch::ScalarType, ge::DataType> kScalarTypeToDtype = {
 
 SpecKVCacheTransfer::SpecKVCacheTransfer(const std::string& device_ip,
                                          const uint16_t listen_port,
-                                         const InstanceRole& instance_role)
-    : LlmDataDistTransfer(device_ip, listen_port, instance_role) {}
+                                         const InstanceRole& instance_role,
+                                         const std::string& model_type)
+    : LlmDataDistTransfer(device_ip, listen_port, instance_role, model_type) {}
 
 void SpecKVCacheTransfer::allocate_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
@@ -127,9 +128,10 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
   }
 
   // convert memory addrs to torch tensors
-  aclFormat npu_format_type = FLAGS_enable_mla && FLAGS_enable_prefix_cache
-                                  ? ACL_FORMAT_FRACTAL_NZ
-                                  : ACL_FORMAT_ND;
+  aclFormat npu_format_type =
+      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
+          ? ACL_FORMAT_FRACTAL_NZ
+          : ACL_FORMAT_ND;
   auto k_torch_tensors = convert_to_torch_tensor(
       kv_cache_shape[0], dtype, k_cache.tensor_addrs, npu_format_type);
   auto v_torch_tensors = convert_to_torch_tensor(

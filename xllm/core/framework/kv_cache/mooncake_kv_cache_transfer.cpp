@@ -23,8 +23,12 @@ namespace xllm {
 
 MooncakeKVCacheTransfer::MooncakeKVCacheTransfer(const int32_t device_id,
                                                  const int16_t listen_port,
-                                                 const torch::Device& device)
-    : device_id_(device_id), listen_port_(listen_port), KVCacheTransfer() {
+                                                 const torch::Device& device,
+                                                 const std::string& model_type)
+    : device_id_(device_id),
+      listen_port_(listen_port),
+      model_type_(model_type),
+      KVCacheTransfer() {
   std::string instance_ip = net::get_local_ip_addr();
   cluster_id_ = net::convert_ip_port_to_uint64(instance_ip, listen_port_);
 
@@ -81,9 +85,10 @@ void MooncakeKVCacheTransfer::allocate_kv_cache(
   }
 
   // convert memory addrs to torch tensors
-  aclFormat npu_format_type = FLAGS_enable_mla && FLAGS_enable_prefix_cache
-                                  ? ACL_FORMAT_FRACTAL_NZ
-                                  : ACL_FORMAT_ND;
+  aclFormat npu_format_type =
+      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
+          ? ACL_FORMAT_FRACTAL_NZ
+          : ACL_FORMAT_ND;
   auto k_torch_tensors = convert_to_torch_tensor(
       kv_cache_shape[0], dtype, k_tensor_addrs, npu_format_type);
   auto v_torch_tensors = convert_to_torch_tensor(

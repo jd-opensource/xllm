@@ -26,7 +26,8 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
  public:
   SpecKVCacheTransfer(const std::string& device_ip,
                       const uint16_t listen_port,
-                      const InstanceRole& instance_role);
+                      const InstanceRole& instance_role,
+                      const std::string& model_type = "");
 
   virtual ~SpecKVCacheTransfer() = default;
 

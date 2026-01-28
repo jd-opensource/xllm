@@ -27,7 +27,8 @@ class LlmDataDistTransfer : public KVCacheTransfer {
  public:
   LlmDataDistTransfer(const std::string& device_ip,
                       const uint16_t listen_port,
-                      const InstanceRole& instance_role);
+                      const InstanceRole& instance_role,
+                      const std::string& model_type = "");
   virtual ~LlmDataDistTransfer() = default;
 
   virtual void initialize(int32_t device_id) override;
@@ -81,6 +82,7 @@ class LlmDataDistTransfer : public KVCacheTransfer {
   uint16_t listen_port_;
   int64_t num_layers_;
   bool enable_mla_ = false;
+  std::string model_type_;
   std::unordered_set<uint64_t> linked_cluster_ids;
 
   std::shared_ptr<LlmDataDist> llm_data_dist_;

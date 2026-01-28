@@ -126,6 +126,36 @@ enum DecoderLayerTensorId : int {
   IN_MLP_DOWN_OFFSET_EXPERT = 81,
   IN_MLP_DOWN_SCALE_EXPERT = 82,
   IN_MLP_DOWN_COMPRESS_IDX_EXPERT = 83,
+
+  IN_INDEXER_WQ_B_WEIGHT = 84,
+  IN_INDEXER_WQ_B_BIAS = 85,
+  IN_INDEXER_WQ_B_DESCALE = 86,
+  IN_INDEXER_WQ_B_OFFSET = 87,
+  IN_INDEXER_WQ_B_SCALE = 88,
+  IN_INDEXER_WQ_B_COMPRESS_IDX = 89,
+
+  IN_INDEXER_WK_WEIGHT = 90,
+  IN_INDEXER_WK_BIAS = 91,
+  IN_INDEXER_WK_DESCALE = 92,
+  IN_INDEXER_WK_OFFSET = 93,
+  IN_INDEXER_WK_SCALE = 94,
+  IN_INDEXER_WK_COMPRESS_IDX = 95,
+
+  IN_INDEXER_K_NORM_WEIGHT = 96,
+  IN_INDEXER_K_NORM_BIAS = 97,
+
+  IN_INDEXER_PROJ_WEIGHT = 98,
+  IN_INDEXER_PROJ_BIAS = 99,
+  IN_INDEXER_PROJ_DESCALE = 100,
+  IN_INDEXER_PROJ_OFFSET = 101,
+  IN_INDEXER_PROJ_SCALE = 102,
+  IN_INDEXER_PROJ_COMPRESS_IDX = 103,
+  IN_Q_PROJ_A_RECOMPUTE_WEIGHT = 104,
+  IN_Q_PROJ_A_RECOMPUTE_BIAS = 105,
+  IN_Q_PROJ_A_RECOMPUTE_DESCALE = 106,
+  IN_Q_PROJ_A_RECOMPUTE_OFFSET = 107,
+  IN_Q_PROJ_A_RECOMPUTE_SCALE = 108,
+  IN_Q_PROJ_A_RECOMPUTE_COMPRESS_IDX = 109,
 };
 
 static const uint64_t WEIGHT_COUNT_PER_LAYER = 110;
@@ -183,25 +213,31 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   CHECK_EQ(parallel_args.world_size(), dp_size_ * dp_local_tp_size_);
   dp_local_tp_rank_ = parallel_args.rank() % dp_local_tp_size_;
 
-  param_from_args(prefill_param_, model_args, parallel_args, true);
-  param_from_args(decode_param_, model_args, parallel_args, false);
-  param_from_args(decode_mla_param_, model_args, parallel_args, false);
-  decode_mla_param_.enableCustomizeMla = FLAGS_enable_customize_mla_kernel;
+  bool is_prefill_ = false;
+
+  if (boost::iequals(FLAGS_instance_role, "DECODE")) {
+    is_prefill_ = false;
+  } else {
+    is_prefill_ = true;
+  }
+
+  param_from_args(layer_param_, model_args, parallel_args, is_prefill_);
+
   loader_ = std::make_unique<DeekseekV32DecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
       context,
       layer_id_,
-      prefill_param_.firstKDenseReplace,
-      prefill_param_.numOfDeviceExperts,
-      prefill_param_.qkRopeHeadDim,
-      prefill_param_.numAttentionHeadsPerRank,
-      decode_param_.worldSize,
+      layer_param_.firstKDenseReplace,
+      layer_param_.numOfDeviceExperts,
+      layer_param_.qkRopeHeadDim,
+      layer_param_.numAttentionHeadsPerRank,
+      layer_param_.worldSize,
       qk_nope_head_dim_,
       kv_lora_rank_,
       num_key_value_heads_,
       v_head_dim_,
-      prefill_param_.isBF16,
-      decode_param_.isBF16);
+      layer_param_.isBF16,
+      layer_param_.isBF16);
   initialize_tensors(options);
 }
 
@@ -663,9 +699,7 @@ void NpuDeepseekV32DecoderLayerImpl::update_expert_weight() {
     std::swap(at_weight_tensors[index], buffer_tensor);
     atb_weight_tensors_[index] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[index]);
-    prefill_node_.inTensors.at(index) = &atb_weight_tensors_[index];
-    decode_node_.inTensors.at(index) = &atb_weight_tensors_[index];
-    decode_mla_node_.inTensors.at(index) = &atb_weight_tensors_[index];
+    layer_node_.inTensors.at(index) = &atb_weight_tensors_[index];
   }
   expert_routing_map_[layer_id_ - first_k_dense_replace_] =
       expert_routing_map_buffer_;
@@ -675,9 +709,7 @@ void NpuDeepseekV32DecoderLayerImpl::update_expert_weight() {
 int64_t NpuDeepseekV32DecoderLayerImpl::init_layer() {
   name_ = "deepseek_v2_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "DeepSeek_V2";
-  CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
-  CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
-  CHECK_OPERATION_STATUS_RETURN(init_node(decode_mla_node_, decode_mla_param_));
+  CHECK_OPERATION_STATUS_RETURN(init_node(layer_node_, layer_param_));
   return atb::NO_ERROR;
 }
 
@@ -685,8 +717,8 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
     atb_speed::Model::Node& node,
     atb_speed::deepseekV2::DecoderLayerParam& param) {
   bool eplb_enabled = FLAGS_enable_eplb &&
-                      layer_id_ >= decode_param_.firstKDenseReplace &&
-                      !param.isPrefill;
+                      layer_id_ >= layer_param_.firstKDenseReplace &&
+                      !layer_param_.isPrefill;
   atb::Operation* operation = nullptr;
   atb_speed::deepseekV2::DecoderLayer(param, &operation);
   node.operation.reset(operation);
@@ -741,50 +773,17 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
   atb::Status st;
   ModelInputParams& input_params_new =
       const_cast<ModelInputParams&>(input_params);
-  if (input_params.batch_forward_type.is_prefill()) {
-    build_node_variant_pack(prefill_node_,
-                            x,
-                            cos_pos,
-                            sin_pos,
-                            attn_mask,
-                            kv_cache,
-                            input_params_new,
-                            true);
-    st = execute_node(prefill_node_, node_id, event, event_flag);
-    LOG_IF(FATAL, st != 0) << model_name_
-                           << "excute prefill layer fail, error code: " << st;
-  } else {
-    const int num_tokens = x.sizes().at(0);
-    // decode phase with tokens more than this limit will lead to error in
-    // customize mla kernel. once detect any input exceed the limit, fall back
-    // to default kernel.
-    const int num_tokens_limit = 230;
-    if (!FLAGS_enable_customize_mla_kernel || num_tokens >= num_tokens_limit) {
-      build_node_variant_pack(decode_node_,
-                              x,
-                              cos_pos,
-                              sin_pos,
-                              /*attn_mask*/ tensor_placeholder_,
-                              kv_cache,
-                              input_params_new,
-                              false);
-      st = execute_node(decode_node_, node_id + 1000, event, event_flag);
-      LOG_IF(FATAL, st != 0)
-          << model_name_ << "excute decode layer fail, error code: " << st;
-    } else {
-      build_node_variant_pack(decode_mla_node_,
-                              x,
-                              cos_pos,
-                              sin_pos,
-                              /*attn_mask*/ tensor_placeholder_,
-                              kv_cache,
-                              input_params_new,
-                              false);
-      st = execute_node(decode_mla_node_, node_id + 1000, event, event_flag);
-      LOG_IF(FATAL, st != 0)
-          << model_name_ << "excute decode layer fail, error code: " << st;
-    }
-  }
+  build_node_variant_pack(layer_node_,
+                          x,
+                          cos_pos,
+                          sin_pos,
+                          attn_mask,
+                          kv_cache,
+                          input_params_new,
+                          true);
+  st = execute_node(layer_node_, node_id, event, event_flag);
+  LOG_IF(FATAL, st != 0) << model_name_
+                         << "execute prefill layer fail, error code: " << st;
   return tensor_placeholder_;
 }
 
@@ -923,13 +922,13 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.dynamic_ep_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 29) =
       atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.moe_idx());
-  if (FLAGS_enable_eplb && layer_id_ >= decode_param_.firstKDenseReplace) {
+  if (FLAGS_enable_eplb && layer_id_ >= layer_param_.firstKDenseReplace) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
         atb_speed::Utils::AtTensor2Tensor(expert_routing_map_);
     if (!is_prefill) {
       node.variantPack.outTensors.at(1) = atb_speed::Utils::AtTensor2Tensor(
           input_params
-              .expert_load_data[layer_id_ - decode_param_.firstKDenseReplace]);
+              .expert_load_data[layer_id_ - layer_param_.firstKDenseReplace]);
     }
   }
 
