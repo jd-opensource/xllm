@@ -71,6 +71,17 @@ void Request::log_statistic(double total_latency) {
   // log the request statistics
   int idx = 0;
   for (const auto& seq : sequences()) {
+    double ttft = seq->time_to_first_token_latency_seconds();
+    size_t gen_tokens = state_.enable_schedule_overlap
+                            ? seq->num_generated_tokens() - 1
+                            : seq->num_generated_tokens();
+    double tpot = 0.0;
+    double gen_speed = 0.0;
+    if (gen_tokens > 1 && total_latency > ttft && ttft > 0) {
+      const double generation_latency = total_latency - ttft;
+      tpot = (generation_latency * 1000.0) / (gen_tokens - 1);
+      gen_speed = gen_tokens / generation_latency;
+    }
     LOG(INFO) << "x-request-id: " << x_request_id_ << ", "
               << "x-request-time: " << x_request_time_ << ", "
               << "request_id: " << request_id_ << ", "
@@ -81,14 +92,11 @@ void Request::log_statistic(double total_latency) {
               << "finish_reason: "
               << seq->finish_reason().to_string().value_or("") << ", "
               << "prompt_tokens: " << seq->num_prompt_tokens() << ", "
-              << "generated_tokens: "
-              << (state_.enable_schedule_overlap
-                      ? seq->num_generated_tokens() - 1
-                      : seq->num_generated_tokens())
-              << ", " << std::fixed << std::setprecision(1)
-              << "ttft: " << seq->time_to_first_token_latency_seconds() * 1000
-              << "ms, "
-              << "total_latency: " << total_latency * 1000 << "ms";
+              << "generated_tokens: " << gen_tokens << ", " << std::fixed
+              << std::setprecision(1) << "ttft: " << ttft * 1000 << "ms, "
+              << "total_latency: " << total_latency * 1000 << "ms, "
+              << "avg tpot: " << tpot << "ms, "
+              << "generation speed: " << gen_speed << " tokens/s";
     // only log once when beam search is enabled
     if (check_beam_search()) {
       break;
