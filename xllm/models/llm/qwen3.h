@@ -71,12 +71,21 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
     auto apply = [this](torch::Tensor x) {
       auto freqs_t = x[0].clone();
+      // mrop_length == freqs_length == head_dim / 2
+      int64_t mrop_length = static_cast<int64_t>(freqs_t.size(-1) / 2);
+
       for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
         int64_t offset = dim_idx;
         int64_t section_len = mrope_section_[dim_idx];
         int64_t length = section_len * 3;
+
+        // Since the last dim of freqs is repeated to 2*mrop_length
+        // idx_first_half: [offset, offset+3, offset+6, ... < mrop_length]
+        // idx_second_half: [mrop_length+offset, mrop_length+offset+3,
+        //     mrop_length+offset+6, ... < 2*mrop_length]
         auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
-        auto idx_second_half = torch::arange(offset, length, 3, torch::kLong);
+        auto idx_second_half = torch::arange(
+            offset + mrop_length, length + mrop_length, 3, torch::kLong);
         auto idx_tensor =
             torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
         // freqs_t[..., idx] = freqs[dim_idx][..., idx]
