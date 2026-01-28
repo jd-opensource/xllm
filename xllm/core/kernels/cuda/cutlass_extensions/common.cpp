@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@ namespace cuda {
 
 int32_t get_sm_version_num() {
   int32_t major_capability, minor_capability;
-  cudaDeviceGetAttribute(&major_capability, cudaDevAttrComputeCapabilityMajor,
-                         0);
-  cudaDeviceGetAttribute(&minor_capability, cudaDevAttrComputeCapabilityMinor,
-                         0);
+  cudaDeviceGetAttribute(
+      &major_capability, cudaDevAttrComputeCapabilityMajor, 0);
+  cudaDeviceGetAttribute(
+      &minor_capability, cudaDevAttrComputeCapabilityMinor, 0);
   int32_t version_num = major_capability * 10 + minor_capability;
   return version_num;
 }

@@ -83,8 +83,16 @@ void requantize_fp8_weight(torch::Tensor& weight,
     auto weight_fp16 = weight_slice.to(torch::kFloat16) * partition_scales[idx];
 
     // Requantize: FP16 -> FP8 with unified max_scale
-    auto weight_scaled = weight_fp16 / max_scale;
-    auto weight_quantized = weight_scaled.to(torch::kFloat8_e4m3fn);
+    auto scale_tensor = torch::tensor(
+        {max_scale}, weight_fp16.options().dtype(torch::kFloat32));
+    auto weight_quantized =
+        torch::empty_like(weight_slice, torch::kFloat8_e4m3fn);
+
+    xllm::kernel::StaticScaledFp8QuantParams quant_params;
+    quant_params.output = weight_quantized;
+    quant_params.input = weight_fp16;
+    quant_params.scale = scale_tensor;
+    xllm::kernel::static_scaled_fp8_quant(quant_params);
 
     weight.slice(0, start, end).copy_(weight_quantized);
     start = end;
@@ -286,7 +294,7 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
     output = xllm::kernel::scaled_matmul(matmul_params);
   } else if (quant_args_.quant_method() == kQuantMethodFp8) {
     // FP8 W8A8 quantization
-    LOG_IF(FATAL, quant_args_.activation_dynamic())
+    CHECK(!quant_args_.activation_dynamic())
         << "FP8 quantization does not support activation_dynamic yet";
 
     auto scale = input_scale_.defined()
@@ -496,7 +504,7 @@ torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
   torch::Tensor output;
   if (quant_args_.quant_method() == kQuantMethodFp8) {
     // FP8 W8A8 quantization
-    LOG_IF(FATAL, quant_args_.activation_dynamic())
+    CHECK(!quant_args_.activation_dynamic())
         << "FP8 quantization does not support activation_dynamic yet";
 
     // Use max of Q/K/V scales as unified scale for fused projection
@@ -723,7 +731,7 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     output = xllm::kernel::scaled_matmul(matmul_params);
   } else if (quant_args_.quant_method() == kQuantMethodFp8) {
     // FP8 W8A8 quantization
-    LOG_IF(FATAL, quant_args_.activation_dynamic())
+    CHECK(!quant_args_.activation_dynamic())
         << "FP8 quantization does not support activation_dynamic yet";
 
     auto scale = input_scale_.defined()

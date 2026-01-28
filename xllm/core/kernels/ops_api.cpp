@@ -912,8 +912,7 @@ std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
 #if defined(USE_CUDA)
   return cuda::fp8_scaled_quantize(params.input, params.output, params.scale);
 #else
-  LOG(FATAL) << "fp8_scaled_quantize is only supported on CUDA";
-  return std::make_tuple(torch::Tensor(), torch::Tensor());
+  NOT_IMPLEMENTED();
 #endif
 }
 
@@ -937,6 +936,14 @@ torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params) {
 #else
   LOG(FATAL) << "fp8_scaled_matmul is only supported on CUDA";
   return torch::Tensor();
+#endif
+}
+
+void static_scaled_fp8_quant(StaticScaledFp8QuantParams& params) {
+#if defined(USE_CUDA)
+  cuda::static_scaled_fp8_quant(params.output, params.input, params.scale);
+#else
+  LOG(FATAL) << "static_scaled_fp8_quant is only supported on CUDA";
 #endif
 }
 

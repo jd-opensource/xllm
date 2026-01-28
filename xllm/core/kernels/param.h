@@ -1351,4 +1351,18 @@ struct Fp8ScaledMatmulParams {
   std::optional<std::vector<int64_t>> input_shape;
 };
 
+// Static scaled FP8 quantization parameters
+// Quantizes input tensor to FP8 using a pre-computed scale factor
+struct StaticScaledFp8QuantParams {
+  // Output tensor to store quantized result. Shape: [..., d].
+  // Dtype: float8_e4m3fn. Must be pre-allocated.
+  torch::Tensor output;
+  // Input tensor to quantize. Shape: [..., d].
+  // Dtype: float16, bfloat16, or float32.
+  torch::Tensor input;
+  // Pre-computed scale factor. Shape: [1] or scalar.
+  // Dtype: float32. Used for static quantization.
+  torch::Tensor scale;
+};
+
 }  // namespace xllm::kernel

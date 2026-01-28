@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 // https://github.com/vllm-project/vllm/blob/main/csrc/cutlass_extensions/common.hpp
 
 #pragma once
-// clang-format off 
+// clang-format off
 #include "cutlass/cutlass.h"
 #include <climits>
 #include "cuda_runtime.h"
@@ -39,7 +39,8 @@ namespace cuda {
 inline int get_cuda_max_shared_memory_per_block_opt_in(int const device) {
   int max_shared_mem_per_block_opt_in = 0;
   cudaDeviceGetAttribute(&max_shared_mem_per_block_opt_in,
-                         cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+                         cudaDevAttrMaxSharedMemoryPerBlockOptin,
+                         device);
   return max_shared_mem_per_block_opt_in;
 }
 

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -65,14 +65,12 @@ void dispatch_scaled_mm(torch::Tensor& c,
     if constexpr (!std::is_same_v<BlockwiseFunc, std::nullptr_t>) {
       int32_t version_num = get_sm_version_num();
       if (version_num >= 90) {
-        TORCH_CHECK(
-            a.size(0) == a_scales.size(0) &&
-                ceil_div(a.size(1), int64_t(128)) == a_scales.size(1),
-            "a_scale_group_shape must be [1, 128].");
-        TORCH_CHECK(
-            ceil_div(b.size(0), int64_t(128)) == b_scales.size(0) &&
-                ceil_div(b.size(1), int64_t(128)) == b_scales.size(1),
-            "b_scale_group_shape must be [128, 128].");
+        TORCH_CHECK(a.size(0) == a_scales.size(0) &&
+                        ceil_div(a.size(1), int64_t(128)) == a_scales.size(1),
+                    "a_scale_group_shape must be [1, 128].");
+        TORCH_CHECK(ceil_div(b.size(0), int64_t(128)) == b_scales.size(0) &&
+                        ceil_div(b.size(1), int64_t(128)) == b_scales.size(1),
+                    "b_scale_group_shape must be [128, 128].");
       }
 
       TORCH_CHECK(!bias, "Bias not yet supported blockwise scaled_mm");

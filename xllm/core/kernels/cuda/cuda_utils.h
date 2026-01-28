@@ -27,11 +27,7 @@ limitations under the License.
 #define check_cuda_error(call) C10_CUDA_CHECK(call)
 #endif
 
-#if defined(__HIPCC__)
-#define HOST_DEVICE_INLINE __host__ __device__
-#define DEVICE_INLINE __device__
-#define HOST_INLINE __host__
-#elif defined(__CUDACC__) || defined(_NVHPC_CUDA)
+#if defined(__CUDACC__) || defined(_NVHPC_CUDA)
 #define HOST_DEVICE_INLINE __host__ __device__ __forceinline__
 #define DEVICE_INLINE __device__ __forceinline__
 #define HOST_INLINE __host__ __forceinline__

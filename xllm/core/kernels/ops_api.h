@@ -104,4 +104,8 @@ std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
 // Performs: c = (a @ b.T) with scales applied
 torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params);
 
+// Static scaled FP8 quantization helper
+// Quantizes input tensor to FP8 using a pre-computed scale factor
+void static_scaled_fp8_quant(StaticScaledFp8QuantParams& params);
+
 }  // namespace xllm::kernel

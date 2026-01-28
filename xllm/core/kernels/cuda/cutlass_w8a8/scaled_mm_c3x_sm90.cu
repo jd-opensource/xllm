@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ void cutlass_scaled_mm_sm90(torch::Tensor& c,
                      b_scales,
                      bias,
                      cutlass_scaled_mm_sm90_fp8,
-                     nullptr,  // int8 not supported
+                     nullptr,   // int8 not supported
                      nullptr);  // blockwise not supported
 }
 
