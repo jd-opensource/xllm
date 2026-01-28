@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,31 +15,30 @@ limitations under the License.
 
 #pragma once
 
-#include <acl/acl.h>
-
-#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <mutex>
 #include <vector>
-
-#include "layer_synchronizer.h"
 
 namespace xllm {
 
-class NPULayerSynchronizerImpl : public LayerSynchronizer {
+class LayerSynchronizer {
  public:
-  NPULayerSynchronizerImpl(const int64_t num_layers,
-                           const int32_t timeout = -1);
-  virtual ~NPULayerSynchronizerImpl();
+  LayerSynchronizer() : timeout_duration_(std::chrono::milliseconds(0)) {}
+  LayerSynchronizer(const int64_t layer_num, const int32_t timeout = 0);
+  virtual ~LayerSynchronizer();
 
-  aclrtEvent* get_event(const int64_t layer_index);
-  std::atomic<bool>* get_event_flag(const int64_t layer_index);
-  uint32_t get_event_size() override { return events_.size(); };
+  void notify(const int64_t layer_index);
 
-  bool synchronize_layer(const int64_t layer_index) override;
+  virtual bool synchronize_layer(const int64_t layer_index);
+  virtual uint32_t get_event_size() { return completed_.size(); };
 
  private:
-  std::vector<aclrtEvent> events_;
-  std::vector<std::atomic<bool>> event_record_flags_;
-  const int32_t timeout_;
+  mutable std::mutex mutex_;
+  std::condition_variable cv_;
+  std::vector<bool> completed_;
+  const std::chrono::milliseconds timeout_duration_;
 };
 
 }  // namespace xllm
