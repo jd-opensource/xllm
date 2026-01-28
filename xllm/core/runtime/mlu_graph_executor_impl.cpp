@@ -44,7 +44,13 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const torch::Device& device,
                                            const runtime::Options& options)
     : num_decoding_tokens_(options.num_decoding_tokens()) {
-  const int64_t max_tokens = FLAGS_max_tokens_per_batch;
+  // If speculative decoding is enabled,
+  // the number of tokens and sequences during verification will be multiplied
+  // (spec_tokens + 1).
+  int32_t expand_factor = options.num_speculative_tokens() + 1;
+
+  // Multiply the expansion factor to max_tokens and max_seqs.
+  const int64_t max_tokens = FLAGS_max_tokens_per_batch * expand_factor;
   const int64_t max_seqs = options.max_seqs_per_batch();
   const int64_t max_seq_len = FLAGS_max_seq_len_for_graph_mode > 0
                                   ? FLAGS_max_seq_len_for_graph_mode
@@ -89,10 +95,22 @@ void GraphPersistentParam::init_params(const ModelInputParams& params,
       params.dp_global_token_nums.size(), padding_num_tokens);
 
   if (params.input_embedding.defined()) {
-    if (!input_embeds_.defined()) {
-      input_embeds_ = torch::zeros_like(output_);
+    // Ensure that persistent_embedding_ has been initialized by
+    // update_input_buffer
+    if (persistent_embedding_.defined()) {
+      // Key point: The graph must see input of fixed size (padding_num_tokens)
+      // Even if the actual data only has 13 tokens, we still provide 16 (e.g.,
+      // if bucket=16) Note: This is just a view/slice operation, no data is
+      // copied
+      params_.input_embedding = persistent_embedding_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/padding_num_tokens);
+    } else {
+      // If persistent_embedding_ is not yet initialized, use the input
+      // embedding directly. This is handled later in update_input_buffer
+      // where persistent_embedding_ will be allocated and filled.
+      params_.input_embedding =
+          params.input_embedding.slice(0, 0, padding_num_tokens);
     }
-    params_.input_embedding = input_embeds_.slice(0, 0, padding_num_tokens);
   }
 }
 
@@ -133,8 +151,27 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   slice_block_tables.copy_(params.block_tables, true);
 
   if (params.input_embedding.defined()) {
-    input_embeds_.slice(0, 0, params.input_embedding.size(0))
-        .copy_(params.input_embedding, true);
+    const auto& embedding = params.input_embedding;
+    const int64_t embedding_tokens = embedding.size(0);
+    const int64_t embedding_dim = embedding.size(1);
+
+    // If the buffer is empty, allocate it with the max token number and actual
+    // embedding dimension.
+    if (persistent_embedding_.numel() == 0) {
+      // input_embedding is for the draft model, so no need to mutliply the
+      // expansion factor.
+      const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+      // Use options that match the device and embedding dtype.
+      auto options = tokens_.options().dtype(embedding.dtype());
+      persistent_embedding_ =
+          torch::zeros({max_tokens_per_batch, embedding_dim}, options);
+    }
+
+    // Copy the current batch input embedding to the head of the persistent
+    // buffer.
+    persistent_embedding_
+        .slice(/*dim=*/0, /*start=*/0, /*end=*/embedding_tokens)
+        .copy_(embedding, /*non_blocking=*/true);
   }
 }
 
@@ -178,6 +215,15 @@ void MluGraph::update_input_buffer(const torch::Tensor& tokens,
   }
   persistent_param_->update_input_buffer(
       tokens, positions, params, padding_needed);
+
+  // After updating the persistent buffer, ensure params_.input_embedding
+  // points to the persistent buffer (not the input params.input_embedding)
+  if (params.input_embedding.defined() &&
+      persistent_param_->persistent_embedding_.defined()) {
+    persistent_param_->params_.input_embedding =
+        persistent_param_->persistent_embedding_.slice(
+            0, 0, padding_num_tokens_);
+  }
 }
 
 MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
@@ -209,12 +255,18 @@ torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   bool graph_mode = params.batch_forward_type.is_decode();
   int64_t actual_num_tokens = tokens.size(0);
   if (params.dp_global_token_nums.size() > 1) {
-    actual_num_tokens = util::max(params.dp_global_token_nums);
-
     auto& dp_is_decode = params.dp_is_decode;
-    graph_mode = std::find(dp_is_decode.begin(), dp_is_decode.end(), 0) ==
-                 dp_is_decode.end();
-    CHECK_EQ(dp_is_decode.size(), params.dp_global_token_nums.size());
+    auto& dp_global_token_nums = params.dp_global_token_nums;
+    actual_num_tokens = util::max(dp_global_token_nums);
+    // For now, graph mode only supports the condition of
+    //  all dp ranks are in decode phase and no dummy tokens.
+    bool dp_all_decode = std::all_of(
+        dp_is_decode.begin(), dp_is_decode.end(), [](int v) { return v != 0; });
+    bool dp_no_dummy = std::all_of(dp_global_token_nums.begin(),
+                                   dp_global_token_nums.end(),
+                                   [](int v) { return v == 0; });
+    graph_mode = dp_all_decode && dp_no_dummy;
+    CHECK_EQ(dp_is_decode.size(), dp_global_token_nums.size());
   }
 
   if (!graph_mode) {
@@ -223,6 +275,17 @@ torch::Tensor MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   }
 
   uint32_t padding_batch_size = get_bucket_num_tokens(actual_num_tokens);
+
+  if (padding_batch_size > persistent_param_->tokens_.size(0)) {
+    LOG(FATAL)
+        << "Graph execution input size (" << actual_num_tokens
+        << ") exceeds persistent buffer size ("
+        << persistent_param_->tokens_.size(0)
+        << "). This usually happens in Speculative Decoding validation step. "
+        << "Please increase FLAGS_max_tokens_per_batch or check expansion "
+           "factor logic.";
+  }
+
   if (auto it = graphs_.find(padding_batch_size); it != graphs_.end()) {
     MluGraph* cur_graph = (it->second).get();
     cur_graph->update_input_buffer(tokens, positions, params);

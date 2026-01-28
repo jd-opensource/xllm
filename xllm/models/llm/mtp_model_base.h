@@ -169,11 +169,8 @@ class MtpModelImplBase : public torch::nn::Module {
     torch::Tensor hidden_states = embed_tokens_(tokens);
     // Mask out embeddings where positions == 0 (for MTP not needed at pos 0)
     auto mask = (positions == 0);  // bool tensor
-    if (mask.any().item<bool>()) {
-      // set masked rows to zero
-      hidden_states.index_put_({mask},
-                               torch::zeros_like(hidden_states.index({mask})));
-    }
+    // if mask is all False, the device execution will naturally do nothing.
+    hidden_states.masked_fill_(mask.unsqueeze(-1), 0.0f);
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < mtp_layers_.size(); i++) {
