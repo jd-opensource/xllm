@@ -437,6 +437,8 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   virtual void reload_model_weights() {
     model_->reload_weights();
     npu_lm_head_->reload_weights();
+    auto stream = c10_npu::getCurrentNPUStream();
+    stream.synchronize();
   }
 
   virtual void reload_model_weights_from_device() {
