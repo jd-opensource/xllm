@@ -511,10 +511,6 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_xtensor_mode(
         src_offsets.push_back(src_v_off);
         dst_offsets.push_back(dst_v_off);
       }
-      for (size_t i = 0; i < src_offsets.size(); ++i) {
-        LOG(INFO) << "src_offsets[" << i << "]: " << src_offsets[i]
-                  << ", dst_offsets[" << i << "]: " << dst_offsets[i];
-      }
       auto* xtensor_te =
           static_cast<MooncakeTransferEngine*>(mooncake_te_.get());
       auto ret = xtensor_te->move_memory_by_global_offsets(
