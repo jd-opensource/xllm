@@ -193,7 +193,6 @@ class ExtBuild(build_ext):
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
             f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={extdir}",
             "-DUSE_CCACHE=ON",
-            "-DUSE_MANYLINUX:BOOL=ON",
             f"-DPython_EXECUTABLE:FILEPATH={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DBUILD_SHARED_LIBS=OFF",
