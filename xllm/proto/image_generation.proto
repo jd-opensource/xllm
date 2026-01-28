@@ -74,11 +74,17 @@ message Parameters {
   // The extent to which the reference image is altered, between 0 and 1
   optional float strength = 8;
 
+  // Scaling factor for prompt embeddings
+  optional float prompt_embeds_scale = 9;
+
+  // Scaling factor for pooled prompt embeddings
+  optional float pooled_prompt_embeds_scale = 10;
+
   // Array of sigma values for noise scheduling
-  // repeated float sigmas = 9;
+  // repeated float sigmas = 11;
 
   // Output type, either "base64" or "url"
-  // optional string output_type = 10;
+  // optional string output_type = 12;
 }
 
 // Request structure for image generation tasks using FLUX models
