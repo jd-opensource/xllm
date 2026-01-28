@@ -312,11 +312,19 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
         input_params.q_seq_lens_vec.data();
   }
 
-  if (FLAGS_enable_graph && !is_prefill &&
-      input_params.graph_buffer.tiling_data.defined()) {
-    node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.graph_buffer.tiling_data);
+  // Only add tiling_data when the operation was built with
+  // enableAclGraphPagedAttention=true (which expects this input tensor)
+  if (decode_param_.enableAclGraphPagedAttention && !is_prefill) {
+    if (input_params.graph_buffer.tiling_data.defined()) {
+      node.variantPack.inTensors.at(input_idx++) =
+          atb_speed::Utils::AtTensor2Tensor(
+              input_params.graph_buffer.tiling_data);
+    } else {
+      // Eager mode fallback: provide placeholder when tiling_data is not
+      // available.
+      node.variantPack.inTensors.at(input_idx++) =
+          atb_speed::Utils::AtTensor2Tensor(at_placeholder_);
+    }
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
