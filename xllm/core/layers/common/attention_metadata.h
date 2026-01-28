@@ -16,15 +16,17 @@ limitations under the License.
 #pragma once
 
 #include <torch/torch.h>
+#include <tvm/ffi/container/array.h>
 
 #include "framework/model/model_input_params.h"
+namespace ffi = tvm::ffi;
 
 namespace xllm {
 namespace layer {
 
 struct PlanInfo {
   int32_t layer_id = -1;
-  torch::Tensor plan_info;
+  ffi::Array<int64_t> plan_info;
   std::string uri;
 };
 
