@@ -377,7 +377,8 @@ class ExtBuild(build_ext):
             cmake_args += ["-DUSE_MLU=ON"]
             set_mlu_envs()
         elif self.device == "cuda":
-            torch_cuda_architectures = os.getenv("TORCH_CUDA_ARCH_LIST")
+            # torch_cuda_architectures = os.getenv("TORCH_CUDA_ARCH_LIST")
+            torch_cuda_architectures = "9.0a 10.0a 12.0a"
             if not torch_cuda_architectures:
                 raise ValueError("Please set TORCH_CUDA_ARCH_LIST environment variable, e.g. export TORCH_CUDA_ARCH_LIST=\"8.0 8.9 9.0 10.0 12.0\"")
             cmake_args += ["-DUSE_CUDA=ON", 

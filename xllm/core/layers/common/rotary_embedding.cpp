@@ -39,6 +39,12 @@ RotaryEmbeddingImpl::RotaryEmbeddingImpl(int64_t rotary_dim,
   auto cos_sin_vec = cos_sin_cache_.chunk(2, /*dim=*/-1);
   cos_ = cos_sin_vec[0].view({-1, rotary_dim});
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
+
+  // Pre-compute CUDA-friendly format
+  if (options.device().is_cuda()) {
+    auto chunks = cos_sin_cache_.chunk(4, -1);
+    cuda_cos_sin_cache_ = torch::cat({chunks[0], chunks[2]}, -1).contiguous();
+  }
 }
 
 void RotaryEmbeddingImpl::forward(torch::Tensor& q,
@@ -64,7 +70,8 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& q,
   rotary_params.k = k;
   rotary_params.sin = sin_;
   rotary_params.cos = cos_;
-  rotary_params.cos_sin = cos_sin_cache_;
+  rotary_params.cos_sin = get_cos_sin_cache();
+  rotary_params.cuda_cos_sin = get_cuda_cos_sin_cache();
   rotary_params.position_ids = position_ids;
   rotary_params.cu_query_lens = cu_query_lens;
   rotary_params.interleaved = interleaved_;
@@ -120,6 +127,7 @@ void MRotaryEmbeddingImpl::forward(torch::Tensor& q,
   rotary_params.sin = attn_metadata.mrope_sin;
   rotary_params.cos = attn_metadata.mrope_cos;
   rotary_params.cos_sin = get_cos_sin_cache();
+  rotary_params.cuda_cos_sin = get_cuda_cos_sin_cache();
   rotary_params.position_ids = std::nullopt;
   rotary_params.cu_query_lens = mrope_cu_seq_lens_;
   rotary_params.interleaved = interleaved_;
@@ -171,6 +179,12 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
   auto cos_sin_vec = cos_sin_cache_.chunk(2, /*dim=*/-1);
   cos_ = cos_sin_vec[0].view({-1, rotary_dim});
   sin_ = cos_sin_vec[1].view({-1, rotary_dim});
+
+  // Pre-compute CUDA-friendly format
+  if (options.device().is_cuda()) {
+    auto chunks = cos_sin_cache_.chunk(4, -1);
+    cuda_cos_sin_cache_ = torch::cat({chunks[0], chunks[2]}, -1).contiguous();
+  }
 }
 
 void DeepseekScalingRotaryEmbeddingImpl::forward(
@@ -203,7 +217,8 @@ void DeepseekScalingRotaryEmbeddingImpl::forward(
   rotary_params.q = q_rot;
   rotary_params.sin = sin_;
   rotary_params.cos = cos_;
-  rotary_params.cos_sin = cos_sin_cache_;
+  rotary_params.cos_sin = get_cos_sin_cache();
+  rotary_params.cuda_cos_sin = get_cuda_cos_sin_cache();
   rotary_params.position_ids = position_ids;
   rotary_params.cu_query_lens = cu_query_lens;
   rotary_params.interleaved = interleaved_;

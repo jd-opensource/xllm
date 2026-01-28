@@ -69,7 +69,8 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                                 qkv_bias,
                                                 /*gather_output=*/false,
                                                 parallel_args,
-                                                options));
+                                                options,
+                                                quant_args));
 
   // 2. Output projection
   o_proj_ = register_module("o_proj",

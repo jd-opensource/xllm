@@ -94,7 +94,7 @@ ModelArgs create_default_model_args() {
 
 QuantArgs create_default_quant_args() {
   QuantArgs quant_args;
-  quant_args.quant_method() = "smoothquant";
+  quant_args.quant_method() = kQuantMethodSmoothquant;
   quant_args.bits() = 8;
   quant_args.activation_dynamic() = true;
   return quant_args;
