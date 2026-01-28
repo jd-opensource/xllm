@@ -451,7 +451,13 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
     }
 
     const auto& raw_sample_output = raw_output.outputs[output_idx];
-    for (size_t token_idx = 0; token_idx < raw_sample_output.tokens.size();
+    // In pre-append phase (not replace), limit to 1 token to avoid
+    // pre-allocating extra capacity for MTP tokens that may not be needed.
+    const size_t max_tokens =
+        (FLAGS_enable_schedule_overlap && !replace_fake_token)
+            ? std::min<size_t>(1, raw_sample_output.tokens.size())
+            : raw_sample_output.tokens.size();
+    for (size_t token_idx = 0; token_idx < max_tokens;
          ++token_idx) {
       const auto& raw_token = raw_sample_output.tokens[token_idx];
       append_token_for_sequence(
