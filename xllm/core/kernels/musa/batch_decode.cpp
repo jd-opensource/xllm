@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "function_factory.h"
 #include "musa_ops_api.h"
 
 namespace xllm::kernel::musa {
@@ -25,10 +26,47 @@ void batch_decode(torch::Tensor& float_workspace_buffer,
                   const std::optional<torch::Tensor>& v_cache,
                   const torch::Tensor& block_table,
                   const torch::Tensor& kv_seq_lens,
-                  int64_t window_left,
                   double sm_scale,
                   torch::Tensor& output,
                   std::optional<torch::Tensor>& output_lse,
-                  bool enable_cuda_graph) {}
+                  bool enable_cuda_graph) {
+  torch::Tensor lse_mate, temp_a, temp_b;
+  std::tie(output, lse_mate, temp_a, temp_b) =
+      FunctionFactory::get_instance().mate_func().call(
+          query,
+          k_cache,
+          v_cache.value(),
+          /*k_new=*/std::nullopt,
+          /*v_new=*/std::nullopt,
+          /*q_v=*/std::nullopt,
+          output,
+          /*cu_seqlens_q=*/std::nullopt,
+          /*cu_seqlens_k=*/std::nullopt,
+          /*cu_seqlens_k_new=*/std::nullopt,
+          /*seqused_q=*/std::nullopt,
+          kv_seq_lens,
+          /*max_seqlen_q=*/1,
+          /*max_seqlen_k=*/std::nullopt,
+          block_table,
+          /*kv_batch_idx=*/std::nullopt,
+          /*leftpad_k=*/std::nullopt,
+          /*rotary_cos=*/std::nullopt,
+          /*rotary_sin=*/std::nullopt,
+          /*seqlens_rotary=*/std::nullopt,
+          /*q_descale=*/std::nullopt,
+          /*k_descale=*/std::nullopt,
+          /*v_descale=*/std::nullopt,
+          /*softmax_scale=*/std::nullopt,
+          /*is_causal=*/false,
+          /*window_size_left=*/-1,
+          /*window_size_right=*/-1,
+          /*attention_chunk=*/0,
+          /*softcap=*/0.f,
+          /*is_rotary_interleaved=*/false,
+          /*scheduler_metadata=*/std::nullopt,
+          /*num_splits=*/1,
+          /*pack_gqa=*/std::nullopt,
+          /*sm_margin=*/0);
+}
 
 }  // namespace xllm::kernel::musa
