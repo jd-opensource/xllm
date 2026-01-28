@@ -91,7 +91,7 @@ class IndexerTest : public ::testing::Test {
       const std::vector<int64_t>& shape,
       float min_val = -1.0f,
       float max_val = 1.0f,
-      c10::optional<torch::ScalarType> dtype = c10::nullopt) {
+      std::optional<torch::ScalarType> dtype = std::nullopt) {
     auto opts = dtype.has_value() ? options_.dtype(dtype.value()) : options_;
     return torch::rand(shape, opts) * (max_val - min_val) + min_val;
   }
