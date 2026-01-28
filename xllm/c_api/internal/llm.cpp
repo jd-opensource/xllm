@@ -105,7 +105,6 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         .node_rank(xllm_init_options.node_rank)
         .dp_size(xllm_init_options.dp_size)
         .ep_size(xllm_init_options.ep_size)
-        .xservice_addr(xllm_init_options.xservice_addr)
         .instance_name(xllm_init_options.instance_name)
         .enable_disagg_pd(xllm_init_options.enable_disagg_pd)
         .enable_schedule_overlap(xllm_init_options.enable_schedule_overlap)
@@ -114,6 +113,8 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         .enable_shm(xllm_init_options.enable_shm)
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
+
+    FLAGS_enable_chunked_prefill = xllm_init_options.enable_chunked_prefill;
 
     handler->master = std::make_unique<xllm::LLMMaster>(options);
     handler->master->run();

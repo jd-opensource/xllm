@@ -125,7 +125,6 @@ void set_init_options(BackendType backend_type,
   XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, instance_role);
   XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, device_ip);
   XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, master_node_addr);
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, xservice_addr);
   XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, instance_name);
   XLLM_SET_FIELD_IF_NONEMPTY(
       xllm_init_options, init_options, kv_cache_transfer_mode);
