@@ -259,6 +259,7 @@ DECLARE_int64(max_token_per_req);
 
 DECLARE_bool(use_audio_in_video);
 
+DECLARE_bool(enable_xtensor);
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);
 #endif

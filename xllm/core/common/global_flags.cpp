@@ -514,6 +514,10 @@ DEFINE_bool(
     use_audio_in_video,
     false,
     "Whether to decode both audio and video when the input is a video.");
+// --- multi model config ---
+DEFINE_bool(enable_xtensor,
+            false,
+            "Whether to enable xTensor memory management.");
 
 #if defined(USE_NPU)
 DEFINE_string(

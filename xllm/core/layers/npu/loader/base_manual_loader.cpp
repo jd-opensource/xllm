@@ -62,9 +62,6 @@ void BaseManualLoader::copy_weights_to_pinned_host() {
   CHECK_EQ(weight_slices_.size(), at_host_weight_tensors_.size())
       << "weight_slices_ size and at_host_weight_tensors_ size mismatch.";
 
-  size_t max_alignment = std::max(kHostAlignment, kDeviceAlignment);
-  storage_size_ = AlignUp(storage_size_, max_alignment);
-
   auto ret = aclrtMallocHost(&host_pinned_storage_, storage_size_);
   CHECK_EQ(ret, ACL_SUCCESS)
       << "Failed to allocate pinned host storage size=" << storage_size_;
@@ -131,7 +128,7 @@ void BaseManualLoader::copy_weights_to_device() {
                         ACL_MEMCPY_HOST_TO_DEVICE);
     }
     CHECK_EQ(err, ACL_SUCCESS) << "aclrtMemcpy failed for tensor index " << i;
-    at_host_weight_tensors_[i] = at::Tensor();
+    at_host_weight_tensors_[i] = torch::Tensor();
   }
 }
 
@@ -196,7 +193,7 @@ void BaseManualLoader::release_host_storage() {
 BaseManualLoader::BaseManualLoader(uint64_t weight_count,
                                    const ModelContext& context)
     : BaseLoader(weight_count, context) {
-  at_host_weight_tensors_.resize(weight_count_);
+  at_host_weight_tensors_.resize(weight_count);
 }
 
 torch::Tensor BaseManualLoader::convert_to_torch_tensor(
@@ -233,5 +230,6 @@ torch::Tensor BaseManualLoader::convert_to_torch_tensor(
 
   return tensor;
 }
+
 }  // namespace layer
 }  // namespace xllm

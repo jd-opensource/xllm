@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ limitations under the License.
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
 #include "loader/deepseek_v2_decoder_loader.h"
+#include "loader/deepseek_v2_decoder_manual_loader.h"
 #include "npu_base_layer.h"
 #include "xllm_kernels/models/deepseekv2/layer/decoder_layer.h"
 
