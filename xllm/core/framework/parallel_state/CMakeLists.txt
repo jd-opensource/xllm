@@ -42,6 +42,7 @@ if(USE_NPU)
       absl::time
       GTest::gtest_main
       xllm_kernels
+      nnopbase
       ascendcl
       atb
       c_sec
