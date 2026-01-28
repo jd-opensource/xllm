@@ -121,9 +121,6 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Master address for multi-node distributed serving (e.g. 10.18.1.1:9999) */
   char master_node_addr[XLLM_META_STRING_FIELD_MAX_LEN];
 
-  /** XService server address (empty string = disable XService) */
-  char xservice_addr[XLLM_META_STRING_FIELD_MAX_LEN];
-
   /** Unique instance name for identification */
   char instance_name[XLLM_META_STRING_FIELD_MAX_LEN];
 
