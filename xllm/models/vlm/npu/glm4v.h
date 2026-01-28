@@ -1085,10 +1085,11 @@ REGISTER_MODEL_ARGS(glm4v, [&] {
   // 0.5);
   LOAD_ARG_OR(rms_norm_eps, "text_config.rms_norm_eps", 1e-05);
   LOAD_ARG_OR(dtype, "text_config.dtype", "bfloat16");
-  LOAD_ARG_OR(rope_scaling_rope_type, "text_config.rope_scaling.type", "mrope");
+  LOAD_ARG_OR(
+      rope_scaling_rope_type, "text_config.rope_parameters.type", "mrope");
   LOAD_ARG(rope_scaling_mrope_section,
-           "text_config.rope_scaling.mrope_section");
-  LOAD_ARG_OR(rope_theta, "text_config.rope_theta", 500000.0f);
+           "text_config.rope_parameters.mrope_section");
+  LOAD_ARG_OR(rope_theta, "text_config.rope_parameters.rope_theta", 500000.0f);
   LOAD_ARG_OR(routed_scaling_factor, "text_config.routed_scaling_factor", 1.0);
   LOAD_ARG_OR(topk_group, "text_config.topk_group", 1);
   // LOAD_ARG_OR(use_cache, "text_config.use_cache", true);
@@ -1117,5 +1118,6 @@ REGISTER_MODEL_ARGS(glm4v, [&] {
   SET_ARG(stop_token_ids,
           std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
                                       args->eos_token_id_vec().end()));
+  SET_ARG(rope_scaling_rope_type, "mrope");
 });
 }  // namespace xllm
