@@ -63,11 +63,9 @@ class GraphPersistentParam {
   torch::Tensor block_table_;
   uint32_t num_decoding_tokens_;
 
-  // for vl
-  torch::Tensor input_embeds_;
-
+ public:
   // for mtp model
-  torch::Tensor embedding_;
+  torch::Tensor persistent_embedding_;
 };
 
 // graph executor using libtorch MLUGraph for memory management

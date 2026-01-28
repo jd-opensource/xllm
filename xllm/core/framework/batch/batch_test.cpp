@@ -26,6 +26,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/request/stopping_checker.h"
 #include "framework/sampling/sampling_params.h"
+#include "platform/device.h"
 
 namespace xllm {
 
@@ -44,6 +45,10 @@ bool equal(const torch::Tensor& t, const std::vector<T>& d) {
 }
 
 TEST(BatchTest, Basic) {
+  // use init device to trigger the loading of torch backend for different
+  // devices
+  //  since the allocation of pinnned memory on cpu is still backend-dependent.
+  torch::Device device(Device::type_torch(), 0);
   const uint32_t n_blocks = 20;
   const uint32_t block_size = 4;
   BlockManager::Options options;
