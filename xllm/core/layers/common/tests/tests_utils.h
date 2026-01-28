@@ -30,54 +30,15 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 
-#define TORCH_VERSION_LESS_THAN(major, minor) \
-  (TORCH_VERSION_MAJOR < (major) ||           \
-   (TORCH_VERSION_MAJOR == (major) && TORCH_VERSION_MINOR < (minor)))
-
-#if defined(USE_NPU) && TORCH_VERSION_LESS_THAN(2, 7)
-#define USE_NPU_HCCL_BACKEND 1
-#include <torch_npu/csrc/distributed/ProcessGroupHCCL.hpp>
-using MockBackendBase = c10d_npu::ProcessGroupHCCL;
-#else
-#define USE_NPU_HCCL_BACKEND 0
-using MockBackendBase = c10d::Backend;
-#endif
-
 namespace xllm {
 namespace layer {
 namespace test {
 
-namespace detail {
-
-#if USE_NPU_HCCL_BACKEND
-inline c10::intrusive_ptr<c10d::TCPStore> createTCPStore(int64_t rank) {
-  c10d::TCPStoreOptions opts;
-  opts.port = 0;
-  opts.isServer = (rank == 0);
-  opts.waitWorkers = true;
-  return c10::make_intrusive<c10d::TCPStore>("127.0.0.1", opts);
-}
-#endif
-
-}  // namespace detail
-
 // Mock Backend for testing - minimal implementation for tp=1 tests
-class MockBackend : public MockBackendBase {
+class MockBackend : public c10d::Backend {
  public:
-#if USE_NPU_HCCL_BACKEND
   MockBackend(int64_t rank, int64_t world_size)
-      : MockBackendBase(detail::createTCPStore(rank),
-                        rank,
-                        world_size,
-                        MockBackendBase::Options::create()),
-        rank_(rank),
-        world_size_(world_size) {}
-#else
-  MockBackend(int64_t rank, int64_t world_size)
-      : MockBackendBase(rank, world_size),
-        rank_(rank),
-        world_size_(world_size) {}
-#endif
+      : c10d::Backend(rank, world_size), rank_(rank), world_size_(world_size) {}
 
   c10::intrusive_ptr<c10d::Work> allreduce(
       std::vector<torch::Tensor>& tensors,
@@ -164,11 +125,9 @@ class MockBackend : public MockBackendBase {
 
   int64_t getSize() const { return world_size_; }
 
-#if !TORCH_VERSION_LESS_THAN(2, 7)
   void shutdown() override {
     // Mock implementation - do nothing
   }
-#endif
 
  private:
   int64_t rank_;
