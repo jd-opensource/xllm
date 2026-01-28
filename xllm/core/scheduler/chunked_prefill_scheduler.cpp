@@ -53,7 +53,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     bool& budget_exhausted,
     bool& blocks_exhausted) {
   while (!running_queue->empty() &&
-         remaining_token_budget > min_speculative_tokens_required_ &&
+         remaining_token_budget >= min_speculative_tokens_required_ &&
          latency_budget > estimate_latency && remaining_seq_budget > 0) {
     std::shared_ptr<Request> request(running_queue->top());
 
@@ -95,7 +95,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       size_t num_tokens_to_handle =
           sequence->is_chunked_prefill_stage()
               ? std::min(assume_max_tokens, num_tokens - kv_cache_tokens_num)
-              : 1 + min_speculative_tokens_required_;
+              : min_speculative_tokens_required_;
 
       if (allocated_seqs + 1 > remaining_seq_budget ||
           allocated_tokens + num_tokens_to_handle > remaining_token_budget) {
@@ -722,7 +722,7 @@ bool ChunkedPrefillScheduler::allocate_blocks_for(
     size_t token_budget,
     size_t* current_step_handle_tokens) {
   // token budget should be large enough for one speculative decoding step
-  CHECK_GT(token_budget, min_speculative_tokens_required_);
+  CHECK_GE(token_budget, min_speculative_tokens_required_);
 
   allocate_shared_blocks_for(sequence);
 
