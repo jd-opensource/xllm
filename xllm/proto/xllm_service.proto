@@ -29,7 +29,9 @@ message MasterInfos {
   string master_node_addr = 3;
   int32 master_status = 4;
   repeated string remote_addrs = 5;       
-  repeated uint64 src_weight_offsets = 6; 
+  repeated uint64 src_weight_offsets = 6;
+  int32 nnodes = 7;
+  int32 dp_size = 8;
 }
 
 message D2DLinkRequest {
