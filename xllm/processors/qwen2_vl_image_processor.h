@@ -77,6 +77,7 @@ class Qwen2VLImageProcessor : public ImageProcessor {
   int temporal_patch_size_ = 2;
 
   bool do_sample_frame_ = true;
+  bool has_feature_extractor_ = false;
 
   int min_frames_ = 4;
   int max_frames_ = 768;

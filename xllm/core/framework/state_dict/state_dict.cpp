@@ -182,6 +182,60 @@ StateDict StateDict::get_dict_with_prefix(
   return tensors;
 }
 
+StateDict StateDict::get_dict_with_renamed_prefix(
+    const std::string& old_prefix,
+    const std::string& new_prefix) const {
+  bool old_end_with_dot = old_prefix.empty() || old_prefix.back() == '.';
+  bool new_end_with_dot = new_prefix.empty() || new_prefix.back() == '.';
+  if ((old_end_with_dot && !new_end_with_dot) ||
+      (!old_end_with_dot && new_end_with_dot)) {
+    LOG(WARNING) << "The input does not comply the standards"
+                 << "you are changing statedict prefixs from " << old_prefix
+                 << " to " << new_prefix;
+  }
+
+  std::unordered_map<std::string, torch::Tensor> tensors;
+
+  for (const auto& [name, tensor] : dict_) {
+    if (absl::StartsWith(name, old_prefix)) {
+      std::string new_name = new_prefix + name.substr(old_prefix.length());
+      tensors[std::move(new_name)] = tensor;
+    } else {
+      tensors[name] = tensor;
+    }
+  }
+
+  return {std::move(tensors), prefix_};
+}
+
+void StateDict::rename_prefix_inplace(const std::string& old_prefix,
+                                      const std::string& new_prefix) {
+  bool old_end_with_dot = old_prefix.empty() || old_prefix.back() == '.';
+  bool new_end_with_dot = new_prefix.empty() || new_prefix.back() == '.';
+  if ((old_end_with_dot && !new_end_with_dot) ||
+      (!old_end_with_dot && new_end_with_dot)) {
+    LOG(WARNING) << "The input does not comply the standards"
+                 << "you are changing statedict prefixs from " << old_prefix
+                 << " to " << new_prefix;
+  }
+
+  std::unordered_map<std::string, torch::Tensor> tensors;
+
+  for (auto it = dict_.begin(); it != dict_.end();) {
+    if (absl::StartsWith(it->first, old_prefix)) {
+      std::string new_key = new_prefix + it->first.substr(old_prefix.length());
+      tensors[std::move(new_key)] = std::move(it->second);
+      it = dict_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  for (auto& [new_key, tensor] : tensors) {
+    dict_[std::move(new_key)] = std::move(tensor);
+  }
+}
+
 StateDictFromSafeTensor::StateDictFromSafeTensor(
     std::unique_ptr<MemoryMapping> mem_map,
     std::unordered_map<std::string, torch::Tensor> dict)
