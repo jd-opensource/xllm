@@ -260,6 +260,10 @@ bool LlmDataDistTransfer::push_kv_blocks(
     // designated worker.
     for (const auto& pair : merged_kv_infos) {
       const KVCacheInfo& kv_info = pair.second;
+      if (kv_info.src_blocks.size() == 0) {
+        continue;
+      }
+
       CacheIndex k_cache_index{kv_info.dst_cluster_id, kv_info.dst_k_cache_id};
       CacheIndex v_cache_index{kv_info.dst_cluster_id, kv_info.dst_v_cache_id};
       KvCacheExtParam ext_param{};
