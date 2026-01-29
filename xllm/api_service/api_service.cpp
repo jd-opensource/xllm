@@ -742,6 +742,14 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
   options.model_path() = request->model_path();
   options.master_status() = request->master_status();
 
+  // Parse nnodes and dp_size (tp_size = nnodes / dp_size, computed by engine)
+  if (request->nnodes() > 0) {
+    options.nnodes() = request->nnodes();
+  }
+  if (request->dp_size() > 0) {
+    options.dp_size() = request->dp_size();
+  }
+
   return true;
 }
 

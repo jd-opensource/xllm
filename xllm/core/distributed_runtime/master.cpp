@@ -318,6 +318,13 @@ std::unique_ptr<Master> fork_master(Master* master, const Options& options) {
   new_options.master_node_addr() = options.master_node_addr();
   new_options.server_idx() = server_idx++;
   new_options.master_status() = options.master_status();
+  // Set nnodes and dp_size from fork request (tp_size * dp_size = nnodes)
+  if (options.nnodes() > 0 && new_options.nnodes() >= options.nnodes()) {
+    new_options.nnodes() = options.nnodes();
+  }
+  if (options.dp_size() > 0 && new_options.dp_size() >= options.nnodes()) {
+    new_options.dp_size() = options.dp_size();
+  }
   std::unique_ptr<Master> new_master;
   if (new_options.node_rank() != 0) {
     new_master = std::make_unique<LLMAssistantMaster>(new_options);

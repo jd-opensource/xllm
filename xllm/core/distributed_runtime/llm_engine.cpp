@@ -223,8 +223,11 @@ bool LLMEngine::init_model(int32_t master_status) {
       CHECK(phy_pool.is_initialized())
           << "PhyPagePool must be initialized before PageAllocator";
       size_t num_phy_pages = phy_pool.num_total();
+      // max_world_size = dp_size * tp_size = worker_clients_num_
+      int32_t max_world_size = static_cast<int32_t>(worker_clients_num_);
       page_allocator.init(num_phy_pages,
                           dp_size_,
+                          max_world_size,
                           /*enable_page_prealloc=*/true);
     }
 
@@ -233,12 +236,21 @@ bool LLMEngine::init_model(int32_t master_status) {
     const std::string& model_id = options_.model_id();
     page_allocator.register_model(model_id, args_.n_layers(), master_status);
 
+    // Set model-specific parallel strategy for broadcast operations
+    // This is important for fork master with different dp/tp than original
+    // master (each model may have different dp_size/tp_size)
+    page_allocator.set_model_parallel_strategy(
+        model_id, dp_size_, dp_local_tp_size_);
+    auto& xtensor_allocator = XTensorAllocator::get_instance();
+    xtensor_allocator.set_model_parallel_strategy(
+        model_id, dp_size_, dp_local_tp_size_);
+
     // Get total weight size and compute aligned num_pages
     int64_t total_weight_size = model_loader->get_total_weight_size();
     int64_t weight_size_per_tp = total_weight_size / dp_local_tp_size_;
 
     size_t page_size = FLAGS_phy_page_granularity_size;
-    size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size;
+    size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size + 10;
 
     LOG(INFO) << "XTensor weight allocation: total_weight_size="
               << total_weight_size << ", tp_size=" << dp_local_tp_size_
