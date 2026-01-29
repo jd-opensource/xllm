@@ -192,8 +192,15 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
     if (FLAGS_npu_kernel_backend != "TORCH") {
       auto head = impl_->get_npu_lm_head();
       draft_impl_->set_npu_lm_head(head);
-      auto word_embedding = impl_->get_npu_word_embedding();
-      draft_impl_->set_npu_word_embedding(word_embedding);
+      // NOTE: Do NOT share word_embedding layer when num_speculative_tokens
+      // > 1. Sharing the NpuWordEmbeddingImpl causes ATB operation state
+      // corruption when the layer is called multiple times rapidly in the MTP
+      // k>1 loop. The draft model uses its own word_embedding layer loaded from
+      // its model weights, which is safe for repeated calls.
+      if (options_.num_speculative_tokens() <= 1) {
+        auto word_embedding = impl_->get_npu_word_embedding();
+        draft_impl_->set_npu_word_embedding(word_embedding);
+      }
     } else {
       // TODO: Support TORCH backend via torch_npu encapsulation in the future.
       // Currently, it is explicitly disabled.
@@ -203,8 +210,12 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
 #else
     auto head = impl_->get_lm_head();
     draft_impl_->set_lm_head(head);
-    auto word_embedding = impl_->get_word_embedding();
-    draft_impl_->set_word_embedding(word_embedding);
+    // NOTE: Do NOT share word_embedding layer when num_speculative_tokens > 1.
+    // See NPU path comment for details.
+    if (options_.num_speculative_tokens() <= 1) {
+      auto word_embedding = impl_->get_word_embedding();
+      draft_impl_->set_word_embedding(word_embedding);
+    }
 #endif
     // Sync context_ from impl_ for WorkerImpl::prepare_work_before_execute
     context_ = impl_->context_;
