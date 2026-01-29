@@ -18,6 +18,8 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <sys/mman.h>
 
+#include <cerrno>
+#include <cstring>
 #include <memory>
 
 #include "kv_cache_store.h"
@@ -488,8 +490,14 @@ void HierarchyKVCacheTransfer::create_page_aligned_host_cache() {
   }
 
   if (mlock(page_aligned_data_, page_aligned_data_size_) != 0) {
+    int err = errno;
     munmap(page_aligned_data_, page_aligned_data_size_);
-    LOG(FATAL) << "Failed to lock memory pool!";
+    uint64_t limit_kb = (page_aligned_data_size_ + 1023) / 1024;
+    LOG(FATAL) << "Failed to lock memory pool! mlock errno=" << err << " ("
+               << strerror(err) << "), size=" << page_aligned_data_size_
+               << " bytes (~" << (page_aligned_data_size_ >> 20) << " MiB). "
+               << "Run: ulimit -l " << limit_kb << " (or ulimit -l unlimited) "
+               << "then restart the process.";
   }
 
 #if defined(USE_NPU)
