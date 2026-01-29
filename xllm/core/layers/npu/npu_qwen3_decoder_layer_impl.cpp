@@ -166,11 +166,19 @@ NpuQwen3DecoderLayerImpl::NpuQwen3DecoderLayerImpl(const ModelContext& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  loader_ = std::make_unique<Qwen3DecoderManualLoader>(
-      WEIGHT_COUNT_PER_LAYER,
-      context,
-      prefill_param_.enableIntraLayerAddNorm ||
-          prefill_param_.enableInterLayerAddNorm);
+  if (FLAGS_enable_xtensor) {
+    loader_ = std::make_unique<Qwen3DecoderManualLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        prefill_param_.enableIntraLayerAddNorm ||
+            prefill_param_.enableInterLayerAddNorm);
+  } else {
+    loader_ = std::make_unique<Qwen3DecoderLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        prefill_param_.enableIntraLayerAddNorm ||
+            prefill_param_.enableInterLayerAddNorm);
+  }
 }
 
 void NpuQwen3DecoderLayerImpl::merge_loaded_weights() {
