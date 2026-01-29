@@ -290,6 +290,30 @@ int64_t XTensorAllocator::init_phy_page_pools(double max_memory_utilization,
   return num_pages;
 }
 
+// ============== Model Parallel Strategy ==============
+
+void XTensorAllocator::set_model_parallel_strategy(const std::string& model_id,
+                                                   int32_t dp_size,
+                                                   int32_t tp_size) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto& tensors = get_or_create_model_tensors(model_id);
+  tensors.dp_size = dp_size;
+  tensors.tp_size = tp_size;
+  LOG(INFO) << "Set model parallel strategy for " << model_id
+            << ": dp_size=" << dp_size << ", tp_size=" << tp_size;
+}
+
+std::pair<int32_t, int32_t> XTensorAllocator::get_model_parallel_strategy(
+    const std::string& model_id) {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto* tensors = get_model_tensors(model_id);
+  if (tensors && tensors->dp_size > 0 && tensors->tp_size > 0) {
+    return {tensors->dp_size, tensors->tp_size};
+  }
+  // Fallback to global values
+  return {dp_size_, tp_size_};
+}
+
 // ============== Broadcast Operations ==============
 
 bool XTensorAllocator::broadcast_map_to_kv_tensors(
@@ -301,16 +325,25 @@ bool XTensorAllocator::broadcast_map_to_kv_tensors(
     return map_to_kv_tensors(model_id, offsets);
   }
 
-  // Get clients for the specified DP group
+  // Get model-specific parallel strategy
+  auto [model_dp_size, model_tp_size] = get_model_parallel_strategy(model_id);
+
   CHECK_GE(dp_rank, 0) << "dp_rank must be >= 0";
-  CHECK_LT(dp_rank, dp_size_) << "dp_rank must be < dp_size";
-  const auto& clients = dp_group_clients_[dp_rank];
+  CHECK_LT(dp_rank, model_dp_size) << "dp_rank must be < model_dp_size";
+
+  // Calculate worker range for this DP group based on model's parallel strategy
+  // Workers are organized as: [dp0_tp0, dp0_tp1, ..., dp1_tp0, dp1_tp1, ...]
+  int32_t start_rank = dp_rank * model_tp_size;
+  int32_t end_rank = start_rank + model_tp_size;
 
   // Broadcast to workers in this DP group via RPC asynchronously
   std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(clients.size());
-  for (auto& client : clients) {
-    futures.push_back(client->map_to_kv_tensors_async(model_id, offsets));
+  futures.reserve(model_tp_size);
+  for (int32_t r = start_rank;
+       r < end_rank && r < static_cast<int32_t>(xtensor_dist_clients_.size());
+       ++r) {
+    futures.push_back(
+        xtensor_dist_clients_[r]->map_to_kv_tensors_async(model_id, offsets));
   }
 
   // Wait for all futures to complete
@@ -332,16 +365,25 @@ bool XTensorAllocator::broadcast_unmap_from_kv_tensors(
     return unmap_from_kv_tensors(model_id, offsets);
   }
 
-  // Get clients for the specified DP group
+  // Get model-specific parallel strategy
+  auto [model_dp_size, model_tp_size] = get_model_parallel_strategy(model_id);
+
   CHECK_GE(dp_rank, 0) << "dp_rank must be >= 0";
-  CHECK_LT(dp_rank, dp_size_) << "dp_rank must be < dp_size";
-  const auto& clients = dp_group_clients_[dp_rank];
+  CHECK_LT(dp_rank, model_dp_size) << "dp_rank must be < model_dp_size";
+
+  // Calculate worker range for this DP group based on model's parallel strategy
+  // Workers are organized as: [dp0_tp0, dp0_tp1, ..., dp1_tp0, dp1_tp1, ...]
+  int32_t start_rank = dp_rank * model_tp_size;
+  int32_t end_rank = start_rank + model_tp_size;
 
   // Broadcast to workers in this DP group via RPC asynchronously
   std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(clients.size());
-  for (auto& client : clients) {
-    futures.push_back(client->unmap_from_kv_tensors_async(model_id, offsets));
+  futures.reserve(model_tp_size);
+  for (int32_t r = start_rank;
+       r < end_rank && r < static_cast<int32_t>(xtensor_dist_clients_.size());
+       ++r) {
+    futures.push_back(xtensor_dist_clients_[r]->unmap_from_kv_tensors_async(
+        model_id, offsets));
   }
 
   // Wait for all futures to complete
@@ -356,7 +398,11 @@ bool XTensorAllocator::broadcast_unmap_from_kv_tensors(
 
 bool XTensorAllocator::broadcast_alloc_weight_pages(const std::string& model_id,
                                                     size_t num_pages) {
-  if (world_size_ <= 1) {
+  // Get model-specific parallel strategy
+  auto [model_dp_size, model_tp_size] = get_model_parallel_strategy(model_id);
+  int32_t model_world_size = model_dp_size * model_tp_size;
+
+  if (model_world_size <= 1) {
     // Single process: allocate locally from PhyPagePool and record
     auto& pool = PhyPagePool::get_instance();
 
@@ -382,11 +428,14 @@ bool XTensorAllocator::broadcast_alloc_weight_pages(const std::string& model_id,
     return true;
   }
 
-  // Broadcast to all workers via RPC
+  // Broadcast to all workers for this model
   std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(xtensor_dist_clients_.size());
-  for (auto& client : xtensor_dist_clients_) {
-    futures.push_back(client->alloc_weight_pages_async(model_id, num_pages));
+  int32_t num_workers = std::min(
+      model_world_size, static_cast<int32_t>(xtensor_dist_clients_.size()));
+  futures.reserve(num_workers);
+  for (int32_t i = 0; i < num_workers; ++i) {
+    futures.push_back(xtensor_dist_clients_[i]->alloc_weight_pages_async(
+        model_id, num_pages));
   }
 
   // Wait for all futures to complete
@@ -400,23 +449,30 @@ bool XTensorAllocator::broadcast_alloc_weight_pages(const std::string& model_id,
   }
 
   LOG(INFO) << "broadcast_alloc_weight_pages success: model=" << model_id
-            << ", num_pages=" << num_pages;
+            << ", num_pages=" << num_pages << ", num_workers=" << num_workers;
   return true;
 }
 
 bool XTensorAllocator::broadcast_free_weight_pages(
     const std::string& model_id) {
-  if (world_size_ <= 1) {
+  // Get model-specific parallel strategy
+  auto [model_dp_size, model_tp_size] = get_model_parallel_strategy(model_id);
+  int32_t model_world_size = model_dp_size * model_tp_size;
+
+  if (model_world_size <= 1) {
     // Single process: free locally
     free_weight_from_global_xtensor(model_id);
     return true;
   }
 
-  // Broadcast to all workers via RPC
+  // Broadcast to all workers for this model
   std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(xtensor_dist_clients_.size());
-  for (auto& client : xtensor_dist_clients_) {
-    futures.push_back(client->free_weight_pages_async(model_id));
+  int32_t num_workers = std::min(
+      model_world_size, static_cast<int32_t>(xtensor_dist_clients_.size()));
+  futures.reserve(num_workers);
+  for (int32_t i = 0; i < num_workers; ++i) {
+    futures.push_back(
+        xtensor_dist_clients_[i]->free_weight_pages_async(model_id));
   }
 
   // Wait for all futures to complete
@@ -428,7 +484,8 @@ bool XTensorAllocator::broadcast_free_weight_pages(
     }
   }
 
-  LOG(INFO) << "broadcast_free_weight_pages success: model=" << model_id;
+  LOG(INFO) << "broadcast_free_weight_pages success: model=" << model_id
+            << ", num_workers=" << num_workers;
   return true;
 }
 

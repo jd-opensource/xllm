@@ -52,10 +52,15 @@ struct ModelTensors {
   size_t weight_current_offset = 0;  // Current allocation offset in bytes
 
   // ============== Fallback Weight Allocation (XTensor with preallocated pages)
-  // ==============
   // Used when contiguous allocation fails due to fragmentation
   std::unique_ptr<XTensor> weight_xtensor;
   bool using_weight_xtensor = false;  // True if using XTensor fallback
+
+  // ============== Model-specific Parallel Strategy (for fork master)
+  // ============== Each model may have different dp_size/tp_size, used in
+  // broadcast operations to select correct workers. 0 means use global values.
+  int32_t dp_size = 0;
+  int32_t tp_size = 0;
 };
 
 /**
@@ -132,6 +137,19 @@ class XTensorAllocator {
   // Initialize PhyPagePool on all workers
   int64_t init_phy_page_pools(double max_memory_utilization = 0.9,
                               int64_t max_cache_size = 0);
+
+  // ============== Model Parallel Strategy ==============
+
+  // Set model-specific parallel strategy (for fork master with different dp/tp)
+  // This should be called before broadcast operations for the model
+  void set_model_parallel_strategy(const std::string& model_id,
+                                   int32_t dp_size,
+                                   int32_t tp_size);
+
+  // Get model-specific parallel strategy (returns global values if not set)
+  // Returns {dp_size, tp_size}
+  std::pair<int32_t, int32_t> get_model_parallel_strategy(
+      const std::string& model_id);
 
   // ============== Broadcast Operations ==============
 
