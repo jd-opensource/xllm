@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
 #include "framework/request/sequence.h"
+#include "framework/xtensor/page_allocator.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
@@ -94,6 +95,16 @@ void DisaggPDScheduler::initialize_rpc_server(const std::string& server_name) {
     absl::SleepFor(absl::Milliseconds(100));
     rpc_server = ServerRegistry::get_instance().get_server(server_name);
   }
+  // connect to master service
+  xservice_client_ = XServiceClient::get_instance();
+  if (!xservice_client_->initialize_done()) {
+    LOG(FATAL) << "XServiceClient not init.";
+    return;
+  }
+  xservice_client_->set_scheduler(this);
+  if (FLAGS_enable_xtensor) {
+    xservice_client_->set_engine(engine_);
+  }
 }
 
 void DisaggPDScheduler::register_instance_info(const std::string& server_name,
@@ -114,6 +125,16 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
   instance_info_.dp_size = options_.dp_size();
 
   engine->get_device_info(instance_info_.device_ips, instance_info_.ports);
+
+  // Get total physical pages per worker (for etcd registration)
+#if defined(USE_NPU)
+  if (FLAGS_enable_xtensor) {
+    auto& page_allocator = PageAllocator::get_instance();
+    if (page_allocator.is_initialized()) {
+      instance_info_.total_phy_pages = page_allocator.get_num_total_phy_pages();
+    }
+  }
+#endif
 }
 
 void DisaggPDScheduler::profile_ttft() {

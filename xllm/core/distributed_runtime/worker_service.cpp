@@ -562,8 +562,15 @@ void WorkerService::Wakeup(::google::protobuf::RpcController* controller,
     options.master_status = req->master_status();
     options.remote_addrs.assign(req->remote_addrs().begin(),
                                 req->remote_addrs().end());
-    options.src_weight_offsets.assign(req->src_weight_offsets().begin(),
-                                      req->src_weight_offsets().end());
+    // Unmarshal weight segments
+    for (const auto& seg_list : req->src_weight_segments()) {
+      std::vector<WeightSegment> segments;
+      segments.reserve(seg_list.segments_size());
+      for (const auto& proto_seg : seg_list.segments()) {
+        segments.push_back({proto_seg.offset(), proto_seg.size()});
+      }
+      options.src_weight_segments.push_back(std::move(segments));
+    }
     bool status = worker_->wakeup(options);
     resp->set_ok(status);
   });

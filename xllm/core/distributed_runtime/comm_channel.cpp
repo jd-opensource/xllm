@@ -414,11 +414,13 @@ bool CommChannel::wakeup(const WakeupOptions& options) {
     req.mutable_remote_addrs()->Assign(options.remote_addrs.begin(),
                                        options.remote_addrs.end());
   }
-  if (!options.src_weight_offsets.empty()) {
-    req.mutable_src_weight_offsets()->Reserve(
-        options.src_weight_offsets.size());
-    for (auto offset : options.src_weight_offsets) {
-      req.add_src_weight_offsets(offset);
+  // Marshal weight segments (new multi-segment format)
+  for (const auto& segments : options.src_weight_segments) {
+    auto* seg_list = req.add_src_weight_segments();
+    for (const auto& seg : segments) {
+      auto* proto_seg = seg_list->add_segments();
+      proto_seg->set_offset(seg.offset);
+      proto_seg->set_size(seg.size);
     }
   }
   stub_->Wakeup(&cntl, &req, &s, nullptr);

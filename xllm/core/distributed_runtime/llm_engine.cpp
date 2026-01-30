@@ -689,6 +689,29 @@ void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
   }
 }
 
+void LLMEngine::get_xtensor_info(
+    std::vector<size_t>& worker_free_phy_pages,
+    std::unordered_map<std::string, std::vector<WeightSegment>>&
+        model_weight_segments) {
+  if (!FLAGS_enable_xtensor) {
+    return;
+  }
+
+  // Worker 0 is in the same process as Master, no RPC needed.
+  // Both PageAllocator and XTensorAllocator are singletons.
+
+  // Get free phy pages from PageAllocator
+  auto& page_allocator = PageAllocator::get_instance();
+  if (page_allocator.is_initialized()) {
+    worker_free_phy_pages = page_allocator.get_all_worker_free_pages();
+  }
+
+  // Get model weight segments from XTensorAllocator directly (no RPC)
+  // Worker 0 is always in dp group 0, weights are duplicated across dp groups
+  auto& xtensor_allocator = XTensorAllocator::get_instance();
+  model_weight_segments = xtensor_allocator.get_all_model_weight_segments();
+}
+
 bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                              const std::vector<std::string>& addrs,
                              const std::vector<std::string>& device_ips,

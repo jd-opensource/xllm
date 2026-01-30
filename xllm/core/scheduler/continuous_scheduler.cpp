@@ -81,6 +81,9 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       return;
     }
     xservice_client_->set_scheduler(this);
+    if (FLAGS_enable_xtensor) {
+      xservice_client_->set_engine(engine_);
+    }
   }
 
   instance_info_.name = options_.instance_name().value_or("");
