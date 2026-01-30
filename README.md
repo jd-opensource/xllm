@@ -127,18 +127,13 @@ Supported models list:
 First, download the image we provide:
 ```bash
 # A2 x86
-docker pull xllm/xllm-ai:xllm-dev-hb-rc2-x86
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.8.0-dev-hb-rc2-x86
 # A2 arm
-docker pull xllm/xllm-ai:xllm-dev-hb-rc2-arm
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.8.0-dev-hb-rc2-arm
 # A3 arm
-docker pull xllm/xllm-ai:xllm-dev-hc-rc2-arm
-# or
-# A2 x86
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-x86
-# A2 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-arm
-# A3 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hc-rc2-arm
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.8.0-dev-hc-rc2-arm
+# CUDA
+docker pull quay.io/jd_xllm/xllm-ai:xllm-0.8.0-dev-cuda-x86
 ```
 Then create the corresponding container:
 ```bash
