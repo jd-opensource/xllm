@@ -59,6 +59,8 @@ APIService::APIService(Master* master,
     : master_(master) {
   if (FLAGS_backend == "llm") {
     auto llm_master = dynamic_cast<LLMMaster*>(master);
+    anthropic_service_impl_ =
+        std::make_unique<AnthropicServiceImpl>(llm_master, model_names);
     completion_service_impl_ =
         ServiceImplFactory<CompletionServiceImpl>::create_service_impl(
             llm_master, model_names);
@@ -187,7 +189,7 @@ size_t get_json_content_length(const brpc::Controller* ctrl) {
     return std::stoul(*content_len);
   }
 
-  LOG(FATAL) << "Content-Length header is missing.";
+  LOG(ERROR) << "Content-Length header is missing.";
   return (size_t)-1L;
 }
 
@@ -283,6 +285,11 @@ void handle_chat_completions(std::unique_ptr<Service>& service,
       google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
 
   auto content_len = get_json_content_length(ctrl);
+  if (content_len == (size_t)-1L) {
+    ctrl->SetFailed("Content-Length header is missing.");
+    return;
+  }
+
   std::string attachment;
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
@@ -557,6 +564,124 @@ void APIService::ModelVersionsHttp(
       models_service_impl_->list_model_versions());
 
   return;
+}
+
+namespace {
+
+// Preprocess Anthropic API JSON to convert "content" field to
+// protobuf-compatible format Anthropic API uses "content" field which can be
+// string or array Our protobuf uses "content_string" for string and
+// "content_blocks" for array
+std::string preprocess_anthropic_json(const std::string& json_str) {
+  try {
+    nlohmann::json j = nlohmann::json::parse(json_str);
+
+    if (j.contains("messages") && j["messages"].is_array()) {
+      for (auto& msg : j["messages"]) {
+        if (msg.contains("content")) {
+          auto& content = msg["content"];
+          if (content.is_string()) {
+            // Convert "content": "string" to "content_string": "string"
+            msg["content_string"] = content.get<std::string>();
+            msg.erase("content");
+          } else if (content.is_array()) {
+            // Convert "content": [...] to "content_blocks": {"blocks": [...]}
+            nlohmann::json content_blocks;
+            content_blocks["blocks"] = content;
+            msg["content_blocks"] = content_blocks;
+            msg.erase("content");
+          }
+        }
+      }
+    }
+
+    if (j.contains("system")) {
+      auto& system = j["system"];
+      if (system.is_string()) {
+        j["system_string"] = system.get<std::string>();
+        j.erase("system");
+      } else if (system.is_array()) {
+        nlohmann::json system_blocks;
+        system_blocks["blocks"] = system;
+        j["system_blocks"] = system_blocks;
+        j.erase("system");
+      }
+    }
+
+    return j.dump();
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to preprocess Anthropic JSON: " << e.what();
+    return json_str;  // Return original on error
+  }
+}
+
+void handle_anthropic_messages(std::unique_ptr<AnthropicServiceImpl>& service,
+                               xllm::ClosureGuard& guard,
+                               brpc::Controller* ctrl,
+                               const proto::HttpRequest* request,
+                               proto::HttpResponse* response) {
+  auto arena = GetArenaWithCheck<AnthropicCall>(response);
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<typename AnthropicCall::ReqType>(
+          arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<typename AnthropicCall::ResType>(
+          arena);
+
+  auto content_len = GetJsonContentLength(ctrl);
+  if (content_len == (size_t)-1L) {
+    ctrl->SetFailed("Content-Length header is missing.");
+    return;
+  }
+  std::string attachment;
+  ctrl->request_attachment().copy_to(&attachment, content_len, 0);
+
+  // Preprocess JSON to convert Anthropic API format to protobuf-compatible
+  // format
+  std::string processed_json = preprocess_anthropic_json(attachment);
+
+  google::protobuf::util::JsonParseOptions options;
+  options.ignore_unknown_fields = true;
+  auto status = google::protobuf::util::JsonStringToMessage(
+      processed_json, req_pb, options);
+  if (!status.ok()) {
+    ctrl->SetFailed(status.ToString());
+    LOG(ERROR) << "parse json to proto failed: " << status.ToString();
+    return;
+  }
+
+  auto call = std::make_shared<AnthropicCall>(
+      ctrl, guard.release(), req_pb, resp_pb, arena != nullptr /*use_arena*/);
+
+  service->process_async(call);
+}
+
+}  // namespace
+
+void APIService::AnthropicMessagesHttp(
+    ::google::protobuf::RpcController* controller,
+    const proto::HttpRequest* request,
+    proto::HttpResponse* response,
+    ::google::protobuf::Closure* done) {
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  if (FLAGS_backend == "llm") {
+    CHECK(anthropic_service_impl_) << " anthropic service is invalid.";
+    handle_anthropic_messages(
+        anthropic_service_impl_, done_guard, ctrl, request, response);
+  } else {
+    ctrl->SetFailed("Anthropic messages API is only supported for LLM backend");
+    LOG(ERROR) << "Anthropic messages API is only supported for LLM backend";
+  }
 }
 
 }  // namespace xllm

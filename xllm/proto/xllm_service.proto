@@ -11,6 +11,7 @@ import "embedding.proto";
 import "image_generation.proto";
 import "rerank.proto";
 import "models.proto";
+import "anthropic.proto";
 
 message HttpRequest {
 };
@@ -38,4 +39,6 @@ service XllmAPIService {
   rpc ModelsHttp (HttpRequest) returns (HttpResponse);
 
   rpc ModelVersionsHttp (HttpRequest) returns (HttpResponse);
+
+  rpc AnthropicMessagesHttp (HttpRequest) returns (HttpResponse);
 };

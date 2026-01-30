@@ -16,6 +16,8 @@ limitations under the License.
 
 #include "request_params.h"
 
+#include <google/protobuf/util/json_util.h>
+
 #include "core/common/global_flags.h"
 #include "core/common/instance_name.h"
 #include "core/util/uuid.h"
@@ -43,6 +45,72 @@ std::string generate_chat_request_id() {
 std::string generate_rerank_request_id() {
   return "rerankcmpl-" + InstanceName::name()->get_name_hash() + "-" +
          short_uuid.random();
+}
+
+std::string generate_anthropic_chat_request_id() {
+  return "anthropiccmpl-" + InstanceName::name()->get_name_hash() + "-" +
+         short_uuid.random();
+}
+
+// Handle tool_choice conversion from Anthropic format to internal format
+std::string handle_tool_choice(
+    const proto::AnthropicMessagesRequest& rpc_request) {
+  if (!rpc_request.has_tool_choice()) {
+    // No tool_choice specified - use default "auto" if tools exist
+    if (rpc_request.tools_size() > 0) {
+      return "auto";
+    }
+    return "";
+  }
+
+  const auto& tool_choice = rpc_request.tool_choice();
+  const std::string& type = tool_choice.type();
+  if (type == "auto") {
+    return "auto";
+  } else if (type == "any") {
+    return "required";
+  } else if (type == "tool") {
+    // Specific tool - format as JSON for named tool choice
+    // Format: {"type": "function", "function": {"name": "<tool_name>"}}
+    if (tool_choice.has_name()) {
+      nlohmann::json tool_choice_json = {
+          {"type", "function"}, {"function", {{"name", tool_choice.name()}}}};
+      return tool_choice_json.dump();
+    } else {
+      // Fallback to auto if no name specified
+      return "auto";
+    }
+  } else {
+    // Unknown type - default to auto
+    return "auto";
+  }
+}
+
+// Build tools list from Anthropic request
+std::vector<JsonTool> handle_tools(
+    const proto::AnthropicMessagesRequest& request) {
+  std::vector<JsonTool> tools;
+
+  for (const auto& tool : request.tools()) {
+    JsonTool json_tool;
+    json_tool.type = "function";
+    json_tool.function.name = tool.name();
+    if (tool.has_description()) {
+      json_tool.function.description = tool.description();
+    }
+
+    // Convert input_schema to JSON
+    if (tool.has_input_schema()) {
+      std::string json_str;
+      google::protobuf::util::MessageToJsonString(tool.input_schema(),
+                                                  &json_str);
+      json_tool.function.parameters = nlohmann::json::parse(json_str);
+    }
+
+    tools.push_back(std::move(json_tool));
+  }
+
+  return tools;
 }
 
 }  // namespace
@@ -421,6 +489,34 @@ RequestParams::RequestParams(const proto::RerankRequest& request,
   } else {
     is_embeddings = true;
   }
+}
+
+RequestParams::RequestParams(const proto::AnthropicMessagesRequest& request,
+                             const std::string& x_rid,
+                             const std::string& x_rtime) {
+  request_id = generate_anthropic_chat_request_id();
+  x_request_id = x_rid;
+  x_request_time = x_rtime;
+
+  max_tokens = static_cast<uint32_t>(request.max_tokens());
+  if (request.has_stream()) {
+    streaming = request.stream();
+  }
+  if (request.has_temperature()) {
+    temperature = request.temperature();
+  }
+  if (request.has_top_p()) {
+    top_p = request.top_p();
+  }
+  if (request.has_top_k()) {
+    top_k = request.top_k();
+  }
+  if (request.stop_sequences_size() > 0) {
+    stop = std::vector<std::string>(request.stop_sequences().begin(),
+                                    request.stop_sequences().end());
+  }
+  tool_choice = std::move(handle_tool_choice(request));
+  tools = std::move(handle_tools(request));
 }
 
 bool RequestParams::verify_params(OutputCallback callback) const {

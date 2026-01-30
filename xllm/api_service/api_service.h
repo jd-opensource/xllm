@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "anthropic_service_impl.h"
 #include "chat_service_impl.h"
 #include "completion_service_impl.h"
 #include "embedding_service_impl.h"
@@ -99,9 +100,15 @@ class APIService : public proto::XllmAPIService {
                          proto::HttpResponse* response,
                          ::google::protobuf::Closure* done) override;
 
+  void AnthropicMessagesHttp(::google::protobuf::RpcController* controller,
+                             const proto::HttpRequest* request,
+                             proto::HttpResponse* response,
+                             ::google::protobuf::Closure* done) override;
+
  private:
   Master* master_;
 
+  std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;
   std::unique_ptr<CompletionServiceImpl> completion_service_impl_;
   std::unique_ptr<ChatServiceImpl> chat_service_impl_;
   std::unique_ptr<MMChatServiceImpl> mm_chat_service_impl_;

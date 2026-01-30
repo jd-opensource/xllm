@@ -22,6 +22,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "anthropic.pb.h"
 #include "chat.pb.h"
 #include "common.pb.h"
 #include "common/macros.h"
@@ -54,6 +55,9 @@ struct RequestParams {
                 const std::string& x_rid,
                 const std::string& x_rtime);
   RequestParams(const proto::RerankRequest& request,
+                const std::string& x_rid,
+                const std::string& x_rtime);
+  RequestParams(const proto::AnthropicMessagesRequest& request,
                 const std::string& x_rid,
                 const std::string& x_rtime);
 

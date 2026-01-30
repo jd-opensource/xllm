@@ -42,6 +42,7 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
                           "v1/models => ModelsHttp,"
                           "v1/image/generation => ImageGenerationHttp,"
                           "v1/rerank => RerankHttp,"
+                          "v1/messages => AnthropicMessagesHttp,"
                           "v2/repository/index => ModelVersionsHttp,") != 0) {
     LOG(ERROR) << "Fail to add api service";
     return false;

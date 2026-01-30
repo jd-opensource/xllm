@@ -39,6 +39,7 @@ if(USE_NPU)
       absl::random_random
       Boost::serialization
       GTest::gtest_main
+      nnopbase
   )
 
   target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto Folly::folly c_sec nnopbase :xllm_server)

@@ -25,10 +25,12 @@ limitations under the License.
 
 #include <boost/algorithm/string.hpp>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_set>
 
 #include "api_service/stream_output_parser.h"
+#include "api_service/utils.h"
 #include "core/common/instance_name.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
@@ -42,64 +44,6 @@ limitations under the License.
 
 namespace xllm {
 namespace {
-
-struct ToolCallResult {
-  std::optional<google::protobuf::RepeatedPtrField<proto::ToolCall>> tool_calls;
-  std::string text;
-  std::string finish_reason;
-};
-
-ToolCallResult process_tool_calls(std::string text,
-                                  const std::vector<xllm::JsonTool>& tools,
-                                  const std::string& parser_format,
-                                  std::string finish_reason,
-                                  google::protobuf::Arena* arena = nullptr) {
-  ToolCallResult result;
-
-  function_call::FunctionCallParser parser(tools, parser_format);
-
-  if (!parser.has_tool_call(text)) {
-    result.text = std::move(text);
-    result.finish_reason = std::move(finish_reason);
-    return result;
-  }
-
-  if (finish_reason == "stop") {
-    result.finish_reason = "tool_calls";
-  } else {
-    result.finish_reason = std::move(finish_reason);
-  }
-
-  try {
-    auto [parsed_text, call_info_list] = parser.parse_non_stream(text);
-    result.text = std::move(parsed_text);
-
-    google::protobuf::RepeatedPtrField<proto::ToolCall> tool_calls;
-
-    for (const auto& call_info : call_info_list) {
-      proto::ToolCall* tool_call =
-          arena ? google::protobuf::Arena::CreateMessage<proto::ToolCall>(arena)
-                : new proto::ToolCall();
-
-      tool_call->set_id(function_call::utils::generate_tool_call_id());
-      tool_call->set_type("function");
-
-      auto* function = tool_call->mutable_function();
-      if (call_info.name) {
-        function->set_name(*call_info.name);
-      }
-      function->set_arguments(call_info.parameters);
-
-      tool_calls.AddAllocated(tool_call);
-    }
-
-    result.tool_calls = std::move(tool_calls);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "Tool call parsing error: " << e.what();
-  }
-
-  return result;
-}
 
 void set_logprobs(proto::ChatChoice* choice,
                   const std::optional<std::vector<LogProb>>& logprobs) {
@@ -262,58 +206,6 @@ bool process_tool_call_stream(std::shared_ptr<ChatCall> call,
   return true;
 }
 
-template <typename ChatCall>
-bool check_for_unstreamed_tool_args(
-    std::shared_ptr<ChatCall> call,
-    std::shared_ptr<StreamOutputParser> stream_parser,
-    size_t index,
-    const std::string& request_id,
-    int64_t created_time,
-    const std::string& model) {
-  auto* parser = stream_parser->get_tool_call_parser(index);
-  if (!parser) {
-    return true;
-  }
-
-  auto* detector = parser->get_detector();
-  if (!detector) {
-    return true;
-  }
-
-  if (!detector->prev_tool_call_arr_.empty() &&
-      !detector->streamed_args_for_tool_.empty()) {
-    size_t tool_index = detector->prev_tool_call_arr_.size() - 1;
-    if (tool_index < detector->streamed_args_for_tool_.size()) {
-      const auto& expected_args = detector->prev_tool_call_arr_[tool_index];
-      const std::string& actual_args =
-          detector->streamed_args_for_tool_[tool_index];
-
-      if (expected_args.find("arguments") != expected_args.end()) {
-        const std::string& expected_call = expected_args.at("arguments");
-
-        if (expected_call.length() > actual_args.length()) {
-          std::string remaining_call =
-              expected_call.substr(actual_args.length());
-
-          if (!remaining_call.empty()) {
-            return send_tool_call_chunk(call,
-                                        index,
-                                        "",
-                                        "",
-                                        remaining_call,
-                                        static_cast<int>(tool_index),
-                                        request_id,
-                                        created_time,
-                                        model);
-          }
-        }
-      }
-    }
-  }
-
-  return true;
-}
-
 bool get_enable_thinking_from_request(
     const nlohmann::json& chat_template_kwargs,
     const std::string& reasoning_parser_format) {
@@ -434,8 +326,19 @@ bool send_delta_to_client_brpc(
     if (seq_output.finish_reason.has_value()) {
       // Check for unstreamed tool args before sending finish reason
       if (stream_parser && stream_parser->get_has_tool_call(index)) {
-        if (!check_for_unstreamed_tool_args(
-                call, stream_parser, index, request_id, created_time, model)) {
+        auto send_func = [&](const std::string& arguments, int tool_index) {
+          return send_tool_call_chunk(call,
+                                      index,
+                                      "",
+                                      "",
+                                      arguments,
+                                      tool_index,
+                                      request_id,
+                                      created_time,
+                                      model);
+        };
+        if (!api_service::check_for_unstreamed_tool_args(
+                stream_parser, index, send_func)) {
           return false;
         }
       }
@@ -531,11 +434,12 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
     if (!tools.empty() && !tool_call_parser_format.empty() &&
         !cur_text.empty()) {
       auto* arena = response.GetArena();
-      auto result = process_tool_calls(cur_text,
-                                       tools,
-                                       tool_call_parser_format,
-                                       output.finish_reason.value_or(""),
-                                       arena);
+      auto result =
+          api_service::process_tool_calls(cur_text,
+                                          tools,
+                                          tool_call_parser_format,
+                                          output.finish_reason.value_or(""),
+                                          arena);
 
       message->mutable_content()->swap(result.text);
 

@@ -21,4 +21,5 @@ proto_library(
     xtensor_manager.proto
     mooncake_transfer_engine.proto
     embedding_data.proto
+    anthropic.proto
 )

@@ -144,7 +144,7 @@ class StreamCall : public Call {
   Response& response() { return *response_; }
   ::google::protobuf::Closure* done() { return done_; }
 
- private:
+ protected:
   ::google::protobuf::Closure* done_;
 
   Request* request_ = nullptr;
@@ -158,6 +158,57 @@ class StreamCall : public Call {
   json2pb::Pb2JsonOptions json_options_;
 
   int connection_status_ = 0;
+};
+
+// Anthropic SSE stream call with custom event formatting
+class AnthropicCall : public StreamCall<proto::AnthropicMessagesRequest,
+                                        proto::AnthropicMessagesResponse> {
+ public:
+  AnthropicCall(brpc::Controller* controller,
+                ::google::protobuf::Closure* done,
+                proto::AnthropicMessagesRequest* request,
+                proto::AnthropicMessagesResponse* response,
+                bool use_arena = false)
+      : StreamCall<proto::AnthropicMessagesRequest,
+                   proto::AnthropicMessagesResponse>(controller,
+                                                     done,
+                                                     request,
+                                                     response,
+                                                     use_arena) {}
+
+  ~AnthropicCall() {}
+
+  // Write SSE event with Anthropic format: event: <type>\ndata: <json>\n\n
+  bool write(const std::string& event_type, const std::string& json_data) {
+    this->io_buf_.clear();
+    this->io_buf_.append("event: ");
+    this->io_buf_.append(event_type);
+    this->io_buf_.append("\ndata: ");
+    this->io_buf_.append(json_data);
+    this->io_buf_.append("\n\n");
+
+    this->connection_status_ |= this->pa_->Write(this->io_buf_);
+    return this->connection_status_ == 0;
+  }
+
+  // Write SSE event with proto message
+  template <typename ProtoMessage>
+  bool write(const std::string& event_type, const ProtoMessage& message) {
+    this->io_buf_.clear();
+    this->io_buf_.append("event: ");
+    this->io_buf_.append(event_type);
+    this->io_buf_.append("\ndata: ");
+    butil::IOBufAsZeroCopyOutputStream json_output(&this->io_buf_);
+    std::string err_msg;
+    if (!json2pb::ProtoMessageToJson(
+            message, &json_output, this->json_options_, &err_msg)) {
+      LOG(ERROR) << "Failed to convert proto to json: " << err_msg;
+      return false;
+    }
+    this->io_buf_.append("\n\n");
+    this->connection_status_ |= this->pa_->Write(this->io_buf_);
+    return this->connection_status_ == 0;
+  }
 };
 
 template <typename T>

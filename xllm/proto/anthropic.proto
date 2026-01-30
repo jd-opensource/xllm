@@ -1,0 +1,213 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package xllm.proto;
+
+import "google/protobuf/struct.proto";
+
+// Anthropic API Protocol Definitions
+// Reference: https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/anthropic/protocol.py
+
+message AnthropicError {
+  string type = 1;
+
+  // Human-readable error message
+  string message = 2;
+}
+
+message AnthropicErrorResponse {
+  string type = 1;
+
+  // The error details
+  AnthropicError error = 2;
+}
+
+message AnthropicUsage {
+  // Number of input tokens
+  int32 input_tokens = 1;
+
+  // Number of output tokens
+  int32 output_tokens = 2;
+
+  // Number of tokens used for cache creation (optional)
+  optional int32 cache_creation_input_tokens = 3;
+
+  // Number of tokens read from cache (optional)
+  optional int32 cache_read_input_tokens = 4;
+}
+
+message AnthropicStructList {
+  repeated google.protobuf.Struct items = 1;
+}
+
+message AnthropicContentBlock {
+  // Type of content block: "text", "image", "tool_use", "tool_result"
+  string type = 1;
+
+  // Text content (for text type)
+  optional string text = 2;
+
+  // Image source (for image type) - dict[str, Any] in Python
+  optional google.protobuf.Struct source = 3;
+
+  // Tool use/result ID
+  optional string id = 4;
+
+  // Tool name (for tool_use type)
+  optional string name = 5;
+
+  // Tool input (for tool_use type) - JSON object
+  optional google.protobuf.Struct input = 6;
+
+  // Tool result content - can be string or complex structure
+  // Using oneof to handle string or structured content
+  oneof tool_result_content {
+    string content_string = 7;
+    AnthropicStructList content_list = 8;
+  }
+
+  // Whether tool result is an error (for tool_result type)
+  optional bool is_error = 9;
+}
+
+message AnthropicContentBlockList {
+  repeated AnthropicContentBlock blocks = 1;
+}
+
+message AnthropicMessage {
+  // Role of the message author: "user" or "assistant"
+  string role = 1;
+
+  // Content can be a simple string or a list of content blocks
+  // For simple string content, use content_string
+  oneof message_content {
+    string content_string = 2;
+    AnthropicContentBlockList content_blocks = 3;
+  }
+}
+
+message AnthropicTool {
+  // Name of the tool
+  string name = 1;
+
+  // Description of the tool (optional)
+  optional string description = 2;
+
+  // JSON Schema for the tool's input parameters
+  google.protobuf.Struct input_schema = 3;
+}
+
+message AnthropicToolChoice {
+  // Type of tool choice: "auto", "any", or "tool"
+  string type = 1;
+
+  // Name of specific tool (required when type is "tool")
+  optional string name = 2;
+}
+
+message AnthropicMessagesRequest {
+  // ID of the model to use
+  string model = 1;
+
+  // A list of messages comprising the conversation so far
+  repeated AnthropicMessage messages = 2;
+
+  // The maximum number of tokens to generate
+  int32 max_tokens = 3;
+
+  // Metadata about the request (optional)
+  optional google.protobuf.Struct metadata = 4;
+
+  // Custom stop sequences (optional)
+  repeated string stop_sequences = 5;
+
+  // Whether to stream the response (optional, default: false)
+  optional bool stream = 6;
+
+  // System prompt - can be string or list of content blocks
+  oneof system_prompt {
+    string system_string = 7;
+    AnthropicContentBlockList system_blocks = 8;
+  }
+
+  // Sampling temperature (optional)
+  optional float temperature = 9;
+
+  // Tool choice configuration (optional)
+  optional AnthropicToolChoice tool_choice = 10;
+
+  // List of tools available to the model (optional)
+  repeated AnthropicTool tools = 11;
+
+  // Top-K sampling (optional)
+  optional int32 top_k = 12;
+
+  // Top-P (nucleus) sampling (optional)
+  optional float top_p = 13;
+}
+
+message AnthropicDelta {
+  // Type of delta: "text_delta" or "input_json_delta"
+  optional string type = 1;
+
+  // Text content (for text_delta)
+  optional string text = 2;
+
+  // Partial JSON (for input_json_delta, used in tool calls)
+  optional string partial_json = 3;
+
+  // Stop reason (for message_delta)
+  optional string stop_reason = 4;
+
+  // Stop sequence that triggered the stop
+  optional string stop_sequence = 5;
+}
+
+message AnthropicStreamEvent {
+  // Type of stream event
+  string type = 1;
+
+  // Full message (for message_start)
+  optional AnthropicMessagesResponse message = 2;
+
+  // Delta content (for message_delta, content_block_delta)
+  optional AnthropicDelta delta = 3;
+
+  // Content block (for content_block_start)
+  optional AnthropicContentBlock content_block = 4;
+
+  // Index of the content block
+  optional int32 index = 5;
+
+  // Error details (for error events)
+  optional AnthropicError error = 6;
+
+  // Usage information (for message_delta with usage)
+  optional AnthropicUsage usage = 7;
+}
+
+message AnthropicMessagesResponse {
+  // Unique message ID
+  string id = 1;
+
+  // Object type, always "message"
+  string type = 2;
+
+  // Role, always "assistant"
+  string role = 3;
+
+  // List of content blocks in the response
+  repeated AnthropicContentBlock content = 4;
+
+  // The model that generated the response
+  string model = 5;
+
+  // Reason the model stopped generating
+  optional string stop_reason = 6;
+
+  // The stop sequence that triggered the stop (if applicable)
+  optional string stop_sequence = 7;
+
+  // Token usage statistics
+  optional AnthropicUsage usage = 8;
+}
