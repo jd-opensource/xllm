@@ -80,12 +80,12 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
                                    std::move(stop_sequences));
 
   auto output_callback = [this](const RequestOutput& output) {
-    return scheduler_->decode_send_stream_generation(output);
+    return scheduler_->send_stream_generation(output);
   };
 
   auto batch_output_callback =
       [this](const std::vector<RequestOutput>& outputs) {
-        return scheduler_->decode_send_stream_generations(outputs);
+        return scheduler_->send_stream_generations(outputs);
       };
 
   RequestState req_state(std::move(prompt),

@@ -76,10 +76,6 @@ class DisaggPDScheduler : public ContinuousScheduler {
 
   // decode allocate blocks with prefix cache.
   bool try_allocate(Sequence* sequence);
-  // decode-3: decode send response to prefill
-  virtual bool decode_send_stream_generation(const RequestOutput& output);
-  virtual std::vector<bool> decode_send_stream_generations(
-      const std::vector<RequestOutput>& outputs);
 
   bool enable_schedule_overlap() { return options_.enable_schedule_overlap(); };
 
@@ -120,7 +116,7 @@ class DisaggPDScheduler : public ContinuousScheduler {
   // Initialize RPC server and xservice client
   // This method waits for the RPC server to be initialized and sets up the
   // xservice client connection.
-  void initialize_rpc_server_and_client(const std::string& server_name);
+  void initialize_rpc_server(const std::string& server_name);
 
   // Register instance information including name, RPC address, type, and cache
   // info
@@ -142,8 +138,6 @@ class DisaggPDScheduler : public ContinuousScheduler {
       instance_channel_map_;
   std::mutex req_to_channel_map_mutex_;
   std::mutex instance_channel_map_mutex_;
-
-  XServiceClient* xservice_client_;
 
   // for prefill, dispatch request to Decode instance
   std::unique_ptr<std::thread> dispatch_thread_;
