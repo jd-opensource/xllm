@@ -73,10 +73,18 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       std::make_unique<ProfileManager>(engine, profile_manager_options);
 
   response_processor_ = std::make_unique<AsyncResponseProcessor>(
-      engine_->tokenizer(), options_.instance_role());
+      engine_->tokenizer(),
+      options_.instance_role(),
+      options_.enable_service_routing());
   create_running_queue(options);
   if (options_.enable_service_routing()) {
-    XServiceClient::get_instance()->set_scheduler(this);
+    // connect to master service
+    xservice_client_ = XServiceClient::get_instance();
+    if (!xservice_client_->initialize_done()) {
+      LOG(FATAL) << "XServiceClient not init.";
+      return;
+    }
+    xservice_client_->set_scheduler(this);
   }
 
   instance_info_.name = options_.instance_name().value_or("");
@@ -1029,8 +1037,7 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
     }
   }
   if (!stream_requests.empty()) {
-    response_processor_->process_stream_requests(stream_requests,
-                                                 last_step_prefill_);
+    response_processor_->process_stream_requests(stream_requests);
   }
 }
 

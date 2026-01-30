@@ -60,7 +60,15 @@ namespace xllm {
     }                                         \
   } while (0)
 
-#define CALLBACK_WITH_ERROR(CODE, MSG) callback(Status{CODE, MSG});
+#define CALLBACK_WITH_ERROR_ARGS2(CODE, MSG) callback(Status{CODE, MSG})
+#define CALLBACK_WITH_ERROR_ARGS3(CODE, MSG, ID) \
+  callback({Status{CODE, MSG}, ID})
+
+#define GET_MACRO(_1, _2, _3, NAME, ...) NAME
+#define CALLBACK_WITH_ERROR(...)       \
+  GET_MACRO(__VA_ARGS__,               \
+            CALLBACK_WITH_ERROR_ARGS3, \
+            CALLBACK_WITH_ERROR_ARGS2)(__VA_ARGS__)
 
 #define CHECK_ACL_SUCCESS(expr, msg)             \
   do {                                           \

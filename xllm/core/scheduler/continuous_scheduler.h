@@ -298,6 +298,8 @@ class ContinuousScheduler : public Scheduler {
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;
 
+  XServiceClient* xservice_client_ = nullptr;
+
   // params for enable_schedule_overlap case
   std::vector<Batch> last_batch_;
   std::vector<std::shared_ptr<Request>> last_running_requests_;
