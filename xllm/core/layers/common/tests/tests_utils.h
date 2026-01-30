@@ -140,7 +140,7 @@ class MockProcessGroup : public xllm::ProcessGroup {
   MockProcessGroup(const torch::Device& device,
                    int64_t rank = 0,
                    int64_t world_size = 1)
-      : xllm::ProcessGroup(device) {
+      : xllm::ProcessGroup(rank, world_size, device) {
     // Initialize pg_ with a mock backend for testing
     pg_ = std::make_unique<MockBackend>(rank, world_size);
   }
