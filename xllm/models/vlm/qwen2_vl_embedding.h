@@ -175,11 +175,11 @@ class EmbeddingVLMImpl<Qwen2_VLForEmbedding> : public EmbeddingVLM {
       : model_(std::move(model)), options_(options) {}
 
   MMDict encode(const ModelInputParams& input_params) override {
-    return MMDict{};
+    return model_->get_multimodal_embeddings(input_params);
   };
   torch::Tensor get_input_embeddings(const torch::Tensor& input_ids,
                                      const ModelInputParams& input_params) {
-    return torch::Tensor{};
+    return model_->get_input_embeddings(input_ids, input_params);
   }
   ModelOutput forward(const torch::Tensor& tokens,
                       const torch::Tensor& positions,
