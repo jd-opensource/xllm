@@ -101,6 +101,13 @@ struct AttentionMetadata {
   // Decode mode (tensor_core) / NPU: kv_seq_lens on CPU for CUDA graph
   bool enable_cuda_graph = false;
 
+  // for xattention
+  torch::Tensor full_k_cache;
+  torch::Tensor full_v_cache;
+  torch::Tensor unshared_k_cache;
+  torch::Tensor unshared_v_cache;
+  torch::Tensor step_tensor;
+
   // for npu
   torch::Tensor attn_mask;
   torch::Tensor kv_seq_lens_host;

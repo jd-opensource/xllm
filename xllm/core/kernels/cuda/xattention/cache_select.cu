@@ -35,15 +35,13 @@ namespace {
 //   k_ptrs_i64      : [Layer] - pointers to K cache tensors for each layer
 //   v_ptrs_i64      : [Layer] - pointers to V cache tensors for each layer
 //   beam_index      : [B*Beam] - mapping from new beam index to old beam index
-//   block_table     : [B] - request ID per batch item
-//   B               : batch size
-//   Beam            : beam width
-//   Kv              : number of KV heads
-//   MaxStep         : maximum decode steps
-//   D               : head dimension
-//   MaxReq          : maximum number of requests
-//   Layer           : number of transformer layers
-//   decode_step     : current decode step (0-indexed)
+//   block_table     : [B] - request ID per batch item (extracted from [B*Beam,
+//   1]) B               : batch size (actual batch size, not batch_size *
+//   beam_size) Beam            : beam width Kv              : number of KV
+//   heads MaxStep         : maximum decode steps D               : head
+//   dimension MaxReq          : maximum number of requests Layer           :
+//   number of transformer layers decode_step     : current decode step
+//   (0-indexed)
 // Cache layout: [MaxReq, Beam, MaxStep, Kv, D]
 // The kernel performs two passes to avoid overwriting data:
 //   pass-1: copy from old_beam > new_beam (increasing new_beam)
@@ -209,7 +207,7 @@ namespace xllm::kernel::cuda {
 void cache_select(const torch::Tensor& beam_index,  // [B*Beam, 1]
                   std::vector<torch::Tensor>& unshared_k_cache,
                   std::vector<torch::Tensor>& unshared_v_cache,
-                  const torch::Tensor& block_table,  // [B, 1]
+                  const torch::Tensor& block_table,  // [B*Beam, 1]
                   int64_t decode_step,
                   int64_t beam_size,
                   int64_t layer_num) {
@@ -224,22 +222,27 @@ void cache_select(const torch::Tensor& beam_index,  // [B*Beam, 1]
 
   CHECK(beam_index.is_cuda()) << "beam_index must be CUDA";
   CHECK(block_table.is_cuda()) << "block_table must be CUDA";
-  CHECK_EQ(block_table.dim(), 2) << "block_table must be [B, 1]";
-  CHECK_EQ(block_table.size(1), 1) << "block_table must be [B, 1]";
+  CHECK_EQ(block_table.dim(), 2) << "block_table must be [B*Beam, 1]";
+  CHECK_EQ(block_table.size(1), 1) << "block_table must be [B*Beam, 1]";
   CHECK_EQ(beam_index.dim(), 2) << "beam_index must be [B*Beam, 1]";
   CHECK_EQ(beam_index.size(1), 1) << "beam_index must be [B*Beam, 1]";
   CHECK_GE(decode_step, 0) << "decode_step must be >= 0";
   CHECK_GT(beam_size, 0) << "beam_size must be > 0";
 
-  const int64_t B = block_table.size(0);
+  // block_table is [B*Beam, 1] with sequential values [0,1,2,3,...]
+  // Infer actual batch_size
+  CHECK_EQ(block_table.size(0) % beam_size, 0)
+      << "block_table.size(0) must be divisible by beam_size";
+  const int64_t B = block_table.size(0) / beam_size;
   CHECK_EQ(beam_index.size(0), B * beam_size)
       << "beam_index size mismatch with B*beam_size";
 
   // Prepare indices (int32, contiguous).
   auto beam_index_i32 = beam_index.to(torch::kInt32).contiguous();
-  auto block_table_i32 =
-      block_table.select(1, 0).to(torch::kInt32).contiguous();  // [B]
-
+  auto block_table_i32 = torch::arange(
+      0,
+      B,
+      torch::TensorOptions().dtype(torch::kInt32).device(block_table.device()));
   // Validate shapes/dtypes against layer 0.
   const auto& k0 = unshared_k_cache[0];
   const auto& v0 = unshared_v_cache[0];

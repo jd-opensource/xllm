@@ -195,6 +195,15 @@ struct Options {
   // Index ID for internal server ID, which must be set different values
   // if the model supports multiple version or there are multiple models.
   PROPERTY(int64_t, server_idx) = 0;
+
+  // enable CUDA graph/ACL graph for performance optimization
+  PROPERTY(bool, enable_graph) = false;
+
+  // beam width for beam search
+  PROPERTY(int32_t, beam_width) = 128;
+
+  // max tokens per batch
+  PROPERTY(int32_t, max_tokens_per_batch) = 4096;
 };
 
 }  // namespace runtime

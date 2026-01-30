@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include <memory>
 #include <tuple>
 
 #include "framework/kv_cache/kv_cache.h"
@@ -26,29 +25,37 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class BaseAttentionImpl;
-
-class AttentionImpl : public torch::nn::Module {
+// Base class for different attention implementations.
+// This class contains common member variables and defines the common interface.
+class BaseAttentionImpl {
  public:
-  AttentionImpl() = default;
+  BaseAttentionImpl(int64_t num_heads,
+                    int64_t head_size,
+                    float scale,
+                    int64_t num_kv_heads,
+                    int64_t sliding_window);
 
-  AttentionImpl(int64_t num_heads,
-                int64_t head_size,
-                float scale,
-                int64_t num_kv_heads,
-                int64_t sliding_window);
+  virtual ~BaseAttentionImpl() = default;
 
-  std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
+  // Pure virtual function that must be implemented by derived classes
+  virtual std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
       const AttentionMetadata& attn_metadata,
       torch::Tensor& query,
       torch::Tensor& key,
       torch::Tensor& value,
-      KVCache& kv_cache);
+      torch::Tensor& output,
+      KVCache& kv_cache) = 0;
 
- private:
-  std::shared_ptr<BaseAttentionImpl> attention_impl_;
+ protected:
+  // Common member variables shared by all attention implementations
+  int64_t num_heads_;
+  int64_t head_size_;
+  float scale_;
+  int64_t num_kv_heads_;
+  int64_t sliding_window_;
+  bool decode_use_tensor_core_;
 };
-TORCH_MODULE(Attention);
 
 }  // namespace layer
 }  // namespace xllm
+

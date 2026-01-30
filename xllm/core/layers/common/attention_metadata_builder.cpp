@@ -83,6 +83,16 @@ AttentionMetadata AttentionMetadataBuilder::build(
   attn_metadata.block_table = params.block_tables;
 #endif
 
+  // TODO: set use_tensor_core from options.
+  // for xattention
+  if (params.has_llmrec_params()) {
+    const auto& llmrec_params = *params.llmrec_params();
+    if (llmrec_params.current_round_tensor.defined() &&
+        llmrec_params.current_round_tensor.numel() > 0) {
+      attn_metadata.step_tensor = llmrec_params.current_round_tensor;
+    }
+  }
+
   return attn_metadata;
 }
 

@@ -21,9 +21,12 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <numeric>
+#include <shared_mutex>
 
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/common/rec_model_utils.h"
+#include "core/platform/cuda/device_capture_lock.h"
 #include "core/platform/device.h"
 #include "core/platform/stream.h"
 #include "core/util/utils.h"
@@ -43,7 +46,16 @@ CudaGraphPersistentParam::CudaGraphPersistentParam(
   // Use max_tokens_per_batch for first dimension size
   const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
   // num_sequences
-  const int64_t max_seqs_per_batch = options.max_seqs_per_batch();
+  int64_t max_seqs_per_batch;
+  if (is_rec_multi_round_mode()) {
+    // max_seqs_per_batch is the max sequence count per Batch in a scheduler
+    // group.
+    // When is_rec_multi_round_mode() == true, multiply by beam_width to account
+    // for beam search.
+    max_seqs_per_batch = options.max_seqs_per_batch() * options_.beam_width();
+  } else {
+    max_seqs_per_batch = options.max_seqs_per_batch();
+  }
   auto tensor_options = torch::TensorOptions().device(device);
 
   const int64_t max_seq_len = FLAGS_max_seq_len_for_graph_mode > 0
@@ -175,31 +187,36 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   persistent_positions_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(positions, /*non_blocking=*/true);
 
-  // q_seq_lens is q_cu_seq_lens in GPU Model.
-  // kv_seq_lens is kv_cu_seq_lens in GPU Model.
-  VLOG(kGraphExecutorLogVerboseLevel)
-      << "copy_ q_seq_lens: src shape=" << params.q_seq_lens.sizes()
-      << ", dst slice shape=[" << actual_batch_size + 1 << "]";
-  q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size + 1)
-      .copy_(params.q_seq_lens, /*non_blocking=*/true);
-  VLOG(kGraphExecutorLogVerboseLevel)
-      << "copy_ kv_seq_lens: src shape=" << params.kv_seq_lens.sizes()
-      << ", dst slice shape=[" << actual_batch_size + 1 << "]";
-  kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size + 1)
-      .copy_(params.kv_seq_lens, /*non_blocking=*/true);
-  VLOG(kGraphExecutorLogVerboseLevel)
-      << "copy_ new_cache_slots: src shape=" << params.new_cache_slots.sizes()
-      << ", dst slice shape=[" << actual_num_tokens << "]";
-  persistent_new_cache_slots_
-      .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-      .copy_(params.new_cache_slots, /*non_blocking=*/true);
+  if (!is_rec_multi_round_mode()) {
+    // q_seq_lens is q_cu_seq_lens in GPU Model.
+    // kv_seq_lens is kv_cu_seq_lens in GPU Model.
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "copy_ q_seq_lens: src shape=" << params.q_seq_lens.sizes()
+        << ", dst slice shape=[" << actual_batch_size + 1 << "]";
+    q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size + 1)
+        .copy_(params.q_seq_lens, /*non_blocking=*/true);
+
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "copy_ kv_seq_lens: src shape=" << params.kv_seq_lens.sizes()
+        << ", dst slice shape=[" << actual_batch_size + 1 << "]";
+    kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size + 1)
+        .copy_(params.kv_seq_lens, /*non_blocking=*/true);
+
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "copy_ new_cache_slots: src shape=" << params.new_cache_slots.sizes()
+        << ", dst slice shape=[" << actual_num_tokens << "]";
+    persistent_new_cache_slots_
+        .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+        .copy_(params.new_cache_slots, /*non_blocking=*/true);
+  }
 
   // Copy block table data
   const int64_t actual_block_table_len = params.block_tables.size(1);
-  auto slice_persistent_block_tables =
+  torch::Tensor slice_persistent_block_tables =
       persistent_block_tables_
           .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
           .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
+
   VLOG(kGraphExecutorLogVerboseLevel)
       << "copy_ block_tables: src shape=" << params.block_tables.sizes()
       << ", dst slice shape=" << slice_persistent_block_tables.sizes();
@@ -247,7 +264,6 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
              /*start=*/0,
              /*end=*/actual_batch_size + 1)
       .copy_(params.paged_kv_indptr, /*non_blocking=*/true);
-
   CHECK(params.paged_kv_indices.defined())
       << "paged_kv_indices should not be null";
   const int64_t actual_indices_size = params.paged_kv_indices.size(0);
@@ -270,7 +286,6 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
              /*start=*/0,
              /*end=*/actual_batch_size)
       .copy_(params.paged_kv_last_page_len, /*non_blocking=*/true);
-
   // Convert cumulative lengths to individual sequence lengths using torch::diff
   // This matches the behavior in attention_metadata_builder.cpp for decode mode
   attn_metadata->kv_seq_lens =
@@ -278,15 +293,13 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   // Set FlashInfer decode parameters (always update, not just for capture)
   // This ensures attn_metadata points to updated persistent buffers for
   // plan_info calculation
-  attn_metadata->paged_kv_indptr =
-      persistent_paged_kv_indptr(actual_batch_size);
+  attn_metadata->paged_kv_indptr = persistent_paged_kv_indptr(actual_batch_size);
   attn_metadata->paged_kv_indices =
       persistent_paged_kv_indices(actual_indices_size);
   attn_metadata->paged_kv_last_page_len =
       persistent_paged_kv_last_page_len(actual_batch_size);
   // qo_indptr is q_cu_seq_lens in GPU Model.
   attn_metadata->qo_indptr = persistent_decode_qo_indptr(actual_batch_size);
-
   // Update plan_info if attn_metadata exists and enable_cuda_graph is true
   // This ensures plan_info is updated before CUDA graph capture/replay
   {
@@ -321,7 +334,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     //                  /*use_custom_mask=*/false)
     //            : "fa2";
     const static std::string backend = "fa2";
-
+    
     // Update plan_info
     // Note: plan_info is only updated at layer 0, so we set layer_id to 0
     attn_metadata->plan_info->layer_id = 0;
@@ -393,7 +406,17 @@ bool CudaGraph::capture(CausalLM* model,
   CHECK_GE(padded_num_tokens_, actual_num_tokens)
       << "bucket_num_tokens >= actual_num_tokens";
 
-  // auto& tensor_options = model->options();
+  // Guard CUDA graph capture region with a device-level exclusive lock to
+  // prevent conflicting GPU work from other streams (e.g., prepare streams) on
+  // the same device when using cudaStreamCaptureModeGlobal. Capture requires
+  // exclusive access, so we use write lock.
+  std::optional<std::unique_lock<std::shared_mutex>> capture_lock_guard;
+  if (FLAGS_enable_graph) {
+    auto& capture_lock =
+        ::xllm::cuda::DeviceCaptureLock::get_instance().get_write_lock(
+            device_index_);
+    capture_lock_guard.emplace(capture_lock);
+  }
 
   // Update persistent parameters with input data before capture
   const torch::Tensor& k_cache = kv_cache[0].get_k_cache();
@@ -476,6 +499,18 @@ ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
   CHECK_LE(actual_num_tokens, padded_num_tokens_)
       << "num_tokens mismatch: expected <= " << padded_num_tokens_ << ", got "
       << actual_num_tokens;
+
+  // Guard CUDA graph replay with a device-level shared lock to allow multiple
+  // replay operations to run concurrently while preventing conflicts with
+  // capture operations. Replay can share the lock with other replay/prepare
+  // operations.
+  std::optional<std::shared_lock<std::shared_mutex>> replay_lock_guard;
+  if (FLAGS_enable_graph) {
+    auto& replay_lock =
+        ::xllm::cuda::DeviceCaptureLock::get_instance().get_read_lock(
+            device_index_);
+    replay_lock_guard.emplace(replay_lock);
+  }
 
   // Update persistent parameters with new input data
   const torch::Tensor& k_cache = kv_cache[0].get_k_cache();

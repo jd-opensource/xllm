@@ -537,9 +537,3 @@ DEFINE_int32(max_decode_rounds,
              "0 means disabled.");
 
 DEFINE_int32(beam_width, 1, "Beam width for beam search.");
-
-DEFINE_int64(max_token_per_req,
-             1024,
-             "Max tokens per request (prompt + generated). "
-             "Used as a global guardrail for per-request token budget. "
-             "This is only used in Rec multi-round pipeline.");

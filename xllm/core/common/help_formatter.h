@@ -65,7 +65,7 @@ const OptionCategory kDisaggregatedPrefillDecodeOptions = {
 
 const OptionCategory kMultiStepDecodeOptions = {
     "MULTI-STEP DECODE OPTIONS",
-    {"max_decode_rounds", "beam_width", "max_token_per_req"}};
+    {"max_decode_rounds", "beam_width"}};
 
 const OptionCategory kMtpOptions = {
     "MTP OPTIONS",

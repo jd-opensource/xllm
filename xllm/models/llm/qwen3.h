@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/common/rec_model_utils.h"
 #include "core/framework/model/model_output.h"
 #if defined(USE_NPU_TORCH)
 #include "core/common/global_flags.h"
@@ -146,6 +147,13 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
+      if (is_rec_multi_round_mode() && input_params_new.has_llmrec_params()) {
+        const auto& llmrec_params = input_params_new.llmrec_params();
+        attn_metadata.full_k_cache = llmrec_params->full_k_caches[i];
+        attn_metadata.full_v_cache = llmrec_params->full_v_caches[i];
+        attn_metadata.unshared_k_cache = llmrec_params->unshared_k_caches[i];
+        attn_metadata.unshared_v_cache = llmrec_params->unshared_v_caches[i];
+      }
 #if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.plan_info->layer_id = i;
 #endif
