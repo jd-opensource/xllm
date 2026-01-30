@@ -83,11 +83,9 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   instance_info_.type = options_.instance_role().value().to_string();
   instance_info_.dp_size = options.dp_size();
 
-  if (options_.enable_schedule_overlap()) {
-    min_speculative_tokens_required_ = options_.num_speculative_tokens() * 2;
-  } else {
-    min_speculative_tokens_required_ = options_.num_speculative_tokens();
-  }
+  min_speculative_tokens_required_ = options_.num_speculative_tokens() + 1;
+  CHECK_GT(min_speculative_tokens_required_, 0)
+      << "min_speculative_tokens_required_ should be greater than 0";
 }
 
 ContinuousScheduler::~ContinuousScheduler() { running_requests_.clear(); }
@@ -377,7 +375,7 @@ void ContinuousScheduler::handle_decode_requests(
     size_t& num_online_decode_preempt_offline_requests,
     std::unique_ptr<DecodePriorityQueue>& running_queue) {
   while (!running_queue->empty() &&
-         remaining_token_budget > min_speculative_tokens_required_ &&
+         remaining_token_budget >= min_speculative_tokens_required_ &&
          latency_budget > estimate_latency && remaining_seq_budget > 0) {
     std::shared_ptr<Request> request = running_queue->top();
     // TODO: check if request is timeout
@@ -421,7 +419,13 @@ void ContinuousScheduler::handle_decode_requests(
       }
       // sequence token already appended
       size_t updated_num_tokens =
-          sequence->num_tokens() + min_speculative_tokens_required_;
+          sequence->num_tokens() + min_speculative_tokens_required_ - 1;
+      // if enable schedule overlap, we need to allocate more tokens for two
+      // steps
+      if (options_.enable_schedule_overlap()) {
+        updated_num_tokens += min_speculative_tokens_required_;
+      }
+
       // no blocks left
       if (!kv_cache_manager_->allocate(sequence.get(), updated_num_tokens)) {
         has_enough_blocks = false;
@@ -433,12 +437,11 @@ void ContinuousScheduler::handle_decode_requests(
       }
 
       // update the allocated tokens for the sequence
-      allocated_tokens += min_speculative_tokens_required_ + 1;
+      allocated_tokens += min_speculative_tokens_required_;
       allocated_seqs += 1;
       allocated_estimate_latency += seq_estimate_latency;
       candidate_sequences.emplace_back(sequence.get());
-      candidate_token_budgets.emplace_back(min_speculative_tokens_required_ +
-                                           1);
+      candidate_token_budgets.emplace_back(min_speculative_tokens_required_);
     }
     CHECK(allocated_tokens <= remaining_token_budget);
     CHECK(allocated_seqs <= remaining_seq_budget);
