@@ -409,7 +409,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(
                         "Image processor process failed.");
     return nullptr;
   }
-
+  input_processor_->hash_mm_items(mm_inputs, mm_data);
   auto prompt = chat_template_->apply(messages);
   if (!prompt.has_value()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
