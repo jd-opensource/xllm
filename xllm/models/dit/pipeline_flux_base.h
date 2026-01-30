@@ -206,7 +206,6 @@ class FluxPipelineBaseImpl : public torch::nn::Module {
     text_input_ids.reserve(batch_size);
     CHECK(tokenizer_2_->batch_encode(prompt, &text_input_ids));
     for (auto& ids : text_input_ids) {
-      LOG(INFO) << "T5 Original IDs size: " << ids;
       ids.resize(max_sequence_length, 0);
     }
 
@@ -236,7 +235,6 @@ class FluxPipelineBaseImpl : public torch::nn::Module {
     text_input_ids.reserve(batch_size);
     CHECK(tokenizer_->batch_encode(prompt, &text_input_ids));
     for (auto& ids : text_input_ids) {
-      LOG(INFO) << "CLIP Original IDs size: " << ids;
       ids.resize(tokenizer_max_length_, 49407);
       ids.back() = 49407;
     }
