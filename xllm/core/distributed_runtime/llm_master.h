@@ -66,6 +66,14 @@ class LLMMaster : public Master {
                             std::vector<RequestParams> sp,
                             BatchOutputCallback callback);
 
+  ContinuousScheduler* get_continuous_scheduler() {
+    auto p = reinterpret_cast<ContinuousScheduler*>(scheduler_.get());
+    if (!p) {
+      LOG(FATAL) << "scheduler_ is not ContinuousScheduler type!";
+    }
+    return p;
+  }
+
   // start running loop
   void run() override;
 

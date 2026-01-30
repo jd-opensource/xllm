@@ -179,6 +179,11 @@ class ContinuousScheduler : public Scheduler {
 
   const InstanceInfo& get_instance_info() { return instance_info_; }
 
+  // send stream generations to xllm_service
+  virtual bool send_stream_generation(const RequestOutput& output);
+  virtual std::vector<bool> send_stream_generations(
+      const std::vector<RequestOutput>& outputs);
+
   std::vector<int> last_batch_lengths_;
 
  protected:
@@ -297,6 +302,8 @@ class ContinuousScheduler : public Scheduler {
 
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;
+
+  XServiceClient* xservice_client_ = nullptr;
 
   // params for enable_schedule_overlap case
   std::vector<Batch> last_batch_;

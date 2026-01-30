@@ -327,6 +327,7 @@ std::vector<bool> XServiceClient::generations(
       gen_status->set_status_msg(output.status.value().message());
     }
     req->set_finished(output.finished);
+    req->set_finished_on_prefill_instance(output.finished_on_prefill_instance);
     if (output.usage.has_value()) {
       proto::OutputUsage* proto_usage = req->mutable_usage();
       proto_usage->set_num_prompt_tokens(

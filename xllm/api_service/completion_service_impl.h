@@ -36,6 +36,8 @@ class CompletionServiceImpl final : public APIServiceImpl<CompletionCall> {
   // brpc call_data needs to use shared_ptr
   void process_async_impl(std::shared_ptr<CompletionCall> call);
 
+  void process_async_rpc_impl(const proto::CompletionRequest* request);
+
  private:
   DISALLOW_COPY_AND_ASSIGN(CompletionServiceImpl);
   LLMMaster* master_ = nullptr;

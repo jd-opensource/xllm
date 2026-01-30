@@ -76,7 +76,13 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       engine_->tokenizer(), options_.instance_role());
   create_running_queue(options);
   if (options_.enable_service_routing()) {
-    XServiceClient::get_instance()->set_scheduler(this);
+    // connect to master service
+    xservice_client_ = XServiceClient::get_instance();
+    if (!xservice_client_->initialize_done()) {
+      LOG(FATAL) << "XServiceClient not init.";
+      return;
+    }
+    xservice_client_->set_scheduler(this);
   }
 
   instance_info_.name = options_.instance_name().value_or("");
@@ -1111,6 +1117,23 @@ void ContinuousScheduler::update_memory_metrics(
       }
     }
   }
+}
+
+bool ContinuousScheduler::send_stream_generation(const RequestOutput& output) {
+  // response to xllm service to avoid the redirect cost.
+  if (xservice_client_ == nullptr) return false;
+  auto return_status = xservice_client_->generations({output});
+  CHECK_EQ(return_status.size(), 1)
+      << "return size of generations is not equal to 1";
+  return return_status[0];
+}
+
+std::vector<bool> ContinuousScheduler::send_stream_generations(
+    const std::vector<RequestOutput>& outputs) {
+  // response to xllm service to avoid the redirect cost.
+  if (xservice_client_ == nullptr)
+    return std::vector<bool>(outputs.size(), false);
+  return xservice_client_->generations(outputs);
 }
 
 void ContinuousScheduler::step_with_pd_ooc(std::vector<Batch>& batch) {
