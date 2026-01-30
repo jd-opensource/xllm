@@ -22,6 +22,7 @@ limitations under the License.
 #include <thread>
 
 #include "common/etcd_client.h"
+#include "distributed_runtime/engine.h"
 #include "forward_params.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/request/request_output.h"
@@ -41,6 +42,7 @@ class XServiceClient {
             const std::string& instance_name = "",
             const BlockManagerPool* block_manager_pool = nullptr);
   void set_scheduler(Scheduler* scheduler);
+  void set_engine(Engine* engine);
   bool initialize_done() { return initialize_done_; }
 
   std::string get_instance_name();
@@ -74,6 +76,7 @@ class XServiceClient {
   std::unique_ptr<EtcdClient> etcd_client_;
   const BlockManagerPool* block_manager_pool_;  // not own
   Scheduler* scheduler_;                        // not own
+  Engine* engine_ = nullptr;                    // not own, for xtensor info
 };
 
 }  // namespace xllm

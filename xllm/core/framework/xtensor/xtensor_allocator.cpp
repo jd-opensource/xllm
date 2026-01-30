@@ -953,4 +953,30 @@ bool XTensorAllocator::get_xtensor_offsets(
   return true;
 }
 
+// ============== ETCD Information Support ==============
+
+std::vector<WeightSegment> XTensorAllocator::get_model_weight_segments(
+    const std::string& model_id) const {
+  std::lock_guard<std::mutex> lock(mtx_);
+  auto it = model_tensors_.find(model_id);
+  if (it == model_tensors_.end()) {
+    return {};
+  }
+  return it->second.weight_segments;
+}
+
+std::unordered_map<std::string, std::vector<WeightSegment>>
+XTensorAllocator::get_all_model_weight_segments() const {
+  std::lock_guard<std::mutex> lock(mtx_);
+  std::unordered_map<std::string, std::vector<WeightSegment>> result;
+
+  for (const auto& [model_id, tensors] : model_tensors_) {
+    if (!tensors.weight_segments.empty()) {
+      result[model_id] = tensors.weight_segments;
+    }
+  }
+
+  return result;
+}
+
 }  // namespace xllm

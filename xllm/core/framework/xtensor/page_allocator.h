@@ -196,6 +196,11 @@ class PageAllocator {
   size_t get_num_free_phy_pages() const;
   size_t get_num_total_phy_pages() const;
 
+  // Get free pages for each worker (for etcd registration)
+  // Returns a vector where index i = num_total_phy_pages -
+  // worker_pages_used_[i]
+  std::vector<size_t> get_all_worker_free_pages() const;
+
   // Convert block_id to virt_page_id
   int64_t get_virt_page_id(int64_t block_id, size_t block_mem_size) const;
 

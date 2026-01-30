@@ -45,8 +45,21 @@ message SleepRequest {
 
 message WakeupRequest {
   int32 master_status = 1;
-  repeated string remote_addrs = 2;     
-  repeated uint64 src_weight_offsets = 3;  
+  repeated string remote_addrs = 2;
+  // Per-remote-addr weight segments (index matches remote_addrs)
+  // Each entry contains ordered segments to pull from that remote source
+  repeated WakeupWeightSegmentList src_weight_segments = 3;
+}
+
+// A single weight segment for D2D transfer
+message WakeupWeightSegment {
+  uint64 offset = 1;  // Byte offset from source GlobalXtensor base
+  uint64 size = 2;    // Segment size in bytes
+}
+
+// List of weight segments for one remote source
+message WakeupWeightSegmentList {
+  repeated WakeupWeightSegment segments = 1;
 }
 
 message D2DLinkWorkerRequest {
