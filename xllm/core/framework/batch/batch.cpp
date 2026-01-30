@@ -140,6 +140,7 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               swap_block_transfer_infos_,
                                               batch_id_,
                                               &args,
+                                              batch_forward_type_,
                                               thread_pool);
   return builder->build_rec_forward_input(num_decoding_tokens,
                                           min_decoding_batch_size);

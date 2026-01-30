@@ -877,8 +877,7 @@ ForwardOutput RecEngine::RecMultiRoundEnginePipeline::get_model_output(
   // D2H transfer for beam_sequence_group (multi-round results)
   auto& output = forward_output.value();
   // TODO. uncomment this in next pr.
-  // output.beam_sequence_group = safe_to(output.beam_sequence_group,
-  // torch::kCPU);
+  output.beam_sequence_group = safe_to(output.beam_sequence_group, torch::kCPU);
   if (output.beam_search_output.out_logprobs.defined()) {
     output.beam_search_output.out_logprobs =
         safe_to(output.beam_search_output.out_logprobs, torch::kCPU);

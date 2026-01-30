@@ -27,6 +27,7 @@ limitations under the License.
 #include <sstream>
 
 #include "common/global_flags.h"
+#include "common/rec_model_utils.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
 
@@ -60,8 +61,10 @@ ProfileManager::ProfileManager(Engine* engine, const Options& options)
 #if defined(USE_NPU) || defined(USE_CUDA)
   // Warmup ACL graph executor if enabled
   if (FLAGS_enable_graph) {
-    LOG(INFO) << "Starting ACL Graph/CUDA Graph warmup.";
-    warmup_for_graph();
+    if (!is_rec_multi_round_mode()) {
+      LOG(INFO) << "Starting ACL Graph/CUDA Graph warmup.";
+      warmup_for_graph();
+    }
   }
 #endif
 }

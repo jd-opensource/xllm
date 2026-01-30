@@ -35,6 +35,7 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     uint64_t batch_id,
     const ModelArgs* args,
+    BatchForwardType batch_forward_type,
     ThreadPool* thread_pool) {
   switch (rec_type) {
     case RecType::kOneRec:
@@ -46,6 +47,7 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
           swap_block_transfer_infos,
           batch_id,
           args,
+          batch_forward_type,
           thread_pool);
     case RecType::kLlmRec:
       // Check if Rec multi-round mode is enabled
@@ -58,6 +60,7 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
             swap_block_transfer_infos,
             batch_id,
             args,
+            batch_forward_type,
             thread_pool);
       }
       // Fall through for non-multi-round LlmRec (not yet implemented)

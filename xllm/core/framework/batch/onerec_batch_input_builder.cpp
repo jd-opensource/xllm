@@ -48,6 +48,7 @@ OneRecBatchInputBuilder::OneRecBatchInputBuilder(
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     const uint64_t batch_id,
     const ModelArgs* args,
+    BatchForwardType batch_forward_type,
     ThreadPool* thread_pool)
     : sequence_groups_(sequence_groups),
       allowed_max_tokens_(allowed_max_tokens),
@@ -56,6 +57,7 @@ OneRecBatchInputBuilder::OneRecBatchInputBuilder(
       swap_block_transfer_infos_(swap_block_transfer_infos),
       batch_id_(batch_id),
       args_(args),
+      batch_forward_type_(batch_forward_type),
       thread_pool_(thread_pool) {
   // Get references to function-local statics (safe initialization)
   auto& perf_cache = get_perf_cache();

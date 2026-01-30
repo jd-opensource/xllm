@@ -151,13 +151,12 @@ struct LlmRecMultiRoundParams {
   std::vector<torch::Tensor> full_v_caches;
   std::vector<torch::Tensor> unshared_k_caches;
   std::vector<torch::Tensor> unshared_v_caches;
-  torch::Tensor naive_block_table;
   std::vector<torch::Tensor> decode_positions_tensor_list;
-  torch::Tensor preallocated_output;
   // beam width for step-level decode
+  int32_t batch_size = 0;
   int32_t beam_width = 1;
   // current round for step-level decode
-  int32_t current_round = 0;
+  torch::Tensor current_round_tensor;
   int32_t total_round = 0;
 
   LlmRecMultiRoundParams to(const torch::Device& device) const {
@@ -179,15 +178,13 @@ struct LlmRecMultiRoundParams {
     for (const auto& t : unshared_v_caches) {
       result.unshared_v_caches.push_back(safe_to(t, device));
     }
-    if (naive_block_table.defined()) {
-      result.naive_block_table = safe_to(naive_block_table, device, true);
+
+    if (current_round_tensor.defined()) {
+      result.current_round_tensor = safe_to(current_round_tensor, device, true);
     }
     result.decode_positions_tensor_list.clear();
     for (const auto& t : decode_positions_tensor_list) {
       result.decode_positions_tensor_list.push_back(safe_to(t, device));
-    }
-    if (preallocated_output.defined()) {
-      result.preallocated_output = safe_to(preallocated_output, device);
     }
 
     return result;
@@ -368,7 +365,6 @@ struct ModelInputParams {
     } else if (const auto* llmrec = llmrec_params()) {
       LOG(INFO) << "ModelInputParams: has llm_rec_multi_round_params"
                 << ", beam_width=" << llmrec->beam_width
-                << ", current_round=" << llmrec->current_round
                 << ", total_round=" << llmrec->total_round;
     }
   }

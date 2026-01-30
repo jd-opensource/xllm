@@ -100,6 +100,7 @@ class WorkerType {
 
 // Step-level decode metadata for Rec multi-round (device loop).
 struct StepDecodeMeta {
+  int32_t batch_size = 0;
   int32_t beam_width = 1;
   int32_t current_round = 0;
   int32_t total_round = 0;
