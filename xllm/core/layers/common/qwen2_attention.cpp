@@ -19,6 +19,8 @@ limitations under the License.
 
 #include <tuple>
 
+#include "core/common/rec_model_utils.h"
+
 namespace {
 inline bool is_qwen3_model(const std::string& model_type) {
   static const std::set<std::string> qwen3_type_set = {

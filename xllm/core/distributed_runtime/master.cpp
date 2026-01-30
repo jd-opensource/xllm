@@ -264,6 +264,9 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .dp_size(options_.dp_size())
         .ep_size(options_.ep_size())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .max_token_per_req(options_.max_token_per_req())
+        .beam_width(options_.beam_width())
+        .enable_graph(options_.enable_graph())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill());
 

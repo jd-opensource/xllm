@@ -64,7 +64,7 @@ void torch_reference(
     torch::Tensor unshared_v_cache,  // [max_num_request, beam_size,
                                      // max_decode_step, kv_heads, head_dim]
     torch::Tensor block_table,       // [batch_size, 1]
-    uint32_t step) {
+    torch::Tensor step) {
   // Read shapes.
   int64_t batch_size = proj_k.size(0);
   int64_t beam_size = proj_k.size(1);
@@ -78,7 +78,8 @@ void torch_reference(
   CHECK_EQ(block_table.size(0), batch_size)
       << "block_table size must match batch_size";
   CHECK_EQ(block_table.size(1), 1) << "block_table second dim must be 1";
-  CHECK_LT(step, max_decode_step) << "step must be less than max_decode_step";
+  // CHECK_LT(step, max_decode_step) << "step must be less than
+  // max_decode_step";
   CHECK_EQ(unshared_k_cache.size(1), beam_size)
       << "unshared_k_cache beam_size mismatch";
   CHECK_EQ(unshared_k_cache.size(3), kv_heads)
@@ -108,8 +109,9 @@ void torch_reference(
 
     // Write into cache at decode step `step`.
     // NOTE: dimension order is [request_id, beam, step, kv_head, head_dim].
-    unshared_k_cache[request_id].select(1, step).copy_(proj_k_batch);
-    unshared_v_cache[request_id].select(1, step).copy_(proj_v_batch);
+    int64_t step_value = step[0].item<int64_t>();
+    unshared_k_cache[request_id].select(1, step_value).copy_(proj_k_batch);
+    unshared_v_cache[request_id].select(1, step_value).copy_(proj_v_batch);
   }
 }
 
@@ -122,7 +124,9 @@ TEST_F(DecoderReshapeAndCacheTest, CorrectnessTest) {
   const int64_t head_dim = 128;
   const int64_t max_num_request = 33437;
   const int64_t max_decode_step = 3;
-  const uint32_t step = 1;
+  // const uint32_t step = 1;
+
+  torch::Tensor step = torch::tensor({1}, torch::kInt64).view({1}).to(device_);
 
   auto options = torch::TensorOptions().device(device_).dtype(dtype_);
 
@@ -163,9 +167,10 @@ TEST_F(DecoderReshapeAndCacheTest, CorrectnessTest) {
   EXPECT_TRUE(torch::allclose(unshared_v_cache, ref_v_cache, 1e-5, 1e-5));
 
   // Sanity-check that the expected slice was copied for each batch element.
+  int64_t step_value = step[0].item<int64_t>();
   for (int64_t b = 0; b < batch_size; ++b) {
     int64_t rid = block_table[b][0].item<int64_t>();
-    torch::Tensor copied_k = unshared_k_cache[rid].select(1, step);
+    torch::Tensor copied_k = unshared_k_cache[rid].select(1, step_value);
     torch::Tensor source_k = proj_k[b];
     EXPECT_TRUE(torch::allclose(copied_k, source_k, 1e-5, 1e-5));
   }

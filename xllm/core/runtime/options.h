@@ -104,6 +104,9 @@ struct Options {
   // the max sequences limit of a batch.
   PROPERTY(int32_t, max_seqs_per_batch) = 256;
 
+  // the max tokens limit of a request.
+  PROPERTY(int32_t, max_token_per_req) = 1024;
+
   // the max tokens per chunk for request in prefill stage.
   PROPERTY(int32_t, max_tokens_per_chunk_for_prefill);
 
@@ -195,6 +198,12 @@ struct Options {
   // Index ID for internal server ID, which must be set different values
   // if the model supports multiple version or there are multiple models.
   PROPERTY(int64_t, server_idx) = 0;
+
+  // enable CUDA graph/ACL graph for performance optimization
+  PROPERTY(bool, enable_graph) = false;
+
+  // beam width for beam search
+  PROPERTY(int32_t, beam_width) = 128;
 };
 
 }  // namespace runtime

@@ -51,12 +51,13 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     const uint64_t batch_id,
     const ModelArgs* args,
+    BatchForwardType batch_forward_type,
     ThreadPool* thread_pool)
     : allowed_max_tokens_(allowed_max_tokens),
       input_embeddings_vec_(input_embeddings_vec),
       mm_data_vec_(mm_data_vec),
       args_(args),
-      batch_forward_type_(BatchForwardType::DECODE),
+      batch_forward_type_(batch_forward_type),
       swap_block_transfer_infos_(swap_block_transfer_infos),
       thread_pool_(thread_pool),
       batch_id_(batch_id) {
@@ -70,6 +71,7 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
   }
 
   num_sequences_ = static_cast<int32_t>(sequences_.size());
+  CHECK_GT(num_sequences_, 0);
 
   if (args_ != nullptr) {
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
@@ -411,11 +413,11 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
     int64_t head_dim = args_ ? args_->head_dim() : 0;
 
     int32_t decode_rounds = get_rec_multi_round_decode_rounds();
-    full_kv_shape = {
-        batch_size * FLAGS_max_token_per_req +
-            batch_size * FLAGS_beam_width * std::max(0, decode_rounds - 1),
-        n_kv_heads,
-        head_dim};
+    full_kv_shape = {FLAGS_max_seqs_per_batch * FLAGS_max_token_per_req +
+                         FLAGS_max_seqs_per_batch * FLAGS_beam_width *
+                             std::max(0, decode_rounds - 1),
+                     n_kv_heads,
+                     head_dim};
   }
 
   // Decode positions
@@ -425,6 +427,7 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
 
   if (is_rec_multi_round_mode()) {
     StepDecodeMeta step_meta;
+    step_meta.batch_size = static_cast<int32_t>(sequences_.size());
     step_meta.beam_width = beam_width;
     step_meta.current_round = current_round;
     step_meta.total_round = total_round;

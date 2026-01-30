@@ -85,7 +85,7 @@ struct AttentionMetadata {
   // the current batch configuration.
   std::shared_ptr<PlanInfo> plan_info;
   // Whether to use tensor core for decode attention computation. Default: true.
-  bool use_tensor_core = true;
+  bool use_tensor_core = false;
 
   // for CUDA graph - CPU tensors for plan_info update (avoid .to(CPU) during
   // graph capture) torch::Tensor q_cu_seq_lens_host;      // Prefill mode:
@@ -94,6 +94,13 @@ struct AttentionMetadata {
   // mode: paged_kv_indptr on CPU torch::Tensor kv_seq_lens_host;        //
   // Decode mode (tensor_core) / NPU: kv_seq_lens on CPU for CUDA graph
   bool enable_cuda_graph = false;
+
+  // for xattention
+  torch::Tensor full_k_cache;
+  torch::Tensor full_v_cache;
+  torch::Tensor unshared_k_cache;
+  torch::Tensor unshared_v_cache;
+  torch::Tensor step_tensor;
 
   // for npu
   torch::Tensor attn_mask;
