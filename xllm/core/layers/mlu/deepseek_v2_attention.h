@@ -96,6 +96,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
 
   Attention attn_{nullptr};
   DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};
+  DeepseekScalingRotaryEmbedding indexer_rotary_emb_{nullptr};
   Indexer indexer_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Attention);

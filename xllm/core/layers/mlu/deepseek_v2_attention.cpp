@@ -121,6 +121,26 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                           args.rope_scaling_mscale_all_dim(),
                           options));
 
+  // indexer rotary embedding for lighting indexer
+  //  DeepSeek V3.2 use interleaved=false as default
+  indexer_rotary_emb_ =
+      register_module("indexer_rotary_emb",
+                      DeepseekScalingRotaryEmbedding(
+                          qk_rope_head_dim_,
+                          qk_rope_head_dim_,
+                          max_position_embeddings,
+                          args.rope_scaling_original_max_position_embeddings(),
+                          args.rope_theta(),
+                          /*interleaved=*/false,
+                          args.rope_scaling_factor(),
+                          args.rope_extrapolation_factor(),
+                          args.rope_scaling_attn_factor(),
+                          args.rope_scaling_beta_fast(),
+                          args.rope_scaling_beta_slow(),
+                          args.rope_scaling_mscale(),
+                          args.rope_scaling_mscale_all_dim(),
+                          options));
+
   if (args.rope_scaling_rope_type() == "deepseek_yarn") {
     float mscale = layer::rotary::yarn_get_mscale(
         args.rope_scaling_factor(), args.rope_scaling_mscale_all_dim());
@@ -137,7 +157,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                 args.index_topk(),
                                 q_lora_rank_,
                                 optimization_config.enable_fused_indexer_qk,
-                                rotary_emb_,
+                                indexer_rotary_emb_,
                                 quant_args,
                                 parallel_args,
                                 options));
