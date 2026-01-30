@@ -60,6 +60,15 @@ def join_path(*paths):
 def get_python_version():
     return sysconfig.get_python_version().replace(".", "")
 
+def get_torch_version(device):
+    try:
+        import torch
+        if device == "cuda":
+            return torch.__version__
+        return torch.__version__.split('+')[0]
+    except ImportError:
+        return None
+
 def get_version():
     # first read from environment variable
     version = os.getenv("XLLM_VERSION")

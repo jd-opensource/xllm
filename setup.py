@@ -12,7 +12,7 @@ from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.command.build_ext import build_ext
 
 from env import get_cxx_abi, set_npu_envs, set_mlu_envs, set_cuda_envs, set_ilu_envs, set_musa_envs
-from utils import get_cpu_arch, get_device_type, pre_build, get_version, check_and_install_pre_commit, read_readme, get_cmake_dir, get_base_dir, get_python_version
+from utils import get_cpu_arch, get_device_type, pre_build, get_version, check_and_install_pre_commit, read_readme, get_cmake_dir, get_base_dir, get_python_version, get_torch_version
 
 BUILD_TEST_FILE = True
 BUILD_EXPORT = True
@@ -276,6 +276,19 @@ class BuildDistWheel(bdist_wheel):
 
     def finalize_options(self):
         super().finalize_options()
+        
+        # generate distribution name
+        if self.device:
+            self.distribution.metadata.name += f"_{self.device}"
+
+        torch_version = get_torch_version(self.device)
+        if torch_version:
+            self.distribution.metadata.name += f"_torch{torch_version}"
+
+        if get_cxx_abi():
+            self.distribution.metadata.name += f"_cxx11_abi"
+        else:
+            self.distribution.metadata.name += f"_no_cxx11_abi"
 
     def run(self):
         build_ext_cmd = self.get_finalized_command('build_ext')
