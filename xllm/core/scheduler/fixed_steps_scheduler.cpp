@@ -231,8 +231,9 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     const std::shared_ptr<Request>& sample_request =
         waiting_priority_queue_.top();
     auto rec_type = sample_request->state().rec_type;
-    bool is_pure_device = is_pure_device_mode();
-    scheduler_pipeline_ = create_scheduler_pipeline(rec_type, is_pure_device);
+    bool is_rec_multi_round = is_rec_multi_round_mode();
+    scheduler_pipeline_ =
+        create_scheduler_pipeline(rec_type, is_rec_multi_round);
   }
 
   // remaining budget for the current batch
@@ -378,7 +379,7 @@ std::vector<Batch> FixedStepsScheduler::OneRecSchedulerPipeline::create_batches(
 }
 
 std::vector<Batch>
-FixedStepsScheduler::PureDeviceSchedulerPipeline::create_batches(
+FixedStepsScheduler::RecMultiRoundSchedulerPipeline::create_batches(
     FixedStepsScheduler& scheduler,
     BatchFactory* batch_factory) {
   return batch_factory->create_batches(
@@ -390,9 +391,9 @@ FixedStepsScheduler::PureDeviceSchedulerPipeline::create_batches(
 
 std::unique_ptr<FixedStepsScheduler::SchedulerPipeline>
 FixedStepsScheduler::create_scheduler_pipeline(RecType rec_type,
-                                               bool is_pure_device) {
-  if (is_pure_device) {
-    return std::make_unique<PureDeviceSchedulerPipeline>();
+                                               bool is_rec_multi_round) {
+  if (is_rec_multi_round) {
+    return std::make_unique<RecMultiRoundSchedulerPipeline>();
   }
   if (rec_type == RecType::kLlmRec) {
     return std::make_unique<LlmRecSchedulerPipeline>();

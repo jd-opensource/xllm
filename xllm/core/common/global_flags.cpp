@@ -535,4 +535,4 @@ DEFINE_int64(max_token_per_req,
              1024,
              "Max tokens per request (prompt + generated). "
              "Used as a global guardrail for per-request token budget. "
-             "This is only used in pure device pipeline.");
+             "This is only used in Rec multi-round pipeline.");

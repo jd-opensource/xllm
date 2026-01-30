@@ -22,7 +22,7 @@ limitations under the License.
 
 #include "core/common/rec_model_utils.h"
 #include "onerec_batch_input_builder.h"
-#include "rec_pure_device_batch_input_builder.h"
+#include "rec_multi_round_batch_input_builder.h"
 
 namespace xllm {
 
@@ -48,9 +48,9 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
           args,
           thread_pool);
     case RecType::kLlmRec:
-      // Check if pure device mode is enabled
-      if (is_pure_device_mode()) {
-        return std::make_unique<RecPureDeviceBatchInputBuilder>(
+      // Check if Rec multi-round mode is enabled
+      if (is_rec_multi_round_mode()) {
+        return std::make_unique<RecMultiRoundBatchInputBuilder>(
             sequence_groups,
             allowed_max_tokens,
             input_embeddings_vec,
@@ -60,7 +60,7 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
             args,
             thread_pool);
       }
-      // Fall through for non-pure-device LlmRec (not yet implemented)
+      // Fall through for non-multi-round LlmRec (not yet implemented)
       break;
     case RecType::kNone:
       break;

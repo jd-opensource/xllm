@@ -22,13 +22,12 @@ limitations under the License.
 
 namespace xllm::kernel::cuda {
 
-// Prefill reshape and cache kernel for Rec pure device mode.
+// Prefill reshape and cache kernel for Rec multi-round mode.
 // Copies projected K and V tensors from prefill phase into shared KV cache.
-// This function is specifically designed for Rec (recommendation) pure device
-// mode, where multi-round decode loops run entirely on device. In this mode,
-// sequences share the same prompt prefix, and the prefill KV cache needs to be
-// stored in a shared cache format for efficient multi-round decoding on device.
-// Inputs:
+// This function is specifically designed for Rec (recommendation) multi-round
+// mode, where multi-round decode loops run on device. In this mode, sequences
+// share the same prompt prefix, and the prefill KV cache needs to be stored in
+// a shared cache format for efficient multi-round decoding on device. Inputs:
 //   proj_k          : [shared_len, kv_heads, head_dim] - projected K tensor
 //                     from prefill phase
 //   proj_v          : [shared_len, kv_heads, head_dim] - projected V tensor

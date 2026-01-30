@@ -98,7 +98,7 @@ class WorkerType {
   Value value_;
 };
 
-// step-level decode metadata for pure-device multi-round.
+// Step-level decode metadata for Rec multi-round (device loop).
 struct StepDecodeMeta {
   int32_t beam_width = 1;
   int32_t current_round = 0;
@@ -254,7 +254,7 @@ struct RawForwardOutput {
   std::vector<int32_t> out_tokens;
   std::vector<float> out_logprobs;
 
-  // batch-level beam output for rec pure device mode
+  // batch-level beam output for Rec multi-round mode
   std::vector<int32_t> beam_sequence_group;  // flattened 2D
   // multimodal embedding output
   std::vector<torch::Tensor> mm_embeddings;

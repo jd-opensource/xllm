@@ -382,7 +382,7 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   if (beam_width <= 1) {
     return;
   }
-  int32_t total_rounds = get_pure_device_decode_rounds();
+  int32_t total_rounds = get_rec_multi_round_decode_rounds();
   size_t num_groups = sequence_groups_.size();
   if (num_groups == 0) {
     // Fallback: treat sequences_ as single group

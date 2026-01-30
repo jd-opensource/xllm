@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "rec_pure_device_batch_input_builder.h"
+#include "rec_multi_round_batch_input_builder.h"
 
 #include <c10/core/DeviceType.h>
 #include <torch/torch.h>
@@ -43,7 +43,7 @@ limitations under the License.
 
 namespace xllm {
 
-RecPureDeviceBatchInputBuilder::RecPureDeviceBatchInputBuilder(
+RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
     const std::vector<SequencesGroup*>& sequence_groups,
     const std::vector<uint32_t>& allowed_max_tokens,
     const std::vector<torch::Tensor>& input_embeddings_vec,
@@ -75,16 +75,16 @@ RecPureDeviceBatchInputBuilder::RecPureDeviceBatchInputBuilder(
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
   }
 
-  // Initialize RecPureDevice specific state
-  rec_pure_device_state_.total_steps = get_pure_device_decode_rounds();
-  rec_pure_device_state_.base_state.batch_forward_type = batch_forward_type_;
+  // Initialize RecMultiRound specific state
+  rec_multi_round_state_.total_steps = get_rec_multi_round_decode_rounds();
+  rec_multi_round_state_.base_state.batch_forward_type = batch_forward_type_;
 }
 
-void RecPureDeviceBatchInputBuilder::process_single_sequence(
+void RecMultiRoundBatchInputBuilder::process_single_sequence(
     int32_t seq_index,
     BuilderState* state_ptr,
     std::unordered_set<int32_t>* write_block_ids_ptr) {
-  RecPureDeviceBuilderState& state = rec_pure_device_state_;
+  RecMultiRoundBuilderState& state = rec_multi_round_state_;
   BuilderState& base_state = state.base_state;
 
   auto* sequence = sequences_[seq_index];
@@ -141,32 +141,32 @@ void RecPureDeviceBatchInputBuilder::process_single_sequence(
   }
 }
 
-ForwardInput RecPureDeviceBatchInputBuilder::build_rec_forward_input(
+ForwardInput RecMultiRoundBatchInputBuilder::build_rec_forward_input(
     uint32_t /*num_decoding_tokens*/,
     uint32_t /*min_decoding_batch_size*/) {
-  // Pure device mode doesn't use num_decoding_tokens and
+  // Rec multi-round mode doesn't use num_decoding_tokens and
   // min_decoding_batch_size parameters, so we ignore them and call the internal
-  // build_forward_input method
+  // build_forward_input method.
   return build_forward_input();
 }
 
-ForwardInput RecPureDeviceBatchInputBuilder::build_forward_input() {
-  // Reset rec pure device state for this build
-  rec_pure_device_state_.total_steps = get_pure_device_decode_rounds();
+ForwardInput RecMultiRoundBatchInputBuilder::build_forward_input() {
+  // Reset Rec multi-round state for this build.
+  rec_multi_round_state_.total_steps = get_rec_multi_round_decode_rounds();
 
   is_mtp_decode_ = false;
   // Single-threaded processing for now; can be extended to use thread_pool_
   for (int32_t i = 0; i < static_cast<int32_t>(sequences_.size()); ++i) {
-    process_single_sequence(i, &rec_pure_device_state_.base_state, nullptr);
+    process_single_sequence(i, &rec_multi_round_state_.base_state, nullptr);
   }
   return state_to_forward_input();
 }
 
-void RecPureDeviceBatchInputBuilder::extract_tokens_and_positions(
+void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
     Sequence* sequence,
     uint32_t n_kv_cache_tokens,
     uint32_t seq_len,
-    RecPureDeviceBuilderState* state_ptr) {
+    RecMultiRoundBuilderState* state_ptr) {
   // First build the "base" view that matches the single-round builder
   BuilderState& base_state = state_ptr->base_state;
 
@@ -276,7 +276,7 @@ void RecPureDeviceBatchInputBuilder::extract_tokens_and_positions(
   }
 }
 
-void RecPureDeviceBatchInputBuilder::setup_kv_cache_info(
+void RecMultiRoundBatchInputBuilder::setup_kv_cache_info(
     Sequence* sequence,
     uint32_t n_kv_cache_tokens,
     uint32_t seq_len,
@@ -294,7 +294,8 @@ void RecPureDeviceBatchInputBuilder::setup_kv_cache_info(
   }
   state.block_tables_vec.emplace_back(std::move(block_ids));
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
-  RecPureDeviceBuilderState& state = rec_pure_device_state_;
+  // TODO: refactor this branch when NPU multi-round xattention lands.
+  RecMultiRoundBuilderState& state = rec_multi_round_state_;
   BuilderState& base_state = state.base_state;
 
   // fill paged_kv_last_page_len for batch_size calculation.
@@ -303,8 +304,8 @@ void RecPureDeviceBatchInputBuilder::setup_kv_cache_info(
 #endif
 }
 
-ForwardInput RecPureDeviceBatchInputBuilder::state_to_forward_input() {
-  BuilderState& state = rec_pure_device_state_.base_state;
+ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
+  BuilderState& state = rec_multi_round_state_.base_state;
   if (state.flatten_tokens_vec.empty()) {
     return {};
   }
@@ -375,42 +376,41 @@ ForwardInput RecPureDeviceBatchInputBuilder::state_to_forward_input() {
                                        state.unique_token_lens_vec);
   }
 
-  // Rec pure device specific metadata
-  auto& rec_pure_device_state = rec_pure_device_state_;
-  rec_pure_device_state.total_steps = get_pure_device_decode_rounds();
+  // Rec multi-round specific metadata.
+  rec_multi_round_state_.total_steps = get_rec_multi_round_decode_rounds();
   const int32_t beam_width = FLAGS_beam_width;
-  const int32_t total_round = rec_pure_device_state.total_steps;
+  const int32_t total_round = rec_multi_round_state_.total_steps;
   const int32_t current_round = 0;
   std::vector<int64_t> full_kv_shape;
   std::vector<int32_t> decode_positions_vec;
 
-  // Setup decoder sampling parameters for rec pure device decode
-  if (!rec_pure_device_state.decode_selected_token_idxes.empty()) {
-    CHECK_EQ(rec_pure_device_state.decode_sampling_params.size(),
-             rec_pure_device_state.decode_selected_token_idxes.size());
+  // Setup decoder sampling parameters for Rec multi-round decode.
+  if (!rec_multi_round_state_.decode_selected_token_idxes.empty()) {
+    CHECK_EQ(rec_multi_round_state_.decode_sampling_params.size(),
+             rec_multi_round_state_.decode_selected_token_idxes.size());
     util::pad_2d_vector<int64_t>(
-        rec_pure_device_state.decode_unique_token_ids_vec,
+        rec_multi_round_state_.decode_unique_token_ids_vec,
         /*pad_value=*/0);
-    util::pad_2d_vector(rec_pure_device_state.decode_unique_token_counts_vec,
+    util::pad_2d_vector(rec_multi_round_state_.decode_unique_token_counts_vec,
                         /*pad_value=*/0);
 
     forward_input.decoder_sampling_params.init(
-        rec_pure_device_state.decode_sampling_params,
-        rec_pure_device_state.decode_selected_token_idxes,
-        rec_pure_device_state.decode_sample_idxes,
-        rec_pure_device_state.decode_unique_token_ids_vec,
-        rec_pure_device_state.decode_unique_token_counts_vec,
-        rec_pure_device_state.decode_unique_token_lens_vec);
+        rec_multi_round_state_.decode_sampling_params,
+        rec_multi_round_state_.decode_selected_token_idxes,
+        rec_multi_round_state_.decode_sample_idxes,
+        rec_multi_round_state_.decode_unique_token_ids_vec,
+        rec_multi_round_state_.decode_unique_token_counts_vec,
+        rec_multi_round_state_.decode_unique_token_lens_vec);
   }
 
-  // Set full_kv_shape if we have rec pure device decode data
-  if (is_pure_device_mode() && !sequences_.empty()) {
+  // Set full_kv_shape if we have Rec multi-round decode data.
+  if (is_rec_multi_round_mode() && !sequences_.empty()) {
     int64_t batch_size = static_cast<int64_t>(sequences_.size());
     int64_t n_kv_heads =
         args_ ? args_->n_kv_heads().value_or(args_->n_heads()) : 0;
     int64_t head_dim = args_ ? args_->head_dim() : 0;
 
-    int32_t decode_rounds = get_pure_device_decode_rounds();
+    int32_t decode_rounds = get_rec_multi_round_decode_rounds();
     full_kv_shape = {
         batch_size * FLAGS_max_token_per_req +
             batch_size * FLAGS_beam_width * std::max(0, decode_rounds - 1),
@@ -419,11 +419,11 @@ ForwardInput RecPureDeviceBatchInputBuilder::state_to_forward_input() {
   }
 
   // Decode positions
-  if (!rec_pure_device_state.decode_positions_vec.empty()) {
-    decode_positions_vec = rec_pure_device_state.decode_positions_vec;
+  if (!rec_multi_round_state_.decode_positions_vec.empty()) {
+    decode_positions_vec = rec_multi_round_state_.decode_positions_vec;
   }
 
-  if (is_pure_device_mode()) {
+  if (is_rec_multi_round_mode()) {
     StepDecodeMeta step_meta;
     step_meta.beam_width = beam_width;
     step_meta.current_round = current_round;

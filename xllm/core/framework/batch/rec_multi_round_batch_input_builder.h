@@ -34,9 +34,9 @@ namespace xllm {
 
 struct ModelArgs;
 
-class RecPureDeviceBatchInputBuilder : public RecBatchInputBuilder {
+class RecMultiRoundBatchInputBuilder : public RecBatchInputBuilder {
  public:
-  explicit RecPureDeviceBatchInputBuilder(
+  explicit RecMultiRoundBatchInputBuilder(
       const std::vector<SequencesGroup*>& sequence_groups,
       const std::vector<uint32_t>& allowed_max_tokens,
       const std::vector<torch::Tensor>& input_embeddings_vec,
@@ -47,7 +47,7 @@ class RecPureDeviceBatchInputBuilder : public RecBatchInputBuilder {
       const ModelArgs* args,
       ThreadPool* thread_pool = nullptr);
 
-  ~RecPureDeviceBatchInputBuilder() override = default;
+  ~RecMultiRoundBatchInputBuilder() override = default;
 
   // Override base class method
   ForwardInput build_rec_forward_input(
@@ -55,8 +55,8 @@ class RecPureDeviceBatchInputBuilder : public RecBatchInputBuilder {
       uint32_t min_decoding_batch_size) override;
 
  private:
-  // Build pure device forward input for the whole batch (internal
-  // implementation)
+  // Build Rec multi-round forward input for the whole batch (internal
+  // implementation).
   ForwardInput build_forward_input();
 
   // Local builder state (copy of the legacy BatchInputBuilder::BuilderState)
@@ -112,24 +112,24 @@ class RecPureDeviceBatchInputBuilder : public RecBatchInputBuilder {
   };
 
  protected:
-  // Core building methods - provide pure device specific logic
+  // Core building methods - provide Rec multi-round specific logic.
   void process_single_sequence(
       int32_t seq_index,
       BuilderState* state_ptr = nullptr,
       std::unordered_set<int32_t>* write_block_ids_ptr = nullptr);
 
  private:
-  // State management for RecPureDevice
-  struct RecPureDeviceBuilderState {
+  // State management for RecMultiRound
+  struct RecMultiRoundBuilderState {
     // Base state compatible with single-round builder
     BuilderState base_state;
 
-    // Pure device step tracking data
+    // Rec multi-round step tracking data
     std::vector<int32_t> step_tokens_vec;
     std::vector<int32_t> step_positions_vec;
     std::vector<torch::Tensor> step_mrope_positions_vec;
 
-    // Pure device decode state buffers
+    // Rec multi-round decode state buffers
     std::vector<int32_t> decode_selected_token_idxes;
     std::vector<const RequestSamplingParam*> decode_sampling_params;
     std::vector<std::vector<int64_t>> decode_unique_token_ids_vec;
@@ -138,22 +138,22 @@ class RecPureDeviceBatchInputBuilder : public RecBatchInputBuilder {
     std::vector<int32_t> decode_sample_idxes;
     std::vector<int32_t> decode_positions_vec;
 
-    // Pure device specific metadata
+    // Rec multi-round specific metadata
     uint32_t total_steps = 0;
   };
 
   // Enhanced state
-  RecPureDeviceBuilderState rec_pure_device_state_;
+  RecMultiRoundBuilderState rec_multi_round_state_;
 
  private:
-  // Override extract_tokens_and_positions to handle rec pure device decode
-  // logic
+  // Override extract_tokens_and_positions to handle Rec multi-round decode
+  // logic.
   void extract_tokens_and_positions(Sequence* sequence,
                                     uint32_t n_kv_cache_tokens,
                                     uint32_t seq_len,
-                                    RecPureDeviceBuilderState* state_ptr);
+                                    RecMultiRoundBuilderState* state_ptr);
 
-  // Pure device specific forward input conversion functions
+  // Rec multi-round specific forward input conversion functions
   ForwardInput state_to_forward_input();
 
   void setup_kv_cache_info(Sequence* sequence,

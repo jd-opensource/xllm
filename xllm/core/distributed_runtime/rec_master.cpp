@@ -375,7 +375,7 @@ std::unique_ptr<RecMaster::RecMasterPipeline> RecMaster::create_pipeline(
     RecMaster& master) {
   switch (type) {
     case RecPipelineType::kLlmRecDefault:
-    case RecPipelineType::kLlmRecPureDevicePipeline:
+    case RecPipelineType::kLlmRecMultiRoundPipeline:
       return std::make_unique<LlmRecMasterPipeline>(master);
     case RecPipelineType::kLlmRecWithMmData:
       return std::make_unique<LlmRecWithMmDataMasterPipeline>(master);

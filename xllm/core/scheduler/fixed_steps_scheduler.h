@@ -81,21 +81,21 @@ class FixedStepsScheduler final : public ContinuousScheduler {
     }
   };
 
-  class PureDeviceSchedulerPipeline final : public SchedulerPipeline {
+  class RecMultiRoundSchedulerPipeline final : public SchedulerPipeline {
    public:
     std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
                                       BatchFactory* batch_factory) override;
     bool requires_kv_cache() const override { return false; }
     bool allocate_kv_cache(KVCacheManager* /*kv_cache_manager*/,
                            Sequence* /*sequence*/) override {
-      return true;  // PureDevice mode does not need KV cache allocation
+      return true;  // RecMultiRound mode does not need KV cache allocation
     }
   };
 
   // Factory method to create scheduler pipeline
   static std::unique_ptr<SchedulerPipeline> create_scheduler_pipeline(
       RecType rec_type,
-      bool is_pure_device);
+      bool is_rec_multi_round);
 
   std::vector<Batch> schedule_request(const absl::Duration& timeout);
 

@@ -126,12 +126,12 @@ class RecEngine : public Engine {
   };
 
   // ============================================================
-  // PureDeviceEnginePipeline: kLlmRecPureDevicePipeline via local Worker
-  // For multi-round pure device inference (multi-round logic in worker)
+  // RecMultiRoundEnginePipeline: kLlmRecMultiRoundPipeline via local Worker
+  // For multi-round Rec inference (multi-round logic in worker/device)
   // ============================================================
-  class PureDeviceEnginePipeline final : public RecEnginePipeline {
+  class RecMultiRoundEnginePipeline final : public RecEnginePipeline {
    public:
-    explicit PureDeviceEnginePipeline(RecEngine& engine);
+    explicit RecMultiRoundEnginePipeline(RecEngine& engine);
 
     void setup_workers() override;
     void process_group_test() override;

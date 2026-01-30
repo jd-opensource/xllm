@@ -144,8 +144,8 @@ struct OneRecModelInputParams {
   }
 };
 
-// Parameters for LLM Rec pure device mode (multi-round decode with beam search)
-struct LlmRecPureDeviceParams {
+// Parameters for LLM Rec multi-round mode (device loop, beam search).
+struct LlmRecMultiRoundParams {
   // full kv caches provided by engine for step-level decode, per layer
   std::vector<torch::Tensor> full_k_caches;
   std::vector<torch::Tensor> full_v_caches;
@@ -160,8 +160,8 @@ struct LlmRecPureDeviceParams {
   int32_t current_round = 0;
   int32_t total_round = 0;
 
-  LlmRecPureDeviceParams to(const torch::Device& device) const {
-    LlmRecPureDeviceParams result = *this;
+  LlmRecMultiRoundParams to(const torch::Device& device) const {
+    LlmRecMultiRoundParams result = *this;
 
     result.full_k_caches.clear();
     result.full_v_caches.clear();
@@ -195,7 +195,7 @@ struct LlmRecPureDeviceParams {
 };
 
 using RecModelInputParams = std::
-    variant<std::monostate, OneRecModelInputParams, LlmRecPureDeviceParams>;
+    variant<std::monostate, OneRecModelInputParams, LlmRecMultiRoundParams>;
 
 enum class TransferType : uint8_t {
   G2H = 0,  // global memory(KVCache store) to host memory(DRAM)
@@ -366,7 +366,7 @@ struct ModelInputParams {
       LOG(INFO) << "ModelInputParams: has onerec_params";
       onerec->print();
     } else if (const auto* llmrec = llmrec_params()) {
-      LOG(INFO) << "ModelInputParams: has llm_rec_pure_device_params"
+      LOG(INFO) << "ModelInputParams: has llm_rec_multi_round_params"
                 << ", beam_width=" << llmrec->beam_width
                 << ", current_round=" << llmrec->current_round
                 << ", total_round=" << llmrec->total_round;
@@ -512,18 +512,18 @@ struct ModelInputParams {
     return std::get<OneRecModelInputParams>(rec_params);
   }
 
-  // Accessors for LLM Rec pure device params inside rec_params variant
-  const LlmRecPureDeviceParams* llmrec_params() const {
-    return std::get_if<LlmRecPureDeviceParams>(&rec_params);
+  // Accessors for LLM Rec multi-round params inside rec_params variant
+  const LlmRecMultiRoundParams* llmrec_params() const {
+    return std::get_if<LlmRecMultiRoundParams>(&rec_params);
   }
 
   bool has_llmrec_params() const { return llmrec_params() != nullptr; }
 
-  LlmRecPureDeviceParams& mutable_llmrec_params() {
+  LlmRecMultiRoundParams& mutable_llmrec_params() {
     if (!has_llmrec_params()) {
-      rec_params.emplace<LlmRecPureDeviceParams>();
+      rec_params.emplace<LlmRecMultiRoundParams>();
     }
-    return std::get<LlmRecPureDeviceParams>(rec_params);
+    return std::get<LlmRecMultiRoundParams>(rec_params);
   }
 
   struct GraphBuffer {

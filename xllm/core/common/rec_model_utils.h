@@ -33,26 +33,26 @@ enum class RecPipelineType : uint8_t {
   kLlmRecDefault = 0,             // LlmRec without mm_data (pure qwen)
   kLlmRecWithMmData = 1,          // LlmRec with mm_data (qwen + embedding)
   kOneRecDefault = 2,             // OneRec
-  kLlmRecPureDevicePipeline = 3,  // LlmRec pure device pipeline for multi-round
+  kLlmRecMultiRoundPipeline = 3,  // LlmRec multi-round pipeline (device loop)
 };
 
-// Check if pure device mode is enabled
-// Pure device mode: multi-round decode loop runs entirely on device (Worker
-// layer) instead of being controlled by Engine layer
-inline bool is_pure_device_mode() { return FLAGS_max_decode_rounds > 0; }
+// Check if Rec multi-round mode is enabled.
+// Rec multi-round mode: multi-round decode loop runs on device (worker layer),
+// while the engine issues a single step.
+inline bool is_rec_multi_round_mode() { return FLAGS_max_decode_rounds > 0; }
 
-// Get the number of decode rounds for pure device mode
-// Returns 0 if pure device mode is disabled
-inline int32_t get_pure_device_decode_rounds() {
-  return is_pure_device_mode() ? FLAGS_max_decode_rounds : 0;
+// Get the number of decode rounds for Rec multi-round mode.
+// Returns 0 if Rec multi-round mode is disabled.
+inline int32_t get_rec_multi_round_decode_rounds() {
+  return is_rec_multi_round_mode() ? FLAGS_max_decode_rounds : 0;
 }
 
 // Pipeline strategy selector: choose strategy based on RecModelKind
 inline RecPipelineType get_rec_pipeline_type(RecModelKind kind) {
   switch (kind) {
     case RecModelKind::kLlmRec:
-      if (is_pure_device_mode()) {
-        return RecPipelineType::kLlmRecPureDevicePipeline;
+      if (is_rec_multi_round_mode()) {
+        return RecPipelineType::kLlmRecMultiRoundPipeline;
       } else {
         return RecPipelineType::kLlmRecDefault;
       }

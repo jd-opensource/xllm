@@ -95,7 +95,8 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
                                       const Tokenizer& tokenizer,
                                       ThreadPool* thread_pool) {
   // Check for multi-round beam search results
-  if (is_pure_device_mode() && check_beam_search() && sequences_.size() == 1) {
+  if (is_rec_multi_round_mode() && check_beam_search() &&
+      sequences_.size() == 1) {
     auto* base = sequences_[0].get();
     if (base->has_beam_result()) {
       generate_multi_round_output(outputs, tokenizer, *base);

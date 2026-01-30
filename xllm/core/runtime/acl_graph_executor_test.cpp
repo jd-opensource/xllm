@@ -106,7 +106,7 @@ class SimpleCausalLM : public CausalLM {
         "pos_embedding",
         torch::randn({max_pos, args.hidden_size()},
                      torch::dtype(torch::kFloat32).device(device)));
-    // Initialize block-related tensors for pure device computation
+    // Initialize block-related tensors for Rec multi-round computation
     block_size_ = torch::tensor(4L, torch::dtype(torch::kInt64).device(device));
     scalar_one_ = torch::tensor(1L, torch::dtype(torch::kInt64).device(device));
 
@@ -171,7 +171,7 @@ class SimpleCausalLM : public CausalLM {
     }
 
     if (params.block_tables.defined() && !kv_caches.empty()) {
-      // Use block_tables to do embedding lookup from kv_cache - pure device
+      // Use block_tables to do embedding lookup from kv_cache - Rec multi-round
       // computation Calculate max_seq_len from actual seq_len tensor
       auto max_seq_len = torch::max(params.kv_seq_lens);
 
