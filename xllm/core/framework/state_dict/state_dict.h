@@ -52,6 +52,8 @@ class StateDict {
 
   size_t size() const { return dict_.size(); }
 
+  bool has(const std::string& tensor_name) const;
+
   std::string_view prefix() const { return prefix_; }
 
   auto begin() const { return dict_.begin(); }
