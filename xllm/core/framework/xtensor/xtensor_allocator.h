@@ -25,6 +25,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
+#include "common/types.h"
 #include "options.h"
 #include "phy_page.h"
 #include "xtensor.h"
@@ -61,6 +62,12 @@ struct ModelTensors {
   // broadcast operations to select correct workers. 0 means use global values.
   int32_t dp_size = 0;
   int32_t tp_size = 0;
+
+  // ============== Weight Segments (for D2D transfer) ==============
+  // Ordered list of weight segments in GlobalXtensor.
+  // For contiguous allocation: single segment.
+  // For fallback (XTensor): multiple segments from non-contiguous pages.
+  std::vector<WeightSegment> weight_segments;
 };
 
 /**
@@ -214,6 +221,16 @@ class XTensorAllocator {
   // Get model tensors (returns nullptr if not found)
   // Public for XTensorDistService to access num_layers
   ModelTensors* get_model_tensors(const std::string& model_id);
+
+  // ============== ETCD Registration Support ==============
+  // Get weight segments for a model (supports non-contiguous allocation)
+  // Returns ordered list of {offset, size} segments in GlobalXtensor
+  std::vector<WeightSegment> get_model_weight_segments(
+      const std::string& model_id) const;
+
+  // Get all model weight segments
+  std::unordered_map<std::string, std::vector<WeightSegment>>
+  get_all_model_weight_segments() const;
 
  private:
   XTensorAllocator() = default;

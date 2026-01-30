@@ -73,6 +73,9 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   create_running_queue(options);
   if (options_.enable_service_routing()) {
     XServiceClient::get_instance()->set_scheduler(this);
+    if (FLAGS_enable_xtensor) {
+      XServiceClient::get_instance()->set_engine(enginse_);
+    }
   }
 
   instance_info_.name = options_.instance_name().value_or("");

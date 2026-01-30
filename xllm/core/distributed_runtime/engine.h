@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <folly/futures/Future.h>
 
+#include <unordered_map>
+
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/model/model_args.h"
@@ -106,6 +108,16 @@ class Engine {
                               std::vector<std::string>& addrs,
                               std::vector<int64_t>& k_cache_ids,
                               std::vector<int64_t>& v_cache_ids) {
+    NOT_IMPLEMENTED();
+  };
+
+  // Get XTensor info for etcd registration (from dp group 0)
+  // worker_free_phy_pages: free pages per worker
+  // model_weight_segments: weight segments in GlobalXtensor per model
+  virtual void get_xtensor_info(
+      std::vector<size_t>& worker_free_phy_pages,
+      std::unordered_map<std::string, std::vector<WeightSegment>>&
+          model_weight_segments) {
     NOT_IMPLEMENTED();
   };
 

@@ -966,10 +966,16 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
     WakeupOptions wakeup_options;
     wakeup_options.remote_addrs.assign(req_pb->remote_addrs().begin(),
                                        req_pb->remote_addrs().end());
-    wakeup_options.src_weight_offsets.reserve(
-        req_pb->src_weight_offsets().size());
-    for (auto offset : req_pb->src_weight_offsets()) {
-      wakeup_options.src_weight_offsets.push_back(offset);
+    // Prefer new segment-based format; fallback to legacy offsets
+    if (req_pb->src_weight_segments_size() > 0) {
+      for (const auto& seg_list : req_pb->src_weight_segments()) {
+        std::vector<WeightSegment> segments;
+        segments.reserve(seg_list.segments_size());
+        for (const auto& proto_seg : seg_list.segments()) {
+          segments.push_back({proto_seg.offset(), proto_seg.size()});
+        }
+        wakeup_options.src_weight_segments.push_back(std::move(segments));
+      }
     }
     if (!master->wakeup(wakeup_options)) {
       LOG(ERROR) << "Failed to wakeup model " << req_pb->model_id()

@@ -540,6 +540,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
     }
 
+    // c10::StreamGuard streamGuard = this->compute_stream_->set_stream_guard();
     // run the model on the given input in working thread
     if (!enable_schedule_overlap()) {
       const auto output = this->step(input);
@@ -636,11 +637,23 @@ bool WorkerImpl::sleep(int32_t master_status) {
 bool WorkerImpl::wakeup(const WakeupOptions& options) {
   if (!options.remote_addrs.empty()) {
 #if defined(USE_NPU)
-    if (options.src_weight_offsets.size() != options.remote_addrs.size()) {
-      LOG(ERROR) << "remote_addrs and src_weight_offsets size mismatch: "
-                 << options.remote_addrs.size() << " vs "
-                 << options.src_weight_offsets.size();
-      return false;
+    // Prefer segment-based transfer if available, fallback to legacy offsets
+    bool use_segments = !options.src_weight_segments.empty();
+
+    if (use_segments) {
+      if (options.src_weight_segments.size() != options.remote_addrs.size()) {
+        LOG(ERROR) << "remote_addrs and src_weight_segments size mismatch: "
+                   << options.remote_addrs.size() << " vs "
+                   << options.src_weight_segments.size();
+        return false;
+      }
+    } else {
+      // Legacy single-offset mode (backward compatibility)
+      if (options.src_weight_segments.empty() &&
+          options.remote_addrs.size() > 0) {
+        LOG(ERROR) << "No weight segments provided for remote wakeup";
+        return false;
+      }
     }
 
     if (!FLAGS_enable_xtensor) {
@@ -663,25 +676,30 @@ bool WorkerImpl::wakeup(const WakeupOptions& options) {
       return false;
     }
 
-    uint64_t dst_offset =
-        reinterpret_cast<uintptr_t>(tensors->weight_base_ptr) -
-        reinterpret_cast<uintptr_t>(global_xtensor.base_vaddr());
-    size_t transfer_size =
-        tensors->weight_num_pages * global_xtensor.page_size();
-
     if (!weight_transfer_) {
       LOG(ERROR) << "MooncakeWeightTransfer not initialized";
       return false;
     }
 
+    // Destination is always contiguous (local allocation)
+    uint64_t dst_base_offset =
+        reinterpret_cast<uintptr_t>(tensors->weight_base_ptr) -
+        reinterpret_cast<uintptr_t>(global_xtensor.base_vaddr());
+
     for (size_t i = 0; i < options.remote_addrs.size(); ++i) {
-      if (!weight_transfer_->pull_weights(options.remote_addrs[i],
-                                          options.src_weight_offsets[i],
-                                          dst_offset,
-                                          transfer_size)) {
-        LOG(ERROR) << "Failed to pull remote weights from "
-                   << options.remote_addrs[i];
-        return false;
+      const auto& segments = options.src_weight_segments[i];
+      uint64_t dst_offset = dst_base_offset;
+
+      // Pull each segment from source, writing sequentially to destination
+      for (const auto& seg : segments) {
+        if (!weight_transfer_->pull_weights(
+                options.remote_addrs[i], seg.offset, dst_offset, seg.size)) {
+          LOG(ERROR) << "Failed to pull remote weight segment from "
+                     << options.remote_addrs[i] << ", src_offset=" << seg.offset
+                     << ", size=" << seg.size;
+          return false;
+        }
+        dst_offset += seg.size;
       }
     }
 
