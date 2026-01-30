@@ -47,7 +47,8 @@ struct DiTGenerationOutput {
 struct DiTRequestOutput {
   DiTRequestOutput() = default;
 
-  DiTRequestOutput(Status&& _status) : status(std::move(_status)) {}
+  DiTRequestOutput(Status&& _status, std::string service_request_id = "")
+      : status(std::move(_status)), service_request_id(service_request_id) {}
 
   void log_request_status() const;
 
