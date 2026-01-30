@@ -118,9 +118,9 @@ VLMMaster::~VLMMaster() {
   }
 }
 
-void VLMMaster::handle_request(const std::string& prompt,
-                               MMData& mm_data,
-                               const RequestParams& sp,
+void VLMMaster::handle_request(std::string prompt,
+                               MMData mm_data,
+                               RequestParams sp,
                                OutputCallback callback) {
   scheduler_->incr_pending_requests(1);
   auto cb = [callback = std::move(callback),
@@ -145,7 +145,10 @@ void VLMMaster::handle_request(const std::string& prompt,
       return;
     }
 
-    auto request = generate_request(prompt, mm_data, sp, callback);
+    auto request = generate_request(std::move(prompt),
+                                    std::move(mm_data),
+                                    std::move(sp),
+                                    std::move(callback));
     if (!request) {
       return;
     }
@@ -157,9 +160,9 @@ void VLMMaster::handle_request(const std::string& prompt,
   });
 }
 
-void VLMMaster::handle_request(const std::vector<Message>& messages,
-                               const RequestParams& sp,
-                               const std::string& payload,
+void VLMMaster::handle_request(std::vector<Message> messages,
+                               RequestParams sp,
+                               std::string payload,
                                OutputCallback callback) {
   scheduler_->incr_pending_requests(1);
   auto cb = [callback = std::move(callback),
@@ -183,7 +186,10 @@ void VLMMaster::handle_request(const std::vector<Message>& messages,
       return;
     }
 
-    auto request = generate_request(messages, sp, payload, callback);
+    auto request = generate_request(std::move(messages),
+                                    std::move(sp),
+                                    std::move(payload),
+                                    std::move(callback));
     if (!request) {
       return;
     }
@@ -195,9 +201,9 @@ void VLMMaster::handle_request(const std::vector<Message>& messages,
   });
 }
 
-void VLMMaster::handle_batch_request(const std::vector<std::string>& prompts,
-                                     std::vector<MMData>& mm_datas,
-                                     const std::vector<RequestParams>& sps,
+void VLMMaster::handle_batch_request(std::vector<std::string> prompts,
+                                     std::vector<MMData> mm_datas,
+                                     std::vector<RequestParams> sps,
                                      BatchOutputCallback callback) {
   CHECK(prompts.size() == sps.size() || sps.size() == 1)
       << "Number of prompts and sampling parameters should be the same";
@@ -205,7 +211,7 @@ void VLMMaster::handle_batch_request(const std::vector<std::string>& prompts,
   const size_t num_requests = prompts.size();
   for (size_t i = 0; i < num_requests; ++i) {
     handle_request(std::move(prompts[i]),
-                   mm_datas[i],
+                   std::move(mm_datas[i]),
                    // the sampling parameter may be shared
                    sps.size() == 1 ? sps[0] : std::move(sps[i]),
                    [i, callback](const RequestOutput& output) {
@@ -216,18 +222,19 @@ void VLMMaster::handle_batch_request(const std::vector<std::string>& prompts,
 }
 
 void VLMMaster::handle_batch_request(
-    const std::vector<std::vector<Message>>& conversations,
-    const std::vector<RequestParams>& sps,
+    std::vector<std::vector<Message>> conversations,
+    std::vector<RequestParams> sps,
     BatchOutputCallback callback) {
   CHECK(conversations.size() == sps.size() || sps.size() == 1)
       << "Number of conversations and sampling parameters should be the same";
 
+  std::string payload;
   const size_t num_requests = conversations.size();
   for (size_t i = 0; i < num_requests; ++i) {
     handle_request(std::move(conversations[i]),
                    // the sampling parameter may be shared
                    sps.size() == 1 ? sps[0] : std::move(sps[i]),
-                   std::string(),
+                   std::move(payload),
                    [i, callback](const RequestOutput& output) {
                      output.log_request_status();
                      return callback(i, output);
@@ -267,9 +274,9 @@ void VLMMaster::generate() {
   running_.store(false, std::memory_order_relaxed);
 }
 
-std::shared_ptr<Request> VLMMaster::generate_request(std::string& prompt,
-                                                     MMData& mm_data,
-                                                     const RequestParams& sp,
+std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
+                                                     MMData mm_data,
+                                                     RequestParams sp,
                                                      OutputCallback callback) {
   if (prompt.empty()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Prompt is empty");
@@ -388,13 +395,14 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string& prompt,
 }
 
 std::shared_ptr<Request> VLMMaster::generate_request(
-    const std::vector<Message>& messages,
-    const RequestParams& sp,
-    const std::string& payload,
+    std::vector<Message> messages,
+    RequestParams sp,
+    std::string payload,
     OutputCallback callback) {
   Timer timer;
   static MMInputTransfer mm_input_transfer;
-  MMInput mm_inputs(payload);
+
+  MMInput mm_inputs(std::move(payload));
   if (!mm_input_transfer.trans(messages, mm_inputs)) {
     LOG(ERROR) << "mm input trans failed.";
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
@@ -419,7 +427,10 @@ std::shared_ptr<Request> VLMMaster::generate_request(
   }
   COUNTER_ADD(chat_template_latency_seconds, timer.elapsed_seconds());
 
-  return generate_request(prompt.value(), mm_data, sp, callback);
+  return generate_request(std::move(prompt.value()),
+                          std::move(mm_data),
+                          std::move(sp),
+                          std::move(callback));
 }
 
 }  // namespace xllm

@@ -64,7 +64,7 @@ struct MMInputItem {
 
 struct MMPayload {
   MMPayload() = default;
-  explicit MMPayload(const std::string& data, size_t offset = 0)
+  explicit MMPayload(std::string data, size_t offset = 0)
       : data(std::move(data)), offset(offset) {}
 
   bool get(std::string& value, size_t len) {
@@ -90,7 +90,7 @@ struct MMPayload {
 class MMInput {
  public:
   MMInput() = default;
-  explicit MMInput(const std::string& payload) : payload(std::move(payload)) {}
+  explicit MMInput(std::string payload) : payload_(std::move(payload)) {}
 
   bool empty() const { return items_.empty(); }
   void clear() { items_.clear(); }
@@ -123,7 +123,7 @@ class MMInput {
         }
       }
     }
-    return std::move(vec);
+    return vec;
   }
 
   std::vector<VideoMetadata> get_video_metadata() const {
@@ -137,9 +137,11 @@ class MMInput {
     return metas;
   }
 
-  MMPayload payload;
+  MMPayload& payload() { return payload_; }
+  const MMPayload& payload() const { return payload_; }
 
  private:
+  MMPayload payload_;
   std::vector<MMInputItem> items_;
 };
 

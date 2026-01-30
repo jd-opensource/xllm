@@ -892,7 +892,7 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
   auto saved_streaming = request_params.streaming;
   auto saved_request_id = request_params.request_id;
 
-  auto& payload = call->get_request_payload();
+  auto payload = call->take_request_payload();
 
   // schedule the request
   master_->handle_request(

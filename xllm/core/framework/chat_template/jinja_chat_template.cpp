@@ -162,7 +162,7 @@ nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
     content_json.emplace_back(item_json);
   }
 
-  return std::move(content_json);
+  return content_json;
 }
 
 }  // namespace xllm

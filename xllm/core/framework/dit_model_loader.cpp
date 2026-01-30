@@ -308,7 +308,7 @@ std::unordered_map<std::string, ModelArgs> DiTModelLoader::get_model_args()
     map.insert({pair.first, pair.second->model_args()});
   }
 
-  return std::move(map);
+  return map;
 }
 
 std::unordered_map<std::string, QuantArgs> DiTModelLoader::get_quant_args()
@@ -318,7 +318,7 @@ std::unordered_map<std::string, QuantArgs> DiTModelLoader::get_quant_args()
     map.insert({pair.first, pair.second->quant_args()});
   }
 
-  return std::move(map);
+  return map;
 }
 
 std::string DiTModelLoader::get_torch_dtype() const {
@@ -335,7 +335,7 @@ std::string DiTModelLoader::get_torch_dtype() const {
     }
   }
 
-  return std::move(dtype);
+  return dtype;
 }
 
 }  // namespace xllm

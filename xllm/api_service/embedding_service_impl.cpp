@@ -163,7 +163,7 @@ void MMEmbeddingServiceImpl::process_async_impl(
   }
   auto request_id = request_params.request_id;
 
-  auto& payload = call->get_request_payload();
+  auto payload = call->take_request_payload();
 
   // schedule the request
   master_->handle_request(
