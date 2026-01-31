@@ -46,7 +46,7 @@ void reshape_paged_cache(
     torch::Tensor value_cache);
 
 void batch_prefill(const std::string& uri,
-                   torch::Tensor plan_info,
+                   ffi::Array<int64_t> plan_info,
                    torch::Tensor float_workspace_buffer,
                    torch::Tensor int_workspace_buffer,
                    torch::Tensor page_locked_int_workspace_buffer,
@@ -62,7 +62,7 @@ void batch_prefill(const std::string& uri,
                    bool enable_cuda_graph);
 
 void batch_decode(const std::string& uri,
-                  torch::Tensor plan_info,
+                  ffi::Array<int64_t> plan_info,
                   torch::Tensor float_workspace_buffer,
                   torch::Tensor int_workspace_buffer,
                   torch::Tensor page_locked_int_workspace_buffer,
