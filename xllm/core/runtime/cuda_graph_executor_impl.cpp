@@ -339,9 +339,10 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         static_cast<int32_t>(n_kv_heads),  // num_kv_heads
         static_cast<int32_t>(block_size),  // block_size
         sliding_window,                    // window_size_left
-        true,                              // enable_cuda_graph
-        causal,                            // causal
-        attn_metadata->use_tensor_core);   // use_tensor_core
+        /*enable_cuda_graph=*/true,
+        causal,                     // causal
+        /*use_tensor_core=*/true);  // let use_tensor_core=true temporarily
+                                    // until we refactor flashinfer API
   }
 
   // Return ModelInputParams with persistent buffer references if requested

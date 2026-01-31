@@ -48,6 +48,7 @@ class AttentionImpl : public torch::nn::Module {
   float scale_;
   int num_kv_heads_;
   int sliding_window_;
+  bool decode_use_tensor_core_;
 };
 TORCH_MODULE(Attention);
 
