@@ -23,6 +23,29 @@ limitations under the License.
 #include "kernels/ops_api.h"
 
 DECLARE_bool(enable_chunked_prefill);
+
+namespace {
+bool should_use_tensor_core(torch::ScalarType kv_cache_dtype,
+                            int64_t num_attention_heads,
+                            int64_t num_kv_heads) {
+  // Calculate GQA group size
+  int64_t gqa_group_size = num_attention_heads / num_kv_heads;
+
+  // For Flashinfer, a GQA group size of at least 4 is needed to efficiently
+  // use Tensor Core for decode phase, as it fuses the head group with the token
+  // dimension in MMA.
+  if (kv_cache_dtype == torch::ScalarType::Float8_e4m3fn ||
+      kv_cache_dtype == torch::ScalarType::Float8_e5m2) {
+    return true;
+  } else if (kv_cache_dtype == torch::ScalarType::Half ||
+             kv_cache_dtype == torch::ScalarType::BFloat16) {
+    return gqa_group_size >= 4;
+  }
+
+  return false;
+}
+}  // namespace
+
 namespace xllm {
 namespace layer {
 AttentionImpl::AttentionImpl(int num_heads,
@@ -34,7 +57,11 @@ AttentionImpl::AttentionImpl(int num_heads,
       head_size_(head_size),
       scale_(scale),
       num_kv_heads_(num_kv_heads),
-      sliding_window_(sliding_window - 1) {}
+      sliding_window_(sliding_window - 1) {
+  // we only support bf16 kvcache for now
+  decode_use_tensor_core_ = should_use_tensor_core(
+      /*kv_cache_dtype=*/torch::ScalarType::BFloat16, num_heads, num_kv_heads);
+}
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     const AttentionMetadata& attn_metadata,
@@ -87,7 +114,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
         /*window_size_left=*/sliding_window_,
         /*enable_cuda_graph=*/attn_metadata.enable_cuda_graph,
         /*causal=*/causal,
-        /*use_tensor_core=*/attn_metadata.use_tensor_core);
+        decode_use_tensor_core_);
   }
 
   xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
@@ -115,6 +142,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   attention_params.page_locked_int_workspace_buffer =
       ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
           .get_page_locked_int_workspace_buffer();
+  attention_params.use_tensor_core = decode_use_tensor_core_;
 
   // TODO: support chunked prefill
   CHECK(!attn_metadata.is_chunked_prefill)

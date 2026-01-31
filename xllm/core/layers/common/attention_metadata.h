@@ -84,8 +84,6 @@ struct AttentionMetadata {
   // plan_info tensor contains pre-computed execution parameters optimized for
   // the current batch configuration.
   std::shared_ptr<PlanInfo> plan_info;
-  // Whether to use tensor core for decode attention computation. Default: true.
-  bool use_tensor_core = true;
 
   // for CUDA graph - CPU tensors for plan_info update (avoid .to(CPU) during
   // graph capture) torch::Tensor q_cu_seq_lens_host;      // Prefill mode:

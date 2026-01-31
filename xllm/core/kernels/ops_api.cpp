@@ -277,7 +277,7 @@ void batch_decode(AttentionParams& params) {
                      params.output,
                      params.output_lse,
                      params.attn_metadata.enable_cuda_graph,
-                     params.attn_metadata.use_tensor_core,
+                     params.use_tensor_core,
                      params.attn_metadata.kv_seq_lens,
                      params.attn_metadata.qo_indptr.defined()
                          ? std::make_optional(params.attn_metadata.qo_indptr)

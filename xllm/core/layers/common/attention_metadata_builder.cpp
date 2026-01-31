@@ -81,8 +81,6 @@ AttentionMetadata AttentionMetadataBuilder::build(
   attn_metadata.block_table = params.block_tables;
 #endif
 
-  // TODO: set use_tensor_core from options.
-
   return attn_metadata;
 }
 

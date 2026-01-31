@@ -258,6 +258,7 @@ struct AttentionParams {
   torch::Tensor float_workspace_buffer;
   torch::Tensor int_workspace_buffer;
   torch::Tensor page_locked_int_workspace_buffer;
+  bool use_tensor_core;
 
   // ========== Prefill-specific parameters ==========
   // Key tensor. Shape: [num_tokens, num_kv_heads, head_dim_qk] (packed) or
