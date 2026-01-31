@@ -87,7 +87,10 @@ class LlmModelImplBase : public torch::nn::Module {
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
+// NOTE: we will remove this until refactor flashinfer API
+#if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.plan_info->layer_id = i;
+#endif
       auto& layer = layers_[i];
       h = layer(h,
                 residual,
