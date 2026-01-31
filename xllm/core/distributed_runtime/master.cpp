@@ -28,6 +28,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "common/types.h"
+#include "dit_engine.h"
 #include "dit_master.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
@@ -268,6 +269,35 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
             options_.max_tokens_per_chunk_for_prefill());
 
     engine_ = std::make_unique<RecEngine>(eng_options);
+  } else if (type == EngineType::DIT) {
+    runtime::Options eng_options;
+    eng_options.model_path(options_.model_path())
+        .devices(devices)
+        .backend(options_.backend())
+        .block_size(options_.block_size())
+        .max_cache_size(options_.max_cache_size())
+        .max_memory_utilization(options_.max_memory_utilization())
+        .enable_prefix_cache(options_.enable_prefix_cache())
+        .task_type(options.task_type())
+        .enable_chunked_prefill(options_.enable_chunked_prefill())
+        .enable_offline_inference(options_.enable_offline_inference())
+        .spawn_worker_path(options_.spawn_worker_path())
+        .enable_shm(options_.enable_shm())
+        .is_local(options_.is_local())
+        .enable_schedule_overlap(options_.enable_schedule_overlap())
+        .master_node_addr(options.master_node_addr())
+        .nnodes(options.nnodes())
+        .node_rank(options.node_rank())
+        .dp_size(options.dp_size())
+        .ep_size(options.ep_size())
+        .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .max_tokens_per_chunk_for_prefill(
+            options_.max_tokens_per_chunk_for_prefill());
+
+    if (options_.device_ip().has_value()) {
+      eng_options.device_ip(options_.device_ip().value());
+    }
+    engine_ = std::make_unique<DiTEngine>(eng_options);
   } else {
     LOG(WARNING) << "Not supported llm engine type: "
                  << static_cast<size_t>(type);

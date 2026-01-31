@@ -748,6 +748,51 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     return language_model_(tokens, positions, kv_caches, input_params);
   }
 
+  // LongCat-Image forward with attention_mask. Mask is [batch_size, seq_len]:
+  // 1 = real token, 0 = padding. Do NOT multiply hidden_states by mask.
+  torch::Tensor forward_longcat(const torch::Tensor& tokens,
+                                const torch::Tensor& positions,
+                                std::vector<KVCache>& kv_caches,
+                                const ModelInputParams& input_params,
+                                const torch::Tensor& attention_mask) {
+    if (kv_caches.empty()) {
+      kv_caches.resize(model_args_.n_layers());
+    }
+
+    auto modified_input_params = input_params;
+
+    int64_t actual_seq_len;
+    if (positions.dim() == 2) {
+      actual_seq_len = positions.size(1);
+    } else if (positions.dim() == 1) {
+      actual_seq_len = positions.size(0);
+    } else {
+      actual_seq_len = positions.numel();
+    }
+
+    if (actual_seq_len > 0) {
+      modified_input_params.q_max_seq_len = actual_seq_len;
+      modified_input_params.kv_max_seq_len = actual_seq_len;
+      auto cu_seqlens =
+          torch::tensor({0, static_cast<int>(actual_seq_len)}, torch::kInt)
+              .to(tokens.device());
+      modified_input_params.q_seq_lens = cu_seqlens;
+      modified_input_params.kv_seq_lens = cu_seqlens;
+      modified_input_params.batch_forward_type = BatchForwardType::PREFILL;
+    }
+
+    modified_input_params.input_embedding =
+        language_model_->get_input_embeddings(tokens);
+    if (attention_mask.defined() && attention_mask.size(0) > 0) {
+      modified_input_params.graph_buffer.attn_mask =
+          attention_mask.view({-1}).to(torch::kFloat32);
+    }
+
+    auto model_output =
+        language_model_(tokens, positions, kv_caches, modified_input_params);
+    return model_output.hidden_states;
+  }
+
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
     return language_model_->logits(hidden_states, seleted_idxes);
@@ -792,6 +837,7 @@ REGISTER_MODEL_ARGS(qwen2_5_vl, [&] {
   // LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0);
   LOAD_ARG_OR(bos_token_id, "bos_token_id", 151643);
   LOAD_ARG_OR(eos_token_id, "eos_token_id", 151645);
+  LOAD_ARG_OR(pad_token_id, "pad_token_id", 151643);
   LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 151652);
   LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 151653);
   LOAD_ARG_OR(vision_token_id, "vision_token_id", 151654);
@@ -843,6 +889,70 @@ REGISTER_MODEL_ARGS(qwen2_5_vl, [&] {
   LOAD_ARG_OR(
       rope_scaling_rope_type, "vision_config.rope_scaling.type", "mrope");
   LOAD_ARG(rope_scaling_mrope_section, "rope_scaling.mrope_section");
+  LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
+});
+
+// Register additional args loader for the full class name used by LongCat-Image
+REGISTER_MODEL_ARGS(Qwen2_5_VLForConditionalGeneration, [&] {
+  // text config
+  // LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0);
+  LOAD_ARG_OR(bos_token_id, "bos_token_id", 151643);
+  LOAD_ARG_OR(eos_token_id, "eos_token_id", 151645);
+  LOAD_ARG_OR(pad_token_id, "pad_token_id", 151643);
+  LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 151652);
+  LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 151653);
+  LOAD_ARG_OR(vision_token_id, "vision_token_id", 151654);
+  LOAD_ARG_OR(image_token_id, "image_token_id", 151655);
+  LOAD_ARG_OR(video_token_id, "video_token_id", 151656);
+  LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
+  LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
+  // LOAD_ARG_OR(initializer_range, "initializer_range", 0.02);
+  LOAD_ARG_OR(intermediate_size, "intermediate_size", 18944);
+  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 128000);
+  LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
+  LOAD_ARG_OR(model_type, "model_type", "qwen2_5_vl");
+  LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
+  LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);
+  LOAD_ARG_OR(n_kv_heads, "num_key_value_heads", 4);
+  LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-06);
+  LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
+  LOAD_ARG_OR(sliding_window, "sliding_window", 32768);
+  LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
+  LOAD_ARG_OR(dtype, "torch_dtype", "");
+  // LOAD_ARG_OR(transformers_version, "transformers_version", "4.41.2");
+  // LOAD_ARG_OR(use_cache, "use_cache", true);
+  LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
+  LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
+    return args->hidden_size() / args->n_heads();
+  });
+
+  // vision_config
+  LOAD_ARG_OR(mm_num_hidden_layers, "vision_config.depth", 32);
+  LOAD_ARG_OR(mm_hidden_act, "vision_config.hidden_act", "silu");
+  LOAD_ARG_OR(mm_hidden_size, "vision_config.hidden_size", 1280);
+  LOAD_ARG_OR(mm_intermediate_size, "vision_config.intermediate_size", 3420);
+  LOAD_ARG_OR(mm_num_attention_heads, "vision_config.num_heads", 16);
+  LOAD_ARG_OR(mm_num_channels, "vision_config.in_chans", 3);
+  LOAD_ARG_OR(mm_projection_dim, "vision_config.out_hidden_size", 3584);
+  LOAD_ARG_OR(mm_patch_size, "vision_config.patch_size", 14);
+  LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2);
+  LOAD_ARG_OR(mm_spatial_patch_size, "vision_config.spatial_patch_size", 14);
+  LOAD_ARG_OR(mm_window_size, "vision_config.window_size", 112);
+  LOAD_ARG_OR(mm_fullatt_block_indexes,
+              "vision_config.fullatt_block_indexes",
+              std::vector<int64_t>({7, 15, 23, 31}));
+  LOAD_ARG_OR(mm_tokens_per_second, "vision_config.tokens_per_second", 2);
+  LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
+  LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {
+    return args->mm_hidden_size() / args->mm_num_attention_heads();
+  });
+
+  // LongCat-Image text_encoder: config at text_encoder/config.json is flat.
+  // rope_scaling at root: {"type":"mrope","mrope_section":[16,24,24]}
+  LOAD_ARG_OR(rope_scaling_rope_type, "rope_scaling.type", "mrope");
+  LOAD_ARG_OR(rope_scaling_mrope_section,
+              "rope_scaling.mrope_section",
+              std::vector<int64_t>{});
   LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
 });
 }  // namespace xllm

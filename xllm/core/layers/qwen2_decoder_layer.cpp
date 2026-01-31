@@ -66,23 +66,51 @@ torch::Tensor Qwen2DecoderLayerImpl::forward(
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
     const ModelInputParams& input_params) {
-  // Pre-attention norm
-  if (!residual.has_value()) {
-    residual = x;
-    x = std::get<0>(input_norm_->forward(x));
-  } else {
-    std::tie(x, residual) = input_norm_->forward(x, residual);
+  // Pre-attention norm: Qwen2 norms input only (no residual add). Reset
+  // residual to layer input each time so post_norm/MLP use correct residual.
+  residual = x;
+  // Ensure input dtype matches weight dtype before calling forward
+  auto input_norm_weight_dtype = input_norm_->weight().scalar_type();
+  auto x_original_dtype = x.scalar_type();
+  torch::Tensor x_for_norm = x;
+  if (x.scalar_type() != input_norm_weight_dtype) {
+    x_for_norm = x.to(input_norm_weight_dtype);
+  }
+  x = std::get<0>(input_norm_->forward(x_for_norm));
+  // Convert back to original dtype if needed
+  if (x.scalar_type() != x_original_dtype) {
+    x = x.to(x_original_dtype);
   }
 
   // Attention
   x = attention_->forward(positions, x, attn_metadata, kv_cache);
 
-  // Post-attention norm
-  std::tie(x, residual) = post_norm_->forward(x, residual);
+  // Post-attention norm: x = norm(attn + residual), residual = attn + residual
+  // Ensure input dtype matches weight dtype before calling forward
+  auto post_norm_weight_dtype = post_norm_->weight().scalar_type();
+  auto x_before_post_norm_dtype = x.scalar_type();
+  torch::Tensor x_for_post_norm = x;
+  if (x.scalar_type() != post_norm_weight_dtype) {
+    x_for_post_norm = x.to(post_norm_weight_dtype);
+  }
+  std::optional<torch::Tensor> residual_for_post_norm = residual;
+  if (residual.has_value() &&
+      residual.value().scalar_type() != post_norm_weight_dtype) {
+    residual_for_post_norm = residual.value().to(post_norm_weight_dtype);
+  }
+  std::tie(x, residual) =
+      post_norm_->forward(x_for_post_norm, residual_for_post_norm);
+  // Convert back to original dtype if needed
+  if (x.scalar_type() != x_before_post_norm_dtype) {
+    x = x.to(x_before_post_norm_dtype);
+  }
 
-  // MLP forward
+  // MLP forward; Qwen2 then adds residual (emb + attn) to MLP output.
+  // Match diffusers: keep bf16 (no float32).
   x = mlp_->forward(x);
-
+  if (residual.has_value()) {
+    x = x + residual.value();
+  }
   return x;
 }
 

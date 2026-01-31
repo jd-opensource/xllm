@@ -20,8 +20,10 @@ limitations under the License.
 #include <sys/sysinfo.h>
 
 #include "core/common/metrics.h"
+#include "framework/batch/batch.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
+#include "runtime/forward_params.h"
 #include "runtime/worker.h"
 #include "util/env_var.h"
 #include "util/timer.h"
@@ -144,5 +146,24 @@ std::vector<int64_t> DiTEngine::get_active_activation_memory() const {
     active_activation_memories.push_back(result.value());
   }
   return active_activation_memories;
+}
+
+ForwardOutput DiTEngine::step(std::vector<Batch>& batch) {
+  (void)batch;
+  // DiTEngine implements Engine interface; DiT execution uses
+  // step(vector<DiTBatch>&). This override exists only to satisfy Engine's pure
+  // virtual and is never used.
+  VLOG(1) << "DiTEngine::step(vector<Batch>&): no-op (DiT uses "
+             "step(vector<DiTBatch>&))";
+  return ForwardOutput{};
+}
+
+void DiTEngine::update_last_step_result(std::vector<Batch>& batch) {
+  (void)batch;
+  // DiTEngine implements Engine interface; DiT path does not use this callback.
+  // This override exists only to satisfy Engine's pure virtual and is never
+  // used.
+  VLOG(1) << "DiTEngine::update_last_step_result(vector<Batch>&): no-op "
+             "(unused for DiT)";
 }
 }  // namespace xllm

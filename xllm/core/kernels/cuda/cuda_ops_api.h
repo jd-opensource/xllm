@@ -59,7 +59,8 @@ void batch_prefill(const std::string& uri,
                    double sm_scale,
                    torch::Tensor output,
                    std::optional<torch::Tensor>& output_lse,
-                   bool enable_cuda_graph);
+                   bool enable_cuda_graph,
+                   const std::optional<torch::Tensor>& mask = std::nullopt);
 
 void batch_decode(const std::string& uri,
                   torch::Tensor plan_info,
