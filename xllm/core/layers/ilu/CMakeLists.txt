@@ -5,6 +5,7 @@ cc_library(
     ilu_layers
   HDRS
     attention.h
+    attention_metadata.h
   SRCS
     attention.cpp
   DEPS
