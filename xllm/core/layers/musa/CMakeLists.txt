@@ -5,6 +5,7 @@ cc_library(
     musa_layers
   HDRS
     attention.h
+    attention_metadata.h
   SRCS
     attention.cpp
   DEPS

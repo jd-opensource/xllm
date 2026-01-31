@@ -40,10 +40,12 @@ AttentionMetadata AttentionMetadataBuilder::build(
   attn_metadata.compute_dtype = compute_dtype;
 
   // for flashinfer
+#if defined(USE_CUDA) || defined(USE_MUSA)
   attn_metadata.paged_kv_indptr = params.paged_kv_indptr;
   attn_metadata.paged_kv_indices = params.paged_kv_indices;
   attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
   attn_metadata.plan_info = std::make_shared<PlanInfo>();
+#endif
 
 #if defined(USE_NPU)
   // for npu
@@ -54,10 +56,13 @@ AttentionMetadata AttentionMetadataBuilder::build(
     attn_metadata.kv_seq_lens_host = params.kv_seq_lens.to(torch::kCPU);
   }
 #endif
+
   attn_metadata.is_chunked_prefill =
       params.batch_forward_type.is_mixed() ||
       params.batch_forward_type.is_chunked_prefill();
+
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
+
   if (!attn_metadata.is_prefill || FLAGS_enable_mla) {
     attn_metadata.block_table = params.block_tables;
     attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens

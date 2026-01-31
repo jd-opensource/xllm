@@ -5,6 +5,7 @@ cc_library(
     cuda_layers
   HDRS
     attention.h
+    attention_metadata.h
     flashinfer_workspace.h
     flashinfer_planinfo.h
   SRCS
