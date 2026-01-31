@@ -19,13 +19,12 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "cuda_ops_api.h"
-#include "function_factory.h"
 #include "utils.h"
 
 namespace xllm::kernel::cuda {
 
 void batch_decode(const std::string& uri,
-                  torch::Tensor plan_info,
+                  ffi::Array<int64_t> plan_info,
                   torch::Tensor float_workspace_buffer,
                   torch::Tensor int_workspace_buffer,
                   torch::Tensor page_locked_int_workspace_buffer,
@@ -44,6 +43,7 @@ void batch_decode(const std::string& uri,
                   torch::Tensor kv_seq_lens,
                   std::optional<torch::Tensor> qo_indptr) {
   VLOG(kGraphExecutorLogVerboseLevel) << "plan_info: " << plan_info;
+
   if (use_tensor_core) {
     torch::Tensor qo_indptr_to_use;
     if (qo_indptr.has_value()) {
@@ -60,51 +60,56 @@ void batch_decode(const std::string& uri,
       qo_indptr_to_use = qo_indptr_host.to(torch::kCUDA);
     }
 
-    FunctionFactory::get_instance().fa2_prefill_paged_run_func(uri).call(
-        float_workspace_buffer,
-        int_workspace_buffer,
+    torch::Tensor v_scale = torch::Tensor();
+    auto [scale_v_tensor, scale_v_scalar] = split_scale_param(v_scale);
+
+    get_function(uri, "paged_run")(
+        to_ffi_tensor(float_workspace_buffer),
+        to_ffi_tensor(int_workspace_buffer),
         plan_info,
-        query,
-        k_cache,
-        v_cache,
-        qo_indptr_to_use,
-        paged_kv_indptr,
-        paged_kv_indices,
-        paged_kv_last_page_len,
-        output,
-        output_lse,
+        to_ffi_tensor(query),
+        to_ffi_tensor(k_cache),
+        to_ffi_tensor(v_cache),
+        to_ffi_tensor(qo_indptr_to_use),
+        to_ffi_tensor(paged_kv_indptr),
+        to_ffi_tensor(paged_kv_indices),
+        to_ffi_tensor(paged_kv_last_page_len),
+        to_ffi_tensor(output),
+        output_lse.has_value() ? to_ffi_tensor(output_lse.value())
+                               : ffi::Optional<ffi::Tensor>(),
         /*mask_mode_code=*/0,  // NON_CAUSAL
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),
-        /*maybe_custom_mask=*/std::optional<torch::Tensor>(),
-        /*maybe_mask_indptr=*/std::optional<torch::Tensor>(),
-        /*maybe_alibi_slopes=*/std::optional<torch::Tensor>(),
-        /*maybe_prefix_len_ptr=*/std::optional<torch::Tensor>(),
-        /*maybe_token_pos_in_items_ptr=*/std::optional<torch::Tensor>(),
-        /*maybe_max_item_len_ptr=*/std::optional<torch::Tensor>(),
+        /*maybe_custom_mask=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_mask_indptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_alibi_slopes=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_prefix_len_ptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_token_pos_in_items_ptr=*/ffi::Optional<ffi::Tensor>(),
+        /*maybe_max_item_len_ptr=*/ffi::Optional<ffi::Tensor>(),
         /*logits_soft_cap=*/0.0,
         sm_scale,
         /*rope_rcp_scale=*/1.0,
         /*rope_rcp_theta=*/1.0 / 10000.0,
         /*token_pos_in_items_len=*/0);
   } else {
-    FunctionFactory::get_instance().decode_run_func(uri).call(
-        float_workspace_buffer,
-        int_workspace_buffer,
+    get_function(uri, "run")(
+        to_ffi_tensor(float_workspace_buffer),
+        to_ffi_tensor(int_workspace_buffer),
         plan_info,
-        query,
-        k_cache,
-        v_cache,
-        paged_kv_indptr,
-        paged_kv_indices,
-        paged_kv_last_page_len,
-        output,
-        output_lse,
+        to_ffi_tensor(query),
+        to_ffi_tensor(k_cache),
+        to_ffi_tensor(v_cache),
+        to_ffi_tensor(paged_kv_indptr),
+        to_ffi_tensor(paged_kv_indices),
+        to_ffi_tensor(paged_kv_last_page_len),
+        to_ffi_tensor(output),
+        output_lse.has_value() ? to_ffi_tensor(output_lse.value())
+                               : ffi::Optional<ffi::Tensor>(),
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),
-        /*maybe_alibi_slopes=*/std::optional<torch::Tensor>(),
+        /*maybe_alibi_slopes=*/ffi::Optional<ffi::Tensor>(),
         /*logits_soft_cap=*/0.0,
         sm_scale,
         /*rope_rcp_scale=*/1.0,

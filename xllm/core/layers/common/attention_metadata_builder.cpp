@@ -43,7 +43,9 @@ AttentionMetadata AttentionMetadataBuilder::build(
   attn_metadata.paged_kv_indptr = params.paged_kv_indptr;
   attn_metadata.paged_kv_indices = params.paged_kv_indices;
   attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
+#if defined(USE_CUDA) || defined(USE_MUSA)
   attn_metadata.plan_info = std::make_shared<PlanInfo>();
+#endif
 
 #if defined(USE_NPU)
   // for npu

@@ -18,7 +18,6 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "flashinfer_planinfo.h"
 #include "flashinfer_workspace.h"
-#include "kernels/cuda/function_factory.h"
 #include "kernels/cuda/utils.h"
 #include "kernels/ops_api.h"
 
@@ -88,6 +87,18 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   // currently we update flashinfer step_wise_attn_state_ at layer 0.
   bool causal = attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
 
+  std::string backend = xllm::kernel::cuda::determine_attention_backend(
+      /*pos_encoding_mode=*/0,
+      /*use_fp16_qk_reduction=*/false,
+      /*use_custom_mask=*/false);
+
+  // NOTE: we only support "fa2" backend for BatchPrefillWithPagedKvcacheKernel
+  // for flashinfer v0.6.2, because it would cause performance degradation if
+  // using "fa3" backend.
+  if (!causal) {
+    backend = "fa2";
+  }
+
   if (attn_metadata.enable_cuda_graph) {
     CHECK(attn_metadata.plan_info->plan_info.defined())
         << "plan_info plan_info should not be null when enable_cuda_graph is "
@@ -97,11 +108,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   } else {
     flashinfer::update_plan_info(
         attn_metadata.plan_info,
-        causal ? xllm::kernel::cuda::determine_attention_backend(
-                     /*pos_encoding_mode=*/0,
-                     /*use_fp16_qk_reduction=*/false,
-                     /*use_custom_mask=*/false)
-               : "fa2",
+        backend,
         attn_metadata,
         query.scalar_type(),
         key.scalar_type(),

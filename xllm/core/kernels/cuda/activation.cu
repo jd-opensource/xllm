@@ -16,7 +16,6 @@ limitations under the License.
 #include <torch/cuda.h>
 
 #include "cuda_ops_api.h"
-#include "function_factory.h"
 
 // ref to:
 // https://github.com/vllm-project/vllm/blob/main/csrc/activation_kernels.cu

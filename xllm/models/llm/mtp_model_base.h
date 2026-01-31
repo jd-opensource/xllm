@@ -181,7 +181,9 @@ class MtpModelImplBase : public torch::nn::Module {
 
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < mtp_layers_.size(); i++) {
+#if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.plan_info->layer_id = i;
+#endif
       auto& layer = mtp_layers_[i];
       hidden_states = layer(hidden_states,
                             residual,

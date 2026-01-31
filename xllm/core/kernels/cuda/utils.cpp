@@ -15,9 +15,13 @@ limitations under the License.
 
 #include "utils.h"
 
+#include <c10/core/Device.h>
 #include <cuda_runtime.h>
+#include <dlpack/dlpack.h>
 
 #include <cstdlib>
+#include <mutex>
+#include <unordered_map>
 
 #include "core/platform/device.h"
 #include "core/util/env_var.h"
@@ -36,6 +40,181 @@ const std::unordered_map<torch::ScalarType, std::string_view>
         {torch::kInt64, "i64"},
         {torch::kUInt64, "u64"},
 };
+
+DLDataType get_data_type_for_dlpack_v1(const torch::Tensor& t) {
+  DLDataType dtype;
+  dtype.lanes = 1;
+  dtype.bits = t.element_size() * 8;
+  switch (t.scalar_type()) {
+    case torch::ScalarType::UInt1:
+    case torch::ScalarType::UInt2:
+    case torch::ScalarType::UInt3:
+    case torch::ScalarType::UInt4:
+    case torch::ScalarType::UInt5:
+    case torch::ScalarType::UInt6:
+    case torch::ScalarType::UInt7:
+    case torch::ScalarType::Byte:
+    case torch::ScalarType::UInt16:
+    case torch::ScalarType::UInt32:
+    case torch::ScalarType::UInt64:
+      dtype.code = DLDataTypeCode::kDLUInt;
+      break;
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 6
+    case torch::ScalarType::Int1:
+    case torch::ScalarType::Int2:
+    case torch::ScalarType::Int3:
+    case torch::ScalarType::Int4:
+    case torch::ScalarType::Int5:
+    case torch::ScalarType::Int6:
+    case torch::ScalarType::Int7:
+    case torch::ScalarType::Char:
+      dtype.code = DLDataTypeCode::kDLInt;
+      break;
+#endif
+    case torch::ScalarType::Double:
+      dtype.code = DLDataTypeCode::kDLFloat;
+      break;
+    case torch::ScalarType::Float:
+      dtype.code = DLDataTypeCode::kDLFloat;
+      break;
+    case torch::ScalarType::Int:
+      dtype.code = DLDataTypeCode::kDLInt;
+      break;
+    case torch::ScalarType::Long:
+      dtype.code = DLDataTypeCode::kDLInt;
+      break;
+    case torch::ScalarType::Short:
+      dtype.code = DLDataTypeCode::kDLInt;
+      break;
+    case torch::ScalarType::Half:
+      dtype.code = DLDataTypeCode::kDLFloat;
+      break;
+    case torch::ScalarType::Bool:
+      dtype.code = DLDataTypeCode::kDLBool;
+      break;
+    case torch::ScalarType::ComplexHalf:
+    case torch::ScalarType::ComplexFloat:
+    case torch::ScalarType::ComplexDouble:
+      dtype.code = DLDataTypeCode::kDLComplex;
+      break;
+    case torch::ScalarType::BFloat16:
+      dtype.code = DLDataTypeCode::kDLBfloat;
+      break;
+    case torch::ScalarType::Float8_e5m2:
+      dtype.code = DLDataTypeCode::kDLFloat8_e5m2;
+      break;
+    case torch::ScalarType::Float8_e5m2fnuz:
+      dtype.code = DLDataTypeCode::kDLFloat8_e5m2fnuz;
+      break;
+    case torch::ScalarType::Float8_e4m3fn:
+      dtype.code = DLDataTypeCode::kDLFloat8_e4m3fn;
+      break;
+    case torch::ScalarType::Float8_e4m3fnuz:
+      dtype.code = DLDataTypeCode::kDLFloat8_e4m3fnuz;
+      break;
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
+    case torch::ScalarType::Float8_e8m0fnu:
+      dtype.code = DLDataTypeCode::kDLFloat8_e8m0fnu;
+      break;
+    case torch::ScalarType::Float4_e2m1fn_x2:
+      dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
+      dtype.lanes = 2;
+      dtype.bits = 4;
+      break;
+#endif
+    default:
+      LOG(FATAL) << "Unsupported scalar type: ";
+      break;
+  }
+  return dtype;
+}
+
+DLDevice torch_device_to_dl_device_for_dlpack_v1(torch::Device device) {
+  DLDevice ctx;
+
+  ctx.device_id =
+      (device.is_cuda() || device.is_privateuseone())
+          ? static_cast<int32_t>(static_cast<unsigned char>(device.index()))
+          : 0;
+
+  switch (device.type()) {
+    case torch::DeviceType::CPU:
+      ctx.device_type = DLDeviceType::kDLCPU;
+      break;
+    case torch::DeviceType::CUDA:
+#ifdef USE_ROCM
+      ctx.device_type = DLDeviceType::kDLROCM;
+#else
+      ctx.device_type = DLDeviceType::kDLCUDA;
+#endif
+      break;
+    case torch::DeviceType::OPENCL:
+      ctx.device_type = DLDeviceType::kDLOpenCL;
+      break;
+    case torch::DeviceType::HIP:
+      ctx.device_type = DLDeviceType::kDLROCM;
+      break;
+    case torch::DeviceType::MAIA:
+      ctx.device_type = DLDeviceType::kDLMAIA;
+      break;
+    case torch::DeviceType::PrivateUse1:
+      ctx.device_type = DLDeviceType::kDLExtDev;
+      break;
+    case torch::DeviceType::MPS:
+      ctx.device_type = DLDeviceType::kDLMetal;
+      break;
+    default:
+      LOG(FATAL) << "Cannot pack tensors on " << device.str();
+      break;
+  }
+
+  return ctx;
+}
+
+template <class T>
+struct ATenDLMTensor {
+  torch::Tensor handle;
+  T tensor{};
+};
+
+template <class T>
+void deleter(T* arg) {
+  delete static_cast<ATenDLMTensor<T>*>(arg->manager_ctx);
+}
+
+// Adds version information for DLManagedTensorVersioned.
+// This is a no-op for the other types.
+template <class T>
+void fill_version(T* tensor) {}
+
+template <>
+void fill_version<DLManagedTensorVersioned>(DLManagedTensorVersioned* tensor) {
+  tensor->flags = 0;
+  tensor->version.major = DLPACK_MAJOR_VERSION;
+  tensor->version.minor = DLPACK_MINOR_VERSION;
+}
+
+// This function returns a shared_ptr to memory managed DLpack tensor
+// constructed out of ATen tensor
+template <class T>
+T* to_dlpack_impl(const torch::Tensor& src) {
+  ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
+  atDLMTensor->handle = src;
+  atDLMTensor->tensor.manager_ctx = atDLMTensor;
+  atDLMTensor->tensor.deleter = &deleter<T>;
+  atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
+  atDLMTensor->tensor.dl_tensor.device =
+      torch_device_to_dl_device_for_dlpack_v1(src.device());
+  atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
+  atDLMTensor->tensor.dl_tensor.dtype = get_data_type_for_dlpack_v1(src);
+  atDLMTensor->tensor.dl_tensor.shape =
+      const_cast<int64_t*>(src.sizes().data());
+  atDLMTensor->tensor.dl_tensor.strides =
+      const_cast<int64_t*>(src.strides().data());
+  atDLMTensor->tensor.dl_tensor.byte_offset = 0;
+  fill_version(&atDLMTensor->tensor);
+  return &(atDLMTensor->tensor);
+}
 }  // namespace
 
 namespace xllm::kernel::cuda {
@@ -130,4 +309,55 @@ torch::Tensor get_cache_buffer(const int32_t seq_len,
   return buffer.slice(0, 0, seq_len);
 }
 
+std::tuple<torch::Tensor, double> split_scale_param(
+    const torch::Tensor& scale) {
+  if (!scale.defined()) {
+    return std::make_tuple(torch::Tensor(), 1.0);
+  }
+
+  if (scale.dim() == 0) {
+    return std::make_tuple(torch::Tensor(), scale.item<double>());
+  }
+
+  return std::make_tuple(scale, 1.0);
+}
+
+ffi::Tensor to_ffi_tensor(const torch::Tensor& torch_tensor) {
+  if (!torch_tensor.defined()) {
+    LOG(FATAL) << "torch_tensor is not defined";
+  }
+
+  auto dlpack = to_dlpack_impl<DLManagedTensorVersioned>(torch_tensor);
+  return ffi::Tensor::FromDLPackVersioned(dlpack);
+}
+
+ffi::Module get_module(const std::string& uri) {
+  static thread_local std::unordered_map<std::string, ffi::Module> module_cache;
+
+  auto it = module_cache.find(uri);
+  if (it != module_cache.end()) {
+    return it->second;
+  }
+
+  std::string so_file_path = path_to_uri_so_lib(uri);
+  auto mod = ffi::Module::LoadFromFile(so_file_path);
+  module_cache.emplace(uri, mod);
+  return mod;
+}
+
+ffi::Function get_function(const std::string& uri,
+                           const std::string& func_name) {
+  static thread_local std::unordered_map<std::string, ffi::Function> func_cache;
+
+  std::string key = uri + "|" + func_name;
+
+  auto it = func_cache.find(key);
+  if (it != func_cache.end()) {
+    return it->second;
+  }
+
+  auto func = get_module(uri)->GetFunction(func_name).value();
+  func_cache.emplace(key, func);
+  return func;
+}
 }  // namespace xllm::kernel::cuda
