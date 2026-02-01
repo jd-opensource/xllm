@@ -273,22 +273,32 @@ class BuildDistWheel(bdist_wheel):
         super().initialize_options()
         self.device = None
         self.arch = None
+        # Cache the original dist name early so finalize_options is idempotent
+        # and so name changes are visible to egg_info/metadata generation.
+        self._base_dist_name = self.distribution.metadata.name
 
     def finalize_options(self):
-        super().finalize_options()
-        
-        # generate distribution name
+        # IMPORTANT: mutate distribution name BEFORE super().finalize_options().
+        # bdist_wheel finalization may finalize/cache egg_info metadata; if we
+        # change the name afterwards, the wheel filename and METADATA can diverge
+        # (pip will reject the wheel as "inconsistent name").
+        name = self._base_dist_name
+
+        # generate distribution name suffix
         if self.device:
-            self.distribution.metadata.name += f"_{self.device}"
+            name += f"_{self.device}"
 
         torch_version = get_torch_version(self.device)
         if torch_version:
-            self.distribution.metadata.name += f"_torch{torch_version}"
+            name += f"_torch{torch_version}"
 
         if get_cxx_abi():
-            self.distribution.metadata.name += f"_cxx11_abi"
+            name += "_cxx11_abi"
         else:
-            self.distribution.metadata.name += f"_no_cxx11_abi"
+            name += "_no_cxx11_abi"
+
+        self.distribution.metadata.name = name
+        super().finalize_options()
 
     def run(self):
         build_ext_cmd = self.get_finalized_command('build_ext')
