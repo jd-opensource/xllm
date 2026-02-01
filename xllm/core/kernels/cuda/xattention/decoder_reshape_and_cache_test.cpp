@@ -16,7 +16,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
-#include "core/kernels/cuda/cuda_ops_api.h"
+#include "core/kernels/cuda/xattention/xattention_ops_api.h"
 
 namespace xllm::kernel::cuda {
 namespace test {

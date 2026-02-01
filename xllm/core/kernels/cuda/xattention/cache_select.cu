@@ -17,12 +17,13 @@ limitations under the License.
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
+#include <glog/logging.h>
 #include <torch/extension.h>
 
 #include <cstdint>
 #include <vector>
 
-#include "cuda_ops_api.h"
+#include "xattention_ops_api.h"
 
 namespace {
 

@@ -20,7 +20,7 @@ limitations under the License.
 #include <limits>
 #include <vector>
 
-#include "core/kernels/cuda/cuda_ops_api.h"
+#include "core/kernels/cuda/xattention/xattention_ops_api.h"
 
 class CacheSelctTest : public ::testing::Test {
  protected:

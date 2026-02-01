@@ -16,8 +16,8 @@ limitations under the License.
 #include <cuda_runtime.h>
 #include <torch/cuda.h>
 
-#include "cuda_ops_api.h"
-#include "utils.h"
+#include "kernels/cuda/utils.h"
+#include "xattention_ops_api.h"
 
 namespace {
 

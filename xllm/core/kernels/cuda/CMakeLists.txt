@@ -29,21 +29,21 @@ cc_test(
   NAME
     decoder_reshape_and_cache_test
   SRCS
-    decoder_reshape_and_cache_test.cpp
+    xattention/decoder_reshape_and_cache_test.cpp
   DEPS
     :cuda_kernels
     torch
     GTest::gtest_main
     glog::glog
 )
-target_link_libraries( decoder_reshape_and_cache_test PRIVATE brpc)
+target_link_libraries(decoder_reshape_and_cache_test PRIVATE brpc)
 
 
 cc_test(
   NAME
     cache_select_test
   SRCS
-    cache_select_test.cpp
+    xattention/cache_select_test.cpp
   DEPS
     :cuda_kernels
     torch
