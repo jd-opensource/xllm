@@ -339,6 +339,35 @@ class TestUT(Command):
         pass
 
     def run_ctest(self, cmake_dir):
+        def run_subprocess_with_streaming(cmd, error_message, warn_if_no_tests=False):
+            """Helper function to run subprocess and stream output"""
+            process = subprocess.Popen(
+                cmd,
+                cwd=cmake_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            
+            output_lines = []
+            for line in iter(process.stdout.readline, ''):
+                print(line, end='')
+                output_lines.append(line)
+            
+            return_code = process.wait()
+            
+            # Warn if no tests were found, but don't fail (some backends may not compile certain tests)
+            if warn_if_no_tests and return_code == 0:
+                output_text = ''.join(output_lines)
+                if 'No tests were found' in output_text:
+                    print(f"No tests matched the pattern (this is OK for some backends).")
+                    return
+            
+            if return_code != 0:
+                print(error_message)
+                exit(1)
+        
         try:
             # Step 1: Run all tests EXCEPT sequential ones in parallel
             if self.SEQUENTIAL_TESTS:
@@ -346,34 +375,18 @@ class TestUT(Command):
                 print("=" * 80)
                 print(f"Running tests in parallel (excluding: {', '.join(self.SEQUENTIAL_TESTS)})...")
                 print("=" * 80)
-                process = subprocess.Popen(
+                run_subprocess_with_streaming(
                     ['ctest', '--parallel', '8', '--repeat', 'until-pass:5', '-E', exclude_pattern],
-                    cwd=cmake_dir,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
+                    "Parallel tests failed."
                 )
             else:
                 print("=" * 80)
                 print("Running all tests in parallel...")
                 print("=" * 80)
-                process = subprocess.Popen(
+                run_subprocess_with_streaming(
                     ['ctest', '--parallel', '8', '--repeat', 'until-pass:5'],
-                    cwd=cmake_dir,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
+                    "Parallel tests failed."
                 )
-            
-            for line in iter(process.stdout.readline, ''):
-                print(line, end='')
-
-            return_code = process.wait()
-            if return_code != 0:
-                print("Parallel tests failed.")
-                exit(1)
             
             # Step 2: Run sequential tests one by one
             for idx, test_name in enumerate(self.SEQUENTIAL_TESTS, start=2):
@@ -382,21 +395,11 @@ class TestUT(Command):
                 print("=" * 80)
                 # Use pattern matching to include all test cases under the test class
                 # e.g., ReduceScatterMultiDeviceTest matches ReduceScatterMultiDeviceTest.BasicTest, etc.
-                process = subprocess.Popen(
+                run_subprocess_with_streaming(
                     ['ctest', '--repeat', 'until-pass:5', '-R', test_name],
-                    cwd=cmake_dir,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
+                    f"Sequential test {test_name} failed.",
+                    warn_if_no_tests=True
                 )
-                for line in iter(process.stdout.readline, ''):
-                    print(line, end='')
-
-                return_code = process.wait()
-                if return_code != 0:
-                    print(f"Sequential test {test_name} failed.")
-                    exit(1)
             
             print("\n" + "=" * 80)
             print("All tests passed!")

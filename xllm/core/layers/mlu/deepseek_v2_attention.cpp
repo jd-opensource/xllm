@@ -103,43 +103,32 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   w_kc_ = weights.slice(1, 0, qk_nope_head_dim_);
   w_vc_ = weights.slice(1, qk_nope_head_dim_, qk_nope_head_dim_ + v_head_dim_);
 
-  rotary_emb_ =
-      register_module("rotary_emb",
-                      DeepseekScalingRotaryEmbedding(
-                          qk_rope_head_dim_,
-                          qk_rope_head_dim_,
-                          max_position_embeddings,
-                          args.rope_scaling_original_max_position_embeddings(),
-                          args.rope_theta(),
-                          interleaved_,
-                          args.rope_scaling_factor(),
-                          args.rope_extrapolation_factor(),
-                          args.rope_scaling_attn_factor(),
-                          args.rope_scaling_beta_fast(),
-                          args.rope_scaling_beta_slow(),
-                          args.rope_scaling_mscale(),
-                          args.rope_scaling_mscale_all_dim(),
-                          options));
+  // Helper lambda to create DeepseekScalingRotaryEmbedding instances
+  auto create_rotary_emb = [&](const std::string& name, bool interleaved) {
+    return register_module(
+        name,
+        DeepseekScalingRotaryEmbedding(
+            qk_rope_head_dim_,
+            qk_rope_head_dim_,
+            max_position_embeddings,
+            args.rope_scaling_original_max_position_embeddings(),
+            args.rope_theta(),
+            interleaved,
+            args.rope_scaling_factor(),
+            args.rope_extrapolation_factor(),
+            args.rope_scaling_attn_factor(),
+            args.rope_scaling_beta_fast(),
+            args.rope_scaling_beta_slow(),
+            args.rope_scaling_mscale(),
+            args.rope_scaling_mscale_all_dim(),
+            options));
+  };
+
+  rotary_emb_ = create_rotary_emb("rotary_emb", interleaved_);
 
   // indexer rotary embedding for lighting indexer
   //  DeepSeek V3.2 use interleaved=false as default
-  indexer_rotary_emb_ =
-      register_module("indexer_rotary_emb",
-                      DeepseekScalingRotaryEmbedding(
-                          qk_rope_head_dim_,
-                          qk_rope_head_dim_,
-                          max_position_embeddings,
-                          args.rope_scaling_original_max_position_embeddings(),
-                          args.rope_theta(),
-                          /*interleaved=*/false,
-                          args.rope_scaling_factor(),
-                          args.rope_extrapolation_factor(),
-                          args.rope_scaling_attn_factor(),
-                          args.rope_scaling_beta_fast(),
-                          args.rope_scaling_beta_slow(),
-                          args.rope_scaling_mscale(),
-                          args.rope_scaling_mscale_all_dim(),
-                          options));
+  indexer_rotary_emb_ = create_rotary_emb("indexer_rotary_emb", false);
 
   if (args.rope_scaling_rope_type() == "deepseek_yarn") {
     float mscale = layer::rotary::yarn_get_mscale(
