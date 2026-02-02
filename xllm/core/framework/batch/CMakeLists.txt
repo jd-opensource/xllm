@@ -40,6 +40,7 @@ cc_test(
     :batch
     absl::time
     GTest::gtest_main
+    $<$<BOOL:${USE_MLU}>:torch_mlu>
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )
 target_link_libraries(batch_test

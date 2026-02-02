@@ -323,6 +323,14 @@ class BuildDistWheel(bdist_wheel):
 class TestUT(Command):
     description = "Run all testing binary."
     user_options = []
+    
+    # Whitelist: tests that must run sequentially (not in parallel with others)
+    # Add test names here if they use fork() or have device initialization conflicts
+    # Note: Use test case name patterns (from gtest), not executable names
+    SEQUENTIAL_TESTS = [
+        'ReduceScatterMultiDeviceTest',
+        'DeepEPMultiDeviceTest',
+    ]
 
     def initialize_options(self):
         pass
@@ -332,32 +340,68 @@ class TestUT(Command):
 
     def run_ctest(self, cmake_dir):
         try:
-            '''
-            result = subprocess.run(
-                ['ctest'],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=cmake_dir
-            )
-            print(result.stdout)
-            '''
-            process = subprocess.Popen(
-                ['ctest', '--parallel', '8', '--repeat', 'until-pass:5'],
-                cwd=cmake_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
+            # Step 1: Run all tests EXCEPT sequential ones in parallel
+            if self.SEQUENTIAL_TESTS:
+                exclude_pattern = '|'.join(self.SEQUENTIAL_TESTS)
+                print("=" * 80)
+                print(f"Running tests in parallel (excluding: {', '.join(self.SEQUENTIAL_TESTS)})...")
+                print("=" * 80)
+                process = subprocess.Popen(
+                    ['ctest', '--parallel', '8', '--repeat', 'until-pass:5', '-E', exclude_pattern],
+                    cwd=cmake_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+            else:
+                print("=" * 80)
+                print("Running all tests in parallel...")
+                print("=" * 80)
+                process = subprocess.Popen(
+                    ['ctest', '--parallel', '8', '--repeat', 'until-pass:5'],
+                    cwd=cmake_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+            
             for line in iter(process.stdout.readline, ''):
                 print(line, end='')
 
             return_code = process.wait()
             if return_code != 0:
-              print("❌ Testing failed.")
-              exit(1)
-            return return_code
+                print("Parallel tests failed.")
+                exit(1)
+            
+            # Step 2: Run sequential tests one by one
+            for idx, test_name in enumerate(self.SEQUENTIAL_TESTS, start=2):
+                print("\n" + "=" * 80)
+                print(f"Step {idx}: Running {test_name} sequentially...")
+                print("=" * 80)
+                # Use pattern matching to include all test cases under the test class
+                # e.g., ReduceScatterMultiDeviceTest matches ReduceScatterMultiDeviceTest.BasicTest, etc.
+                process = subprocess.Popen(
+                    ['ctest', '--repeat', 'until-pass:5', '-R', test_name],
+                    cwd=cmake_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                for line in iter(process.stdout.readline, ''):
+                    print(line, end='')
+
+                return_code = process.wait()
+                if return_code != 0:
+                    print(f"Sequential test {test_name} failed.")
+                    exit(1)
+            
+            print("\n" + "=" * 80)
+            print("All tests passed!")
+            print("=" * 80)
+            return 0
         except subprocess.CalledProcessError as e:
             print(e.stderr)
             exit(1)
