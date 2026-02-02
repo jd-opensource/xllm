@@ -1125,21 +1125,10 @@ bool LLMEngine::sleep(int32_t master_status) {
   }
 
   // Put the model to sleep in PageAllocator
-  // This stops preallocation and releases physical pages
+  // This releases both weight pages and KV cache pages
   const std::string& model_id = options_.model_id();
   auto& page_allocator = PageAllocator::get_instance();
-
-  // Release weight pages first
-  size_t weight_pages = page_allocator.get_weight_pages_allocated(model_id);
-  if (weight_pages > 0) {
-    page_allocator.free_weight_pages(model_id, weight_pages);
-    LOG(INFO) << "PageAllocator: released " << weight_pages
-              << " weight pages for model " << model_id;
-  }
-
-  // Then release KV cache pages
   page_allocator.sleep_model(model_id);
-  LOG(INFO) << "PageAllocator: model " << model_id << " is now sleeping";
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
@@ -1175,23 +1164,10 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
   }
 
   // Wake up the model in PageAllocator
+  // This re-allocates both KV cache pages and weight pages
   const std::string& model_id = options_.model_id();
   auto& page_allocator = PageAllocator::get_instance();
-
-  // First wake up the model state (clears is_sleeping flag)
   page_allocator.wakeup_model(model_id);
-  LOG(INFO) << "PageAllocator: model " << model_id << " is now awake";
-
-  // Re-allocate weight pages (global xtensor handles mapping)
-  size_t weight_pages = page_allocator.get_weight_pages_allocated(model_id);
-  if (weight_pages > 0) {
-    if (!page_allocator.alloc_weight_pages(model_id, weight_pages)) {
-      LOG(ERROR) << "Failed to re-allocate weight pages for model " << model_id;
-      return false;
-    }
-    LOG(INFO) << "PageAllocator: re-allocated " << weight_pages
-              << " weight pages for model " << model_id;
-  }
 
   LOG(INFO) << "Waking up LLM engine, remote_addrs.size()="
             << options.remote_addrs.size();

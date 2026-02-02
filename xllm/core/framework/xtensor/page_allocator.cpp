@@ -144,6 +144,7 @@ void PageAllocator::sleep_model(const std::string& model_id) {
   std::vector<std::pair<int32_t, std::vector<int64_t>>> pages_to_unmap;
   size_t total_phy_pages_to_release = 0;
   size_t phy_pages_per_virt = 0;
+  size_t weight_pages = 0;
 
   {
     std::unique_lock<std::mutex> lock(mtx_);
@@ -170,6 +171,7 @@ void PageAllocator::sleep_model(const std::string& model_id) {
 
     state.is_sleeping = true;
     phy_pages_per_virt = state.phy_pages_per_virt_page;
+    weight_pages = state.weight_pages_allocated;
 
     // Collect all mapped pages (reserved + allocated) from each DP group
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
@@ -193,7 +195,13 @@ void PageAllocator::sleep_model(const std::string& model_id) {
     }
 
     LOG(INFO) << "Sleeping model " << model_id << ", will release "
-              << total_phy_pages_to_release << " physical pages(KV Cache)";
+              << total_phy_pages_to_release << " KV cache pages and "
+              << weight_pages << " weight pages";
+  }
+
+  // Release weight pages first (reuse existing function)
+  if (weight_pages > 0) {
+    free_weight_pages(model_id, weight_pages);
   }
 
   // Unmap pages outside the lock
@@ -232,6 +240,7 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
   std::vector<std::pair<int32_t, std::vector<int64_t>>> pages_to_map;
   size_t total_phy_pages_needed = 0;
   size_t phy_pages_per_virt = 0;
+  size_t weight_pages = 0;
 
   {
     std::lock_guard<std::mutex> lock(mtx_);
@@ -249,6 +258,7 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
     }
 
     phy_pages_per_virt = state.phy_pages_per_virt_page;
+    weight_pages = state.weight_pages_allocated;
 
     // Collect all pages that need to be re-mapped (reserved + allocated)
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
@@ -271,7 +281,7 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
       }
     }
 
-    // Check if each DP group has enough physical pages
+    // Check if each DP group has enough physical pages for KV cache
     for (auto& [dp_rank, virt_page_ids] : pages_to_map) {
       size_t pages_needed = virt_page_ids.size() * phy_pages_per_virt;
       auto [start_w, end_w] = get_dp_group_worker_range(model_id, dp_rank);
@@ -283,7 +293,7 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
       }
     }
 
-    // Consume physical pages for each DP group
+    // Consume physical pages for KV cache (each DP group)
     for (auto& [dp_rank, virt_page_ids] : pages_to_map) {
       size_t pages_needed = virt_page_ids.size() * phy_pages_per_virt;
       auto [start_w, end_w] = get_dp_group_worker_range(model_id, dp_rank);
@@ -295,13 +305,22 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
     update_memory_usage();
 
     LOG(INFO) << "Waking up model " << model_id << ", will map "
-              << total_phy_pages_needed << " physical pages(KV Cache)";
+              << total_phy_pages_needed << " KV cache pages and "
+              << weight_pages << " weight pages";
   }
 
-  // Re-map pages outside the lock
+  // Re-map KV cache pages outside the lock
   for (auto& [dp_rank, virt_page_ids] : pages_to_map) {
     if (!virt_page_ids.empty()) {
       map_virt_pages(model_id, dp_rank, virt_page_ids);
+    }
+  }
+
+  // Re-allocate weight pages (reuse existing function)
+  if (weight_pages > 0) {
+    if (!alloc_weight_pages(model_id, weight_pages)) {
+      LOG(ERROR) << "Failed to re-allocate weight pages for model " << model_id;
+      // Note: KV cache pages are already mapped, model is partially awake
     }
   }
 

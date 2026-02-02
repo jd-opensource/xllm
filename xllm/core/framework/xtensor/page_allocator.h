@@ -94,12 +94,15 @@ class PageAllocator {
   void unregister_model(const std::string& model_id);
 
   // Put a model to sleep:
-  // - Stop preallocation for this model
-  // - Unmap all mapped virtual pages
+  // - Release weight pages (via free_weight_pages)
+  // - Unmap all mapped KV cache virtual pages
   // - Release physical pages back to shared pool
+  // - Stop preallocation for this model
   void sleep_model(const std::string& model_id);
 
   // Wake up a sleeping model:
+  // - Re-map all previously mapped KV cache virtual pages
+  // - Re-allocate weight pages (via alloc_weight_pages)
   // - Resume preallocation for this model
   void wakeup_model(const std::string& model_id);
 
