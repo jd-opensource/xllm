@@ -54,5 +54,5 @@ class BaseExecutorImpl : public ExecutorImpl {
   torch::Device device_;
   runtime::Options options_;
 };
-REGISTER_EXECUTOR("base", BaseExecutorImpl);
+REGISTER_EXECUTOR("llm", BaseExecutorImpl);
 }  // namespace xllm

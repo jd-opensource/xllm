@@ -20,7 +20,9 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "framework/model/causal_vlm.h"
 #include "util/utils.h"
+#include "vlm_executor_impl.h"
 
 namespace {
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
@@ -238,6 +240,15 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
     graph_mode = std::find(dp_is_decode.begin(), dp_is_decode.end(), 0) ==
                  dp_is_decode.end();
     CHECK_EQ(dp_is_decode.size(), params.dp_global_token_nums.size());
+  }
+
+  // Process multimodal data for VLM models
+  if (options_.backend() == "vlm") {
+    auto* vlm_model = dynamic_cast<CausalVLM*>(model_);
+    if (vlm_model) {
+      xllm::VlmExecutorImpl::process_mm_data(
+          const_cast<ModelInputParams&>(params), vlm_model, device_, tokens);
+    }
   }
 
   if (!graph_mode) {

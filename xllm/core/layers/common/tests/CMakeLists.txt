@@ -12,6 +12,7 @@ cc_test(
     mla_tests.cpp
     deepseek_v2_decoder_layer_tests.cpp
     qwen2_attention_tests.cpp
+    qwen2_vision_attention_tests.cpp
   DEPS
     :common_layers
     :parallel_state

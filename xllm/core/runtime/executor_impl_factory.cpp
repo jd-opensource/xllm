@@ -44,13 +44,10 @@ std::unique_ptr<ExecutorImpl> ExecutorImplFactory::create_executor_impl(
     const ModelArgs& args,
     const torch::Device& device,
     const runtime::Options& options) {
-  std::string backend = "base";
+  std::string backend = options.backend();
   if (FLAGS_enable_graph) {
     backend = Device::type_str();
     LOG(INFO) << "Creating Graph Executor for " << backend << " device";
-  }
-  if (options.backend() == "vlm") {
-    backend = "vlm";
   }
 
   auto it = creators_.find(backend);

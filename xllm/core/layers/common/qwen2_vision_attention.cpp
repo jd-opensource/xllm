@@ -149,6 +149,7 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   attn_metadata.max_seq_len = max_seqlen;
   attn_metadata.compute_dtype = "half";
   attn_metadata.is_causal = false;
+  attn_metadata.is_chunked_prefill = false;
 
   xllm::kernel::AttentionParams attention_params(attn_metadata);
   attention_params.query = q;
