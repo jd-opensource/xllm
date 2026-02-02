@@ -97,9 +97,7 @@ SharedMemoryManager::SharedMemoryManager(const std::string& name,
   }
 
   // Initialize memory to zero only for creator.
-  if (is_creator) {
-    std::memset(addr_, 0, size_);
-  }
+  std::memset(addr_, 0, size_);
 }
 
 SharedMemoryManager::~SharedMemoryManager() {
