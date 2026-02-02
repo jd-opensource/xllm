@@ -438,9 +438,10 @@ bool CudaGraph::capture(CausalLM* model,
 
   // Store result in persistent buffer
   persistent_param_.set_hidden_states(forward_result.hidden_states);
-  // Note: aux_hidden_states capture is controlled by options in executor
-  // For now, always capture if available, filtering happens in executor::run()
-  if (forward_result.aux_hidden_states.defined()) {
+  // Only capture aux_hidden_states when enable_graph_aux_hidden_states is on
+  // (e.g. main worker in EAGLE-3); draft worker has this option false.
+  if (options.enable_graph_aux_hidden_states() &&
+      forward_result.aux_hidden_states.defined()) {
     persistent_param_.set_aux_hidden_states(forward_result.aux_hidden_states);
   }
 

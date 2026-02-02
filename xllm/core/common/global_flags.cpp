@@ -73,12 +73,6 @@ DEFINE_string(devices,
               "npu:0",
               "Devices to run the model on, e.g. npu:0, npu:0,npu:1.");
 
-DEFINE_string(draft_model, "", "draft hf model path to the model file.");
-
-DEFINE_string(draft_devices,
-              "npu:0",
-              "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1.");
-
 DEFINE_bool(enable_mla,
             false,
             "Whether to enable multi-head latent attention.");
@@ -326,7 +320,18 @@ DEFINE_uint64(output_shm_size,
 
 // --- speculative config ---
 
+DEFINE_string(draft_model, "", "draft hf model path to the model file.");
+
+DEFINE_string(draft_devices,
+              "npu:0",
+              "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1.");
+
 DEFINE_int32(num_speculative_tokens, 0, "Number of speculative tokens.");
+
+DEFINE_string(speculative_algorithm,
+              "MTP",
+              "Speculative decoding algorithm. Supported options: MTP, Eagle3. "
+              "Default is MTP.");
 
 DEFINE_bool(enable_atb_spec_kernel,
             false,

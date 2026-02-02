@@ -25,10 +25,12 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
+#include "runtime/eagle3_worker_impl.h"
 #include "runtime/embed_vlm_worker_impl.h"
 #include "runtime/embed_worker_impl.h"
 #include "runtime/llm_worker_impl.h"
@@ -44,7 +46,13 @@ Worker::Worker(const ParallelArgs& parallel_args,
                const runtime::Options& options,
                WorkerType worker_type) {
   if (options.enable_speculative_decode()) {
-    impl_ = new SpeculativeWorkerImpl(parallel_args, device, options);
+    // Check speculative_algorithm flag to determine which worker to use
+    if (FLAGS_speculative_algorithm == "Eagle3") {
+      impl_ = new Eagle3WorkerImpl(parallel_args, device, options);
+    } else {
+      // Default to MTP or other algorithms
+      impl_ = new SpeculativeWorkerImpl(parallel_args, device, options);
+    }
   } else if (worker_type == WorkerType::LLM) {
     impl_ = new LLMWorkerImpl(parallel_args, device, options);
   } else if (worker_type == WorkerType::VLM) {
