@@ -99,6 +99,11 @@ DEFINE_bool(enable_prefill_piecewise_graph,
             "When enabled, attention operations use eager mode while other "
             "operations are captured in CUDA graphs.");
 
+DEFINE_bool(enable_graph_vmm_pool,
+            true,
+            "Whether to enable VMM-backed CUDA graph memory pool for "
+            "multi-shape graph memory reuse.");
+
 DEFINE_int32(max_tokens_for_graph_mode,
              2048,
              "Maximum number of tokens for graph execution. "

@@ -91,6 +91,8 @@ DECLARE_bool(enable_graph_mode_decode_no_padding);
 
 DECLARE_bool(enable_prefill_piecewise_graph);
 
+DECLARE_bool(enable_graph_vmm_pool);
+
 DECLARE_int32(max_tokens_for_graph_mode);
 
 DECLARE_bool(enable_chunked_prefill);

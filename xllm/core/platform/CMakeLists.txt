@@ -13,6 +13,7 @@ cc_library(
     device.h
     vmm_api.h
     shared_vmm_allocator.h
+    vmm_torch_allocator.h
   SRCS
     stream.cpp
     device.cpp

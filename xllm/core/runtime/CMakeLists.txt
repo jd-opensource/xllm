@@ -62,6 +62,7 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
     :common
+    :platform
     :model_context
     :request
     :state_dict
