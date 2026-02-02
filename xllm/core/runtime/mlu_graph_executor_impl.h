@@ -80,7 +80,8 @@ class MluGraph {
   // Capture computation graph for given bucket num_tokens
   void capture(CausalLM* model,
                std::vector<KVCache>& kv_cache,
-               torch_mlu::MempoolId_t& pool);
+               torch_mlu::MempoolId_t& pool,
+               const runtime::Options& options);
 
   // Replay captured graph with new input data
   ModelOutput replay();
