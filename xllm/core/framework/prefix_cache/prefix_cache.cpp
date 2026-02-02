@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "kv_cache/kv_cache_store.h"
 
 namespace xllm {
 
@@ -297,6 +298,7 @@ uint32_t PrefixCache::compute_hash_keys(const Slice<int32_t>& token_ids,
   }
   size_t full_block_size =
       std::min(token_ids.size() / block_size, blocks.size());
+  uint32_t unshared_count = 0;
 
   for (size_t i = cached_blocks; i < full_block_size; i++) {
     if (i == 0) {
@@ -308,9 +310,21 @@ uint32_t PrefixCache::compute_hash_keys(const Slice<int32_t>& token_ids,
                    token_ids.slice(i * block_size, (i + 1) * block_size),
                    blocks[i].get_mutable_hash_value());
     }
+    unshared_count++;
   }
 
-  return full_block_size;
+  return unshared_count;
+}
+
+uint32_t PrefixCache::match_in_kvcache_store(
+    const std::vector<uint8_t*>& keys) {
+  std::vector<std::string> str_keys;
+  for (auto key : keys) {
+    std::string str_key(reinterpret_cast<const char*>(key),
+                        MURMUR_HASH3_VALUE_LEN);
+    str_keys.emplace_back(str_key);
+  }
+  return KVCacheStore::get_instance().batch_exist(str_keys);
 }
 
 }  // namespace xllm

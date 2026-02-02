@@ -26,6 +26,7 @@ cc_library(
     tensor_helper.h
     threadpool.h
     timer.h
+    scoped_timer.h
     type_traits.h
     utils.h
     uuid.h

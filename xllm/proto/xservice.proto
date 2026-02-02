@@ -45,6 +45,7 @@ message KvCacheEvent {
 message LoadMetrics {
   uint64 waiting_requests_num = 1;
   float gpu_cache_usage_perc = 2;
+  uint32 offload_batch = 3;
 }
 
 message LatencyMetrics {
