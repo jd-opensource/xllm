@@ -193,15 +193,6 @@ void CompletionServiceImpl::process_async_impl(
     return;
   }
 
-  // Check if master is in sleep state.
-  if (master->get_master_status() == LIGHT_SLEEP ||
-      master->get_master_status() == DEEP_SLEEP) {
-    master->get_rate_limiter()->decrease_one_request();
-    call->finish_with_error(StatusCode::UNAVAILABLE,
-                            "Model is currently in sleep state.");
-    return;
-  }
-
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
   bool include_usage = false;
