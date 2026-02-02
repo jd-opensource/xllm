@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ std::string convert_finish_reason_to_anthropic(
   } else if (finish_reason == "function_call") {
     return "tool_use";
   }
-  return finish_reason;
+  return "end_turn";
 }
 
 // Build messages from Anthropic protobuf request
@@ -566,19 +566,21 @@ bool send_delta_to_client(
   // last `content_block_stop` and `message_delta` event
   if (output.finished || output.cancelled) {
     if (output.finished) {
-      CHECK(!finish_reason.empty()) << "finish_reason is empty";
       finish_reason = convert_finish_reason_to_anthropic(finish_reason);
     } else {
       finish_reason = "stop";
     }
 
-    // send content_block_stop event for the last content block
-    proto::AnthropicStreamEvent stop_chunk;
-    stop_chunk.set_index(content_block_index);
-    stop_chunk.set_type("content_block_stop");
-    if (!call->write(stop_chunk.type(), stop_chunk)) {
-      LOG(ERROR) << "Failed to send content_block_stop event";
-      return false;
+    // if content_block_index < 0, means no content block started
+    // so we don't need to send content_block_stop event
+    if (content_block_index >= 0) {
+      proto::AnthropicStreamEvent stop_chunk;
+      stop_chunk.set_index(content_block_index);
+      stop_chunk.set_type("content_block_stop");
+      if (!call->write(stop_chunk.type(), stop_chunk)) {
+        LOG(ERROR) << "Failed to send content_block_stop event";
+        return false;
+      }
     }
 
     // send message_delta event for the last message

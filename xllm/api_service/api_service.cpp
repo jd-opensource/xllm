@@ -628,7 +628,7 @@ void handle_anthropic_messages(std::unique_ptr<AnthropicServiceImpl>& service,
       google::protobuf::Arena::CreateMessage<typename AnthropicCall::ResType>(
           arena);
 
-  auto content_len = GetJsonContentLength(ctrl);
+  auto content_len = get_json_content_length(ctrl);
   if (content_len == (size_t)-1L) {
     ctrl->SetFailed("Content-Length header is missing.");
     return;
