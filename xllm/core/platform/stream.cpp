@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "stream.h"
 
+#include <ostream>
+
 namespace xllm {
 
 #if defined(USE_NPU)
@@ -81,6 +83,24 @@ void Stream::wait_stream(const Stream& other_stream) {
   c10::Event event(current_c10_stream.device_type());
   event.record(target_c10_stream);
   event.block(current_c10_stream);
+}
+
+std::ostream& operator<<(std::ostream& os, const Stream& stream) {
+#if defined(USE_NPU)
+  // NPUStream output: device index and stream id
+  os << "NPUStream[device=" << stream.stream_.device_index()
+     << ", stream_id=" << stream.stream_.id() << "]";
+#elif defined(USE_MLU)
+  // MLUStream output: device index and stream id
+  os << "MLUStream[device=" << stream.stream_.device_index()
+     << ", stream_id=" << stream.stream_.id() << "]";
+#elif defined(USE_CUDA) || defined(USE_ILU)
+  // For CUDA, use the existing operator<< from c10::cuda::CUDAStream
+  os << stream.stream_;
+#else
+  os << "UnknownStream";
+#endif
+  return os;
 }
 
 }  // namespace xllm

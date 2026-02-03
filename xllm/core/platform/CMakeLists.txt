@@ -5,6 +5,10 @@ if(USE_NPU)
   add_subdirectory(npu)
 endif()
 
+if(USE_NPU)
+  add_subdirectory(npu)
+endif()
+
 cc_library(
   NAME
     platform
