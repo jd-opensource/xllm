@@ -228,7 +228,7 @@ std::vector<xllm::JsonTool> parse_tools_from_proto(
 }
 
 template <typename ChatRequest>
-void InitFromChatRequest(RequestParams& params, const ChatRequest& request) {
+void init_from_chat_request(RequestParams& params, const ChatRequest& request) {
   if (request.has_request_id()) {
     params.request_id = request.request_id();
   }
@@ -361,7 +361,7 @@ RequestParams::RequestParams(const proto::ChatRequest& request,
   x_request_id = x_rid;
   x_request_time = x_rtime;
 
-  InitFromChatRequest(*this, request);
+  init_from_chat_request(*this, request);
 }
 
 RequestParams::RequestParams(const proto::MMChatRequest& request,
@@ -371,7 +371,7 @@ RequestParams::RequestParams(const proto::MMChatRequest& request,
   x_request_id = x_rid;
   x_request_time = x_rtime;
 
-  InitFromChatRequest(*this, request);
+  init_from_chat_request(*this, request);
 }
 
 RequestParams::RequestParams(const proto::EmbeddingRequest& request,

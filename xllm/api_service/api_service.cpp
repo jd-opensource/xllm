@@ -175,7 +175,7 @@ void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
 
 namespace {
 
-size_t GetJsonContentLength(const brpc::Controller* ctrl) {
+size_t get_json_content_length(const brpc::Controller* ctrl) {
   const auto infer_content_len =
       ctrl->http_request().GetHeader(kInferContentLength);
   if (infer_content_len != nullptr) {
@@ -193,7 +193,7 @@ size_t GetJsonContentLength(const brpc::Controller* ctrl) {
 
 // Preprocess chat JSON to normalize array content to string.
 // Returns Status with processed JSON on success, or error status on failure.
-std::pair<Status, std::string> PreprocessChatJson(std::string json_str) {
+std::pair<Status, std::string> pre_process_chat_json(std::string json_str) {
   try {
     auto json = nlohmann::json::parse(json_str);
     if (!json.contains("messages") || !json["messages"].is_array()) {
@@ -271,23 +271,23 @@ std::pair<Status, std::string> PreprocessChatJson(std::string json_str) {
 }
 
 template <typename ChatCall, typename Service>
-void ChatCompletionsImpl(std::unique_ptr<Service>& service,
-                         xllm::ClosureGuard& guard,
-                         brpc::Controller* ctrl,
-                         const proto::HttpRequest* request,
-                         proto::HttpResponse* response) {
+void handle_chat_completions(std::unique_ptr<Service>& service,
+                             xllm::ClosureGuard& guard,
+                             brpc::Controller* ctrl,
+                             const proto::HttpRequest* request,
+                             proto::HttpResponse* response) {
   auto arena = GetArenaWithCheck<ChatCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ReqType>(arena);
   auto resp_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ResType>(arena);
 
-  auto content_len = GetJsonContentLength(ctrl);
+  auto content_len = get_json_content_length(ctrl);
   std::string attachment;
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
   auto [preprocess_status, processed_json] =
-      PreprocessChatJson(std::move(attachment));
+      pre_process_chat_json(std::move(attachment));
   if (!preprocess_status.ok()) {
     ctrl->SetFailed(preprocess_status.message());
     LOG(ERROR) << "Complex message preprocessing failed: "
@@ -329,15 +329,15 @@ void APIService::ChatCompletionsHttp(
 
   if (FLAGS_backend == "llm") {
     CHECK(chat_service_impl_) << " chat service is invalid.";
-    ChatCompletionsImpl<ChatCall, ChatServiceImpl>(
+    handle_chat_completions<ChatCall, ChatServiceImpl>(
         chat_service_impl_, done_guard, ctrl, request, response);
   } else if (FLAGS_backend == "vlm") {
     CHECK(mm_chat_service_impl_) << " mm chat service is invalid.";
-    ChatCompletionsImpl<MMChatCall, MMChatServiceImpl>(
+    handle_chat_completions<MMChatCall, MMChatServiceImpl>(
         mm_chat_service_impl_, done_guard, ctrl, request, response);
   } else if (FLAGS_backend == "rec") {
     CHECK(chat_service_impl_) << " chat service is invalid.";
-    ChatCompletionsImpl<ChatCall, ChatServiceImpl>(
+    handle_chat_completions<ChatCall, ChatServiceImpl>(
         chat_service_impl_, done_guard, ctrl, request, response);
   }
 }
