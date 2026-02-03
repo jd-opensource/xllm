@@ -155,8 +155,11 @@ void RecCompletionServiceImpl::process_async_impl(
 
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
-  bool include_usage = false;
-  if (rpc_request.has_stream_options()) {
+  // Default: when streaming, include usage before [DONE].
+  // Caller can explicitly override via stream_options.include_usage.
+  bool include_usage = request_params.streaming;
+  if (rpc_request.has_stream_options() &&
+      rpc_request.stream_options().has_include_usage()) {
     include_usage = rpc_request.stream_options().include_usage();
   }
 

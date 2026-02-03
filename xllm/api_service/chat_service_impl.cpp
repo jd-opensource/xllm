@@ -462,25 +462,26 @@ bool send_delta_to_client_brpc(
     }
   }
 
-  if (include_usage && output.usage.has_value()) {
-    response.Clear();
-    const auto& usage = output.usage.value();
-    response.set_object("chat.completion.chunk");
-    response.set_id(request_id);
-    response.set_created(created_time);
-    response.set_model(model);
-    auto* proto_usage = response.mutable_usage();
-    proto_usage->set_prompt_tokens(
-        static_cast<int32_t>(usage.num_prompt_tokens));
-    proto_usage->set_completion_tokens(
-        static_cast<int32_t>(usage.num_generated_tokens));
-    proto_usage->set_total_tokens(static_cast<int32_t>(usage.num_total_tokens));
-    if (!call->write(response)) {
-      return false;
-    }
-  }
-
   if (output.finished || output.cancelled) {
+    // Only include usage once at the end of the stream (right before [DONE]).
+    if (include_usage && output.usage.has_value()) {
+      response.Clear();
+      const auto& usage = output.usage.value();
+      response.set_object("chat.completion.chunk");
+      response.set_id(request_id);
+      response.set_created(created_time);
+      response.set_model(model);
+      auto* proto_usage = response.mutable_usage();
+      proto_usage->set_prompt_tokens(
+          static_cast<int32_t>(usage.num_prompt_tokens));
+      proto_usage->set_completion_tokens(
+          static_cast<int32_t>(usage.num_generated_tokens));
+      proto_usage->set_total_tokens(
+          static_cast<int32_t>(usage.num_total_tokens));
+      if (!call->write(response)) {
+        return false;
+      }
+    }
     response.Clear();
     return call->finish();
   }
@@ -643,8 +644,11 @@ void ChatServiceImpl::process_rec_chat_request(std::shared_ptr<ChatCall> call) {
     }
   }
 
-  bool include_usage = false;
-  if (rpc_request.has_stream_options()) {
+  // Default: when streaming, include usage before [DONE].
+  // Caller can explicitly override via stream_options.include_usage.
+  bool include_usage = request_params.streaming;
+  if (rpc_request.has_stream_options() &&
+      rpc_request.stream_options().has_include_usage()) {
     include_usage = rpc_request.stream_options().include_usage();
   }
 
@@ -760,8 +764,11 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     }
   }
 
-  bool include_usage = false;
-  if (rpc_request.has_stream_options()) {
+  // Default: when streaming, include usage before [DONE].
+  // Caller can explicitly override via stream_options.include_usage.
+  bool include_usage = request_params.streaming;
+  if (rpc_request.has_stream_options() &&
+      rpc_request.stream_options().has_include_usage()) {
     include_usage = rpc_request.stream_options().include_usage();
   }
   std::optional<std::vector<int>> prompt_tokens = std::nullopt;
@@ -884,8 +891,11 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
     return;
   }
 
-  bool include_usage = false;
-  if (rpc_request.has_stream_options()) {
+  // Default: when streaming, include usage before [DONE].
+  // Caller can explicitly override via stream_options.include_usage.
+  bool include_usage = request_params.streaming;
+  if (rpc_request.has_stream_options() &&
+      rpc_request.stream_options().has_include_usage()) {
     include_usage = rpc_request.stream_options().include_usage();
   }
 

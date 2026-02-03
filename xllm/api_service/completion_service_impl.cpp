@@ -96,26 +96,27 @@ bool send_delta_to_client_brpc(std::shared_ptr<CompletionCall> call,
     }
   }
 
-  if (include_usage && output.usage.has_value()) {
-    const auto& usage = output.usage.value();
-    response.Clear();
-    response.set_object("text_completion");
-    response.set_id(request_id);
-    response.set_created(created_time);
-    response.set_model(model);
-    response.mutable_choices();
-    auto* proto_usage = response.mutable_usage();
-    proto_usage->set_prompt_tokens(
-        static_cast<int32_t>(usage.num_prompt_tokens));
-    proto_usage->set_completion_tokens(
-        static_cast<int32_t>(usage.num_generated_tokens));
-    proto_usage->set_total_tokens(static_cast<int32_t>(usage.num_total_tokens));
-    if (!call->write(response)) {
-      return false;
-    }
-  }
-
   if (output.finished || output.cancelled) {
+    // Only include usage once at the end of the stream (right before [DONE]).
+    if (include_usage && output.usage.has_value()) {
+      const auto& usage = output.usage.value();
+      response.Clear();
+      response.set_object("text_completion");
+      response.set_id(request_id);
+      response.set_created(created_time);
+      response.set_model(model);
+      response.mutable_choices();
+      auto* proto_usage = response.mutable_usage();
+      proto_usage->set_prompt_tokens(
+          static_cast<int32_t>(usage.num_prompt_tokens));
+      proto_usage->set_completion_tokens(
+          static_cast<int32_t>(usage.num_generated_tokens));
+      proto_usage->set_total_tokens(
+          static_cast<int32_t>(usage.num_total_tokens));
+      if (!call->write(response)) {
+        return false;
+      }
+    }
     response.Clear();
     return call->finish();
   }
@@ -187,8 +188,11 @@ void CompletionServiceImpl::process_async_impl(
 
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
-  bool include_usage = false;
-  if (rpc_request.has_stream_options()) {
+  // Default: when streaming, include usage before [DONE].
+  // Caller can explicitly override via stream_options.include_usage.
+  bool include_usage = request_params.streaming;
+  if (rpc_request.has_stream_options() &&
+      rpc_request.stream_options().has_include_usage()) {
     include_usage = rpc_request.stream_options().include_usage();
   }
 
