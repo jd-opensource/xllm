@@ -5,8 +5,10 @@ cc_library(
     ilu_layers
   HDRS
     attention.h
+    fused_moe.h
   SRCS
     attention.cpp
+    fused_moe.cpp
   DEPS
     :common_layers
 )

@@ -49,6 +49,7 @@ cc_library(
     qwen3_vision_layer.cpp
     qwen3_moe_decoder_layer.cpp
   DEPS
+    $<$<BOOL:${USE_ILU}>:ilu_layers>
     :common_layers
     :parallel_state
     :state_dict

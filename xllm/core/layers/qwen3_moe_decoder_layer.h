@@ -18,7 +18,11 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "common/dense_mlp.h"
+#if defined(USE_ILU)
+#include "ilu/fused_moe.h"
+#else
 #include "common/fused_moe.h"
+#endif
 #include "common/qwen2_attention.h"
 #include "common/rms_norm.h"
 #include "framework/kv_cache/kv_cache.h"

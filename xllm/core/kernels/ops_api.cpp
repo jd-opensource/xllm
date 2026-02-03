@@ -198,10 +198,6 @@ void batch_prefill(AttentionParams& params) {
                       params.output_lse,
                       params.attn_metadata.enable_cuda_graph);
 #elif defined(USE_ILU)
-  std::optional<torch::Tensor> block_tables;
-  if (params.attn_metadata.is_chunked_prefill) {
-    block_tables = params.attn_metadata.block_table;
-  }
   ilu::batch_prefill(params.query,
                      params.key,
                      params.value,
@@ -214,7 +210,7 @@ void batch_prefill(AttentionParams& params) {
                      params.q_quant_scale,
                      params.k_quant_scale,
                      params.v_quant_scale,
-                     block_tables,
+                     params.attn_metadata.block_table,
                      params.attn_metadata.max_query_len,
                      params.attn_metadata.max_seq_len,
                      params.scale,
@@ -357,7 +353,6 @@ void fused_layernorm(FusedLayerNormParams& params) {
                              params.output,
                              params.residual,
                              params.weight,
-                             params.beta,  // weight_bias
                              params.bias,  // residual_bias
                              params.residual_out,
                              params.eps);
@@ -401,6 +396,12 @@ torch::Tensor group_gemm(GroupGemmParams& params) {
                          params.trans_a,
                          params.trans_b,
                          params.a_quant_bit);
+#elif defined(USE_ILU)
+  return ilu::group_gemm(params.a,
+                         params.b,
+                         params.token_count,
+                         params.combine_idx,
+                         params.output);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -419,6 +420,17 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.scoring_func,
                               params.route_scale,
                               params.e_score_correction_bias);
+#elif defined(USE_ILU)
+  return ilu::moe_active_topk(params.input,
+                              params.topk,
+                              params.num_expert_group,
+                              params.topk_group,
+                              params.normalize,
+                              params.mask,
+                              params.normed_by,
+                              params.scoring_func,
+                              params.route_scale,
+                              params.e_score_correction_bias);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -427,6 +439,8 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
 std::vector<torch::Tensor> moe_gen_idx(MoeGenIdxParams& params) {
 #if defined(USE_MLU)
   return mlu::moe_gen_idx(params.expert_id, params.expert_num);
+#elif defined(USE_ILU)
+  return ilu::moe_gen_idx(params.expert_id, params.expert_num);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -439,6 +453,9 @@ torch::Tensor moe_expand_input(MoeExpandInputParams& params) {
                                params.cusum_token_count,
                                params.start_expert_id,
                                params.expert_size);
+#elif defined(USE_ILU)
+  return ilu::moe_expand_input(
+      params.input, params.gather_index, params.combine_idx, params.topk);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -454,6 +471,8 @@ torch::Tensor moe_combine_result(MoeCombineResultParams& params) {
                                  params.start_expert_id,
                                  params.expert_size,
                                  params.bias);
+#elif defined(USE_ILU)
+  return ilu::moe_combine_result(params.input, params.reduce_weight);
 #else
   NOT_IMPLEMENTED();
 #endif
