@@ -30,19 +30,20 @@ limitations under the License.
 #include "acl/acl.h"
 #include "aclnn_replace_token.h"
 #include "core/common/macros.h"
-#include "replace_token.h"
+#include "core/kernels/npu/utils.h"
+#include "xllm_ops_api.h"
 
-namespace xllm_ops {
+namespace xllm::kernel::npu {
 
 void replace_token(torch::Tensor& dst, torch::Tensor& src) {
-  xllm_ops_utils::check_tensor(dst, "dst", "replace_token");
-  xllm_ops_utils::check_tensor(src, "src", "replace_token");
+  check_tensor(dst, "dst", "replace_token");
+  check_tensor(src, "src", "replace_token");
   aclTensor* dst_ids = nullptr;
   aclTensor* src_ids = nullptr;
   int32_t device_id = dst.device().index();
   aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
-  xllm_ops_utils::create_acltensor(&dst_ids, dst);
-  xllm_ops_utils::create_acltensor(&src_ids, src);
+  create_acltensor(&dst_ids, dst);
+  create_acltensor(&src_ids, src);
   uint64_t workspace_size = 0;
   aclOpExecutor* executor;
   CHECK_ACL_SUCCESS(aclnnReplaceTokenGetWorkspaceSize(
@@ -57,4 +58,4 @@ void replace_token(torch::Tensor& dst, torch::Tensor& src) {
   aclDestroyTensor(dst_ids);
   aclDestroyTensor(src_ids);
 }
-}  // namespace xllm_ops
+}  // namespace xllm::kernel::npu

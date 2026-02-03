@@ -29,7 +29,8 @@ limitations under the License.
 
 #include "acl/acl.h"
 #include "aclnn_beam_search.h"
-#include "beam_search.h"
+#include "core/kernels/npu/utils.h"
+#include "xllm_ops_api.h"
 
 #define CHECK_ACL_SUCCESS(expr, msg) \
   do {                               \
@@ -39,7 +40,7 @@ limitations under the License.
       throw std::runtime_error(msg); \
     }                                \
   } while (0)
-namespace xllm_ops {
+namespace xllm::kernel::npu {
 
 void beam_search(const torch::Tensor& logprobs,
                  const torch::Tensor& top_tokens,
@@ -47,9 +48,9 @@ void beam_search(const torch::Tensor& logprobs,
                  torch::Tensor& src_seq_idxes,
                  torch::Tensor& out_logprobs,
                  torch::Tensor& out_tokens) {
-  xllm_ops_utils::check_tensor(logprobs, "logprobs", "beam_search");
-  xllm_ops_utils::check_tensor(top_tokens, "top_tokens", "beam_search");
-  xllm_ops_utils::check_tensor(top_logprobs, "top_logprobs", "beam_search");
+  check_tensor(logprobs, "logprobs", "beam_search");
+  check_tensor(top_tokens, "top_tokens", "beam_search");
+  check_tensor(top_logprobs, "top_logprobs", "beam_search");
   aclTensor* logprobs_ids = nullptr;
   aclTensor* top_tokens_ids = nullptr;
   aclTensor* top_logprobs_ids = nullptr;
@@ -58,12 +59,12 @@ void beam_search(const torch::Tensor& logprobs,
   aclTensor* out_tokens_ids = nullptr;
   int32_t device_id = logprobs.device().index();
   aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
-  xllm_ops_utils::create_acltensor(&logprobs_ids, logprobs);
-  xllm_ops_utils::create_acltensor(&top_tokens_ids, top_tokens);
-  xllm_ops_utils::create_acltensor(&top_logprobs_ids, top_logprobs);
-  xllm_ops_utils::create_acltensor(&src_seq_idxes_ids, src_seq_idxes);
-  xllm_ops_utils::create_acltensor(&out_logprobs_ids, out_logprobs);
-  xllm_ops_utils::create_acltensor(&out_tokens_ids, out_tokens);
+  create_acltensor(&logprobs_ids, logprobs);
+  create_acltensor(&top_tokens_ids, top_tokens);
+  create_acltensor(&top_logprobs_ids, top_logprobs);
+  create_acltensor(&src_seq_idxes_ids, src_seq_idxes);
+  create_acltensor(&out_logprobs_ids, out_logprobs);
+  create_acltensor(&out_tokens_ids, out_tokens);
 
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
@@ -105,4 +106,4 @@ void beam_search(const torch::Tensor& logprobs,
   // LOG(INFO) << "beam_search_ops out_logprobs: " << out_logprobs;
   // LOG(INFO) << "beam_search_ops out_tokens: " << out_tokens;
 }
-}  // namespace xllm_ops
+}  // namespace xllm::kernel::npu

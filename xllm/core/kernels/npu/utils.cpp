@@ -29,9 +29,9 @@ limitations under the License.
 
 #include "acl/acl.h"
 #include "aclnn/acl_meta.h"
-#include "acltensor_utils.h"
+#include "utils.h"
 
-namespace xllm_ops_utils {
+namespace xllm::kernel::npu {
 aclDataType type_info::get_acl_type(const torch::ScalarType& dtype) {
   switch (dtype) {
     case torch::kInt64:
@@ -55,7 +55,7 @@ aclDataType type_info::get_acl_type(const torch::ScalarType& dtype) {
 
 void create_acltensor(aclTensor** tensor, const torch::Tensor& tensor_data) {
   aclDataType acl_tensor_type =
-      xllm_ops_utils::type_info::get_acl_type(tensor_data.scalar_type());
+      type_info::get_acl_type(tensor_data.scalar_type());
   void* deviceData = const_cast<void*>(tensor_data.storage().data());
   c10::SmallVector<int64_t, 8> storageDims;
   storageDims.push_back(tensor_data.storage().nbytes() /
@@ -99,4 +99,4 @@ void check_tensor_shapes_equal(const torch::Tensor& a,
   }
 }
 
-}  // namespace xllm_ops_utils
+}  // namespace xllm::kernel::npu

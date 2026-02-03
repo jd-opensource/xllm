@@ -15,24 +15,21 @@ limitations under the License.
 
 #pragma once
 
-#include <torch_npu/csrc/libs/init_npu.h>
-#include <torch_npu/torch_npu.h>
+#include <torch/torch.h>
 
-#include <vector>
+namespace xllm::kernel::npu {
 
-#include "acl/acl.h"
-#include "util/tensor_helper.h"
+void beam_search(const torch::Tensor& logprobs,
+                 const torch::Tensor& top_tokens,
+                 const torch::Tensor& top_logprobs,
+                 torch::Tensor& src_seq_idxes,
+                 torch::Tensor& out_logprobs,
+                 torch::Tensor& out_token_ids);
 
-namespace xllm_ops_utils {
-struct type_info {
-  static aclDataType get_acl_type(const torch::ScalarType& dtype);
-};
+void top_k_top_p(torch::Tensor& logits,
+                 const torch::Tensor& topK,
+                 const torch::Tensor& topP);
 
-void create_acltensor(aclTensor** tensor, const torch::Tensor& tensor_data);
-void check_tensor(const torch::Tensor& t,
-                  const std::string& name,
-                  const std::string& func_name = "");
-void check_tensor_shapes_equal(const torch::Tensor& a,
-                               const torch::Tensor& b,
-                               const std::string& func_name = "");
-}  // namespace xllm_ops_utils
+void replace_token(torch::Tensor& dst, torch::Tensor& src);
+
+}  // namespace xllm::kernel::npu

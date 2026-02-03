@@ -18,7 +18,7 @@ limitations under the License.
 #include <torch/types.h>
 
 #if defined(USE_NPU)
-#include "kernels/npu/xllm_ops/beam_search.h"
+#include "kernels/npu/xllm_ops/xllm_ops_api.h"
 #endif
 
 namespace xllm {

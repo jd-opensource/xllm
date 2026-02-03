@@ -113,7 +113,7 @@ void apply_top_k_top_p(torch::Tensor& logits,
         torch::where(
             top_k <= 0, torch::tensor(max_value).to(top_k.device()), top_k)
             .to(torch::kInt32);
-    xllm_ops::top_k_top_p(logits, processed_top_k, top_p);
+    xllm::kernel::npu::top_k_top_p(logits, processed_top_k, top_p);
 #elif defined(USE_MLU)
     apply_top_k_top_p_torch_impl(logits, top_k, top_p);
 #endif

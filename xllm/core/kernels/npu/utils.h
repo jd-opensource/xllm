@@ -14,18 +14,26 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
+#include <string>
 #include <vector>
 
 #include "acl/acl.h"
-#include "aclnnop/aclnn_apply_top_k_top_p.h"
-#include "acltensor_utils.h"
 #include "util/tensor_helper.h"
 
-namespace xllm_ops {
-void top_k_top_p(torch::Tensor& logits,
-                 const torch::Tensor& topK,
-                 const torch::Tensor& topP);
-}  // namespace xllm_ops
+namespace xllm::kernel::npu {
+struct type_info {
+  static aclDataType get_acl_type(const torch::ScalarType& dtype);
+};
+
+void create_acltensor(aclTensor** tensor, const torch::Tensor& tensor_data);
+void check_tensor(const torch::Tensor& t,
+                  const std::string& name,
+                  const std::string& func_name = "");
+void check_tensor_shapes_equal(const torch::Tensor& a,
+                               const torch::Tensor& b,
+                               const std::string& func_name = "");
+}  // namespace xllm::kernel::npu

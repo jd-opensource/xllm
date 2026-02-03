@@ -22,7 +22,7 @@ limitations under the License.
 #include <torch/torch.h>
 #if defined(USE_NPU)
 #include "acl/acl.h"
-#include "kernels/npu/xllm_ops/replace_token.h"
+#include "kernels/npu/xllm_ops/xllm_ops_api.h"
 #elif defined(USE_MLU)
 #include <framework/core/caching_allocator.h>
 #elif defined(USE_CUDA) || defined(USE_ILU)
@@ -345,8 +345,8 @@ void WorkerImpl::update_last_step_output(
 ForwardInput WorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
 #if defined(USE_A2)
-  xllm_ops::replace_token(inputs.token_ids,
-                          last_step_output_.sample_output.next_tokens);
+  xllm::kernel::npu::replace_token(inputs.token_ids,
+                                   last_step_output_.sample_output.next_tokens);
 #else
   auto& flatten_tokens = inputs.token_ids;
   auto neg_mask = (flatten_tokens < 0);

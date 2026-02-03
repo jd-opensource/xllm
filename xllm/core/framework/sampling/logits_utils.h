@@ -20,7 +20,7 @@ limitations under the License.
 #include <vector>
 
 #if defined(USE_NPU)
-#include "kernels/npu/xllm_ops/top_k_top_p.h"
+#include "kernels/npu/xllm_ops/xllm_ops_api.h"
 #endif
 #include "kernels/ops_api.h"
 

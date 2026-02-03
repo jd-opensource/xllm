@@ -30,23 +30,24 @@ limitations under the License.
 #include "acl/acl.h"
 #include "aclnnop/aclnn_apply_top_k_top_p.h"
 #include "core/common/macros.h"
-#include "top_k_top_p.h"
+#include "core/kernels/npu/utils.h"
+#include "xllm_ops_api.h"
 
-namespace xllm_ops {
+namespace xllm::kernel::npu {
 void top_k_top_p(torch::Tensor& logits,
                  const torch::Tensor& topK,
                  const torch::Tensor& topP) {
-  xllm_ops_utils::check_tensor(logits, "logits", "top_k_top_p");
-  xllm_ops_utils::check_tensor(topK, "topK", "top_k_top_p");
-  xllm_ops_utils::check_tensor(topP, "topP", "top_k_top_p");
+  check_tensor(logits, "logits", "top_k_top_p");
+  check_tensor(topK, "topK", "top_k_top_p");
+  check_tensor(topP, "topP", "top_k_top_p");
   aclTensor* logits_ids = nullptr;
   aclTensor* topK_ids = nullptr;
   aclTensor* topP_ids = nullptr;
   int32_t device_id = logits.device().index();
   aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
-  xllm_ops_utils::create_acltensor(&logits_ids, logits);
-  xllm_ops_utils::create_acltensor(&topK_ids, topK);
-  xllm_ops_utils::create_acltensor(&topP_ids, topP);
+  create_acltensor(&logits_ids, logits);
+  create_acltensor(&topK_ids, topK);
+  create_acltensor(&topP_ids, topP);
 
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
@@ -76,4 +77,4 @@ void top_k_top_p(torch::Tensor& logits,
                       "top_k_top_p: failed to free workspace");
   }
 }
-}  // namespace xllm_ops
+}  // namespace xllm::kernel::npu
