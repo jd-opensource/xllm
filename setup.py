@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import argparse
+from typing import Any, Optional
 
 from distutils.core import Command
 from setuptools import Extension, setup
@@ -14,8 +15,8 @@ from setuptools.command.build_ext import build_ext
 from env import get_cxx_abi, set_npu_envs, set_mlu_envs, set_cuda_envs, set_ilu_envs, set_musa_envs
 from utils import get_cpu_arch, get_device_type, pre_build, get_version, check_and_install_pre_commit, read_readme, get_cmake_dir, get_base_dir, get_python_version, get_torch_version
 
-BUILD_TEST_FILE = True
-BUILD_EXPORT = True
+BUILD_TEST_FILE: bool = True
+BUILD_EXPORT: bool = True
         
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
@@ -32,21 +33,21 @@ class ExtBuild(build_ext):
         ("generate-so=", None, "generate so or binary"),
     ]
 
-    def initialize_options(self):
+    def initialize_options(self) -> None:
         build_ext.initialize_options(self)
         self.base_dir = get_base_dir()
-        self.device = None  
-        self.arch = None
-        self.install_xllm_kernels = None
-        self.generate_so = False
+        self.device: Optional[str] = None
+        self.arch: Optional[str] = None
+        self.install_xllm_kernels: Optional[bool] = None
+        self.generate_so: bool = False
 
-    def finalize_options(self):
+    def finalize_options(self) -> None:
         build_ext.finalize_options(self)
 
-    def run(self):
+    def run(self) -> None:
         # check if cmake is installed
         try:
-            out = subprocess.check_output(["cmake", "--version"])
+            out: bytes = subprocess.check_output(["cmake", "--version"])
         except OSError:
             raise RuntimeError(
                 "CMake must be installed to build the following extensions: "
@@ -57,6 +58,8 @@ class ExtBuild(build_ext):
         match = re.search(
             r"version\s*(?P<major>\d+)\.(?P<minor>\d+)([\d.]+)?", out.decode()
         )
+        if match is None:
+            raise RuntimeError(f"Failed to parse CMake version from: {out!r}")
         cmake_major, cmake_minor = int(match.group("major")), int(match.group("minor"))
         if (cmake_major, cmake_minor) < (3, 18):
             raise RuntimeError("CMake >= 3.18.0 is required")
@@ -70,10 +73,10 @@ class ExtBuild(build_ext):
             print(f"Details: {e}")
             exit(1)
 
-    def build_extension(self, ext: CMakeExtension):
+    def build_extension(self, ext: CMakeExtension) -> None:
         ninja_dir = shutil.which("ninja")
         # the output dir for the extension
-        extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.path)))
+        extdir: str = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.path)))
 
         # create build directory
         os.makedirs(self.build_temp, exist_ok=True)
@@ -81,19 +84,20 @@ class ExtBuild(build_ext):
         # Using this requires trailing slash for auto-detection & inclusion of
         # auxiliary "native" libs
 
-        debug = int(os.environ.get("DEBUG", 0)) if self.debug is None else self.debug
-        build_type = "Debug" if debug else "Release"
+        debug: int = int(os.environ.get("DEBUG", 0)) if self.debug is None else int(self.debug)
+        build_type: str = "Debug" if debug else "Release"
 
-        max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
-        max_jobs_int = int(max_jobs)
+        default_jobs = os.cpu_count() or 1
+        max_jobs: str = os.getenv("MAX_JOBS", str(default_jobs))
+        max_jobs_int: int = int(max_jobs)
         
         # Limit archive (ar/ranlib) concurrency to avoid file locking conflicts.
         # The ar tool requires exclusive access to archive files (.a files) when
         # creating or updating static libraries. When multiple ar processes attempt
         # to modify the same archive file simultaneously, they compete for file locks,
         # which can cause deadlocks and hang the build process.
-        archive_jobs = min(8, max(1, max_jobs_int // 4))
-        cmake_args = [
+        archive_jobs: int = min(8, max(1, max_jobs_int // 4))
+        cmake_args: list[str] = [
             "-G",
             "Ninja",
             f"-DCMAKE_MAKE_PROGRAM={ninja_dir}",
@@ -108,6 +112,11 @@ class ExtBuild(build_ext):
             f"-DINSTALL_XLLM_KERNELS={'ON' if self.install_xllm_kernels else 'OFF'}",
             f"-DCMAKE_JOB_POOLS=archive={archive_jobs}",
         ]
+
+        if self.device is None:
+            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu or musa.")
+        if self.arch is None:
+            raise ValueError("Please set --arch to x86 or arm.")
 
         if self.device == "a2" or self.device == "a3":
             cmake_args += ["-DUSE_NPU=ON"]
@@ -133,7 +142,7 @@ class ExtBuild(build_ext):
         else:
             raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu or musa.")
 
-        product = "xllm"
+        product: str = "xllm"
         if self.generate_so:
             product = "libxllm.so"
             cmake_args += ["-DGENERATE_SO=ON"]
@@ -154,14 +163,22 @@ class ExtBuild(build_ext):
         build_args = ["--config", build_type]
         build_args += ["-j" + max_jobs]
 
-        env = os.environ.copy()
+        env: dict[str, str] = os.environ.copy()
         env["VCPKG_MAX_CONCURRENCY"] = str(max_jobs)
         print("CMake Args: ", cmake_args)
         print("Env: ", env)
 
         self.build_cmake_targets(ext, cmake_args, build_args, env, extdir, product)
 
-    def build_cmake_targets(self, ext, cmake_args, build_args, env, extdir, product):
+    def build_cmake_targets(
+        self,
+        ext: CMakeExtension,
+        cmake_args: list[str],
+        build_args: list[str],
+        env: dict[str, str],
+        extdir: str,
+        product: str,
+    ) -> None:
         """Build CMake targets"""
         cmake_dir = get_cmake_dir()
         subprocess.check_call(
@@ -195,16 +212,24 @@ class ExtBuildSingleTest(ExtBuild):
         ("test-name=", None, "name of the test target to build and run"),
     ]
 
-    def initialize_options(self):
+    def initialize_options(self) -> None:
         ExtBuild.initialize_options(self)
-        self.test_name = None
+        self.test_name: Optional[str] = None
 
-    def finalize_options(self):
+    def finalize_options(self) -> None:
         ExtBuild.finalize_options(self)
         if not self.test_name:
             raise ValueError("--test-name is required for ExtBuildSingleTest")
 
-    def build_cmake_targets(self, ext, cmake_args, build_args, env, extdir, product):
+    def build_cmake_targets(
+        self,
+        ext: CMakeExtension,
+        cmake_args: list[str],
+        build_args: list[str],
+        env: dict[str, str],
+        extdir: str,
+        product: str,
+    ) -> None:
         """Override method: only build the specified test target and run"""
         cmake_dir = get_cmake_dir()
         subprocess.check_call(
@@ -218,8 +243,8 @@ class ExtBuildSingleTest(ExtBuild):
 
         # Find test executable
         # CMake usually places executables in CMAKE_RUNTIME_OUTPUT_DIRECTORY or build directory
-        test_executable = None
-        possible_paths = [
+        test_executable: Optional[str] = None
+        possible_paths: list[str] = [
             os.path.join(cmake_dir, self.test_name),
             os.path.join(extdir, self.test_name),
             os.path.join(cmake_dir, "xllm", "core", self.test_name),
@@ -269,15 +294,15 @@ class BuildDistWheel(bdist_wheel):
         ("arch=", None, "target arch type (x86 or arm)"),
     ]
 
-    def initialize_options(self):
+    def initialize_options(self) -> None:
         super().initialize_options()
-        self.device = None
-        self.arch = None
+        self.device: Optional[str] = None
+        self.arch: Optional[str] = None
         # Cache the original dist name early so finalize_options is idempotent
         # and so name changes are visible to egg_info/metadata generation.
         self._base_dist_name = self.distribution.metadata.name
 
-    def finalize_options(self):
+    def finalize_options(self) -> None:
         # IMPORTANT: mutate distribution name BEFORE super().finalize_options().
         # bdist_wheel finalization may finalize/cache egg_info metadata; if we
         # change the name afterwards, the wheel filename and METADATA can diverge
@@ -300,7 +325,7 @@ class BuildDistWheel(bdist_wheel):
         self.distribution.metadata.name = name
         super().finalize_options()
 
-    def run(self):
+    def run(self) -> None:
         build_ext_cmd = self.get_finalized_command('build_ext')
         build_ext_cmd.device = self.device
         build_ext_cmd.arch = self.arch
@@ -342,14 +367,18 @@ class TestUT(Command):
         'DeepEPMultiDeviceTest',
     ]
 
-    def initialize_options(self):
+    def initialize_options(self) -> None:
         pass
 
-    def finalize_options(self):
+    def finalize_options(self) -> None:
         pass
 
-    def run_ctest(self, cmake_dir):
-        def run_subprocess_with_streaming(cmd, error_message, warn_if_no_tests=False):
+    def run_ctest(self, cmake_dir: str) -> int:
+        def run_subprocess_with_streaming(
+            cmd: list[str],
+            error_message: str,
+            warn_if_no_tests: bool = False,
+        ) -> None:
             """Helper function to run subprocess and stream output"""
             process = subprocess.Popen(
                 cmd,
@@ -360,16 +389,19 @@ class TestUT(Command):
                 bufsize=1,
             )
             
-            output_lines = []
+            if process.stdout is None:
+                raise RuntimeError("Failed to capture subprocess stdout for streaming.")
+
+            output_lines: list[str] = []
             for line in iter(process.stdout.readline, ''):
                 print(line, end='')
                 output_lines.append(line)
             
-            return_code = process.wait()
+            return_code: int = process.wait()
             
             # Warn if no tests were found, but don't fail (some backends may not compile certain tests)
             if warn_if_no_tests and return_code == 0:
-                output_text = ''.join(output_lines)
+                output_text: str = ''.join(output_lines)
                 if 'No tests were found' in output_text:
                     print(f"No tests matched the pattern (this is OK for some backends).")
                     return
@@ -419,7 +451,7 @@ class TestUT(Command):
             print(e.stderr)
             exit(1)
 
-    def run(self):
+    def run(self) -> None:
         self.run_ctest(get_cmake_dir())
 
 class BuildTest(Command):
@@ -433,18 +465,18 @@ class BuildTest(Command):
         ("generate-so=", None, "generate so or binary"),
     ]
 
-    def initialize_options(self):
-        self.test_name = None
-        self.device = None
-        self.arch = None
-        self.install_xllm_kernels = None
-        self.generate_so = False
+    def initialize_options(self) -> None:
+        self.test_name: Optional[str] = None
+        self.device: Optional[str] = None
+        self.arch: Optional[str] = None
+        self.install_xllm_kernels: Optional[bool] = None
+        self.generate_so: bool = False
 
-    def finalize_options(self):
+    def finalize_options(self) -> None:
         if not self.test_name:
             raise ValueError("--test-name is required for build_test command")
 
-    def run(self):
+    def run(self) -> None:
         # Create ExtBuildSingleTest instance and set parameters
         build_ext = ExtBuildSingleTest(self.distribution)
         build_ext.initialize_options()
@@ -462,7 +494,7 @@ class BuildTest(Command):
         # Run build
         build_ext.run()
 
-def parse_arguments():
+def parse_arguments() -> dict[str, Any]:
     parser = argparse.ArgumentParser(
         description='Setup helper for building xllm',
         epilog='Example: python setup.py build --device a3',

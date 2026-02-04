@@ -1,22 +1,26 @@
 import os
 import platform
 
+from typing import Optional
 
-def get_cxx_abi():
+
+def get_cxx_abi() -> bool:
     try:
         import torch
         return torch.compiled_with_cxx11_abi()
     except ImportError:
         return False
 
-def get_python_include_path():
+
+def get_python_include_path() -> Optional[str]:
     try:
         from sysconfig import get_paths
         return get_paths()["include"]
     except ImportError:
         return None
 
-def get_torch_root_path():
+
+def get_torch_root_path() -> Optional[str]:
     try:
         import torch
         import os
@@ -24,7 +28,8 @@ def get_torch_root_path():
     except ImportError:
         return None
 
-def get_torch_mlu_root_path():
+
+def get_torch_mlu_root_path() -> Optional[str]:
     try:
         import torch_mlu
         import os
@@ -32,7 +37,8 @@ def get_torch_mlu_root_path():
     except ImportError:
         return None
 
-def get_ixformer_root_path():
+
+def get_ixformer_root_path() -> Optional[str]:
     try:
         import ixformer
         import os
@@ -40,7 +46,8 @@ def get_ixformer_root_path():
     except ImportError:
         return None
     
-def get_cuda_root_path():
+
+def get_cuda_root_path() -> Optional[str]:
     try:
         import torch
         from torch.utils.cpp_extension import CUDA_HOME
@@ -53,7 +60,8 @@ def get_cuda_root_path():
     except ImportError:
         return None
     
-def get_torch_musa_root_path():
+
+def get_torch_musa_root_path() -> Optional[str]:
     try:
         import torch_musa
         import os
@@ -61,13 +69,15 @@ def get_torch_musa_root_path():
     except ImportError:
         return None
     
-def set_common_envs():
-    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path()
-    os.environ["PYTHON_LIB_PATH"] =  get_torch_root_path()
-    os.environ["LIBTORCH_ROOT"] = get_torch_root_path()
-    os.environ["PYTORCH_INSTALL_PATH"] = get_torch_root_path()
+def set_common_envs() -> None:
+    os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path() or ""
+    torch_root = get_torch_root_path() or ""
+    os.environ["PYTHON_LIB_PATH"] = torch_root
+    os.environ["LIBTORCH_ROOT"] = torch_root
+    os.environ["PYTORCH_INSTALL_PATH"] = torch_root
 
-def set_npu_envs():
+
+def set_npu_envs() -> None:
     PYTORCH_NPU_INSTALL_PATH = os.getenv("PYTORCH_NPU_INSTALL_PATH")
     if not PYTORCH_NPU_INSTALL_PATH:
         os.environ["PYTORCH_NPU_INSTALL_PATH"] = "/usr/local/libtorch_npu"
@@ -154,21 +164,25 @@ def set_npu_envs():
     os.environ["LCCL_DETERMINISTIC"] = "0"
     os.environ["LCCL_PARALLEL"] = "0"
 
-def set_mlu_envs():
+
+def set_mlu_envs() -> None:
     set_common_envs()
-    os.environ["PYTORCH_MLU_INSTALL_PATH"] = get_torch_mlu_root_path()
+    os.environ["PYTORCH_MLU_INSTALL_PATH"] = get_torch_mlu_root_path() or ""
     
-def set_cuda_envs():
-    set_common_envs()
-    os.environ["CUDA_TOOLKIT_ROOT_DIR"] = get_cuda_root_path()
 
-def set_ilu_envs():
+def set_cuda_envs() -> None:
     set_common_envs()
-    os.environ["IXFORMER_INSTALL_PATH"] = get_ixformer_root_path()
+    os.environ["CUDA_TOOLKIT_ROOT_DIR"] = get_cuda_root_path() or ""
 
-def set_musa_envs():
+
+def set_ilu_envs() -> None:
     set_common_envs()
-    os.environ["PYTORCH_MUSA_INSTALL_PATH"] = get_torch_musa_root_path()
+    os.environ["IXFORMER_INSTALL_PATH"] = get_ixformer_root_path() or ""
+
+
+def set_musa_envs() -> None:
+    set_common_envs()
+    os.environ["PYTORCH_MUSA_INSTALL_PATH"] = get_torch_musa_root_path() or ""
     import torch_musa
     from torch_musa.utils.musa_extension import MUSA_HOME
     os.environ["TORCH_MUSA_PYTHONPATH"] = torch_musa.core.cmake_prefix_path

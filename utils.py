@@ -4,9 +4,10 @@ import platform
 import subprocess
 import sysconfig
 import io
+from typing import Optional
 
 # get cpu architecture
-def get_cpu_arch():
+def get_cpu_arch() -> str:
     arch = platform.machine()
     if "x86" in arch or "amd64" in arch:
         return "x86"
@@ -16,7 +17,7 @@ def get_cpu_arch():
         raise ValueError(f"❌ Unsupported architecture: {arch}")
 
 # get device type
-def get_device_type():
+def get_device_type() -> str:
     import torch
 
     if torch.cuda.is_available():
@@ -50,17 +51,17 @@ def get_device_type():
     print("❌ Unsupported device type, please check what device you are using.")
     exit(1)
 
-def get_base_dir():
+def get_base_dir() -> str:
     return os.path.abspath(os.path.dirname(__file__))
 
-def join_path(*paths):
+def join_path(*paths: str) -> str:
     return os.path.join(get_base_dir(), *paths)
 
 # return the python version as a string like "310" or "311" etc
-def get_python_version():
+def get_python_version() -> str:
     return sysconfig.get_python_version().replace(".", "")
 
-def get_torch_version(device):
+def get_torch_version(device: str) -> Optional[str]:
     try:
         import torch
         if device == "cuda":
@@ -69,9 +70,9 @@ def get_torch_version(device):
     except ImportError:
         return None
 
-def get_version():
+def get_version() -> str:
     # first read from environment variable
-    version = os.getenv("XLLM_VERSION")
+    version: Optional[str] = os.getenv("XLLM_VERSION")
     if not version:
         # then read from version file
         with open(join_path("version.txt"), "r") as f:
@@ -96,7 +97,7 @@ def read_readme() -> str:
     else:
         return ""
 
-def get_cmake_dir():
+def get_cmake_dir() -> str:
     plat_name = sysconfig.get_platform()
     python_version = get_python_version()
     dir_name = f"cmake.{plat_name}-{sys.implementation.name}-{python_version}"
@@ -104,7 +105,7 @@ def get_cmake_dir():
     os.makedirs(cmake_dir, exist_ok=True)
     return cmake_dir
 
-def check_and_install_pre_commit():
+def check_and_install_pre_commit() -> None:
     # check if .git is a directory
     if not os.path.isdir(".git"):
         return
@@ -116,7 +117,7 @@ def check_and_install_pre_commit():
             print("❌ Run 'pre-commit install' failed. Please install pre-commit: pip install pre-commit")
             exit(1)
 
-def run_shell_command(command, cwd=None, check=True):
+def run_shell_command(command: str, cwd: Optional[str] = None, check: bool = True) -> bool:
     try:
         import shlex
         subprocess.run(shlex.split(command), cwd=cwd, check=check, capture_output=True, text=True)
@@ -125,7 +126,7 @@ def run_shell_command(command, cwd=None, check=True):
         print(f"❌ Run shell command '{command}' failed: {e.stderr.strip() if hasattr(e, 'stderr') else e}")
         return False
 
-def has_uncommitted_changes(repo_path):
+def has_uncommitted_changes(repo_path: str) -> bool:
     result = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=repo_path,
@@ -134,7 +135,7 @@ def has_uncommitted_changes(repo_path):
     )
     return bool(result.stdout.strip())
 
-def is_safe_directory_set(repo_path):
+def is_safe_directory_set(repo_path: str) -> bool:
     try:
         result = subprocess.run(
             ["git", "config", "--global", "--get-all", "safe.directory"],
@@ -147,7 +148,7 @@ def is_safe_directory_set(repo_path):
     except subprocess.CalledProcessError:
         return False 
 
-def apply_patch_safely(patch_file_path, repo_path):
+def apply_patch_safely(patch_file_path: str, repo_path: str) -> bool:
     print(f"🔍 Checking repo status: {repo_path}")
 
     if not is_safe_directory_set(repo_path):
@@ -184,7 +185,7 @@ def apply_patch_safely(patch_file_path, repo_path):
         print(f"  cd {repo_path} && git apply {patch_file_path}")
         return False
 
-def pre_build(device):
+def pre_build(device: str) -> None:
     if os.path.exists("third_party/custom_patch"):
         script_path = os.path.dirname(os.path.abspath(__file__))
         mooncake_repo_path = os.path.join(script_path, "third_party/Mooncake")

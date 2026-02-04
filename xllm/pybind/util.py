@@ -3,8 +3,9 @@ import psutil
 import signal
 import socket
 import sys
+from typing import Union
 
-def terminate_process(pid, timeout=30):
+def terminate_process(pid: int, timeout: Union[int, float] = 30) -> None:
     try:
         parent = psutil.Process(pid)
     except psutil.NoSuchProcess:
@@ -26,7 +27,7 @@ def terminate_process(pid, timeout=30):
         except psutil.NoSuchProcess:
             pass
 
-def get_free_port():
+def get_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('0.0.0.0', 0))
         _, port = s.getsockname()
