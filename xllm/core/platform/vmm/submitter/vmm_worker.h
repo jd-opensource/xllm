@@ -21,7 +21,8 @@ limitations under the License.
 #include <thread>
 #include <unordered_set>
 
-#include "common.h"
+#include "core/common/macros.h"
+#include "vmm_common.h"
 
 namespace xllm {
 namespace vmm {
@@ -31,10 +32,7 @@ class VMMWorker {
     public:
         ~VMMWorker();
         
-        VMMWorker(const VMMWorker&) = delete;
-        VMMWorker& operator=(const VMMWorker&) = delete;
-        VMMWorker(VMMWorker&&) = delete;
-        VMMWorker& operator=(VMMWorker&&) = delete;
+        DISALLOW_COPY_AND_MOVE(VMMWorker);
         
         void start();
         
@@ -55,13 +53,13 @@ class VMMWorker {
         
         void schedule(int32_t max_ops);
         
-        bool has_conflict(VirtPtr va);
+        bool has_conflict(VirPtr va);
         
         void execute_map(VMMRequest& req);
         
         void execute_unmap(VMMRequest& req);
         
-        void notify_completion(VMMSubmitter* submitter, RequestId request_id, 
+        void notify_completion(VMMSubmitter* submitter, uint64_t request_id, 
                               OpType op_type, bool success);
     
         int32_t device_id_;
@@ -70,7 +68,7 @@ class VMMWorker {
         
         RequestQueue work_queue_;
         
-        std::unordered_set<VirtPtr> deferred_va_;
+        std::unordered_set<VirPtr> deferred_va_;
         
         std::deque<VMMRequest> deferred_requests_;
     

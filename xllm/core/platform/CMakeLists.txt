@@ -1,12 +1,14 @@
 include(cc_library)
 
+include_directories(.)
+
 cc_library(
   NAME
     platform
   HDRS
     stream.h
     device.h
-    vmm/submitter/common.h
+    vmm/submitter/vmm_common.h
     vmm/submitter/vmm_manager.h
     vmm/submitter/vmm_submitter.h
     vmm/submitter/vmm_worker.h

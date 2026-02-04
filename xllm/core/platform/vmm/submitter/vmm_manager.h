@@ -20,6 +20,8 @@ limitations under the License.
 #include <unordered_map>
 #include <memory>
 
+#include "core/common/macros.h"
+
 namespace xllm {
 namespace vmm {
 
@@ -45,10 +47,7 @@ class VMMManager {
         VMMManager() = default;
         ~VMMManager();
         
-        VMMManager(const VMMManager&) = delete;
-        VMMManager& operator=(const VMMManager&) = delete;
-        VMMManager(VMMManager&&) = delete;
-        VMMManager& operator=(VMMManager&&) = delete;
+        DISALLOW_COPY_AND_MOVE(VMMManager);
             
         std::shared_ptr<VMMWorker> create_worker(int32_t device_id);
         

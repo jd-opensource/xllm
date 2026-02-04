@@ -19,48 +19,41 @@ limitations under the License.
 
 #include <folly/concurrency/UnboundedQueue.h>
 
-#include "../../vmm/vmm_api.h"
+#include "vmm/vmm_api.h"
 
-using VirtPtr = void*;
-using PhyMemHandle = void*;
-
-namespace xllm
-{
-namespace vmm
-{
+namespace xllm {
+namespace vmm {
 
 enum class OpType {
     MAP,
     UNMAP
 };
 
-using RequestId = uint64_t;
-
 class VMMSubmitter;
 
 struct VMMRequest {
     OpType op_type;
-    VirtPtr va;
+    VirPtr va;
     PhyMemHandle phy;
     size_t size;
-    RequestId request_id;
+    uint64_t request_id;
     VMMSubmitter* submitter;
     
     VMMRequest() 
         : op_type(OpType::MAP), va(0), phy(0), size(0), request_id(0), submitter(nullptr) {}
     
-    VMMRequest(OpType type, VirtPtr v, PhyMemHandle p, size_t s, RequestId id, VMMSubmitter* sub)
+    VMMRequest(OpType type, VirPtr v, PhyMemHandle p, size_t s, uint64_t id, VMMSubmitter* sub)
         : op_type(type), va(v), phy(p), size(s), request_id(id), submitter(sub) {}
 };
 
 struct VMMCompletion {
-    RequestId request_id;
+    uint64_t request_id;
     OpType op_type;
     bool success;
     
     VMMCompletion() : request_id(0), op_type(OpType::MAP), success(false) {}
     
-    VMMCompletion(RequestId id, OpType type, bool succ)
+    VMMCompletion(uint64_t id, OpType type, bool succ)
         : request_id(id), op_type(type), success(succ) {}
 };
 
@@ -68,5 +61,5 @@ using RequestQueue = folly::UMPSCQueue<VMMRequest, /* Mayblock */ false>;
 using CompletionQueue = folly::USPSCQueue<VMMCompletion, /* Mayblock */ false>;
 
 
-}
-}
+} // namespace vmm
+} // namespace xllm

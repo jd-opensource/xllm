@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "core/common/macros.h"
 #include "vmm_worker.h"
 #include "vmm_submitter.h"
 
@@ -99,7 +100,7 @@ bool VMMWorker::step_deferred() {
     return true;
 }
 
-void VMMWorker::schedule(int max_ops) {
+void VMMWorker::schedule(int32_t max_ops) {
     int ops_done = 0;
     
     while (ops_done < max_ops) {
@@ -111,7 +112,7 @@ void VMMWorker::schedule(int max_ops) {
     }
 }
 
-bool VMMWorker::has_conflict(VirtPtr va) {
+bool VMMWorker::has_conflict(VirPtr va) {
     return deferred_va_.find(va) != deferred_va_.end();
 }
 
@@ -130,7 +131,7 @@ void VMMWorker::defer_request(const VMMRequest& req) {
     deferred_requests_.push_back(req);
 }
 
-void VMMWorker::notify_completion(VMMSubmitter* submitter, RequestId request_id,
+void VMMWorker::notify_completion(VMMSubmitter* submitter, uint64_t request_id,
                                   OpType op_type, bool success) {
     if (!submitter) {
         return;

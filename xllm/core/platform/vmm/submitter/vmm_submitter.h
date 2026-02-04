@@ -25,7 +25,8 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "common.h"
+#include "core/common/macros.h"
+#include "vmm_common.h"
 
 namespace xllm {
 namespace vmm {
@@ -38,15 +39,14 @@ class VMMSubmitter {
 public:
     ~VMMSubmitter();
     
-    VMMSubmitter(const VMMSubmitter&) = delete;
-    VMMSubmitter& operator=(const VMMSubmitter&) = delete;
-    VMMSubmitter(VMMSubmitter&& other) = delete;
-    VMMSubmitter& operator=(VMMSubmitter&& other) = delete;
+    DISALLOW_COPY_AND_MOVE(VMMSubmitter);
     
-    RequestId map(VirtPtr va, PhyMemHandle phy);
+    uint64_t map(VirPtr va, PhyMemHandle phy);
     
-    RequestId unmap(VirtPtr va, size_t aligned_size);
-    
+    uint64_t unmap(VirPtr va, size_t aligned_size);
+
+    /// Polls completed map/unmap operations from the completion queue.
+    /// Called by the submitter thread. Returns the number of completions processed.    
     size_t poll_completions(size_t max_completions = 32);
     
     bool all_map_done() const;
@@ -57,6 +57,8 @@ public:
     
     bool is_connected() const { return connected_ && worker_ != nullptr; }
 
+    /// Pushes a completion into the submitter's completion queue.
+    /// Called by the worker thread after a map/unmap operation finishes.
     bool push_completion(const VMMCompletion& completion);
 
 private:
@@ -66,19 +68,18 @@ private:
 
     void disconnect();
     
-    
     int32_t device_id_;
 
-    std::shared_ptr<VMMWorker> worker_;
+    std::shared_ptr<VMMWorker> worker_ = nullptr;
 
-    bool connected_;
+    bool connected_ = false;
     
     CompletionQueue completion_queue_;
-    
-    RequestId next_request_id_;
 
-    uint64_t pending_map_{0};
-    uint64_t pending_unmap_{0};
+    uint64_t next_request_id_ = 1;
+
+    uint64_t pending_map_ = 0;
+    uint64_t pending_unmap_ = 0;
     
     friend class VMMManager;
 };

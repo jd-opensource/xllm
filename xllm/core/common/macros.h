@@ -51,6 +51,18 @@ namespace xllm {
   void operator=(const TypeName&) = delete
 #endif
 
+#ifndef DISALLOW_MOVE_AND_ASSIGN
+#define DISALLOW_MOVE_AND_ASSIGN(TypeName) \
+  TypeName(TypeName&&) = delete; \
+  void operator=(TypeName&&) = delete
+#endif
+
+#ifndef DISALLOW_COPY_AND_MOVE
+#define DISALLOW_COPY_AND_MOVE(TypeName) \
+  DISALLOW_COPY_AND_ASSIGN(TypeName); \
+  DISALLOW_MOVE_AND_ASSIGN(TypeName);
+#endif
+
 // Define a macro to simplify adding elements from a vector to a repeated field
 #define ADD_VECTOR_TO_PROTO(proto_field, vec) \
   do {                                        \
