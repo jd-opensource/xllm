@@ -393,6 +393,7 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
   std::shared_ptr<std::atomic<uint32_t>> success_cnt_;
   std::promise<void> close_promise_;
   std::atomic<bool> promise_set_{false};
+  std::shared_ptr<ClientStreamReceiver> self_holder_;
 
  public:
   ClientStreamReceiver(std::shared_ptr<std::atomic<int32_t>> termination_flag,
@@ -405,11 +406,20 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
     }
   }
 
+  void set_self_holder(std::shared_ptr<ClientStreamReceiver> self) {
+    self_holder_ = self;
+  }
+
   std::future<void> get_close_future() { return close_promise_.get_future(); }
 
   int on_received_messages(brpc::StreamId id,
                            butil::IOBuf* const messages[],
                            size_t size) override {
+    if (termination_flag_->load(std::memory_order_acquire) <= 0) {
+      brpc::StreamClose(id);
+      return -1;
+    }
+
     for (size_t i = 0; i < size; ++i) {
       std::string msg_str = messages[i]->to_string();
       int32_t success_cnt = std::stoi(msg_str);
@@ -432,12 +442,14 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
     if (!promise_set_.exchange(true)) {
       close_promise_.set_value();
     }
+    self_holder_.reset();
   }
 
   virtual void on_closed(brpc::StreamId id) override {
     if (!promise_set_.exchange(true)) {
       close_promise_.set_value();
     }
+    self_holder_.reset();
   }
 };
 
@@ -445,33 +457,50 @@ void CommChannel::prefetch_from_storage(
     const std::vector<BlockTransferInfo>& block_transfer_info,
     std::shared_ptr<std::atomic<int32_t>> flag,
     std::shared_ptr<std::atomic<uint32_t>> success_cnt) {
+  if (flag->load(std::memory_order_acquire) <= 0) {
+    return;
+  }
+
   proto::BlockTransferInfos pb_block_transfer_info;
   if (!block_transfer_info_to_proto(block_transfer_info,
                                     &pb_block_transfer_info)) {
     LOG(ERROR) << "prefetch_from_storage fail: create proto fail!";
     return;
   }
-  ClientStreamReceiver receiver(flag, success_cnt);
+
+  auto receiver = std::make_shared<ClientStreamReceiver>(flag, success_cnt);
+  receiver->set_self_holder(receiver);
+
   brpc::Controller cntl;
   brpc::StreamOptions stream_options;
   brpc::StreamId stream_id;
   proto::Status response;
-  stream_options.handler = &receiver;
+  stream_options.handler = receiver.get();
   stream_options.idle_timeout_ms = 30;
   if (brpc::StreamCreate(&stream_id, cntl, &stream_options) != 0) {
     LOG(ERROR) << "Failed to create stream";
+    flag->fetch_sub(1, std::memory_order_release);
     return;
   }
 
   stub_->PrefetchFromStorage(
       &cntl, &pb_block_transfer_info, &response, nullptr);
 
-  if (cntl.Failed() || !response.ok()) {
-    LOG(ERROR) << "Fail to connect stream, " << cntl.ErrorText();
+  if (cntl.Failed()) {
+    LOG(ERROR) << "PrefetchFromStorage RPC failed: " << cntl.ErrorText();
+    flag->fetch_sub(1, std::memory_order_release);
+    brpc::StreamClose(stream_id);
     return;
   }
 
-  receiver.get_close_future().wait();
+  if (!response.ok()) {
+    LOG(ERROR) << "PrefetchFromStorage returned not ok";
+    flag->fetch_sub(1, std::memory_order_release);
+    brpc::StreamClose(stream_id);
+    return;
+  }
+
+  receiver->get_close_future().wait();
   brpc::StreamClose(stream_id);
 }
 

@@ -143,6 +143,8 @@ DECLARE_bool(enable_block_copy_kernel);
 
 DECLARE_string(etcd_addr);
 
+DECLARE_uint32(offload_batch);
+
 DECLARE_bool(enable_service_routing);
 
 DECLARE_double(heart_beat_interval);

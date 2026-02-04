@@ -28,6 +28,11 @@ if(USE_NPU)
       message(STATUS "Building for device: A2 (macro USE_A2 defined)")
   endif()
 
+  add_definitions(-DBUILD_SHARED_LIBS=ON)
+  add_compile_definitions(USE_UB)
+  add_definitions(-DUSE_UB)
+  set(USE_UB ON)
+
   option(INSTALL_XLLM_KERNELS "Install xllm_kernels RPM" ON)  
   message(STATUS "INSTALL_XLLM_KERNELS enabled: ${INSTALL_XLLM_KERNELS}")
   if(INSTALL_XLLM_KERNELS)

@@ -1,0 +1,18 @@
+diff --git a/include/ylt/easylog.hpp b/include/ylt/easylog.hpp
+index f0ccfd3..e5999e1 100644
+--- a/include/ylt/easylog.hpp
++++ b/include/ylt/easylog.hpp
+@@ -179,12 +179,7 @@ class logger {
+     }
+   }
+ 
+-  std::atomic<Severity> min_severity_ =
+-#if NDEBUG
+-      Severity::WARN;
+-#else
+-      Severity::TRACE;
+-#endif
++  std::atomic<Severity> min_severity_ = Severity::WARN;
+   bool async_ = false;
+   bool enable_console_ = true;
+   std::atomic<std::chrono::milliseconds> log_sample_interval_;

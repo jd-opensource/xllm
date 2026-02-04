@@ -280,7 +280,7 @@ class Sequence final {
     return &prefetch_results_;
   }
 
-  bool update_prefetch_result(uint32_t timeout, uint32_t& success_cnt);
+  bool update_prefetch_result(const uint32_t timeout, uint32_t& success_cnt);
 
   void reset();
 
@@ -362,6 +362,11 @@ class Sequence final {
   bool last_token_handled() const {
     return last_token_handled_.load(std::memory_order_relaxed);
   }
+
+  void set_offload_batch(uint32_t offload_batch) {
+    offload_batch_ = offload_batch;
+  }
+  uint32_t get_offload_batch() { return offload_batch_; }
 
  private:
   void record_first_token(const Token& token);
@@ -500,6 +505,8 @@ class Sequence final {
   int32_t total_rounds_cached_ = 0;
   std::vector<std::vector<int32_t>> beam_seq_group_flat_;
   std::vector<float> beam_last_logprobs_;
+
+  uint32_t offload_batch_ = std::numeric_limits<uint32_t>::max();
 };
 
 }  // namespace xllm

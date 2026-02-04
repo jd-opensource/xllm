@@ -22,6 +22,7 @@ limitations under the License.
 #include <atomic>
 #include <boost/algorithm/string.hpp>
 #include <csignal>
+#include <cstdint>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -57,7 +58,9 @@ LLMMaster::LLMMaster(const Options& options)
     XServiceClient* xservice_client = XServiceClient::get_instance();
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
                                options_.instance_name().value_or(""),
-                               engine_->block_manager_pool())) {
+                               engine_->block_manager_pool(),
+                               options_.offload_batch().value_or(
+                                   std::numeric_limits<uint32_t>::max()))) {
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }

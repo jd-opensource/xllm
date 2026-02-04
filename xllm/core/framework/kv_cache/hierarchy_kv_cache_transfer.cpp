@@ -23,6 +23,7 @@ limitations under the License.
 #include <memory>
 
 #include "kv_cache_store.h"
+
 namespace xllm {
 
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
@@ -37,11 +38,12 @@ HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
     : options_(options), device_(device), kv_caches_ptr_(kv_caches_ptr) {
   device_.set_device();
   device_.init_device_context();
-  h2d_threadpool_ = std::make_unique<ThreadPool>(
+  load_threadpool_ = std::make_unique<ThreadPool>(
       2, [this]() mutable { device_.set_device(); });
-  d2h_threadpool_ = std::make_unique<ThreadPool>(
+  offload_threadpool_ = std::make_unique<ThreadPool>(
       5, [this]() mutable { device_.set_device(); });
-  for (int i = 0; i < h2d_threadpool_->size() + d2h_threadpool_->size(); i++) {
+  for (int i = 0; i < load_threadpool_->size() + offload_threadpool_->size();
+       i++) {
     copy_stream_.enqueue(device_.get_stream_from_pool(TIMEOUT_MS));
   }
 
@@ -55,12 +57,25 @@ HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
     config.protocol = options_.store_protocol();
     config.metadata_server = options_.store_metadata_server();
     config.master_server_address = options_.store_master_server_address();
-    config.tp_rank = options_.tp_rank();
+    config.enable_mla = options_.enable_mla();
+    config.tp_rank = options_.enable_mla() ? 0 : options_.tp_rank();
+    config.tp_size = options_.enable_mla() ? 1 : options_.tp_size();
     config.total_size = page_aligned_data_size_;
     config.tensor_data = page_aligned_data_;
 
-    if (!KVCacheStore::get_instance().init(config, &host_kv_caches_)) {
-      LOG(FATAL) << "Init KVCacheStore fail!";
+    if (options_.host_blocks_factor() < 1.0) {
+      config.format = TensorFormat::LAYER_WISE;
+      config.layers_wise_copy_batchs = options_.layers_wise_copy_batchs();
+      if (!KVCacheStore::get_instance().init(config, kv_caches_ptr_)) {
+        LOG(FATAL) << "Init KVCacheStore with RH2D fail!";
+      }
+      LOG(INFO) << "Init KVCacheStore with RH2D success!";
+    } else {
+      config.format = TensorFormat::BLOCK_WISE;
+      if (!KVCacheStore::get_instance().init(config, &host_kv_caches_)) {
+        LOG(FATAL) << "Init KVCacheStore with RH2H fail!";
+      }
+      LOG(INFO) << "Init KVCacheStore with RH2H success!";
     }
   }
 }
@@ -81,21 +96,26 @@ uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
   CHECK(!block_transfer_info.empty());
 
   switch (block_transfer_info[0].transfer_type) {
+    case TransferType::D2H2G:
+      return offload_via_host(std::move(block_transfer_info));
+    case TransferType::D2G:
+      return offload_direct(std::move(block_transfer_info));
     case TransferType::H2D: {
-      h2d_threadpool_->schedule(
+      load_threadpool_->schedule(
           [this,
            batch_id = batch_id,
            block_transfer_info = std::move(block_transfer_info)]() mutable {
-            Slice<BlockTransferInfo> info_slice{block_transfer_info};
-            h2d_batch_copy(batch_id, info_slice);
+            load_via_host(batch_id, block_transfer_info);
           });
       break;
     }
-    case TransferType::D2G:
-      return offload_kv_blocks(std::move(block_transfer_info));
     case TransferType::G2D: {
-      // TODO load_kv_blocks async
-      LOG(ERROR) << "Unsupport copy type G2D.";
+      load_threadpool_->schedule(
+          [this,
+           batch_id = batch_id,
+           block_transfer_info = std::move(block_transfer_info)]() mutable {
+            load_direct(batch_id, block_transfer_info);
+          });
       break;
     }
     default:
@@ -113,7 +133,7 @@ uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
 
   switch (block_transfer_info[0].transfer_type) {
     case TransferType::G2H:
-      return load_from_store(block_transfer_info);
+      return KVCacheStore::get_instance().batch_get(block_transfer_info);
     default:
       LOG(ERROR) << "Unsupport copy type: "
                  << uint32_t(block_transfer_info[0].transfer_type);
@@ -124,23 +144,34 @@ uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
 
 void HierarchyKVCacheTransfer::set_layer_synchronizer(
     ModelInputParams& params) {
-#if defined(USE_NPU)
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (layer_wise_load_synchronizer_.count(params.batch_id) != 0) {
-      params.layer_wise_load_synchronizer =
-          layer_wise_load_synchronizer_[params.batch_id];
-      layer_wise_load_synchronizer_.erase(params.batch_id);
-      uint32_t event_cnt =
-          params.layer_wise_load_synchronizer->get_event_size();
-      params.layers_per_bacth_copy =
-          (options_.layers() + event_cnt - 1) / event_cnt;
-    }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (layer_wise_load_synchronizer_.count(params.batch_id) != 0) {
+    params.layer_wise_load_synchronizer =
+        layer_wise_load_synchronizer_[params.batch_id];
+    layer_wise_load_synchronizer_.erase(params.batch_id);
+    params.layers_per_bacth_copy =
+        (options_.layers() + options_.layers_wise_copy_batchs() - 1) /
+        options_.layers_wise_copy_batchs();
   }
-#endif
 }
 
-uint32_t HierarchyKVCacheTransfer::offload_kv_blocks(
+uint32_t HierarchyKVCacheTransfer::offload_direct(
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  folly::Promise<uint32_t> promise;
+  auto future = promise.getSemiFuture();
+  offload_threadpool_->schedule([promise = std::move(promise),
+                                 block_transfer_info =
+                                     std::move(block_transfer_info)]() mutable {
+    uint32_t success_cnt =
+        KVCacheStore::get_instance().batch_put(std::move(block_transfer_info));
+
+    promise.setValue(success_cnt);
+  });
+
+  return std::move(future).get();
+}
+
+uint32_t HierarchyKVCacheTransfer::offload_via_host(
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   if (block_transfer_info.empty()) {
     return 0;
@@ -164,15 +195,18 @@ uint32_t HierarchyKVCacheTransfer::offload_kv_blocks(
     auto slice = transfer_info_slice.slice(
         i, std::min(i + max_blocks_per_batch, block_transfer_info.size()));
 
-    d2h_threadpool_->schedule([this,
-                               promise = std::move(promise),
-                               slice = std::move(slice)]() mutable {
-      bool ret = d2h_batch_copy(slice);
-      auto success_cnt = offload_to_store(slice);
-      if (success_cnt != slice.size()) {
-        LOG(WARNING) << "KVCacheStore not all put success: " << success_cnt
-                     << "/" << slice.size();
+    offload_threadpool_->schedule([this,
+                                   promise = std::move(promise),
+                                   slice = std::move(slice)]() mutable {
+      bool ret = offload_to_host(slice);
+      if (options_.enable_kvcache_store()) {
+        auto success_cnt = KVCacheStore::get_instance().batch_put(slice);
+        if (success_cnt != slice.size()) {
+          LOG(WARNING) << "KVCacheStore not all put success: " << success_cnt
+                       << "/" << slice.size();
+        }
       }
+
       promise.setValue(ret);
     });
 
@@ -196,7 +230,7 @@ uint32_t HierarchyKVCacheTransfer::offload_kv_blocks(
   return block_transfer_info.size();
 }
 
-bool HierarchyKVCacheTransfer::d2h_batch_copy(
+bool HierarchyKVCacheTransfer::offload_to_host(
     Slice<BlockTransferInfo>& block_transfer_info) {
 #if defined(USE_NPU)
   const int64_t num_layers = options_.layers();
@@ -277,18 +311,43 @@ bool HierarchyKVCacheTransfer::d2h_batch_copy(
   return true;
 }
 
-bool HierarchyKVCacheTransfer::h2d_batch_copy(
+bool HierarchyKVCacheTransfer::load_direct(
     const uint64_t batch_id,
-    Slice<BlockTransferInfo>& block_transfer_info) {
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  auto synchronizer = std::make_shared<LayerSynchronizer>(
+      options_.layers_wise_copy_batchs(), TIMEOUT_MS);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (layer_wise_load_synchronizer_.count(batch_id) != 0) {
+      LOG(FATAL) << "Batch id already exists!";
+    }
+    layer_wise_load_synchronizer_[batch_id] = synchronizer;
+  }
+
+  for (size_t i = 0; i < options_.layers_wise_copy_batchs(); i++) {
+    auto success_cnt =
+        KVCacheStore::get_instance().batch_get(block_transfer_info, i);
+    if (success_cnt != block_transfer_info.size()) {
+      LOG(FATAL)
+          << "batch_get error, faill to get all match kvcache from store, "
+             "expected: "
+          << block_transfer_info.size() << ", got: " << success_cnt;
+    }
+
+    synchronizer->notify(i);
+  }
+
+  return true;
+}
+
+bool HierarchyKVCacheTransfer::load_via_host(
+    const uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
 #if defined(USE_NPU)
   CHECK(block_transfer_info.size() < BATCH_COPY_MAX_SIZE / cache_tensor_cnt_)
       << "h2d_batch_copy support copy blocks less than "
       << BATCH_COPY_MAX_SIZE / cache_tensor_cnt_ << ", but got "
       << block_transfer_info.size();
-
-  if (block_transfer_info.empty()) {
-    return true;
-  }
 
   const int64_t num_layers = options_.layers();
   uint32_t layers_per_bacth_copy =
@@ -400,23 +459,6 @@ bool HierarchyKVCacheTransfer::h2d_batch_copy(
   delete[] copy_size;
 #endif
   return true;
-}
-
-uint32_t HierarchyKVCacheTransfer::offload_to_store(
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  if (!options_.enable_kvcache_store()) {
-    return block_transfer_info.size();
-  }
-
-  return KVCacheStore::get_instance().batch_put(block_transfer_info);
-}
-
-uint32_t HierarchyKVCacheTransfer::load_from_store(
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  if (!options_.enable_kvcache_store()) {
-    return 0;
-  }
-  return KVCacheStore::get_instance().batch_get(block_transfer_info);
 }
 
 void HierarchyKVCacheTransfer::create_page_aligned_host_cache() {

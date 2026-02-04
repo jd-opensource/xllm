@@ -185,18 +185,13 @@ def apply_patch_safely(patch_file_path: str, repo_path: str) -> bool:
         print(f"  cd {repo_path} && git apply {patch_file_path}")
         return False
 
-def pre_build(device: str) -> None:
+def pre_build() -> None:
     if os.path.exists("third_party/custom_patch"):
         script_path = os.path.dirname(os.path.abspath(__file__))
         mooncake_repo_path = os.path.join(script_path, "third_party/Mooncake")
-        if device in ("a2", "a3"):
-            if not apply_patch_safely("../custom_patch/Mooncake_npu.patch", mooncake_repo_path):
-                print("❌ Failed to apply Mooncake_npu.patch!")
-                exit(1)
-        else:
-            if not apply_patch_safely("../custom_patch/Mooncake.patch", mooncake_repo_path):
-                print("❌ Failed to apply Mooncake.patch!")
-                exit(1)
+        if not apply_patch_safely("../custom_patch/Mooncake.patch", mooncake_repo_path):
+            print("❌ Failed to apply Mooncake.patch!")
+            exit(1)
 
         cpprestsdk_repo_path = os.path.join(script_path, "third_party/cpprestsdk")
         if not apply_patch_safely("../custom_patch/cpprestsdk.patch", cpprestsdk_repo_path):

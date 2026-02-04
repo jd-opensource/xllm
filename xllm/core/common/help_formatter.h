@@ -74,8 +74,9 @@ const OptionCategory kMtpOptions = {
     "MTP OPTIONS",
     {"draft_model", "draft_devices", "num_speculative_tokens"}};
 
-const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
-                                            {"etcd_addr", "rank_tablefile"}};
+const OptionCategory kXllmServiceOptions = {
+    "XLLM-SERVICE OPTIONS",
+    {"etcd_addr", "offload_batch", "rank_tablefile"}};
 
 const OptionCategory kBeamSearchOptions = {
     "BEAM SEARCH OPTIONS",

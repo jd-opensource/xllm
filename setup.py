@@ -572,7 +572,7 @@ if __name__ == "__main__":
     print(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
     
     if not config['dry_run']:
-        pre_build(device)
+        pre_build()
 
     install_kernels = config['install_xllm_kernels']
     generate_so = config['generate_so']

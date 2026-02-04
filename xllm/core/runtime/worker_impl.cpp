@@ -692,14 +692,17 @@ int64_t WorkerImpl::get_active_activation_memory() {
 
 void WorkerImpl::init_hierarchy_kv_cache_transfer() {
   if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
+    CHECK(kv_caches_.size() > 0) << "kv_caches is not initialized.";
     HierarchyKVCacheTransfer::Options transfer_options;
     transfer_options
         .tp_rank(options_.dp_size() > 1
                      ? options_.node_rank() % options_.dp_size()
                      : options_.node_rank())
+        .tp_size(options_.world_size() / options_.dp_size())
         .layers(context_.get_model_args().n_layers())
         .host_blocks_factor(options_.host_blocks_factor())
         .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
+        .enable_mla(options_.enable_mla())
         .enable_kvcache_store(options_.enable_kvcache_store())
         .store_protocol(options_.store_protocol())
         .store_master_server_address(options_.store_master_server_address())
