@@ -268,7 +268,7 @@ std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(
 
   std::vector<HcclComm> comms(devices.size());
   const int32_t world_size = static_cast<int32_t>(devices.size());
-  // HCCLCHECK(HcclCommInitAll(world_size, device_idxs.data(),comms.data()));
+  HCCLCHECK(HcclCommInitAll(world_size, device_idxs.data(), comms.data()));
 
   std::vector<std::unique_ptr<ProcessGroup>> process_groups;
   process_groups.reserve(devices.size());

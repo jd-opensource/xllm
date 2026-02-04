@@ -20,6 +20,7 @@ limitations under the License.
 #include <sys/sysinfo.h>
 
 #include "core/common/metrics.h"
+#include "core/platform/device.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "runtime/worker.h"
@@ -33,10 +34,13 @@ DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {
 
   CHECK(!devices[0].is_cpu()) << "CPU device is not supported";
   const auto device_type = devices[0].type();
-  for (const auto device : devices) {
-    CHECK_EQ(device.type(), device_type)
+  for (size_t i = 0; i < devices.size(); ++i) {
+    CHECK(devices[i].type() == device_type)
         << "All devices should be the same type";
+    Device device(devices[i]);
+    device.set_device();
   }
+
   if (devices.size() > 1) {
     // create a process group for each device if there are multiple gpus
     process_groups_ = parallel_state::create_npu_process_groups(devices);

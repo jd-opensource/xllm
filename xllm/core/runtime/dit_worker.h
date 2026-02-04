@@ -23,6 +23,7 @@ limitations under the License.
 #include "dit_executor.h"
 #include "framework/dit_model_context.h"
 #include "framework/parallel_state/parallel_args.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "options.h"
 #include "platform/device.h"
 #include "util/threadpool.h"
@@ -40,7 +41,15 @@ class DiTWorker {
   // initialize model, cache manager. blocking call
   bool init_model(const std::string& model_weights_path);
 
+  folly::SemiFuture<bool> init_model_async(
+      const std::string& model_weights_path);
+
   std::optional<DiTForwardOutput> step(const DiTForwardInput& inputs);
+
+  folly::SemiFuture<std::optional<DiTForwardOutput>> step_async(
+      const DiTForwardInput& inputs);
+
+  void process_group_test();
 
   folly::SemiFuture<folly::Unit> process_group_test_async();
 

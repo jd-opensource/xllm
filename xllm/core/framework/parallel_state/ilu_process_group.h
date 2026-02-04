@@ -31,7 +31,7 @@ class ProcessGroupImpl : public ProcessGroup {
                    const std::string& host,
                    const std::string& group_name,
                    const torch::Device& device)
-      : ProcessGroup(device) {
+      : ProcessGroup(global_rank, world_size, device) {
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> pg_options =
         c10d::ProcessGroupNCCL::Options::create();
 #if TORCH_VERSION_MAJOR > 2 || \

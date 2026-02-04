@@ -30,6 +30,7 @@ limitations under the License.
 #include "common/types.h"
 #include "core/common/global_flags.h"
 #include "core/framework/dit_model_loader.h"
+#include "core/platform/device.h"
 #include "framework/dit_cache/dit_cache.h"
 #include "framework/state_dict/state_dict.h"
 #include "models/model_registry.h"
@@ -100,6 +101,17 @@ bool DiTWorker::init_model(const std::string& model_weights_path) {
   return true;
 }
 
+folly::SemiFuture<bool> DiTWorker::init_model_async(
+    const std::string& model_weights_path) {
+  auto promise = std::make_shared<folly::Promise<bool>>();
+  auto future = promise->getSemiFuture();
+  threadpool_.schedule([this, model_weights_path, promise]() mutable {
+    bool status = this->init_model(model_weights_path);
+    promise->setValue(status);
+  });
+  return future;
+}
+
 std::optional<DiTForwardOutput> DiTWorker::step(const DiTForwardInput& inputs) {
   Timer timer;
 
@@ -111,11 +123,33 @@ std::optional<DiTForwardOutput> DiTWorker::step(const DiTForwardInput& inputs) {
   return output;
 }
 
+folly::SemiFuture<std::optional<DiTForwardOutput>> DiTWorker::step_async(
+    const DiTForwardInput& inputs) {
+  auto promise =
+      std::make_shared<folly::Promise<std::optional<DiTForwardOutput>>>();
+  auto future = promise->getSemiFuture();
+  threadpool_.schedule([this, inputs, promise]() mutable {
+    auto output = this->step(inputs);
+    promise->setValue(output);
+  });
+  return future;
+}
+
+void DiTWorker::process_group_test() {
+  // create random tensors
+  const auto options = torch::dtype(torch::kHalf).device(device_);
+  torch::Tensor tensor = torch::randn({10, 10}, options);
+  // call allreduce
+  parallel_state::reduce(tensor, context_.get_parallel_args().process_group_);
+  // call allgather
+  parallel_state::gather(tensor, context_.get_parallel_args().process_group_);
+}
+
 folly::SemiFuture<folly::Unit> DiTWorker::process_group_test_async() {
   folly::Promise<folly::Unit> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this, promise = std::move(promise)]() mutable {
-    this->process_group_test_async();
+    this->process_group_test();
     promise.setValue();
   });
   return future;
