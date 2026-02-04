@@ -1,6 +1,6 @@
 
 ARG CUDA_VERSION=12.8.0
-ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu22.04
+ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu24.04
 
 FROM ${BASE_IMAGE}
 
@@ -13,7 +13,7 @@ ARG TORCH_VERSION=2.7.1
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0 10.0 12.0"
 
-ARG FLASHINFER_VERSION=0.3.1
+ARG FLASHINFER_VERSION=0.6.2
 ARG FLASHINFER_CUDA_ARCH_LIST="8.0 8.9 9.0a 10.0a 12.0a"
 
 ARG GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
@@ -60,17 +60,16 @@ RUN set -eux; \
       libwayland-dev libxrandr-dev libxinerama-dev libxcursor-dev libepoxy-dev libgtk-3-dev \
     libnuma-dev libibverbs-dev nasm software-properties-common; \
     add-apt-repository ppa:deadsnakes/ppa -y; \
-    apt-get update -y; \
-    apt-get install -y --no-install-recommends \
-    python${PYTHON_VERSION} \
-    python${PYTHON_VERSION}-dev \
-    python${PYTHON_VERSION}-venv \
-    libibverbs-dev; \
-    rm -rf /var/lib/apt/lists/*; \
+    apt install -y --no-install-recommends python${PYTHON_VERSION}-full python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv; \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1; \
     update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1; \
+    update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION}; \
     update-alternatives --set python /usr/bin/python${PYTHON_VERSION}; \
     ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config; \
-    curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
+    rm -rf /var/lib/apt/lists/*; \
+    wget -q https://bootstrap.pypa.io/get-pip.py && python get-pip.py --break-system-packages && rm get-pip.py; \
+    # Allow pip to install packages globally (PEP 668 workaround for Ubuntu 24.04)
+    python -m pip config set global.break-system-packages true; \
     python --version && pip --version; \
     apt-get clean
 
@@ -143,10 +142,10 @@ RUN set -eux; \
     uv venv --python ${PYTHON_VERSION} && source .venv/bin/activate; \
     uv pip install -v .; \
     uv pip install "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}"; \
-    uv pip install "cuda-python==${CUDA_VERSION}" setuptools pillow; \
+    uv pip install "cuda-python==${CUDA_VERSION}"; \
     python -m flashinfer.aot; \
     deactivate; \
-    mv /workspace/flashinfer/aot-ops /flashinfer_ops; \
+    ln -sf /root/.cache/flashinfer/${FLASHINFER_VERSION}/*/cached_ops /flashinfer_ops; \
     rm -rf /workspace/flashinfer
 
 ENV FLASHINFER_OPS_PATH=/flashinfer_ops
