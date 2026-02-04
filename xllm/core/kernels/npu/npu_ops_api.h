@@ -45,6 +45,18 @@ void batch_decode(const torch::Tensor& query,
                   const torch::Tensor& seq_lens,
                   torch::Tensor& output);
 
+// Custom batch decode for ACL graph execution
+// This variant uses CustomPagedAttention to avoid .to(kCPU) operations
+// that break ACL graph capture
+void batch_decode_acl_graph(const torch::Tensor& query,
+                            const torch::Tensor& k_cache,
+                            const torch::Tensor& v_cache,
+                            float scale,
+                            const torch::Tensor& block_table,
+                            const torch::Tensor& seq_lens,
+                            const torch::Tensor& tiling_data,
+                            torch::Tensor& output);
+
 torch::Tensor matmul(const torch::Tensor& a,
                      const torch::Tensor& b,
                      const std::optional<torch::Tensor>& bias);

@@ -51,9 +51,24 @@ AttentionMetadata AttentionMetadataBuilder::build(
   // for npu
   if (attn_mask.has_value()) {
     attn_metadata.attn_mask = attn_mask.value();
-    // FIXME: The .to(kCPU) operation breaks ACL graph execution. The attention
-    // operator needs to be updated to handle this.
-    attn_metadata.kv_seq_lens_host = params.kv_seq_lens.to(torch::kCPU);
+  }
+  // Determine if we should use ACL graph mode:
+  // - FLAGS_enable_graph must be enabled
+  // - Must be decode phase (not prefill)
+  // - tiling_data must be available
+  bool is_decode = !params.batch_forward_type.is_prefill() &&
+                   !params.batch_forward_type.is_mixed() &&
+                   !params.batch_forward_type.is_chunked_prefill();
+  bool use_acl_graph = FLAGS_enable_graph && is_decode &&
+                       params.graph_buffer.tiling_data.defined();
+  if (use_acl_graph) {
+    // ACL graph mode: use CustomPagedAttention with tiling_data on device
+    attn_metadata.paged_attention_tiling_data = params.graph_buffer.tiling_data;
+  }
+  // Provide host seq_lens for NPU kernels (required by CustomPagedAttention).
+  if (!params.kv_seq_lens_vec.empty()) {
+    attn_metadata.kv_seq_lens_host =
+        torch::tensor(params.kv_seq_lens_vec, torch::kInt);
   }
 #endif
   attn_metadata.is_chunked_prefill =
@@ -62,7 +77,12 @@ AttentionMetadata AttentionMetadataBuilder::build(
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
   if (!attn_metadata.is_prefill || FLAGS_enable_mla) {
     attn_metadata.block_table = params.block_tables;
+#if defined(USE_NPU)
+    // NPU path uses per-sequence lengths (not cumulative), so no diff.
+    attn_metadata.kv_seq_lens = params.kv_seq_lens;
+#else
     attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
+#endif
   }
 
   attn_metadata.is_dummy = (params.q_max_seq_len == 0);

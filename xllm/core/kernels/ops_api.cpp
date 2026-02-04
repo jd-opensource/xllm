@@ -253,13 +253,28 @@ void batch_decode(AttentionParams& params) {
                     params.return_lse,
                     params.kv_cache_quant_bit_size);
 #elif defined(USE_NPU)
-  npu::batch_decode(params.query,
-                    params.k_cache,
-                    params.v_cache.value_or(torch::Tensor()),
-                    params.scale,
-                    params.attn_metadata.block_table,
-                    params.seq_lens,
-                    params.output);
+  if (params.attn_metadata.paged_attention_tiling_data.defined()) {
+    // Use CustomPagedAttention for ACL graph mode to avoid .to(kCPU) operations
+
+    npu::batch_decode_acl_graph(
+        params.query,
+        params.k_cache,
+        params.v_cache.value_or(torch::Tensor()),
+        params.scale,
+        params.attn_metadata.block_table,
+        params.seq_lens,
+        params.attn_metadata.paged_attention_tiling_data,
+        params.output);
+  } else {
+    // Standard PagedAttention path
+    npu::batch_decode(params.query,
+                      params.k_cache,
+                      params.v_cache.value_or(torch::Tensor()),
+                      params.scale,
+                      params.attn_metadata.block_table,
+                      params.seq_lens,
+                      params.output);
+  }
 #elif defined(USE_CUDA)
   cuda::batch_decode(params.attn_metadata.plan_info->uri,
                      params.attn_metadata.plan_info->plan_info,
