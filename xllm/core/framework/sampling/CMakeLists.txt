@@ -19,6 +19,7 @@ cc_library(
     beam_searcher.cpp
     rec_constrained_decoding.cpp
   DEPS
+    :state_dict
     :common
     glog::glog
     torch
