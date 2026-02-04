@@ -19,7 +19,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
-#include "platform/vmm_api.h"
+#include "platform/vmm/vmm_api.h"
 
 namespace xllm {
 // for all sequences

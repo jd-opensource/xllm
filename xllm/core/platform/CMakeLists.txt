@@ -6,13 +6,21 @@ cc_library(
   HDRS
     stream.h
     device.h
-    vmm_api.h
+    vmm/submitter/common.h
+    vmm/submitter/manager.h
+    vmm/submitter/submitter.h
+    vmm/submitter/worker.h
+    vmm/vmm_api.h
   SRCS
     stream.cpp
     device.cpp
-    vmm_api.cpp
+    vmm/submitter/manager.cpp
+    vmm/submitter/submitter.cpp
+    vmm/submitter/worker.cpp
+    vmm/vmm_api.cpp
   DEPS
     torch
+    Folly::folly
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ascendcl>
     $<$<BOOL:${USE_MLU}>:torch_mlu>
