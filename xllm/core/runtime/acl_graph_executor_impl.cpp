@@ -61,7 +61,8 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
       need_update_attn_mask_(need_update_attn_mask) {
   // Determine whether attention plan needs to be updated based on model type
   // Future logic can be extended here for more complex model-specific behavior
-  need_update_attention_plan_ = (args.model_type() != "deepseek_v32");
+  need_update_attention_plan_ =
+      (args.model_type() != "deepseek_v32" && args.model_type() != "glm5_moe");
 
   // Use max_tokens_per_batch for first dimension size
   // num_decode_tokens
