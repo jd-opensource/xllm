@@ -15,8 +15,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "worker.h"
-#include "submitter.h"
+#include "vmm_worker.h"
+#include "vmm_submitter.h"
 
 namespace xllm {
 namespace vmm {

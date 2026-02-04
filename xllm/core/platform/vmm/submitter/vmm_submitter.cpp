@@ -13,15 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "submitter.h"
+#include "vmm_submitter.h"
 
 #include <chrono>
 #include <thread>
 
 #include <glog/logging.h>
 
-#include "manager.h"
-#include "worker.h"
+#include "vmm_manager.h"
+#include "vmm_worker.h"
 
 namespace xllm {
 namespace vmm {

@@ -7,16 +7,16 @@ cc_library(
     stream.h
     device.h
     vmm/submitter/common.h
-    vmm/submitter/manager.h
-    vmm/submitter/submitter.h
-    vmm/submitter/worker.h
+    vmm/submitter/vmm_manager.h
+    vmm/submitter/vmm_submitter.h
+    vmm/submitter/vmm_worker.h
     vmm/vmm_api.h
   SRCS
     stream.cpp
     device.cpp
-    vmm/submitter/manager.cpp
-    vmm/submitter/submitter.cpp
-    vmm/submitter/worker.cpp
+    vmm/submitter/vmm_manager.cpp
+    vmm/submitter/vmm_submitter.cpp
+    vmm/submitter/vmm_worker.cpp
     vmm/vmm_api.cpp
   DEPS
     torch
