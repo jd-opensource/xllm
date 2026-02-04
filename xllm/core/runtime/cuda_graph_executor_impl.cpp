@@ -325,6 +325,10 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     // Update plan_info
     // Note: plan_info is only updated at layer 0, so we set layer_id to 0
     attn_metadata->plan_info->layer_id = 0;
+    CHECK_EQ(dtype, torch::ScalarType::BFloat16)
+        << "only support bf16 kvcache for now";
+    bool use_tensor_core =
+        xllm::kernel::cuda::should_use_tensor_core(dtype, n_heads, n_kv_heads);
 
     layer::flashinfer::update_plan_info(
         attn_metadata->plan_info,
@@ -340,9 +344,8 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         static_cast<int32_t>(block_size),  // block_size
         sliding_window,                    // window_size_left
         /*enable_cuda_graph=*/true,
-        causal,                     // causal
-        /*use_tensor_core=*/true);  // let use_tensor_core=true temporarily
-                                    // until we refactor flashinfer API
+        causal,  // causal
+        use_tensor_core);
   }
 
   // Return ModelInputParams with persistent buffer references if requested

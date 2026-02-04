@@ -44,6 +44,10 @@ torch::Tensor get_cache_buffer(const int32_t seq_len,
   AT_DISPATCH_SWITCH(TYPE, NAME, DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
 // NOLINTEND(cppcoreguidelines-macro-usage)
 
+bool should_use_tensor_core(torch::ScalarType kv_cache_dtype,
+                            int64_t num_attention_heads,
+                            int64_t num_kv_heads);
+
 bool support_pdl();
 
 std::string path_to_uri_so_lib(const std::string& uri);

@@ -219,6 +219,26 @@ T* to_dlpack_impl(const torch::Tensor& src) {
 
 namespace xllm::kernel::cuda {
 
+bool should_use_tensor_core(torch::ScalarType kv_cache_dtype,
+                            int64_t num_attention_heads,
+                            int64_t num_kv_heads) {
+  // Calculate GQA group size
+  int64_t gqa_group_size = num_attention_heads / num_kv_heads;
+
+  // For Flashinfer, a GQA group size of at least 4 is needed to efficiently
+  // use Tensor Core for decode phase, as it fuses the head group with the token
+  // dimension in MMA.
+  if (kv_cache_dtype == torch::ScalarType::Float8_e4m3fn ||
+      kv_cache_dtype == torch::ScalarType::Float8_e5m2) {
+    return true;
+  } else if (kv_cache_dtype == torch::ScalarType::Half ||
+             kv_cache_dtype == torch::ScalarType::BFloat16) {
+    return gqa_group_size >= 4;
+  }
+
+  return false;
+}
+
 bool support_pdl() { return Device::is_enable_pdl(); }
 
 std::string path_to_uri_so_lib(const std::string& uri) {
