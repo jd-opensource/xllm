@@ -101,7 +101,7 @@ bool VMMWorker::step_deferred() {
 }
 
 void VMMWorker::schedule(int32_t max_ops) {
-    int ops_done = 0;
+    int32_t ops_done = 0;
     
     while (ops_done < max_ops) {
         if (step_current() || step_deferred()) {

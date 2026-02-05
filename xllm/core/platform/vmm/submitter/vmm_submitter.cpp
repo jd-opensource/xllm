@@ -26,7 +26,7 @@ limitations under the License.
 namespace xllm {
 namespace vmm {
 
-VMMSubmitter::VMMSubmitter(int device_id)
+VMMSubmitter::VMMSubmitter(int32_t device_id)
     : device_id_(device_id) {
 
     connect(device_id);
