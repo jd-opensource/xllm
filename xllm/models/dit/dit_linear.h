@@ -23,7 +23,11 @@ namespace F = torch::nn::functional;
 
 class DiTLinearImpl : public torch::nn::Module {
  public:
-  DiTLinearImpl(int64_t in, int64_t out, bool with_bias = true) {
+  DiTLinearImpl(int64_t in,
+                int64_t out,
+                bool with_bias = true,
+                bool fused = true)
+      : fused_(fused) {
     weight = register_parameter("weight", torch::empty({out, in}));
     if (with_bias) {
       bias = register_parameter("bias", torch::empty(out));
@@ -33,11 +37,34 @@ class DiTLinearImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(const torch::Tensor& x) {
-    return F::linear(x, weight, bias);
+    // use addmm when bias is provided
+    if (bias.defined() && fused_) {
+      auto sizes = x.sizes();
+      if (sizes.size() == 3) {
+        torch::Tensor x_;
+        x_ = x.reshape({sizes[0] * sizes[1], sizes[2]});
+        return torch::addmm(bias, x_, weight, 1, 1)
+            .reshape({sizes[0], sizes[1], weight.size(1)});
+      } else {
+        return torch::addmm(bias, x, weight, 1, 1);
+      }
+    } else {
+      return F::linear(x, weight, bias);
+    }
   }
 
   void load_state_dict(const StateDict& state_dict) {
-    weight::load_weight(state_dict, "weight", weight, weight_is_loaded_);
+    // only transpoes weights when state_dict has the key
+    // or it would be transposed multiple times when having
+    // multiple state dicts
+    if (state_dict.has("weight")) {
+      weight::load_weight(state_dict, "weight", weight, weight_is_loaded_);
+      // weight need to be transposed when using addmm
+      if (bias.defined() && fused_) {
+        torch::Tensor transposed = weight.data().transpose(0, 1).contiguous();
+        weight.set_data(transposed);
+      }
+    }
     if (bias.defined()) {
       weight::load_weight(state_dict, "bias", bias, bias_is_loaded_);
     }
@@ -64,6 +91,7 @@ class DiTLinearImpl : public torch::nn::Module {
  private:
   bool weight_is_loaded_{false};
   bool bias_is_loaded_{false};
+  bool fused_;
 };
 
 TORCH_MODULE(DiTLinear);
