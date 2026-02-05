@@ -41,7 +41,9 @@ struct DiTGenerationParams {
            num_images_per_prompt == other.num_images_per_prompt &&
            seed == other.seed &&
            max_sequence_length == other.max_sequence_length &&
-           strength == other.strength;
+           strength == other.strength &&
+           prompt_embeds_scale == other.prompt_embeds_scale &&
+           pooled_prompt_embeds_scale == other.pooled_prompt_embeds_scale;
   }
 
   bool operator!=(const DiTGenerationParams& other) const {
@@ -65,6 +67,10 @@ struct DiTGenerationParams {
   int32_t max_sequence_length = 512;
 
   float strength = 1.0;
+
+  float prompt_embeds_scale = 1.0;
+
+  float pooled_prompt_embeds_scale = 1.0;
 };
 
 struct DiTInputParams {
