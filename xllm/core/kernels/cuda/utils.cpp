@@ -248,7 +248,14 @@ std::string path_to_uri_so_lib(const std::string& uri) {
 
 std::string determine_attention_backend(int64_t pos_encoding_mode,
                                         bool use_fp16_qk_reduction,
-                                        bool use_custom_mask) {
+                                        bool use_custom_mask,
+                                        bool causal) {
+  // NOTE: we only support "fa2" backend for non-causal (e.g.
+  // BatchPrefillWithPagedKvcacheKernel) for flashinfer v0.6.2, because it would
+  // cause performance degradation if using "fa3" backend.
+  if (!causal) {
+    return "fa2";
+  }
   bool support_fa3_backend =
       (pos_encoding_mode == 0) && !use_fp16_qk_reduction && !use_custom_mask;
 

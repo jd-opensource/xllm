@@ -67,11 +67,11 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> XAttentionImpl::forward(
     bool causal = attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
     flashinfer::update_plan_info(
         attn_metadata.plan_info,
-        causal ? xllm::kernel::cuda::determine_attention_backend(
-                     /*pos_encoding_mode=*/0,
-                     /*use_fp16_qk_reduction=*/false,
-                     /*use_custom_mask=*/false)
-               : "fa2",
+        xllm::kernel::cuda::determine_attention_backend(
+            /*pos_encoding_mode=*/0,
+            /*use_fp16_qk_reduction=*/false,
+            /*use_custom_mask=*/false,
+            /*causal=*/causal),
         attn_metadata,
         query.scalar_type(),
         key.scalar_type(),

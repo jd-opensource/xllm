@@ -454,11 +454,13 @@ class TestUT(Command):
     def run(self) -> None:
         self.run_ctest(get_cmake_dir())
 
-class BuildTest(Command):
+class SingleTest(Command):
     """Command to build and run a single test"""
     description = "Build and run a single test target."
+    # test_name should match a CMake/CTest target name, for example:
+    #   python setup.py test --test-name common_test
     user_options = [
-        ("test-name=", None, "name of the test target to build and run"),
+        ("test-name=", None, "name of the test target to build and run (e.g. platform_vmm_test)"),
         ("device=", None, "target device type (a3 or a2 or mlu or cuda or ilu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("install-xllm-kernels=", None, "install xllm_kernels RPM package (true/false)"),
@@ -474,7 +476,7 @@ class BuildTest(Command):
 
     def finalize_options(self) -> None:
         if not self.test_name:
-            raise ValueError("--test-name is required for build_test command")
+            raise ValueError("--test-name is required for single_test command")
 
     def run(self) -> None:
         # Create ExtBuildSingleTest instance and set parameters
@@ -542,7 +544,7 @@ def parse_arguments() -> dict[str, Any]:
         '--test-name',
         type=str,
         default=None,
-        help='Name of the test target to build and run (for build_test command)'
+        help='Name of the test target to build and run; when omitted, all tests run'
     )
 
     args = parser.parse_args()
@@ -586,6 +588,28 @@ if __name__ == "__main__":
     # check and install git pre-commit
     check_and_install_pre_commit()
 
+    test_cmd = SingleTest if test_name else TestUT
+    options = {
+        'build_ext': {
+            'device': device,
+            'arch': arch,
+            'install_xllm_kernels': install_kernels,
+            'generate_so': generate_so
+        },
+        'bdist_wheel': {
+            'device': device,
+            'arch': arch,
+        }
+    }
+    if test_name:
+        options['test'] = {
+            'device': device,
+            'arch': arch,
+            'install_xllm_kernels': install_kernels,
+            'generate_so': generate_so,
+            'test_name': test_name,
+        }
+
     setup(
         name="xllm",
         version=version,
@@ -615,27 +639,9 @@ if __name__ == "__main__":
         ],
         ext_modules=[CMakeExtension("xllm", "xllm/")],
         cmdclass={"build_ext": ExtBuild,
-                  "test": TestUT,
-                  "build_test": BuildTest,
+                  "test": test_cmd,
                   'bdist_wheel': BuildDistWheel},
-        options={'build_ext': {
-                    'device': device,
-                    'arch': arch,
-                    'install_xllm_kernels': install_kernels,
-                    'generate_so': generate_so
-                    },
-                 'build_test': {
-                    'device': device,
-                    'arch': arch,
-                    'install_xllm_kernels': install_kernels,
-                    'generate_so': generate_so,
-                    'test_name': test_name,
-                    },
-                 'bdist_wheel': {
-                    'device': device,
-                    'arch': arch,
-                    }
-                },
+        options=options,
         zip_safe=False,
         py_modules=["xllm/launch_xllm", "xllm/__init__",
                     "xllm/pybind/llm", "xllm/pybind/vlm",

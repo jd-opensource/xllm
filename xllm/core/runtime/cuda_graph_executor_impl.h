@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <absl/container/flat_hash_map.h>
 #include <c10/cuda/CUDAStream.h>
@@ -195,7 +196,7 @@ class CudaGraphPersistentParam {
 class CudaGraph {
  public:
   explicit CudaGraph(CudaGraphPersistentParam& persistent_param,
-                     c10::DeviceIndex device_index)
+                     at::DeviceIndex device_index)
       : persistent_param_(persistent_param), device_index_(device_index) {
     // Initialize capture stream in constructor
     initialize_capture_stream(device_index);
@@ -210,7 +211,7 @@ class CudaGraph {
                const ModelInputParams& params,
                std::vector<KVCache>& kv_cache,
                uint32_t bucket_num_tokens,
-               const decltype(at::cuda::graph_pool_handle())& pool);
+               const at::cuda::MempoolId_t& pool);
 
   // Replay captured graph with new input data
   ModelOutput replay(const torch::Tensor& tokens,
@@ -228,7 +229,7 @@ class CudaGraph {
   void print_graph_tensors() const;
 
   // Initialize capture stream if not already initialized
-  void initialize_capture_stream(c10::DeviceIndex device_index);
+  void initialize_capture_stream(at::DeviceIndex device_index);
 
   // CUDA graph for capturing and replaying
   at::cuda::CUDAGraph graph_;
@@ -239,8 +240,8 @@ class CudaGraph {
   CudaGraphPersistentParam& persistent_param_;
 
   // Cached capture stream, initialized on first capture
-  std::optional<c10::cuda::CUDAStream> capture_stream_;
-  c10::DeviceIndex device_index_;
+  std::optional<at::cuda::CUDAStream> capture_stream_;
+  at::DeviceIndex device_index_;
 };
 
 // Executor implementation using CUDA graph optimization
@@ -276,7 +277,7 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   std::unique_ptr<CudaGraphPersistentParam> persistent_param_;
 
   // CUDA graph memory pool shared across all CudaGraph instances
-  decltype(at::cuda::graph_pool_handle()) graph_pool_;
+  at::cuda::MempoolId_t graph_pool_;
 
   // Get bucket num_tokens for given num_tokens
   // For num_tokens < 8: use 1, 2, 4, 8

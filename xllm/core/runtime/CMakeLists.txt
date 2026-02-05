@@ -136,3 +136,21 @@ cc_test(
     torch_mlu
 )
 endif()
+
+if(USE_CUDA)
+cc_test(
+  NAME
+    cuda_graph_executor_test
+  SRCS
+    cuda_graph_executor_test.cpp
+  DEPS
+    :runtime
+    :cuda_layers
+    :batch
+    :block
+    :kv_cache
+    :kernels
+    GTest::gtest_main
+    torch
+)
+endif()

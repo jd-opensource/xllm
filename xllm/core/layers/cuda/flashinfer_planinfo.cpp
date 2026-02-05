@@ -77,6 +77,10 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
   CHECK(plan_info->layer_id != -1) << "Need to set layer_id to PlanInfo.";
   if (plan_info->layer_id != 0) return;
 
+  const auto device =
+      FlashinferWorkspace::get_instance().get_float_workspace_buffer().device();
+  bind_tvmffi_stream_to_current_torch_stream(device);
+
   VLOG(kGraphExecutorLogVerboseLevel)
       << "update_plan_info: layer_id=" << plan_info->layer_id
       << ", enable_cuda_graph=" << enable_cuda_graph;

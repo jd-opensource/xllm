@@ -64,7 +64,8 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
   std::string backend = xllm::kernel::cuda::determine_attention_backend(
       /*pos_encoding_mode=*/0,
       /*use_fp16_qk_reduction=*/false,
-      /*use_custom_mask=*/false);
+      /*use_custom_mask=*/false,
+      /*causal=*/causal);
 
   // NOTE: we only support "fa2" backend for BatchPrefillWithPagedKvcacheKernel
   // for flashinfer v0.6.2, because it would cause performance degradation if

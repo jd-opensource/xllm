@@ -105,6 +105,7 @@ DEFINE_bool(enable_graph_no_padding,
             "Whether to enable graph execution for decode phase without "
             "padding. If true, graph will be caputured with every actual num "
             "tokens, as stride is 1.");
+
 // --- vlm config ---
 
 DEFINE_int32(limit_image_per_prompt,

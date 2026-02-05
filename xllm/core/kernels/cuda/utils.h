@@ -16,9 +16,12 @@ limitations under the License.
 #pragma once
 
 #include <ATen/DynamicLibrary.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <glog/logging.h>
 #include <torch/torch.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/optional.h>
 
@@ -54,7 +57,8 @@ std::string path_to_uri_so_lib(const std::string& uri);
 
 std::string determine_attention_backend(int64_t pos_encoding_mode,
                                         bool use_fp16_qk_reduction,
-                                        bool use_custom_mask);
+                                        bool use_custom_mask,
+                                        bool causal);
 
 std::string get_batch_prefill_uri(const std::string& backend,
                                   torch::ScalarType dtype_q,
@@ -86,4 +90,20 @@ ffi::Module get_module(const std::string& uri);
 
 ffi::Function get_function(const std::string& uri,
                            const std::string& func_name);
+
+inline void bind_tvmffi_stream_to_current_torch_stream(
+    const torch::Device& device) {
+  const auto cur = c10::cuda::getCurrentCUDAStream(device.index());
+  // DLPack device type for CUDA is 2 (kDLCUDA).
+  void* original_stream = nullptr;
+  const int rc = TVMFFIEnvSetStream(
+      /*device_type=*/2,
+      /*device_id=*/device.index(),
+      reinterpret_cast<void*>(cur.stream()),
+      &original_stream);
+  if (rc != 0) {
+    LOG(WARNING) << "[tvmffi.stream] failed to set stream, rc=" << rc
+                 << " dev=" << device.index();
+  }
+}
 }  // namespace xllm::kernel::cuda

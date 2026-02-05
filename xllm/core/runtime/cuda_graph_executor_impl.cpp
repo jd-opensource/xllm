@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <c10/core/Device.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 
@@ -170,6 +171,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   std::shared_ptr<layer::AttentionMetadata> attn_metadata =
       std::make_shared<layer::AttentionMetadata>(
           layer::AttentionMetadataBuilder::build(params));
+  CHECK(attn_metadata) << "attn_metadata should not be null";
   attn_metadata->enable_cuda_graph = true;
 
   const uint32_t actual_num_tokens = tokens.size(0);
@@ -295,8 +297,10 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   // plan_info calculation
   attn_metadata->paged_kv_indptr =
       persistent_paged_kv_indptr(actual_batch_size);
-  attn_metadata->paged_kv_indices =
-      persistent_paged_kv_indices(actual_indices_size);
+  // Match FlashInfer's CUDAGraph wrapper behavior: always pass the full
+  // pre-allocated indices buffer and use indptr to delimit valid range.
+  // This keeps kernel arguments stable across replays.
+  attn_metadata->paged_kv_indices = persistent_paged_kv_indices_;
   attn_metadata->paged_kv_last_page_len =
       persistent_paged_kv_last_page_len(actual_batch_size);
   // qo_indptr is q_cu_seq_lens in GPU Model.
@@ -328,13 +332,11 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     constexpr bool causal = false;
 
     // Determine backend
-    // const std::string backend =
-    //     causal ? xllm::kernel::cuda::determine_attention_backend(
-    //                  /*pos_encoding_mode=*/0,
-    //                  /*use_fp16_qk_reduction=*/false,
-    //                  /*use_custom_mask=*/false)
-    //            : "fa2";
-    const static std::string backend = "fa2";
+    const std::string backend = xllm::kernel::cuda::determine_attention_backend(
+        /*pos_encoding_mode=*/0,
+        /*use_fp16_qk_reduction=*/false,
+        /*use_custom_mask=*/false,
+        /*causal=*/causal);
 
     // Update plan_info
     // Note: plan_info is only updated at layer 0, so we set layer_id to 0
@@ -378,7 +380,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   return std::nullopt;
 }
 
-void CudaGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
+void CudaGraph::initialize_capture_stream(torch::DeviceIndex device_index) {
   // Get a secondary stream from high-priority pool for graph capture.
   // This is required because CUDA graphs must be captured on a non-default
   // stream. Use xllm's Device interface to get stream, but we need high
@@ -386,7 +388,8 @@ void CudaGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   // uses internally) Note: Stream class doesn't expose a getter for CUDAStream,
   // and Device::get_stream_from_pool doesn't support high priority, so we use
   // the underlying API that Stream uses internally.
-  capture_stream_ = c10::cuda::getStreamFromPool(true, device_index);
+  capture_stream_ =
+      at::cuda::getStreamFromPool(/*isHighPriority=*/true, device_index);
   device_index_ = device_index;
   LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
             << ", device_index: " << device_index;
@@ -401,7 +404,7 @@ bool CudaGraph::capture(CausalLM* model,
                         const ModelInputParams& params,
                         std::vector<KVCache>& kv_cache,
                         uint32_t bucket_num_tokens,
-                        const decltype(at::cuda::graph_pool_handle())& pool) {
+                        const at::cuda::MempoolId_t& pool) {
   padded_num_tokens_ = bucket_num_tokens;
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_GE(padded_num_tokens_, actual_num_tokens)
@@ -418,8 +421,22 @@ bool CudaGraph::capture(CausalLM* model,
             device_index_);
     capture_lock_guard.emplace(capture_lock);
   }
+  // Use the returned ModelInputParams for graph capture
+  // Always use capture stream for plan/update + capture + forward.
+  CHECK(capture_stream_.has_value()) << "capture_stream_ must be initialized";
+  at::cuda::CUDAStream original_stream =
+      at::cuda::getCurrentCUDAStream(device_index_);
+  at::cuda::CUDAStream capture_stream = capture_stream_.value();
+  if (original_stream != capture_stream) {
+    original_stream.synchronize();
+    capture_stream.synchronize();
+  }
+  at::cuda::CUDAStreamGuard stream_guard(capture_stream);
 
-  // Update persistent parameters with input data before capture
+  // auto& tensor_options = model->options();
+
+  // Update persistent parameters with input data before capture (includes
+  // FlashInfer plan/update).
   const torch::Tensor& k_cache = kv_cache[0].get_k_cache();
   const torch::Tensor& v_cache = kv_cache[0].get_v_cache();
   auto graph_params_opt =
@@ -439,19 +456,6 @@ bool CudaGraph::capture(CausalLM* model,
   LOG(INFO) << "CUDA graph capture begin, bucket_num_tokens: "
             << bucket_num_tokens
             << ", actual_num_tokens: " << actual_num_tokens;
-
-  // Use cached capture stream for graph capture
-  // capture_stream_ is initialized in constructor
-  bool need_restore_stream = false;
-
-  // Check if current stream is default stream, if so switch to capture stream
-  if (c10::cuda::getCurrentCUDAStream(device_index_) ==
-      c10::cuda::getDefaultCUDAStream(device_index_)) {
-    c10::cuda::getCurrentCUDAStream(device_index_).synchronize();
-    c10::cuda::setCurrentCUDAStream(capture_stream_.value());
-    capture_stream_.value().synchronize();
-    need_restore_stream = true;
-  }
 
   // Begin graph capture (capture_mode defaults to cudaStreamCaptureModeGlobal)
   // Use shared pool passed from executor
@@ -475,16 +479,12 @@ bool CudaGraph::capture(CausalLM* model,
   // End graph capture
   graph_.capture_end();
 
-  // Restore stream if we switched it
+  // Synchronize to ensure graph capture is completed.
+  capture_stream.synchronize();
+  stream_guard.~CUDAStreamGuard();
 
-  if (need_restore_stream) {
-    c10::cuda::setCurrentCUDAStream(
-        c10::cuda::getDefaultCUDAStream(device_index_));
-  }
-
-  // Synchronize and test replay to verify graph capture
-  torch::cuda::synchronize();
-
+  // Replay graph to get hidden states from graph, because in the capture phase,
+  // the kernel is just recorded, not executed.
   graph_.replay();
 
   LOG(INFO) << "CUDA graph capture end, bucket_num_tokens: "
@@ -646,7 +646,6 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
     }
     return ModelOutput(hidden_states);
   }
-
   // Fallback to eager mode if capture fails
   LOG(ERROR) << "Failed to capture CUDA graph for bucket num_tokens: "
              << bucket_num_tokens;
