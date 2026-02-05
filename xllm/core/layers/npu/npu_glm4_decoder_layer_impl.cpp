@@ -158,7 +158,7 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
                               FLAGS_communication_backend};
   param.linearHasBias = {true, false, false, false};
   param.useQKNorm = false;
-
+  param.enableAclGraphPagedAttention = FLAGS_enable_graph && !isPrefill;
   param.numHiddenLayers = args.n_layers();
   param.usePostSelfAttnLayerNorm = true;
   param.usePostMlpLayerNorm = true;
@@ -371,12 +371,20 @@ void NpuGlm4DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+  size_t input_idx = WEIGHT_COUNT_PER_LAYER + 11;
   if (is_prefill &&
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
+    node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
+    node.variantPack.inTensors.at(input_idx - 1).hostData =
         input_params.q_seq_lens_vec.data();
+  }
+
+  if (FLAGS_enable_graph && !is_prefill &&
+      input_params.graph_buffer.tiling_data.defined()) {
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.graph_buffer.tiling_data);
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
