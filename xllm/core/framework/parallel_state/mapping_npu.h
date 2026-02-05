@@ -48,7 +48,7 @@ struct ParallelInfo {
         buffer_size_(other.buffer_size()),
         backend_(other.backend()) {};
 
-  nlohmann::json to_json() {
+  nlohmann::json to_json(int32_t buffer_offset = 0) {
     nlohmann::json data;
     data["group_size"] = group_size_;
     // data["num_group"] = num_group_;
@@ -56,7 +56,7 @@ struct ParallelInfo {
     data["groupId"] = current_group_id_;
     data["rank"] = rank_;
     // data["domain"] = domain_;
-    data["bufferSize"] = buffer_size_;
+    data["bufferSize"] = buffer_size_ + buffer_offset;
     data["backend"] = backend_;
     return data;
   }
@@ -130,6 +130,11 @@ class MappingNPU final {
   nlohmann::json to_json();
 
  private:
+  // HACK: Static counter for auto-assigning buffer_offset in multi-model
+  // scenarios. Increments for each MappingNPU instance. This is a hack and
+  // should be refactored later.
+  static int32_t s_buffer_offset_counter_;
+  int32_t buffer_offset_ = 0;
   Options options_;
   std::string rank_table_file_;
   int32_t num_nodes_;

@@ -223,6 +223,7 @@ class WorkerImpl {
   Device device_;
 
   std::unique_ptr<Stream> prepare_stream_;
+  std::unique_ptr<Stream> compute_stream_;
 
   // parallel args of current instance
   ParallelArgs parallel_args_;

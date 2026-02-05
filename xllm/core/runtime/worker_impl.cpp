@@ -84,6 +84,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   device_.init_device_context();
   threadpool_.schedule([this]() mutable { device_.set_device(); });
   prepare_stream_ = device_.get_stream_from_pool();
+  compute_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
 
 #if defined(USE_NPU)
@@ -540,7 +541,6 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
     }
 
-    // c10::StreamGuard streamGuard = this->compute_stream_->set_stream_guard();
     // run the model on the given input in working thread
     if (!enable_schedule_overlap()) {
       const auto output = this->step(input);
