@@ -51,8 +51,6 @@ DEFINE_int32(max_concurrent_requests,
              "Maximum number of concurrent requests the xllm service can "
              "handle. If set to 0, there is no limit.");
 
-BRPC_VALIDATE_GFLAG(max_concurrent_requests, brpc::NonNegativeInteger);
-
 // --- model config ---
 
 DEFINE_string(model_id, "", "hf model name.");
