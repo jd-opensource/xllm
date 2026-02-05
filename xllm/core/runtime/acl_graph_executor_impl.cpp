@@ -90,14 +90,13 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // Create persistent tensors with max_tokens_per_batch as first dimension
   persistent_tokens_ = torch::zeros({max_tokens_per_batch},
                                     torch::dtype(torch::kInt).device(device));
-  // mRoPE positions have shape [3, num_tokens], regular positions have shape
-  // [num_tokens]
-  if (use_mrope_) {
-    persistent_positions_ = torch::zeros(
-        {3, max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
-  } else {
+  if (args.rope_scaling_mrope_section().empty()) {
     persistent_positions_ = torch::zeros(
         {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  } else {
+    persistent_positions_ = torch::zeros(
+        {3, max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+    use_mrope_ = true;
   }
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
@@ -320,6 +319,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                                /*start=*/0,
                                /*end=*/actual_batch_size);
     }
+
     return params_for_capture;
   }
   return std::nullopt;

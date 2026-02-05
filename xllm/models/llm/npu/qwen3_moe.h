@@ -255,11 +255,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
           // idx_first_half: [offset, offset+3, offset+6, ... < mrop_length]
           // idx_second_half: [mrop_length+offset, mrop_length+offset+3,
           //     mrop_length+offset+6, ... < 2*mrop_length]
-          auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
+          torch::TensorOptions options =
+              torch::TensorOptions().dtype(torch::kLong).device(x.device());
+          auto idx_first_half = torch::arange(offset, length, 3, options);
           auto idx_second_half = torch::arange(
-              offset + mrop_length, length + mrop_length, 3, torch::kLong);
-          auto idx_tensor =
-              torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
+              offset + mrop_length, length + mrop_length, 3, options);
+          auto idx_tensor = torch::cat({idx_first_half, idx_second_half}, 0);
           // freqs_t[..., idx] = freqs[dim_idx][..., idx]
           auto src = x[dim_idx].index_select(-1, idx_tensor);
           freqs_t.index_copy_(-1, idx_tensor, src);

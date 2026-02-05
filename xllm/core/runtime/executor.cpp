@@ -15,7 +15,9 @@ limitations under the License.
 
 #include "executor.h"
 
+#include "common/global_flags.h"
 #include "executor_impl_factory.h"
+#include "platform/device.h"
 
 namespace xllm {
 
