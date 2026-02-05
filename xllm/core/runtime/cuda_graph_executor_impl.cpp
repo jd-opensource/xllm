@@ -293,7 +293,8 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   // Set FlashInfer decode parameters (always update, not just for capture)
   // This ensures attn_metadata points to updated persistent buffers for
   // plan_info calculation
-  attn_metadata->paged_kv_indptr = persistent_paged_kv_indptr(actual_batch_size);
+  attn_metadata->paged_kv_indptr =
+      persistent_paged_kv_indptr(actual_batch_size);
   attn_metadata->paged_kv_indices =
       persistent_paged_kv_indices(actual_indices_size);
   attn_metadata->paged_kv_last_page_len =
@@ -334,7 +335,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     //                  /*use_custom_mask=*/false)
     //            : "fa2";
     const static std::string backend = "fa2";
-    
+
     // Update plan_info
     // Note: plan_info is only updated at layer 0, so we set layer_id to 0
     attn_metadata->plan_info->layer_id = 0;

@@ -58,4 +58,3 @@ class BaseAttentionImpl {
 
 }  // namespace layer
 }  // namespace xllm
-

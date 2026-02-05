@@ -37,4 +37,3 @@ BaseAttentionImpl::BaseAttentionImpl(int64_t num_heads,
 
 }  // namespace layer
 }  // namespace xllm
-
