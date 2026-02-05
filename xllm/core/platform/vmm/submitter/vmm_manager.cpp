@@ -12,75 +12,74 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "vmm_manager.h"
+
 #include <glog/logging.h>
 
-#include "vmm_manager.h"
-#include "vmm_worker.h"
 #include "vmm_submitter.h"
+#include "vmm_worker.h"
 
 namespace xllm {
 namespace vmm {
 
-VMMManager::~VMMManager() {
-    shutdown();
-}
+VMMManager::~VMMManager() { shutdown(); }
 
 bool VMMManager::init_device(int32_t device_id) {
-    std::lock_guard<std::mutex> lock(workers_mutex_);
-    
-    if (workers_.find(device_id) != workers_.end()) {
-        LOG(WARNING) << "Device " << device_id << " already initialized";
-        return false;
-    }
+  std::lock_guard<std::mutex> lock(workers_mutex_);
 
-    // Create worker using private factory method
-    auto worker = create_worker(device_id);
-    if (!worker) {
-        LOG(ERROR) << "Failed to create worker for device " << device_id;
-        return false;
-    }
+  if (workers_.find(device_id) != workers_.end()) {
+    LOG(WARNING) << "Device " << device_id << " already initialized";
+    return false;
+  }
 
-    worker->start();
-    workers_[device_id] = worker;
-    LOG(INFO) << "Initialized worker for device " << device_id;
-    return true;
+  // Create worker using private factory method
+  auto worker = create_worker(device_id);
+  if (!worker) {
+    LOG(ERROR) << "Failed to create worker for device " << device_id;
+    return false;
+  }
+
+  worker->start();
+  workers_[device_id] = worker;
+  LOG(INFO) << "Initialized worker for device " << device_id;
+  return true;
 }
 
 void VMMManager::shutdown() {
-    std::lock_guard<std::mutex> lock(workers_mutex_);
-    if (shutdown_flag_.exchange(true)) {
-        return;  // Already shutting down or done
-    }
+  std::lock_guard<std::mutex> lock(workers_mutex_);
+  if (shutdown_flag_.exchange(true)) {
+    return;  // Already shutting down or done
+  }
 
-    LOG(INFO) << "Shutting down VMMManager...";
+  LOG(INFO) << "Shutting down VMMManager...";
 
-    for (auto& [device_id, worker] : workers_) {
-        worker->stop();
-    }
+  for (auto& [device_id, worker] : workers_) {
+    worker->stop();
+  }
 
-    workers_.clear();
-    LOG(INFO) << "VMMManager shutdown complete";
+  workers_.clear();
+  LOG(INFO) << "VMMManager shutdown complete";
 }
 
 std::unique_ptr<VMMSubmitter> VMMManager::create_submitter(int32_t device_id) {
-    // Use private constructor to create submitter
-    return std::unique_ptr<VMMSubmitter>(new VMMSubmitter(device_id));
+  // Use private constructor to create submitter
+  return std::unique_ptr<VMMSubmitter>(new VMMSubmitter(device_id));
 }
 
 std::shared_ptr<VMMWorker> VMMManager::get_worker(int32_t device_id) {
-    std::lock_guard<std::mutex> lock(workers_mutex_);
-    
-    auto it = workers_.find(device_id);
-    if (it == workers_.end()) {
-        return nullptr;
-    }
-    
-    return it->second;
+  std::lock_guard<std::mutex> lock(workers_mutex_);
+
+  auto it = workers_.find(device_id);
+  if (it == workers_.end()) {
+    return nullptr;
+  }
+
+  return it->second;
 }
 
 std::shared_ptr<VMMWorker> VMMManager::create_worker(int32_t device_id) {
-    // Use private constructor to create worker
-    return std::shared_ptr<VMMWorker>(new VMMWorker(device_id));
+  // Use private constructor to create worker
+  return std::shared_ptr<VMMWorker>(new VMMWorker(device_id));
 }
 
 }  // namespace vmm

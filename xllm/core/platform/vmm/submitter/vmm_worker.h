@@ -29,50 +29,52 @@ namespace vmm {
 // VMMWorker: Worker thread that executes VMM operations
 // Can only be constructed by VMMManager
 class VMMWorker {
-    public:
-        ~VMMWorker();
-        
-        DISALLOW_COPY_AND_MOVE(VMMWorker);
-        
-        void start();
-        
-        void stop();
-        
-        bool submit_request(const VMMRequest& req);
-        
-    private:
-        VMMWorker(int32_t device_id);
-        
-        void worker_loop();
-        
-        bool step_current();
-        
-        bool step_deferred();
-    
-        void defer_request(const VMMRequest& req);
-        
-        void schedule(int32_t max_ops);
-        
-        bool has_conflict(VirPtr va);
-        
-        void execute_map(VMMRequest& req);
-        
-        void execute_unmap(VMMRequest& req);
-        
-        void notify_completion(VMMSubmitter* submitter, uint64_t request_id, 
-                              OpType op_type, bool success);
-    
-        int32_t device_id_;
-        std::unique_ptr<std::thread> worker_thread_;
-        std::atomic<bool> running_;
-        
-        RequestQueue work_queue_;
-        
-        std::unordered_set<VirPtr> deferred_va_;
-        
-        std::deque<VMMRequest> deferred_requests_;
-    
-        friend class VMMManager;
+ public:
+  ~VMMWorker();
+
+  DISALLOW_COPY_AND_MOVE(VMMWorker);
+
+  void start();
+
+  void stop();
+
+  bool submit_request(const VMMRequest& req);
+
+ private:
+  VMMWorker(int32_t device_id);
+
+  void worker_loop();
+
+  bool step_current();
+
+  bool step_deferred();
+
+  void defer_request(const VMMRequest& req);
+
+  void schedule(int32_t max_ops);
+
+  bool has_conflict(VirPtr va);
+
+  void execute_map(VMMRequest& req);
+
+  void execute_unmap(VMMRequest& req);
+
+  void notify_completion(VMMSubmitter* submitter,
+                         uint64_t request_id,
+                         OpType op_type,
+                         bool success);
+
+  int32_t device_id_;
+  std::unique_ptr<std::thread> worker_thread_;
+  std::atomic<bool> running_;
+
+  RequestQueue work_queue_;
+
+  std::unordered_set<VirPtr> deferred_va_;
+
+  std::deque<VMMRequest> deferred_requests_;
+
+  friend class VMMManager;
 };
 
 }  // namespace vmm

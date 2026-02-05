@@ -36,52 +36,53 @@ class VMMWorker;
 // VMMSubmitter: Client interface for submitting requests
 // Can only be constructed by VMMManager
 class VMMSubmitter {
-public:
-    ~VMMSubmitter();
-    
-    DISALLOW_COPY_AND_MOVE(VMMSubmitter);
-    
-    uint64_t map(VirPtr va, PhyMemHandle phy);
-    
-    uint64_t unmap(VirPtr va, size_t aligned_size);
+ public:
+  ~VMMSubmitter();
 
-    /// Polls completed map/unmap operations from the completion queue.
-    /// Called by the submitter thread. Returns the number of completions processed.    
-    size_t poll_completions(size_t max_completions = 32);
-    
-    bool all_map_done() const;
-    
-    bool all_unmap_done() const;
-    
-    void wait_all();
-    
-    bool is_connected() const { return connected_ && worker_ != nullptr; }
+  DISALLOW_COPY_AND_MOVE(VMMSubmitter);
 
-    /// Pushes a completion into the submitter's completion queue.
-    /// Called by the worker thread after a map/unmap operation finishes.
-    bool push_completion(const VMMCompletion& completion);
+  uint64_t map(VirPtr va, PhyMemHandle phy);
 
-private:
-    VMMSubmitter(int32_t device_id);
+  uint64_t unmap(VirPtr va, size_t aligned_size);
 
-    bool connect(int32_t device_id);
+  /// Polls completed map/unmap operations from the completion queue.
+  /// Called by the submitter thread. Returns the number of completions
+  /// processed.
+  size_t poll_completions(size_t max_completions = 32);
 
-    void disconnect();
-    
-    int32_t device_id_;
+  bool all_map_done() const;
 
-    std::shared_ptr<VMMWorker> worker_ = nullptr;
+  bool all_unmap_done() const;
 
-    bool connected_ = false;
-    
-    CompletionQueue completion_queue_;
+  void wait_all();
 
-    uint64_t next_request_id_ = 1;
+  bool is_connected() const { return connected_ && worker_ != nullptr; }
 
-    uint64_t pending_map_ = 0;
-    uint64_t pending_unmap_ = 0;
-    
-    friend class VMMManager;
+  /// Pushes a completion into the submitter's completion queue.
+  /// Called by the worker thread after a map/unmap operation finishes.
+  bool push_completion(const VMMCompletion& completion);
+
+ private:
+  VMMSubmitter(int32_t device_id);
+
+  bool connect(int32_t device_id);
+
+  void disconnect();
+
+  int32_t device_id_;
+
+  std::shared_ptr<VMMWorker> worker_ = nullptr;
+
+  bool connected_ = false;
+
+  CompletionQueue completion_queue_;
+
+  uint64_t next_request_id_ = 1;
+
+  uint64_t pending_map_ = 0;
+  uint64_t pending_unmap_ = 0;
+
+  friend class VMMManager;
 };
 
 }  // namespace vmm

@@ -15,10 +15,10 @@ limitations under the License.
 
 #include "vmm_submitter.h"
 
+#include <glog/logging.h>
+
 #include <chrono>
 #include <thread>
-
-#include <glog/logging.h>
 
 #include "vmm_manager.h"
 #include "vmm_worker.h"
@@ -26,118 +26,113 @@ limitations under the License.
 namespace xllm {
 namespace vmm {
 
-VMMSubmitter::VMMSubmitter(int32_t device_id)
-    : device_id_(device_id) {
-
-    connect(device_id);
+VMMSubmitter::VMMSubmitter(int32_t device_id) : device_id_(device_id) {
+  connect(device_id);
 }
 
 VMMSubmitter::~VMMSubmitter() {
-    wait_all();
-    disconnect();
+  wait_all();
+  disconnect();
 }
 
 bool VMMSubmitter::connect(int32_t device_id) {
-    if (connected_) {
-        LOG(WARNING) << "Already connected to device " << device_id;
-        return false;
-    }
+  if (connected_) {
+    LOG(WARNING) << "Already connected to device " << device_id;
+    return false;
+  }
 
-    worker_ = VMMManager::get_instance().get_worker(device_id);
-    if (!worker_) {
-        LOG(ERROR) << "Failed to get worker for device " << device_id
-                   << ". Device not initialized?";
-        return false;
-    }
-    device_id_ = device_id;
-    connected_ = true;
-    LOG(INFO) << "Submitter connected to device " << device_id;
-    return true;
+  worker_ = VMMManager::get_instance().get_worker(device_id);
+  if (!worker_) {
+    LOG(ERROR) << "Failed to get worker for device " << device_id
+               << ". Device not initialized?";
+    return false;
+  }
+  device_id_ = device_id;
+  connected_ = true;
+  LOG(INFO) << "Submitter connected to device " << device_id;
+  return true;
 }
 
 void VMMSubmitter::disconnect() {
-    if (connected_) {
-        LOG(INFO) << "Disconnecting submitter from device " << device_id_;
-        wait_all();
-        worker_.reset();
-        connected_ = false;
-    }
+  if (connected_) {
+    LOG(INFO) << "Disconnecting submitter from device " << device_id_;
+    wait_all();
+    worker_.reset();
+    connected_ = false;
+  }
 }
 
 uint64_t VMMSubmitter::map(VirPtr va, PhyMemHandle phy) {
-    if (!is_connected()) {
-        LOG(ERROR) << "Not connected or worker destroyed";
-        return 0;
-    }
-    
-    uint64_t request_id = next_request_id_++;
-    VMMRequest req(OpType::MAP, va, phy, 0, request_id, this);
-    
-    if (!worker_->submit_request(req)) {
-        LOG(ERROR) << "Failed to submit map request";
-        return 0;
-    }
+  if (!is_connected()) {
+    LOG(ERROR) << "Not connected or worker destroyed";
+    return 0;
+  }
 
-    pending_map_++;
-    return request_id;
+  uint64_t request_id = next_request_id_++;
+  VMMRequest req(OpType::MAP, va, phy, 0, request_id, this);
+
+  if (!worker_->submit_request(req)) {
+    LOG(ERROR) << "Failed to submit map request";
+    return 0;
+  }
+
+  pending_map_++;
+  return request_id;
 }
 
 uint64_t VMMSubmitter::unmap(VirPtr va, size_t aligned_size) {
-    if (!is_connected()) {
-        LOG(ERROR) << "Not connected or worker destroyed";
-        return 0;
-    }
-    
-    uint64_t request_id = next_request_id_++;
-    VMMRequest req(OpType::UNMAP, va, 0, aligned_size, request_id, this);
-    
-    if (!worker_->submit_request(req)) {
-        LOG(ERROR) << "Failed to submit unmap request";
-        return 0;
-    }
+  if (!is_connected()) {
+    LOG(ERROR) << "Not connected or worker destroyed";
+    return 0;
+  }
 
-    pending_unmap_++;
-    return request_id;
+  uint64_t request_id = next_request_id_++;
+  VMMRequest req(OpType::UNMAP, va, 0, aligned_size, request_id, this);
+
+  if (!worker_->submit_request(req)) {
+    LOG(ERROR) << "Failed to submit unmap request";
+    return 0;
+  }
+
+  pending_unmap_++;
+  return request_id;
 }
 
 size_t VMMSubmitter::poll_completions(size_t max_completions) {
-    size_t count = 0;
-    VMMCompletion completion;
+  size_t count = 0;
+  VMMCompletion completion;
 
-    while (count < max_completions && completion_queue_.try_dequeue(completion)) {
-        if (completion.op_type == OpType::MAP) {
-            if (pending_map_ > 0) pending_map_--;
-        } else {
-            if (pending_unmap_ > 0) pending_unmap_--;
-        }
-        if (!completion.success) {
-            LOG(ERROR) << "Operation failed: request_id=" << completion.request_id
-                       << ", type=" << (completion.op_type == OpType::MAP ? "MAP" : "UNMAP");
-        }
-        count++;
+  while (count < max_completions && completion_queue_.try_dequeue(completion)) {
+    if (completion.op_type == OpType::MAP) {
+      if (pending_map_ > 0) pending_map_--;
+    } else {
+      if (pending_unmap_ > 0) pending_unmap_--;
     }
+    if (!completion.success) {
+      LOG(ERROR) << "Operation failed: request_id=" << completion.request_id
+                 << ", type="
+                 << (completion.op_type == OpType::MAP ? "MAP" : "UNMAP");
+    }
+    count++;
+  }
 
-    return count;
+  return count;
 }
 
-bool VMMSubmitter::all_map_done() const {
-    return pending_map_ == 0;
-}
+bool VMMSubmitter::all_map_done() const { return pending_map_ == 0; }
 
-bool VMMSubmitter::all_unmap_done() const {
-    return pending_unmap_ == 0;
-}
+bool VMMSubmitter::all_unmap_done() const { return pending_unmap_ == 0; }
 
 void VMMSubmitter::wait_all() {
-    while (!all_map_done() || !all_unmap_done()) {
-        poll_completions(32);
-        std::this_thread::yield();
-    }
+  while (!all_map_done() || !all_unmap_done()) {
+    poll_completions(32);
+    std::this_thread::yield();
+  }
 }
 
 bool VMMSubmitter::push_completion(const VMMCompletion& completion) {
-    completion_queue_.enqueue(completion);
-    return true;
+  completion_queue_.enqueue(completion);
+  return true;
 }
 
 }  // namespace vmm
