@@ -44,9 +44,23 @@ class ProcessGroup {
 
   virtual ~ProcessGroup() = default;
 
-  int32_t rank() const { return rank_; }
+  int32_t rank() const {
+#if defined(USE_NPU)
+    return rank_;
+#else
+    CHECK(pg_ != nullptr) << "Process group is not initialized.";
+    return pg_->getRank();
+#endif
+  }
 
-  int32_t world_size() const { return world_size_; }
+  int32_t world_size() const {
+#if defined(USE_NPU)
+    return world_size_;
+#else
+    CHECK(pg_ != nullptr) << "Process group is not initialized.";
+    return pg_->getSize();
+#endif
+  }
 
   const torch::Device& device() const { return device_; }
 
