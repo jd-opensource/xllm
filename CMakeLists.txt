@@ -384,7 +384,7 @@ if(USE_MUSA)
   find_package(MUSA REQUIRED)
 
   if(NOT DEFINED ENV{MTT_OPLIB_PATH})
-    set(ENV{MTT_OPLIB_PATH} /workspace/MTTOplib)
+    set(ENV{MTT_OPLIB_PATH} $ENV{MUSA_HOME}/tools/MTTOplib)
   endif()
 
   message(STATUS  "using MTT Oplib at: $ENV{MTT_OPLIB_PATH}")

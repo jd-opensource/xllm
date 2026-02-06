@@ -295,7 +295,8 @@ void RecMultiRoundBatchInputBuilder::setup_kv_cache_info(
     block_ids.push_back(block.id());
   }
   state.block_tables_vec.emplace_back(std::move(block_ids));
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_MUSA)
   // TODO: refactor this branch when NPU multi-round xattention lands.
   RecMultiRoundBuilderState& state = rec_multi_round_state_;
   BuilderState& base_state = state.base_state;

@@ -9,6 +9,12 @@ if(USE_MLU)
 endif()
 
 if(USE_MUSA)
+  set(CMAKE_CXX_COMPILER ${CMAKE_MUSA_COMPILER})
+  string(REPLACE "-Wno-format-truncation" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=macro-redefined \
+  -Wno-error=defaulted-function-deleted -x musa --offload-arch=mp_31 \
+  -fplugin=$ENV{MUSAMAPPING_PATH}/libMusaMapping.so")
+  set(CMAKE_MUSA_FLAGS "${CMAKE_MUSA_FLAGS} -fplugin=$ENV{MUSAMAPPING_PATH}/libMusaMapping.so")
   add_subdirectory(musa)
 endif()
 
