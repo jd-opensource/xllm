@@ -28,7 +28,7 @@ if(USE_NPU)
       message(STATUS "Building for device: A2 (macro USE_A2 defined)")
   endif()
 
-  option(INSTALL_XLLM_KERNELS "Install xllm_kernels RPM" ON)  
+  option(INSTALL_XLLM_KERNELS "Install xllm_kernels RPM" OFF)  
   message(STATUS "INSTALL_XLLM_KERNELS enabled: ${INSTALL_XLLM_KERNELS}")
   if(INSTALL_XLLM_KERNELS)
     if(DEVICE_TYPE STREQUAL "USE_A3")

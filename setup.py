@@ -526,7 +526,7 @@ def parse_arguments() -> dict[str, Any]:
         '--install-xllm-kernels',
         type=str.lower,
         choices=['true', 'false', '1', '0', 'yes', 'no', 'y', 'n', 'on', 'off'],
-        default='true',
+        default='false',
         help='Whether to install xllm kernels'
     )
     

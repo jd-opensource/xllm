@@ -85,7 +85,7 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
       c10d_npu::ProcessGroupHCCL::Options::create();
 #if TORCH_VERSION_MAJOR > 2 || \
     (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 7)
-  hccl_pg_options->group_name = group_name;
+  hccl_pg_options->group_id = group_name;
 #endif
   int32_t rank = global_rank;
   if (world_size != rank_size) {

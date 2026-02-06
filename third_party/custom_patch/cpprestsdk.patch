@@ -1,7 +1,7 @@
 diff --git a/Release/CMakeLists.txt b/Release/CMakeLists.txt
 old mode 100644
 new mode 100755
-index 14e43ced..428e0038
+index 14e43ced..78f136ce
 --- a/Release/CMakeLists.txt
 +++ b/Release/CMakeLists.txt
 @@ -26,7 +26,7 @@ set(CPPREST_INSTALL ON CACHE BOOL "Add install commands.")
@@ -13,6 +13,19 @@ index 14e43ced..428e0038
  endif()
  
  if(IOS OR ANDROID OR WINDOWS_STORE OR WINDOWS_PHONE)
+@@ -173,6 +173,12 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fpermissive -D_GLIBCXX_USE_SCHED_YIELD -D_GLIBCXX_USE_NANOSLEEP")
+   endif()
+ 
++  # Add GCC 12+ specific flags to avoid false positive warnings
++  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "12")
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-restrict -Wno-attributes")
++    message(STATUS "GCC 12+ detected: Added -Wno-restrict and -Wno-attributes")
++  endif()
++
+ elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+   message("-- Setting msvc options")
+   set(WARNINGS)
 diff --git a/Release/include/pplx/pplxtasks.h b/Release/include/pplx/pplxtasks.h
 index 6868fc16..6b4d17b6 100644
 --- a/Release/include/pplx/pplxtasks.h
