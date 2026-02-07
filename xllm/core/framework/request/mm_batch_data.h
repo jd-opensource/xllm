@@ -88,10 +88,10 @@ class MMBatchData {
   std::vector<MMData> mm_datas_;
 };
 
-bool mmdata_to_proto(const xllm::MMBatchData& cpp_mmdata,
-                     proto::MMData* pb_mmdata);
+bool mmbatchdata_to_proto(const xllm::MMBatchData& mmdata,
+                          proto::MMBatchData* pb_mmdata);
 
-bool proto_to_mmdata(const proto::MMData& pb_mmdata,
-                     xllm::MMBatchData* cpp_mmdata);
+bool proto_to_mmbatchdata(const proto::MMBatchData& pb_mmdata,
+                          xllm::MMBatchData* mmdata);
 
 }  // namespace xllm
