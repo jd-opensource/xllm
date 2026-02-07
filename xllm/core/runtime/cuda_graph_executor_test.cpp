@@ -47,7 +47,7 @@ class CudaGraphExecutorTestEnvironment : public ::testing::Environment {
     // Keep the test minimal and deterministic.
     FLAGS_block_size = 1;
     FLAGS_max_tokens_per_batch = 8;
-    FLAGS_enable_graph_no_padding = true;
+    FLAGS_enable_graph_mode_decode_no_padding = true;
 
     // Seed all RNGs once per test environment.
     torch::manual_seed(0);
@@ -237,7 +237,7 @@ TEST(CudaGraphExecutorTest, BatchDecodeCaptureAndReplay) {
   options.max_seqs_per_batch(1);
 
   auto model = std::make_unique<FakeAttnCausalLM>(args, device);
-  auto graph_exec = std::make_unique<cuda::CudaGraphExecutorImpl>(
+  auto graph_exec = std::make_unique<runtime::cuda::CudaGraphExecutorImpl>(
       model.get(), args, device, options);
 
   auto tokens = torch::tensor(

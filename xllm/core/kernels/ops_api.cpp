@@ -20,6 +20,7 @@ limitations under the License.
 #elif defined(USE_NPU)
 #include "npu/npu_ops_api.h"
 #elif defined(USE_CUDA)
+#include "cuda/attention_runner.h"
 #include "cuda/cuda_ops_api.h"
 #elif defined(USE_ILU)
 #include "ilu/ilu_ops_api.h"
@@ -182,21 +183,21 @@ void batch_prefill(AttentionParams& params) {
                      params.scale,
                      params.output);
 #elif defined(USE_CUDA)
-  cuda::batch_prefill(params.attn_metadata.plan_info->uri,
-                      params.attn_metadata.plan_info->plan_info,
-                      params.float_workspace_buffer,
-                      params.int_workspace_buffer,
-                      params.page_locked_int_workspace_buffer,
-                      params.query,
-                      params.key,
-                      params.value,
-                      params.attn_metadata.q_cu_seq_lens,
-                      params.attn_metadata.kv_cu_seq_lens,
-                      params.window_size_left,
-                      params.scale,
-                      params.output,
-                      params.output_lse,
-                      params.attn_metadata.enable_cuda_graph);
+  cuda::maybe_capturing_batch_prefill(params.attn_metadata.plan_info->uri,
+                                      params.attn_metadata.plan_info->plan_info,
+                                      params.float_workspace_buffer,
+                                      params.int_workspace_buffer,
+                                      params.page_locked_int_workspace_buffer,
+                                      params.query,
+                                      params.key,
+                                      params.value,
+                                      params.attn_metadata.q_cu_seq_lens,
+                                      params.attn_metadata.kv_cu_seq_lens,
+                                      params.window_size_left,
+                                      params.scale,
+                                      params.output,
+                                      params.output_lse,
+                                      params.attn_metadata.enable_cuda_graph);
 #elif defined(USE_ILU)
   ilu::batch_prefill(params.query,
                      params.key,

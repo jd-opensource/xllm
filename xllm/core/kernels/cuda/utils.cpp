@@ -382,8 +382,16 @@ ffi::Function get_function(const std::string& uri,
   if (it != func_cache.end()) {
     return it->second;
   }
-
-  auto func = get_module(uri)->GetFunction(func_name).value();
+  VLOG(10) << "get_function:  uri: " << uri << " func_name: " << func_name;
+  auto func_opt = get_module(uri)->GetFunction(func_name);
+  if (!func_opt.defined()) {
+    LOG(FATAL) << "TVM function not found. uri=" << uri
+               << " func_name=" << func_name
+               << " so_path=" << path_to_uri_so_lib(uri)
+               << ". This usually indicates a mismatched or incomplete kernel "
+                  "library build.";
+  }
+  auto func = func_opt.value();
   func_cache.emplace(key, func);
   return func;
 }

@@ -26,6 +26,7 @@ limitations under the License.
 #include <c10/core/StreamGuard.h>
 
 #include <cstdint>
+#include <ostream>
 #if defined(USE_NPU)
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
@@ -67,6 +68,9 @@ class Stream {
   torch_mlu::MLUStream* get_stream() { return &stream_; }
 #endif
   void wait_stream(const Stream& other_stream);
+
+  // Support for LOG(INFO) output
+  friend std::ostream& operator<<(std::ostream& os, const Stream& stream);
 
  private:
 #if defined(USE_NPU)

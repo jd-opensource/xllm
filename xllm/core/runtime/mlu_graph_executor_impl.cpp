@@ -27,7 +27,7 @@ limitations under the License.
 namespace {
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
-  if (FLAGS_enable_graph_no_padding) {
+  if (FLAGS_enable_graph_mode_decode_no_padding) {
     return num_tokens;
   }
   const uint32_t graph_step = 16;
@@ -48,9 +48,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
     : num_decoding_tokens_(options.num_decoding_tokens()) {
   const int64_t max_tokens = FLAGS_max_tokens_per_batch;
   const int64_t max_seqs = options.max_seqs_per_batch();
-  const int64_t max_seq_len = FLAGS_max_seq_len_for_graph_mode > 0
-                                  ? FLAGS_max_seq_len_for_graph_mode
-                                  : args.max_position_embeddings();
+  const int64_t max_seq_len = args.max_position_embeddings();
   const uint32_t block_size = options.block_size();
   const int64_t max_num_blocks_per_req =
       (max_seq_len + block_size - 1) / block_size + 1;

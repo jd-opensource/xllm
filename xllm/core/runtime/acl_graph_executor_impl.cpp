@@ -70,9 +70,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   const int64_t max_seqs_per_batch = options.max_seqs_per_batch();
   auto tensor_options = torch::TensorOptions().device(device);
 
-  const int64_t max_seq_len = FLAGS_max_seq_len_for_graph_mode > 0
-                                  ? FLAGS_max_seq_len_for_graph_mode
-                                  : args_.max_position_embeddings();
+  const int64_t max_seq_len = args_.max_position_embeddings();
 
   // Create persistent tensors with max_tokens_per_batch as first dimension
   persistent_tokens_ = torch::zeros({max_tokens_per_batch},
@@ -643,7 +641,7 @@ void GraphPersistentParam::update_attention_mask(
   const int64_t batch_size = input_params.kv_seq_lens.size(0);
   const int64_t max_seq_len = input_params.kv_max_seq_len > 0
                                   ? input_params.kv_max_seq_len
-                                  : FLAGS_max_seq_len_for_graph_mode;
+                                  : args_.max_position_embeddings();
 
   // persistent_mask_ is already initialized in constructor
   // Check if size is sufficient
@@ -940,9 +938,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(n_tokens);
 
   // Check if conditions are suitable for graph execution (replay or capture)
-  const auto max_seq_len = FLAGS_max_seq_len_for_graph_mode > 0
-                               ? FLAGS_max_seq_len_for_graph_mode
-                               : args_.max_position_embeddings();
+  const auto max_seq_len = args_.max_position_embeddings();
   const bool seq_len_supported = params_single.kv_max_seq_len <= max_seq_len;
 
   // Combined condition for graph capture support
@@ -1043,7 +1039,7 @@ void AclGraph::print_graph_tensors() const {
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
     uint32_t num_tokens) const {
-  if (FLAGS_enable_graph_no_padding) {
+  if (FLAGS_enable_graph_mode_decode_no_padding) {
     return num_tokens;
   }
   if (num_tokens <= 1) {
