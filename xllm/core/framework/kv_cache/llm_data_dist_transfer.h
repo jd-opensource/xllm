@@ -82,12 +82,15 @@ class LlmDataDistTransfer : public KVCacheTransfer {
   uint16_t listen_port_;
   int64_t num_layers_;
   bool enable_mla_ = false;
+  bool enable_lighting_indexer_ = false;
   std::string model_type_;
   std::unordered_set<uint64_t> linked_cluster_ids;
 
   std::shared_ptr<LlmDataDist> llm_data_dist_;
   Cache k_cache_;
   Cache v_cache_;
+  Cache index_cache_;
 };
 
 }  // namespace xllm
+
