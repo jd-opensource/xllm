@@ -213,8 +213,14 @@ DECLARE_int64(cache_size_per_token);
 
 DECLARE_int64(buffer_size_per_seq);
 
+// --- beam search config ---
 DECLARE_bool(enable_beam_search_kernel);
 
+DECLARE_bool(enable_fast_sampler);
+
+DECLARE_bool(enable_topk_sorted);
+
+// --- qwen3 reranker config ---
 DECLARE_bool(enable_qwen3_reranker);
 
 DECLARE_string(reasoning_parser);

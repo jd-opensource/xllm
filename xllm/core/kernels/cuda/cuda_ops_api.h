@@ -95,4 +95,18 @@ torch::Tensor matmul(torch::Tensor a,
                      torch::Tensor b,
                      std::optional<torch::Tensor> bias);
 
+std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search(
+    torch::Tensor combined_probs,
+    uint32_t batch_size,
+    uint32_t beam_size,
+    uint32_t top_k,
+    torch::Device device);
+
+std::pair<torch::Tensor, torch::Tensor> compute_topk_general(
+    torch::Tensor input,
+    uint32_t batch_size,
+    uint32_t input_length,
+    uint32_t k,
+    torch::Device device);
+
 }  // namespace xllm::kernel::cuda

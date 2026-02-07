@@ -74,6 +74,10 @@ const OptionCategory kMtpOptions = {
 const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
                                             {"etcd_addr", "rank_tablefile"}};
 
+const OptionCategory kBeamSearchOptions = {
+    "BEAM SEARCH OPTIONS",
+    {"enable_beam_search_kernel", "enable_fast_sampler", "enable_topk_sorted"}};
+
 const OptionCategory kOtherOptions = {
     "OTHER OPTIONS",
     {"max_concurrent_requests",
@@ -91,6 +95,7 @@ const std::vector<OptionCategory> kOptionCategories = {
     kMultiStepDecodeOptions,
     kMtpOptions,
     kXllmServiceOptions,
+    kBeamSearchOptions,
     kOtherOptions};
 
 }  // namespace
