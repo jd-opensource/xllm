@@ -43,15 +43,10 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                            const torch::TensorOptions& options)
     : num_total_experts_(model_args.n_routed_experts()),
       topk_(model_args.num_experts_per_tok()),
-      num_expert_group_(model_args.n_group()),
-      topk_group_(model_args.topk_group()),
-      route_scale_(model_args.routed_scaling_factor()),
       hidden_size_(model_args.hidden_size()),
       n_shared_experts_(model_args.n_shared_experts()),
       is_gated_(moe_args.is_gated),
-      renormalize_(model_args.norm_topk_prob() ? 1 : 0),
       hidden_act_(model_args.hidden_act()),
-      scoring_func_(model_args.scoring_func()),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
       options_(options),
@@ -59,7 +54,6 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   const int64_t num_experts = num_total_experts_;
   const int64_t intermediate_size =
       static_cast<int64_t>(model_args.moe_intermediate_size());
-  const std::string& topk_method = model_args.topk_method();
   int64_t ep_size = parallel_args.ep_size();
   int64_t ep_rank = 0;
   tp_pg_ = parallel_args.tp_group_;
@@ -152,14 +146,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   num_experts_per_rank_ = num_experts / ep_size;
   start_expert_id_ = ep_rank * num_experts_per_rank_;
 
-  if (topk_method == "noaux_tc") {
-    e_score_correction_bias_ = register_parameter(
-        "e_score_correction_bias", torch::empty({num_experts}, options), false);
-  }
-
-  gate_ = register_module(
-      "gate_proj",
-      ReplicatedLinear(hidden_size_, num_experts, false, quant_args, options));
+  gate_ = register_module("gate", MoEGate(model_args, quant_args, options));
   if (n_shared_experts_ > 0) {
     ProcessGroup* shared_expert_pg;
     if (parallel_args_.ep_size() > 1) {
@@ -292,35 +279,13 @@ torch::Tensor FusedMoEImpl::create_group_gemm_output(
 
 torch::Tensor FusedMoEImpl::select_experts(
     const torch::Tensor& hidden_states_2d,
-    const torch::Tensor& router_logits_2d,
+    const torch::Tensor& reduce_weight,
+    const torch::Tensor& expert_id,
     SelectedExpertInfo& selected_expert_info,
     bool enable_all2all_communication) {
-  // prepare the parameters for select_experts
-  std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
-  if (e_score_correction_bias_.defined()) {
-    e_score_correction_bias = e_score_correction_bias_;
-  }
   int64_t expert_size = w13_.size(0);
 
-  // Step 1: apply softmax topk or sigmoid topk / routing logic
-  torch::Tensor reduce_weight;
-  torch::Tensor expert_id;
-  {
-    xllm::kernel::MoeActiveTopkParams moe_active_topk_params;
-    moe_active_topk_params.input = router_logits_2d;
-    moe_active_topk_params.topk = topk_;
-    moe_active_topk_params.num_expert_group = num_expert_group_;
-    moe_active_topk_params.topk_group = topk_group_;
-    moe_active_topk_params.normalize = renormalize_;
-    moe_active_topk_params.normed_by = "topk_logit";
-    moe_active_topk_params.scoring_func = scoring_func_;
-    moe_active_topk_params.route_scale = route_scale_;
-    moe_active_topk_params.e_score_correction_bias = e_score_correction_bias;
-    std::tie(reduce_weight, expert_id) =
-        xllm::kernel::moe_active_topk(moe_active_topk_params);
-  }
-
-  // Step 2: generate expert ids
+  // Step 1: generate expert ids (gate / routing already done by MoEGate)
   torch::Tensor gather_idx;
   torch::Tensor combine_idx;
   torch::Tensor token_count;
@@ -343,7 +308,7 @@ torch::Tensor FusedMoEImpl::select_experts(
     }
   }
 
-  // Step 3: expand and quantize input if needed
+  // Step 2: expand and quantize input if needed
   torch::Tensor expand_hidden_states;
   torch::Tensor hidden_states_scale;
   torch::Tensor token_count_slice;
@@ -427,46 +392,39 @@ torch::Tensor FusedMoEImpl::select_experts(
 }
 
 torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
-                                            const torch::Tensor& router_logits,
                                             bool enable_all2all_communication) {
   if (!stream_initialized_) {
-    // update device record
     device_ = xllm::Device(hidden_states.device());
-
-    // acquire streams from the pool again
     routed_stream_ = device_.get_stream_from_pool();
     shared_stream_ = device_.get_stream_from_pool();
     stream_initialized_ = true;
   }
 
-  std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
-  if (e_score_correction_bias_.defined()) {
-    e_score_correction_bias = e_score_correction_bias_;
-  }
-
-  // prepare the parameters for MoE computation
   torch::Tensor shared_expert_output;
   torch::IntArrayRef hidden_states_shape = hidden_states.sizes();
   torch::ScalarType hidden_states_dtype = hidden_states.dtype().toScalarType();
   torch::Tensor hidden_states_2d =
       hidden_states.reshape({-1, hidden_states.size(-1)});
-  torch::Tensor router_logits_2d =
-      router_logits.reshape({-1, router_logits.size(-1)});
+
+  torch::Tensor reduce_weight;
+  torch::Tensor expert_id;
+  std::tie(reduce_weight, expert_id) = gate_->forward(hidden_states_2d);
+
   int64_t group_gemm_max_dim = enable_all2all_communication
                                    ? deep_ep_params_.max_num_tokens_recv / topk_
                                    : hidden_states_2d.size(0);
   int64_t expert_size = w13_.size(0);
 
-  // Step 1-3: select experts
   SelectedExpertInfo selected_expert_info;
   torch::Tensor expand_hidden_states =
       select_experts(hidden_states_2d,
-                     router_logits_2d,
+                     reduce_weight,
+                     expert_id,
                      selected_expert_info,
                      enable_all2all_communication);
 
-  // Communciation Step 1: Dipatch
-  // intermediate outputs that are used both in dispatch and combine
+  // Communication Step 1: Dispatch
+  // intermediate outputs used in both dispatch and combine
   torch::Tensor gather_by_rank_index;
   torch::Tensor token_sum;
   if (enable_all2all_communication) {
@@ -495,7 +453,6 @@ torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
     token_sum = deep_ep_meta.token_sum;
   }
 
-  // common gemm workspace for reduce memory footprint
   torch::Tensor gemm_workspace;
 
   // Step 4: group gemm 1
@@ -536,8 +493,6 @@ torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
   if (is_smoothquant_) {
     int64_t slice_dim = gemm1_out.size(1);
     if (is_gated_) slice_dim /= 2;
-    // slice operation is a view, does not take up extra memory, but points to
-    // the same memory
     act_out = expand_hidden_states.slice(1, 0, slice_dim);
     act_out_scale =
         selected_expert_info.input_scale.value().slice(0, 0, gemm1_out.size(0));
@@ -595,7 +550,7 @@ torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
     gemm2_out = xllm::kernel::group_gemm(group_gemm_params);
   }
 
-  // Communciation Step 2: Combine
+  // Communication Step 2: Combine
   if (enable_all2all_communication) {
     int64_t num_token_expand = hidden_states_2d.size(0) * topk_;
     // Delegate pack, layout generation and combine to DeepEP
@@ -670,7 +625,7 @@ torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
     return final_hidden_states;
   }
 
-  // Communciation Step 3: AllReduce for non-all2all communication
+  // Communication Step 3: AllReduce for non-all2all communication
   // shared experts can be parallelized with the final communication step
   // during moe computation.
   auto current_stream = device_.current_stream();
@@ -726,25 +681,13 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
                                    parallel_args_.dp_local_process_group_,
                                    input_params.dp_global_token_nums);
   }
-  // MoE Gate
-  auto router_logits = gate_(input);
-
-  // MoE Experts
-  auto output =
-      forward_experts(input, router_logits, enable_all2all_communication);
+  auto output = forward_experts(input, enable_all2all_communication);
 
   if (need_gather_and_slice) {
     output = get_dp_local_slice(output, input_params, parallel_args_);
   }
 
   return output;
-}
-
-void FusedMoEImpl::load_e_score_correction_bias(const StateDict& state_dict) {
-  if (e_score_correction_bias_.defined() &&
-      !e_score_correction_bias_is_loaded_) {
-    LOAD_WEIGHT(e_score_correction_bias);
-  }
 }
 
 void FusedMoEImpl::load_experts(const StateDict& state_dict) {
@@ -783,7 +726,6 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
         state_dict.get_dict_with_prefix("shared_experts."));
   }
   gate_->load_state_dict(state_dict.get_dict_with_prefix("gate."));
-  load_e_score_correction_bias(state_dict.get_dict_with_prefix("gate."));
   load_experts(state_dict.get_dict_with_prefix("experts."));
 }
 

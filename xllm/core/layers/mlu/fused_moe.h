@@ -25,7 +25,7 @@ limitations under the License.
 #include "framework/state_dict/utils.h"
 #include "layers/common/deep_ep.h"
 #include "layers/common/dense_mlp.h"
-#include "layers/common/linear.h"
+#include "layers/mlu/moe_gate.h"
 #include "platform/device.h"
 #include "util/tensor_helper.h"
 
@@ -47,7 +47,6 @@ class FusedMoEImpl : public torch::nn::Module {
                const torch::TensorOptions& options);
 
   torch::Tensor forward_experts(const torch::Tensor& hidden_states,
-                                const torch::Tensor& router_logits,
                                 bool enable_all2all_communication);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
@@ -63,24 +62,20 @@ class FusedMoEImpl : public torch::nn::Module {
     std::optional<torch::Tensor> input_scale;
   };
 
-  // initial steps for MoE computation, select the experts for each token
+  // Uses precomputed reduce_weight and expert_id from MoEGate (no gate here).
   torch::Tensor select_experts(const torch::Tensor& hidden_states_2d,
-                               const torch::Tensor& router_logits_2d,
+                               const torch::Tensor& reduce_weight,
+                               const torch::Tensor& expert_id,
                                SelectedExpertInfo& selected_expert_info,
                                bool enable_all2all_communication);
 
  private:
   int64_t num_total_experts_;
   int64_t topk_;
-  int64_t num_expert_group_;
-  int64_t topk_group_;
-  double route_scale_;
   int64_t hidden_size_;
   int64_t n_shared_experts_;
   bool is_gated_;
-  int64_t renormalize_;
   std::string hidden_act_;
-  std::string scoring_func_;
   bool is_smoothquant_;
 
   int64_t num_experts_per_rank_;
@@ -93,13 +88,13 @@ class FusedMoEImpl : public torch::nn::Module {
   torch::Tensor dispatch_recv_token_tensor_head_;
   torch::Tensor dispatch_recv_token_tensor_tail_;
 
-  // steams for parallel shared experts
+  // streams for parallel shared experts
   std::unique_ptr<Stream> shared_stream_;
   std::unique_ptr<Stream> routed_stream_;
   xllm::Device device_;
   bool stream_initialized_ = false;
 
-  ReplicatedLinear gate_{nullptr};
+  MoEGate gate_{nullptr};
   DenseMLP shared_experts_{nullptr};
   DeepEP deep_ep_{nullptr};
 
@@ -112,7 +107,6 @@ class FusedMoEImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(w1);
   DEFINE_FUSED_WEIGHT(w3);
   DEFINE_FUSED_WEIGHT(w2);
-  DEFINE_WEIGHT(e_score_correction_bias);
   DEFINE_WEIGHT(w13_scale);
   DEFINE_FUSED_WEIGHT(w1_scale);
   DEFINE_FUSED_WEIGHT(w3_scale);
@@ -120,7 +114,6 @@ class FusedMoEImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(input_smooth);
   DEFINE_FUSED_WEIGHT(act_smooth);
 
-  void load_e_score_correction_bias(const StateDict& state_dict);
   void load_experts(const StateDict& state_dict);
   // create the group gemm output tensor with the workspace
   torch::Tensor create_group_gemm_output(const torch::Tensor& a,

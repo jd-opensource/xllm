@@ -340,29 +340,14 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
       {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
 
-  // Create router logits (batch_size * seq_len, num_experts)
-  std::vector<float> router_values;
-  router_values.reserve(batch_size * seq_len * num_experts);
-  for (size_t i = 0; i < batch_size * seq_len; ++i) {
-    for (size_t j = 0; j < num_experts; ++j) {
-      router_values.push_back(static_cast<float>(j) * 0.1f);
-    }
-  }
-  auto router_logits =
-      create_router_logits({batch_size * seq_len, num_experts}, router_values);
-  auto score_bias = torch::full({num_experts}, 0.1f, options_);
   auto output =
       fused_moe->forward_experts(hidden_states,
-                                 router_logits,
                                  /*enable_all2all_communication=*/false);
 
-  // Verify output shape
   CHECK_EQ(output.sizes().size(), 2) << "Output should be 2D tensor";
   CHECK_EQ(output.size(0), batch_size * seq_len)
       << "The number of tokens should match";
   CHECK_EQ(output.size(1), hidden_size) << "The hidden size should match";
-
-  // Verify output is not all zeros (weights were loaded)
   auto output_sum = torch::sum(output).item<float>();
   CHECK_NE(output_sum, 0.0f)
       << "Output should not be all zeros after loading weights";
@@ -410,20 +395,8 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
       {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
 
-  // Create router logits (batch_size * seq_len, num_experts)
-  std::vector<float> router_values;
-  router_values.reserve(batch_size * seq_len * num_experts);
-  for (size_t i = 0; i < batch_size * seq_len; ++i) {
-    for (size_t j = 0; j < num_experts; ++j) {
-      router_values.push_back(static_cast<float>(j) * 0.1f);
-    }
-  }
-  // use custom logits and residual tensor for precision verification
-  auto router_logits =
-      create_router_logits({batch_size * seq_len, num_experts}, router_values);
   auto output =
       fused_moe->forward_experts(hidden_states,
-                                 router_logits,
                                  /*enable_all2all_communication=*/false);
 
   xllm::Device device(options_.device());
