@@ -79,16 +79,9 @@ class Glm47Detector : public BaseFormatDetector {
   bool is_first_param_;
   bool value_started_;
   std::string cached_value_type_;
+  std::string utf8_buffer_;  // Buffer for incomplete UTF-8 sequences
   std::string last_arguments_;
   size_t streamed_raw_length_;
-
-  // UTF-8 buffer for handling incomplete multi-byte sequences in streaming
-  std::string utf8_buffer_;
-
-  // Split incomplete UTF-8 sequence from the end of input
-  // Returns: (complete_text, incomplete_bytes)
-  std::pair<std::string, std::string> split_incomplete_utf8(
-      const std::string& input) const;
 
   std::string trim_whitespace(std::string_view str) const;
 
@@ -119,6 +112,11 @@ class Glm47Detector : public BaseFormatDetector {
                                             const std::vector<JsonTool>& tools);
 
   void reset_streaming_state();
+
+  // Helper to split string into complete UTF-8 part and incomplete tail
+  // Returns: {complete_utf8_string, incomplete_tail}
+  std::pair<std::string, std::string> split_incomplete_utf8(
+      const std::string& str) const;
 };
 
 }  // namespace function_call
