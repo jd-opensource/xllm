@@ -24,6 +24,27 @@ cc_test(
     GTest::gtest_main
 )
 
+# MoE Gate unit test for MLU (uses layers/mlu/moe_gate)
+if(USE_MLU)
+cc_test(
+  NAME
+    moe_layer_test
+  SRCS
+    moe_gate_tests.cpp
+    tests_utils.cpp
+  DEPS
+    :common_layers
+    :mlu_layers
+    :parallel_state
+    :model
+    :model_context
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+endif()
+
 # Add test for DeepEP
 # This test must exist individually, because it contains forked processes
 #  which does not allow any device init on main process

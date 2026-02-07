@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "tests_utils.h"
 
+#include <cmath>
+
 #include "core/platform/device.h"
 
 namespace xllm {
@@ -82,6 +84,35 @@ void verify_precision(const torch::Tensor& actual_output,
 
   LOG(INFO) << "Verifying precision with rtol=" << rtol << ", atol=" << atol;
   verify_tensor_close(actual_output, expected_tensor, rtol, atol);
+}
+
+void expect_tensor_stats(const torch::Tensor& t,
+                         double expected_min,
+                         double expected_max,
+                         double expected_sum,
+                         double rtol,
+                         double atol) {
+  EXPECT_TRUE(t.defined() && t.numel() > 0)
+      << "Tensor must be defined and non-empty";
+  torch::Tensor flat = t.flatten().to(torch::kFloat32);
+  if (t.device() != torch::kCPU) {
+    flat = flat.cpu();
+  }
+  double actual_min = torch::min(flat).item<double>();
+  double actual_max = torch::max(flat).item<double>();
+  double actual_sum = torch::sum(flat).item<double>();
+
+  auto within_tol = [rtol, atol](double actual, double expected) {
+    double tol = atol + rtol * std::abs(expected);
+    return std::abs(actual - expected) <= tol;
+  };
+
+  EXPECT_TRUE(within_tol(actual_min, expected_min))
+      << "min mismatch: actual=" << actual_min << ", expected=" << expected_min;
+  EXPECT_TRUE(within_tol(actual_max, expected_max))
+      << "max mismatch: actual=" << actual_max << ", expected=" << expected_max;
+  EXPECT_TRUE(within_tol(actual_sum, expected_sum))
+      << "sum mismatch: actual=" << actual_sum << ", expected=" << expected_sum;
 }
 
 ModelArgs create_default_model_args() {
