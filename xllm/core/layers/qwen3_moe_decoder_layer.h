@@ -18,10 +18,12 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "common/dense_mlp.h"
-#if defined(USE_ILU)
-#include "ilu/fused_moe.h"
+#if defined(USE_MLU)
+#include "layers/mlu/fused_moe.h"
+#elif defined(USE_ILU)
+#include "layers/ilu/fused_moe.h"
 #else
-#include "common/fused_moe.h"
+#include "layers/common/fused_moe.h"
 #endif
 #include "common/qwen2_attention.h"
 #include "common/rms_norm.h"

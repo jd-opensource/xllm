@@ -6,7 +6,6 @@ cc_test(
     layer_test
   SRCS
     dense_mlp_tests.cpp
-    fused_moe_tests.cpp
     tests_utils.cpp
     indexer_tests.cpp
     mla_tests.cpp
@@ -31,6 +30,7 @@ cc_test(
     moe_layer_test
   SRCS
     moe_gate_tests.cpp
+    fused_moe_tests.cpp
     tests_utils.cpp
   DEPS
     :common_layers
