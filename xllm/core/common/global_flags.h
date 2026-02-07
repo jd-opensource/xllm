@@ -39,10 +39,6 @@ DECLARE_string(task);
 
 DECLARE_string(devices);
 
-DECLARE_string(draft_model);
-
-DECLARE_string(draft_devices);
-
 DECLARE_int32(limit_image_per_prompt);
 
 DECLARE_int32(block_size);
@@ -63,7 +59,11 @@ DECLARE_int32(max_seqs_per_batch);
 
 DECLARE_int32(max_tokens_per_chunk_for_prefill);
 
+// --- speculative inference config ---
+DECLARE_string(draft_model);
+DECLARE_string(draft_devices);
 DECLARE_int32(num_speculative_tokens);
+DECLARE_string(speculative_algorithm);
 
 DECLARE_int32(num_request_handling_threads);
 

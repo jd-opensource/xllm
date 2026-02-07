@@ -15,6 +15,11 @@ limitations under the License.
 
 #pragma once
 
+#include <optional>
+#include <unordered_set>
+#include <vector>
+
+#include "core/common/global_flags.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
@@ -67,6 +72,25 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       layers_.push_back(block);
       blocks_->push_back(block);
     }
+
+    // Eagle3: layer ids to capture (can be read from layers_to_capture in
+    // config.json)
+    if (FLAGS_speculative_algorithm == "Eagle3") {
+      const auto& layer_ids_from_config = model_args.layers_to_capture();
+      if (!layer_ids_from_config.empty()) {
+        set_eagle3_layers_to_capture(
+            std::make_optional<std::vector<int32_t>>(layer_ids_from_config));
+      } else {
+        set_eagle3_layers_to_capture();
+      }
+      // Pre-allocate aux output buffer [max_tokens_per_batch, hidden_size *
+      // num_captured]
+      const size_t num_captured = layers_to_capture_set_.size();
+      const int64_t aux_dim =
+          model_args.hidden_size() * static_cast<int64_t>(num_captured);
+      aux_output_buffer_ =
+          torch::empty({FLAGS_max_tokens_per_batch, aux_dim}, options);
+    }
   }
 
   torch::Tensor deepstack_process(torch::Tensor hidden_states,
@@ -77,6 +101,25 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     auto local_this = selected + visual_embeds;
     hidden_states.index_put_({visual_pos_masks}, local_this);
     return hidden_states;
+  }
+
+  void set_eagle3_layers_to_capture(
+      const std::optional<std::vector<int32_t>>& layer_ids = std::nullopt) {
+    capture_aux_hidden_states_ = true;
+    layers_to_capture_set_.clear();
+    if (!layer_ids.has_value()) {
+      int32_t num_layers = static_cast<int32_t>(layers_.size());
+      layers_to_capture_set_.insert(2);
+      layers_to_capture_set_.insert(num_layers / 2);
+      layers_to_capture_set_.insert(num_layers - 3);
+    } else {
+      // Config uses 0-based layer indices, same as default {2, n/2, n-3}
+      for (int32_t val : layer_ids.value()) {
+        layers_to_capture_set_.insert(val);
+      }
+    }
+    LOG(INFO) << "layers_to_capture_set_ size: "
+              << layers_to_capture_set_.size();
   }
 
   virtual ModelOutput forward(torch::Tensor tokens,
@@ -167,6 +210,9 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
+    const int64_t num_tokens = h.size(0);
+    const int64_t hidden_size = h.size(-1);
+    size_t capture_idx = 0;
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event{nullptr};
       std::atomic<bool>* event_flag{nullptr};
@@ -180,6 +226,15 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
 
       auto& layer = layers_[i];
+      if (capture_aux_hidden_states_ &&
+          layers_to_capture_set_.count(static_cast<int32_t>(i)) != 0) {
+        aux_output_buffer_.slice(0, 0, num_tokens)
+            .slice(1,
+                   static_cast<int64_t>(capture_idx) * hidden_size,
+                   static_cast<int64_t>(capture_idx + 1) * hidden_size)
+            .copy_(h.reshape({num_tokens, hidden_size}));
+        capture_idx++;
+      }
 
       layer(h,
             cos_pos,
@@ -197,11 +252,19 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
     }
     auto hidden_states = norm_(h, 0);
+    if (capture_aux_hidden_states_) {
+      torch::Tensor aux_hidden_states =
+          aux_output_buffer_.slice(0, 0, num_tokens);
+      return ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);
+    }
     return ModelOutput(hidden_states);
   }
 
  private:
   torch::Tensor viusal_pos_mask_;
+  std::unordered_set<int32_t> layers_to_capture_set_;
+  bool capture_aux_hidden_states_ = false;
+  torch::Tensor aux_output_buffer_;
 };
 TORCH_MODULE(QWen3Model);
 
@@ -237,6 +300,10 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
 
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
   LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
+
+  // Eagle3: layer ids (0-based) to capture from config, e.g.
+  // "layers_to_capture": [2, 14, 25]; defaults to empty if missing
+  LOAD_ARG_OR(layers_to_capture, "layers_to_capture", std::vector<int32_t>{});
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
     return args->hidden_size() / args->n_heads();
