@@ -44,9 +44,6 @@ class FusedMoEImpl : public torch::nn::Module {
                int64_t intermediate_size,
                int64_t n_shared_experts,
                bool is_gated,
-               bool has_score_bias,
-               bool has_bias,
-               bool skip_bias_add,
                int64_t renormalize,
                const std::string& hidden_act,
                const std::string& scoring_func,
@@ -87,9 +84,6 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t hidden_size_;
   int64_t n_shared_experts_;
   bool is_gated_;
-  bool has_score_bias_;
-  bool has_bias_;
-  bool skip_bias_add_;
   int64_t renormalize_;
   std::string hidden_act_;
   std::string scoring_func_;

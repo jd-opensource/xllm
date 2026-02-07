@@ -221,9 +221,6 @@ class FusedMoETest : public ::testing::Test {
                             int64_t intermediate_size,
                             int64_t n_shared_experts = 1,
                             bool is_gated = true,
-                            bool has_score_bias = false,
-                            bool has_bias = false,
-                            bool skip_bias_add = false,
                             int64_t renormalize = 0,
                             const std::string& hidden_act = "silu",
                             const std::string& scoring_func = "sigmoid",
@@ -237,9 +234,6 @@ class FusedMoETest : public ::testing::Test {
                                  intermediate_size,
                                  n_shared_experts,
                                  is_gated,
-                                 has_score_bias,
-                                 has_bias,
-                                 skip_bias_add,
                                  renormalize,
                                  hidden_act,
                                  scoring_func,
@@ -317,9 +311,6 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
   const int64_t top_k = 2;
   const double route_scale = 2.5;
   const bool gated = true;
-  const bool has_score_bias = true;
-  const bool has_bias = false;
-  const bool skip_bias_add = false;
   const int64_t renormalize = 1;
   const int64_t n_shared_experts = 1;
 
@@ -333,9 +324,6 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
                                     intermediate_size,
                                     n_shared_experts,
                                     gated,
-                                    has_score_bias,
-                                    has_bias,
-                                    skip_bias_add,
                                     renormalize);
 
   // Create test weights and load them
@@ -393,9 +381,6 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   const int64_t top_k = 2;
   const double route_scale = 2.5;
   const bool gated = true;
-  const bool has_score_bias = true;
-  const bool has_bias = false;
-  const bool skip_bias_add = false;
   const int64_t renormalize = 1;
   const int64_t n_shared_experts = 1;
 
@@ -409,9 +394,6 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
                                     intermediate_size,
                                     n_shared_experts,
                                     gated,
-                                    has_score_bias,
-                                    has_bias,
-                                    skip_bias_add,
                                     renormalize);
 
   // Create test weights and load them

@@ -65,11 +65,8 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
                                         1.0,  // route_scale
                                         model_args.hidden_size(),
                                         model_args.moe_intermediate_size(),
-                                        0,      // n_shared_experts
-                                        true,   // is_gated
-                                        false,  // has_score_bias
-                                        false,  // has_bias
-                                        false,  // skip_bias_add
+                                        0,     // n_shared_experts
+                                        true,  // is_gated
                                         model_args.norm_topk_prob(),
                                         model_args.hidden_act(),
                                         "softmax",
