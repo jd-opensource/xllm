@@ -317,9 +317,16 @@ inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
   // get npu storage constructor from register and construct storage
   auto fptr = c10::GetStorageImplCreate(device_type);
   auto allocator = c10::GetAllocator(device_type);
-  storage = fptr(c10::StorageImpl::use_byte_size_t(), 0, allocator, true);
-  storage.unsafeGetStorageImpl()->set_nbytes(tensor_nbytes);
-  storage.set_data_ptr(std::move(c10_data_ptr));
+
+  // PyTorch 2.7+ API Change:
+  // Old: StorageImpl(size, allocator) + storage.set_data_ptr(data)  // two
+  // steps New: StorageImpl(size, data_ptr, allocator)                     //
+  // one step
+  storage = fptr(c10::StorageImpl::use_byte_size_t(),
+                 c10::SymInt(tensor_nbytes),
+                 std::move(c10_data_ptr),
+                 allocator,
+                 true);
 
   tensor.set_(storage, 0, dims);
 #endif

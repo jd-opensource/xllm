@@ -12,18 +12,18 @@ index 047ae3e..b4ae201 100644
  execute_process(
      COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print(sys.path[-1])"
 diff --git a/mooncake-common/common.cmake b/mooncake-common/common.cmake
-index 4a25227..f5d82dd 100644
+index 4a25227..1d38241 100644
 --- a/mooncake-common/common.cmake
 +++ b/mooncake-common/common.cmake
-@@ -59,7 +59,7 @@ option(BUILD_UNIT_TESTS "Build unit tests" ON)
- option(USE_CUDA "option for enabling gpu features" OFF)
+@@ -60,7 +60,7 @@ option(USE_CUDA "option for enabling gpu features" OFF)
  option(USE_NVMEOF "option for using NVMe over Fabric" OFF)
  option(USE_TCP "option for using TCP transport" ON)
--option(USE_ASCEND "option for using npu with HCCL" OFF)
-+option(USE_ASCEND "option for using npu with HCCL" ON)
- option(USE_ASCEND_DIRECT "option for using ascend npu with adxl engine" OFF)
+ option(USE_ASCEND "option for using npu with HCCL" OFF)
+-option(USE_ASCEND_DIRECT "option for using ascend npu with adxl engine" OFF)
++option(USE_ASCEND_DIRECT "option for using ascend npu with adxl engine" ON)
  option(USE_ASCEND_HETEROGENEOUS "option for transferring between ascend npu and gpu" OFF)
  option(USE_MNNVL "option for using Multi-Node NVLink transport" OFF)
+ option(USE_CXL "option for using CXL protocol" OFF)
 diff --git a/mooncake-store/CMakeLists.txt b/mooncake-store/CMakeLists.txt
 index 8483085..9d263dd 100644
 --- a/mooncake-store/CMakeLists.txt
@@ -159,22 +159,24 @@ index de7e35d..5d44865 100644
 +target_link_libraries(base PRIVATE glog::glog)
 \ No newline at end of file
 diff --git a/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt b/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
-index bde573d..ec8217f 100644
+index bde573d..8ae0260 100644
 --- a/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
 +++ b/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
-@@ -8,6 +8,10 @@ else ()
+@@ -8,6 +8,12 @@ else ()
  endif ()
  
  add_library(ascend_transport OBJECT ${ASCEND_SOURCES})
 +if (USE_ASCEND)
 +    target_link_libraries(ascend_transport PRIVATE ascend_transport_mem glog::glog)
++elseif (USE_ASCEND_DIRECT)
++    target_link_libraries(ascend_transport PRIVATE glog::glog)
 +endif ()
 +
  
  set_target_properties(ascend_transport
                        PROPERTIES
 diff --git a/mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/ascend_transport_c/CMakeLists.txt b/mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/ascend_transport_c/CMakeLists.txt
-index 06ea0ff..68934f4 100644
+index 06ea0ff..414a6a4 100644
 --- a/mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/ascend_transport_c/CMakeLists.txt
 +++ b/mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/ascend_transport_c/CMakeLists.txt
 @@ -5,9 +5,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
@@ -187,8 +189,10 @@ index 06ea0ff..68934f4 100644
 -target_link_libraries(ascend_transport_mem PRIVATE hccl ascendcl glog gflags)
 +target_link_libraries(ascend_transport_mem PRIVATE hccl hccl_plf ascendcl glog::glog gflags::gflags)
  
- target_compile_options(ascend_transport_mem BEFORE PRIVATE "-std=c++11" "-fstack-protector-strong" "-s" "-Wl,-z,relro" "-Wl,-z,now" "-Wl,-z,noexecstack" "-Wl,--copy-dt-needed-entries" "-DOPEN_BUILD_PROJECT" "-DLOG_CPP" "-D_GLIBCXX_USE_CXX11_ABI=0")
- target_link_options(ascend_transport_mem BEFORE PRIVATE "-std=c++11" "-fstack-protector-strong" "-s" "-Wl,-z,relro" "-Wl,-z,now" "-Wl,-z,noexecstack" "-Wl,--copy-dt-needed-entries" "-DOPEN_BUILD_PROJECT" "-DLOG_CPP" "-D_GLIBCXX_USE_CXX11_ABI=0")
+-target_compile_options(ascend_transport_mem BEFORE PRIVATE "-std=c++11" "-fstack-protector-strong" "-s" "-Wl,-z,relro" "-Wl,-z,now" "-Wl,-z,noexecstack" "-Wl,--copy-dt-needed-entries" "-DOPEN_BUILD_PROJECT" "-DLOG_CPP" "-D_GLIBCXX_USE_CXX11_ABI=0")
+-target_link_options(ascend_transport_mem BEFORE PRIVATE "-std=c++11" "-fstack-protector-strong" "-s" "-Wl,-z,relro" "-Wl,-z,now" "-Wl,-z,noexecstack" "-Wl,--copy-dt-needed-entries" "-DOPEN_BUILD_PROJECT" "-DLOG_CPP" "-D_GLIBCXX_USE_CXX11_ABI=0")
++target_compile_options(ascend_transport_mem BEFORE PRIVATE "-std=c++11" "-fstack-protector-strong" "-s" "-Wl,-z,relro" "-Wl,-z,now" "-Wl,-z,noexecstack" "-Wl,--copy-dt-needed-entries" "-DOPEN_BUILD_PROJECT" "-DLOG_CPP" "-D_GLIBCXX_USE_CXX11_ABI=1")
++target_link_options(ascend_transport_mem BEFORE PRIVATE "-std=c++11" "-fstack-protector-strong" "-s" "-Wl,-z,relro" "-Wl,-z,now" "-Wl,-z,noexecstack" "-Wl,--copy-dt-needed-entries" "-DOPEN_BUILD_PROJECT" "-DLOG_CPP" "-D_GLIBCXX_USE_CXX11_ABI=1")
 diff --git a/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt b/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt
 index 23fa1b4..7c6a0f0 100644
 --- a/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt

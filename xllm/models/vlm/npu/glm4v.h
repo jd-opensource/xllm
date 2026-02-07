@@ -462,7 +462,7 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
       auto interpolated_embed = F::grid_sample(pos_embed_2d,
                                                grid,
                                                F::GridSampleFuncOptions()
-                                                   .mode(torch::kBicubic)
+                                                   .mode(torch::kBilinear)
                                                    .padding_mode(torch::kBorder)
                                                    .align_corners(false));
       adapted_pos_embed =
