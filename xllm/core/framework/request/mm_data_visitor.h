@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <unordered_set>
 
+#include "common/global_flags.h"
 #include "mm_batch_data.h"
 #include "mm_data.h"
 
@@ -98,6 +99,7 @@ class EncoderEmbeddingGatherVisitor : public MMDataItem::IVisitor {
  public:
   torch::Device device_;
   std::string gather_prefix_ = "embedding";
+  std::string deepstack_prefix_ = "deepstack";
   std::unordered_map<MMKey, std::vector<torch::Tensor>> datas_;
 };
 
