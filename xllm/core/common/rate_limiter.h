@@ -29,6 +29,8 @@ class RateLimiter final {
 
   void decrease_one_request();
 
+  void decrease_requests(size_t decrease_requests_num);
+
  private:
   std::atomic<int32_t> num_concurrent_requests_{0};
 };
