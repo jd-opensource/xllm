@@ -198,6 +198,8 @@ class MtpModelImplBase : public torch::nn::Module {
       layers_[i]->load_state_dict(
           state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
     }
+    embed_tokens_->load_state_dict(
+        state_dict.get_dict_with_prefix("embed_tokens."));
     eh_proj_->load_state_dict(state_dict.get_dict_with_prefix("eh_proj."));
     enorm_->load_state_dict(state_dict.get_dict_with_prefix("enorm."));
     hnorm_->load_state_dict(state_dict.get_dict_with_prefix("hnorm."));
@@ -210,6 +212,7 @@ class MtpModelImplBase : public torch::nn::Module {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
+    embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
     eh_proj_->verify_loaded_weights(prefix + "eh_proj.");
     enorm_->verify_loaded_weights(prefix + "enorm.");
     hnorm_->verify_loaded_weights(prefix + "hnorm.");
@@ -220,6 +223,7 @@ class MtpModelImplBase : public torch::nn::Module {
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
+    embed_tokens_->merge_loaded_weights();
     eh_proj_->merge_loaded_weights();
     enorm_->merge_loaded_weights();
     hnorm_->merge_loaded_weights();
