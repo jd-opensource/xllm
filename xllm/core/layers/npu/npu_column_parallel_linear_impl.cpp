@@ -25,19 +25,29 @@ void NpuColumnParallelLinearImpl::param_from_args(
   param.fusionLinearParam.isBF16 = args.dtype() == "bfloat16";
   param.unpadInputs = true;
   param.fusionLinearParam.transposeType = 1;
+
   if (parallel_args.world_size() > 1) {
-    if (dp_size_ > 1) {
-      param.tensorParallelInfo.rank = dp_local_tp_rank_;
-      param.tensorParallelInfo.worldSize = dp_local_tp_size_;
+    if (parallel_args.mapping_data().empty()) {
+      if (dp_size_ > 1) {
+        param.tensorParallelInfo.rank = dp_local_tp_rank_;
+        param.tensorParallelInfo.worldSize = dp_local_tp_size_;
+      } else {
+        param.tensorParallelInfo.rank = parallel_args.rank();
+        param.tensorParallelInfo.worldSize = parallel_args.world_size();
+      }
+      param.parallelType = atb_speed::common::COLUMN_PARALLEL;
+      param.tensorParallelInfo.commDomain = std::to_string(dp_rank_);
+      param.tensorParallelInfo.backend = "lccl";
     } else {
-      param.tensorParallelInfo.rank = parallel_args.rank();
-      param.tensorParallelInfo.worldSize = parallel_args.world_size();
+      param.parallelType = atb_speed::common::COLUMN_PARALLEL;
+      atb_speed::common::ParallelInfo parallelInfo =
+          parallel_args.mapping().Get(atb_speed::base::WORD_EMBED_TP);
+      param.tensorParallelInfo.rank = parallelInfo.rank;
+      param.tensorParallelInfo.worldSize = parallelInfo.rankIds.size();
+      param.tensorParallelInfo.backend = FLAGS_communication_backend;
+      parallelInfo.InitCommDomain(param.tensorParallelInfo.hcommInfo,
+                                  param.tensorParallelInfo.commDomain);
     }
-    param.parallelType = atb_speed::common::COLUMN_PARALLEL;
-    param.tensorParallelInfo.commDomain = std::to_string(dp_rank_);
-    // param.tensorParallelInfo.backend =
-    // FLAGS_communication_backend;
-    param.tensorParallelInfo.backend = "lccl";
   }
 }
 
