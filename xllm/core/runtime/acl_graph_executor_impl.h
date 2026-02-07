@@ -78,6 +78,11 @@ class GraphPersistentParam {
   }
   torch::Tensor persistent_positions(uint32_t actual_tokens = 0) const {
     if (actual_tokens > 0) {
+      if (use_mrope_) {
+        // mRoPE positions have shape [3, num_tokens]
+        return persistent_positions_.slice(
+            /*dim=*/1, /*start=*/0, /*end=*/actual_tokens);
+      }
       return persistent_positions_.slice(
           /*dim=*/0, /*start=*/0, /*end=*/actual_tokens);
     }
@@ -195,6 +200,9 @@ class GraphPersistentParam {
 
   // for mtp model
   torch::Tensor persistent_embedding_;
+
+  // for mrope (multimodal rotary position embedding)
+  bool use_mrope_ = false;
 
   // ModelOutput fields
   torch::Tensor aux_hidden_states_;

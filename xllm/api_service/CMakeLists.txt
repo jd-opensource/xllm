@@ -2,12 +2,13 @@ include(cc_library)
 include(cc_test)
 
 cc_library(
-  NAME 
+  NAME
     api_service
   HDRS
     api_service.h
     api_service_impl.h
     call.h
+    chat_json_utils.h
     completion_service_impl.h
     rec_completion_service_impl.h
     chat_service_impl.h
@@ -81,3 +82,14 @@ cc_test(
 )
 target_link_libraries(anthropic_service_test PRIVATE brpc leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
 add_dependencies(anthropic_service_test brpc-static)
+
+cc_test(
+  NAME
+    api_service_test
+  SRCS
+    chat_json_utils_test.cpp
+  DEPS
+    api_service
+    GTest::gtest_main
+    nlohmann_json::nlohmann_json
+)

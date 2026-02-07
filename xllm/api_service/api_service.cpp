@@ -24,6 +24,7 @@ limitations under the License.
 
 #include "call.h"
 #include "chat.pb.h"
+#include "chat_json_utils.h"
 #include "common.pb.h"
 #include "completion.pb.h"
 #include "core/common/constants.h"
@@ -193,9 +194,19 @@ size_t get_json_content_length(const brpc::Controller* ctrl) {
   return (size_t)-1L;
 }
 
+}  // namespace
+
 // Preprocess chat JSON to normalize array content to string.
+// For text-only backends, combines text array items into a single string.
+// For multimodal backends, passes through unchanged without parsing.
 // Returns Status with processed JSON on success, or error status on failure.
-std::pair<Status, std::string> pre_process_chat_json(std::string json_str) {
+std::pair<Status, std::string> preprocess_chat_json(std::string json_str,
+                                                    bool is_multimodal) {
+  // Multimodal backends handle array content natively, skip parsing
+  if (is_multimodal) {
+    return {Status(), std::move(json_str)};
+  }
+
   try {
     auto json = nlohmann::json::parse(json_str);
     if (!json.contains("messages") || !json["messages"].is_array()) {
@@ -210,9 +221,7 @@ std::pair<Status, std::string> pre_process_chat_json(std::string json_str) {
                 ""};
       }
       if (msg.contains("content") && msg["content"].is_array()) {
-        // Pre-calculate total size to avoid multiple reallocations
-        size_t total_size = 0;
-        size_t num_items = msg["content"].size();
+        // Validate all items are text-only with proper text field
         for (const auto& item : msg["content"]) {
           if (!item.is_object()) {
             return {Status(StatusCode::INVALID_ARGUMENT,
@@ -220,22 +229,26 @@ std::pair<Status, std::string> pre_process_chat_json(std::string json_str) {
                     ""};
           }
           if (!item.contains("type") || item["type"] != "text") {
+            // Non-text content on text-only backend is an error
             return {Status(StatusCode::INVALID_ARGUMENT,
-                           "Non-text content requires multimodal endpoint"),
+                           "Non-text content (e.g., image_url) requires "
+                           "multimodal backend (-backend vlm)"),
                     ""};
           }
-          if (!item.contains("text")) {
+          // Validate text items have proper text field
+          if (!item.contains("text") || !item["text"].is_string()) {
             return {Status(StatusCode::INVALID_ARGUMENT,
-                           "Missing 'text' field for content item with type "
-                           "'text'."),
+                           "Missing or invalid 'text' field in content item."),
                     ""};
           }
-          if (!item["text"].is_string()) {
-            return {Status(StatusCode::INVALID_ARGUMENT,
-                           "Invalid 'text' field in content item: must be a "
-                           "string."),
-                    ""};
-          }
+        }
+
+        // All items are text-only; combine into single string.
+        // Pre-calculate total size to avoid reallocations.
+        size_t total_size = 0;
+        size_t num_items = msg["content"].size();
+        for (const auto& item : msg["content"]) {
+          // Already validated above
           total_size += item["text"].get_ref<const std::string&>().size();
         }
         // Add space for newline separators
@@ -272,12 +285,15 @@ std::pair<Status, std::string> pre_process_chat_json(std::string json_str) {
   }
 }
 
+namespace {
+
 template <typename ChatCall, typename Service>
-void handle_chat_completions(std::unique_ptr<Service>& service,
-                             xllm::ClosureGuard& guard,
-                             brpc::Controller* ctrl,
-                             const proto::HttpRequest* request,
-                             proto::HttpResponse* response) {
+void chat_completions_impl(std::unique_ptr<Service>& service,
+                           xllm::ClosureGuard& guard,
+                           brpc::Controller* ctrl,
+                           const proto::HttpRequest* request,
+                           proto::HttpResponse* response,
+                           bool is_multimodal) {
   auto arena = GetArenaWithCheck<ChatCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ReqType>(arena);
@@ -294,7 +310,7 @@ void handle_chat_completions(std::unique_ptr<Service>& service,
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
   auto [preprocess_status, processed_json] =
-      pre_process_chat_json(std::move(attachment));
+      preprocess_chat_json(std::move(attachment), is_multimodal);
   if (!preprocess_status.ok()) {
     ctrl->SetFailed(preprocess_status.message());
     LOG(ERROR) << "Complex message preprocessing failed: "
@@ -336,16 +352,29 @@ void APIService::ChatCompletionsHttp(
 
   if (FLAGS_backend == "llm") {
     CHECK(chat_service_impl_) << " chat service is invalid.";
-    handle_chat_completions<ChatCall, ChatServiceImpl>(
-        chat_service_impl_, done_guard, ctrl, request, response);
+    chat_completions_impl<ChatCall, ChatServiceImpl>(chat_service_impl_,
+                                                     done_guard,
+                                                     ctrl,
+                                                     request,
+                                                     response,
+                                                     /*is_multimodal=*/false);
   } else if (FLAGS_backend == "vlm") {
     CHECK(mm_chat_service_impl_) << " mm chat service is invalid.";
-    handle_chat_completions<MMChatCall, MMChatServiceImpl>(
-        mm_chat_service_impl_, done_guard, ctrl, request, response);
+    chat_completions_impl<MMChatCall, MMChatServiceImpl>(
+        mm_chat_service_impl_,
+        done_guard,
+        ctrl,
+        request,
+        response,
+        /*is_multimodal=*/true);
   } else if (FLAGS_backend == "rec") {
     CHECK(chat_service_impl_) << " chat service is invalid.";
-    handle_chat_completions<ChatCall, ChatServiceImpl>(
-        chat_service_impl_, done_guard, ctrl, request, response);
+    chat_completions_impl<ChatCall, ChatServiceImpl>(chat_service_impl_,
+                                                     done_guard,
+                                                     ctrl,
+                                                     request,
+                                                     response,
+                                                     /*is_multimodal=*/false);
   }
 }
 
