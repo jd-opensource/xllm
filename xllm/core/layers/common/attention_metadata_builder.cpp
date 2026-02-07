@@ -47,11 +47,20 @@ AttentionMetadata AttentionMetadataBuilder::build(
   attn_metadata.plan_info = std::make_shared<PlanInfo>();
 #endif
 
-#if defined(USE_NPU)
-  // for npu
-  if (attn_mask.has_value()) {
-    attn_metadata.attn_mask = attn_mask.value();
+#if defined(USE_CUDA) || defined(USE_NPU)
+  // Use explicit attn_mask if provided; otherwise fall back to
+  // graph_buffer.attn_mask (e.g. Qwen2_5_VL sets graph_buffer.attn_mask for
+  // LongCat text encoding)
+  std::optional<torch::Tensor> mask_to_use = attn_mask;
+  if (!mask_to_use.has_value() && params.graph_buffer.attn_mask.defined()) {
+    mask_to_use = params.graph_buffer.attn_mask;
   }
+  if (mask_to_use.has_value()) {
+    attn_metadata.attn_mask = mask_to_use.value();
+  }
+#endif
+
+#if defined(USE_NPU)
   // Determine if we should use ACL graph mode:
   // - FLAGS_enable_graph must be enabled
   // - Must be decode phase (not prefill)

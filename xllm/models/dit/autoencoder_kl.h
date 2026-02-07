@@ -48,8 +48,13 @@ torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
   at::Generator gen = at::detail::createCPUGenerator();
   gen = gen.clone();
   gen.set_current_seed(seed);
-  torch::Tensor latents;
-  latents = torch::randn(shape, gen, options.device(torch::kCPU));
+  // Generate in float32 on CPU first (matches Python torch.randn default).
+  // Using options.device(torch::kCPU) with options.dtype() would generate
+  // in bfloat16, producing different distribution and range vs Python.
+  torch::Tensor latents = torch::randn(
+      shape,
+      gen,
+      torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32));
   latents = latents.to(options);
   return latents;
 }

@@ -41,7 +41,9 @@ struct DiTGenerationParams {
            num_images_per_prompt == other.num_images_per_prompt &&
            seed == other.seed &&
            max_sequence_length == other.max_sequence_length &&
-           strength == other.strength;
+           strength == other.strength &&
+           enable_cfg_renorm == other.enable_cfg_renorm &&
+           cfg_renorm_min == other.cfg_renorm_min;
   }
 
   bool operator!=(const DiTGenerationParams& other) const {
@@ -65,6 +67,10 @@ struct DiTGenerationParams {
   int32_t max_sequence_length = 512;
 
   float strength = 1.0;
+
+  bool enable_cfg_renorm = true;
+
+  float cfg_renorm_min = 0.0f;
 };
 
 struct DiTInputParams {

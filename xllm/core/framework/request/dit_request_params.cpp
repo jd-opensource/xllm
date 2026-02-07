@@ -129,6 +129,12 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
     generation_params.width = size.first;
     generation_params.height = size.second;
   }
+  if (params.has_height()) {
+    generation_params.height = params.height();
+  }
+  if (params.has_width()) {
+    generation_params.width = params.width();
+  }
   if (params.has_num_inference_steps()) {
     generation_params.num_inference_steps = params.num_inference_steps();
   }
@@ -149,6 +155,12 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   }
   if (params.has_max_sequence_length()) {
     generation_params.max_sequence_length = params.max_sequence_length();
+  }
+  if (params.has_enable_cfg_renorm()) {
+    generation_params.enable_cfg_renorm = params.enable_cfg_renorm();
+  }
+  if (params.has_cfg_renorm_min()) {
+    generation_params.cfg_renorm_min = params.cfg_renorm_min();
   }
 }
 
