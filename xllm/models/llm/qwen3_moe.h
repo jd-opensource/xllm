@@ -199,5 +199,14 @@ REGISTER_MODEL_ARGS(qwen3_moe, [&] {
   LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int>());
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+
+  // arguments to be compatible with other fused moe models
+  LOAD_ARG_OR(n_routed_experts, "num_experts", 128);
+  SET_ARG(n_shared_experts, 0);
+  SET_ARG(scoring_func, "softmax");
+  SET_ARG(topk_method, "");
+  SET_ARG(n_group, -1);
+  SET_ARG(topk_group, 0);
+  SET_ARG(routed_scaling_factor, 1.0);
 });
 }  // namespace xllm

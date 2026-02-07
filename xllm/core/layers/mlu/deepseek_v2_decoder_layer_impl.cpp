@@ -66,19 +66,8 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   // Initialize mlp
   if (is_moe_layer_) {
     moe_mlp_ = register_module("mlp",
-                               FusedMoE(model_args.n_routed_experts(),
-                                        model_args.num_experts_per_tok(),
-                                        model_args.n_group(),
-                                        model_args.topk_group(),
-                                        model_args.routed_scaling_factor(),
-                                        model_args.hidden_size(),
-                                        model_args.moe_intermediate_size(),
-                                        model_args.n_shared_experts(),
-                                        /*is_gated=*/true,
-                                        model_args.norm_topk_prob(),
-                                        model_args.hidden_act(),
-                                        model_args.scoring_func(),
-                                        model_args.topk_method(),
+                               FusedMoE(model_args,
+                                        FusedMoEArgs{.is_gated = true},
                                         quant_args,
                                         parallel_args_,
                                         options));

@@ -211,7 +211,6 @@ class FusedMoETest : public ::testing::Test {
     return weight_dict;
   }
 
-  // Helper function to create FusedMoE with custom dimensions
   FusedMoE create_fused_moe(int64_t num_experts,
                             int64_t top_k,
                             int64_t num_expert_group,
@@ -225,19 +224,21 @@ class FusedMoETest : public ::testing::Test {
                             const std::string& hidden_act = "silu",
                             const std::string& scoring_func = "sigmoid",
                             const std::string& topk_method = "noaux_tc") {
-    return FusedMoE(FusedMoEImpl(num_experts,
-                                 top_k,
-                                 num_expert_group,
-                                 topk_group,
-                                 route_scale,
-                                 hidden_size,
-                                 intermediate_size,
-                                 n_shared_experts,
-                                 is_gated,
-                                 renormalize,
-                                 hidden_act,
-                                 scoring_func,
-                                 topk_method,
+    ModelArgs args = model_args_;
+    args.n_routed_experts() = static_cast<int32_t>(num_experts);
+    args.num_experts_per_tok() = static_cast<int32_t>(top_k);
+    args.n_group() = static_cast<int32_t>(num_expert_group);
+    args.topk_group() = static_cast<int32_t>(topk_group);
+    args.routed_scaling_factor() = static_cast<float>(route_scale);
+    args.hidden_size() = hidden_size;
+    args.moe_intermediate_size() = static_cast<int32_t>(intermediate_size);
+    args.n_shared_experts() = static_cast<int32_t>(n_shared_experts);
+    args.norm_topk_prob() = (renormalize != 0);
+    args.hidden_act() = hidden_act;
+    args.scoring_func() = scoring_func;
+    args.topk_method() = topk_method;
+    return FusedMoE(FusedMoEImpl(args,
+                                 FusedMoEArgs{.is_gated = is_gated},
                                  quant_args_,
                                  parallel_args_,
                                  options_));

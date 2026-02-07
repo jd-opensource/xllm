@@ -36,37 +36,30 @@ int32_t get_dtype_size(torch::ScalarType dtype) {
 namespace xllm {
 namespace layer {
 
-FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
-                           int64_t top_k,
-                           int64_t num_expert_group,
-                           int64_t topk_group,
-                           double route_scale,
-                           int64_t hidden_size,
-                           int64_t intermediate_size,
-                           int64_t n_shared_experts,
-                           bool is_gated,
-                           int64_t renormalize,
-                           const std::string& hidden_act,
-                           const std::string& scoring_func,
-                           const std::string& topk_method,
+FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
+                           const FusedMoEArgs& moe_args,
                            const QuantArgs& quant_args,
                            const ParallelArgs& parallel_args,
                            const torch::TensorOptions& options)
-    : num_total_experts_(num_experts),
-      topk_(top_k),
-      num_expert_group_(num_expert_group),
-      topk_group_(topk_group),
-      route_scale_(route_scale),
-      hidden_size_(hidden_size),
-      n_shared_experts_(n_shared_experts),
-      is_gated_(is_gated),
-      renormalize_(renormalize),
-      hidden_act_(hidden_act),
-      scoring_func_(scoring_func),
+    : num_total_experts_(model_args.n_routed_experts()),
+      topk_(model_args.num_experts_per_tok()),
+      num_expert_group_(model_args.n_group()),
+      topk_group_(model_args.topk_group()),
+      route_scale_(model_args.routed_scaling_factor()),
+      hidden_size_(model_args.hidden_size()),
+      n_shared_experts_(model_args.n_shared_experts()),
+      is_gated_(moe_args.is_gated),
+      renormalize_(model_args.norm_topk_prob() ? 1 : 0),
+      hidden_act_(model_args.hidden_act()),
+      scoring_func_(model_args.scoring_func()),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
       options_(options),
-      device_(options_.device()) {
+      device_(options.device()) {
+  const int64_t num_experts = num_total_experts_;
+  const int64_t intermediate_size =
+      static_cast<int64_t>(model_args.moe_intermediate_size());
+  const std::string& topk_method = model_args.topk_method();
   int64_t ep_size = parallel_args.ep_size();
   int64_t ep_rank = 0;
   tp_pg_ = parallel_args.tp_group_;
@@ -166,7 +159,7 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
 
   gate_ = register_module(
       "gate_proj",
-      ReplicatedLinear(hidden_size, num_experts, false, quant_args, options));
+      ReplicatedLinear(hidden_size_, num_experts, false, quant_args, options));
   if (n_shared_experts_ > 0) {
     ProcessGroup* shared_expert_pg;
     if (parallel_args_.ep_size() > 1) {
@@ -185,7 +178,7 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
     // maintains its own unique weights.
     shared_experts_ =
         register_module("shared_experts",
-                        DenseMLP(hidden_size,
+                        DenseMLP(hidden_size_,
                                  intermediate_size * n_shared_experts_,
                                  is_gated_,
                                  false,
@@ -205,7 +198,7 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
     w13_ = register_parameter(
         "w13",
         torch::empty(
-            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size},
+            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size_},
             quant_option),
         false);
     w13_scale_ = register_parameter(
@@ -218,17 +211,17 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
     // retrieving quantization parameters for any subset of experts as required.
     input_smooth_ = register_parameter(
         "input_smooth",
-        torch::empty({num_total_experts_, hidden_size}, fp_option),
+        torch::empty({num_total_experts_, hidden_size_}, fp_option),
         false);
     w2_ = register_parameter(
         "w2",
         torch::empty(
-            {num_experts_per_rank_, hidden_size, local_intermediate_size},
+            {num_experts_per_rank_, hidden_size_, local_intermediate_size},
             quant_option),
         false);
     w2_scale_ = register_parameter(
         "w2_scale",
-        torch::empty({num_experts_per_rank_, hidden_size}, fp_option),
+        torch::empty({num_experts_per_rank_, hidden_size_}, fp_option),
         false);
     act_smooth_ = register_parameter(
         "act_smooth",
@@ -240,13 +233,13 @@ FusedMoEImpl::FusedMoEImpl(int64_t num_experts,
     w13_ = register_parameter(
         "w13",
         torch::empty(
-            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size},
+            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size_},
             options_),
         false);
     w2_ = register_parameter(
         "w2",
         torch::empty(
-            {num_experts_per_rank_, hidden_size, local_intermediate_size},
+            {num_experts_per_rank_, hidden_size_, local_intermediate_size},
             options_),
         false);
   }
