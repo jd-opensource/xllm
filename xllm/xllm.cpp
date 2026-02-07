@@ -139,11 +139,6 @@ int run() {
   LOG(INFO) << "set worker role to "
             << (is_local ? "local worker" : "remote worker");
 
-  if (FLAGS_backend == "vlm") {
-    FLAGS_enable_prefix_cache = false;
-    FLAGS_enable_chunked_prefill = false;
-  }
-
   // if max_tokens_per_chunk_for_prefill is not set, set its value to
   // max_tokens_per_batch
   if (FLAGS_max_tokens_per_chunk_for_prefill < 0) {
