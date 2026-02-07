@@ -90,10 +90,13 @@ void BlockManagerPool::deallocate(std::vector<Sequence*>& sequences) {
 
 void BlockManagerPool::deallocate(Sequence* sequence) {
   DCHECK(sequence != nullptr);
-  // add blocks to the prefix cache
   int32_t dp_rank = get_dp_rank(sequence);
-  cache(sequence);
+  // deallocate must be called before cache() to correctly update
+  // num_used_blocks_ cache() increases ref_count, which would cause
+  // deallocate() to skip the decrement if called after
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+  // add blocks to the prefix cache
+  cache(sequence);
   // release the blocks after prefix cache insertion
   sequence->reset();
 }
