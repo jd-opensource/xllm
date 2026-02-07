@@ -675,6 +675,47 @@ TEST_F(DeepSeek32DetectorTest, JsonFormatWithFunctionWrapper) {
   EXPECT_EQ(params["city"], "Tokyo");
 }
 
+// Test trailing markdown language hint before DSML tool block
+TEST_F(DeepSeek32DetectorTest, StripTrailingJsonHintBeforeDsmlToolBlock) {
+  std::string text =
+      "Some text before tool call\n"
+      "json\n"
+      "<｜DSML｜function_calls><｜DSML｜invoke "
+      "name=\"get_weather\"><｜DSML｜parameter "
+      "name=\"city\" "
+      "string=\"true\">Beijing</｜DSML｜parameter></｜DSML｜invoke></"
+      "｜DSML｜function_calls>";
+
+  auto result = detector_->detect_and_parse(text, tools_);
+
+  EXPECT_EQ(result.normal_text, "Some text before tool call");
+  ASSERT_EQ(result.calls.size(), 1);
+
+  const auto& call = result.calls[0];
+  EXPECT_EQ(call.name.value(), "get_weather");
+  nlohmann::json params = nlohmann::json::parse(call.parameters);
+  EXPECT_EQ(params["city"], "Beijing");
+}
+
+// Test trailing markdown language hint before JSON fallback tool block
+TEST_F(DeepSeek32DetectorTest, StripTrailingJsonHintBeforeJsonToolBlock) {
+  std::string text =
+      "Some text before tool call\n"
+      "json\n"
+      "{\"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": "
+      "{\"city\": \"Beijing\"}}]}";
+
+  auto result = detector_->detect_and_parse(text, tools_);
+
+  EXPECT_EQ(result.normal_text, "Some text before tool call");
+  ASSERT_EQ(result.calls.size(), 1);
+
+  const auto& call = result.calls[0];
+  EXPECT_EQ(call.name.value(), "get_weather");
+  nlohmann::json params = nlohmann::json::parse(call.parameters);
+  EXPECT_EQ(params["city"], "Beijing");
+}
+
 // Test streaming with multiple tool calls
 TEST_F(DeepSeek32DetectorTest, StreamingMultipleToolCalls) {
   std::vector<std::string> chunks = {"<｜DSML｜function_calls>",
@@ -709,6 +750,127 @@ TEST_F(DeepSeek32DetectorTest, StreamingMultipleToolCalls) {
 
   EXPECT_EQ(tool_calls_found, 2)
       << "Should find 2 tool calls in streaming mode";
+}
+
+// Test streaming response with trailing empty markdown json fence before
+// tool-call chunks. The empty fence should not leak to normal_text.
+TEST_F(DeepSeek32DetectorTest,
+       StreamingSkipsTrailingEmptyJsonFenceBeforeToolCall) {
+  std::vector<std::string> chunks = {
+      "Let me break this down.\n\nNow I'll call the tool.\n\n```json\n",
+      "\n```",
+      "<｜DSML｜invoke name=\"get_weather\"><｜DSML｜parameter "
+      "name=\"city\" string=\"true\">Boston</｜DSML｜parameter></"
+      "｜DSML｜invoke>"};
+
+  std::string accumulated_normal_text;
+  int tool_name_events = 0;
+
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+    if (!result.normal_text.empty()) {
+      accumulated_normal_text += result.normal_text;
+    }
+    for (const auto& call : result.calls) {
+      if (call.name.has_value()) {
+        tool_name_events++;
+      }
+    }
+  }
+
+  EXPECT_EQ(tool_name_events, 1);
+  EXPECT_TRUE(accumulated_normal_text.find("```json") == std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("```") == std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("Now I'll call the tool") !=
+              std::string::npos);
+}
+
+// Test streaming response with trailing placeholder punctuation and fence at
+// stream end. These artifacts should be removed from flushed normal_text.
+TEST_F(DeepSeek32DetectorTest,
+       StreamingFlushStripsTrailingPlaceholderAndFence) {
+  std::vector<std::string> chunks = {
+      "Let me break this down.\n\n"
+      "The user is asking for weather info.\n\n"
+      "I will call the weather tool now.\n\n"
+      "、、、\n"
+      "```\n"};
+
+  std::string accumulated_normal_text;
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+    if (!result.normal_text.empty()) {
+      accumulated_normal_text += result.normal_text;
+    }
+  }
+
+  auto flush_result = detector_->parse_streaming_increment("", tools_);
+  if (!flush_result.normal_text.empty()) {
+    accumulated_normal_text += flush_result.normal_text;
+  }
+
+  EXPECT_TRUE(accumulated_normal_text.find(
+                  "I will call the weather tool now.") != std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("、、、") == std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("```") == std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("\n\n\n") == std::string::npos);
+  EXPECT_TRUE(!accumulated_normal_text.empty() &&
+              accumulated_normal_text.back() != ' ');
+}
+
+// Test standalone placeholder/fence chunks right before invoke start.
+// They should not leak into streamed normal_text.
+TEST_F(DeepSeek32DetectorTest,
+       StreamingDropsStandalonePlaceholderChunkBeforeToolCall) {
+  std::vector<std::string> chunks = {
+      "I'll use the weather tool for Boston.\n\n",
+      "、、、",
+      "\n```",
+      "<｜DSML｜invoke name=\"get_weather\"><｜DSML｜parameter "
+      "name=\"city\" string=\"true\">Boston</｜DSML｜parameter></"
+      "｜DSML｜invoke>"};
+
+  std::string accumulated_normal_text;
+  int tool_name_events = 0;
+
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+    if (!result.normal_text.empty()) {
+      accumulated_normal_text += result.normal_text;
+    }
+    for (const auto& call : result.calls) {
+      if (call.name.has_value()) {
+        tool_name_events++;
+      }
+    }
+  }
+
+  EXPECT_EQ(tool_name_events, 1);
+  EXPECT_TRUE(
+      accumulated_normal_text.find("I'll use the weather tool for Boston.") !=
+      std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("、、、") == std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("```") == std::string::npos);
+}
+
+// Test that deferred trailing whitespace does not grow into large blank blocks
+// across chunks.
+TEST_F(DeepSeek32DetectorTest,
+       StreamingDeferredWhitespaceDoesNotAccumulateBlankLines) {
+  std::vector<std::string> chunks = {"First line.\n\n\n", "Second line."};
+
+  std::string accumulated_normal_text;
+  for (const auto& chunk : chunks) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+    if (!result.normal_text.empty()) {
+      accumulated_normal_text += result.normal_text;
+    }
+  }
+
+  EXPECT_TRUE(accumulated_normal_text.find("First line.") != std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("Second line.") !=
+              std::string::npos);
+  EXPECT_TRUE(accumulated_normal_text.find("\n\n\n") == std::string::npos);
 }
 
 // Test tool call without function_calls wrapper
