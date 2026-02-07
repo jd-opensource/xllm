@@ -64,7 +64,6 @@ class Device {
 
   DeviceMem get_device_mem() const;
 
- private:
   torch::Device device_;
 
   // only used for cuda
