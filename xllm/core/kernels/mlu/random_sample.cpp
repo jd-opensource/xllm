@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "common/global_flags.h"
+#include "framework/generator/generator_impl.h"
 #include "mlu_ops_api.h"
 
 namespace xllm::kernel::mlu {
@@ -27,7 +29,10 @@ torch::Tensor random_sample(const torch::Tensor& probs) {
   auto output =
       torch::empty({flat_probs.size(0), 1},
                    torch::dtype(torch::kInt64).device(probs.device()));
-  tmo::torch_api::random_sample(flat_probs, output, true, torch::Generator());
+  // the default device index is the current device.
+  auto generator = torch::make_generator<torch_mlu::MLUGeneratorImpl>();
+  generator.set_current_seed(static_cast<uint64_t>(FLAGS_random_seed));
+  tmo::torch_api::random_sample(flat_probs, output, true, generator);
   if (probs.dim() == 3) {
     return output.reshape({probs.size(0), probs.size(1)});
   }
