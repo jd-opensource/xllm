@@ -83,10 +83,8 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
       comm_stream_(c10_npu::getNPUStreamFromPool(device.index())) {
   c10::intrusive_ptr<c10d_npu::ProcessGroupHCCL::Options> hccl_pg_options =
       c10d_npu::ProcessGroupHCCL::Options::create();
-#if TORCH_VERSION_MAJOR > 2 || \
-    (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 7)
   hccl_pg_options->group_id = group_name;
-#endif
+
   int32_t rank = global_rank;
   if (world_size != rank_size) {
     auto [local_rank, group_ranks] =
