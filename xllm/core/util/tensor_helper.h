@@ -326,4 +326,8 @@ inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
   return tensor;
 }
 
+inline int32_t get_dtype_size(torch::ScalarType dtype) {
+  return static_cast<int32_t>(torch::elementSize(dtype));
+}
+
 }  // namespace xllm

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,15 +23,8 @@ limitations under the License.
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
 #include "layers/common/dp_utils.h"
+#include "util/tensor_helper.h"
 #include "util/utils.h"
-
-namespace {
-
-int32_t get_dtype_size(torch::ScalarType dtype) {
-  return static_cast<int32_t>(torch::elementSize(dtype));
-}
-
-}  // namespace
 
 namespace xllm {
 namespace layer {

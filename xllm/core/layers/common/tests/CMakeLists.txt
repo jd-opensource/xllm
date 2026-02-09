@@ -24,7 +24,6 @@ cc_test(
 )
 
 # MoE Gate unit test for MLU (uses layers/mlu/moe_gate)
-if(USE_MLU)
 cc_test(
   NAME
     moe_layer_test
@@ -43,7 +42,6 @@ cc_test(
     torch
     GTest::gtest_main
 )
-endif()
 
 # Add test for DeepEP
 # This test must exist individually, because it contains forked processes
