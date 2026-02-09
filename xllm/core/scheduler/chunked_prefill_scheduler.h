@@ -50,6 +50,8 @@ class ChunkedPrefillScheduler : public ContinuousScheduler {
 
   void allocate_shared_blocks_for(Sequence* sequence);
 
+  virtual void recycle_running_requests() override;
+
  private:
   void handle_running_queue_requests(
       const size_t max_tokens_per_chunk_for_prefill,

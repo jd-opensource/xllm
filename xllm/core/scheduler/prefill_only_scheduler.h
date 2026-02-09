@@ -27,6 +27,7 @@ class PrefillOnlyScheduler final : public ContinuousScheduler {
  private:
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch() override;
+  virtual void recycle_running_requests() override;
   void handle_prefill_requests(
       double& latency_budget,
       double& estimate_latency,
@@ -43,5 +44,7 @@ class PrefillOnlyScheduler final : public ContinuousScheduler {
       std::vector<std::shared_ptr<Request>>& running_requests,
       size_t& num_online_prefill_preempt_offline_requests,
       std::vector<std::shared_ptr<Request>>& finished_requests);
+
+  std::vector<std::shared_ptr<Request>> last_step_prefill_requests_;
 };
 }  // namespace xllm

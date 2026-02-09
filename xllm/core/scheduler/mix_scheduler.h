@@ -40,6 +40,10 @@ class MixScheduler : public ChunkedPrefillScheduler {
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch() override;
 
+  virtual void recycle_running_requests() override;
+
+  virtual void fetch_new_requests() override;
+
   virtual bool if_queue_not_empty() override;
 
   bool allocate_blocks_for(Sequence* sequence,
