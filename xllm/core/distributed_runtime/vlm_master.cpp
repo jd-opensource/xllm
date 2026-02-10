@@ -436,10 +436,11 @@ std::shared_ptr<Request> VLMMaster::generate_request(
   static MMInputTransfer mm_input_transfer;
 
   MMInput mm_inputs(std::move(payload));
-  if (!mm_input_transfer.trans(messages, mm_inputs)) {
-    LOG(ERROR) << "mm input trans failed.";
-    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "MM input transfer trans failed.");
+  MMErrCode code = mm_input_transfer.trans(messages, mm_inputs);
+  if (code != MMErrCode::SUCCESS) {
+    std::string msg = MMErrToString(code);
+    LOG(ERROR) << msg;
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, msg);
     return nullptr;
   }
 
@@ -483,7 +484,8 @@ bool VLMMaster::build_mm_data_from_image_urls(
   messages.emplace_back("user", std::move(contents));
 
   MMInput mm_inputs;
-  if (!mm_input_transfer.trans(messages, mm_inputs)) {
+  MMErrCode code = mm_input_transfer.trans(messages, mm_inputs);
+  if (code != MMErrCode::SUCCESS) {
     LOG(ERROR) << "mm input trans failed.";
     return false;
   }
