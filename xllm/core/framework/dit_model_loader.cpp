@@ -129,6 +129,7 @@ bool DiTFolderLoader::load_model_args(const std::string& model_weights_path) {
       LOG(ERROR) << "Failed to load required config.json for safetensors model";
       return false;
     }
+    load_image_preprocessor_args(model_weights_path);
   } else {
     std::filesystem::path tokenizer_config_path =
         model_dir / "tokenizer_config.json";
@@ -165,6 +166,39 @@ bool DiTFolderLoader::load_model_args(const std::string& model_weights_path) {
     }
   }
 
+  return true;
+}
+
+bool DiTFolderLoader::load_image_preprocessor_args(
+    const std::string& model_weights_path) {
+  JsonReader reader;
+  const std::string path = model_weights_path + "/preprocessor_config.json";
+  if (!std::filesystem::exists(path)) {
+    return true;
+  }
+  if (!reader.parse(path)) {
+    LOG(ERROR) << "Failed to parse preprocessor_config.json at " << path;
+    return false;
+  }
+  LOG(INFO) << "Loaded image preprocessor config from " << path;
+  args_.mm_image_min_pixels() =
+      reader.value_or<int>("min_pixels", args_.mm_image_min_pixels());
+  args_.mm_image_max_pixels() =
+      reader.value_or<int>("max_pixels", args_.mm_image_max_pixels());
+  args_.mm_image_patch_size() =
+      reader.value_or<int>("patch_size", args_.mm_image_patch_size());
+  args_.mm_image_temporal_patch_size() = reader.value_or<int>(
+      "temporal_patch_size", args_.mm_image_temporal_patch_size());
+  args_.mm_image_merge_size() =
+      reader.value_or<int>("merge_size", args_.mm_image_merge_size());
+  if (reader.contains("image_mean")) {
+    args_.mm_image_normalize_mean() =
+        reader.data()["image_mean"].get<std::vector<double>>();
+  }
+  if (reader.contains("image_std")) {
+    args_.mm_image_normalize_std() =
+        reader.data()["image_std"].get<std::vector<double>>();
+  }
   return true;
 }
 

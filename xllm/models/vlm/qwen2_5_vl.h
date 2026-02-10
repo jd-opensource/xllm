@@ -730,6 +730,24 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     torch::Tensor multimodal_embeds;
     if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
       multimodal_embeds = emb.value();
+    } else if (mm_data.get<torch::Tensor>("pixel_values").has_value() &&
+               mm_data.get<torch::Tensor>("image_grid_thw").has_value()) {
+      // Compute vision embeddings from pixel_values and merge with text
+      auto mm_dict = get_multimodal_embeddings(input_params);
+      if (mm_dict.count("image|embedding")) {
+        const auto& image_embeds_list =
+            std::get<std::vector<torch::Tensor>>(mm_dict["image|embedding"]);
+        multimodal_embeds = torch::cat(image_embeds_list, 0);
+      }
+      if (mm_dict.count("video|embedding")) {
+        const auto& video_embeds_list =
+            std::get<std::vector<torch::Tensor>>(mm_dict["video|embedding"]);
+        auto video_embeds = torch::cat(video_embeds_list, 0);
+        multimodal_embeds =
+            multimodal_embeds.defined()
+                ? torch::cat({multimodal_embeds, video_embeds}, 0)
+                : video_embeds;
+      }
     }
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
     if (!multimodal_embeds.defined()) {

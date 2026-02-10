@@ -70,10 +70,14 @@ run_eager_causal_padded_attention(const torch::Tensor& query,
       Vg.permute({0, 1, 3, 2}).reshape({-1, num_heads, head_size});
   auto Qf = query.to(torch::kFloat32);
   auto Kf = Kr.to(torch::kFloat32);
-  // scores[t,h,j] = sum_d Q[t,h,d]*K[j,h,d]. Use
-  // (T,H,1,D)*(1,H,T,D)->(T,H,T,D)->sum(-1).
-  auto Kf_1HTD = Kf.permute({1, 0, 2}).unsqueeze(0);  // [1, H, T, D]
-  auto scores = (Qf.unsqueeze(2) * Kf_1HTD).sum(-1) * scale;
+  // Optimized: use bmm to compute Q @ K^T directly, avoiding O(T^2 * H * D)
+  // intermediate tensor. Memory: O(T^2 * H) instead of O(T^2 * H * D).
+  // Q: [T, H, D] -> [H, T, D], K: [T, H, D] -> [H, D, T]
+  // scores = Q @ K^T = [H, T, T] -> permute to [T, H, T]
+  auto Qf_HTD = Qf.permute({1, 0, 2});               // [H, T, D]
+  auto Kf_HDT = Kf.permute({1, 2, 0});               // [H, D, T]
+  auto scores = torch::bmm(Qf_HTD, Kf_HDT) * scale;  // [H, T, T]
+  scores = scores.permute({1, 0, 2});                // [T, H, T]
   scores = scores + add_mask.unsqueeze(1);
   // Match diffusers: softmax in float32, cast attn to query dtype; attn @ V
   // in bf16.
