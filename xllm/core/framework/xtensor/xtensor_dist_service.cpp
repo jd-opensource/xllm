@@ -27,14 +27,6 @@ limitations under the License.
 #include "platform/device.h"
 #include "xtensor_allocator.h"
 
-#if defined(USE_NPU)
-#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
-#elif defined(USE_MLU)
-#include <torch_mlu/csrc/framework/core/caching_allocator.h>
-#elif defined(USE_CUDA) || defined(USE_ILU)
-#include <c10/cuda/CUDACachingAllocator.h>
-#endif
-
 namespace xllm {
 
 XTensorDistService::XTensorDistService(int32_t global_rank,
@@ -70,20 +62,7 @@ void XTensorDistService::GetMemoryInfo(
     device.set_device();
 
     // Empty torch cache to get accurate memory info
-    size_t torch_cache = 0;
-    size_t torch_largest_block = 0;
     int32_t device_id = device_.index();
-
-#if defined(USE_NPU)
-    c10_npu::NPUCachingAllocator::emptyCache();
-    c10_npu::NPUCachingAllocator::FreeDeviceCachedMemory(device_id);
-    c10_npu::NPUCachingAllocator::cacheInfo(
-        device_id, &torch_cache, &torch_largest_block);
-#elif defined(USE_MLU)
-    torch_mlu::MLUCachingAllocator::emptyCache();
-#elif defined(USE_CUDA) || defined(USE_ILU)
-    c10::cuda::CUDACachingAllocator::emptyCache();
-#endif
 
     const auto available_memory = device.free_memory();
     const auto total_memory = device.total_memory();
@@ -92,11 +71,11 @@ void XTensorDistService::GetMemoryInfo(
     DeviceMonitor::get_instance().set_total_memory(device_id, total_memory);
 
     LOG(INFO) << "GetMemoryInfo: global_rank=" << global_rank_
-              << ", available_memory=" << available_memory + torch_cache
+              << ", available_memory=" << available_memory
               << ", total_memory=" << total_memory;
 
     // Returns 0 for both fields on failure (handled by caller)
-    response->set_available_memory(available_memory + torch_cache);
+    response->set_available_memory(available_memory);
     response->set_total_memory(total_memory);
   });
 }

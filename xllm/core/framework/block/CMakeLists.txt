@@ -42,6 +42,7 @@ if(USE_NPU)
     SRCS
       ${TEST_SRCS}
     DEPS
+      :xllm_server
       :block
       :flags
       :kv_cache

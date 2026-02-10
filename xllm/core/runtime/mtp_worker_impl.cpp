@@ -122,15 +122,17 @@ MTPWorkerImpl::MTPWorkerImpl(const ParallelArgs& parallel_args,
 }
 
 bool MTPWorkerImpl::init_model(const std::string& model_weights_path,
-                               int32_t random_seed) {
+                               int32_t random_seed,
+                               int32_t master_status) {
   // Load target model via base class
   bool result = true;
   if (impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {
-    result = SpeculativeWorkerImpl::init_model(model_weights_path, random_seed);
+    result = SpeculativeWorkerImpl::init_model(
+        model_weights_path, random_seed, master_status);
   } else {
     CHECK_EQ(draft_impl_->get_status(), WorkerImpl::Status::UNINITIALIZED);
-    result =
-        draft_impl_->WorkerImpl::init_model(model_weights_path, random_seed);
+    result = draft_impl_->WorkerImpl::init_model(
+        model_weights_path, random_seed, master_status);
   }
 
   if (draft_impl_ != nullptr &&
@@ -200,7 +202,6 @@ bool MTPWorkerImpl::allocate_kv_cache(
 
 #if defined(USE_NPU)
 bool MTPWorkerImpl::allocate_kv_cache_with_transfer(
-    const uint64_t kv_cache_size,
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   CHECK(impl_ != nullptr);
   CHECK(draft_impl_ != nullptr);

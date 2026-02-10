@@ -105,8 +105,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
 
   // temporarily use [0], will be adapted in next pr
   // call model executor forward to get hidden states
-
+#if defined(USE_NPU)
   SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
+#endif
 
   auto model_output = model_executor_->forward(
       input.token_ids, input.positions, kv_caches_, input.input_params);

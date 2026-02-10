@@ -136,11 +136,6 @@ class PageAllocator {
   std::unique_ptr<VirtPage> alloc_kv_cache_page(const std::string& model_id,
                                                 int32_t dp_rank);
 
-  // Free a single KV cache virtual page
-  void free_kv_cache_page(const std::string& model_id,
-                          int32_t dp_rank,
-                          int64_t virt_page_id);
-
   // Free multiple KV cache virtual pages
   void free_kv_cache_pages(const std::string& model_id,
                            int32_t dp_rank,

@@ -149,11 +149,11 @@ bool WorkerImpl::allocate_kv_cache(
         model_id, kv_cache_shape[1], dtype_, num_layers);
 
     for (int64_t i = 0; i < num_layers; ++i) {
+      auto k_tensor = k_tensors[i];
+      auto v_tensor = v_tensors[i];
 #if defined(USE_NPU)
-      auto k_tensor =
-          at_npu::native::npu_format_cast(k_tensors[i], ACL_FORMAT_ND);
-      auto v_tensor =
-          at_npu::native::npu_format_cast(v_tensors[i], ACL_FORMAT_ND);
+      k_tensor = at_npu::native::npu_format_cast(k_tensor, ACL_FORMAT_ND);
+      v_tensor = at_npu::native::npu_format_cast(v_tensor, ACL_FORMAT_ND);
 #endif
       kv_caches_.emplace_back(k_tensor, v_tensor);
     }
@@ -450,11 +450,11 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #if defined(USE_NPU)
   // Without device_capture_lock, ACL graph capture will be interrupted by the
   // synchronization H2D of data update streams asynchronously scheduled by
-  // other threads, even if the capture and synchronization streams are not the
-  // same, and even if capture_mode is set to
+  // other threads, even if the capture and synchronization streams are not
+  // the same, and even if capture_mode is set to
   // ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL.
-  // The possible reason is that ACL graph capture may use additional auxiliary
-  // streams, and these auxiliary streams might be the same as the
+  // The possible reason is that ACL graph capture may use additional
+  // auxiliary streams, and these auxiliary streams might be the same as the
   // asynchronously scheduled data update streams.
 
   std::optional<std::unique_lock<std::mutex>> lock_guard;
@@ -628,6 +628,7 @@ bool WorkerImpl::sleep(int32_t master_status) {
     auto model_loader = ModelLoader::create(model_weights_path_);
     model_->lazy_load_model(std::move(model_loader));
   } else if (master_status == DEEP_SLEEP) {
+    // only release model weights from host memory.
     model_->free_model_weights();
   }
 
@@ -758,8 +759,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   if (options_.enable_speculative_decode()) {
     args.num_speculative_tokens(options_.num_speculative_tokens());
     // When running speculative decoding, the draft worker reuses the same
-    // checkpoint as the target DeepSeek V3/V32 model. The draft worker needs to
-    // instantiate the MTP variant, so override the model_type here without
+    // checkpoint as the target DeepSeek V3/V32 model. The draft worker needs
+    // to instantiate the MTP variant, so override the model_type here without
     // mutating the original config.
     if (options_.num_speculative_tokens() == 0 &&
         (args.model_type() == "deepseek_v3" ||
@@ -936,8 +937,8 @@ int64_t WorkerImpl::get_num_layers() const {
   int64_t num_layers = context_.get_model_args().n_layers();
 #if !defined(USE_NPU)
   if (is_spec_draft_) {
-    // for MTP draft models, the number of layers is the number of nextn predict
-    // layers
+    // for MTP draft models, the number of layers is the number of nextn
+    // predict layers
     std::string model_type = context_.get_model_args().model_type();
     if (model_type == "deepseek_v3_mtp") {
       num_layers = context_.get_model_args().num_nextn_predict_layers();

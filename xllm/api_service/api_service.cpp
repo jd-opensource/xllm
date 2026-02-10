@@ -15,13 +15,12 @@ limitations under the License.
 
 #include "api_service.h"
 
-#include <filesystem>
-
 #include <glog/logging.h>
 #include <google/protobuf/util/json_util.h>
 #include <json2pb/json_to_pb.h>
 #include <json2pb/pb_to_json.h>
 
+#include <filesystem>
 #include <nlohmann/json.hpp>
 
 #include "call.h"
@@ -966,7 +965,6 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
     WakeupOptions wakeup_options;
     wakeup_options.remote_addrs.assign(req_pb->remote_addrs().begin(),
                                        req_pb->remote_addrs().end());
-    // Prefer new segment-based format; fallback to legacy offsets
     if (req_pb->src_weight_segments_size() > 0) {
       for (const auto& seg_list : req_pb->src_weight_segments()) {
         std::vector<WeightSegment> segments;
