@@ -150,6 +150,51 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
     auto [hidden_states, residual_out] = norm_(h, residual);
     return ModelOutput(hidden_states, residual_out);
   }
+
+  StateDict update_expert_dict(const StateDict& state_dict) {
+    auto dict = std::unordered_map<std::string, torch::Tensor>(
+        state_dict.begin(), state_dict.end());
+    std::unordered_map<std::string, torch::Tensor> expert_dict;
+    for (auto& [name, expert_gate_up] : dict) {
+      if (name.find(".mlp.experts.gate_up_proj") == std::string::npos) {
+        continue;
+      }
+
+      const std::string prefix = name.substr(0, name.find("gate_up_proj"));
+      const std::string down_name = prefix + "down_proj";
+      auto expert_down = state_dict.get_tensor(down_name);
+      CHECK(expert_down.defined()) << "not find down_proj: " << down_name;
+
+      const int32_t num_experts = expert_gate_up.size(0);
+      auto chunks = expert_gate_up.chunk(2, -1);
+      torch::Tensor expert_gate = chunks[0].permute({0, 2, 1});
+      torch::Tensor expert_up = chunks[1].permute({0, 2, 1});
+      expert_down = expert_down.permute({0, 2, 1});
+
+      for (int j = 0; j < num_experts; ++j) {
+        const std::string expert_key = prefix + std::to_string(j) + ".";
+        expert_dict[expert_key + "gate_proj.weight"] = expert_gate[j];
+        expert_dict[expert_key + "up_proj.weight"] = expert_up[j];
+        expert_dict[expert_key + "down_proj.weight"] = expert_down[j];
+      }
+    }
+    if (expert_dict.empty()) {
+      return state_dict;
+    }
+    dict.merge(expert_dict);
+    return StateDict(std::move(dict));
+  }
+
+  void load_state_dict(const StateDict& state_dict) override {
+    embed_tokens_->load_state_dict(
+        state_dict.get_dict_with_prefix("embed_tokens."));
+    auto new_state_dict = update_expert_dict(state_dict);
+    for (size_t i = 0; i < layers_.size(); ++i) {
+      layers_[i]->load_state_dict(new_state_dict.get_dict_with_prefix(
+          "layers." + std::to_string(i) + "."));
+    }
+    norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
+  }
 };
 TORCH_MODULE(Qwen3MoeModel);
 
