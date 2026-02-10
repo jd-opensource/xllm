@@ -186,19 +186,14 @@ InstanceInfo XServiceClient::get_instance_info(
   req.set_name(instance_name);
 
   std::string master_addr;
-  if (!get_master_service_addr(&master_addr)) {
+  if (!with_master_stub(
+          [&](xllm_service::proto::XllmRpcService_Stub* master_stub) {
+            master_stub->GetInstanceInfo(&cntl, &req, &resp, nullptr);
+          },
+          &master_addr)) {
     return result;
   }
 
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    auto* master_stub = find_stub_locked(master_addr);
-    if (master_stub == nullptr) {
-      LOG(ERROR) << "No master stub available for address: " << master_addr;
-      return result;
-    }
-    master_stub->GetInstanceInfo(&cntl, &req, &resp, nullptr);
-  }
   if (cntl.Failed()) {
     LOG(ERROR) << "Fail to get instance info from xservice server "
                << master_addr << ", error text: " << cntl.ErrorText();
@@ -289,20 +284,14 @@ void XServiceClient::heartbeat() {
       req.mutable_latency_metrics()->set_recent_max_tbt(*max_tbt);
     }
 
-    std::string master_addr;
-    if (!get_master_service_addr(&master_addr)) {
-      continue;
-    }
-
     xllm_service::proto::Status resp;
-    {
-      std::shared_lock<std::shared_mutex> lock(mutex_);
-      auto* master_stub = find_stub_locked(master_addr);
-      if (master_stub == nullptr) {
-        LOG(ERROR) << "No master stub available for address: " << master_addr;
-        continue;
-      }
-      master_stub->Heartbeat(&cntl, &req, &resp, nullptr);
+    std::string master_addr;
+    if (!with_master_stub(
+            [&](xllm_service::proto::XllmRpcService_Stub* master_stub) {
+              master_stub->Heartbeat(&cntl, &req, &resp, nullptr);
+            },
+            &master_addr)) {
+      continue;
     }
 
     if (cntl.Failed()) {
@@ -322,18 +311,12 @@ std::vector<std::string> XServiceClient::get_static_decode_list() {
   req.set_name(instance_name_);
 
   std::string master_addr;
-  if (!get_master_service_addr(&master_addr)) {
+  if (!with_master_stub(
+          [&](xllm_service::proto::XllmRpcService_Stub* master_stub) {
+            master_stub->GetStaticDecodeList(&cntl, &req, &resp, nullptr);
+          },
+          &master_addr)) {
     return {};
-  }
-
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    auto* master_stub = find_stub_locked(master_addr);
-    if (master_stub == nullptr) {
-      LOG(ERROR) << "No master stub available for address: " << master_addr;
-      return {};
-    }
-    master_stub->GetStaticDecodeList(&cntl, &req, &resp, nullptr);
   }
 
   if (cntl.Failed()) {
@@ -351,18 +334,12 @@ std::vector<std::string> XServiceClient::get_static_prefill_list() {
   req.set_name(instance_name_);
 
   std::string master_addr;
-  if (!get_master_service_addr(&master_addr)) {
+  if (!with_master_stub(
+          [&](xllm_service::proto::XllmRpcService_Stub* master_stub) {
+            master_stub->GetStaticPrefillList(&cntl, &req, &resp, nullptr);
+          },
+          &master_addr)) {
     return {};
-  }
-
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    auto* master_stub = find_stub_locked(master_addr);
-    if (master_stub == nullptr) {
-      LOG(ERROR) << "No master stub available for address: " << master_addr;
-      return {};
-    }
-    master_stub->GetStaticPrefillList(&cntl, &req, &resp, nullptr);
   }
 
   if (cntl.Failed()) {
@@ -549,7 +526,7 @@ bool XServiceClient::connect_to_xservice(const std::string& xservice_addr) {
 
   std::unique_lock<std::shared_mutex> lock(mutex_);
 
-  // If already connected, directly return tru
+  // If already connected, directly return true
   if (xservice_channels_.find(xservice_addr) != xservice_channels_.end()) {
     return true;
   }
@@ -570,27 +547,55 @@ bool XServiceClient::connect_to_xservice(const std::string& xservice_addr) {
   return true;
 }
 
-bool XServiceClient::get_master_service_addr(std::string* master_addr) {
+bool XServiceClient::with_master_stub(
+    const std::function<void(xllm_service::proto::XllmRpcService_Stub*)>& fn,
+    std::string* master_addr) {
   if (master_addr == nullptr) {
     return false;
   }
 
-  {
+  // wrapper in a whole lambda function
+  auto run_with_current_master_stub = [&](bool* has_master_addr) -> bool {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     *master_addr = master_xservice_addr_;
-  }
+    *has_master_addr = !master_addr->empty();
+    if (!*has_master_addr) {
+      LOG(ERROR) << "Master xservice address is empty";
+      return false;
+    }
 
-  if (master_addr->empty()) {
-    LOG(ERROR) << "Master xservice address is empty";
+    auto* master_stub = find_stub_locked(*master_addr);
+    if (master_stub == nullptr) {
+      return false;
+    }
+
+    fn(master_stub);
+    return true;
+  };
+
+  bool has_master_addr = false;
+  if (run_with_current_master_stub(&has_master_addr)) {
+    return true;
+  }
+  if (!has_master_addr) {
     return false;
   }
 
+  // try re-connecting once
   if (!connect_to_xservice(*master_addr)) {
     LOG(ERROR) << "Failed to connect to master xservice: " << *master_addr;
     return false;
   }
 
-  return true;
+  if (run_with_current_master_stub(&has_master_addr)) {
+    return true;
+  }
+  if (!has_master_addr) {
+    return false;
+  }
+
+  LOG(ERROR) << "No master stub available for address: " << *master_addr;
+  return false;
 }
 
 xllm_service::proto::XllmRpcService_Stub* XServiceClient::find_stub_locked(
@@ -609,7 +614,7 @@ void XServiceClient::disconnect_xservice(const std::string& xservice_addr) {
     xservice_channels_.erase(xservice_addr);
     LOG(INFO) << "Disconnected from xservice: " << xservice_addr;
 
-    // 如果断开的是master，需要更新master地址
+    // if master disconnected，need to update master address
     if (xservice_addr == master_xservice_addr_) {
       LOG(WARNING) << "Master xservice disconnected: " << master_xservice_addr_;
     }
@@ -640,6 +645,13 @@ void XServiceClient::handle_master_service_watch(
 
       if (!connect_to_xservice(new_master_addr)) {
         LOG(ERROR) << "Failed to connect to new master: " << new_master_addr;
+      }
+    } else if (event.event_type() == etcd::Event::EventType::DELETE_) {
+      std::unique_lock<std::shared_mutex> lock(mutex_);
+      if (!master_xservice_addr_.empty()) {
+        LOG(WARNING) << "Master service key deleted, clear cached master addr: "
+                     << master_xservice_addr_;
+        master_xservice_addr_.clear();
       }
     }
   }

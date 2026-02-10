@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <brpc/channel.h>
 
+#include <functional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -67,8 +68,10 @@ class XServiceClient {
   // remove the connection to specific xllm_service
   void disconnect_xservice(const std::string& xservice_addr);
 
-  // get connected master xservice address
-  bool get_master_service_addr(std::string* master_addr);
+  // call rpc with current master stub atomically.
+  bool with_master_stub(
+      const std::function<void(xllm_service::proto::XllmRpcService_Stub*)>& fn,
+      std::string* master_addr);
 
   // find stub by address, caller should hold mutex_
   xllm_service::proto::XllmRpcService_Stub* find_stub_locked(
