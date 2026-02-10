@@ -94,6 +94,52 @@ std::vector<torch::Tensor> Qwen2VisionAttentionImpl::split_qkv(
   return {q, k, v};
 }
 
+namespace {
+
+#if defined(USE_CUDA)
+// Pure PyTorch scaled dot-product attention for Qwen2 vision.
+void compute_qwen2_vision_attention_cuda(
+    torch::Tensor& q,
+    torch::Tensor& k,
+    torch::Tensor& v,
+    torch::Tensor& output,
+    const std::vector<int32_t>& cu_seq_len_vec,
+    float scale) {
+  if (cu_seq_len_vec.size() < 2) return;
+
+  const int32_t num_seqs = static_cast<int32_t>(cu_seq_len_vec.size()) - 1;
+  for (int32_t i = 0; i < num_seqs; ++i) {
+    int32_t start = cu_seq_len_vec[i];
+    int32_t end = cu_seq_len_vec[i + 1];
+    int32_t len = end - start;
+    if (len <= 0) continue;
+
+    // Current sequence: [len, heads, head_dim]
+    auto q_i = q.slice(/*dim=*/0, /*start=*/start, /*end=*/end);
+    auto k_i = k.slice(0, start, end);
+    auto v_i = v.slice(0, start, end);
+
+    // [len, H, D] -> [H, len, D]
+    q_i = q_i.permute({1, 0, 2});
+    k_i = k_i.permute({1, 0, 2});
+    v_i = v_i.permute({1, 0, 2});
+
+    // Scaled dot-product attention per head.
+    auto q_scaled = q_i * scale;
+    auto k_t = k_i.transpose(1, 2);              // [H, D, len]
+    auto scores = torch::matmul(q_scaled, k_t);  // [H, len, len]
+    auto attn = torch::softmax(scores, /*dim=*/-1);
+    auto out_i = torch::matmul(attn, v_i);  // [H, len, D]
+
+    // Back to [len, H, D] and write into output.
+    out_i = out_i.permute({1, 0, 2}).contiguous();
+    output.slice(/*dim=*/0, /*start=*/start, /*end=*/end).copy_(out_i);
+  }
+}
+#endif  // defined(USE_CUDA)
+
+}  // namespace
+
 torch::Tensor Qwen2VisionAttentionImpl::forward(
     torch::Tensor& hidden_states,
     torch::Tensor& m_cos_pos,
@@ -118,20 +164,28 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   CHECK_EQ(head_dim, hidden_size_per_attention_head_) << "head_dim mismatch";
 
   // 4. rope
+  // Reshape q, k from [B, S, H, D] to [B*S, H, D] before applying RoPE so
+  // that the RoPE kernel sees the correct total token count (B*S = seq_len),
+  // not just the batch dimension (B=1).
+  q = q.reshape({B * S, num_attention_heads_per_partition_, head_dim});
+  k = k.reshape({B * S, num_attention_heads_per_partition_, head_dim});
+
+  // Apply rotary position embedding to both q and k in a single call.
+  // NOTE: Do NOT call apply_rotary twice; the first call already handles both
+  // q and k. A second call would incorrectly apply RoPE to k a second time.
   xllm::kernel::RotaryParams rotary_params;
   rotary_params.q = q;
+  rotary_params.k = k;
   rotary_params.sin = m_sin_pos;
   rotary_params.cos = m_cos_pos;
   rotary_params.interleaved = false;
   rotary_params.discrete = false;
   rotary_params.max_query_len = S;
   xllm::kernel::apply_rotary(rotary_params);
-  rotary_params.q = k;
-  xllm::kernel::apply_rotary(rotary_params);
 
   // q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
-  q = q.view({B * S, q.size(2), q.size(3)});
-  k = k.view({B * S, k.size(2), k.size(3)});
+  // q and k are already [B*S, H, D] after the reshape above; just
+  // flatten v to the same shape.
   v = v.view({B * S, v.size(2), v.size(3)});
   torch::Tensor output = torch::zeros_like(q);
 
@@ -139,6 +193,13 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   int32_t max_seqlen =
       *std::max_element(cu_seq_len_vec.begin(), cu_seq_len_vec.end());
 
+#if defined(USE_CUDA)
+  // CUDA path: use a pure PyTorch vision attention implementation that matches
+  // Transformers Qwen2.5-VL VisionAttention. FlashInfer's precompiled AOT
+  // kernels in this project do not support head_dim=80, so we intentionally do
+  // not call FlashInfer here and run attention entirely in PyTorch instead.
+  compute_qwen2_vision_attention_cuda(q, k, v, output, cu_seq_len_vec, scale_);
+#else
   // Create AttentionMetadata for AttentionParams
   // Note: This is a special case where we manually create AttentionMetadata
   // with the required fields for this vision attention layer
@@ -160,6 +221,7 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   attention_params.window_size_left = -1;
   attention_params.scale = scale_;
   xllm::kernel::batch_prefill(attention_params);
+#endif
 
   // context_layer = rearrange(output, "(b s) h d -> s b (h d)", b=batch_size)
   output = output.view({B, S, -1});
