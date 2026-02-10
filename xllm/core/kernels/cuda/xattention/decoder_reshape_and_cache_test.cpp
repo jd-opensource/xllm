@@ -21,16 +21,6 @@ limitations under the License.
 namespace xllm::kernel::cuda {
 namespace test {
 
-// This test validates `xllm::kernel::cuda::decoder_reshape_and_cache` by
-// comparing its output against two CPU/PyTorch reference implementations:
-//
-// - `torch_reference`: copies one full [beam_size, kv_heads, head_dim] slab at
-//   once using `select(...).copy_` (easy to read and matches the math).
-// - `torch_reference_bench_style`: copies one [head_dim] vector at a time for
-//   each (b, beam, kv_head), mirroring the style used in the Python benchmark.
-//
-// Having two independent references helps catch subtle indexing/layout bugs in
-// the CUDA kernel (e.g. mixing up beam/step strides).
 class DecoderReshapeAndCacheTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -45,134 +35,140 @@ class DecoderReshapeAndCacheTest : public ::testing::Test {
   torch::ScalarType dtype_ = torch::kFloat16;
 };
 
-// Reference implementation using PyTorch indexing ops.
-// It writes:
-//   unshared_*_cache[request_id, :, step, :, :] = proj_*(b, :, :, :)
+// This test validates `xllm::kernel::cuda::decoder_reshape_and_cache` against
+// a PyTorch reference implementation that follows the current CUDA kernel
+// contract.
 //
-// Expected shapes:
-// - proj_k/proj_v:         [batch_size, beam_size, kv_heads, head_dim]
-// - unshared_k/unshared_v: [max_num_request, beam_size, max_decode_step,
-// kv_heads, head_dim]
-// - block_table:           [batch_size, 1] mapping batch -> request_id
-// (block_id)
+// Kernel input contract:
+// - proj_k/proj_v: [num_seqs, kv_heads, head_dim], where
+//   num_seqs = batch_size * beam_size
+// - block_table:   [num_seqs, 1], sequence-level block ids
+//
+// Cache layout:
+// - unshared_k/v_cache: [max_num_request, beam_size, max_decode_step, kv_heads,
+//   head_dim]
+//
+// Mapping used by both kernel and reference:
+// - request_id = block_id / beam_size
+// - beam_id    = block_id % beam_size
+//
+// The test checks:
+// 1) full-tensor equivalence (CUDA output vs reference output)
+// 2) per-sequence slice correctness at the target decode step
+void torch_reference(const torch::Tensor& proj_k,
+                     const torch::Tensor& proj_v,
+                     torch::Tensor& unshared_k_cache,
+                     torch::Tensor& unshared_v_cache,
+                     const torch::Tensor& block_table,
+                     const torch::Tensor& step) {
+  const int64_t num_seqs = proj_k.size(0);
+  const int64_t kv_heads = proj_k.size(1);
+  const int64_t head_dim = proj_k.size(2);
 
-void torch_reference(
-    torch::Tensor proj_k,  // [batch_size, beam_size, kv_heads, head_dim]
-    torch::Tensor proj_v,  // [batch_size, beam_size, kv_heads, head_dim]
-    torch::Tensor unshared_k_cache,  // [max_num_request, beam_size,
-                                     // max_decode_step, kv_heads, head_dim]
-    torch::Tensor unshared_v_cache,  // [max_num_request, beam_size,
-                                     // max_decode_step, kv_heads, head_dim]
-    torch::Tensor block_table,       // [batch_size, 1]
-    torch::Tensor step) {
-  // Read shapes.
-  int64_t batch_size = proj_k.size(0);
-  int64_t beam_size = proj_k.size(1);
-  int64_t kv_heads = proj_k.size(2);
-  int64_t head_dim = proj_k.size(3);
-  int64_t max_num_request = unshared_k_cache.size(0);
-  int64_t max_decode_step = unshared_k_cache.size(2);
-  // Basic shape checks.
+  const int64_t max_num_request = unshared_k_cache.size(0);
+  const int64_t beam_size = unshared_k_cache.size(1);
+  const int64_t max_decode_step = unshared_k_cache.size(2);
+
+  CHECK_EQ(proj_k.dim(), 3) << "proj_k must be 3-dimensional";
+  CHECK_EQ(proj_v.dim(), 3) << "proj_v must be 3-dimensional";
   CHECK_EQ(proj_v.sizes(), proj_k.sizes())
       << "proj_v and proj_k must have same shape";
-  CHECK_EQ(block_table.size(0), batch_size)
-      << "block_table size must match batch_size";
+
+  CHECK_EQ(block_table.dim(), 2) << "block_table must be [num_seqs, 1]";
   CHECK_EQ(block_table.size(1), 1) << "block_table second dim must be 1";
-  CHECK_LT(step[0].item<int64_t>(), max_decode_step)
-      << "step must be less than max_decode_step, step: "
-      << step[0].item<int64_t>() << ", max_decode_step: " << max_decode_step;
-  CHECK_EQ(unshared_k_cache.size(1), beam_size)
-      << "unshared_k_cache beam_size mismatch";
+  CHECK_EQ(block_table.size(0), num_seqs)
+      << "block_table size must match num_seqs";
+
+  CHECK_EQ(unshared_k_cache.dim(), 5)
+      << "unshared_k_cache must be 5-dimensional";
+  CHECK_EQ(unshared_v_cache.sizes(), unshared_k_cache.sizes())
+      << "unshared_v_cache and unshared_k_cache must have same shape";
   CHECK_EQ(unshared_k_cache.size(3), kv_heads)
       << "unshared_k_cache kv_heads mismatch";
   CHECK_EQ(unshared_k_cache.size(4), head_dim)
       << "unshared_k_cache head_dim mismatch";
-  CHECK_EQ(unshared_v_cache.sizes(), unshared_k_cache.sizes())
-      << "unshared_v_cache and unshared_k_cache must have same shape";
 
-  // Move block_table to CPU so `.item<>()` does not repeatedly sync.
-  auto block_table_cpu =
-      block_table.select(1, 0).to(torch::kCPU);  // [batch_size]
+  CHECK_EQ(step.dim(), 1) << "step must be 1-dimensional";
+  CHECK_EQ(step.size(0), 1) << "step must have shape [1]";
+  const int64_t step_value = step[0].item<int64_t>();
+  CHECK_GE(step_value, 0) << "step must be >= 0";
+  CHECK_LT(step_value, max_decode_step)
+      << "step must be less than max_decode_step";
 
-  // For each batch element, write into its assigned request_id slot.
-  for (int64_t b = 0; b < batch_size; ++b) {
-    int64_t request_id = block_table_cpu[b].item<int64_t>();
+  const int64_t max_num_seqs = max_num_request * beam_size;
+  auto block_table_cpu = block_table.select(1, 0).to(torch::kCPU);
 
-    // Validate request_id.
-    CHECK_GE(request_id, 0) << "Invalid request_id: " << request_id;
-    CHECK_LT(request_id, max_num_request)
-        << "request_id (" << request_id << ") >= max_num_request ("
-        << max_num_request << ")";
+  for (int64_t seq_idx = 0; seq_idx < num_seqs; ++seq_idx) {
+    const int64_t block_id = block_table_cpu[seq_idx].item<int64_t>();
+    CHECK_GE(block_id, 0) << "Invalid block_id: " << block_id;
+    CHECK_LT(block_id, max_num_seqs)
+        << "block_id (" << block_id << ") >= max_num_seqs (" << max_num_seqs
+        << ")";
 
-    // Extract one batch slice: [beam_size, kv_heads, head_dim]
-    auto proj_k_batch = proj_k[b];  // [beam_size, kv_heads, head_dim]
-    auto proj_v_batch = proj_v[b];  // [beam_size, kv_heads, head_dim]
+    const int64_t request_id = block_id / beam_size;
+    const int64_t beam_id = block_id % beam_size;
 
-    // Write into cache at decode step `step`.
-    // NOTE: dimension order is [request_id, beam, step, kv_head, head_dim].
-    int64_t step_value = step[0].item<int64_t>();
-    unshared_k_cache[request_id].select(1, step_value).copy_(proj_k_batch);
-    unshared_v_cache[request_id].select(1, step_value).copy_(proj_v_batch);
+    unshared_k_cache[request_id][beam_id]
+        .select(0, step_value)
+        .copy_(proj_k[seq_idx]);
+    unshared_v_cache[request_id][beam_id]
+        .select(0, step_value)
+        .copy_(proj_v[seq_idx]);
   }
 }
 
 TEST_F(DecoderReshapeAndCacheTest, CorrectnessTest) {
-  // Small shapes are enough to catch indexing bugs, while keeping the test
-  // fast.
   const int64_t batch_size = 1;
   const int64_t beam_size = 2;
+  const int64_t num_seqs = batch_size * beam_size;
   const int64_t kv_heads = 8;
   const int64_t head_dim = 128;
-  const int64_t max_num_request = 33437;
+  const int64_t max_num_request = 2;
   const int64_t max_decode_step = 3;
-  // const uint32_t step = 1;
 
-  torch::Tensor step = torch::tensor({1}, torch::kInt64).view({1}).to(device_);
+  torch::Tensor step = torch::tensor({1}, torch::kInt32).to(device_);
 
-  auto options = torch::TensorOptions().device(device_).dtype(dtype_);
+  const auto float_opts = torch::TensorOptions().device(device_).dtype(dtype_);
+  const auto int_opts =
+      torch::TensorOptions().device(device_).dtype(torch::kInt32);
 
-  // 1) Prepare inputs.
-  // proj_k/proj_v: [batch_size, beam_size, kv_heads, head_dim]
+  // Current kernel input shape: [num_seqs, kv_heads, head_dim]
   torch::Tensor proj_k =
-      torch::randn({batch_size, beam_size, kv_heads, head_dim}, options);
+      torch::randn({num_seqs, kv_heads, head_dim}, float_opts);
   torch::Tensor proj_v =
-      torch::randn({batch_size, beam_size, kv_heads, head_dim}, options);
+      torch::randn({num_seqs, kv_heads, head_dim}, float_opts);
 
-  // 2) Prepare block table mapping batch index -> request_id (block_id).
-  // Here we map the only batch element to request_id=0.
+  // Sequence-level block ids.
   torch::Tensor block_table =
-      torch::tensor({0}, torch::kInt64).view({batch_size, 1}).to(device_);
+      torch::arange(num_seqs, int_opts).view({num_seqs, 1});
 
-  // 3) Prepare caches.
-  // Layout: [max_num_request, beam_size, max_decode_step, kv_heads, head_dim]
   torch::Tensor unshared_k_cache = torch::zeros(
       {max_num_request, beam_size, max_decode_step, kv_heads, head_dim},
-      options);
+      float_opts);
   torch::Tensor unshared_v_cache = torch::zeros(
       {max_num_request, beam_size, max_decode_step, kv_heads, head_dim},
-      options);
+      float_opts);
 
-  // Reference buffers (two independent references).
   torch::Tensor ref_k_cache = unshared_k_cache.clone();
   torch::Tensor ref_v_cache = unshared_v_cache.clone();
 
-  // 4) Run CUDA kernel under test.
   decoder_reshape_and_cache(
       proj_k, proj_v, unshared_k_cache, unshared_v_cache, block_table, step);
 
-  // 5) Run references.
   torch_reference(proj_k, proj_v, ref_k_cache, ref_v_cache, block_table, step);
 
-  // 6) Compare results.
   EXPECT_TRUE(torch::allclose(unshared_k_cache, ref_k_cache, 1e-5, 1e-5));
   EXPECT_TRUE(torch::allclose(unshared_v_cache, ref_v_cache, 1e-5, 1e-5));
 
-  // Sanity-check that the expected slice was copied for each batch element.
-  int64_t step_value = step[0].item<int64_t>();
-  for (int64_t b = 0; b < batch_size; ++b) {
-    int64_t rid = block_table[b][0].item<int64_t>();
-    torch::Tensor copied_k = unshared_k_cache[rid].select(1, step_value);
-    torch::Tensor source_k = proj_k[b];
+  const int64_t step_value = step[0].item<int64_t>();
+  for (int64_t seq_idx = 0; seq_idx < num_seqs; ++seq_idx) {
+    const int64_t block_id = block_table[seq_idx][0].item<int64_t>();
+    const int64_t request_id = block_id / beam_size;
+    const int64_t beam_id = block_id % beam_size;
+
+    torch::Tensor copied_k =
+        unshared_k_cache[request_id][beam_id].select(0, step_value);
+    torch::Tensor source_k = proj_k[seq_idx];
     EXPECT_TRUE(torch::allclose(copied_k, source_k, 1e-5, 1e-5));
   }
 }

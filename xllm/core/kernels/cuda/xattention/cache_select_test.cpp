@@ -262,9 +262,17 @@ TEST_F(CacheSelctTest, CorrectnessTest) {
     v_cache_normal.push_back(base_v_cache[layer].clone());
   }
 
-  //   use cache intelligent
+  // CPU reference uses request-level block table: [batch_size, 1].
   torch::Tensor block_table =
-      torch::randint(0, max_num_request, {batch_size, 1}, int_opts);
+      torch::arange(batch_size, int_opts).view({batch_size, 1});
+
+  // CUDA kernel uses sequence-level block table shape [batch_size * beam_size,
+  // 1].
+  torch::Tensor seq_block_table =
+      torch::arange(batch_size * beam_size, int_opts)
+          .view({batch_size * beam_size, 1});
+
+  //   use cache intelligent
   cache_select_intelligent(beam_after_sort,
                            k_cache_intelligent,
                            v_cache_intelligent,
@@ -293,7 +301,7 @@ TEST_F(CacheSelctTest, CorrectnessTest) {
   xllm::kernel::cuda::cache_select(beam_after_sort,
                                    k_cache_cuda,
                                    v_cache_cuda,
-                                   block_table,
+                                   seq_block_table,
                                    current_step,
                                    beam_size,
                                    layer_num);
