@@ -52,7 +52,7 @@ class GlobalXtensor {
   void* get_vaddr_by_page_id(page_id_t page_id) const;
 
   // Get base virtual address
-  void* base_vaddr() const { return vaddr_; }
+  void* base_vaddr() const { return vir_ptr_to_void_ptr(vaddr_); }
 
   size_t total_size() const { return total_size_; }
   size_t num_total_pages() const { return num_total_pages_; }
@@ -75,7 +75,7 @@ class GlobalXtensor {
 
   bool initialized_ = false;
   bool mooncake_registered_ = false;
-  VirPtr vaddr_ = nullptr;
+  VirPtr vaddr_ = {};
   size_t total_size_ = 0;
   size_t page_size_ = 0;
   size_t num_total_pages_ = 0;

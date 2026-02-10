@@ -15,7 +15,9 @@ limitations under the License.
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #if defined(USE_NPU)
 #include "acl/acl.h"
@@ -42,6 +44,42 @@ using PhyMemHandle = CUmemGenericAllocationHandle;
 using VirPtr = MUdeviceptr;
 using PhyMemHandle = MUmemGenericAllocationHandle;
 #endif
+
+template <typename T>
+inline uintptr_t vir_ptr_to_uintptr_impl(T ptr) {
+  if constexpr (std::is_pointer_v<T>) {
+    return reinterpret_cast<uintptr_t>(ptr);
+  } else {
+    return static_cast<uintptr_t>(ptr);
+  }
+}
+
+inline uintptr_t vir_ptr_to_uintptr(VirPtr ptr) {
+  return vir_ptr_to_uintptr_impl(ptr);
+}
+
+template <typename T>
+inline T uintptr_to_vir_ptr_impl(uintptr_t ptr) {
+  if constexpr (std::is_pointer_v<T>) {
+    return reinterpret_cast<T>(ptr);
+  } else {
+    return static_cast<T>(ptr);
+  }
+}
+
+inline VirPtr uintptr_to_vir_ptr(uintptr_t ptr) {
+  return uintptr_to_vir_ptr_impl<VirPtr>(ptr);
+}
+
+inline VirPtr add_vir_ptr_offset(VirPtr base, size_t offset_bytes) {
+  return uintptr_to_vir_ptr(vir_ptr_to_uintptr(base) + offset_bytes);
+}
+
+inline void* vir_ptr_to_void_ptr(VirPtr ptr) {
+  return reinterpret_cast<void*>(vir_ptr_to_uintptr(ptr));
+}
+
+inline bool is_null_vir_ptr(VirPtr ptr) { return vir_ptr_to_uintptr(ptr) == 0; }
 
 namespace vmm {
 

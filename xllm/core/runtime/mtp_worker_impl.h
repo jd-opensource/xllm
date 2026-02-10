@@ -52,14 +52,14 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
 
  public:
   bool init_model(const std::string& model_weights_path,
-                  int32_t random_seed) override;
+                  int32_t random_seed,
+                  int32_t master_status) override;
 
   bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 
 #if defined(USE_NPU)
   bool allocate_kv_cache_with_transfer(
-      const uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 #endif
 

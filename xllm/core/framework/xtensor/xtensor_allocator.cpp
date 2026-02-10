@@ -650,7 +650,7 @@ void XTensorAllocator::record_weight_fallback_allocation(
   // Create XTensor with the non-contiguous preallocated pages
   tensors.weight_xtensor =
       std::make_unique<XTensor>(page_ids, torch::kBFloat16, dev_);
-  if (tensors.weight_xtensor->vaddr() == nullptr) {
+  if (is_null_vir_ptr(tensors.weight_xtensor->vaddr())) {
     LOG(ERROR) << "XTensorAllocator: failed to create XTensor for model "
                << model_id;
     // Free pages on failure
@@ -661,7 +661,8 @@ void XTensorAllocator::record_weight_fallback_allocation(
 
   tensors.using_weight_xtensor = true;
   tensors.weight_num_pages = page_ids.size();
-  tensors.weight_base_ptr = tensors.weight_xtensor->vaddr();
+  tensors.weight_base_ptr =
+      vir_ptr_to_void_ptr(tensors.weight_xtensor->vaddr());
   tensors.weight_current_offset = 0;
   tensors.weight_start_page_id = -1;  // Not applicable for non-contiguous
 

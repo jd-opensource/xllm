@@ -542,50 +542,6 @@ std::unique_ptr<VirtPage> PageAllocator::alloc_kv_cache_page(
   return std::make_unique<VirtPage>(*virt_page_id, page_size_);
 }
 
-void PageAllocator::free_kv_cache_page(const std::string& model_id,
-                                       int32_t dp_rank,
-                                       int64_t virt_page_id) {
-  CHECK_GE(dp_rank, 0) << "dp_rank must be >= 0";
-  CHECK_LT(dp_rank, dp_size_) << "dp_rank must be < dp_size";
-
-  size_t phy_pages_per_virt = 0;
-
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-
-    ModelState& state = get_model_state(model_id);
-    auto& dp_pages = state.dp_group_pages[dp_rank];
-    phy_pages_per_virt = state.phy_pages_per_virt_page;
-
-    // Remove from allocated list
-    dp_pages.allocated_virt_page_list.erase(virt_page_id);
-
-    dp_pages.num_free_virt_pages++;
-
-    // Fast path: keep page mapped for reuse if not sleeping and pool not full
-    if (!state.is_sleeping && dp_pages.reserved_virt_page_list.size() <
-                                  static_cast<size_t>(max_reserved_pages_)) {
-      dp_pages.reserved_virt_page_list.push_back(virt_page_id);
-      update_memory_usage();
-      cond_.notify_all();
-      return;
-    }
-    // Slow path: need to unmap (model sleeping or reserved pool full)
-  }
-
-  // Slow path: unmap physical pages and add to free list
-  unmap_virt_pages(model_id, dp_rank, {virt_page_id});
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-    ModelState& state = get_model_state(model_id);
-    auto& dp_pages = state.dp_group_pages[dp_rank];
-    dp_pages.free_virt_page_list.push_back(virt_page_id);
-    release_phy_pages_for_dp(model_id, dp_rank, phy_pages_per_virt);
-    update_memory_usage();
-    cond_.notify_all();
-  }
-}
-
 void PageAllocator::free_kv_cache_pages(
     const std::string& model_id,
     int32_t dp_rank,

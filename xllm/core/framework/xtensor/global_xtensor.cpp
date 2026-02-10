@@ -43,7 +43,7 @@ void GlobalXtensor::init(const torch::Device& device) {
   total_size_ = num_total_pages_ * page_size_;
 
   vmm::create_vir_ptr(vaddr_, total_size_);
-  if (vaddr_ == nullptr) {
+  if (is_null_vir_ptr(vaddr_)) {
     LOG(ERROR) << "GlobalXtensor: failed to allocate virtual memory";
     return;
   }
@@ -64,8 +64,7 @@ bool GlobalXtensor::map_page(PhyPage* page, size_t offset) {
   CHECK(offset % page_size_ == 0) << "Offset not aligned to page size";
   CHECK(offset < total_size_) << "Offset out of bounds";
 
-  VirPtr vaddr =
-      reinterpret_cast<VirPtr>(reinterpret_cast<uintptr_t>(vaddr_) + offset);
+  VirPtr vaddr = add_vir_ptr_offset(vaddr_, offset);
   PhyMemHandle phy_handle = page->get_phy_handle();
   vmm::map(vaddr, phy_handle);
   return true;
@@ -97,8 +96,7 @@ void* GlobalXtensor::get_vaddr_by_page_id(page_id_t page_id) const {
     return nullptr;
   }
 
-  return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(vaddr_) +
-                                 page_id * page_size_);
+  return vir_ptr_to_void_ptr(add_vir_ptr_offset(vaddr_, page_id * page_size_));
 }
 
 }  // namespace xllm
