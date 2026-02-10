@@ -35,10 +35,15 @@ Request::Request(const std::string& request_id,
                  const std::string& x_request_time,
                  const RequestState& state,
                  const std::string& service_request_id,
+                 const std::string& source_xservice_addr,
                  bool offline,
                  int32_t slo_ms,
                  RequestPriority priority)
-    : RequestBase(request_id, x_request_id, x_request_time, service_request_id),
+    : RequestBase(request_id,
+                  x_request_id,
+                  x_request_time,
+                  service_request_id,
+                  source_xservice_addr),
       state_(std::move(state)),
       offline_(offline),
       priority_(priority),
@@ -158,6 +163,7 @@ RequestOutput Request::generate_output(const Tokenizer& tokenizer,
   RequestOutput output;
   output.request_id = request_id_;
   output.service_request_id = service_request_id_;
+  output.target_xservice_addr = source_xservice_addr_;
   output.usage = usage;
   output.status = Status(StatusCode::OK);
   output.finished = finished();
