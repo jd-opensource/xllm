@@ -42,6 +42,7 @@ class Request : public RequestBase {
           const std::string& x_request_time,
           const RequestState& state,
           const std::string& service_request_id = "",
+          const std::string& source_xservice_addr = "",
           bool offline = false,
           int32_t slo_ms = 0,
           RequestPriority priority = RequestPriority::NORMAL);

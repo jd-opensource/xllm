@@ -96,6 +96,7 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
       req.x_request_time(),
       std::move(req_state),
       req.service_req_id(),
+      req.source_xservice_addr(),
       req.offline(),
       req.slo_ms(),
       static_cast<xllm::RequestPriority>(req.priority()));

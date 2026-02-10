@@ -45,6 +45,9 @@ class EtcdClient {
 
   bool get_master_service(const std::string& key_prefix, std::string* values);
 
+  bool get_all_xservices(const std::string& key_prefix,
+                         std::vector<std::string>* values);
+
  private:
   struct WatcherInfo {
     std::unique_ptr<etcd::Watcher> watcher;

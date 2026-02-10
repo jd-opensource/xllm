@@ -100,15 +100,30 @@ message CompletionRequest {
   optional bool add_special_tokens = 30;
   // tensor for rec embedding.
   repeated InferInputTensor input_tensors = 31;
+
+  optional int32 ttft_slo_ms = 32;
+
+  optional int32 tpot_slo_ms = 33;
+
+  optional int32 tpot_priority_weight = 34;
+
+  optional int32 ttft_priority_weight = 35;
+
+  optional int32 ttlt_priority_weight = 36;
+
+  optional int32 priority_weight = 37;
+
+  // xllm_service rpc addr(ip:rpc_port) that forwards this request.
+  optional string source_xservice_addr = 38;
 }
 
 message LogProbs {
   repeated float token_logprobs = 1 [json_name="token_logprobs"];
-  
+
   repeated string tokens = 2;
-  
+
   repeated int32 token_ids = 3 [json_name="token_ids"];
-  
+
   // rpc doesn't allow: repeated map<string, float> top_logprobs = 4;
 }
 
@@ -151,4 +166,3 @@ message CompletionResponse {
   // for rec output
   repeated InferOutputTensor output_tensors = 7;
 }
-

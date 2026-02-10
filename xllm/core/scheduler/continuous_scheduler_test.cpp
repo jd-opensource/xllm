@@ -149,6 +149,7 @@ std::vector<std::shared_ptr<Request>> generate_request(
         "1",
         std::move(req_state),
         "1",
+        "",
         offline_vec[i],
         0,
         static_cast<RequestPriority>(priority_vec[i]));
