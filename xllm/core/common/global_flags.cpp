@@ -536,3 +536,8 @@ DEFINE_int64(max_token_per_req,
              "Max tokens per request (prompt + generated). "
              "Used as a global guardrail for per-request token budget. "
              "This is only used in Rec multi-round pipeline.");
+
+// --- health check config ---
+DEFINE_int32(health_check_interval_ms,
+             3000,
+             "Worker health check interval in milliseconds.");
