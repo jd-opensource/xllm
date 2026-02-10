@@ -79,11 +79,6 @@ DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
 
 // --- graph mode execution config ---
 
-DEFINE_int32(max_seq_len_for_graph_mode,
-             0,
-             "Maximum number of tokens per sequence for graph execution. "
-             "If 0, use model max_position_embeddings.");
-
 DEFINE_bool(
     enable_graph,
     false,
@@ -92,12 +87,22 @@ DEFINE_bool(
     "or MLU Graph) to optimize decode performance by reducing kernel "
     "launch overhead and device idle time.");
 
-DEFINE_bool(enable_graph_no_padding,
+DEFINE_bool(enable_graph_mode_decode_no_padding,
             false,
             "Whether to enable graph execution for decode phase without "
             "padding. If true, graph will be caputured with every actual num "
             "tokens, as stride is 1.");
 
+DEFINE_bool(enable_prefill_piecewise_graph,
+            false,
+            "Whether to enable piecewise CUDA graph for prefill phase. "
+            "When enabled, attention operations use eager mode while other "
+            "operations are captured in CUDA graphs.");
+
+DEFINE_int32(max_tokens_for_graph_mode,
+             2048,
+             "Maximum number of tokens for graph execution. "
+             "If 0, no limit is applied.");
 // --- vlm config ---
 
 DEFINE_int32(limit_image_per_prompt,

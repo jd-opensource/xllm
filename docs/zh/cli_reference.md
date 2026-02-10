@@ -61,7 +61,8 @@ xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 | 参数名称 | 类型 | 默认值 | 其他值 | 参数含义 | 其他 |
 |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
 | `enable_graph` | `bool` | false | true | 是否启用图执行模式优化decode阶段性能。仅用于decode阶段，对prefill阶段不生效。支持ACL Graph（NPU）、MLU Graph。 | [详情](./features/acl_graph.md) |
-| `max_seq_len_for_graph_mode` | `int32` | 0 | 任意大于0的整数 | 图执行模式支持的最大序列长度。如果为0，则使用模型的最大位置嵌入长度。 |  |
+| `enable_prefill_piecewise_graph` | `bool` | false | true | 是否启用prefill阶段的分段Graph。attention以eager执行，其他算子进入图捕获。 |  |
+| `max_tokens_for_graph_mode` | `int32` | 1024 | 任意大于等于0的整数 | 图执行模式最大token数。为0表示不限制。 |  |
 
 
 ## 配套xLLM-service使用的参数

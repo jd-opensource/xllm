@@ -61,7 +61,8 @@ xLLM uses gflags to manage service startup parameters. The specific parameter me
 | Parameter Name | Type | Default Value | Other Values | Description | Notes |
 |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
 | `enable_graph` | `bool` | false | true | Whether to enable graph execution mode to optimize decode phase performance. Only applied during decode phase and does not take effect during prefill phase. Supports ACL Graph (NPU), and MLU Graph. | [Details](./features/acl_graph.md) |
-| `max_seq_len_for_graph_mode` | `int32` | 0 | Any integer greater than 0 | Maximum sequence length supported by graph execution mode. If 0, uses the model's maximum position embeddings length. |  |
+| `enable_prefill_piecewise_graph` | `bool` | false | true | Whether to enable piecewise graph for prefill phase. Attention runs eagerly while other ops are captured into CUDA graphs. |  |
+| `max_tokens_for_graph_mode` | `int32` | 1024 | Any integer greater than or equal to 0 | Maximum number of tokens for graph execution. If 0, no limit is applied. |  |
 
 
 ## Parameters for Use with xLLM-service
