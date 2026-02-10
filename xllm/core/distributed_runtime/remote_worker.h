@@ -143,6 +143,12 @@ class RemoteWorker : public WorkerClient {
   virtual folly::SemiFuture<int64_t> get_active_activation_memory_async()
       override;
 
+  // Check if the connection to worker is healthy
+  bool check_health();
+
+  // Get worker global rank
+  int32_t global_rank() const { return global_rank_; }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(RemoteWorker);
 
