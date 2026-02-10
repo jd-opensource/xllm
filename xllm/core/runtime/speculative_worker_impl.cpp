@@ -167,15 +167,18 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
                             device,
                             options,
                             MainOptions(options),
-                            DraftOptions(options)) {}
+                            DraftOptions(options),
+                            FLAGS_enable_opt_validate_probs) {}
 
 SpeculativeWorkerImpl::SpeculativeWorkerImpl(
     const ParallelArgs& parallel_args,
     const torch::Device& device,
     const runtime::Options& options,
     const runtime::Options& options_main,
-    const runtime::Options& options_draft)
-    : WorkerImpl(parallel_args, device, options) {
+    const runtime::Options& options_draft,
+    bool enable_opt_validate_probs)
+    : WorkerImpl(parallel_args, device, options),
+      enable_opt_validate_probs_(enable_opt_validate_probs) {
   impl_ = std::make_unique<LLMWorkerImpl>(parallel_args, device, options_main);
   // options_draft already carries draft-specific settings (e.g.
   // num_speculative_tokens(0) for Eagle3, or enable_graph_aux_hidden_states
@@ -443,10 +446,21 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
       prepare_draft_inputs(draft_input, next_step_input, 1, device_);
     }
     draft_outputs.push_back(std::move(future).get().value());
+    auto& last_output = draft_outputs.back().sample_output;
+
+    // Extract probability for selected draft token
+    if (last_output.probs.defined() && enable_opt_validate_probs_) {
+      auto selected_probs =
+          last_output.probs
+              .gather(
+                  /*dim=*/-1, last_output.next_tokens.unsqueeze(-1))
+              .squeeze(-1);
+      last_output.probs = selected_probs;  // [batch_size]
+    }
+
     // update input of next step
     if (i < options_.num_speculative_tokens() - 1) {
       draft_input = next_step_input;
-      auto& last_output = draft_outputs.back().sample_output;
       draft_input.token_ids = safe_to(last_output.next_tokens, torch::kInt);
       draft_input.input_params.input_embedding =
           last_output.embeddings.to(device_);
@@ -702,20 +716,29 @@ SampleOutput SpeculativeWorkerImpl::validate(
   // [batch_size, n_speculative_tokens, vocab_size]
   auto target_logits =
       target_output.logits.view({batch_size, num_val_tokens, vocab_size});
-
-  // prepare input for rejection sampling
   std::vector<torch::Tensor> draft_token_ids_vec;
   std::vector<torch::Tensor> draft_probs_vec;
-  for (const auto& draft_output : draft_outputs) {
-    auto draft_token_ids =
-        draft_output.sample_output.next_tokens.view({batch_size, 1});
-    auto draft_probs =
-        draft_output.sample_output.probs.view({{batch_size, 1, vocab_size}});
-    draft_token_ids_vec.push_back(draft_token_ids);
+  draft_token_ids_vec.reserve(draft_outputs.size());
+  draft_probs_vec.reserve(draft_outputs.size());
+
+  // prepare input for rejection sampling
+  // draft_output.sample_output.probs has been extracted to [batch_size] in
+  // step_decode
+  for (size_t i = 0; i < draft_outputs.size(); ++i) {
+    const auto& draft_output = draft_outputs[i];
+    auto draft_token_ids = draft_output.sample_output.next_tokens;
+    auto draft_probs = draft_output.sample_output.probs;
+
+    if (enable_opt_validate_probs_) {
+      draft_probs = draft_probs.view({{batch_size, 1}});
+    } else {
+      draft_probs = draft_probs.view({{batch_size, 1, vocab_size}});
+    }
+    draft_token_ids_vec.push_back(draft_token_ids.view({batch_size, 1}));
     draft_probs_vec.push_back(draft_probs);
   }
 
-  // concatenate the draft token ids and probs along the last dimension
+  // concatenate the draft token ids along the last dimension
   const auto draft_token_ids =
       torch::cat(draft_token_ids_vec, /*dim=*/1).to(bonus_token_ids);
   const auto draft_probs =

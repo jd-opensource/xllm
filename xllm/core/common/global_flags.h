@@ -64,6 +64,7 @@ DECLARE_string(draft_model);
 DECLARE_string(draft_devices);
 DECLARE_int32(num_speculative_tokens);
 DECLARE_string(speculative_algorithm);
+DECLARE_bool(enable_opt_validate_probs);
 
 DECLARE_int32(num_request_handling_threads);
 
