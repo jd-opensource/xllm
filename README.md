@@ -134,7 +134,6 @@ This project was made possible thanks to the following open-source projects:
 - [safetensors](https://github.com/huggingface/safetensors) - xLLM relies on the C binding safetensors capability.
 - [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - Implement xLLM's C++ JSON parser with insights from Python and Go implementations.
 - [concurrentqueue](https://github.com/cameron314/concurrentqueue) - A fast multi-producer, multi-consumer lock-free concurrent queue for C++11.
-- [Flashinfer](https://github.com/flashinfer-ai/flashinfer) - High-performance NVIDIA GPU kernels.
 
 
 Thanks to the following collaborating university laboratories:
