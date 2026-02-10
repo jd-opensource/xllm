@@ -498,3 +498,8 @@ DEFINE_string(
     "ATB",
     "NPU kernel backend. Supported options: ATB, TORCH. Default is ATB.");
 #endif
+
+// --- health check config ---
+DEFINE_int32(health_check_interval_ms,
+             3000,
+             "Worker health check interval in milliseconds.");

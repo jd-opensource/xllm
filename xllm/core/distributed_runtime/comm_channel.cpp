@@ -51,6 +51,23 @@ bool CommChannel::hello() {
   return true;
 }
 
+bool CommChannel::check_health() {
+  proto::Status req;
+  proto::Status resp;
+  brpc::Controller cntl;
+
+  // Set a timeout for health check
+  // check hang status: 10min(magic num)
+  cntl.set_timeout_ms(600000);
+  stub_->Hello(&cntl, &req, &resp, nullptr);
+  if (cntl.Failed()) {
+    LOG(WARNING) << "Health check failed: " << cntl.ErrorText();
+    return false;
+  }
+
+  return resp.ok();
+}
+
 bool CommChannel::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   proto::KVCacheShape shape;

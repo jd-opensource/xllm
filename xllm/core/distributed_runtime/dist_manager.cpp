@@ -18,10 +18,12 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "comm_channel.h"
+#include "common/health_check_manager.h"
 #include "distributed_runtime/collective_service.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/parallel_state/process_group.h"
+#include "remote_worker.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/llm_worker_impl.h"
 #include "server/xllm_server_registry.h"
@@ -41,6 +43,9 @@ DistManager::DistManager(const runtime::Options& options)
 }
 
 DistManager::~DistManager() {
+  // Stop health check
+  HealthCheckManager::instance().stop_health_check_thread();
+
   XllmServer* collective_server =
       ServerRegistry::get_instance().get_server(server_name_);
   if (collective_server != nullptr) {
@@ -209,6 +214,21 @@ void DistManager::setup_multi_node_workers(
                                          devices[r % each_node_ranks],
                                          std::move(channel)));
     }
+
+    // Register health check for each worker and start background health check
+    for (auto& worker_client : worker_clients_) {
+      auto* remote_worker = dynamic_cast<RemoteWorker*>(worker_client.get());
+      if (remote_worker) {
+        int rank = remote_worker->global_rank();
+        HealthCheckManager::instance().register_health_check(
+            rank, [remote_worker]() { return remote_worker->check_health(); });
+      }
+    }
+    // Start background health check thread with 3(magic num) second interval
+    HealthCheckManager::instance().start_health_check_thread(
+        FLAGS_health_check_interval_ms);
+
+    LOG(INFO) << "Started cluster health check thread";
   }
 
   for (int idx = 0; idx < dones.size(); ++idx) {
