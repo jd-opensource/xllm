@@ -82,6 +82,28 @@ bool EtcdClient::get_master_service(const std::string& key,
   return true;
 }
 
+bool EtcdClient::get_all_xservices(const std::string& key_prefix,
+                                   std::vector<std::string>* values) {
+  auto response = client_.ls(key_prefix);
+  if (!response.is_ok()) {
+    LOG(ERROR) << "etcd get " << key_prefix
+               << " failed: " << response.error_message();
+    return false;
+  }
+
+  if (values == nullptr) {
+    return true;
+  }
+
+  values->clear();
+  values->reserve(response.keys().size());
+  for (int i = 0; i < response.keys().size(); ++i) {
+    values->emplace_back(response.value(i).as_string());
+  }
+
+  return true;
+}
+
 bool EtcdClient::register_instance(const std::string& key,
                                    const std::string& value,
                                    const int ttl) {

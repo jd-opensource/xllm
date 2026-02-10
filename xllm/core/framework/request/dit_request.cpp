@@ -33,8 +33,13 @@ DiTRequest::DiTRequest(const std::string& request_id,
                        const std::string& x_request_id,
                        const std::string& x_request_time,
                        const DiTRequestState& state,
-                       const std::string& service_request_id)
-    : RequestBase(request_id, x_request_id, x_request_time, service_request_id),
+                       const std::string& service_request_id,
+                       const std::string& source_xservice_addr)
+    : RequestBase(request_id,
+                  x_request_id,
+                  x_request_time,
+                  service_request_id,
+                  source_xservice_addr),
       state_(state) {}
 
 bool DiTRequest::finished() const { return true; }

@@ -425,7 +425,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                                            sp.x_request_id,
                                            sp.x_request_time,
                                            std::move(req_state),
-                                           sp.service_request_id);
+                                           sp.service_request_id,
+                                           sp.source_xservice_addr);
 
   // add one sequence, rest will be added by scheduler
   return request;
