@@ -278,7 +278,7 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
     attn_output = attn_output.to(query.dtype());
     return attn_output.flatten(2);
-#else
+#elif defined(USE_CUDA)
     query = query.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
     key = key.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
     value = value.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
@@ -294,6 +294,8 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
         query, key, value, torch::nullopt, 0.0, false);
     attn_output = attn_output.to(query.dtype());
     return attn_output.transpose(1, 2).flatten(2);
+#else
+    NOT_IMPLEMENTED();
 #endif
   }
 
@@ -456,7 +458,7 @@ class FluxAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
 
     attn_output = attn_output.reshape({batch_size, -1, attn_heads * head_dim});
-#else
+#elif defined(USE_CUDA)
     // SDPA expects (B, H, S, D); our query1/key1/value1 are (B, S, H, D).
     // Transpose to match diffusers dispatch_attention_fn (permute 0,2,1,3).
     query1 = query1.transpose(1, 2);
@@ -466,6 +468,8 @@ class FluxAttentionImpl : public torch::nn::Module {
         query1, key1, value1, torch::nullopt, 0.0, false);
     attn_output = attn_output.transpose(1, 2).reshape(
         {batch_size, -1, attn_heads * head_dim});
+#else
+    NOT_IMPLEMENTED();
 #endif
     attn_output = attn_output.to(query.dtype());
 
