@@ -16,6 +16,8 @@ limitations under the License.
 #include "xservice_client.h"
 
 #include <absl/strings/str_split.h>
+#include <folly/executors/GlobalExecutor.h>
+#include <folly/futures/Future.h>
 #include <glog/logging.h>
 
 #include "util/hash_util.h"
@@ -468,50 +470,88 @@ std::vector<bool> XServiceClient::generations(
     }
   }
 
-  // send requests to each xllm_service
+  struct ServiceCallResult {
+    bool rpc_success = false;
+    std::vector<bool> all_status_ok;
+  };
+
+  std::vector<std::string> service_order;
+  service_order.reserve(service_requests_map.size());
+  std::vector<folly::SemiFuture<ServiceCallResult>> futures;
+  futures.reserve(service_requests_map.size());
+
+  // send requests to each xllm_service in parallel
   for (const auto& pair : service_requests_map) {
-    const std::string& service_addr = pair.first;
-    const auto& gens = pair.second;
+    const std::string service_addr = pair.first;
+    auto gens = std::make_shared<proto::DisaggStreamGenerations>(pair.second);
+    service_order.push_back(service_addr);
 
-    if (!connect_to_xservice(service_addr)) {
-      LOG(ERROR) << "Failed to connect target xservice: " << service_addr;
-      mark_service_failed(service_addr);
-      continue;
-    }
+    futures.emplace_back(folly::via(
+        folly::getGlobalCPUExecutor(),
+        [this, service_addr, gens]() -> ServiceCallResult {
+          ServiceCallResult call_result;
 
-    proto::StatusSet resp;
-    brpc::Controller cntl;
-    {
-      std::shared_lock<std::shared_mutex> lock(mutex_);
-      auto* service_stub = find_stub_locked(service_addr);
-      if (service_stub == nullptr) {
-        LOG(ERROR) << "No stub available for xservice: " << service_addr;
-        mark_service_failed(service_addr);
-        continue;
-      }
-      service_stub->Generations(&cntl, &gens, &resp, nullptr);
-    }
-    if (cntl.Failed()) {
-      LOG(ERROR) << "Fail to response tokens to xservice server "
-                 << service_addr << ", error text: " << cntl.ErrorText();
-      mark_service_failed(service_addr);
-      continue;
-    }
+          if (!connect_to_xservice(service_addr)) {
+            LOG(ERROR) << "Failed to connect target xservice: " << service_addr;
+            return call_result;
+          }
 
-    const auto& all_status = resp.all_status();
+          proto::StatusSet resp;
+          brpc::Controller cntl;
+          {
+            std::shared_lock<std::shared_mutex> lock(mutex_);
+            auto* service_stub = find_stub_locked(service_addr);
+            if (service_stub == nullptr) {
+              LOG(ERROR) << "No stub available for xservice: " << service_addr;
+              return call_result;
+            }
+            service_stub->Generations(&cntl, gens.get(), &resp, nullptr);
+          }
+
+          if (cntl.Failed()) {
+            LOG(ERROR) << "Fail to response tokens to xservice server "
+                       << service_addr << ", error text: " << cntl.ErrorText();
+            return call_result;
+          }
+
+          call_result.rpc_success = true;
+          call_result.all_status_ok.reserve(resp.all_status_size());
+          for (const auto& status : resp.all_status()) {
+            call_result.all_status_ok.push_back(status.ok());
+          }
+          return call_result;
+        }));
+  }
+
+  auto try_results = folly::collectAll(futures).get();
+  for (size_t i = 0; i < try_results.size(); ++i) {
+    const std::string& service_addr = service_order[i];
     auto index_it = service_outputs_map.find(service_addr);
     CHECK(index_it != service_outputs_map.end())
         << "No output index found for service: " << service_addr;
     const auto& indices = index_it->second;
-    CHECK_EQ(all_status.size(), indices.size())
+
+    if (try_results[i].hasException()) {
+      LOG(ERROR) << "Async call throws exception for xservice: "
+                 << service_addr;
+      mark_service_failed(service_addr);
+      continue;
+    }
+
+    const auto& call_result = try_results[i].value();
+    if (!call_result.rpc_success) {
+      mark_service_failed(service_addr);
+      continue;
+    }
+
+    CHECK_EQ(call_result.all_status_ok.size(), indices.size())
         << "The size of status set is not equal to the size of outputs for "
            "service: "
         << service_addr;
 
-    for (size_t i = 0; i < all_status.size(); ++i) {
-      const auto& status = all_status[i];
-      size_t original_idx = indices[i];
-      results[original_idx] = status.ok();
+    for (size_t j = 0; j < call_result.all_status_ok.size(); ++j) {
+      size_t original_idx = indices[j];
+      results[original_idx] = call_result.all_status_ok[j];
     }
   }
 
