@@ -58,7 +58,12 @@ bool MiniCPMVImageProcessor::process_images(std::vector<torch::Tensor> images,
     new_images.clear();
     tgt_sizes.clear();
 
-    if (!this->process_image(image, new_images, tgt_sizes)) return false;
+    if (!this->process_image(image, new_images, tgt_sizes)) {
+      LOG(ERROR)
+          << "Failed to process image. The shape(channels, height, width) is: "
+          << image.sizes();
+      return false;
+    }
 
     // image shape: [C, H, W]
     const auto& image_size = image.sizes();

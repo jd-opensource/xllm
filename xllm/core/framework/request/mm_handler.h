@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "core/common/message.h"
 #include "core/common/types.h"
+#include "mm_input.h"
 
 namespace xllm {
 
@@ -32,24 +33,24 @@ class MMHandlerBase {
   MMHandlerBase() = default;
   virtual ~MMHandlerBase() = default;
 
-  bool process(const MMContent& content,
-               MMInputItem& input,
-               MMPayload& payload);
-
-  virtual bool load(const MMContent& content,
+  MMErrCode process(const MMContent& content,
                     MMInputItem& input,
-                    MMPayload& payload) = 0;
+                    MMPayload& payload);
 
-  virtual bool decode(MMInputItem& input) = 0;
+  virtual MMErrCode load(const MMContent& content,
+                         MMInputItem& input,
+                         MMPayload& payload) = 0;
+
+  virtual MMErrCode decode(MMInputItem& input) = 0;
 
  protected:
-  bool load_from_dataurl(const std::string& url,
-                         std::string& data,
-                         MMPayload& payload);
+  MMErrCode load_from_dataurl(const std::string& url,
+                              std::string& data,
+                              MMPayload& payload);
 
-  bool load_from_local(const std::string& url, std::string& data);
+  MMErrCode load_from_local(const std::string& url, std::string& data);
 
-  bool load_from_http(const std::string& url, std::string& data);
+  MMErrCode load_from_http(const std::string& url, std::string& data);
 
  protected:
   std::string httpurl_prefix_{"http"};
@@ -60,10 +61,10 @@ class ImageHandler : public MMHandlerBase {
   ImageHandler() = default;
   ~ImageHandler() = default;
 
-  virtual bool load(const MMContent& content,
-                    MMInputItem& input,
-                    MMPayload& payload) override;
-  virtual bool decode(MMInputItem& input) override;
+  virtual MMErrCode load(const MMContent& content,
+                         MMInputItem& input,
+                         MMPayload& payload) override;
+  virtual MMErrCode decode(MMInputItem& input) override;
 
  private:
   std::string dataurl_prefix_{"data:image"};
@@ -74,10 +75,10 @@ class VideoHandler : public MMHandlerBase {
   VideoHandler() = default;
   ~VideoHandler() = default;
 
-  virtual bool load(const MMContent& content,
-                    MMInputItem& input,
-                    MMPayload& payload) override;
-  virtual bool decode(MMInputItem& input) override;
+  virtual MMErrCode load(const MMContent& content,
+                         MMInputItem& input,
+                         MMPayload& payload) override;
+  virtual MMErrCode decode(MMInputItem& input) override;
 
  private:
   std::string dataurl_prefix_{"data:video"};
@@ -88,10 +89,10 @@ class AudioHandler : public MMHandlerBase {
   AudioHandler() = default;
   ~AudioHandler() = default;
 
-  virtual bool load(const MMContent& content,
-                    MMInputItem& input,
-                    MMPayload& payload) override;
-  virtual bool decode(MMInputItem& input) override;
+  virtual MMErrCode load(const MMContent& content,
+                         MMInputItem& input,
+                         MMPayload& payload) override;
+  virtual MMErrCode decode(MMInputItem& input) override;
 
  private:
   std::string dataurl_prefix_{"data:audio"};
@@ -102,10 +103,10 @@ class MMHandlerSet {
   MMHandlerSet();
   ~MMHandlerSet();
 
-  bool process(const std::string& type,
-               const MMContent& content,
-               MMInputItem& input,
-               MMPayload& payload);
+  MMErrCode process(const std::string& type,
+                    const MMContent& content,
+                    MMInputItem& input,
+                    MMPayload& payload);
 
  private:
   std::unordered_map<std::string, std::unique_ptr<MMHandlerBase>> handlers_;

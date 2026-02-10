@@ -239,6 +239,9 @@ bool Qwen2VLImageProcessor::process_images(std::vector<torch::Tensor> images,
 
   for (const auto& img : images) {
     if (!this->process_image(img, pixel_values, thw)) {
+      LOG(ERROR)
+          << "Failed to process image. The shape(channels, height, width) is: "
+          << img.sizes();
       return false;
     }
 
@@ -253,7 +256,6 @@ bool Qwen2VLImageProcessor::process_image(torch::Tensor image,
                                           torch::Tensor& pixel_values,
                                           torch::Tensor& thw) {
   auto shape = image.sizes();
-
   auto resized_height = shape[1];
   auto resized_width = shape[2];
 
@@ -334,6 +336,9 @@ bool Qwen2VLImageProcessor::process_videos(
     auto& vid = videos[i];
     auto& metadata = video_meta_list[i];
     if (!this->process_video(vid, metadata, pixel_values, thw)) {
+      LOG(ERROR) << "Failed to process video. The shape(num_frames, channels, "
+                    "height, width) is: "
+                 << vid.sizes();
       return false;
     }
 

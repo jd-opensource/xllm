@@ -25,10 +25,10 @@ class MMEmbeddingHandler : public MMHandlerBase {
   MMEmbeddingHandler(MMType::Value mm_type);
   ~MMEmbeddingHandler() = default;
 
-  virtual bool load(const MMContent& content,
-                    MMInputItem& input,
-                    MMPayload& payload) override;
-  virtual bool decode(MMInputItem& input) override;
+  virtual MMErrCode load(const MMContent& content,
+                         MMInputItem& input,
+                         MMPayload& payload) override;
+  virtual MMErrCode decode(MMInputItem& input) override;
 
  private:
   MMType::Value mm_type_;

@@ -27,8 +27,8 @@ MMInputTransfer::MMInputTransfer() {
 
 MMInputTransfer::~MMInputTransfer() {}
 
-bool MMInputTransfer::trans(const std::vector<Message>& messages,
-                            MMInput& inputs) {
+MMErrCode MMInputTransfer::trans(const std::vector<Message>& messages,
+                                 MMInput& inputs) {
   inputs.clear();
   std::vector<MMInputItem> ins;
 
@@ -36,18 +36,19 @@ bool MMInputTransfer::trans(const std::vector<Message>& messages,
     const auto& message = messages[idx];
     const auto& mmc = std::get<MMContentVec>(message.content);
 
-    if (!this->trans(mmc, ins, inputs.payload())) {
-      return false;
+    MMErrCode code = this->trans(mmc, ins, inputs.payload());
+    if (code != MMErrCode::SUCCESS) {
+      return code;
     }
 
     inputs.insert(ins);
   }
-  return true;
+  return MMErrCode::SUCCESS;
 }
 
-bool MMInputTransfer::trans(const MMContentVec& mmc,
-                            std::vector<MMInputItem>& inputs,
-                            MMPayload& payload) {
+MMErrCode MMInputTransfer::trans(const MMContentVec& mmc,
+                                 std::vector<MMInputItem>& inputs,
+                                 MMPayload& payload) {
   inputs.clear();
   for (int idx = 0; idx < mmc.size(); ++idx) {
     const auto& item = mmc[idx];
@@ -55,15 +56,16 @@ bool MMInputTransfer::trans(const MMContentVec& mmc,
 
     if (type != "text") {
       MMInputItem input;
-      if (!mm_handlers_->process(type, item, input, payload)) {
-        return false;
+      MMErrCode code = mm_handlers_->process(type, item, input, payload);
+      if (code != MMErrCode::SUCCESS) {
+        return code;
       }
 
       inputs.emplace_back(std::move(input));
     }
   }
 
-  return true;
+  return MMErrCode::SUCCESS;
 }
 
 }  // namespace xllm
