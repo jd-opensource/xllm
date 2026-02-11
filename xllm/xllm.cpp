@@ -50,7 +50,8 @@ static std::unordered_set<std::string> deepseek_like_model_set = {
     "deepseek_v32_mtp",
     "kimi_k2",
     "glm4_moe_lite",
-    "glm5_moe"};
+    "glm5_moe",
+    "glm_moe_dsa"};
 
 void shutdown_handler(int signal) {
   // TODO: gracefully shutdown the server

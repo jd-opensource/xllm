@@ -50,8 +50,18 @@ class Glm5MoeMtpForCausalLMImpl
 };
 TORCH_MODULE(Glm5MoeMtpForCausalLM);
 
+using GlmMoeDsaMtpForCausalLM = Glm5MoeMtpForCausalLM;
+
 // register the causal model
 REGISTER_CAUSAL_MODEL(glm5_moe_mtp, Glm5MoeMtpForCausalLM);
+REGISTER_CAUSAL_MODEL(glm_moe_dsa_mtp, GlmMoeDsaMtpForCausalLM);
+
+REGISTER_MODEL_ARGS_LOADER(glm_moe_dsa_mtp,
+                           [](const JsonReader& json, ModelArgs* args) {
+                             auto loader = ModelRegistry::get_model_args_loader(
+                                 "glm5_moe_mtp");
+                             return loader != nullptr && loader(json, args);
+                           });
 
 REGISTER_MODEL_ARGS(glm5_moe_mtp, [&] {
   LOAD_ARG_OR(model_type, "model_type", "glm5_moe_mtp");

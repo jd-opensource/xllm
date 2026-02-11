@@ -229,8 +229,18 @@ class Glm5MoeForCausalLMImpl : public LlmForCausalLMImplBase<Glm5MoeModel> {
 };
 TORCH_MODULE(Glm5MoeForCausalLM);
 
+using GlmMoeDsaForCausalLM = Glm5MoeForCausalLM;
+
 // register the causal model
 REGISTER_CAUSAL_MODEL(glm5_moe, Glm5MoeForCausalLM);
+REGISTER_CAUSAL_MODEL(glm_moe_dsa, GlmMoeDsaForCausalLM);
+
+REGISTER_MODEL_ARGS_LOADER(glm_moe_dsa,
+                           [](const JsonReader& json, ModelArgs* args) {
+                             auto loader =
+                                 ModelRegistry::get_model_args_loader("glm5_moe");
+                             return loader != nullptr && loader(json, args);
+                           });
 
 // register the model args
 // example config:
