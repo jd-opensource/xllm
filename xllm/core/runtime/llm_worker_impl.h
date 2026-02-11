@@ -72,7 +72,7 @@ class LLMWorkerImpl : public WorkerImpl {
     model_->set_word_embedding(embedding);
   };
 
- private:
+ protected:
   std::unique_ptr<BeamSearcher> beam_searcher_;
 };
 

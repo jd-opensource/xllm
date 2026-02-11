@@ -22,6 +22,7 @@ limitations under the License.
 #include <limits>
 #include <memory>
 #include <queue>
+#include <semaphore>
 
 #include "async_response_processor.h"
 #include "common/macros.h"
@@ -33,9 +34,17 @@ limitations under the License.
 #include "runtime/xservice_client.h"
 #include "scheduler.h"
 #include "scheduler/continuous_scheduler.h"
+#include "util/threadpool.h"
 
 namespace xllm {
 class Engine;
+
+// Return value structure for schedule_request
+struct ScheduleResult {
+  std::vector<Batch> batches;
+  std::vector<std::shared_ptr<Request>> requests;
+  std::vector<Sequence*> sequences;
+};
 
 class FixedStepsScheduler final : public ContinuousScheduler {
  public:
@@ -97,7 +106,7 @@ class FixedStepsScheduler final : public ContinuousScheduler {
       RecType rec_type,
       bool is_rec_multi_round);
 
-  std::vector<Batch> schedule_request(const absl::Duration& timeout);
+  ScheduleResult schedule_request(const absl::Duration& timeout);
 
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch();
@@ -109,6 +118,12 @@ class FixedStepsScheduler final : public ContinuousScheduler {
 
   // Lazy-initialized pipeline
   std::unique_ptr<SchedulerPipeline> scheduler_pipeline_;
+
+  // Scheduler thread pool for parallel execution of step()
+  std::unique_ptr<ThreadPool> step_threadpool_;
+
+  // Semaphore to control concurrent execution of step()
+  std::counting_semaphore<10000> step_semaphore_;
 };
 
 }  // namespace xllm

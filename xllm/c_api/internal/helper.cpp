@@ -159,7 +159,12 @@ void transfer_request_params(InferenceType inference_type,
 
     XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, n);
     XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, best_of);
-    XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, slo_ms);
+    XLLM_SET_FIELD_IF_NONZERO(
+        &final_request_params, request_params, ttlt_slo_ms);
+    XLLM_SET_FIELD_IF_NONZERO(
+        &final_request_params, request_params, ttft_slo_ms);
+    XLLM_SET_FIELD_IF_NONZERO(
+        &final_request_params, request_params, tpot_slo_ms);
     XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, top_k);
     XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, top_p);
     XLLM_SET_FIELD_IF_NONZERO(
@@ -187,7 +192,9 @@ void transfer_request_params(InferenceType inference_type,
   xllm_request_params->ignore_eos = final_request_params.ignore_eos;
 
   xllm_request_params->best_of = final_request_params.best_of;
-  xllm_request_params->slo_ms = final_request_params.slo_ms;
+  xllm_request_params->ttlt_slo_ms = final_request_params.ttlt_slo_ms;
+  xllm_request_params->ttft_slo_ms = final_request_params.ttft_slo_ms;
+  xllm_request_params->tpot_slo_ms = final_request_params.tpot_slo_ms;
   xllm_request_params->top_k = final_request_params.top_k;
   xllm_request_params->top_p = final_request_params.top_p;
   xllm_request_params->n = final_request_params.n;
