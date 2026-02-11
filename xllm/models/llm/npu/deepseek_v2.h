@@ -75,19 +75,16 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
 };
 TORCH_MODULE(DeepseekV2DecoderLayer);
 
-class DeepseekV2ModelImpl : public torch::nn::Module {
+class DeepseekV2ModelImpl : public LlmModelImplBase<DeepseekV2DecoderLayer> {
  public:
   DeepseekV2ModelImpl(const ModelContext& context)
-      : device_(context.get_tensor_options().device()) {
+      : LlmModelImplBase<DeepseekV2DecoderLayer>(context.get_model_args()) {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
     layers_.reserve(model_args.n_layers());
-    // register submodules
-    device_ = options.device();
-    dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
 
     npu_embed_tokens_ =
@@ -110,7 +107,6 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
         model_args.rope_scaling_mscale_all_dim(),
         options);
 
-    max_seq_len_ = model_args.max_position_embeddings();
     int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
@@ -123,95 +119,6 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     }
 
     norm_ = register_module("norm", layer::NpuRMSNorm(context));
-
-    dp_size_ = parallel_args.dp_size();
-    dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
-    dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
-    rank_ = parallel_args.rank();
-    num_experts_per_tok_ = model_args.num_experts_per_tok();
-  }
-
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    if (dp_size_ > 1) {
-      if (tokens.sizes() == 0) {
-        tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
-        positions = torch::tensor({0}).to(torch::kInt32).to(device_);
-      }
-    }
-
-    auto h = npu_embed_tokens_(tokens, 0);
-    auto cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
-    auto cos_sin_chunks = cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
-    auto cos_pos = cos_sin_chunks[0].contiguous();
-    auto sin_pos = cos_sin_chunks[1].contiguous();
-
-    torch::Tensor attn_mask;
-    if (FLAGS_enable_prefix_cache &&
-        !input_params.batch_forward_type.is_decode()) {
-      attn_mask = attn_mask_.get_attn_mask(512, dtype_, device_);
-    } else if (input_params.batch_forward_type.is_prefill()) {
-      attn_mask = attn_mask_.get_attn_mask(128, dtype_, device_);
-    } else if (num_speculative_tokens_ > 0) {
-      // TODO :the judgement of gen_free_mask need more check
-      attn_mask = attn_mask_.gen_free_mask(
-          num_speculative_tokens_ + 1, dtype_, device_);
-    }
-
-    for (size_t i = 0; i < layers_.size(); i++) {
-      aclrtEvent* event = nullptr;
-      std::atomic<bool>* event_flag = nullptr;
-      if (input_params.layer_synchronizer != nullptr) {
-        event = input_params.layer_synchronizer->get_event(i);
-        event_flag = input_params.layer_synchronizer->get_event_flag(i);
-      }
-      if (!input_params.synchronize_layer(i)) {
-        return ModelOutput();
-      }
-
-      auto& layer = layers_[i];
-      layer(h,
-            cos_pos,
-            sin_pos,
-            attn_mask,
-            kv_caches[i],
-            input_params,
-            event,
-            event_flag);
-    }
-    auto hidden_states = norm_(h, 0);
-    return ModelOutput(hidden_states);
-  }
-
-  // load the weight from the checkpoint
-  void load_state_dict(const StateDict& state_dict) {
-    npu_embed_tokens_->load_state_dict(
-        state_dict.get_dict_with_prefix("embed_tokens."));
-    // call each layer's load_state_dict function
-    for (int i = 0; i < layers_.size(); i++) {
-      layers_[i]->load_state_dict(
-          state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
-    }
-    norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
-  }
-
-  void verify_loaded_weights(const std::string& prefix) const {
-    npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
-    for (int i = 0; i < layers_.size(); i++) {
-      layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
-                                        ".");
-    }
-    norm_->verify_loaded_weights(prefix + "norm.");
-  }
-
-  void merge_loaded_weights() {
-    npu_embed_tokens_->merge_loaded_weights();
-    for (int i = 0; i < layers_.size(); i++) {
-      layers_[i]->merge_loaded_weights();
-    }
-    norm_->merge_loaded_weights();
   }
 
   void prepare_expert_weight(int32_t layer_id,
@@ -223,29 +130,33 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     layers_[layer_id]->update_expert_weight();
   }
 
-  layer::NpuWordEmbedding get_npu_word_embedding() { return npu_embed_tokens_; }
+ protected:
+  torch::Tensor build_attention_mask(
+      const ModelInputParams& input_params,
+      const torch::Tensor& cos_pos,
+      const torch::Tensor& hidden_states) override {
+    if (FLAGS_enable_prefix_cache &&
+        !input_params.batch_forward_type.is_decode()) {
+      return attn_mask_.get_attn_mask(
+          512, hidden_states.dtype().toScalarType(), hidden_states.device());
+    }
 
-  void set_npu_word_embedding(layer::NpuWordEmbedding& npu_word_embedding) {
-    npu_embed_tokens_ = npu_word_embedding;
+    if (input_params.batch_forward_type.is_prefill()) {
+      return attn_mask_.get_attn_mask(
+          128, hidden_states.dtype().toScalarType(), hidden_states.device());
+    }
+
+    if (num_speculative_tokens_ > 0) {
+      return attn_mask_.gen_free_mask(num_speculative_tokens_ + 1,
+                                      hidden_states.dtype().toScalarType(),
+                                      hidden_states.device());
+    }
+
+    return torch::Tensor();
   }
 
  private:
-  torch::nn::ModuleList blocks_{nullptr};
-  std::vector<DeepseekV2DecoderLayer> layers_;
-  int32_t max_seq_len_ = 0;
-  int32_t dp_rank_;
-  int32_t rank_;
-  int32_t dp_size_;
-  int32_t dp_local_tp_size_;
-  int32_t num_experts_per_tok_;
   int32_t num_speculative_tokens_ = 0;
-  at::Device device_;
-  torch::Dtype dtype_;
-  layer::NpuWordEmbedding npu_embed_tokens_{nullptr};
-  torch::Tensor cos_sin_;
-  layer::NpuPosEmbedding atb_pos_emb_{nullptr};
-  layer::AttentionMask attn_mask_;
-  layer::NpuRMSNorm norm_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Model);
 
