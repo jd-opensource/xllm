@@ -18,7 +18,7 @@ limitations under the License.
 #include <gflags/gflags.h>
 
 #include <boost/algorithm/string.hpp>
-#include <iostream>
+#include <sstream>
 #include <utility>
 
 #include "common/global_flags.h"

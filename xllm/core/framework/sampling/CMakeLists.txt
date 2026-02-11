@@ -23,6 +23,7 @@ cc_library(
     glog::glog
     torch
     :kernels
+    :state_dict
     $<$<BOOL:${USE_NPU}>:xllm_ops>
 )
 
