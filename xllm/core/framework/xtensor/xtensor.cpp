@@ -239,9 +239,6 @@ bool XTensor::map_with_page_ids(const std::vector<page_id_t>& page_ids) {
     size_t offset = i * page_size_;
     VirPtr vaddr = add_vir_ptr_offset(vaddr_, offset);
 
-    // Unmap first (in case there's existing mapping), then map the physical
-    // page
-    vmm::unmap(vaddr, page_size_);
     PhyMemHandle phy_handle = page->get_phy_handle();
     vmm::map(vaddr, phy_handle);
 
