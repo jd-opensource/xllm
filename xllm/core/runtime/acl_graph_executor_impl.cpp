@@ -22,6 +22,7 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
+#include <boost/algorithm/string.hpp>
 #include <numeric>
 
 #include "core/common/global_flags.h"
@@ -63,6 +64,9 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // Future logic can be extended here for more complex model-specific behavior
   need_update_attention_plan_ = (args.model_type() != "deepseek_v32");
 
+  // Check if mRoPE is used (for VLM models like qwen2-vl)
+  use_mrope_ = boost::iequals(args.rope_scaling_rope_type(), "mrope");
+
   // Use max_tokens_per_batch for first dimension size
   // num_decode_tokens
   const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
@@ -75,8 +79,13 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // Create persistent tensors with max_tokens_per_batch as first dimension
   persistent_tokens_ = torch::zeros({max_tokens_per_batch},
                                     torch::dtype(torch::kInt).device(device));
-  persistent_positions_ = torch::zeros(
-      {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  // mRoPE positions have shape [3, num_tokens], regular positions have shape
+  // [num_tokens]
+  const auto positions_shape =
+      use_mrope_ ? std::vector<int64_t>{3, max_tokens_per_batch}
+                 : std::vector<int64_t>{max_tokens_per_batch};
+  persistent_positions_ =
+      torch::zeros(positions_shape, torch::dtype(torch::kInt).device(device));
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
 
@@ -177,7 +186,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   // Copy data from input parameters to persistent graph tensors
   persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(tokens, /*non_blocking=*/true);
-  persistent_positions_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+  // mRoPE positions have shape [3, num_tokens], slice on dim 1
+  const int slice_dim = use_mrope_ ? 1 : 0;
+  persistent_positions_
+      .slice(/*dim=*/slice_dim, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(positions, /*non_blocking=*/true);
   q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
       .copy_(params.q_seq_lens, /*non_blocking=*/true);
