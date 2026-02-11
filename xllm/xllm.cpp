@@ -251,6 +251,7 @@ int run() {
       .input_shm_size(FLAGS_input_shm_size)
       .output_shm_size(FLAGS_output_shm_size)
       .beam_width(FLAGS_beam_width)
+      .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency)
       .is_local(is_local);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
