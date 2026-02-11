@@ -114,16 +114,27 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
 
   // Can be applied to prefill, but has not been tested yet
   param.enableFusedReducesumDiv = !is_prefill;
-  param.enableAclnnExternelAddRmsNorm = FLAGS_enable_intralayer_addnorm && !is_prefill;;
+  param.enableAclnnExternelAddRmsNorm =
+      FLAGS_enable_intralayer_addnorm && !is_prefill;
+  ;
   param.enableAclnnAddRmsNorm = !is_prefill;
   param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
 
-  param.mlpLinearTransposeType = {-1, -1, -1, -1};
-
+  param.mlpLinearTransposeType = {static_cast<int>(TransposeType::INVALID),
+                                  static_cast<int>(TransposeType::INVALID),
+                                  static_cast<int>(TransposeType::INVALID),
+                                  static_cast<int>(TransposeType::INVALID)};
   if (quantize_type_.empty()) {
-    param.moeLinearTransposeType = std::vector<int>{1, 1, -1, 1};
+    param.moeLinearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
+                                    static_cast<int>(TransposeType::TRANSPOSE),
+                                    static_cast<int>(TransposeType::INVALID),
+                                    static_cast<int>(TransposeType::TRANSPOSE)};
   } else {
-    param.moeLinearTransposeType = std::vector<int>{1, 0, -1, 1};
+    param.moeLinearTransposeType = {
+        static_cast<int>(TransposeType::TRANSPOSE),
+        static_cast<int>(TransposeType::NOT_TRANSPOSE),
+        static_cast<int>(TransposeType::INVALID),
+        static_cast<int>(TransposeType::TRANSPOSE)};
   }
   param.normEps = args.rms_norm_eps();
   param.rank = parallel_args.rank();
@@ -152,8 +163,12 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
       1, static_cast<int>(optionalValue.value()) / parallel_args.world_size());
   param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
 
-  param.attnLinearTransposeType = {1, -1, -1, 1, -1, -1};
-  // param.attnLinearTransposeType = {0, -1, -1, 0, -1, -1};
+  param.attnLinearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
+                                   static_cast<int>(TransposeType::INVALID),
+                                   static_cast<int>(TransposeType::INVALID),
+                                   static_cast<int>(TransposeType::TRANSPOSE),
+                                   static_cast<int>(TransposeType::INVALID),
+                                   static_cast<int>(TransposeType::INVALID)};
   param.worldSize = parallel_args.world_size();
 
   if (is_prefill) {
