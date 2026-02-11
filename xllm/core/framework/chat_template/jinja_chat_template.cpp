@@ -131,14 +131,19 @@ std::optional<std::string> JinjaChatTemplate::apply(
     nlohmann::ordered_json& messages,
     const nlohmann::ordered_json& tools,
     const nlohmann::ordered_json& chat_template_kwargs) const {
-  minja::chat_template_inputs input;
-  input.messages = messages;
-  input.tools = tools;
-  input.add_generation_prompt = true;
-  input.extra_context = chat_template_kwargs;
-  minja::chat_template_options options;
+  try {
+    minja::chat_template_inputs input;
+    input.messages = messages;
+    input.tools = tools;
+    input.add_generation_prompt = true;
+    input.extra_context = chat_template_kwargs;
+    minja::chat_template_options options;
 
-  return template_->apply(input, options);
+    return template_->apply(input, options);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to apply chat template: " << e.what();
+    return std::nullopt;
+  }
 }
 
 nlohmann::ordered_json JinjaChatTemplate::get_mm_content(
