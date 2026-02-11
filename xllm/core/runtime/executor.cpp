@@ -15,7 +15,9 @@ limitations under the License.
 
 #include "executor.h"
 
+#include "common/global_flags.h"
 #include "executor_impl_factory.h"
+#include "platform/device.h"
 
 namespace xllm {
 
@@ -23,8 +25,16 @@ Executor::Executor(CausalLM* model,
                    const ModelArgs& args,
                    const torch::Device& device,
                    const runtime::Options& options) {
+  std::string backend = "llm";
+  if (FLAGS_enable_graph) {
+    backend = Device::type_str();
+    LOG(INFO) << "Creating Graph Executor for " << backend << " device";
+  }
+  if (options.backend() == "vlm") {
+    backend = "vlm";
+  }
   impl_ = ExecutorImplFactory::get_instance().create_executor_impl(
-      model, args, device, options);
+      model, args, device, options, backend);
 }
 
 ForwardInput Executor::prepare_inputs(Batch& batch) {

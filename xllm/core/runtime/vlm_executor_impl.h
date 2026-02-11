@@ -50,20 +50,13 @@ class VlmExecutorImpl : public ExecutorImpl {
 
   virtual MMDict encode(const ModelInputParams& params);
 
-  // Static helper function to process multimodal data
-  // This can be called by other executor implementations (e.g.,
-  // MluGraphExecutorImpl)
-  static void process_mm_data(ModelInputParams& params,
-                              CausalVLM* model,
-                              const torch::Device& device,
-                              const torch::Tensor& tokens);
-
  private:
   // not own
   CausalVLM* model_;
   ModelArgs args_;
   torch::Device device_;
   runtime::Options options_;
+  std::unique_ptr<ExecutorImpl> llm_executor_;
 };
 // Q: backend device ?
 REGISTER_EXECUTOR("vlm", VlmExecutorImpl);

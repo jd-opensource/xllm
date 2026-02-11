@@ -75,8 +75,14 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // Create persistent tensors with max_tokens_per_batch as first dimension
   persistent_tokens_ = torch::zeros({max_tokens_per_batch},
                                     torch::dtype(torch::kInt).device(device));
-  persistent_positions_ = torch::zeros(
-      {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  if (args.rope_scaling_mrope_section().empty()) {
+    persistent_positions_ = torch::zeros(
+        {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  } else {
+    persistent_positions_ = torch::zeros(
+        {3, max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+    use_mrope_ = true;
+  }
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
 
@@ -177,7 +183,11 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   // Copy data from input parameters to persistent graph tensors
   persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(tokens, /*non_blocking=*/true);
-  persistent_positions_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+  int32_t slice_dim = use_mrope_ ? 1 : 0;
+  persistent_positions_
+      .slice(/*dim=*/slice_dim,
+             /*start=*/0,
+             /*end=*/actual_num_tokens)
       .copy_(positions, /*non_blocking=*/true);
   q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
       .copy_(params.q_seq_lens, /*non_blocking=*/true);
@@ -290,6 +300,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                                /*start=*/0,
                                /*end=*/actual_batch_size);
     }
+
     return params_for_capture;
   }
   return std::nullopt;

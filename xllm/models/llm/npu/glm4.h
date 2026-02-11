@@ -85,7 +85,7 @@ class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
     } else {
       h = npu_embed_tokens_(tokens, 0);
     }
-    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
+    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions.contiguous(), 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
 

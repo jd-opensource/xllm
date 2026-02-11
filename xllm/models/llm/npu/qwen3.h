@@ -143,11 +143,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     if (use_deepstack) {
       deep_stacks = input_params.deep_stacks;  // [num_deepstack, hidden_size]
     }
-    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
+    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions.contiguous(), 0);
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
-
     if (positions.dim() == 2) {  // mrope
       auto apply = [this](torch::Tensor x) {
         auto freqs_t = x[0].clone();
@@ -163,12 +162,13 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
           // idx_first_half: [offset, offset+3, offset+6, ... < mrop_length]
           // idx_second_half: [mrop_length+offset, mrop_length+offset+3,
           //     mrop_length+offset+6, ... < 2*mrop_length]
-          auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
+          torch::TensorOptions options =
+              torch::TensorOptions().dtype(torch::kLong).device(x.device());
+          auto idx_first_half = torch::arange(offset, length, 3, options);
           auto idx_second_half = torch::arange(
-              offset + mrop_length, length + mrop_length, 3, torch::kLong);
+              offset + mrop_length, length + mrop_length, 3, options);
 
-          auto idx_tensor =
-              torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
+          auto idx_tensor = torch::cat({idx_first_half, idx_second_half}, 0);
           // freqs_t[..., idx] = freqs[dim_idx][..., idx]
           auto src = x[dim_idx].index_select(-1, idx_tensor);
           freqs_t.index_copy_(-1, idx_tensor, src);

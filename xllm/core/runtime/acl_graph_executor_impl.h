@@ -78,8 +78,9 @@ class GraphPersistentParam {
   }
   torch::Tensor persistent_positions(uint32_t actual_tokens = 0) const {
     if (actual_tokens > 0) {
+      int32_t slice_dim = use_mrope_ ? 1 : 0;
       return persistent_positions_.slice(
-          /*dim=*/0, /*start=*/0, /*end=*/actual_tokens);
+          /*dim=*/slice_dim, /*start=*/0, /*end=*/actual_tokens);
     }
     return persistent_positions_;
   }
@@ -210,6 +211,7 @@ class GraphPersistentParam {
   // Cached attention parameters
   int32_t num_head_;
   int32_t head_dim_;
+  bool use_mrope_ = false;
 
   // Flag indicating whether attention mask needs to be updated
   bool need_update_attn_mask_;

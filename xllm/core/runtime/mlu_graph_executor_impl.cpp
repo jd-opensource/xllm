@@ -242,15 +242,6 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
     CHECK_EQ(dp_is_decode.size(), params.dp_global_token_nums.size());
   }
 
-  // Process multimodal data for VLM models
-  if (options_.backend() == "vlm") {
-    auto* vlm_model = dynamic_cast<CausalVLM*>(model_);
-    if (vlm_model) {
-      xllm::VlmExecutorImpl::process_mm_data(
-          const_cast<ModelInputParams&>(params), vlm_model, device_, tokens);
-    }
-  }
-
   if (!graph_mode) {
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
