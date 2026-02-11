@@ -220,169 +220,10 @@ void PrefillOnlyScheduler::handle_prefill_requests(
   }
 }
 
-void PrefillOnlyScheduler::handle_last_step_prefill_requests(
-    double& latency_budget,
-    double& estimate_latency,
-    size_t& remaining_token_budget,
-    size_t& remaining_seq_budget,
-    std::vector<std::shared_ptr<Request>>& last_step_prefill_requests,
-    size_t& num_online_prefill_preempt_offline_requests,
-    std::vector<std::shared_ptr<Request>>& finished_requests) {
-  bool budget_exhausted = false;
-  bool blocks_exhausted = false;
-
-  size_t req_idx = 0;
-  while (req_idx < last_step_prefill_requests.size() &&
-         remaining_seq_budget > 0 && remaining_token_budget > 0 &&
-         latency_budget > estimate_latency) {
-    if (kv_cache_manager_->kv_cache_utilization() >=
-        FLAGS_prefill_scheduling_memory_usage_threshold) {
-      blocks_exhausted = true;
-      break;
-    }
-
-    std::shared_ptr<Request> request(last_step_prefill_requests[req_idx++]);
-    if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
-      // release the ownership of the request
-      finished_requests.emplace_back(request);
-      continue;
-    }
-
-    const size_t num_sequences = request->sequences().size();
-    if (!request->preempted()) {
-      CHECK(num_sequences == 1)
-          << "Waiting request should have only one sequence.";
-    }
-
-    // TODO: FIXME later
-    // Optimization of the scheduling algorithm under multiple sequences
-    // TODO: can refactor like handle_decode otherwise request with multiple
-    // long sequences may stuck when n>1
-    size_t allocated_tokens = 0;
-    size_t allocated_seqs = 0;
-    size_t allocated_estimate_latency = 0;
-    bool can_schedule = true;
-    std::vector<Sequence*> prefill_sequences;
-    std::vector<size_t> prefill_sequences_budget;
-    prefill_sequences.reserve(request->sequences().size());
-    prefill_sequences_budget.reserve(request->sequences().size());
-    for (auto& prefill_sequence : request->sequences()) {
-      if (prefill_sequence->finished()) {
-        continue;
-      }
-
-      // FIXME: use actual num_tokens to handle
-      // Currently overestimating the number of tokens actually processed when
-      // enable prefix cache
-      // size_t num_tokens = prefill_sequence->num_need_compute_tokens();
-      size_t num_tokens = std::min(prefill_sequence->num_need_compute_tokens(),
-                                   remaining_token_budget);
-      if (remaining_token_budget < allocated_tokens + num_tokens ||
-          remaining_seq_budget < allocated_seqs + 1) {
-        can_schedule = false;
-        budget_exhausted = true;
-        break;
-      }
-
-      // preempt offline decode
-      if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
-        can_schedule = false;
-        if (options_.enable_online_preempt_offline() && !request->offline() &&
-            !running_queue_offline_->empty()) {
-          // preempt offline decode
-          preempt_offline_decode(can_schedule,
-                                 num_online_prefill_preempt_offline_requests,
-                                 prefill_sequence.get(),
-                                 prefill_sequence->num_tokens());
-        }
-        if (!can_schedule) {
-          // release shared prefix blocks
-          kv_cache_manager_->deallocate(prefill_sequence.get());
-          blocks_exhausted = true;
-          break;
-        }
-      }
-
-      // OPTIMIZE for multi-slo requests
-      // for prefill requests, check latency after prefix cache match
-      double seq_estimate_latency = 0;
-      if (options_.enable_latency_aware_schedule()) {
-        seq_estimate_latency =
-            profile_manager_->predict_step_time(prefill_sequence.get(), false);
-        if (estimate_latency + allocated_estimate_latency +
-                seq_estimate_latency >
-            latency_budget) {
-          // release shared prefix blocks
-          kv_cache_manager_->deallocate(prefill_sequence.get());
-          can_schedule = false;
-          budget_exhausted = true;
-          break;
-        }
-      }
-
-      prefill_sequences_budget.emplace_back(num_tokens);
-      prefill_sequences.emplace_back(prefill_sequence.get());
-      allocated_tokens += num_tokens;
-      allocated_seqs += 1;
-      allocated_estimate_latency += seq_estimate_latency;
-    }
-
-    if (!can_schedule) {
-      for (auto& seq : prefill_sequences) {
-        // release shared blocks
-        kv_cache_manager_->deallocate(seq);
-      }
-      break;
-    }
-
-    remaining_token_budget -= allocated_tokens;
-    remaining_seq_budget -= allocated_seqs;
-    estimate_latency += allocated_estimate_latency;
-    // waiting_priority_queue.pop();
-    running_requests_.emplace_back(request);
-    running_sequences_.insert(running_sequences_.end(),
-                              prefill_sequences.begin(),
-                              prefill_sequences.end());
-    running_sequences_budgets_.insert(running_sequences_budgets_.end(),
-                                      prefill_sequences_budget.begin(),
-                                      prefill_sequences_budget.end());
-  }
-  // maybe can pre-compute if prompt beyond length
-  if (running_sequences_.empty() && !last_step_prefill_requests.empty() &&
-      running_queue_->empty()) {
-    std::shared_ptr<Request> request(last_step_prefill_requests.front());
-    last_step_prefill_requests.erase(last_step_prefill_requests.begin());
-    kv_cache_manager_->deallocate(request.get());
-    if (blocks_exhausted) {
-      LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
-                    "a single sequence.";
-      // no enough memory to schedule single sequence, just finish the request
-      response_processor_->process_failed_request(
-          request,
-          {StatusCode::RESOURCE_EXHAUSTED,
-           "No enough memory to schedule single sequence"});
-    } else if (budget_exhausted) {
-      LOG(ERROR) << "Request prompt is too long, no enough budget to schedule "
-                    "a single sequence. Please set a larger budegt.";
-      // no enough memory to schedule single sequence, just finish the request
-      response_processor_->process_failed_request(
-          request,
-          {StatusCode::RESOURCE_EXHAUSTED,
-           "No enough budget to schedule single sequence."});
-    } else {
-      LOG(FATAL) << "Unexpected error: blocks and budget are enough but can "
-                    "not schedule.";
-    }
-  }
-
-  if (!running_sequences_.empty()) {
-    last_step_prefill_ = true;
-  }
-}
-
 void PrefillOnlyScheduler::recycle_running_requests() {
-  last_step_prefill_requests_.clear();
+  while (!last_step_prefill_requests_.empty()) {
+    last_step_prefill_requests_.pop();
+  }
 
   if (options_.priority_strategy() == "fcfs") {
     if (last_step_prefill_) {
@@ -399,7 +240,7 @@ void PrefillOnlyScheduler::recycle_running_requests() {
         }
         handle_single_running_request(*it);
         if ((*it)->is_chunked_prefill_stage()) {
-          last_step_prefill_requests_.emplace_back(*it);
+          last_step_prefill_requests_.push(*it);
         } else {
           if ((*it)->offline()) {
             running_queue_offline_->push(*it, last_step_prefill_);
@@ -442,7 +283,7 @@ void PrefillOnlyScheduler::recycle_running_requests() {
       }
       handle_single_running_request(*it);
       if ((*it)->is_chunked_prefill_stage()) {
-        last_step_prefill_requests_.emplace_back(*it);
+        last_step_prefill_requests_.push(*it);
       } else {
         if ((*it)->offline()) {
           running_queue_offline_->push(*it);
@@ -492,14 +333,13 @@ std::vector<Batch> PrefillOnlyScheduler::prepare_batch() {
   // 1. handle last step prefill requests
   // try to finish prefill requests as soon as fast as possible
   if (!last_step_prefill_requests_.empty()) {
-    handle_last_step_prefill_requests(
-        latency_budget,
-        estimate_latency,
-        remaining_token_budget,
-        remaining_seq_budget,
-        last_step_prefill_requests_,
-        num_online_prefill_preempt_offline_requests,
-        finished_requests);
+    handle_prefill_requests(latency_budget,
+                            estimate_latency,
+                            remaining_token_budget,
+                            remaining_seq_budget,
+                            last_step_prefill_requests_,
+                            num_online_prefill_preempt_offline_requests,
+                            finished_requests);
   }
   // 2. handle prefill requests
   // try to schedule prefill request if have remaining budget
