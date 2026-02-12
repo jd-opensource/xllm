@@ -825,4 +825,55 @@ void fused_indexer_k(FusedIndexerKParams& params) {
 #endif
 }
 
+std::vector<torch::Tensor> grouped_matmul(GroupedMatmulParams& params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_grouped_matmul(
+      params.x, params.weight, params.bias, params.scale, params.offset,
+      params.antiquant_scale, params.antiquant_offset, params.per_token_scale,
+      params.group_list, params.activation_input,
+      params.activation_quant_scale, params.activation_quant_offset,
+      params.split_item, params.group_type, params.group_list_type,
+      params.act_type, params.tuning_config, params.output_dtype);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_gating_topk_softmax(
+    MoeGatingTopkSoftmaxParams& params) {
+#if defined(USE_NPU)
+  return npu::apply_moe_gating_topk_softmax(
+    params.x, params.finished, params.k
+  );
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor moe_token_unpermute(MoeTokenUnpermuteParams &params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_moe_token_unpermute(
+    params.permuted_tokens, params.sorted_indices,
+    params.probes, params.padded_mode, params.restore_shape
+  );
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> moe_init_routing_v2(
+    MoeInitRoutingV2Params &params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_moe_init_routing_v2(
+    params.x, params.expert_idx, params.scale,
+    params.offset, params.active_num, params.expert_capacity,
+    params.expert_num, params.drop_pad_mode, params.expert_tokens_num_type,
+    params.expert_tokens_num_flag, params.quant_mode, params.active_expert_range,
+    params.row_idx_type
+  );
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 }  // namespace xllm::kernel
