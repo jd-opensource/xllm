@@ -1,12 +1,14 @@
-# 使用 xLLM 在 Ascend A3设备 推理 GLM-5.0 基座模型
+# 使用 xLLM 在 Ascend A3设备 推理 GLM-5.0-W8A8 基座模型
 
 + 源码地址：https://github.com/jd-opensource/xllm
 
 + 国内可用: https://gitcode.com/xLLM-AI/xllm
 
++ 权重下载: [modelscope-GLM-5-W8A8](https://www.modelscope.cn/models/Eco-Tech/GLM-5-W8A8-xLLM/files)
+  
 ## 1.拉取镜像环境
 
-首先下载我们提供的镜像：
+首先下载xLLM提供的镜像：
 
 ```bash
 # A2 x86
@@ -93,9 +95,7 @@ export LD_PRELOAD=/usr/lib64/libjemalloc.so.2:$LD_PRELOAD
 # source /usr/local/Ascend/nnal/atb/set_env.sh
 
 ##### 2， 配置日志相关环境变量
-rm -rf /root/atb/log/
 rm -rf /root/ascend/log/
-
 rm -rf core.*
 
 ##### 3. 配置性能、通信相关环境变量
@@ -127,10 +127,10 @@ BATCH_SIZE=256
 #推理最大batch数量
 XLLM_PATH="./myxllm/xllm/build/xllm/core/server/xllm"
 #推理入口文件路径（上一步中编译产物）
-MODEL_PATH=/export/home/models/GLM-5-w8a8/
-#模型路径（此处为int量化的Glm-5）
-DRAFT_MODEL_PATH=/export/home/models/GLM-5-MTP/
-#Glm-5 导出的mtp权重(导出可见下方教程)
+MODEL_PATH=/path/to/GLM-5-W8A8/
+#模型路径（此处为int8量化的Glm-5）
+DRAFT_MODEL_PATH=/path/to/GLM-5-W8A8/GLM-5-W8A8-MTP/
+#Glm-5 导出的mtp权重
 
 MASTER_NODE_ADDR="11.87.49.110:10015"
 LOCAL_HOST="11.87.49.110"
@@ -166,17 +166,16 @@ do
     --draft_model=$DRAFT_MODEL_PATH \
     --draft_devices="npu:$DEVICE" \
     --num_speculative_tokens=1 \
-    --ep_size=16 \
+    --ep_size=8 \
     --dp_size=1 \
     > $LOG_FILE 2>&1 &
 done
 
-#numactl -C $((i*12))-$((i*12+11))      
-#                           亲和性绑核(亲和性查询命令： npu-smi info -t topo)
+# numactl -C xxxxx          亲和性绑核(NUMA亲和性查询命令： npu-smi info -t topo)
 #--max_memory_utilization   单卡最大显存占用比例
 #--max_tokens_per_batch     单batch最大token数  （主要限制prefill）
 #--max_seqs_per_batch       单batch最大请求数   （主要限制decoe）
-#--communication_backend    通信backend 建议hccl
+#--communication_backend    通信backend 可选(hccl / lccl) 此处建议hccl
 #--enable_schedule_overlap  开启异步调度
 #--enable_prefix_cache      开启prefix_cache
 #--enable_chunked_prefill   开启chunked_prefill
