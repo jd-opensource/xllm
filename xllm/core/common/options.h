@@ -209,6 +209,9 @@ class Options {
 
   // beam width for beam search
   PROPERTY(int32_t, beam_width) = 128;
+
+  // max concurrency for rec worker
+  PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
 };
 
 }  // namespace xllm

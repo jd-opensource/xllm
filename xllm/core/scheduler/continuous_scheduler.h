@@ -121,6 +121,9 @@ class ContinuousScheduler : public Scheduler {
 
     // Prefetch timeout for prefetch from kv cache store
     PROPERTY(uint32_t, prefetch_timeout) = 0;
+
+    // max concurrency for rec worker
+    PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
   };
 
   ContinuousScheduler(Engine* engine, const Options& options);

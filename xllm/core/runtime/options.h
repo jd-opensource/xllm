@@ -204,6 +204,9 @@ struct Options {
 
   // max tokens per batch
   PROPERTY(int32_t, max_tokens_per_batch) = 4096;
+
+  // max concurrency for rec worker
+  PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
 };
 
 }  // namespace runtime
