@@ -28,7 +28,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "glm4v.h"
-#include "models/llm/npu/oxygen.h"
+#include "models/llm/npu/qwen3.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
@@ -44,7 +44,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     visual_ = register_module("visual", Glm4VisionTransformer(context));
 
     language_model_ =
-        register_module("language_model", OxygenForCausalLM(context));
+        register_module("language_model", QWen3ForCausalLM(context));
   }
 
   void prepare_encoder_input(const ModelInputParams& input_params,
@@ -206,7 +206,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
   ModelArgs model_args_;
   torch::TensorOptions options_;
   Glm4VisionTransformer visual_{nullptr};
-  OxygenForCausalLM language_model_{nullptr};
+  QWen3ForCausalLM language_model_{nullptr};
 };
 TORCH_MODULE(OxygenvlmForConditionalGeneration);
 

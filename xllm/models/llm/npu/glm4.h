@@ -34,7 +34,7 @@ TORCH_MODULE(Glm4DecoderLayer);
 class Glm4ModelImpl : public LlmModelImplBase<Glm4DecoderLayer> {
  public:
   Glm4ModelImpl(const ModelContext& context)
-      : LlmModelImplBase<Glm4DecoderLayer>("glm4", context.get_model_args()) {
+      : LlmModelImplBase<Glm4DecoderLayer>(context.get_model_args()) {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();

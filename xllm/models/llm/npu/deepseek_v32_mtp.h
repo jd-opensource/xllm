@@ -25,7 +25,7 @@ class DeepseekV32MtpModelImpl
     : public MtpModelImplBase<DeepseekV32DecoderLayer> {
  public:
   DeepseekV32MtpModelImpl(const ModelContext& context)
-      : MtpModelImplBase<DeepseekV32DecoderLayer>("deepseek_v32_mtp", context) {
+      : MtpModelImplBase<DeepseekV32DecoderLayer>(context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
