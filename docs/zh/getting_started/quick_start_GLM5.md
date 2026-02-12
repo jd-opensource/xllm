@@ -186,9 +186,7 @@ done
 #--num_speculative_tokens   mtp - 预测token数
 ```
 
-日志出现"Brpc Server Started"表示服务成功拉起。拉起成功截图：
-
-![success](./image.png)
+日志出现"Brpc Server Started"表示服务成功拉起。
 
 ## 其他可选环境变量
 
@@ -587,7 +585,3 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ../xllm-service/build/xllm_service/xllm_m
   测试命令和上面类似，注意`curl http://localhost:{PORT}/v1/chat/completions ...`的`PORT`选择为启动xLLM service的`http_server_port`。
 
 - 多机部署P或者Q时(例如部署两个P)，需要增加--rank_tablefile来完成通信。
-
-## 测试结果
-
-xLLM 在 A3 设备上性能强劲，欢迎在 [这里](result.md) 查看测试报告。
