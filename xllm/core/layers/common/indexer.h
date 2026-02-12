@@ -64,7 +64,7 @@ class IndexerImpl : public torch::nn::Module {
               int64_t index_topk,
               int64_t q_lora_rank,
               bool enable_fused_qk,
-              DeepseekScalingRotaryEmbedding& rotary_emb,
+              RotaryEmbeddingVariants& rotary_emb,
               const QuantArgs& quant_args,
               const ParallelArgs& parallel_args,
               const torch::TensorOptions& options);
@@ -99,7 +99,7 @@ class IndexerImpl : public torch::nn::Module {
   RMSNorm k_norm_{nullptr};
 
   // Rotary embedding
-  DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};
+  RotaryEmbeddingVariants rotary_emb_;
 
   // Hadamard matrix
   torch::Tensor hadamard_matrix_;
