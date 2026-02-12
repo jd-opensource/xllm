@@ -476,11 +476,8 @@ void MixScheduler::handle_running_queue_requests(
   }
 }
 
-std::vector<Batch> MixScheduler::prepare_batch() {
-  Timer timer;
-  // propogate new requests to waiting_priority_queue_
+void MixScheduler::fetch_new_requests() {
   std::shared_ptr<Request> request;
-  // read from request queue then push to waiting_priority_queue_
   while (request_queue_.read(request)) {
     CHECK(request);
 
@@ -500,34 +497,35 @@ std::vector<Batch> MixScheduler::prepare_batch() {
       running_requests_.emplace_back(request);
     }
   }
+}
 
-  // handle finished/cancelled requests
-  std::vector<std::shared_ptr<Request>> finished_requests;
-  for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
-       ++it) {
-    std::shared_ptr<Request> request = *it;
-    request->update_connection_status();
-    if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
-      // release the ownership of the request
-      finished_requests.emplace_back(request);
-      // finished request is set to nullptr
-      *it = nullptr;
-    }
-  }
-
-  // insert running requests back to the priority queue, iterating from the
-  // lowest priority to the highest
+void MixScheduler::recycle_running_requests() {
   for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
        ++it) {
     // finished request is set to nullptr
     if (*it == nullptr) {
       continue;
     }
-    handle_running_requests(*it);
+    handle_single_running_request(*it);
     // unified multi priority strategy
     running_queue_.push_back(*it);
   }
+}
+
+std::vector<Batch> MixScheduler::prepare_batch() {
+  Timer timer;
+  // preprocess request_queue and running_requests
+
+  // read from request queue then directly push to running_queue_
+  fetch_new_requests();
+
+  // handle finished/cancelled requests in running_requests_
+  std::vector<std::shared_ptr<Request>> finished_requests;
+  collect_finished_requests(finished_requests);
+
+  // insert running requests back to the priority queue, iterating from the
+  // lowest priority to the highest
+  recycle_running_requests();
 
   // allocate prefix cache ahead
   for (auto& request : running_queue_) {

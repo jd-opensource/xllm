@@ -215,83 +215,12 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   }
   deferred_reqs.clear();
 
-  // handle finished/cancelled requests
+  // handle finished/cancelled requests in running_requests_
   std::vector<std::shared_ptr<Request>> finished_requests;
-  for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
-       ++it) {
-    if (*it == nullptr) {
-      continue;
-    }
-    std::shared_ptr<Request> request = *it;
-    request->update_connection_status();
-    if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
-      // release the ownership of the request
-      finished_requests.emplace_back(request);
-      // finished request is set to nullptr
-      *it = nullptr;
-    }
-  }
+  collect_finished_requests(finished_requests);
 
-  if (options_.priority_strategy() == "fcfs") {
-    if (last_step_prefill_) {
-      // insert all requests to the back of running_queue_
-      // 1. last step is prefill step:
-      // new prefill has high priority, but these requests has lower priority
-      // then existed requests in running_queue_ in decoding stage.
-      // so we need to push them to the back of running_queue_.
-      for (auto it = running_requests_.begin(); it != running_requests_.end();
-           ++it) {
-        // finished request is set to nullptr
-        if (*it == nullptr) {
-          continue;
-        }
-        handle_running_requests(*it);
-        if ((*it)->offline()) {
-          running_queue_offline_->push(*it, last_step_prefill_);
-        } else {
-          running_queue_->push(*it, last_step_prefill_);
-        }
-      }
-    } else {
-      // insert all requests to the front of running_queue_
-      // 2. last step is decode step:
-      // We need to traverse running_requests_ array in reverse order.
-      // Because there may be some unexecuted requests with
-      // lower priorities remaining in the running_queue_.
-      // For the requests in running_requests_,
-      // their priorities are all higher than those of the
-      // remaining requests. Therefore, the `push_front`
-      // method needs to be used.
-      //
-      for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
-           ++it) {
-        // finished request is set to nullptr
-        if (*it == nullptr) {
-          continue;
-        }
-        handle_running_requests(*it);
-        if ((*it)->offline()) {
-          running_queue_offline_->push(*it, last_step_prefill_);
-        } else {
-          running_queue_->push(*it, last_step_prefill_);
-        }
-      }
-    }
-  } else {
-    for (auto it = running_requests_.begin(); it != running_requests_.end();
-         ++it) {
-      if (*it == nullptr) {
-        continue;
-      }
-      handle_running_requests(*it);
-      if ((*it)->offline()) {
-        running_queue_offline_->push(*it);
-      } else {
-        running_queue_->push(*it);
-      }
-    }
-  }
+  // insert request from running_requests_ to running_queue_
+  recycle_running_requests();
 
   // clear previous batch
   last_step_prefill_ = false;

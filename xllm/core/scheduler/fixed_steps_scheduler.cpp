@@ -180,42 +180,13 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
   Timer timer;
   // propogate new requests to waiting_priority_queue_
   // Include those requests that are preempted by others.
-  std::shared_ptr<Request> request;
+
   // read from request queue then push to waiting priority queue
-  while (request_queue_.read(request)) {
-    CHECK(request);
+  fetch_new_requests();
 
-    // expand sequences to the target number if prefix cache is disabled.
-    if (!enable_prefix_cache_) {
-      // expand sequences to the target number
-      request->expand_sequences(false);
-    }
-
-    if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
-      waiting_priority_queue_.push(request);
-    } else {
-      // request from prefill instance in disagge pd mode.
-      running_requests_.emplace_back(request);
-    }
-  }
-
-  // handle finished/cancelled requests
+  // handle finished/cancelled requests in running_requests_
   std::vector<std::shared_ptr<Request>> finished_requests;
-  for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
-       ++it) {
-    if (*it == nullptr) {
-      continue;
-    }
-    std::shared_ptr<Request> request = *it;
-    request->update_connection_status();
-    if (request->finished() || request->cancelled()) {
-      // kv_cache_manager_->deallocate(request.get());
-      // release the ownership of the request
-      finished_requests.emplace_back(request);
-      // finished request is set to nullptr
-      *it = nullptr;
-    }
-  }
+  collect_finished_requests(finished_requests);
 
   // clear previous batch
   running_requests_.clear();

@@ -166,6 +166,41 @@ bool ContinuousScheduler::check_if_enough_to_evict(
   return false;
 }
 
+void ContinuousScheduler::preempt_offline_decode(
+    bool& can_schedule,
+    size_t& num_preempted_requests,
+    Sequence* prefill_sequence,
+    size_t need_allocated_num_tokens) {
+  size_t num_request_to_evict = 0;
+  // according to the prefill_sequence num tokens to check if can
+  // allocate blocks for it through evict
+  bool enough_to_evict = check_if_enough_to_evict(running_queue_offline_.get(),
+                                                  prefill_sequence,
+                                                  need_allocated_num_tokens,
+                                                  num_request_to_evict);
+  if (enough_to_evict) {
+    for (size_t i = 0; i < num_request_to_evict; ++i) {
+      std::shared_ptr<Request> request_to_preempt =
+          running_queue_offline_->back();
+      ++num_preempted_requests;
+      kv_cache_manager_->deallocate(request_to_preempt.get());
+      running_queue_offline_->pop_back();
+      // add preemptable request to waiting priority queue
+      // TO IMPROVE?: not process this offline request in current batch
+      request_to_preempt->set_preempted();
+      waiting_priority_queue_offline_.push(request_to_preempt);
+    }
+    if (!kv_cache_manager_->allocate(prefill_sequence,
+                                     need_allocated_num_tokens)) {
+      LOG(ERROR) << "Should be able to allocate after preempting "
+                 << num_request_to_evict << " offline requests, but failed.";
+      can_schedule = false;
+    } else {
+      can_schedule = true;
+    }
+  }
+}
+
 void ContinuousScheduler::handle_prefill_requests(
     double& latency_budget,
     double& estimate_latency,
@@ -246,41 +281,15 @@ void ContinuousScheduler::handle_prefill_requests(
         break;
       }
 
-      // preempt offline decode
       if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
-          size_t num_request_to_evict = 0;
-          // according to the prefill_sequence num tokens to check if can
-          // allocate blocks for it through evict
-
-          bool enough_to_evict =
-              check_if_enough_to_evict(running_queue_offline_.get(),
-                                       prefill_sequence.get(),
-                                       num_tokens,
-                                       num_request_to_evict);
-          if (enough_to_evict) {
-            for (size_t i = 0; i < num_request_to_evict; ++i) {
-              std::shared_ptr<Request> request_to_preempt =
-                  running_queue_offline_->back();
-              ++num_online_prefill_preempt_offline_requests;
-              kv_cache_manager_->deallocate(request_to_preempt.get());
-              running_queue_offline_->pop_back();
-              // add preemptable request to waiting priority queue
-              // TO IMPROVE?: not process this offline request in current batch
-              request_to_preempt->set_preempted();
-              waiting_priority_queue_offline_.push(request_to_preempt);
-            }
-            if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
-              LOG(ERROR) << "Should be able to allocate after preempting "
-                         << num_request_to_evict
-                         << " offline requests, but failed.";
-              can_schedule = false;
-            } else {
-              can_schedule = true;
-            }
-          }
+          // preempt offline decode
+          preempt_offline_decode(can_schedule,
+                                 num_online_prefill_preempt_offline_requests,
+                                 prefill_sequence.get(),
+                                 prefill_sequence->num_tokens());
         }
         if (!can_schedule) {
           // release shared prefix blocks
@@ -607,7 +616,7 @@ void ContinuousScheduler::handle_abnormal_request(
   }
 }
 
-void ContinuousScheduler::handle_running_requests(
+void ContinuousScheduler::handle_single_running_request(
     std::shared_ptr<Request> request) {
   if (request->finished() || request->cancelled()) {
     LOG(FATAL) << "Unknow error, finished/cancelled request have be handled "
@@ -629,35 +638,8 @@ void ContinuousScheduler::handle_running_requests(
   }
 }
 
-std::vector<Batch> ContinuousScheduler::prepare_batch() {
-  Timer timer;
-  // propogate new requests to waiting_priority_queue_
-  // Include those requests that are preempted by others.
-  std::shared_ptr<Request> request;
-  // read from request queue then push to waiting priority queue
-  while (request_queue_.read(request)) {
-    CHECK(request);
-
-    // expand sequences to the target number if prefix cache is disabled.
-    if (!enable_prefix_cache_) {
-      // expand sequences to the target number
-      request->expand_sequences(false);
-    }
-
-    if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
-      if (request->offline()) {
-        waiting_priority_queue_offline_.push(request);
-      } else {
-        waiting_priority_queue_.push(request);
-      }
-    } else {
-      // request from prefill instance in disagge pd mode.
-      running_requests_.emplace_back(request);
-    }
-  }
-
-  // handle finished/cancelled requests
-  std::vector<std::shared_ptr<Request>> finished_requests;
+void ContinuousScheduler::collect_finished_requests(
+    std::vector<std::shared_ptr<Request>>& finished_requests) {
   for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
        ++it) {
     if (*it == nullptr) {
@@ -673,7 +655,9 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
       *it = nullptr;
     }
   }
+}
 
+void ContinuousScheduler::recycle_running_requests() {
   if (options_.priority_strategy() == "fcfs") {
     if (last_step_prefill_) {
       // insert all requests to the back of running_queue_
@@ -687,7 +671,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
         if (*it == nullptr) {
           continue;
         }
-        handle_running_requests(*it);
+        handle_single_running_request(*it);
         if ((*it)->offline()) {
           running_queue_offline_->push(*it, last_step_prefill_);
         } else {
@@ -711,7 +695,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
         if (*it == nullptr) {
           continue;
         }
-        handle_running_requests(*it);
+        handle_single_running_request(*it);
         if ((*it)->offline()) {
           running_queue_offline_->push(*it, last_step_prefill_);
         } else {
@@ -725,7 +709,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
       if (*it == nullptr) {
         continue;
       }
-      handle_running_requests(*it);
+      handle_single_running_request(*it);
       if ((*it)->offline()) {
         running_queue_offline_->push(*it);
       } else {
@@ -733,6 +717,45 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
       }
     }
   }
+}
+
+void ContinuousScheduler::fetch_new_requests() {
+  std::shared_ptr<Request> request;
+  while (request_queue_.read(request)) {
+    CHECK(request);
+
+    // expand sequences to the target number if prefix cache is disabled.
+    if (!enable_prefix_cache_) {
+      // expand sequences to the target number
+      request->expand_sequences(false);
+    }
+
+    if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
+      if (request->offline()) {
+        waiting_priority_queue_offline_.push(request);
+      } else {
+        waiting_priority_queue_.push(request);
+      }
+    } else {
+      // request from prefill instance in disagge pd mode.
+      running_requests_.emplace_back(request);
+    }
+  }
+}
+
+std::vector<Batch> ContinuousScheduler::prepare_batch() {
+  Timer timer;
+  // preprocess request_queue and running_requests
+
+  // read from request queue then push to waiting priority queue
+  fetch_new_requests();
+
+  // handle finished/cancelled requests in running_requests_
+  std::vector<std::shared_ptr<Request>> finished_requests;
+  collect_finished_requests(finished_requests);
+
+  // insert request from running_requests_ to running_queue_
+  recycle_running_requests();
 
   // clear previous batch
   last_step_prefill_ = false;

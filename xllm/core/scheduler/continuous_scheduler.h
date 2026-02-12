@@ -279,12 +279,24 @@ class ContinuousScheduler : public Scheduler {
       double& estimate_latency,
       bool budget_exhausted,
       bool block_exhausted);
-  void handle_running_requests(std::shared_ptr<Request> request);
+
+  void handle_single_running_request(std::shared_ptr<Request> request);
+
+  virtual void recycle_running_requests();
+
+  void collect_finished_requests(
+      std::vector<std::shared_ptr<Request>>& finished_requests);
+
+  virtual void fetch_new_requests();
 
   bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
                                 Sequence* prefill_sequence,
                                 size_t max_handle_num_tokens,
                                 size_t& num_request_to_evict);
+  void preempt_offline_decode(bool& can_schedule,
+                              size_t& num_preempted_requests,
+                              Sequence* prefill_sequence,
+                              size_t need_allocated_num_tokens);
 
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch();
