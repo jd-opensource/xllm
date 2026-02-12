@@ -32,28 +32,28 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 class MockDeepseekScalingRotaryEmbedding
-    : public DeepseekScalingRotaryEmbedding {
+    : public DeepseekScalingRotaryEmbeddingImpl {
  public:
   MockDeepseekScalingRotaryEmbedding(int64_t rotary_dim,
                                      int64_t max_position_embeddings,
                                      int64_t rope_theta,
                                      bool interleaved,
                                      const torch::TensorOptions& options)
-      : DeepseekScalingRotaryEmbedding(rotary_dim,
-                                       rotary_dim,
-                                       max_position_embeddings,
-                                       max_position_embeddings,
-                                       rope_theta,
-                                       interleaved,
-                                       /*scaling_factor=*/2.5,
-                                       /*extrapolation_factor=*/1.,
-                                       /*attn_factor=*/40,
-                                       /*beta_fast=*/32,
-                                       /*beta_slow=*/1,
-                                       /*mscale=*/1.,
-                                       /*mscale_all_dim=*/1.,
-                                       options) {
-    mock_rope_ = RotaryEmbedding(
+      : DeepseekScalingRotaryEmbeddingImpl(rotary_dim,
+                                           rotary_dim,
+                                           max_position_embeddings,
+                                           max_position_embeddings,
+                                           rope_theta,
+                                           interleaved,
+                                           /*scaling_factor=*/2.5,
+                                           /*extrapolation_factor=*/1.,
+                                           /*attn_factor=*/40,
+                                           /*beta_fast=*/32,
+                                           /*beta_slow=*/1,
+                                           /*mscale=*/1.,
+                                           /*mscale_all_dim=*/1.,
+                                           options) {
+    mock_rope_ = std::make_shared<RotaryEmbeddingImpl>(
         rotary_dim, max_position_embeddings, rope_theta, interleaved, options);
   }
   void forward(torch::Tensor& q,
@@ -62,11 +62,12 @@ class MockDeepseekScalingRotaryEmbedding
                const torch::Tensor& cu_query_lens,
                int64_t max_query_len,
                bool is_prompt) {
-    return mock_rope_(q, k, positions, cu_query_lens, max_query_len, is_prompt);
+    return mock_rope_->forward(
+        q, k, positions, cu_query_lens, max_query_len, is_prompt);
   }
 
  private:
-  RotaryEmbedding mock_rope_{nullptr};
+  std::shared_ptr<RotaryEmbeddingImpl> mock_rope_;
 };
 
 class IndexerTest : public ::testing::Test {
@@ -228,7 +229,7 @@ class IndexerTest : public ::testing::Test {
                            bool chunked_prefill = false,
                            int64_t history_len = 0) {
     test_config_ = TestConfig();
-    rotary_emb_ = std::make_unique<MockDeepseekScalingRotaryEmbedding>(
+    rotary_emb_ = std::make_shared<MockDeepseekScalingRotaryEmbedding>(
         test_config_.qk_rope_head_dim,
         test_config_.max_position_embeddings,
         test_config_.rope_theta,
@@ -287,7 +288,7 @@ class IndexerTest : public ::testing::Test {
                                        test_config_.index_topk,
                                        test_config_.q_lora_rank,
                                        enable_fused_qk,
-                                       *rotary_emb_,
+                                       rotary_emb_,
                                        quant_args,
                                        parallel_args_,
                                        options_));
@@ -305,7 +306,7 @@ class IndexerTest : public ::testing::Test {
   torch::TensorOptions options_;
   torch::TensorOptions int_option_;
   std::unique_ptr<xllm::ProcessGroup> mock_process_group_;
-  std::unique_ptr<DeepseekScalingRotaryEmbedding> rotary_emb_;
+  RotaryEmbeddingVariants rotary_emb_;
 };
 
 TEST_F(IndexerTest, PrefillBatch) {
