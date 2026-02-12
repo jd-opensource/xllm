@@ -165,15 +165,17 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
                                              const runtime::Options& options)
     : SpeculativeWorkerImpl(parallel_args,
                             device,
+                            options,
                             MainOptions(options),
                             DraftOptions(options)) {}
 
 SpeculativeWorkerImpl::SpeculativeWorkerImpl(
     const ParallelArgs& parallel_args,
     const torch::Device& device,
+    const runtime::Options& options,
     const runtime::Options& options_main,
     const runtime::Options& options_draft)
-    : WorkerImpl(parallel_args, device, options_main) {
+    : WorkerImpl(parallel_args, device, options) {
   impl_ = std::make_unique<LLMWorkerImpl>(parallel_args, device, options_main);
   // options_draft already carries draft-specific settings (e.g.
   // num_speculative_tokens(0) for Eagle3, or enable_graph_aux_hidden_states
@@ -766,7 +768,6 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   torch::Tensor positions = safe_to(inputs.positions, torch::kCPU);
   Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
                                     static_cast<size_t>(positions.numel())};
-  // Get the tokens generated in the last step (flattened for easier indexing)
   torch::Tensor last_token_ids = safe_to(
       last_step_output_.sample_output.next_tokens.flatten(), torch::kCPU);
   Slice<int64_t> last_tokens_ids_slice = {

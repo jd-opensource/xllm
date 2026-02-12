@@ -41,9 +41,11 @@ class SpeculativeWorkerImpl : public WorkerImpl {
  protected:
   // For derived classes (e.g. Eagle3WorkerImpl) that need different options
   // for main vs draft worker (e.g. main uses graph aux_hidden_states, draft
-  // does not).
+  // does not). options is used by this wrapper worker itself; options_main
+  // and options_draft are for the inner target/draft worker impls.
   SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
                         const torch::Device& device,
+                        const runtime::Options& options,
                         const runtime::Options& options_main,
                         const runtime::Options& options_draft);
 

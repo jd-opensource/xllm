@@ -48,6 +48,7 @@ Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                                    const runtime::Options& options)
     : SpeculativeWorkerImpl(parallel_args,
                             device,
+                            options,
                             eagle3_main_options(options),
                             eagle3_draft_options(options)) {}
 
@@ -128,7 +129,6 @@ std::optional<ForwardOutput> Eagle3WorkerImpl::step_decode(
       last_output.next_tokens =
           hot_token_id_.index_select(0, last_output.next_tokens);
     }
-    // update input of next step
     if (i < options_.num_speculative_tokens() - 1) {
       draft_input = next_step_input;
       draft_input.token_ids = safe_to(last_output.next_tokens, torch::kInt);
