@@ -16,12 +16,15 @@ limitations under the License.
 #include "device.h"
 #if defined(USE_NPU)
 #include <torch_npu/csrc/aten/NPUGeneratorImpl.h>
+#include <torch_npu/csrc/core/npu/NPUCachingAllocator.h>
 #elif defined(USE_MLU)
 #include <cn_api.h>
+#include <framework/core/caching_allocator.h>
 #include <framework/core/device.h>
 #include <framework/core/device_utils.h>
 #include <framework/generator/generator_impl.h>
 #elif defined(USE_CUDA) || defined(USE_ILU)
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 #include <cuda.h>
 #elif defined(USE_MUSA)
@@ -201,7 +204,17 @@ Device::DeviceMem Device::get_device_mem() const {
 
 int64_t Device::total_memory() { return get_device_mem().total_memory; }
 
-int64_t Device::free_memory() { return get_device_mem().free_memory; }
+int64_t Device::free_memory() {
+#if defined(USE_NPU)
+  c10_npu::NPUCachingAllocator::emptyCache();
+  c10_npu::NPUCachingAllocator::FreeDeviceCachedMemory(index());
+#elif defined(USE_MLU)
+  torch_mlu::MLUCachingAllocator::emptyCache();
+#elif defined(USE_CUDA) || defined(USE_ILU)
+  c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
+  return get_device_mem().free_memory;
+}
 
 int Device::synchronize_default_stream() {
 #if defined(USE_NPU)

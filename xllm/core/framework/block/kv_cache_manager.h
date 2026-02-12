@@ -68,6 +68,9 @@ class KVCacheManager {
   virtual std::vector<size_t> num_used_blocks() const = 0;
   virtual double kv_cache_utilization() const = 0;
 
+  // Post initialization (e.g., for XTensor mode)
+  virtual void post_init() {}
+
  protected:
   KVCacheManager() = default;
 

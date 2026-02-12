@@ -36,6 +36,16 @@ class BaseManualLoader : public BaseLoader {
 
   virtual void init_weight_slices();
 
+  virtual void merge_and_move_pinned_host() override;
+
+  virtual void merge_loaded_weights() override;
+
+  virtual void free_weights() override;
+
+  virtual void reload_weights() override;
+
+  virtual void reload_weights_from_device() override;
+
  protected:
   struct WeightSlice {
     uint64_t offset = 0;
@@ -43,6 +53,9 @@ class BaseManualLoader : public BaseLoader {
     std::vector<int64_t> sizes;
     torch::ScalarType dtype = torch::kFloat16;
   };
+
+  virtual void merge_host_at_weights() = 0;
+  std::string model_id_;
   void* host_pinned_storage_ = nullptr;
   void* device_storage_ = nullptr;
   uint64_t storage_size_ = 0;
@@ -55,11 +68,12 @@ class BaseManualLoader : public BaseLoader {
   void release_host_storage();
   int copy_host_nd_to_nz(torch::Tensor host_tensor,
                          void* dst_ptr,
-                         uint64_t len);
+                         uint64_t len,
+                         aclrtMemcpyKind kind = ACL_MEMCPY_DEVICE_TO_DEVICE);
   torch::Tensor convert_to_torch_tensor(const std::vector<int64_t>& dims,
                                         const torch::ScalarType dtype,
                                         const uintptr_t& dev_addr,
-                                        int acl_format = 2);
+                                        int acl_format = ACL_FORMAT_ND);
 };
 
 }  // namespace layer

@@ -285,12 +285,10 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
 
   GAUGE_SET(kv_cache_utilization_perc,
             kv_cache_manager_->kv_cache_utilization());
-  if (!FLAGS_enable_continuous_kvcache) {
-    GAUGE_SET(num_blocks_in_prefix_cache,
-              kv_cache_manager_->num_blocks_in_prefix_cache().size());
-    GAUGE_SET(num_free_blocks, kv_cache_manager_->num_free_blocks().size());
-    GAUGE_SET(num_used_blocks, kv_cache_manager_->num_used_blocks().size());
-  }
+  GAUGE_SET(num_blocks_in_prefix_cache,
+            kv_cache_manager_->num_blocks_in_prefix_cache().size());
+  GAUGE_SET(num_free_blocks, kv_cache_manager_->num_free_blocks().size());
+  GAUGE_SET(num_used_blocks, kv_cache_manager_->num_used_blocks().size());
 
   return batches;
 }

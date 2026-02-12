@@ -53,10 +53,11 @@ Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                             eagle3_draft_options(options)) {}
 
 bool Eagle3WorkerImpl::init_model(const std::string& model_weights_path,
-                                  int32_t random_seed) {
+                                  int32_t random_seed,
+                                  int32_t master_status) {
   // Call parent's init_model first
-  bool result =
-      SpeculativeWorkerImpl::init_model(model_weights_path, random_seed);
+  bool result = SpeculativeWorkerImpl::init_model(
+      model_weights_path, random_seed, master_status);
 
   // Load hot_token_id_ directly from state_dict (EAGLE-3 specific)
   // This should be done after draft model is loaded

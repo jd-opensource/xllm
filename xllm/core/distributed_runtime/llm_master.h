@@ -73,6 +73,16 @@ class LLMMaster : public Master {
   // this is a blocking call
   void generate();
 
+  bool sleep() override;
+
+  bool wakeup() override;
+
+  bool wakeup(const WakeupOptions& options) override;
+
+  bool link_d2d(const std::vector<std::string>& device_ips) override;
+
+  bool unlink_d2d(const std::vector<std::string>& device_ips) override;
+
  private:
   std::shared_ptr<Request> generate_request(
       std::string prompt,
@@ -119,12 +129,13 @@ class LLMMaster : public Master {
 class LLMAssistantMaster : public Master {
  public:
   LLMAssistantMaster(const Options& options);
-  ~LLMAssistantMaster() = default;
+  ~LLMAssistantMaster();
   void run() override;
 
   static void handle_signal(int signum) { running_ = false; }
 
  private:
+  std::thread loop_thread_;
   static volatile bool running_;
 };
 

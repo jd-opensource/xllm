@@ -30,17 +30,13 @@ NpuRMSNormImpl::NpuRMSNormImpl(const ModelContext& context)
     : BaseLayer(context) {
   param_from_args(norm_param_, context.get_model_args());
 
-  // at_weight_tensors_.resize(1);
   atb_weight_tensors_.resize(1);
-  loader_ = std::make_unique<RMSNORMLoader>((uint64_t)1,  // 1 weight
-                                            context);
-}
 
-void NpuRMSNormImpl::merge_loaded_weights() {
-  auto& at_weight_tensors = loader_->get_at_weight_tensors();
-  atb_weight_tensors_[0] =
-      atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[0]);
-  init_layer();
+  if (FLAGS_enable_xtensor) {
+    loader_ = std::make_unique<RMSNormManualLoader>(1, context);
+  } else {
+    loader_ = std::make_unique<RMSNormLoader>(1, context);
+  }
 }
 
 int64_t NpuRMSNormImpl::init_layer() {

@@ -39,6 +39,11 @@ class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
   // brpc call_data needs to use shared_ptr
   void process_async_impl(std::shared_ptr<ChatCall> call);
 
+  void add_model_master(const std::string& model, LLMMaster* master) {
+    llm_model_to_master_[model] = master;
+    models_.insert(model);
+  }
+
  private:
   void process_rec_chat_request(std::shared_ptr<ChatCall> call);
 
@@ -46,6 +51,7 @@ class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
 
   LLMMaster* master_ = nullptr;
   RecMaster* rec_master_ = nullptr;
+  std::unordered_map<std::string, LLMMaster*> llm_model_to_master_;
   const std::string tool_call_parser_format_;
   const std::string reasoning_parser_format_;
   bool is_force_reasoning_ = false;
