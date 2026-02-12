@@ -44,4 +44,11 @@ void RateLimiter::decrease_one_request() {
             num_concurrent_requests_.load(std::memory_order_relaxed));
 }
 
+void RateLimiter::decrease_requests(size_t decrease_requests_num) {
+  num_concurrent_requests_.fetch_sub(decrease_requests_num,
+                                     std::memory_order_relaxed);
+  GAUGE_SET(num_concurrent_requests,
+            num_concurrent_requests_.load(std::memory_order_relaxed));
+}
+
 }  // namespace xllm

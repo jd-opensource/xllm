@@ -33,14 +33,12 @@ namespace xllm {
 
 AsyncResponseProcessor::AsyncResponseProcessor(
     const Tokenizer* tokenizer,
-    const std::optional<InstanceRole>& role)
+    const std::optional<InstanceRole>& role,
+    bool enable_service_routing)
     : response_threadpool_(FLAGS_num_response_handling_threads),
       tokenizer_(tokenizer->clone()),
-      role_(role.value_or(InstanceRole::DEFAULT)) {
-  if (role_ == InstanceRole::DECODE || role_ == InstanceRole::MIX) {
-    enable_batch_response_ = true;
-  }
-}
+      role_(role.value_or(InstanceRole::DEFAULT)),
+      enable_batch_response_(enable_service_routing) {}
 
 void AsyncResponseProcessor::process_failed_request(
     std::shared_ptr<Request> request,
@@ -89,14 +87,7 @@ void AsyncResponseProcessor::process_completed_request(
                       static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
     RequestOutput req_output =
         request->generate_output(*tokenizer_, &generate_output_threadpool_);
-
-    if (role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) {
-      // entering here means non-stream request's prefill stage ends in Disagg
-      // P/D mode.
-      req_output.finished_on_prefill_instance = true;
-    } else {
-      request->log_statistic(end_2_end_latency_seconds);
-    }
+    request->log_statistic(end_2_end_latency_seconds);
     request->state().output_func(req_output);
   };
   if (request->state().response_thread_id < 0) {
@@ -126,9 +117,16 @@ void AsyncResponseProcessor::batch_process_completed_requests(
       HISTOGRAM_OBSERVE(
           end_2_end_latency_milliseconds,
           static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
-      request->log_statistic(end_2_end_latency_seconds);
+      if (request->finished() || request->cancelled()) {
+        // not log in prefill instance
+        request->log_statistic(end_2_end_latency_seconds);
+      }
 
       *request_output = std::move(request->generate_output(*tokenizer_));
+      if (request->sequences()[0]->num_generated_tokens() == 1) {
+        // currently only support one sequence when enable_service_routing
+        request_output->finished_on_prefill_instance = true;
+      }
       counter->decrement_count();
     };
     if (request->state().response_thread_id < 0) {
@@ -212,11 +210,6 @@ void AsyncResponseProcessor::process_stream_request(
           req_output.outputs.push_back(std::move(seq_output.value()));
         }
       }
-      if (role_ == InstanceRole::PREFILL || role_ == InstanceRole::MIX) {
-        // stream request's prefill stage finishes in prefill instance in Disagg
-        // P/D mode.
-        req_output.finished_on_prefill_instance = true;
-      }
       if (!request->state().output_func(req_output)) {
         // cancel the request if on_stream returns false
         request->set_cancel();
@@ -284,6 +277,12 @@ void AsyncResponseProcessor::batch_process_stream_requests(
         auto seq_output = seq->generate_streaming_output(size, *tokenizer_);
         if (seq_output.has_value()) {
           req_output->outputs.push_back(std::move(seq_output.value()));
+          if (seq->num_generated_tokens() == 1) {
+            // currently only support one sequence when enable_service_routing
+            // IMPROVE LATER: support enable_schedule_overlap in Default mode
+            // for stream request
+            req_output->finished_on_prefill_instance = true;
+          }
         }
       }
       counter->decrement_count();
@@ -315,9 +314,8 @@ void AsyncResponseProcessor::batch_process_stream_requests(
 
 // process stream requests
 void AsyncResponseProcessor::process_stream_requests(
-    std::vector<std::shared_ptr<Request>>& requests,
-    bool is_prefill) {
-  if (!enable_batch_response_ || is_prefill) {
+    std::vector<std::shared_ptr<Request>>& requests) {
+  if (!enable_batch_response_) {
     for (auto& req : requests) {
       process_stream_request(req);
     }

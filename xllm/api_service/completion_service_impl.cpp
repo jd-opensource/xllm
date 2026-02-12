@@ -166,6 +166,69 @@ CompletionServiceImpl::CompletionServiceImpl(
   CHECK(master_ != nullptr);
 }
 
+// complete_async for brpc from xllm_service
+void CompletionServiceImpl::process_async_rpc_impl(
+    const proto::CompletionRequest* request) {
+  const auto& service_request_id = request->service_request_id();
+  auto callback = [master = master_](const RequestOutput& req_output) -> bool {
+    req_output.log_request_status();
+    if (req_output.status.has_value()) {
+      const auto& status = req_output.status.value();
+      if (!status.ok()) {
+        // Reduce the number of concurrent requests when a request is
+        // finished with error.
+        master->get_rate_limiter()->decrease_one_request();
+        return master->handle_rpc_response(req_output);
+      }
+    }
+    // Reduce the number of concurrent requests when a request is finished
+    // or canceled.
+    if (req_output.finished || req_output.cancelled ||
+        req_output.finished_on_prefill_instance) {
+      master->get_rate_limiter()->decrease_one_request();
+    }
+    return master->handle_rpc_response(req_output);
+  };
+
+  // Check if the request is being rate-limited.
+  if (unlikely(master_->get_rate_limiter()->is_limited())) {
+    CALLBACK_WITH_ERROR(
+        StatusCode::RESOURCE_EXHAUSTED,
+        "The number of concurrent requests has reached the limit.",
+        service_request_id);
+    return;
+  }
+
+  // check if model is supported
+  const auto& rpc_request = *request;
+  const auto& model = rpc_request.model();
+  if (unlikely(!models_.contains(model))) {
+    CALLBACK_WITH_ERROR(
+        StatusCode::UNKNOWN, "Model not supported", service_request_id);
+    return;
+  }
+
+  RequestParams request_params(rpc_request, "", "");
+
+  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
+  if (rpc_request.has_routing()) {
+    prompt_tokens = std::vector<int>{};
+    prompt_tokens->reserve(rpc_request.token_ids_size());
+    for (int i = 0; i < rpc_request.token_ids_size(); i++) {
+      prompt_tokens->emplace_back(rpc_request.token_ids(i));
+    }
+
+    request_params.decode_address = rpc_request.routing().decode_name();
+  }
+
+  // schedule the request
+  master_->handle_request(std::move(rpc_request.prompt()),
+                          std::move(prompt_tokens),
+                          std::move(request_params),
+                          std::nullopt,
+                          callback);
+}
+
 // complete_async for brpc
 void CompletionServiceImpl::process_async_impl(
     std::shared_ptr<CompletionCall> call) {
@@ -219,6 +282,7 @@ void CompletionServiceImpl::process_async_impl(
        request_id = std::move(saved_request_id),
        created_time = absl::ToUnixSeconds(absl::Now())](
           const RequestOutput& req_output) -> bool {
+        req_output.log_request_status();
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
           if (!status.ok()) {
