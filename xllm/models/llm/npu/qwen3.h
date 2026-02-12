@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/nn/functional/normalization.h>
+
 #include <optional>
 #include <unordered_set>
 #include <vector>
@@ -272,6 +274,16 @@ class QWen3ForCausalLMImpl : public LlmForCausalLMImplBase<QWen3Model> {
  public:
   QWen3ForCausalLMImpl(const ModelContext& context)
       : LlmForCausalLMImplBase<QWen3Model>(context) {}
+
+  torch::Tensor pooler(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) {
+    auto h = hidden_states;
+    if (seleted_idxes.defined()) {
+      h = h.index_select(/*dim=*/0, seleted_idxes);
+    }
+    return torch::nn::functional::normalize(
+        h, torch::nn::functional::NormalizeFuncOptions().p(2).dim(1));
+  }
 };
 TORCH_MODULE(QWen3ForCausalLM);
 

@@ -54,6 +54,17 @@ class CausalLM : public torch::nn::Module {
 
   // hidden_states: [num_tokens, hidden_size]
   // seleted_idxes: [num_tokens]
+  // returns: [num_seqs, hidden_size]
+  virtual torch::Tensor pooler(const torch::Tensor& hidden_states,
+                               const torch::Tensor& seleted_idxes) {
+    if (seleted_idxes.defined()) {
+      return hidden_states.index_select(/*dim=*/0, seleted_idxes);
+    }
+    return hidden_states;
+  }
+
+  // hidden_states: [num_tokens, hidden_size]
+  // seleted_idxes: [num_tokens]
   // returns: [num_tokens, vocab_size]
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes) = 0;
@@ -109,6 +120,11 @@ class CausalLMImpl : public CausalLM {
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& parameters) override {
     return model_->forward(tokens, positions, kv_caches, parameters);
+  }
+
+  torch::Tensor pooler(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) override {
+    return model_->pooler(hidden_states, seleted_idxes);
   }
 
   torch::Tensor logits(const torch::Tensor& hidden_states,
