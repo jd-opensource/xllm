@@ -118,7 +118,8 @@ Sequence::Sequence(size_t index,
       latest_generate_time_(absl::Now()),
       sequence_params_(seq_params),
       decoder_(std::move(decoder)),
-      termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
+      termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)),
+      request_id_(seq_params.request_id) {
   if (is_onerec_model()) {
     init_onerec_sequence(prompt_token_ids, std::move(input_embedding));
     return;
@@ -176,6 +177,7 @@ Sequence::Sequence(const Sequence& other)
       onerec_state_(other.onerec_state_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
       embedding_id_(other.embedding_id_),
+      request_id_(other.request_id_),
       finished_(other.finished_),
       finish_status_invalidated_(other.finish_status_invalidated_),
       finish_reason_(other.finish_reason_),

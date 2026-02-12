@@ -34,6 +34,19 @@ std::string Options::to_string() const {
      << ", max_tokens_per_chunk_for_prefill: "
      << max_tokens_per_chunk_for_prefill()
      << ", num_speculative_tokens: " << num_speculative_tokens()
+     << ", speculative_algorithm: " << speculative_algorithm()
+     << ", speculative_suffix_cache_max_depth: "
+     << speculative_suffix_cache_max_depth()
+     << ", speculative_suffix_max_spec_factor: "
+     << speculative_suffix_max_spec_factor()
+     << ", speculative_suffix_max_spec_offset: "
+     << speculative_suffix_max_spec_offset()
+     << ", speculative_suffix_min_token_prob: "
+     << speculative_suffix_min_token_prob()
+     << ", speculative_suffix_max_cached_requests: "
+     << speculative_suffix_max_cached_requests()
+     << ", speculative_suffix_use_tree_spec: "
+     << speculative_suffix_use_tree_spec()
      << ", num_request_handling_threads: " << num_request_handling_threads()
      << ", communication_backend: " << communication_backend().value_or("null")
      << ", rank_tablefile: " << rank_tablefile().value_or("null")

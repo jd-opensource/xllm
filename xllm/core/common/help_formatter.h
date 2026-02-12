@@ -70,9 +70,17 @@ const OptionCategory kMultiStepDecodeOptions = {
     "MULTI-STEP DECODE OPTIONS",
     {"max_decode_rounds", "beam_width"}};
 
-const OptionCategory kMtpOptions = {
-    "MTP OPTIONS",
-    {"draft_model", "draft_devices", "num_speculative_tokens"}};
+const OptionCategory kMtpOptions = {"SPECULATIVE OPTIONS",
+                                    {"draft_model",
+                                     "draft_devices",
+                                     "num_speculative_tokens",
+                                     "speculative_algorithm",
+                                     "speculative_suffix_cache_max_depth",
+                                     "speculative_suffix_max_spec_factor",
+                                     "speculative_suffix_max_spec_offset",
+                                     "speculative_suffix_min_token_prob",
+                                     "speculative_suffix_max_cached_requests",
+                                     "speculative_suffix_use_tree_spec"}};
 
 const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
                                             {"etcd_addr", "rank_tablefile"}};

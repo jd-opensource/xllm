@@ -23,6 +23,9 @@ cc_library(
     slice.h
     spin_lock.h
     spin_rw_lock.h
+    int32_map.h
+    suffix_decoding_cache.h
+    suffix_tree.h
     tensor_helper.h
     threadpool.h
     timer.h
@@ -38,6 +41,8 @@ cc_library(
     json_reader.cpp
     net.cpp
     pretty_print.cpp
+    suffix_decoding_cache.cpp
+    suffix_tree.cpp
     threadpool.cpp
     timer.cpp
     utils.cpp
@@ -67,6 +72,7 @@ cc_test(
     util_test
   SRCS
     blocking_counter_test.cpp
+    suffix_decoding_cache_test.cpp
     threadpool_test.cpp
   DEPS
     util

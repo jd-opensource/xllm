@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <string>
 
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
@@ -124,6 +125,7 @@ struct ForwardInput {
     inputs.eplb_info = eplb_info;
     inputs.acc_logprob = safe_to(acc_logprob, device, true);
     inputs.step_decode = step_decode;
+    inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
     inputs.device_input_buffer = device_input_buffer;
     return inputs;
   }
@@ -156,6 +158,8 @@ struct ForwardInput {
 
   // step-level decode metadata
   std::optional<StepDecodeMeta> step_decode;
+  // If true, skip sampler forward and only keep logits.
+  bool skip_sampling_for_logits_only = false;
 
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
@@ -222,6 +226,8 @@ struct RawForwardInput {
   std::vector<int32_t> extra_token_ids;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
+  // request ids of each sequence
+  std::vector<std::string> request_ids;
   // swap
   std::vector<BlockTransferInfo> swap_blocks;
   uint64_t batch_id;
