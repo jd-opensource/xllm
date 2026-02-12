@@ -161,9 +161,11 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
   float sm_scale_;
   int32_t num_speculative_tokens_ = 0;
 
-  atb_speed::deepseekV2::DecoderLayerParam layer_param_;
+  atb_speed::deepseekV2::DecoderLayerParam prefill_param_;
+  atb_speed::deepseekV2::DecoderLayerParam decode_param_;
 
-  atb_speed::Model::Node layer_node_;
+  atb_speed::Model::Node prefill_node_;
+  atb_speed::Model::Node decode_node_;
 
   atb::Tensor internal_tensor_;
 
