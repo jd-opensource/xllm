@@ -342,6 +342,11 @@ DEFINE_string(speculative_algorithm,
               "Speculative decoding algorithm. Supported options: MTP, Eagle3. "
               "Default is MTP.");
 
+DEFINE_bool(enable_opt_validate_probs,
+            false,
+            "Whether to use optimized draft_probs handling in speculative "
+            "validation.");
+
 DEFINE_bool(enable_atb_spec_kernel,
             false,
             "Whether to use ATB speculative kernel.");

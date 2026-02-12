@@ -47,7 +47,8 @@ class SpeculativeWorkerImpl : public WorkerImpl {
                         const torch::Device& device,
                         const runtime::Options& options,
                         const runtime::Options& options_main,
-                        const runtime::Options& options_draft);
+                        const runtime::Options& options_draft,
+                        bool enable_opt_validate_probs = false);
 
  public:
   // initialize model, cache manager. blocking call
@@ -174,6 +175,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
 
   std::shared_ptr<EmbeddingCache> embedding_cache_;
   bool enable_fused_kernel_ = false;
+  bool enable_opt_validate_probs_ = false;
 
   // performance debug for fixing the speculative acceptance rate
   // NOTE: This is for performance debugging only, it will
