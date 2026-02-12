@@ -47,10 +47,19 @@ class EmbeddingCache final {
 
   torch::Tensor read(int32_t embedding_id);
   torch::Tensor read(const std::vector<int32_t>& embedding_ids);
+#if defined(USE_MLU)
+  torch::Tensor read_previous_input(int32_t embedding_id);
+  torch::Tensor read_previous_input(const std::vector<int32_t>& ids);
+#endif
 
  private:
   // embedding cache
   std::vector<torch::Tensor> cache_;
+#if defined(USE_MLU)
+  // previous cache for MTP speculative sampling
+  // Temporary workaround for MTP draft models bugs.
+  std::vector<torch::Tensor> previous_cache_;
+#endif
   // placeholder for empty slots (e.g. PD separation decode instance)
   torch::Tensor placeholder_;
 };

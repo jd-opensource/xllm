@@ -535,6 +535,7 @@ folly::SemiFuture<bool> WorkerImpl::init_model_async(
 bool WorkerImpl::init_model(const std::string& model_weights_path,
                             int32_t random_seed) {
   // set same random seed for all worker
+  FLAGS_random_seed = random_seed;
   device_.set_seed(random_seed);
 
   auto model_loader = ModelLoader::create(model_weights_path);
