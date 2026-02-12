@@ -68,7 +68,31 @@ def get_torch_musa_root_path() -> Optional[str]:
         return os.path.dirname(os.path.abspath(torch_musa.__file__))
     except ImportError:
         return None
-    
+
+def prepend_path_env(var_name: str, path: str, sep: str = os.pathsep) -> None:
+    """Prepend a path into a path env var without duplicates."""
+    if not path:
+        return
+    current = os.getenv(var_name, "")
+    entries = [item for item in current.split(sep) if item]
+    if path in entries:
+        entries = [item for item in entries if item != path]
+    entries.insert(0, path)
+    os.environ[var_name] = sep.join(entries)
+
+
+def set_npu_torch_ld_library_path() -> None:
+    """Only for NPU flow: ensure torch runtime libraries are discoverable."""
+    torch_root = os.getenv("PYTORCH_INSTALL_PATH") or get_torch_root_path() or ""
+    if not torch_root:
+        return
+
+    # Order keeps current behavior: torch.libs > torch > torch/lib
+    for path in (f"{torch_root}.libs", torch_root, os.path.join(torch_root, "lib")):
+        if os.path.isdir(path):
+            prepend_path_env("LD_LIBRARY_PATH", path)
+
+
 def set_common_envs() -> None:
     os.environ["PYTHON_INCLUDE_PATH"] = get_python_include_path() or ""
     torch_root = get_torch_root_path() or ""
@@ -87,6 +111,7 @@ def set_npu_envs() -> None:
         os.environ["XLLM_KERNELS_PATH"] = "/usr/local/xllm_kernels"
 
     set_common_envs()
+    set_npu_torch_ld_library_path()
     NPU_TOOLKIT_HOME = os.getenv("NPU_TOOLKIT_HOME")
     if not NPU_TOOLKIT_HOME:
         os.environ["NPU_TOOLKIT_HOME"] = "/usr/local/Ascend/ascend-toolkit/latest"
