@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "forward_params.h"
-#include "runtime/speculative_worker_impl.h"
+#include "runtime/mtp_worker_impl.h"
 #include "util/timer.h"
 
 namespace xllm {
 
-class Eagle3WorkerImpl : public SpeculativeWorkerImpl {
+class Eagle3WorkerImpl : public MTPWorkerImpl {
  public:
   Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                    const torch::Device& device,

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -46,17 +46,16 @@ runtime::Options eagle3_draft_options(const runtime::Options& options) {
 Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                                    const torch::Device& device,
                                    const runtime::Options& options)
-    : SpeculativeWorkerImpl(parallel_args,
-                            device,
-                            options,
-                            eagle3_main_options(options),
-                            eagle3_draft_options(options)) {}
+    : MTPWorkerImpl(parallel_args,
+                    device,
+                    options,
+                    eagle3_main_options(options),
+                    eagle3_draft_options(options)) {}
 
 bool Eagle3WorkerImpl::init_model(const std::string& model_weights_path,
                                   int32_t random_seed) {
   // Call parent's init_model first
-  bool result =
-      SpeculativeWorkerImpl::init_model(model_weights_path, random_seed);
+  bool result = MTPWorkerImpl::init_model(model_weights_path, random_seed);
 
   // Load hot_token_id_ directly from state_dict (EAGLE-3 specific)
   // This should be done after draft model is loaded
@@ -89,8 +88,6 @@ int64_t Eagle3WorkerImpl::get_embedding_placeholder_size() {
 
 std::optional<ForwardOutput> Eagle3WorkerImpl::step_decode(
     const ForwardInput& input) {
-  // TODO : now only support Deepseek MTP
-  // More work need to support n-gram and native speculative decoding.
   ForwardInput draft_input = input;
   // get embedding cache
   torch::Tensor embeddings =
