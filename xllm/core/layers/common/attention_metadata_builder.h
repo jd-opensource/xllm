@@ -43,6 +43,17 @@ class AttentionMetadataBuilder {
       const ModelInputParams& params,
       const std::string& compute_dtype,
       const std::optional<torch::Tensor>& attn_mask = {});
+
+#if defined(USE_MUSA)
+  static void set_musa_metadata(AttentionMetadata& attn_metadata,
+                                std::vector<int32_t> const& q_seq_lens_vec,
+                                std::vector<int32_t> const& kv_seq_lens_vec,
+                                int32_t q_heads,
+                                int32_t kv_heads,
+                                int32_t q_head_dim,
+                                torch::Tensor const& cache_mapping,
+                                int32_t page_tokens);
+#endif
 };
 
 }  // namespace layer

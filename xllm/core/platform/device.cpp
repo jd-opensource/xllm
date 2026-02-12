@@ -167,7 +167,7 @@ std::string Device::type_str() {
 }
 
 torch::DeviceType Device::type_torch() {
-#if defined(USE_NPU) || defined(USE_MLU) || defined(USE_MUSA)
+#if defined(USE_NPU) || defined(USE_MLU)
   return torch::kPrivateUse1;
 #elif defined(USE_CUDA) || defined(USE_ILU)
   return torch::kCUDA;

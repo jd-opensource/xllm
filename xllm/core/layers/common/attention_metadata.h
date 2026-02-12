@@ -25,6 +25,10 @@ namespace ffi = tvm::ffi;
 #include <memory>
 #include <string>
 
+#if defined(USE_MUSA)
+#include "MTTOplib/Attention.h"
+#endif
+
 namespace xllm::layer {
 
 #if defined(USE_CUDA) || defined(USE_MUSA)
@@ -118,6 +122,10 @@ struct AttentionMetadata {
   // If defined, use this instead of kv_seq_lens_host to avoid .to(kCPU)
   // operations that break ACL graph capture.
   torch::Tensor paged_attention_tiling_data;
+#endif
+
+#if defined(USE_MUSA)
+  xllm_musa::AttnMetaData amd;
 #endif
 };
 
