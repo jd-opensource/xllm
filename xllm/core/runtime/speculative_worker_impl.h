@@ -165,6 +165,15 @@ class SpeculativeWorkerImpl : public WorkerImpl {
                               const int32_t num_val_tokens,
                               const int32_t total_num_val_tokens);
 
+#if defined(USE_MLU)
+  // MTP: Patch draft KV cache for accepted draft tokens.
+  // When a draft token is accepted by the target model, the draft model's
+  // KV cache is missing that token. This function runs a forward pass on
+  // the draft model to fill in the missing KV cache entries.
+  void patch_draft_kv_cache_for_accepted_tokens(const ForwardInput& input,
+                                                const SampleOutput& val_output);
+#endif
+
  protected:
   // Protected members for derived classes (e.g., Eagle3WorkerImpl)
   std::unique_ptr<LLMWorkerImpl> impl_;
