@@ -262,3 +262,5 @@ DECLARE_bool(use_audio_in_video);
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);
 #endif
+
+DECLARE_int32(health_check_interval_ms);
