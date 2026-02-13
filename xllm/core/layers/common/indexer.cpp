@@ -111,7 +111,7 @@ IndexerImpl::IndexerImpl(int64_t dim,
                          int64_t index_topk,
                          int64_t q_lora_rank,
                          bool enable_fused_qk,
-                         DeepseekScalingRotaryEmbedding& rotary_emb,
+                         RotaryEmbeddingVariants& rotary_emb,
                          const QuantArgs& quant_args,
                          const ParallelArgs& parallel_args,
                          const torch::TensorOptions& options)
@@ -272,11 +272,12 @@ torch::Tensor IndexerImpl::preprocess_indexer_q(
   auto q = wq_b_->forward(qr);
   q = q.view({q.size(0), n_heads_, head_dim_});
   auto q_pe = q.slice(-1, 0, rope_head_dim_);
-  rotary_emb_->forward(q_pe,
-                       positions,
-                       attn_metadata.q_cu_seq_lens,
-                       attn_metadata.max_query_len,
-                       attn_metadata.is_prefill);
+  apply_rotary_embedding(rotary_emb_,
+                         q_pe,
+                         positions,
+                         attn_metadata.q_cu_seq_lens,
+                         attn_metadata.max_query_len,
+                         attn_metadata.is_prefill);
 
   // Apply rotation activation
   q = rotate_activation(q, hadamard_matrix_);
@@ -298,11 +299,12 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::preprocess_indexer_k(
 
   // Apply rotary embedding to positional parts only (like Python)
   auto k_pe = k.slice(-1, 0, rope_head_dim_).unsqueeze(1);
-  rotary_emb_->forward(k_pe,
-                       positions,
-                       attn_metadata.q_cu_seq_lens,
-                       attn_metadata.max_query_len,
-                       attn_metadata.is_prefill);
+  apply_rotary_embedding(rotary_emb_,
+                         k_pe,
+                         positions,
+                         attn_metadata.q_cu_seq_lens,
+                         attn_metadata.max_query_len,
+                         attn_metadata.is_prefill);
   k = rotate_activation(k, hadamard_matrix_);
 
   // Reshape paged cache
@@ -338,8 +340,8 @@ torch::Tensor IndexerImpl::preprocess_indexer_q_fused(
   q_params.w_q = w_q;
   q_params.w_q_scale = std::nullopt;
   q_params.hadamard_matrix = hadamard_matrix_;
-  q_params.sin = rotary_emb_->get_sin_cache();
-  q_params.cos = rotary_emb_->get_cos_cache();
+  q_params.sin = get_sin_cache(rotary_emb_);
+  q_params.cos = get_cos_cache(rotary_emb_);
   q_params.position_id = positions;
   q_params.quant_mode = "none";
   kernel::fused_indexer_q(q_params);
@@ -359,8 +361,8 @@ torch::Tensor IndexerImpl::preprocess_indexer_k_fused(
   k_params.x = x;
   k_params.wk = wk_->weight();
   k_params.wproj = wproj_weight;
-  k_params.sin_table = rotary_emb_->get_sin_cache();
-  k_params.cos_table = rotary_emb_->get_cos_cache();
+  k_params.sin_table = get_sin_cache(rotary_emb_);
+  k_params.cos_table = get_cos_cache(rotary_emb_);
   k_params.position_id = positions;
   k_params.slot_mapping = attn_metadata.slot_mapping;
   k_params.head_weights = head_weights;

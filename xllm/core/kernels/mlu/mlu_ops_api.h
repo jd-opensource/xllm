@@ -125,6 +125,27 @@ void masked_indexer_select_paged_kv(
     const torch::Tensor& sparse_block_table,
     const torch::Tensor& sparse_context_lens);
 
+// Torch-based implementation of masked_indexer_select_paged_kv using pure
+// PyTorch ops. Only supports non-quantized dtypes (bfloat16/half). For
+// quantized dtypes, use the fused kernel version above.
+void masked_indexer_select_paged_kv_torch(
+    const torch::Tensor& query,
+    const torch::Tensor& k_cache,
+    const torch::Tensor& weights,
+    const torch::Tensor& kv_cache_block_table,
+    const std::optional<torch::Tensor>& cu_seq_q_lens,
+    const std::optional<torch::Tensor>& cu_seq_k_lens,
+    const std::optional<torch::Tensor>& k_context_lens,
+    const std::optional<torch::Tensor>& k_cache_block_table,
+    const bool is_prefill,
+    const int64_t index_topk,
+    const int64_t kv_cache_block_size,
+    const double softmax_scale,
+    const std::optional<torch::Tensor>& q_scale,
+    const std::optional<torch::Tensor>& k_scale_cache,
+    torch::Tensor& sparse_block_table,
+    torch::Tensor& sparse_context_lens);
+
 void fused_layernorm(const torch::Tensor& input,
                      torch::Tensor& output,
                      const std::optional<torch::Tensor>& residual,

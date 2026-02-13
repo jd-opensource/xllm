@@ -133,6 +133,7 @@ struct ModelArgs {
   PROPERTY(int32_t, index_head_dim) = 0;
   PROPERTY(int32_t, index_n_heads) = 0;
   PROPERTY(int32_t, index_topk) = 0;
+  PROPERTY(bool, indexer_rope_interleave) = false;
 
   PROPERTY(int32_t, vision_start_token_id) = 0;
   PROPERTY(int32_t, vision_end_token_id) = 0;

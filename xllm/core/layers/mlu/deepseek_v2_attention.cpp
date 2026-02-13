@@ -103,32 +103,18 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   w_kc_ = weights.slice(1, 0, qk_nope_head_dim_);
   w_vc_ = weights.slice(1, qk_nope_head_dim_, qk_nope_head_dim_ + v_head_dim_);
 
-  // Helper lambda to create DeepseekScalingRotaryEmbedding instances
-  auto create_rotary_emb = [&](const std::string& name, bool interleaved) {
-    return register_module(
-        name,
-        DeepseekScalingRotaryEmbedding(
-            qk_rope_head_dim_,
-            qk_rope_head_dim_,
-            max_position_embeddings,
-            args.rope_scaling_original_max_position_embeddings(),
-            args.rope_theta(),
-            interleaved,
-            args.rope_scaling_factor(),
-            args.rope_extrapolation_factor(),
-            args.rope_scaling_attn_factor(),
-            args.rope_scaling_beta_fast(),
-            args.rope_scaling_beta_slow(),
-            args.rope_scaling_mscale(),
-            args.rope_scaling_mscale_all_dim(),
-            options));
-  };
-
-  rotary_emb_ = create_rotary_emb("rotary_emb", interleaved_);
+  // Create rotary embedding using factory function based on rope_type
+  // Using shared_ptr directly, no need for register_module since buffers are
+  // registered inside the impl constructors
+  rotary_emb_ = create_rotary_embedding(
+      args, qk_rope_head_dim_, max_position_embeddings, interleaved_, options);
 
   // indexer rotary embedding for lighting indexer
-  //  DeepSeek V3.2 use interleaved=false as default
-  indexer_rotary_emb_ = create_rotary_emb("indexer_rotary_emb", false);
+  indexer_rotary_emb_ = create_rotary_embedding(args,
+                                                qk_rope_head_dim_,
+                                                max_position_embeddings,
+                                                args.indexer_rope_interleave(),
+                                                options);
 
   if (args.rope_scaling_rope_type() == "deepseek_yarn") {
     float mscale = layer::rotary::yarn_get_mscale(
@@ -195,11 +181,12 @@ void DeepseekV2AttentionImpl::decode_q_pre_base(
   auto q_nope_transposed = q_nope.transpose(0, 1);
   auto q_input_slice = q_input.slice(dim, 0, kv_lora_rank_).transpose(0, 1);
   torch::bmm_out(q_input_slice, q_nope_transposed, w_kc_);
-  rotary_emb_(q_pe,
-              positions,
-              attn_metadata.q_cu_seq_lens,
-              attn_metadata.max_query_len,
-              attn_metadata.is_prefill);
+  apply_rotary_embedding(rotary_emb_,
+                         q_pe,
+                         positions,
+                         attn_metadata.q_cu_seq_lens,
+                         attn_metadata.max_query_len,
+                         attn_metadata.is_prefill);
   q_input.slice(dim, kv_lora_rank_) = q_pe;
 }
 
@@ -214,11 +201,12 @@ void DeepseekV2AttentionImpl::decode_kv_pre_base(
                                         /*residual=*/std::nullopt,
                                         v_input));
   auto k_pe = latent_cache.slice(-1, kv_lora_rank_).unsqueeze(1);
-  rotary_emb_(k_pe,
-              positions,
-              attn_metadata.q_cu_seq_lens,
-              attn_metadata.max_query_len,
-              attn_metadata.is_prefill);
+  apply_rotary_embedding(rotary_emb_,
+                         k_pe,
+                         positions,
+                         attn_metadata.q_cu_seq_lens,
+                         attn_metadata.max_query_len,
+                         attn_metadata.is_prefill);
 }
 
 void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
@@ -247,8 +235,8 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
     fused_mla_q_params.weight_b = q_b_proj_->weight();
     fused_mla_q_params.weight_b_scale = q_b_proj_->per_channel_scale();
     fused_mla_q_params.weight_c = weight_c_;
-    fused_mla_q_params.sin = rotary_emb_->get_sin_cache();
-    fused_mla_q_params.cos = rotary_emb_->get_cos_cache();
+    fused_mla_q_params.sin = get_sin_cache(rotary_emb_);
+    fused_mla_q_params.cos = get_cos_cache(rotary_emb_);
     fused_mla_q_params.position_id = positions;
     fused_mla_q_params.quant_mode = "none";
     fused_mla_q_params.eps = eps_;
@@ -270,8 +258,8 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
       latent_cache.view({batch, seq, head_num, latent_cache.size(-1)});
   kernel::FusedMlaKVParams fused_mla_kv_params;
   fused_mla_kv_params.input_kv = latent_cache;
-  fused_mla_kv_params.sin = rotary_emb_->get_sin_cache();
-  fused_mla_kv_params.cos = rotary_emb_->get_cos_cache();
+  fused_mla_kv_params.sin = get_sin_cache(rotary_emb_);
+  fused_mla_kv_params.cos = get_cos_cache(rotary_emb_);
   fused_mla_kv_params.position_id = positions;
   fused_mla_kv_params.gamma = kv_a_layernorm_->weight();
   fused_mla_kv_params.kv_cache = kv_cache;
