@@ -714,22 +714,51 @@ torch::Tensor rejection_sample(RejectionSampleParams& params) {
 
 void masked_indexer_select_paged_kv(MaskedIndexerSelectPagedKVParams& params) {
 #if defined(USE_MLU)
-  mlu::masked_indexer_select_paged_kv(params.query,
-                                      params.k_cache,
-                                      params.weights,
-                                      params.kv_cache_block_table,
-                                      params.cu_seq_q_lens,
-                                      params.cu_seq_k_lens,
-                                      params.k_context_lens,
-                                      params.k_cache_block_table,
-                                      params.is_prefill,
-                                      params.index_topk,
-                                      params.kv_cache_block_size,
-                                      params.softmax_scale,
-                                      params.q_scale,
-                                      params.k_scale_cache,
-                                      params.sparse_block_table,
-                                      params.sparse_context_lens);
+  // Extract head_num from query tensor based on mode
+  // Prefill mode: query shape is [total_seq_q, head_num, head_size]
+  // Decode mode: query shape is [batch_num, seq_q, head_num, head_size]
+  int64_t head_num =
+      params.is_prefill ? params.query.size(1) : params.query.size(2);
+
+  // Fused kernel only supports head_num == 64 for now.
+  bool use_fused_kernel = head_num == 64;
+
+  if (use_fused_kernel) {
+    mlu::masked_indexer_select_paged_kv(params.query,
+                                        params.k_cache,
+                                        params.weights,
+                                        params.kv_cache_block_table,
+                                        params.cu_seq_q_lens,
+                                        params.cu_seq_k_lens,
+                                        params.k_context_lens,
+                                        params.k_cache_block_table,
+                                        params.is_prefill,
+                                        params.index_topk,
+                                        params.kv_cache_block_size,
+                                        params.softmax_scale,
+                                        params.q_scale,
+                                        params.k_scale_cache,
+                                        params.sparse_block_table,
+                                        params.sparse_context_lens);
+  } else {
+    // Torch-based implementation supports any head_num.
+    mlu::masked_indexer_select_paged_kv_torch(params.query,
+                                              params.k_cache,
+                                              params.weights,
+                                              params.kv_cache_block_table,
+                                              params.cu_seq_q_lens,
+                                              params.cu_seq_k_lens,
+                                              params.k_context_lens,
+                                              params.k_cache_block_table,
+                                              params.is_prefill,
+                                              params.index_topk,
+                                              params.kv_cache_block_size,
+                                              params.softmax_scale,
+                                              params.q_scale,
+                                              params.k_scale_cache,
+                                              params.sparse_block_table,
+                                              params.sparse_context_lens);
+  }
 #else
   NOT_IMPLEMENTED();
 #endif
