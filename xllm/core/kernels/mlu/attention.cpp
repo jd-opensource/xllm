@@ -202,6 +202,11 @@ void masked_indexer_select_paged_kv_torch(
   auto base_dtype = torch::kBFloat16;  // Use bfloat16 for computation
   int64_t head_num, head_size, batch_num;
 
+  // Pre-copy cumulative sequence lengths to CPU to avoid per-iteration sync
+  torch::Tensor cu_seq_q_lens_cpu;
+  torch::Tensor cu_seq_k_lens_cpu;
+  torch::Tensor k_context_lens_cpu;
+
   // Get dimensions based on mode
   if (is_prefill) {
     // Prefill mode: query is [total_seq_q, head_num, head_size]
@@ -213,6 +218,17 @@ void masked_indexer_select_paged_kv_torch(
     batch_num = query.size(0);
     head_num = query.size(2);
     head_size = query.size(3);
+  }
+
+  // One-time copy to CPU to eliminate per-iteration .item<>() synchronization
+  if (cu_seq_q_lens.has_value()) {
+    cu_seq_q_lens_cpu = cu_seq_q_lens.value().to(torch::kCPU);
+  }
+  if (cu_seq_k_lens.has_value()) {
+    cu_seq_k_lens_cpu = cu_seq_k_lens.value().to(torch::kCPU);
+  }
+  if (k_context_lens.has_value()) {
+    k_context_lens_cpu = k_context_lens.value().to(torch::kCPU);
   }
 
   // Convert query to base dtype for computation
@@ -227,14 +243,16 @@ void masked_indexer_select_paged_kv_torch(
 
     if (is_prefill) {
       // Prefill mode: get context length from cumulative sequence lengths
-      context_lens_i = (cu_seq_k_lens.value()[i + 1] - cu_seq_k_lens.value()[i])
-                           .item<int64_t>();
-      q_offset = cu_seq_q_lens.value()[i].item<int64_t>();
-      seq_q = (cu_seq_q_lens.value()[i + 1] - cu_seq_q_lens.value()[i])
-                  .item<int64_t>();
+      // Use CPU accessor (zero synchronization)
+      auto cu_q_accessor = cu_seq_q_lens_cpu.accessor<int32_t, 1>();
+      auto cu_k_accessor = cu_seq_k_lens_cpu.accessor<int32_t, 1>();
+
+      context_lens_i = cu_k_accessor[i + 1] - cu_k_accessor[i];
+      q_offset = cu_q_accessor[i];
+      seq_q = cu_q_accessor[i + 1] - cu_q_accessor[i];
 
       // Get k_cache slice for this batch
-      int64_t k_start = cu_seq_k_lens.value()[i].item<int64_t>();
+      int64_t k_start = cu_k_accessor[i];
       ki = k_cache.slice(
           0, k_start, k_start + context_lens_i);  // [context_lens_i, head_size]
       ki = ki.to(base_dtype);
@@ -248,7 +266,9 @@ void masked_indexer_select_paged_kv_torch(
       weights_i = weights.slice(0, q_offset, q_offset + seq_q);
     } else {
       // Decode mode: get context length from k_context_lens
-      context_lens_i = k_context_lens.value()[i].item<int64_t>();
+      // Use CPU accessor (zero synchronization)
+      auto context_lens_accessor = k_context_lens_cpu.accessor<int32_t, 1>();
+      context_lens_i = context_lens_accessor[i];
       seq_q = query.size(1);
 
       // Get k_cache from block table
