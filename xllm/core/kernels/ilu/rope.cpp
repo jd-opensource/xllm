@@ -24,7 +24,7 @@ void apply_rope_pos_ids_cos_sin_cache(torch::Tensor& query,
                                       torch::Tensor& positions,
                                       bool interleave) {
   const int64_t head_size = cos_sin_cache.size(-1);
-  infer::vllm_rotary_embedding(
+  infer::xllm_rotary_embedding(
       positions, query, key, head_size, cos_sin_cache, !interleave);
 }
 

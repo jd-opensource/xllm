@@ -74,7 +74,7 @@ void batch_prefill(torch::Tensor& query,
                    const std::optional<torch::Tensor>& q_quant_scale,
                    const std::optional<torch::Tensor>& k_quant_scale,
                    const std::optional<torch::Tensor>& v_quant_scale,
-                   const std::optional<torch::Tensor>& block_tables,
+                   const torch::Tensor& block_tables,
                    int64_t max_query_len,
                    int64_t max_seq_len,
                    float scale,
@@ -110,7 +110,6 @@ void residual_layer_norm(torch::Tensor& input,
                          torch::Tensor& output,
                          std::optional<torch::Tensor>& residual,
                          torch::Tensor& weight,
-                         std::optional<torch::Tensor>& beta,
                          std::optional<torch::Tensor>& bias,
                          std::optional<torch::Tensor>& residual_out,
                          double eps);
@@ -124,4 +123,31 @@ torch::Tensor matmul(torch::Tensor a,
                      torch::Tensor b,
                      std::optional<torch::Tensor> bias);
 
+std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
+    const torch::Tensor& input,
+    int64_t topk,
+    int64_t num_expert_group,
+    int64_t topk_group,
+    bool normalize,
+    const std::optional<torch::Tensor>& mask,
+    const std::string& normed_by,
+    const std::string& scoring_func,
+    double route_scale,
+    const std::optional<torch::Tensor>& e_score_correction_bias);
+
+std::vector<torch::Tensor> moe_gen_idx(torch::Tensor& expert_id,
+                                       int64_t expert_num);
+
+torch::Tensor moe_expand_input(const torch::Tensor& input,
+                               const torch::Tensor& gather_index,
+                               const torch::Tensor& combine_idx,
+                               int64_t topk);
+
+torch::Tensor group_gemm(torch::Tensor& input,
+                         torch::Tensor& weight,
+                         torch::Tensor& tokens_per_experts,
+                         const std::optional<torch::Tensor>& dst_to_src,
+                         torch::Tensor& output);
+
+torch::Tensor moe_combine_result(torch::Tensor& input, torch::Tensor& weight);
 }  // namespace xllm::kernel::ilu

@@ -122,4 +122,5 @@ cc_library(
     torch
     torch_npu
     xllm_kernels
+    nnopbase
 )

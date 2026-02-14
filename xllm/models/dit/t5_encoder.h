@@ -30,9 +30,9 @@ limitations under the License.
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
-#include "dit_linear.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
+#include "xllm/core/layers/common/add_matmul.h"
 
 namespace xllm {
 // T5 model compatible with huggingface weights
@@ -96,13 +96,17 @@ class T5DenseActDenseImpl : public T5DenseInterface {
   explicit T5DenseActDenseImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    wi_ = register_module(
-        "wi", DiTLinear(model_args.d_model(), model_args.d_ff(), false));
-    wo_ = register_module(
-        "wo", DiTLinear(model_args.d_ff(), model_args.d_model(), false));
+    wi_ = register_module("wi",
+                          layer::AddMatmul(model_args.d_model(),
+                                           model_args.d_ff(),
+                                           /*with_bias=*/false,
+                                           options));
+    wo_ = register_module("wo",
+                          layer::AddMatmul(model_args.d_ff(),
+                                           model_args.d_model(),
+                                           /*with_bias=*/false,
+                                           options));
 
-    wi_->to(options);
-    wo_->to(options);
     if (model_args.act_fn() == "relu") {
       act_ = register_module("act", torch::nn::Functional(torch::relu));
     } else if (model_args.act_fn() == "gelu_new") {
@@ -115,10 +119,6 @@ class T5DenseActDenseImpl : public T5DenseInterface {
   torch::Tensor forward(const torch::Tensor& hidden_states) {
     torch::Tensor hidden = wi_->forward(hidden_states);
     hidden = act_(hidden);
-    if (wo_->weight.dtype() != torch::kInt8 &&
-        hidden.dtype() != wo_->weight.dtype()) {
-      hidden = hidden.to(wo_->weight.dtype());
-    }
     hidden = wo_->forward(hidden);
     return hidden;
   }
@@ -136,8 +136,8 @@ class T5DenseActDenseImpl : public T5DenseInterface {
   }
 
  private:
-  DiTLinear wi_ = nullptr;
-  DiTLinear wo_ = nullptr;
+  layer::AddMatmul wi_ = nullptr;
+  layer::AddMatmul wo_ = nullptr;
   torch::nn::Functional act_ = nullptr;
 };
 
@@ -146,16 +146,22 @@ class T5DenseGatedActDenseImpl : public T5DenseInterface {
   explicit T5DenseGatedActDenseImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    wi_0_ = register_module(
-        "wi_0", DiTLinear(model_args.d_model(), model_args.d_ff(), false));
-    wi_1_ = register_module(
-        "wi_1", DiTLinear(model_args.d_model(), model_args.d_ff(), false));
-    wo_ = register_module(
-        "wo", DiTLinear(model_args.d_ff(), model_args.d_model(), false));
+    wi_0_ = register_module("wi_0",
+                            layer::AddMatmul(model_args.d_model(),
+                                             model_args.d_ff(),
+                                             /*with_bias=*/false,
+                                             options));
+    wi_1_ = register_module("wi_1",
+                            layer::AddMatmul(model_args.d_model(),
+                                             model_args.d_ff(),
+                                             /*with_bias=*/false,
+                                             options));
+    wo_ = register_module("wo",
+                          layer::AddMatmul(model_args.d_ff(),
+                                           model_args.d_model(),
+                                           /*with_bias=*/false,
+                                           options));
 
-    wi_0_->to(options);
-    wi_1_->to(options);
-    wo_->to(options);
     if (model_args.act_fn() == "relu") {
       act_ = register_module("act", torch::nn::Functional(torch::relu));
     } else if (model_args.act_fn() == "gelu_new") {
@@ -169,10 +175,6 @@ class T5DenseGatedActDenseImpl : public T5DenseInterface {
     torch::Tensor hidden_gelu = act_(wi_0_->forward(hidden_states));
     torch::Tensor hidden_linear = wi_1_->forward(hidden_states);
     torch::Tensor new_hidden_states = hidden_gelu * hidden_linear;
-    if (wo_->weight.dtype() != torch::kInt8 &&
-        new_hidden_states.dtype() != wo_->weight.dtype()) {
-      new_hidden_states = new_hidden_states.to(wo_->weight.dtype());
-    }
     new_hidden_states = wo_->forward(new_hidden_states);
     return new_hidden_states;
   }
@@ -193,9 +195,9 @@ class T5DenseGatedActDenseImpl : public T5DenseInterface {
   }
 
  private:
-  DiTLinear wi_0_ = nullptr;
-  DiTLinear wi_1_ = nullptr;
-  DiTLinear wo_ = nullptr;
+  layer::AddMatmul wi_0_ = nullptr;
+  layer::AddMatmul wi_1_ = nullptr;
+  layer::AddMatmul wo_ = nullptr;
   torch::nn::Functional act_ = nullptr;
 };
 
@@ -270,36 +272,6 @@ find_pruneable_heads_and_indices(
   return {heads_to_prune, index};
 }
 
-DiTLinear prune_linear_layer(const DiTLinear& layer,
-                             const torch::Tensor& index,
-                             int64_t dim = 0) {
-  torch::Device device = layer->weight.device();
-  torch::Tensor pruned_weight =
-      layer->weight.index_select(dim, index.to(device)).detach().clone();
-  std::optional<torch::Tensor> pruned_bias = std::nullopt;
-  if (layer->bias.defined()) {
-    if (dim == 1) {
-      pruned_bias = layer->bias.detach().clone();
-    } else {
-      pruned_bias = layer->bias.index({index.to(device)}).detach().clone();
-    }
-  }
-
-  DiTLinear new_layer(
-      pruned_weight.size(1), pruned_weight.size(0), pruned_bias.has_value());
-  new_layer->weight.requires_grad_(false);
-  new_layer->weight.copy_(pruned_weight.contiguous());
-  new_layer->weight.requires_grad_(true);
-
-  if (pruned_bias.has_value()) {
-    new_layer->bias.requires_grad_(false);
-    new_layer->bias.copy_(pruned_bias.value().contiguous());
-    new_layer->bias.requires_grad_(true);
-  }
-
-  return new_layer;
-}
-
 class T5AttentionImpl : public torch::nn::Module {
  public:
   T5AttentionImpl(const ModelContext& context,
@@ -318,38 +290,23 @@ class T5AttentionImpl : public torch::nn::Module {
         model_args.relative_attention_max_distance();
 
     inner_dim_ = n_heads_ * key_value_proj_dim_;
-    q_ = register_module("q", DiTLinear(d_model_, inner_dim_, false));
-    k_ = register_module("k", DiTLinear(d_model_, inner_dim_, false));
-    v_ = register_module("v", DiTLinear(d_model_, inner_dim_, false));
-    o_ = register_module("o", DiTLinear(inner_dim_, d_model_, false));
-
-    q_->to(options);
-    k_->to(options);
-    v_->to(options);
-    o_->to(options);
+    q_ = register_module(
+        "q",
+        layer::AddMatmul(d_model_, inner_dim_, /*with_bias=*/false, options));
+    k_ = register_module(
+        "k",
+        layer::AddMatmul(d_model_, inner_dim_, /*with_bias=*/false, options));
+    v_ = register_module(
+        "v",
+        layer::AddMatmul(d_model_, inner_dim_, /*with_bias=*/false, options));
+    o_ = register_module(
+        "o",
+        layer::AddMatmul(inner_dim_, d_model_, /*with_bias=*/false, options));
 
     if (has_relative_attention_bias_) {
       relative_attention_bias_ = register_module(
           "relative_attention_bias",
           torch::nn::Embedding(relative_attention_num_buckets_, n_heads_));
-    }
-  }
-
-  void prune_heads(const std::vector<int64_t>& heads,
-                   torch::ScalarType dtype = torch::kBFloat16) {
-    if (heads.empty()) return;
-
-    auto [new_heads, indices] = find_pruneable_heads_and_indices(
-        heads, n_heads_, key_value_proj_dim_, pruned_heads_, dtype);
-    if (new_heads.empty()) return;
-    q_ = prune_linear_layer(q_, indices);
-    k_ = prune_linear_layer(k_, indices);
-    v_ = prune_linear_layer(v_, indices);
-    o_ = prune_linear_layer(o_, indices, 1);
-    n_heads_ -= new_heads.size();
-    inner_dim_ = key_value_proj_dim_ * n_heads_;
-    for (int64_t h : new_heads) {
-      pruned_heads_.insert(h);
     }
   }
 
@@ -407,18 +364,7 @@ class T5AttentionImpl : public torch::nn::Module {
         curr_position_bias = curr_position_bias + causal_mask;
       }
     }
-    if (!pruned_heads_.empty()) {
-      torch::Tensor head_mask =
-          torch::ones(n_heads_ + pruned_heads_.size(), torch::kBool)
-              .to(scores.device());
-      for (int64_t pruned : pruned_heads_) {
-        head_mask[pruned] = false;
-      }
-      curr_position_bias = curr_position_bias.index({torch::indexing::Slice(),
-                                                     head_mask,
-                                                     torch::indexing::Slice(),
-                                                     torch::indexing::Slice()});
-    }
+
     scores += curr_position_bias;
     torch::Tensor attn_weights =
         torch::softmax(scores.to(torch::kFloat), -1).to(scores.dtype());
@@ -540,13 +486,12 @@ class T5AttentionImpl : public torch::nn::Module {
   int64_t n_heads_;
   int64_t inner_dim_;
   std::optional<int64_t> layer_idx_;
-  DiTLinear q_ = nullptr;
-  DiTLinear k_ = nullptr;
-  DiTLinear v_ = nullptr;
-  DiTLinear o_ = nullptr;
+  layer::AddMatmul q_ = nullptr;
+  layer::AddMatmul k_ = nullptr;
+  layer::AddMatmul v_ = nullptr;
+  layer::AddMatmul o_ = nullptr;
   torch::nn::Embedding relative_attention_bias_ = nullptr;
   bool is_relative_attention_bias_loaded_ = false;
-  std::unordered_set<int64_t> pruned_heads_;
 };
 TORCH_MODULE(T5Attention);
 

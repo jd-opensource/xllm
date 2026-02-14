@@ -38,10 +38,14 @@ struct Reader {
   // AVIO read callback
   static int32_t read(void* opaque, uint8_t* buf, int32_t buf_size) {
     auto* mc = static_cast<MemCtx*>(opaque);
-    if (mc->offset < 0) return AVERROR(EINVAL);
+    if (mc->offset < 0) {
+      return AVERROR(EINVAL);
+    }
     int64_t remain = mc->size - mc->offset;
     int64_t n = std::min(remain, static_cast<int64_t>(buf_size));
-    if (n <= 0) return AVERROR_EOF;
+    if (n <= 0) {
+      return AVERROR_EOF;
+    }
     std::memcpy(buf, mc->mem_ptr + mc->offset, static_cast<size_t>(n));
     mc->offset += n;
     return static_cast<int32_t>(n);
@@ -70,7 +74,9 @@ struct Reader {
         return AVERROR(EINVAL);
     }
 
-    if (pos < 0 || pos > mc->size) return AVERROR(EINVAL);
+    if (pos < 0 || pos > mc->size) {
+      return AVERROR(EINVAL);
+    }
 
     mc->offset = pos;
     return pos;
@@ -100,58 +106,52 @@ class MemoryMediaReader {
     if (codec_ctx_) {
       avcodec_free_context(&codec_ctx_);
     }
-    // if opened via avformat_open_input, close with avformat_close_input
-    // otherwise free with avformat_free_context
     if (fmt_ctx_) {
-      if (opened_) {
-        avformat_close_input(&fmt_ctx_);
-      } else {
-        avformat_free_context(fmt_ctx_);
-      }
+      avformat_close_input(&fmt_ctx_);
     }
     if (avio_ctx_) {
       av_freep(&avio_ctx_->buffer);
       avio_context_free(&avio_ctx_);
+    } else if (avio_buf_) {
+      av_freep(reinterpret_cast<void**>(&avio_buf_));
     }
   }
 
   bool init(AVMediaType type) {
     fmt_ctx_ = avformat_alloc_context();
+    if (!fmt_ctx_) {
+      return false;
+    }
     constexpr int32_t avio_buf_sz = 1 << 16;
-    uint8_t* avio_buf =
+    avio_buf_ =
         static_cast<uint8_t*>(av_malloc(static_cast<size_t>(avio_buf_sz)));
-    if (!fmt_ctx_ || !avio_buf) {
-      if (fmt_ctx_) {
-        avformat_free_context(fmt_ctx_);
-        fmt_ctx_ = nullptr;
-      }
-      if (avio_buf) av_free(avio_buf);
+    if (!avio_buf_) {
       return false;
     }
 
     avio_ctx_ = avio_alloc_context(
-        avio_buf, avio_buf_sz, 0, &mc_, &Reader::read, nullptr, &Reader::seek);
+        avio_buf_, avio_buf_sz, 0, &mc_, &Reader::read, nullptr, &Reader::seek);
     if (!avio_ctx_) {
-      av_free(avio_buf);
-      avformat_free_context(fmt_ctx_);
-      fmt_ctx_ = nullptr;
       return false;
     }
+    avio_buf_ = nullptr;
 
     avio_ctx_->seekable = AVIO_SEEKABLE_NORMAL;
     fmt_ctx_->pb = avio_ctx_;
     fmt_ctx_->flags |= AVFMT_FLAG_CUSTOM_IO;
 
-    if (avformat_open_input(&fmt_ctx_, nullptr, nullptr, nullptr) < 0)
+    if (avformat_open_input(&fmt_ctx_, nullptr, nullptr, nullptr) < 0) {
       return false;
-    opened_ = true;
+    }
 
     if (avformat_find_stream_info(fmt_ctx_, nullptr) < 0) {
       return false;
     }
 
     stream_index_ = av_find_best_stream(fmt_ctx_, type, -1, -1, nullptr, 0);
-    if (stream_index_ < 0) return false;
+    if (stream_index_ < 0) {
+      return false;
+    }
 
     AVStream* st = fmt_ctx_->streams[stream_index_];
     const AVCodec* codec = avcodec_find_decoder(st->codecpar->codec_id);
@@ -169,25 +169,20 @@ class MemoryMediaReader {
       return false;
     }
 
-    return true;
-  }
-
-  bool decode() {
-    if (!fmt_ctx_ || !codec_ctx_ || stream_index_ < 0) {
-      return false;
-    }
-
-    if (!pkt_) {
-      pkt_ = av_packet_alloc();
-    }
-    if (!frm_) {
-      frm_ = av_frame_alloc();
-    }
+    pkt_ = av_packet_alloc();
+    frm_ = av_frame_alloc();
     if (!pkt_ || !frm_) {
       return false;
     }
 
-    // Read packets, send to decoder, pull frames
+    return true;
+  }
+
+  bool decode() {
+    CHECK(fmt_ctx_ && codec_ctx_ && pkt_ && frm_) << "ffmpeg init failed";
+    CHECK_GE(stream_index_, 0) << "stream index not found";
+
+    // read packets, send to decoder, pull frames
     while (av_read_frame(fmt_ctx_, pkt_) >= 0) {
       if (pkt_->stream_index == stream_index_) {
         if (avcodec_send_packet(codec_ctx_, pkt_) == 0) {
@@ -219,13 +214,13 @@ class MemoryMediaReader {
 
  protected:
   AVFormatContext* fmt_ctx_ = nullptr;
+  uint8_t* avio_buf_ = nullptr;
   AVIOContext* avio_ctx_ = nullptr;
   AVCodecContext* codec_ctx_ = nullptr;
   AVPacket* pkt_ = nullptr;
   AVFrame* frm_ = nullptr;
   MemCtx mc_{nullptr, 0, 0};
   int32_t stream_index_ = -1;
-  bool opened_ = false;
 };
 
 class MemoryVideoReader : public MemoryMediaReader {
@@ -258,7 +253,7 @@ class MemoryVideoReader : public MemoryMediaReader {
   }
 
   bool read(torch::Tensor& tensor, VideoMetadata& metadata) {
-    frames_.clear();
+    CHECK(frames_.empty()) << "frames is not cleared before read";
 
     if (!decode()) {
       return false;
@@ -269,9 +264,10 @@ class MemoryVideoReader : public MemoryMediaReader {
 
     tensor = torch::stack(frames_);  // [T,C,H,W]
     metadata.total_num_frames = static_cast<int64_t>(frames_.size());
-    metadata.duration = (metadata.fps > 0.0)
-                            ? (double)metadata.total_num_frames / metadata.fps
-                            : 0.0;
+    metadata.duration =
+        (metadata.fps > 0.0)
+            ? static_cast<double>(metadata.total_num_frames) / metadata.fps
+            : 0.0;
     return true;
   }
 
@@ -313,7 +309,9 @@ class MemoryVideoReader : public MemoryMediaReader {
         return false;
       }
     }
-    if (av_frame_make_writable(rgb_frame_) < 0) return false;
+    if (av_frame_make_writable(rgb_frame_) < 0) {
+      return false;
+    }
 
     // convert the current decoded frame into RGB24
     if (sws_scale(sws_ctx_,
@@ -359,9 +357,6 @@ class MemoryAudioReader : public MemoryMediaReader {
   }
 
   bool init(AudioMetadata& metadata) {
-    target_sr_ = 16000;
-    target_ch_ = 1;
-
     if (!MemoryMediaReader::init(AVMEDIA_TYPE_AUDIO)) {
       return false;
     }
@@ -376,7 +371,9 @@ class MemoryAudioReader : public MemoryMediaReader {
     }
 
     AVChannelLayout in_layout;
-    av_channel_layout_copy(&in_layout, &codec_ctx_->ch_layout);
+    if (av_channel_layout_copy(&in_layout, &codec_ctx_->ch_layout) < 0) {
+      return false;
+    }
 
     AVChannelLayout out_layout;
     av_channel_layout_default(&out_layout, static_cast<int32_t>(target_ch_));
@@ -392,7 +389,6 @@ class MemoryAudioReader : public MemoryMediaReader {
                             nullptr) < 0) {
       av_channel_layout_uninit(&out_layout);
       av_channel_layout_uninit(&in_layout);
-      swr_free(&swr_ctx_);
       return false;
     }
 
@@ -404,13 +400,11 @@ class MemoryAudioReader : public MemoryMediaReader {
     if (target_ch_ == 1 && in_ch == 2) {
       constexpr double matrix[2] = {0.5, 0.5};
       if (swr_set_matrix(swr_ctx_, matrix, in_ch) < 0) {
-        swr_free(&swr_ctx_);
         return false;
       }
     }
 
     if (swr_init(swr_ctx_) < 0) {
-      swr_free(&swr_ctx_);
       return false;
     }
 
@@ -422,50 +416,31 @@ class MemoryAudioReader : public MemoryMediaReader {
   }
 
   bool read(torch::Tensor& tensor, AudioMetadata& metadata) {
-    pcm_.clear();
+    CHECK(swr_ctx_) << "SwrContext is null";
+    CHECK(pcm_.empty()) << "PCM buffer is not cleared before read";
 
-    if (!swr_ctx_) {
-      return false;
-    }
     if (!decode()) {
       return false;
     }
 
-    // flush resampler buffered samples after decoder flush
+    // flush resampler buffered samples after decode
     while (true) {
-      int32_t out_nb = swr_get_out_samples(swr_ctx_, 0);
-      if (out_nb <= 0) {
+      if (resample_to_pcm(nullptr, 0) <= 0) {
         break;
       }
-
-      std::vector<float> out_buf(static_cast<size_t>(out_nb) *
-                                 static_cast<size_t>(target_ch_));
-      uint8_t* out_data[1] = {reinterpret_cast<uint8_t*>(out_buf.data())};
-
-      int32_t converted = swr_convert(swr_ctx_, out_data, out_nb, nullptr, 0);
-      if (converted < 0) {
-        return false;
-      }
-      if (converted == 0) {
-        break;
-      }
-
-      const int64_t n = static_cast<int64_t>(converted) * target_ch_;
-      pcm_.reserve(pcm_.size() + static_cast<size_t>(n));
-      pcm_.insert(pcm_.end(), out_buf.data(), out_buf.data() + n);
     }
 
     if (pcm_.empty()) {
       return false;
     }
 
-    // build output tensor and compute duration from samples
+    // build output tensor and compute metadata
     if (target_ch_ == 1) {
       tensor = torch::from_blob(pcm_.data(),
                                 {static_cast<int64_t>(pcm_.size())},
                                 torch::TensorOptions().dtype(torch::kFloat32))
                    .clone();
-      metadata.duration = (double)pcm_.size() / (double)target_sr_;
+      metadata.duration = static_cast<double>(pcm_.size()) / target_sr_;
     } else {
       int64_t T =
           static_cast<int64_t>(pcm_.size() / static_cast<size_t>(target_ch_));
@@ -474,7 +449,7 @@ class MemoryAudioReader : public MemoryMediaReader {
                                 torch::TensorOptions().dtype(torch::kFloat32))
                    .permute({1, 0})
                    .clone();
-      metadata.duration = (double)T / (double)target_sr_;
+      metadata.duration = static_cast<double>(T) / target_sr_;
     }
     metadata.sample_rate = target_sr_;
     metadata.num_channels = target_ch_;
@@ -482,32 +457,38 @@ class MemoryAudioReader : public MemoryMediaReader {
   }
 
   bool handle_frame(AVFrame* f) override {
-    int32_t out_nb = swr_get_out_samples(swr_ctx_, f->nb_samples);
+    return resample_to_pcm((const uint8_t**)f->extended_data, f->nb_samples) >=
+           0;
+  }
+
+  int32_t resample_to_pcm(const uint8_t** in_data, int32_t nb_samples) {
+    int32_t out_nb = swr_get_out_samples(swr_ctx_, nb_samples);
     if (out_nb < 0) {
-      return false;
+      return out_nb;
     }
     if (out_nb == 0) {
-      return true;
+      return 0;
     }
 
     std::vector<float> out_buf(static_cast<size_t>(out_nb) *
                                static_cast<size_t>(target_ch_));
     uint8_t* out_data[1] = {reinterpret_cast<uint8_t*>(out_buf.data())};
-    const uint8_t** in_data = (const uint8_t**)f->extended_data;
 
     // convert input frame samples to target format
     int32_t converted =
-        swr_convert(swr_ctx_, out_data, out_nb, in_data, f->nb_samples);
-
+        swr_convert(swr_ctx_, out_data, out_nb, in_data, nb_samples);
     if (converted < 0) {
-      return false;
+      return converted;
+    }
+    if (converted == 0) {
+      return 0;
     }
 
     // append converted samples to pcm buffer
     const int64_t n = static_cast<int64_t>(converted) * target_ch_;
     pcm_.reserve(pcm_.size() + static_cast<size_t>(n));
     pcm_.insert(pcm_.end(), out_buf.data(), out_buf.data() + n);
-    return true;
+    return converted;
   }
 
  private:

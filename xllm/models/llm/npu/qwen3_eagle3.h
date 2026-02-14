@@ -244,20 +244,6 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
     norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
   }
 
-  // Load d2t and t2d from root level state_dict (without prefix)
-  virtual void load_token_mappings(const StateDict& state_dict) {
-    // Handle d2t (draft-to-target) token mapping
-    // d2t stores diffs between draft id and target id
-    // hot_token_id = d2t + arange(d2t.size(0))
-    torch::Tensor d2t_tensor = state_dict.get_tensor("d2t");
-    if (d2t_tensor.defined()) {
-      // hot_token_id = d2t + arange(d2t.size(0))
-      hot_token_id_ = d2t_tensor + torch::arange(d2t_tensor.size(0));
-      LOG(INFO) << "Loaded d2t tensor, hot_token_id size: "
-                << hot_token_id_.size(0);
-    }
-  }
-
   virtual void verify_loaded_weights(const std::string& prefix) const {
     fc_->verify_loaded_weights(prefix + "fc.");
     decoder_->verify_loaded_weights(prefix + "midlayer.");
@@ -277,11 +263,6 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
   virtual void set_npu_word_embedding(
       layer::NpuWordEmbedding& npu_word_embedding) {
     embed_tokens_ = npu_word_embedding;
-  }
-
-  // Get hot_token_id for draft-to-target token mapping
-  torch::Tensor get_hot_token_id() const {
-    return hot_token_id_.to(options_.device());
   }
 
  protected:
@@ -304,14 +285,6 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
 
   // Decoder
   QWen3Eagle3DecoderLayer decoder_{nullptr};
-
-  // d2t (draft-to-target) token mapping
-  // hot_token_id = d2t + arange(d2t.size(0))
-  torch::Tensor hot_token_id_;
-
-  // t2d (target-to-draft) token mapping
-  // Maps target token ids to draft token ids
-  torch::Tensor t2d_;
 
   bool layer_forward_interrupted_ = false;
 };
@@ -366,9 +339,6 @@ class QWen3Eagle3ForCausalLMImpl : public torch::nn::Module {
     for (const auto& state_dict : loader->get_state_dicts()) {
       model_->load_state_dict(*state_dict);
 
-      // Load d2t and t2d from root level (always without prefix)
-      model_->load_token_mappings(*state_dict);
-
       if (!load_lm_head_from_target_) {
         if (tie_word_embeddings_) {
           npu_lm_head_->load_state_dict(
@@ -414,9 +384,6 @@ class QWen3Eagle3ForCausalLMImpl : public torch::nn::Module {
     model_->set_npu_word_embedding(npu_word_embedding);
   }
 
-  // Get hot_token_id for draft-to-target token mapping
-  torch::Tensor get_hot_token_id() const { return model_->get_hot_token_id(); }
-
  protected:
   QWen3Eagle3Model model_{nullptr};
   int device_id_ = 0;
@@ -444,9 +411,6 @@ REGISTER_MODEL_ARGS(qwen3_eagle3, [&] {
   LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-6);
   LOAD_ARG_OR(eos_token_id, "eos_token_id", 151643);
   LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
-
-  // EAGLE-3 specific parameters
-  LOAD_ARG_OR(vocab_size, "vocab_size", 0);
 
   // For qwen3/2.5 model < 7B, tie_word_embeddings = true
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);

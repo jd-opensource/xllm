@@ -59,7 +59,8 @@ void batch_prefill(const std::string& uri,
                    double sm_scale,
                    torch::Tensor output,
                    std::optional<torch::Tensor>& output_lse,
-                   bool enable_cuda_graph);
+                   bool enable_cuda_graph,
+                   const std::optional<torch::Tensor>& mask = std::nullopt);
 
 void batch_decode(const std::string& uri,
                   ffi::Array<int64_t> plan_info,
@@ -94,5 +95,19 @@ void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
 torch::Tensor matmul(torch::Tensor a,
                      torch::Tensor b,
                      std::optional<torch::Tensor> bias);
+
+std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search(
+    torch::Tensor combined_probs,
+    uint32_t batch_size,
+    uint32_t beam_size,
+    uint32_t top_k,
+    torch::Device device);
+
+std::pair<torch::Tensor, torch::Tensor> compute_topk_general(
+    torch::Tensor input,
+    uint32_t batch_size,
+    uint32_t input_length,
+    uint32_t k,
+    torch::Device device);
 
 }  // namespace xllm::kernel::cuda

@@ -20,6 +20,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <fstream>
+#include <source_location>
 #include <vector>
 
 namespace xllm {
@@ -72,20 +73,25 @@ inline torch::Tensor load_tensor(std::string filename) {
   return my_tensor;
 }
 
-inline void print_tensor(const torch::Tensor& tensor,
-                         const std::string& tensor_name = "tensor",
-                         int num = 10,
-                         bool part = true,
-                         bool print_value = true) {
+inline void print_tensor(
+    const torch::Tensor& tensor,
+    const std::string& tensor_name = "tensor",
+    int num = 10,
+    bool part = true,
+    bool print_value = true,
+    const std::source_location& loc = std::source_location::current()) {
+  auto& log_stream =
+      google::LogMessage(
+          loc.file_name(), static_cast<int>(loc.line()), google::GLOG_INFO)
+          .stream();
   if (!tensor.defined()) {
-    LOG(INFO) << tensor_name << ", Undefined tensor." << std::endl;
+    log_stream << tensor_name << ", Undefined tensor." << std::endl;
     return;
   }
 
-  LOG(INFO) << "======================================" << std::endl;
-  LOG(INFO) << tensor_name << ": " << tensor.sizes()
-            << ", dtype: " << tensor.dtype() << ", device: " << tensor.device()
-            << std::endl;
+  log_stream << tensor_name << ": " << tensor.sizes()
+             << ", dtype: " << tensor.dtype() << ", device: " << tensor.device()
+             << std::endl;
 
   if (!print_value) {
     return;
@@ -97,8 +103,8 @@ inline void print_tensor(const torch::Tensor& tensor,
     // const auto& front_elements = flat_tensor.slice(0, 0, max_elements);
     const auto& front_elements =
         flat_tensor.slice(0, 0, max_elements).to(torch::kCPU);
-    LOG(INFO) << "First " << max_elements << " elements: \n"
-              << front_elements << std::endl;
+    log_stream << "First " << max_elements << " elements: \n"
+               << front_elements << std::endl;
 
     int back_num = flat_tensor.size(0) > num ? num : flat_tensor.size(0);
     // const auto& back_elements = flat_tensor.slice(0, flat_tensor.size(0) -
@@ -107,10 +113,10 @@ inline void print_tensor(const torch::Tensor& tensor,
         flat_tensor
             .slice(0, flat_tensor.size(0) - back_num, flat_tensor.size(0))
             .to(torch::kCPU);
-    LOG(INFO) << "Last " << back_num << " elements: \n"
-              << back_elements << std::endl;
+    log_stream << "Last " << back_num << " elements: \n"
+               << back_elements << std::endl;
   } else {
-    LOG(INFO) << "All: \n" << tensor.to(torch::kCPU) << std::endl;
+    log_stream << "All: \n" << tensor.to(torch::kCPU) << std::endl;
   }
 }
 
@@ -325,6 +331,10 @@ inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
   tensor.set_(storage, 0, dims);
 #endif
   return tensor;
+}
+
+inline int32_t get_dtype_size(torch::ScalarType dtype) {
+  return static_cast<int32_t>(torch::elementSize(dtype));
 }
 
 }  // namespace xllm

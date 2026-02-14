@@ -16,6 +16,8 @@ limitations under the License.
 #include "xservice_client.h"
 
 #include <absl/strings/str_split.h>
+#include <folly/executors/GlobalExecutor.h>
+#include <folly/futures/Future.h>
 #include <glog/logging.h>
 
 #include "util/hash_util.h"
@@ -24,6 +26,8 @@ limitations under the License.
 namespace xllm {
 namespace {
 static std::string ETCD_MASTER_SERVICE_KEY = "XLLM:SERVICE:MASTER";
+static std::string ETCD_XSERVICES_KEY_PREFIX =
+    "XLLM:SERVICE:";  // all xllm_service registeration prefix
 static std::unordered_map<xllm_service::proto::InstanceType, std::string>
     ETCD_KEYS_PREFIX_MAP = {
         {xllm_service::proto::InstanceType::DEFAULT, "XLLM:DEFAULT:"},
@@ -34,7 +38,7 @@ static std::unordered_map<xllm_service::proto::InstanceType, std::string>
 
 std::string parse_instance_name(const std::string& name) {
   if (name.empty()) return "";
-  // Vlidate the format of instance name
+  // Validate the format of instance name
   // The format is `ip:port` currently.
   auto pos = name.find(':');
   if (pos == std::string::npos) {
@@ -73,37 +77,51 @@ bool XServiceClient::init(const std::string& etcd_addr,
 
   etcd_client_ = std::make_unique<EtcdClient>(etcd_addr);
 
+  // connect master xllm_service
   while (!etcd_client_->get_master_service(ETCD_MASTER_SERVICE_KEY,
-                                           &xservice_addr_)) {
+                                           &master_xservice_addr_)) {
     LOG(ERROR) << "Master service not set, wait 2s!";
     sleep(2);
   }
 
-  if (!check_instance_name(xservice_addr_)) {
+  if (!check_instance_name(master_xservice_addr_)) {
     LOG(FATAL) << "Invalid master service name format, now only support "
                   "`ip:port` style.";
     return false;
   }
 
-  xservice_channel_ = std::make_unique<brpc::Channel>();
-  if (xservice_channel_->Init(xservice_addr_.c_str(), "", &chan_options_) !=
-      0) {
-    LOG(FATAL) << "Fail to initialize xsevrice channel to server "
-               << xservice_addr_;
+  if (!connect_to_xservice(master_xservice_addr_)) {
+    LOG(FATAL) << "Fail to initialize connection to master xservice server "
+               << master_xservice_addr_;
     return false;
   }
-  xservice_stub_ = std::make_unique<xllm_service::proto::XllmRpcService_Stub>(
-      xservice_channel_.get());
+
+  // Get and connect to all existing xllm_service instances.
+  std::vector<std::string> all_services;
+  if (etcd_client_->get_all_xservices(ETCD_XSERVICES_KEY_PREFIX,
+                                      &all_services)) {
+    for (const auto& service_addr : all_services) {
+      if (service_addr != master_xservice_addr_ &&
+          check_instance_name(service_addr)) {
+        connect_to_xservice(service_addr);
+      }
+    }
+  }
 
   // heartbeat thread
   heartbeat_thread_ =
       std::make_unique<std::thread>(&XServiceClient::heartbeat, this);
 
-  auto func = std::bind(&XServiceClient::handle_master_service_watch,
-                        this,
-                        std::placeholders::_1);
+  // watch master xllm_service change
+  auto master_func = std::bind(&XServiceClient::handle_master_service_watch,
+                               this,
+                               std::placeholders::_1);
+  etcd_client_->add_watch(ETCD_MASTER_SERVICE_KEY, master_func);
 
-  etcd_client_->add_watch(ETCD_MASTER_SERVICE_KEY, func);
+  // watch all xllm_service changes
+  auto xservices_func = std::bind(
+      &XServiceClient::handle_xservices_watch, this, std::placeholders::_1);
+  etcd_client_->add_watch(ETCD_XSERVICES_KEY_PREFIX, xservices_func);
 
   block_manager_pool_ = block_manager_pool;
 
@@ -168,13 +186,19 @@ InstanceInfo XServiceClient::get_instance_info(
   xllm_service::proto::InstanceID req;
   xllm_service::proto::InstanceMetaInfo resp;
   req.set_name(instance_name);
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    xservice_stub_->GetInstanceInfo(&cntl, &req, &resp, nullptr);
+
+  std::string master_addr;
+  if (!with_master_stub(
+          [&](xllm_service::proto::XllmRpcService_Stub* master_stub) {
+            master_stub->GetInstanceInfo(&cntl, &req, &resp, nullptr);
+          },
+          &master_addr)) {
+    return result;
   }
+
   if (cntl.Failed()) {
     LOG(ERROR) << "Fail to get instance info from xservice server "
-               << xservice_addr_ << ", error text: " << cntl.ErrorText();
+               << master_addr << ", error text: " << cntl.ErrorText();
     return result;
   }
   result.name = resp.name();
@@ -263,15 +287,21 @@ void XServiceClient::heartbeat() {
     }
 
     xllm_service::proto::Status resp;
-    {
-      std::shared_lock<std::shared_mutex> lock(mutex_);
-      xservice_stub_->Heartbeat(&cntl, &req, &resp, nullptr);
+    std::string master_addr;
+    if (!with_master_stub(
+            [&](xllm_service::proto::XllmRpcService_Stub* master_stub) {
+              master_stub->Heartbeat(&cntl, &req, &resp, nullptr);
+            },
+            &master_addr)) {
+      continue;
     }
+
     if (cntl.Failed()) {
-      LOG(ERROR) << "Failed to send heartbeat to xservice " << xservice_addr_
-                 << ", error msg is: " << cntl.ErrorText();
+      LOG(ERROR) << "Failed to send heartbeat to master xservice "
+                 << master_addr << ", error msg is: " << cntl.ErrorText();
     } else if (!resp.ok()) {
-      LOG(ERROR) << "Failed to send heartbeat to xservice " << xservice_addr_;
+      LOG(ERROR) << "Failed to send heartbeat to master xservice "
+                 << master_addr;
     }
   }
 }
@@ -281,13 +311,19 @@ std::vector<std::string> XServiceClient::get_static_decode_list() {
   xllm_service::proto::InstanceID req;
   xllm_service::proto::InstanceIDs resp;
   req.set_name(instance_name_);
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    xservice_stub_->GetStaticDecodeList(&cntl, &req, &resp, nullptr);
+
+  std::string master_addr;
+  if (!with_master_stub(
+          [&](xllm_service::proto::XllmRpcService_Stub* master_stub) {
+            master_stub->GetStaticDecodeList(&cntl, &req, &resp, nullptr);
+          },
+          &master_addr)) {
+    return {};
   }
+
   if (cntl.Failed()) {
-    LOG(ERROR) << "Fail to get static decode list from xservice server "
-               << xservice_addr_ << ", error text: " << cntl.ErrorText();
+    LOG(ERROR) << "Fail to get static decode list from master xservice server "
+               << master_addr << ", error text: " << cntl.ErrorText();
     return {};
   }
   return std::vector<std::string>(resp.names().begin(), resp.names().end());
@@ -298,25 +334,74 @@ std::vector<std::string> XServiceClient::get_static_prefill_list() {
   xllm_service::proto::InstanceID req;
   xllm_service::proto::InstanceIDs resp;
   req.set_name(instance_name_);
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    xservice_stub_->GetStaticPrefillList(&cntl, &req, &resp, nullptr);
+
+  std::string master_addr;
+  if (!with_master_stub(
+          [&](xllm_service::proto::XllmRpcService_Stub* master_stub) {
+            master_stub->GetStaticPrefillList(&cntl, &req, &resp, nullptr);
+          },
+          &master_addr)) {
+    return {};
   }
+
   if (cntl.Failed()) {
-    LOG(ERROR) << "Fail to get static prefill list from xservice server "
-               << xservice_addr_ << ", error text: " << cntl.ErrorText();
+    LOG(ERROR) << "Fail to get static prefill list from master xservice server "
+               << master_addr << ", error text: " << cntl.ErrorText();
     return {};
   }
   return std::vector<std::string>(resp.names().begin(), resp.names().end());
 }
 
+std::vector<std::string> XServiceClient::get_all_xservice_addrs() {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
+  std::vector<std::string> addrs;
+  for (const auto& pair : xservice_stubs_) {
+    addrs.push_back(pair.first);
+  }
+  return addrs;
+}
+
 std::vector<bool> XServiceClient::generations(
     const std::vector<RequestOutput>& outputs) {
   std::vector<bool> results(outputs.size(), false);
-  // response to xllm service to avoid the redirect cost.
-  proto::DisaggStreamGenerations gens;
-  for (auto& output : outputs) {
-    // build xllm_service::proto::DisaggStreamGeneration
+  std::string master_addr;
+  {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    master_addr = master_xservice_addr_;
+  }
+
+  // group requests by target xllm_service
+  std::unordered_map<std::string, std::vector<size_t>> service_outputs_map;
+  std::unordered_map<std::string, proto::DisaggStreamGenerations>
+      service_requests_map;
+
+  auto mark_service_failed = [&](const std::string& service_addr) {
+    auto index_it = service_outputs_map.find(service_addr);
+    if (index_it == service_outputs_map.end()) {
+      return;
+    }
+    for (size_t idx : index_it->second) {
+      results[idx] = false;
+    }
+  };
+
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    const auto& output = outputs[i];
+    std::string target_service = master_addr;
+    if (!output.target_xservice_addr.empty()) {
+      target_service = output.target_xservice_addr;
+    }
+
+    if (target_service.empty()) {
+      LOG(ERROR) << "No target xservice address available for request_id: "
+                 << output.request_id;
+      continue;
+    }
+
+    service_outputs_map[target_service].push_back(i);
+
+    // construct the request to corresponding service
+    auto& gens = service_requests_map[target_service];
     proto::DisaggStreamGeneration* req = gens.mutable_gens()->Add();
     req->set_req_id(output.request_id);
     req->set_service_req_id(output.service_request_id);
@@ -337,7 +422,6 @@ std::vector<bool> XServiceClient::generations(
     }
     req->mutable_outputs()->Reserve(output.outputs.size());
     for (auto& seq_output : output.outputs) {
-      // proto::SequenceOutput proto_seq_out;
       auto proto_seq_out = req->mutable_outputs()->Add();
       proto_seq_out->set_index(seq_output.index);
       proto_seq_out->set_text(seq_output.text);
@@ -353,62 +437,228 @@ std::vector<bool> XServiceClient::generations(
       if (seq_output.logprobs.has_value()) {
         size_t logprobs_size = seq_output.logprobs.value().size();
         proto_seq_out->mutable_logprobs()->Reserve(logprobs_size);
-        for (size_t i = 0; i < logprobs_size; ++i) {
-          // proto::LogProb logprob;
+        for (size_t j = 0; j < logprobs_size; ++j) {
           auto logprob = proto_seq_out->mutable_logprobs()->Add();
           proto::LogProbData* log_prob_data = logprob->mutable_log_prob_data();
-          log_prob_data->set_token(seq_output.logprobs.value()[i].token);
-          log_prob_data->set_token_id(seq_output.logprobs.value()[i].token_id);
-          log_prob_data->set_logprob(seq_output.logprobs.value()[i].logprob);
+          log_prob_data->set_token(seq_output.logprobs.value()[j].token);
+          log_prob_data->set_token_id(seq_output.logprobs.value()[j].token_id);
+          log_prob_data->set_logprob(seq_output.logprobs.value()[j].logprob);
           log_prob_data->set_finished_token(
-              seq_output.logprobs.value()[i].finished_token);
-          if (seq_output.logprobs.value()[i].top_logprobs.has_value()) {
+              seq_output.logprobs.value()[j].finished_token);
+          if (seq_output.logprobs.value()[j].top_logprobs.has_value()) {
             size_t top_logprobs_size =
-                seq_output.logprobs.value()[i].top_logprobs.value().size();
-            for (size_t j = 0; j < top_logprobs_size; ++j) {
+                seq_output.logprobs.value()[j].top_logprobs.value().size();
+            for (size_t k = 0; k < top_logprobs_size; ++k) {
               proto::LogProbData* top_log_prob_data =
                   logprob->mutable_top_logprobs()->Add();
               top_log_prob_data->set_token(
-                  seq_output.logprobs.value()[i].top_logprobs.value()[j].token);
-              top_log_prob_data->set_token_id(seq_output.logprobs.value()[i]
-                                                  .top_logprobs.value()[j]
+                  seq_output.logprobs.value()[j].top_logprobs.value()[k].token);
+              top_log_prob_data->set_token_id(seq_output.logprobs.value()[j]
+                                                  .top_logprobs.value()[k]
                                                   .token_id);
-              top_log_prob_data->set_logprob(seq_output.logprobs.value()[i]
-                                                 .top_logprobs.value()[j]
+              top_log_prob_data->set_logprob(seq_output.logprobs.value()[j]
+                                                 .top_logprobs.value()[k]
                                                  .logprob);
               top_log_prob_data->set_finished_token(
-                  seq_output.logprobs.value()[i]
-                      .top_logprobs.value()[j]
+                  seq_output.logprobs.value()[j]
+                      .top_logprobs.value()[k]
                       .finished_token);
             }
           }
-          //*proto_seq_out.mutable_logprobs()->Add() = logprob;
         }
       }
-      //*req.mutable_outputs()->Add() = proto_seq_out;
     }
   }
-  proto::StatusSet resp;
-  brpc::Controller cntl;
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    xservice_stub_->Generations(&cntl, &gens, &resp, nullptr);
+
+  struct ServiceCallResult {
+    bool rpc_success = false;
+    std::vector<bool> all_status_ok;
+  };
+
+  std::vector<std::string> service_order;
+  service_order.reserve(service_requests_map.size());
+  std::vector<folly::SemiFuture<ServiceCallResult>> futures;
+  futures.reserve(service_requests_map.size());
+
+  // send requests to each xllm_service in parallel
+  for (const auto& pair : service_requests_map) {
+    const std::string service_addr = pair.first;
+    auto gens = std::make_shared<proto::DisaggStreamGenerations>(pair.second);
+    service_order.push_back(service_addr);
+
+    futures.emplace_back(folly::via(
+        folly::getGlobalCPUExecutor(),
+        [this, service_addr, gens]() -> ServiceCallResult {
+          ServiceCallResult call_result;
+
+          if (!connect_to_xservice(service_addr)) {
+            LOG(ERROR) << "Failed to connect target xservice: " << service_addr;
+            return call_result;
+          }
+
+          proto::StatusSet resp;
+          brpc::Controller cntl;
+          {
+            std::shared_lock<std::shared_mutex> lock(mutex_);
+            auto* service_stub = find_stub_locked(service_addr);
+            if (service_stub == nullptr) {
+              LOG(ERROR) << "No stub available for xservice: " << service_addr;
+              return call_result;
+            }
+            service_stub->Generations(&cntl, gens.get(), &resp, nullptr);
+          }
+
+          if (cntl.Failed()) {
+            LOG(ERROR) << "Fail to response tokens to xservice server "
+                       << service_addr << ", error text: " << cntl.ErrorText();
+            return call_result;
+          }
+
+          call_result.rpc_success = true;
+          call_result.all_status_ok.reserve(resp.all_status_size());
+          for (const auto& status : resp.all_status()) {
+            call_result.all_status_ok.push_back(status.ok());
+          }
+          return call_result;
+        }));
   }
-  if (cntl.Failed()) {
-    LOG(ERROR) << "Fail to response tokens to xservice server "
-               << xservice_addr_ << ", error text: " << cntl.ErrorText();
-    return results;
+
+  auto try_results = folly::collectAll(futures).get();
+  for (size_t i = 0; i < try_results.size(); ++i) {
+    const std::string& service_addr = service_order[i];
+    auto index_it = service_outputs_map.find(service_addr);
+    CHECK(index_it != service_outputs_map.end())
+        << "No output index found for service: " << service_addr;
+    const auto& indices = index_it->second;
+
+    if (try_results[i].hasException()) {
+      LOG(ERROR) << "Async call throws exception for xservice: "
+                 << service_addr;
+      mark_service_failed(service_addr);
+      continue;
+    }
+
+    const auto& call_result = try_results[i].value();
+    if (!call_result.rpc_success) {
+      mark_service_failed(service_addr);
+      continue;
+    }
+
+    CHECK_EQ(call_result.all_status_ok.size(), indices.size())
+        << "The size of status set is not equal to the size of outputs for "
+           "service: "
+        << service_addr;
+
+    for (size_t j = 0; j < call_result.all_status_ok.size(); ++j) {
+      size_t original_idx = indices[j];
+      results[original_idx] = call_result.all_status_ok[j];
+    }
   }
-  const auto& all_status = resp.all_status();
-  CHECK_EQ(all_status.size(), outputs.size())
-      << "The size of status set is not equal to the size of "
-         "outputs, status size: "
-      << all_status.size() << ", outputs size: " << outputs.size();
-  for (size_t i = 0; i < all_status.size(); ++i) {
-    const auto& status = all_status[i];
-    results[i] = status.ok();
-  }
+
   return results;
+}
+
+bool XServiceClient::connect_to_xservice(const std::string& xservice_addr) {
+  if (!check_instance_name(xservice_addr)) {
+    LOG(ERROR) << "Invalid xservice address format: " << xservice_addr;
+    return false;
+  }
+
+  std::unique_lock<std::shared_mutex> lock(mutex_);
+
+  // If already connected, directly return true
+  if (xservice_channels_.find(xservice_addr) != xservice_channels_.end()) {
+    return true;
+  }
+
+  auto channel = std::make_unique<brpc::Channel>();
+  if (channel->Init(xservice_addr.c_str(), "", &chan_options_) != 0) {
+    LOG(ERROR) << "Fail to initialize xservice channel to server "
+               << xservice_addr;
+    return false;
+  }
+
+  xservice_channels_[xservice_addr] = std::move(channel);
+  xservice_stubs_[xservice_addr] =
+      std::make_unique<xllm_service::proto::XllmRpcService_Stub>(
+          xservice_channels_[xservice_addr].get());
+
+  LOG(INFO) << "Successfully connected to xservice: " << xservice_addr;
+  return true;
+}
+
+bool XServiceClient::with_master_stub(
+    const std::function<void(xllm_service::proto::XllmRpcService_Stub*)>& fn,
+    std::string* master_addr) {
+  if (master_addr == nullptr) {
+    return false;
+  }
+
+  // wrapper in a whole lambda function
+  auto run_with_current_master_stub = [&](bool* has_master_addr) -> bool {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    *master_addr = master_xservice_addr_;
+    *has_master_addr = !master_addr->empty();
+    if (!*has_master_addr) {
+      LOG(ERROR) << "Master xservice address is empty";
+      return false;
+    }
+
+    auto* master_stub = find_stub_locked(*master_addr);
+    if (master_stub == nullptr) {
+      return false;
+    }
+
+    fn(master_stub);
+    return true;
+  };
+
+  bool has_master_addr = false;
+  if (run_with_current_master_stub(&has_master_addr)) {
+    return true;
+  }
+  if (!has_master_addr) {
+    return false;
+  }
+
+  // try re-connecting once
+  if (!connect_to_xservice(*master_addr)) {
+    LOG(ERROR) << "Failed to connect to master xservice: " << *master_addr;
+    return false;
+  }
+
+  if (run_with_current_master_stub(&has_master_addr)) {
+    return true;
+  }
+  if (!has_master_addr) {
+    return false;
+  }
+
+  LOG(ERROR) << "No master stub available for address: " << *master_addr;
+  return false;
+}
+
+xllm_service::proto::XllmRpcService_Stub* XServiceClient::find_stub_locked(
+    const std::string& xservice_addr) {
+  auto it = xservice_stubs_.find(xservice_addr);
+  if (it == xservice_stubs_.end() || it->second == nullptr) {
+    return nullptr;
+  }
+  return it->second.get();
+}
+
+void XServiceClient::disconnect_xservice(const std::string& xservice_addr) {
+  std::unique_lock<std::shared_mutex> lock(mutex_);
+
+  if (xservice_stubs_.erase(xservice_addr) > 0) {
+    xservice_channels_.erase(xservice_addr);
+    LOG(INFO) << "Disconnected from xservice: " << xservice_addr;
+
+    // if master disconnected，need to update master address
+    if (xservice_addr == master_xservice_addr_) {
+      LOG(WARNING) << "Master xservice disconnected: " << master_xservice_addr_;
+    }
+  }
 }
 
 void XServiceClient::handle_master_service_watch(
@@ -419,23 +669,89 @@ void XServiceClient::handle_master_service_watch(
 
   for (const auto& event : response.events()) {
     if (event.event_type() == etcd::Event::EventType::PUT) {
-      auto xservice_addr = event.kv().as_string();
+      auto new_master_addr = event.kv().as_string();
 
-      std::unique_lock<std::shared_mutex> lock(mutex_);
-      if (xservice_addr_.compare(xservice_addr) != 0) {
-        xservice_addr_ = xservice_addr;
-        xservice_channel_ = std::make_unique<brpc::Channel>();
-        if (xservice_channel_->Init(
-                xservice_addr_.c_str(), "", &chan_options_) != 0) {
-          LOG(FATAL) << "Fail to initialize xsevrice channel to server "
-                     << xservice_addr_;
-          return;
+      {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        if (master_xservice_addr_.compare(new_master_addr) == 0) {
+          continue;
         }
-        xservice_stub_ =
-            std::make_unique<xllm_service::proto::XllmRpcService_Stub>(
-                xservice_channel_.get());
-        LOG(INFO) << "Change MasterService to " << xservice_addr_;
+
+        LOG(INFO) << "Master service changed from " << master_xservice_addr_
+                  << " to " << new_master_addr;
+
+        master_xservice_addr_ = new_master_addr;
       }
+
+      if (!connect_to_xservice(new_master_addr)) {
+        LOG(ERROR) << "Failed to connect to new master: " << new_master_addr;
+      }
+    } else if (event.event_type() == etcd::Event::EventType::DELETE_) {
+      std::unique_lock<std::shared_mutex> lock(mutex_);
+      if (!master_xservice_addr_.empty()) {
+        LOG(WARNING) << "Master service key deleted, clear cached master addr: "
+                     << master_xservice_addr_;
+        master_xservice_addr_.clear();
+      }
+    }
+  }
+}
+
+void XServiceClient::handle_xservices_watch(const etcd::Response& response) {
+  if (response.events().empty() || exited_) {
+    return;
+  }
+
+  for (const auto& event : response.events()) {
+    std::string event_key;
+    std::string service_addr;
+    if (event.event_type() == etcd::Event::EventType::PUT) {
+      if (event.has_kv()) {
+        event_key = event.kv().key();
+        service_addr = event.kv().as_string();
+      }
+    } else if (event.event_type() == etcd::Event::EventType::DELETE_) {
+      if (event.has_prev_kv()) {
+        event_key = event.prev_kv().key();
+        service_addr = event.prev_kv().as_string();
+      }
+      if (service_addr.empty() && event.has_kv()) {
+        if (event_key.empty()) {
+          event_key = event.kv().key();
+        }
+        service_addr = event.kv().as_string();
+      }
+    }
+
+    if (event_key == ETCD_MASTER_SERVICE_KEY) {
+      continue;
+    }
+
+    if (service_addr.empty() && !event_key.empty() &&
+        event_key.rfind(ETCD_XSERVICES_KEY_PREFIX, 0) == 0) {
+      service_addr = event_key.substr(ETCD_XSERVICES_KEY_PREFIX.size());
+    }
+
+    if (service_addr.empty()) {
+      continue;
+    }
+
+    if (!check_instance_name(service_addr)) {
+      continue;
+    }
+
+    if (event.event_type() == etcd::Event::EventType::PUT) {
+      std::string master_xservice_addr;
+      {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        master_xservice_addr = master_xservice_addr_;
+      }
+
+      if (service_addr != master_xservice_addr) {
+        connect_to_xservice(service_addr);
+      }
+    } else if (event.event_type() == etcd::Event::EventType::DELETE_) {
+      disconnect_xservice(service_addr);
     }
   }
 }

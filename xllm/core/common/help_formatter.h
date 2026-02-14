@@ -44,6 +44,9 @@ const OptionCategory kCommonOptions = {"COMMON OPTIONS",
                                         "enable_prefix_cache",
                                         "enable_shm",
                                         "enable_graph",
+                                        "enable_graph_mode_decode_no_padding",
+                                        "enable_prefill_piecewise_graph",
+                                        "max_tokens_for_graph_mode",
                                         "communication_backend",
                                         "block_size",
                                         "task",
@@ -74,6 +77,10 @@ const OptionCategory kMtpOptions = {
 const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
                                             {"etcd_addr", "rank_tablefile"}};
 
+const OptionCategory kBeamSearchOptions = {
+    "BEAM SEARCH OPTIONS",
+    {"enable_beam_search_kernel", "enable_fast_sampler", "enable_topk_sorted"}};
+
 const OptionCategory kOtherOptions = {
     "OTHER OPTIONS",
     {"max_concurrent_requests",
@@ -91,6 +98,7 @@ const std::vector<OptionCategory> kOptionCategories = {
     kMultiStepDecodeOptions,
     kMtpOptions,
     kXllmServiceOptions,
+    kBeamSearchOptions,
     kOtherOptions};
 
 }  // namespace

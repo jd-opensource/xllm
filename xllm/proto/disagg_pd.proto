@@ -69,6 +69,7 @@ message DisaggRequest {
   optional int32 ttft_priority_weight = 35;
   optional int32 ttlt_priority_weight = 36;
   optional int32 priority_weight = 37;
+  string source_xservice_addr = 38;
 
 }
 

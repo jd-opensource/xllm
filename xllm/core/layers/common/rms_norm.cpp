@@ -60,7 +60,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> RMSNormImpl::forward(
   std::optional<torch::Tensor> residual_out;
   if (residual.has_value()) {
     residual.value() = residual.value().reshape({-1, norm_dim_});
-    if (Device::type_str() == "mlu") {
+    if (Device::type_str() == "mlu" || Device::type_str() == "ilu") {
       residual_out = residual.value();
     }
   }

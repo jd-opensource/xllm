@@ -212,7 +212,7 @@ def set_musa_envs() -> None:
     from torch_musa.utils.musa_extension import MUSA_HOME
     os.environ["TORCH_MUSA_PYTHONPATH"] = torch_musa.core.cmake_prefix_path
     os.environ["MUSA_TOOLKIT_ROOT_DIR"] = MUSA_HOME
-    os.environ["MTT_OPLIB_PATH"] = "/workspace/MTTOplib"
     os.environ["MKL_DIR"] = "/opt/intel/oneapi/mkl/lib/cmake/mkl"
     os.environ["MKLROOT"] = "/opt/intel/oneapi/mkl"
     os.environ["TorchMusa_DIR"] = torch_musa.core.cmake_prefix_path + "/TorchMusa"
+    os.environ["MUSAMAPPING_PATH"] = MUSA_HOME + "/tools/musamapping"

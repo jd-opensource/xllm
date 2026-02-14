@@ -62,4 +62,29 @@ void batch_decode(const torch::Tensor& query,
                            o);
 }
 
+void batch_decode_acl_graph(const torch::Tensor& query,
+                            const torch::Tensor& k_cache,
+                            const torch::Tensor& v_cache,
+                            float scale,
+                            const torch::Tensor& block_table,
+                            const torch::Tensor& seq_lens,
+                            const torch::Tensor& tiling_data,
+                            torch::Tensor& output) {
+  int64_t head_size = query.size(-1);
+  int64_t num_heads = query.size(-2);
+  int64_t num_kv_heads = k_cache.size(-2);
+  auto q = query.view({-1, num_heads, head_size});
+  auto o = output.view({-1, num_heads, head_size});
+  atb::npu_custom_paged_attention(q,
+                                  k_cache,
+                                  v_cache,
+                                  num_kv_heads,
+                                  num_heads,
+                                  scale,
+                                  block_table,
+                                  seq_lens,
+                                  tiling_data,
+                                  o);
+}
+
 }  // namespace xllm::kernel::npu

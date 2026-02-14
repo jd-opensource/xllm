@@ -47,28 +47,27 @@ class VLMMaster : public Master {
   ~VLMMaster();
 
   // completion
-  void handle_request(const std::string& prompt,
-                      MMData& mm_data,
-                      const RequestParams& sp,
+  void handle_request(std::string prompt,
+                      MMData mm_data,
+                      RequestParams sp,
                       OutputCallback callback);
 
   // chat
-  void handle_request(const std::vector<Message>& messages,
-                      const RequestParams& sp,
-                      const std::string& payload,
+  void handle_request(std::vector<Message> messages,
+                      RequestParams sp,
+                      std::string payload,
                       OutputCallback callback);
 
   // batch completion
-  void handle_batch_request(const std::vector<std::string>& prompts,
-                            std::vector<MMData>& mm_datas,
-                            const std::vector<RequestParams>& sps,
+  void handle_batch_request(std::vector<std::string> prompts,
+                            std::vector<MMData> mm_datas,
+                            std::vector<RequestParams> sps,
                             BatchOutputCallback callback);
 
   // batch chat
-  void handle_batch_request(
-      const std::vector<std::vector<Message>>& conversations,
-      const std::vector<RequestParams>& sps,
-      BatchOutputCallback callback);
+  void handle_batch_request(std::vector<std::vector<Message>> conversations,
+                            std::vector<RequestParams> sps,
+                            BatchOutputCallback callback);
 
   // start the handling loop
   void run() override;
@@ -80,16 +79,15 @@ class VLMMaster : public Master {
 
  private:
   using Task = folly::Function<void()>;
-  std::shared_ptr<Request> generate_request(std::string& prompt,
-                                            MMData& mm_data,
-                                            const RequestParams& sp,
+  std::shared_ptr<Request> generate_request(std::string prompt,
+                                            MMData mm_data,
+                                            RequestParams sp,
                                             OutputCallback callback);
 
-  std::shared_ptr<Request> generate_request(
-      const std::vector<Message>& messages,
-      const RequestParams& sp,
-      const std::string& payload,
-      OutputCallback callback);
+  std::shared_ptr<Request> generate_request(std::vector<Message> messages,
+                                            RequestParams sp,
+                                            std::string payload,
+                                            OutputCallback callback);
 
   std::unique_ptr<Scheduler> scheduler_;
 

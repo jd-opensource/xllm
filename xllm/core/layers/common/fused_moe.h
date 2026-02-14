@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "deep_ep.h"
 #include "dense_mlp.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -26,31 +25,22 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "linear.h"
-#include "platform/device.h"
-#include "util/tensor_helper.h"
 
 namespace xllm {
 namespace layer {
 
+// Must match layers/mlu/fused_moe.h and layers/ilu/fused_moe.h.
+struct FusedMoEArgs {
+  bool is_gated = true;
+};
+
+// FusedMoE common implementation - placeholder for unsupported backends
+// Actual implementation is in layers/mlu/fused_moe.h and layers/ilu/fused_moe.h
 class FusedMoEImpl : public torch::nn::Module {
  public:
   FusedMoEImpl() = default;
-  FusedMoEImpl(int64_t num_experts,
-               int64_t top_k,
-               int64_t num_expert_group,
-               int64_t topk_group,
-               double route_scale,
-               int64_t hidden_size,
-               int64_t intermediate_size,
-               int64_t n_shared_experts,
-               bool is_gated,
-               bool has_score_bias,
-               bool has_bias,
-               bool skip_bias_add,
-               int64_t renormalize,
-               const std::string& hidden_act,
-               const std::string& scoring_func,
-               const std::string& topk_method,
+  FusedMoEImpl(const ModelArgs& model_args,
+               const FusedMoEArgs& moe_args,
                const QuantArgs& quant_args,
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
@@ -61,85 +51,6 @@ class FusedMoEImpl : public torch::nn::Module {
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
-
- private:
-  // struct to store the selected expert info
-  struct SelectedExpertInfo {
-    torch::Tensor reduce_weight;
-    torch::Tensor combine_idx;
-    torch::Tensor token_count_slice;
-    std::optional<torch::Tensor> cusum_token_count;
-    std::optional<torch::Tensor> input_scale;
-  };
-
-  // initial steps for MoE computation, select the experts for each token
-  torch::Tensor select_experts(const torch::Tensor& hidden_states_2d,
-                               const torch::Tensor& router_logits_2d,
-                               SelectedExpertInfo& selected_expert_info,
-                               bool enable_all2all_communication);
-
- private:
-  int64_t num_total_experts_;
-  int64_t topk_;
-  int64_t num_expert_group_;
-  int64_t topk_group_;
-  double route_scale_;
-  int64_t hidden_size_;
-  int64_t n_shared_experts_;
-  bool is_gated_;
-  bool has_score_bias_;
-  bool has_bias_;
-  bool skip_bias_add_;
-  int64_t renormalize_;
-  std::string hidden_act_;
-  std::string scoring_func_;
-  bool is_smoothquant_;
-
-  int64_t num_experts_per_rank_;
-  int64_t start_expert_id_;
-
-  // Deep EP related parameters
-  bool enable_deep_ep_;
-  DeepEPBuffer deep_ep_buffer_;
-  DeepEPParams deep_ep_params_;
-  torch::Tensor dispatch_recv_token_tensor_head_;
-  torch::Tensor dispatch_recv_token_tensor_tail_;
-
-  // steams for parallel shared experts
-  std::unique_ptr<Stream> shared_stream_;
-  std::unique_ptr<Stream> routed_stream_;
-  xllm::Device device_;
-  bool stream_initialized_ = false;
-
-  ReplicatedLinear gate_{nullptr};
-  DenseMLP shared_experts_{nullptr};
-  DeepEP deep_ep_{nullptr};
-
-  QuantArgs quant_args_;
-  ParallelArgs parallel_args_;
-  torch::TensorOptions options_;
-  ProcessGroup* tp_pg_;
-
-  DEFINE_WEIGHT(w13);
-  DEFINE_FUSED_WEIGHT(w1);
-  DEFINE_FUSED_WEIGHT(w3);
-  DEFINE_FUSED_WEIGHT(w2);
-  DEFINE_WEIGHT(e_score_correction_bias);
-  DEFINE_WEIGHT(w13_scale);
-  DEFINE_FUSED_WEIGHT(w1_scale);
-  DEFINE_FUSED_WEIGHT(w3_scale);
-  DEFINE_FUSED_WEIGHT(w2_scale);
-  DEFINE_FUSED_WEIGHT(input_smooth);
-  DEFINE_FUSED_WEIGHT(act_smooth);
-
-  void load_e_score_correction_bias(const StateDict& state_dict);
-  void load_experts(const StateDict& state_dict);
-  // create the group gemm output tensor with the workspace
-  torch::Tensor create_group_gemm_output(const torch::Tensor& a,
-                                         const torch::Tensor& b,
-                                         const torch::Tensor& group_list,
-                                         torch::ScalarType dtype,
-                                         torch::Tensor& workspace);
 };
 TORCH_MODULE(FusedMoE);
 

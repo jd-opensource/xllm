@@ -15,24 +15,30 @@ limitations under the License.
 
 #pragma once
 
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <absl/container/flat_hash_map.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/torch.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <unordered_map>
 
 #include "core/common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/kernels/cuda/piecewise_graphs.h"
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
 #include "options.h"
 
-namespace xllm::cuda {
+namespace xllm::runtime::cuda {
 
 // Helper class to hold persistent parameters for CUDA graph execution
 // Multiple CudaGraph instances can share the same CudaGraphPersistentParam
@@ -134,6 +140,7 @@ class CudaGraphPersistentParam {
   }
   // Setter for aux_hidden_states (for assignment)
   void set_aux_hidden_states(const torch::Tensor& value);
+  size_t get_persistent_tensor_bytes() const;
   // FlashInfer decode mode parameters
   torch::Tensor persistent_paged_kv_indptr(uint32_t actual_batch_size) const {
     if (actual_batch_size > 0) {
@@ -194,12 +201,16 @@ class CudaGraphPersistentParam {
 // CUDA graph executor using libtorch CUDAGraph for memory management
 class CudaGraph {
  public:
+  // is_piecewise: if true, use piecewise graph capture for prefill
+  // capture_stream: the stream to use for CUDA graph capture
   explicit CudaGraph(CudaGraphPersistentParam& persistent_param,
-                     c10::DeviceIndex device_index)
-      : persistent_param_(persistent_param), device_index_(device_index) {
-    // Initialize capture stream in constructor
-    initialize_capture_stream(device_index);
-  }
+                     at::DeviceIndex device_index,
+                     at::cuda::CUDAStream capture_stream,
+                     bool is_piecewise = false)
+      : persistent_param_(persistent_param),
+        device_index_(device_index),
+        capture_stream_(capture_stream),
+        is_piecewise_(is_piecewise) {}
 
   // Capture computation graph for given bucket num_tokens
   bool capture(CausalLM* model,
@@ -210,7 +221,8 @@ class CudaGraph {
                const ModelInputParams& params,
                std::vector<KVCache>& kv_cache,
                uint32_t bucket_num_tokens,
-               const decltype(at::cuda::graph_pool_handle())& pool);
+               const at::cuda::MempoolId_t& pool,
+               c10::cuda::MemPool* pool_ptr = nullptr);
 
   // Replay captured graph with new input data
   ModelOutput replay(const torch::Tensor& tokens,
@@ -227,20 +239,22 @@ class CudaGraph {
   // Print graph held tensors for debugging
   void print_graph_tensors() const;
 
-  // Initialize capture stream if not already initialized
-  void initialize_capture_stream(c10::DeviceIndex device_index);
-
-  // CUDA graph for capturing and replaying
+  // CUDA graph for capturing and replaying (decode mode)
   at::cuda::CUDAGraph graph_;
+  // Piecewise graphs for prefill mode
+  PiecewiseGraphs piecewise_graph_;
+  // Whether this graph uses piecewise capture
+  bool is_piecewise_ = false;
+
   uint32_t padded_num_tokens_;
 
   // Reference to persistent parameters (shared across multiple CudaGraph
   // instances)
   CudaGraphPersistentParam& persistent_param_;
 
-  // Cached capture stream, initialized on first capture
-  std::optional<c10::cuda::CUDAStream> capture_stream_;
-  c10::DeviceIndex device_index_;
+  // CUDA stream for graph capture (reference, owned by CudaGraphExecutorImpl)
+  at::cuda::CUDAStream capture_stream_;
+  at::DeviceIndex device_index_;
 };
 
 // Executor implementation using CUDA graph optimization
@@ -251,7 +265,7 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
                         const torch::Device& device,
                         const runtime::Options& options);
 
-  ~CudaGraphExecutorImpl() override = default;
+  ~CudaGraphExecutorImpl() override;
 
   ForwardInput prepare_inputs(Batch& batch) override;
 
@@ -261,6 +275,10 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
                   std::vector<KVCache>& kv_caches,
                   const ModelInputParams& params) override;
 
+  // Return current graph executor memory usage in bytes (including persistent
+  // parameters). Exposed for tests and diagnostics.
+  size_t get_graph_memory_usage_bytes();
+
  private:
   // not own
   CausalLM* model_;
@@ -269,19 +287,83 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   torch::Device device_;
   runtime::Options options_;
 
-  // Lazy-loaded CUDA graphs for different num_tokens
+  // Lazy-loaded CUDA graphs for decode phase (by bucket_num_tokens)
   absl::flat_hash_map<uint32_t, std::unique_ptr<CudaGraph>> graphs_;
+
+  // Lazy-loaded CUDA graphs for prefill phase with piecewise capture
+  // (by bucket_num_tokens)
+  absl::flat_hash_map<uint32_t, std::unique_ptr<CudaGraph>> prefill_graphs_;
 
   // Persistent parameters shared across all CudaGraph instances
   std::unique_ptr<CudaGraphPersistentParam> persistent_param_;
 
-  // CUDA graph memory pool shared across all CudaGraph instances
-  decltype(at::cuda::graph_pool_handle()) graph_pool_;
+  // CUDA graph memory pool shared across all CudaGraph instances.
+  // This executor is expected to be called from a single worker thread (no
+  // concurrent run() on the same executor instance), so sharing one pool per
+  // executor is intentional. If concurrent calls are introduced in the future,
+  // this assumption must be revisited.
+  at::cuda::MempoolId_t graph_pool_;
+  // Whether to enable prefill piecewise graph
+  bool enable_prefill_piecewise_graph_;
+  int64_t max_tokens_for_graph_mode_ = 0;
 
   // Get bucket num_tokens for given num_tokens
   // For num_tokens < 8: use 1, 2, 4, 8
   // For num_tokens >= 8: use multiples of 8
-  uint32_t get_bucket_num_tokens(uint32_t num_tokens) const;
+  // When is_prefill=true, no_padding is disabled (prefill requires padding)
+  uint32_t get_bucket_num_tokens(uint32_t num_tokens,
+                                 bool is_prefill = false) const;
+
+  ModelOutput attach_aux_hidden_states_if_needed(
+      const torch::Tensor& hidden_states,
+      uint32_t n_tokens) const;
+
+  // Get CUDA graph memory pool id for capture. When VMM is enabled, uses
+  // per-shape MemPool under (physical_pool_id, shape_id). Same physical_pool_id
+  // => reuse across different shapes (e.g. prefill vs decode are different
+  // pools).
+  at::cuda::MempoolId_t get_mem_pool(uint32_t physical_pool_id = 0,
+                                     uint32_t shape_id = 0);
+
+  // Switch VMM allocator to a new virtual address space before capture for the
+  // given physical pool. Enables physical memory reuse within that pool across
+  // shapes (max(shape) instead of sum(shape)).
+  void reset_vmm_allocator_offset(uint32_t physical_pool_id);
+
+  struct VmmPoolState;
+
+  struct GraphMemoryUsageStats {
+    size_t executor_total_bytes = 0;
+    size_t persistent_param_bytes = 0;
+    size_t allocated_pool_bytes = 0;
+    size_t active_pool_bytes = 0;
+    size_t pool_high_water_mark_bytes = 0;
+  };
+
+  VmmPoolState& get_or_create_vmm_pool_state(uint32_t physical_pool_id);
+  c10::cuda::MemPool* get_or_create_vmm_mempool(uint32_t physical_pool_id,
+                                                uint32_t shape_id);
+  c10::cuda::MemPool* get_vmm_mempool(uint32_t physical_pool_id,
+                                      uint32_t shape_id);
+  GraphMemoryUsageStats get_graph_memory_usage_stats();
+  void log_graph_memory_after_capture();
+
+  std::mutex vmm_mutex_;
+  std::unordered_map<uint32_t, std::unique_ptr<VmmPoolState>> vmm_pools_;
+
+  size_t baseline_private_pool_reserved_bytes_ = 0;
+  size_t baseline_private_pool_allocated_bytes_ = 0;
+  size_t baseline_private_pool_active_bytes_ = 0;
+  size_t baseline_allocator_reserved_bytes_ = 0;
+
+  size_t last_logged_executor_total_bytes_ = 0;
+
+  // Get CUDA capture stream for current thread
+  // Each thread automatically gets its own high-priority capture stream
+  // Returns the stream and device index
+  static c10::cuda::CUDAStream get_capture_stream(
+      c10::DeviceIndex device_index);
 };
 REGISTER_EXECUTOR("cuda", CudaGraphExecutorImpl);
-}  // namespace xllm::cuda
+
+}  // namespace xllm::runtime::cuda

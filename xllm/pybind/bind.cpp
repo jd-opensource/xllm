@@ -250,9 +250,9 @@ PYBIND11_MODULE(xllm_export, m) {
            py::arg("options"),
            py::call_guard<py::gil_scoped_release>())
       .def("handle_batch_request",
-           py::overload_cast<const std::vector<std::string>&,
-                             std::vector<MMData>&,
-                             const std::vector<RequestParams>&,
+           py::overload_cast<std::vector<std::string>,
+                             std::vector<MMData>,
+                             std::vector<RequestParams>,
                              BatchOutputCallback>(
                &VLMMaster::handle_batch_request),
            py::call_guard<py::gil_scoped_release>())

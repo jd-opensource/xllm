@@ -28,6 +28,7 @@ limitations under the License. -->
 
 ### 📢 新闻
 
+- 2026-02-12: 🎉 我们 day-0 支持了最新的[GLM-5](https://github.com/zai-org/GLM-5) 模型的高效推理服务，部署请参考[部署文档](https://github.com/zai-org/GLM-5/blob/main/example/ascend.md)。
 - 2025-12-21: 🎉 我们在第一时间内支持了[GLM-4.7](https://github.com/zai-org)模型的高效推理。
 - 2025-12-08: 🎉 我们在第一时间内支持了[GLM-4.6V](https://github.com/zai-org/GLM-V)模型的高效推理。
 - 2025-12-05: 🎉 我们支持了[GLM-4.5/GLM-4.6](https://github.com/zai-org/GLM-4.5/blob/main/README_zh.md)系列模型.
@@ -134,7 +135,6 @@ xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与
 - [safetensors](https://github.com/huggingface/safetensors) - 依赖其c binding safetensors能力。
 - [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - xLLM的C++版本JSON解析器，参考Python与Go实现的设计思路。
 - [concurrentqueue](https://github.com/cameron314/concurrentqueue) - 高性能无锁Queue.
-- [Flashinfer](https://github.com/flashinfer-ai/flashinfer) - 高性能NVIDIA GPU算子。
 
 感谢以下合作的高校实验室：
 

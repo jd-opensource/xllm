@@ -57,7 +57,7 @@ message ChatRequest {
   optional uint32 n = 7;
 
   // whether to stream partial completions back as they are generated. default = false
-  optional bool stream = 8; 
+  optional bool stream = 8;
 
   // up to 4 sequences where the API will stop generating further tokens.
   repeated string stop = 9;
@@ -66,7 +66,7 @@ message ChatRequest {
   optional uint32 max_tokens = 10;
 
   // values between [-2.0, 2.0]. default = 0.0
-  // Positive values penalize new tokens based on their existing in the text so far, increasing 
+  // Positive values penalize new tokens based on their existing in the text so far, increasing
   // the model's likelihood to talk about new topics.
   optional float presence_penalty = 11;
 
@@ -113,7 +113,7 @@ message ChatRequest {
   optional string service_request_id = 25;
 
   repeated int32 token_ids = 26;
-  
+
   Routing routing = 27;
 
   repeated Tool tools = 28;
@@ -144,6 +144,9 @@ message ChatRequest {
   optional int32 ttlt_priority_weight = 40;
 
   optional int32 priority_weight = 41;
+
+  // xllm_service rpc addr(ip:rpc_port) that forwards this request.
+  optional string source_xservice_addr = 42;
 }
 
 message ChatLogProbData {

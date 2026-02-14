@@ -7,7 +7,7 @@ function error() {
 }
 
 REGISTRY="registry.iluvatar.com.cn:10443/infra"
-COREX_VERSION="4.4.0.20251023"
+COREX_VERSION="4.4.0.20251229"
 IMAGE="${REGISTRY}/xllm-builder:${COREX_VERSION}-ubuntu22.04-py310-xllm-x86_64"
 
 RUN_OPTS=(

@@ -21,7 +21,7 @@ The aforementioned features have been implemented internally within the xLLM eng
 
 **Note**:
 - Graph execution mode is only applied during decode phase (generating tokens one at a time) and does not take effect during prefill phase
-- Supports multiple backends: CUDA Graph (GPU), ACL Graph (NPU), and MLU Graph
+- Supports multiple backends: ACL Graph (NPU), and MLU Graph
 - Not all models support this feature. Please refer to the specific model documentation
 
 ## Performance Impact

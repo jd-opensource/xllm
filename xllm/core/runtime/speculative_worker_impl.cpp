@@ -142,26 +142,47 @@ void update_kv_seq_lens_vec(std::vector<int32_t>& kv_seq_lens_vec,
 
 }  // namespace
 
+namespace {
+
+runtime::Options MainOptions(const runtime::Options& options) {
+  auto opts = options;
+  opts.enable_schedule_overlap(false);
+  return opts;
+}
+
+runtime::Options DraftOptions(const runtime::Options& options) {
+  auto opts = options;
+  opts.enable_schedule_overlap(false)
+      .num_decoding_tokens(1)
+      .num_speculative_tokens(0);
+  return opts;
+}
+
+}  // namespace
+
 SpeculativeWorkerImpl::SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
                                              const torch::Device& device,
                                              const runtime::Options& options)
-    : WorkerImpl(parallel_args, device, options) {
-  auto runtime_options = options;
-  runtime_options.enable_schedule_overlap(false);
-  impl_ =
-      std::make_unique<LLMWorkerImpl>(parallel_args, device, runtime_options);
-  // here we specify num speculative tokens to 0 to pass the indication of
-  //  draft model to worker when enable_speculative_decode.
-  // NOTE: If you want to modify this part, make sure you also check the usage
-  // of
-  //  num_speculative_tokens in draft model.
-  runtime_options.num_decoding_tokens(1).num_speculative_tokens(0);
-  draft_impl_ =
-      std::make_unique<LLMWorkerImpl>(parallel_args, device, runtime_options);
+    : SpeculativeWorkerImpl(parallel_args,
+                            device,
+                            options,
+                            MainOptions(options),
+                            DraftOptions(options)) {}
 
-  // performance debug for fixing the speculative acceptance rate
-  // NOTE: This is for performance debugging only, it will
-  // influence the model accuracy and should not be used in production.
+SpeculativeWorkerImpl::SpeculativeWorkerImpl(
+    const ParallelArgs& parallel_args,
+    const torch::Device& device,
+    const runtime::Options& options,
+    const runtime::Options& options_main,
+    const runtime::Options& options_draft)
+    : WorkerImpl(parallel_args, device, options) {
+  impl_ = std::make_unique<LLMWorkerImpl>(parallel_args, device, options_main);
+  // options_draft already carries draft-specific settings (e.g.
+  // num_speculative_tokens(0) for Eagle3, or enable_graph_aux_hidden_states
+  // false for draft in Eagle3).
+  draft_impl_ =
+      std::make_unique<LLMWorkerImpl>(parallel_args, device, options_draft);
+
   std::optional<double> fixed_acceptance_rate =
       util::get_fix_speculative_acceptance_rate();
   if (fixed_acceptance_rate.has_value()) {
@@ -215,14 +236,25 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
   return result;
 }
 
+int64_t SpeculativeWorkerImpl::get_embedding_placeholder_size() {
+  // When this is called, embedding_cache_ is only created when impl_ is
+  // loaded, so embedding_size_ is already set.
+  return static_cast<int64_t>(embedding_size_);
+}
+
 bool SpeculativeWorkerImpl::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
-  // init embedding cache, using total number of blocks
+  const int64_t num_blocks = kv_cache_shape[0][0];
   if (impl_->get_status() == WorkerImpl::Status::LOADED) {
-    embedding_allocator_ = std::make_shared<EmbeddingAllocator>(
-        kv_cache_shape[0][0], embedding_size_, dtype_);
+    embedding_cache_ = std::make_shared<EmbeddingCache>(num_blocks);
   }
-
+  if (embedding_cache_) {
+    int64_t size = get_embedding_placeholder_size();
+    if (size > 0) {
+      embedding_cache_->set_placeholder(
+          torch::zeros({size}, torch::dtype(dtype_).device(torch::kCPU)));
+    }
+  }
   if (impl_->get_status() == WorkerImpl::Status::LOADED) {
     return impl_->allocate_kv_cache(kv_cache_shape);
   } else {
@@ -249,8 +281,14 @@ bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
     CHECK_EQ(draft_impl_->get_status(), WorkerImpl::Status::LOADED);
     draft_impl_->allocate_kv_cache_with_transfer(kv_cache_transfer_,
                                                  kv_cache_shape);
-    embedding_allocator_ = std::make_shared<EmbeddingAllocator>(
-        kv_cache_shape[0][0], embedding_size_, dtype_);
+    embedding_cache_ = std::make_shared<EmbeddingCache>(kv_cache_shape[0][0]);
+    if (embedding_cache_) {
+      int64_t size = get_embedding_placeholder_size();
+      if (size > 0) {
+        embedding_cache_->set_placeholder(
+            torch::zeros({size}, torch::dtype(dtype_).device(device_)));
+      }
+    }
   }
   return true;
 }
@@ -332,7 +370,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_prefill(
     embeddings = embeddings.index_select(
         /*dim=*/0, input.sampling_params.selected_token_idxes);
     CHECK_EQ(embeddings.size(0), output.sample_output.next_tokens.size(0));
-    embedding_allocator_->write(input.input_params.embedding_ids, embeddings);
+    embedding_cache_->write(input.input_params.embedding_ids, embeddings);
   }
   output.sample_output.embeddings = torch::Tensor();
 
@@ -388,7 +426,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
   ForwardInput draft_input = input;
   // get embedding cache
   torch::Tensor embeddings =
-      embedding_allocator_->read(draft_input.input_params.embedding_ids);
+      embedding_cache_->read(draft_input.input_params.embedding_ids);
   draft_input.input_params.input_embedding = embeddings.to(device_);
 
   // run the draft model to get proposals
@@ -408,7 +446,7 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
     // update input of next step
     if (i < options_.num_speculative_tokens() - 1) {
       draft_input = next_step_input;
-      auto last_output = draft_outputs.back().sample_output;
+      auto& last_output = draft_outputs.back().sample_output;
       draft_input.token_ids = safe_to(last_output.next_tokens, torch::kInt);
       draft_input.input_params.input_embedding =
           last_output.embeddings.to(device_);
@@ -441,9 +479,10 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
               timer.elapsed_seconds());
 
   // write the right cache and clear embeddings
-  embedding_allocator_->write_validate(input.input_params.embedding_ids,
-                                       val_output.next_tokens.to(torch::kCPU),
-                                       val_output.embeddings);
+  val_output.next_tokens = val_output.next_tokens.to(torch::kCPU);
+  embedding_cache_->write_validate(input.input_params.embedding_ids,
+                                   val_output.next_tokens,
+                                   val_output.embeddings);
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_) {
     return std::nullopt;
@@ -729,7 +768,6 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   torch::Tensor positions = safe_to(inputs.positions, torch::kCPU);
   Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
                                     static_cast<size_t>(positions.numel())};
-  // Get the tokens generated in the last step (flattened for easier indexing)
   torch::Tensor last_token_ids = safe_to(
       last_step_output_.sample_output.next_tokens.flatten(), torch::kCPU);
   Slice<int64_t> last_tokens_ids_slice = {

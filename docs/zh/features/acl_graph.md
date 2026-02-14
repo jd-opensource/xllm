@@ -22,7 +22,7 @@
 
 **注意**：
 - 图执行模式仅用于decode阶段（逐个生成token），对prefill阶段不生效
-- 支持多种后端：CUDA Graph（GPU）、ACL Graph（NPU）、MLU Graph
+- 支持多种后端：ACL Graph（NPU）、MLU Graph
 - 并非所有模型都支持该功能，请参考具体模型的文档
 
 

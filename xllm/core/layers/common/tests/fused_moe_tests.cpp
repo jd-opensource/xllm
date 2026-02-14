@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "layers/common/fused_moe.h"
+#include "layers/mlu/fused_moe.h"
 #include "platform/device.h"
 #include "tests_utils.h"
 
@@ -211,7 +211,6 @@ class FusedMoETest : public ::testing::Test {
     return weight_dict;
   }
 
-  // Helper function to create FusedMoE with custom dimensions
   FusedMoE create_fused_moe(int64_t num_experts,
                             int64_t top_k,
                             int64_t num_expert_group,
@@ -221,29 +220,25 @@ class FusedMoETest : public ::testing::Test {
                             int64_t intermediate_size,
                             int64_t n_shared_experts = 1,
                             bool is_gated = true,
-                            bool has_score_bias = false,
-                            bool has_bias = false,
-                            bool skip_bias_add = false,
                             int64_t renormalize = 0,
                             const std::string& hidden_act = "silu",
                             const std::string& scoring_func = "sigmoid",
                             const std::string& topk_method = "noaux_tc") {
-    return FusedMoE(FusedMoEImpl(num_experts,
-                                 top_k,
-                                 num_expert_group,
-                                 topk_group,
-                                 route_scale,
-                                 hidden_size,
-                                 intermediate_size,
-                                 n_shared_experts,
-                                 is_gated,
-                                 has_score_bias,
-                                 has_bias,
-                                 skip_bias_add,
-                                 renormalize,
-                                 hidden_act,
-                                 scoring_func,
-                                 topk_method,
+    ModelArgs args = model_args_;
+    args.n_routed_experts() = static_cast<int32_t>(num_experts);
+    args.num_experts_per_tok() = static_cast<int32_t>(top_k);
+    args.n_group() = static_cast<int32_t>(num_expert_group);
+    args.topk_group() = static_cast<int32_t>(topk_group);
+    args.routed_scaling_factor() = static_cast<float>(route_scale);
+    args.hidden_size() = hidden_size;
+    args.moe_intermediate_size() = static_cast<int32_t>(intermediate_size);
+    args.n_shared_experts() = static_cast<int32_t>(n_shared_experts);
+    args.norm_topk_prob() = (renormalize != 0);
+    args.hidden_act() = hidden_act;
+    args.scoring_func() = scoring_func;
+    args.topk_method() = topk_method;
+    return FusedMoE(FusedMoEImpl(args,
+                                 FusedMoEArgs{.is_gated = is_gated},
                                  quant_args_,
                                  parallel_args_,
                                  options_));
@@ -317,9 +312,6 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
   const int64_t top_k = 2;
   const double route_scale = 2.5;
   const bool gated = true;
-  const bool has_score_bias = true;
-  const bool has_bias = false;
-  const bool skip_bias_add = false;
   const int64_t renormalize = 1;
   const int64_t n_shared_experts = 1;
 
@@ -333,9 +325,6 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
                                     intermediate_size,
                                     n_shared_experts,
                                     gated,
-                                    has_score_bias,
-                                    has_bias,
-                                    skip_bias_add,
                                     renormalize);
 
   // Create test weights and load them
@@ -351,29 +340,14 @@ TEST_F(FusedMoETest, LoadStateDictTest) {
       {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
 
-  // Create router logits (batch_size * seq_len, num_experts)
-  std::vector<float> router_values;
-  router_values.reserve(batch_size * seq_len * num_experts);
-  for (size_t i = 0; i < batch_size * seq_len; ++i) {
-    for (size_t j = 0; j < num_experts; ++j) {
-      router_values.push_back(static_cast<float>(j) * 0.1f);
-    }
-  }
-  auto router_logits =
-      create_router_logits({batch_size * seq_len, num_experts}, router_values);
-  auto score_bias = torch::full({num_experts}, 0.1f, options_);
   auto output =
       fused_moe->forward_experts(hidden_states,
-                                 router_logits,
                                  /*enable_all2all_communication=*/false);
 
-  // Verify output shape
   CHECK_EQ(output.sizes().size(), 2) << "Output should be 2D tensor";
   CHECK_EQ(output.size(0), batch_size * seq_len)
       << "The number of tokens should match";
   CHECK_EQ(output.size(1), hidden_size) << "The hidden size should match";
-
-  // Verify output is not all zeros (weights were loaded)
   auto output_sum = torch::sum(output).item<float>();
   CHECK_NE(output_sum, 0.0f)
       << "Output should not be all zeros after loading weights";
@@ -393,9 +367,6 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   const int64_t top_k = 2;
   const double route_scale = 2.5;
   const bool gated = true;
-  const bool has_score_bias = true;
-  const bool has_bias = false;
-  const bool skip_bias_add = false;
   const int64_t renormalize = 1;
   const int64_t n_shared_experts = 1;
 
@@ -409,9 +380,6 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
                                     intermediate_size,
                                     n_shared_experts,
                                     gated,
-                                    has_score_bias,
-                                    has_bias,
-                                    skip_bias_add,
                                     renormalize);
 
   // Create test weights and load them
@@ -427,20 +395,8 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
       {batch_size * seq_len, hidden_size},
       std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
 
-  // Create router logits (batch_size * seq_len, num_experts)
-  std::vector<float> router_values;
-  router_values.reserve(batch_size * seq_len * num_experts);
-  for (size_t i = 0; i < batch_size * seq_len; ++i) {
-    for (size_t j = 0; j < num_experts; ++j) {
-      router_values.push_back(static_cast<float>(j) * 0.1f);
-    }
-  }
-  // use custom logits and residual tensor for precision verification
-  auto router_logits =
-      create_router_logits({batch_size * seq_len, num_experts}, router_values);
   auto output =
       fused_moe->forward_experts(hidden_states,
-                                 router_logits,
                                  /*enable_all2all_communication=*/false);
 
   xllm::Device device(options_.device());

@@ -6,7 +6,6 @@ cc_test(
     layer_test
   SRCS
     dense_mlp_tests.cpp
-    fused_moe_tests.cpp
     tests_utils.cpp
     indexer_tests.cpp
     mla_tests.cpp
@@ -15,6 +14,26 @@ cc_test(
     qwen2_vision_attention_tests.cpp
   DEPS
     :common_layers
+    :parallel_state
+    :model
+    :model_context
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+
+# MoE Gate unit test for MLU (uses layers/mlu/moe_gate)
+cc_test(
+  NAME
+    moe_layer_test
+  SRCS
+    moe_gate_tests.cpp
+    fused_moe_tests.cpp
+    tests_utils.cpp
+  DEPS
+    :common_layers
+    :mlu_layers
     :parallel_state
     :model
     :model_context

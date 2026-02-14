@@ -153,6 +153,9 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
   if (request.has_service_request_id()) {
     service_request_id = request.service_request_id();
   }
+  if (request.has_source_xservice_addr()) {
+    source_xservice_addr = request.source_xservice_addr();
+  }
   if (request.has_max_tokens()) {
     max_tokens = request.max_tokens();
   }
@@ -332,6 +335,9 @@ void init_from_chat_request(RequestParams& params, const ChatRequest& request) {
 
   if (request.has_service_request_id()) {
     params.service_request_id = request.service_request_id();
+  }
+  if (request.has_source_xservice_addr()) {
+    params.source_xservice_addr = request.source_xservice_addr();
   }
   if (request.has_max_tokens()) {
     params.max_tokens = request.max_tokens();

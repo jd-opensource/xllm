@@ -85,6 +85,10 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
   xllm::kernel::AttentionParams attention_params{attn_metadata};
 
   attention_params.query = query.view({-1, num_heads_, head_size_});
+
+  CHECK(!attn_metadata.is_chunked_prefill)
+      << "chunked prefill is not supported";
+
   if (attention_params.attn_metadata.is_prefill) {
     attention_params.key = key.view({-1, num_kv_heads_, head_size_});
     attention_params.value = value.view({-1, num_kv_heads_, head_size_});
@@ -114,7 +118,12 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
   attention_params.k_cache = k_cache;
   attention_params.v_cache = v_cache;
 
-  attention_params.seq_lens = attention_params.attn_metadata.kv_seq_lens_host;
+  if (attention_params.attn_metadata.kv_seq_lens_host.defined()) {
+    attention_params.seq_lens = attention_params.attn_metadata.kv_seq_lens_host;
+  } else {
+    // Fallback if host tensor isn't prepared.
+    attention_params.seq_lens = attention_params.attn_metadata.kv_seq_lens;
+  }
 
   xllm::kernel::batch_decode(attention_params);
 }

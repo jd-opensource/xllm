@@ -28,8 +28,8 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/dense_mlp.h"
-#include "layers/common/fused_moe.h"
 #include "layers/common/rms_norm.h"
+#include "layers/mlu/fused_moe.h"
 
 namespace xllm {
 namespace layer {

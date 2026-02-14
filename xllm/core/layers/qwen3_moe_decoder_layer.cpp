@@ -55,25 +55,11 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
   auto mlp_only_layers = model_args.mlp_only_layers();
   if ((std::count(mlp_only_layers.begin(), mlp_only_layers.end(), layer_id) ==
        0) &&
-      model_args.num_experts() > 0 &&
+      model_args.n_routed_experts() > 0 &&
       (layer_id + 1) % model_args.decoder_sparse_step() == 0) {
     moe_mlp_ = register_module("mlp",
-                               FusedMoE(model_args.num_experts(),
-                                        model_args.num_experts_per_tok(),
-                                        -1,   // num_expert_group
-                                        0,    // topk_group
-                                        1.0,  // route_scale
-                                        model_args.hidden_size(),
-                                        model_args.moe_intermediate_size(),
-                                        0,      // n_shared_experts
-                                        true,   // is_gated
-                                        false,  // has_score_bias
-                                        false,  // has_bias
-                                        false,  // skip_bias_add
-                                        model_args.norm_topk_prob(),
-                                        model_args.hidden_act(),
-                                        "softmax",
-                                        "",
+                               FusedMoE(model_args,
+                                        FusedMoEArgs{.is_gated = true},
                                         quant_args,
                                         parallel_args,
                                         options));

@@ -384,7 +384,7 @@ if(USE_MUSA)
   find_package(MUSA REQUIRED)
 
   if(NOT DEFINED ENV{MTT_OPLIB_PATH})
-    set(ENV{MTT_OPLIB_PATH} /workspace/MTTOplib)
+    set(ENV{MTT_OPLIB_PATH} $ENV{MUSA_HOME}/tools/MTTOplib)
   endif()
 
   message(STATUS  "using MTT Oplib at: $ENV{MTT_OPLIB_PATH}")
@@ -397,6 +397,19 @@ if(USE_MUSA)
   list(POP_BACK CMAKE_PREFIX_PATH)
 
   find_package(MKL REQUIRED)
+  execute_process(
+    COMMAND tvm-ffi-config --includedir
+    OUTPUT_VARIABLE tvm_ffi_INCLUDE_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  execute_process(
+    COMMAND tvm-ffi-config --libdir
+    OUTPUT_VARIABLE tvm_ffi_LIB_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  string(REGEX MATCH "[^\n]*/include[^\n]*" tvm_ffi_INCLUDE_DIR "${tvm_ffi_INCLUDE_DIR}")
+  string(REGEX MATCH "[^\n]*/lib[^\n]*" tvm_ffi_LIB_DIR "${tvm_ffi_LIB_DIR}")
+  
 
   include_directories(
       ${MUSA_INCLUDE_DIRS}
@@ -407,6 +420,7 @@ if(USE_MUSA)
       $ENV{PYTORCH_INSTALL_PATH}/include
       $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
       ${MTTOplib_INCLUDE_DIRS}
+      ${tvm_ffi_INCLUDE_DIR}
   )
 
   link_directories(
@@ -415,7 +429,7 @@ if(USE_MUSA)
     $ENV{PYTORCH_INSTALL_PATH}/lib
     ${TorchMusa_LIB_PATH}
     ${MKL_LIB_PATH}
-
+    ${tvm_ffi_LIB_DIR}
     ${TorchMusa_INSTALL_PREFIX}/lib
     )
   set(MUSA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -O3)

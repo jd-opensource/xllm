@@ -202,6 +202,7 @@ void AsyncResponseProcessor::process_stream_request(
       RequestOutput req_output;
       req_output.request_id = request->request_id();
       req_output.service_request_id = request->service_request_id();
+      req_output.target_xservice_addr = request->source_xservice_addr();
       for (size_t i = 0; i < indexes.size(); ++i) {
         const size_t index = indexes[i];
         const size_t size = num_tokens[i];
@@ -274,6 +275,7 @@ void AsyncResponseProcessor::batch_process_stream_requests(
       // RequestOutput req_output;
       req_output->request_id = request->request_id();
       req_output->service_request_id = request->service_request_id();
+      req_output->target_xservice_addr = request->source_xservice_addr();
       for (size_t i = 0; i < indexes.size(); ++i) {
         const size_t index = indexes[i];
         const size_t size = num_tokens[i];

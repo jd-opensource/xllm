@@ -36,7 +36,7 @@ bool MMInputTransfer::trans(const std::vector<Message>& messages,
     const auto& message = messages[idx];
     const auto& mmc = std::get<MMContentVec>(message.content);
 
-    if (!this->trans(mmc, ins, inputs.payload)) {
+    if (!this->trans(mmc, ins, inputs.payload())) {
       return false;
     }
 

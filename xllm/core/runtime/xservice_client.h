@@ -17,9 +17,11 @@ limitations under the License.
 
 #include <brpc/channel.h>
 
+#include <functional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #include "common/etcd_client.h"
 #include "forward_params.h"
@@ -50,11 +52,30 @@ class XServiceClient {
   std::vector<std::string> get_static_decode_list();
   std::vector<std::string> get_static_prefill_list();
 
+  // get all xllm_service addrs
+  std::vector<std::string> get_all_xservice_addrs();
+
   // response generation tokens to xllm service
   std::vector<bool> generations(const std::vector<RequestOutput>& outputs);
 
  private:
   void handle_master_service_watch(const etcd::Response& response);
+  void handle_xservices_watch(const etcd::Response& response);
+
+  // connect to specific xllm_service
+  bool connect_to_xservice(const std::string& xservice_addr);
+
+  // remove the connection to specific xllm_service
+  void disconnect_xservice(const std::string& xservice_addr);
+
+  // call rpc with current master stub atomically.
+  bool with_master_stub(
+      const std::function<void(xllm_service::proto::XllmRpcService_Stub*)>& fn,
+      std::string* master_addr);
+
+  // find stub by address, caller should hold mutex_
+  xllm_service::proto::XllmRpcService_Stub* find_stub_locked(
+      const std::string& xservice_addr);
 
  private:
   XServiceClient() = default;
@@ -64,16 +85,19 @@ class XServiceClient {
   bool initialize_done_ = false;
   std::string instance_name_;
 
-  std::string xservice_addr_;
-  std::unique_ptr<brpc::Channel> xservice_channel_;
-  std::unique_ptr<xllm_service::proto::XllmRpcService_Stub> xservice_stub_;
+  std::string master_xservice_addr_;
+  std::unordered_map<std::string, std::unique_ptr<brpc::Channel>>
+      xservice_channels_;
+  std::unordered_map<std::string,
+                     std::unique_ptr<xllm_service::proto::XllmRpcService_Stub>>
+      xservice_stubs_;
   std::unique_ptr<std::thread> heartbeat_thread_;
 
   std::shared_mutex mutex_;
   brpc::ChannelOptions chan_options_;
   std::unique_ptr<EtcdClient> etcd_client_;
-  const BlockManagerPool* block_manager_pool_;  // not own
-  Scheduler* scheduler_;                        // not own
+  const BlockManagerPool* block_manager_pool_ = nullptr;  // not own
+  Scheduler* scheduler_ = nullptr;                        // not own
 };
 
 }  // namespace xllm

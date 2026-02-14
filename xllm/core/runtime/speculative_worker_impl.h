@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "common/macros.h"
-#include "framework/kv_cache/embedding_allocator.h"
+#include "framework/kv_cache/embedding_cache.h"
 #include "framework/sampling/rejection_sampler.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache/spec_kv_cache_transfer.h"
@@ -38,6 +38,18 @@ class SpeculativeWorkerImpl : public WorkerImpl {
 
   ~SpeculativeWorkerImpl() override = default;
 
+ protected:
+  // For derived classes (e.g. Eagle3WorkerImpl) that need different options
+  // for main vs draft worker (e.g. main uses graph aux_hidden_states, draft
+  // does not). options is used by this wrapper worker itself; options_main
+  // and options_draft are for the inner target/draft worker impls.
+  SpeculativeWorkerImpl(const ParallelArgs& parallel_args,
+                        const torch::Device& device,
+                        const runtime::Options& options,
+                        const runtime::Options& options_main,
+                        const runtime::Options& options_draft);
+
+ public:
   // initialize model, cache manager. blocking call
   bool init_model(ModelContext& context) override {
     // do nothing
@@ -99,6 +111,10 @@ class SpeculativeWorkerImpl : public WorkerImpl {
 
   ForwardInput update_input_by_last_step_output(ForwardInput& inputs) override;
 
+ protected:
+  // Protected method for derived classes to override
+  virtual std::optional<ForwardOutput> step_decode(const ForwardInput& inputs);
+
   folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
@@ -117,8 +133,6 @@ class SpeculativeWorkerImpl : public WorkerImpl {
  private:
   std::optional<ForwardOutput> step_prefill(const ForwardInput& input);
 
-  std::optional<ForwardOutput> step_decode(const ForwardInput& inputs);
-
   // When enable DP, inputs sometimes be empty but model need to execute.
   std::optional<ForwardOutput> step_empty(const ForwardInput& inputs);
 
@@ -126,39 +140,50 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   void prepare_prefill_inputs(const ForwardInput& inputs,
                               ForwardInput& prefill_inputs);
 
+ protected:
   // prepare inputs for draft model at Decode phase.
+  // Protected for derived classes (e.g., Eagle3WorkerImpl) to use
   void prepare_draft_inputs(const ForwardInput& inputs,
                             ForwardInput& draft_inputs,
                             const int64_t offset,
                             const torch::Device device);
 
   // prepare inputs for target model at Decode phase.
+  // Protected for derived classes (e.g., Eagle3WorkerImpl) to use
   void prepare_validate_inputs(const ForwardInput& inputs,
                                ForwardInput& validate_inputs);
 
-  SampleOutput validate(const SamplingParameters& sampling_params,
-                        const std::vector<ForwardOutput>& draft_outputs,
-                        const ForwardOutput& target_output);
+  // Protected method for derived classes to override
+  virtual SampleOutput validate(const SamplingParameters& sampling_params,
+                                const std::vector<ForwardOutput>& draft_outputs,
+                                const ForwardOutput& target_output);
 
+  // PD separation: placeholder size for empty embedding slot. Default: 1x
+  // hidden_size. Eagle3 overrides to 3 * target_hidden_size.
+  virtual int64_t get_embedding_placeholder_size();
+
+ private:
   void update_sampling_params(SamplingParameters& sampling_params,
                               const int32_t num_val_tokens,
                               const int32_t total_num_val_tokens);
 
- private:
-  int32_t embedding_size_ = 0;
-  bool enable_fused_kernel_ = false;
-
+ protected:
+  // Protected members for derived classes (e.g., Eagle3WorkerImpl)
   std::unique_ptr<LLMWorkerImpl> impl_;
   std::unique_ptr<LLMWorkerImpl> draft_impl_;
 
-  std::shared_ptr<EmbeddingAllocator> embedding_allocator_;
-#if defined(USE_NPU)
-  std::shared_ptr<SpecKVCacheTransfer> kv_cache_transfer_;
-#endif
+  std::shared_ptr<EmbeddingCache> embedding_cache_;
+  bool enable_fused_kernel_ = false;
 
   // performance debug for fixing the speculative acceptance rate
   // NOTE: This is for performance debugging only, it will
   // influence the model accuracy and should not be used in production.
   std::shared_ptr<RejectionSamplerRateController> rate_controller_;
+
+ private:
+  int32_t embedding_size_ = 0;
+#if defined(USE_NPU)
+  std::shared_ptr<SpecKVCacheTransfer> kv_cache_transfer_;
+#endif
 };
 }  // namespace xllm

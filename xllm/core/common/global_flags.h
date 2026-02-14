@@ -39,10 +39,6 @@ DECLARE_string(task);
 
 DECLARE_string(devices);
 
-DECLARE_string(draft_model);
-
-DECLARE_string(draft_devices);
-
 DECLARE_int32(limit_image_per_prompt);
 
 DECLARE_int32(block_size);
@@ -63,7 +59,11 @@ DECLARE_int32(max_seqs_per_batch);
 
 DECLARE_int32(max_tokens_per_chunk_for_prefill);
 
+// --- speculative inference config ---
+DECLARE_string(draft_model);
+DECLARE_string(draft_devices);
 DECLARE_int32(num_speculative_tokens);
+DECLARE_string(speculative_algorithm);
 
 DECLARE_int32(num_request_handling_threads);
 
@@ -87,9 +87,13 @@ constexpr int32_t kGraphExecutorLogVerboseLevel = 50;
 
 DECLARE_bool(enable_graph);
 
-DECLARE_bool(enable_graph_no_padding);
+DECLARE_bool(enable_graph_mode_decode_no_padding);
 
-DECLARE_int32(max_seq_len_for_graph_mode);
+DECLARE_bool(enable_prefill_piecewise_graph);
+
+DECLARE_bool(enable_graph_vmm_pool);
+
+DECLARE_int32(max_tokens_for_graph_mode);
 
 DECLARE_bool(enable_chunked_prefill);
 
@@ -213,8 +217,14 @@ DECLARE_int64(cache_size_per_token);
 
 DECLARE_int64(buffer_size_per_seq);
 
+// --- beam search config ---
 DECLARE_bool(enable_beam_search_kernel);
 
+DECLARE_bool(enable_fast_sampler);
+
+DECLARE_bool(enable_topk_sorted);
+
+// --- qwen3 reranker config ---
 DECLARE_bool(enable_qwen3_reranker);
 
 DECLARE_string(reasoning_parser);
@@ -260,3 +270,5 @@ DECLARE_bool(use_audio_in_video);
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);
 #endif
+
+DECLARE_int32(health_check_interval_ms);

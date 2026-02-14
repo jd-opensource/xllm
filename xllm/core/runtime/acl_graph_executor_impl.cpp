@@ -63,6 +63,9 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // Future logic can be extended here for more complex model-specific behavior
   need_update_attention_plan_ = (args.model_type() != "deepseek_v32");
 
+  // Check if mRoPE is used (for VLM models like qwen2-vl)
+  use_mrope_ = !args.rope_scaling_mrope_section().empty();
+
   // Use max_tokens_per_batch for first dimension size
   // num_decode_tokens
   const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
@@ -70,15 +73,20 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   const int64_t max_seqs_per_batch = options.max_seqs_per_batch();
   auto tensor_options = torch::TensorOptions().device(device);
 
-  const int64_t max_seq_len = FLAGS_max_seq_len_for_graph_mode > 0
-                                  ? FLAGS_max_seq_len_for_graph_mode
-                                  : args_.max_position_embeddings();
+  const int64_t max_seq_len = args_.max_position_embeddings();
 
   // Create persistent tensors with max_tokens_per_batch as first dimension
   persistent_tokens_ = torch::zeros({max_tokens_per_batch},
                                     torch::dtype(torch::kInt).device(device));
-  persistent_positions_ = torch::zeros(
-      {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  // mRoPE positions have shape [3, num_tokens], regular positions have shape
+  // [num_tokens]
+  if (use_mrope_) {
+    persistent_positions_ = torch::zeros(
+        {3, max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  } else {
+    persistent_positions_ = torch::zeros(
+        {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  }
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
 
@@ -179,8 +187,16 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   // Copy data from input parameters to persistent graph tensors
   persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(tokens, /*non_blocking=*/true);
-  persistent_positions_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-      .copy_(positions, /*non_blocking=*/true);
+  // mRoPE positions have shape [3, num_tokens], slice on dim 1
+  if (use_mrope_) {
+    persistent_positions_
+        .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_num_tokens)
+        .copy_(positions, /*non_blocking=*/true);
+  } else {
+    persistent_positions_
+        .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+        .copy_(positions, /*non_blocking=*/true);
+  }
   q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
       .copy_(params.q_seq_lens, /*non_blocking=*/true);
   kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
@@ -643,7 +659,7 @@ void GraphPersistentParam::update_attention_mask(
   const int64_t batch_size = input_params.kv_seq_lens.size(0);
   const int64_t max_seq_len = input_params.kv_max_seq_len > 0
                                   ? input_params.kv_max_seq_len
-                                  : FLAGS_max_seq_len_for_graph_mode;
+                                  : args_.max_position_embeddings();
 
   // persistent_mask_ is already initialized in constructor
   // Check if size is sufficient
@@ -940,9 +956,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(n_tokens);
 
   // Check if conditions are suitable for graph execution (replay or capture)
-  const auto max_seq_len = FLAGS_max_seq_len_for_graph_mode > 0
-                               ? FLAGS_max_seq_len_for_graph_mode
-                               : args_.max_position_embeddings();
+  const auto max_seq_len = args_.max_position_embeddings();
   const bool seq_len_supported = params_single.kv_max_seq_len <= max_seq_len;
 
   // Combined condition for graph capture support
@@ -1043,7 +1057,7 @@ void AclGraph::print_graph_tensors() const {
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
     uint32_t num_tokens) const {
-  if (FLAGS_enable_graph_no_padding) {
+  if (FLAGS_enable_graph_mode_decode_no_padding) {
     return num_tokens;
   }
   if (num_tokens <= 1) {

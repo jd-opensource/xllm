@@ -176,6 +176,15 @@ void verify_precision(const torch::Tensor& actual_output,
                       double rtol = 1e-3,
                       double atol = 1e-4);
 
+// Expect tensor's min, max, sum (computed in fp32) to match expected values
+// within tolerance. Uses atol + rtol * |expected| for each of min, max, sum.
+void expect_tensor_stats(const torch::Tensor& t,
+                         double expected_min,
+                         double expected_max,
+                         double expected_sum,
+                         double rtol = 1e-2,
+                         double atol = 1e-5);
+
 // Helper function to create default model arguments for testing
 ModelArgs create_default_model_args();
 

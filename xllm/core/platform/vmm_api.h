@@ -45,6 +45,9 @@ using PhyMemHandle = MUmemGenericAllocationHandle;
 
 namespace vmm {
 
+// get the recommended granularity size for physical memory allocation
+size_t get_recommended_granularity(int32_t device_id);
+
 // create a physical memory handle for a specific device
 void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id);
 
@@ -58,7 +61,11 @@ void release_phy_mem_handle(PhyMemHandle& phy_mem_handle);
 void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size);
 
 // map a virtual memory pointer to a physical memory handle
-void map(VirPtr& vir_ptr, PhyMemHandle& phy_mem_handle);
+void map(VirPtr& vir_ptr, PhyMemHandle& phy_mem_handle, int32_t device_id = 0);
+void map(VirPtr& vir_ptr,
+         PhyMemHandle& phy_mem_handle,
+         size_t granularity_size,
+         int32_t device_id = 0);
 
 // unmap a virtual memory pointer with a specific aligned size
 void unmap(VirPtr& vir_ptr, size_t aligned_size);

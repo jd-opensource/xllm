@@ -580,5 +580,188 @@ TEST_F(Glm47DetectorTest, StreamingLargePayloadNoStackOverflow) {
   EXPECT_TRUE(found_args);
 }
 
+// =============================================================================
+// UTF-8 Streaming Tests
+// =============================================================================
+// These tests verify that multi-byte UTF-8 characters are handled correctly
+// when split across streaming chunks. The fix buffers incomplete UTF-8
+// sequences until the next chunk completes them.
+
+// Test streaming with Chinese characters split across chunks
+// "北京" = 0xE5 0x8C 0x97 (北) + 0xE4 0xBA 0xAC (京)
+TEST_F(Glm47DetectorTest, StreamingParseWithChineseCharactersSplit) {
+  // Chunk 1: Function name and key, start of value
+  std::string chunk1 =
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>";
+
+  // Chunk 2: First 2 bytes of "北" (0xE5 0x8C) - incomplete 3-byte sequence
+  std::string chunk2 = "\xE5\x8C";
+
+  // Chunk 3: Last byte of "北" (0x97) + first 2 bytes of "京" (0xE4 0xBA)
+  std::string chunk3 = "\x97\xE4\xBA";
+
+  // Chunk 4: Last byte of "京" (0xAC) + closing tags
+  std::string chunk4 = "\xAC</arg_value></tool_call>";
+
+  // Process each chunk - should not crash with UTF-8 errors
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  // Function name is returned when <arg_key> is seen
+  EXPECT_GE(result1.calls.size(), 1);
+  if (result1.calls.size() > 0) {
+    EXPECT_TRUE(result1.calls[0].name.has_value());
+    EXPECT_EQ(result1.calls[0].name.value(), "get_weather");
+  }
+
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  // Should buffer incomplete UTF-8, not crash
+
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  // Should complete first character and buffer second incomplete
+
+  auto result4 = detector_->parse_streaming_increment(chunk4, tools_);
+  // Should complete the tool call
+  EXPECT_GE(result4.calls.size(), 1);
+}
+
+// Test with single Chinese character split (simpler case)
+TEST_F(Glm47DetectorTest, StreamingParseWithSingleChineseCharacterSplit) {
+  // "北" = 0xE5 0x8C 0x97 (3-byte UTF-8)
+  std::string chunk1 =
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>";
+  std::string chunk2 = "\xE5\x8C";  // First 2 bytes (incomplete)
+  std::string chunk3 = "\x97</arg_value></tool_call>";  // Last byte + closing
+
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  // Should not crash with "invalid UTF-8 byte at index 1: 0xE5"
+
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  EXPECT_GE(result3.calls.size(), 1);
+}
+
+// Test with 4-byte UTF-8 emoji split
+// Emoji "😊" = 0xF0 0x9F 0x98 0x8A (4-byte UTF-8)
+TEST_F(Glm47DetectorTest, StreamingParseWithEmojiSplit) {
+  std::string chunk1 =
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>Tokyo ";
+  std::string chunk2 = "\xF0\x9F";  // First 2 bytes of emoji (incomplete)
+  std::string chunk3 =
+      "\x98\x8A</arg_value></tool_call>";  // Last 2 bytes + closing
+
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  // Should buffer incomplete 4-byte sequence
+
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  EXPECT_GE(result3.calls.size(), 1);
+}
+
+// Test with complete UTF-8 characters (no splitting needed)
+TEST_F(Glm47DetectorTest, StreamingParseWithCompleteUtf8) {
+  // Complete Chinese characters in single chunks
+  std::string chunk1 =
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>";
+  std::string chunk2 = "北京";  // Complete UTF-8 characters
+  std::string chunk3 = "</arg_value></tool_call>";
+
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  // Function name is returned when <arg_key> is seen
+  EXPECT_GE(result1.calls.size(), 1);
+  if (result1.calls.size() > 0) {
+    EXPECT_TRUE(result1.calls[0].name.has_value());
+    EXPECT_EQ(result1.calls[0].name.value(), "get_weather");
+  }
+
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+
+  EXPECT_GE(result3.calls.size(), 1);
+}
+
+// Test with mixed UTF-8 and ASCII
+TEST_F(Glm47DetectorTest, StreamingParseWithMixedUtf8AndAscii) {
+  // Mix of ASCII and Chinese with UTF-8 split at boundary
+  std::string chunk1 =
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>City: ";
+  std::string chunk2 = "\xE5";  // First byte of "北" (incomplete)
+  std::string chunk3 =
+      "\x8C\x97京</arg_value></tool_call>";  // Rest of "北" + complete "京"
+
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  // Should buffer the single incomplete byte
+
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  EXPECT_GE(result3.calls.size(), 1);
+}
+
+// Test with Japanese characters (also 3-byte UTF-8)
+// "東京" = 0xE6 0x9D 0xB1 (東) + 0xE4 0xBA 0xAC (京)
+TEST_F(Glm47DetectorTest, StreamingParseWithJapaneseCharactersSplit) {
+  std::string chunk1 =
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>";
+  std::string chunk2 = "\xE6\x9D";  // First 2 bytes of "東" (incomplete)
+  std::string chunk3 = "\xB1\xE4\xBA\xAC</arg_value></tool_call>";  // Rest
+
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+
+  EXPECT_GE(result3.calls.size(), 1);
+}
+
+// Test with Korean characters (also 3-byte UTF-8)
+// "서울" = 0xEC 0x84 0x9C (서) + 0xEC 0x9A 0xB8 (울)
+TEST_F(Glm47DetectorTest, StreamingParseWithKoreanCharactersSplit) {
+  std::string chunk1 =
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>";
+  std::string chunk2 = "\xEC\x84";  // First 2 bytes of "서" (incomplete)
+  std::string chunk3 = "\x9C\xEC\x9A\xB8</arg_value></tool_call>";  // Rest
+
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+
+  EXPECT_GE(result3.calls.size(), 1);
+}
+
+// Test UTF-8 boundary: one byte at a time for 3-byte char
+TEST_F(Glm47DetectorTest, StreamingParseWithUtf8OneByteAtATime) {
+  // Split "北" (0xE5 0x8C 0x97) one byte at a time
+  std::string chunk1 =
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>";
+  std::string chunk2 = "\xE5";                          // First byte
+  std::string chunk3 = "\x8C";                          // Second byte
+  std::string chunk4 = "\x97</arg_value></tool_call>";  // Third byte + closing
+
+  auto result1 = detector_->parse_streaming_increment(chunk1, tools_);
+  auto result2 = detector_->parse_streaming_increment(chunk2, tools_);
+  auto result3 = detector_->parse_streaming_increment(chunk3, tools_);
+  auto result4 = detector_->parse_streaming_increment(chunk4, tools_);
+
+  EXPECT_GE(result4.calls.size(), 1);
+}
+
+// Test UTF-8 in non-streaming (full parse) mode still works
+TEST_F(Glm47DetectorTest, NonStreamingParseWithUtf8) {
+  std::string text =
+      "Query for city "
+      "<tool_call>get_weather<arg_key>city</arg_key><arg_value>北京</arg_value>"
+      "<arg_key>date</arg_key><arg_value>2024-06-27</arg_value></tool_call>";
+
+  auto result = detector_->detect_and_parse(text, tools_);
+
+  EXPECT_EQ(result.normal_text, "Query for city");
+  ASSERT_EQ(result.calls.size(), 1);
+
+  const auto& call = result.calls[0];
+  EXPECT_TRUE(call.name.has_value());
+  EXPECT_EQ(call.name.value(), "get_weather");
+
+  nlohmann::json params = nlohmann::json::parse(call.parameters);
+  EXPECT_EQ(params["city"], "北京");
+  EXPECT_EQ(params["date"], "2024-06-27");
+}
+
 }  // namespace function_call
 }  // namespace xllm

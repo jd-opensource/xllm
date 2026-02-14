@@ -97,6 +97,9 @@ struct RequestOutput {
   // the id of the request which generated in xllm service.
   std::string service_request_id;
 
+  // target xllm_service rpc address for this output.
+  std::string target_xservice_addr;
+
   // the prompt text for the request.
   std::optional<std::string> prompt;
 

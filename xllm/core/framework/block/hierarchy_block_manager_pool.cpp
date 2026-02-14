@@ -227,13 +227,13 @@ void HierarchyBlockManagerPool::prefetch_from_storage(
             options_.block_size() -
         shared_blocks_num;
     if (num_additional_blocks <= 1) {
-      return;
+      continue;
     }
 
     auto host_blocks =
         host_block_managers_[dp_rank]->allocate(num_additional_blocks);
     if (host_blocks.size() != num_additional_blocks) {
-      return;
+      continue;
     }
     prefill_sequence->host_kv_state().add_kv_blocks(host_blocks);
     PrefixCache::compute_hash_keys(

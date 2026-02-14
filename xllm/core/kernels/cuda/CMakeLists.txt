@@ -51,3 +51,13 @@ cc_test(
     glog::glog
 )
 target_link_libraries(cache_select_test PRIVATE brpc)
+
+cc_test(
+  NAME
+    moe_topk_funcs_test
+  SRCS
+    moe_topk_funcs_test.cu
+  DEPS
+    :cuda_kernels
+    GTest::gtest_main
+)

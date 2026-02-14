@@ -110,6 +110,9 @@ class CommChannel {
   virtual bool get_active_activation_memory_async(
       folly::Promise<int64_t>& promise);
 
+  // Check if the connection to worker is healthy
+  virtual bool check_health();
+
  protected:
   bool execute_model_with_brpc(
       const RawForwardInput& input,

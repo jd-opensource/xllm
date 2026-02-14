@@ -31,6 +31,7 @@ limitations under the License.
 #include "flowmatch_euler_discrete_scheduler.h"
 #include "models/model_registry.h"
 #include "t5_encoder.h"
+#include "transformer_flux.h"
 
 namespace xllm {
 
@@ -72,63 +73,6 @@ std::pair<torch::Tensor, int64_t> retrieve_timesteps(
     scheduler_timesteps = scheduler_timesteps.to(device);
   }
   return {scheduler_timesteps, steps};
-}
-
-torch::Tensor get_1d_rotary_pos_embed(
-    int64_t dim,
-    const torch::Tensor& pos,
-    float theta = 10000.0,
-    bool use_real = false,
-    float linear_factor = 1.0,
-    float ntk_factor = 1.0,
-    bool repeat_interleave_real = true,
-    torch::Dtype freqs_dtype = torch::kFloat32) {
-  CHECK_EQ(dim % 2, 0) << "Dimension must be even";
-
-  torch::Tensor pos_tensor = pos;
-  if (pos.dim() == 0) {
-    pos_tensor = torch::arange(pos.item<int64_t>(), pos.options());
-  }
-
-  theta = theta * ntk_factor;
-
-  auto freqs =
-      1.0 /
-      (torch::pow(
-           theta,
-           torch::arange(
-               0, dim, 2, torch::dtype(freqs_dtype).device(pos.device())) /
-               dim) *
-       linear_factor);  // [D/2]
-
-  auto tensors = {pos_tensor, freqs};
-
-  auto freqs_outer = torch::einsum("s,d->sd", tensors);  // [S, D/2]
-#if defined(USE_NPU)
-  freqs_outer = freqs_outer.to(torch::kFloat32);
-#endif
-  if (use_real && repeat_interleave_real) {
-    auto cos_vals = torch::cos(freqs_outer);  // [S, D/2]
-    auto sin_vals = torch::sin(freqs_outer);  // [S, D/2]
-
-    auto freqs_cos = cos_vals.transpose(-1, -2)
-                         .repeat_interleave(2, -2)
-                         .transpose(-1, -2)
-                         .to(torch::kFloat32);  // [S, D]
-
-    auto freqs_sin = sin_vals.transpose(-1, -2)
-                         .repeat_interleave(2, -2)
-                         .transpose(-1, -2)
-                         .to(torch::kFloat32);  // [S, D]
-    return torch::cat({freqs_cos.unsqueeze(0), freqs_sin.unsqueeze(0)},
-                      0);  // [2, S, D]
-  }
-  // This case should not happen in practice, but required for compilation
-  LOG(FATAL) << "get_1d_rotary_pos_embed returned empty tensor, which should "
-                "not happen. use_real: "
-             << use_real
-             << " repeat_interleave_real: " << repeat_interleave_real;
-  return torch::Tensor();
 }
 
 class FluxPosEmbedImpl : public torch::nn::Module {
@@ -206,7 +150,6 @@ class FluxPipelineBaseImpl : public torch::nn::Module {
     text_input_ids.reserve(batch_size);
     CHECK(tokenizer_2_->batch_encode(prompt, &text_input_ids));
     for (auto& ids : text_input_ids) {
-      LOG(INFO) << "T5 Original IDs size: " << ids;
       ids.resize(max_sequence_length, 0);
     }
 
@@ -236,7 +179,6 @@ class FluxPipelineBaseImpl : public torch::nn::Module {
     text_input_ids.reserve(batch_size);
     CHECK(tokenizer_->batch_encode(prompt, &text_input_ids));
     for (auto& ids : text_input_ids) {
-      LOG(INFO) << "CLIP Original IDs size: " << ids;
       ids.resize(tokenizer_max_length_, 49407);
       ids.back() = 49407;
     }

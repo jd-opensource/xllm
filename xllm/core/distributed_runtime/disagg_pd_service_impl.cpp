@@ -108,7 +108,8 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
                                                req.x_request_id(),
                                                req.x_request_time(),
                                                std::move(req_state),
-                                               req.service_req_id());
+                                               req.service_req_id(),
+                                               req.source_xservice_addr());
 
   // add one sequence, rest will be added by scheduler
   return new_request;

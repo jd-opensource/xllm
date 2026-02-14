@@ -108,9 +108,17 @@ struct AttentionMetadata {
   torch::Tensor unshared_v_cache;
   torch::Tensor step_tensor;
 
-  // for npu
+  // custom attention mask
   torch::Tensor attn_mask;
+
+#if defined(USE_NPU)
+  // for npu
   torch::Tensor kv_seq_lens_host;
+  // For ACL graph execution - tiling data for CustomPagedAttention.
+  // If defined, use this instead of kv_seq_lens_host to avoid .to(kCPU)
+  // operations that break ACL graph capture.
+  torch::Tensor paged_attention_tiling_data;
+#endif
 };
 
 }  // namespace xllm::layer

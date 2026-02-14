@@ -27,7 +27,7 @@ limitations under the License.
 namespace {
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
-  if (FLAGS_enable_graph_no_padding) {
+  if (FLAGS_enable_graph_mode_decode_no_padding) {
     return num_tokens;
   }
   const uint32_t graph_step = 16;
@@ -48,9 +48,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
     : num_decoding_tokens_(options.num_decoding_tokens()) {
   const int64_t max_tokens = FLAGS_max_tokens_per_batch;
   const int64_t max_seqs = options.max_seqs_per_batch();
-  const int64_t max_seq_len = FLAGS_max_seq_len_for_graph_mode > 0
-                                  ? FLAGS_max_seq_len_for_graph_mode
-                                  : args.max_position_embeddings();
+  const int64_t max_seq_len = args.max_position_embeddings();
   const uint32_t block_size = options.block_size();
   const int64_t max_num_blocks_per_req =
       (max_seq_len + block_size - 1) / block_size + 1;
@@ -148,7 +146,8 @@ MluGraph::MluGraph(GraphPersistentParam* persistent_param,
 
 void MluGraph::capture(CausalLM* model,
                        std::vector<KVCache>& kv_cache,
-                       torch_mlu::MempoolId_t& pool) {
+                       torch_mlu::MempoolId_t& pool,
+                       const runtime::Options& options) {
   int32_t slice_dim = persistent_param_->use_mrope_ ? 1 : 0;
   torch_mlu::synchronize();
   auto prev_stream = torch_mlu::getCurrentMLUStream();
@@ -162,9 +161,10 @@ void MluGraph::capture(CausalLM* model,
       persistent_param_->params_);
   persistent_param_->output_.slice(0, 0, forward_result.hidden_states.size(0))
       .copy_(forward_result.hidden_states, true);
-  // Note: aux_hidden_states capture is controlled by options in executor
-  // For now, always capture if available, filtering happens in executor::run()
-  if (forward_result.aux_hidden_states.defined()) {
+  // Only capture aux_hidden_states when enable_graph_aux_hidden_states is on
+  // (e.g. main worker in EAGLE-3); draft worker has this option false.
+  if (options.enable_graph_aux_hidden_states() &&
+      forward_result.aux_hidden_states.defined()) {
     if (persistent_param_->aux_hidden_states_.numel() == 0) {
       // Lazy initialization
       auto shape = forward_result.aux_hidden_states.sizes().vec();
@@ -278,7 +278,7 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
     std::unique_ptr<MluGraph> graph =
         std::make_unique<MluGraph>(persistent_param_.get(), padding_batch_size);
     graph->update_input_buffer(tokens, positions, params, true);
-    graph->capture(model_, kv_caches, pool_);
+    graph->capture(model_, kv_caches, pool_, options_);
     graphs_[padding_batch_size] = std::move(graph);
     // Return the output from capture
     auto hidden_states = persistent_param_->output_.slice(0, 0, actual_tokens);

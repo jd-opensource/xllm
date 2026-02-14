@@ -32,6 +32,7 @@ cc_library(
     worker_client.h
     xservice_client.h
     speculative_worker_impl.h
+    eagle3_worker_impl.h
     forward_shared_memory_manager.h
   SRCS
     executor.cpp
@@ -55,11 +56,13 @@ cc_library(
     xservice_client.cpp
     params_utils.cpp
     speculative_worker_impl.cpp
+    eagle3_worker_impl.cpp
     forward_shared_memory_manager.cpp
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
     :common
+    :platform
     :model_context
     :request
     :state_dict
@@ -134,5 +137,23 @@ cc_test(
     :platform
     GTest::gtest_main
     torch_mlu
+)
+endif()
+
+if(USE_CUDA)
+cc_test(
+  NAME
+    cuda_graph_executor_test
+  SRCS
+    cuda_graph_executor_test.cpp
+  DEPS
+    :runtime
+    :cuda_layers
+    :batch
+    :block
+    :kv_cache
+    :kernels
+    GTest::gtest_main
+    torch
 )
 endif()

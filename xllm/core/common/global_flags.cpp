@@ -51,8 +51,6 @@ DEFINE_int32(max_concurrent_requests,
              "Maximum number of concurrent requests the xllm service can "
              "handle. If set to 0, there is no limit.");
 
-BRPC_VALIDATE_GFLAG(max_concurrent_requests, brpc::NonNegativeInteger);
-
 // --- model config ---
 
 DEFINE_string(model_id, "", "hf model name.");
@@ -73,12 +71,6 @@ DEFINE_string(devices,
               "npu:0",
               "Devices to run the model on, e.g. npu:0, npu:0,npu:1.");
 
-DEFINE_string(draft_model, "", "draft hf model path to the model file.");
-
-DEFINE_string(draft_devices,
-              "npu:0",
-              "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1.");
-
 DEFINE_bool(enable_mla,
             false,
             "Whether to enable multi-head latent attention.");
@@ -86,11 +78,6 @@ DEFINE_bool(enable_mla,
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
 
 // --- graph mode execution config ---
-
-DEFINE_int32(max_seq_len_for_graph_mode,
-             0,
-             "Maximum number of tokens per sequence for graph execution. "
-             "If 0, use model max_position_embeddings.");
 
 DEFINE_bool(
     enable_graph,
@@ -100,11 +87,27 @@ DEFINE_bool(
     "or MLU Graph) to optimize decode performance by reducing kernel "
     "launch overhead and device idle time.");
 
-DEFINE_bool(enable_graph_no_padding,
+DEFINE_bool(enable_graph_mode_decode_no_padding,
             false,
             "Whether to enable graph execution for decode phase without "
             "padding. If true, graph will be caputured with every actual num "
             "tokens, as stride is 1.");
+
+DEFINE_bool(enable_prefill_piecewise_graph,
+            false,
+            "Whether to enable piecewise CUDA graph for prefill phase. "
+            "When enabled, attention operations use eager mode while other "
+            "operations are captured in CUDA graphs.");
+
+DEFINE_bool(enable_graph_vmm_pool,
+            true,
+            "Whether to enable VMM-backed CUDA graph memory pool for "
+            "multi-shape graph memory reuse.");
+
+DEFINE_int32(max_tokens_for_graph_mode,
+             2048,
+             "Maximum number of tokens for graph execution. "
+             "If 0, no limit is applied.");
 // --- vlm config ---
 
 DEFINE_int32(limit_image_per_prompt,
@@ -326,7 +329,18 @@ DEFINE_uint64(output_shm_size,
 
 // --- speculative config ---
 
+DEFINE_string(draft_model, "", "draft hf model path to the model file.");
+
+DEFINE_string(draft_devices,
+              "npu:0",
+              "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1.");
+
 DEFINE_int32(num_speculative_tokens, 0, "Number of speculative tokens.");
+
+DEFINE_string(speculative_algorithm,
+              "MTP",
+              "Speculative decoding algorithm. Supported options: MTP, Eagle3. "
+              "Default is MTP.");
 
 DEFINE_bool(enable_atb_spec_kernel,
             false,
@@ -431,6 +445,12 @@ DEFINE_int64(buffer_size_per_seq,
 DEFINE_bool(enable_beam_search_kernel,
             false,
             "Whether to enable beam search kernel.");
+
+DEFINE_bool(enable_fast_sampler, false, "Whether to enable fast sampler path.");
+
+DEFINE_bool(enable_topk_sorted,
+            true,
+            "Whether to enable sorted output for topk.");
 
 // --- reasoning parser config ---
 
@@ -537,3 +557,8 @@ DEFINE_int32(max_decode_rounds,
              "0 means disabled.");
 
 DEFINE_int32(beam_width, 1, "Beam width for beam search.");
+
+// --- health check config ---
+DEFINE_int32(health_check_interval_ms,
+             3000,
+             "Worker health check interval in milliseconds.");

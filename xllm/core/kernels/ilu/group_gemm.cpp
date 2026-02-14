@@ -13,17 +13,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "musa_ops_api.h"
+#include "ilu_ops_api.h"
 
-namespace xllm::kernel::musa {
+namespace xllm::kernel::ilu {
 
-void reshape_paged_cache(
-    torch::Tensor slot_ids,   // [n_tokens]
-    torch::Tensor keys,       // [n_tokens, n_kv_heads, head_dim]
-    torch::Tensor values,     // [n_tokens, n_kv_heads, head_dim]
-    torch::Tensor key_cache,  // [n_blocks, block_size, n_heads, head_dim]
-    torch::Tensor value_cache) {
-  
+torch::Tensor group_gemm(torch::Tensor& input,
+                         torch::Tensor& weight,
+                         torch::Tensor& tokens_per_experts,
+                         const std::optional<torch::Tensor>& dst_to_src,
+                         torch::Tensor& output) {
+  infer::moe_w16a16_group_gemm(
+      output,
+      input,
+      weight,
+      tokens_per_experts,
+      dst_to_src,
+      /*bias=*/std::nullopt,
+      /*format=*/"TN",
+      /*persistent=*/0,
+      /*output_n=*/tokens_per_experts.sum().item<int64_t>());
+
+  return output;
 }
 
-}  // namespace xllm::kernel::musa
+}  // namespace xllm::kernel::ilu

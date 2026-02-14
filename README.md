@@ -30,6 +30,7 @@ limitations under the License. -->
 
 ### 📢 News
 
+- 2026-02-12: 🎉 We day-0 support high-performance inference for the [GLM-5](https://github.com/zai-org/GLM-5) model, please refer to the [Deployment Document](https://github.com/zai-org/GLM-5/blob/main/example/ascend.md) for deployment.
 - 2025-12-21: 🎉 We day-0 support high-performance inference for the [GLM-4.7](https://github.com/zai-org) model.
 - 2025-12-08: 🎉 We day-0 support high-performance inference for the [GLM-4.6V](https://github.com/zai-org/GLM-V) model.
 - 2025-12-05: 🎉 We now support high-performance inference for the [GLM-4.5/GLM-4.6](https://github.com/zai-org/GLM-4.5/blob/main/README_zh.md) series models.
@@ -134,7 +135,6 @@ This project was made possible thanks to the following open-source projects:
 - [safetensors](https://github.com/huggingface/safetensors) - xLLM relies on the C binding safetensors capability.
 - [Partial JSON Parser](https://github.com/promplate/partial-json-parser) - Implement xLLM's C++ JSON parser with insights from Python and Go implementations.
 - [concurrentqueue](https://github.com/cameron314/concurrentqueue) - A fast multi-producer, multi-consumer lock-free concurrent queue for C++11.
-- [Flashinfer](https://github.com/flashinfer-ai/flashinfer) - High-performance NVIDIA GPU kernels.
 
 
 Thanks to the following collaborating university laboratories:

@@ -14,8 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include "dit.h"
 #include "pipeline_flux_base.h"
+#include "transformer_flux.h"
 // pipeline_flux_control compatible with huggingface weights
 // ref to:
 // https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/flux/pipeline_flux_control.py
@@ -81,25 +81,23 @@ class FluxControlPipelineImpl : public FluxPipelineBaseImpl {
             ? std::make_optional(input.pooled_prompt_embeds)
             : std::nullopt;
 
-    std::vector<torch::Tensor> output =
-        forward_(prompts,
-                 prompts_2,
-                 control_image,
-                 height,
-                 width,
-                 generation_params.strength,
-                 generation_params.num_inference_steps,
-                 generation_params.guidance_scale,
-                 generation_params.num_images_per_prompt,
-                 seed,
-                 latents,
-                 prompt_embeds,
-                 pooled_prompt_embeds,
-                 generation_params.max_sequence_length);
+    auto output = forward_impl(prompts,
+                               prompts_2,
+                               control_image,
+                               height,
+                               width,
+                               generation_params.strength,
+                               generation_params.num_inference_steps,
+                               generation_params.guidance_scale,
+                               generation_params.num_images_per_prompt,
+                               seed,
+                               latents,
+                               prompt_embeds,
+                               pooled_prompt_embeds,
+                               generation_params.max_sequence_length);
 
     DiTForwardOutput out;
-    out.tensors = torch::chunk(output[0], output[0].size(0), 0);
-    LOG(INFO) << "Output tensor chunks size: " << out.tensors.size();
+    out.tensors = torch::chunk(output, input.batch_size);
     return out;
   }
 
@@ -200,7 +198,7 @@ class FluxControlPipelineImpl : public FluxPipelineBaseImpl {
     return image;
   }
 
-  std::vector<torch::Tensor> forward_(
+  torch::Tensor forward_impl(
       std::optional<std::vector<std::string>> prompt = std::nullopt,
       std::optional<std::vector<std::string>> prompt_2 = std::nullopt,
       torch::Tensor control_image = torch::Tensor(),
@@ -298,7 +296,8 @@ class FluxControlPipelineImpl : public FluxPipelineBaseImpl {
                                   latent_image_ids,
                                   height / (vae_scale_factor_ * 2),
                                   width / (vae_scale_factor_ * 2));
-    torch::Tensor image_rotary_emb = torch::stack({rot_emb1, rot_emb2}, 0);
+    torch::Tensor image_rotary_emb =
+        torch::stack({rot_emb1, rot_emb2}, 0).to(options_.dtype());
     for (int64_t i = 0; i < timesteps.numel(); ++i) {
       torch::Tensor t = timesteps[i].unsqueeze(0);
       timestep.fill_(t.item<float>())
@@ -334,7 +333,7 @@ class FluxControlPipelineImpl : public FluxPipelineBaseImpl {
     unpacked_latents = unpacked_latents.to(options_.dtype());
     image = vae_->decode(unpacked_latents);
     image = image_processor_->postprocess(image);
-    return std::vector<torch::Tensor>{{image}};
+    return image;
   }
 
  private:
