@@ -606,7 +606,7 @@ void DeekseekV32DecoderLoader::process_general_weights(
     torch::Tensor tmp_tensor_re = tensor.to(device_);
     at_weight_tensors_[index_re] = tmp_tensor_re;
   }
-  if (layer_id_ != 61 && absl::StrContains(name, "layernorm.weight")) {
+  if (layer_id_ != n_layers_ && absl::StrContains(name, "layernorm.weight")) {
     at_weight_tensors_[index + 1] = torch::zeros_like(tmp_tensor);
   }
 }
