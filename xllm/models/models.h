@@ -32,6 +32,8 @@ limitations under the License.
 #include "llm/npu/glm4_moe.h"                 // IWYU pragma: keep
 #include "llm/npu/glm4_moe_lite.h"            // IWYU pragma: keep
 #include "llm/npu/glm4_moe_mtp.h"             // IWYU pragma: keep
+#include "llm/npu/glm5_moe.h"                 // IWYU pragma: keep
+#include "llm/npu/glm5_moe_mtp.h"             // IWYU pragma: keep
 #include "llm/npu/kimi_k2.h"                  // IWYU pragma: keep
 #include "llm/npu/llama.h"                    // IWYU pragma: keep
 #include "llm/npu/llama3.h"                   // IWYU pragma: keep
