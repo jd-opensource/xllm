@@ -1174,8 +1174,24 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
 
-  for (auto& worker : worker_clients_) {
-    futures.push_back(worker->wakeup_async(options));
+  if (!options.remote_addrs.empty() &&
+      options.remote_addrs.size() == worker_clients_num_) {
+    // D2D mode with TP: each worker pulls only from its corresponding source
+    for (size_t i = 0; i < worker_clients_num_; ++i) {
+      WakeupOptions per_worker_options;
+      per_worker_options.master_status = options.master_status;
+      per_worker_options.remote_addrs = {options.remote_addrs[i]};
+      if (i < options.src_weight_segments.size()) {
+        per_worker_options.src_weight_segments = {
+            options.src_weight_segments[i]};
+      }
+      futures.push_back(worker_clients_[i]->wakeup_async(per_worker_options));
+    }
+  } else {
+    // H2D mode or non-TP: pass options as-is
+    for (auto& worker : worker_clients_) {
+      futures.push_back(worker->wakeup_async(options));
+    }
   }
 
   auto results = folly::collectAll(futures).get();
