@@ -64,6 +64,7 @@ class BaseManualLoader : public BaseLoader {
   static constexpr size_t kHostAlignment = 64;
 
   virtual bool is_nz_format_tensor(int weight_index) { return false; };
+  void allocate_device_storage();
   void release_device_storage();
   void release_host_storage();
   int copy_host_nd_to_nz(torch::Tensor host_tensor,
