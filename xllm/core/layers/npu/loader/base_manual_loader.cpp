@@ -55,8 +55,16 @@ void BaseManualLoader::reload_weights() {
 
 void BaseManualLoader::reload_weights_from_device() {
   if (!device_storage_) {
-    LOG(ERROR) << "device_storage_ is null, cannot reload weights from device.";
-    return;
+    // D2D path: weights already transferred to GlobalXtensor weight region.
+    // Call allocate_weight to get the pointer into the pre-allocated region.
+    auto& allocator = XTensorAllocator::get_instance();
+    bool ok =
+        allocator.allocate_weight(model_id_, device_storage_, storage_size_);
+    if (!ok) {
+      LOG(ERROR) << "device_storage_ is null and failed to allocate weight"
+                 << " for D2D reload, model=" << model_id_;
+      return;
+    }
   }
   init_device_at_weights();
 }

@@ -635,6 +635,13 @@ void XTensorAllocator::record_weight_allocation(const std::string& model_id,
   tensors.using_weight_xtensor = false;
   tensors.weight_xtensor.reset();
 
+  // Populate weight_segments for D2D transfer support
+  size_t page_size = global_xtensor.page_size();
+  tensors.weight_segments.clear();
+  tensors.weight_segments.push_back(
+      {static_cast<uint64_t>(start_page_id) * page_size,
+       static_cast<uint64_t>(num_pages) * page_size});
+
   LOG(INFO) << "XTensorAllocator: recorded weight allocation for model "
             << model_id << ", start_page=" << start_page_id
             << ", num_pages=" << num_pages << ", base_ptr=" << base_ptr;
@@ -666,9 +673,33 @@ void XTensorAllocator::record_weight_fallback_allocation(
   tensors.weight_current_offset = 0;
   tensors.weight_start_page_id = -1;  // Not applicable for non-contiguous
 
+  // Populate weight_segments for D2D transfer support
+  // Merge adjacent page_ids into contiguous segments
+  size_t page_size = GlobalXtensor::get_instance().page_size();
+  tensors.weight_segments.clear();
+  if (!page_ids.empty()) {
+    std::vector<page_id_t> sorted_pages(page_ids.begin(), page_ids.end());
+    std::sort(sorted_pages.begin(), sorted_pages.end());
+
+    uint64_t seg_offset = static_cast<uint64_t>(sorted_pages[0]) * page_size;
+    uint64_t seg_size = page_size;
+    for (size_t i = 1; i < sorted_pages.size(); ++i) {
+      if (sorted_pages[i] == sorted_pages[i - 1] + 1) {
+        seg_size += page_size;
+      } else {
+        tensors.weight_segments.push_back({seg_offset, seg_size});
+        seg_offset = static_cast<uint64_t>(sorted_pages[i]) * page_size;
+        seg_size = page_size;
+      }
+    }
+    tensors.weight_segments.push_back({seg_offset, seg_size});
+  }
+
   LOG(INFO) << "XTensorAllocator: recorded XTensor allocation for model "
             << model_id << ", num_pages=" << page_ids.size()
-            << ", base_ptr=" << tensors.weight_base_ptr << " (fallback mode)";
+            << ", base_ptr=" << tensors.weight_base_ptr
+            << ", weight_segments=" << tensors.weight_segments.size()
+            << " (fallback mode)";
 }
 
 bool XTensorAllocator::allocate_weight(const std::string& model_id,
@@ -795,6 +826,7 @@ size_t XTensorAllocator::free_weight_from_global_xtensor(
   tensors->weight_num_pages = 0;
   tensors->weight_base_ptr = nullptr;
   tensors->weight_current_offset = 0;
+  tensors->weight_segments.clear();
 
   return num_pages;
 }
