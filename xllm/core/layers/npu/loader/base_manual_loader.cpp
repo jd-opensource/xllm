@@ -41,31 +41,24 @@ BaseManualLoader::~BaseManualLoader() {
 
 void BaseManualLoader::free_weights() { release_host_storage(); }
 
+void BaseManualLoader::allocate_device_storage() {
+  auto& allocator = XTensorAllocator::get_instance();
+  bool ok =
+      allocator.allocate_weight(model_id_, device_storage_, storage_size_);
+  CHECK(ok) << "Failed to allocate contiguous device storage size="
+            << storage_size_;
+}
+
 void BaseManualLoader::reload_weights() {
-  if (!device_storage_) {
-    auto& allocator = XTensorAllocator::get_instance();
-    bool ok =
-        allocator.allocate_weight(model_id_, device_storage_, storage_size_);
-    CHECK(ok) << "Failed to allocate contiguous device storage size="
-              << storage_size_;
-  }
+  allocate_device_storage();
   copy_weights_to_device_async();
   init_device_at_weights();
 }
 
 void BaseManualLoader::reload_weights_from_device() {
-  if (!device_storage_) {
-    // D2D path: weights already transferred to GlobalXtensor weight region.
-    // Call allocate_weight to get the pointer into the pre-allocated region.
-    auto& allocator = XTensorAllocator::get_instance();
-    bool ok =
-        allocator.allocate_weight(model_id_, device_storage_, storage_size_);
-    if (!ok) {
-      LOG(ERROR) << "device_storage_ is null and failed to allocate weight"
-                 << " for D2D reload, model=" << model_id_;
-      return;
-    }
-  }
+  // D2D path: weights already transferred to GlobalXtensor weight region.
+  // Call allocate_weight to get the pointer into the pre-allocated region.
+  allocate_device_storage();
   init_device_at_weights();
 }
 
@@ -143,11 +136,7 @@ void BaseManualLoader::copy_weights_to_device() {
   CHECK_EQ(weight_slices_.size(), at_host_weight_tensors_.size())
       << "weight_slices_ size and at_host_weight_tensors_ size mismatch.";
 
-  auto& allocator = XTensorAllocator::get_instance();
-  bool ok =
-      allocator.allocate_weight(model_id_, device_storage_, storage_size_);
-  CHECK(ok) << "Failed to allocate contiguous device storage size="
-            << storage_size_;
+  allocate_device_storage();
 
   for (size_t i = 0; i < weight_slices_.size(); ++i) {
     const auto& slice = weight_slices_[i];
