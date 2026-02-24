@@ -116,10 +116,9 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   param.enableFusedReducesumDiv = !is_prefill;
   param.enableAclnnExternelAddRmsNorm =
       FLAGS_enable_intralayer_addnorm && !is_prefill;
-  ;
   param.enableAclnnAddRmsNorm = !is_prefill;
-  param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
 
+  param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
   param.mlpLinearTransposeType = {static_cast<int>(TransposeType::INVALID),
                                   static_cast<int>(TransposeType::INVALID),
                                   static_cast<int>(TransposeType::INVALID),
@@ -197,8 +196,7 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
   param.enableFusedRouting = 1;
   param.numOfExperts = args.num_experts();
   param.maskStartIdx = 0;
-  param.routingMethod = "integratedSoftmaxTopK";  //"softMaxTopK";
-
+  param.routingMethod = "integratedSoftmaxTopK";
   param.quantGroupSize = 0;
 
   param.enableInitQuant = false;
@@ -359,10 +357,6 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   int32_t input_idx = 0;
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
 
-  LOG(INFO) << "VarriantPack.inTensor size is: "
-            << node.variantPack.inTensors.size()
-            << "; try to add inputs with size "
-            << WEIGHT_COUNT_PER_LAYER + 16;  // TODO: hard code now
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
       atb_speed::Utils::AtTensor2Tensor(input_params.expert_array);
@@ -438,7 +432,7 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   }
 
   if (input_params.batch_forward_type.is_decode() &&
-      FLAGS_enable_intralayer_addnorm) {  // TODO
+      FLAGS_enable_intralayer_addnorm) {
     // input
     auto residual_tensor = input_params.residual_tensor;
     node.variantPack.inTensors.at(input_idx++) =

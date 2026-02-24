@@ -5,6 +5,13 @@ include_directories(
   ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
 )
 
+find_library(
+    ASCEND_RUNTIME_SO
+    NAMES libruntime.so
+    PATHS /usr/local/Ascend/ascend-toolkit/latest/lib64
+    NO_DEFAULT_PATH
+)
+
 cc_library(
   NAME
     npu_layers 
@@ -137,7 +144,7 @@ cc_library(
     torch
     torch_npu
     xllm_atb_layers
-    /usr/local/Ascend/ascend-toolkit/latest/lib64/libruntime.so
+    ${ASCEND_RUNTIME_SO}
     xllm_kernels
     nnopbase
 )

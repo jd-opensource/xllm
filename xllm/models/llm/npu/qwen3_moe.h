@@ -280,7 +280,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
     RollingLayerGuard rolling_guard(rolling_mgr_);
 
-    if (FLAGS_enable_intralayer_addnorm) input_params_new.residual_tensor = torch::zeros_like(h);
+    if (FLAGS_enable_intralayer_addnorm)
+      input_params_new.residual_tensor = torch::zeros_like(h);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
