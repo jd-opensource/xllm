@@ -36,6 +36,9 @@ class FlashinferWorkspace {
   torch::Tensor get_int_workspace_buffer();
   torch::Tensor get_page_locked_int_workspace_buffer();
 
+  torch::Tensor get_two_stage_unshared_int_workspace_buffer();
+  torch::Tensor get_two_stage_unshared_page_locked_int_workspace_buffer();
+
  private:
   FlashinferWorkspace() = default;
   ~FlashinferWorkspace() = default;
@@ -44,6 +47,9 @@ class FlashinferWorkspace {
   torch::Tensor float_workspace_buffer_;
   torch::Tensor int_workspace_buffer_;
   torch::Tensor page_locked_int_workspace_buffer_;
+
+  torch::Tensor two_stage_unshared_int_workspace_buffer_;
+  torch::Tensor two_stage_unshared_page_locked_int_workspace_buffer_;
 };
 
 }  // namespace xllm::layer::flashinfer

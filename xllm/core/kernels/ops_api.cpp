@@ -282,7 +282,9 @@ void batch_prefill(AttentionParams& params) {
       params.scale,
       params.output,
       params.output_lse,
-      params.attn_metadata.enable_cuda_graph);
+      params.attn_metadata.enable_cuda_graph,
+      params.attn_metadata.is_causal,
+      params.mask);
 #elif defined(USE_MUSA)
   cuda::batch_prefill(params.attn_metadata.plan_info->uri,
                       params.attn_metadata.plan_info->plan_info,

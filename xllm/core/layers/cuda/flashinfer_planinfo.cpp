@@ -74,7 +74,8 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                       int32_t window_size_left,
                       bool enable_cuda_graph,
                       bool causal,
-                      bool use_tensor_core) {
+                      bool use_tensor_core,
+                      bool force_prefill_plan) {
   CHECK(plan_info->layer_id != -1) << "Need to set layer_id to PlanInfo.";
   if (plan_info->layer_id != 0) return;
 
@@ -85,16 +86,37 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
   VLOG(kGraphExecutorLogVerboseLevel)
       << "update_plan_info: layer_id=" << plan_info->layer_id
       << ", enable_cuda_graph=" << enable_cuda_graph;
-  // Workspace tensors shared by both prefill and decode plan functions.
-  auto float_workspace_buffer = to_ffi_tensor(
-      FlashinferWorkspace::get_instance().get_float_workspace_buffer());
-  auto int_workspace_buffer = to_ffi_tensor(
-      FlashinferWorkspace::get_instance().get_int_workspace_buffer());
-  auto page_locked_int_workspace_buffer =
-      to_ffi_tensor(FlashinferWorkspace::get_instance()
-                        .get_page_locked_int_workspace_buffer());
+  auto& workspace = FlashinferWorkspace::get_instance();
+  const bool use_two_stage_unshared_workspace =
+      attn_meta.xattention_two_stage_decode_cache.has_value() &&
+      !force_prefill_plan;
+  torch::Tensor int_workspace_buffer =
+      use_two_stage_unshared_workspace
+          ? workspace.get_two_stage_unshared_int_workspace_buffer()
+          : workspace.get_int_workspace_buffer();
+  torch::Tensor page_locked_int_workspace_buffer =
+      use_two_stage_unshared_workspace
+          ? workspace.get_two_stage_unshared_page_locked_int_workspace_buffer()
+          : workspace.get_page_locked_int_workspace_buffer();
+  CHECK(int_workspace_buffer.defined() &&
+        page_locked_int_workspace_buffer.defined())
+      << "flashinfer plan workspace buffers must be initialized";
+
+  auto ffi_float_workspace_buffer =
+      to_ffi_tensor(workspace.get_float_workspace_buffer());
+  auto ffi_int_workspace_buffer = to_ffi_tensor(int_workspace_buffer);
+  auto ffi_page_locked_int_workspace_buffer =
+      to_ffi_tensor(page_locked_int_workspace_buffer);
+  CHECK(!force_prefill_plan || !causal)
+      << "force_prefill_plan is only expected for non-causal shared stage.";
+  if (!force_prefill_plan) {
+    CHECK_EQ(causal, attn_meta.is_causal)
+        << "causal argument must match attn_meta.is_causal when "
+           "force_prefill_plan is false.";
+  }
+
   // 1. prefill plan info
-  if (causal) {
+  if (causal || force_prefill_plan) {
     plan_info->uri =
         get_batch_prefill_uri(backend,
                               query_dtype,
@@ -121,13 +143,16 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
     // invalid after the function returns Wrap the entire TVM call in try-catch
     // to handle any potential crashes
     auto plan_func = get_function(plan_info->uri, "plan");
-    // For sm90 architecture, the plan function doesn't accept
-    // fixed_split_size / disable_split_kv / num_colocated_ctas
+    // For FA3 on sm90 architecture, the plan function doesn't accept
+    // fixed_split_size / disable_split_kv / num_colocated_ctas.
+    // FA2 still expects the full argument list.
+    const bool use_sm90_short_plan_args =
+        Device::is_support_sm90a() && backend == "fa3";
     ffi::Array<int64_t> plan_result =
-        Device::is_support_sm90a()
-            ? plan_func(float_workspace_buffer,
-                        int_workspace_buffer,
-                        page_locked_int_workspace_buffer,
+        use_sm90_short_plan_args
+            ? plan_func(ffi_float_workspace_buffer,
+                        ffi_int_workspace_buffer,
+                        ffi_page_locked_int_workspace_buffer,
                         to_ffi_tensor(qo_indptr_host),
                         to_ffi_tensor(kv_cu_seq_lens_host),
                         to_ffi_tensor(kv_len_arr_host),
@@ -139,12 +164,12 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                         enable_cuda_graph,
                         head_dim_qk,
                         head_dim_vo,
-                        /*causal=*/true,
+                        /*causal=*/causal,
                         /*window_size_left=*/-1)
                   .cast<ffi::Array<int64_t>>()
-            : plan_func(float_workspace_buffer,
-                        int_workspace_buffer,
-                        page_locked_int_workspace_buffer,
+            : plan_func(ffi_float_workspace_buffer,
+                        ffi_int_workspace_buffer,
+                        ffi_page_locked_int_workspace_buffer,
                         to_ffi_tensor(qo_indptr_host),
                         to_ffi_tensor(kv_cu_seq_lens_host),
                         to_ffi_tensor(kv_len_arr_host),
@@ -156,7 +181,7 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                         enable_cuda_graph,
                         head_dim_qk,
                         head_dim_vo,
-                        /*causal=*/true,
+                        /*causal=*/causal,
                         /*window_size_left=*/-1,
                         /*fixed_split_size=*/-1,
                         /*disable_split_kv=*/false,
@@ -188,9 +213,9 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
 
       plan_info->plan_info =
           deep_copy_plan_info(get_function(plan_info->uri, "plan")(
-                                  float_workspace_buffer,
-                                  int_workspace_buffer,
-                                  page_locked_int_workspace_buffer,
+                                  ffi_float_workspace_buffer,
+                                  ffi_int_workspace_buffer,
+                                  ffi_page_locked_int_workspace_buffer,
                                   to_ffi_tensor(qo_indptr_host),
                                   to_ffi_tensor(paged_kv_indptr_host),
                                   to_ffi_tensor(kv_len_arr_host),
@@ -230,9 +255,9 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
 
       plan_info->plan_info =
           deep_copy_plan_info(get_function(plan_info->uri, "plan")(
-                                  float_workspace_buffer,
-                                  int_workspace_buffer,
-                                  page_locked_int_workspace_buffer,
+                                  ffi_float_workspace_buffer,
+                                  ffi_int_workspace_buffer,
+                                  ffi_page_locked_int_workspace_buffer,
                                   to_ffi_tensor(paged_kv_indptr_host),
                                   batch_size,
                                   num_qo_heads,

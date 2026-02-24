@@ -32,6 +32,7 @@ void batch_prefill(const std::string& uri,
                    torch::Tensor output,
                    std::optional<torch::Tensor>& output_lse,
                    bool enable_cuda_graph,
+                   bool is_causal,
                    const std::optional<torch::Tensor>& mask) {
   // Optional custom mask (e.g. for Qwen2_5_VL padding) -> FlashInfer packed
   // format.
@@ -94,7 +95,7 @@ void batch_prefill(const std::string& uri,
       determine_attention_backend(/*pos_encoding_mode=*/0,
                                   /*use_fp16_qk_reduction=*/false,
                                   use_custom_mask,
-                                  /*causal=*/true);
+                                  /*causal=*/is_causal);
 
   if (backend == "fa2") {
     get_function(uri, "ragged_run")(
@@ -109,7 +110,7 @@ void batch_prefill(const std::string& uri,
         to_ffi_tensor(output),
         output_lse.has_value() ? to_ffi_tensor(output_lse.value())
                                : ffi::Optional<ffi::Tensor>(),
-        /*mask_mode_code=*/1,  // CAUSAL
+        /*mask_mode_code=*/is_causal ? 1 : 0,
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),
@@ -144,7 +145,7 @@ void batch_prefill(const std::string& uri,
         to_ffi_tensor(output),
         output_lse.has_value() ? to_ffi_tensor(output_lse.value())
                                : ffi::Optional<ffi::Tensor>(),
-        /*mask_mode_code=*/1,  // CAUSAL
+        /*mask_mode_code=*/is_causal ? 1 : 0,
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),

@@ -33,6 +33,7 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
                       int32_t window_size_left,
                       bool enable_cuda_graph,
                       bool causal,
-                      bool use_tensor_core);
+                      bool use_tensor_core,
+                      bool force_prefill_plan = false);
 
 }  // namespace xllm::layer::flashinfer

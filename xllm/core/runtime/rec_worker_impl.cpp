@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/device_monitor.h"
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "common/rec_model_utils.h"
 #include "common/types.h"
@@ -32,6 +33,7 @@ limitations under the License.
 #if defined(USE_CUDA)
 #include "kernels/cuda/cuda_ops_api.h"
 #include "kernels/cuda/xattention/xattention_ops_api.h"
+#include "layers/cuda/flashinfer_workspace.h"
 #include "platform/cuda/device_capture_lock.h"
 #endif
 #include "framework/model_loader.h"
@@ -362,6 +364,30 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
       torch::arange(max_seqs_per_batch_ * beam_width_, int_options)
           .unsqueeze(1);
   cached_current_round_tensor_ = torch::zeros({1}, int_options);
+
+  if (FLAGS_enable_xattention_two_stage_decode) {
+    const int64_t num_heads = worker_.context_.get_model_args().n_heads();
+    const int64_t max_total_beam =
+        static_cast<int64_t>(max_seqs_per_batch_) * beam_width_;
+    auto fp32_options =
+        torch::TensorOptions().dtype(torch::kFloat32).device(device);
+    cached_two_stage_shared_lse_ =
+        torch::zeros({max_total_beam, num_heads, 1}, fp32_options);
+    cached_two_stage_shared_o_ =
+        torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
+    cached_two_stage_unshared_lse_ =
+        torch::zeros({max_total_beam, num_heads, 1}, fp32_options);
+    cached_two_stage_unshared_o_ =
+        torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
+    cached_two_stage_q_cu_seq_lens_shared_ =
+        torch::zeros({max_seqs_per_batch_ + 1}, int_options);
+    cached_two_stage_paged_kv_indptr_expanded_ =
+        torch::zeros({max_total_beam + 1}, int_options);
+    cached_two_stage_paged_kv_indices_expanded_ =
+        torch::zeros({max_total_beam}, int_options);
+    cached_two_stage_paged_kv_last_page_len_expanded_ =
+        torch::zeros({max_total_beam}, int_options);
+  }
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::
@@ -380,6 +406,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::
   int32_t total_round = step_meta->total_round;
   llm_rec_params.batch_size = batch_size;
   llm_rec_params.beam_width = beam_width;
+  llm_rec_params.total_round = total_round;
   const auto& shape = step_meta->full_kv_shape;
   CHECK(shape.size() == 3) << "the dims of full_kv_shape should be three.";
   int32_t full_kv_len = shape[0];
@@ -640,6 +667,106 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::build_final_output(
   output.beam_sequence_group = beam_tensors.sequence_group;
 }
 
+void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
+    ForwardInput& input,
+    int32_t round,
+    const torch::Tensor& top_tokens,
+    const BeamSearchTensors& beam_tensors) {
+#if defined(USE_NPU)
+// TODO: implement prepare_two_stage_round_input for NPU
+#elif defined(USE_CUDA)
+  auto& llm_rec_params = input.input_params.mutable_llmrec_params();
+  CHECK(FLAGS_enable_xattention_two_stage_decode)
+      << "prepare_two_stage_round_input should only be called when "
+         "two-stage decode is enabled";
+
+  input.input_params.paged_kv_indices = torch::Tensor();
+  input.input_params.paged_kv_indptr = torch::Tensor();
+  input.input_params.paged_kv_last_page_len = torch::Tensor();
+  input.input_params.num_sequences =
+      llm_rec_params.batch_size *
+      std::max<int32_t>(llm_rec_params.beam_width, 1);
+
+  // previous_step corresponds to the decode step that produced tokens for
+  // this round.
+  const int32_t previous_step = round - 1;
+  if (previous_step == 0) {
+    // First decode step uses top_tokens from prefill.
+    if (top_tokens.defined()) {
+      input.token_ids = top_tokens.reshape({-1});
+    }
+  } else if (previous_step > 0) {
+    // Later steps use beam search output tokens.
+    input.token_ids = beam_tensors.out_token_ids.reshape({-1});
+  }
+
+  if (!llm_rec_params.decode_positions_tensor_list.empty() &&
+      previous_step >= 0 &&
+      previous_step < static_cast<int32_t>(
+                          llm_rec_params.decode_positions_tensor_list.size())) {
+    input.positions =
+        llm_rec_params.decode_positions_tensor_list[previous_step];
+  }
+
+  input.input_params.batch_forward_type = BatchForwardType(2);
+  input.input_params.input_embedding = torch::Tensor();
+  cached_current_round_tensor_.fill_(previous_step);
+  llm_rec_params.current_round_tensor = cached_current_round_tensor_;
+
+  const int32_t batch_size = std::max<int32_t>(llm_rec_params.batch_size, 0);
+  const int32_t beam_width = std::max<int32_t>(llm_rec_params.beam_width, 1);
+  const int64_t total_beam = static_cast<int64_t>(batch_size) * beam_width;
+
+  CHECK_LE(total_beam, cached_two_stage_shared_lse_.size(0))
+      << "two-stage cache total_beam overflow";
+  CHECK_LE(batch_size + 1, cached_two_stage_q_cu_seq_lens_shared_.size(0))
+      << "two-stage q_cu_seq_lens cache overflow";
+
+  llm_rec_params.two_stage_shared_lse =
+      cached_two_stage_shared_lse_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_shared_o =
+      cached_two_stage_shared_o_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_unshared_lse =
+      cached_two_stage_unshared_lse_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_unshared_o =
+      cached_two_stage_unshared_o_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_q_cu_seq_lens_shared =
+      cached_two_stage_q_cu_seq_lens_shared_.slice(0, 0, batch_size + 1);
+  llm_rec_params.two_stage_paged_kv_indptr_expanded =
+      cached_two_stage_paged_kv_indptr_expanded_.slice(0, 0, total_beam + 1);
+  llm_rec_params.two_stage_paged_kv_indices_expanded =
+      cached_two_stage_paged_kv_indices_expanded_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_paged_kv_last_page_len_expanded =
+      cached_two_stage_paged_kv_last_page_len_expanded_.slice(0, 0, total_beam);
+
+  auto int_options =
+      torch::TensorOptions().dtype(torch::kInt32).device(worker_.device());
+  auto q_cu_seq_lens_values =
+      torch::arange(0, (batch_size + 1) * beam_width, beam_width, int_options);
+  llm_rec_params.two_stage_q_cu_seq_lens_shared.copy_(q_cu_seq_lens_values,
+                                                      /*non_blocking=*/true);
+
+  auto paged_kv_indptr_values = torch::arange(total_beam + 1, int_options);
+  llm_rec_params.two_stage_paged_kv_indptr_expanded.copy_(
+      paged_kv_indptr_values, /*non_blocking=*/true);
+
+  if (input.input_params.block_tables.defined() &&
+      input.input_params.block_tables.numel() >= total_beam) {
+    llm_rec_params.two_stage_paged_kv_indices_expanded.copy_(
+        input.input_params.block_tables.view({-1}).slice(0, 0, total_beam),
+        /*non_blocking=*/true);
+  } else {
+    auto paged_kv_indices_values = torch::arange(total_beam, int_options);
+    llm_rec_params.two_stage_paged_kv_indices_expanded.copy_(
+        paged_kv_indices_values, /*non_blocking=*/true);
+  }
+
+  llm_rec_params.two_stage_paged_kv_last_page_len_expanded.fill_(previous_step +
+                                                                 1);
+  input.input_params.attn_metadata = nullptr;
+#endif
+}
+
 void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_input_for_current_round(
     ForwardInput& input,
     const NextRoundInputResults& results,
@@ -649,6 +776,11 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_input_for_current_round(
 #if defined(USE_NPU)
 // TODO: implement prepare_input_for_current_round for NPU
 #elif defined(USE_CUDA)
+  if (FLAGS_enable_xattention_two_stage_decode) {
+    prepare_two_stage_round_input(input, round, top_tokens, beam_tensors);
+    return;
+  }
+
   input.input_params.paged_kv_indices = results.paged_kv_indices;
   input.input_params.paged_kv_indptr = results.paged_kv_indptr;
   input.input_params.paged_kv_last_page_len = results.paged_kv_last_page_len;
@@ -698,6 +830,11 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::compute_next_round_input_async(
 #if defined(USE_NPU)
 // TODO: implement compute_next_round_input_async for NPU
 #elif defined(USE_CUDA)
+  if (FLAGS_enable_xattention_two_stage_decode) {
+    promise.setValue(NextRoundInputResults{});
+    return future;
+  }
+
   // Capture necessary data for async computation
   auto full_kv_offsets = full_kv_cache_offsets_->full_kv_offsets;
   auto full_kv_mask = full_kv_cache_offsets_->full_kv_mask;

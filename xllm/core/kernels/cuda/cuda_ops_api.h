@@ -60,6 +60,7 @@ void batch_prefill(const std::string& uri,
                    torch::Tensor output,
                    std::optional<torch::Tensor>& output_lse,
                    bool enable_cuda_graph,
+                   bool is_causal = true,
                    const std::optional<torch::Tensor>& mask = std::nullopt);
 
 void batch_decode(const std::string& uri,
