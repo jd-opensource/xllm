@@ -224,6 +224,12 @@ struct AttentionParams {
   // Contains sequence lengths, paged KV cache indices, plan_info, etc.
   const layer::AttentionMetadata& attn_metadata;
 
+  // Optional override for block_table. When set, this takes precedence over
+  // attn_metadata.block_table. Used when key/value are dequantized to 3D
+  // tensors (e.g., in chunked prefill with quantized KV cache), where paged
+  // cache mode should not be used.
+  std::optional<torch::Tensor> block_tables;
+
   // ========== Common parameters (used by both prefill and decode) ==========
   // Query tensor. Shape depends on mode:
   // - Prefill: 3D [total_tokens, num_heads, head_dim] (packed) or

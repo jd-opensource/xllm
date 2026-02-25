@@ -224,10 +224,6 @@ void dequant_from_paged_cache(ReshapeFromCacheParams& params) {
 
 void batch_prefill(AttentionParams& params) {
 #if defined(USE_MLU)
-  std::optional<torch::Tensor> block_tables;
-  if (params.attn_metadata.is_chunked_prefill) {
-    block_tables = params.attn_metadata.block_table;
-  }
   mlu::batch_prefill(params.query,
                      params.key,
                      params.value,
@@ -241,7 +237,7 @@ void batch_prefill(AttentionParams& params) {
                      params.k_quant_scale,
                      params.v_quant_scale,
                      params.out_quant_scale,
-                     block_tables,
+                     params.block_tables,
                      params.attn_metadata.max_query_len,
                      params.attn_metadata.max_seq_len,
                      params.scale,

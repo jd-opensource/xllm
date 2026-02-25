@@ -139,7 +139,18 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
                     k_scale_opt,
                     v_scale_opt);
   } else {
-    prefill_forward(query, key, value, output, k_cache, v_cache, attn_metadata);
+    prefill_forward(
+        query,
+        key,
+        value,
+        output,
+        k_cache,
+        v_cache,
+        attn_metadata,
+        enable_kv_cache_quant ? std::optional<torch::Tensor>(k_cache_scale)
+                              : std::nullopt,
+        enable_kv_cache_quant ? std::optional<torch::Tensor>(v_cache_scale)
+                              : std::nullopt);
   }
 
   int64_t head_size = enable_mla_ ? v_head_dim_ : head_size_;
@@ -168,11 +179,52 @@ void AttentionImpl::prefill_forward(
     attention_params.key = key.view({-1, num_kv_heads_, head_size_});
     attention_params.value = value.view({-1, num_kv_heads_, head_size_v});
   } else if (attn_metadata.is_chunked_prefill) {
-    // For chunked prefill, we need to handle quantized KV cache
-    // MLA scenario: no special handling needed (uses decode path)
-    // Non-MLA scenario: need to dequantize first
-    attention_params.key = k_cache;
-    attention_params.value = v_cache.value();
+    // For chunked prefill with quantized KV cache, we need to dequantize first
+    if (k_cache_scale.has_value() && k_cache_scale->defined() &&
+        k_cache_scale->numel() > 0) {
+      // Quantized KV cache path - dequantize before flash attention
+
+      // Calculate total sequence length from cumulative sequence lengths
+      int64_t total_seqlens = attn_metadata.kv_cu_seq_lens[-1].item<int64_t>();
+
+      // Allocate dequantized output tensors
+      torch::Tensor key_dequant = torch::zeros(
+          {total_seqlens, num_kv_heads_, head_size_}, query.options());
+
+      torch::Tensor value_dequant;
+      if (v_cache_scale.has_value() && v_cache_scale->defined() &&
+          v_cache_scale->numel() > 0) {
+        value_dequant = torch::zeros(
+            {total_seqlens, num_kv_heads_, head_size_v}, query.options());
+      }
+
+      // Call dequant_from_paged_cache
+      xllm::kernel::ReshapeFromCacheParams dequant_params;
+      dequant_params.key = key_dequant;
+      dequant_params.value = value_dequant;
+      dequant_params.key_cache = k_cache;
+      dequant_params.value_cache = v_cache;
+      dequant_params.key_cache_quant_scale = k_cache_scale;
+      dequant_params.value_cache_quant_scale = v_cache_scale;
+      dequant_params.context_lengths = attn_metadata.kv_seq_lens;
+      dequant_params.max_context_len = attn_metadata.max_seq_len;
+      dequant_params.context_seq_offset = std::nullopt;
+      dequant_params.block_tables = attn_metadata.block_table;
+      dequant_params.quant_mode = 1;  // per-token quantization
+      dequant_params.quant_bit = 8;   // only support INT8 for now.
+
+      xllm::kernel::dequant_from_paged_cache(dequant_params);
+
+      // Use dequantized tensors for flash attention
+      attention_params.key = key_dequant;
+      attention_params.value = value_dequant;
+      attention_params.block_tables = std::nullopt;
+    } else {
+      // Non-quantized KV cache path - use directly
+      attention_params.key = k_cache;
+      attention_params.value = v_cache.value();
+      attention_params.block_tables = attn_metadata.block_table;
+    }
   }
   xllm::kernel::batch_prefill(attention_params);
 }
