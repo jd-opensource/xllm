@@ -90,6 +90,12 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     v_cache = kv_cache.get_v_cache();
   }
 
+  // Check if KV cache quantization is enabled by checking scale tensors
+  torch::Tensor k_cache_scale = kv_cache.get_k_cache_scale();
+  torch::Tensor v_cache_scale = kv_cache.get_v_cache_scale();
+  bool enable_kv_cache_quant =
+      k_cache_scale.defined() && k_cache_scale.numel() > 0;
+
   bool skip_process_cache = enable_mla_ && (only_prefill || use_fused_mla_qkv_);
   if (!skip_process_cache) {
     xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
@@ -98,7 +104,16 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     reshape_paged_cache_params.k_cache = k_cache;
     reshape_paged_cache_params.v_cache = v_cache;
     reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
-    xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+
+    if (enable_kv_cache_quant) {
+      // Use quant_to_paged_cache for INT8 quantization
+      reshape_paged_cache_params.k_cache_scale = k_cache_scale;
+      reshape_paged_cache_params.v_cache_scale = v_cache_scale;
+      xllm::kernel::quant_to_paged_cache(reshape_paged_cache_params);
+    } else {
+      // Use standard reshape_paged_cache
+      xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+    }
   }
 
   if (enable_lighting_indexer_ || !only_prefill) {
@@ -110,7 +125,19 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
       k_cache = k_cache.reshape({-1, k_cache.size(1), 1, k_cache.size(3)})
                     .contiguous();
     }
-    decoder_forward(query, output, k_cache, v_cache, attn_metadata);
+    std::optional<torch::Tensor> k_scale_opt =
+        enable_kv_cache_quant ? std::optional<torch::Tensor>(k_cache_scale)
+                              : std::nullopt;
+    std::optional<torch::Tensor> v_scale_opt =
+        enable_kv_cache_quant ? std::optional<torch::Tensor>(v_cache_scale)
+                              : std::nullopt;
+    decoder_forward(query,
+                    output,
+                    k_cache,
+                    v_cache,
+                    attn_metadata,
+                    k_scale_opt,
+                    v_scale_opt);
   } else {
     prefill_forward(query, key, value, output, k_cache, v_cache, attn_metadata);
   }
@@ -120,13 +147,16 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   return {output, output_lse};
 }
 
-void AttentionImpl::prefill_forward(torch::Tensor& query,
-                                    torch::Tensor& key,
-                                    torch::Tensor& value,
-                                    torch::Tensor& output,
-                                    const torch::Tensor& k_cache,
-                                    const std::optional<torch::Tensor>& v_cache,
-                                    const AttentionMetadata& attn_metadata) {
+void AttentionImpl::prefill_forward(
+    torch::Tensor& query,
+    torch::Tensor& key,
+    torch::Tensor& value,
+    torch::Tensor& output,
+    const torch::Tensor& k_cache,
+    const std::optional<torch::Tensor>& v_cache,
+    const AttentionMetadata& attn_metadata,
+    const std::optional<torch::Tensor>& k_cache_scale,
+    const std::optional<torch::Tensor>& v_cache_scale) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
   xllm::kernel::AttentionParams attention_params(attn_metadata);
   attention_params.query = query.view({-1, num_heads_, head_size_});
@@ -138,17 +168,23 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
     attention_params.key = key.view({-1, num_kv_heads_, head_size_});
     attention_params.value = value.view({-1, num_kv_heads_, head_size_v});
   } else if (attn_metadata.is_chunked_prefill) {
+    // For chunked prefill, we need to handle quantized KV cache
+    // MLA scenario: no special handling needed (uses decode path)
+    // Non-MLA scenario: need to dequantize first
     attention_params.key = k_cache;
     attention_params.value = v_cache.value();
   }
   xllm::kernel::batch_prefill(attention_params);
 }
 
-void AttentionImpl::decoder_forward(torch::Tensor& query,
-                                    torch::Tensor& output,
-                                    const torch::Tensor& k_cache,
-                                    const std::optional<torch::Tensor>& v_cache,
-                                    const AttentionMetadata& attn_metadata) {
+void AttentionImpl::decoder_forward(
+    torch::Tensor& query,
+    torch::Tensor& output,
+    const torch::Tensor& k_cache,
+    const std::optional<torch::Tensor>& v_cache,
+    const AttentionMetadata& attn_metadata,
+    const std::optional<torch::Tensor>& k_cache_scale,
+    const std::optional<torch::Tensor>& v_cache_scale) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
   xllm::kernel::AttentionParams attention_params(attn_metadata);
   attention_params.query = query.view({-1, 1, num_heads_, head_size_});
@@ -158,6 +194,15 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
   attention_params.scale = scale_;
   attention_params.k_cache = k_cache;
   attention_params.v_cache = v_cache;
+
+  // Set quantization parameters if KV cache is quantized
+  if (k_cache_scale.has_value()) {
+    attention_params.k_cache_quant_scale = k_cache_scale;
+    if (v_cache_scale.has_value()) {
+      attention_params.v_cache_quant_scale = v_cache_scale;
+    }
+    attention_params.kv_cache_quant_bit_size = 8;  // INT8 quantization
+  }
 
   xllm::kernel::batch_decode(attention_params);
 }

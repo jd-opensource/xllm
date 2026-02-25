@@ -272,3 +272,7 @@ DECLARE_string(npu_kernel_backend);
 #endif
 
 DECLARE_int32(health_check_interval_ms);
+
+// --- kv cache quantization config ---
+
+DECLARE_string(kv_cache_dtype);

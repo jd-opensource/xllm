@@ -276,5 +276,237 @@ TEST_F(Qwen2AttentionTest, MixedSequenceLengthTest) {
   test::verify_precision(test_output, expected_values, 1e-5, 1e-6);
 }
 
+TEST_F(Qwen2AttentionTest, QuantizedKVCachePrefillTest) {
+  auto qwen2_attention = Qwen2Attention(context_);
+  std::string prefix = "model.layers.0.self_attn.";
+  StateDict state_dict(weight_dict_, prefix);
+  qwen2_attention->load_state_dict(state_dict.get_dict_with_prefix(prefix));
+
+  // Test parameters
+  int64_t batch_size = 2;
+  int64_t seq_len = 128;
+  int64_t hidden_size = model_args_.hidden_size();
+  int64_t num_tokens = batch_size * seq_len;
+  int64_t block_num = 100;
+  int64_t n_kv_heads = model_args_.n_kv_heads().value();
+  int64_t head_dim = model_args_.head_dim();
+  int64_t block_size = 16;
+
+  // Create INT8 KV cache tensors using seeded tensors for reproducibility
+  auto k_cache =
+      test::seeded_tensor("qwen2_quant_test.k_cache",
+                          {block_num, n_kv_heads, block_size, head_dim},
+                          torch::kInt8,
+                          options_.device());
+  auto v_cache =
+      test::seeded_tensor("qwen2_quant_test.v_cache",
+                          {block_num, n_kv_heads, block_size, head_dim},
+                          torch::kInt8,
+                          options_.device());
+
+  // Create float32 scale tensors
+  auto k_cache_scale = test::seeded_tensor("qwen2_quant_test.k_scale",
+                                           {block_num, n_kv_heads, block_size},
+                                           torch::kFloat32,
+                                           options_.device());
+  auto v_cache_scale = test::seeded_tensor("qwen2_quant_test.v_scale",
+                                           {block_num, n_kv_heads, block_size},
+                                           torch::kFloat32,
+                                           options_.device());
+
+  KVCache quant_kv_cache(
+      k_cache, v_cache, torch::Tensor(), k_cache_scale, v_cache_scale);
+
+  // Create input tensors using seeded tensors
+  auto hidden_states = test::seeded_tensor("qwen2_quant_test.hidden_states",
+                                           {num_tokens, hidden_size},
+                                           torch::kBFloat16,
+                                           options_.device());
+  auto positions = test::seeded_tensor("qwen2_quant_test.positions",
+                                       {num_tokens},
+                                       torch::kInt32,
+                                       options_.device());
+
+  auto metadata = CreateAttentionMetadata(
+      batch_size, seq_len, true, model_args_.max_position_embeddings());
+
+  // Run forward with quantized KV cache
+  auto output =
+      qwen2_attention(positions, hidden_states, metadata, quant_kv_cache);
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  // Verify output shape
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
+
+  // Verify precision using expect_tensor_stats
+  // Expected values from Phase 1 print test
+  test::expect_tensor_stats(output,
+                            /*expected_min=*/-2.65625,
+                            /*expected_max=*/2.625,
+                            /*expected_sum=*/4461.05);
+}
+
+// Phase 3: Diagnostic test for Decode scenario
+// This test uses zeros/ones to isolate potential issues with random values
+TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeDiagnosticTest) {
+  auto qwen2_attention = Qwen2Attention(context_);
+  std::string prefix = "model.layers.0.self_attn.";
+  StateDict state_dict(weight_dict_, prefix);
+  qwen2_attention->load_state_dict(state_dict.get_dict_with_prefix(prefix));
+
+  // Test parameters - use minimal batch size for diagnosis
+  int64_t batch_size = 1;
+  int64_t seq_len = 16;  // Start with a small sequence length
+  int64_t hidden_size = model_args_.hidden_size();
+  int64_t num_tokens = batch_size;
+  int64_t block_num = 100;
+  int64_t n_kv_heads = model_args_.n_kv_heads().value();
+  int64_t head_dim = model_args_.head_dim();
+  int64_t block_size = 16;
+
+  auto int8_options =
+      torch::TensorOptions().dtype(torch::kInt8).device(options_.device());
+  auto float_options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device());
+
+  // 1. Use zeros for INT8 cache to avoid random value issues
+  auto k_cache =
+      torch::zeros({block_num, n_kv_heads, block_size, head_dim}, int8_options);
+  auto v_cache =
+      torch::zeros({block_num, n_kv_heads, block_size, head_dim}, int8_options);
+
+  // 2. Use ones for scale to avoid scale=0 issues
+  auto k_cache_scale =
+      torch::ones({block_num, n_kv_heads, block_size}, float_options);
+  auto v_cache_scale =
+      torch::ones({block_num, n_kv_heads, block_size}, float_options);
+
+  // Verify cache and scale shapes and dtypes
+  ASSERT_EQ(k_cache.sizes(),
+            torch::IntArrayRef({block_num, n_kv_heads, block_size, head_dim}));
+  ASSERT_EQ(k_cache.scalar_type(), torch::kInt8);
+  ASSERT_EQ(k_cache_scale.sizes(),
+            torch::IntArrayRef({block_num, n_kv_heads, block_size}));
+  ASSERT_EQ(k_cache_scale.scalar_type(), torch::kFloat32);
+
+  KVCache quant_kv_cache(
+      k_cache, v_cache, torch::Tensor(), k_cache_scale, v_cache_scale);
+
+  // Create input tensors using seeded tensors
+  auto hidden_states = test::seeded_tensor("qwen2_decode_diag.hidden_states",
+                                           {num_tokens, hidden_size},
+                                           torch::kBFloat16,
+                                           options_.device());
+  auto positions =
+      torch::full({num_tokens}, seq_len - 1, options_.dtype(torch::kInt32));
+
+  auto metadata = CreateAttentionMetadata(
+      batch_size, seq_len, false, model_args_.max_position_embeddings());
+
+  // Run forward with quantized KV cache
+  auto output =
+      qwen2_attention(positions, hidden_states, metadata, quant_kv_cache);
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  // Verify output shape
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
+
+  // Print output stats for debugging
+  torch::Tensor flat = output.flatten().to(torch::kFloat32).cpu();
+  double out_min = torch::min(flat).item<double>();
+  double out_max = torch::max(flat).item<double>();
+  double out_sum = torch::sum(flat).item<double>();
+  LOG(INFO) << "Decode Diagnostic output - min: " << out_min
+            << ", max: " << out_max << ", sum: " << out_sum;
+}
+
+// Phase 4: Decode test with controlled seeded values
+TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeTest) {
+  auto qwen2_attention = Qwen2Attention(context_);
+  std::string prefix = "model.layers.0.self_attn.";
+  StateDict state_dict(weight_dict_, prefix);
+  qwen2_attention->load_state_dict(state_dict.get_dict_with_prefix(prefix));
+
+  // Test parameters - match DecodeTest configuration
+  int64_t batch_size = 4;
+  int64_t seq_len = 256;
+  int64_t hidden_size = model_args_.hidden_size();
+  int64_t num_tokens = batch_size;
+  int64_t block_num = 100;
+  int64_t n_kv_heads = model_args_.n_kv_heads().value();
+  int64_t head_dim = model_args_.head_dim();
+  int64_t block_size = 16;
+
+  // Create INT8 KV cache tensors using seeded tensors for reproducibility
+  auto k_cache =
+      test::seeded_tensor("qwen2_quant_decode.k_cache",
+                          {block_num, n_kv_heads, block_size, head_dim},
+                          torch::kInt8,
+                          options_.device());
+  auto v_cache =
+      test::seeded_tensor("qwen2_quant_decode.v_cache",
+                          {block_num, n_kv_heads, block_size, head_dim},
+                          torch::kInt8,
+                          options_.device());
+
+  // Create scale tensors with controlled range [0.5, 1.5] to avoid extreme
+  // values
+  auto k_cache_scale_raw =
+      test::seeded_tensor("qwen2_quant_decode.k_scale",
+                          {block_num, n_kv_heads, block_size},
+                          torch::kFloat32,
+                          options_.device());
+  auto v_cache_scale_raw =
+      test::seeded_tensor("qwen2_quant_decode.v_scale",
+                          {block_num, n_kv_heads, block_size},
+                          torch::kFloat32,
+                          options_.device());
+  // Scale to [0.5, 1.5] range: 0.5 + raw * 1.0
+  auto k_cache_scale = 0.5f + k_cache_scale_raw;
+  auto v_cache_scale = 0.5f + v_cache_scale_raw;
+
+  KVCache quant_kv_cache(
+      k_cache, v_cache, torch::Tensor(), k_cache_scale, v_cache_scale);
+
+  // Create input tensors using seeded tensors
+  auto hidden_states = test::seeded_tensor("qwen2_quant_decode.hidden_states",
+                                           {num_tokens, hidden_size},
+                                           torch::kBFloat16,
+                                           options_.device());
+  auto positions =
+      torch::full({num_tokens}, seq_len, options_.dtype(torch::kInt32));
+
+  auto metadata = CreateAttentionMetadata(
+      batch_size, seq_len + 1, false, model_args_.max_position_embeddings());
+
+  // Run forward with quantized KV cache
+  auto output =
+      qwen2_attention(positions, hidden_states, metadata, quant_kv_cache);
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  // Verify output shape
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
+
+  // Print output stats for debugging
+  torch::Tensor flat = output.flatten().to(torch::kFloat32).cpu();
+  double out_min = torch::min(flat).item<double>();
+  double out_max = torch::max(flat).item<double>();
+  double out_sum = torch::sum(flat).item<double>();
+  LOG(INFO) << "Quantized Decode output - min: " << out_min
+            << ", max: " << out_max << ", sum: " << out_sum;
+
+  // Verify precision using expect_tensor_stats
+  // Expected values established from successful diagnostic run
+  test::expect_tensor_stats(output,
+                            /*expected_min=*/-360.0,
+                            /*expected_max=*/440.0,
+                            /*expected_sum=*/1555.03,
+                            /*rtol=*/0.01,
+                            /*atol=*/1.0);
+}
+
 }  // namespace layer
 }  // namespace xllm

@@ -268,6 +268,7 @@ int run() {
       .input_shm_size(FLAGS_input_shm_size)
       .output_shm_size(FLAGS_output_shm_size)
       .beam_width(FLAGS_beam_width)
+      .kv_cache_dtype(FLAGS_kv_cache_dtype)
       .is_local(is_local);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
