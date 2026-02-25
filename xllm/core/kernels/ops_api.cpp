@@ -825,7 +825,6 @@ void fused_indexer_k(FusedIndexerKParams& params) {
 #endif
 }
 
-
 std::vector<torch::Tensor> grouped_matmul(GroupedMatmulParams& params) {
 #if defined(USE_NPU)
   return npu::apply_npu_grouped_matmul(params.x,
@@ -872,7 +871,6 @@ torch::Tensor moe_token_unpermute(MoeTokenUnpermuteParams& params) {
   NOT_IMPLEMENTED();
 #endif
 }
-
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 moe_init_routing_v2(MoeInitRoutingV2Params& params) {

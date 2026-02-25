@@ -17,16 +17,24 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "dense_mlp.h"
+#include <optional>
+
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
-#include "linear.h"
+#include "layers/common/dense_mlp.h"
+#include "layers/common/linear.h"
+
 namespace xllm {
 namespace layer {
+
+// match layers/ilu/fused_moe.h and layers/mlu/fused_moe.h.
+struct FusedMoEArgs {
+  bool is_gated = true;
+};
 
 class FusedMoEImpl : public torch::nn::Module {
  public:
@@ -61,10 +69,12 @@ class FusedMoEImpl : public torch::nn::Module {
                                SelectedExpertInfo& selected_expert_info);
 
  private:
+  int64_t num_total_experts_;
   int64_t topk_;
   int64_t num_expert_group_;
   int64_t topk_group_;
   double route_scale_;
+  int64_t hidden_size_;
   int64_t n_shared_experts_;
   bool is_gated_;
   bool has_score_bias_;

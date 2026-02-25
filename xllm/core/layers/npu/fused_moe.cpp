@@ -17,6 +17,9 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <numeric>
+#include <vector>
+
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
 
@@ -48,18 +51,19 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       hidden_size_(model_args.hidden_size()),
       n_shared_experts_(model_args.n_shared_experts()),
       is_gated_(moe_args.is_gated),
+      renormalize_(model_args.norm_topk_prob() ? 1 : 0),
       hidden_act_(model_args.hidden_act()),
+      is_smoothquant_(false),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
       options_(options),
-      device_(options.device()) {
+      tp_pg_(parallel_args.tp_group_) {
   const int64_t num_experts = num_total_experts_;
   const int64_t intermediate_size =
       static_cast<int64_t>(model_args.moe_intermediate_size());
-  int64_t ep_size = parallel_args.ep_size();
+  const std::string& topk_method = model_args.topk_method();
   int64_t ep_size = parallel_args.ep_size();
   int64_t ep_rank = 0;
-  tp_pg_ = parallel_args.tp_group_;
   if (ep_size > 1) {
     ep_rank = parallel_args.moe_ep_group_->rank();
     tp_pg_ = parallel_args.moe_tp_group_;
@@ -93,7 +97,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
 
   gate_ = register_module(
       "gate_proj",
-      ReplicatedLinear(hidden_size, num_experts, false, quant_args, options));
+      ReplicatedLinear(hidden_size_, num_experts, false, quant_args, options));
   if (n_shared_experts_ > 0) {
     /*
     The shared_experts are usually implemented using the RowParallelLinear
@@ -104,19 +108,21 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
     */
     shared_experts_ =
         register_module("shared_experts",
-                        DenseMLP(hidden_size,
+                        DenseMLP(hidden_size_,
                                  intermediate_size * n_shared_experts_,
                                  is_gated_,
                                  false,
                                  hidden_act_,
+                                 /*enable_result_reduction=*/false,
                                  quant_args,
-                                 parallel_args,
+                                 tp_pg_,
                                  options));
     shared_expert_gate_ = register_module(
         "shared_expert_gate",
         torch::nn::Linear(
-            torch::nn::LinearOptions(hidden_size, 1).bias(false)));
-    shared_expert_gate_->weight.set_data(shared_expert_gate_->weight.to(options));
+            torch::nn::LinearOptions(hidden_size_, 1).bias(false)));
+    shared_expert_gate_->weight.set_data(
+        shared_expert_gate_->weight.to(options));
   }
 
   // create weight buffer
@@ -128,7 +134,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
     w13_ = register_parameter(
         "w13",
         torch::empty(
-            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size},
+            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size_},
             quant_option),
         false);
     w13_scale_ = register_parameter(
@@ -138,17 +144,17 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
         false);
     input_smooth_ = register_parameter(
         "input_smooth",
-        torch::empty({num_experts_per_rank_, hidden_size}, fp_option),
+        torch::empty({num_experts_per_rank_, hidden_size_}, fp_option),
         false);
     w2_ = register_parameter(
         "w2",
         torch::empty(
-            {num_experts_per_rank_, hidden_size, local_intermediate_size},
+            {num_experts_per_rank_, hidden_size_, local_intermediate_size},
             quant_option),
         false);
     w2_scale_ = register_parameter(
         "w2_scale",
-        torch::empty({num_experts_per_rank_, hidden_size}, fp_option),
+        torch::empty({num_experts_per_rank_, hidden_size_}, fp_option),
         false);
     act_smooth_ = register_parameter(
         "act_smooth",
@@ -160,13 +166,13 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
     w13_ = register_parameter(
         "w13",
         torch::empty(
-            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size},
+            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size_},
             options_),
         false);
     w2_ = register_parameter(
         "w2",
         torch::empty(
-            {num_experts_per_rank_, hidden_size, local_intermediate_size},
+            {num_experts_per_rank_, hidden_size_, local_intermediate_size},
             options_),
         false);
   }
@@ -179,9 +185,11 @@ torch::Tensor FusedMoEImpl::select_experts(
   // prepare the parameters for select_experts
   xllm::kernel::MoeGatingTopkSoftmaxParams gating_topk_params;
   gating_topk_params.x = router_logits_2d;
-  gating_topk_params.finished = torch::Tensor();
+  gating_topk_params.finished = std::nullopt;
   gating_topk_params.k = topk_;
-  auto [topk_weights, topk_ids, row_ids] = xllm::kernel::moe_gating_topk_softmax(gating_topk_params);
+  auto [topk_weights, topk_ids, row_ids] =
+      xllm::kernel::moe_gating_topk_softmax(gating_topk_params);
+  (void)row_ids;
   topk_ids = topk_ids.to(torch::kInt32);
   if (renormalize_) {
     topk_weights = topk_weights / (topk_weights.sum(-1, true) + 1e-6);
@@ -193,16 +201,21 @@ torch::Tensor FusedMoEImpl::select_experts(
   moe_init_routing_params.scale = std::nullopt;
   moe_init_routing_params.offset = std::nullopt;
   moe_init_routing_params.active_num = hidden_states_2d.size(0) * topk_;
+  moe_init_routing_params.expert_capacity = 0;
   moe_init_routing_params.expert_num = num_experts_per_rank_;
+  moe_init_routing_params.drop_pad_mode = 0;
   moe_init_routing_params.expert_tokens_num_type = 1;
   moe_init_routing_params.expert_tokens_num_flag = true;
-  std::vector<int64_t> expert_range = {start_expert_id_, start_expert_id_ + num_experts_per_rank_};
+  moe_init_routing_params.row_idx_type = 0;
+  std::vector<int64_t> expert_range = {
+      start_expert_id_, start_expert_id_ + num_experts_per_rank_};
   moe_init_routing_params.active_expert_range = expert_range;
   moe_init_routing_params.quant_mode = -1;
-  auto [expand_hidden_states, expand_row_ids, group_list, dynamic_scale] = xllm::kernel::moe_init_routing_v2(
-    moe_init_routing_params);
+  auto [expand_hidden_states, expand_row_ids, group_list, dynamic_scale] =
+      xllm::kernel::moe_init_routing_v2(moe_init_routing_params);
+  (void)dynamic_scale;
 
-    // collect the selected tensor
+  // collect the selected tensor
   selected_expert_info.reduce_weight = topk_weights;
   selected_expert_info.combine_idx = expand_row_ids;
   selected_expert_info.token_count_slice = group_list;
@@ -214,11 +227,6 @@ torch::Tensor FusedMoEImpl::forward_expert(
     const torch::Tensor& hidden_states,
     const torch::Tensor& router_logits,
     const std::optional<torch::Tensor>& shared_output) {
-  std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
-  if (e_score_correction_bias_.defined()) {
-    e_score_correction_bias = e_score_correction_bias_;
-  }
-
   // prepare the parameters for MoE computation
   torch::IntArrayRef hidden_states_shape = hidden_states.sizes();
   torch::ScalarType hidden_states_dtype = hidden_states.dtype().toScalarType();
@@ -226,8 +234,6 @@ torch::Tensor FusedMoEImpl::forward_expert(
       hidden_states.reshape({-1, hidden_states.size(-1)});
   torch::Tensor router_logits_2d =
       router_logits.reshape({-1, router_logits.size(-1)});
-  int64_t group_gemm_max_dim = hidden_states_2d.size(0);
-  int64_t expert_size = w13_.size(0);
 
   // Step 1-3: select experts
   SelectedExpertInfo selected_expert_info;
@@ -243,11 +249,13 @@ torch::Tensor FusedMoEImpl::forward_expert(
 
   {
     xllm::kernel::GroupedMatmulParams grouped_matmul_params;
-    grouped_matmul_params.x = expand_hidden_states;
+    std::vector<torch::Tensor> x_list = {expand_hidden_states};
     if (w13_.size(1) != expand_hidden_states.size(1)) {
       w13_ = w13_.transpose(1, 2);
     }
-    grouped_matmul_params.weight = w13_;
+    std::vector<torch::Tensor> weight_list = {w13_};
+    grouped_matmul_params.x = x_list;
+    grouped_matmul_params.weight = weight_list;
     grouped_matmul_params.split_item = 2;
     grouped_matmul_params.group_type = 0;
     grouped_matmul_params.group_list_type = 1;
@@ -256,13 +264,16 @@ torch::Tensor FusedMoEImpl::forward_expert(
   }
 
   // Step 5: activation or scaled quantization(fused with activation)
-  torch::Tensor act_out;
-  torch::Tensor act_out_scale;
+  torch::Tensor act_out =
+      is_gated_ ? gemm1_out.slice(1, 0, gemm1_out.size(1) / 2).contiguous()
+                : gemm1_out;
 
   xllm::kernel::ActivationParams activation_params;
   activation_params.input = gemm1_out;
-  activation_params.act_mode = "swiglu";
-  act_out = xllm::kernel::active_tensor(activation_params);
+  activation_params.output = act_out;
+  activation_params.act_mode = hidden_act_;
+  activation_params.is_gated = is_gated_;
+  xllm::kernel::active(activation_params);
   // Step 6: group gemm 2
   torch::Tensor gemm2_out =
       create_group_gemm_output(act_out,
@@ -270,14 +281,15 @@ torch::Tensor FusedMoEImpl::forward_expert(
                                selected_expert_info.token_count_slice,
                                hidden_states_dtype);
 
-
   {
     xllm::kernel::GroupedMatmulParams grouped_matmul_params;
-    grouped_matmul_params.x = act_out;
+    std::vector<torch::Tensor> x_list = {act_out};
     if (w2_.size(1) != act_out.size(1)) {
       w2_ = w2_.transpose(1, 2);
     }
-    grouped_matmul_params.weight = w2_;
+    std::vector<torch::Tensor> weight_list = {w2_};
+    grouped_matmul_params.x = x_list;
+    grouped_matmul_params.weight = weight_list;
     grouped_matmul_params.split_item = 2;
     grouped_matmul_params.group_list_type = 1;
     grouped_matmul_params.group_type = 0;
@@ -287,15 +299,16 @@ torch::Tensor FusedMoEImpl::forward_expert(
 
   // Step 7: combine the intermediate results and get the final hidden states
   torch::Tensor final_hidden_states;
-    xllm::kernel::MoeTokenUnpermuteParams moe_token_unpermute_params;
-    moe_token_unpermute_params.permuted_tokens = gemm2_out;
-    moe_token_unpermute_params.sorted_indices = selected_expert_info.combine_idx;
-    moe_token_unpermute_params.padded_mode = false;
-    moe_token_unpermute_params.probes = selected_expert_info.reduce_weight;
-    final_hidden_states = xllm::kernel::moe_token_unpermute(moe_token_unpermute_params);
-    if (shared_output.has_value()) {
-      final_hidden_states = final_hidden_states + shared_output.value();
-    }
+  xllm::kernel::MoeTokenUnpermuteParams moe_token_unpermute_params;
+  moe_token_unpermute_params.permuted_tokens = gemm2_out;
+  moe_token_unpermute_params.sorted_indices = selected_expert_info.combine_idx;
+  moe_token_unpermute_params.padded_mode = false;
+  moe_token_unpermute_params.probes = selected_expert_info.reduce_weight;
+  final_hidden_states =
+      xllm::kernel::moe_token_unpermute(moe_token_unpermute_params);
+  if (shared_output.has_value()) {
+    final_hidden_states = final_hidden_states + shared_output.value();
+  }
   // reshape the final hidden states to the original shape
   final_hidden_states = final_hidden_states.reshape(hidden_states_shape);
 
@@ -375,7 +388,6 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
   if (state_dict.size() == 0) {
     return;
   }
-
 
   if (n_shared_experts_ > 0) {
     shared_experts_->load_state_dict(

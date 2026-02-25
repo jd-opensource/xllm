@@ -90,7 +90,6 @@ void fused_indexer_q(FusedIndexerQParams& params);
 
 void fused_indexer_k(FusedIndexerKParams& params);
 
-
 std::vector<torch::Tensor> grouped_matmul(GroupedMatmulParams& params);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_gating_topk_softmax(
@@ -99,5 +98,5 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_gating_topk_softmax(
 torch::Tensor moe_token_unpermute(MoeTokenUnpermuteParams& params);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
-    moe_init_routing_v2(MoeInitRoutingV2Params& params);
+moe_init_routing_v2(MoeInitRoutingV2Params& params);
 }  // namespace xllm::kernel
