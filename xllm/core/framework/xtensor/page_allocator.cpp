@@ -113,35 +113,9 @@ bool PageAllocator::register_model(const std::string& model_id,
   return true;
 }
 
-void PageAllocator::unregister_model(const std::string& model_id) {
-  std::lock_guard<std::mutex> lock(mtx_);
-
-  auto it = model_states_.find(model_id);
-  if (it == model_states_.end()) {
-    LOG(WARNING) << "Model " << model_id << " not found for unregister";
-    return;
-  }
-
-  // Release any weight pages from per-worker tracking
-  if (it->second.weight_pages_allocated > 0) {
-    int32_t model_world_size = it->second.model_world_size > 0
-                                   ? it->second.model_world_size
-                                   : max_world_size_;
-    for (int32_t i = 0; i < model_world_size && i < max_world_size_; ++i) {
-      if (worker_pages_used_[i] >= it->second.weight_pages_allocated) {
-        worker_pages_used_[i] -= it->second.weight_pages_allocated;
-      } else {
-        worker_pages_used_[i] = 0;
-      }
-    }
-  }
-
-  model_states_.erase(it);
-  LOG(INFO) << "Unregistered model " << model_id;
-}
-
-void PageAllocator::sleep_model(const std::string& model_id) {
+bool PageAllocator::sleep_model(const std::string& model_id) {
   std::vector<std::pair<int32_t, std::vector<int64_t>>> pages_to_unmap;
+  std::vector<bool> unmap_success;
   size_t total_phy_pages_to_release = 0;
   size_t phy_pages_per_virt = 0;
   size_t weight_pages = 0;
@@ -152,13 +126,13 @@ void PageAllocator::sleep_model(const std::string& model_id) {
     auto it = model_states_.find(model_id);
     if (it == model_states_.end()) {
       LOG(WARNING) << "Model " << model_id << " not found for sleep";
-      return;
+      return false;
     }
 
     ModelState& state = it->second;
     if (state.is_sleeping) {
       LOG(WARNING) << "Model " << model_id << " is already sleeping";
-      return;
+      return false;
     }
 
     // Wait for pending map/unmap operations to complete
@@ -201,13 +175,24 @@ void PageAllocator::sleep_model(const std::string& model_id) {
 
   // Release weight pages first (reuse existing function)
   if (weight_pages > 0) {
-    free_weight_pages(model_id, weight_pages);
+    if (!free_weight_pages(model_id, weight_pages)) {
+      LOG(ERROR) << "Failed to free weight pages during sleep for model "
+                 << model_id << ", keep consumed weight page count";
+      return false;
+    }
   }
 
+  bool has_unmap_failures = false;
+  unmap_success.assign(pages_to_unmap.size(), true);
+
   // Unmap pages outside the lock
-  for (auto& [dp_rank, virt_page_ids] : pages_to_unmap) {
+  for (size_t i = 0; i < pages_to_unmap.size(); ++i) {
+    auto& [dp_rank, virt_page_ids] = pages_to_unmap[i];
     if (!virt_page_ids.empty()) {
-      unmap_virt_pages(model_id, dp_rank, virt_page_ids);
+      if (!unmap_virt_pages(model_id, dp_rank, virt_page_ids)) {
+        has_unmap_failures = true;
+        unmap_success[i] = false;
+      }
     }
   }
 
@@ -218,7 +203,11 @@ void PageAllocator::sleep_model(const std::string& model_id) {
   {
     std::lock_guard<std::mutex> lock(mtx_);
     // Release physical pages from per-worker tracking for each DP group
-    for (auto& [dp_rank, virt_page_ids] : pages_to_unmap) {
+    for (size_t i = 0; i < pages_to_unmap.size(); ++i) {
+      if (!unmap_success[i]) {
+        continue;
+      }
+      auto& [dp_rank, virt_page_ids] = pages_to_unmap[i];
       size_t pages_released = virt_page_ids.size() * phy_pages_per_virt;
       auto [start_w, end_w] = get_dp_group_worker_range(model_id, dp_rank);
       for (int32_t w = start_w; w < end_w && w < max_world_size_; ++w) {
@@ -233,14 +222,23 @@ void PageAllocator::sleep_model(const std::string& model_id) {
     cond_.notify_all();
   }
 
+  if (has_unmap_failures) {
+    LOG(ERROR) << "Model " << model_id
+               << " sleep encountered KV unmap failures, page accounting was "
+                  "not released for failed groups";
+    return false;
+  }
   LOG(INFO) << "Model " << model_id << " is now sleeping";
+  return true;
 }
 
-void PageAllocator::wakeup_model(const std::string& model_id) {
-  std::vector<std::pair<int32_t, std::vector<int64_t>>> pages_to_map;
+bool PageAllocator::wakeup_model(const std::string& model_id) {
+  std::vector<std::pair<int32_t, std::vector<int64_t>>> groups_to_map;
+  std::vector<size_t> pages_to_consume_per_worker;
   size_t total_phy_pages_needed = 0;
   size_t phy_pages_per_virt = 0;
   size_t weight_pages = 0;
+  int32_t weight_end_worker = 0;
 
   {
     std::lock_guard<std::mutex> lock(mtx_);
@@ -248,17 +246,21 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
     auto it = model_states_.find(model_id);
     if (it == model_states_.end()) {
       LOG(WARNING) << "Model " << model_id << " not found for wakeup";
-      return;
+      return false;
     }
 
     ModelState& state = it->second;
     if (!state.is_sleeping) {
       LOG(WARNING) << "Model " << model_id << " is not sleeping";
-      return;
+      return false;
     }
 
     phy_pages_per_virt = state.phy_pages_per_virt_page;
     weight_pages = state.weight_pages_allocated;
+    int32_t model_world_size =
+        state.model_world_size > 0 ? state.model_world_size : max_world_size_;
+    weight_end_worker = std::min(model_world_size, max_world_size_);
+    pages_to_consume_per_worker.assign(max_world_size_, 0);
 
     // Collect all pages that need to be re-mapped (reserved + allocated)
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
@@ -276,32 +278,41 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
                            dp_pages.allocated_virt_page_list.end());
 
       if (!virt_page_ids.empty()) {
-        total_phy_pages_needed += virt_page_ids.size() * phy_pages_per_virt;
-        pages_to_map.emplace_back(dp_rank, std::move(virt_page_ids));
+        size_t pages_needed = virt_page_ids.size() * phy_pages_per_virt;
+        auto [start_w, end_w] = get_dp_group_worker_range(model_id, dp_rank);
+        total_phy_pages_needed += pages_needed;
+        groups_to_map.push_back({dp_rank, std::move(virt_page_ids)});
+        for (int32_t w = start_w; w < end_w && w < max_world_size_; ++w) {
+          pages_to_consume_per_worker[w] += pages_needed;
+        }
       }
     }
 
-    // Check if each DP group has enough physical pages for KV cache
-    for (auto& [dp_rank, virt_page_ids] : pages_to_map) {
-      size_t pages_needed = virt_page_ids.size() * phy_pages_per_virt;
-      auto [start_w, end_w] = get_dp_group_worker_range(model_id, dp_rank);
-      size_t min_free = get_min_free_pages_in_range(start_w, end_w);
-      if (min_free < pages_needed) {
-        LOG(ERROR) << "Not enough physical pages for wakeup dp_rank=" << dp_rank
-                   << ": need " << pages_needed << ", available " << min_free;
-        return;
+    // Weight pages are allocated on all workers used by this model.
+    for (int32_t w = 0; w < weight_end_worker; ++w) {
+      pages_to_consume_per_worker[w] += weight_pages;
+    }
+
+    // Phase 1 (lock): check KV + weight requirements together.
+    for (int32_t w = 0; w < max_world_size_; ++w) {
+      if (pages_to_consume_per_worker[w] == 0) {
+        continue;
+      }
+      size_t worker_free = num_total_phy_pages_ - worker_pages_used_[w];
+      if (worker_free < pages_to_consume_per_worker[w]) {
+        LOG(ERROR) << "Not enough physical pages for wakeup worker=" << w
+                   << ": need " << pages_to_consume_per_worker[w]
+                   << ", available " << worker_free;
+        return false;
       }
     }
 
-    // Consume physical pages for KV cache (each DP group)
-    for (auto& [dp_rank, virt_page_ids] : pages_to_map) {
-      size_t pages_needed = virt_page_ids.size() * phy_pages_per_virt;
-      auto [start_w, end_w] = get_dp_group_worker_range(model_id, dp_rank);
-      for (int32_t w = start_w; w < end_w && w < max_world_size_; ++w) {
-        worker_pages_used_[w] += pages_needed;
+    // Only consume page counts after all checks pass.
+    for (int32_t w = 0; w < max_world_size_; ++w) {
+      if (pages_to_consume_per_worker[w] > 0) {
+        worker_pages_used_[w] += pages_to_consume_per_worker[w];
       }
     }
-    state.is_sleeping = false;
     update_memory_usage();
 
     LOG(INFO) << "Waking up model " << model_id << ", will map "
@@ -309,19 +320,44 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
               << weight_pages << " weight pages";
   }
 
-  // Re-map KV cache pages outside the lock
-  for (auto& [dp_rank, virt_page_ids] : pages_to_map) {
-    if (!virt_page_ids.empty()) {
-      map_virt_pages(model_id, dp_rank, virt_page_ids);
+  // Phase 2 (unlock): execute actual mapping/allocation.
+  bool map_ok = true;
+  for (auto& [dp_rank, virt_page_ids] : groups_to_map) {
+    if (virt_page_ids.empty()) {
+      continue;
+    }
+    if (!map_virt_pages(model_id, dp_rank, virt_page_ids)) {
+      map_ok = false;
+      LOG(ERROR) << "Failed to map KV cache pages for wakeup model=" << model_id
+                 << " dp_rank=" << dp_rank;
+      break;
     }
   }
 
-  // Re-allocate weight pages (reuse existing function)
-  if (weight_pages > 0) {
-    if (!alloc_weight_pages(model_id, weight_pages)) {
+  bool weight_ok = true;
+  if (map_ok && weight_pages > 0) {
+    auto& allocator = XTensorAllocator::get_instance();
+    weight_ok = allocator.broadcast_alloc_weight_pages(model_id, weight_pages);
+    if (!weight_ok) {
       LOG(ERROR) << "Failed to re-allocate weight pages for model " << model_id;
-      // Note: KV cache pages are already mapped, model is partially awake
     }
+  }
+
+  if (!map_ok || !weight_ok) {
+    LOG(ERROR) << "Failed to wake up model " << model_id
+               << ", keep sleep state and keep consumed page counts "
+               << "(no rollback due to unknown mapping state)";
+    return false;
+  }
+
+  // Phase 3: mark awake only after all operations succeed.
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    auto it = model_states_.find(model_id);
+    if (it != model_states_.end()) {
+      it->second.is_sleeping = false;
+    }
+    update_memory_usage();
   }
 
   // Trigger preallocation to refill reserved pages
@@ -330,6 +366,7 @@ void PageAllocator::wakeup_model(const std::string& model_id) {
   }
 
   LOG(INFO) << "Model " << model_id << " is now awake";
+  return true;
 }
 
 bool PageAllocator::is_model_sleeping(const std::string& model_id) const {
@@ -589,26 +626,36 @@ void PageAllocator::free_kv_cache_pages(
         pages_to_unmap = virt_page_ids;
       }
     }
-  }
 
-  if (pages_to_unmap.empty()) {
-    update_memory_usage();
-    return;
+    if (pages_to_unmap.empty()) {
+      update_memory_usage();
+      return;
+    }
   }
 
   // Slow path: unmap physical pages
-  unmap_virt_pages(model_id, dp_rank, pages_to_unmap);
+  bool unmap_success = unmap_virt_pages(model_id, dp_rank, pages_to_unmap);
   {
     std::lock_guard<std::mutex> lock(mtx_);
     ModelState& state = get_model_state(model_id);
     auto& dp_pages = state.dp_group_pages[dp_rank];
-    for (int64_t virt_page_id : pages_to_unmap) {
-      dp_pages.free_virt_page_list.push_back(virt_page_id);
+    if (unmap_success) {
+      for (int64_t virt_page_id : pages_to_unmap) {
+        dp_pages.free_virt_page_list.push_back(virt_page_id);
+      }
+      release_phy_pages_for_dp(
+          model_id, dp_rank, pages_to_unmap.size() * phy_pages_per_virt);
+      cond_.notify_all();
+    } else {
+      // Keep these pages mapped to avoid accounting drift on failed unmap.
+      for (int64_t virt_page_id : pages_to_unmap) {
+        dp_pages.reserved_virt_page_list.push_back(virt_page_id);
+      }
+      LOG(ERROR) << "Failed to unmap KV cache pages for model=" << model_id
+                 << " dp_rank=" << dp_rank
+                 << ", pages moved back to reserved list";
     }
-    release_phy_pages_for_dp(
-        model_id, dp_rank, pages_to_unmap.size() * phy_pages_per_virt);
     update_memory_usage();
-    cond_.notify_all();
   }
 }
 
@@ -636,17 +683,26 @@ void PageAllocator::trim_kv_cache(const std::string& model_id,
     }
   }
 
-  unmap_virt_pages(model_id, dp_rank, pages_to_unmap);
+  bool unmap_success = unmap_virt_pages(model_id, dp_rank, pages_to_unmap);
 
   {
     std::lock_guard<std::mutex> lock(mtx_);
     ModelState& state = get_model_state(model_id);
     auto& dp_pages = state.dp_group_pages[dp_rank];
-    for (int64_t virt_page_id : pages_to_unmap) {
-      dp_pages.free_virt_page_list.push_back(virt_page_id);
+    if (unmap_success) {
+      for (int64_t virt_page_id : pages_to_unmap) {
+        dp_pages.free_virt_page_list.push_back(virt_page_id);
+      }
+      release_phy_pages_for_dp(
+          model_id, dp_rank, pages_to_unmap.size() * phy_pages_per_virt);
+      cond_.notify_all();
+    } else {
+      for (int64_t virt_page_id : pages_to_unmap) {
+        dp_pages.reserved_virt_page_list.push_back(virt_page_id);
+      }
+      LOG(ERROR) << "Failed to trim KV cache for model=" << model_id
+                 << " dp_rank=" << dp_rank << ", reserved pages restored";
     }
-    release_phy_pages_for_dp(
-        model_id, dp_rank, pages_to_unmap.size() * phy_pages_per_virt);
     update_memory_usage();
   }
 }
@@ -693,18 +749,8 @@ bool PageAllocator::alloc_weight_pages(const std::string& model_id,
   // Broadcast to all workers to allocate weight pages in GlobalXtensor
   auto& allocator = XTensorAllocator::get_instance();
   if (!allocator.broadcast_alloc_weight_pages(model_id, num_pages)) {
-    // Rollback on failure
-    std::lock_guard<std::mutex> lock(mtx_);
-    ModelState& state = get_model_state(model_id);
-    int32_t ws =
-        state.model_world_size > 0 ? state.model_world_size : max_world_size_;
-    for (int32_t i = 0; i < ws && i < max_world_size_; ++i) {
-      worker_pages_used_[i] -= num_pages;
-    }
-    state.weight_pages_allocated = 0;
-    update_memory_usage();
     LOG(ERROR) << "Failed to broadcast alloc_weight_pages for model "
-               << model_id;
+               << model_id << ", keep consumed weight page count (no rollback)";
     return false;
   }
 
@@ -714,11 +760,15 @@ bool PageAllocator::alloc_weight_pages(const std::string& model_id,
   return true;
 }
 
-void PageAllocator::free_weight_pages(const std::string& model_id,
+bool PageAllocator::free_weight_pages(const std::string& model_id,
                                       size_t num_pages) {
   // Broadcast to all workers to free weight pages in GlobalXtensor
   auto& allocator = XTensorAllocator::get_instance();
-  allocator.broadcast_free_weight_pages(model_id);
+  if (!allocator.broadcast_free_weight_pages(model_id)) {
+    LOG(ERROR) << "Failed to broadcast free_weight_pages for model " << model_id
+               << ", keep consumed weight page count (no rollback)";
+    return false;
+  }
 
   {
     std::lock_guard<std::mutex> lock(mtx_);
@@ -750,6 +800,7 @@ void PageAllocator::free_weight_pages(const std::string& model_id,
   LOG(INFO) << "Freed " << num_pages
             << " physical pages from weight (global xtensor) of model "
             << model_id;
+  return true;
 }
 
 size_t PageAllocator::get_num_free_virt_pages(const std::string& model_id,

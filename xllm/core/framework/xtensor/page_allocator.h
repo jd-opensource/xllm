@@ -90,21 +90,18 @@ class PageAllocator {
                       int64_t num_layers,
                       int32_t master_status);
 
-  // Unregister a model (releases all its resources)
-  void unregister_model(const std::string& model_id);
-
   // Put a model to sleep:
   // - Release weight pages (via free_weight_pages)
   // - Unmap all mapped KV cache virtual pages
   // - Release physical pages back to shared pool
   // - Stop preallocation for this model
-  void sleep_model(const std::string& model_id);
+  bool sleep_model(const std::string& model_id);
 
   // Wake up a sleeping model:
   // - Re-map all previously mapped KV cache virtual pages
   // - Re-allocate weight pages (via alloc_weight_pages)
   // - Resume preallocation for this model
-  void wakeup_model(const std::string& model_id);
+  bool wakeup_model(const std::string& model_id);
 
   // Check if a model is sleeping
   bool is_model_sleeping(const std::string& model_id) const;
@@ -154,7 +151,7 @@ class PageAllocator {
   // Free physical pages from weight tensor
   // model_id: which model
   // num_pages: same count used in alloc_weight_pages
-  void free_weight_pages(const std::string& model_id, size_t num_pages);
+  bool free_weight_pages(const std::string& model_id, size_t num_pages);
 
   // Get number of weight pages allocated for a model (not cleared on free)
   size_t get_weight_pages_allocated(const std::string& model_id) const;
@@ -162,24 +159,6 @@ class PageAllocator {
   // Set weight pages count (for LIGHT_SLEEP/DEEP_SLEEP mode without physical
   // allocation)
   void set_weight_pages_count(const std::string& model_id, size_t num_pages);
-
-  // ============ Global XTensor Weight Allocation ============
-  // These methods use global xtensor for weight allocation,
-  // avoiding per-page RPC mapping overhead.
-
-  // Allocate weight from global xtensor
-  // Only consumes page count, no RPC mapping needed
-  // The actual mapping is done by
-  // XTensorAllocator::allocate_weight_from_global_xtensor model_id: which model
-  // this allocation is for num_pages: number of pages needed for weight Returns
-  // true if page count available and consumed
-  bool alloc_weight_pages_from_global_xtensor(const std::string& model_id,
-                                              size_t num_pages);
-
-  // Free weight pages from global xtensor (only updates page count)
-  // The actual memory is managed by GlobalXtensor
-  void free_weight_pages_from_global_xtensor(const std::string& model_id,
-                                             size_t num_pages);
 
   // Virtual page getters (for specific model and DP group)
   size_t get_num_free_virt_pages(const std::string& model_id,
