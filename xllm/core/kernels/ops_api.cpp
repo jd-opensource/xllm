@@ -475,6 +475,48 @@ torch::Tensor group_gemm(GroupGemmParams& params) {
                          params.trans_a,
                          params.trans_b,
                          params.a_quant_bit);
+#elif defined(USE_NPU)
+  std::vector<torch::Tensor> x_list;
+  std::vector<torch::Tensor> weight_list;
+  torch::TensorList x_ref;
+  torch::TensorList weight_ref;
+  if (params.x_list.has_value()) {
+    x_ref = params.x_list.value();
+  } else {
+    x_list = {params.a};
+    x_ref = x_list;
+  }
+  if (params.weight_list.has_value()) {
+    weight_ref = params.weight_list.value();
+  } else {
+    weight_list = {params.b};
+    weight_ref = weight_list;
+  }
+  std::optional<torch::Tensor> group_list = params.group_list;
+  if (!group_list.has_value()) {
+    group_list = params.token_count;
+  }
+
+  auto outputs =
+      npu::apply_npu_grouped_matmul(x_ref,
+                                    weight_ref,
+                                    params.bias_list,
+                                    params.scale_list,
+                                    params.offset_list,
+                                    params.antiquant_scale_list,
+                                    params.antiquant_offset_list,
+                                    params.per_token_scale_list,
+                                    group_list,
+                                    params.activation_input_list,
+                                    params.activation_quant_scale_list,
+                                    params.activation_quant_offset_list,
+                                    params.split_item,
+                                    params.group_type,
+                                    params.group_list_type,
+                                    params.act_type,
+                                    params.tuning_config,
+                                    params.output_dtype);
+  return outputs.back();
 #elif defined(USE_ILU)
   return ilu::group_gemm(params.a,
                          params.b,
@@ -499,6 +541,11 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.scoring_func,
                               params.route_scale,
                               params.e_score_correction_bias);
+#elif defined(USE_NPU)
+  auto [topk_weights, topk_ids, row_ids] = npu::apply_moe_gating_topk_softmax(
+      params.input, params.finished, params.topk);
+  (void)row_ids;
+  return std::make_tuple(topk_weights, topk_ids);
 #elif defined(USE_ILU)
   return ilu::moe_active_topk(params.input,
                               params.topk,
@@ -550,6 +597,20 @@ torch::Tensor moe_combine_result(MoeCombineResultParams& params) {
                                  params.start_expert_id,
                                  params.expert_size,
                                  params.bias);
+#elif defined(USE_NPU)
+  std::optional<torch::Tensor> probes =
+      params.probes.has_value()
+          ? params.probes
+          : std::optional<torch::Tensor>(params.reduce_weight);
+  auto output = npu::apply_npu_moe_token_unpermute(params.input,
+                                                   params.gather_ids,
+                                                   probes,
+                                                   params.padded_mode,
+                                                   params.restore_shape);
+  if (params.residual.has_value()) {
+    output = output + params.residual.value();
+  }
+  return output;
 #elif defined(USE_ILU)
   return ilu::moe_combine_result(params.input, params.reduce_weight);
 #else
@@ -820,53 +881,6 @@ void fused_indexer_k(FusedIndexerKParams& params) {
                        params.k_cache,
                        params.k_cache_scale,
                        params.hadamard_matrix);
-#else
-  NOT_IMPLEMENTED();
-#endif
-}
-
-std::vector<torch::Tensor> grouped_matmul(GroupedMatmulParams& params) {
-#if defined(USE_NPU)
-  return npu::apply_npu_grouped_matmul(params.x,
-                                       params.weight,
-                                       params.bias,
-                                       params.scale,
-                                       params.offset,
-                                       params.antiquant_scale,
-                                       params.antiquant_offset,
-                                       params.per_token_scale,
-                                       params.group_list,
-                                       params.activation_input,
-                                       params.activation_quant_scale,
-                                       params.activation_quant_offset,
-                                       params.split_item,
-                                       params.group_type,
-                                       params.group_list_type,
-                                       params.act_type,
-                                       params.tuning_config,
-                                       params.output_dtype);
-#else
-  NOT_IMPLEMENTED();
-#endif
-}
-
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_gating_topk_softmax(
-    MoeGatingTopkSoftmaxParams& params) {
-#if defined(USE_NPU)
-  return npu::apply_moe_gating_topk_softmax(
-      params.x, params.finished, params.k);
-#else
-  NOT_IMPLEMENTED();
-#endif
-}
-
-torch::Tensor moe_token_unpermute(MoeTokenUnpermuteParams& params) {
-#if defined(USE_NPU)
-  return npu::apply_npu_moe_token_unpermute(params.permuted_tokens,
-                                            params.sorted_indices,
-                                            params.probes,
-                                            params.padded_mode,
-                                            params.restore_shape);
 #else
   NOT_IMPLEMENTED();
 #endif

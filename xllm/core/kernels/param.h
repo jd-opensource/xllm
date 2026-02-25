@@ -451,6 +451,52 @@ struct GroupGemmParams {
   // Quantization bit-width for input a.
   // Set -1 to disable quantization.
   int64_t a_quant_bit;
+  // ========== Torch NPU related parameters ==========
+  // Optional input tensor list for grouped matmul.
+  // If provided, this overrides `a` for NPU backend.
+  // Each tensor shape: [M, K] (or [K, M] if trans_a is true).
+  std::optional<torch::TensorList> x_list;
+  // Optional weight tensor list for grouped matmul.
+  // If provided, this overrides `b` for NPU backend.
+  // Each tensor shape: [K, N] or [N, K] depending on trans_b.
+  std::optional<torch::TensorList> weight_list;
+  // Optional bias list. Used in quantized or fused-activation paths.
+  std::optional<torch::TensorList> bias_list;
+  // Optional scale list for quantized weights.
+  std::optional<torch::TensorList> scale_list;
+  // Optional offset list for quantized weights.
+  std::optional<torch::TensorList> offset_list;
+  // Optional anti-quantization scale list.
+  std::optional<torch::TensorList> antiquant_scale_list;
+  // Optional anti-quantization offset list.
+  std::optional<torch::TensorList> antiquant_offset_list;
+  // Optional per-token scale list.
+  std::optional<torch::TensorList> per_token_scale_list;
+  // Optional group list for NPU grouped matmul.
+  // If group_list_type == 0: values are cumsum of group sizes.
+  // If group_list_type == 1: values are per-group sizes.
+  std::optional<torch::Tensor> group_list;
+  // Optional activation input list for fused activation.
+  std::optional<torch::TensorList> activation_input_list;
+  // Optional activation quantization scale list.
+  std::optional<torch::TensorList> activation_quant_scale_list;
+  // Optional activation quantization offset list.
+  std::optional<torch::TensorList> activation_quant_offset_list;
+  // Optional split item for grouped matmul.
+  // Common value is 2 for gated MLP (gate + up).
+  std::optional<int64_t> split_item = 2;
+  // Optional group type for grouped matmul.
+  // 0 indicates grouping along the M axis (row-wise).
+  std::optional<int64_t> group_type = 0;
+  // Optional group list type for grouped matmul.
+  // 0: cumsum of group sizes; 1: per-group sizes.
+  std::optional<int64_t> group_list_type = 1;
+  // Optional activation type for fused activation.
+  std::optional<int64_t> act_type;
+  // Optional tuning configuration for NPU kernel.
+  c10::OptionalIntArrayRef tuning_config;
+  // Optional output dtype for NPU kernel.
+  std::optional<torch::ScalarType> output_dtype;
   // ========== Torch ILU related parameters ==========
   // Inverse mapping of gather_idx.
   // Shape: [expand_token_num].
@@ -464,6 +510,10 @@ struct MoeActiveTopkParams {
   // Dtype: float32, float16, bfloat16.
   // Must be contiguous.
   torch::Tensor input;
+  // Optional finished mask for NPU gating topk softmax.
+  // Shape should be broadcastable to input's leading dims.
+  // If not provided, all tokens are considered active.
+  std::optional<torch::Tensor> finished;
   // Number of top-k experts to select per token.
   // Constraint: 0 < topk <= num_expert.
   int64_t topk;
@@ -555,6 +605,14 @@ struct MoeCombineResultParams {
   // - Dtype: int32.
   // - Corresponds to permutation/scatter indices for reordering expert outputs.
   torch::Tensor gather_ids;
+  // Optional probes tensor for NPU token unpermute.
+  // If provided, used as probe weights in unpermute kernel.
+  // Shape: [num_tokens, topk].
+  std::optional<torch::Tensor> probes;
+  // Whether the permuted tokens are padded (NPU token unpermute).
+  bool padded_mode = false;
+  // Optional restore shape for NPU token unpermute.
+  c10::OptionalIntArrayRef restore_shape = c10::nullopt;
   // Optional residual connection input.
   // Shape: [num_tokens, hidden_size].
   // - Must have same shape and dtype as output if provided.
@@ -1237,42 +1295,9 @@ struct FusedIndexerKParams {
   std::optional<torch::Tensor> hadamard_matrix;
 };
 
-struct GroupedMatmulParams {
-  torch::TensorList x;
-  torch::TensorList weight;
-  std::optional<torch::TensorList> bias;
-  std::optional<torch::TensorList> scale;
-  std::optional<torch::TensorList> offset;
-  std::optional<torch::TensorList> antiquant_scale;
-  std::optional<torch::TensorList> antiquant_offset;
-  std::optional<torch::TensorList> per_token_scale;
-  std::optional<torch::Tensor> group_list;
-  std::optional<torch::TensorList> activation_input;
-  std::optional<torch::TensorList> activation_quant_scale;
-  std::optional<torch::TensorList> activation_quant_offset;
-  std::optional<int64_t> split_item;
-  std::optional<int64_t> group_type;
-  std::optional<int64_t> group_list_type;
-  std::optional<int64_t> act_type;
-  c10::OptionalIntArrayRef tuning_config;
-  std::optional<torch::ScalarType> output_dtype;
-};
-
-struct MoeGatingTopkSoftmaxParams {
-  torch::Tensor x;
-  std::optional<torch::Tensor> finished;
-  int k;
-};
-
-struct MoeTokenUnpermuteParams {
-  torch::Tensor permuted_tokens;
-  torch::Tensor sorted_indices;
-  std::optional<torch::Tensor> probes;
-  bool padded_mode;
-  c10::OptionalIntArrayRef restore_shape;
-};
-
 struct MoeInitRoutingV2Params {
+  // TODO: NPU moe_init_routing_v2 is equivalent to moe_gen_idx +
+  // moe_expand_input (and token_count/cusum outputs) on other backends.
   torch::Tensor x;
   torch::Tensor expert_idx;
   std::optional<torch::Tensor> scale;

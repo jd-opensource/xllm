@@ -183,13 +183,12 @@ torch::Tensor FusedMoEImpl::select_experts(
     const torch::Tensor& router_logits_2d,
     SelectedExpertInfo& selected_expert_info) {
   // prepare the parameters for select_experts
-  xllm::kernel::MoeGatingTopkSoftmaxParams gating_topk_params;
-  gating_topk_params.x = router_logits_2d;
-  gating_topk_params.finished = std::nullopt;
-  gating_topk_params.k = topk_;
-  auto [topk_weights, topk_ids, row_ids] =
-      xllm::kernel::moe_gating_topk_softmax(gating_topk_params);
-  (void)row_ids;
+  xllm::kernel::MoeActiveTopkParams moe_active_topk_params;
+  moe_active_topk_params.input = router_logits_2d;
+  moe_active_topk_params.finished = std::nullopt;
+  moe_active_topk_params.topk = topk_;
+  auto [topk_weights, topk_ids] =
+      xllm::kernel::moe_active_topk(moe_active_topk_params);
   topk_ids = topk_ids.to(torch::kInt32);
   if (renormalize_) {
     topk_weights = topk_weights / (topk_weights.sum(-1, true) + 1e-6);
@@ -211,6 +210,8 @@ torch::Tensor FusedMoEImpl::select_experts(
       start_expert_id_, start_expert_id_ + num_experts_per_rank_};
   moe_init_routing_params.active_expert_range = expert_range;
   moe_init_routing_params.quant_mode = -1;
+  // TODO: NPU moe_init_routing_v2 is equivalent to moe_gen_idx +
+  // moe_expand_input (and the token_count/cusum outputs) on other backends.
   auto [expand_hidden_states, expand_row_ids, group_list, dynamic_scale] =
       xllm::kernel::moe_init_routing_v2(moe_init_routing_params);
   (void)dynamic_scale;
@@ -248,19 +249,17 @@ torch::Tensor FusedMoEImpl::forward_expert(
                                hidden_states_dtype);
 
   {
-    xllm::kernel::GroupedMatmulParams grouped_matmul_params;
-    std::vector<torch::Tensor> x_list = {expand_hidden_states};
+    xllm::kernel::GroupGemmParams group_gemm_params;
+    group_gemm_params.a = expand_hidden_states;
     if (w13_.size(1) != expand_hidden_states.size(1)) {
       w13_ = w13_.transpose(1, 2);
     }
-    std::vector<torch::Tensor> weight_list = {w13_};
-    grouped_matmul_params.x = x_list;
-    grouped_matmul_params.weight = weight_list;
-    grouped_matmul_params.split_item = 2;
-    grouped_matmul_params.group_type = 0;
-    grouped_matmul_params.group_list_type = 1;
-    grouped_matmul_params.group_list = selected_expert_info.token_count_slice;
-    gemm1_out = xllm::kernel::grouped_matmul(grouped_matmul_params).back();
+    group_gemm_params.b = w13_;
+    group_gemm_params.group_list = selected_expert_info.token_count_slice;
+    group_gemm_params.split_item = 2;
+    group_gemm_params.group_type = 0;
+    group_gemm_params.group_list_type = 1;
+    gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
   }
 
   // Step 5: activation or scaled quantization(fused with activation)
@@ -282,30 +281,26 @@ torch::Tensor FusedMoEImpl::forward_expert(
                                hidden_states_dtype);
 
   {
-    xllm::kernel::GroupedMatmulParams grouped_matmul_params;
-    std::vector<torch::Tensor> x_list = {act_out};
+    xllm::kernel::GroupGemmParams group_gemm_params;
+    group_gemm_params.a = act_out;
     if (w2_.size(1) != act_out.size(1)) {
       w2_ = w2_.transpose(1, 2);
     }
-    std::vector<torch::Tensor> weight_list = {w2_};
-    grouped_matmul_params.x = x_list;
-    grouped_matmul_params.weight = weight_list;
-    grouped_matmul_params.split_item = 2;
-    grouped_matmul_params.group_list_type = 1;
-    grouped_matmul_params.group_type = 0;
-    grouped_matmul_params.group_list = selected_expert_info.token_count_slice;
-    gemm2_out = xllm::kernel::grouped_matmul(grouped_matmul_params).back();
+    group_gemm_params.b = w2_;
+    group_gemm_params.group_list = selected_expert_info.token_count_slice;
+    group_gemm_params.split_item = 2;
+    group_gemm_params.group_type = 0;
+    group_gemm_params.group_list_type = 1;
+    gemm2_out = xllm::kernel::group_gemm(group_gemm_params);
   }
 
   // Step 7: combine the intermediate results and get the final hidden states
   torch::Tensor final_hidden_states;
-  xllm::kernel::MoeTokenUnpermuteParams moe_token_unpermute_params;
-  moe_token_unpermute_params.permuted_tokens = gemm2_out;
-  moe_token_unpermute_params.sorted_indices = selected_expert_info.combine_idx;
-  moe_token_unpermute_params.padded_mode = false;
-  moe_token_unpermute_params.probes = selected_expert_info.reduce_weight;
-  final_hidden_states =
-      xllm::kernel::moe_token_unpermute(moe_token_unpermute_params);
+  xllm::kernel::MoeCombineResultParams moe_combine_params;
+  moe_combine_params.input = gemm2_out;
+  moe_combine_params.reduce_weight = selected_expert_info.reduce_weight;
+  moe_combine_params.gather_ids = selected_expert_info.combine_idx;
+  final_hidden_states = xllm::kernel::moe_combine_result(moe_combine_params);
   if (shared_output.has_value()) {
     final_hidden_states = final_hidden_states + shared_output.value();
   }
