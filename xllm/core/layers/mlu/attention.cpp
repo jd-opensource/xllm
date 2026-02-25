@@ -179,7 +179,9 @@ void AttentionImpl::prefill_forward(
       // Quantized KV cache path - dequantize before flash attention
 
       // Calculate total sequence length from cumulative sequence lengths
-      int64_t total_seqlens = attn_metadata.kv_cu_seq_lens[-1].item<int64_t>();
+      int64_t total_seqlens =
+          attn_metadata.kv_cu_seq_lens[attn_metadata.kv_cu_seq_lens.size(0) - 1]
+              .item<int64_t>();
 
       // Allocate dequantized output tensors
       torch::Tensor key_dequant = torch::zeros(

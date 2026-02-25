@@ -312,17 +312,16 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     index_slot_size = dtype_size * index_n_head * args_.index_head_dim();
   }
 
-  // Calculate scale tensor overhead for quantized KV cache
-  // Scale shape per block: [n_kv_heads, block_size], dtype: float32
-  // For MLA: scale shape per block: [1, block_size] (for kv_lora_rank +
-  // qk_rope_head_dim)
+  // Calculate scale tensor overhead for quantized KV cache (per-token bytes).
+  // worker_impl allocates scale as kv_cache_shape with last dim removed.
+  // Standard attention: K scale [num_blocks, n_kv_heads, block_size], V same
+  // => per token: n_kv_heads floats for K + n_kv_heads for V.
+  // MLA: key scale [num_blocks, 1, block_size] => one float per token.
   if (enable_kv_cache_quant) {
     const int32_t block_size = options_.block_size();
     if (FLAGS_enable_mla) {
-      // MLA has single scale for combined kv_lora_rank + qk_rope_head_dim
-      scale_slot_size = sizeof(float) *
-                        (args_.kv_lora_rank() + args_.qk_rope_head_dim()) /
-                        block_size;
+      // MLA scale shape is [num_blocks, 1, block_size] -> one float per token
+      scale_slot_size = sizeof(float);
     } else {
       // Standard attention: separate K and V scales
       // K scale: [n_kv_heads, block_size], V scale: [n_kv_heads, block_size]
