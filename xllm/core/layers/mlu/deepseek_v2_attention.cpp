@@ -227,6 +227,7 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
     torch::Tensor& q_input,
     torch::Tensor& latent_cache,
     torch::Tensor& kv_cache,
+    std::optional<torch::Tensor> k_cache_scale,
     const torch::Tensor& positions,
     const AttentionMetadata& attn_metadata) {
   // forward_decoder_fused_mla_q
@@ -272,15 +273,17 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
   fused_mla_kv_params.input_kv = latent_cache;
   fused_mla_kv_params.sin = rotary_emb_->get_sin_cache();
   fused_mla_kv_params.cos = rotary_emb_->get_cos_cache();
+
   fused_mla_kv_params.position_id = positions;
   fused_mla_kv_params.gamma = kv_a_layernorm_->weight();
   fused_mla_kv_params.kv_cache = kv_cache;
-  fused_mla_kv_params.kv_cache_scale = std::nullopt;
+  fused_mla_kv_params.kv_cache_scale = k_cache_scale;
   fused_mla_kv_params.slot_mapping =
       attn_metadata.slot_mapping.view({batch, seq});
   fused_mla_kv_params.cache_bs_id = std::nullopt;
   fused_mla_kv_params.cache_seq_offset = std::nullopt;
-  fused_mla_kv_params.quant_mode = "none";
+  fused_mla_kv_params.quant_mode =
+      k_cache_scale.has_value() ? "dynamic_per_token" : "none";
   fused_mla_kv_params.eps = eps_;
   fused_mla_kv_params.interleaved = interleaved_;
   kernel::fused_mla_kv(fused_mla_kv_params);
@@ -306,9 +309,16 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   }
   auto latent_cache = kv_a_proj_with_mqa_(hidden_states);
   auto k_cache = kv_cache.get_k_cache();
+  std::optional<torch::Tensor> k_cache_scale = kv_cache.get_k_cache_scale();
   if (enable_fused_qkv) {
-    decode_qkv_pre_fused(
-        q, qr, q_input, latent_cache, k_cache, positions, attn_metadata);
+    decode_qkv_pre_fused(q,
+                         qr,
+                         q_input,
+                         latent_cache,
+                         k_cache,
+                         k_cache_scale,
+                         positions,
+                         attn_metadata);
   } else {
     decode_q_pre_base(q, qr, q_input, positions, attn_metadata);
     decode_kv_pre_base(latent_cache, positions, attn_metadata);
@@ -328,12 +338,20 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   if (!attn_metadata.is_dummy) {
     // mla prefill save cache before flashattn
     if (only_prefill) {
+      // Check if KV cache quantization is enabled by checking scale tensors
       auto key = k_input.unsqueeze(1);
       xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
       reshape_paged_cache_params.key = key;
       reshape_paged_cache_params.k_cache = k_cache;
       reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
-      xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+      if (k_cache_scale.has_value()) {
+        // Use quant_to_paged_cache for INT8 quantization
+        reshape_paged_cache_params.k_cache_scale = k_cache_scale;
+        xllm::kernel::quant_to_paged_cache(reshape_paged_cache_params);
+      } else {
+        // Use standard reshape_paged_cache
+        xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+      }
     }
     // indexer and update index params for attn
     attn_indexer_metadata = attn_metadata;

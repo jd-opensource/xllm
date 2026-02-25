@@ -47,8 +47,8 @@ class KVCache final {
   torch::Tensor get_index_cache() const;
 
   // Get scale tensors for quantized KV cache
-  torch::Tensor get_k_cache_scale() const;
-  torch::Tensor get_v_cache_scale() const;
+  std::optional<torch::Tensor> get_k_cache_scale() const;
+  std::optional<torch::Tensor> get_v_cache_scale() const;
 
   std::vector<std::vector<int64_t>> get_shapes();
 

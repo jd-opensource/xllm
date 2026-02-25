@@ -46,8 +46,18 @@ torch::Tensor KVCache::get_k_cache() const { return key_cache_; }
 torch::Tensor KVCache::get_v_cache() const { return value_cache_; }
 torch::Tensor KVCache::get_index_cache() const { return index_cache_; }
 
-torch::Tensor KVCache::get_k_cache_scale() const { return key_cache_scale_; }
-torch::Tensor KVCache::get_v_cache_scale() const { return value_cache_scale_; }
+std::optional<torch::Tensor> KVCache::get_k_cache_scale() const {
+  if (!key_cache_scale_.defined() || key_cache_scale_.numel() == 0) {
+    return std::nullopt;
+  }
+  return key_cache_scale_;
+}
+std::optional<torch::Tensor> KVCache::get_v_cache_scale() const {
+  if (!value_cache_scale_.defined() || value_cache_scale_.numel() == 0) {
+    return std::nullopt;
+  }
+  return value_cache_scale_;
+}
 
 std::vector<std::vector<int64_t>> KVCache::get_shapes() {
   std::vector<std::vector<int64_t>> tensor_shapes(3);

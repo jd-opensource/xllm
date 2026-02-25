@@ -91,10 +91,8 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   }
 
   // Check if KV cache quantization is enabled by checking scale tensors
-  torch::Tensor k_cache_scale = kv_cache.get_k_cache_scale();
-  torch::Tensor v_cache_scale = kv_cache.get_v_cache_scale();
-  bool enable_kv_cache_quant =
-      k_cache_scale.defined() && k_cache_scale.numel() > 0;
+  std::optional<torch::Tensor> k_cache_scale = kv_cache.get_k_cache_scale();
+  std::optional<torch::Tensor> v_cache_scale = kv_cache.get_v_cache_scale();
 
   bool skip_process_cache = enable_mla_ && (only_prefill || use_fused_mla_qkv_);
   if (!skip_process_cache) {
@@ -105,7 +103,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     reshape_paged_cache_params.v_cache = v_cache;
     reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
 
-    if (enable_kv_cache_quant) {
+    if (k_cache_scale.has_value()) {
       // Use quant_to_paged_cache for INT8 quantization
       reshape_paged_cache_params.k_cache_scale = k_cache_scale;
       reshape_paged_cache_params.v_cache_scale = v_cache_scale;
@@ -124,33 +122,29 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
       // we must explicitly make sure the k_cache is contiguous after reshaping
       k_cache = k_cache.reshape({-1, k_cache.size(1), 1, k_cache.size(3)})
                     .contiguous();
+      if (k_cache_scale.has_value()) {
+        auto scale = k_cache_scale.value();
+        k_cache_scale = scale.reshape({-1, scale.size(1), 1}).contiguous();
+      }
     }
-    std::optional<torch::Tensor> k_scale_opt =
-        enable_kv_cache_quant ? std::optional<torch::Tensor>(k_cache_scale)
-                              : std::nullopt;
-    std::optional<torch::Tensor> v_scale_opt =
-        enable_kv_cache_quant ? std::optional<torch::Tensor>(v_cache_scale)
-                              : std::nullopt;
+
     decoder_forward(query,
                     output,
                     k_cache,
                     v_cache,
                     attn_metadata,
-                    k_scale_opt,
-                    v_scale_opt);
+                    k_cache_scale,
+                    v_cache_scale);
   } else {
-    prefill_forward(
-        query,
-        key,
-        value,
-        output,
-        k_cache,
-        v_cache,
-        attn_metadata,
-        enable_kv_cache_quant ? std::optional<torch::Tensor>(k_cache_scale)
-                              : std::nullopt,
-        enable_kv_cache_quant ? std::optional<torch::Tensor>(v_cache_scale)
-                              : std::nullopt);
+    prefill_forward(query,
+                    key,
+                    value,
+                    output,
+                    k_cache,
+                    v_cache,
+                    attn_metadata,
+                    k_cache_scale,
+                    v_cache_scale);
   }
 
   int64_t head_size = enable_mla_ ? v_head_dim_ : head_size_;

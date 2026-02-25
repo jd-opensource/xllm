@@ -942,10 +942,10 @@ TEST_F(DeepseekV2DecoderLayerTest, MLAQuantizedKVCachePrefillTest) {
 
   // Verify scale tensor properties
   auto retrieved_k_scale = quant_kv_cache.get_k_cache_scale();
-  EXPECT_TRUE(retrieved_k_scale.defined());
-  EXPECT_EQ(retrieved_k_scale.sizes(),
+  EXPECT_TRUE(retrieved_k_scale.has_value());
+  EXPECT_EQ(retrieved_k_scale.value().sizes(),
             torch::IntArrayRef({block_num, 1, block_size}));
-  EXPECT_EQ(retrieved_k_scale.scalar_type(), torch::kFloat32);
+  EXPECT_EQ(retrieved_k_scale.value().scalar_type(), torch::kFloat32);
 
   // Verify Indexer Cache uses original dtype (not INT8)
   auto index_cache_retrieved = quant_kv_cache.get_index_cache();
@@ -956,7 +956,8 @@ TEST_F(DeepseekV2DecoderLayerTest, MLAQuantizedKVCachePrefillTest) {
   // Verify V cache scale is not defined (MLA uses compressed KV, no separate V
   // cache)
   auto retrieved_v_scale = quant_kv_cache.get_v_cache_scale();
-  EXPECT_TRUE(!retrieved_v_scale.defined() || retrieved_v_scale.numel() == 0);
+  EXPECT_TRUE(!retrieved_v_scale.has_value() ||
+              retrieved_v_scale.value().numel() == 0);
 }
 
 TEST_F(DeepseekV2DecoderLayerTest, MLAQuantizedKVCacheDecodeTest) {
@@ -999,7 +1000,8 @@ TEST_F(DeepseekV2DecoderLayerTest, MLAQuantizedKVCacheDecodeTest) {
   // Verify V cache scale is not defined (MLA uses compressed KV, no separate V
   // cache)
   auto retrieved_v_scale = quant_kv_cache.get_v_cache_scale();
-  EXPECT_TRUE(!retrieved_v_scale.defined() || retrieved_v_scale.numel() == 0);
+  EXPECT_TRUE(!retrieved_v_scale.has_value() ||
+              retrieved_v_scale.value().numel() == 0);
 }
 
 }  // namespace layer

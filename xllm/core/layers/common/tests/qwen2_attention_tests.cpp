@@ -75,14 +75,23 @@ class Qwen2AttentionTest : public ::testing::Test {
     int64_t q_size = n_heads * head_dim;
     int64_t kv_size = n_kv_heads * head_dim;
 
+    const std::string weight_seed_prefix = "qwen2_attention_test.";
+    auto seeded = [this, &weight_seed_prefix](const std::string& name,
+                                              torch::IntArrayRef shape) {
+      return test::seeded_tensor(weight_seed_prefix + name,
+                                 shape,
+                                 torch::typeMetaToScalarType(options_.dtype()),
+                                 options_.device());
+    };
+
     std::unordered_map<std::string, torch::Tensor> weight_map = {
-        {"q_proj.weight", torch::randn({q_size, hidden_size}, options_)},
-        {"k_proj.weight", torch::randn({kv_size, hidden_size}, options_)},
-        {"v_proj.weight", torch::randn({kv_size, hidden_size}, options_)},
-        {"q_proj.bias", torch::randn({q_size}, options_)},
-        {"k_proj.bias", torch::randn({kv_size}, options_)},
-        {"v_proj.bias", torch::randn({kv_size}, options_)},
-        {"o_proj.weight", torch::randn({hidden_size, q_size}, options_)},
+        {"q_proj.weight", seeded("q_proj.weight", {q_size, hidden_size})},
+        {"k_proj.weight", seeded("k_proj.weight", {kv_size, hidden_size})},
+        {"v_proj.weight", seeded("v_proj.weight", {kv_size, hidden_size})},
+        {"q_proj.bias", seeded("q_proj.bias", {q_size})},
+        {"k_proj.bias", seeded("k_proj.bias", {kv_size})},
+        {"v_proj.bias", seeded("v_proj.bias", {kv_size})},
+        {"o_proj.weight", seeded("o_proj.weight", {hidden_size, q_size})},
     };
 
     for (auto& [name, tensor] : weight_map) {
@@ -193,16 +202,16 @@ TEST_F(Qwen2AttentionTest, PrefillTest) {
 
   CHECK_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
-  std::vector<float> expected_values = {0.0917969,
-                                        0.00613403,
-                                        -0.0490723,
-                                        0.0766602,
-                                        -0.0327148,
-                                        -0.0371094,
-                                        -0.0466309,
-                                        0.0253906,
-                                        -0.0541992,
-                                        0.0424805};
+  std::vector<float> expected_values = {0.2031f,
+                                        0.2109f,
+                                        0.2129f,
+                                        0.2041f,
+                                        0.1963f,
+                                        0.2129f,
+                                        0.2139f,
+                                        0.2070f,
+                                        0.2188f,
+                                        0.2061f};
   test::verify_precision(test_output, expected_values, 1e-5, 1e-6);
 }
 
@@ -232,16 +241,16 @@ TEST_F(Qwen2AttentionTest, DecodeTest) {
 
   CHECK_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
-  std::vector<float> expected_values = {-0.000411987,
-                                        0.000113487,
-                                        0.000747681,
-                                        0.000123024,
-                                        -0.00124359,
-                                        0.000873566,
-                                        0.000455856,
-                                        0.00135803,
-                                        -0.00119781,
-                                        -0.000526428};
+  std::vector<float> expected_values = {0.0001f * 9.1171f,
+                                        0.0001f * 7.7820f,
+                                        0.0001f * 5.5695f,
+                                        0.0001f * 2.3651f,
+                                        0.0001f * 2.3174f,
+                                        0.0001f * 2.4986f,
+                                        0.0001f * 3.2997f,
+                                        0.0001f * 1.4973f,
+                                        0.0001f * 7.7820f,
+                                        0.0001f * 6.4468f};
   test::verify_precision(test_output, expected_values, 1e-5, 1e-6);
 }
 
@@ -295,16 +304,16 @@ TEST_F(Qwen2AttentionTest, MixedSequenceLengthTest) {
 
   CHECK_EQ(output.sizes(), torch::IntArrayRef({total_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
-  std::vector<float> expected_values = {0.0145264,
-                                        0.0148315,
-                                        0.0098877,
-                                        0.0314941,
-                                        -0.0291748,
-                                        -0.0197754,
-                                        -0.0522461,
-                                        0.032959,
-                                        -0.0488281,
-                                        -0.0219727};
+  std::vector<float> expected_values = {0.2412f,
+                                        0.2520f,
+                                        0.2559f,
+                                        0.2422f,
+                                        0.2393f,
+                                        0.2559f,
+                                        0.2578f,
+                                        0.2520f,
+                                        0.2539f,
+                                        0.2441f};
   test::verify_precision(test_output, expected_values, 1e-5, 1e-6);
 }
 
@@ -374,9 +383,9 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCachePrefillTest) {
   // Verify precision using expect_tensor_stats
   // Expected values from Phase 1 print test
   test::expect_tensor_stats(output,
-                            /*expected_min=*/-2.65625,
-                            /*expected_max=*/2.625,
-                            /*expected_sum=*/4461.05);
+                            /*expected_min=*/240,
+                            /*expected_max=*/280,
+                            /*expected_sum=*/67867024);
 }
 
 TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeDiagnosticTest) {
@@ -531,9 +540,9 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeTest) {
   // Verify precision using expect_tensor_stats
   // Expected values established from successful diagnostic run
   test::expect_tensor_stats(output,
-                            /*expected_min=*/-360.0,
-                            /*expected_max=*/440.0,
-                            /*expected_sum=*/1555.03,
+                            /*expected_min=*/-296,
+                            /*expected_max=*/165,
+                            /*expected_sum=*/-211443.53,
                             /*rtol=*/0.01,
                             /*atol=*/1.0);
 }
@@ -621,9 +630,9 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheChunkedPrefillTest) {
   // Verify precision using expect_tensor_stats
   // Expected values will be updated after first test run
   test::expect_tensor_stats(output,
-                            /*expected_min=*/-352.0,
-                            /*expected_max=*/310.0,
-                            /*expected_sum=*/17107.71,
+                            /*expected_min=*/-236,
+                            /*expected_max=*/272,
+                            /*expected_sum=*/7604961.5,
                             /*rtol=*/0.01,
                             /*atol=*/1.0);
 }
