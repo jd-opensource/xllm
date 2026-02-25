@@ -158,7 +158,10 @@ bool LLMEngine::init(int32_t master_status) {
   // This allows KV cache allocation to complete first, then releases resources
   if (FLAGS_enable_xtensor && master_status != WAKEUP) {
     const std::string& model_id = options_.model_id();
-    PageAllocator::get_instance().sleep_model(model_id);
+    if (!PageAllocator::get_instance().sleep_model(model_id)) {
+      LOG(ERROR) << "Failed to sleep model " << model_id << " after init";
+      return false;
+    }
     LOG(INFO) << "Model " << model_id
               << " put to sleep after init (master_status=" << master_status
               << ")";
@@ -1128,7 +1131,10 @@ bool LLMEngine::sleep(int32_t master_status) {
   // This releases both weight pages and KV cache pages
   const std::string& model_id = options_.model_id();
   auto& page_allocator = PageAllocator::get_instance();
-  page_allocator.sleep_model(model_id);
+  if (!page_allocator.sleep_model(model_id)) {
+    LOG(ERROR) << "PageAllocator sleep_model failed, aborting sleep flow";
+    return false;
+  }
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
@@ -1167,7 +1173,10 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
   // This re-allocates both KV cache pages and weight pages
   const std::string& model_id = options_.model_id();
   auto& page_allocator = PageAllocator::get_instance();
-  page_allocator.wakeup_model(model_id);
+  if (!page_allocator.wakeup_model(model_id)) {
+    LOG(ERROR) << "PageAllocator wakeup_model failed, aborting wakeup flow";
+    return false;
+  }
 
   LOG(INFO) << "Waking up LLM engine, remote_addrs.size()="
             << options.remote_addrs.size();
