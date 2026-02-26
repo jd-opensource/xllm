@@ -782,7 +782,7 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
 
 void APIService::ForkMaster(::google::protobuf::RpcController* controller,
                             const proto::MasterInfos* request,
-                            proto::RpcStatus* response,
+                            proto::Status* response,
                             ::google::protobuf::Closure* done) {
   // TODO with xllm-service
 }
@@ -801,8 +801,7 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
   auto arena = response->GetArena();
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-  auto resp_pb =
-      google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
+  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -863,7 +862,7 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
 
 void APIService::Sleep(::google::protobuf::RpcController* controller,
                        const proto::MasterInfos* request,
-                       proto::RpcStatus* response,
+                       proto::Status* response,
                        ::google::protobuf::Closure* done) {
   // TODO with xllm-service
 }
@@ -881,8 +880,7 @@ void APIService::SleepHttp(::google::protobuf::RpcController* controller,
   auto arena = response->GetArena();
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-  auto resp_pb =
-      google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
+  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -941,7 +939,7 @@ void APIService::SleepHttp(::google::protobuf::RpcController* controller,
 
 void APIService::Wakeup(::google::protobuf::RpcController* controller,
                         const proto::MasterInfos* request,
-                        proto::RpcStatus* response,
+                        proto::Status* response,
                         ::google::protobuf::Closure* done) {
   // TODO with xllm-service
 }
@@ -959,8 +957,7 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
   auto arena = response->GetArena();
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-  auto resp_pb =
-      google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
+  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -1031,7 +1028,7 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
 
 void APIService::LinkD2D(::google::protobuf::RpcController* controller,
                          const proto::D2DLinkRequest* request,
-                         proto::RpcStatus* response,
+                         proto::Status* response,
                          ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
   if (!request || !response || !controller) {
@@ -1041,14 +1038,14 @@ void APIService::LinkD2D(::google::protobuf::RpcController* controller,
 
   if (masters_.find(request->model_id()) == masters_.end()) {
     LOG(ERROR) << "Master for model " << request->model_id() << " not found";
-    response->set_status(false);
+    response->set_ok(false);
     return;
   }
 
   auto master = masters_[request->model_id()];
   bool status = master->link_d2d(
       {request->device_ips().begin(), request->device_ips().end()});
-  response->set_status(status);
+  response->set_ok(status);
 }
 
 void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
@@ -1064,8 +1061,7 @@ void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
   auto arena = response->GetArena();
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::D2DLinkRequest>(arena);
-  auto resp_pb =
-      google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
+  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -1089,7 +1085,7 @@ void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
   auto master = masters_[req_pb->model_id()];
   bool status = master->link_d2d(
       {req_pb->device_ips().begin(), req_pb->device_ips().end()});
-  resp_pb->set_status(status);
+  resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;
   json_options.bytes_to_base64 = false;
@@ -1104,7 +1100,7 @@ void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
 
 void APIService::UnlinkD2D(::google::protobuf::RpcController* controller,
                            const proto::D2DLinkRequest* request,
-                           proto::RpcStatus* response,
+                           proto::Status* response,
                            ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
   if (!request || !response || !controller) {
@@ -1114,14 +1110,14 @@ void APIService::UnlinkD2D(::google::protobuf::RpcController* controller,
 
   if (masters_.find(request->model_id()) == masters_.end()) {
     LOG(ERROR) << "Master for model " << request->model_id() << " not found";
-    response->set_status(false);
+    response->set_ok(false);
     return;
   }
 
   auto master = masters_[request->model_id()];
   bool status = master->unlink_d2d(
       {request->device_ips().begin(), request->device_ips().end()});
-  response->set_status(status);
+  response->set_ok(status);
 }
 
 void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
@@ -1137,8 +1133,7 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
   auto arena = response->GetArena();
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::D2DLinkRequest>(arena);
-  auto resp_pb =
-      google::protobuf::Arena::CreateMessage<proto::RpcStatus>(arena);
+  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -1162,7 +1157,7 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
   auto master = masters_[req_pb->model_id()];
   bool status = master->unlink_d2d(
       {req_pb->device_ips().begin(), req_pb->device_ips().end()});
-  resp_pb->set_status(status);
+  resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;
   json_options.bytes_to_base64 = false;

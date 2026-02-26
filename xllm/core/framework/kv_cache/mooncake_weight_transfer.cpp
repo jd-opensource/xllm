@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -40,14 +40,14 @@ bool MooncakeWeightTransfer::initialize() {
 }
 
 bool MooncakeWeightTransfer::register_global_xtensor() {
-  auto& global_xtensor = GlobalXtensor::get_instance();
+  auto& global_xtensor = GlobalXTensor::get_instance();
   if (!global_xtensor.is_initialized()) {
-    LOG(ERROR) << "GlobalXtensor not initialized";
+    LOG(ERROR) << "GlobalXTensor not initialized";
     return false;
   }
 
   if (global_xtensor.is_mooncake_registered()) {
-    LOG(INFO) << "GlobalXtensor already registered to mooncake, skip";
+    LOG(INFO) << "GlobalXTensor already registered to mooncake, skip";
     return true;
   }
 
@@ -55,12 +55,12 @@ bool MooncakeWeightTransfer::register_global_xtensor() {
   std::vector<size_t> lens = {global_xtensor.total_size()};
   if (!mooncake_te_->register_memory(
           addrs, lens, static_cast<int64_t>(global_xtensor.page_size()))) {
-    LOG(ERROR) << "register GlobalXtensor failed";
+    LOG(ERROR) << "register GlobalXTensor failed";
     return false;
   }
 
   global_xtensor.set_mooncake_registered(true);
-  LOG(INFO) << "MooncakeWeightTransfer: register GlobalXtensor success, "
+  LOG(INFO) << "MooncakeWeightTransfer: register GlobalXTensor success, "
             << "total_size=" << global_xtensor.total_size()
             << ", num_pages=" << global_xtensor.num_total_pages();
   return true;

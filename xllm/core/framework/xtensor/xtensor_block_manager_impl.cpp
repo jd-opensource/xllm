@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ XTensorBlockManagerImpl::XTensorBlockManagerImpl(const Options& options,
             << ", num_blocks=" << options.num_blocks();
 }
 
-void XTensorBlockManagerImpl::post_init() {
+void XTensorBlockManagerImpl::reserve_xtensor_null_blocks() {
   // Reserve the first block as null block for padding tokens
   auto null_blocks = alloc_internal(1);
   if (null_blocks.empty() || null_blocks[0] != 0) {

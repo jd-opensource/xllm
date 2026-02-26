@@ -113,7 +113,7 @@ class Engine {
 
   // Get XTensor info for etcd registration (from dp group 0)
   // worker_free_phy_pages: free pages per worker
-  // model_weight_segments: weight segments in GlobalXtensor per model
+  // model_weight_segments: weight segments in GlobalXTensor per model
   virtual void get_xtensor_info(
       std::vector<size_t>& worker_free_phy_pages,
       std::unordered_map<std::string, std::vector<WeightSegment>>&
@@ -161,7 +161,7 @@ class Engine {
     return false;
   };
 
-  // XTensor mode: get GlobalXtensor offsets for allocated blocks
+  // XTensor mode: get GlobalXTensor offsets for allocated blocks
   // Returns per-layer K/V offsets for each block
   // Output: offsets[layer_id] = {k_offsets, v_offsets}
   // dp_rank: Target DP rank to query (offsets come from workers in that DP

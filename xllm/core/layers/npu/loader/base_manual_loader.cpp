@@ -56,7 +56,7 @@ void BaseManualLoader::reload_weights() {
 }
 
 void BaseManualLoader::reload_weights_from_device() {
-  // D2D path: weights already transferred to GlobalXtensor weight region.
+  // D2D path: weights already transferred to GlobalXTensor weight region.
   // Call allocate_weight to get the pointer into the pre-allocated region.
   allocate_device_storage();
   init_device_at_weights();

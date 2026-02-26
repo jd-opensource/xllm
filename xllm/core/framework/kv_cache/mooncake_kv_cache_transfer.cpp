@@ -336,14 +336,14 @@ void MooncakeKVCacheTransferXTensor::allocate_kv_cache_xtensor(
 void MooncakeKVCacheTransferXTensor::register_global_xtensor(
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
     torch::ScalarType dtype) {
-  auto& global_xtensor = GlobalXtensor::get_instance();
+  auto& global_xtensor = GlobalXTensor::get_instance();
   if (!global_xtensor.is_initialized()) {
-    LOG(ERROR) << "GlobalXtensor not initialized in xtensor mode";
+    LOG(ERROR) << "GlobalXTensor not initialized in xtensor mode";
     return;
   }
 
   if (global_xtensor.is_mooncake_registered()) {
-    LOG(INFO) << "GlobalXtensor already registered to mooncake, skip";
+    LOG(INFO) << "GlobalXTensor already registered to mooncake, skip";
     return;
   }
 
@@ -351,7 +351,7 @@ void MooncakeKVCacheTransferXTensor::register_global_xtensor(
   std::vector<size_t> lens = {global_xtensor.total_size()};
 
   if (!mooncake_te_->register_memory(addrs, lens, size_per_block_)) {
-    LOG(ERROR) << "register GlobalXtensor failed";
+    LOG(ERROR) << "register GlobalXTensor failed";
     return;
   }
 
@@ -394,7 +394,7 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_xtensor_mode(
 
   auto& allocator = XTensorAllocator::get_instance();
 
-  // For each layer, convert block_ids to GlobalXtensor offsets and transfer
+  // For each layer, convert block_ids to GlobalXTensor offsets and transfer
   for (int64_t layer_id = 0; layer_id < num_layers_; ++layer_id) {
     std::vector<uint64_t> src_offsets;
     std::vector<uint64_t> dst_offsets;
@@ -402,7 +402,7 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_xtensor_mode(
     dst_offsets.reserve(dst_blocks.size() * 2);
 
     for (size_t i = 0; i < src_blocks.size(); ++i) {
-      // Source block -> GlobalXtensor offsets
+      // Source block -> GlobalXTensor offsets
       auto [src_k_off, src_v_off] = allocator.get_global_offsets_for_block(
           model_id_, layer_id, src_blocks[i], size_per_block_);
       if (src_k_off == UINT64_MAX || src_v_off == UINT64_MAX) {
@@ -411,7 +411,7 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_xtensor_mode(
         return false;
       }
 
-      // Destination block -> GlobalXtensor offsets
+      // Destination block -> GlobalXTensor offsets
       auto [dst_k_off, dst_v_off] = allocator.get_global_offsets_for_block(
           model_id_, layer_id, dst_blocks[i], size_per_block_);
       if (dst_k_off == UINT64_MAX || dst_v_off == UINT64_MAX) {
@@ -475,7 +475,7 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_xtensor_mode(
       dst_offsets.reserve(kv_info.dst_blocks.size() * 2);
 
       for (size_t i = 0; i < kv_info.src_blocks.size(); ++i) {
-        // Source block -> GlobalXtensor offsets (calculate locally on P-node)
+        // Source block -> GlobalXTensor offsets (calculate locally on P-node)
         auto [src_k_off, src_v_off] = allocator.get_global_offsets_for_block(
             model_id_, layer_index, kv_info.src_blocks[i], size_per_block_);
         if (src_k_off == UINT64_MAX || src_v_off == UINT64_MAX) {

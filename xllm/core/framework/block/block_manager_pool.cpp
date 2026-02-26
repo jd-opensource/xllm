@@ -344,17 +344,17 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
   sequence->reset();
 }
 
-void BlockManagerPool::post_init() {
+void BlockManagerPool::reserve_xtensor_null_blocks() {
   if (!options_.enable_xtensor()) {
     return;
   }
 
-  // Call post_init on each XTensorBlockManagerImpl to reserve null block
+  // Reserve null block on each XTensorBlockManagerImpl.
   for (auto& manager : block_managers_) {
     auto* xtensor_manager =
         dynamic_cast<XTensorBlockManagerImpl*>(manager.get());
     if (xtensor_manager) {
-      xtensor_manager->post_init();
+      xtensor_manager->reserve_xtensor_null_blocks();
     }
   }
 

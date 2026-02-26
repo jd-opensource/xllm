@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ class XTensorDistService : public proto::XTensorDist {
                           proto::Status* response,
                           ::google::protobuf::Closure* done) override;
 
-  // Weight pages allocation from GlobalXtensor
+  // Weight pages allocation from GlobalXTensor
   void AllocWeightPages(::google::protobuf::RpcController* controller,
                         const proto::AllocWeightPagesRequest* request,
                         proto::Status* response,

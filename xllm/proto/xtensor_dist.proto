@@ -25,7 +25,7 @@ message InitPhyPagePoolRequest {
   int64 num_pages = 1;  // Number of physical pages to allocate
 }
 
-// Request for allocating weight pages from GlobalXtensor
+// Request for allocating weight pages from GlobalXTensor
 message AllocWeightPagesRequest {
   string model_id = 1;
   uint64 num_pages = 2;  // Number of pages to allocate
@@ -73,11 +73,11 @@ service XTensorDist {
   rpc MapToKvTensors (KvTensorRequest) returns (Status);
   rpc UnmapFromKvTensors (KvTensorRequest) returns (Status);
   
-  // Weight pages allocation from GlobalXtensor
+  // Weight pages allocation from GlobalXTensor
   rpc AllocWeightPages (AllocWeightPagesRequest) returns (Status);
   rpc FreeWeightPages (FreeWeightPagesRequest) returns (Status);
   
   // Get XTensor offsets for KV cache blocks (used in PD disaggregation)
-  // Returns GlobalXtensor offsets for each block at each layer
+  // Returns GlobalXTensor offsets for each block at each layer
   rpc GetXTensorOffsets (GetXTensorOffsetsRequest) returns (GetXTensorOffsetsResponse);
 }

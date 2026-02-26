@@ -199,7 +199,7 @@ struct RawToken {
 // Weight segment info for D2D transfer (supports non-contiguous allocation)
 // Forward declaration needed by InstanceInfo
 struct WeightSegment {
-  uint64_t offset;  // Offset from GlobalXtensor base address
+  uint64_t offset;  // Offset from GlobalXTensor base address
   uint64_t size;    // Segment size in bytes
 };
 
@@ -227,7 +227,7 @@ struct InstanceInfo {
   // XTensor mode: total physical pages per worker (all workers have the same
   // total)
   size_t total_phy_pages = 0;
-  // XTensor mode: model weight segments in GlobalXtensor (dp group 0 only)
+  // XTensor mode: model weight segments in GlobalXTensor (dp group 0 only)
   // key: model_id, value: list of {offset, size} segments
   std::unordered_map<std::string, std::vector<WeightSegment>>
       model_weight_segments;
@@ -276,8 +276,8 @@ struct InstanceInfo {
 
 // XTensor mode: per-layer offsets for KV cache transfer
 struct XTensorLayerOffsets {
-  std::vector<uint64_t> k_offsets;  // K cache offsets in GlobalXtensor
-  std::vector<uint64_t> v_offsets;  // V cache offsets in GlobalXtensor
+  std::vector<uint64_t> k_offsets;  // K cache offsets in GlobalXTensor
+  std::vector<uint64_t> v_offsets;  // V cache offsets in GlobalXTensor
 };
 
 struct TransferKVInfo {

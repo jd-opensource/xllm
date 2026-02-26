@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ struct ModelTensors {
   int64_t num_layers = 0;
   size_t kv_tensor_size_per_layer = 0;
 
-  // ============== Weight Allocation (from GlobalXtensor) ==============
+  // ============== Weight Allocation (from GlobalXTensor) ==============
   page_id_t weight_start_page_id =
       -1;                            // Starting page ID of pre-allocated region
   size_t weight_num_pages = 0;       // Number of pages pre-allocated
@@ -64,7 +64,7 @@ struct ModelTensors {
   int32_t tp_size = 0;
 
   // ============== Weight Segments (for D2D transfer) ==============
-  // Ordered list of weight segments in GlobalXtensor.
+  // Ordered list of weight segments in GlobalXTensor.
   // For contiguous allocation: single segment.
   // For fallback (XTensor): multiple segments from non-contiguous pages.
   std::vector<WeightSegment> weight_segments;
@@ -201,7 +201,7 @@ class XTensorAllocator {
 
   // ============== PD Disaggregation Support (XTensor Mode) ==============
 
-  // Convert a block_id to GlobalXtensor offsets for KV cache transfer.
+  // Convert a block_id to GlobalXTensor offsets for KV cache transfer.
   // This is only used when FLAGS_enable_xtensor is true for PD disaggregation.
   //
   // Parameters:
@@ -210,7 +210,7 @@ class XTensorAllocator {
   //   block_id: Block ID within the KV cache
   //   block_size: Size of each block in bytes
   //
-  // Returns: {k_offset, v_offset} relative to GlobalXtensor base address,
+  // Returns: {k_offset, v_offset} relative to GlobalXTensor base address,
   //          or {UINT64_MAX, UINT64_MAX} on error.
   std::pair<uint64_t, uint64_t> get_global_offsets_for_block(
       const std::string& model_id,
@@ -224,7 +224,7 @@ class XTensorAllocator {
 
   // ============== ETCD Registration Support ==============
   // Get weight segments for a model (supports non-contiguous allocation)
-  // Returns ordered list of {offset, size} segments in GlobalXtensor
+  // Returns ordered list of {offset, size} segments in GlobalXTensor
   std::vector<WeightSegment> get_model_weight_segments(
       const std::string& model_id) const;
 

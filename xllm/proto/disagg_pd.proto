@@ -87,7 +87,7 @@ message DisaggResponse {
   repeated int32 blocks_ids = 3;
   int32 dp_rank = 4;
 
-  // XTensor mode: GlobalXtensor offsets for each block (per-layer)
+  // XTensor mode: GlobalXTensor offsets for each block (per-layer)
   // For each layer, there are K and V offsets for each block.
   // Layout: [layer0_block0_k, layer0_block0_v, layer0_block1_k, layer0_block1_v, ...]
   //         [layer1_block0_k, layer1_block0_v, ...]
@@ -96,9 +96,9 @@ message DisaggResponse {
 
 // XTensor mode: offsets for one layer
 message XTensorLayerOffsets {
-  // K cache offsets for each block in GlobalXtensor
+  // K cache offsets for each block in GlobalXTensor
   repeated uint64 k_offsets = 1;
-  // V cache offsets for each block in GlobalXtensor
+  // V cache offsets for each block in GlobalXTensor
   repeated uint64 v_offsets = 2;
 }
 

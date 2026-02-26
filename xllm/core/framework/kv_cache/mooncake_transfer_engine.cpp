@@ -522,7 +522,7 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
     return false;
   }
 
-  // XTensor mode: use buffer[0] which is the GlobalXtensor
+  // XTensor mode: use buffer[0] which is the GlobalXTensor
   if (local_segment_desc->buffers.empty() ||
       remote_segment_desc->buffers.empty()) {
     LOG(ERROR) << "No buffers registered for XTensor mode";

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@ limitations under the License.
 
 namespace xllm {
 
-void GlobalXtensor::init(const torch::Device& device) {
+void GlobalXTensor::init(const torch::Device& device) {
   if (initialized_) {
-    LOG(WARNING) << "GlobalXtensor already initialized";
+    LOG(WARNING) << "GlobalXTensor already initialized";
     return;
   }
 
@@ -35,7 +35,7 @@ void GlobalXtensor::init(const torch::Device& device) {
 
   num_total_pages_ = pool.num_total();
   if (num_total_pages_ == 0) {
-    LOG(ERROR) << "GlobalXtensor: PhyPagePool has no pages";
+    LOG(ERROR) << "GlobalXTensor: PhyPagePool has no pages";
     return;
   }
 
@@ -44,22 +44,22 @@ void GlobalXtensor::init(const torch::Device& device) {
 
   vmm::create_vir_ptr(vaddr_, total_size_);
   if (is_null_vir_ptr(vaddr_)) {
-    LOG(ERROR) << "GlobalXtensor: failed to allocate virtual memory";
+    LOG(ERROR) << "GlobalXTensor: failed to allocate virtual memory";
     return;
   }
 
   auto pages = pool.get_all_pages();
   if (!map_all_pages(pages)) {
-    LOG(ERROR) << "Failed to map all pages for GlobalXtensor";
+    LOG(ERROR) << "Failed to map all pages for GlobalXTensor";
     return;
   }
 
   initialized_ = true;
-  LOG(INFO) << "GlobalXtensor initialized: " << num_total_pages_ << " pages, "
+  LOG(INFO) << "GlobalXTensor initialized: " << num_total_pages_ << " pages, "
             << total_size_ << " bytes";
 }
 
-bool GlobalXtensor::map_page(PhyPage* page, size_t offset) {
+bool GlobalXTensor::map_page(PhyPage* page, size_t offset) {
   CHECK(page) << "Page is null";
   CHECK(offset % page_size_ == 0) << "Offset not aligned to page size";
   CHECK(offset < total_size_) << "Offset out of bounds";
@@ -70,7 +70,7 @@ bool GlobalXtensor::map_page(PhyPage* page, size_t offset) {
   return true;
 }
 
-bool GlobalXtensor::map_all_pages(const std::vector<PhyPage*>& pages) {
+bool GlobalXTensor::map_all_pages(const std::vector<PhyPage*>& pages) {
   if (pages.size() != num_total_pages_) {
     LOG(ERROR) << "Page count mismatch: expected " << num_total_pages_
                << ", got " << pages.size();
@@ -87,7 +87,7 @@ bool GlobalXtensor::map_all_pages(const std::vector<PhyPage*>& pages) {
   return true;
 }
 
-void* GlobalXtensor::get_vaddr_by_page_id(page_id_t page_id) const {
+void* GlobalXTensor::get_vaddr_by_page_id(page_id_t page_id) const {
   if (!initialized_) {
     return nullptr;
   }

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -96,13 +96,13 @@ void XTensorDistService::InitPhyPagePool(
       // Initialize PhyPagePool with specified number of pages
       PhyPagePool::get_instance().init(device_, num_pages);
 
-      // Initialize GlobalXtensor after PhyPagePool
-      GlobalXtensor::get_instance().init(device_);
-      LOG(INFO) << "GlobalXtensor initialized on worker " << global_rank_;
+      // Initialize GlobalXTensor after PhyPagePool
+      GlobalXTensor::get_instance().init(device_);
+      LOG(INFO) << "GlobalXTensor initialized on worker " << global_rank_;
 
       response->set_ok(true);
     } catch (const std::exception& e) {
-      LOG(ERROR) << "Failed to init PhyPagePool/GlobalXtensor: " << e.what();
+      LOG(ERROR) << "Failed to init PhyPagePool/GlobalXTensor: " << e.what();
       response->set_ok(false);
     }
   });
@@ -173,7 +173,7 @@ void XTensorDistService::AllocWeightPages(
     auto& pool = PhyPagePool::get_instance();
     auto& allocator = XTensorAllocator::get_instance();
 
-    // Try contiguous allocation first (from GlobalXtensor)
+    // Try contiguous allocation first (from GlobalXTensor)
     page_id_t start_page = pool.allocate_contiguous_from_right(num_pages);
     if (start_page >= 0) {
       allocator.record_weight_allocation(model_id, start_page, num_pages);

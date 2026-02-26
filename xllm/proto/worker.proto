@@ -53,7 +53,7 @@ message WakeupRequest {
 
 // A single weight segment for D2D transfer
 message WakeupWeightSegment {
-  uint64 offset = 1;  // Byte offset from source GlobalXtensor base
+  uint64 offset = 1;  // Byte offset from source GlobalXTensor base
   uint64 size = 2;    // Segment size in bytes
 }
 
