@@ -75,11 +75,10 @@ class FusedMoEImpl : public torch::nn::Module {
                             torch::Tensor& shared_expert_output);
 
   // ===== All2All path methods (DeepEP communication mode) =====
-  torch::Tensor select_experts_all2all(
-      const torch::Tensor& hidden_states_2d,
-      const torch::Tensor& reduce_weight,
-      const torch::Tensor& expert_id,
-      SelectedExpertInfo& selected_expert_info);
+  void select_experts_all2all(const torch::Tensor& hidden_states_2d,
+                              const torch::Tensor& reduce_weight,
+                              const torch::Tensor& expert_id,
+                              SelectedExpertInfo& selected_expert_info);
 
   torch::Tensor forward_experts_all2all(const torch::Tensor& hidden_states);
 

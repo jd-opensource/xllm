@@ -25,7 +25,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-torch::Tensor FusedMoEImpl::select_experts_all2all(
+void FusedMoEImpl::select_experts_all2all(
     const torch::Tensor& hidden_states_2d,
     const torch::Tensor& reduce_weight,
     const torch::Tensor& expert_id,
@@ -106,8 +106,6 @@ torch::Tensor FusedMoEImpl::select_experts_all2all(
   if (is_smoothquant_) {
     selected_expert_info.input_scale = hidden_states_scale;
   }
-
-  return expand_hidden_states;
 }
 
 FusedMoEImpl::CombineResult FusedMoEImpl::combine_step(

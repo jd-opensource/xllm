@@ -24,6 +24,7 @@ limitations under the License.
 
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -81,10 +82,13 @@ struct All2AllTestParams {
   int64_t batch_size;
   int64_t seq_len;
   bool is_smoothquant;
-  // Expected output stats (used by rank 0 for validation)
+  // Expected output stats (used when perform_precise_validation is true)
   double expected_min = 0.0;
   double expected_max = 0.0;
   double expected_sum = 0.0;
+  // When true, validate output against expected_min/max/sum (avoids fragile
+  // "any non-zero expected" heuristic; allows validation when all are 0.0).
+  bool perform_precise_validation = false;
 };
 
 // Helper to create model args
@@ -315,9 +319,7 @@ int32_t run_all2all_basic_test_child(All2AllTestParams params) {
     // Basic sanity check (will be replaced with precise validation later)
     CHECK_NE(actual_sum, 0.0) << "Output should not be all zeros";
 
-    // If expected values are provided (non-zero), perform precise validation
-    if (params.expected_min != 0.0 || params.expected_max != 0.0 ||
-        params.expected_sum != 0.0) {
+    if (params.perform_precise_validation) {
       test::expect_tensor_stats(output,
                                 params.expected_min,
                                 params.expected_max,
@@ -358,27 +360,50 @@ class FusedMoEAll2AllMultiDeviceTest : public ::testing::Test {
     seq_len_ = 4;
   }
 
+  // Runs multi-process test with params built from fixture (optionally
+  // is_smoothquant). Use this for basic flow tests.
   void run_test(int32_t (*test_fn)(All2AllTestParams),
                 bool is_smoothquant = false) {
+    run_test_impl(test_fn, [this, is_smoothquant](int32_t rank) {
+      All2AllTestParams params;
+      params.rank = rank;
+      params.world_size = world_size_;
+      params.port = port_;
+      params.host = host_;
+      params.device_index = -1;
+      params.hidden_size = hidden_size_;
+      params.intermediate_size = intermediate_size_;
+      params.num_experts = num_experts_;
+      params.top_k = top_k_;
+      params.batch_size = batch_size_;
+      params.seq_len = seq_len_;
+      params.is_smoothquant = is_smoothquant;
+      return params;
+    });
+  }
+
+  // Runs multi-process test with custom params from factory (e.g. for precise
+  // validation tests). params_factory(rank) is called per rank; the returned
+  // params should have rank set by the factory or will be overwritten.
+  // Named separately to avoid overload ambiguity with run_test(..., bool).
+  void run_test_with_params(
+      int32_t (*test_fn)(All2AllTestParams),
+      std::function<All2AllTestParams(int32_t rank)> params_factory) {
+    run_test_impl(test_fn, params_factory);
+  }
+
+ private:
+  void run_test_impl(
+      int32_t (*test_fn)(All2AllTestParams),
+      std::function<All2AllTestParams(int32_t rank)> params_factory) {
     std::vector<pid_t> child_pids;
 
     for (int32_t rank = 0; rank < world_size_; ++rank) {
       pid_t pid = fork();
       if (pid == 0) {
-        All2AllTestParams params;
+        All2AllTestParams params = params_factory(rank);
         params.rank = rank;
         params.world_size = world_size_;
-        params.port = port_;
-        params.host = host_;
-        params.device_index = -1;
-        params.hidden_size = hidden_size_;
-        params.intermediate_size = intermediate_size_;
-        params.num_experts = num_experts_;
-        params.top_k = top_k_;
-        params.batch_size = batch_size_;
-        params.seq_len = seq_len_;
-        params.is_smoothquant = is_smoothquant;
-
         int32_t exit_code = test_fn(params);
         _exit(exit_code);
       } else if (pid > 0) {
@@ -415,6 +440,7 @@ class FusedMoEAll2AllMultiDeviceTest : public ::testing::Test {
     }
   }
 
+ protected:
   int32_t world_size_;
   int32_t port_;
   std::string host_;
@@ -434,11 +460,10 @@ TEST_F(FusedMoEAll2AllMultiDeviceTest, SmoothQuantAll2AllFlow) {
   run_test(run_all2all_smoothquant_test_child, /*is_smoothquant=*/true);
 }
 
-// Single-rank test with precise validation for BasicAll2All
 TEST_F(FusedMoEAll2AllMultiDeviceTest, BasicAll2AllPreciseValidation) {
   // Expected values obtained from running with seeded tensors:
   // min=835584, max=1.26976e+06, sum=4.20999e+09
-  auto test_with_expected = []() {
+  run_test_with_params(run_all2all_basic_test_child, [](int32_t /*rank*/) {
     All2AllTestParams params;
     params.rank = 0;
     params.world_size = 2;
@@ -452,88 +477,39 @@ TEST_F(FusedMoEAll2AllMultiDeviceTest, BasicAll2AllPreciseValidation) {
     params.batch_size = 2;
     params.seq_len = 4;
     params.is_smoothquant = false;
-    // Expected stats from seeded tensor run
     params.expected_min = 835584.0;
     params.expected_max = 1269760.0;
     params.expected_sum = 4209990000.0;
+    params.perform_precise_validation = true;
     return params;
-  };
-
-  std::vector<pid_t> child_pids;
-  auto params_template = test_with_expected();
-
-  for (int32_t rank = 0; rank < world_size_; ++rank) {
-    pid_t pid = fork();
-    if (pid == 0) {
-      auto params = test_with_expected();
-      params.rank = rank;
-      int32_t exit_code = run_all2all_basic_test_child(params);
-      _exit(exit_code);
-    } else if (pid > 0) {
-      child_pids.push_back(pid);
-    }
-  }
-
-  bool any_failed = false;
-  for (size_t i = 0; i < child_pids.size(); ++i) {
-    int32_t status;
-    waitpid(child_pids[i], &status, 0);
-    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-      any_failed = true;
-    }
-  }
-  ASSERT_FALSE(any_failed) << "Precise validation test failed.";
+  });
 }
 
-// Single-rank test with precise validation for SmoothQuantAll2All
 TEST_F(FusedMoEAll2AllMultiDeviceTest, SmoothQuantAll2AllPreciseValidation) {
   // Expected values obtained from running with seeded tensors:
   // min=0, max=0.104004, sum=3.88289
-  auto test_with_expected = []() {
-    All2AllTestParams params;
-    params.rank = 0;
-    params.world_size = 2;
-    params.port = 29504;  // Different port to avoid conflicts
-    params.host = "127.0.0.1";
-    params.device_index = -1;
-    params.hidden_size = 512;
-    params.intermediate_size = 256;
-    params.num_experts = 4;
-    params.top_k = 2;
-    params.batch_size = 2;
-    params.seq_len = 4;
-    params.is_smoothquant = true;
-    // Expected stats from seeded tensor run
-    // Note: min=0 is valid for SmoothQuant due to quantization effects
-    params.expected_min = 0.0;
-    params.expected_max = 0.104004;
-    params.expected_sum = 3.88289;
-    return params;
-  };
-
-  std::vector<pid_t> child_pids;
-
-  for (int32_t rank = 0; rank < world_size_; ++rank) {
-    pid_t pid = fork();
-    if (pid == 0) {
-      auto params = test_with_expected();
-      params.rank = rank;
-      int32_t exit_code = run_all2all_smoothquant_test_child(params);
-      _exit(exit_code);
-    } else if (pid > 0) {
-      child_pids.push_back(pid);
-    }
-  }
-
-  bool any_failed = false;
-  for (size_t i = 0; i < child_pids.size(); ++i) {
-    int32_t status;
-    waitpid(child_pids[i], &status, 0);
-    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-      any_failed = true;
-    }
-  }
-  ASSERT_FALSE(any_failed) << "SmoothQuant precise validation test failed.";
+  run_test_with_params(
+      run_all2all_smoothquant_test_child, [](int32_t /*rank*/) {
+        All2AllTestParams params;
+        params.rank = 0;
+        params.world_size = 2;
+        params.port = 29504;  // Different port to avoid conflicts
+        params.host = "127.0.0.1";
+        params.device_index = -1;
+        params.hidden_size = 512;
+        params.intermediate_size = 256;
+        params.num_experts = 4;
+        params.top_k = 2;
+        params.batch_size = 2;
+        params.seq_len = 4;
+        params.is_smoothquant = true;
+        // Note: min=0 is valid for SmoothQuant due to quantization effects
+        params.expected_min = 0.0;
+        params.expected_max = 0.104004;
+        params.expected_sum = 3.88289;
+        params.perform_precise_validation = true;
+        return params;
+      });
 }
 
 }  // namespace test
