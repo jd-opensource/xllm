@@ -58,7 +58,6 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
     auto fused_down = experts_state_dict.get_tensor("down_proj");
 
     bool is_fused = fused_gate_up.defined() && fused_down.defined();
-
     if (is_fused) {
       torch::Tensor expert_gate_up = fused_gate_up;
       torch::Tensor expert_down = fused_down;
@@ -73,7 +72,8 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
       for (const auto& [name, tensor] : state_dict) {
         if (name.find("self_attn.") == 0 || name.find("mlp.gate.") == 0 ||
             name.find("input_layernorm.") == 0 ||
-            name.find("post_attention_layernorm.") == 0) {
+            name.find("post_attention_layernorm.") == 0 ||
+            name.find("shared_expert.") == 0) {
           out_state_dict.emplace(name, tensor);
         }
       }
@@ -131,6 +131,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
+    has_embedding_ = (model_args.model_type() != "qwen3_omni_moe_talker");
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
@@ -186,6 +187,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         positions = torch::tensor({0}).to(torch::kInt32).to(device_);
       }
     }
+
     auto inputs_embeds = input_params.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
@@ -198,6 +200,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
+
     if (positions.dim() == 2) {  // mrope
       auto apply = [this](torch::Tensor x) {
         // auto sections = mrope_section_;
@@ -302,8 +305,11 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict) {
-    npu_embed_tokens_->load_state_dict(
-        state_dict.get_dict_with_prefix("embed_tokens."));
+    // TODO(panxuanyu): check whether has npu_embed_tokens
+    if (has_embedding_) {
+      npu_embed_tokens_->load_state_dict(
+          state_dict.get_dict_with_prefix("embed_tokens."));
+    }
     // call each layer's load_state_dict function
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
@@ -313,7 +319,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
+    // TODO(panxuanyu): check whether has npu_embed_tokens
+    if (has_embedding_)
+      npu_embed_tokens_->verify_loaded_weights(prefix + "embed_tokens.");
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
@@ -322,7 +330,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   }
 
   void merge_loaded_weights() {
-    npu_embed_tokens_->merge_loaded_weights();
+    if (has_embedding_)
+      npu_embed_tokens_->merge_loaded_weights();  // TODO(panxuanyu): check
+    // whether has npu_embed_tokens
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
     }
@@ -383,6 +393,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   int32_t num_speculative_tokens_ = 0;
   at::Device device_;
   torch::Dtype dtype_;
+  bool has_embedding_ = true;
   layer::NpuWordEmbedding npu_embed_tokens_{nullptr};
   layer::AttentionMask attn_mask_;
   layer::NpuRMSNorm norm_{nullptr};

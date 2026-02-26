@@ -50,6 +50,22 @@ class StateDict {
   virtual StateDict get_dict_with_prefix(const std::string& prefix,
                                          TensorTransform transform_func) const;
 
+  virtual StateDict get_dict_with_renamed_prefix(
+      const std::string& old_prefix,
+      const std::string& new_prefix) const;
+
+  virtual void rename_prefix_inplace(const std::string& old_prefix,
+                                     const std::string& new_prefix);
+
+  std::vector<std::string> get_all_tensor_names() const {
+    std::vector<std::string> names;
+    names.reserve(dict_.size());
+    for (const auto& kv : dict_) {
+      names.emplace_back(kv.first);
+    }
+    return names;
+  }
+
   size_t size() const { return dict_.size(); }
 
   std::string_view prefix() const { return prefix_; }
