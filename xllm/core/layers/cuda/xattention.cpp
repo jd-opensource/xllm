@@ -20,7 +20,6 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "kernels/cuda/cuda_ops_api.h"
 #include "kernels/cuda/xattention/xattention_ops_api.h"
-#include "kernels/ops_api.h"
 #include "layers/common/attention_metadata.h"
 
 namespace xllm {
@@ -44,7 +43,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> XAttentionImpl::forward(
     torch::Tensor& value,
     torch::Tensor& output,
     KVCache& kv_cache) {
-  auto output_lse = std::nullopt;
+  std::optional<at::Tensor> output_lse = std::nullopt;
   if (attn_metadata.max_seq_len == 0) {
     output = output.view({-1, num_heads_ * head_size_});
     return std::make_tuple(output, output_lse);
@@ -58,10 +57,20 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> XAttentionImpl::forward(
   torch::Tensor k_cache = kv_cache.get_k_cache();
   torch::Tensor v_cache = kv_cache.get_v_cache();
 
-  if (attn_metadata.is_prefill) {
-    CHECK(!attn_metadata.is_chunked_prefill)
-        << "chunked prefill is not supported";
+  torch::Tensor float_workspace_buffer =
+      flashinfer::FlashinferWorkspace::get_instance()
+          .get_float_workspace_buffer();
+  torch::Tensor int_workspace_buffer =
+      flashinfer::FlashinferWorkspace::get_instance()
+          .get_int_workspace_buffer();
+  torch::Tensor page_locked_int_workspace_buffer =
+      flashinfer::FlashinferWorkspace::get_instance()
+          .get_page_locked_int_workspace_buffer();
 
+  CHECK(!attn_metadata.is_chunked_prefill)
+      << "chunked prefill is not supported";
+
+  if (attn_metadata.is_prefill) {
     // maybe we need to update shared attn state before execute attention,
     // currently we update flashinfer step_wise_attn_state_ at layer 0.
     bool causal = attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
@@ -80,34 +89,30 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> XAttentionImpl::forward(
         head_size_,
         num_heads_,
         num_kv_heads_,
-        /*block_size*/ k_cache.size(1),
-        /*window_size_left*/ sliding_window_,
-        /*enable_cuda_graph*/ false,
-        /*causal*/ causal,
-        /*use_tensor_core*/ true);
+        /*block_size=*/k_cache.size(1),
+        /*window_size_left=*/sliding_window_,
+        /*enable_cuda_graph=*/false,
+        /*causal=*/causal,
+        /*use_tensor_core=*/true);
 
     xllm::kernel::cuda::prefill_reshape_and_cache(
         key, value, attn_metadata.full_k_cache, attn_metadata.full_v_cache);
-    xllm::kernel::AttentionParams attention_params(attn_metadata);
-    attention_params.query = query;
-    attention_params.output = output;
-    attention_params.output_lse = output_lse;
-    attention_params.window_size_left = sliding_window_;
-    attention_params.scale = scale_;
-    // for flashinfer
-    attention_params.float_workspace_buffer =
-        flashinfer::FlashinferWorkspace::get_instance()
-            .get_float_workspace_buffer();
-    attention_params.int_workspace_buffer =
-        flashinfer::FlashinferWorkspace::get_instance()
-            .get_int_workspace_buffer();
-    attention_params.page_locked_int_workspace_buffer =
-        flashinfer::FlashinferWorkspace::get_instance()
-            .get_page_locked_int_workspace_buffer();
 
-    attention_params.key = key;
-    attention_params.value = value;
-    xllm::kernel::batch_prefill(attention_params);
+    xllm::kernel::cuda::batch_prefill_with_optional_piecewise_capture(
+        attn_metadata.plan_info->uri,
+        attn_metadata.plan_info->plan_info,
+        float_workspace_buffer,
+        int_workspace_buffer,
+        page_locked_int_workspace_buffer,
+        query,
+        key,
+        value,
+        attn_metadata.q_cu_seq_lens,
+        attn_metadata.kv_cu_seq_lens,
+        sliding_window_,
+        scale_,
+        output,
+        output_lse);
   } else {
     key = key.contiguous();
     value = value.contiguous();
@@ -143,42 +148,32 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> XAttentionImpl::forward(
                                    head_size_,
                                    num_heads_,
                                    num_kv_heads_,
-                                   /*block_size*/ full_k_cache.size(1),
-                                   /*window_size_left*/ sliding_window_,
-                                   /*enable_cuda_graph*/ false,
-                                   /*causal*/ false,
-                                   /*use_tensor_core*/ decode_use_tensor_core_);
+                                   /*block_size=*/full_k_cache.size(1),
+                                   /*window_size_left=*/sliding_window_,
+                                   /*enable_cuda_graph=*/false,
+                                   /*causal=*/false,
+                                   /*use_tensor_core=*/decode_use_tensor_core_);
     }
 
-    xllm::kernel::AttentionParams attention_params(attn_metadata);
-    auto unshared_lse = std::nullopt;
+    std::optional<at::Tensor> unshared_lse = std::nullopt;
 
-    attention_params.return_lse = false;
-    attention_params.output_lse = unshared_lse;
-
-    attention_params.window_size_left = sliding_window_;
-    attention_params.scale = scale_;
-    // for flashinfer
-    attention_params.float_workspace_buffer =
-        flashinfer::FlashinferWorkspace::get_instance()
-            .get_float_workspace_buffer();
-    attention_params.int_workspace_buffer =
-        flashinfer::FlashinferWorkspace::get_instance()
-            .get_int_workspace_buffer();
-    attention_params.page_locked_int_workspace_buffer =
-        flashinfer::FlashinferWorkspace::get_instance()
-            .get_page_locked_int_workspace_buffer();
-    // TODO: support chunked prefill
-    CHECK(!attn_metadata.is_chunked_prefill)
-        << "chunked prefill is not supported";
-
-    attention_params.query = query;
-    attention_params.output = output;
-
-    attention_params.k_cache = full_k_cache;
-    attention_params.v_cache = full_v_cache;
-    attention_params.use_tensor_core = decode_use_tensor_core_;
-    xllm::kernel::batch_decode(attention_params);
+    xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
+                                     attn_metadata.plan_info->plan_info,
+                                     float_workspace_buffer,
+                                     int_workspace_buffer,
+                                     page_locked_int_workspace_buffer,
+                                     query,
+                                     full_k_cache,
+                                     full_v_cache,
+                                     attn_metadata.paged_kv_indptr,
+                                     attn_metadata.paged_kv_indices,
+                                     attn_metadata.paged_kv_last_page_len,
+                                     sliding_window_,
+                                     scale_,
+                                     output,
+                                     unshared_lse,
+                                     decode_use_tensor_core_,
+                                     attn_metadata.qo_indptr);
   }
   output = output.view({-1, num_heads_ * head_size_});
   return {output, output_lse};

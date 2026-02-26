@@ -39,6 +39,7 @@ limitations under the License.
 #include "core/platform/stream.h"
 #include "core/platform/vmm_torch_allocator.h"
 #include "core/util/utils.h"
+#include "kernels/cuda/global_capture_instance.h"
 #include "kernels/cuda/utils.h"
 
 namespace xllm::runtime::cuda {

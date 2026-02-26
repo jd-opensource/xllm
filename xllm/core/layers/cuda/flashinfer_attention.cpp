@@ -18,7 +18,7 @@ limitations under the License.
 #include "flashinfer_planinfo.h"
 #include "flashinfer_workspace.h"
 #include "framework/kv_cache/kv_cache.h"
-#include "kernels/cuda/utils.h"
+#include "kernels/cuda/cuda_ops_api.h"
 #include "kernels/ops_api.h"
 #include "layers/common/attention_metadata.h"
 
@@ -104,7 +104,7 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
                                  torch::Tensor& value,
                                  torch::Tensor& output,
                                  KVCache& kv_cache) {
-  auto output_lse = std::nullopt;
+  std::optional<at::Tensor> output_lse = std::nullopt;
   if (attn_metadata.max_seq_len == 0) {
     output = output.view({-1, num_heads_ * head_size_});
     return std::make_tuple(output, output_lse);
@@ -181,37 +181,21 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
     xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
   }
 
-  xllm::kernel::AttentionParams attention_params(attn_metadata);
-  attention_params.query = query;
-  attention_params.output = output;
-  attention_params.output_lse = output_lse;
-  // attention_params.max_seq_len = attn_metadata.max_seq_len;
-  attention_params.window_size_left = sliding_window_;
-  attention_params.scale = scale_;
-  // for flashinfer
-  attention_params.float_workspace_buffer =
-      ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
+  torch::Tensor float_workspace_buffer =
+      flashinfer::FlashinferWorkspace::get_instance()
           .get_float_workspace_buffer();
-  attention_params.int_workspace_buffer =
-      ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
+  torch::Tensor int_workspace_buffer =
+      flashinfer::FlashinferWorkspace::get_instance()
           .get_int_workspace_buffer();
-  attention_params.page_locked_int_workspace_buffer =
-      ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
+  torch::Tensor page_locked_int_workspace_buffer =
+      flashinfer::FlashinferWorkspace::get_instance()
           .get_page_locked_int_workspace_buffer();
-  attention_params.use_tensor_core = decode_use_tensor_core_;
-
-  // Pass attention_mask if provided (use_custom_mask implies
-  // attn_mask.defined())
-  if (use_custom_mask) {
-    attention_params.mask = attn_metadata.attn_mask;
-  }
 
   // TODO: support chunked prefill
   CHECK(!attn_metadata.is_chunked_prefill)
       << "chunked prefill is not supported";
+
   if (attn_metadata.is_prefill) {
-    attention_params.key = key;
-    attention_params.value = value;
     if (use_custom_mask) {
       auto [result, _] =
           run_eager_causal_padded_attention(query,
@@ -224,14 +208,39 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
                                             head_size_);
       return {result, output_lse};
     }
-    xllm::kernel::batch_prefill(attention_params);
+    xllm::kernel::cuda::batch_prefill_with_optional_piecewise_capture(
+        attn_metadata.plan_info->uri,
+        attn_metadata.plan_info->plan_info,
+        float_workspace_buffer,
+        int_workspace_buffer,
+        page_locked_int_workspace_buffer,
+        query,
+        key,
+        value,
+        attn_metadata.q_cu_seq_lens,
+        attn_metadata.kv_cu_seq_lens,
+        sliding_window_,
+        scale_,
+        output,
+        output_lse);
   } else {
-    attention_params.query = query;
-    attention_params.output = output;
-    attention_params.k_cache = k_cache;
-    attention_params.v_cache = v_cache;
-
-    xllm::kernel::batch_decode(attention_params);
+    xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
+                                     attn_metadata.plan_info->plan_info,
+                                     float_workspace_buffer,
+                                     int_workspace_buffer,
+                                     page_locked_int_workspace_buffer,
+                                     query,
+                                     k_cache,
+                                     v_cache,
+                                     attn_metadata.paged_kv_indptr,
+                                     attn_metadata.paged_kv_indices,
+                                     attn_metadata.paged_kv_last_page_len,
+                                     sliding_window_,
+                                     scale_,
+                                     output,
+                                     output_lse,
+                                     decode_use_tensor_core_,
+                                     attn_metadata.qo_indptr);
   }
 
   output = output.view({-1, num_heads_ * head_size_});

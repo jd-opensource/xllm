@@ -84,7 +84,7 @@ struct AttentionMetadata {
   // qo_indptr[batch_size] = total_tokens. Shape: [batch_size + 1]. Type: int32.
   // Used when use_tensor_core=true. If not defined (use .defined() to check),
   // will be created internally in batch_decode.
-  torch::Tensor qo_indptr;
+  std::optional<torch::Tensor> qo_indptr;
   // FlashInfer execution plan information for attention computation.
   // Contains kernel URI and plan tensor that specifies how to execute the
   // attention kernel. Only updated at layer 0 (shared across all layers). The

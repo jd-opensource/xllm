@@ -281,8 +281,7 @@ void batch_prefill(AttentionParams& params) {
       params.window_size_left,
       params.scale,
       params.output,
-      params.output_lse,
-      params.attn_metadata.enable_cuda_graph);
+      params.output_lse);
 #elif defined(USE_MUSA)
   cuda::batch_prefill(params.attn_metadata.plan_info->uri,
                       params.attn_metadata.plan_info->plan_info,
@@ -388,12 +387,8 @@ void batch_decode(AttentionParams& params) {
                      params.scale,
                      params.output,
                      params.output_lse,
-                     params.attn_metadata.enable_cuda_graph,
                      params.use_tensor_core,
-                     params.attn_metadata.kv_seq_lens,
-                     params.attn_metadata.qo_indptr.defined()
-                         ? std::make_optional(params.attn_metadata.qo_indptr)
-                         : std::nullopt);
+                     params.attn_metadata.qo_indptr);
 #elif defined(USE_ILU)
   torch::Tensor block_tables, kv_seq_lens;
   block_tables = params.attn_metadata.block_table;
