@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,244 @@ from utils import get_cpu_arch, get_device_type, pre_build, get_version, check_a
 
 BUILD_TEST_FILE: bool = True
 BUILD_EXPORT: bool = True
+
+
+def _prepend_env_path(env_name: str, path: str) -> None:
+    current = os.environ.get(env_name, "")
+    items = [item for item in current.split(os.pathsep) if item]
+    if path not in items:
+        items.insert(0, path)
+        os.environ[env_name] = os.pathsep.join(items)
+
+
+def _setup_tilelang_env(tilelang_root: str) -> None:
+    os.environ["TL_ROOT"] = tilelang_root
+    _prepend_env_path("PYTHONPATH", tilelang_root)
+    if tilelang_root not in sys.path:
+        sys.path.insert(0, tilelang_root)
+    # Avoid TVM/torch_npu conflict when importing tilelang in NPU env.
+    os.environ.setdefault("ACL_OP_INIT_MODE", "1")
+
+
+def _find_cann_set_env() -> Optional[str]:
+    candidates = []
+    npu_home_path = os.environ.get("NPU_HOME_PATH", "")
+    if npu_home_path:
+        candidates.append(os.path.join(npu_home_path, "set_env.sh"))
+        toolkit_root = os.path.dirname(npu_home_path.rstrip("/"))
+        candidates.append(os.path.join(toolkit_root, "set_env.sh"))
+
+    candidates.extend(
+        [
+            "/usr/local/Ascend/ascend-toolkit/set_env.sh",
+            "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh",
+        ]
+    )
+
+    for script in candidates:
+        if script and os.path.isfile(script):
+            return script
+    return None
+
+
+def _resolve_cann_set_env() -> str:
+    cann_set_env = _find_cann_set_env()
+    if cann_set_env:
+        return cann_set_env
+
+    # Reuse xLLM's NPU env bootstrap as a fallback, then search again.
+    set_npu_envs()
+    cann_set_env = _find_cann_set_env()
+    if cann_set_env:
+        return cann_set_env
+
+    raise RuntimeError(
+        "[ERROR] Cannot find CANN set_env.sh. "
+        "Expected path like /usr/local/Ascend/ascend-toolkit/set_env.sh"
+    )
+
+
+def _ensure_tilelang_submodules(tilelang_root: str) -> None:
+    tvm_cmake = os.path.join(tilelang_root, "3rdparty", "tvm", "CMakeLists.txt")
+    if not os.path.isfile(tvm_cmake):
+        raise RuntimeError(
+            "[ERROR] tilelang-ascend nested dependencies are incomplete: "
+            "missing 3rdparty/tvm/CMakeLists.txt."
+        )
+
+
+def _patch_tilelang_install_script(tilelang_root: str) -> None:
+    script_path = os.path.join(tilelang_root, "install_ascend.sh")
+    if not os.path.isfile(script_path):
+        raise RuntimeError(
+            "[ERROR] Missing tilelang install script: install_ascend.sh"
+        )
+
+    line_no = 145
+    current_line = subprocess.run(
+        ["sed", "-n", f"{line_no}p", script_path],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+
+    if current_line == "make -j${MAKE_JOBS}":
+        subprocess.check_call(["sed", "-i", f"{line_no}c\\make -j", script_path])
+        print(f"[INFO] Applied tilelang install parallel patch at line {line_no}: make -j")
+        return
+
+    if current_line == "make -j":
+        return
+
+    raise RuntimeError(
+        f"[ERROR] Unexpected install_ascend.sh content at line {line_no}: {current_line!r}"
+    )
+
+
+def _run_tilelang_install(tilelang_root: str, cann_set_env: str) -> None:
+    _ensure_tilelang_submodules(tilelang_root)
+    _patch_tilelang_install_script(tilelang_root)
+
+    cmd = (
+        f"source {shlex.quote(cann_set_env)} && "
+        "bash install_ascend.sh && "
+        "source set_env.sh"
+    )
+    subprocess.check_call(
+        ["bash", "-lc", cmd],
+        cwd=tilelang_root,
+        env=os.environ.copy(),
+    )
+
+
+def _tilelang_git_head_cache_path(tilelang_root: str) -> str:
+    return os.path.join(tilelang_root, "build", ".xllm_tilelang_git_head_cached")
+
+
+def _get_tilelang_git_head(tilelang_root: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", tilelang_root, "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print("[WARN] failed to read tilelang git HEAD; using empty HEAD cache")
+        if result.stderr:
+            print(result.stderr.strip())
+        return ""
+    head = result.stdout.strip()
+    if not head:
+        print("[WARN] failed to read tilelang git HEAD; using empty HEAD cache")
+        return ""
+    return head
+
+
+def _read_tilelang_git_head_cached(tilelang_root: str) -> Optional[str]:
+    cache_path = _tilelang_git_head_cache_path(tilelang_root)
+    if not os.path.isfile(cache_path):
+        return None
+    with open(cache_path, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def _write_tilelang_git_head_cached(tilelang_root: str, head: str) -> None:
+    cache_path = _tilelang_git_head_cache_path(tilelang_root)
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with open(cache_path, "w", encoding="utf-8") as f:
+        f.write(head + "\n")
+
+
+def _tilelang_artifacts_ready(tilelang_root: str) -> bool:
+    required = [
+        "build/libtilelang_module.so",
+        "build/libtilelang.so",
+        "build/tvm/libtvm.so",
+    ]
+    return all(os.path.exists(os.path.join(tilelang_root, relpath)) for relpath in required)
+
+
+def _verify_tilelang_import(tilelang_root: str, cann_set_env: str) -> bool:
+    check_code = "import tilelang; print(tilelang.__file__)"
+    cmd = (
+        f"source {shlex.quote(cann_set_env)} && "
+        "source set_env.sh && "
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(check_code)}"
+    )
+    result = subprocess.run(
+        ["bash", "-lc", cmd],
+        cwd=tilelang_root,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        print(f"[INFO] tilelang import success: {result.stdout.strip()}")
+        return True
+    print("[WARN] tilelang import failed.")
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.stderr:
+        print(result.stderr.strip())
+    return False
+
+
+def ensure_tilelang_ascend(device: str, dry_run: bool) -> None:
+    if device not in ("a2", "a3"):
+        return
+
+    tilelang_root = os.path.join(get_base_dir(), "third_party", "tilelang-ascend")
+    if not os.path.isdir(tilelang_root):
+        raise RuntimeError(
+            "[ERROR] Missing dependency directory: third_party/tilelang-ascend."
+        )
+
+    _setup_tilelang_env(tilelang_root)
+    _ensure_tilelang_submodules(tilelang_root)
+    cann_set_env = _resolve_cann_set_env()
+
+    current_head = _get_tilelang_git_head(tilelang_root)
+    cached_head = _read_tilelang_git_head_cached(tilelang_root)
+    artifacts_ready = _tilelang_artifacts_ready(tilelang_root)
+
+    head_changed = cached_head is None or current_head != cached_head
+    needs_install = head_changed or not artifacts_ready
+
+    if head_changed:
+        print("[INFO] tilelang git HEAD changed; running install")
+    elif needs_install:
+        print("[INFO] tilelang git HEAD unchanged; running install (artifacts missing)")
+    else:
+        print("[INFO] tilelang git HEAD unchanged; skipping install")
+
+    if needs_install:
+        install_reasons = []
+        if cached_head is None:
+            install_reasons.append("HEAD cache missing")
+        elif current_head != cached_head:
+            install_reasons.append("HEAD changed")
+        if not artifacts_ready:
+            install_reasons.append("artifacts missing")
+
+        reason_msg = "; ".join(install_reasons)
+        if dry_run:
+            print(
+                "[INFO] Dry-run mode: pre_build is skipped, but TileLang artifacts are required. "
+                f"Running install_ascend.sh ({reason_msg}) ..."
+            )
+        else:
+            print(f"[INFO] tilelang-ascend requires reinstall ({reason_msg}), running install_ascend.sh ...")
+        _run_tilelang_install(tilelang_root, cann_set_env)
+        _setup_tilelang_env(tilelang_root)
+        _write_tilelang_git_head_cached(tilelang_root, current_head)
+
+    if not _verify_tilelang_import(tilelang_root, cann_set_env):
+        print("[INFO] Retry tilelang-ascend installation ...")
+        _run_tilelang_install(tilelang_root, cann_set_env)
+        _setup_tilelang_env(tilelang_root)
+        _write_tilelang_git_head_cached(tilelang_root, current_head)
+        if not _verify_tilelang_import(tilelang_root, cann_set_env):
+            raise RuntimeError("[ERROR] tilelang import still failed after install_ascend.sh")
+    print("[INFO] tilelang-ascend is ready.")
         
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
@@ -528,7 +767,7 @@ def parse_arguments() -> dict[str, Any]:
         '--install-xllm-kernels',
         type=str.lower,
         choices=['true', 'false', '1', '0', 'yes', 'no', 'y', 'n', 'on', 'off'],
-        default='true',
+        default='false',
         help='Whether to install xllm kernels'
     )
     
@@ -570,6 +809,8 @@ if __name__ == "__main__":
     if device == 'auto':
         device = get_device_type()
     print(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
+
+    ensure_tilelang_ascend(device, config['dry_run'])
     
     if not config['dry_run']:
         pre_build(device)
