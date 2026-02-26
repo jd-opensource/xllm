@@ -90,4 +90,8 @@ void fused_indexer_q(FusedIndexerQParams& params);
 
 void fused_indexer_k(FusedIndexerKParams& params);
 
+// TODO: NPU moe_init_routing_v2 is equivalent to moe_gen_idx + moe_expand_input
+// (and token_count/cusum outputs) on other backends.
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+moe_init_routing_v2(MoeInitRoutingV2Params& params);
 }  // namespace xllm::kernel
