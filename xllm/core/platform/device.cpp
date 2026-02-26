@@ -204,17 +204,19 @@ Device::DeviceMem Device::get_device_mem() const {
 
 int64_t Device::total_memory() { return get_device_mem().total_memory; }
 
-int64_t Device::free_memory() {
+void Device::empty_cache(int32_t device_index) {
+  (void)device_index;
 #if defined(USE_NPU)
   c10_npu::NPUCachingAllocator::emptyCache();
-  c10_npu::NPUCachingAllocator::FreeDeviceCachedMemory(index());
+  c10_npu::NPUCachingAllocator::FreeDeviceCachedMemory(device_index);
 #elif defined(USE_MLU)
   torch_mlu::MLUCachingAllocator::emptyCache();
 #elif defined(USE_CUDA) || defined(USE_ILU)
   c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
-  return get_device_mem().free_memory;
 }
+
+int64_t Device::free_memory() { return get_device_mem().free_memory; }
 
 int Device::synchronize_default_stream() {
 #if defined(USE_NPU)

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -208,9 +208,9 @@ int64_t XTensorAllocator::init_phy_page_pools(double max_memory_utilization,
 
     PhyPagePool::get_instance().init(dev_, num_pages);
 
-    // Initialize GlobalXtensor after PhyPagePool
-    GlobalXtensor::get_instance().init(dev_);
-    LOG(INFO) << "GlobalXtensor initialized (local)";
+    // Initialize GlobalXTensor after PhyPagePool
+    GlobalXTensor::get_instance().init(dev_);
+    LOG(INFO) << "GlobalXTensor initialized (local)";
 
     return num_pages;
   }
@@ -406,7 +406,7 @@ bool XTensorAllocator::broadcast_alloc_weight_pages(const std::string& model_id,
     // Single process: allocate locally from PhyPagePool and record
     auto& pool = PhyPagePool::get_instance();
 
-    // Try contiguous allocation first (from GlobalXtensor)
+    // Try contiguous allocation first (from GlobalXTensor)
     page_id_t start_page = pool.allocate_contiguous_from_right(num_pages);
     if (start_page >= 0) {
       record_weight_allocation(model_id, start_page, num_pages);
@@ -624,7 +624,7 @@ void XTensorAllocator::record_weight_allocation(const std::string& model_id,
                                                 size_t num_pages) {
   std::lock_guard<std::mutex> lock(mtx_);
 
-  auto& global_xtensor = GlobalXtensor::get_instance();
+  auto& global_xtensor = GlobalXTensor::get_instance();
   void* base_ptr = global_xtensor.get_vaddr_by_page_id(start_page_id);
 
   auto& tensors = get_or_create_model_tensors(model_id);
@@ -675,7 +675,7 @@ void XTensorAllocator::record_weight_fallback_allocation(
 
   // Populate weight_segments for D2D transfer support
   // Merge adjacent page_ids into contiguous segments
-  size_t page_size = GlobalXtensor::get_instance().page_size();
+  size_t page_size = GlobalXTensor::get_instance().page_size();
   tensors.weight_segments.clear();
   if (!page_ids.empty()) {
     std::vector<page_id_t> sorted_pages(page_ids.begin(), page_ids.end());
@@ -725,8 +725,8 @@ bool XTensorAllocator::allocate_weight(const std::string& model_id,
     return true;
   }
 
-  // Normal path: allocate from GlobalXtensor
-  auto& global_xtensor = GlobalXtensor::get_instance();
+  // Normal path: allocate from GlobalXTensor
+  auto& global_xtensor = GlobalXTensor::get_instance();
   size_t region_size = tensors->weight_num_pages * global_xtensor.page_size();
 
   // Check if there's enough space in pre-allocated region
@@ -804,7 +804,7 @@ size_t XTensorAllocator::free_weight_from_global_xtensor(
     LOG(INFO) << "Freed " << num_pages
               << " weight pages (XTensor fallback) for model " << model_id;
   } else {
-    // Normal path: free contiguous pages from GlobalXtensor
+    // Normal path: free contiguous pages from GlobalXTensor
     page_id_t start_page = tensors->weight_start_page_id;
 
     // Build page_ids vector and free via PhyPagePool
@@ -859,9 +859,9 @@ std::pair<uint64_t, uint64_t> XTensorAllocator::get_global_offsets_for_block(
     return {INVALID_OFFSET, INVALID_OFFSET};
   }
 
-  auto& global_xtensor = GlobalXtensor::get_instance();
+  auto& global_xtensor = GlobalXTensor::get_instance();
   if (!global_xtensor.is_initialized()) {
-    LOG(ERROR) << "GlobalXtensor not initialized";
+    LOG(ERROR) << "GlobalXTensor not initialized";
     return {INVALID_OFFSET, INVALID_OFFSET};
   }
 
@@ -889,8 +889,8 @@ std::pair<uint64_t, uint64_t> XTensorAllocator::get_global_offsets_for_block(
     return {INVALID_OFFSET, INVALID_OFFSET};
   }
 
-  // Calculate GlobalXtensor offsets using page_id
-  // GlobalXtensor offset = page_id * page_size + (block offset within page)
+  // Calculate GlobalXTensor offsets using page_id
+  // GlobalXTensor offset = page_id * page_size + (block offset within page)
   size_t offset_within_page = (block_id * block_size) % page_size;
 
   uint64_t k_global_offset =

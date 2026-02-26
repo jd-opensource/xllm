@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,17 +29,17 @@ limitations under the License.
 namespace xllm {
 
 /**
- * GlobalXtensor maps all physical pages into a single large XTensor-backed
+ * GlobalXTensor maps all physical pages into a single large XTensor-backed
  * virtual address space. It provides contiguous segment allocation for
  * model weights without per-page RPC mapping.
  *
  * This is a singleton (one per worker).
  */
-class GlobalXtensor {
+class GlobalXTensor {
  public:
   // Get the global singleton instance
-  static GlobalXtensor& get_instance() {
-    static GlobalXtensor instance;
+  static GlobalXTensor& get_instance() {
+    static GlobalXTensor instance;
     return instance;
   }
 
@@ -65,10 +65,10 @@ class GlobalXtensor {
   }
 
  private:
-  GlobalXtensor() = default;
-  ~GlobalXtensor() = default;
-  GlobalXtensor(const GlobalXtensor&) = delete;
-  GlobalXtensor& operator=(const GlobalXtensor&) = delete;
+  GlobalXTensor() = default;
+  ~GlobalXTensor() = default;
+  GlobalXTensor(const GlobalXTensor&) = delete;
+  GlobalXTensor& operator=(const GlobalXTensor&) = delete;
 
   bool map_page(PhyPage* page, size_t offset);
   bool map_all_pages(const std::vector<PhyPage*>& pages);

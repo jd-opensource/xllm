@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ class XTensorDistClient {
       const std::string& model_id,
       const std::vector<offset_t>& offsets);
 
-  // Weight pages allocation from GlobalXtensor
+  // Weight pages allocation from GlobalXTensor
   folly::SemiFuture<bool> alloc_weight_pages_async(const std::string& model_id,
                                                    size_t num_pages);
   folly::SemiFuture<bool> free_weight_pages_async(const std::string& model_id);

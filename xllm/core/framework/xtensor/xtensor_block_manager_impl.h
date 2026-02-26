@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -111,9 +111,9 @@ class XTensorBlockManagerImpl : public BlockManager {
   // Get mapped memory size in bytes
   size_t get_mapped_memory_size() const;
 
-  // Post initialization: reserve null block
-  // Should be called after KV tensors are created
-  void post_init();
+  // Reserve null block for padding tokens.
+  // Should be called after KV tensors are created.
+  void reserve_xtensor_null_blocks();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(XTensorBlockManagerImpl);

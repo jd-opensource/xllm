@@ -97,7 +97,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
       LOG(ERROR) << "Failed to initialize MooncakeWeightTransfer";
     }
     if (!weight_transfer_->register_global_xtensor()) {
-      LOG(ERROR) << "Failed to register GlobalXtensor";
+      LOG(ERROR) << "Failed to register GlobalXTensor";
     }
   }
 #endif
@@ -369,17 +369,11 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
   size_t torch_cache = 0;
   size_t torch_largest_block = 0;
   int32_t device_id = device_.index();
+  Device::empty_cache(device_id);
 #if defined(USE_NPU)
-  c10_npu::NPUCachingAllocator::emptyCache();
-  c10_npu::NPUCachingAllocator::FreeDeviceCachedMemory(device_id);
-  // aclrtSynchronizeDevice();
-  // get torch's cache memory size since torch_npu's emptyCache is useless
+  // get torch's cache memory size
   c10_npu::NPUCachingAllocator::cacheInfo(
       device_id, &torch_cache, &torch_largest_block);
-#elif defined(USE_MLU)
-  torch_mlu::MLUCachingAllocator::emptyCache();
-#elif defined(USE_CUDA) || defined(USE_ILU)
-  c10::cuda::CUDACachingAllocator::emptyCache();
 #endif
   const auto available_memory = device_.free_memory();
   const auto total_memory = device_.total_memory();
@@ -671,9 +665,9 @@ bool WorkerImpl::wakeup(const WakeupOptions& options) {
       return false;
     }
 
-    auto& global_xtensor = GlobalXtensor::get_instance();
+    auto& global_xtensor = GlobalXTensor::get_instance();
     if (!global_xtensor.is_initialized()) {
-      LOG(ERROR) << "GlobalXtensor not initialized";
+      LOG(ERROR) << "GlobalXTensor not initialized";
       return false;
     }
 

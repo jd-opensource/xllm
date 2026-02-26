@@ -27,6 +27,7 @@ message FunctionCall {
   string name = 1;
   string arguments = 2;  // JSON string
 }
+
 enum Priority {
   DEFAULT = 0;
 

@@ -161,7 +161,7 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
         *(resp->mutable_blocks_ids()->Add()) = block_id;
         block_ids.push_back(block_id);
       }
-      // XTensor mode: calculate and return GlobalXtensor offsets
+      // XTensor mode: calculate and return GlobalXTensor offsets
       if (FLAGS_enable_xtensor && !block_ids.empty()) {
         std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>
             layer_offsets;
@@ -177,7 +177,7 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
               layer_proto->add_v_offsets(v_off);
             }
           }
-          VLOG(1) << "XTensor offsets added for request " << req.req_id()
+          VLOG(5) << "XTensor offsets added for request " << req.req_id()
                   << ", num_blocks=" << block_ids.size()
                   << ", num_layers=" << layer_offsets.size();
         } else {

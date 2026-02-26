@@ -109,7 +109,7 @@ class APIService : public proto::XllmAPIService {
 
   void ForkMaster(::google::protobuf::RpcController* controller,
                   const proto::MasterInfos* request,
-                  proto::RpcStatus* response,
+                  proto::Status* response,
                   ::google::protobuf::Closure* done) override;
 
   void ForkMasterHttp(::google::protobuf::RpcController* controller,
@@ -119,7 +119,7 @@ class APIService : public proto::XllmAPIService {
 
   void Sleep(::google::protobuf::RpcController* controller,
              const proto::MasterInfos* request,
-             proto::RpcStatus* response,
+             proto::Status* response,
              ::google::protobuf::Closure* done) override;
 
   void SleepHttp(::google::protobuf::RpcController* controller,
@@ -129,7 +129,7 @@ class APIService : public proto::XllmAPIService {
 
   void Wakeup(::google::protobuf::RpcController* controller,
               const proto::MasterInfos* request,
-              proto::RpcStatus* response,
+              proto::Status* response,
               ::google::protobuf::Closure* done) override;
 
   void WakeupHttp(::google::protobuf::RpcController* controller,
@@ -139,7 +139,7 @@ class APIService : public proto::XllmAPIService {
 
   void LinkD2D(::google::protobuf::RpcController* controller,
                const proto::D2DLinkRequest* request,
-               proto::RpcStatus* response,
+               proto::Status* response,
                ::google::protobuf::Closure* done) override;
 
   void LinkD2DHttp(::google::protobuf::RpcController* controller,
@@ -149,7 +149,7 @@ class APIService : public proto::XllmAPIService {
 
   void UnlinkD2D(::google::protobuf::RpcController* controller,
                  const proto::D2DLinkRequest* request,
-                 proto::RpcStatus* response,
+                 proto::Status* response,
                  ::google::protobuf::Closure* done) override;
 
   void UnlinkD2DHttp(::google::protobuf::RpcController* controller,

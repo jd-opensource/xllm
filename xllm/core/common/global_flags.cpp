@@ -447,15 +447,6 @@ DEFINE_int64(
     "Granularity size for one physical page in bytes, default 2MB, when enable "
     "continuous kv cache.");
 
-DEFINE_int64(cache_size_per_token,
-             0,
-             "Cache size per token in bytes, default 0, which means it is "
-             "calculated by head_dim and n_local_kv_heads.");
-
-DEFINE_int64(buffer_size_per_seq,
-             0,
-             "Buffer size per sequence in bytes, default 0.");
-
 // --- beam search config ---
 
 DEFINE_bool(enable_beam_search_kernel,

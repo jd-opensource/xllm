@@ -40,6 +40,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/xtensor.h"
 #include "loader/base_loader.h"
+#include "platform/device.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "pytorch/adapter/workspace/workspace.h"
 
@@ -142,7 +143,7 @@ class BaseLayer : public torch::nn::Module {
         atb_weight_tensors_[i] =
             atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
       }
-      c10_npu::NPUCachingAllocator::emptyCache();
+      Device::empty_cache(device_.index());
       init_layer();
     }
   };

@@ -485,7 +485,7 @@ void DisaggPDScheduler::dispatch_requests() {
                                      layer_offsets.v_offsets().end());
               info.dst_xtensor_layer_offsets.emplace_back(std::move(layer));
             }
-            VLOG(1) << "Received XTensor offsets from D-node for request "
+            VLOG(5) << "Received XTensor offsets from D-node for request "
                     << requests[i]->request_id()
                     << ", num_layers=" << info.dst_xtensor_layer_offsets.size();
           }

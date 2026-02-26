@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -746,7 +746,7 @@ bool PageAllocator::alloc_weight_pages(const std::string& model_id,
     update_memory_usage();
   }
 
-  // Broadcast to all workers to allocate weight pages in GlobalXtensor
+  // Broadcast to all workers to allocate weight pages in GlobalXTensor
   auto& allocator = XTensorAllocator::get_instance();
   if (!allocator.broadcast_alloc_weight_pages(model_id, num_pages)) {
     LOG(ERROR) << "Failed to broadcast alloc_weight_pages for model "
@@ -762,7 +762,7 @@ bool PageAllocator::alloc_weight_pages(const std::string& model_id,
 
 bool PageAllocator::free_weight_pages(const std::string& model_id,
                                       size_t num_pages) {
-  // Broadcast to all workers to free weight pages in GlobalXtensor
+  // Broadcast to all workers to free weight pages in GlobalXTensor
   auto& allocator = XTensorAllocator::get_instance();
   if (!allocator.broadcast_free_weight_pages(model_id)) {
     LOG(ERROR) << "Failed to broadcast free_weight_pages for model " << model_id

@@ -96,7 +96,7 @@ class PhyPagePool {
 
   // ============== Global XTensor Support ==============
 
-  // Get all pages as raw pointers for GlobalXtensor mapping
+  // Get all pages as raw pointers for GlobalXTensor mapping
   // Ownership remains with pool, pages are NOT marked as allocated
   const std::vector<PhyPage*>& get_all_pages() const;
 
@@ -115,7 +115,7 @@ class PhyPagePool {
   // This owns the pages and provides O(1) lookup by page_id
   std::vector<std::unique_ptr<PhyPage>> all_pages_;
 
-  // Raw pointers to all pages (for GlobalXtensor, filled once at init)
+  // Raw pointers to all pages (for GlobalXTensor, filled once at init)
   std::vector<PhyPage*> all_page_ptrs_;
 
   // Free page indices (page_ids of pages available for allocation)

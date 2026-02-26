@@ -216,10 +216,6 @@ DECLARE_bool(enable_xtensor);
 
 DECLARE_int64(phy_page_granularity_size);
 
-DECLARE_int64(cache_size_per_token);
-
-DECLARE_int64(buffer_size_per_seq);
-
 // --- beam search config ---
 DECLARE_bool(enable_beam_search_kernel);
 

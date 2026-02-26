@@ -12,16 +12,13 @@ import "image_generation.proto";
 import "rerank.proto";
 import "models.proto";
 import "anthropic.proto";
+import "common.proto";
 
 message HttpRequest {
 };
 
 message HttpResponse {
 };
-
-message RpcStatus {
-  bool status = 1;
-}
 
 message MasterInfos {
   string model_id = 1;
@@ -74,18 +71,18 @@ service XllmAPIService {
 
   rpc AnthropicMessagesHttp (HttpRequest) returns (HttpResponse);
 
-  rpc ForkMaster (MasterInfos) returns (RpcStatus);
+  rpc ForkMaster (MasterInfos) returns (Status);
   rpc ForkMasterHttp (HttpRequest) returns (HttpResponse);
   
-  rpc Sleep (MasterInfos) returns (RpcStatus);
+  rpc Sleep (MasterInfos) returns (Status);
   rpc SleepHttp (HttpRequest) returns (HttpResponse);
 
-  rpc Wakeup (MasterInfos) returns (RpcStatus);
+  rpc Wakeup (MasterInfos) returns (Status);
   rpc WakeupHttp (HttpRequest) returns (HttpResponse);
 
-  rpc LinkD2D (D2DLinkRequest) returns (RpcStatus);
+  rpc LinkD2D (D2DLinkRequest) returns (Status);
   rpc LinkD2DHttp (HttpRequest) returns (HttpResponse);
 
-  rpc UnlinkD2D (D2DLinkRequest) returns (RpcStatus);
+  rpc UnlinkD2D (D2DLinkRequest) returns (Status);
   rpc UnlinkD2DHttp (HttpRequest) returns (HttpResponse);
 }; 
