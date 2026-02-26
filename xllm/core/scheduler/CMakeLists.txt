@@ -53,6 +53,7 @@ cc_test(
   SRCS
     chunked_prefill_scheduler_test.cpp
     continuous_scheduler_test.cpp
+    mix_scheduler_test.cpp
   DEPS
     :scheduler
     GTest::gtest_main

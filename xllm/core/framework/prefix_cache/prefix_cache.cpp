@@ -192,6 +192,7 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
       node_list.push_front(new_node);
 
       cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
+      cached_block_id_refs_[new_node->block.id()]++;
 
       num_blocks_++;
 
@@ -237,6 +238,7 @@ size_t PrefixCache::insert(Slice<Block>& blocks,
       node_list.push_front(new_node);
 
       cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
+      cached_block_id_refs_[new_node->block.id()]++;
 
       num_blocks_++;
 
@@ -277,8 +279,19 @@ size_t PrefixCache::evict(size_t n_blocks,
     iter_node = lru_lst_.remove_node(del_node);
 
     Murmur3Key token_hash_key(del_node->block.get_immutable_hash_value());
+    const int32_t block_id = del_node->block.id();
 
     cached_blocks_.erase(token_hash_key);
+
+    auto block_iter = cached_block_id_refs_.find(block_id);
+    CHECK(block_iter != cached_block_id_refs_.end())
+        << "State inconsistency: block " << block_id
+        << " is in cached_blocks_ but not in cached_block_id_refs_.";
+    if (block_iter->second <= 1) {
+      cached_block_id_refs_.erase(block_iter);
+    } else {
+      block_iter->second--;
+    }
 
     delete del_node;
     ++evict_count;

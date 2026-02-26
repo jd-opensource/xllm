@@ -15,15 +15,183 @@ limitations under the License.
 
 #include "scheduler/mix_scheduler.h"
 
-#include <algorithm>
-#include <limits>
+#include <glog/logging.h>
 
+#include <algorithm>
+#include <cstring>
+#include <limits>
+#include <vector>
+
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/batch/batch_factory.h"
+#include "framework/prefix_cache/prefix_cache.h"
 #include "util/timer.h"
 #include "util/utils.h"
 
 namespace xllm {
+
+namespace {
+
+struct InBatchPrefixProvider {
+  Sequence* sequence = nullptr;
+  int32_t dp_rank = -1;
+  size_t available_full_blocks = 0;
+};
+
+size_t get_common_prefix_full_blocks(const Sequence* lhs,
+                                     const Sequence* rhs,
+                                     size_t block_size,
+                                     size_t lhs_full_blocks_cap) {
+  if (lhs == nullptr || rhs == nullptr || block_size == 0 ||
+      lhs_full_blocks_cap == 0) {
+    return 0;
+  }
+
+  const auto lhs_tokens = lhs->tokens();
+  const auto rhs_tokens = rhs->tokens();
+
+  const size_t lhs_full_blocks = lhs_tokens.size() / block_size;
+  const size_t rhs_full_blocks = rhs_tokens.size() / block_size;
+  const size_t max_blocks =
+      std::min({lhs_full_blocks_cap, lhs_full_blocks, rhs_full_blocks});
+
+  size_t matched_blocks = 0;
+  const size_t block_bytes = block_size * sizeof(int32_t);
+  for (; matched_blocks < max_blocks; ++matched_blocks) {
+    const size_t block_start = matched_blocks * block_size;
+    if (std::memcmp(lhs_tokens.data() + block_start,
+                    rhs_tokens.data() + block_start,
+                    block_bytes) != 0) {
+      return matched_blocks;
+    }
+  }
+
+  return matched_blocks;
+}
+
+void try_reuse_prefix_in_batch(
+    Sequence* sequence,
+    const std::vector<InBatchPrefixProvider>& providers,
+    size_t block_size) {
+  if (sequence == nullptr || providers.empty() || block_size == 0 ||
+      !sequence->is_prefill_stage() || sequence->num_tokens() < block_size) {
+    return;
+  }
+
+  const int32_t preferred_dp_rank = sequence->dp_rank();
+  const size_t existing_full_blocks =
+      sequence->kv_state().kv_cache_tokens_num() / block_size;
+  size_t best_blocks = existing_full_blocks;
+  const InBatchPrefixProvider* best_provider = nullptr;
+
+  for (const auto& provider : providers) {
+    if (provider.sequence == nullptr || provider.sequence == sequence ||
+        provider.available_full_blocks == 0) {
+      continue;
+    }
+    if (provider.sequence->kv_state().num_kv_blocks() <
+        provider.available_full_blocks) {
+      continue;
+    }
+    if (preferred_dp_rank >= 0 && preferred_dp_rank != provider.dp_rank) {
+      continue;
+    }
+
+    const size_t matched_blocks =
+        get_common_prefix_full_blocks(provider.sequence,
+                                      sequence,
+                                      block_size,
+                                      provider.available_full_blocks);
+    if (matched_blocks > best_blocks) {
+      best_blocks = matched_blocks;
+      best_provider = &provider;
+    }
+  }
+
+  if (best_provider == nullptr || best_blocks == 0) {
+    return;
+  }
+
+  const int32_t consumer_seq_id = sequence->seq_id();
+  const int32_t provider_seq_id = best_provider->sequence->seq_id();
+  const int32_t provider_dp_rank = best_provider->dp_rank;
+  const size_t shared_blocks_before =
+      sequence->kv_state().shared_kv_blocks_num();
+
+  if (preferred_dp_rank < 0) {
+    sequence->set_dp_rank(best_provider->dp_rank);
+  }
+
+  const auto provider_blocks = best_provider->sequence->kv_state().kv_blocks();
+  if (provider_blocks.size() < best_blocks) {
+    return;
+  }
+
+  std::vector<Block> shared_blocks;
+  shared_blocks.reserve(best_blocks);
+  for (size_t i = 0; i < best_blocks; ++i) {
+    shared_blocks.emplace_back(provider_blocks[i]);
+  }
+  sequence->add_shared_kv_blocks(std::move(shared_blocks));
+
+  VLOG(5) << "[in_batch_prefix_reuse][matched]"
+          << " consumer_seq_id=" << consumer_seq_id
+          << " provider_seq_id=" << provider_seq_id
+          << " matched_blocks=" << best_blocks
+          << " shared_blocks_before=" << shared_blocks_before
+          << " shared_blocks_after="
+          << sequence->kv_state().shared_kv_blocks_num()
+          << " consumer_dp_rank_before=" << preferred_dp_rank
+          << " consumer_dp_rank_after=" << sequence->dp_rank()
+          << " provider_dp_rank=" << provider_dp_rank
+          << " block_size=" << block_size;
+}
+
+void register_prefix_provider_in_batch(
+    Sequence* sequence,
+    size_t block_size,
+    size_t max_handle_num_tokens,
+    std::vector<InBatchPrefixProvider>* providers) {
+  if (sequence == nullptr || providers == nullptr || block_size == 0 ||
+      !sequence->is_prefill_stage()) {
+    return;
+  }
+
+  size_t available_full_blocks = max_handle_num_tokens / block_size;
+  if (available_full_blocks == 0) {
+    return;
+  }
+  available_full_blocks =
+      std::min(available_full_blocks, sequence->kv_state().num_kv_blocks());
+
+  auto* mutable_blocks = sequence->kv_state().mutable_kv_blocks();
+  if (mutable_blocks == nullptr || mutable_blocks->empty()) {
+    return;
+  }
+  const size_t existed_shared_blocks_num = std::min(
+      sequence->kv_state().shared_kv_blocks_num(), available_full_blocks);
+  const uint32_t hashed_full_blocks = PrefixCache::compute_hash_keys(
+      sequence->tokens(), *mutable_blocks, existed_shared_blocks_num);
+  available_full_blocks =
+      std::min<size_t>(available_full_blocks, hashed_full_blocks);
+  if (available_full_blocks == 0 || sequence->dp_rank() < 0) {
+    return;
+  }
+
+  VLOG(5) << "[in_batch_prefix_reuse][register_provider]"
+          << " seq_id=" << sequence->seq_id()
+          << " dp_rank=" << sequence->dp_rank()
+          << " max_handle_num_tokens=" << max_handle_num_tokens
+          << " hashed_full_blocks=" << hashed_full_blocks
+          << " available_full_blocks=" << available_full_blocks
+          << " existed_shared_blocks_num=" << existed_shared_blocks_num
+          << " block_size=" << block_size;
+
+  providers->push_back({sequence, sequence->dp_rank(), available_full_blocks});
+}
+
+}  // namespace
 
 MixScheduler::MixScheduler(Engine* engine, const Options& options)
     : ChunkedPrefillScheduler(engine, options) {}
@@ -259,6 +427,7 @@ void MixScheduler::handle_running_queue_requests(
           : std::numeric_limits<int32_t>::max();
 
   std::vector<std::shared_ptr<Request>> preempted_request_vec;
+  std::vector<InBatchPrefixProvider> prefix_providers;
   bool is_preempt_iterator_valid = true;
   auto preempt_iterator = std::prev(running_queue.end());
   while (!running_queue.empty() &&
@@ -291,9 +460,13 @@ void MixScheduler::handle_running_queue_requests(
         continue;
       }
 
+      const size_t block_size = kv_cache_manager_->block_size();
+      if (FLAGS_enable_in_batch_prefix_cache_reuse) {
+        try_reuse_prefix_in_batch(sequence.get(), prefix_providers, block_size);
+      }
+
       // support kv cache swapping between host and device and try to overlap
       // the computation and copy overhead.
-      auto block_size = kv_cache_manager_->block_size();
       size_t host_blocks_num =
           sequence->host_kv_state().kv_cache_tokens_num() / block_size;
       size_t device_blocks_num =
@@ -380,6 +553,13 @@ void MixScheduler::handle_running_queue_requests(
       allocated_tokens += current_step_handle_tokens;
       allocated_seqs += 1;
       allocated_copy_blocks += cur_step_copy_blocks;
+      if (FLAGS_enable_in_batch_prefix_cache_reuse) {
+        register_prefix_provider_in_batch(
+            sequence.get(),
+            block_size,
+            kv_cache_tokens_num + current_step_handle_tokens,
+            &prefix_providers);
+      }
       candidate_sequences.emplace_back(sequence.get());
       candidate_token_budgets.emplace_back(current_step_handle_tokens);
     }

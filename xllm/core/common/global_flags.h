@@ -49,6 +49,8 @@ DECLARE_double(max_memory_utilization);
 
 DECLARE_bool(enable_prefix_cache);
 
+DECLARE_bool(enable_in_batch_prefix_cache_reuse);
+
 DECLARE_bool(enable_cache_upload);
 
 DECLARE_uint32(murmur_hash3_seed);
