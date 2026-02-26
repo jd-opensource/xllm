@@ -102,15 +102,23 @@ std::optional<ForwardOutput> Eagle3WorkerImpl::step_decode(
   ForwardInput validate_input, next_step_input;
   Timer timer;
   std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
-  for (size_t i = 0; i < options_.num_speculative_tokens(); ++i) {
+  const size_t num_speculative_tokens = options_.num_speculative_tokens();
+  for (size_t i = 0; i < num_speculative_tokens + 1; ++i) {
     auto future = draft_impl_->step_async(draft_input);
-    if (i == options_.num_speculative_tokens() - 1) {
+    if (i == num_speculative_tokens - 1) {
       // final step, prepare validate input
       prepare_validate_inputs(input, validate_input);
-    } else {
+    }
+    if (i < num_speculative_tokens) {
       prepare_draft_inputs(draft_input, next_step_input, 1, device_);
     }
-    draft_outputs.push_back(std::move(future).get().value());
+    ForwardOutput draft_output = std::move(future).get().value();
+    if (i < num_speculative_tokens) {
+      draft_outputs.push_back(std::move(draft_output));
+    }
+    if (i >= num_speculative_tokens) {
+      continue;
+    }
     auto& last_output = draft_outputs.back().sample_output;
 
     // Extract probability for selected draft token
@@ -129,7 +137,7 @@ std::optional<ForwardOutput> Eagle3WorkerImpl::step_decode(
       last_output.next_tokens =
           hot_token_id_.index_select(0, last_output.next_tokens);
     }
-    if (i < options_.num_speculative_tokens() - 1) {
+    if (i < num_speculative_tokens) {
       draft_input = next_step_input;
       draft_input.token_ids = safe_to(last_output.next_tokens, torch::kInt);
       draft_input.input_params.input_embedding =

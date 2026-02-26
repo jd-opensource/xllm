@@ -434,17 +434,22 @@ std::optional<ForwardOutput> SpeculativeWorkerImpl::step_decode(
   ForwardInput validate_input, next_step_input;
   Timer timer;
   std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
-  for (size_t i = 0; i < options_.num_speculative_tokens(); ++i) {
+  const size_t num_speculative_tokens = options_.num_speculative_tokens();
+  for (size_t i = 0; i < num_speculative_tokens + 1; ++i) {
     auto future = draft_impl_->step_async(draft_input);
-    if (i == options_.num_speculative_tokens() - 1) {
+    if (i == num_speculative_tokens - 1) {
       // final step, prepare validate input
       prepare_validate_inputs(input, validate_input);
-    } else {
+    }
+    if (i < num_speculative_tokens) {
       prepare_draft_inputs(draft_input, next_step_input, 1, device_);
     }
-    draft_outputs.push_back(std::move(future).get().value());
-    // update input of next step
-    if (i < options_.num_speculative_tokens() - 1) {
+    ForwardOutput draft_output = std::move(future).get().value();
+    if (i < num_speculative_tokens) {
+      draft_outputs.push_back(std::move(draft_output));
+    }
+    // update input of next step, including the warmup step input
+    if (i < num_speculative_tokens) {
       draft_input = next_step_input;
       auto& last_output = draft_outputs.back().sample_output;
       draft_input.token_ids = safe_to(last_output.next_tokens, torch::kInt);
