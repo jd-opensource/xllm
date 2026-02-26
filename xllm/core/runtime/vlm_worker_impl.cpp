@@ -69,7 +69,9 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
 
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
-  if (!driver_) {
+  if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
+      !options_.enable_speculative_decode()) {
+    auto ret = device_.synchronize_default_stream();
     return std::nullopt;
   }
 
