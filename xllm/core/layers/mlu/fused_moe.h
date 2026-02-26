@@ -62,12 +62,38 @@ class FusedMoEImpl : public torch::nn::Module {
     std::optional<torch::Tensor> input_scale;
   };
 
-  // Uses precomputed reduce_weight and expert_id from MoEGate (no gate here).
-  torch::Tensor select_experts(const torch::Tensor& hidden_states_2d,
-                               const torch::Tensor& reduce_weight,
-                               const torch::Tensor& expert_id,
-                               SelectedExpertInfo& selected_expert_info,
-                               bool enable_all2all_communication);
+  // ===== Base path methods (AllReduce communication mode) =====
+  torch::Tensor select_experts_base(const torch::Tensor& hidden_states_2d,
+                                    const torch::Tensor& reduce_weight,
+                                    const torch::Tensor& expert_id,
+                                    SelectedExpertInfo& selected_expert_info);
+
+  torch::Tensor forward_experts_base(const torch::Tensor& hidden_states);
+
+  void final_comm_allreduce(torch::Tensor& final_hidden_states,
+                            const torch::Tensor& hidden_states,
+                            torch::Tensor& shared_expert_output);
+
+  // ===== All2All path methods (DeepEP communication mode) =====
+  torch::Tensor select_experts_all2all(
+      const torch::Tensor& hidden_states_2d,
+      const torch::Tensor& reduce_weight,
+      const torch::Tensor& expert_id,
+      SelectedExpertInfo& selected_expert_info);
+
+  torch::Tensor forward_experts_all2all(const torch::Tensor& hidden_states);
+
+  // Result structure for combine_step
+  struct CombineResult {
+    torch::Tensor output;
+    torch::Tensor shared_expert_output;
+  };
+
+  CombineResult combine_step(const torch::Tensor& gemm2_out,
+                             const torch::Tensor& gather_by_rank_index,
+                             const torch::Tensor& token_sum,
+                             const torch::Tensor& hidden_states,
+                             int64_t num_token_expand);
 
  private:
   int64_t num_total_experts_;
