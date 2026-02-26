@@ -88,6 +88,7 @@ bool WorkerImpl::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
+  const bool enable_linear_attention = context_.get_model_args().full_attention_interval() > 1;
 
   // create a KVCache for each layer
   const int64_t num_layers = get_num_layers();
@@ -95,7 +96,7 @@ bool WorkerImpl::allocate_kv_cache(
       context_.get_model_args().index_n_heads() > 0;
   kv_caches_.reserve(num_layers);
   for (int64_t i = 0; i < num_layers; ++i) {
-    torch::Tensor key_cache, value_cache, index_cache;
+    torch::Tensor key_cache, value_cache, index_cache, conv_cache, ssm_cache;
 #if defined(USE_NPU)
     aclFormat npu_format_type =
         context_.get_model_args().model_type() == "deepseek_v3" &&
@@ -112,6 +113,14 @@ bool WorkerImpl::allocate_kv_cache(
       index_cache = at_npu::native::npu_format_cast(
           torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_)),
           npu_format_type);
+    }
+    if (enable_linear_attention) {
+      conv_cache = at_npu::native::npu_format_cast(
+          torch::zeros(kv_cache_shape[2], torch::dtype(dtype_).device(device_)),
+          2);
+      ssm_cache = at_npu::native::npu_format_cast(
+          torch::zeros(kv_cache_shape[3], torch::dtype(dtype_).device(device_)),
+          2);
     }
 #elif defined(USE_ILU) || defined(USE_MLU)
     key_cache =
@@ -136,7 +145,7 @@ bool WorkerImpl::allocate_kv_cache(
           torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
     }
 #endif
-    kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+    kv_caches_.emplace_back(key_cache, value_cache, index_cache, conv_cache, ssm_cache);
   }
 
   init_hierarchy_kv_cache_transfer();
