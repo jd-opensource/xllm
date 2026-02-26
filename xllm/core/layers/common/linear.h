@@ -65,6 +65,11 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict,
                        const std::vector<std::string>& prefixes);
 
+  // load_state_dict for merged weights with variable shard sizes
+  void load_state_dict(const StateDict& state_dict,
+                       int32_t shard_tensor_count,
+                       const std::vector<int64_t>& shard_sizes);
+
   void pretty_print(std::ostream& stream) const {
     stream << name() << " " << weight_.sizes() << " " << weight_.device();
   }

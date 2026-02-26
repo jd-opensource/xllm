@@ -6,6 +6,11 @@ cc_library(
   HDRS
     qwen2_attention.h
     qwen2_vision_attention.h
+    qwen3_next_attention.h
+    qwen3_next_gated_delta_net.h
+    qwen3_next_rms_norm.h
+    partial_rotary_embedding.h
+    rms_norm_gated.h
     rms_norm.h
     rotary_embedding.h
     rotary_embedding_util.h
@@ -23,6 +28,11 @@ cc_library(
   SRCS
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
+    qwen3_next_attention.cpp
+    qwen3_next_gated_delta_net.cpp
+    qwen3_next_rms_norm.cpp
+    partial_rotary_embedding.cpp
+    rms_norm_gated.cpp
     rms_norm.cpp
     rotary_embedding.cpp
     rotary_embedding_util.cpp
