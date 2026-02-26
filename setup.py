@@ -17,6 +17,31 @@ from utils import get_cpu_arch, get_device_type, pre_build, get_version, check_a
 
 BUILD_TEST_FILE: bool = True
 BUILD_EXPORT: bool = True
+
+
+def _maybe_compile_tilelang_kernels(device: str) -> None:
+    if device not in ("a2", "a3"):
+        return
+
+    output_root = os.path.join(get_cmake_dir(), "xllm", "compiler", "tilelang")
+    os.makedirs(output_root, exist_ok=True)
+
+    env = os.environ.copy()
+    base_dir = get_base_dir()
+
+    cmd = [
+        sys.executable,
+        os.path.join(base_dir, "xllm", "compiler", "tilelang_launcher.py"),
+        "compile-kernels",
+        "--target",
+        "ascend",
+        "--device",
+        device,
+        "--output-root",
+        output_root,
+    ]
+    print("[INFO] compiling TileLang kernels via source-tree launcher")
+    subprocess.check_call(cmd, cwd=base_dir, env=env)
         
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
@@ -119,6 +144,7 @@ class ExtBuild(build_ext):
         if self.device == "npu":
             cmake_args += ["-DUSE_NPU=ON"]
             set_npu_envs()
+            _maybe_compile_tilelang_kernels(self.device)
         elif self.device == "mlu":
             cmake_args += ["-DUSE_MLU=ON"]
             set_mlu_envs()
@@ -514,7 +540,6 @@ def parse_arguments() -> dict[str, Any]:
         default='auto',
         help='Device type: npu, mlu, ilu, cuda or musa (case-insensitive)'
     )
-
     parser.add_argument(
         '--generate-so',
         type=str.lower,

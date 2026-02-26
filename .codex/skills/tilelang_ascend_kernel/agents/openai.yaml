@@ -1,0 +1,7 @@
+interface:
+  display_name: "TileLang Ascend Kernel"
+  short_description: "Guide xLLM TileLang Ascend kernel or specialization work"
+  default_prompt: "Use $tilelang-ascend-kernel to add or modify an xLLM TileLang Ascend kernel or specialization."
+
+policy:
+  allow_implicit_invocation: true
