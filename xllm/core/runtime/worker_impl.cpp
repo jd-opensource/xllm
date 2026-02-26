@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "worker_impl.h"
 
+#include <ATen/Parallel.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 #include <gflags/gflags.h>
@@ -59,6 +60,45 @@ constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 constexpr uint32_t BATCH_COPY_MAX_SIZE = 4096;
 constexpr uint32_t TIMEOUT_S = 60;      // second
 constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
+
+namespace {
+
+// During TP model initialization, each rank loads weights concurrently.
+// MoE weight assembly (especially stack/cat on large expert tensors) runs on
+// CPU and is backed by ATen intra-op thread pools.
+//
+// If every TP rank also uses many intra-op threads, we get severe CPU
+// oversubscription and memory-bandwidth contention:
+//   1) many processes run large stack/cat at the same time
+//   2) each process fans out into multiple CPU workers
+//   3) host-side contention dominates load time even when I/O is fast
+//
+// For the weight-loading window only, forcing ATen to 1 thread reduces this
+// cross-rank contention and usually lowers end-to-end load latency in TP mode.
+// We restore the previous thread count immediately after load_model() returns,
+// so runtime compute behavior remains unchanged.
+class ScopedAtenLoadThreads {
+ public:
+  explicit ScopedAtenLoadThreads(int target_threads)
+      : prev_threads_(at::get_num_threads()) {
+    if (target_threads > 0 && prev_threads_ != target_threads) {
+      torch::set_num_threads(target_threads);
+      active_ = true;
+    }
+  }
+
+  ~ScopedAtenLoadThreads() {
+    if (active_) {
+      torch::set_num_threads(prev_threads_);
+    }
+  }
+
+ private:
+  int prev_threads_ = 0;
+  bool active_ = false;
+};
+
+}  // namespace
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
@@ -592,7 +632,22 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     return false;
   }
 
-  this->load_model(std::move(model_loader));
+  int tp_world_size = parallel_args_.world_size();
+  if (parallel_args_.tp_group_) {
+    tp_world_size = parallel_args_.tp_group_->world_size();
+  }
+  if (tp_world_size > 1) {
+    const int prev_threads = torch::get_num_threads();
+    LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
+              << ", tp_world_size=" << tp_world_size
+              << ", prev_threads=" << prev_threads;
+    ScopedAtenLoadThreads scoped_load_threads(/*target_threads=*/1);
+    this->load_model(std::move(model_loader));
+    LOG(INFO) << "Weight loading completed, restored ATen threads="
+              << torch::get_num_threads();
+  } else {
+    this->load_model(std::move(model_loader));
+  }
 
   status_ = Status::LOADED;
   if (FLAGS_enable_eplb) {
