@@ -90,4 +90,15 @@ void fused_indexer_q(FusedIndexerQParams& params);
 
 void fused_indexer_k(FusedIndexerKParams& params);
 
+std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(FusedGdnGatingParams& params);
+
+std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
+    FusedRecurrentGatedDeltaRuleParams& params);
+
+torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params);
+
+torch::Tensor gated_layer_norm(GatedLayerNormParams& params);
+
+std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(PartialRotaryEmbeddingParams& params);
+
 }  // namespace xllm::kernel

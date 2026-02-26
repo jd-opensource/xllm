@@ -54,7 +54,7 @@ PartialRotaryEmbeddingImpl::PartialRotaryEmbeddingImpl(int64_t rotary_dim,
 void PartialRotaryEmbeddingImpl::forward(const torch::Tensor& positions,
                                   torch::Tensor& q,
                                   torch::Tensor& k) {
-  xllm::kernel::PartialRotaryEmbedding partial_rotary_params;
+  xllm::kernel::PartialRotaryEmbeddingParams partial_rotary_params;
   partial_rotary_params.positions = positions;
   partial_rotary_params.query = q;
   partial_rotary_params.key = k;
