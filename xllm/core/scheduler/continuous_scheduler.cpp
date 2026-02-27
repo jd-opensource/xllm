@@ -81,8 +81,9 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       return;
     }
     xservice_client_->set_scheduler(this);
-    if (FLAGS_enable_xtensor) {
+    if (FLAGS_enable_xtensor && !options_.enable_disagg_pd()) {
       xservice_client_->set_engine(engine_);
+      engine_->get_device_info(instance_info_.device_ips, instance_info_.ports);
     }
   }
 
