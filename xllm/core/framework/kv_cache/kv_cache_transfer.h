@@ -144,6 +144,7 @@ class KVCacheTransferFactory {
       int64_t num_layers,
       std::function<void(const std::vector<std::vector<int64_t>>&)>
           allocate_kv_cache_func,
+      bool enable_lighting_indexer,
       const std::string& model_type = "");
 };
 
