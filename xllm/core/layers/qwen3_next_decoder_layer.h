@@ -56,6 +56,7 @@ class Qwen3NextDecoderLayerImpl : public torch::nn::Module {
   Qwen3NextRMSNorm input_norm_{nullptr};
   Qwen3NextRMSNorm post_norm_{nullptr};
 };
+TORCH_MODULE(Qwen3NextDecoderLayer);
 
 }  // namespace layer
 }  // namespace xllm

@@ -29,31 +29,6 @@ namespace xllm {
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
 
-class Qwen3NextDecoderLayerImpl : public torch::nn::Module {
- public:
-  Qwen3NextDecoderLayerImpl(const ModelContext& context, const int32_t i) {
-    // register submodules
-    decoder_layer_ = register_module("decoder_layer",
-                                     layer::Qwen3NextDecoderLayer(context, i));
-  }
-
-  torch::Tensor forward(torch::Tensor& x,
-                        torch::Tensor& positions,
-                        const layer::AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache,
-                        const ModelInputParams& input_params) {
-    return decoder_layer_(x, positions, attn_metadata, kv_cache, input_params);
-  }
-
-  void load_state_dict(const StateDict& state_dict) {
-    decoder_layer_->load_state_dict(state_dict);
-  }
-
- private:
-  layer::Qwen3NextDecoderLayer decoder_layer_{nullptr};
-};
-TORCH_MODULE(Qwen3NextDecoderLayer);
-
 class Qwen3NextModelImpl : public torch::nn::Module {
  public:
   Qwen3NextModelImpl(const ModelContext& context)

@@ -126,4 +126,12 @@ apply_npu_moe_init_routing_v2(const torch::Tensor& x,
                               torch::IntArrayRef active_expert_range,
                               int row_idx_type);
 
+std::pair<torch::Tensor, torch::Tensor> apply_npu_partial_rotary_embedding(const torch::Tensor &positions,
+                                            torch::Tensor &query,
+                                            torch::Tensor &key,
+                                            int64_t head_size,
+                                            int64_t rotary_dim,
+                                            const torch::Tensor &cos_sin_cache,
+                                            bool is_neox_style);
+
 }  // namespace xllm::kernel::npu
