@@ -94,8 +94,12 @@ void apply_top_k_top_p(torch::Tensor& logits,
     return;
   }
 
+// skip top_p process since the result of fused kernel is not deterministic on
+// all devices
+//  during multi-nodes inference
+// TODO: fix this after mtp draft model bugs are officially fixed.
 #if defined(USE_MLU)
-  if (top_k.defined() || top_p.defined()) {
+  if (top_k.defined() && !top_p.defined()) {
     xllm::kernel::TopKPParams params;
     params.logits = logits;
     params.top_k = top_k;

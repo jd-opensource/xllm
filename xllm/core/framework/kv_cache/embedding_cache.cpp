@@ -25,6 +25,9 @@ namespace xllm {
 EmbeddingCache::EmbeddingCache(int32_t total_nums) {
   CHECK_GT(total_nums, 0) << "No embeddings to allocate";
   cache_.resize(total_nums);
+#if defined(USE_MLU)
+  previous_cache_.resize(total_nums);
+#endif
 }
 
 // write embeddings to cache
@@ -49,6 +52,11 @@ void EmbeddingCache::write_validate(const std::vector<int32_t>& ids,
     torch::Tensor cur_tokens = next_tokens[i];
     for (int32_t j = 0; j < cur_tokens.size(0); ++j) {
       if (cur_tokens[j].item<int32_t>() >= 0) {
+#if defined(USE_MLU)
+        if (j == 0) {
+          previous_cache_[ids[i]] = embeddings[i][j];
+        }
+#endif
         write(ids[i], embeddings[i][j]);
       }
     }
@@ -81,4 +89,22 @@ torch::Tensor EmbeddingCache::read(const std::vector<int32_t>& ids) {
   }
   return torch::stack(tensors);
 }
+
+#if defined(USE_MLU)
+// Temporary workaround for MTP draft models bugs.
+torch::Tensor EmbeddingCache::read_previous_input(int32_t id) {
+  return previous_cache_[id];
+}
+torch::Tensor EmbeddingCache::read_previous_input(
+    const std::vector<int32_t>& ids) {
+  std::vector<torch::Tensor> tensors;
+  int32_t total_nums = ids.size();
+  tensors.reserve(total_nums);
+  for (int32_t i = 0; i < total_nums; ++i) {
+    tensors.emplace_back(read_previous_input(ids[i]));
+  }
+  return torch::stack(tensors);
+}
+#endif
+
 }  // namespace xllm
