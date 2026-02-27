@@ -96,17 +96,17 @@ bool WorkerImpl::allocate_kv_cache(
 
   if (enable_kv_cache_quant) {
 #if !defined(USE_MLU)
-    CHECK(false) << "KV Cache quantization is only supported on MLU backend. "
-                 << "Current backend does not support this feature.";
+    LOG(FATAL) << "KV Cache quantization is only supported on MLU backend. "
+               << "Current backend does not support this feature.";
 #endif
     // Check for unsupported scenarios
     if (options_.backend() == "vlm") {
-      CHECK(false) << "KV Cache quantization is not supported for VLM "
-                      "(Vision-Language Model) backend.";
+      LOG(FATAL) << "KV Cache quantization is not supported for VLM "
+                    "(Vision-Language Model) backend.";
     }
     if (options_.enable_disagg_pd()) {
-      CHECK(false) << "KV Cache quantization is not supported in PD "
-                      "disaggregation mode.";
+      LOG(FATAL) << "KV Cache quantization is not supported in PD "
+                    "disaggregation mode.";
     }
   }
 

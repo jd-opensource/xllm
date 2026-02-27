@@ -141,6 +141,13 @@ DEFINE_double(max_memory_utilization,
               "The fraction of GPU memory to be used for model inference, "
               "including model weights and kv cache.");
 
+DEFINE_string(
+    kv_cache_dtype,
+    "auto",
+    "KV cache data type for quantization. \"auto\" (default): KV "
+    "cache dtype aligns with model dtype (no quantization). "
+    "\"int8\": Enables INT8 quantization. Only supported on MLU backend.");
+
 // --- scheduler config ---
 
 DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
@@ -562,12 +569,3 @@ DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 DEFINE_int32(health_check_interval_ms,
              3000,
              "Worker health check interval in milliseconds.");
-
-// --- kv cache quantization config ---
-
-DEFINE_string(
-    kv_cache_dtype,
-    "auto",
-    "KV cache data type for quantization. \"auto\" (default): KV "
-    "cache dtype aligns with model dtype (no quantization). "
-    "\"int8\": Enables INT8 quantization. Only supported on MLU backend.");
