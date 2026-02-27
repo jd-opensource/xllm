@@ -82,26 +82,29 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
                                     const torch::Tensor& k_cache,
                                     const std::optional<torch::Tensor>& v_cache,
                                     const AttentionMetadata& attn_metadata) {
-  xllm::kernel::AttentionParams attention_params{attn_metadata};
+  query = query.view({-1, num_heads_, head_size_});
+  output = output.view({-1, num_heads_, head_size_});
 
-  attention_params.query = query.view({-1, num_heads_, head_size_});
+  if (attn_metadata.is_prefill) {
+    key = key.view({-1, num_kv_heads_, head_size_});
+    value = value.view({-1, num_kv_heads_, head_size_});
 
-  CHECK(!attn_metadata.is_chunked_prefill)
-      << "chunked prefill is not supported";
-
-  if (attention_params.attn_metadata.is_prefill) {
-    attention_params.key = key.view({-1, num_kv_heads_, head_size_});
-    attention_params.value = value.view({-1, num_kv_heads_, head_size_});
-  } else if (attention_params.attn_metadata.is_chunked_prefill) {
-    attention_params.key = k_cache;
-    attention_params.value = v_cache.value();
+    xllm::kernel::npu::batch_prefill(query,
+                                     key,
+                                     value,
+                                     attn_metadata.attn_mask,
+                                     attn_metadata.kv_seq_lens_host,
+                                     scale_,
+                                     output);
+  } else if (attn_metadata.is_chunked_prefill) {
+    xllm::kernel::npu::batch_prefill(query,
+                                     k_cache,
+                                     v_cache.value(),
+                                     attn_metadata.attn_mask,
+                                     attn_metadata.kv_seq_lens_host,
+                                     scale_,
+                                     output);
   }
-  attention_params.attn_mask = attention_params.attn_metadata.attn_mask;
-  attention_params.seq_lens = attention_params.attn_metadata.kv_seq_lens_host;
-  attention_params.scale = scale_;
-  attention_params.output = output.view({-1, num_heads_, head_size_});
-
-  xllm::kernel::batch_prefill(attention_params);
 }
 
 void AttentionImpl::decoder_forward(torch::Tensor& query,
@@ -109,23 +112,39 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
                                     const torch::Tensor& k_cache,
                                     const std::optional<torch::Tensor>& v_cache,
                                     const AttentionMetadata& attn_metadata) {
-  xllm::kernel::AttentionParams attention_params{attn_metadata};
-  attention_params.query = query.view({-1, 1, num_heads_, head_size_});
-  attention_params.output = output.view({-1, 1, num_heads_, head_size_});
-  attention_params.output_lse = std::nullopt;
-  attention_params.window_size_left = sliding_window_;
-  attention_params.scale = scale_;
-  attention_params.k_cache = k_cache;
-  attention_params.v_cache = v_cache;
+  query = query.view({-1, 1, num_heads_, head_size_});
+  output = output.view({-1, 1, num_heads_, head_size_});
 
-  if (attention_params.attn_metadata.kv_seq_lens_host.defined()) {
-    attention_params.seq_lens = attention_params.attn_metadata.kv_seq_lens_host;
+  torch::Tensor kv_seq_lens;
+  if (attn_metadata.kv_seq_lens_host.defined()) {
+    kv_seq_lens = attn_metadata.kv_seq_lens_host;
   } else {
     // Fallback if host tensor isn't prepared.
-    attention_params.seq_lens = attention_params.attn_metadata.kv_seq_lens;
+    kv_seq_lens = attn_metadata.kv_seq_lens;
   }
 
-  xllm::kernel::batch_decode(attention_params);
+  if (attn_metadata.paged_attention_tiling_data.defined()) {
+    // Use CustomPagedAttention for ACL graph mode to avoid .to(kCPU) operations
+
+    xllm::kernel::npu::batch_decode_acl_graph(
+        query,
+        k_cache,
+        v_cache.value_or(torch::Tensor()),
+        scale_,
+        attn_metadata.block_table,
+        kv_seq_lens,
+        attn_metadata.paged_attention_tiling_data,
+        output);
+  } else {
+    // Standard PagedAttention path
+    xllm::kernel::npu::batch_decode(query,
+                                    k_cache,
+                                    v_cache.value_or(torch::Tensor()),
+                                    scale_,
+                                    attn_metadata.block_table,
+                                    kv_seq_lens,
+                                    output);
+  }
 }
 
 }  // namespace layer
