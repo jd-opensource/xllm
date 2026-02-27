@@ -15,6 +15,8 @@ cc_library(
     deepseek_v2_decoder_layer_impl.cpp
     moe_gate.cpp
     fused_moe.cpp
+    fused_moe_base.cpp
+    fused_moe_all2all.cpp
   DEPS
     :common_layers
 )
