@@ -67,6 +67,11 @@ bool check_instance_name(const std::string& name) {
 bool XServiceClient::init(const std::string& etcd_addr,
                           const std::string& instance_name,
                           const BlockManagerPool* block_manager_pool) {
+  if (initialize_done_) {
+    LOG(INFO) << "XServiceClient is already initialized, skipping.";
+    return true;
+  }
+
   if (etcd_addr.empty()) {
     LOG(ERROR) << "etcd_addr address is empty.";
     return false;

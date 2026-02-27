@@ -73,8 +73,9 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   create_running_queue(options);
   if (options_.enable_service_routing()) {
     XServiceClient::get_instance()->set_scheduler(this);
-    if (FLAGS_enable_xtensor) {
+    if (FLAGS_enable_xtensor && !options_.enable_disagg_pd()) {
       XServiceClient::get_instance()->set_engine(engine_);
+      engine_->get_device_info(instance_info_.device_ips, instance_info_.ports);
     }
   }
 

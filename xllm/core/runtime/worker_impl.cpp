@@ -171,10 +171,12 @@ bool WorkerImpl::allocate_kv_cache(
               ? ACL_FORMAT_FRACTAL_NZ
               : ACL_FORMAT_ND;
       key_cache = at_npu::native::npu_format_cast(
-          torch::empty(kv_cache_shape[0], torch::dtype(cache_dtype).device(device_)),
+          torch::empty(kv_cache_shape[0],
+                       torch::dtype(cache_dtype).device(device_)),
           npu_format_type);
       value_cache = at_npu::native::npu_format_cast(
-          torch::empty(kv_cache_shape[1], torch::dtype(cache_dtype).device(device_)),
+          torch::empty(kv_cache_shape[1],
+                       torch::dtype(cache_dtype).device(device_)),
           npu_format_type);
       if (enable_lighting_indexer) {
         index_cache = at_npu::native::npu_format_cast(
@@ -183,8 +185,8 @@ bool WorkerImpl::allocate_kv_cache(
             npu_format_type);
       }
 #elif defined(USE_ILU) || defined(USE_MLU)
-      key_cache =
-          torch::zeros(kv_cache_shape[0], torch::dtype(cache_dtype).device(device_));
+      key_cache = torch::zeros(kv_cache_shape[0],
+                               torch::dtype(cache_dtype).device(device_));
       if (!kv_cache_shape[1].empty()) {
         value_cache = torch::zeros(kv_cache_shape[1],
                                    torch::dtype(cache_dtype).device(device_));
@@ -206,8 +208,8 @@ bool WorkerImpl::allocate_kv_cache(
         }
       }
 #else
-      key_cache =
-          torch::empty(kv_cache_shape[0], torch::dtype(cache_dtype).device(device_));
+      key_cache = torch::empty(kv_cache_shape[0],
+                               torch::dtype(cache_dtype).device(device_));
       if (!kv_cache_shape[1].empty()) {
         value_cache = torch::empty(kv_cache_shape[1],
                                    torch::dtype(cache_dtype).device(device_));
