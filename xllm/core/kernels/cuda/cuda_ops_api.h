@@ -110,4 +110,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_general(
     uint32_t k,
     torch::Device device);
 
+torch::Tensor air_log_softmax_last_dim(const torch::Tensor& input,
+                                       const torch::Tensor& temperatures);
+
 }  // namespace xllm::kernel::cuda

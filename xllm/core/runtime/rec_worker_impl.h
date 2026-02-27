@@ -29,6 +29,8 @@ limitations under the License.
 
 namespace xllm {
 
+class RecSampler;
+
 class RecWorkerImpl : public LLMWorkerImpl {
  public:
   RecWorkerImpl(const ParallelArgs& parallel_args,
@@ -231,6 +233,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
     torch::Tensor cached_current_round_tensor_;
 
     RecWorkerImpl& worker_;
+    std::unique_ptr<RecSampler> rec_sampler_;
 
     // for async scheduler
     ThreadPool threadpool_;
