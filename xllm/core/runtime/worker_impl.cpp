@@ -80,7 +80,7 @@ namespace {
 class ScopedAtenLoadThreads {
  public:
   explicit ScopedAtenLoadThreads(int32_t target_threads)
-      : prev_threads_(at::get_num_threads()) {
+      : prev_threads_(static_cast<int32_t>(at::get_num_threads())) {
     if (target_threads > 0 && prev_threads_ != target_threads) {
       torch::set_num_threads(target_threads);
       active_ = true;
@@ -100,7 +100,7 @@ class ScopedAtenLoadThreads {
   ScopedAtenLoadThreads& operator=(ScopedAtenLoadThreads&&) = delete;
 
  private:
-  int prev_threads_ = 0;
+  int32_t prev_threads_ = 0;
   bool active_ = false;
 };
 
@@ -645,7 +645,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
 
   std::unique_ptr<ScopedAtenLoadThreads> scoped_load_threads;
   if (tp_world_size > 1) {
-    const int prev_threads = torch::get_num_threads();
+    const int32_t prev_threads =
+        static_cast<int32_t>(torch::get_num_threads());
     LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
               << ", tp_world_size=" << tp_world_size
               << ", prev_threads=" << prev_threads;
