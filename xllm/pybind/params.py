@@ -1,23 +1,23 @@
-from typing import List, Optional, Type, Union
+from typing import Any, List, Optional, Type, Union
 
 from xllm_export import RequestParams
 
 
 class _RequestParamsProxy:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         object.__setattr__(self, "_request_params", RequestParams())
         for key, value in kwargs.items():
             self._set_field(key, value)
 
-    def _set_field(self, key: str, value):
+    def _set_field(self, key: str, value: Any) -> None:
         if not hasattr(self._request_params, key):
             raise TypeError(f"Unexpected parameter: {key}")
         setattr(self._request_params, key, value)
 
-    def __getattr__(self, key: str):
+    def __getattr__(self, key: str) -> Any:
         return getattr(self._request_params, key)
 
-    def __setattr__(self, key: str, value):
+    def __setattr__(self, key: str, value: Any) -> None:
         if key == "_request_params":
             object.__setattr__(self, key, value)
             return
@@ -32,12 +32,15 @@ class SamplingParams(_RequestParamsProxy):
 
 
 class BeamSearchParams(SamplingParams):
-    def __init__(self, beam_width: int = 1, max_tokens: int = 16, **kwargs):
+    def __init__(self,
+                 beam_width: int = 1,
+                 max_tokens: int = 16,
+                 **kwargs: Any) -> None:
         super().__init__(beam_width=beam_width, max_tokens=max_tokens, **kwargs)
 
 
 class PoolingParams(_RequestParamsProxy):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.is_embeddings = True
 

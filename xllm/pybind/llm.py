@@ -3,7 +3,7 @@ import os
 import signal
 import sys
 from . import util
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import xllm_export
 from xllm_export import (LLMMaster, VLMMaster, Options, RequestOutput,
@@ -131,7 +131,7 @@ class LLM:
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
         signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
@@ -205,7 +205,7 @@ class LLM:
         else:
             self.master = LLMMaster(options)
 
-    def finish(self):
+    def finish(self) -> None:
         try:
             #os.kill(os.getpid(), signal.SIGTERM)
             #os.kill(os.getpid(), signal.SIGKILL)
@@ -226,7 +226,7 @@ class LLM:
             List[SamplingParams],
         ]] = None,
         wait_for_schedule: bool = True,
-        **kwargs,
+        **kwargs: Any,
     ) -> List[RequestOutput]:
         request_params = kwargs.pop("request_params", None)
         if kwargs:

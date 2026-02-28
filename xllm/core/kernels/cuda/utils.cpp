@@ -17,8 +17,8 @@ limitations under the License.
 
 #include <c10/core/Device.h>
 #include <cuda_runtime.h>
-#include <dlpack/dlpack.h>
 #include <dlfcn.h>
+#include <dlpack/dlpack.h>
 
 #include <cstdlib>
 #include <mutex>
@@ -43,7 +43,8 @@ const std::unordered_map<torch::ScalarType, std::string_view>
 };
 
 void ensure_tvm_ffi_global_symbols() {
-  // Ensure that TVMFFIEnvGetStream and other TVM FFI symbols are globally visible for offline inference
+  // Ensure that TVMFFIEnvGetStream and other TVM FFI symbols are globally
+  // visible for offline inference
   static std::once_flag once;
   std::call_once(once, []() {
     auto has_required_symbol = [](void* handle) -> bool {

@@ -1,7 +1,8 @@
 import argparse
+from argparse import Namespace
 
 class ArgumentParser:
-    def __init__(self):
+    def __init__(self) -> None:
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument('--model', type=str, help='"Name or path of the huggingface model to use."')
         self.parser.add_argument('--task', type=str, default="generate", help='The task to use the model for. generate/embed.')
@@ -45,5 +46,5 @@ class ArgumentParser:
         self.parser.add_argument('--output_shm_size', type=int, default=128, help='The size of output shared memory in MB.')
         self.parser.add_argument('--kv_cache_dtype', type=str, default='auto', help='KV cache data type. "auto" (default) aligns with model dtype, "int8" enables INT8 quantization (MLU only).')
 
-    def parse_args(self):
+    def parse_args(self) -> Namespace:
         return self.parser.parse_args()

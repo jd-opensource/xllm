@@ -50,7 +50,7 @@ class VLM:
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
         signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
@@ -107,7 +107,7 @@ class VLM:
         options.output_shm_size = output_shm_size
         self.master = VLMMaster(options)
 
-    def finish(self):
+    def finish(self) -> None:
         try:
             #os.kill(os.getpid(), signal.SIGTERM)
             #os.kill(os.getpid(), signal.SIGKILL)
@@ -128,7 +128,7 @@ class VLM:
             List[SamplingParams],
         ]] = None,
         wait_for_schedule: bool = True,
-        **kwargs,
+        **kwargs: Any,
     ) -> List[RequestOutput]:
         from . import mm_utils
         prompts, mm_datas, image_urls = mm_utils.normalize_vllm_style_inputs(prompts)

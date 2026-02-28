@@ -33,7 +33,7 @@ namespace xllm {
 bool xllm::SpawnWorkerServer::g_running_ = true;
 
 namespace {
-std::string backend_from_worker_type(const std::string& worker_type) {
+std::string get_backend_from_worker_type(const std::string& worker_type) {
   if (worker_type == "LLM" || worker_type == "ELM") {
     return "llm";
   }
@@ -68,7 +68,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      const std::string& communication_backend) {
   // TODO: pass whole xllm::runtime::Options here from main process.
   xllm::runtime::Options runner_options;
-  const std::string backend = backend_from_worker_type(worker_type);
+  const std::string backend = get_backend_from_worker_type(worker_type);
   CHECK(!backend.empty()) << "Unsupported worker_type for backend mapping: "
                           << worker_type;
   runner_options.block_size(block_size)
