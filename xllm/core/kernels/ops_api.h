@@ -40,10 +40,6 @@ void quant_to_paged_cache(ReshapePagedCacheParams& params);
 // Only supported on MLU backend
 void dequant_from_paged_cache(ReshapeFromCacheParams& params);
 
-void batch_prefill(AttentionParams& params);
-
-void batch_decode(AttentionParams& params);
-
 void fused_layernorm(FusedLayerNormParams& params);
 
 torch::Tensor matmul(MatmulParams& params);
