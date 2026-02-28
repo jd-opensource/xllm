@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/framework/tokenizer/tokenizer_args.h"
 #include "core/util/json_reader.h"
 #include "core/util/type_traits.h"  // IWYU pragma: keep
+#include "processors/feature_extractor.h"
 #include "processors/image_processor.h"
 #include "processors/input_processor.h"
 
@@ -60,6 +61,9 @@ using InputProcessorFactory =
 using ImageProcessorFactory =
     std::function<std::unique_ptr<ImageProcessor>(const ModelArgs& args)>;
 
+using FeatureExtractorFactory =
+    std::function<std::unique_ptr<FeatureExtractor>(const ModelArgs& args)>;
+
 using ModelArgsLoader =
     std::function<bool(const JsonReader& json, ModelArgs* args)>;
 
@@ -79,6 +83,7 @@ struct ModelMeta {
   DiTModelFactory dit_model_factory;
   InputProcessorFactory input_processor_factory;
   ImageProcessorFactory image_processor_factory;
+  FeatureExtractorFactory feature_extractor_factory;
   ModelArgsLoader model_args_loader;
   QuantArgsLoader quant_args_loader;
   TokenizerArgsLoader tokenizer_args_loader;
@@ -119,8 +124,13 @@ class ModelRegistry {
 
   static void register_input_processor_factory(const std::string& name,
                                                InputProcessorFactory factory);
+
   static void register_image_processor_factory(const std::string& name,
                                                ImageProcessorFactory factory);
+
+  static void register_feature_extractor_factory(
+      const std::string& name,
+      FeatureExtractorFactory factory);
 
   static CausalLMFactory get_causallm_factory(const std::string& name);
 
@@ -145,6 +155,9 @@ class ModelRegistry {
       const std::string& name);
 
   static ImageProcessorFactory get_image_processor_factory(
+      const std::string& name);
+
+  static FeatureExtractorFactory get_feature_extractor_factory(
       const std::string& name);
 
   static std::string get_model_backend(const std::string& name);
@@ -291,6 +304,20 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
   REGISTER_IMAGE_PROCESSOR_WITH_VARNAME(                         \
       ModelType, ModelType, ImageProcessorClass)
 
+#define REGISTER_FEATURE_EXTRACTOR_WITH_VARNAME(                \
+    VarName, ModelType, FeatureExtractorClass)                  \
+  const bool VarName##_feature_extractor_registered = []() {    \
+    ModelRegistry::register_feature_extractor_factory(          \
+        #ModelType, [](const ModelArgs& args) {                 \
+          return std::make_unique<FeatureExtractorClass>(args); \
+        });                                                     \
+    return true;                                                \
+  }()
+
+#define REGISTER_FEATURE_EXTRACTOR(ModelType, FeatureExtractorClass) \
+  REGISTER_FEATURE_EXTRACTOR_WITH_VARNAME(                           \
+      ModelType, ModelType, FeatureExtractorClass)
+
 // Macro to register a model args loader with the ModelRegistry
 #define REGISTER_MODEL_ARGS_LOADER_WITH_VARNAME(VarName, ModelType, Loader) \
   const bool VarName##_args_loader_registered = []() {                      \
@@ -374,5 +401,47 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
   }()
 
 #define SET_ARG(arg_name, value) [&] { args->arg_name() = value; }()
+
+#define LOAD_ARG_WITH_PREFIX_JSON(json_prefix, ...)                     \
+  [&] {                                                                 \
+    auto prefix_json_data = json.sub_json(json_prefix);                 \
+    if (!prefix_json_data.has_value()) {                                \
+      LOG(WARNING) << "config.json doesn't contains a sub json strsuct" \
+                   << "that starts with the key: " << json_prefix       \
+                   << ". The parameters wouldn't be loaded, "           \
+                   << "please check your config";                       \
+      return;                                                           \
+    }                                                                   \
+    auto prefix_json = JsonReader(prefix_json_data.value());            \
+    __VA_ARGS__();                                                      \
+  }()
+
+#define LOAD_ARG_OR_PREFIX(arg_name, json_name, default_value)      \
+  [&] {                                                             \
+    auto value = args->arg_name();                                  \
+    using value_type = remove_optional_t<decltype(value)>;          \
+    args->arg_name() =                                              \
+        prefix_json.value_or<value_type>(json_name, default_value); \
+  }()
+
+#define LOAD_ARG_PREFIX(arg_name, json_name)                          \
+  [&] {                                                               \
+    auto value = args->arg_name();                                    \
+    using value_type = remove_optional_t<decltype(value)>;            \
+    if (auto data_value = prefix_json.value<value_type>(json_name)) { \
+      args->arg_name() = data_value.value();                          \
+    }                                                                 \
+  }()
+
+#define LOAD_ARG_OR_FUNC_PREFIX(arg_name, json_name, ...)             \
+  [&] {                                                               \
+    auto value = args->arg_name();                                    \
+    using value_type = remove_optional_t<decltype(value)>;            \
+    if (auto data_value = prefix_json.value<value_type>(json_name)) { \
+      args->arg_name() = data_value.value();                          \
+    } else {                                                          \
+      args->arg_name() = __VA_ARGS__();                               \
+    }                                                                 \
+  }()
 
 }  // namespace xllm

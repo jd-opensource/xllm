@@ -104,6 +104,17 @@ VLMMaster::VLMMaster(const Options& options)
     image_processor_ = image_processor_factory(model_args_);
   }
 
+  if (model_args_.has_feature_extractor()) {
+    auto feature_extractor_factory =
+        ModelRegistry::get_feature_extractor_factory(model_args_.model_type());
+    if (feature_extractor_factory == nullptr) {
+      LOG(FATAL) << "No feature extractor defined for model type: "
+                 << model_args_.model_type();
+    } else {
+      feature_extractor_ = feature_extractor_factory(model_args_);
+    }
+  }
+
   // construct tokenizer and handling threads
   tokenizer_ = engine_->tokenizer()->clone();
   threadpool_ =
@@ -416,6 +427,14 @@ std::shared_ptr<Request> VLMMaster::generate_request(
     LOG(ERROR) << " image processor process failed.";
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Image processor process failed.");
+    return nullptr;
+  }
+
+  if (feature_extractor_ && !mm_inputs.empty() &&
+      !feature_extractor_->process(mm_inputs, mm_data)) {
+    LOG(ERROR) << " feature extractor process failed.";
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "Feature extractor process failed.");
     return nullptr;
   }
 

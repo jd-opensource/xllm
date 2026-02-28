@@ -20,6 +20,8 @@ limitations under the License.
 #include <limits>
 #include <vector>
 
+#include "core/util/audio_utils.h"
+
 namespace xllm {
 
 class Sequence;
@@ -40,6 +42,10 @@ class MPositionHelper {
   std::tuple<torch::Tensor, int> get_positions_glm(
       torch::Tensor image_grid_thw,
       torch::Tensor video_grid_thw);
+  std::tuple<torch::Tensor, int> get_positions_omni(
+      torch::Tensor image_grid_thw,
+      torch::Tensor video_grid_thw,
+      torch::Tensor feat_length);
 
   torch::Tensor get_positions_d();
 

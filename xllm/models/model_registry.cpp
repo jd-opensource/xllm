@@ -168,6 +168,19 @@ void ModelRegistry::register_image_processor_factory(
   }
 }
 
+void ModelRegistry::register_feature_extractor_factory(
+    const std::string& name,
+    FeatureExtractorFactory factory) {
+  ModelRegistry* instance = get_instance();
+
+  if (instance->model_registry_[name].feature_extractor_factory != nullptr) {
+    SAFE_LOG_WARNING("feature extractor factory for "
+                     << name << " already registered.");
+  } else {
+    instance->model_registry_[name].feature_extractor_factory = factory;
+  }
+}
+
 void ModelRegistry::register_model_args_loader(const std::string& name,
                                                ModelArgsLoader loader) {
   ModelRegistry* instance = get_instance();
@@ -254,6 +267,13 @@ ImageProcessorFactory ModelRegistry::get_image_processor_factory(
   ModelRegistry* instance = get_instance();
 
   return instance->model_registry_[name].image_processor_factory;
+}
+
+FeatureExtractorFactory ModelRegistry::get_feature_extractor_factory(
+    const std::string& name) {
+  ModelRegistry* instance = get_instance();
+
+  return instance->model_registry_[name].feature_extractor_factory;
 }
 
 ModelArgsLoader ModelRegistry::get_model_args_loader(const std::string& name) {

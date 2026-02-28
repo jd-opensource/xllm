@@ -92,6 +92,21 @@ void MMData::get(uint32_t type, MMItemVec& vec) const {
   }
 }
 
+MMItemPtrVec* MMData::get(uint32_t type) {
+  MMItemPtrVec* vec = new MMItemPtrVec();
+  if (!valid()) return vec;
+
+  if (!hold<MMItemVec>()) return vec;
+
+  auto& data = items<MMItemVec>();
+  for (auto& item : data) {
+    if (item.type() & type) {
+      vec->push_back(&item);
+    }
+  }
+  return vec;
+}
+
 void MMData::get(const MMKey& key, std::vector<torch::Tensor>& vec) const {
   if (!valid()) return;
 
