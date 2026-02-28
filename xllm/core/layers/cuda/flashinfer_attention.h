@@ -44,6 +44,22 @@ class FlashInferAttentionImpl : public BaseAttentionImpl {
       torch::Tensor& value,
       torch::Tensor& output,
       KVCache& kv_cache) override;
+
+ private:
+  void prefill_forward(const AttentionMetadata& attn_metadata,
+                       torch::Tensor& query,
+                       torch::Tensor& key,
+                       torch::Tensor& value,
+                       torch::Tensor& output,
+                       std::optional<at::Tensor>& output_lse);
+
+  void decoder_forward(const AttentionMetadata& attn_metadata,
+                       torch::Tensor& query,
+                       const torch::Tensor& key,
+                       torch::Tensor& output,
+                       std::optional<at::Tensor>& output_lse,
+                       const torch::Tensor& k_cache,
+                       const torch::Tensor& v_cache);
 };
 
 }  // namespace layer
