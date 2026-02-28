@@ -91,6 +91,13 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                             const int64_t offset,
                             const torch::Device device);
 
+  // Build first-step draft input with optional two-row expansion for sequences
+  // that need decode tail KV fix.
+  void prepare_first_decode_inputs(
+      const ForwardInput& base_input,
+      const std::vector<EmbeddingCache::DecodeState>& cache_items,
+      ForwardInput& first_input);
+
  protected:
   // Draft model worker
   std::unique_ptr<LLMWorkerImpl> draft_impl_;

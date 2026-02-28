@@ -26,6 +26,15 @@ namespace xllm {
 
 class EmbeddingCache final {
  public:
+  struct DecodeState {
+    // Current decode embedding (last accepted token embedding).
+    torch::Tensor embedding;
+    int32_t last_token_id = -1;
+    torch::Tensor prev_embedding;
+    int32_t prev_token_id = -1;
+    bool need_first_decode_fix = false;
+  };
+
   EmbeddingCache(int32_t total_nums);
 
   ~EmbeddingCache() = default;
@@ -37,8 +46,15 @@ class EmbeddingCache final {
   void write(const std::vector<int32_t>& embedding_ids,
              const torch::Tensor& embeddings);
   void write_validate(const std::vector<int32_t>& embedding_ids,
-                      torch::Tensor& next_tokens,
-                      const torch::Tensor& embeddings);
+                      const torch::Tensor& next_tokens,
+                      const torch::Tensor& embeddings,
+                      int32_t num_speculative_tokens = -1);
+
+  std::vector<DecodeState> read_for_decode(
+      const std::vector<int32_t>& embedding_ids);
+
+  void clear_first_decode_fix(const std::vector<int32_t>& embedding_ids,
+                              const std::vector<uint8_t>& clear_mask);
 
   // Set placeholder tensor for PD separation: when read() finds an empty slot
   // (e.g. first decode on this instance), return placeholder instead so batch
@@ -49,10 +65,15 @@ class EmbeddingCache final {
   torch::Tensor read(const std::vector<int32_t>& embedding_ids);
 
  private:
-  // embedding cache
-  std::vector<torch::Tensor> cache_;
+  std::vector<DecodeState> decode_tails_;
   // placeholder for empty slots (e.g. PD separation decode instance)
   torch::Tensor placeholder_;
+
+  DecodeState& mutable_tail(int32_t embedding_id);
+  const DecodeState& get_tail(int32_t embedding_id) const;
+  void set_last_state(int32_t embedding_id,
+                      const torch::Tensor& embedding,
+                      int32_t token_id);
 };
 
 }  // namespace xllm
