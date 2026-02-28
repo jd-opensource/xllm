@@ -35,10 +35,11 @@ limitations under the License.
 // @worker_type
 // @input_shm_size
 // @output_shm_size
+// @communication_backend
 int main(int argc, char* argv[]) {
-  if (argc < 15) {
+  if (argc < 16) {
     LOG(ERROR)
-        << "Spwan worker process receive wrong args. Need 15 args, receive "
+        << "Spwan worker process receive wrong args. Need 16 args, receive "
         << argc;
     return 1;
   }
@@ -64,6 +65,7 @@ int main(int argc, char* argv[]) {
   std::string worker_type = std::string(argv[12]);
   uint64_t input_shm_size = atoll(argv[13]);
   uint64_t output_shm_size = atoll(argv[14]);
+  std::string communication_backend = std::string(argv[15]);
 
   LOG(INFO) << "Spwan worker: "
             << "master_node_addr = " << master_node_addr
@@ -78,7 +80,8 @@ int main(int argc, char* argv[]) {
             << ", is_local = " << (is_local > 0)
             << ", enable_prefill_sp = " << (enable_prefill_sp > 0)
             << ", task_type = " << task_type
-            << ", worker_type = " << worker_type << "\n";
+            << ", worker_type = " << worker_type
+            << ", communication_backend = " << communication_backend << "\n";
 
   xllm::SpawnWorkerServer worker(master_node_addr,
                                  local_rank,
@@ -93,7 +96,8 @@ int main(int argc, char* argv[]) {
                                  is_local > 0,
                                  enable_prefill_sp > 0,
                                  task_type,
-                                 worker_type);
+                                 worker_type,
+                                 communication_backend);
 
   worker.run();
 

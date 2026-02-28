@@ -7,6 +7,7 @@ from typing import List, Optional, Union
 
 from xllm_export import (LLMMaster, Options, RequestOutput,
                          RequestParams)
+from .errors import ValidationError
 
 class Embedding:
     def __init__(
@@ -99,7 +100,7 @@ class Embedding:
         self,
         inputs: Union[str, List[str]],
         request_params: Optional[Union[RequestParams, List[RequestParams]]] = None,
-        wait_schedule_done: bool = True,
+        wait_for_schedule: bool = True,
     ) -> List[RequestOutput]:
         if request_params is None:
             request_params = RequestParams()
@@ -123,7 +124,7 @@ class Embedding:
         )
 
         # TODO: add wait later
-        if wait_schedule_done:
+        if wait_for_schedule:
             pass
 
         # generate

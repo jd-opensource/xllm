@@ -41,7 +41,9 @@ RemoteWorker::RemoteWorker(int32_t global_rank,
                            const torch::Device& d,
                            std::unique_ptr<CommChannel> channel)
     : global_rank_(global_rank), device_(d), channel_(std::move(channel)) {
-  wait_for_server_ready(server_address);
+  CHECK(wait_for_server_ready(server_address))
+      << "Failed to wait for remote worker server ready: " << server_address
+      << ", global_rank: " << global_rank_;
 }
 
 bool RemoteWorker::wait_for_server_ready(const std::string& server_address) {

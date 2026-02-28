@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
+#include "models/model_registry.h"
 
 namespace xllm {
 namespace py = pybind11;
@@ -139,6 +140,17 @@ PYBIND11_MODULE(xllm_export, m) {
   // 3. export RequestParams
   py::class_<RequestParams>(m, "RequestParams")
       .def(py::init())
+      .def(py::init([](py::kwargs kwargs) {
+        RequestParams params;
+        py::object obj = py::cast(params);
+        for (const auto& item : kwargs) {
+          if (!py::isinstance<py::str>(item.first)) {
+            throw py::type_error("Keyword argument name must be a string");
+          }
+          py::setattr(obj, item.first, item.second);
+        }
+        return obj.cast<RequestParams>();
+      }))
       .def_readwrite("request_id", &RequestParams::request_id)
       .def_readwrite("service_request_id", &RequestParams::service_request_id)
       .def_readwrite("x_request_id", &RequestParams::x_request_id)
@@ -159,9 +171,26 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("ignore_eos", &RequestParams::ignore_eos)
       .def_readwrite("is_embeddings", &RequestParams::is_embeddings)
       .def_readwrite("stop", &RequestParams::stop)
-      .def_readwrite("stop_token_ids", &RequestParams::stop_token_ids);
+      .def_readwrite("stop_token_ids", &RequestParams::stop_token_ids)
+      .def_readwrite("beam_width", &RequestParams::beam_width);
 
-  // 4. export RequestOutput
+  // 4. export Usage
+  py::class_<Usage>(m, "Usage")
+      .def(py::init())
+      .def_readwrite("num_prompt_tokens", &Usage::num_prompt_tokens)
+      .def_readwrite("num_generated_tokens", &Usage::num_generated_tokens)
+      .def_readwrite("num_total_tokens", &Usage::num_total_tokens)
+      .def_property_readonly(
+          "prompt_tokens",
+          [](const Usage& self) { return self.num_prompt_tokens; })
+      .def_property_readonly(
+          "completion_tokens",
+          [](const Usage& self) { return self.num_generated_tokens; })
+      .def_property_readonly("total_tokens", [](const Usage& self) {
+        return self.num_total_tokens;
+      });
+
+  // 5. export RequestOutput
   py::class_<RequestOutput>(m, "RequestOutput")
       .def(py::init())
       .def_readwrite("request_id", &RequestOutput::request_id)
@@ -173,7 +202,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("finished", &RequestOutput::finished)
       .def_readwrite("cancelled", &RequestOutput::cancelled);
 
-  // 5. export StatusCode
+  // 6. export StatusCode
   py::enum_<StatusCode>(m, "StatusCode")
       .value("OK", StatusCode::OK)
       .value("CANCELLED", StatusCode::CANCELLED)
@@ -183,7 +212,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .value("RESOURCE_EXHAUSTED", StatusCode::RESOURCE_EXHAUSTED)
       .export_values();
 
-  // 6. export Status
+  // 7. export Status
   py::class_<Status>(m, "Status")
       .def(py::init<StatusCode, const std::string&>(),
            py::arg("code"),
@@ -199,7 +228,7 @@ PYBIND11_MODULE(xllm_export, m) {
                                                         self.message());
       });
 
-  // 7. export SequenceOutput
+  // 8. export SequenceOutput
   py::class_<SequenceOutput>(m, "SequenceOutput")
       .def(py::init())
       .def_readwrite("index", &SequenceOutput::index)
@@ -213,7 +242,7 @@ PYBIND11_MODULE(xllm_export, m) {
         return "SequenceOutput({}: {!r})"_s.format(self.index, self.text);
       });
 
-  // 8. export MMType
+  // 9. export MMType
   py::enum_<MMType::Value>(m, "MMType")
       .value("NONE", MMType::Value::NONE)
       .value("IMAGE", MMType::Value::IMAGE)
@@ -221,7 +250,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .value("AUDIO", MMType::Value::AUDIO)
       .export_values();
 
-  // 9. export MMData
+  // 10. export MMData
   py::class_<MMData>(m, "MMData")
       .def(py::init<int, const MMDict&>(), py::arg("ty"), py::arg("data"))
       .def("get",
@@ -246,7 +275,7 @@ PYBIND11_MODULE(xllm_export, m) {
         return ss.str();
       });
 
-  // 10. export VLMMaster
+  // 11. export VLMMaster
   py::class_<VLMMaster>(m, "VLMMaster")
       .def(py::init<const Options&>(),
            py::arg("options"),
@@ -258,12 +287,24 @@ PYBIND11_MODULE(xllm_export, m) {
                              BatchOutputCallback>(
                &VLMMaster::handle_batch_request),
            py::call_guard<py::gil_scoped_release>())
+      .def("handle_batch_request_with_image_urls",
+           py::overload_cast<std::vector<std::string>,
+                             std::vector<std::vector<std::string>>,
+                             std::vector<RequestParams>,
+                             BatchOutputCallback>(
+               &VLMMaster::handle_batch_request_with_image_urls),
+           py::call_guard<py::gil_scoped_release>())
       .def("generate",
            &VLMMaster::generate,
            py::call_guard<py::gil_scoped_release>())
       .def("__repr__", [](const VLMMaster& self) {
         return "VLMMaster({})"_s.format(self.options());
       });
+
+  // 12. export helpers
+  m.def("get_model_backend",
+        &ModelRegistry::get_model_backend,
+        py::arg("model_type"));
 }
 
 }  // namespace xllm

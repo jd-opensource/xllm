@@ -1,17 +1,18 @@
 # python examples/generate.py --model='/path/models/Qwen2-7B-Instruct' --devices='npu:0'
 # python generate.py --model='/path/models/Qwen2-7B-Instruct' --devices='npu:0,npu:1'
 
-from xllm import ArgumentParser, LLM, RequestParams
+from xllm import ArgumentParser, LLM, SamplingParams
 
 # Create an LLM.
 parser = ArgumentParser()
 llm = LLM(**vars(parser.parse_args()))
 
-# Create a reqeust params, include sampling params
-request_params = RequestParams()
-request_params.temperature = 0.8
-request_params.top_p = 0.95
-request_params.max_tokens = 10
+# Create sampling params.
+sampling_params = SamplingParams(
+    temperature=0.8,
+    top_p=0.95,
+    max_tokens=10,
+)
 
 # Generate texts from the prompts. The output is a list of RequestOutput
 # objects that contain the prompt, generated text, and other information.
@@ -22,7 +23,7 @@ prompts = [
     "The future of AI is",
 ]
 
-outputs = llm.generate(prompts, request_params, True)
+outputs = llm.generate(prompts, sampling_params=sampling_params)
 
 # Print the outputs.
 for i, output in enumerate(outputs):
@@ -31,4 +32,3 @@ for i, output in enumerate(outputs):
     print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
 llm.finish()
-

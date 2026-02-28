@@ -19,6 +19,9 @@ limitations under the License.
 #include <butil/strings/string_number_conversions.h>
 #include <glog/logging.h>
 
+#include <fstream>
+#include <iterator>
+
 #include "common/global_flags.h"
 #include "core/util/http_downloader.h"
 #include "mm_codec.h"
@@ -74,7 +77,21 @@ bool MMHandlerBase::load_from_dataurl(const std::string& url,
 }
 
 bool MMHandlerBase::load_from_local(const std::string& url, std::string& data) {
-  return false;
+  std::string path = url;
+  const std::string prefix = "file://";
+  if (path.compare(0, prefix.size(), prefix) == 0) {
+    path = path.substr(prefix.size());
+  }
+
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    LOG(ERROR) << "failed to open local file: " << path;
+    return false;
+  }
+
+  data.assign(std::istreambuf_iterator<char>(in),
+              std::istreambuf_iterator<char>());
+  return true;
 }
 
 bool MMHandlerBase::load_from_http(const std::string& url, std::string& data) {
@@ -101,6 +118,11 @@ bool ImageHandler::load(const MMContent& content,
     input.type = MMType::IMAGE;
     return this->load_from_http(url, input.raw_data);
   } else {
+    // treat as local path or file:// url
+    input.type = MMType::IMAGE;
+    if (this->load_from_local(url, input.raw_data)) {
+      return true;
+    }
     LOG(ERROR) << " image url is invalid, url is " << url;
     return false;
   }

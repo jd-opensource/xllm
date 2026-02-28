@@ -622,7 +622,8 @@ if __name__ == "__main__":
         py_modules=["xllm/launch_xllm", "xllm/__init__",
                     "xllm/pybind/llm", "xllm/pybind/vlm",
                     "xllm/pybind/embedding", "xllm/pybind/util",
-                    "xllm/pybind/args"],
+                    "xllm/pybind/args", "xllm/pybind/params",
+                    "xllm/pybind/errors", "xllm/pybind/mm_utils"],
         entry_points={
             'console_scripts': [
                 'xllm = xllm.launch_xllm:launch_xllm'

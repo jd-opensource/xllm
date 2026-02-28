@@ -349,6 +349,14 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     // enable logprobs for best_of to generate sequence logprob
     sampling_param.logprobs = true;
   }
+  if (sampling_param.beam_width > 1) {
+    // beam search requires logprobs, and needs at least one top_logprob
+    // candidate for beam expansion.
+    sampling_param.logprobs = true;
+    if (sampling_param.top_logprobs == 0) {
+      sampling_param.top_logprobs = 1;
+    }
+  }
   // sampling_param.do_sample = sp.do_sample;
 
   SchedulerParam scheduler_param;

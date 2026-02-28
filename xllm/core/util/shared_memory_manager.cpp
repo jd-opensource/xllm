@@ -123,13 +123,11 @@ SharedMemoryManager::~SharedMemoryManager() {
 }
 
 void SharedMemoryManager::cleanup_handler(int sig) {
-  std::lock_guard<std::mutex> lock(cleanup_mutex);
-  LOG(INFO) << "Signal: " << sig << " (" << strsignal(sig) << ")";
-  for (const auto& name : pending_cleanups) {
-    LOG(INFO) << "SharedMemoryManager cleanup_handler name:" << name;
-    shm_unlink(name.c_str());
-  }
-  exit(sig);
+  // Avoid non-async-signal-safe operations (mutex, logging, shm_unlink, exit).
+  // Just restore default handler and re-raise to terminate normally.
+  // TODO: support cleaning up shared memory properly when singal is received.
+  signal(sig, SIG_DFL);
+  kill(getpid(), sig);
 }
 
 }  // namespace xllm

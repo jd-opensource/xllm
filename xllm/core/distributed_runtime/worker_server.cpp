@@ -159,6 +159,7 @@ void WorkerServer::create_spawn_server(int local_rank,
   const char* is_local_ptr = is_local_str.c_str();
   auto enable_prefill_sp_str = std::to_string(options.enable_prefill_sp());
   const char* enable_prefill_sp_ptr = enable_prefill_sp_str.c_str();
+  const char* communication_backend_ptr = FLAGS_communication_backend.c_str();
   const char* worker_type_ptr = worker_type.to_string();
   std::string spawn_worker_bin_path =
       options.spawn_worker_path() + "/spawn_worker";
@@ -178,6 +179,7 @@ void WorkerServer::create_spawn_server(int local_rank,
                         worker_type_ptr,
                         input_shm_size_ptr,
                         output_shm_size_ptr,
+                        communication_backend_ptr,
                         nullptr};
   pid_t pid;
   posix_spawn_file_actions_init(&file_actions_);
@@ -260,10 +262,10 @@ WorkerServer::WorkerServer(int local_worker_idx,
       worker_thread_ =
           std::make_unique<std::thread>(&WorkerServer::create_server,
                                         this,
-                                        std::cref(options),
+                                        options,
                                         std::ref(done),
-                                        std::cref(master_node_addr),
-                                        std::cref(d),
+                                        master_node_addr,
+                                        d,
                                         parallel_args.world_size(),
                                         parallel_args.rank(),
                                         parallel_args.dp_size(),
@@ -330,7 +332,7 @@ WorkerServer::~WorkerServer() {
     worker_server->stop();
   }
 
-  if (worker_thread_->joinable()) {
+  if (worker_thread_ && worker_thread_->joinable()) {
     worker_thread_->join();
   }
 

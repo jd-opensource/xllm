@@ -25,9 +25,11 @@ limitations under the License.
 #include <vector>
 
 #include "common/metrics.h"
+#include "core/common/message.h"
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/model/model_args.h"
 #include "framework/request/mm_data.h"
+#include "framework/request/mm_input.h"
 #include "framework/request/request.h"
 #include "models/model_registry.h"
 #include "runtime/xservice_client.h"
@@ -211,6 +213,37 @@ void VLMMaster::handle_batch_request(std::vector<std::string> prompts,
   for (size_t i = 0; i < num_requests; ++i) {
     handle_request(std::move(prompts[i]),
                    std::move(mm_datas[i]),
+                   // the sampling parameter may be shared
+                   sps.size() == 1 ? sps[0] : std::move(sps[i]),
+                   [i, callback](const RequestOutput& output) {
+                     output.log_request_status();
+                     return callback(i, output);
+                   });
+  }
+}
+
+void VLMMaster::handle_batch_request_with_image_urls(
+    std::vector<std::string> prompts,
+    std::vector<std::vector<std::string>> image_urls,
+    std::vector<RequestParams> sps,
+    BatchOutputCallback callback) {
+  CHECK(prompts.size() == image_urls.size())
+      << "Number of prompts and image urls should be the same";
+  CHECK(prompts.size() == sps.size() || sps.size() == 1)
+      << "Number of prompts and sampling parameters should be the same";
+
+  const size_t num_requests = prompts.size();
+  for (size_t i = 0; i < num_requests; ++i) {
+    MMData mm_data;
+    if (!build_mm_data_from_image_urls(image_urls[i], mm_data)) {
+      callback(i,
+               RequestOutput(Status{StatusCode::INVALID_ARGUMENT,
+                                    "Image processor process failed."}));
+      continue;
+    }
+
+    handle_request(std::move(prompts[i]),
+                   std::move(mm_data),
                    // the sampling parameter may be shared
                    sps.size() == 1 ? sps[0] : std::move(sps[i]),
                    [i, callback](const RequestOutput& output) {
@@ -431,6 +464,36 @@ std::shared_ptr<Request> VLMMaster::generate_request(
                           std::move(mm_data),
                           std::move(sp),
                           std::move(callback));
+}
+
+bool VLMMaster::build_mm_data_from_image_urls(
+    const std::vector<std::string>& image_urls,
+    MMData& mm_data) {
+  static MMInputTransfer mm_input_transfer;
+
+  MMContentVec contents;
+  contents.reserve(image_urls.size());
+  for (const auto& url : image_urls) {
+    ImageURL image_url;
+    image_url.url = url;
+    contents.emplace_back("image_url", image_url);
+  }
+
+  std::vector<Message> messages;
+  messages.emplace_back("user", std::move(contents));
+
+  MMInput mm_inputs;
+  if (!mm_input_transfer.trans(messages, mm_inputs)) {
+    LOG(ERROR) << "mm input trans failed.";
+    return false;
+  }
+
+  if (!mm_inputs.empty() && !image_processor_->process(mm_inputs, mm_data)) {
+    LOG(ERROR) << "image processor process failed.";
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace xllm

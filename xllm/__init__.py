@@ -46,14 +46,19 @@ _spec.loader.exec_module(xllm_export)
 
 from xllm.pybind.embedding import Embedding
 from xllm.pybind.llm import LLM
-from xllm.pybind.vlm import VLM
+try:
+    from xllm.pybind.vlm import VLM
+except Exception:
+    VLM = None
 from xllm.pybind.args import ArgumentParser
+from xllm.pybind.params import SamplingParams, BeamSearchParams, PoolingParams
 from xllm_export import (
     LLMMaster,
     VLMMaster,
     Options,
     RequestParams,
     RequestOutput,
+    Usage,
     SequenceOutput,
     Status,
     StatusCode,
@@ -69,8 +74,12 @@ __all__ = [
     "VLM",
     "VLMMaster",
     "Options",
+    "SamplingParams",
+    "BeamSearchParams",
+    "PoolingParams",
     "RequestParams",
     "RequestOutput",
+    "Usage",
     "SequenceOutput",
     "Status",
     "StatusCode",

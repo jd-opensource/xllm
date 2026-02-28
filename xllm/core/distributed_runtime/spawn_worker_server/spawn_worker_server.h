@@ -15,9 +15,14 @@ limitations under the License.
 
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+#include <memory>
 #include <string>
 
 namespace xllm {
+
+class WorkerServer;
 
 class SpawnWorkerServer final {
  public:
@@ -34,15 +39,20 @@ class SpawnWorkerServer final {
                              bool is_local,
                              bool enable_prefill_sp,
                              const std::string& task_type,
-                             const std::string& worker_type);
+                             const std::string& worker_type,
+                             const std::string& communication_backend);
 
-  ~SpawnWorkerServer() = default;
+  ~SpawnWorkerServer();
 
   void run();
 
   static void handle_signal(int signum);
 
   static bool g_running_;
+
+ private:
+  std::atomic<bool> done_{false};
+  std::unique_ptr<WorkerServer> worker_server_;
 };
 
 }  // namespace xllm
