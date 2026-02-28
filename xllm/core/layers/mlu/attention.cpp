@@ -168,6 +168,7 @@ void AttentionImpl::prefill_forward(
   output = output.view({-1, num_heads_, head_size_v});
 
   std::optional<torch::Tensor> block_tables = std::nullopt;
+  std::optional<torch::Tensor> output_lse = std::nullopt;
 
   if (attn_metadata.is_prefill) {
     key = key.view({-1, num_kv_heads_, head_size_});
@@ -226,7 +227,7 @@ void AttentionImpl::prefill_forward(
                                    key,
                                    value,
                                    output,
-                                   /*output_lse=*/std::nullopt,
+                                   output_lse,
                                    attn_metadata.q_cu_seq_lens,
                                    attn_metadata.kv_cu_seq_lens,
                                    /*alibi_slope=*/std::nullopt,
@@ -258,6 +259,8 @@ void AttentionImpl::decoder_forward(
   query = query.view({-1, 1, num_heads_, head_size_});
   output = output.view({-1, 1, num_heads_, head_size_v});
 
+  std::optional<torch::Tensor> output_lse = std::nullopt;
+
   // Set quantization parameters if KV cache is quantized
   std::optional<torch::Tensor> k_cache_quant_scale;
   std::optional<torch::Tensor> v_cache_quant_scale;
@@ -273,10 +276,10 @@ void AttentionImpl::decoder_forward(
   xllm::kernel::mlu::batch_decode(query,
                                   k_cache,
                                   output,
-                                  block_tables,
+                                  attn_metadata.block_table,
                                   attn_metadata.kv_seq_lens,
                                   v_cache,
-                                  /*output_lse=*/std::nullopt,
+                                  output_lse,
                                   /*q_quant_scale=*/std::nullopt,
                                   k_cache_quant_scale,
                                   v_cache_quant_scale,

@@ -143,11 +143,13 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
       *std::max_element(cu_seq_len_vec.begin(), cu_seq_len_vec.end());
 
 #if defined(USE_MLU)
+  std::optional<torch::Tensor> output_lse = std::nullopt;
+
   xllm::kernel::mlu::batch_prefill(q,
                                    k,
                                    v,
                                    output,
-                                   /*output_lse=*/std::nullopt,
+                                   output_lse,
                                    cu_seq_len,
                                    cu_seq_len,
                                    /*alibi_slope=*/std::nullopt,
