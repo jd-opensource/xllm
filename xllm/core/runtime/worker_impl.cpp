@@ -448,7 +448,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     auto dst_tensor =
         torch::tensor(dst_indices, torch::dtype(torch::kLong).device(device_));
     const int64_t num_layers = context_.get_model_args().n_layers();
-    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+    for (int32_t layer_id = 0; layer_id < num_layers; layer_id++) {
       kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
     }
   }
@@ -638,7 +638,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     return false;
   }
 
-  int tp_world_size = parallel_args_.world_size();
+  int32_t tp_world_size = parallel_args_.world_size();
   if (parallel_args_.tp_group_) {
     tp_world_size = parallel_args_.tp_group_->world_size();
   }
