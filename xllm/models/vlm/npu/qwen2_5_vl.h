@@ -707,7 +707,6 @@ struct Qwen2_5_VLImageInputs {
 struct Qwen2_5_VLVideoInputs {
   torch::Tensor pixel_values_videos;
   torch::Tensor video_grid_thw;
-  torch::Tensor second_per_grid_ts;
 };
 
 class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
@@ -742,17 +741,11 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (const auto& res = mm_data.get<torch::Tensor>("video_grid_thw"))
       video_grid_thw = res.value();
 
-    torch::Tensor second_per_grid_ts;
-    if (const auto& res = mm_data.get<torch::Tensor>("second_per_grid_ts"))
-      second_per_grid_ts = res.value();
-
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Qwen2_5_VLImageInputs{pixel_values, image_grid_thw};
 
-    if (pixel_values_videos.defined() && video_grid_thw.defined() &&
-        second_per_grid_ts.defined())
-      video_inputs = Qwen2_5_VLVideoInputs{
-          pixel_values_videos, video_grid_thw, second_per_grid_ts};
+    if (pixel_values_videos.defined() && video_grid_thw.defined())
+      video_inputs = Qwen2_5_VLVideoInputs{pixel_values_videos, video_grid_thw};
   }
 
   MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
