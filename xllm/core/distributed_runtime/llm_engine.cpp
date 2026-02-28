@@ -24,12 +24,14 @@ limitations under the License.
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
+#include "common/options.h"
 #include "framework/block/hierarchy_block_manager_pool.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
@@ -40,6 +42,23 @@ limitations under the License.
 #include "util/env_var.h"
 #include "util/pretty_print.h"
 #include "util/utils.h"
+
+namespace {
+int64_t get_kv_cache_dtype_size_in_bytes(const std::string& kv_cache_dtype,
+                                         int64_t model_dtype_size) {
+  if (kv_cache_dtype == "auto") {
+    return model_dtype_size;
+  }
+  if (kv_cache_dtype == "int8") {
+    return static_cast<int64_t>(sizeof(int8_t));
+  }
+  // for future: fp8_e4m3, fp8_e5m2, etc. -> 1 byte
+  if (kv_cache_dtype == "fp8_e4m3" || kv_cache_dtype == "fp8_e5m2") {
+    return static_cast<int64_t>(sizeof(int8_t));
+  }
+  return model_dtype_size;
+}
+}  // namespace
 
 namespace xllm {
 
@@ -162,7 +181,8 @@ bool LLMEngine::init_model() {
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
             << ", n_local_kv_heads: " << n_local_kv_heads_
             << ", head_dim: " << head_dim_ << ", n_layers: " << args_.n_layers()
-            << ", dtype: " << dtype_;
+            << ", dtype: " << dtype_
+            << ", kv_cache_dtype: " << options_.kv_cache_dtype();
 
   if (tokenizer_->vocab_size() != args_.vocab_size()) {
     // use tokenizer vocab size if model vocab size is not set
@@ -254,31 +274,59 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 
   // compute kv cache slot size
+  const bool enable_kv_cache_quant = options_.kv_cache_dtype() != "auto";
+  const int64_t cache_dtype_size = get_kv_cache_dtype_size_in_bytes(
+      options_.kv_cache_dtype(),
+      static_cast<int64_t>(torch::scalarTypeToTypeMeta(dtype_).itemsize()));
+  // Model dtype size for Indexer Cache (always uses original precision)
   const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
+
   int64_t slot_size = 0;
   int64_t index_slot_size = 0;
+  int64_t scale_slot_size =
+      0;  // Extra overhead for scale tensors in quant mode
+
   if (FLAGS_enable_mla) {
 #if defined(USE_NPU)
     if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       slot_size =
-          dtype_size *
+          cache_dtype_size *
           ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
            (args_.qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT) *
           NZ_ALIGNMENT;
     } else {
       slot_size =
-          dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+          cache_dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
     }
 #else
-    slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+    slot_size =
+        cache_dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
 #endif
-
   } else {
-    slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
+    slot_size = 2 * cache_dtype_size * head_dim_ * n_local_kv_heads_;
   }
+
+  // Indexer Cache always uses original precision (not quantized)
   if (args_.index_n_heads() > 0) {
     int index_n_head = 1;
     index_slot_size = dtype_size * index_n_head * args_.index_head_dim();
+  }
+
+  // Calculate scale tensor overhead for quantized KV cache (per-token bytes).
+  // worker_impl allocates scale as kv_cache_shape with last dim removed.
+  // Standard attention: K scale [num_blocks, n_kv_heads, block_size], V same
+  // => per token: n_kv_heads floats for K + n_kv_heads for V.
+  // MLA: key scale [num_blocks, 1, block_size] => one float per token.
+  if (enable_kv_cache_quant) {
+    const int32_t block_size = options_.block_size();
+    if (FLAGS_enable_mla) {
+      // MLA scale shape is [num_blocks, 1, block_size] -> one float per token
+      scale_slot_size = sizeof(float);
+    } else {
+      // Standard attention: separate K and V scales
+      // K scale: [n_kv_heads, block_size], V scale: [n_kv_heads, block_size]
+      scale_slot_size = 2 * sizeof(float) * n_local_kv_heads_;
+    }
   }
   kv_cache_cap.slot_size = slot_size;
   kv_cache_cap.index_slot_size = index_slot_size;
@@ -299,8 +347,10 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   if (!FLAGS_enable_continuous_kvcache) {
     // compute kv cache n_blocks
     const int32_t block_size = options_.block_size();
+    // Include scale tensor overhead in block size calculation
     const int64_t block_size_in_bytes =
-        block_size * (slot_size + index_slot_size);
+        block_size * (slot_size + index_slot_size) +
+        block_size * scale_slot_size;
     kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
                             (kv_cache_cap.n_layers * block_size_in_bytes);
     CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
@@ -323,7 +373,8 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
             << readable_size(kv_cache_cap.cache_size_in_bytes)
             << ", blocks: " << kv_cache_cap.n_blocks
             << ", slot_size: " << kv_cache_cap.slot_size
-            << ", n_layers: " << kv_cache_cap.n_layers;
+            << ", n_layers: " << kv_cache_cap.n_layers
+            << ", kv_cache_dtype: " << options_.kv_cache_dtype();
 
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no memory for kv cache";
   const int32_t block_size = options_.block_size();

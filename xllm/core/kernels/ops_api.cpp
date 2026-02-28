@@ -197,12 +197,45 @@ void reshape_from_cache(ReshapeFromCacheParams& params) {
 #endif
 }
 
+void quant_to_paged_cache(ReshapePagedCacheParams& params) {
+#if defined(USE_MLU)
+  CHECK(params.k_cache_scale.has_value())
+      << "k_cache_scale is required for quant_to_paged_cache";
+  mlu::quant_to_paged_cache(params.key,
+                            params.value,
+                            params.k_cache,
+                            params.v_cache,
+                            params.k_cache_scale.value(),
+                            params.v_cache_scale,
+                            params.slot_mapping);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+void dequant_from_paged_cache(ReshapeFromCacheParams& params) {
+#if defined(USE_MLU)
+  CHECK(params.key_cache_quant_scale.has_value())
+      << "key_cache_quant_scale is required for dequant_from_paged_cache";
+  mlu::dequant_from_paged_cache(params.key,
+                                params.value,
+                                params.key_cache,
+                                params.value_cache,
+                                params.key_cache_quant_scale.value(),
+                                params.value_cache_quant_scale,
+                                params.context_lengths,
+                                params.max_context_len,
+                                params.context_seq_offset,
+                                params.block_tables.value(),
+                                params.quant_mode,
+                                params.quant_bit);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 void batch_prefill(AttentionParams& params) {
 #if defined(USE_MLU)
-  std::optional<torch::Tensor> block_tables;
-  if (params.attn_metadata.is_chunked_prefill) {
-    block_tables = params.attn_metadata.block_table;
-  }
   mlu::batch_prefill(params.query,
                      params.key,
                      params.value,
@@ -216,7 +249,7 @@ void batch_prefill(AttentionParams& params) {
                      params.k_quant_scale,
                      params.v_quant_scale,
                      params.out_quant_scale,
-                     block_tables,
+                     params.block_tables,
                      params.attn_metadata.max_query_len,
                      params.attn_metadata.max_seq_len,
                      params.scale,

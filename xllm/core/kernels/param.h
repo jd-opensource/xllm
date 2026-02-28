@@ -146,6 +146,14 @@ struct ReshapePagedCacheParams {
   // Direction flag: false = CONTEXT2CACHE (copy from context to cache),
   // true = CACHE2CONTEXT (copy from cache to context).
   bool direction = false;
+  // Optional scale tensor for quantized key cache. Shape: [num_blocks,
+  // num_heads, block_size]. Dtype: float32. Required when using INT8
+  // quantization.
+  std::optional<torch::Tensor> k_cache_scale;
+  // Optional scale tensor for quantized value cache. Shape: [num_blocks,
+  // num_heads, block_size]. Dtype: float32. Required when using INT8
+  // quantization.
+  std::optional<torch::Tensor> v_cache_scale;
 };
 
 // ReshapeFromCacheParams describes parameters for gathering and flattening
@@ -191,6 +199,20 @@ struct ReshapeFromCacheParams {
   // Used for slicing key and value cache starts in memory.
   // Shape: [batch_size]. Dtype: int32. Default: None.
   std::optional<torch::Tensor> cache_seq_offset;
+
+  // ========== Quantization parameters (for dequant_from_paged_cache)
+  // ========== Optional scale tensor for quantized key cache. Shape:
+  // [num_blocks, num_heads, block_size] or [num_heads, head_dim]. Dtype:
+  // float32. Required when dequantizing INT8 cache.
+  std::optional<torch::Tensor> key_cache_quant_scale;
+  // Optional scale tensor for quantized value cache.
+  // Shape: [num_blocks, num_heads, block_size] or [num_heads, head_dim].
+  // Dtype: float32. Required when dequantizing INT8 cache.
+  std::optional<torch::Tensor> value_cache_quant_scale;
+  // Quantization mode: 0 for per-channel, 1 for per-token. Default: 1.
+  int64_t quant_mode = 1;
+  // Quantization bit size. Default: 8 (INT8).
+  int64_t quant_bit = 8;
 };
 
 // Attention parameters
@@ -204,6 +226,12 @@ struct AttentionParams {
   // Batch-level attention metadata shared across all layers.
   // Contains sequence lengths, paged KV cache indices, plan_info, etc.
   const layer::AttentionMetadata& attn_metadata;
+
+  // Optional override for block_table. When set, this takes precedence over
+  // attn_metadata.block_table. Used when key/value are dequantized to 3D
+  // tensors (e.g., in chunked prefill with quantized KV cache), where paged
+  // cache mode should not be used.
+  std::optional<torch::Tensor> block_tables;
 
   // ========== Common parameters (used by both prefill and decode) ==========
   // Query tensor. Shape depends on mode:

@@ -41,11 +41,11 @@ DECLARE_string(devices);
 
 DECLARE_int32(limit_image_per_prompt);
 
+// --- kvcache config ---
 DECLARE_int32(block_size);
-
 DECLARE_int64(max_cache_size);
-
 DECLARE_double(max_memory_utilization);
+DECLARE_string(kv_cache_dtype);
 
 DECLARE_bool(enable_prefix_cache);
 

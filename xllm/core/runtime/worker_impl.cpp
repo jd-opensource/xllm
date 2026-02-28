@@ -89,13 +89,39 @@ bool WorkerImpl::allocate_kv_cache(
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
+  // Check if KV cache quantization is enabled
+  // "auto" (default): cache dtype aligns with model dtype (no quantization)
+  // "int8": enables INT8 quantization
+  const bool enable_kv_cache_quant = options_.kv_cache_dtype() == "int8";
+
+  if (enable_kv_cache_quant) {
+#if !defined(USE_MLU)
+    LOG(FATAL) << "KV Cache quantization is only supported on MLU backend. "
+               << "Current backend does not support this feature.";
+#endif
+    // Check for unsupported scenarios
+    if (options_.backend() == "vlm") {
+      LOG(FATAL) << "KV Cache quantization is not supported for VLM "
+                    "(Vision-Language Model) backend.";
+    }
+    if (options_.enable_disagg_pd()) {
+      LOG(FATAL) << "KV Cache quantization is not supported in PD "
+                    "disaggregation mode.";
+    }
+  }
+
   // create a KVCache for each layer
   const int64_t num_layers = get_num_layers();
   const bool enable_lighting_indexer =
       context_.get_model_args().index_n_heads() > 0;
   kv_caches_.reserve(num_layers);
+
+  // Determine cache dtype based on quantization setting
+  torch::ScalarType cache_dtype = enable_kv_cache_quant ? torch::kInt8 : dtype_;
+
   for (int64_t i = 0; i < num_layers; ++i) {
     torch::Tensor key_cache, value_cache, index_cache;
+    torch::Tensor key_cache_scale, value_cache_scale;
 #if defined(USE_NPU)
     aclFormat npu_format_type =
         context_.get_model_args().model_type() == "deepseek_v3" &&
@@ -103,10 +129,12 @@ bool WorkerImpl::allocate_kv_cache(
             ? ACL_FORMAT_FRACTAL_NZ
             : ACL_FORMAT_ND;
     key_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_)),
+        torch::empty(kv_cache_shape[0],
+                     torch::dtype(cache_dtype).device(device_)),
         npu_format_type);
     value_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
+        torch::empty(kv_cache_shape[1],
+                     torch::dtype(cache_dtype).device(device_)),
         npu_format_type);
     if (enable_lighting_indexer) {
       index_cache = at_npu::native::npu_format_cast(
@@ -114,29 +142,52 @@ bool WorkerImpl::allocate_kv_cache(
           npu_format_type);
     }
 #elif defined(USE_ILU) || defined(USE_MLU)
-    key_cache =
-        torch::zeros(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
+    key_cache = torch::zeros(kv_cache_shape[0],
+                             torch::dtype(cache_dtype).device(device_));
     if (!kv_cache_shape[1].empty()) {
-      value_cache =
-          torch::zeros(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+      value_cache = torch::zeros(kv_cache_shape[1],
+                                 torch::dtype(cache_dtype).device(device_));
     }
     if (enable_lighting_indexer) {
       index_cache =
           torch::zeros(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
     }
+    // Allocate scale tensors for quantized KV cache
+    if (enable_kv_cache_quant) {
+      // Scale shape: [block_nums, num_kv_heads, block_size] (remove head_size
+      // dim)
+      std::vector<int64_t> key_scale_shape(kv_cache_shape[0].begin(),
+                                           kv_cache_shape[0].end() - 1);
+      key_cache_scale = torch::zeros(
+          key_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+      if (!kv_cache_shape[1].empty()) {
+        std::vector<int64_t> value_scale_shape(kv_cache_shape[1].begin(),
+                                               kv_cache_shape[1].end() - 1);
+        value_cache_scale = torch::zeros(
+            value_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+      }
+    }
 #else
-    key_cache =
-        torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
+    key_cache = torch::empty(kv_cache_shape[0],
+                             torch::dtype(cache_dtype).device(device_));
     if (!kv_cache_shape[1].empty()) {
-      value_cache =
-          torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+      value_cache = torch::empty(kv_cache_shape[1],
+                                 torch::dtype(cache_dtype).device(device_));
     }
     if (enable_lighting_indexer) {
       index_cache =
           torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
     }
 #endif
-    kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+    if (enable_kv_cache_quant) {
+      kv_caches_.emplace_back(key_cache,
+                              value_cache,
+                              index_cache,
+                              key_cache_scale,
+                              value_cache_scale);
+    } else {
+      kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+    }
   }
 
   init_hierarchy_kv_cache_transfer();

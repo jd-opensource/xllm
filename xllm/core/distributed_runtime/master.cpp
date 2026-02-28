@@ -233,7 +233,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .input_shm_size(options_.input_shm_size() * 1024 * 1024)
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
         .is_local(options_.is_local())
-        .server_idx(options_.server_idx());
+        .server_idx(options_.server_idx())
+        .kv_cache_dtype(options_.kv_cache_dtype());
 
     if (options_.device_ip().has_value()) {
       eng_options.device_ip(options_.device_ip().value());
