@@ -210,6 +210,31 @@ void ColumnParallelLinearImpl::load_state_dict(
   }
 }
 
+// load_state_dict for merged weights with variable shard sizes
+void ColumnParallelLinearImpl::load_state_dict(
+    const StateDict& state_dict,
+    int32_t shard_tensor_count,
+    const std::vector<int64_t>& shard_sizes) {
+  const int64_t rank = rank_;
+  const int64_t world_size = world_size_;
+
+  // load and merge the weights on dim 0 with variable shard sizes
+  if (quant_args_.quant_method() == "smoothquant") {
+    // For smoothquant, load quantized weights with variable shard sizes
+    LOAD_MERGED_WEIGHT_V2(qweight, 0);
+    LOAD_MERGED_WEIGHT_V2(per_channel_scale, 0);
+  } else {
+    // For regular weights, use the new merged weight loading with variable shard sizes
+    LOAD_MERGED_WEIGHT_V2(weight, 0);
+  }
+
+  if (bias_.defined()) {
+    // For bias, we might need to handle it differently based on the use case
+    // For now, we'll use the same approach if bias is also sharded
+    LOAD_MERGED_WEIGHT_V2(bias, 0);
+  }
+}
+
 QKVParallelLinearImpl::QKVParallelLinearImpl(
     int64_t hidden_size,
     int64_t num_heads,

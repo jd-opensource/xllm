@@ -311,6 +311,61 @@ void load_merged_weight(const StateDict& state_dict,
   weight_is_loaded = true;
 }
 
+void load_merged_weight_v2(const StateDict& state_dict,
+                           const std::string& name,
+                           int64_t dim,
+                           int32_t rank,
+                           int32_t world_size,
+                           int32_t shard_tensor_count,
+                           const std::vector<int64_t>& shard_sizes,
+                           torch::Tensor& weight,
+                           bool& weight_is_loaded) {
+  if (weight_is_loaded) {
+    return;
+  }
+  const auto& tensor = state_dict.get_tensor(name);
+  if (!tensor.defined()) {
+    return;
+  }
+
+  // Check that shard_tensor_count matches the size of shard_sizes vector
+  CHECK_EQ(shard_tensor_count, static_cast<int32_t>(shard_sizes.size()))
+      << "shard_tensor_count does not match shard_sizes vector size for " << state_dict.prefix() << name;
+
+  // Calculate total expected size
+  int64_t total_expected_size = 0;
+  for (int64_t size : shard_sizes) {
+    total_expected_size += size * world_size;
+  }
+  CHECK_EQ(tensor.size(dim), total_expected_size)
+      << name << "[" << dim << "] size mismatch for " << state_dict.prefix() << name;
+
+  std::vector<torch::Tensor> shard_tensors;
+
+  for (size_t shard_id = 0; shard_id < shard_tensor_count; shard_id++) {
+    int64_t shard_size = shard_sizes[shard_id];
+
+    // Calculate the offset for this shard and rank
+    // First, skip all the data from previous shards for all ranks
+    int64_t shard_offset = 0;
+    for (int32_t prev_shard = 0; prev_shard < shard_id; ++prev_shard) {
+      shard_offset += shard_sizes[prev_shard] * world_size;
+    }
+
+    // Then add the offset within this shard for the current rank
+    shard_offset += rank * shard_size;
+
+    shard_tensors.push_back(
+        tensor.slice(dim, shard_offset, shard_offset + shard_size));
+  }
+
+  auto merged_weight = torch::cat(shard_tensors, dim);
+  CHECK_EQ(weight.sizes(), merged_weight.sizes())
+      << "weight size mismatch for " << state_dict.prefix() << name;
+  weight.copy_(merged_weight);
+  weight_is_loaded = true;
+}
+
 }  // namespace weight
 
 }  // namespace xllm

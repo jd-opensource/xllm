@@ -31,6 +31,8 @@ message KVCacheShape {
   repeated int64 key_shape = 1;
   repeated int64 value_shape = 2;
   repeated int64 index_shape = 3;
+  repeated int64 conv_shape = 4;
+  repeated int64 ssm_shape = 5;
 }
 
 message XTensorOptions {
