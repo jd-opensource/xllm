@@ -273,6 +273,9 @@ bool Glm4VImageProcessor::process_images(std::vector<torch::Tensor> images,
 
   for (const auto& img : images) {
     if (!this->process_image(img, pixel_values, thw)) {
+      LOG(ERROR)
+          << "Failed to process image. The shape(channels, height, width) is: "
+          << img.sizes();
       return false;
     }
 
@@ -366,6 +369,9 @@ bool Glm4VImageProcessor::process_videos(
     auto& vid = videos[i];
     auto& metadata = video_meta_list[i];
     if (!this->process_video(vid, metadata, pixel_values, thw)) {
+      LOG(ERROR) << "Failed to process video. The shape(num_frames, channels, "
+                    "height, width) is: "
+                 << vid.sizes();
       return false;
     }
 
