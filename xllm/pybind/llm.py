@@ -1,17 +1,100 @@
+import json
 import os
 import signal
 import sys
 from . import util
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
-from xllm_export import (LLMMaster, Options, RequestOutput,
+import xllm_export
+from xllm_export import (LLMMaster, VLMMaster, Options, RequestOutput,
                          RequestParams)
+from .errors import ValidationError
+from .params import (
+    BeamSearchParams,
+    PoolingParams,
+    SamplingParams,
+    to_request_params,
+    to_request_params_list,
+)
+
+def _read_json(path: str) -> Dict[str, object]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _infer_model_backend(model_path: str) -> str:
+    model_index_path = os.path.join(model_path, "model_index.json")
+    if os.path.exists(model_index_path):
+        data = _read_json(model_index_path)
+        if "_diffusers_version" in data:
+            return "dit"
+
+    config_path = os.path.join(model_path, "config.json")
+    if not os.path.exists(config_path):
+        raise ValueError(
+            "config.json or model_index.json is required for backend detection"
+        )
+    data = _read_json(config_path)
+    model_type = data.get("model_type") or data.get("model_name")
+    if not model_type:
+        raise ValueError("config.json must contain model_type or model_name")
+
+    get_backend = getattr(xllm_export, "get_model_backend", None)
+    if not callable(get_backend):
+        raise ValueError(
+            "xllm_export.get_model_backend is not available. "
+            "Please rebuild xllm_export or explicitly specify backend."
+        )
+    try:
+        backend = get_backend(model_type)
+    except Exception as exc:
+        raise ValueError(f"Failed to resolve backend for model_type: {model_type}") from exc
+    if not backend:
+        raise ValueError(f"Unsupported model_type: {model_type}")
+    return backend
+
+
+class BeamSearchOutput:
+    def __init__(self, output: RequestOutput):
+        self.prompt = output.prompt
+        self.sequences = output.outputs
+        self.status = output.status
+        self.usage = output.usage
+        self.request_output = output
+
+
+class EmbeddingOutputs:
+    def __init__(self, output: RequestOutput):
+        embedding = []
+        if output.outputs and len(output.outputs) > 0:
+            embedding = output.outputs[0].embeddings
+        self.embedding = embedding
+        self.embeddings = embedding
+
+
+class EmbeddingOutput:
+    def __init__(self, output: RequestOutput):
+        self.prompt = output.prompt
+        self.outputs = EmbeddingOutputs(output)
+        self.status = output.status
+        self.usage = output.usage
+        self.request_output = output
+
 
 class LLM:
+    @staticmethod
+    def _is_vllm_style_inputs(prompts: object) -> bool:
+        if isinstance(prompts, dict):
+            return True
+        if isinstance(prompts, list) and prompts and all(isinstance(x, dict) for x in prompts):
+            return True
+        return False
+
     def __init__(
         self,
         model: str,
         task: str = "generate",
+        runner: Optional[str] = None,
         devices: str = 'auto',
         draft_model: Optional[str] = None,
         draft_devices: Optional[str] = None,
@@ -24,7 +107,7 @@ class LLM:
         max_tokens_per_chunk_for_prefill: int = -1,
         num_speculative_tokens: int = 0,
         num_request_handling_threads: int = 4,
-        communication_backend: str = 'lccl',
+        communication_backend: str = 'hccl',
         rank_tablefile: str = '',
         expert_parallel_degree: int = 0,
         enable_mla: bool = False,
@@ -52,8 +135,19 @@ class LLM:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
         signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
 
+        if runner is not None:
+            if runner != "pooling":
+                raise ValueError(f"unsupported runner: {runner}")
+            task = "embed"
+
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
+
+        backend = _infer_model_backend(model)
+        if backend == "dit":
+            raise ValueError("LLM does not support DiT backend models")
+        if backend == "vlm" and task != "generate":
+            raise ValueError("VLM backend only supports generate task in LLM")
 
         options = Options()
         options.model_path = model
@@ -61,7 +155,7 @@ class LLM:
         options.devices = devices
         options.draft_model_path = draft_model
         options.draft_devices = draft_devices
-        options.backend = "llm"
+        options.backend = backend
         options.block_size = block_size
         options.max_cache_size = max_cache_size
         options.max_memory_utilization = max_memory_utilization
@@ -103,7 +197,11 @@ class LLM:
         options.is_local = is_local
         options.input_shm_size = input_shm_size
         options.output_shm_size = output_shm_size
-        self.master = LLMMaster(options)
+        self._backend = backend
+        if backend == "vlm":
+            self.master = VLMMaster(options)
+        else:
+            self.master = LLMMaster(options)
 
     def finish(self):
         try:
@@ -115,16 +213,46 @@ class LLM:
 
     def generate(
         self,
-        prompts: Union[str, List[str]],
-        request_params: Optional[Union[RequestParams, List[RequestParams]]] = None,
-        wait_schedule_done: bool = True,
+        prompts: Union[
+            str,
+            List[str],
+            Dict[str, object],
+            List[Dict[str, object]],
+        ],
+        sampling_params: Optional[Union[
+            SamplingParams,
+            List[SamplingParams],
+        ]] = None,
+        wait_for_schedule: bool = True,
+        **kwargs,
     ) -> List[RequestOutput]:
+        request_params = kwargs.pop("request_params", None)
+        if kwargs:
+            unknown = ", ".join(kwargs.keys())
+            raise TypeError(f"Unexpected keyword arguments: {unknown}")
         if request_params is None:
-            request_params = RequestParams()
-        if isinstance(prompts, str):
-            prompts = [prompts]
-        if isinstance(request_params, RequestParams):
-            request_params = [request_params]
+            request_params = sampling_params
+        elif sampling_params is not None:
+            raise ValueError("sampling_params and request_params cannot both be set")
+
+        mm_datas = None
+        image_urls = None
+        if self._is_vllm_style_inputs(prompts):
+            from . import mm_utils
+            prompts, mm_datas, image_urls = mm_utils.normalize_vllm_style_inputs(prompts)
+        else:
+            if isinstance(prompts, str):
+                prompts = [prompts]
+            if not isinstance(prompts, list) or not all(isinstance(x, str) for x in prompts):
+                raise TypeError("prompts must be str/list[str] or vLLM-style dicts")
+
+        request_params_list = to_request_params_list(
+            request_params, default_cls=SamplingParams)
+        if len(request_params_list) not in (1, len(prompts)):
+            raise ValueError(
+                "The number of request_params must be 1 or equal to the "
+                "number of prompts."
+            )
 
         outputs = [None] * len(prompts)
         def callback(index: int, output: RequestOutput) -> bool:
@@ -132,12 +260,27 @@ class LLM:
             return True
 
         # schedule all requests
-        self.master.handle_batch_request(
-            prompts, request_params, callback
-        )
+        if self._backend == "vlm":
+            if mm_datas is not None:
+                self.master.handle_batch_request(
+                    prompts, mm_datas, request_params_list, callback
+                )
+            else:
+                if image_urls is None:
+                    image_urls = [[] for _ in prompts]
+                self.master.handle_batch_request_with_image_urls(
+                    prompts, image_urls, request_params_list, callback
+                )
+        else:
+            has_images = image_urls is not None and any(image_urls)
+            if mm_datas is not None or has_images:
+                raise ValueError("multi_modal_data is only supported for VLM models")
+            self.master.handle_batch_request(
+                prompts, request_params_list, callback
+            )
 
         # TODO: add wait later
-        if wait_schedule_done:
+        if wait_for_schedule:
             pass
 
         # generate
@@ -155,3 +298,66 @@ class LLM:
             idx += 1
 
         return outputs
+
+    def beam_search(
+        self,
+        prompts: Union[str, Dict[str, str], List[Union[str, Dict[str, str]]]],
+        params: Optional[Union[RequestParams, BeamSearchParams]] = None,
+        wait_for_schedule: bool = True,
+    ) -> List[BeamSearchOutput]:
+        if isinstance(prompts, (str, dict)):
+            prompts = [prompts]
+
+        parsed_prompts: List[str] = []
+        for prompt in prompts:
+            if isinstance(prompt, str):
+                parsed_prompts.append(prompt)
+                continue
+            if isinstance(prompt, dict):
+                if "prompt" not in prompt:
+                    raise ValueError("beam_search prompt dict must contain key 'prompt'")
+                parsed_prompts.append(prompt["prompt"])
+                continue
+            raise TypeError("prompts must be str or dict with key 'prompt'")
+
+        params = to_request_params(params, default_cls=BeamSearchParams)
+        if params.beam_width <= 0:
+            raise ValueError("beam_width must be greater than 0")
+        else:
+            # Beam search relies on top-k logprob candidates from sampler.
+            # Keep this aligned with vLLM's internal default behavior.
+            params.logprobs = True
+            if params.top_logprobs == 0:
+                # if not set top_logprobs, default to returning 2x candidates for better deduplication
+                params.top_logprobs = 2 * params.beam_width
+
+        outputs = self.generate(parsed_prompts,
+                                request_params=params,
+                                wait_for_schedule=wait_for_schedule)
+        return [BeamSearchOutput(output) for output in outputs]
+
+    def embed(
+        self,
+        prompts: Union[str, List[str]],
+        pooling_params: Optional[Union[
+            RequestParams,
+            PoolingParams,
+            List[Union[RequestParams, PoolingParams]],
+        ]] = None,
+        wait_for_schedule: bool = True,
+    ) -> List[EmbeddingOutput]:
+        request_params_list = to_request_params_list(
+            pooling_params, default_cls=PoolingParams)
+        for params in request_params_list:
+            params.is_embeddings = True
+
+        use_params: Union[RequestParams, List[RequestParams]]
+        if len(request_params_list) == 1:
+            use_params = request_params_list[0]
+        else:
+            use_params = request_params_list
+
+        outputs = self.generate(prompts,
+                                request_params=use_params,
+                                wait_for_schedule=wait_for_schedule)
+        return [EmbeddingOutput(output) for output in outputs]

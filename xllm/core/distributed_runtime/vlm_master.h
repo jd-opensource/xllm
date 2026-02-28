@@ -64,6 +64,13 @@ class VLMMaster : public Master {
                             std::vector<RequestParams> sps,
                             BatchOutputCallback callback);
 
+  // batch completion with image urls/paths (no python image processor)
+  void handle_batch_request_with_image_urls(
+      std::vector<std::string> prompts,
+      std::vector<std::vector<std::string>> image_urls,
+      std::vector<RequestParams> sps,
+      BatchOutputCallback callback);
+
   // batch chat
   void handle_batch_request(std::vector<std::vector<Message>> conversations,
                             std::vector<RequestParams> sps,
@@ -88,6 +95,9 @@ class VLMMaster : public Master {
                                             RequestParams sp,
                                             std::string payload,
                                             OutputCallback callback);
+
+  bool build_mm_data_from_image_urls(const std::vector<std::string>& image_urls,
+                                     MMData& mm_data);
 
   std::unique_ptr<Scheduler> scheduler_;
 

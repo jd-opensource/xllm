@@ -1,55 +1,71 @@
 # python generate_vlm.py --model /path/to/Qwen2.5-VL-7B-Instruct/ --disable_prefix_cache --disable_chunked_prefill --max_seqs_per_batch 4 --devices='npu:0' --enable_shm
 
+from xllm import ArgumentParser, SamplingParams
+from xllm import LLM
+# from xllm import VLM
+import base64
 import os
-import signal
 
-from xllm import ArgumentParser, VLM, RequestParams, MMType, MMData
+def encode_image_from_file(file_path: str) -> str:
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"not found image: {file_path}")
+    with open(file_path, "rb") as image_file:
+        result = base64.b64encode(image_file.read()).decode("utf-8")
+    return result
 
-from PIL import Image
-from transformers import AutoImageProcessor
-
-# Create an VLM.
 parser = ArgumentParser()
 args = parser.parse_args()
+# vlm = VLM(**vars(args))
+vlm = LLM(**vars(args))
 
-vlm = VLM(**vars(args))
-processor = AutoImageProcessor.from_pretrained(args.model, trust_remote_code=True)
 
-questions = ["简单介绍下图片"]
-prompts = [
-    (
-        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
-        "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
-        f"{question}<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
-    for question in questions
+image_1 = "./images/3.jpg"
+image_2 = "./images/4.jpg"
+
+# image_base64_1 = encode_image_from_file(image_1)
+# image_base64_2 = encode_image_from_file(image_2)
+
+# image_1 = f"data:image/jpeg;base64,{image_base64_1}"
+# image_2 = f"data:image/jpeg;base64,{image_base64_2}"
+
+requests = [
+    {
+        "prompt": (
+            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            "<|im_start|>user\n"
+            "<|vision_start|><|image_pad|><|vision_end|>"
+            "请描述这张图片。<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        ),
+        "multi_modal_data": {
+            "image": image_1,
+        },
+    },
+    {
+        "prompt": (
+            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            "<|im_start|>user\n"
+            "<|vision_start|><|image_pad|><|vision_end|>"
+            "<|vision_start|><|image_pad|><|vision_end|>"
+            "请对比这两张图片的主要区别。<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        ),
+        "multi_modal_data": {
+            "image": [image_1, image_2],
+        },
+    },
 ]
 
-paths = ["00307664d4ce393b.png"]
-images = []
-for path in paths:
-    images.append(Image.open(path).convert("RGB"))
+sampling_params = SamplingParams(
+    temperature=0.8,
+    top_p=0.95,
+    max_tokens=50,
+)
 
-multi_modal_datas = []
-for idx in range(len(images)):
-    print(f"Processing image: {paths[idx]}")
-    image = images[idx]
-
-    data = processor.preprocess([image], return_tensors="pt").data
-    mm_data = {
-        "pixel_values": data['pixel_values'],
-        "image_grid_thw": data['image_grid_thw'],            
-    }
-    multi_modal_datas.append(MMData(MMType.IMAGE, mm_data))
-
-
-# Create a reqeust params, include sampling params
-request_params = RequestParams()
-request_params.temperature = 0
-request_params.max_tokens = 1024
-
-outputs = vlm.generate(prompts, multi_modal_datas, request_params, True)
+outputs = vlm.generate(
+    requests,
+    sampling_params=sampling_params
+)
 
 for output in outputs:
     prompt = output.prompt
@@ -57,5 +73,3 @@ for output in outputs:
     print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
 vlm.finish()
-
-
