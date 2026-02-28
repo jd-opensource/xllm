@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "disagg_pd.pb.h"
+#include "runtime/xservice_client.h"
 
 namespace xllm {
 
@@ -47,6 +48,7 @@ class DisaggPDServiceImpl {
 
   DisaggPDScheduler* scheduler_;  // not owned
   Engine* engine_;                // not owned
+  XServiceClient* xservice_client_ = nullptr;
 };
 
 }  // namespace xllm

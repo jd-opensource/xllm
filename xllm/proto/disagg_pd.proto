@@ -173,6 +173,7 @@ message DisaggStreamGeneration {
   repeated SequenceOutput outputs = 4;
   OutputUsage usage = 5;
   bool finished = 6;
+  bool finished_on_prefill_instance = 7;
 }
 
 message DisaggStreamGenerations {

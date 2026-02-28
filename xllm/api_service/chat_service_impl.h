@@ -39,6 +39,8 @@ class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
   // brpc call_data needs to use shared_ptr
   void process_async_impl(std::shared_ptr<ChatCall> call);
 
+  void process_async_rpc_impl(const proto::ChatRequest* request);
+
  private:
   void process_rec_chat_request(std::shared_ptr<ChatCall> call);
 

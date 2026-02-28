@@ -87,7 +87,8 @@ struct SequenceOutput {
 struct RequestOutput {
   RequestOutput() = default;
 
-  RequestOutput(Status&& _status) : status(std::move(_status)) {}
+  RequestOutput(Status&& _status, std::string service_request_id = "")
+      : status(std::move(_status)), service_request_id(service_request_id) {}
 
   void log_request_status() const;
 

@@ -71,7 +71,6 @@ bool XServiceClient::init(const std::string& etcd_addr,
   }
 
   instance_name_ = instance_name;
-  chan_options_.protocol = "http";
   chan_options_.max_retry = 3;
   chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
 
@@ -412,6 +411,7 @@ std::vector<bool> XServiceClient::generations(
       gen_status->set_status_msg(output.status.value().message());
     }
     req->set_finished(output.finished);
+    req->set_finished_on_prefill_instance(output.finished_on_prefill_instance);
     if (output.usage.has_value()) {
       proto::OutputUsage* proto_usage = req->mutable_usage();
       proto_usage->set_num_prompt_tokens(

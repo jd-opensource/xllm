@@ -55,7 +55,7 @@ DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
     server_name_.append(std::to_string(options.server_idx()));
     rpc_server_thread_ = std::make_unique<std::thread>(
         &DisaggPDScheduler::start_rpc_server, this);
-    initialize_rpc_server_and_client(server_name_);
+    initialize_rpc_server(server_name_);
     register_instance_info(server_name_, engine);
 
     // Profile ttft & topt and update instance info (for mix instances)
@@ -87,21 +87,13 @@ DisaggPDScheduler::~DisaggPDScheduler() {
   }
 }
 
-void DisaggPDScheduler::initialize_rpc_server_and_client(
-    const std::string& server_name) {
+void DisaggPDScheduler::initialize_rpc_server(const std::string& server_name) {
   // wait rpc server initialized
   auto rpc_server = ServerRegistry::get_instance().get_server(server_name);
   while (!rpc_server || !rpc_server->has_initialized()) {
     absl::SleepFor(absl::Milliseconds(100));
     rpc_server = ServerRegistry::get_instance().get_server(server_name);
   }
-  // connect to master service
-  xservice_client_ = XServiceClient::get_instance();
-  if (!xservice_client_->initialize_done()) {
-    LOG(FATAL) << "XServiceClient not init.";
-    return;
-  }
-  xservice_client_->set_scheduler(this);
 }
 
 void DisaggPDScheduler::register_instance_info(const std::string& server_name,
@@ -488,7 +480,9 @@ void DisaggPDScheduler::prefill_send_first_generation() {
     }
   }
   // call non_stream_request's callback in P instance when its prefill ends
-  response_processor_->process_completed_requests(non_stream_requests);
+  if (!non_stream_requests.empty()) {
+    response_processor_->process_completed_requests(non_stream_requests);
+  }
 
   // No prefill request needs to be transferred to decode.
   if (requests.size() == 0) {
@@ -692,21 +686,6 @@ bool DisaggPDScheduler::decode_recv_first_generation(
 
   request_queue_.write(request);
   return true;
-}
-
-bool DisaggPDScheduler::decode_send_stream_generation(
-    const RequestOutput& output) {
-  // response to xllm service to avoid the redirect cost.
-  auto return_status = xservice_client_->generations({output});
-  CHECK_EQ(return_status.size(), 1)
-      << "return size of generations is not equal to 1";
-  return return_status[0];
-}
-
-std::vector<bool> DisaggPDScheduler::decode_send_stream_generations(
-    const std::vector<RequestOutput>& outputs) {
-  // response to xllm service to avoid the redirect cost.
-  return xservice_client_->generations(outputs);
 }
 
 bool DisaggPDScheduler::try_allocate(Sequence* sequence) {
