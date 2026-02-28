@@ -22,6 +22,7 @@ limitations under the License.
 
 #include <string>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 #include "core/common/global_flags.h"
@@ -44,9 +45,7 @@ namespace xllm {
 template <typename DecoderLayerType>
 class MtpModelImplBase : public torch::nn::Module {
  public:
-  // mode type: qwen2, qwen3 .etc
-  MtpModelImplBase(const std::string& model_type, const ModelContext& context)
-      : model_type_(model_type) {
+  MtpModelImplBase(const ModelContext& context) {
     InterruptionBus::get_instance().subscribe([this](bool interrupted) {
       this->layer_forward_interrupted_ = interrupted;
     });
@@ -107,48 +106,9 @@ class MtpModelImplBase : public torch::nn::Module {
     h = torch::cat({enorm, hnorm}, /*dim=*/-1);
     h = eh_proj_(h, 0);
 
-    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
-    auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
-    auto cos_pos = target_cos_sin_chunks[0].contiguous();
-    auto sin_pos = target_cos_sin_chunks[1].contiguous();
-    if (model_type_ == "glm4_moe_mtp") {
-      cos_pos = cos_pos.view(at::IntArrayRef{-1, 2, cos_pos.size(-1) / 2});
-      sin_pos = sin_pos.view(at::IntArrayRef{-1, 2, sin_pos.size(-1) / 2});
-    }
+    auto [cos_pos, sin_pos] = build_rotary_pos_embeddings(positions);
 
-    torch::Tensor attn_mask;
-    // TODO(liangzhiwei20): support prefix cache for deepseek .
-    if (FLAGS_enable_chunked_prefill) {
-      int num_sequences = input_params.num_sequences;
-      if (num_sequences > 0) {
-        std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(num_sequences);
-
-        for (int j = 0; j < num_sequences; j++) {
-          auto mask =
-              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                         input_params.kv_seq_lens_vec[j],
-                                         input_params.kv_max_seq_len,
-                                         h.dtype().toScalarType(),
-                                         h.device());
-          req_mask_vec.emplace_back(mask);
-        }
-        attn_mask = torch::cat(req_mask_vec, 0);
-      }
-    } else if (model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache &&
-               !input_params.batch_forward_type.is_decode()) {
-      attn_mask =
-          attn_mask_.get_attn_mask(512, h.dtype().toScalarType(), h.device());
-    } else {
-      attn_mask =
-          attn_mask_.get_attn_mask(128, h.dtype().toScalarType(), h.device());
-    }
-
-    int64_t input_length = tokens.size(0);
-    torch::Tensor expert_array = torch::arange(
-        0,
-        input_length * num_experts_per_tok_,
-        torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
+    auto attn_mask = build_attention_mask(input_params, cos_pos, h);
 
     // TODO(liangzhiwei20): MTP need more support for layer wise copy.
     if (input_params.layer_wise_load_synchronizer != nullptr) {
@@ -157,7 +117,7 @@ class MtpModelImplBase : public torch::nn::Module {
 
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
-    input_params_new.expert_array = expert_array;
+    mutate_input_params(input_params_new, tokens, h);
 
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
@@ -177,6 +137,8 @@ class MtpModelImplBase : public torch::nn::Module {
         return ModelOutput();
       }
 
+      before_layer_forward(i, h, input_params_new);
+
       layer(h,
             cos_pos,
             sin_pos,
@@ -185,6 +147,8 @@ class MtpModelImplBase : public torch::nn::Module {
             input_params_new,
             event,
             event_flag);
+
+      after_layer_forward(i, h, input_params_new);
     }
 
     auto hidden_states = final_norm_(h, 0);
@@ -235,6 +199,73 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
  protected:
+  virtual std::pair<torch::Tensor, torch::Tensor> build_rotary_pos_embeddings(
+      const torch::Tensor& positions) {
+    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
+    auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
+    auto cos_pos = target_cos_sin_chunks[0].contiguous();
+    auto sin_pos = target_cos_sin_chunks[1].contiguous();
+
+    post_process_rotary_pos_embeddings(cos_pos, sin_pos, positions);
+    return {cos_pos, sin_pos};
+  }
+
+  virtual void post_process_rotary_pos_embeddings(
+      torch::Tensor& cos_pos,
+      torch::Tensor& sin_pos,
+      const torch::Tensor& positions) {
+    return;
+  }
+
+  virtual torch::Tensor build_attention_mask(
+      const ModelInputParams& input_params,
+      const torch::Tensor& cos_pos,
+      const torch::Tensor& hidden_states) {
+    if (FLAGS_enable_chunked_prefill) {
+      int num_sequences = input_params.num_sequences;
+      if (num_sequences > 0) {
+        std::vector<torch::Tensor> req_mask_vec;
+        req_mask_vec.reserve(num_sequences);
+
+        for (int j = 0; j < num_sequences; j++) {
+          auto mask =
+              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
+                                         input_params.kv_seq_lens_vec[j],
+                                         input_params.kv_max_seq_len,
+                                         cos_pos.dtype().toScalarType(),
+                                         cos_pos.device());
+          req_mask_vec.emplace_back(mask);
+        }
+        return torch::cat(req_mask_vec, 0);
+      }
+    }
+
+    return attn_mask_.get_attn_mask(
+        128, hidden_states.dtype().toScalarType(), hidden_states.device());
+  }
+
+  virtual void mutate_input_params(ModelInputParams& input_params,
+                                   const torch::Tensor& tokens,
+                                   const torch::Tensor& hidden_states) {
+    int64_t input_length = tokens.size(0);
+    input_params.expert_array = torch::arange(
+        0,
+        input_length * num_experts_per_tok_,
+        torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
+  }
+
+  virtual void before_layer_forward(size_t layer_id,
+                                    torch::Tensor& hidden_states,
+                                    ModelInputParams& input_params) {
+    return;
+  }
+
+  virtual void after_layer_forward(size_t layer_id,
+                                   torch::Tensor& hidden_states,
+                                   ModelInputParams& input_params) {
+    return;
+  }
+
   int32_t dp_rank_;
   int32_t rank_;
   int32_t dp_size_;
@@ -258,7 +289,6 @@ class MtpModelImplBase : public torch::nn::Module {
   bool layer_forward_interrupted_ = false;
 
  private:
-  std::string model_type_;
 };
 
 template <typename MtpModelType>
