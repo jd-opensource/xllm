@@ -62,6 +62,7 @@ const std::unordered_map<std::string,
         {"qwen25", [] { return std::make_unique<Qwen25Detector>(); }},
         {"kimi_k2", [] { return std::make_unique<KimiK2Detector>(); }},
         {"deepseekv3", [] { return std::make_unique<DeepSeekV3Detector>(); }},
+        {"deepseekv32", [] { return std::make_unique<DeepSeekV32Detector>(); }},
         {"glm45", [] { return std::make_unique<Glm45Detector>(); }},
         {"glm47", [] { return std::make_unique<Glm47Detector>(); }},
 };
