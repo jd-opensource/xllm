@@ -28,11 +28,11 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "loader/qwen3_moe_decoder_loader.h"
 #include "npu_base_layer.h"
-#include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
-#include "xllm_kernels/core/include/atb_speed/base/model.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
-#include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
-#include "xllm_kernels/models/qwen3/layer/moe_decoder_layer.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/hosttensor_binder.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/model.h"
+#include "xllm_atb_layers/core/include/atb_speed/log.h"
+#include "xllm_atb_layers/core/include/atb_speed/utils/model_factory.h"
+#include "xllm_atb_layers/models/qwen3/layer/moe_decoder_layer.h"
 
 namespace xllm {
 namespace layer {

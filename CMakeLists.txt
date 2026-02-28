@@ -28,33 +28,13 @@ if(USE_NPU)
       message(STATUS "Building for device: A2 (macro USE_A2 defined)")
   endif()
 
-  option(INSTALL_XLLM_KERNELS "Install xllm_kernels RPM" ON)  
-  message(STATUS "INSTALL_XLLM_KERNELS enabled: ${INSTALL_XLLM_KERNELS}")
-  if(INSTALL_XLLM_KERNELS)
-    if(DEVICE_TYPE STREQUAL "USE_A3")
-        message("downloading a3 arm xllm kernels")
-        file(DOWNLOAD 
-            "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.8.0/xllm_kernels-1.3.10-Linux.a3.arm.rpm"
-            "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
-        )
-    else()  
-      if(DEVICE_ARCH STREQUAL "ARM")
-          message("downloading a2 arm xllm_kernels")
-          file(DOWNLOAD 
-              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.8.0/xllm_kernels-1.3.10-Linux.a2.arm.rpm"
-              "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
-          )
-      else()
-          message("downloading a2 x86 xllm_kernels")
-          file(DOWNLOAD 
-              "https://9n-das-tools.s3.cn-north-1.jdcloud-oss.com/xllm-ai/xllm_kernels/0.8.0/xllm_kernels-1.3.10-Linux.a2.x86.rpm"
-              "${CMAKE_BINARY_DIR}/xllm_kernels.rpm"
-          )
-      endif()
-    endif()
-      execute_process(COMMAND rpm -ivh  --replacepkgs --replacefiles "${CMAKE_BINARY_DIR}/xllm_kernels.rpm")
-      file(WRITE "${CMAKE_BINARY_DIR}/.xllm_installed" "")
+  set(XLLM_ATB_LAYERS_SOURCE_DIR
+      "${CMAKE_SOURCE_DIR}/third_party/xllm_atb_layers"
+      CACHE PATH "Path to xllm_atb_layers source tree")
+  if(NOT EXISTS "${XLLM_ATB_LAYERS_SOURCE_DIR}")
+    message(FATAL_ERROR "xllm_atb_layers source not found: ${XLLM_ATB_LAYERS_SOURCE_DIR}")
   endif()
+  message(STATUS "Using xllm_atb_layers source at: ${XLLM_ATB_LAYERS_SOURCE_DIR}")
 
   execute_process(
     COMMAND git -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD
@@ -319,6 +299,13 @@ if(USE_NPU)
   # set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
   set(CMAKE_VERBOSE_MAKEFILE ON)
   add_definitions(-DTORCH_HIGHER_THAN_PTA6)
+
+  add_subdirectory(
+    "${XLLM_ATB_LAYERS_SOURCE_DIR}"
+    "${CMAKE_BINARY_DIR}/xllm_atb_layers"
+  )
+  message(STATUS "Configured xllm_atb_layers from source: ${XLLM_ATB_LAYERS_SOURCE_DIR}")
+
   include_directories(
       $ENV{PYTHON_INCLUDE_PATH}
       $ENV{PYTORCH_INSTALL_PATH}/include
@@ -329,13 +316,12 @@ if(USE_NPU)
       $ENV{ATB_HOME_PATH}/include
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
   )
-  # xllm_kernels - mark as system headers to suppress warnings from third-party code
+  # Keep third-party warnings suppressed while providing headers expected by
+  # legacy includes like "atb_speed/log.h" from xllm_atb_layers.
   include_directories(SYSTEM
-      $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels/core/include
-      $ENV{XLLM_KERNELS_PATH}/include/xllm_kernels
-      $ENV{XLLM_KERNELS_PATH}/include/
+      ${XLLM_ATB_LAYERS_SOURCE_DIR}
+      ${XLLM_ATB_LAYERS_SOURCE_DIR}/core/include
   )
-
   link_directories(
       $ENV{PYTHON_LIB_PATH}
       $ENV{PYTORCH_INSTALL_PATH}/lib
@@ -344,7 +330,6 @@ if(USE_NPU)
       $ENV{ATB_HOME_PATH}/lib
       $ENV{NPU_TOOLKIT_HOME}/lib64
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
-      $ENV{XLLM_KERNELS_PATH}/lib/
   )
   link_libraries(cust_opapi)
 endif()

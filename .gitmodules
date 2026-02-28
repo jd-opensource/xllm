@@ -28,3 +28,6 @@
 [submodule "third_party/torch_npu_ops"]
 	path = third_party/torch_npu_ops
 	url = https://gitcode.com/xLLM-AI/torch_npu_ops.git
+[submodule "third_party/xllm_atb_layers"]
+	path = third_party/xllm_atb_layers
+	url = https://gitcode.com/xLLM-AI/xllm_atb_layers.git

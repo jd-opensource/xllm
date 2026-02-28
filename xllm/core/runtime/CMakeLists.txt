@@ -115,8 +115,8 @@ target_link_libraries(acl_graph_executor_test
                       c_sec
                       nnopbase
                       )
-# Use --whole-archive for spdlog to ensure all symbols are available for xllm_kernels
-# This resolves the undefined reference issues in xllm_kernels
+# Use --whole-archive for spdlog to ensure all symbols are available for xllm_atb_layers
+# This resolves the undefined reference issues in xllm_atb_layers
 target_link_options(acl_graph_executor_test PRIVATE
   "-Wl,--whole-archive"
   "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"

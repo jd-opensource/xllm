@@ -29,7 +29,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "loader/deepseek_v2_decoder_loader.h"
 #include "npu_base_layer.h"
-#include "xllm_kernels/models/deepseekv2/layer/decoder_layer.h"
+#include "xllm_atb_layers/models/deepseekv2/layer/decoder_layer.h"
 
 namespace xllm {
 namespace layer {

@@ -44,9 +44,9 @@ limitations under the License.
 #include "util/timer.h"
 #if defined(USE_NPU)
 #include "hccl/hccl.h"
-#include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
-#include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
-#include "xllm_kernels/models/base/param/mapping.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/external_comm_manager.h"
+#include "xllm_atb_layers/core/include/atb_speed/utils/singleton.h"
+#include "xllm_atb_layers/models/base/param/mapping.h"
 #endif
 
 extern char** environ;
