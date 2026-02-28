@@ -466,23 +466,36 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         << ", causal=" << causal << ", backend=" << backend
         << ", enable_cuda_graph=" << attn_metadata->enable_cuda_graph;
 
-    layer::flashinfer::update_plan_info(
-        attn_metadata->plan_info,
-        backend,
-        *attn_metadata,
-        dtype,                             // query_dtype
-        dtype,                             // key_dtype
-        dtype,                             // output_dtype
-        head_dim,                          // head_dim_qk
-        head_dim,                          // head_dim_vo
-        static_cast<int32_t>(n_heads),     // num_qo_heads
-        static_cast<int32_t>(n_kv_heads),  // num_kv_heads
-        static_cast<int32_t>(block_size),  // block_size
-        sliding_window,                    // window_size_left
-        /*enable_cuda_graph=*/true,
-        causal,          // causal
-        use_tensor_core  // use_tensor_core for decode planning
-    );
+    if (causal) {
+      layer::flashinfer::update_prefill_plan_info(
+          attn_metadata->plan_info,
+          backend,
+          *attn_metadata,
+          dtype,                             // query_dtype
+          dtype,                             // key_dtype
+          dtype,                             // output_dtype
+          head_dim,                          // head_dim_qk
+          head_dim,                          // head_dim_vo
+          static_cast<int32_t>(n_heads),     // num_qo_heads
+          static_cast<int32_t>(n_kv_heads),  // num_kv_heads
+          /*enable_cuda_graph=*/true);
+    } else {
+      layer::flashinfer::update_decode_plan_info(
+          attn_metadata->plan_info,
+          backend,
+          *attn_metadata,
+          dtype,                             // query_dtype
+          dtype,                             // key_dtype
+          dtype,                             // output_dtype
+          head_dim,                          // head_dim_qk
+          head_dim,                          // head_dim_vo
+          static_cast<int32_t>(n_heads),     // num_qo_heads
+          static_cast<int32_t>(n_kv_heads),  // num_kv_heads
+          static_cast<int32_t>(block_size),  // block_size
+          sliding_window,                    // window_size_left
+          /*enable_cuda_graph=*/true,
+          use_tensor_core);
+    }
 
     VLOG(kGraphExecutorLogVerboseLevel)
         << "CudaGraphPersistentParam::update() plan_info updated: uri="
