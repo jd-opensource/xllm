@@ -120,12 +120,14 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
                                     const std::optional<torch::Tensor>& v_cache,
                                     const AttentionMetadata& attn_metadata) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
+  std::optional<torch::Tensor> output_lse = std::nullopt;
   query = query.view({-1, num_heads_, head_size_});
   output = output.view({-1, num_heads_, head_size_v});
-
+  // torch::Tensor k_cache_ = k_cache;
+  // torch::Tensor v_cache_ = v_cache.value();
   xllm::kernel::ilu::batch_prefill(query,
                                    k_cache,
-                                   v_cache.value(),
+                                   v_cache,
                                    output,
                                    output_lse,
                                    attn_metadata.q_cu_seq_lens,
