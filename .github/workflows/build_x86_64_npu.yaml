@@ -114,6 +114,16 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: true
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+    - name: Rebase
+      if: github.event_name == 'pull_request'
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+        git fetch origin ${{ github.base_ref }}
+        git rebase origin/${{ github.base_ref }}
 
     - name: Build
       if: ${{ success() }}
