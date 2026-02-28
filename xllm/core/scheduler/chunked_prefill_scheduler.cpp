@@ -327,41 +327,15 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
                                num_tokens,
                                &current_step_handle_tokens)) {
         can_schedule = false;
+        size_t max_handle_num_tokens =
+            current_step_handle_tokens +
+            prefill_sequence->kv_state().kv_cache_tokens_num();
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
-          size_t num_request_to_evict = 0;
-          // according to the prefill_sequence num tokens to check if can
-          // allocate blocks for it through evict
-          size_t max_handle_num_tokens =
-              current_step_handle_tokens +
-              prefill_sequence->kv_state().kv_cache_tokens_num();
-          bool enough_to_evict =
-              check_if_enough_to_evict(running_queue_offline_.get(),
-                                       prefill_sequence.get(),
-                                       max_handle_num_tokens,
-                                       num_request_to_evict);
-          if (enough_to_evict) {
-            for (size_t i = 0; i < num_request_to_evict; ++i) {
-              std::shared_ptr<Request> request_to_preempt =
-                  running_queue_offline_->back();
-              ++num_preempted_requests;
-              kv_cache_manager_->deallocate(request_to_preempt.get());
-              running_queue_offline_->pop_back();
-              // add preemptable request to waiting priority queue
-              // TO IMPROVE?: not process this offline request in current batch
-              request_to_preempt->set_preempted();
-              waiting_priority_queue_offline_.push(request_to_preempt);
-            }
-            if (!kv_cache_manager_->allocate(prefill_sequence.get(),
-                                             max_handle_num_tokens)) {
-              LOG(ERROR) << "Should be able to allocate after preempting "
-                         << num_request_to_evict
-                         << " offline requests, but failed.";
-              can_schedule = false;
-            } else {
-              can_schedule = true;
-            }
-          }
+          preempt_offline_decode(can_schedule,
+                                 num_preempted_requests,
+                                 prefill_sequence.get(),
+                                 max_handle_num_tokens);
         }
         if (!can_schedule) {
           kv_cache_manager_->deallocate(prefill_sequence.get());
@@ -487,49 +461,7 @@ void ChunkedPrefillScheduler::handle_remaining_budget(
   }
 }
 
-std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
-  Timer timer;
-  // propogate new requests to waiting_priority_queue_
-  std::shared_ptr<Request> request;
-  // read from request queue then push to waiting_priority_queue_
-  while (request_queue_.read(request)) {
-    CHECK(request);
-
-    // expand sequences to the target number if prefix cache is disabled.
-    if (!enable_prefix_cache_) {
-      // expand sequences to the target number
-      request->expand_sequences(false);
-    }
-
-    if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
-      if (request->offline()) {
-        waiting_priority_queue_offline_.push(request);
-      } else {
-        waiting_priority_queue_.push(request);
-      }
-    } else {
-      // request from prefill instance in disagge pd mode.
-      // NOTE: running_requests_ keep a batch of requests in running state,
-      //   sorted by priority from high to low.
-      running_requests_.emplace_back(request);
-    }
-  }
-
-  // handle finished/cancelled requests
-  std::vector<std::shared_ptr<Request>> finished_requests;
-  for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
-       ++it) {
-    std::shared_ptr<Request> request = *it;
-    request->update_connection_status();
-    if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
-      // release the ownership of the request
-      finished_requests.emplace_back(request);
-      // finished request is set to nullptr
-      *it = nullptr;
-    }
-  }
-
+void ChunkedPrefillScheduler::recycle_running_requests() {
   // insert running requests back to the priority queue, iterating from the
   // lowest priority to the highest
   for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
@@ -538,7 +470,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
     if (*it == nullptr) {
       continue;
     }
-    handle_running_requests(*it);
+    handle_single_running_request(*it);
     // unified multi priority strategy
     if ((*it)->offline()) {
       running_queue_offline_->push(*it);
@@ -549,6 +481,21 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
     // push the request front to the priority deque
     // running_queue_->push(request, false /*if_back*/);
   }
+}
+
+std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
+  Timer timer;
+  // preprocess request_queue and running_requests
+
+  // read from request queue then push to waiting_priority_queue_
+  fetch_new_requests();
+
+  // handle finished/cancelled requests in running_requests_
+  std::vector<std::shared_ptr<Request>> finished_requests;
+  collect_finished_requests(finished_requests);
+
+  // insert request from running_requests_ to running_queue_
+  recycle_running_requests();
 
   // clear previous batch
   running_requests_.clear();
