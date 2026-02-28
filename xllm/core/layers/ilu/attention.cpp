@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "attention.h"
 
+#include "kernels/ilu/ilu_ops_api.h"
 #include "kernels/ops_api.h"
 
 namespace xllm {
