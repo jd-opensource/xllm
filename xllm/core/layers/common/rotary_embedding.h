@@ -44,15 +44,16 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
                int64_t max_query_len,
                bool is_prompt);
 
-  torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
-
  protected:
   bool interleaved_;
+  torch::Tensor cos_sin_cache_;
+  // Pre-formatted [cos_half, sin_half] cache for CUDA/MUSA/ILU kernels.
+  // Avoids chunk/cat operations on every forward call.
+  torch::Tensor precomputed_cos_sin_cache_;
 
  private:
   torch::Tensor sin_;
   torch::Tensor cos_;
-  torch::Tensor cos_sin_cache_;
 };
 TORCH_MODULE(RotaryEmbedding);
 
@@ -99,10 +100,8 @@ class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
                const torch::Tensor& cu_query_lens,
                int64_t max_query_len,
                bool is_prompt);
-
-  torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
-  torch::Tensor get_sin_cache() { return sin_; }
-  torch::Tensor get_cos_cache() { return cos_; }
+  const torch::Tensor& get_sin_cache() const { return sin_; }
+  const torch::Tensor& get_cos_cache() const { return cos_; }
 
  private:
   int64_t head_size_;
@@ -111,6 +110,9 @@ class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
   torch::Tensor sin_;
   torch::Tensor cos_;
   torch::Tensor cos_sin_cache_;
+  // Pre-formatted [cos_half, sin_half] cache for CUDA/MUSA/ILU kernels.
+  // Avoids chunk/cat operations on every forward call.
+  torch::Tensor precomputed_cos_sin_cache_;
 };
 TORCH_MODULE(DeepseekScalingRotaryEmbedding);
 
