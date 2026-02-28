@@ -79,7 +79,7 @@ namespace {
 // so runtime compute behavior remains unchanged.
 class ScopedAtenLoadThreads {
  public:
-  explicit ScopedAtenLoadThreads(int target_threads)
+  explicit ScopedAtenLoadThreads(int32_t target_threads)
       : prev_threads_(at::get_num_threads()) {
     if (target_threads > 0 && prev_threads_ != target_threads) {
       torch::set_num_threads(target_threads);
@@ -92,6 +92,12 @@ class ScopedAtenLoadThreads {
       torch::set_num_threads(prev_threads_);
     }
   }
+
+  // Non-copyable and non-movable
+  ScopedAtenLoadThreads(const ScopedAtenLoadThreads&) = delete;
+  ScopedAtenLoadThreads& operator=(const ScopedAtenLoadThreads&) = delete;
+  ScopedAtenLoadThreads(ScopedAtenLoadThreads&&) = delete;
+  ScopedAtenLoadThreads& operator=(ScopedAtenLoadThreads&&) = delete;
 
  private:
   int prev_threads_ = 0;
@@ -636,17 +642,22 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   if (parallel_args_.tp_group_) {
     tp_world_size = parallel_args_.tp_group_->world_size();
   }
+
+  std::unique_ptr<ScopedAtenLoadThreads> scoped_load_threads;
   if (tp_world_size > 1) {
     const int prev_threads = torch::get_num_threads();
     LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
               << ", tp_world_size=" << tp_world_size
               << ", prev_threads=" << prev_threads;
-    ScopedAtenLoadThreads scoped_load_threads(/*target_threads=*/1);
-    this->load_model(std::move(model_loader));
+    scoped_load_threads =
+        std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
+  }
+
+  this->load_model(std::move(model_loader));
+
+  if (scoped_load_threads) {
     LOG(INFO) << "Weight loading completed, restored ATen threads="
               << torch::get_num_threads();
-  } else {
-    this->load_model(std::move(model_loader));
   }
 
   status_ = Status::LOADED;
