@@ -202,6 +202,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     int64_t num_layers,
     std::function<void(const std::vector<std::vector<int64_t>>&)>
         allocate_kv_cache_func,
+    bool enable_lighting_indexer,
     const std::string& model_type) {
   std::shared_ptr<KVCacheTransfer> transfer;
 
@@ -209,8 +210,11 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 
 #if defined(USE_NPU)
   if (transfer_type == "LlmDataDist") {
-    transfer = std::make_shared<LlmDataDistTransfer>(
-        device_ip, transfer_listen_port, instance_role, model_type);
+    transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
+                                                     transfer_listen_port,
+                                                     instance_role,
+                                                     model_type,
+                                                     enable_lighting_indexer);
 
     kv_caches.reserve(num_layers);
 

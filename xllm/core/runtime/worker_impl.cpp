@@ -236,6 +236,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   int32_t device_id = device_.index();
   // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
+  const bool enable_lighting_indexer =
+      context_.get_model_args().index_n_heads() > 0;
   kv_cache_transfer_ = KVCacheTransferFactory::create(
       FLAGS_kv_cache_transfer_type,
       options_.device_ip().value(),
@@ -249,6 +251,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       [this](const std::vector<std::vector<int64_t>>& shape) {
         this->allocate_kv_cache(shape);
       },
+      enable_lighting_indexer,
       context_.get_model_args().model_type());
 
   init_hierarchy_kv_cache_transfer();
