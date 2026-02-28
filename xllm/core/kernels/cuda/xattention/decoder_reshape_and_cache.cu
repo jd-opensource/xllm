@@ -41,6 +41,7 @@ __global__ void decoder_reshape_and_cache_kernel(
     scalar_t* __restrict__ unshared_v_cache,
     const int32_t* __restrict__ block_table,  // [num_seqs, 1]
     const int32_t* __restrict__ step,         // [1] - current decode step
+    const int64_t block_table_stride,
     const int64_t num_seqs,
     const int64_t kv_heads,
     const int64_t head_dim,
@@ -57,7 +58,7 @@ __global__ void decoder_reshape_and_cache_kernel(
   const int64_t seq_idx = idx / kv_heads;
   const int64_t kv_head_idx = idx % kv_heads;
 
-  const int32_t block_id = block_table[seq_idx];
+  const int32_t block_id = block_table[seq_idx * block_table_stride];
 
   // Guard invalid block id
   if (block_id < 0 || block_id >= max_num_seqs) {
@@ -125,7 +126,10 @@ void decoder_reshape_and_cache(torch::Tensor proj_k,
   const at::cuda::OptionalCUDAGuard device_guard(device_of(proj_k));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  torch::Tensor block_table_flat = block_table.select(1, 0).to(torch::kInt32);
+  torch::Tensor block_table_i32 = block_table.scalar_type() == torch::kInt32
+                                      ? block_table
+                                      : block_table.to(torch::kInt32);
+  const int64_t block_table_stride = block_table_i32.stride(0);
 
   // Launch kernel: one block per (seq, kv_head), threads along head_dim
   const int64_t total_elements = num_seqs * kv_heads;
@@ -141,8 +145,9 @@ void decoder_reshape_and_cache(torch::Tensor proj_k,
                 proj_v.data_ptr<scalar_t>(),
                 unshared_k_cache.data_ptr<scalar_t>(),
                 unshared_v_cache.data_ptr<scalar_t>(),
-                block_table_flat.data_ptr<int32_t>(),
+                block_table_i32.data_ptr<int32_t>(),
                 step.data_ptr<int32_t>(),
+                block_table_stride,
                 num_seqs,
                 kv_heads,
                 head_dim,
