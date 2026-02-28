@@ -25,7 +25,6 @@ void decoder_reshape_and_cache(torch::Tensor proj_k,
                                torch::Tensor proj_v,
                                torch::Tensor unshared_k_cache,
                                torch::Tensor unshared_v_cache,
-                               torch::Tensor block_table,
                                torch::Tensor step);
 
 void cache_select(const torch::Tensor& beam_index,
