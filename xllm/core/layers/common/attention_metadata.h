@@ -23,6 +23,7 @@ namespace ffi = tvm::ffi;
 #endif
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace xllm::layer {
