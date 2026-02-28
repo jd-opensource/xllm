@@ -16,24 +16,12 @@ limitations under the License.
 
 #pragma once
 
-#include <atb/atb_infer.h>
-#include <c10/core/ScalarType.h>
 #include <torch/torch.h>
 
-#include <regex>
-#include <unordered_map>
-
-#include "core/framework/dit_model_loader.h"
-#include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
-#include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
 #include "models/model_registry.h"
-#include "processors/clip_image_processor.h"
-#include "processors/input_processor.h"
-#include "processors/pywarpper_image_processor.h"
 #include "xllm/core/layers/common/add_matmul.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
 // clip_text_model compatible with huggingface weights
@@ -58,96 +46,6 @@ torch::Tensor _create_4d_causal_attention_mask(torch::IntArrayRef input_shape,
   causal_mask = causal_mask.expand({bsz, 1, tgt_len, tgt_len});
   return causal_mask;
 }
-
-class CLIPVLInputProcessor : public InputProcessor {
-  enum class TokenType {
-    INVALID,
-    IMAGE,
-    VIDEO,
-  };
-
- public:
-  explicit CLIPVLInputProcessor(const ModelArgs& args) {
-    merge_size_ = args.mm_image_merge_size();
-  }
-  void process(std::string& prompt, const MMData& mm_data) override {
-    torch::Tensor image_grid_thw;
-    if (auto res = mm_data.get<torch::Tensor>("image_grid_thw"))
-      image_grid_thw = res.value();
-    torch::Tensor video_grid_thw;
-    if (auto res = mm_data.get<torch::Tensor>("video_grid_thw"))
-      video_grid_thw = res.value();
-    if (!image_grid_thw.defined() && !video_grid_thw.defined()) return;
-    auto merge_length = merge_size_ * merge_size_;
-    int total_image_token = 0;
-    if (image_grid_thw.defined()) {
-      auto count = image_grid_thw.sizes()[0];
-      for (int idx = 0; idx < count; ++idx)
-        total_image_token +=
-            image_grid_thw[idx].prod().item<int>() / merge_length;
-    }
-    int total_video_token = 0;
-    if (video_grid_thw.defined()) {
-      auto count = video_grid_thw.sizes()[0];
-      for (int idx = 0; idx < count; ++idx)
-        total_video_token +=
-            video_grid_thw[idx].prod().item<int>() / merge_length;
-    }
-    size_t total_token_len = total_image_token * image_token_.size() +
-                             total_video_token * video_token_.size();
-    std::string data;
-    data.reserve(prompt.size() + total_token_len);
-    int image_index = 0;
-    int video_index = 0;
-    const torch::Tensor* grid_thw = nullptr;
-    const std::string* token = nullptr;
-    int* index = 0;
-    size_t begin = 0;
-    auto pair = _find_vision_token(prompt, begin);
-    while (pair.second != std::string::npos) {
-      data.append(prompt, begin, pair.second - begin);
-      if (pair.first == TokenType::IMAGE) {
-        grid_thw = &image_grid_thw;
-        token = &image_token_;
-        index = &image_index;
-      } else if (pair.first == TokenType::VIDEO) {
-        grid_thw = &video_grid_thw;
-        token = &video_token_;
-        index = &video_index;
-      } else {
-        assert(false);
-      }
-      auto token_num = (*grid_thw)[(*index)].prod().item<int>() / merge_length;
-      while (token_num--) data.append(*token);
-      ++(*index);
-      begin = pair.second + token->size();
-      pair = _find_vision_token(prompt, begin);
-    }
-    if (begin < prompt.size()) data.append(prompt, begin, std::string::npos);
-    prompt = std::move(data);
-  }
-
- private:
-  std::pair<TokenType, size_t> _find_vision_token(const std::string& prompt,
-                                                  size_t begin) {
-    auto img_pos = prompt.find(image_token_, begin);
-    auto vid_pos = prompt.find(video_token_, begin);
-    if (img_pos == std::string::npos && vid_pos == std::string::npos)
-      return {TokenType::INVALID, std::string::npos};
-    else if (vid_pos == std::string::npos)
-      return {TokenType::IMAGE, img_pos};
-    else if (img_pos == std::string::npos)
-      return {TokenType::VIDEO, vid_pos};
-    else
-      return img_pos < vid_pos ? std::make_pair(TokenType::IMAGE, img_pos)
-                               : std::make_pair(TokenType::VIDEO, vid_pos);
-  }
-
- private:
-  const std::string image_token_ = "<|image_pad|>";
-  const std::string video_token_ = "<|video_pad|>";
-  int merge_size_ = 0;
-};
 
 class CLIPTextEmbeddingImpl : public torch::nn::Module {
  public:
@@ -189,23 +87,23 @@ class CLIPTextEmbeddingImpl : public torch::nn::Module {
     weight::load_weight(state_dict,
                         "token_embedding.weight",
                         token_embedding_->weight,
-                        is_token_embedding_loaded);
+                        is_token_embedding_loaded_);
     weight::load_weight(state_dict,
                         "position_embedding.weight",
                         position_embedding_,
-                        is_position_embedding_loaded);
+                        is_position_embedding_loaded_);
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    CHECK(is_position_embedding_loaded)
+    CHECK(is_position_embedding_loaded_)
         << "weight is not loaded for " << prefix + "position_embedding.weight";
-    CHECK(is_token_embedding_loaded)
+    CHECK(is_token_embedding_loaded_)
         << "weight is not loaded for " << prefix + "token_embedding.weight";
   }
 
  private:
-  bool is_position_embedding_loaded = false;
-  bool is_token_embedding_loaded = false;
+  bool is_position_embedding_loaded_ = false;
+  bool is_token_embedding_loaded_ = false;
   torch::Tensor position_ids_;
   torch::nn::Embedding token_embedding_ = nullptr;
   torch::Tensor position_embedding_;

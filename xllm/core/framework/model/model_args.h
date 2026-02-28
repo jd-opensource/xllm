@@ -289,6 +289,8 @@ struct ModelArgs {
   // VLM image preprocessor resize
   PROPERTY(bool, mm_image_do_resize) = false;
   PROPERTY(int, mm_image_resize_shortest_edge) = 336;
+  PROPERTY(int64_t, mm_image_size_height) = 384;
+  PROPERTY(int64_t, mm_image_size_width) = 384;
 
   PROPERTY(int, mm_image_resample) = 0;
 
