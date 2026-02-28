@@ -282,9 +282,7 @@ void batch_prefill(AttentionParams& params) {
       params.scale,
       params.output,
       params.output_lse,
-      params.attn_metadata.enable_cuda_graph,
-      params.attn_metadata.is_causal,
-      params.mask);
+      params.attn_metadata.enable_cuda_graph);
 #elif defined(USE_MUSA)
   cuda::batch_prefill(params.attn_metadata.plan_info->uri,
                       params.attn_metadata.plan_info->plan_info,
@@ -326,6 +324,27 @@ void batch_prefill(AttentionParams& params) {
                      params.return_lse);
 #else
   NOT_IMPLEMENTED();
+#endif
+}
+
+void batch_prefill_non_causal(AttentionParams& params) {
+#if defined(USE_CUDA)
+  cuda::batch_prefill_non_causal(params.attn_metadata.plan_info->uri,
+                                 params.attn_metadata.plan_info->plan_info,
+                                 params.float_workspace_buffer,
+                                 params.int_workspace_buffer,
+                                 params.page_locked_int_workspace_buffer,
+                                 params.query,
+                                 params.key,
+                                 params.value,
+                                 params.attn_metadata.q_cu_seq_lens,
+                                 params.attn_metadata.kv_cu_seq_lens,
+                                 params.window_size_left,
+                                 params.scale,
+                                 params.output,
+                                 params.output_lse,
+                                 params.attn_metadata.enable_cuda_graph,
+                                 params.mask);
 #endif
 }
 

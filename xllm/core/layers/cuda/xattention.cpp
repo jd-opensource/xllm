@@ -25,6 +25,8 @@ limitations under the License.
 #include "kernels/cuda/xattention/xattention_ops_api.h"
 #include "kernels/ops_api.h"
 #include "layers/common/attention_metadata.h"
+#include "xattention_planinfo.h"
+#include "xattention_workspace.h"
 
 namespace xllm {
 namespace layer {
@@ -188,8 +190,7 @@ void XAttentionImpl::run_two_stage_decode(
         << "shared stage plan_info should not be null when enable_cuda_graph "
            "is true";
   } else {
-    // Update shared stage plan info (ragged prefill, non-causal).
-    flashinfer::update_plan_info(
+    xattention::update_xattention_plan_info(
         attn_metadata.shared_plan_info,
         xllm::kernel::cuda::determine_attention_backend(
             /*pos_encoding_mode=*/0,
@@ -209,7 +210,7 @@ void XAttentionImpl::run_two_stage_decode(
         /*enable_cuda_graph*/ false,
         /*causal*/ false,
         /*use_tensor_core*/ true,
-        /*force_prefill_plan*/ true);
+        /*is_shared_stage_plan*/ true);
   }
 
   xllm::kernel::AttentionParams shared_attention_params(shared_attn_meta);
@@ -228,7 +229,7 @@ void XAttentionImpl::run_two_stage_decode(
   shared_attention_params.key = shared_k_cache;
   shared_attention_params.value = shared_v_cache;
 
-  xllm::kernel::batch_prefill(shared_attention_params);
+  xllm::kernel::batch_prefill_non_causal(shared_attention_params);
 
   // ===== Unshared stage: attend to unshared (per-beam) KV =====
   AttentionMetadata unshared_attn_meta = attn_metadata;
@@ -238,10 +239,13 @@ void XAttentionImpl::run_two_stage_decode(
   unshared_attn_meta.paged_kv_last_page_len =
       cache.paged_kv_last_page_len_expanded;
 
+  auto& xattention_workspace =
+      xllm::layer::xattention::XAttentionWorkspace::get_instance();
   torch::Tensor unshared_int_workspace_buffer =
-      workspace.get_two_stage_unshared_int_workspace_buffer();
+      xattention_workspace.get_two_stage_unshared_int_workspace_buffer();
   torch::Tensor unshared_page_locked_int_workspace_buffer =
-      workspace.get_two_stage_unshared_page_locked_int_workspace_buffer();
+      xattention_workspace
+          .get_two_stage_unshared_page_locked_int_workspace_buffer();
   CHECK(unshared_int_workspace_buffer.defined() &&
         unshared_page_locked_int_workspace_buffer.defined())
       << "two-stage unshared workspace buffers must be initialized.";
@@ -257,22 +261,23 @@ void XAttentionImpl::run_two_stage_decode(
         << "unshared stage plan_info should not be null when enable_cuda_graph "
            "is true";
   } else {
-    flashinfer::update_plan_info(attn_metadata.unshared_plan_info,
-                                 /*backend*/ "fa3",
-                                 unshared_attn_meta,
-                                 query.scalar_type(),
-                                 unshared_k_cache.scalar_type(),
-                                 cache.unshared_o.scalar_type(),
-                                 head_size_,
-                                 head_size_,
-                                 num_heads_,
-                                 num_kv_heads_,
-                                 /*block_size*/ max_decode_step,
-                                 /*window_size_left*/ sliding_window_,
-                                 /*enable_cuda_graph*/ false,
-                                 /*causal*/ false,
-                                 /*use_tensor_core*/ false,
-                                 /*force_prefill_plan*/ false);
+    xattention::update_xattention_plan_info(
+        attn_metadata.unshared_plan_info,
+        /*backend*/ "fa3",
+        unshared_attn_meta,
+        query.scalar_type(),
+        unshared_k_cache.scalar_type(),
+        cache.unshared_o.scalar_type(),
+        head_size_,
+        head_size_,
+        num_heads_,
+        num_kv_heads_,
+        /*block_size*/ max_decode_step,
+        /*window_size_left*/ sliding_window_,
+        /*enable_cuda_graph*/ false,
+        /*causal*/ false,
+        /*use_tensor_core*/ false,
+        /*is_shared_stage_plan*/ false);
   }
 
   xllm::kernel::AttentionParams unshared_attention_params(unshared_attn_meta);

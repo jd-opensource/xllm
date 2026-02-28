@@ -34,6 +34,7 @@ limitations under the License.
 #include "kernels/cuda/cuda_ops_api.h"
 #include "kernels/cuda/xattention/xattention_ops_api.h"
 #include "layers/cuda/flashinfer_workspace.h"
+#include "layers/cuda/xattention_workspace.h"
 #include "platform/cuda/device_capture_lock.h"
 #endif
 #include "framework/model_loader.h"
@@ -568,6 +569,44 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
       if (round == total_rounds - 1) {
         build_final_output(
             logits, sample_output, sampling_params, beam_tensors, output);
+        if (VLOG_IS_ON(10)) {
+          std::vector<std::vector<int32_t>> sequences;
+          for (int i = 0; i < batch_size; i++) {
+            for (int j = 0; j < beam_width; j++) {
+              std::vector<int32_t> seq;
+              for (int k = 0; k < beam_tensors.sequence_group.size(2); k++) {
+                seq.push_back(
+                    beam_tensors.sequence_group[i][j][k].item<int32_t>());
+              }
+              sequences.push_back(seq);
+            }
+          }
+          std::string json_filename = "beam_sequences.json";
+          std::ofstream json_file(json_filename);
+          if (json_file.is_open()) {
+            json_file << "{\n  \"sequences\": [\n";
+            for (size_t idx = 0; idx < sequences.size(); idx++) {
+              json_file << "    [";
+              for (size_t k = 0; k < sequences[idx].size(); k++) {
+                if (k > 0) {
+                  json_file << ", ";
+                }
+                json_file << sequences[idx][k];
+              }
+              json_file << "]";
+              if (idx < sequences.size() - 1) {
+                json_file << ",";
+              }
+              json_file << "\n";
+            }
+            json_file << "  ]\n}\n";
+            json_file.close();
+            LOG(INFO) << "Beam sequences saved to: " << json_filename;
+          } else {
+            LOG(WARNING) << "Failed to open file for writing: "
+                         << json_filename;
+          }
+        }
       }
     }
   }
@@ -1016,6 +1055,17 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
     : LLMWorkerImpl(parallel_args, device, options) {
+#if defined(USE_CUDA)
+  if (FLAGS_enable_xattention_two_stage_decode) {
+    const auto int_workspace_size =
+        ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
+            .get_int_workspace_buffer()
+            .size(0);
+    ::xllm::layer::xattention::XAttentionWorkspace::get_instance().initialize(
+        device_, int_workspace_size);
+  }
+#endif
+
   if (!is_driver()) {
     return;
   }

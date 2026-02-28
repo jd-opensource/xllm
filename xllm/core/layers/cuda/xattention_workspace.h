@@ -21,29 +21,28 @@ limitations under the License.
 
 #include "core/common/macros.h"
 
-namespace xllm::layer::flashinfer {
+namespace xllm::layer::xattention {
 
-class FlashinferWorkspace {
+class XAttentionWorkspace {
  public:
-  static FlashinferWorkspace& get_instance() {
-    static FlashinferWorkspace instance;
+  static XAttentionWorkspace& get_instance() {
+    static XAttentionWorkspace instance;
     return instance;
   };
 
-  void initialize(const torch::Device& device);
+  void initialize(const torch::Device& device, int64_t int_workspace_size);
 
-  torch::Tensor get_float_workspace_buffer();
-  torch::Tensor get_int_workspace_buffer();
-  torch::Tensor get_page_locked_int_workspace_buffer();
+  torch::Tensor get_two_stage_unshared_int_workspace_buffer();
+
+  torch::Tensor get_two_stage_unshared_page_locked_int_workspace_buffer();
 
  private:
-  FlashinferWorkspace() = default;
-  ~FlashinferWorkspace() = default;
-  DISALLOW_COPY_AND_ASSIGN(FlashinferWorkspace);
+  XAttentionWorkspace() = default;
+  ~XAttentionWorkspace() = default;
+  DISALLOW_COPY_AND_ASSIGN(XAttentionWorkspace);
 
-  torch::Tensor float_workspace_buffer_;
-  torch::Tensor int_workspace_buffer_;
-  torch::Tensor page_locked_int_workspace_buffer_;
+  torch::Tensor two_stage_unshared_int_workspace_buffer_;
+  torch::Tensor two_stage_unshared_page_locked_int_workspace_buffer_;
 };
 
-}  // namespace xllm::layer::flashinfer
+}  // namespace xllm::layer::xattention

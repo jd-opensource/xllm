@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/layers/common/attention_metadata.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/cuda/flashinfer_planinfo.h"
+#include "core/layers/cuda/xattention_planinfo.h"
 #include "core/platform/cuda/device_capture_lock.h"
 #include "core/platform/device.h"
 #include "core/platform/shared_vmm_allocator.h"
@@ -532,7 +533,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
       shared_attn_meta.is_causal = false;
 
       attn_metadata->shared_plan_info->layer_id = 0;
-      layer::flashinfer::update_plan_info(
+      layer::xattention::update_xattention_plan_info(
           attn_metadata->shared_plan_info,
           xllm::kernel::cuda::determine_attention_backend(
               /*pos_encoding_mode=*/0,
@@ -552,7 +553,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
           /*enable_cuda_graph=*/true,
           /*causal=*/false,
           /*use_tensor_core=*/true,
-          /*force_prefill_plan=*/true);
+          /*is_shared_stage_plan*/ true);
 
       layer::AttentionMetadata unshared_attn_meta = *attn_metadata;
       unshared_attn_meta.plan_info = attn_metadata->unshared_plan_info;
@@ -563,22 +564,23 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
       unshared_attn_meta.is_causal = false;
 
       attn_metadata->unshared_plan_info->layer_id = 0;
-      layer::flashinfer::update_plan_info(attn_metadata->unshared_plan_info,
-                                          /*backend=*/"fa3",
-                                          unshared_attn_meta,
-                                          dtype,
-                                          dtype,
-                                          dtype,
-                                          head_dim,
-                                          head_dim,
-                                          static_cast<int32_t>(n_heads),
-                                          static_cast<int32_t>(n_kv_heads),
-                                          static_cast<int32_t>(max_decode_step),
-                                          sliding_window,
-                                          /*enable_cuda_graph=*/true,
-                                          /*causal=*/false,
-                                          /*use_tensor_core=*/false,
-                                          /*force_prefill_plan=*/false);
+      layer::xattention::update_xattention_plan_info(
+          attn_metadata->unshared_plan_info,
+          /*backend=*/"fa3",
+          unshared_attn_meta,
+          dtype,
+          dtype,
+          dtype,
+          head_dim,
+          head_dim,
+          static_cast<int32_t>(n_heads),
+          static_cast<int32_t>(n_kv_heads),
+          static_cast<int32_t>(max_decode_step),
+          sliding_window,
+          /*enable_cuda_graph=*/true,
+          /*causal=*/false,
+          /*use_tensor_core=*/false,
+          /*is_shared_stage_plan*/ false);
     } else {
       const bool causal =
           attn_metadata->is_prefill || attn_metadata->is_chunked_prefill;
@@ -869,7 +871,6 @@ ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
         updated_params.attn_metadata->plan_info->plan_info;
     replay_params.q_cu_seq_lens = updated_params.attn_metadata->q_cu_seq_lens;
     replay_params.kv_cu_seq_lens = updated_params.attn_metadata->kv_cu_seq_lens;
-    replay_params.is_causal = updated_params.attn_metadata->is_causal;
 
     // Replay piecewise graphs and attention runners
     piecewise_graph_.replay(replay_params);

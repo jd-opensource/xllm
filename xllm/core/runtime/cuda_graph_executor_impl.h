@@ -34,7 +34,6 @@ limitations under the License.
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/kernels/cuda/piecewise_graphs.h"
-#include "core/layers/common/attention_metadata.h"
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
 #include "options.h"
@@ -194,6 +193,7 @@ class CudaGraphPersistentParam {
   torch::Tensor persistent_paged_kv_indices_;
   torch::Tensor persistent_paged_kv_last_page_len_;
   torch::Tensor persistent_decode_qo_indptr_;
+
   // TODO maybe not used. or use q_cu_seq_lens instead.
   torch::Tensor persistent_chunked_prefill_qo_indptr_;
 };
