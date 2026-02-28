@@ -25,6 +25,7 @@ limitations under the License.
 #include "kernels/cuda/xattention/xattention_ops_api.h"
 #include "kernels/ops_api.h"
 #include "layers/common/attention_metadata.h"
+#include "xattention_workspace.h"
 
 namespace xllm {
 namespace layer {
@@ -228,7 +229,7 @@ void XAttentionImpl::run_two_stage_decode(
   shared_attention_params.key = shared_k_cache;
   shared_attention_params.value = shared_v_cache;
 
-  xllm::kernel::batch_prefill(shared_attention_params);
+  xllm::kernel::batch_prefill_non_causal(shared_attention_params);
 
   // ===== Unshared stage: attend to unshared (per-beam) KV =====
   AttentionMetadata unshared_attn_meta = attn_metadata;
@@ -238,10 +239,13 @@ void XAttentionImpl::run_two_stage_decode(
   unshared_attn_meta.paged_kv_last_page_len =
       cache.paged_kv_last_page_len_expanded;
 
+  auto& xattention_workspace =
+      xllm::layer::xattention::XAttentionWorkspace::get_instance();
   torch::Tensor unshared_int_workspace_buffer =
-      workspace.get_two_stage_unshared_int_workspace_buffer();
+      xattention_workspace.get_two_stage_unshared_int_workspace_buffer();
   torch::Tensor unshared_page_locked_int_workspace_buffer =
-      workspace.get_two_stage_unshared_page_locked_int_workspace_buffer();
+      xattention_workspace
+          .get_two_stage_unshared_page_locked_int_workspace_buffer();
   CHECK(unshared_int_workspace_buffer.defined() &&
         unshared_page_locked_int_workspace_buffer.defined())
       << "two-stage unshared workspace buffers must be initialized.";

@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/util/utils.h"
 #include "flashinfer_workspace.h"
 #include "kernels/cuda/utils.h"
+#include "xattention_workspace.h"
 
 using namespace xllm::kernel::cuda;
 
@@ -90,14 +91,21 @@ void update_plan_info(std::shared_ptr<PlanInfo> plan_info,
   const bool use_two_stage_unshared_workspace =
       attn_meta.xattention_two_stage_decode_cache.has_value() &&
       !force_prefill_plan;
-  torch::Tensor int_workspace_buffer =
-      use_two_stage_unshared_workspace
-          ? workspace.get_two_stage_unshared_int_workspace_buffer()
-          : workspace.get_int_workspace_buffer();
-  torch::Tensor page_locked_int_workspace_buffer =
-      use_two_stage_unshared_workspace
-          ? workspace.get_two_stage_unshared_page_locked_int_workspace_buffer()
-          : workspace.get_page_locked_int_workspace_buffer();
+  torch::Tensor int_workspace_buffer;
+  torch::Tensor page_locked_int_workspace_buffer;
+  if (use_two_stage_unshared_workspace) {
+    auto& xattention_workspace =
+        xllm::layer::xattention::XAttentionWorkspace::get_instance();
+    int_workspace_buffer =
+        xattention_workspace.get_two_stage_unshared_int_workspace_buffer();
+    page_locked_int_workspace_buffer =
+        xattention_workspace
+            .get_two_stage_unshared_page_locked_int_workspace_buffer();
+  } else {
+    int_workspace_buffer = workspace.get_int_workspace_buffer();
+    page_locked_int_workspace_buffer =
+        workspace.get_page_locked_int_workspace_buffer();
+  }
   CHECK(int_workspace_buffer.defined() &&
         page_locked_int_workspace_buffer.defined())
       << "flashinfer plan workspace buffers must be initialized";

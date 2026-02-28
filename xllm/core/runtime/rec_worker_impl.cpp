@@ -34,6 +34,7 @@ limitations under the License.
 #include "kernels/cuda/cuda_ops_api.h"
 #include "kernels/cuda/xattention/xattention_ops_api.h"
 #include "layers/cuda/flashinfer_workspace.h"
+#include "layers/cuda/xattention_workspace.h"
 #include "platform/cuda/device_capture_lock.h"
 #endif
 #include "framework/model_loader.h"
@@ -1016,6 +1017,17 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
     : LLMWorkerImpl(parallel_args, device, options) {
+#if defined(USE_CUDA)
+  if (FLAGS_enable_xattention_two_stage_decode) {
+    const auto int_workspace_size =
+        ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
+            .get_int_workspace_buffer()
+            .size(0);
+    ::xllm::layer::xattention::XAttentionWorkspace::get_instance().initialize(
+        device_, int_workspace_size);
+  }
+#endif
+
   if (!is_driver()) {
     return;
   }

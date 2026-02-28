@@ -42,6 +42,8 @@ void dequant_from_paged_cache(ReshapeFromCacheParams& params);
 
 void batch_prefill(AttentionParams& params);
 
+void batch_prefill_non_causal(AttentionParams& params);
+
 void batch_decode(AttentionParams& params);
 
 void fused_layernorm(FusedLayerNormParams& params);
