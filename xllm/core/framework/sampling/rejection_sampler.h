@@ -75,7 +75,9 @@ class RejectionSampler final {
 
   // Sample tokens ids using rejection sampling.
   // draft_token_ids: [batch_size, n_speculative_tokens]
-  // draft_probs: [batch_size, n_speculative_tokens, vocab_size]
+  // draft_probs:
+  //   1) dense format: [batch_size, n_speculative_tokens, vocab_size]
+  //   2) selected-only format: [batch_size, n_speculative_tokens]
   // target_logits: [batch_size, n_speculative_tokens + 1, vocab_size]
   // bonus_token_ids: [batch_size, 1]
   SampleOutput forward(const torch::Tensor& draft_token_ids,

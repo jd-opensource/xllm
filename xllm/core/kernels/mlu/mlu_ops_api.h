@@ -63,6 +63,43 @@ void reshape_from_cache(torch::Tensor& key,
                         const std::optional<torch::Tensor>& block_tables,
                         const std::optional<torch::Tensor>& cache_seq_offset);
 
+// Quantize and store KV cache to paged cache (INT8 quantization)
+// k/v: [token_nums, head_num_kv, head_size] (FP16/BF16)
+// k_cache/v_cache: [block_nums, head_num_kv, block_size, head_size] (INT8)
+// k_cache_scale/v_cache_scale: [block_nums, head_num_kv, block_size] (FP32)
+// slot_mapping: [token_nums] (INT32)
+void quant_to_paged_cache(const torch::Tensor& k,
+                          const std::optional<torch::Tensor>& v,
+                          torch::Tensor& k_cache,
+                          const std::optional<torch::Tensor>& v_cache,
+                          torch::Tensor& k_cache_scale,
+                          const std::optional<torch::Tensor>& v_cache_scale,
+                          const torch::Tensor& slot_mapping);
+
+// Dequantize KV cache from paged cache (INT8 to FP16/BF16)
+// key/value: [total_seqlens, head_num, head_size] (FP16/BF16) - output
+// key_cache/value_cache: [block_nums, head_num, block_size, head_size] (INT8)
+// key_cache_scale/value_cache_scale: [block_nums, head_num, block_size] or
+// [head_num, head_size] (FP32) context_lengths: [batch] (INT32)
+// max_context_len: maximum context length
+// context_seq_offset: [batch] (INT32) - optional sequence offset
+// block_tables: [batch, max_block_num] (INT32)
+// quant_mode: 0 for per-channel, 1 for per-token
+// quant_bit: quantization bit (default 8)
+void dequant_from_paged_cache(
+    torch::Tensor& key,
+    const std::optional<torch::Tensor>& value,
+    const torch::Tensor& key_cache,
+    const std::optional<torch::Tensor>& value_cache,
+    const torch::Tensor& key_cache_quant_scale,
+    const std::optional<torch::Tensor>& value_cache_quant_scale,
+    const torch::Tensor& context_lengths,
+    int64_t max_context_len,
+    const std::optional<torch::Tensor>& context_seq_offset,
+    const torch::Tensor& block_tables,
+    int64_t quant_mode,
+    int64_t quant_bit);
+
 void batch_prefill(const torch::Tensor& query,
                    const torch::Tensor& key,
                    const torch::Tensor& value,

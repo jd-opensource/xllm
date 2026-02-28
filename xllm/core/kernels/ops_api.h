@@ -32,6 +32,14 @@ void reshape_paged_cache(ReshapePagedCacheParams& params);
 
 void reshape_from_cache(ReshapeFromCacheParams& params);
 
+// Quantize and store KV cache to paged cache (INT8 quantization)
+// Only supported on MLU backend
+void quant_to_paged_cache(ReshapePagedCacheParams& params);
+
+// Dequantize KV cache from paged cache (INT8 to FP16/BF16)
+// Only supported on MLU backend
+void dequant_from_paged_cache(ReshapeFromCacheParams& params);
+
 void batch_prefill(AttentionParams& params);
 
 void batch_decode(AttentionParams& params);

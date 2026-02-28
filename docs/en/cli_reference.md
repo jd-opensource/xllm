@@ -28,6 +28,7 @@ xLLM uses gflags to manage service startup parameters. The specific parameter me
 | `block_size` | `int32` | 128 |  | The block size for KV Cache storage. |  |
 | `task` | `string` | "generate" | "embed" | Service type: generation or embedding. |  |
 | `max_cache_size` | `int64` | 0 |  | The usable KV Cache size in bytes. |  |
+| `kv_cache_dtype` | `string` | "auto" | "int8" | KV Cache data type. "auto" aligns with model dtype (no quantization), "int8" enables INT8 quantization to save ~50% memory. MLU backend only. |  |
 
 ## MoE Model Related Parameters
 | Parameter Name | Type | Default Value | Other Values | Description | Notes |

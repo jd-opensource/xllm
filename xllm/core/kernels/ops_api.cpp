@@ -57,11 +57,17 @@ void apply_rotary(RotaryParams& params) {
   torch::Tensor cos_sin;
 
   if (params.position_ids.has_value()) {
+    // positions is already int64 on CUDA/MUSA (pre-converted in
+    // ForwardInput::to).
     pos_ids = params.position_ids.value().to(torch::kInt64);
-    auto cos_sin_vec = params.cos_sin.chunk(4, -1);
-    auto cos = cos_sin_vec[0];
-    auto sin = cos_sin_vec[2];
-    cos_sin = torch::cat({cos, sin}, -1);
+    if (params.precomputed_cos_sin.defined()) {
+      cos_sin = params.precomputed_cos_sin;
+    } else {
+      auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+      auto cos = cos_sin_vec[0];
+      auto sin = cos_sin_vec[2];
+      cos_sin = torch::cat({cos, sin}, -1);
+    }
   } else if (params.cu_query_lens.has_value()) {
     auto cu = params.cu_query_lens.value().to(torch::kInt64);
     CHECK(cu.numel() >= 2) << "apply_rotary (CUDA): cu_query_lens must have at "
@@ -90,6 +96,8 @@ void apply_rotary(RotaryParams& params) {
       auto cos_sliced = params.cos.contiguous().slice(-1, 0, rot_half);
       auto sin_sliced = params.sin.contiguous().slice(-1, 0, rot_half);
       cos_sin = torch::cat({cos_sliced, sin_sliced}, -1);
+    } else if (params.precomputed_cos_sin.defined()) {
+      cos_sin = params.precomputed_cos_sin;
     } else {
       auto cos_sin_vec = params.cos_sin.chunk(4, -1);
       auto cos = cos_sin_vec[0];
@@ -104,13 +112,17 @@ void apply_rotary(RotaryParams& params) {
 
   cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
 #elif defined(USE_ILU)
-  auto cos_sin_vec = params.cos_sin.chunk(4, -1);
-  auto cos = cos_sin_vec[0];
-  auto sin = cos_sin_vec[2];
-  auto cos_sin = torch::cat({cos, sin}, -1);
+  torch::Tensor ilu_cos_sin;
+  if (params.precomputed_cos_sin.defined()) {
+    ilu_cos_sin = params.precomputed_cos_sin;
+  } else {
+    auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+    ilu_cos_sin = torch::cat({cos_sin_vec[0], cos_sin_vec[2]}, -1);
+  }
+  // positions is already int64 on ILU (pre-converted in ForwardInput::to).
   torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
   ilu::apply_rope_pos_ids_cos_sin_cache(
-      params.q, params.k, cos_sin, long_position_ids, params.interleaved);
+      params.q, params.k, ilu_cos_sin, long_position_ids, params.interleaved);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -185,12 +197,45 @@ void reshape_from_cache(ReshapeFromCacheParams& params) {
 #endif
 }
 
+void quant_to_paged_cache(ReshapePagedCacheParams& params) {
+#if defined(USE_MLU)
+  CHECK(params.k_cache_scale.has_value())
+      << "k_cache_scale is required for quant_to_paged_cache";
+  mlu::quant_to_paged_cache(params.key,
+                            params.value,
+                            params.k_cache,
+                            params.v_cache,
+                            params.k_cache_scale.value(),
+                            params.v_cache_scale,
+                            params.slot_mapping);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+void dequant_from_paged_cache(ReshapeFromCacheParams& params) {
+#if defined(USE_MLU)
+  CHECK(params.key_cache_quant_scale.has_value())
+      << "key_cache_quant_scale is required for dequant_from_paged_cache";
+  mlu::dequant_from_paged_cache(params.key,
+                                params.value,
+                                params.key_cache,
+                                params.value_cache,
+                                params.key_cache_quant_scale.value(),
+                                params.value_cache_quant_scale,
+                                params.context_lengths,
+                                params.max_context_len,
+                                params.context_seq_offset,
+                                params.block_tables.value(),
+                                params.quant_mode,
+                                params.quant_bit);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 void batch_prefill(AttentionParams& params) {
 #if defined(USE_MLU)
-  std::optional<torch::Tensor> block_tables;
-  if (params.attn_metadata.is_chunked_prefill) {
-    block_tables = params.attn_metadata.block_table;
-  }
   mlu::batch_prefill(params.query,
                      params.key,
                      params.value,
@@ -204,7 +249,7 @@ void batch_prefill(AttentionParams& params) {
                      params.k_quant_scale,
                      params.v_quant_scale,
                      params.out_quant_scale,
-                     block_tables,
+                     params.block_tables,
                      params.attn_metadata.max_query_len,
                      params.attn_metadata.max_seq_len,
                      params.scale,

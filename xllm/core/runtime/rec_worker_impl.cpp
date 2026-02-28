@@ -35,6 +35,7 @@ limitations under the License.
 #include "platform/cuda/device_capture_lock.h"
 #endif
 #include "framework/model_loader.h"
+#include "framework/sampling/rec_sampler.h"
 #include "models/model_registry.h"
 #include "util/env_var.h"
 #include "util/timer.h"
@@ -292,7 +293,9 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecWithMmDataWorkPipeline::step(
 
 RecWorkerImpl::LlmRecMultiRoundPipeline::LlmRecMultiRoundPipeline(
     RecWorkerImpl& worker)
-    : worker_(worker) {
+    : worker_(worker),
+      rec_sampler_(std::make_unique<RecSampler>(
+          RecPipelineType::kLlmRecMultiRoundPipeline)) {
   full_kv_cache_offsets_ = std::make_unique<FullKvCacheOffsets>(this);
   allocate_kv_caches_related();
 }
@@ -508,7 +511,7 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
     if (sampling_params.selected_token_idxes.defined()) {
       logits = worker_.model_->logits(hidden_states,
                                       sampling_params.selected_token_idxes);
-      sample_output = worker_.sampler_->forward(logits, sampling_params);
+      sample_output = rec_sampler_->forward(logits, sampling_params);
     }
 
     if (sample_output.top_tokens.defined() &&

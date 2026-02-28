@@ -27,6 +27,17 @@ KVCache::KVCache(torch::Tensor key_cache,
       value_cache_(std::move(value_cache)),
       index_cache_(std::move(index_cache)) {}
 
+KVCache::KVCache(torch::Tensor key_cache,
+                 torch::Tensor value_cache,
+                 torch::Tensor index_cache,
+                 torch::Tensor key_cache_scale,
+                 torch::Tensor value_cache_scale)
+    : key_cache_(std::move(key_cache)),
+      value_cache_(std::move(value_cache)),
+      index_cache_(std::move(index_cache)),
+      key_cache_scale_(std::move(key_cache_scale)),
+      value_cache_scale_(std::move(value_cache_scale)) {}
+
 KVCache::KVCache(std::shared_ptr<XTensor> key_xtensor,
                  std::shared_ptr<XTensor> value_xtensor)
     : key_xtensor_(key_xtensor), value_xtensor_(value_xtensor) {}
@@ -34,6 +45,19 @@ KVCache::KVCache(std::shared_ptr<XTensor> key_xtensor,
 torch::Tensor KVCache::get_k_cache() const { return key_cache_; }
 torch::Tensor KVCache::get_v_cache() const { return value_cache_; }
 torch::Tensor KVCache::get_index_cache() const { return index_cache_; }
+
+std::optional<torch::Tensor> KVCache::get_k_cache_scale() const {
+  if (!key_cache_scale_.defined() || key_cache_scale_.numel() == 0) {
+    return std::nullopt;
+  }
+  return key_cache_scale_;
+}
+std::optional<torch::Tensor> KVCache::get_v_cache_scale() const {
+  if (!value_cache_scale_.defined() || value_cache_scale_.numel() == 0) {
+    return std::nullopt;
+  }
+  return value_cache_scale_;
+}
 
 std::vector<std::vector<int64_t>> KVCache::get_shapes() {
   std::vector<std::vector<int64_t>> tensor_shapes(3);
@@ -79,6 +103,18 @@ void KVCache::swap_blocks(torch::Tensor& src_tensor,
   // batch copy keys and values to dst indices
   key_cache_.index_copy_(0, dst_tensor, selected_keys);
   value_cache_.index_copy_(0, dst_tensor, selected_values);
+
+  // batch copy scale tensors if quantization is enabled
+  if (key_cache_scale_.defined() && key_cache_scale_.numel() > 0) {
+    auto selected_k_scales =
+        torch::index_select(key_cache_scale_, 0, src_tensor);
+    key_cache_scale_.index_copy_(0, dst_tensor, selected_k_scales);
+  }
+  if (value_cache_scale_.defined() && value_cache_scale_.numel() > 0) {
+    auto selected_v_scales =
+        torch::index_select(value_cache_scale_, 0, src_tensor);
+    value_cache_scale_.index_copy_(0, dst_tensor, selected_v_scales);
+  }
 }
 
 std::shared_ptr<XTensor> KVCache::get_k_xtensor() const { return key_xtensor_; }

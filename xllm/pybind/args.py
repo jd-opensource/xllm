@@ -41,6 +41,7 @@ class ArgumentParser:
         self.parser.add_argument('--enable_shm', action='store_true', help='Use shared memory for inter-process communication in the single-machine multi-GPU scenario.')
         self.parser.add_argument('--input_shm_size', type=int, default=1024, help='The size of input shared memory in MB.')
         self.parser.add_argument('--output_shm_size', type=int, default=128, help='The size of output shared memory in MB.')
+        self.parser.add_argument('--kv_cache_dtype', type=str, default='auto', help='KV cache data type. "auto" (default) aligns with model dtype, "int8" enables INT8 quantization (MLU only).')
 
     def parse_args(self):
         return self.parser.parse_args()

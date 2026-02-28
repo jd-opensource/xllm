@@ -35,8 +35,8 @@ limitations under the License.
 #include "runtime/embed_worker_impl.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/mm_embed_vlm_worker_impl.h"
+#include "runtime/mtp_worker_impl.h"
 #include "runtime/rec_worker_impl.h"
-#include "runtime/speculative_worker_impl.h"
 #include "runtime/vlm_worker_impl.h"
 #include "util/timer.h"
 
@@ -46,12 +46,13 @@ Worker::Worker(const ParallelArgs& parallel_args,
                const runtime::Options& options,
                WorkerType worker_type) {
   if (options.enable_speculative_decode()) {
-    // Check speculative_algorithm flag to determine which worker to use
-    if (FLAGS_speculative_algorithm == "Eagle3") {
+    auto algo = FLAGS_speculative_algorithm;
+    LOG(INFO) << "Speculative decode is enabled, algorithm: " << algo;
+    if (algo == "Eagle3") {
       impl_ = new Eagle3WorkerImpl(parallel_args, device, options);
     } else {
-      // Default to MTP or other algorithms
-      impl_ = new SpeculativeWorkerImpl(parallel_args, device, options);
+      // Default: MTP
+      impl_ = new MTPWorkerImpl(parallel_args, device, options);
     }
   } else if (worker_type == WorkerType::LLM) {
     impl_ = new LLMWorkerImpl(parallel_args, device, options);

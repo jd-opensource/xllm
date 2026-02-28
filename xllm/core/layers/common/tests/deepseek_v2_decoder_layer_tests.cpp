@@ -908,5 +908,101 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
       << "First 5 elements do not match expected values";
 }
 
+TEST_F(DeepseekV2DecoderLayerTest, MLAQuantizedKVCachePrefillTest) {
+  // Test parameters
+  int64_t block_num = 100;
+  int64_t block_size = 16;
+  int64_t qk_rope_head_dim = model_args_.qk_rope_head_dim();
+  int64_t kv_lora_rank = model_args_.kv_lora_rank();
+  int64_t index_head_dim = model_args_.index_head_dim();
+
+  // Create INT8 Key Cache tensor (quantized) using seeded tensors
+  auto k_cache = test::seeded_tensor(
+      "mla_quant_prefill.k_cache",
+      {block_num, 1, block_size, qk_rope_head_dim + kv_lora_rank},
+      torch::kInt8,
+      options_.device());
+
+  // Create float32 scale tensor for Key Cache
+  auto k_cache_scale = test::seeded_tensor("mla_quant_prefill.k_scale",
+                                           {block_num, 1, block_size},
+                                           torch::kFloat32,
+                                           options_.device());
+
+  // Indexer Cache is NOT quantized (uses original dtype)
+  auto index_cache =
+      test::seeded_tensor("mla_quant_prefill.index_cache",
+                          {block_num, 1, block_size, index_head_dim},
+                          torch::kBFloat16,
+                          options_.device());
+
+  // Create KVCache with quantized Key Cache and non-quantized Indexer Cache
+  KVCache quant_kv_cache(
+      k_cache, torch::Tensor(), index_cache, k_cache_scale, torch::Tensor());
+
+  // Verify scale tensor properties
+  auto retrieved_k_scale = quant_kv_cache.get_k_cache_scale();
+  EXPECT_TRUE(retrieved_k_scale.has_value());
+  EXPECT_EQ(retrieved_k_scale.value().sizes(),
+            torch::IntArrayRef({block_num, 1, block_size}));
+  EXPECT_EQ(retrieved_k_scale.value().scalar_type(), torch::kFloat32);
+
+  // Verify Indexer Cache uses original dtype (not INT8)
+  auto index_cache_retrieved = quant_kv_cache.get_index_cache();
+  EXPECT_TRUE(index_cache_retrieved.defined());
+  EXPECT_NE(index_cache_retrieved.scalar_type(), torch::kInt8);
+  EXPECT_EQ(index_cache_retrieved.scalar_type(), torch::kBFloat16);
+
+  // Verify V cache scale is not defined (MLA uses compressed KV, no separate V
+  // cache)
+  auto retrieved_v_scale = quant_kv_cache.get_v_cache_scale();
+  EXPECT_TRUE(!retrieved_v_scale.has_value() ||
+              retrieved_v_scale.value().numel() == 0);
+}
+
+TEST_F(DeepseekV2DecoderLayerTest, MLAQuantizedKVCacheDecodeTest) {
+  // Test parameters
+  int64_t block_num = 100;
+  int64_t block_size = 16;
+  int64_t qk_rope_head_dim = model_args_.qk_rope_head_dim();
+  int64_t kv_lora_rank = model_args_.kv_lora_rank();
+  int64_t index_head_dim = model_args_.index_head_dim();
+
+  // Create INT8 Key Cache tensor (quantized) using seeded tensors
+  auto k_cache = test::seeded_tensor(
+      "mla_quant_decode.k_cache",
+      {block_num, 1, block_size, qk_rope_head_dim + kv_lora_rank},
+      torch::kInt8,
+      options_.device());
+
+  // Create float32 scale tensor for Key Cache
+  auto k_cache_scale = test::seeded_tensor("mla_quant_decode.k_scale",
+                                           {block_num, 1, block_size},
+                                           torch::kFloat32,
+                                           options_.device());
+
+  // Indexer Cache is NOT quantized (uses original dtype)
+  auto index_cache =
+      test::seeded_tensor("mla_quant_decode.index_cache",
+                          {block_num, 1, block_size, index_head_dim},
+                          torch::kBFloat16,
+                          options_.device());
+
+  KVCache quant_kv_cache(
+      k_cache, torch::Tensor(), index_cache, k_cache_scale, torch::Tensor());
+
+  // Verify scale tensor statistics using expect_tensor_stats
+  test::expect_tensor_stats(k_cache_scale,
+                            /*expected_min=*/0.000686,
+                            /*expected_max=*/0.999,
+                            /*expected_sum=*/803.8);
+
+  // Verify V cache scale is not defined (MLA uses compressed KV, no separate V
+  // cache)
+  auto retrieved_v_scale = quant_kv_cache.get_v_cache_scale();
+  EXPECT_TRUE(!retrieved_v_scale.has_value() ||
+              retrieved_v_scale.value().numel() == 0);
+}
+
 }  // namespace layer
 }  // namespace xllm

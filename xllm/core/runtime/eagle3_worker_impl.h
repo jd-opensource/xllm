@@ -17,12 +17,12 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "forward_params.h"
-#include "runtime/speculative_worker_impl.h"
+#include "runtime/mtp_worker_impl.h"
 #include "util/timer.h"
 
 namespace xllm {
 
-class Eagle3WorkerImpl : public SpeculativeWorkerImpl {
+class Eagle3WorkerImpl : public MTPWorkerImpl {
  public:
   Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                    const torch::Device& device,
