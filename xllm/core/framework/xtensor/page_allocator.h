@@ -95,7 +95,8 @@ class PageAllocator {
   // - Unmap all mapped KV cache virtual pages
   // - Release physical pages back to shared pool
   // - Stop preallocation for this model
-  bool sleep_model(const std::string& model_id);
+  bool sleep_model(const std::string& model_id,
+                   bool skip_weight_release = false);
 
   // Wake up a sleeping model:
   // - Re-map all previously mapped KV cache virtual pages

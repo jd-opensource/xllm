@@ -158,7 +158,8 @@ bool LLMEngine::init(int32_t master_status) {
   // This allows KV cache allocation to complete first, then releases resources
   if (FLAGS_enable_xtensor && master_status != WAKEUP) {
     const std::string& model_id = options_.model_id();
-    if (!PageAllocator::get_instance().sleep_model(model_id)) {
+    if (!PageAllocator::get_instance().sleep_model(
+            model_id, /*skip_weight_release=*/true)) {
       LOG(ERROR) << "Failed to sleep model " << model_id << " after init";
       return false;
     }
