@@ -46,8 +46,8 @@ void reshape_paged_cache(torch::Tensor& key,
 }
 
 void batch_prefill(torch::Tensor& query,
-                   torch::Tensor& key,
-                   torch::Tensor& value,
+                   const torch::Tensor& key,
+                   const std::optional<torch::Tensor>& value,
                    torch::Tensor& output,
                    std::optional<torch::Tensor>& output_lse,
                    const std::optional<torch::Tensor>& q_cu_seq_lens,
@@ -74,9 +74,11 @@ void batch_prefill(torch::Tensor& query,
   auto k_quant_scale_ = k_quant_scale.value_or(torch::Tensor());
   auto v_quant_scale_ = v_quant_scale.value_or(torch::Tensor());
   auto block_tables_ = block_tables;
+  auto key_ = key;
+  auto value_ = value.value();
   infer::ixinfer_flash_attn_unpad_with_block_tables(query,
-                                                    key,
-                                                    value,
+                                                    key_,
+                                                    value_,
                                                     output,
                                                     block_tables_,
                                                     q_cu_seq_lens_,
@@ -95,10 +97,10 @@ void batch_prefill(torch::Tensor& query,
 }
 
 void batch_decode(torch::Tensor& query,
-                  torch::Tensor& k_cache,
+                  const torch::Tensor& k_cache,
                   torch::Tensor& output,
-                  torch::Tensor& block_table,
-                  torch::Tensor& seq_lens,
+                  const torch::Tensor& block_table,
+                  const torch::Tensor& seq_lens,
                   const std::optional<torch::Tensor>& v_cache,
                   std::optional<torch::Tensor>& output_lse,
                   const std::optional<torch::Tensor>& q_quant_scale,
@@ -135,15 +137,17 @@ void batch_decode(torch::Tensor& query,
   double softcap = 0.0;
   bool enable_cuda_graph = false;
   bool use_sqrt_alibi = false;
-
+  auto block_table_ = block_table;
+  auto k_cache_ = k_cache;
+  auto seq_lens_ = seq_lens;
   infer::xllm_paged_attention(output,
                               query,
-                              k_cache,
+                              k_cache_,
                               v_cache_,
                               num_kv_heads,
                               scale,
-                              block_table,
-                              seq_lens,
+                              block_table_,
+                              seq_lens_,
                               page_block_size,
                               max_seq_len,
                               alibi_slope,

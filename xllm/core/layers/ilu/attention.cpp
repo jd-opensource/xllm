@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "attention.h"
 
+#include "kernels/ilu/ilu_ops_api.h"
 #include "kernels/ops_api.h"
 
 namespace xllm {
@@ -119,16 +120,32 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
                                     const std::optional<torch::Tensor>& v_cache,
                                     const AttentionMetadata& attn_metadata) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
-  xllm::kernel::AttentionParams attention_params{attn_metadata};
-  attention_params.query = query.view({-1, num_heads_, head_size_});
-  attention_params.output = output.view({-1, num_heads_, head_size_v});
-  attention_params.window_size_left = sliding_window_;
-  attention_params.scale = scale_;
-
-  attention_params.key = k_cache;
-  attention_params.value = v_cache.value();
-
-  xllm::kernel::batch_prefill(attention_params);
+  std::optional<torch::Tensor> output_lse = std::nullopt;
+  query = query.view({-1, num_heads_, head_size_});
+  output = output.view({-1, num_heads_, head_size_v});
+  // torch::Tensor k_cache_ = k_cache;
+  // torch::Tensor v_cache_ = v_cache.value();
+  xllm::kernel::ilu::batch_prefill(query,
+                                   k_cache,
+                                   v_cache,
+                                   output,
+                                   output_lse,
+                                   attn_metadata.q_cu_seq_lens,
+                                   attn_metadata.kv_cu_seq_lens,
+                                   /*alibi_slope=*/std::nullopt,
+                                   /*attn_bias=*/std::nullopt,
+                                   /*q_quant_scale=*/std::nullopt,
+                                   /*k_quant_scale=*/std::nullopt,
+                                   /*v_quant_scale=*/std::nullopt,
+                                   attn_metadata.block_table,
+                                   attn_metadata.max_query_len,
+                                   attn_metadata.max_seq_len,
+                                   scale_,
+                                   attn_metadata.is_causal,
+                                   sliding_window_,
+                                   /*window_size_right=*/-1,
+                                   attn_metadata.compute_dtype,
+                                   /*return_lse=*/false);
 }
 
 void AttentionImpl::decoder_forward(torch::Tensor& query,
@@ -137,19 +154,34 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
                                     const std::optional<torch::Tensor>& v_cache,
                                     const AttentionMetadata& attn_metadata) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
-  xllm::kernel::AttentionParams attention_params{attn_metadata};
-  attention_params.query = query.view({-1, 1, num_heads_, head_size_});
-  attention_params.output = output.view({-1, 1, num_heads_, head_size_v});
-  attention_params.output_lse = std::nullopt;
-  // Set block_aligned_max_seq_len for ILU
-  attention_params.block_aligned_max_seq_len =
-      attn_metadata.block_table.size(-1) * k_cache.size(2);
-  attention_params.window_size_left = sliding_window_;
-  attention_params.scale = scale_;
-  attention_params.k_cache = k_cache;
-  attention_params.v_cache = v_cache;
+  query = query.view({-1, 1, num_heads_, head_size_});
+  output = output.view({-1, 1, num_heads_, head_size_v});
+  std::optional<torch::Tensor> output_lse = std::nullopt;
 
-  xllm::kernel::batch_decode(attention_params);
+  int64_t block_aligned_max_seq_len =
+      attn_metadata.block_table.size(-1) * k_cache.size(2);
+
+  xllm::kernel::ilu::batch_decode(query,
+                                  k_cache,
+                                  output,
+                                  attn_metadata.block_table,
+                                  attn_metadata.kv_seq_lens,
+                                  v_cache,
+                                  output_lse,
+                                  /*q_quant_scale=*/std::nullopt,
+                                  /*k_quant_scale=*/std::nullopt,
+                                  /*v_quant_scale=*/std::nullopt,
+                                  /*out_quant_scale=*/std::nullopt,
+                                  /*alibi_slope=*/std::nullopt,
+                                  attn_metadata.attn_mask,
+                                  attn_metadata.compute_dtype,
+                                  block_aligned_max_seq_len,
+                                  sliding_window_,
+                                  /*window_size_right=*/-1,
+                                  scale_,
+                                  /*return_lse=*/false,
+                                  attn_metadata.is_causal,
+                                  /*kv_cache_quant_bit_size=*/-1);
 }
 
 }  // namespace layer

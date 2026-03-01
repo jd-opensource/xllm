@@ -31,7 +31,6 @@ void batch_prefill(const std::string& uri,
                    double sm_scale,
                    torch::Tensor output,
                    std::optional<torch::Tensor>& output_lse,
-                   bool enable_cuda_graph,
                    const std::optional<torch::Tensor>& mask) {
   // Optional custom mask (e.g. for Qwen2_5_VL padding) -> FlashInfer packed
   // format.
