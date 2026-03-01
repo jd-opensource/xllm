@@ -53,6 +53,14 @@ class FlashInferAttentionImpl : public BaseAttentionImpl {
                        torch::Tensor& output,
                        std::optional<at::Tensor>& output_lse);
 
+  void chunked_prefill_forward(const AttentionMetadata& attn_metadata,
+                               torch::Tensor& query,
+                               const torch::Tensor& key,
+                               torch::Tensor& output,
+                               std::optional<at::Tensor>& output_lse,
+                               const torch::Tensor& k_cache,
+                               const torch::Tensor& v_cache);
+
   void decoder_forward(const AttentionMetadata& attn_metadata,
                        torch::Tensor& query,
                        const torch::Tensor& key,
@@ -60,6 +68,11 @@ class FlashInferAttentionImpl : public BaseAttentionImpl {
                        std::optional<at::Tensor>& output_lse,
                        const torch::Tensor& k_cache,
                        const torch::Tensor& v_cache);
+
+ private:
+  torch::Tensor float_workspace_buffer_;
+  torch::Tensor int_workspace_buffer_;
+  torch::Tensor page_locked_int_workspace_buffer_;
 };
 
 }  // namespace layer

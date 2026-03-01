@@ -95,7 +95,15 @@ FlashInferAttentionImpl::FlashInferAttentionImpl(int64_t num_heads,
                         head_size,
                         scale,
                         num_kv_heads,
-                        sliding_window - 1) {}
+                        sliding_window - 1) {
+  float_workspace_buffer_ = flashinfer::FlashinferWorkspace::get_instance()
+                                .get_float_workspace_buffer();
+  int_workspace_buffer_ = flashinfer::FlashinferWorkspace::get_instance()
+                              .get_int_workspace_buffer();
+  page_locked_int_workspace_buffer_ =
+      flashinfer::FlashinferWorkspace::get_instance()
+          .get_page_locked_int_workspace_buffer();
+}
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>>
 FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
@@ -130,12 +138,11 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
     xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
   }
 
-  // TODO: support chunked prefill
-  CHECK(!attn_metadata.is_chunked_prefill)
-      << "chunked prefill is not supported";
-
   if (attn_metadata.is_prefill) {
     prefill_forward(attn_metadata, query, key, value, output, output_lse);
+  } else if (attn_metadata.is_chunked_prefill) {
+    chunked_prefill_forward(
+        attn_metadata, query, key, output, output_lse, k_cache, v_cache);
   } else {
     decoder_forward(
         attn_metadata, query, key, output, output_lse, k_cache, v_cache);
@@ -194,22 +201,12 @@ void FlashInferAttentionImpl::prefill_forward(
     return;
   }
 
-  torch::Tensor float_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_float_workspace_buffer();
-  torch::Tensor int_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_int_workspace_buffer();
-  torch::Tensor page_locked_int_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_page_locked_int_workspace_buffer();
-
   xllm::kernel::cuda::batch_prefill_with_optional_piecewise_capture(
       attn_metadata.plan_info->uri,
       attn_metadata.plan_info->plan_info,
-      float_workspace_buffer,
-      int_workspace_buffer,
-      page_locked_int_workspace_buffer,
+      float_workspace_buffer_,
+      int_workspace_buffer_,
+      page_locked_int_workspace_buffer_,
       query,
       key,
       value,
@@ -219,6 +216,68 @@ void FlashInferAttentionImpl::prefill_forward(
       scale_,
       output,
       output_lse);
+}
+
+void FlashInferAttentionImpl::chunked_prefill_forward(
+    const AttentionMetadata& attn_metadata,
+    torch::Tensor& query,
+    const torch::Tensor& key,
+    torch::Tensor& output,
+    std::optional<at::Tensor>& output_lse,
+    const torch::Tensor& k_cache,
+    const torch::Tensor& v_cache) {
+  // Get block_size from k_cache if defined and has proper dimensions,
+  // otherwise use a default value (for prefill without KV cache, e.g., LongCat)
+  int64_t block_size = 1;
+  if (k_cache.defined() && k_cache.dim() >= 2) {
+    block_size = k_cache.size(1);
+  }
+
+  // NOTE: we only support "fa2" backend for BatchPrefillWithPagedKvcacheKernel
+  // for flashinfer v0.6.2, because it would cause performance degradation if
+  // using "fa3" backend.
+  std::string backend = "fa2";
+
+  if (attn_metadata.enable_cuda_graph) {
+    CHECK(attn_metadata.plan_info->plan_info.defined())
+        << "plan_info plan_info should not be null when enable_cuda_graph is "
+           "true";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "no need to update plan_info for CUDA graph";
+  } else {
+    flashinfer::update_chunked_prefill_plan_info(
+        attn_metadata.plan_info,
+        backend,
+        attn_metadata,
+        query.scalar_type(),
+        key.scalar_type(),
+        output.scalar_type(),
+        head_size_,
+        head_size_,
+        num_heads_,
+        num_kv_heads_,
+        block_size,
+        sliding_window_,
+        attn_metadata.enable_cuda_graph);
+  }
+
+  xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
+                                   attn_metadata.plan_info->plan_info,
+                                   float_workspace_buffer_,
+                                   int_workspace_buffer_,
+                                   page_locked_int_workspace_buffer_,
+                                   query,
+                                   k_cache,
+                                   v_cache,
+                                   attn_metadata.paged_kv_indptr,
+                                   attn_metadata.paged_kv_indices,
+                                   attn_metadata.paged_kv_last_page_len,
+                                   sliding_window_,
+                                   scale_,
+                                   output,
+                                   output_lse,
+                                   /*use_tensor_core=*/true,
+                                   attn_metadata.qo_indptr);
 }
 
 void FlashInferAttentionImpl::decoder_forward(
@@ -264,21 +323,11 @@ void FlashInferAttentionImpl::decoder_forward(
                                         decode_use_tensor_core_);
   }
 
-  torch::Tensor float_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_float_workspace_buffer();
-  torch::Tensor int_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_int_workspace_buffer();
-  torch::Tensor page_locked_int_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_page_locked_int_workspace_buffer();
-
   xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
                                    attn_metadata.plan_info->plan_info,
-                                   float_workspace_buffer,
-                                   int_workspace_buffer,
-                                   page_locked_int_workspace_buffer,
+                                   float_workspace_buffer_,
+                                   int_workspace_buffer_,
+                                   page_locked_int_workspace_buffer_,
                                    query,
                                    k_cache,
                                    v_cache,
