@@ -83,7 +83,7 @@ int32_t calculate_kv_len(const Slice<int32_t>& kv_seq_lens_slice,
 void append_seq_len(std::vector<int32_t>& vec, int32_t len) {
 #if defined(USE_NPU)
   vec.emplace_back(len);
-#elif defined(USE_MLU) || defined(USE_CUDA)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_MUSA)
   push_cumsum(vec, len);
 #endif
 }

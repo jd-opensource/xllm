@@ -141,7 +141,7 @@ bool WorkerImpl::allocate_kv_cache(
           torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_)),
           npu_format_type);
     }
-#elif defined(USE_ILU) || defined(USE_MLU)
+#elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
     key_cache = torch::zeros(kv_cache_shape[0],
                              torch::dtype(cache_dtype).device(device_));
     if (!kv_cache_shape[1].empty()) {
@@ -347,6 +347,8 @@ std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
   torch_mlu::MLUCachingAllocator::emptyCache();
 #elif defined(USE_CUDA) || defined(USE_ILU)
   c10::cuda::CUDACachingAllocator::emptyCache();
+#elif defined(USE_MUSA)
+  c10::musa::MUSACachingAllocator::emptyCache();
 #endif
   const auto available_memory = device_.free_memory();
   const auto total_memory = device_.total_memory();
@@ -405,8 +407,14 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
   auto& flatten_tokens = inputs.token_ids;
   auto neg_mask = (flatten_tokens < 0);
   auto clamped_neg_indices = torch::clamp(-flatten_tokens, 0);
+#if defined(USE_MUSA)
+  auto cpu = clamped_neg_indices.cpu() - 1;
+  auto replacement =
+      last_step_output_.sample_output.next_tokens.index({cpu.musa()});
+#else
   auto replacement = last_step_output_.sample_output.next_tokens.index(
       {clamped_neg_indices - 1});
+#endif
   inputs.token_ids = torch::where(neg_mask, replacement, flatten_tokens);
 #endif
   return inputs;

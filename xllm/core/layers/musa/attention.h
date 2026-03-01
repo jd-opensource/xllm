@@ -17,23 +17,33 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include <tuple>
+#include <cassert>
+#include <cstdint>
+#include <optional>
 
-#include "framework/kv_cache/kv_cache.h"
-#include "framework/model/model_input_params.h"
-#include "layers/common/attention_metadata.h"
+#include "framework/state_dict/state_dict.h"
+#include "framework/state_dict/utils.h"
+#include "musa_layer_base.h"
 
-namespace xllm {
-namespace layer {
-class AttentionImpl : public torch::nn::Module {
+namespace xllm::layer {
+
+class AttentionImpl : public MUSALayerBaseImpl {
  public:
-  AttentionImpl() = default;
+  explicit AttentionImpl(ModelArgs const& args,
+                         QuantArgs const& quant_args,
+                         ParallelArgs const& parallel_args,
+                         torch::TensorOptions const& options);
 
-  AttentionImpl(int num_heads,
-                int head_size,
+  AttentionImpl(int64_t num_heads,
+                int64_t head_size,
                 float scale,
-                int num_kv_heads,
-                int sliding_window);
+                int64_t num_kv_heads,
+                int64_t sliding_window);
+
+  ~AttentionImpl() {};
+
+  torch::Tensor forward(torch::Tensor& input,
+                        ForwardParams& fwd_params) override;
 
   std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
       const AttentionMetadata& attn_metadata,
@@ -42,14 +52,19 @@ class AttentionImpl : public torch::nn::Module {
       torch::Tensor& value,
       KVCache& kv_cache);
 
+  void load_state_dict(StateDict const& state_dict) override;
+
  private:
   int32_t num_heads_;
-  int32_t head_size_;
-  float scale_;
   int32_t num_kv_heads_;
-  int32_t sliding_window_;
+  int32_t head_dim_;
+  int32_t q_size_;
+  int32_t kv_size_;
+  int32_t hidden_size_;
+  float rms_eps;
+  float scaling_;
+  constexpr static int32_t weight_num_ = 7;
 };
 TORCH_MODULE(Attention);
 
-}  // namespace layer
-}  // namespace xllm
+}  // namespace xllm::layer
