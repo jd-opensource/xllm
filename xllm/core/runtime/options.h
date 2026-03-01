@@ -170,9 +170,6 @@ struct Options {
   // max requests per batch
   PROPERTY(int, max_requests_per_batch) = 0;
 
-  // enable continuous kvcache
-  PROPERTY(bool, enable_continuous_kvcache) = false;
-
   // start with offline inference, default is false
   PROPERTY(bool, enable_offline_inference) = false;
 

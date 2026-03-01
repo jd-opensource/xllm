@@ -33,6 +33,10 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(bool, enable_disagg_pd) = false;
     PROPERTY(bool, enable_cache_upload) = false;
     PROPERTY(bool, enable_kvcache_store) = false;
+    PROPERTY(bool, enable_xtensor) = false;
+    PROPERTY(int64_t, num_layers) = 0;  // Required when enable_xtensor is true
+    PROPERTY(int64_t, slot_size) = 0;   // Memory size per slot (for xtensor)
+    PROPERTY(std::string, model_id);    // Model ID for multi-model support
   };
 
   explicit BlockManagerPool(const Options& options, int32_t dp_size = 1);
@@ -78,6 +82,10 @@ class BlockManagerPool : public KVCacheManager {
 
   // get the options for the block manager
   const Options& options() const { return options_; }
+
+  // Reserve XTensor null blocks for each DP manager.
+  // Should be called after KV tensors are created.
+  void reserve_xtensor_null_blocks() override;
 
  protected:
   int32_t get_manager_with_max_free_blocks() const;

@@ -60,18 +60,13 @@ class WorkerService : public proto::DistributeWorker {
                            ::google::protobuf::Closure* done) override;
 
   void AllocateKVCache(::google::protobuf::RpcController* controller,
-                       const proto::KVCacheShape* request,
+                       const proto::AllocateKVCacheRequest* request,
                        proto::Status* response,
                        ::google::protobuf::Closure* done) override;
 
-  void AllocateContinuousKVCache(::google::protobuf::RpcController* controller,
-                                 const proto::XTensorOptionsVec* request,
-                                 proto::Status* response,
-                                 ::google::protobuf::Closure* done) override;
-
   void AllocateKVCacheWithTransfer(
       ::google::protobuf::RpcController* controller,
-      const proto::AllocateKVCacheWithTransferRequest* req,
+      const proto::AllocateKVCacheRequest* req,
       proto::Status* resp,
       ::google::protobuf::Closure* done) override;
 
@@ -110,6 +105,16 @@ class WorkerService : public proto::DistributeWorker {
                      proto::Status* resp,
                      ::google::protobuf::Closure* done) override;
 
+  void LinkD2D(::google::protobuf::RpcController* controller,
+               const proto::D2DLinkWorkerRequest* req,
+               proto::Status* resp,
+               ::google::protobuf::Closure* done) override;
+
+  void UnlinkD2D(::google::protobuf::RpcController* controller,
+                 const proto::D2DLinkWorkerRequest* req,
+                 proto::Status* resp,
+                 ::google::protobuf::Closure* done) override;
+
   void ExecuteModel(::google::protobuf::RpcController* controller,
                     const proto::ForwardInput* pb_fwd_input,
                     proto::ForwardOutput* pb_forward_output,
@@ -124,6 +129,16 @@ class WorkerService : public proto::DistributeWorker {
                                  const proto::Empty* req,
                                  proto::ActivationMemory* resp,
                                  ::google::protobuf::Closure* done) override;
+
+  void Sleep(::google::protobuf::RpcController* controller,
+             const proto::SleepRequest* req,
+             proto::Status* resp,
+             ::google::protobuf::Closure* done) override;
+
+  void Wakeup(::google::protobuf::RpcController* controller,
+              const proto::WakeupRequest* req,
+              proto::Status* resp,
+              ::google::protobuf::Closure* done) override;
 
  private:
   void step(ForwardInput& fwd_input,

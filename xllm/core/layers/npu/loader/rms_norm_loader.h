@@ -23,9 +23,9 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class RMSNORMLoader : public BaseLoader {
+class RMSNormLoader : public BaseLoader {
  public:
-  RMSNORMLoader(uint64_t weight_count, const ModelContext& context);
+  RMSNormLoader(uint64_t weight_count, const ModelContext& context);
 
   void load_state_dict(const StateDict& state_dict) override;
 

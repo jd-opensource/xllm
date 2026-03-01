@@ -100,6 +100,8 @@ DECLARE_bool(enable_chunked_prefill);
 
 DECLARE_string(master_node_addr);
 
+DECLARE_string(xtensor_master_node_addr);
+
 DECLARE_bool(enable_disagg_pd);
 
 DECLARE_bool(enable_pd_ooc);
@@ -210,13 +212,9 @@ DECLARE_int32(max_global_tpot_ms);
 
 DECLARE_int32(max_requests_per_batch);
 
-DECLARE_bool(enable_continuous_kvcache);
+DECLARE_bool(enable_xtensor);
 
 DECLARE_int64(phy_page_granularity_size);
-
-DECLARE_int64(cache_size_per_token);
-
-DECLARE_int64(buffer_size_per_seq);
 
 // --- beam search config ---
 DECLARE_bool(enable_beam_search_kernel);

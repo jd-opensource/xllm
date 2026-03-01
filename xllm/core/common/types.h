@@ -18,6 +18,8 @@ limitations under the License.
 
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "nlohmann/json.hpp"
 #include "util/slice.h"
@@ -94,6 +96,8 @@ enum class StatusCode : uint8_t {
   DEADLINE_EXCEEDED = 4,
   // resource exhausted.
   RESOURCE_EXHAUSTED = 5,
+  // service unavailable (e.g., model is sleeping).
+  UNAVAILABLE = 6,
 };
 
 class Status final {
@@ -192,6 +196,13 @@ struct RawToken {
   std::vector<float> embeddings;  // hidden states
 };
 
+// Weight segment info for D2D transfer (supports non-contiguous allocation)
+// Forward declaration needed by InstanceInfo
+struct WeightSegment {
+  uint64_t offset;  // Offset from GlobalXTensor base address
+  uint64_t size;    // Segment size in bytes
+};
+
 struct InstanceInfo {
   std::string name = "";
   std::string rpc_address = "";
@@ -210,6 +221,16 @@ struct InstanceInfo {
   std::vector<std::pair<int32_t, double>> ttft_profiling_data;
   // tpot profiling data
   std::vector<std::tuple<int32_t, int32_t, double>> tpot_profiling_data;
+
+  // XTensor mode: per-worker free physical pages
+  std::vector<size_t> worker_free_phy_pages;
+  // XTensor mode: total physical pages per worker (all workers have the same
+  // total)
+  size_t total_phy_pages = 0;
+  // XTensor mode: model weight segments in GlobalXTensor (dp group 0 only)
+  // key: model_id, value: list of {offset, size} segments
+  std::unordered_map<std::string, std::vector<WeightSegment>>
+      model_weight_segments;
 
   nlohmann::json serialize_to_json() const {
     nlohmann::json json_val;
@@ -236,8 +257,27 @@ struct InstanceInfo {
     json_val["ports"] = ports;
     json_val["ttft_profiling_data"] = ttft_profiling_data;
     json_val["tpot_profiling_data"] = tpot_profiling_data;
+    // XTensor mode info
+    json_val["worker_free_phy_pages"] = worker_free_phy_pages;
+    json_val["total_phy_pages"] = total_phy_pages;
+    // Serialize model_weight_segments: {model_id -> [{offset, size}, ...]}
+    nlohmann::json segments_json;
+    for (const auto& [model_id, segments] : model_weight_segments) {
+      nlohmann::json seg_array = nlohmann::json::array();
+      for (const auto& seg : segments) {
+        seg_array.push_back({{"offset", seg.offset}, {"size", seg.size}});
+      }
+      segments_json[model_id] = seg_array;
+    }
+    json_val["model_weight_segments"] = segments_json;
     return json_val;
   }
+};
+
+// XTensor mode: per-layer offsets for KV cache transfer
+struct XTensorLayerOffsets {
+  std::vector<uint64_t> k_offsets;  // K cache offsets in GlobalXTensor
+  std::vector<uint64_t> v_offsets;  // V cache offsets in GlobalXTensor
 };
 
 struct TransferKVInfo {
@@ -246,6 +286,10 @@ struct TransferKVInfo {
   std::vector<uint64_t> remote_blocks_ids;
   int32_t dp_rank;
   InstanceInfo remote_instance_info;
+
+  // XTensor mode: destination offsets from D-node (per-layer)
+  // Only populated when FLAGS_enable_xtensor is true
+  std::vector<XTensorLayerOffsets> dst_xtensor_layer_offsets;
 };
 
 // in bytes
@@ -297,6 +341,15 @@ struct EplbInfo {
 inline constexpr int REC_TOKEN_SIZE = 3;
 
 using RecTokenTriple = std::array<int32_t, REC_TOKEN_SIZE>;
+
+// Options for remote weight wakeup
+struct WakeupOptions {
+  int32_t master_status = 0;
+  std::vector<std::string> remote_addrs;
+  // Each remote_addr has a list of weight segments to pull
+  // Segments are ordered and should be concatenated at destination
+  std::vector<std::vector<WeightSegment>> src_weight_segments;
+};
 
 inline constexpr const char* LLM_REC_INPUT_TOKENS = "llm_rec_input_tokens";
 inline constexpr const char* LLM_REC_INPUT_INDICES = "llm_rec_input_indices";

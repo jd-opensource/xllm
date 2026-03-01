@@ -29,6 +29,12 @@ limitations under the License.
 #include "framework/request/request_params.h"
 namespace xllm {
 
+enum MasterStaus : int32_t {
+  WAKEUP = 0,
+  LIGHT_SLEEP = 1,
+  DEEP_SLEEP = 2,
+};
+
 class Master {
  public:
   explicit Master(const Options& options, EngineType type);
@@ -36,15 +42,38 @@ class Master {
   virtual void run() = 0;
   virtual const Options& options() const { return options_; }
 
+  virtual bool sleep() { return false; }
+
+  virtual bool wakeup() { return false; }
+
+  virtual bool wakeup(const WakeupOptions& options) { return false; }
+
+  virtual bool link_d2d(const std::vector<std::string>& device_ips) {
+    return false;
+  }
+
+  virtual bool unlink_d2d(const std::vector<std::string>& device_ips) {
+    return false;
+  }
+
+  int32_t get_master_status() const { return master_status_; }
+
+  void set_master_status(int32_t master_status) {
+    master_status_ = master_status;
+  }
+
   RateLimiter* get_rate_limiter() { return &rate_limiter_; }
 
  protected:
   Options options_;
   std::unique_ptr<Engine> engine_;
   RateLimiter rate_limiter_;
+  int32_t master_status_{0};
 };
 
 std::unique_ptr<Master> create_master(const std::string& backend,
                                       const Options& options);
+
+std::unique_ptr<Master> fork_master(Master* master, const Options& options);
 
 }  // namespace xllm

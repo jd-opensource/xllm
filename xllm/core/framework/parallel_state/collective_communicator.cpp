@@ -68,6 +68,9 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   }
 
   // comunicator will be inited in atb.
+  // HACK: MappingNPU internally uses a static counter to auto-assign
+  // buffer_offset for multi-model scenarios. This is a hack and should be
+  // refactored later.
   MappingNPU::Options mapping_options;
   mapping_options.dp_size(dp_size)
       .tp_size(world_size / dp_size)

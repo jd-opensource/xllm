@@ -21,24 +21,100 @@ limitations under the License.
 #include "layers/npu/npu_lm_head_impl.h"
 #include "layers/npu/npu_word_embedding_impl.h"
 #endif
+#include "layers/common/lm_head.h"
+#include "layers/common/word_embedding.h"
 // clang-format on
 #include <c10/core/Device.h>
 #include <torch/torch.h>
 
+#include <type_traits>
+#include <utility>
 #include <vector>
 
+#include "common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model_loader.h"
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
-#include "layers/common/lm_head.h"
-#include "layers/common/word_embedding.h"
 #include "model_args.h"
 #include "model_input_params.h"
 #include "model_output.h"
-#include "model_traits.h"
 
 namespace xllm {
+
+namespace detail {
+template <typename T, typename = void>
+struct has_get_lm_head : std::false_type {};
+
+template <typename T>
+struct has_get_lm_head<T,
+                       std::void_t<decltype(std::declval<T>()->get_lm_head())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_set_lm_head : std::false_type {};
+
+template <typename T>
+struct has_set_lm_head<T,
+                       std::void_t<decltype(std::declval<T>()->set_lm_head(
+                           std::declval<layer::LmHead&>()))>> : std::true_type {
+};
+
+template <typename T, typename = void>
+struct has_get_word_embedding : std::false_type {};
+
+template <typename T>
+struct has_get_word_embedding<
+    T,
+    std::void_t<decltype(std::declval<T>()->get_word_embedding())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_set_word_embedding : std::false_type {};
+
+template <typename T>
+struct has_set_word_embedding<
+    T,
+    std::void_t<decltype(std::declval<T>()->set_word_embedding(
+        std::declval<layer::WordEmbedding&>()))>> : std::true_type {};
+
+template <typename T, typename = void>
+struct has_lazy_load_model : std::false_type {};
+
+template <typename T>
+struct has_lazy_load_model<
+    T,
+    std::void_t<decltype(std::declval<T>()->lazy_load_model(
+        std::declval<std::unique_ptr<ModelLoader>>()))>> : std::true_type {};
+
+template <typename T, typename = void>
+struct has_free_model_weights : std::false_type {};
+
+template <typename T>
+struct has_free_model_weights<
+    T,
+    std::void_t<decltype(std::declval<T>()->free_model_weights())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_reload_model_weights : std::false_type {};
+
+template <typename T>
+struct has_reload_model_weights<
+    T,
+    std::void_t<decltype(std::declval<T>()->reload_model_weights())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_reload_model_weights_from_device : std::false_type {};
+
+template <typename T>
+struct has_reload_model_weights_from_device<
+    T,
+    std::void_t<
+        decltype(std::declval<T>()->reload_model_weights_from_device())>>
+    : std::true_type {};
+}  // namespace detail
 
 class CausalLM : public torch::nn::Module {
  public:
@@ -71,19 +147,12 @@ class CausalLM : public torch::nn::Module {
 
   // MTP-specific interface.
 #if defined(USE_NPU)
-  virtual layer::NpuLmHead get_npu_lm_head() {
-    NOT_IMPLEMENTED();
-    return nullptr;
-  }
-  virtual void set_npu_lm_head(layer::NpuLmHead& head) { NOT_IMPLEMENTED(); }
-  virtual layer::NpuWordEmbedding get_npu_word_embedding() {
-    NOT_IMPLEMENTED();
-    return nullptr;
-  }
-  virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) {
-    NOT_IMPLEMENTED();
-  }
+  virtual layer::NpuLmHead get_npu_lm_head() = 0;
+  virtual void set_npu_lm_head(layer::NpuLmHead& head) = 0;
+  virtual layer::NpuWordEmbedding get_npu_word_embedding() = 0;
+  virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) = 0;
 #endif
+
   virtual layer::LmHead get_lm_head() {
     NOT_IMPLEMENTED();
     return nullptr;
@@ -93,9 +162,20 @@ class CausalLM : public torch::nn::Module {
     NOT_IMPLEMENTED();
     return nullptr;
   }
+
   virtual void set_word_embedding(layer::WordEmbedding& embedding) {
     NOT_IMPLEMENTED();
   }
+
+  virtual void lazy_load_model(std::unique_ptr<ModelLoader> loader) {
+    NOT_IMPLEMENTED();
+  }
+
+  virtual void free_model_weights() { NOT_IMPLEMENTED(); }
+
+  virtual void reload_model_weights() { NOT_IMPLEMENTED(); }
+
+  virtual void reload_model_weights_from_device() { NOT_IMPLEMENTED(); }
 };
 
 template <typename Model>
@@ -119,6 +199,39 @@ class CausalLMImpl : public CausalLM {
   void load_model(std::unique_ptr<ModelLoader> loader) override {
     model_->load_model(std::move(loader));
   }
+
+  void lazy_load_model(std::unique_ptr<ModelLoader> loader) override {
+    if constexpr (detail::has_lazy_load_model<Model>::value) {
+      model_->lazy_load_model(std::move(loader));
+    } else {
+      CausalLM::lazy_load_model(std::move(loader));
+    }
+  }
+
+  void free_model_weights() override {
+    if constexpr (detail::has_free_model_weights<Model>::value) {
+      model_->free_model_weights();
+    } else {
+      CausalLM::free_model_weights();
+    }
+  }
+
+  void reload_model_weights() override {
+    if constexpr (detail::has_reload_model_weights<Model>::value) {
+      model_->reload_model_weights();
+    } else {
+      CausalLM::reload_model_weights();
+    }
+  }
+
+  void reload_model_weights_from_device() override {
+    if constexpr (detail::has_reload_model_weights_from_device<Model>::value) {
+      model_->reload_model_weights_from_device();
+    } else {
+      CausalLM::reload_model_weights_from_device();
+    }
+  }
+
   virtual void prepare_expert_weight(
       int32_t layer_id,
       const std::vector<int32_t>& expert_ids) override {
@@ -131,37 +244,22 @@ class CausalLMImpl : public CausalLM {
 
 #if defined(USE_NPU)
   layer::NpuLmHead get_npu_lm_head() override {
-    if constexpr (detail::has_get_npu_lm_head<Model>::value) {
-      return model_->get_npu_lm_head();
-    } else {
-      return CausalLM::get_npu_lm_head();
-    }
+    return model_->get_npu_lm_head();
   }
 
   void set_npu_lm_head(layer::NpuLmHead& head) override {
-    if constexpr (detail::has_set_npu_lm_head<Model>::value) {
-      model_->set_npu_lm_head(head);
-    } else {
-      CausalLM::set_npu_lm_head(head);
-    }
+    model_->set_npu_lm_head(head);
   }
 
   layer::NpuWordEmbedding get_npu_word_embedding() override {
-    if constexpr (detail::has_get_npu_word_embedding<Model>::value) {
-      return model_->get_npu_word_embedding();
-    } else {
-      return CausalLM::get_npu_word_embedding();
-    }
+    return model_->get_npu_word_embedding();
   }
 
   void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) override {
-    if constexpr (detail::has_set_npu_word_embedding<Model>::value) {
-      model_->set_npu_word_embedding(embedding);
-    } else {
-      CausalLM::set_npu_word_embedding(embedding);
-    }
+    model_->set_npu_word_embedding(embedding);
   }
 #endif
+
   layer::LmHead get_lm_head() override {
     if constexpr (detail::has_get_lm_head<Model>::value) {
       return model_->get_lm_head();

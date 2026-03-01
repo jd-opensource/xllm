@@ -32,6 +32,7 @@ if(USE_NPU)
     SRCS
       prefix_cache_test.cpp
     DEPS
+      :xllm_server
       :flags
       :kv_cache
       :prefix_cache
@@ -52,6 +53,7 @@ cc_binary(
   SRCS
     prefix_cache_benchmark.cpp
   DEPS
+    torch_python
     :kv_cache
     :prefix_cache
     :block

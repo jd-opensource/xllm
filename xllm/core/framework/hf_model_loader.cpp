@@ -23,6 +23,7 @@ limitations under the License.
 
 #include <boost/algorithm/string.hpp>
 #include <filesystem>
+#include <unordered_map>
 #include <vector>
 
 #include "core/common/rec_model_utils.h"
@@ -87,6 +88,67 @@ std::vector<std::unique_ptr<StateDict>>& HFModelLoader::get_state_dicts() {
     counter.wait();
   }
   return state_dicts_;
+}
+
+int64_t HFModelLoader::get_total_weight_size() const {
+  // find the index json file
+  std::string index_json_path;
+  for (const auto& entry :
+       std::filesystem::directory_iterator(model_weights_path_)) {
+    if (absl::EndsWith(entry.path().string(), ".index.json")) {
+      index_json_path = entry.path().string();
+      break;
+    }
+  }
+
+  if (index_json_path.empty()) {
+    LOG(WARNING) << "Failed to find .index.json file in "
+                 << model_weights_path_;
+    return 0;
+  }
+
+  JsonReader reader;
+  if (!reader.parse(index_json_path)) {
+    LOG(ERROR) << "Failed to parse json file " << index_json_path;
+    return 0;
+  }
+
+  auto total_size = reader.value<int64_t>("metadata.total_size");
+  if (!total_size.has_value()) {
+    LOG(WARNING) << "Failed to find metadata.total_size in " << index_json_path;
+    return 0;
+  }
+
+  int64_t result = total_size.value();
+
+  // When tie_word_embeddings is true, lm_head shares weight with word_embedding
+  // in the checkpoint, but we need to allocate memory for both during
+  // inference. Add the size of word_embedding weight (vocab_size * hidden_size
+  // * bytes_per_elem)
+  if (args_.tie_word_embeddings()) {
+    static const std::unordered_map<std::string, torch::Dtype> kDtypeMap = {
+        {"float16", torch::kFloat16},
+        {"bfloat16", torch::kBFloat16},
+        {"float32", torch::kFloat32},
+        {"float64", torch::kFloat64},
+        {"int8", torch::kInt8},
+        {"int16", torch::kInt16},
+        {"int32", torch::kInt32},
+        {"int64", torch::kInt64},
+        {"uint8", torch::kUInt8},
+        {"bool", torch::kBool},
+    };
+    auto it = kDtypeMap.find(args_.dtype());
+    CHECK(it != kDtypeMap.end()) << "Unsupported dtype: " << args_.dtype();
+    int64_t bytes_per_elem = torch::elementSize(it->second);
+    int64_t embedding_size =
+        args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
+    result += embedding_size;
+    LOG(INFO) << "tie_word_embeddings is true, adding embedding weight size: "
+              << embedding_size << " bytes";
+  }
+
+  return result;
 }
 
 bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {

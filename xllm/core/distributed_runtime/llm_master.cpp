@@ -37,6 +37,7 @@ limitations under the License.
 #include "server/xllm_server_registry.h"
 #include "speculative_engine.h"
 #include "util/device_name_utils.h"
+#include "util/net.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
 
@@ -48,7 +49,7 @@ LLMMaster::LLMMaster(const Options& options)
              options.draft_model_path().value_or("").empty()
                  ? EngineType::LLM
                  : EngineType::SSM) {
-  CHECK(engine_->init());
+  CHECK(engine_->init(master_status_));
   task_type_ = options_.task_type();
 
   model_args_ = engine_->model_args();
@@ -111,6 +112,7 @@ LLMMaster::LLMMaster(const Options& options)
 LLMMaster::~LLMMaster() {
   stoped_.store(true, std::memory_order_relaxed);
   // wait for the loop thread to finish
+  LOG(INFO) << "LLMMaster stopping...";
   if (loop_thread_.joinable()) {
     loop_thread_.join();
   }
@@ -458,6 +460,28 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       std::move(prompt.value()), std::move(prompt_tokens), sp, call, callback);
 }
 
+bool LLMMaster::sleep() { return engine_->sleep(master_status_); }
+
+bool LLMMaster::wakeup() {
+  WakeupOptions options;
+  options.master_status = master_status_;
+  return engine_->wakeup(options);
+}
+
+bool LLMMaster::wakeup(const WakeupOptions& options) {
+  WakeupOptions opts = options;
+  opts.master_status = master_status_;
+  return engine_->wakeup(opts);
+}
+
+bool LLMMaster::link_d2d(const std::vector<std::string>& device_ips) {
+  return engine_->link_d2d(device_ips);
+}
+
+bool LLMMaster::unlink_d2d(const std::vector<std::string>& device_ips) {
+  return engine_->unlink_d2d(device_ips);
+}
+
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)
     : Master(options,
              options.draft_model_path().value_or("").empty()
@@ -475,13 +499,22 @@ LLMAssistantMaster::LLMAssistantMaster(const Options& options)
   running_ = true;
 }
 
+LLMAssistantMaster::~LLMAssistantMaster() {
+  // wait for the loop thread to finish
+  if (loop_thread_.joinable()) {
+    loop_thread_.join();
+  }
+}
+
 void LLMAssistantMaster::run() {
   signal(SIGINT, LLMAssistantMaster::handle_signal);
   signal(SIGTERM, LLMAssistantMaster::handle_signal);
 
-  while (running_) {
-    sleep(5);
-  }
+  loop_thread_ = std::thread([this]() {
+    while (running_) {
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+  });
 }
 
 }  // namespace xllm

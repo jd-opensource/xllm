@@ -31,16 +31,15 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
+#include "core/distributed_runtime/master.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state/parallel_state.h"
-#include "framework/xtensor/multi_layer_xtensor_transfer.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/worker.h"
 #include "util/env_var.h"
 #include "util/pretty_print.h"
 #include "util/utils.h"
-
 namespace xllm {
 
 VLMEngine::VLMEngine(const runtime::Options& options,
@@ -169,7 +168,8 @@ bool VLMEngine::init_model() {
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
-    futures.push_back(worker->init_model_async(model_path, FLAGS_random_seed));
+    futures.push_back(
+        worker->init_model_async(model_path, FLAGS_random_seed, WAKEUP));
   }
   // wait for all futures to complete
   auto results = folly::collectAll(futures).get();

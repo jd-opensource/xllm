@@ -118,7 +118,7 @@ void NpuEagle3DecoderLayerImpl::merge_loaded_weights() {
   initialize_linear_transpose_type();
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
-  c10_npu::NPUCachingAllocator::emptyCache();
+  Device::empty_cache(device_.index());
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);

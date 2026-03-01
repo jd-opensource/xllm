@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "common/global_flags.h"
+
 #if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 
@@ -137,6 +139,12 @@ void KVCacheTransfer::merge_kv_blocks(
         kv_info.dst_blocks.insert(kv_info.dst_blocks.end(),
                                   info.remote_blocks_ids.begin(),
                                   info.remote_blocks_ids.end());
+
+        // XTensor mode: copy destination offsets
+        if (!info.dst_xtensor_layer_offsets.empty()) {
+          kv_info.dst_xtensor_layer_offsets = info.dst_xtensor_layer_offsets;
+        }
+
         merged_kv_infos[key] = std::move(kv_info);
       } else {
         merged_kv_infos[key].src_blocks.insert(
@@ -147,6 +155,30 @@ void KVCacheTransfer::merge_kv_blocks(
             merged_kv_infos[key].dst_blocks.end(),
             info.remote_blocks_ids.begin(),
             info.remote_blocks_ids.end());
+
+        // XTensor mode: merge destination offsets (append to each layer)
+        if (!info.dst_xtensor_layer_offsets.empty()) {
+          auto& existing = merged_kv_infos[key].dst_xtensor_layer_offsets;
+          // Initialize if not already done
+          if (existing.empty()) {
+            existing = info.dst_xtensor_layer_offsets;
+          } else {
+            // Append offsets for each layer
+            for (size_t layer = 0;
+                 layer < info.dst_xtensor_layer_offsets.size() &&
+                 layer < existing.size();
+                 ++layer) {
+              existing[layer].k_offsets.insert(
+                  existing[layer].k_offsets.end(),
+                  info.dst_xtensor_layer_offsets[layer].k_offsets.begin(),
+                  info.dst_xtensor_layer_offsets[layer].k_offsets.end());
+              existing[layer].v_offsets.insert(
+                  existing[layer].v_offsets.end(),
+                  info.dst_xtensor_layer_offsets[layer].v_offsets.begin(),
+                  info.dst_xtensor_layer_offsets[layer].v_offsets.end());
+            }
+          }
+        }
       }
     }
   }
@@ -203,12 +235,15 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     std::function<void(const std::vector<std::vector<int64_t>>&)>
         allocate_kv_cache_func,
     bool enable_lighting_indexer,
-    const std::string& model_type) {
+    const std::string& model_type,
+    const std::string& model_id) {
   std::shared_ptr<KVCacheTransfer> transfer;
 
   int32_t device_id = device.index();
 
 #if defined(USE_NPU)
+  LOG(INFO) << "Create KVCacheTransfer for " << transfer_type << "flag"
+            << FLAGS_kv_cache_transfer_type;
   if (transfer_type == "LlmDataDist") {
     transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
                                                      transfer_listen_port,
@@ -221,12 +256,28 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     transfer->initialize(device_id);
     transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
   } else if (transfer_type == "Mooncake") {
-    transfer = std::make_shared<MooncakeKVCacheTransfer>(
-        device_id, transfer_listen_port, device, model_type);
+    std::shared_ptr<MooncakeKVCacheTransferBase> mooncake_transfer;
+    if (FLAGS_enable_xtensor) {
+      auto xtensor_transfer = std::make_shared<MooncakeKVCacheTransferXTensor>(
+          device_id, transfer_listen_port, device);
+      if (!model_id.empty()) {
+        xtensor_transfer->set_model_id(model_id);
+        LOG(INFO)
+            << "XTensor mode enabled for MooncakeKVCacheTransfer, model_id="
+            << model_id;
+      }
+      mooncake_transfer = xtensor_transfer;
+    } else {
+      mooncake_transfer = std::make_shared<MooncakeKVCacheTransferNative>(
+          device_id, transfer_listen_port, device, model_type);
+    }
 
-    transfer->initialize(device_id);
-    transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
-    transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);
+    mooncake_transfer->initialize(device_id);
+    mooncake_transfer->allocate_kv_cache(
+        kv_caches, num_layers, kv_cache_shape, dtype);
+    mooncake_transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);
+
+    transfer = mooncake_transfer;
   } else {
     LOG(FATAL) << "Unsupported KVCacheTransfer type : " << transfer_type;
   }

@@ -34,6 +34,8 @@ class HFModelLoader : public ModelLoader {
 
   std::vector<std::unique_ptr<StateDict>>& get_state_dicts() override;
 
+  int64_t get_total_weight_size() const override;
+
  private:
   bool load_args(const std::string& model_weights_path);
   bool load_rec_vocab(const std::string& model_weights_path);

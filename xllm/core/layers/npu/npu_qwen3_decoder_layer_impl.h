@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/qwen3_decoder_loader.h"
 #include "loader/qwen3_decoder_manual_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
@@ -48,8 +49,6 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
   explicit NpuQwen3DecoderLayerImpl(const ModelContext& context);
 
   ~NpuQwen3DecoderLayerImpl() override = default;
-
-  virtual void merge_loaded_weights() override;
 
   virtual int64_t init_layer() override;
 

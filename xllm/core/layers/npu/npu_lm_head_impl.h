@@ -30,6 +30,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "loader/lm_head_loader.h"
+#include "loader/lm_head_manual_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
@@ -47,8 +48,6 @@ class NpuLmHeadImpl : public BaseLayer {
   explicit NpuLmHeadImpl(const ModelContext& context);
 
   ~NpuLmHeadImpl() override = default;
-
-  void merge_loaded_weights() override;
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& seleted_idxes,

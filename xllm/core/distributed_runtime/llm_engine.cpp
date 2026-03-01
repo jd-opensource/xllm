@@ -35,7 +35,9 @@ limitations under the License.
 #include "framework/block/hierarchy_block_manager_pool.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
-#include "framework/xtensor/multi_layer_xtensor_transfer.h"
+#include "framework/xtensor/page_allocator.h"
+#include "framework/xtensor/phy_page_pool.h"
+#include "framework/xtensor/xtensor_allocator.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
@@ -130,8 +132,8 @@ void LLMEngine::process_group_test() {
 #endif
 }
 
-bool LLMEngine::init() {
-  if (!init_model()) {
+bool LLMEngine::init(int32_t master_status) {
+  if (!init_model(master_status)) {
     LOG(ERROR) << "Failed to init model from: " << options_.model_path();
     return false;
   }
@@ -145,17 +147,31 @@ bool LLMEngine::init() {
 
   auto kv_cache_cap = estimate_kv_cache_capacity();
 
-  if (!(FLAGS_enable_continuous_kvcache
-            ? allocate_continuous_kv_cache(kv_cache_cap)
-            : allocate_kv_cache(kv_cache_cap))) {
-    LOG(ERROR) << "Failed to initialize  kv cache";
+  if (!allocate_kv_cache(kv_cache_cap)) {
+    LOG(ERROR) << "Failed to initialize kv cache";
     return false;
+  } else {
+    LOG(INFO) << "Successfully initialized kv cache";
+  }
+
+  // If master_status is not WAKEUP, put the model to sleep after initialization
+  // This allows KV cache allocation to complete first, then releases resources
+  if (FLAGS_enable_xtensor && master_status != WAKEUP) {
+    const std::string& model_id = options_.model_id();
+    if (!PageAllocator::get_instance().sleep_model(
+            model_id, /*skip_weight_release=*/true)) {
+      LOG(ERROR) << "Failed to sleep model " << model_id << " after init";
+      return false;
+    }
+    LOG(INFO) << "Model " << model_id
+              << " put to sleep after init (master_status=" << master_status
+              << ")";
   }
 
   return true;
 }
 
-bool LLMEngine::init_model() {
+bool LLMEngine::init_model(int32_t master_status) {
   const std::string& model_path = options_.model_path();
   auto model_loader = ModelLoader::create(model_path);
   LOG(INFO) << "Initializing model from: " << model_path;
@@ -203,12 +219,72 @@ bool LLMEngine::init_model() {
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
   LOG(INFO) << "Initializing model with random seed: " << FLAGS_random_seed;
 
+  // Initialize PageAllocator if using XTensor mode (before using it)
+  if (FLAGS_enable_xtensor) {
+    auto& page_allocator = PageAllocator::get_instance();
+    if (!page_allocator.is_initialized()) {
+      auto& phy_pool = PhyPagePool::get_instance();
+      CHECK(phy_pool.is_initialized())
+          << "PhyPagePool must be initialized before PageAllocator";
+      size_t num_phy_pages = phy_pool.num_total();
+      // max_world_size = dp_size * tp_size = worker_clients_num_
+      int32_t max_world_size = static_cast<int32_t>(worker_clients_num_);
+      page_allocator.init(num_phy_pages,
+                          dp_size_,
+                          max_world_size,
+                          /*enable_page_prealloc=*/true);
+    }
+
+    // Register model with model_id from options
+    // Each model has its own logical page_list but shares physical pages
+    const std::string& model_id = options_.model_id();
+    page_allocator.register_model(model_id, args_.n_layers(), master_status);
+
+    // Set model-specific parallel strategy for broadcast operations
+    // This is important for fork master with different dp/tp than original
+    // master (each model may have different dp_size/tp_size)
+    page_allocator.set_model_parallel_strategy(
+        model_id, dp_size_, dp_local_tp_size_);
+    auto& xtensor_allocator = XTensorAllocator::get_instance();
+    xtensor_allocator.set_model_parallel_strategy(
+        model_id, dp_size_, dp_local_tp_size_);
+
+    // Get total weight size and compute aligned num_pages
+    int64_t total_weight_size = model_loader->get_total_weight_size();
+    int64_t weight_size_per_tp = total_weight_size / dp_local_tp_size_;
+
+    size_t page_size = FLAGS_phy_page_granularity_size;
+    size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size + 10;
+
+    LOG(INFO) << "XTensor weight allocation: total_weight_size="
+              << total_weight_size << ", tp_size=" << dp_local_tp_size_
+              << ", weight_size_per_tp=" << weight_size_per_tp
+              << ", num_pages=" << num_pages
+              << ", master_status=" << master_status;
+
+    if (master_status == WAKEUP) {
+      // Consume physical pages for weights (global xtensor handles mapping)
+      if (!page_allocator.alloc_weight_pages(model_id, num_pages)) {
+        LOG(ERROR) << "Failed to allocate weight pages";
+        return false;
+      }
+      LOG(INFO) << "master_status=0 (WAKEUP): Allocated weight pages, "
+                   "will load to device";
+    } else if (master_status == LIGHT_SLEEP || master_status == DEEP_SLEEP) {
+      // Record num_pages for later wakeup
+      page_allocator.set_weight_pages_count(model_id, num_pages);
+      LOG(INFO) << "master_status=" << master_status
+                << " (SLEEP): Recorded weight pages, num_pages=" << num_pages;
+    }
+  }
+
   // init model for each worker in parallel
   // multiple workers, call async init
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
-    futures.push_back(worker->init_model_async(model_path, FLAGS_random_seed));
+    futures.push_back(
+        worker->init_model_async(model_path, FLAGS_random_seed, master_status));
   }
   // wait for all futures to complete
   auto results = folly::collectAll(futures).get();
@@ -225,39 +301,53 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   const int64_t max_cache_size = options_.max_cache_size();
   const double max_memory_utilization = options_.max_memory_utilization();
 
-  std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
-  futures.reserve(worker_clients_num_);
-  for (auto& worker : worker_clients_) {
-    futures.push_back(worker->estimate_kv_cache_capacity_async());
-  }
-
   int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
-  auto results = folly::collectAll(futures).get();
-  for (size_t i = 0; i < results.size(); ++i) {
-    if (!results[i].hasValue()) {
-      LOG(ERROR) << "Failed to estimate kv cache capacity for worker: " << i;
-      continue;
+
+  if (FLAGS_enable_xtensor) {
+    // For xtensor mode, use PhyPagePool's total pages * page_size
+    auto& phy_pool = PhyPagePool::get_instance();
+    CHECK(phy_pool.is_initialized()) << "PhyPagePool not initialized";
+    cache_size_in_bytes = static_cast<int64_t>(phy_pool.num_total()) *
+                          FLAGS_phy_page_granularity_size;
+    LOG(INFO) << "XTensor mode: available memory from PhyPagePool: "
+              << readable_size(cache_size_in_bytes)
+              << " (pages: " << phy_pool.num_total()
+              << ", page_size: " << FLAGS_phy_page_granularity_size << ")";
+  } else {
+    // Original logic: query each worker for available memory
+    std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
+    futures.reserve(worker_clients_num_);
+    for (auto& worker : worker_clients_) {
+      futures.push_back(worker->estimate_kv_cache_capacity_async());
     }
 
-    auto [available_memory, total_memory] = results[i].value();
-    LOG(INFO) << "worker #" << i
-              << ": available memory: " << readable_size(available_memory)
-              << ", total memory: " << readable_size(total_memory)
-              << ". Using max_memory_utilization: " << max_memory_utilization
-              << ", max_cache_size: " << readable_size(max_cache_size);
-    GAUGE_SET(weight_size_in_kilobytes,
-              (total_memory - available_memory) / 1024);
-    GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
-    // apply memory cap from config if it is set
-    if (max_memory_utilization < 1.0) {
-      const int64_t buffer_memory =
-          total_memory * (1.0 - max_memory_utilization);
-      available_memory -= buffer_memory;
+    auto results = folly::collectAll(futures).get();
+    for (size_t i = 0; i < results.size(); ++i) {
+      if (!results[i].hasValue()) {
+        LOG(ERROR) << "Failed to estimate kv cache capacity for worker: " << i;
+        continue;
+      }
+
+      auto [available_memory, total_memory] = results[i].value();
+      LOG(INFO) << "worker #" << i
+                << ": available memory: " << readable_size(available_memory)
+                << ", total memory: " << readable_size(total_memory)
+                << ". Using max_memory_utilization: " << max_memory_utilization
+                << ", max_cache_size: " << readable_size(max_cache_size);
+      GAUGE_SET(weight_size_in_kilobytes,
+                (total_memory - available_memory) / 1024);
+      GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
+      // apply memory cap from config if it is set
+      if (max_memory_utilization < 1.0) {
+        const int64_t buffer_memory =
+            total_memory * (1.0 - max_memory_utilization);
+        available_memory -= buffer_memory;
+      }
+      if (max_cache_size > 0) {
+        available_memory = std::min(available_memory, max_cache_size);
+      }
+      cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
     }
-    if (max_cache_size > 0) {
-      available_memory = std::min(available_memory, max_cache_size);
-    }
-    cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
   }
 
   Engine::KVCacheCapacity kv_cache_cap;
@@ -318,7 +408,6 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   // => per token: n_kv_heads floats for K + n_kv_heads for V.
   // MLA: key scale [num_blocks, 1, block_size] => one float per token.
   if (enable_kv_cache_quant) {
-    const int32_t block_size = options_.block_size();
     if (FLAGS_enable_mla) {
       // MLA scale shape is [num_blocks, 1, block_size] -> one float per token
       scale_slot_size = sizeof(float);
@@ -344,27 +433,13 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 #endif
 
-  if (!FLAGS_enable_continuous_kvcache) {
-    // compute kv cache n_blocks
-    const int32_t block_size = options_.block_size();
-    // Include scale tensor overhead in block size calculation
-    const int64_t block_size_in_bytes =
-        block_size * (slot_size + index_slot_size) +
-        block_size * scale_slot_size;
-    kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                            (kv_cache_cap.n_layers * block_size_in_bytes);
-    CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
-  } else {
-    int32_t n_pages =
-        kv_cache_cap.cache_size_in_bytes / FLAGS_phy_page_granularity_size;
-    if (FLAGS_enable_mla) {
-      n_pages -= n_pages % (kv_cache_cap.n_layers);
-    } else {
-      n_pages -= n_pages % (2 * kv_cache_cap.n_layers);
-    }
-    kv_cache_cap.n_pages = n_pages;
-    CHECK_GT(kv_cache_cap.n_pages, 0) << "no n_pages for kv cache";
-  }
+  // compute kv cache n_blocks
+  const int32_t block_size = options_.block_size();
+  const int64_t block_size_in_bytes =
+      block_size * (slot_size + index_slot_size + scale_slot_size);
+  kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
+                          (kv_cache_cap.n_layers * block_size_in_bytes);
+  CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
   return kv_cache_cap;
 }
 
@@ -448,10 +523,16 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   options.num_blocks(kv_cache_cap.n_blocks)
       .block_size(block_size)
       .host_num_blocks(kv_cache_cap.n_blocks * options_.host_blocks_factor())
-      .enable_prefix_cache(options_.enable_prefix_cache())
+      .enable_prefix_cache(
+          FLAGS_enable_xtensor ? false : options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload())
-      .enable_kvcache_store(options_.enable_kvcache_store());
+      .enable_kvcache_store(options_.enable_kvcache_store())
+      .enable_xtensor(FLAGS_enable_xtensor)
+      .num_layers(args_.n_layers())
+      .slot_size(kv_cache_cap.slot_size)
+      .model_id(options_.model_id());
+
   if (options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store()) {
     kv_cache_manager_ =
         std::make_unique<HierarchyBlockManagerPool>(options, this, dp_size_);
@@ -473,8 +554,8 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       return false;
     }
     for (auto& worker : worker_clients_) {
-      futures.push_back(worker->allocate_kv_cache_with_transfer_async(
-          kv_cache_cap.cache_size_in_bytes, kv_cache_shape));
+      futures.push_back(
+          worker->allocate_kv_cache_with_transfer_async(kv_cache_shape));
     }
   }
   // wait for all futures to complete
@@ -484,75 +565,9 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       return false;
     }
   }
-  return true;
-}
+  // XTensor mode: reserve null blocks and start prealloc thread.
+  kv_cache_manager_->reserve_xtensor_null_blocks();
 
-bool LLMEngine::allocate_continuous_kv_cache(
-    const Engine::KVCacheCapacity& kv_cache_cap) {
-  LOG(INFO) << "kv cache capacity: "
-            << "bytes: " << kv_cache_cap.cache_size_in_bytes
-            << ", blocks: " << kv_cache_cap.n_blocks
-            << ", slot_size: " << kv_cache_cap.slot_size;
-
-  std::vector<XTensor::Options> xtensor_options_vec;
-  xtensor_options_vec.reserve(2);
-  // int64_t head_dim = head_dim_;
-  // if (options_.enable_mla()) {
-  //   head_dim = args_.kv_lora_rank() + args_.qk_rope_head_dim();
-  // }
-
-  XTensor::Options k_xtensor_options;
-  XTensor::Options v_xtensor_options;
-  k_xtensor_options.num_kv_heads(n_local_kv_heads_)
-      .max_context_len(args_.max_position_embeddings())
-      .max_seqs_per_batch(options_.max_seqs_per_batch());
-  v_xtensor_options.num_kv_heads(n_local_kv_heads_)
-      .max_context_len(args_.max_position_embeddings())
-      .max_seqs_per_batch(options_.max_seqs_per_batch());
-  if (FLAGS_enable_mla) {
-    k_xtensor_options.head_size(args_.kv_lora_rank());
-    v_xtensor_options.head_size(args_.qk_rope_head_dim());
-  } else {
-    k_xtensor_options.head_size(head_dim_);
-    v_xtensor_options.head_size(head_dim_);
-  }
-
-  xtensor_options_vec.emplace_back(k_xtensor_options);
-  xtensor_options_vec.emplace_back(v_xtensor_options);
-
-  std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(worker_clients_.size());
-  for (auto& worker : worker_clients_) {
-    futures.push_back(
-        worker->allocate_continuous_kv_cache_async(xtensor_options_vec));
-  }
-  // wait for all futures to complete
-  auto results = folly::collectAll(futures).get();
-  for (const auto& result : results) {
-    if (!result.value()) {
-      return false;
-    }
-  }
-
-  int64_t cache_size_per_token = 0;
-  if (FLAGS_enable_mla) {
-    cache_size_per_token =
-        args_.kv_lora_rank() * torch::scalarTypeToTypeMeta(dtype_).itemsize();
-  } else {
-    cache_size_per_token = kv_cache_cap.slot_size / 2;
-  }
-
-  FLAGS_cache_size_per_token = cache_size_per_token;
-
-  // init xtensor manager pool
-  xtensor::Options xtensor_manager_options;
-  xtensor_manager_options.devices(options_.devices())
-      .num_total_pages(kv_cache_cap.n_pages)
-      .num_layers(args_.n_layers())
-      .cache_size_per_token(cache_size_per_token)
-      .server_idx(options_.server_idx());
-  kv_cache_manager_ = std::make_unique<XTensorManagerPool>(
-      xtensor_manager_options, options_.dp_size());
   return true;
 }
 
@@ -678,6 +693,29 @@ void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
   }
 }
 
+void LLMEngine::get_xtensor_info(
+    std::vector<size_t>& worker_free_phy_pages,
+    std::unordered_map<std::string, std::vector<WeightSegment>>&
+        model_weight_segments) {
+  if (!FLAGS_enable_xtensor) {
+    return;
+  }
+
+  // Worker 0 is in the same process as Master, no RPC needed.
+  // Both PageAllocator and XTensorAllocator are singletons.
+
+  // Get free phy pages from PageAllocator
+  auto& page_allocator = PageAllocator::get_instance();
+  if (page_allocator.is_initialized()) {
+    worker_free_phy_pages = page_allocator.get_all_worker_free_pages();
+  }
+
+  // Get model weight segments from XTensorAllocator directly (no RPC)
+  // Worker 0 is always in dp group 0, weights are duplicated across dp groups
+  auto& xtensor_allocator = XTensorAllocator::get_instance();
+  model_weight_segments = xtensor_allocator.get_all_model_weight_segments();
+}
+
 bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                              const std::vector<std::string>& addrs,
                              const std::vector<std::string>& device_ips,
@@ -793,6 +831,74 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   for (const auto& result : results) {
     if (!result.value()) {
       LOG(ERROR) << "Unlink cluster failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
+  if (device_ips.size() != worker_clients_num_) {
+    LOG(ERROR) << "device_ips size " << device_ips.size()
+               << " != worker_clients_num " << worker_clients_num_;
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
+    std::string remote_addr = device_ips[worker_rank];
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                remote_addr]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->link_d2d(remote_addr));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Link D2D failed.";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool LLMEngine::unlink_d2d(const std::vector<std::string>& device_ips) {
+  if (device_ips.size() != worker_clients_num_) {
+    LOG(ERROR) << "device_ips size " << device_ips.size()
+               << " != worker_clients_num " << worker_clients_num_;
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
+    std::string remote_addr = device_ips[worker_rank];
+    folly::Promise<bool> promise;
+    auto future = promise.getSemiFuture();
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                remote_addr]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->unlink_d2d(remote_addr));
+    });
+    futures.emplace_back(std::move(future));
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Unlink D2D failed.";
       return false;
     }
   }
@@ -1006,6 +1112,151 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
   }
 
   return batched_inputs;
+}
+
+bool LLMEngine::sleep(int32_t master_status) {
+  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
+  if (!FLAGS_enable_xtensor) {
+    LOG(WARNING) << "sleep requires FLAGS_enable_xtensor to be enabled";
+    return false;
+  }
+
+  LOG(INFO) << "Starting to sleep. Worker clients count: "
+            << worker_clients_num_;
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to sleep.";
+    return false;
+  }
+
+  // Put the model to sleep in PageAllocator
+  // This releases both weight pages and KV cache pages
+  const std::string& model_id = options_.model_id();
+  auto& page_allocator = PageAllocator::get_instance();
+  if (!page_allocator.sleep_model(model_id)) {
+    LOG(ERROR) << "PageAllocator sleep_model failed, aborting sleep flow";
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->sleep_async(master_status));
+  }
+
+  auto results = folly::collectAll(futures).get();
+
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Sleep failed.";
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool LLMEngine::wakeup(const WakeupOptions& options) {
+  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
+  if (!FLAGS_enable_xtensor) {
+    LOG(WARNING) << "wakeup requires FLAGS_enable_xtensor to be enabled";
+    return false;
+  }
+
+  LOG(INFO) << "Starting to wakeup. Worker clients count: "
+            << worker_clients_num_;
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to wakeup.";
+    return false;
+  }
+
+  // Wake up the model in PageAllocator
+  // This re-allocates both KV cache pages and weight pages
+  const std::string& model_id = options_.model_id();
+  auto& page_allocator = PageAllocator::get_instance();
+  if (!page_allocator.wakeup_model(model_id)) {
+    LOG(ERROR) << "PageAllocator wakeup_model failed, aborting wakeup flow";
+    return false;
+  }
+
+  LOG(INFO) << "Waking up LLM engine, remote_addrs.size()="
+            << options.remote_addrs.size();
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+
+  if (!options.remote_addrs.empty() &&
+      options.remote_addrs.size() == worker_clients_num_) {
+    // D2D mode with TP: each worker pulls only from its corresponding source
+    for (size_t i = 0; i < worker_clients_num_; ++i) {
+      WakeupOptions per_worker_options;
+      per_worker_options.master_status = options.master_status;
+      per_worker_options.remote_addrs = {options.remote_addrs[i]};
+      if (i < options.src_weight_segments.size()) {
+        per_worker_options.src_weight_segments = {
+            options.src_weight_segments[i]};
+      }
+      futures.push_back(worker_clients_[i]->wakeup_async(per_worker_options));
+    }
+  } else {
+    // H2D mode or non-TP: pass options as-is
+    for (auto& worker : worker_clients_) {
+      futures.push_back(worker->wakeup_async(options));
+    }
+  }
+
+  auto results = folly::collectAll(futures).get();
+
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Wakeup failed.";
+      return false;
+    }
+  }
+  LOG(INFO) << "Wakeup finished for LLM engine.";
+
+  return true;
+}
+
+bool LLMEngine::get_xtensor_offsets_for_blocks(
+    int32_t dp_rank,
+    const std::vector<int32_t>& block_ids,
+    std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
+        layer_offsets) {
+  if (!FLAGS_enable_xtensor) {
+    return false;
+  }
+
+  const std::string& model_id = options_.model_id();
+
+  // Calculate block size in bytes: block_size * slot_size
+  // slot_size is stored in kv_cache_manager (BlockManagerPool)
+  auto* block_manager = block_manager_pool();
+  if (!block_manager) {
+    LOG(ERROR) << "BlockManagerPool not available";
+    return false;
+  }
+
+  // Note: Currently, xtensor only supports the traditional attention mechanism,
+  // meaning both K and V must be present and have identical shapes.
+  uint64_t block_size_bytes =
+      static_cast<uint64_t>(block_manager->options().slot_size()) *
+      options_.block_size() / 2;
+
+  // Use RPC to call worker in the specified DP group
+  auto& allocator = XTensorAllocator::get_instance();
+  bool success = allocator.get_xtensor_offsets(
+      dp_rank, model_id, block_ids, block_size_bytes, layer_offsets);
+
+  if (!success) {
+    LOG(ERROR) << "get_xtensor_offsets_for_blocks via RPC failed for dp_rank="
+               << dp_rank << ", model_id=" << model_id;
+    return false;
+  }
+
+  VLOG(1) << "get_xtensor_offsets_for_blocks: dp_rank=" << dp_rank
+          << ", num_blocks=" << block_ids.size()
+          << ", num_layers=" << layer_offsets.size();
+  return true;
 }
 
 }  // namespace xllm

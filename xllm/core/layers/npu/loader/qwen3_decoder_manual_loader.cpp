@@ -212,13 +212,6 @@ bool Qwen3DecoderManualLoader::is_nz_format_tensor(int weight_index) {
   return false;
 }
 
-void Qwen3DecoderManualLoader::merge_loaded_weights() {
-  merge_host_at_weights();
-  init_weight_slices();
-  copy_weights_to_device();
-  init_device_at_weights();
-}
-
 void Qwen3DecoderManualLoader::merge_host_at_weights() {
   if (quantize_type_.compare("w8a8") == 0) {
     at_host_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE] =

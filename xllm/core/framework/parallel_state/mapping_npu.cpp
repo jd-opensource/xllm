@@ -26,11 +26,19 @@ limitations under the License.
 
 namespace xllm {
 
+// HACK: Static counter for auto-assigning buffer_offset in multi-model
+// scenarios. This is a hack solution and should be refactored later.
+int32_t MappingNPU::s_buffer_offset_counter_ = 0;
+
 MappingNPU::MappingNPU(const std::string rank_table_file,
                        const int32_t world_size,
                        const int32_t rank,
                        const Options& options)
     : rank_table_file_(rank_table_file), rank_(rank), options_(options) {
+  // HACK: Auto-assign buffer_offset for multi-model scenarios.
+  // Increments for each MappingNPU instance. This is a hack and should be
+  // refactored later.
+  buffer_offset_ = s_buffer_offset_counter_++;
   num_nodes_ = get_num_nodes();
   world_size_ = world_size;
   local_world_size_ = world_size / num_nodes_;
@@ -317,11 +325,11 @@ nlohmann::json MappingNPU::to_json() {
   // when enable lmhead, the data is output in
   // the form of a data parallel (DP) strategy.
   if (ENV_enable_dp_partition_up) {
-    lmhead_tp = attn_tp_.to_json();
-    lmhead_dp = attn_dp_.to_json();
+    lmhead_tp = attn_tp_.to_json(buffer_offset_);
+    lmhead_dp = attn_dp_.to_json(buffer_offset_);
   } else {
-    lmhead_tp = mlp_tp_.to_json();
-    lmhead_dp = mlp_dp_.to_json();
+    lmhead_tp = mlp_tp_.to_json(buffer_offset_);
+    lmhead_dp = mlp_dp_.to_json(buffer_offset_);
   }
   data["moeEpSize"] = options_.moe_ep_size();
   data["moeTpSize"] = options_.moe_tp_size();
@@ -333,21 +341,21 @@ nlohmann::json MappingNPU::to_json() {
   data["localWorldSize"] = local_world_size_;
   data["lcclCommDomainLowerBound"] = lccl_comm_domain_lower_bound_;
   data["lcclCommDomainUpperBound"] = lccl_comm_domain_upper_bound_;
-  data["wordEmbedTp"] = word_embed_tp_.to_json();
-  data["wordEmbedDp"] = word_embed_dp_.to_json();
-  data["attnTp"] = attn_tp_.to_json();
-  data["attnDp"] = attn_dp_.to_json();
-  data["attnInnerSp"] = attn_inner_sp_.to_json();
-  data["attnOProjTp"] = attn_o_proj_tp_.to_json();
-  data["attnOProjDp"] = attn_o_proj_dp_.to_json();
-  data["mlpTp"] = mlp_tp_.to_json();
-  data["mlpDp"] = mlp_dp_.to_json();
-  data["moeTp"] = moe_tp_.to_json();
-  data["moeEp"] = moe_ep_.to_json();
+  data["wordEmbedTp"] = word_embed_tp_.to_json(buffer_offset_);
+  data["wordEmbedDp"] = word_embed_dp_.to_json(buffer_offset_);
+  data["attnTp"] = attn_tp_.to_json(buffer_offset_);
+  data["attnDp"] = attn_dp_.to_json(buffer_offset_);
+  data["attnInnerSp"] = attn_inner_sp_.to_json(buffer_offset_);
+  data["attnOProjTp"] = attn_o_proj_tp_.to_json(buffer_offset_);
+  data["attnOProjDp"] = attn_o_proj_dp_.to_json(buffer_offset_);
+  data["mlpTp"] = mlp_tp_.to_json(buffer_offset_);
+  data["mlpDp"] = mlp_dp_.to_json(buffer_offset_);
+  data["moeTp"] = moe_tp_.to_json(buffer_offset_);
+  data["moeEp"] = moe_ep_.to_json(buffer_offset_);
   data["lmHeadTp"] = lmhead_tp;
   data["lmHeadDp"] = lmhead_dp;
-  data["lcocAttnTp"] = attn_tp_.to_json();
-  data["attnCp"] = attn_cp_.to_json();
+  data["lcocAttnTp"] = attn_tp_.to_json(buffer_offset_);
+  data["attnCp"] = attn_cp_.to_json(buffer_offset_);
 
   return data;
 }

@@ -7,6 +7,7 @@ option cc_generic_services = true;
 
 import "common.proto";
 import "tensor.proto";
+import "disagg_pd.proto";
 
 // NPU: HcclRootInfo
 message CommInfo {
@@ -16,6 +17,7 @@ message CommInfo {
 message InitModelRequest {
   string model_weights_path = 1;
   int32 random_seed = 2;
+  int32 master_status = 3;
 }
 
 message ActivationMemory {
@@ -33,21 +35,35 @@ message KVCacheShape {
   repeated int64 index_shape = 3;
 }
 
-message XTensorOptions {
-  int64 num_kv_heads = 1;
-  int64 head_size = 2;
-  int32 max_context_len = 3;
-  int32 max_seqs_per_batch = 4;
+message AllocateKVCacheRequest {
+  KVCacheShape kv_cache_shape = 1;
 }
 
-message XTensorOptionsVec{
-  XTensorOptions key_options = 1;
-  XTensorOptions value_options = 2;
+message SleepRequest {
+  int32 master_status = 1; 
 }
 
-message AllocateKVCacheWithTransferRequest {
-  uint64 kv_cache_size = 1;
-  KVCacheShape kv_cache_shape = 2;
+message WakeupRequest {
+  int32 master_status = 1;
+  repeated string remote_addrs = 2;
+  // Per-remote-addr weight segments (index matches remote_addrs)
+  // Each entry contains ordered segments to pull from that remote source
+  repeated WakeupWeightSegmentList src_weight_segments = 3;
+}
+
+// A single weight segment for D2D transfer
+message WakeupWeightSegment {
+  uint64 offset = 1;  // Byte offset from source GlobalXTensor base
+  uint64 size = 2;    // Segment size in bytes
+}
+
+// List of weight segments for one remote source
+message WakeupWeightSegmentList {
+  repeated WakeupWeightSegment segments = 1;
+}
+
+message D2DLinkWorkerRequest {
+  string remote_addr = 1; 
 }
 
 message PullKVCacheRequest {
@@ -117,6 +133,9 @@ message TransferKVInfo {
   repeated uint64 remote_blocks_ids = 3;
   int32 dp_rank = 4;
   InstanceInfo remote_instance_info = 5;
+  // XTensor mode: destination offsets from D-node (per-layer)
+  // Each XTensorLayerOffsets contains K/V offsets for all blocks at one layer
+  repeated XTensorLayerOffsets dst_xtensor_layer_offsets = 6;
 }
 
 message EplbInfo {
@@ -211,9 +230,6 @@ message ForwardInput {
   repeated int32 src_block_indices = 32;
   repeated int32 dst_block_indices = 33;
   repeated int32 cum_sum = 34;
-  // for continuous kvcache
-  repeated int64 new_cache_slot_offsets = 35;
-  repeated int64 kv_cache_start_offsets = 36;
   // beam search kernel
   repeated float acc_logprob_vec = 37;
   uint64 batch_id = 38;
@@ -268,17 +284,20 @@ service DistributeWorker {
   rpc InitModel (InitModelRequest) returns (Status);
   rpc ProcessGroupTest (Empty) returns (Status);
   rpc ProfileDeviceMemory (Empty) returns (DeviceMemory);
-  rpc AllocateKVCache (KVCacheShape) returns (Status);
-  rpc AllocateContinuousKVCache (XTensorOptionsVec) returns (Status);
-  rpc AllocateKVCacheWithTransfer(AllocateKVCacheWithTransferRequest) returns (Status) {}
+  rpc AllocateKVCache (AllocateKVCacheRequest) returns (Status);
+  rpc AllocateKVCacheWithTransfer(AllocateKVCacheRequest) returns (Status) {}
   rpc PullKVCache(PullKVCacheRequest) returns (Status) {}
   rpc GetDeviceInfo(Empty) returns (DeviceInfo) {}
   rpc GetCacheInfo(Empty) returns (CacheInfo) {}
   rpc LinkCluster(ClusterInfo) returns (Status) {}
   rpc UnlinkCluster(ClusterInfo) returns (Status) {}
+  rpc LinkD2D(D2DLinkWorkerRequest) returns (Status) {}
+  rpc UnlinkD2D(D2DLinkWorkerRequest) returns (Status) {}
   rpc ExecuteModel (ForwardInput) returns (ForwardOutput);
   rpc GetLastStepResult (Empty) returns (ForwardOutput);
   rpc GetActiveActivationMemory (Empty) returns (ActivationMemory);
   rpc TransferBlocks(BlockTransferInfos) returns (TransferStatus) {}
   rpc PrefetchFromStorage(BlockTransferInfos) returns (Status) {}
+  rpc Sleep (SleepRequest)  returns (Status);
+  rpc Wakeup (WakeupRequest) returns (Status);
 }

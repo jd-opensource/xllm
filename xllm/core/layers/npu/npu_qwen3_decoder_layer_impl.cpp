@@ -166,23 +166,19 @@ NpuQwen3DecoderLayerImpl::NpuQwen3DecoderLayerImpl(const ModelContext& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  loader_ = std::make_unique<Qwen3DecoderManualLoader>(
-      WEIGHT_COUNT_PER_LAYER,
-      context,
-      prefill_param_.enableIntraLayerAddNorm ||
-          prefill_param_.enableInterLayerAddNorm);
-}
-
-void NpuQwen3DecoderLayerImpl::merge_loaded_weights() {
-  loader_->merge_loaded_weights();
-  auto& at_weight_tensors = loader_->get_at_weight_tensors();
-  c10_npu::NPUCachingAllocator::emptyCache();
-  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
-    atb_weight_tensors_[i] =
-        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
+  if (FLAGS_enable_xtensor) {
+    loader_ = std::make_unique<Qwen3DecoderManualLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        prefill_param_.enableIntraLayerAddNorm ||
+            prefill_param_.enableInterLayerAddNorm);
+  } else {
+    loader_ = std::make_unique<Qwen3DecoderLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        prefill_param_.enableIntraLayerAddNorm ||
+            prefill_param_.enableInterLayerAddNorm);
   }
-
-  init_layer();
 }
 
 int64_t NpuQwen3DecoderLayerImpl::init_layer() {

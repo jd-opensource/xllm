@@ -20,6 +20,8 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
 
+#include <unordered_map>
+
 #include "util/hash_util.h"
 #include "util/net.h"
 
@@ -65,6 +67,11 @@ bool check_instance_name(const std::string& name) {
 bool XServiceClient::init(const std::string& etcd_addr,
                           const std::string& instance_name,
                           const BlockManagerPool* block_manager_pool) {
+  if (initialize_done_) {
+    LOG(INFO) << "XServiceClient is already initialized, skipping.";
+    return true;
+  }
+
   if (etcd_addr.empty()) {
     LOG(ERROR) << "etcd_addr address is empty.";
     return false;
@@ -132,6 +139,8 @@ bool XServiceClient::init(const std::string& etcd_addr,
 void XServiceClient::set_scheduler(Scheduler* scheduler) {
   scheduler_ = scheduler;
 }
+
+void XServiceClient::set_engine(Engine* engine) { engine_ = engine; }
 
 XServiceClient::~XServiceClient() {
   exited_ = true;
@@ -284,6 +293,30 @@ void XServiceClient::heartbeat() {
     if (!tbt.empty()) {
       auto max_tbt = std::max_element(tbt.begin(), tbt.end());
       req.mutable_latency_metrics()->set_recent_max_tbt(*max_tbt);
+    }
+
+    // Collect XTensor info (worker free pages, model weight segments)
+    if (engine_ != nullptr) {
+      std::vector<size_t> worker_free_phy_pages;
+      std::unordered_map<std::string, std::vector<WeightSegment>>
+          model_weight_segments;
+      engine_->get_xtensor_info(worker_free_phy_pages, model_weight_segments);
+
+      auto* xtensor_info = req.mutable_xtensor_info();
+      for (size_t free_pages : worker_free_phy_pages) {
+        xtensor_info->add_worker_free_phy_pages(free_pages);
+      }
+
+      // Report weight segments (for non-contiguous allocation support)
+      for (const auto& [model_id, segments] : model_weight_segments) {
+        auto& seg_list =
+            (*xtensor_info->mutable_model_weight_segments())[model_id];
+        for (const auto& seg : segments) {
+          auto* proto_seg = seg_list.add_segments();
+          proto_seg->set_offset(seg.offset);
+          proto_seg->set_size(seg.size);
+        }
+      }
     }
 
     xllm_service::proto::Status resp;

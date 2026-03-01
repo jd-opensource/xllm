@@ -12,12 +12,41 @@ import "image_generation.proto";
 import "rerank.proto";
 import "models.proto";
 import "anthropic.proto";
+import "common.proto";
 
 message HttpRequest {
 };
 
 message HttpResponse {
 };
+
+message MasterInfos {
+  string model_id = 1;
+  string model_path = 2;
+  string master_node_addr = 3;
+  int32 master_status = 4;
+  repeated string remote_addrs = 5;
+  int32 nnodes = 6;
+  int32 dp_size = 7;
+  // Per-remote-addr weight segments (index matches remote_addrs)
+  repeated MasterWeightSegmentList src_weight_segments = 8;
+}
+
+// A single weight segment for master wakeup
+message MasterWeightSegment {
+  uint64 offset = 1;
+  uint64 size = 2;
+}
+
+// List of weight segments for one remote source
+message MasterWeightSegmentList {
+  repeated MasterWeightSegment segments = 1;
+}
+
+message D2DLinkRequest {
+  string model_id = 1;
+  repeated string device_ips = 2;
+}
 
 service XllmAPIService {
   rpc Completions (CompletionRequest) returns (CompletionResponse);
@@ -41,4 +70,19 @@ service XllmAPIService {
   rpc ModelVersionsHttp (HttpRequest) returns (HttpResponse);
 
   rpc AnthropicMessagesHttp (HttpRequest) returns (HttpResponse);
-};
+
+  rpc ForkMaster (MasterInfos) returns (Status);
+  rpc ForkMasterHttp (HttpRequest) returns (HttpResponse);
+  
+  rpc Sleep (MasterInfos) returns (Status);
+  rpc SleepHttp (HttpRequest) returns (HttpResponse);
+
+  rpc Wakeup (MasterInfos) returns (Status);
+  rpc WakeupHttp (HttpRequest) returns (HttpResponse);
+
+  rpc LinkD2D (D2DLinkRequest) returns (Status);
+  rpc LinkD2DHttp (HttpRequest) returns (HttpResponse);
+
+  rpc UnlinkD2D (D2DLinkRequest) returns (Status);
+  rpc UnlinkD2DHttp (HttpRequest) returns (HttpResponse);
+}; 

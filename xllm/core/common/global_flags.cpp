@@ -283,6 +283,11 @@ DEFINE_string(master_node_addr,
               "The master address for multi-node distributed serving(e.g. "
               "10.18.1.1:9999).");
 
+DEFINE_string(
+    xtensor_master_node_addr,
+    "127.0.0.1:19889",
+    "The master address for XTensor distributed service(e.g. 10.18.1.1:9999).");
+
 DEFINE_int32(nnodes, 1, "The number of multi-nodes.");
 
 DEFINE_int32(node_rank, 0, "The node rank.");
@@ -431,26 +436,16 @@ DEFINE_int32(micro_batch_num,
 
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
-// --- continuous kv cache config ---
-
-DEFINE_bool(enable_continuous_kvcache,
-            false,
-            "Whether to enable continuous kv cache.");
+DEFINE_bool(
+    enable_xtensor,
+    false,
+    "Whether to enable xtensor for model weights with physical page pool.");
 
 DEFINE_int64(
     phy_page_granularity_size,
     2 * 1024 * 1024,
     "Granularity size for one physical page in bytes, default 2MB, when enable "
     "continuous kv cache.");
-
-DEFINE_int64(cache_size_per_token,
-             0,
-             "Cache size per token in bytes, default 0, which means it is "
-             "calculated by head_dim and n_local_kv_heads.");
-
-DEFINE_int64(buffer_size_per_seq,
-             0,
-             "Buffer size per sequence in bytes, default 0.");
 
 // --- beam search config ---
 

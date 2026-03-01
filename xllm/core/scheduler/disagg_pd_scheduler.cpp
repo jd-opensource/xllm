@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
 #include "framework/request/sequence.h"
+#include "framework/xtensor/page_allocator.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
@@ -102,6 +103,9 @@ void DisaggPDScheduler::initialize_rpc_server_and_client(
     return;
   }
   xservice_client_->set_scheduler(this);
+  if (FLAGS_enable_xtensor) {
+    xservice_client_->set_engine(engine_);
+  }
 }
 
 void DisaggPDScheduler::register_instance_info(const std::string& server_name,
@@ -122,6 +126,16 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
   instance_info_.dp_size = options_.dp_size();
 
   engine->get_device_info(instance_info_.device_ips, instance_info_.ports);
+
+  // Get total physical pages per worker (for etcd registration)
+#if defined(USE_NPU)
+  if (FLAGS_enable_xtensor) {
+    auto& page_allocator = PageAllocator::get_instance();
+    if (page_allocator.is_initialized()) {
+      instance_info_.total_phy_pages = page_allocator.get_num_total_phy_pages();
+    }
+  }
+#endif
 }
 
 void DisaggPDScheduler::profile_ttft() {
@@ -457,6 +471,25 @@ void DisaggPDScheduler::dispatch_requests() {
           info.dp_rank = resps.resps()[i].dp_rank();
           // TODO: remote_instances_info_ is not multi-thread safe.
           info.remote_instance_info = remote_instances_info_[selected_instance];
+
+          // XTensor mode: save destination offsets from D-node
+          const auto& resp = resps.resps()[i];
+          if (resp.xtensor_layer_offsets_size() > 0) {
+            info.dst_xtensor_layer_offsets.reserve(
+                resp.xtensor_layer_offsets_size());
+            for (const auto& layer_offsets : resp.xtensor_layer_offsets()) {
+              XTensorLayerOffsets layer;
+              layer.k_offsets.assign(layer_offsets.k_offsets().begin(),
+                                     layer_offsets.k_offsets().end());
+              layer.v_offsets.assign(layer_offsets.v_offsets().begin(),
+                                     layer_offsets.v_offsets().end());
+              info.dst_xtensor_layer_offsets.emplace_back(std::move(layer));
+            }
+            VLOG(5) << "Received XTensor offsets from D-node for request "
+                    << requests[i]->request_id()
+                    << ", num_layers=" << info.dst_xtensor_layer_offsets.size();
+          }
+
           sequence->kv_state().set_transfer_kv_info(std::move(info));
         }
 
