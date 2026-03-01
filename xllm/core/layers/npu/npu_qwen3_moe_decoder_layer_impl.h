@@ -139,6 +139,8 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
   torch::Tensor int_tensor_placeholder_;
   torch::Tensor decode_attn_mask_;
   torch::Tensor expert_group_;
+  torch::Tensor quant_add_norm_scaling_;
+  torch::Tensor quant_add_norm_offset_;
   torch::Tensor one_hot_;
   torch::Tensor zero_hot_;
   torch::Tensor final_hidden_states_;
