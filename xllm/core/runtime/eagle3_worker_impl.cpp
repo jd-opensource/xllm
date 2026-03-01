@@ -90,25 +90,43 @@ int64_t Eagle3WorkerImpl::get_embedding_placeholder_size() {
 std::optional<ForwardOutput> Eagle3WorkerImpl::step_decode(
     const ForwardInput& input) {
   ForwardInput draft_input = input;
-  // get embedding cache
-  torch::Tensor embeddings =
-      embedding_cache_->read(draft_input.input_params.embedding_ids);
-  draft_input.input_params.input_embedding = embeddings.to(device_);
+  auto cache_items =
+      embedding_cache_->read_for_decode(draft_input.input_params.embedding_ids);
+  std::vector<torch::Tensor> embedding_rows;
+  embedding_rows.reserve(cache_items.size());
+  for (const auto& item : cache_items) {
+    embedding_rows.emplace_back(item.embedding);
+  }
+  draft_input.input_params.input_embedding =
+      torch::stack(embedding_rows).to(device_);
 
   // run the draft model to get proposals
   std::vector<ForwardOutput> draft_outputs;
   ForwardInput validate_input, next_step_input;
   Timer timer;
-  std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
   for (size_t i = 0; i < options_.num_speculative_tokens(); ++i) {
-    auto future = draft_impl_->step_async(draft_input);
+    std::optional<ForwardInput> first_step_input_holder;
+    const ForwardInput* run_input = &draft_input;
+    if (i == 0) {
+      first_step_input_holder.emplace();
+      prepare_first_decode_inputs(
+          draft_input, cache_items, first_step_input_holder.value());
+      run_input = &first_step_input_holder.value();
+    }
+    auto future = draft_impl_->step_async(*run_input);
+
+    // Overlap next-step input preparation with async draft forward.
     if (i == options_.num_speculative_tokens() - 1) {
       // final step, prepare validate input
       prepare_validate_inputs(input, validate_input);
     } else {
       prepare_draft_inputs(draft_input, next_step_input, 1, device_);
     }
-    draft_outputs.push_back(std::move(future).get().value());
+    std::optional<ForwardOutput> draft_output_opt = std::move(future).get();
+    CHECK(draft_output_opt.has_value())
+        << "draft output is empty in speculative step";
+
+    draft_outputs.push_back(std::move(draft_output_opt.value()));
     auto& last_output = draft_outputs.back().sample_output;
 
     // Extract probability for selected draft token
@@ -164,7 +182,8 @@ std::optional<ForwardOutput> Eagle3WorkerImpl::step_decode(
   val_output.next_tokens = val_output.next_tokens.to(torch::kCPU);
   embedding_cache_->write_validate(input.input_params.embedding_ids,
                                    val_output.next_tokens,
-                                   val_output.embeddings);
+                                   val_output.embeddings,
+                                   options_.num_speculative_tokens());
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_) {
     return std::nullopt;
