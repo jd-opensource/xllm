@@ -61,3 +61,14 @@ cc_test(
     :cuda_kernels
     GTest::gtest_main
 )
+
+cc_test(
+  NAME
+    fused_qknorm_rope_test
+  SRCS
+    fused_qknorm_rope_test.cpp
+  DEPS
+    :cuda_kernels
+    torch
+    GTest::gtest_main
+)
