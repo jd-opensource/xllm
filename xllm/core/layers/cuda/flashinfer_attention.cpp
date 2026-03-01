@@ -95,7 +95,15 @@ FlashInferAttentionImpl::FlashInferAttentionImpl(int64_t num_heads,
                         head_size,
                         scale,
                         num_kv_heads,
-                        sliding_window - 1) {}
+                        sliding_window - 1) {
+  float_workspace_buffer_ = flashinfer::FlashinferWorkspace::get_instance()
+                                .get_float_workspace_buffer();
+  int_workspace_buffer_ = flashinfer::FlashinferWorkspace::get_instance()
+                              .get_int_workspace_buffer();
+  page_locked_int_workspace_buffer_ =
+      flashinfer::FlashinferWorkspace::get_instance()
+          .get_page_locked_int_workspace_buffer();
+}
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>>
 FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
@@ -118,57 +126,6 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
   torch::Tensor k_cache = kv_cache.get_k_cache();
   torch::Tensor v_cache = kv_cache.get_v_cache();
 
-  // Get block_size from k_cache if defined and has proper dimensions,
-  // otherwise use a default value (for prefill without KV cache, e.g., LongCat)
-  int64_t block_size = 1;  // Default value when KV cache is not initialized
-  if (k_cache.defined() && k_cache.dim() >= 2) {
-    block_size = k_cache.size(1);
-  }
-
-  // maybe we need to update shared attn state before execute attention,
-  // currently we update flashinfer step_wise_attn_state_ at layer 0.
-  bool causal = attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
-
-  // Check if attention_mask is provided
-  bool use_custom_mask = attn_metadata.attn_mask.defined();
-
-  std::string backend = xllm::kernel::cuda::determine_attention_backend(
-      /*pos_encoding_mode=*/0,
-      /*use_fp16_qk_reduction=*/false,
-      use_custom_mask,
-      causal);
-
-  // NOTE: we only support "fa2" backend for BatchPrefillWithPagedKvcacheKernel
-  // for flashinfer v0.6.2, because it would cause performance degradation if
-  // using "fa3" backend.
-  if (!causal) {
-    backend = "fa2";
-  }
-
-  if (attn_metadata.enable_cuda_graph) {
-    CHECK(attn_metadata.plan_info->plan_info.defined())
-        << "plan_info plan_info should not be null when enable_cuda_graph is "
-           "true";
-    VLOG(kGraphExecutorLogVerboseLevel)
-        << "no need to update plan_info for CUDA graph";
-  } else {
-    flashinfer::update_plan_info(attn_metadata.plan_info,
-                                 backend,
-                                 attn_metadata,
-                                 query.scalar_type(),
-                                 key.scalar_type(),
-                                 output.scalar_type(),
-                                 head_size_,
-                                 head_size_,
-                                 num_heads_,
-                                 num_kv_heads_,
-                                 block_size,
-                                 sliding_window_,
-                                 attn_metadata.enable_cuda_graph,
-                                 causal,
-                                 decode_use_tensor_core_);
-  }
-
   // Only reshape and store to cache if k_cache is properly initialized
   // For prefill without KV cache (e.g., LongCat text encoding), skip this step
   if (k_cache.defined() && k_cache.dim() >= 2) {
@@ -181,70 +138,208 @@ FlashInferAttentionImpl::forward(const AttentionMetadata& attn_metadata,
     xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
   }
 
-  torch::Tensor float_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_float_workspace_buffer();
-  torch::Tensor int_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_int_workspace_buffer();
-  torch::Tensor page_locked_int_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_page_locked_int_workspace_buffer();
-
-  // TODO: support chunked prefill
-  CHECK(!attn_metadata.is_chunked_prefill)
-      << "chunked prefill is not supported";
-
   if (attn_metadata.is_prefill) {
-    if (use_custom_mask) {
-      auto [result, _] =
-          run_eager_causal_padded_attention(query,
-                                            key,
-                                            value,
-                                            attn_metadata.attn_mask,
-                                            scale_,
-                                            num_heads_,
-                                            num_kv_heads_,
-                                            head_size_);
-      return {result, output_lse};
-    }
-    xllm::kernel::cuda::batch_prefill_with_optional_piecewise_capture(
-        attn_metadata.plan_info->uri,
-        attn_metadata.plan_info->plan_info,
-        float_workspace_buffer,
-        int_workspace_buffer,
-        page_locked_int_workspace_buffer,
-        query,
-        key,
-        value,
-        attn_metadata.q_cu_seq_lens,
-        attn_metadata.kv_cu_seq_lens,
-        sliding_window_,
-        scale_,
-        output,
-        output_lse);
+    prefill_forward(attn_metadata, query, key, value, output, output_lse);
+  } else if (attn_metadata.is_chunked_prefill) {
+    chunked_prefill_forward(
+        attn_metadata, query, key, output, output_lse, k_cache, v_cache);
   } else {
-    xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
-                                     attn_metadata.plan_info->plan_info,
-                                     float_workspace_buffer,
-                                     int_workspace_buffer,
-                                     page_locked_int_workspace_buffer,
-                                     query,
-                                     k_cache,
-                                     v_cache,
-                                     attn_metadata.paged_kv_indptr,
-                                     attn_metadata.paged_kv_indices,
-                                     attn_metadata.paged_kv_last_page_len,
-                                     sliding_window_,
-                                     scale_,
-                                     output,
-                                     output_lse,
-                                     decode_use_tensor_core_,
-                                     attn_metadata.qo_indptr);
+    decoder_forward(
+        attn_metadata, query, key, output, output_lse, k_cache, v_cache);
   }
 
   output = output.view({-1, num_heads_ * head_size_});
   return {output, output_lse};
+}
+
+void FlashInferAttentionImpl::prefill_forward(
+    const AttentionMetadata& attn_metadata,
+    torch::Tensor& query,
+    torch::Tensor& key,
+    torch::Tensor& value,
+    torch::Tensor& output,
+    std::optional<at::Tensor>& output_lse) {
+  bool use_custom_mask = attn_metadata.attn_mask.defined();
+
+  std::string backend = xllm::kernel::cuda::determine_attention_backend(
+      /*pos_encoding_mode=*/0,
+      /*use_fp16_qk_reduction=*/false,
+      use_custom_mask,
+      /*causal=*/true);
+
+  if (attn_metadata.enable_cuda_graph) {
+    CHECK(attn_metadata.plan_info->plan_info.defined())
+        << "plan_info plan_info should not be null when enable_cuda_graph is "
+           "true";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "no need to update plan_info for CUDA graph";
+  } else {
+    flashinfer::update_prefill_plan_info(attn_metadata.plan_info,
+                                         backend,
+                                         attn_metadata,
+                                         query.scalar_type(),
+                                         key.scalar_type(),
+                                         output.scalar_type(),
+                                         head_size_,
+                                         head_size_,
+                                         num_heads_,
+                                         num_kv_heads_,
+                                         attn_metadata.enable_cuda_graph);
+  }
+
+  if (use_custom_mask) {
+    auto [result, _] =
+        run_eager_causal_padded_attention(query,
+                                          key,
+                                          value,
+                                          attn_metadata.attn_mask,
+                                          scale_,
+                                          num_heads_,
+                                          num_kv_heads_,
+                                          head_size_);
+    output = result;
+    return;
+  }
+
+  xllm::kernel::cuda::batch_prefill_with_optional_piecewise_capture(
+      attn_metadata.plan_info->uri,
+      attn_metadata.plan_info->plan_info,
+      float_workspace_buffer_,
+      int_workspace_buffer_,
+      page_locked_int_workspace_buffer_,
+      query,
+      key,
+      value,
+      attn_metadata.q_cu_seq_lens,
+      attn_metadata.kv_cu_seq_lens,
+      sliding_window_,
+      scale_,
+      output,
+      output_lse);
+}
+
+void FlashInferAttentionImpl::chunked_prefill_forward(
+    const AttentionMetadata& attn_metadata,
+    torch::Tensor& query,
+    const torch::Tensor& key,
+    torch::Tensor& output,
+    std::optional<at::Tensor>& output_lse,
+    const torch::Tensor& k_cache,
+    const torch::Tensor& v_cache) {
+  // Get block_size from k_cache if defined and has proper dimensions,
+  // otherwise use a default value (for prefill without KV cache, e.g., LongCat)
+  int64_t block_size = 1;
+  if (k_cache.defined() && k_cache.dim() >= 2) {
+    block_size = k_cache.size(1);
+  }
+
+  // NOTE: we only support "fa2" backend for BatchPrefillWithPagedKvcacheKernel
+  // for flashinfer v0.6.2, because it would cause performance degradation if
+  // using "fa3" backend.
+  std::string backend = "fa2";
+
+  if (attn_metadata.enable_cuda_graph) {
+    CHECK(attn_metadata.plan_info->plan_info.defined())
+        << "plan_info plan_info should not be null when enable_cuda_graph is "
+           "true";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "no need to update plan_info for CUDA graph";
+  } else {
+    flashinfer::update_chunked_prefill_plan_info(
+        attn_metadata.plan_info,
+        backend,
+        attn_metadata,
+        query.scalar_type(),
+        key.scalar_type(),
+        output.scalar_type(),
+        head_size_,
+        head_size_,
+        num_heads_,
+        num_kv_heads_,
+        block_size,
+        sliding_window_,
+        attn_metadata.enable_cuda_graph);
+  }
+
+  xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
+                                   attn_metadata.plan_info->plan_info,
+                                   float_workspace_buffer_,
+                                   int_workspace_buffer_,
+                                   page_locked_int_workspace_buffer_,
+                                   query,
+                                   k_cache,
+                                   v_cache,
+                                   attn_metadata.paged_kv_indptr,
+                                   attn_metadata.paged_kv_indices,
+                                   attn_metadata.paged_kv_last_page_len,
+                                   sliding_window_,
+                                   scale_,
+                                   output,
+                                   output_lse,
+                                   /*use_tensor_core=*/true,
+                                   attn_metadata.qo_indptr);
+}
+
+void FlashInferAttentionImpl::decoder_forward(
+    const AttentionMetadata& attn_metadata,
+    torch::Tensor& query,
+    const torch::Tensor& key,
+    torch::Tensor& output,
+    std::optional<at::Tensor>& output_lse,
+    const torch::Tensor& k_cache,
+    const torch::Tensor& v_cache) {
+  // Get block_size from k_cache if defined and has proper dimensions,
+  // otherwise use a default value (for prefill without KV cache, e.g., LongCat)
+  int64_t block_size = 1;
+  if (k_cache.defined() && k_cache.dim() >= 2) {
+    block_size = k_cache.size(1);
+  }
+
+  // NOTE: we only support "fa2" backend for BatchPrefillWithPagedKvcacheKernel
+  // for flashinfer v0.6.2, because it would cause performance degradation if
+  // using "fa3" backend.
+  std::string backend = "fa2";
+
+  if (attn_metadata.enable_cuda_graph) {
+    CHECK(attn_metadata.plan_info->plan_info.defined())
+        << "plan_info plan_info should not be null when enable_cuda_graph is "
+           "true";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "no need to update plan_info for CUDA graph";
+  } else {
+    flashinfer::update_decode_plan_info(attn_metadata.plan_info,
+                                        backend,
+                                        attn_metadata,
+                                        query.scalar_type(),
+                                        key.scalar_type(),
+                                        output.scalar_type(),
+                                        head_size_,
+                                        head_size_,
+                                        num_heads_,
+                                        num_kv_heads_,
+                                        block_size,
+                                        sliding_window_,
+                                        attn_metadata.enable_cuda_graph,
+                                        decode_use_tensor_core_);
+  }
+
+  xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
+                                   attn_metadata.plan_info->plan_info,
+                                   float_workspace_buffer_,
+                                   int_workspace_buffer_,
+                                   page_locked_int_workspace_buffer_,
+                                   query,
+                                   k_cache,
+                                   v_cache,
+                                   attn_metadata.paged_kv_indptr,
+                                   attn_metadata.paged_kv_indices,
+                                   attn_metadata.paged_kv_last_page_len,
+                                   sliding_window_,
+                                   scale_,
+                                   output,
+                                   output_lse,
+                                   decode_use_tensor_core_,
+                                   attn_metadata.qo_indptr);
 }
 
 }  // namespace layer
