@@ -1,30 +1,16 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 047ae3e..b4ae201 100644
+index 13179e7..fe79fe9 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -16,7 +16,7 @@ option(WITH_STORE "build mooncake store library and sample code" ON)
- option(WITH_P2P_STORE "build p2p store library and sample code" OFF)
+@@ -17,7 +17,7 @@ option(WITH_P2P_STORE "build p2p store library and sample code" OFF)
  option(WITH_RUST_EXAMPLE "build the Rust interface and sample code for the transfer engine" OFF)
+ option(WITH_EP "build mooncake with expert parallelism support" OFF)
  
 -add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/pybind11)
 +#add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/pybind11)
  set(PYTHON_EXECUTABLE "python3")
  execute_process(
      COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print(sys.path[-1])"
-diff --git a/mooncake-store/CMakeLists.txt b/mooncake-store/CMakeLists.txt
-index 8483085..9d263dd 100644
---- a/mooncake-store/CMakeLists.txt
-+++ b/mooncake-store/CMakeLists.txt
-@@ -20,5 +20,7 @@ include_directories(
- 
- # Add subdirectories
- add_subdirectory(src)
--add_subdirectory(tests)
-+if (BUILD_UNIT_TESTS)
-+  add_subdirectory(tests)
-+endif()
- add_subdirectory(benchmarks)
-\ No newline at end of file
 diff --git a/mooncake-store/include/offset_allocator/offset_allocator.hpp b/mooncake-store/include/offset_allocator/offset_allocator.hpp
 index b6d55c8..2d80158 100644
 --- a/mooncake-store/include/offset_allocator/offset_allocator.hpp
@@ -39,7 +25,7 @@ index b6d55c8..2d80158 100644
  namespace mooncake::offset_allocator {
  typedef unsigned char uint8;
 diff --git a/mooncake-store/include/types.h b/mooncake-store/include/types.h
-index 077926b..b36862b 100644
+index d9e617d..7939c94 100644
 --- a/mooncake-store/include/types.h
 +++ b/mooncake-store/include/types.h
 @@ -8,7 +8,10 @@
@@ -76,7 +62,7 @@ index 796838a..8e72b80 100644
 +#pragma GCC pop_options
 \ No newline at end of file
 diff --git a/mooncake-store/src/rpc_service.cpp b/mooncake-store/src/rpc_service.cpp
-index f515671..7a019b6 100644
+index 057e590..2e4d8b2 100644
 --- a/mooncake-store/src/rpc_service.cpp
 +++ b/mooncake-store/src/rpc_service.cpp
 @@ -1,3 +1,6 @@
@@ -86,18 +72,14 @@ index f515671..7a019b6 100644
  #include "rpc_service.h"
  
  #include <ylt/struct_json/json_reader.h>
-@@ -571,4 +574,6 @@ void RegisterRpcService(
-         &wrapped_master_service);
+@@ -634,3 +637,5 @@ void RegisterRpcService(
  }
  
--}  // namespace mooncake
-\ No newline at end of file
-+}  // namespace mooncake
+ }  // namespace mooncake
 +
 +#pragma GCC pop_options
-\ No newline at end of file
 diff --git a/mooncake-store/src/utils.cpp b/mooncake-store/src/utils.cpp
-index 9678f57..f41eb10 100644
+index 8923ffd..ce2eadd 100644
 --- a/mooncake-store/src/utils.cpp
 +++ b/mooncake-store/src/utils.cpp
 @@ -1,6 +1,6 @@
@@ -108,30 +90,19 @@ index 9678f57..f41eb10 100644
  #include <glog/logging.h>
  #include <netinet/in.h>
  #include <sys/socket.h>
-diff --git a/mooncake-store/tests/CMakeLists.txt b/mooncake-store/tests/CMakeLists.txt
-index 421ed47..fc6f598 100644
---- a/mooncake-store/tests/CMakeLists.txt
-+++ b/mooncake-store/tests/CMakeLists.txt
-@@ -106,8 +106,8 @@ target_link_libraries(offset_allocator_test PUBLIC
- )
- add_test(NAME offset_allocator_test COMMAND offset_allocator_test)
+diff --git a/mooncake-transfer-engine/src/CMakeLists.txt b/mooncake-transfer-engine/src/CMakeLists.txt
+index 01fab59..719c7dd 100644
+--- a/mooncake-transfer-engine/src/CMakeLists.txt
++++ b/mooncake-transfer-engine/src/CMakeLists.txt
+@@ -57,7 +57,7 @@ if (USE_ASCEND)
+ endif()
  
--add_executable(utils_test utils_test.cpp)
--target_link_libraries(utils_test PUBLIC
-+add_executable(mc_utils_test utils_test.cpp)
-+target_link_libraries(mc_utils_test PUBLIC
-     mooncake_store
-     cachelib_memory_allocator
-     glog
-@@ -115,7 +115,7 @@ target_link_libraries(utils_test PUBLIC
-     gtest_main
-     pthread
- )
--add_test(NAME utils_test COMMAND utils_test)
-+add_test(NAME mc_utils_test COMMAND mc_utils_test)
+ if (USE_UB)
+-  target_link_libraries(transfer_engine PUBLIC ascendcl ub_transport)
++  target_link_libraries(transfer_engine PUBLIC ascendcl)
+ endif()
  
- add_executable(client_buffer_test client_buffer_test.cpp)
- target_link_libraries(client_buffer_test PUBLIC
+ if (USE_ASCEND_DIRECT)
 diff --git a/mooncake-transfer-engine/src/common/base/CMakeLists.txt b/mooncake-transfer-engine/src/common/base/CMakeLists.txt
 index de7e35d..5d44865 100644
 --- a/mooncake-transfer-engine/src/common/base/CMakeLists.txt
@@ -145,6 +116,19 @@ index de7e35d..5d44865 100644
 +add_library(base STATIC ${SRC})
 +target_link_libraries(base PRIVATE glog::glog)
 \ No newline at end of file
+diff --git a/mooncake-transfer-engine/src/transport/CMakeLists.txt b/mooncake-transfer-engine/src/transport/CMakeLists.txt
+index 5f26a4b..9c9054f 100644
+--- a/mooncake-transfer-engine/src/transport/CMakeLists.txt
++++ b/mooncake-transfer-engine/src/transport/CMakeLists.txt
+@@ -26,7 +26,7 @@ endif()
+ 
+ if (USE_UB)
+   add_subdirectory(ub_transport)
+-  target_sources(transport PUBLIC $<TARGET_OBJECTS:ub_transport>)
++  target_sources(transport PUBLIC $<TARGET_OBJECTS:ub_transport> $<TARGET_OBJECTS:mem_fabric_api>)
+ endif()
+ 
+ if (USE_ASCEND_HETEROGENEOUS)
 diff --git a/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt b/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt
 index 23fa1b4..7c6a0f0 100644
 --- a/mooncake-transfer-engine/src/transport/tcp_transport/CMakeLists.txt
@@ -155,3 +139,22 @@ index 23fa1b4..7c6a0f0 100644
  add_library(tcp_transport OBJECT ${TCP_SOURCES})
 -target_link_libraries(tcp_transport PRIVATE JsonCpp::JsonCpp yalantinglibs::yalantinglibs)
 +target_link_libraries(tcp_transport PRIVATE JsonCpp::JsonCpp glog::glog yalantinglibs::yalantinglibs)
+diff --git a/mooncake-transfer-engine/src/transport/ub_transport/CMakeLists.txt b/mooncake-transfer-engine/src/transport/ub_transport/CMakeLists.txt
+index 775169d..c752e8d 100644
+--- a/mooncake-transfer-engine/src/transport/ub_transport/CMakeLists.txt
++++ b/mooncake-transfer-engine/src/transport/ub_transport/CMakeLists.txt
+@@ -2,11 +2,10 @@ file(GLOB MEM_FABRIC_API_SOURCE "memfabric_smem_dl.cpp")
+ set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
+ string(REPLACE "-O3" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+ string(REPLACE "-O3" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+-add_library(mem_fabric_api SHARED ${MEM_FABRIC_API_SOURCE})
++add_library(mem_fabric_api OBJECT ${MEM_FABRIC_API_SOURCE})
+ set_target_properties(mem_fabric_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
+-target_link_libraries(mem_fabric_api PRIVATE glog gflags)
+-install(TARGETS mem_fabric_api DESTINATION lib)
++target_link_libraries(mem_fabric_api PRIVATE glog::glog gflags::gflags)
+ 
+ file(GLOB UB_SOURCES "memfabric_transport.cpp")
+ add_library(ub_transport OBJECT ${UB_SOURCES})
+-target_link_libraries(ub_transport PRIVATE mem_fabric_api glog gflags)
++target_link_libraries(ub_transport PRIVATE glog::glog gflags::gflags)

@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <brpc/channel.h>
 
+#include <cstdint>
 #include <functional>
 #include <shared_mutex>
 #include <string>
@@ -41,7 +42,8 @@ class XServiceClient {
   ~XServiceClient();
   bool init(const std::string& etcd_addr,
             const std::string& instance_name = "",
-            const BlockManagerPool* block_manager_pool = nullptr);
+            const BlockManagerPool* block_manager_pool = nullptr,
+            uint32_t offload_batch = std::numeric_limits<uint32_t>::max());
   void set_scheduler(Scheduler* scheduler);
   bool initialize_done() { return initialize_done_; }
 
@@ -57,6 +59,10 @@ class XServiceClient {
 
   // response generation tokens to xllm service
   std::vector<bool> generations(const std::vector<RequestOutput>& outputs);
+
+  uint32_t get_offload_batch() {
+    return offload_batch_.load(std::memory_order_relaxed);
+  }
 
  private:
   void handle_master_service_watch(const etcd::Response& response);
@@ -98,6 +104,8 @@ class XServiceClient {
   std::unique_ptr<EtcdClient> etcd_client_;
   const BlockManagerPool* block_manager_pool_ = nullptr;  // not own
   Scheduler* scheduler_ = nullptr;                        // not own
+
+  std::atomic_uint32_t offload_batch_{std::numeric_limits<uint32_t>::max()};
 };
 
 }  // namespace xllm

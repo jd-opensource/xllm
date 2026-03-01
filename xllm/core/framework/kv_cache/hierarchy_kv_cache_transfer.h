@@ -28,7 +28,6 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "acl/acl_rt.h"
-#include "platform/npu/npu_layer_synchronizer.h"
 #endif
 
 namespace xllm {
@@ -36,9 +35,11 @@ class HierarchyKVCacheTransfer {
  public:
   struct Options {
     PROPERTY(uint32_t, tp_rank);
+    PROPERTY(uint32_t, tp_size);
     PROPERTY(uint32_t, layers);
     PROPERTY(double, host_blocks_factor) = 0.0;
     PROPERTY(uint32_t, layers_wise_copy_batchs) = 1;
+    PROPERTY(bool, enable_mla) = false;
     PROPERTY(bool, enable_kvcache_store) = false;
     PROPERTY(std::string, store_protocol) = "tcp";
     PROPERTY(std::string, store_master_server_address) = "";
@@ -63,15 +64,16 @@ class HierarchyKVCacheTransfer {
  private:
   void create_page_aligned_host_cache();
 
-  uint32_t offload_kv_blocks(
+  uint32_t offload_direct(
       const std::vector<BlockTransferInfo>& block_transfer_info);
+  uint32_t offload_via_host(
+      const std::vector<BlockTransferInfo>& block_transfer_info);
+  bool offload_to_host(Slice<BlockTransferInfo>& block_transfer_info);
 
-  bool d2h_batch_copy(Slice<BlockTransferInfo>& block_transfer_info);
-  bool h2d_batch_copy(const uint64_t batch_id,
-                      Slice<BlockTransferInfo>& block_transfer_info);
-
-  uint32_t offload_to_store(Slice<BlockTransferInfo>& block_transfer_info);
-  uint32_t load_from_store(Slice<BlockTransferInfo>& block_transfer_info);
+  bool load_direct(const uint64_t batch_id,
+                   const std::vector<BlockTransferInfo>& block_transfer_info);
+  bool load_via_host(const uint64_t batch_id,
+                     const std::vector<BlockTransferInfo>& block_transfer_info);
 
  private:
   // options
@@ -80,9 +82,9 @@ class HierarchyKVCacheTransfer {
   Device device_;
 
   // working thread for data copy
-  std::unique_ptr<ThreadPool> h2d_threadpool_;
-  std::unique_ptr<ThreadPool> d2h_threadpool_;
-  // copy streams only can be used in h2d_threadpool_ and d2h_threadpool_
+  std::unique_ptr<ThreadPool> load_threadpool_;
+  std::unique_ptr<ThreadPool> offload_threadpool_;
+  // copy streams only can be used in load_threadpool_ and offload_threadpool_
   moodycamel::BlockingConcurrentQueue<std::unique_ptr<Stream>> copy_stream_;
 
   std::vector<xllm::KVCache>* kv_caches_ptr_;
@@ -99,11 +101,11 @@ class HierarchyKVCacheTransfer {
 
   aclrtMemcpyBatchAttr h2d_attrs_;
   aclrtMemcpyBatchAttr d2h_attrs_;
+#endif
 
   mutable std::mutex mutex_;
-  std::unordered_map<uint64_t, std::shared_ptr<NPULayerSynchronizerImpl>>
+  std::unordered_map<uint64_t, std::shared_ptr<LayerSynchronizer>>
       layer_wise_load_synchronizer_;
-#endif
 };
 
 }  // namespace xllm

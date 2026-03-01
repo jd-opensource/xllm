@@ -77,6 +77,11 @@ echo "Checking out yalantinglibs version 0.5.5..."
 git checkout 0.5.5
 check_success "Failed to checkout yalantinglibs version 0.5.5"
 
+# Apply yalantinglibs patch
+echo "Applying yalantinglibs patch..."
+git apply ${REPO_ROOT}/third_party/custom_patch/ylt.patch
+check_success "Failed to apply yalantinglibs patch"
+
 mkdir -p build
 check_success "Failed to create build directory"
 

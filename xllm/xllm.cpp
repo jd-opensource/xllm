@@ -20,8 +20,10 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <csignal>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 #include "api_service/api_service.h"
 #include "core/common/global_flags.h"
@@ -231,6 +233,7 @@ int run() {
       .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .etcd_addr(FLAGS_etcd_addr)
+      .offload_batch(std::optional<uint32_t>(FLAGS_offload_batch))
       .enable_service_routing(FLAGS_enable_service_routing ||
                               FLAGS_enable_disagg_pd)
       .tool_call_parser(FLAGS_tool_call_parser)
@@ -242,8 +245,7 @@ int run() {
           FLAGS_enable_prefix_cache && FLAGS_enable_cache_upload)
       .host_blocks_factor(FLAGS_host_blocks_factor)
       .enable_kvcache_store(FLAGS_enable_kvcache_store &&
-                            FLAGS_enable_prefix_cache &&
-                            (FLAGS_host_blocks_factor > 1.0))
+                            FLAGS_enable_prefix_cache)
       .prefetch_timeout(FLAGS_prefetch_timeout)
       .prefetch_bacth_size(FLAGS_prefetch_bacth_size)
       .layers_wise_copy_batchs(FLAGS_layers_wise_copy_batchs)
