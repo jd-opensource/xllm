@@ -37,6 +37,7 @@ limitations under the License.
 #include "runtime/mm_embed_vlm_worker_impl.h"
 #include "runtime/mtp_worker_impl.h"
 #include "runtime/rec_worker_impl.h"
+#include "runtime/suffix_worker_impl.h"
 #include "runtime/vlm_worker_impl.h"
 #include "util/timer.h"
 
@@ -50,6 +51,8 @@ Worker::Worker(const ParallelArgs& parallel_args,
     LOG(INFO) << "Speculative decode is enabled, algorithm: " << algo;
     if (algo == "Eagle3") {
       impl_ = new Eagle3WorkerImpl(parallel_args, device, options);
+    } else if (algo == "Suffix") {
+      impl_ = new SuffixWorkerImpl(parallel_args, device, options);
     } else {
       // Default: MTP
       impl_ = new MTPWorkerImpl(parallel_args, device, options);

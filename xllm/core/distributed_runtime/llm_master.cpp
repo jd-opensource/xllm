@@ -41,13 +41,22 @@ limitations under the License.
 #include "util/timer.h"
 
 namespace xllm {
+namespace {
+
+bool should_use_ssm_engine(const Options& options) {
+  return !options.draft_model_path().value_or("").empty() ||
+         (options.speculative_algorithm() == "Suffix" &&
+          options.num_speculative_tokens() > 0);
+}
+
+}  // namespace
+
 volatile bool LLMAssistantMaster::running_ = false;
 
 LLMMaster::LLMMaster(const Options& options)
-    : Master(options,
-             options.draft_model_path().value_or("").empty()
-                 ? EngineType::LLM
-                 : EngineType::SSM) {
+    : Master(
+          options,
+          should_use_ssm_engine(options) ? EngineType::SSM : EngineType::LLM) {
   CHECK(engine_->init());
   task_type_ = options_.task_type();
 
@@ -459,10 +468,9 @@ std::shared_ptr<Request> LLMMaster::generate_request(
 }
 
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)
-    : Master(options,
-             options.draft_model_path().value_or("").empty()
-                 ? EngineType::LLM
-                 : EngineType::SSM) {
+    : Master(
+          options,
+          should_use_ssm_engine(options) ? EngineType::SSM : EngineType::LLM) {
   // setup process workers
   auto master_node_addr = options_.master_node_addr().value_or("");
   // TODO: support local unix domain socket later.

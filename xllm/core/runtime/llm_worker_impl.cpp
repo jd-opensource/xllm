@@ -148,28 +148,29 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
   }
 
   // driver prepare model output
-  SampleOutput sample_output;
   if (sampling_params.selected_token_idxes.defined()) {
-    sample_output = sampler_->forward(logits, sampling_params);
     output.logits = logits;
-
-    // beam search kernel
-    BeamSearchOutput beam_search_output;
-    if (sampling_params.use_beam_search && input.acc_logprob.defined() &&
-        input.acc_logprob.numel() > 0) {
-      beam_search_output = beam_searcher_->forward(input.acc_logprob,
-                                                   sample_output.top_tokens,
-                                                   sample_output.top_logprobs);
-    }
-
-    // set sample output to output
-    output.sample_output = sample_output;
-    // carry over the sampling params
     output.do_sample = sampling_params.do_sample;
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
-    // set beam search output to output
-    output.beam_search_output = beam_search_output;
+    if (!input.skip_sampling_for_logits_only) {
+      auto sample_output = sampler_->forward(logits, sampling_params);
+
+      // beam search kernel
+      BeamSearchOutput beam_search_output;
+      if (sampling_params.use_beam_search && input.acc_logprob.defined() &&
+          input.acc_logprob.numel() > 0) {
+        beam_search_output =
+            beam_searcher_->forward(input.acc_logprob,
+                                    sample_output.top_tokens,
+                                    sample_output.top_logprobs);
+      }
+
+      // set sample output to output
+      output.sample_output = sample_output;
+      // set beam search output to output
+      output.beam_search_output = beam_search_output;
+    }
   }
 
   if (options_.enable_speculative_decode()) {

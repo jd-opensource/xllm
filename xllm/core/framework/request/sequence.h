@@ -87,6 +87,9 @@ struct SequenceParams {
 
   int32_t bos_token_id = 0;
 
+  // request id for suffix-decoding request identity
+  std::string request_id;
+
   // sampling params
   // reference from request
   RequestSamplingParam* sampling_param;  // not owned
@@ -183,6 +186,7 @@ class Sequence final {
   // update embeddings to the sequence
   void update_embeddings(const torch::Tensor& embedding);
   int32_t get_embedding_id() const { return embedding_id_; }
+  const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
 
@@ -494,6 +498,8 @@ class Sequence final {
 
   // whether the last token is handled
   std::atomic<bool> last_token_handled_{false};
+
+  std::string request_id_;
 
   // Multi-round beam search result caching
   int32_t beam_width_cached_ = 0;

@@ -33,6 +33,7 @@ cc_library(
     xservice_client.h
     speculative_worker_impl.h
     mtp_worker_impl.h
+    suffix_worker_impl.h
     eagle3_worker_impl.h
     forward_shared_memory_manager.h
   SRCS
@@ -58,6 +59,7 @@ cc_library(
     params_utils.cpp
     speculative_worker_impl.cpp
     mtp_worker_impl.cpp
+    suffix_worker_impl.cpp
     eagle3_worker_impl.cpp
     forward_shared_memory_manager.cpp
   DEPS

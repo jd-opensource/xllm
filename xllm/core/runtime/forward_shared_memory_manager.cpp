@@ -53,6 +53,14 @@ inline size_t get_string_size(const std::string& str) {
   return type_size<uint64_t> + str.size();
 }
 
+inline size_t get_string_vector_size(const std::vector<std::string>& vec) {
+  size_t size = type_size<uint64_t>;
+  for (const auto& str : vec) {
+    size += get_string_size(str);
+  }
+  return size;
+}
+
 template <typename T>
 inline size_t get_vector_size(const std::vector<T>& vec) {
   return type_size<uint64_t> + vec.size() * type_size<T>;
@@ -253,6 +261,7 @@ size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   total += get_vector_size(input.dp_global_token_nums);
   total += get_vector_size(input.dp_is_decode);
   total += get_vector_size(input.embedding_ids);
+  total += get_string_vector_size(input.request_ids);
   total += get_vector_size(input.extra_token_ids);
   total += type_size<uint64_t> +
            input.swap_blocks.size() * swap_block_info_fixed_size();
@@ -300,6 +309,15 @@ inline void write_string(char*& buffer, const std::string& str) {
   if (len > 0) {
     std::memcpy(buffer, str.data(), len);
     buffer += len;
+  }
+}
+
+inline void write_string_vector(char*& buffer,
+                                const std::vector<std::string>& vec) {
+  const uint64_t size = vec.size();
+  write_data(buffer, size);
+  for (const auto& str : vec) {
+    write_string(buffer, str);
   }
 }
 
@@ -602,6 +620,27 @@ inline void read_string(const char*& buffer,
     safe_advance_buffer(device_buffer, len);
   } else {
     str.clear();
+  }
+}
+
+inline void read_string_vector(const char*& buffer,
+                               std::vector<std::string>& vec) {
+  uint64_t size;
+  read_data(buffer, size);
+  vec.resize(size);
+  for (uint64_t i = 0; i < size; ++i) {
+    read_string(buffer, vec[i]);
+  }
+}
+
+inline void read_string_vector(const char*& buffer,
+                               std::vector<std::string>& vec,
+                               const char*& device_buffer) {
+  uint64_t size;
+  read_data(buffer, size, device_buffer);
+  vec.resize(size);
+  for (uint64_t i = 0; i < size; ++i) {
+    read_string(buffer, vec[i], device_buffer);
   }
 }
 
@@ -997,6 +1036,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   read_vector(buffer, input_params.dp_global_token_nums, device_buffer);
   read_vector(buffer, input_params.dp_is_decode, device_buffer);
   read_vector(buffer, input_params.embedding_ids, device_buffer);
+  read_string_vector(buffer, input_params.request_ids, device_buffer);
   read_vector(buffer, input_params.extra_token_ids, device_buffer);
   read_swap_blocks(buffer, input_params.swap_blocks, device_buffer);
   read_tensor(buffer, input_params.src_block_indices, device_buffer);
@@ -1079,6 +1119,7 @@ inline void serialize_raw_forward_input(const RawForwardInput& input,
   write_vector(buffer, input.dp_global_token_nums);
   write_vector(buffer, input.dp_is_decode);
   write_vector(buffer, input.embedding_ids);
+  write_string_vector(buffer, input.request_ids);
   write_vector(buffer, input.extra_token_ids);
   write_swap_blocks(buffer, input.swap_blocks);
   write_vector_to_tensor(buffer, input.src_block_indices);
@@ -1275,6 +1316,7 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   input_params.kv_max_seq_len = raw_input.max_seq_len;
   input_params.q_max_seq_len = raw_input.q_max_seq_len;
   input_params.embedding_ids = std::move(raw_input.embedding_ids);
+  input_params.request_ids = std::move(raw_input.request_ids);
   input_params.dp_global_token_nums = std::move(raw_input.dp_global_token_nums);
   input_params.dp_is_decode = std::move(raw_input.dp_is_decode);
 
