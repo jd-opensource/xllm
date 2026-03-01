@@ -113,7 +113,8 @@ bool PageAllocator::register_model(const std::string& model_id,
   return true;
 }
 
-bool PageAllocator::sleep_model(const std::string& model_id) {
+bool PageAllocator::sleep_model(const std::string& model_id,
+                                bool skip_weight_release) {
   std::vector<std::pair<int32_t, std::vector<int64_t>>> pages_to_unmap;
   std::vector<bool> unmap_success;
   size_t total_phy_pages_to_release = 0;
@@ -170,11 +171,11 @@ bool PageAllocator::sleep_model(const std::string& model_id) {
 
     LOG(INFO) << "Sleeping model " << model_id << ", will release "
               << total_phy_pages_to_release << " KV cache pages and "
-              << weight_pages << " weight pages";
+              << (skip_weight_release ? 0 : weight_pages) << " weight pages";
   }
 
   // Release weight pages first (reuse existing function)
-  if (weight_pages > 0) {
+  if (!skip_weight_release && weight_pages > 0) {
     if (!free_weight_pages(model_id, weight_pages)) {
       LOG(ERROR) << "Failed to free weight pages during sleep for model "
                  << model_id << ", keep consumed weight page count";
