@@ -269,6 +269,10 @@ DEFINE_bool(enable_prefix_cache,
             true,
             "Whether to enable the prefix cache for the block manager.");
 
+DEFINE_bool(enable_in_batch_prefix_cache_reuse,
+            false,
+            "Whether to enable in-batch prefix block reuse in MixScheduler.");
+
 DEFINE_bool(enable_cache_upload,
             false,
             "Whether to upload cache info to service. This feature is only "

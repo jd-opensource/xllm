@@ -68,8 +68,20 @@ std::vector<Block> BlockManagerImpl::allocate(size_t num_blocks) {
 void BlockManagerImpl::deallocate(const Slice<Block>& blocks) {
   if (options_.enable_prefix_cache()) {
     for (const auto& block : blocks) {
-      // the block is not shared by other sequence
-      if (block.is_valid() && block.ref_count() <= 2) {
+      if (!block.is_valid()) {
+        continue;
+      }
+      const uint32_t ref_count = block.ref_count();
+      // A block should reduce used-count when this release removes the last
+      // sequence reference:
+      // - ref_count==1: only held by current sequence.
+      // - ref_count==2 && in prefix cache: held by current sequence + cache.
+      // For in-batch shared blocks without cache entry, ref_count can be 2
+      // while another sequence still owns it, and must not be decremented.
+      const bool should_decrease_used =
+          (ref_count == 1) || (ref_count == 2 && prefix_cache_ != nullptr &&
+                               prefix_cache_->contains_block_id(block.id()));
+      if (should_decrease_used) {
         if (num_used_blocks_ == 0) {
           LOG(ERROR) << "num_used_blocks_==0 cannot fetch_sub for id:"
                      << block.id()

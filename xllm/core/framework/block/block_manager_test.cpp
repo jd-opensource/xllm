@@ -119,4 +119,35 @@ TEST(BlockManagerTest, Basic) {
   }
 }
 
+TEST(BlockManagerTest,
+     SharedBlocksWithoutPrefixCacheEntryDoNotDoubleDecrement) {
+  const uint32_t n_blocks = 10;
+  const uint32_t block_size = 2;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size).enable_prefix_cache(true);
+  BlockManagerImpl manager(options);
+
+  std::vector<Block> provider_blocks = manager.allocate(1);
+  ASSERT_EQ(provider_blocks.size(), 1);
+  EXPECT_EQ(manager.num_used_blocks(), 1);
+
+  std::vector<Block> consumer_blocks;
+  consumer_blocks.push_back(provider_blocks[0]);
+  EXPECT_EQ(provider_blocks[0].ref_count(), 2);
+
+  // Simulate in-batch shared prefix blocks: the consumer sequence releases
+  // shared blocks first, while those blocks are not in prefix_cache.
+  manager.deallocate(consumer_blocks);
+  EXPECT_EQ(manager.num_used_blocks(), 1);
+
+  consumer_blocks.clear();
+  EXPECT_EQ(provider_blocks[0].ref_count(), 1);
+
+  manager.deallocate(provider_blocks);
+  EXPECT_EQ(manager.num_used_blocks(), 0);
+
+  provider_blocks.clear();
+  EXPECT_EQ(manager.num_free_blocks(), n_blocks - 1);
+}
+
 }  // namespace xllm
