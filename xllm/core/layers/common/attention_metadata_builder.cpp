@@ -45,6 +45,8 @@ AttentionMetadata AttentionMetadataBuilder::build(
   attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
 #if defined(USE_CUDA) || defined(USE_MUSA)
   attn_metadata.plan_info = std::make_shared<PlanInfo>();
+  attn_metadata.shared_plan_info = std::make_shared<PlanInfo>();
+  attn_metadata.unshared_plan_info = std::make_shared<PlanInfo>();
 #endif
 
 #if defined(USE_CUDA) || defined(USE_NPU)
@@ -119,6 +121,54 @@ AttentionMetadata AttentionMetadataBuilder::build(
     if (llmrec_params.current_round_tensor.defined() &&
         llmrec_params.current_round_tensor.numel() > 0) {
       attn_metadata.step_tensor = llmrec_params.current_round_tensor;
+    }
+
+    const bool has_two_stage_cache_tensors =
+        llmrec_params.two_stage_shared_lse.defined() ||
+        llmrec_params.two_stage_shared_o.defined() ||
+        llmrec_params.two_stage_unshared_lse.defined() ||
+        llmrec_params.two_stage_unshared_o.defined() ||
+        llmrec_params.two_stage_q_cu_seq_lens_shared.defined() ||
+        llmrec_params.two_stage_paged_kv_indptr_expanded.defined() ||
+        llmrec_params.two_stage_paged_kv_indices_expanded.defined() ||
+        llmrec_params.two_stage_paged_kv_last_page_len_expanded.defined();
+
+    if (has_two_stage_cache_tensors) {
+#if defined(USE_CUDA) || defined(USE_MUSA)
+      attn_metadata.xattention_two_stage_decode_cache.emplace(
+          XAttentionTwoStageDecodeCache{});
+      auto& cache = attn_metadata.xattention_two_stage_decode_cache.value();
+
+      cache.shared_lse = llmrec_params.two_stage_shared_lse;
+      cache.shared_o = llmrec_params.two_stage_shared_o;
+      cache.unshared_lse = llmrec_params.two_stage_unshared_lse;
+      cache.unshared_o = llmrec_params.two_stage_unshared_o;
+      cache.q_cu_seq_lens_shared = llmrec_params.two_stage_q_cu_seq_lens_shared;
+      cache.paged_kv_indptr_expanded =
+          llmrec_params.two_stage_paged_kv_indptr_expanded;
+      cache.paged_kv_indices_expanded =
+          llmrec_params.two_stage_paged_kv_indices_expanded;
+      cache.paged_kv_last_page_len_expanded =
+          llmrec_params.two_stage_paged_kv_last_page_len_expanded;
+
+      if (cache.q_cu_seq_lens_shared.defined()) {
+        cache.cached_batch_size =
+            static_cast<int32_t>(cache.q_cu_seq_lens_shared.numel()) - 1;
+      }
+      cache.cached_beam_size = llmrec_params.beam_width;
+      if (!llmrec_params.unshared_k_caches.empty()) {
+        cache.cached_max_decode_step =
+            static_cast<int32_t>(llmrec_params.unshared_k_caches[0].size(2));
+      }
+      if (cache.shared_o.defined() && cache.shared_o.dim() == 3) {
+        cache.cached_num_heads = static_cast<int32_t>(cache.shared_o.size(1));
+        cache.cached_head_size = static_cast<int32_t>(cache.shared_o.size(2));
+      }
+      if (llmrec_params.current_round_tensor.defined() &&
+          llmrec_params.current_round_tensor.numel() > 0) {
+        cache.cached_step = llmrec_params.current_round_tensor.item<int32_t>();
+      }
+#endif
     }
   }
 

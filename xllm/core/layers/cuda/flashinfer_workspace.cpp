@@ -31,6 +31,7 @@ void FlashinferWorkspace::initialize(const torch::Device& device) {
   page_locked_int_workspace_buffer_ = torch::empty(
       {int_workspace_buffer_.size(0)},
       torch::dtype(torch::kUInt8).device(torch::kCPU).pinned_memory(true));
+
   LOG(INFO) << "FlashinferWorkspace initialize end with "
                "flashinfer_workspace_buffer_size: "
             << FLAGS_flashinfer_workspace_buffer_size;

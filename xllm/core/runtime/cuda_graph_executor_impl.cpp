@@ -363,65 +363,92 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         .copy_(embedding, /*non_blocking=*/true);
   }
 
-  // FlashInfer decode parameters update (if present)
-  CHECK(params.paged_kv_indptr.defined())
-      << "paged_kv_indptr should not be null";
-  VLOG(kGraphExecutorLogVerboseLevel)
-      << "copy_ paged_kv_indptr: src shape=" << params.paged_kv_indptr.sizes()
-      << ", dst slice shape=[" << (actual_batch_size + 1) << "]";
-  if (VLOG_IS_ON(kGraphExecutorLogVerboseLevel)) {
-    torch::Tensor paged_kv_indptr_cpu = params.paged_kv_indptr.to(torch::kCPU);
+  const bool enable_two_stage_decode =
+      FLAGS_enable_xattention_two_stage_decode &&
+      params.batch_forward_type.is_decode() && params.has_llmrec_params();
+
+  // FlashInfer decode parameters update.
+  if (!enable_two_stage_decode) {
+    CHECK(params.paged_kv_indptr.defined())
+        << "paged_kv_indptr should not be null";
     VLOG(kGraphExecutorLogVerboseLevel)
-        << "copy_ paged_kv_indptr: src values=" << paged_kv_indptr_cpu;
+        << "copy_ paged_kv_indptr: src shape=" << params.paged_kv_indptr.sizes()
+        << ", dst slice shape=[" << (actual_batch_size + 1) << "]";
+    if (VLOG_IS_ON(kGraphExecutorLogVerboseLevel)) {
+      torch::Tensor paged_kv_indptr_cpu =
+          params.paged_kv_indptr.to(torch::kCPU);
+      VLOG(kGraphExecutorLogVerboseLevel)
+          << "copy_ paged_kv_indptr: src values=" << paged_kv_indptr_cpu;
+    }
+    persistent_paged_kv_indptr_
+        .slice(/*dim=*/0,
+               /*start=*/0,
+               /*end=*/actual_batch_size + 1)
+        .copy_(params.paged_kv_indptr, /*non_blocking=*/true);
+    CHECK(params.paged_kv_indices.defined())
+        << "paged_kv_indices should not be null";
+    const int64_t actual_indices_size = params.paged_kv_indices.size(0);
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "copy_ paged_kv_indices: src shape="
+        << params.paged_kv_indices.sizes() << ", dst slice shape=["
+        << actual_indices_size << "]";
+    persistent_paged_kv_indices_
+        .slice(/*dim=*/0,
+               /*start=*/0,
+               /*end=*/actual_indices_size)
+        .copy_(params.paged_kv_indices, /*non_blocking=*/true);
+    CHECK(params.paged_kv_last_page_len.defined())
+        << "paged_kv_last_page_len should not be null";
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "copy_ paged_kv_last_page_len: src shape="
+        << params.paged_kv_last_page_len.sizes() << ", dst slice shape=["
+        << actual_batch_size << "]";
+    persistent_paged_kv_last_page_len_
+        .slice(/*dim=*/0,
+               /*start=*/0,
+               /*end=*/actual_batch_size)
+        .copy_(params.paged_kv_last_page_len, /*non_blocking=*/true);
+    // Convert cumulative lengths to individual sequence lengths using
+    // torch::diff. This matches the behavior in
+    // attention_metadata_builder.cpp for decode mode.
+    attn_metadata->kv_seq_lens =
+        torch::diff(kv_seq_lens(/*actual_batch_size=*/actual_batch_size + 1));
+    // Set FlashInfer decode parameters (always update, not just for capture).
+    attn_metadata->paged_kv_indptr =
+        persistent_paged_kv_indptr(actual_batch_size);
+    // Match FlashInfer's CUDAGraph wrapper behavior: always pass the full
+    // pre-allocated indices buffer and use indptr to delimit valid range.
+    attn_metadata->paged_kv_indices = persistent_paged_kv_indices_;
+    attn_metadata->paged_kv_last_page_len =
+        persistent_paged_kv_last_page_len(actual_batch_size);
+    // qo_indptr is q_cu_seq_lens in GPU Model.
+    attn_metadata->qo_indptr = persistent_decode_qo_indptr(actual_batch_size);
+  } else {
+    if (params.q_seq_lens.defined() && params.q_seq_lens.numel() > 0) {
+      const int64_t q_numel = params.q_seq_lens.numel();
+      q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_numel)
+          .copy_(params.q_seq_lens, /*non_blocking=*/true);
+      attn_metadata->q_cu_seq_lens = q_seq_lens(/*actual_batch_size=*/q_numel);
+    }
+
+    if (params.kv_seq_lens.defined() && params.kv_seq_lens.numel() > 0) {
+      const int64_t kv_numel = params.kv_seq_lens.numel();
+      kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/kv_numel)
+          .copy_(params.kv_seq_lens, /*non_blocking=*/true);
+      attn_metadata->kv_cu_seq_lens =
+          kv_seq_lens(/*actual_batch_size=*/kv_numel);
+      if (kv_numel > 1) {
+        attn_metadata->kv_seq_lens = torch::diff(attn_metadata->kv_cu_seq_lens);
+      }
+    }
+
+    attn_metadata->paged_kv_indptr = torch::Tensor();
+    attn_metadata->paged_kv_indices = torch::Tensor();
+    attn_metadata->paged_kv_last_page_len = torch::Tensor();
+    attn_metadata->qo_indptr = torch::Tensor();
   }
-  persistent_paged_kv_indptr_
-      .slice(/*dim=*/0,
-             /*start=*/0,
-             /*end=*/actual_batch_size + 1)
-      .copy_(params.paged_kv_indptr, /*non_blocking=*/true);
-  CHECK(params.paged_kv_indices.defined())
-      << "paged_kv_indices should not be null";
-  const int64_t actual_indices_size = params.paged_kv_indices.size(0);
-  VLOG(kGraphExecutorLogVerboseLevel)
-      << "copy_ paged_kv_indices: src shape=" << params.paged_kv_indices.sizes()
-      << ", dst slice shape=[" << actual_indices_size << "]";
-  persistent_paged_kv_indices_
-      .slice(/*dim=*/0,
-             /*start=*/0,
-             /*end=*/actual_indices_size)
-      .copy_(params.paged_kv_indices, /*non_blocking=*/true);
-  CHECK(params.paged_kv_last_page_len.defined())
-      << "paged_kv_last_page_len should not be null";
-  VLOG(kGraphExecutorLogVerboseLevel)
-      << "copy_ paged_kv_last_page_len: src shape="
-      << params.paged_kv_last_page_len.sizes() << ", dst slice shape=["
-      << actual_batch_size << "]";
-  persistent_paged_kv_last_page_len_
-      .slice(/*dim=*/0,
-             /*start=*/0,
-             /*end=*/actual_batch_size)
-      .copy_(params.paged_kv_last_page_len, /*non_blocking=*/true);
-  // Convert cumulative lengths to individual sequence lengths using torch::diff
-  // This matches the behavior in attention_metadata_builder.cpp for decode mode
-  attn_metadata->kv_seq_lens =
-      torch::diff(kv_seq_lens(/*actual_batch_size=*/actual_batch_size + 1));
-  // Set FlashInfer decode parameters (always update, not just for capture)
-  // This ensures attn_metadata points to updated persistent buffers for
-  // plan_info calculation
-  attn_metadata->paged_kv_indptr =
-      persistent_paged_kv_indptr(actual_batch_size);
-  // Match FlashInfer's CUDAGraph wrapper behavior: always pass the full
-  // pre-allocated indices buffer and use indptr to delimit valid range.
-  // This keeps kernel arguments stable across replays.
-  attn_metadata->paged_kv_indices = persistent_paged_kv_indices_;
-  attn_metadata->paged_kv_last_page_len =
-      persistent_paged_kv_last_page_len(actual_batch_size);
-  // qo_indptr is q_cu_seq_lens in GPU Model.
-  attn_metadata->qo_indptr = persistent_decode_qo_indptr(actual_batch_size);
-  // Update plan_info if attn_metadata exists and enable_cuda_graph is true
-  // This ensures plan_info is updated before CUDA graph capture/replay
+  // Update plan_info if attn_metadata exists and enable_cuda_graph is true.
   {
-    // Get attention parameters from ModelArgs
     const int32_t head_dim = args_.head_dim();
     const int64_t n_heads = args_.n_heads();
     const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
@@ -439,57 +466,168 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     // Get dtype from k_cache
     const auto dtype = k_cache.scalar_type();
 
-    // Determine if causal (prefill mode)
-    const bool causal =
-        attn_metadata->is_prefill || attn_metadata->is_chunked_prefill;
+    if (enable_two_stage_decode) {
+      const auto& llmrec_params = *params.llmrec_params();
+      CHECK(attn_metadata->xattention_two_stage_decode_cache.has_value())
+          << "two-stage cache must be prepared in rec worker before "
+             "cuda graph update";
 
-    // Determine backend
-    const std::string backend = xllm::kernel::cuda::determine_attention_backend(
-        /*pos_encoding_mode=*/0,
-        /*use_fp16_qk_reduction=*/false,
-        /*use_custom_mask=*/false,
-        /*causal=*/causal);
+      auto cache = attn_metadata->xattention_two_stage_decode_cache.value();
+      CHECK(cache.q_cu_seq_lens_shared.defined())
+          << "q_cu_seq_lens_shared must be initialized in rec worker";
+      CHECK(cache.paged_kv_indptr_expanded.defined() &&
+            cache.paged_kv_indices_expanded.defined() &&
+            cache.paged_kv_last_page_len_expanded.defined())
+          << "paged_kv_* expanded tensors must be initialized in rec worker";
+      CHECK(cache.shared_lse.defined() && cache.shared_o.defined() &&
+            cache.unshared_lse.defined() && cache.unshared_o.defined())
+          << "two-stage shared/unshared output cache tensors must be "
+             "initialized in rec worker";
 
-    // Update plan_info
-    // Note: plan_info is only updated at layer 0, so we set layer_id to 0
-    attn_metadata->plan_info->layer_id = 0;
-    CHECK_EQ(dtype, torch::ScalarType::BFloat16)
-        << "only support bf16 kvcache for now";
-    bool use_tensor_core =
-        xllm::kernel::cuda::should_use_tensor_core(dtype, n_heads, n_kv_heads);
+      const int64_t request_batch_size =
+          cache.q_cu_seq_lens_shared.numel() > 0
+              ? (cache.q_cu_seq_lens_shared.numel() - 1)
+              : 0;
+      CHECK_GT(request_batch_size, 0)
+          << "request_batch_size must be > 0 for two-stage xattention";
+      const int64_t beam_width = std::max<int64_t>(llmrec_params.beam_width, 1);
+      const int64_t total_beam = request_batch_size * beam_width;
 
-    VLOG(kGraphExecutorLogVerboseLevel)
-        << "CudaGraphPersistentParam::update() calling update_plan_info: "
-        << "is_prefill=" << attn_metadata->is_prefill
-        << ", is_chunked_prefill=" << attn_metadata->is_chunked_prefill
-        << ", causal=" << causal << ", backend=" << backend
-        << ", enable_cuda_graph=" << attn_metadata->enable_cuda_graph;
+      CHECK_EQ(cache.shared_o.size(0), total_beam)
+          << "shared_o first dim mismatch: expected total_beam=" << total_beam
+          << ", got " << cache.shared_o.size(0);
+      CHECK_EQ(cache.unshared_o.size(0), total_beam)
+          << "unshared_o first dim mismatch: expected total_beam=" << total_beam
+          << ", got " << cache.unshared_o.size(0);
+      CHECK_EQ(cache.paged_kv_indptr_expanded.numel(), total_beam + 1)
+          << "paged_kv_indptr_expanded size mismatch";
+      CHECK_EQ(cache.paged_kv_indices_expanded.numel(), total_beam)
+          << "paged_kv_indices_expanded size mismatch";
+      CHECK_EQ(cache.paged_kv_last_page_len_expanded.numel(), total_beam)
+          << "paged_kv_last_page_len_expanded size mismatch";
 
-    layer::flashinfer::update_plan_info(
-        attn_metadata->plan_info,
-        backend,
-        *attn_metadata,
-        dtype,                             // query_dtype
-        dtype,                             // key_dtype
-        dtype,                             // output_dtype
-        head_dim,                          // head_dim_qk
-        head_dim,                          // head_dim_vo
-        static_cast<int32_t>(n_heads),     // num_qo_heads
-        static_cast<int32_t>(n_kv_heads),  // num_kv_heads
-        static_cast<int32_t>(block_size),  // block_size
-        sliding_window,                    // window_size_left
-        /*enable_cuda_graph=*/true,
-        causal,          // causal
-        use_tensor_core  // use_tensor_core for decode planning
-    );
+      const int64_t max_decode_step =
+          !llmrec_params.unshared_k_caches.empty()
+              ? llmrec_params.unshared_k_caches[0].size(2)
+              : std::max<int64_t>(FLAGS_max_decode_rounds - 1, 1);
+      CHECK_GT(max_decode_step, 0)
+          << "max_decode_step must be > 0 for two-stage decode";
 
-    VLOG(kGraphExecutorLogVerboseLevel)
-        << "CudaGraphPersistentParam::update() plan_info updated: uri="
-        << attn_metadata->plan_info->uri << ", plan_info.defined="
-        << attn_metadata->plan_info->plan_info.defined() << ", plan_info.size="
-        << (attn_metadata->plan_info->plan_info.defined()
-                ? attn_metadata->plan_info->plan_info.size()
-                : 0);
+      cache.cached_batch_size = static_cast<int32_t>(request_batch_size);
+      cache.cached_beam_size = static_cast<int32_t>(beam_width);
+      cache.cached_num_heads = static_cast<int32_t>(n_heads);
+      cache.cached_head_size = static_cast<int32_t>(head_dim);
+      cache.cached_max_decode_step = static_cast<int32_t>(max_decode_step);
+      cache.cached_step =
+          (llmrec_params.current_round_tensor.defined() &&
+           llmrec_params.current_round_tensor.numel() > 0)
+              ? llmrec_params.current_round_tensor.item<int32_t>()
+              : 0;
+
+      attn_metadata->xattention_two_stage_decode_cache = cache;
+
+      layer::AttentionMetadata shared_attn_meta = *attn_metadata;
+      shared_attn_meta.plan_info = attn_metadata->shared_plan_info;
+      shared_attn_meta.q_cu_seq_lens = cache.q_cu_seq_lens_shared;
+      shared_attn_meta.is_causal = false;
+
+      attn_metadata->shared_plan_info->layer_id = 0;
+      layer::flashinfer::update_plan_info(
+          attn_metadata->shared_plan_info,
+          xllm::kernel::cuda::determine_attention_backend(
+              /*pos_encoding_mode=*/0,
+              /*use_fp16_qk_reduction=*/false,
+              /*use_custom_mask=*/false,
+              /*causal=*/false),
+          shared_attn_meta,
+          dtype,
+          dtype,
+          dtype,
+          head_dim,
+          head_dim,
+          static_cast<int32_t>(n_heads),
+          static_cast<int32_t>(n_kv_heads),
+          /*block_size=*/1,
+          /*window_size_left=*/-1,
+          /*enable_cuda_graph=*/true,
+          /*causal=*/false,
+          /*use_tensor_core=*/true,
+          /*force_prefill_plan=*/true);
+
+      layer::AttentionMetadata unshared_attn_meta = *attn_metadata;
+      unshared_attn_meta.plan_info = attn_metadata->unshared_plan_info;
+      unshared_attn_meta.paged_kv_indptr = cache.paged_kv_indptr_expanded;
+      unshared_attn_meta.paged_kv_indices = cache.paged_kv_indices_expanded;
+      unshared_attn_meta.paged_kv_last_page_len =
+          cache.paged_kv_last_page_len_expanded;
+      unshared_attn_meta.is_causal = false;
+
+      attn_metadata->unshared_plan_info->layer_id = 0;
+      layer::flashinfer::update_plan_info(attn_metadata->unshared_plan_info,
+                                          /*backend=*/"fa3",
+                                          unshared_attn_meta,
+                                          dtype,
+                                          dtype,
+                                          dtype,
+                                          head_dim,
+                                          head_dim,
+                                          static_cast<int32_t>(n_heads),
+                                          static_cast<int32_t>(n_kv_heads),
+                                          static_cast<int32_t>(max_decode_step),
+                                          sliding_window,
+                                          /*enable_cuda_graph=*/true,
+                                          /*causal=*/false,
+                                          /*use_tensor_core=*/false,
+                                          /*force_prefill_plan=*/false);
+    } else {
+      const bool causal =
+          attn_metadata->is_prefill || attn_metadata->is_chunked_prefill;
+
+      const std::string backend =
+          xllm::kernel::cuda::determine_attention_backend(
+              /*pos_encoding_mode=*/0,
+              /*use_fp16_qk_reduction=*/false,
+              /*use_custom_mask=*/false,
+              /*causal=*/causal);
+
+      attn_metadata->plan_info->layer_id = 0;
+      CHECK_EQ(dtype, torch::ScalarType::BFloat16)
+          << "only support bf16 kvcache for now";
+      bool use_tensor_core = xllm::kernel::cuda::should_use_tensor_core(
+          dtype, n_heads, n_kv_heads);
+
+      VLOG(kGraphExecutorLogVerboseLevel)
+          << "CudaGraphPersistentParam::update() calling update_plan_info: "
+          << "is_prefill=" << attn_metadata->is_prefill
+          << ", is_chunked_prefill=" << attn_metadata->is_chunked_prefill
+          << ", causal=" << causal << ", backend=" << backend
+          << ", enable_cuda_graph=" << attn_metadata->enable_cuda_graph;
+
+      layer::flashinfer::update_plan_info(attn_metadata->plan_info,
+                                          backend,
+                                          *attn_metadata,
+                                          dtype,
+                                          dtype,
+                                          dtype,
+                                          head_dim,
+                                          head_dim,
+                                          static_cast<int32_t>(n_heads),
+                                          static_cast<int32_t>(n_kv_heads),
+                                          static_cast<int32_t>(block_size),
+                                          sliding_window,
+                                          /*enable_cuda_graph=*/true,
+                                          causal,
+                                          use_tensor_core);
+
+      VLOG(kGraphExecutorLogVerboseLevel)
+          << "CudaGraphPersistentParam::update() plan_info updated: uri="
+          << attn_metadata->plan_info->uri << ", plan_info.defined="
+          << attn_metadata->plan_info->plan_info.defined()
+          << ", plan_info.size="
+          << (attn_metadata->plan_info->plan_info.defined()
+                  ? attn_metadata->plan_info->plan_info.size()
+                  : 0);
+    }
   }
 
   // Return ModelInputParams with persistent buffer references if requested
@@ -731,6 +869,7 @@ ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
         updated_params.attn_metadata->plan_info->plan_info;
     replay_params.q_cu_seq_lens = updated_params.attn_metadata->q_cu_seq_lens;
     replay_params.kv_cu_seq_lens = updated_params.attn_metadata->kv_cu_seq_lens;
+    replay_params.is_causal = updated_params.attn_metadata->is_causal;
 
     // Replay piecewise graphs and attention runners
     piecewise_graph_.replay(replay_params);

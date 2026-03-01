@@ -96,7 +96,8 @@ void AttentionRunner::run_replay(const AttentionReplayParams& params) {
                 scale_,
                 output_slice,
                 output_lse,
-                /*enable_cuda_graph=*/false);
+                /*enable_cuda_graph=*/false,
+                /*is_causal=*/params.is_causal);
 }
 
 }  // namespace cuda

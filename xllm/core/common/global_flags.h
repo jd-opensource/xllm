@@ -266,6 +266,8 @@ DECLARE_int32(max_decode_rounds);
 
 DECLARE_int32(beam_width);
 
+DECLARE_bool(enable_xattention_two_stage_decode);
+
 DECLARE_bool(use_audio_in_video);
 
 #if defined(USE_NPU)

@@ -9,6 +9,7 @@ cc_library(
     flashinfer_attention.h
     xattention.h
     flashinfer_workspace.h
+    xattention_workspace.h
     flashinfer_planinfo.h
   SRCS
     attention.cpp
@@ -16,6 +17,7 @@ cc_library(
     xattention.cpp
     flashinfer_attention.cpp
     flashinfer_workspace.cpp
+    xattention_workspace.cpp
     flashinfer_planinfo.cpp
   DEPS
     :common_layers
