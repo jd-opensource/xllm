@@ -98,4 +98,18 @@ void fused_indexer_k(FusedIndexerKParams& params);
 // (and token_count/cusum outputs) on other backends.
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 moe_init_routing_v2(MoeInitRoutingV2Params& params);
+
+// FP8 scaled quantize: quantizes input tensor to FP8 e4m3 format
+// Returns: (quantized_output, scale)
+std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
+    Fp8ScaledQuantizeParams& params);
+
+// FP8 scaled matmul for W8A8 quantization using CUTLASS kernels
+// Performs: c = (a @ b.T) with scales applied
+torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params);
+
+// Static scaled FP8 quantization helper
+// Quantizes input tensor to FP8 using a pre-computed scale factor
+void static_scaled_fp8_quant(StaticScaledFp8QuantParams& params);
+
 }  // namespace xllm::kernel

@@ -20,9 +20,21 @@ limitations under the License.
 #include <nvtx3/nvToolsExt.h>
 
 #include <mutex>
+#include <string>
+#include <type_traits>
 
 #ifndef check_cuda_error
 #define check_cuda_error(call) C10_CUDA_CHECK(call)
+#endif
+
+#if defined(__CUDACC__) || defined(_NVHPC_CUDA)
+#define HOST_DEVICE_INLINE __host__ __device__ __forceinline__
+#define DEVICE_INLINE __device__ __forceinline__
+#define HOST_INLINE __host__ __forceinline__
+#else
+#define HOST_DEVICE_INLINE inline
+#define DEVICE_INLINE inline
+#define HOST_INLINE inline
 #endif
 
 namespace xllm::kernel::cuda {
@@ -47,5 +59,11 @@ class NvtxRange {
 
   ~NvtxRange() { nvtxRangePop(); }
 };
+
+template <typename T>
+HOST_DEVICE_INLINE constexpr std::enable_if_t<std::is_integral_v<T>, T>
+ceil_div(T a, T b) {
+  return (a + b - 1) / b;
+}
 
 }  // namespace xllm::kernel::cuda

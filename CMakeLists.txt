@@ -536,6 +536,15 @@ include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Mooncake/moon
 include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Mooncake/mooncake-transfer-engine/include)
 include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Mooncake/mooncake-store/include)
 
+# CUTLASS - CUDA kernel library for scaled matmul
+if(USE_CUDA)
+  set(CUTLASS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cutlass)
+  set(CUTLASS_INCLUDE_DIR ${CUTLASS_DIR}/include)
+  set(CUTLASS_TOOLS_UTIL_INCLUDE_DIR ${CUTLASS_DIR}/tools/util/include)
+  include_directories(SYSTEM ${CUTLASS_INCLUDE_DIR})
+  include_directories(SYSTEM ${CUTLASS_TOOLS_UTIL_INCLUDE_DIR})
+endif()
+
 # sentencepiece - mark as system headers to suppress warnings from third-party code
 # This must be added before add_subdirectory(third_party) to ensure it takes precedence
 include_directories(SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sentencepiece)
