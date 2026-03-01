@@ -37,7 +37,7 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
 #include "models/model_registry.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
+#include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm {
 

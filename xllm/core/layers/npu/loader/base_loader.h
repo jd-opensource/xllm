@@ -23,8 +23,8 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
-#include "xllm_kernels/pytorch/atb_torch/core/include/base_operation.h"
-#include "xllm_kernels/pytorch/atb_torch/core/include/graph_operation.h"
+#include "xllm_atb_layers/pytorch/atb_torch/core/include/base_operation.h"
+#include "xllm_atb_layers/pytorch/atb_torch/core/include/graph_operation.h"
 
 namespace xllm {
 namespace layer {

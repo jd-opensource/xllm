@@ -13,7 +13,7 @@ cc_binary(
     :model
     :distributed_runtime
     absl::strings
-    xllm_kernels
+    xllm_atb_layers
     ascendcl
     nnopbase
     atb

@@ -27,6 +27,7 @@ cc_library(
     $<$<BOOL:${USE_MLU}>:torch_mlu>
     $<$<BOOL:${USE_MUSA}>:torch_musa>
     $<$<BOOL:${USE_NPU}>:hccl>
+    $<$<BOOL:${USE_NPU}>:xllm_atb_layers>
     glog::glog
 )
 
@@ -41,7 +42,7 @@ if(USE_NPU)
       absl::synchronization
       absl::time
       GTest::gtest_main
-      xllm_kernels
+      xllm_atb_layers
       nnopbase
       ascendcl
       atb

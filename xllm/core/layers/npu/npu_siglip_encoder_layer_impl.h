@@ -21,8 +21,8 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "loader/siglip_encoder_loader.h"
 #include "npu_base_layer.h"
-#include "xllm_kernels/pytorch/atb_torch/core/include/base_operation.h"
-#include "xllm_kernels/pytorch/atb_torch/core/include/graph_operation.h"
+#include "xllm_atb_layers/pytorch/atb_torch/core/include/base_operation.h"
+#include "xllm_atb_layers/pytorch/atb_torch/core/include/graph_operation.h"
 
 namespace xllm {
 namespace layer {

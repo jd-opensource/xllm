@@ -30,7 +30,7 @@ limitations under the License.
 #include "loader/deepseek_v32_decoder_loader.h"
 #include "npu_base_layer.h"
 #include "npu_deepseek_v2_decoder_layer_impl.h"
-#include "xllm_kernels/models/deepseekv2/layer/decoder_layer.h"
+#include "xllm_atb_layers/models/deepseekv2/layer/decoder_layer.h"
 
 namespace xllm {
 namespace layer {

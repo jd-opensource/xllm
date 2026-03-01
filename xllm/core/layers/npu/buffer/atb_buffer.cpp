@@ -23,8 +23,8 @@ limitations under the License.
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <torch_npu/torch_npu.h>
 
-#include "xllm_kernels/core/include/atb_speed/utils/statistic.h"
-#include "xllm_kernels/pytorch/adapter/utils/utils.h"
+#include "xllm_atb_layers/core/include/atb_speed/utils/statistic.h"
+#include "xllm_atb_layers/pytorch/adapter/utils/utils.h"
 
 namespace xllm {
 
