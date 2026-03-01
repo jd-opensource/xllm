@@ -178,8 +178,11 @@ typedef struct XLLM_CAPI_EXPORT XLLM_RequestParams {
   /** Number of sequences to generate per prompt for top-n selection */
   uint32_t best_of;
 
-  /** SLO timeout in milliseconds (0 = unlimited) */
-  uint32_t slo_ms;
+  int32_t ttlt_slo_ms;
+
+  int32_t ttft_slo_ms;
+
+  int32_t tpot_slo_ms;
 
   /** Beam search width (0 = disable beam search) */
   uint32_t beam_width;

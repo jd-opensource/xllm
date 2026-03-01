@@ -91,7 +91,8 @@ LLMMaster::LLMMaster(const Options& options)
       .max_global_ttft_ms(options_.max_global_ttft_ms())
       .max_global_tpot_ms(options_.max_global_tpot_ms())
       .server_idx(options_.server_idx())
-      .prefetch_timeout(options_.prefetch_timeout());
+      .prefetch_timeout(options_.prefetch_timeout())
+      .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
   if (options_.enable_service_routing()) {

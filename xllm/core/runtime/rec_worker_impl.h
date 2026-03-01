@@ -32,12 +32,20 @@ namespace xllm {
 class RecSampler;
 
 class RecWorkerImpl : public LLMWorkerImpl {
+  friend class RecWorkPipeline;
+
  public:
   RecWorkerImpl(const ParallelArgs& parallel_args,
                 const torch::Device& device,
                 const runtime::Options& options);
 
+  virtual ~RecWorkerImpl();
+  bool init_model(const std::string& model_weights_path,
+                  int32_t random_seed) override;
+
   bool init_model(ModelContext& context) override;
+
+  void load_model(std::unique_ptr<ModelLoader> loader) override;
 
   ForwardInput prepare_inputs(Batch& batch) override;
 
@@ -46,81 +54,83 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   std::optional<ForwardOutput> step(const ForwardInput& input) override;
 
+  folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const ForwardInput& input);
+
  protected:
   std::shared_ptr<ThreadPool> input_builder_thread_pool_;
 
  private:
+  struct RecPipelineRuntime {
+    RecPipelineRuntime(RecWorkerImpl& worker) : worker(worker) {}
+    RecPipelineRuntime(RecPipelineRuntime&& other) : worker(other.worker) {
+      stream = std::move(other.stream);
+      model = std::move(other.model);
+      executor = std::move(other.executor);
+      context = std::move(other.context);
+      eplb_executor = std::move(other.eplb_executor);
+      expert_load_data = std::move(other.expert_load_data);
+    }
+    std::unique_ptr<Stream> stream;
+    std::unique_ptr<CausalLM> model;
+    std::unique_ptr<Executor> executor;
+    std::unique_ptr<ModelContext> context;
+    std::unique_ptr<EplbExecutor> eplb_executor;
+    torch::Tensor expert_load_data;
+
+    RecWorkerImpl& worker;  // not owned
+  };
+
   class RecWorkPipeline {
    public:
+    RecWorkPipeline(RecPipelineRuntime& runtime)
+        : runtime_(std::move(runtime)) {}
     virtual ~RecWorkPipeline() = default;
 
-    virtual bool create_model(RecWorkerImpl& worker, ModelContext& context) = 0;
+    virtual ForwardInput prepare_inputs(Batch& batch);
 
-    virtual ForwardInput prepare_inputs(Batch& batch) = 0;
+    virtual void prepare_work_before_execute(const ForwardInput& inputs,
+                                             ForwardInput& processed_inputs);
 
-    virtual void prepare_work_before_execute(
-        const ForwardInput& inputs,
-        ForwardInput& processed_inputs) = 0;
+    virtual std::optional<ForwardOutput> step(const ForwardInput& input);
 
-    virtual std::optional<ForwardOutput> step(const ForwardInput& input) = 0;
+    RecPipelineRuntime& runtime() { return runtime_; }
+
+   protected:
+    RecPipelineRuntime runtime_;
   };
 
   class LlmRecWorkPipeline final : public RecWorkPipeline {
    public:
-    explicit LlmRecWorkPipeline(RecWorkerImpl& worker);
-
-    bool create_model(RecWorkerImpl& worker, ModelContext& context) override;
-
-    ForwardInput prepare_inputs(Batch& batch) override;
+    explicit LlmRecWorkPipeline(RecPipelineRuntime& runtime)
+        : RecWorkPipeline(runtime) {}
 
     void prepare_work_before_execute(const ForwardInput& inputs,
                                      ForwardInput& processed_inputs) override;
-
-    std::optional<ForwardOutput> step(const ForwardInput& input) override;
-
-   private:
-    RecWorkerImpl& worker_;
   };
 
   class OneRecWorkPipeline final : public RecWorkPipeline {
    public:
-    explicit OneRecWorkPipeline(RecWorkerImpl& worker);
-
-    bool create_model(RecWorkerImpl& worker, ModelContext& context) override;
+    explicit OneRecWorkPipeline(RecPipelineRuntime& runtime)
+        : RecWorkPipeline(runtime) {}
 
     ForwardInput prepare_inputs(Batch& batch) override;
 
-    void prepare_work_before_execute(const ForwardInput& inputs,
-                                     ForwardInput& processed_inputs) override;
-
     std::optional<ForwardOutput> step(const ForwardInput& input) override;
-
-   private:
-    RecWorkerImpl& worker_;
   };
 
   class LlmRecWithMmDataWorkPipeline final : public RecWorkPipeline {
    public:
-    explicit LlmRecWithMmDataWorkPipeline(RecWorkerImpl& worker);
-
-    bool create_model(RecWorkerImpl& worker, ModelContext& context) override;
-
-    ForwardInput prepare_inputs(Batch& batch) override;
+    explicit LlmRecWithMmDataWorkPipeline(RecPipelineRuntime& runtime)
+        : RecWorkPipeline(runtime) {}
 
     void prepare_work_before_execute(const ForwardInput& inputs,
                                      ForwardInput& processed_inputs) override;
-
-    std::optional<ForwardOutput> step(const ForwardInput& input) override;
-
-   private:
-    RecWorkerImpl& worker_;
   };
 
   class LlmRecMultiRoundPipeline final : public RecWorkPipeline {
    public:
-    explicit LlmRecMultiRoundPipeline(RecWorkerImpl& worker);
-
-    bool create_model(RecWorkerImpl& worker, ModelContext& context) override;
+    explicit LlmRecMultiRoundPipeline(RecPipelineRuntime& runtime);
 
     ForwardInput prepare_inputs(Batch& batch) override;
 
@@ -232,24 +242,21 @@ class RecWorkerImpl : public LLMWorkerImpl {
     torch::Tensor cached_naive_block_table_;
     torch::Tensor cached_current_round_tensor_;
 
-    RecWorkerImpl& worker_;
     std::unique_ptr<RecSampler> rec_sampler_;
 
     // for async scheduler
     ThreadPool threadpool_;
 
-    int32_t max_seqs_per_batch_{worker_.options_.max_seqs_per_batch()};
-    int32_t max_tokens_per_batch_{worker_.options_.max_tokens_per_batch()};
-    int32_t max_token_per_req_{
-        max_seqs_per_batch_ > 0 ? (max_tokens_per_batch_ / max_seqs_per_batch_)
-                                : 0};
-    int32_t beam_width_{worker_.options_.beam_width()};
+    int32_t max_seqs_per_batch_;
+    int32_t max_tokens_per_batch_;
+    int32_t max_token_per_req_;
+    int32_t beam_width_;
   };
 
   // Factory method to create pipeline (can access private classes)
   static std::unique_ptr<RecWorkPipeline> create_pipeline(
       RecPipelineType type,
-      RecWorkerImpl& worker);
+      RecPipelineRuntime& runtime);
 
   torch::Tensor merge_embeddings_by_indices(
       const torch::Tensor& input_tokens_embedding,
@@ -258,9 +265,13 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   void prepare_multi_modal_data(ForwardInput& processed_inputs);
 
-  std::unique_ptr<RecWorkPipeline> work_pipeline_;
+  std::vector<std::unique_ptr<RecWorkPipeline>> work_pipelines_;
 
   RecModelKind rec_model_kind_ = RecModelKind::kNone;
+
+  std::unique_ptr<ThreadPool> step_threadpool_;
+
+  moodycamel::BlockingConcurrentQueue<size_t> index_queue_;
 };
 
 }  // namespace xllm

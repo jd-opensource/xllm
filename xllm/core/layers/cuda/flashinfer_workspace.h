@@ -26,7 +26,7 @@ namespace xllm::layer::flashinfer {
 class FlashinferWorkspace {
  public:
   static FlashinferWorkspace& get_instance() {
-    static FlashinferWorkspace instance;
+    thread_local FlashinferWorkspace instance;
     return instance;
   };
 

@@ -269,6 +269,7 @@ int run() {
       .output_shm_size(FLAGS_output_shm_size)
       .beam_width(FLAGS_beam_width)
       .kv_cache_dtype(FLAGS_kv_cache_dtype)
+      .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency)
       .is_local(is_local);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));

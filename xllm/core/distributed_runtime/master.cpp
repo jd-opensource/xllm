@@ -269,7 +269,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .max_tokens_per_batch(options_.max_tokens_per_batch())
         .enable_graph(options_.enable_graph())
         .max_tokens_per_chunk_for_prefill(
-            options_.max_tokens_per_chunk_for_prefill());
+            options_.max_tokens_per_chunk_for_prefill())
+        .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
 
     engine_ = std::make_unique<RecEngine>(eng_options);
   } else {

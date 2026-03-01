@@ -32,7 +32,11 @@ limitations under the License.
 #if defined(USE_CUDA)
 #include "kernels/cuda/cuda_ops_api.h"
 #include "kernels/cuda/xattention/xattention_ops_api.h"
+#include "layers/cuda/flashinfer_workspace.h"
 #include "platform/cuda/device_capture_lock.h"
+#endif
+#if defined(USE_NPU)
+#include "platform/npu/device_capture_lock.h"
 #endif
 #include "framework/model_loader.h"
 #include "framework/sampling/rec_sampler.h"
@@ -42,62 +46,257 @@ limitations under the License.
 
 namespace xllm {
 
-RecWorkerImpl::LlmRecWorkPipeline::LlmRecWorkPipeline(RecWorkerImpl& worker)
-    : worker_(worker) {}
+// ============================================================
+// RecWorkerImpl Implementation (base)
+// ============================================================
 
-bool RecWorkerImpl::LlmRecWorkPipeline::create_model(RecWorkerImpl& worker,
-                                                     ModelContext& context) {
-  return worker.LLMWorkerImpl::init_model(context);
+void RecWorkerImpl::RecWorkPipeline::prepare_work_before_execute(
+    const ForwardInput& inputs,
+    ForwardInput& processed_inputs) {
+#if defined(USE_NPU)
+  // Without device_capture_lock, ACL graph capture will be interrupted by the
+  // synchronization H2D of data update streams asynchronously scheduled by
+  // other threads, even if the capture and synchronization streams are not the
+  // same, and even if capture_mode is set to
+  // ACL_MODEL_RI_CAPTURE_MODE_THREAD_LOCAL.
+  // The possible reason is that ACL graph capture may use additional auxiliary
+  // streams, and these auxiliary streams might be the same as the
+  // asynchronously scheduled data update streams.
+
+  std::optional<std::unique_lock<std::mutex>> lock_guard;
+  if (FLAGS_enable_graph) {
+    auto& capture_lock =
+        ::xllm::npu::DeviceCaptureLock::get_instance().get_lock(
+            runtime_.worker.device().index());
+    lock_guard.emplace(capture_lock);
+  }
+#endif
+  processed_inputs =
+      inputs.to(runtime_.worker.device(), runtime_.worker.dtype());
+  auto& input_params = processed_inputs.input_params;
+#if defined(USE_NPU)
+  if (input_params.swap_blocks.size() > 0 && !FLAGS_enable_block_copy_kernel) {
+    auto& swap_blocks = input_params.swap_blocks;
+
+    // collect src and dst indices
+    std::vector<int64_t> src_indices, dst_indices;
+    src_indices.reserve(swap_blocks.size());
+    dst_indices.reserve(swap_blocks.size());
+
+    for (const auto& block : swap_blocks) {
+      src_indices.push_back(block.src_block_id);
+      dst_indices.push_back(block.dst_block_id);
+    }
+
+    // batch select keys and values
+    auto src_tensor = torch::tensor(
+        src_indices,
+        torch::dtype(torch::kLong).device(runtime_.worker.device_));
+    auto dst_tensor = torch::tensor(
+        dst_indices,
+        torch::dtype(torch::kLong).device(runtime_.worker.device_));
+    const int64_t num_layers = runtime_.context->get_model_args().n_layers();
+    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+      runtime_.worker.kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
+    }
+  }
+  if (FLAGS_enable_mla &&
+      input_params.batch_forward_type.is_chunked_prefill()) {
+    runtime_.worker.prepare_mla_prefixcache_inputs(input_params);
+  }
+
+  if (!runtime_.context->get_parallel_args().mapping_data().empty() &&
+      (runtime_.context->get_parallel_args().dp_size() > 1 ||
+       runtime_.context->get_parallel_args().ep_size() > 1)) {
+    torch::Tensor token_size_per_dp_group =
+        torch::tensor(processed_inputs.input_params.dp_global_token_nums,
+                      torch::TensorOptions()
+                          .device(torch::kCPU)
+                          .dtype(torch::kInt32)
+                          .pinned_memory(true));
+    bool is_prefill =
+        processed_inputs.input_params.batch_forward_type.is_prefill();
+    DpEpPadding dp_ep_padding(
+        token_size_per_dp_group,
+        runtime_.context->get_model_args().num_experts_per_tok(),
+        runtime_.context->get_parallel_args().mapping_data(),
+        runtime_.worker.device(),
+        runtime_.worker.dtype(),
+        is_prefill);
+    processed_inputs.input_params.dp_ep_padding_data = dp_ep_padding.build();
+  }
+#endif
 }
 
-ForwardInput RecWorkerImpl::LlmRecWorkPipeline::prepare_inputs(Batch& batch) {
-  return worker_.WorkerImpl::prepare_inputs(batch);
+ForwardInput RecWorkerImpl::RecWorkPipeline::prepare_inputs(Batch& batch) {
+  return runtime_.worker.WorkerImpl::prepare_inputs(batch);
+}
+
+std::optional<ForwardOutput> RecWorkerImpl::RecWorkPipeline::step(
+    const ForwardInput& input) {
+  Timer timer;
+  auto& sampling_params = input.sampling_params;
+
+  std::vector<folly::SemiFuture<bool>> futures;
+
+  if (runtime_.worker.options_.kv_cache_transfer_mode() == "PUSH" &&
+      !input.transfer_kv_infos.empty()) {
+#if defined(USE_NPU)
+    std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer =
+        std::make_shared<NPULayerSynchronizerImpl>(
+            runtime_.context->get_model_args().n_layers());
+    const_cast<ModelInputParams*>(&(input.input_params))->layer_synchronizer =
+        layer_synchronizer;
+
+    futures.emplace_back(
+        runtime_.worker.kv_cache_transfer_->push_kv_blocks_async(
+            input.transfer_kv_infos,
+            runtime_.context->get_parallel_args(),
+            layer_synchronizer,
+            runtime_.worker.is_spec_draft_));
+#endif
+  }
+
+  if (FLAGS_enable_eplb) {
+    runtime_.eplb_executor->eplb_execute(input.eplb_info);
+  }
+
+  // temporarily use [0], will be adapted in next pr
+  // call model executor forward to get hidden states
+  auto model_output = runtime_.executor->forward(input.token_ids,
+                                                 input.positions,
+                                                 runtime_.worker.kv_caches_,
+                                                 input.input_params);
+  if (!model_output.hidden_states.defined()) {
+    return std::nullopt;
+  }
+
+  torch::Tensor logits;
+  if (sampling_params.selected_token_idxes.defined()) {
+    logits = runtime_.model->logits(model_output.hidden_states,
+                                    sampling_params.selected_token_idxes);
+  }
+
+  ForwardOutput output;
+  if (FLAGS_enable_eplb) {
+    output.expert_load_data = runtime_.expert_load_data;
+    output.prepared_layer_id = runtime_.eplb_executor->get_ready_layer_id();
+    if (output.prepared_layer_id != -1) {
+      runtime_.eplb_executor->reset_ready_layer_id();
+    }
+  }
+
+  if (!runtime_.worker.driver_ && !runtime_.worker.dp_driver_ &&
+      !runtime_.worker.options_.enable_speculative_decode()) {
+    auto ret = runtime_.stream->synchronize();
+    // in p-d disaggregation scene, all micro batches should be in same
+    // prefill/decode stage, so, to judge transfer_kv_infos.empty,
+    if (runtime_.worker.options_.kv_cache_transfer_mode() == "PUSH" &&
+        !input.transfer_kv_infos.empty()) {
+      auto results =
+          folly::collectAll(futures).within(std::chrono::seconds(60)).get();
+      for (const auto& result : results) {
+        // TODO: Add error handling
+        if (!result.value()) {
+          LOG(ERROR) << "kv_cache_transfer_ failed";
+          break;
+        }
+      }
+    }
+    if (FLAGS_enable_eplb) {
+      return output;
+    }
+    return std::nullopt;
+  }
+
+  // driver prepare model output
+  SampleOutput sample_output;
+  if (sampling_params.selected_token_idxes.defined()) {
+    sample_output = runtime_.worker.sampler_->forward(logits, sampling_params);
+    output.logits = logits;
+
+    // beam search kernel
+    BeamSearchOutput beam_search_output;
+    if (sampling_params.use_beam_search && input.acc_logprob.defined() &&
+        input.acc_logprob.numel() > 0) {
+      beam_search_output =
+          runtime_.worker.beam_searcher_->forward(input.acc_logprob,
+                                                  sample_output.top_tokens,
+                                                  sample_output.top_logprobs);
+    }
+
+    // set sample output to output
+    output.sample_output = sample_output;
+    // carry over the sampling params
+    output.do_sample = sampling_params.do_sample;
+    output.logprobs = sampling_params.logprobs;
+    output.max_top_logprobs = sampling_params.max_top_logprobs;
+    // set beam search output to output
+    output.beam_search_output = beam_search_output;
+  }
+
+  if (runtime_.worker.options_.enable_speculative_decode()) {
+    if (!input.input_params.batch_forward_type.is_decode() &&
+        !runtime_.worker.is_spec_draft_) {
+      output.sample_output.embeddings = model_output.hidden_states;
+    } else if (sampling_params.selected_token_idxes.defined()) {
+      auto embeddings = model_output.hidden_states.index_select(
+          /*dim=*/0, sampling_params.selected_token_idxes);
+      output.sample_output.embeddings = embeddings;
+    }
+  }
+
+  auto ret = runtime_.stream->synchronize();
+
+  if (runtime_.worker.options_.kv_cache_transfer_mode() == "PUSH" &&
+      !input.transfer_kv_infos.empty()) {
+    auto results =
+        folly::collectAll(futures).within(std::chrono::seconds(60)).get();
+    for (const auto& result : results) {
+      // TODO: Add error handling
+      if (!result.value()) {
+        LOG(ERROR) << "kv_cache_transfer_ failed";
+        break;
+      }
+    }
+  }
+
+  COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
+  DeviceMonitor::get_instance().update_active_activation_memory(
+      runtime_.worker.device_.index());
+
+  return output;
 }
 
 void RecWorkerImpl::LlmRecWorkPipeline::prepare_work_before_execute(
     const ForwardInput& inputs,
     ForwardInput& processed_inputs) {
-  worker_.WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
+  RecWorkPipeline::prepare_work_before_execute(inputs, processed_inputs);
 
-  worker_.prepare_multi_modal_data(processed_inputs);
+  runtime_.worker.prepare_multi_modal_data(processed_inputs);
 }
 
-std::optional<ForwardOutput> RecWorkerImpl::LlmRecWorkPipeline::step(
-    const ForwardInput& input) {
-  return worker_.LLMWorkerImpl::step(input);
-}
-
-RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(RecWorkerImpl& worker)
-    : worker_(worker) {}
-
-bool RecWorkerImpl::OneRecWorkPipeline::create_model(RecWorkerImpl& worker,
-                                                     ModelContext& context) {
-  // OneRec also uses LLM model for now, can be extended to create_rec_model
-  // later
-  return worker.LLMWorkerImpl::init_model(context);
-}
+// ============================================================
+// OneRecWorkPipeline Implementation
+// ============================================================
 
 ForwardInput RecWorkerImpl::OneRecWorkPipeline::prepare_inputs(Batch& batch) {
-  ThreadPool* thread_pool = worker_.input_builder_thread_pool_
-                                ? worker_.input_builder_thread_pool_.get()
-                                : nullptr;
+  ThreadPool* thread_pool =
+      runtime_.worker.input_builder_thread_pool_
+          ? runtime_.worker.input_builder_thread_pool_.get()
+          : nullptr;
 
-  return batch.prepare_rec_forward_input(worker_.options_.num_decoding_tokens(),
-                                         /*min_decoding_batch_size=*/0,
-                                         worker_.context_.get_model_args(),
-                                         thread_pool);
-}
-
-void RecWorkerImpl::OneRecWorkPipeline::prepare_work_before_execute(
-    const ForwardInput& inputs,
-    ForwardInput& processed_inputs) {
-  worker_.WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
+  return batch.prepare_rec_forward_input(
+      runtime_.worker.options_.num_decoding_tokens(),
+      /*min_decoding_batch_size=*/0,
+      runtime_.context->get_model_args(),
+      thread_pool);
 }
 
 std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     const ForwardInput& input) {
   Timer timer;
-  worker_.device_.set_device();
+  runtime_.worker.device_.set_device();
 
   const auto& sampling_params = input.sampling_params;
   const auto& input_params = input.input_params;
@@ -112,8 +311,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     if (!rec_params.is_first_prefill) {
       ModelInputParams decoder_params = input_params;
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
-      auto model_output = worker_.model_executor_->forward(
-          input.token_ids, input.positions, worker_.kv_caches_, decoder_params);
+      auto model_output = runtime_.executor->forward(input.token_ids,
+                                                     input.positions,
+                                                     runtime_.worker.kv_caches_,
+                                                     decoder_params);
       hidden_states = model_output.hidden_states;
     } else {
       const bool has_sparse_embedding =
@@ -138,22 +339,26 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
         encoder_tokens = rec_params.encoder_token_ids;
       }
 
-      worker_.model_executor_->forward(encoder_tokens,
-                                       rec_params.encoder_positions,
-                                       worker_.kv_caches_,
-                                       encoder_params);
+      runtime_.executor->forward(encoder_tokens,
+                                 rec_params.encoder_positions,
+                                 runtime_.worker.kv_caches_,
+                                 encoder_params);
 
       ModelInputParams decoder_params = input_params;
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
-      auto model_output = worker_.model_executor_->forward(
-          input.token_ids, input.positions, worker_.kv_caches_, decoder_params);
+      auto model_output = runtime_.executor->forward(input.token_ids,
+                                                     input.positions,
+                                                     runtime_.worker.kv_caches_,
+                                                     decoder_params);
       hidden_states = model_output.hidden_states;
     }
   } else {
     ModelInputParams decoder_params = input_params;
     decoder_params.mutable_onerec_params().is_encoder_forward = false;
-    auto model_output = worker_.model_executor_->forward(
-        input.token_ids, input.positions, worker_.kv_caches_, decoder_params);
+    auto model_output = runtime_.executor->forward(input.token_ids,
+                                                   input.positions,
+                                                   runtime_.worker.kv_caches_,
+                                                   decoder_params);
     hidden_states = model_output.hidden_states;
   }
 
@@ -161,25 +366,26 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     return std::nullopt;
   }
 
-  if (!worker_.enable_schedule_overlap() && !worker_.driver_ &&
-      !worker_.dp_driver_ && !worker_.options_.enable_speculative_decode()) {
-    worker_.device_.synchronize_default_stream();
+  if (!runtime_.worker.driver_ && !runtime_.worker.dp_driver_ &&
+      !runtime_.worker.options_.enable_speculative_decode()) {
+    runtime_.stream->synchronize();
     COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
     DeviceMonitor::get_instance().update_active_activation_memory(
-        worker_.device_.index());
+        runtime_.worker.device_.index());
     return std::nullopt;
   }
 
   torch::Tensor logits;
   if (sampling_params.selected_token_idxes.defined()) {
-    logits = worker_.model_->logits(hidden_states,
+    logits = runtime_.model->logits(hidden_states,
                                     sampling_params.selected_token_idxes);
   }
 
   ForwardOutput output;
 
   if (sampling_params.selected_token_idxes.defined()) {
-    auto sample_output = worker_.sampler_->forward(logits, sampling_params);
+    auto sample_output =
+        runtime_.worker.sampler_->forward(logits, sampling_params);
     output.logits = logits;
     output.sample_output = sample_output;
     output.do_sample = sampling_params.do_sample;
@@ -187,10 +393,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     output.max_top_logprobs = sampling_params.max_top_logprobs;
   }
 
-  worker_.device_.synchronize_default_stream();
+  runtime_.stream->synchronize();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
   DeviceMonitor::get_instance().update_active_activation_memory(
-      worker_.device_.index());
+      runtime_.worker.device_.index());
 
   return output;
 }
@@ -199,25 +405,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
 // LlmRecWithMmDataWorkPipeline Implementation (qwen3 with embedding)
 // ============================================================
 
-RecWorkerImpl::LlmRecWithMmDataWorkPipeline::LlmRecWithMmDataWorkPipeline(
-    RecWorkerImpl& worker)
-    : worker_(worker) {}
-
-bool RecWorkerImpl::LlmRecWithMmDataWorkPipeline::create_model(
-    RecWorkerImpl& worker,
-    ModelContext& context) {
-  return worker.LLMWorkerImpl::init_model(context);
-}
-
-ForwardInput RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_inputs(
-    Batch& batch) {
-  return worker_.WorkerImpl::prepare_inputs(batch);
-}
-
 void RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_work_before_execute(
     const ForwardInput& inputs,
     ForwardInput& processed_inputs) {
-  worker_.WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
+  RecWorkPipeline::prepare_work_before_execute(inputs, processed_inputs);
 
   if (!inputs.input_params.mm_data.valid()) {
     return;
@@ -245,7 +436,7 @@ void RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_work_before_execute(
   }
 
   if (input_embedding.defined()) {
-    input_embedding = input_embedding.to(worker_.dtype());
+    input_embedding = input_embedding.to(runtime_.worker.dtype());
   }
 
   if (input_indices_tensor.defined()) {
@@ -255,11 +446,11 @@ void RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_work_before_execute(
 
 #if defined(USE_NPU)
     layer::NpuWordEmbedding npu_word_embedding =
-        worker_.get_npu_word_embedding();
+        runtime_.worker.get_npu_word_embedding();
     torch::Tensor input_tokens_embedding =
         npu_word_embedding(input_tokens_tensor, 0);
 #else
-    layer::WordEmbedding word_embedding = worker_.get_word_embedding();
+    layer::WordEmbedding word_embedding = runtime_.worker.get_word_embedding();
     torch::Tensor input_tokens_embedding =
         word_embedding->forward(input_tokens_tensor);
 #endif
@@ -272,7 +463,7 @@ void RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_work_before_execute(
           input_indices_ptr, input_indices_ptr + input_indices_cpu.numel());
 
       processed_inputs.input_params.input_embedding =
-          worker_.merge_embeddings_by_indices(
+          runtime_.worker.merge_embeddings_by_indices(
               input_tokens_embedding, input_embedding, input_indices);
     } else {
       processed_inputs.input_params.input_embedding = input_tokens_embedding;
@@ -282,48 +473,46 @@ void RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_work_before_execute(
   }
 }
 
-std::optional<ForwardOutput> RecWorkerImpl::LlmRecWithMmDataWorkPipeline::step(
-    const ForwardInput& input) {
-  return worker_.LLMWorkerImpl::step(input);
-}
-
 // ============================================================
 // LlmRecMultiRoundPipeline Implementation (qwen3 with embedding)
 // ============================================================
 
 RecWorkerImpl::LlmRecMultiRoundPipeline::LlmRecMultiRoundPipeline(
-    RecWorkerImpl& worker)
-    : worker_(worker),
+    RecPipelineRuntime& runtime)
+    : RecWorkPipeline(runtime),
       rec_sampler_(std::make_unique<RecSampler>(
           RecPipelineType::kLlmRecMultiRoundPipeline)) {
+  max_seqs_per_batch_ = runtime_.worker.options_.max_seqs_per_batch();
+  max_tokens_per_batch_ = runtime_.worker.options_.max_tokens_per_batch();
+  max_token_per_req_ = max_seqs_per_batch_ > 0
+                           ? (max_tokens_per_batch_ / max_seqs_per_batch_)
+                           : 0;
+  beam_width_ = runtime_.worker.options_.beam_width();
+
   full_kv_cache_offsets_ = std::make_unique<FullKvCacheOffsets>(this);
   allocate_kv_caches_related();
 }
 
-bool RecWorkerImpl::LlmRecMultiRoundPipeline::create_model(
-    RecWorkerImpl& worker,
-    ModelContext& context) {
-  return worker.LLMWorkerImpl::init_model(context);
-}
-
 ForwardInput RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_inputs(
     Batch& batch) {
-  ThreadPool* thread_pool = worker_.input_builder_thread_pool_
-                                ? worker_.input_builder_thread_pool_.get()
-                                : nullptr;
+  ThreadPool* thread_pool =
+      runtime_.worker.input_builder_thread_pool_
+          ? runtime_.worker.input_builder_thread_pool_.get()
+          : nullptr;
 
-  return batch.prepare_rec_forward_input(worker_.options_.num_decoding_tokens(),
-                                         /*min_decoding_batch_size=*/0,
-                                         worker_.context_.get_model_args(),
-                                         thread_pool);
+  return batch.prepare_rec_forward_input(
+      runtime_.worker.options_.num_decoding_tokens(),
+      /*min_decoding_batch_size=*/0,
+      runtime_.context->get_model_args(),
+      thread_pool);
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_work_before_execute(
     const ForwardInput& inputs,
     ForwardInput& processed_inputs) {
-  worker_.WorkerImpl::prepare_work_before_execute(inputs, processed_inputs);
+  RecWorkPipeline::prepare_work_before_execute(inputs, processed_inputs);
 
-  worker_.prepare_multi_modal_data(processed_inputs);
+  runtime_.worker.prepare_multi_modal_data(processed_inputs);
 
 #if defined(USE_NPU) || defined(USE_CUDA)
   prepare_kv_caches_related_for_input(inputs, processed_inputs);
@@ -331,19 +520,19 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_work_before_execute(
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
-  auto dtype = worker_.dtype();
-  auto device = worker_.device();
+  auto dtype = runtime_.worker.dtype();
+  auto device = runtime_.worker.device();
   auto kv_cache_options = torch::TensorOptions().dtype(dtype).device(device);
   auto int_options = torch::TensorOptions().dtype(torch::kInt32).device(device);
-  int32_t num_layers = worker_.context_.get_model_args().n_layers();
+  int32_t num_layers = runtime_.context->get_model_args().n_layers();
 
   int32_t full_kv_len =
       max_tokens_per_batch_ + max_seqs_per_batch_ * beam_width_ *
                                   (get_rec_multi_round_decode_rounds() - 1);
   int64_t num_kv_heads =
-      worker_.context_.get_model_args().n_kv_heads().value_or(
-          worker_.context_.get_model_args().n_heads());
-  int64_t head_dim = worker_.context_.get_model_args().head_dim();
+      runtime_.context->get_model_args().n_kv_heads().value_or(
+          runtime_.context->get_model_args().n_heads());
+  int64_t head_dim = runtime_.context->get_model_args().head_dim();
 
   cached_full_k_caches_.resize(num_layers);
   cached_full_v_caches_.resize(num_layers);
@@ -367,7 +556,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
 void RecWorkerImpl::LlmRecMultiRoundPipeline::
     prepare_kv_caches_related_for_input(const ForwardInput& inputs,
                                         ForwardInput& processed_inputs) {
-  auto device = worker_.device();
+  auto device = runtime_.worker.device();
   auto int_options = torch::TensorOptions().dtype(torch::kInt32).device(device);
   auto& input_params = processed_inputs.input_params;
   auto& llm_rec_params = input_params.mutable_llmrec_params();
@@ -385,7 +574,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::
   int32_t full_kv_len = shape[0];
   int64_t num_kv_heads = shape[1];
   int64_t head_dim = shape[2];
-  int32_t num_layers = worker_.context_.get_model_args().n_layers();
+  int32_t num_layers = runtime_.context->get_model_args().n_layers();
   int32_t max_decode_step = total_round - 1;
   int32_t unshared_offset = max_tokens_per_batch_;
 
@@ -453,7 +642,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::
 std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
     const ForwardInput& input) {
   Timer timer;
-  auto device = worker_.device_;
+  auto device = runtime_.worker.device_;
   device.set_device();
 
   ForwardInput& mutable_input = const_cast<ForwardInput&>(input);
@@ -466,9 +655,10 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
   int32_t batch_size = step_meta->batch_size;
   int32_t beam_width = step_meta->beam_width;
   int32_t num_layers =
-      static_cast<int32_t>(worker_.context_.get_model_args().n_layers());
+      static_cast<int32_t>(runtime_.context->get_model_args().n_layers());
 
-  CHECK_GT(worker_.kv_caches_.size(), 0) << "KV caches are not initialized.";
+  CHECK_GT(runtime_.worker.kv_caches_.size(), 0)
+      << "KV caches are not initialized.";
 
   BeamSearchTensors beam_tensors =
       prepare_beam_search_tensors(batch_size, beam_width, total_rounds, device);
@@ -498,18 +688,17 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
                                           beam_tensors,
                                           next_round_async_result);
 
-    auto model_output =
-        worker_.model_executor_->forward(mutable_input.token_ids,
-                                         mutable_input.positions,
-                                         worker_.kv_caches_,
-                                         mutable_input.input_params);
+    auto model_output = runtime_.executor->forward(mutable_input.token_ids,
+                                                   mutable_input.positions,
+                                                   runtime_.worker.kv_caches_,
+                                                   mutable_input.input_params);
     if (!model_output.hidden_states.defined()) {
       return std::nullopt;
     }
     torch::Tensor hidden_states = model_output.hidden_states;
 
     if (sampling_params.selected_token_idxes.defined()) {
-      logits = worker_.model_->logits(hidden_states,
+      logits = runtime_.model->logits(hidden_states,
                                       sampling_params.selected_token_idxes);
       sample_output = rec_sampler_->forward(logits, sampling_params);
     }
@@ -545,7 +734,7 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
     }
   }
 
-  device.synchronize_default_stream();
+  runtime_.stream->synchronize();
 
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
   DeviceMonitor::get_instance().update_active_activation_memory(device.index());
@@ -708,7 +897,7 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::compute_next_round_input_async(
 
   // Launch async computation in thread pool (can overlap with GPU execution)
   threadpool_.schedule([=, this, promise = std::move(promise)]() mutable {
-    auto device = worker_.device();
+    auto device = runtime_.worker.device();
     auto int32_device_options =
         torch::TensorOptions().dtype(torch::kInt32).device(device);
     // Protect CUDA graph capture from conflicting GPU work submitted on
@@ -717,13 +906,15 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::compute_next_round_input_async(
     // with capture operations. This mirrors the NPU DeviceCaptureLock usage in
     // WorkerImpl::prepare_work_before_execute.
     std::optional<std::shared_lock<std::shared_mutex>> lock_guard;
-    if (worker_.options_.enable_graph()) {
+    if (runtime_.worker.options_.enable_graph()) {
       auto& replay_lock =
           ::xllm::cuda::DeviceCaptureLock::get_instance().get_read_lock(
-              worker_.device_.index());
+              runtime_.worker.device_.index());
       lock_guard.emplace(replay_lock);
     }
-    c10::StreamGuard streamGuard = worker_.prepare_stream_->set_stream_guard();
+
+    c10::StreamGuard streamGuard =
+        runtime_.worker.prepare_stream_->set_stream_guard();
     auto shared_kv_offsets =
         full_kv_offsets.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
 
@@ -777,7 +968,7 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::compute_next_round_input_async(
     auto paged_kv_indices = full_kv_indices.masked_select(full_kv_mask);
     auto paged_kv_last_page_len =
         torch::ones({batch_size * beam_width}, int32_device_options);
-    worker_.prepare_stream_->synchronize();
+    runtime_.worker.prepare_stream_->synchronize();
 
     NextRoundInputResults results;
     results.paged_kv_indices = paged_kv_indices;
@@ -828,7 +1019,7 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::FullKvCacheOffsets::FullKvCacheOffsets(
 #if defined(USE_NPU)
 // TODO: implement FullKvCacheOffsets for NPU
 #elif defined(USE_CUDA)
-  auto device = multi_round_pipeline->worker_.device();
+  auto device = multi_round_pipeline->runtime().worker.device();
   auto int32_device_options =
       torch::TensorOptions().dtype(torch::kInt32).device(device);
   int32_t max_decode_step = get_rec_multi_round_decode_rounds() - 1;
@@ -875,6 +1066,10 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::FullKvCacheOffsets::FullKvCacheOffsets(
 #endif
 }
 
+// ============================================================
+// RecWorkerImpl Implementation
+// ============================================================
+
 RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
@@ -883,35 +1078,146 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
     return;
   }
 
+  step_threadpool_ = std::make_unique<ThreadPool>(
+      options_.rec_worker_max_concurrency(), [this]() mutable {
+        device_.set_device();
+#if defined(USE_CUDA)
+        ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
+            .initialize(device_);
+#endif
+      });
+
+  LOG(INFO) << "RecWorkerImpl constructor: "
+            << options_.rec_worker_max_concurrency();
   const int64_t num_threads = std::max<int64_t>(
       1, util::get_int_env("XLLM_REC_INPUT_BUILDER_THREADS", 16));
   input_builder_thread_pool_ =
       std::make_shared<ThreadPool>(static_cast<size_t>(num_threads));
 }
 
+RecWorkerImpl::~RecWorkerImpl() {
+  // Release model_, model_executor_, eplb_executor_ in destructor to avoid
+  // double deletion. Ownership actually belongs to work_pipelines_[0].
+  model_.release();
+  model_executor_.release();
+
+  if (FLAGS_enable_eplb) {
+    eplb_executor_.release();
+  }
+}
+
+bool RecWorkerImpl::init_model(const std::string& model_weights_path,
+                               int32_t random_seed) {
+  if (!WorkerImpl::init_model(model_weights_path, random_seed)) {
+    return false;
+  }
+
+  if (FLAGS_enable_eplb) {
+    work_pipelines_[0]->runtime().expert_load_data = expert_load_data_;
+
+    for (size_t i = 1; i < work_pipelines_.size(); ++i) {
+      work_pipelines_[i]->runtime().expert_load_data =
+          work_pipelines_[0]->runtime().expert_load_data.clone();
+    }
+  }
+
+  return true;
+}
+
 bool RecWorkerImpl::init_model(ModelContext& context) {
+  CHECK(model_ == nullptr) << "Model is already initialized.";
+
+  // Determine rec model kind and pipeline type
   const auto& model_type = context.get_model_args().model_type();
   rec_model_kind_ = get_rec_model_kind(model_type);
   CHECK(rec_model_kind_ != RecModelKind::kNone)
       << "Unsupported rec model_type: " << model_type;
 
-  // Create work pipeline first
+  // Create concurrent pipeline (not base class pipeline)
   auto pipeline_type = get_rec_pipeline_type(rec_model_kind_);
-  work_pipeline_ = create_pipeline(pipeline_type, *this);
-  // Let pipeline create model
-  return work_pipeline_->create_model(*this, context);
+
+  // Reserve space for model instances
+  work_pipelines_.reserve(options_.rec_worker_max_concurrency());
+  for (size_t i = 0; i < options_.rec_worker_max_concurrency(); ++i) {
+    RecPipelineRuntime runtime(*this);
+    auto stream = device_.get_stream_from_pool();
+    runtime.stream = std::move(stream);
+    auto stream_guard = runtime.stream->set_stream_guard();
+
+    runtime.context =
+        std::make_unique<ModelContext>(context.get_parallel_args(),
+                                       context.get_model_args(),
+                                       context.get_quant_args(),
+                                       context.get_tensor_options());
+
+    runtime.model = create_llm_model(*runtime.context.get());
+    CHECK(runtime.model != nullptr) << "Failed to create model instance " << i;
+
+    runtime.executor =
+        std::make_unique<Executor>(runtime.model.get(),
+                                   runtime.context->get_model_args(),
+                                   runtime.worker.device(),
+                                   runtime.worker.options_);
+
+    if (FLAGS_enable_eplb) {
+      runtime.eplb_executor = std::make_unique<EplbExecutor>(
+          runtime.model.get(), runtime.worker.device());
+    }
+
+    work_pipelines_.emplace_back(create_pipeline(pipeline_type, runtime));
+    index_queue_.enqueue(i);
+  }
+
+  model_.reset(work_pipelines_[0]->runtime().model.get());
+  model_executor_.reset(work_pipelines_[0]->runtime().executor.get());
+
+  // Complete other initialization (EPLB, BeamSearcher, etc.)
+  if (FLAGS_enable_beam_search_kernel) {
+    beam_searcher_ = std::make_unique<BeamSearcher>();
+  }
+
+  if (FLAGS_enable_eplb) {
+    eplb_executor_.reset(work_pipelines_[0]->runtime().eplb_executor.get());
+  }
+
+  LOG(INFO) << "Created " << work_pipelines_.size()
+            << " pipelines for concurrent execution";
+  return true;
+}
+
+void RecWorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
+  CHECK(!work_pipelines_.empty())
+      << "Model instances are not initialized. Call init_model() first.";
+
+  // Save model weights path to create new loaders for other instances
+  std::string model_weights_path = loader->model_weights_path();
+
+  // Load weights for the first model instance (using the original loader)
+  work_pipelines_[0]->runtime().model->load_model(std::move(loader));
+  LOG(INFO) << "Loaded weights for model instance 0";
+
+  // Create new loaders and load weights for other model instances
+  for (size_t i = 1; i < work_pipelines_.size(); ++i) {
+    auto model_loader = ModelLoader::create(model_weights_path);
+    CHECK(model_loader != nullptr)
+        << "Failed to create ModelLoader for model instance " << i;
+    work_pipelines_[i]->runtime().model->load_model(std::move(model_loader));
+    LOG(INFO) << "Loaded weights for model instance " << i;
+  }
+
+  LOG(INFO) << "Loaded weights for all " << work_pipelines_.size() << " models";
 }
 
 ForwardInput RecWorkerImpl::prepare_inputs(Batch& batch) {
-  CHECK(work_pipeline_ != nullptr) << "RecWorkerImpl is not initialized.";
-  return work_pipeline_->prepare_inputs(batch);
+  CHECK(!work_pipelines_.empty()) << "RecWorkerImpl is not initialized.";
+  return work_pipelines_[0]->prepare_inputs(batch);
 }
 
 void RecWorkerImpl::prepare_work_before_execute(
     const ForwardInput& inputs,
     ForwardInput& processed_inputs) {
-  CHECK(work_pipeline_ != nullptr) << "RecWorkerImpl is not initialized.";
-  work_pipeline_->prepare_work_before_execute(inputs, processed_inputs);
+  LOG(FATAL)
+      << "RecWorkerImpl::prepare_work_before_execute should not be called.";
 }
 
 void RecWorkerImpl::prepare_multi_modal_data(ForwardInput& processed_inputs) {
@@ -954,8 +1260,43 @@ void RecWorkerImpl::prepare_multi_modal_data(ForwardInput& processed_inputs) {
 }
 
 std::optional<ForwardOutput> RecWorkerImpl::step(const ForwardInput& input) {
-  CHECK(work_pipeline_ != nullptr) << "RecWorkerImpl is not initialized.";
-  return work_pipeline_->step(input);
+  LOG(FATAL) << "RecWorkerImpl::step should not be called.";
+  return std::nullopt;
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
+    const ForwardInput& input) {
+  folly::Promise<std::optional<ForwardOutput>> promise;
+
+  size_t index;
+  index_queue_.wait_dequeue(index);
+  auto future = promise.getSemiFuture();
+
+  // Use schedule() to assign tasks, letting ThreadPool automatically select
+  // idle threads The logic for allocating instance_id happens when the task
+  // executes (see lambda below)
+  step_threadpool_->schedule_with_tid(
+      [this, &input, index, promise = std::move(promise)]() mutable {
+        auto stream_guard =
+            work_pipelines_[index]->runtime().stream->set_stream_guard();
+
+        ForwardInput input_on_device;
+        work_pipelines_[index]->prepare_work_before_execute(input,
+                                                            input_on_device);
+
+        if (hierarchy_kv_cache_transfer_ != nullptr) {
+          hierarchy_kv_cache_transfer_->set_layer_synchronizer(
+              input_on_device.input_params);
+        }
+
+        const auto output = work_pipelines_[index]->step(input_on_device);
+        promise.setValue(output);
+
+        index_queue_.enqueue(index);
+      },
+      index);
+
+  return future;
 }
 
 // ============================================================
@@ -964,14 +1305,14 @@ std::optional<ForwardOutput> RecWorkerImpl::step(const ForwardInput& input) {
 
 std::unique_ptr<RecWorkerImpl::RecWorkPipeline> RecWorkerImpl::create_pipeline(
     RecPipelineType type,
-    RecWorkerImpl& worker) {
+    RecPipelineRuntime& runtime) {
   switch (type) {
     case RecPipelineType::kLlmRecDefault:
-      return std::make_unique<LlmRecWorkPipeline>(worker);
+      return std::make_unique<LlmRecWorkPipeline>(runtime);
     case RecPipelineType::kOneRecDefault:
-      return std::make_unique<OneRecWorkPipeline>(worker);
+      return std::make_unique<OneRecWorkPipeline>(runtime);
     case RecPipelineType::kLlmRecMultiRoundPipeline:
-      return std::make_unique<LlmRecMultiRoundPipeline>(worker);
+      return std::make_unique<LlmRecMultiRoundPipeline>(runtime);
     default:
       LOG(FATAL) << "Unknown RecWorkerImpl pipeline type: "
                  << static_cast<int>(type);
