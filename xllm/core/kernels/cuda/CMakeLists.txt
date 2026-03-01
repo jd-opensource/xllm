@@ -38,6 +38,18 @@ cc_test(
 )
 target_link_libraries(decoder_reshape_and_cache_test PRIVATE brpc)
 
+cc_test(
+  NAME
+    prefill_reshape_and_cache_test
+  SRCS
+    xattention/prefill_reshape_and_cache_test.cpp
+  DEPS
+    :cuda_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+target_link_libraries(prefill_reshape_and_cache_test PRIVATE brpc)
 
 cc_test(
   NAME
