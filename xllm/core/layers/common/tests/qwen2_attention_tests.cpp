@@ -558,12 +558,15 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheChunkedPrefillTest) {
   StateDict state_dict(weight_dict_, prefix);
   qwen2_attention->load_state_dict(state_dict.get_dict_with_prefix(prefix));
 
-  // Test parameters - use smaller values to fit within block limits
+  // Test parameters - first prefill a history chunk, then append a new chunk
+  // through the chunked prefill path.
   int64_t batch_size = 2;
-  int64_t seq_len = 32;      // Smaller sequence length
-  int64_t max_seq_len = 64;  // Match block_table allocation
+  int64_t history_len = 32;
+  int64_t chunk_len = 32;
+  int64_t total_seq_len = history_len + chunk_len;
+  int64_t max_seq_len = total_seq_len;
   int64_t hidden_size = model_args_.hidden_size();
-  int64_t num_tokens = batch_size * seq_len;
+  int64_t num_tokens = batch_size * chunk_len;
   int64_t block_size = 16;
   // Calculate required blocks: each batch needs (max_seq_len/block_size) blocks
   int64_t num_blocks_per_req = (max_seq_len + block_size - 1) / block_size + 1;
@@ -601,23 +604,101 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheChunkedPrefillTest) {
   KVCache quant_kv_cache(
       k_cache, v_cache, torch::Tensor(), k_cache_scale, v_cache_scale);
 
+  auto options_int = options_.dtype(torch::kInt32);
+  auto make_seq_offsets = [&](int64_t len) {
+    return torch::arange(0, (batch_size + 1) * len, len, options_int);
+  };
+  auto make_positions = [&](int64_t start, int64_t len) {
+    return torch::arange(start, start + len, options_int).repeat({batch_size});
+  };
+  auto make_block_table = [&]() {
+    std::vector<int32_t> block_table_vec;
+    block_table_vec.reserve(batch_size * num_blocks_per_req);
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < num_blocks_per_req; ++i) {
+        block_table_vec.push_back(
+            static_cast<int32_t>(b * num_blocks_per_req + i));
+      }
+    }
+    return torch::tensor(block_table_vec, options_int)
+        .reshape({batch_size, num_blocks_per_req});
+  };
+
+  // Populate the history region first. Each request owns a full max_seq_len
+  // slice in the paged cache, so batch b uses slots
+  // [b * max_seq_len, b * max_seq_len + history_len).
+  auto history_hidden_states =
+      test::seeded_tensor("qwen2_quant_chunked.history_hidden_states",
+                          {batch_size * history_len, hidden_size},
+                          torch::kBFloat16,
+                          options_.device());
+  auto history_positions = make_positions(/*start=*/0, history_len);
+
+  AttentionMetadata history_metadata;
+  history_metadata.q_cu_seq_lens = make_seq_offsets(history_len);
+  history_metadata.kv_cu_seq_lens = history_metadata.q_cu_seq_lens;
+  std::vector<int32_t> history_slot_mapping_vec;
+  history_slot_mapping_vec.reserve(batch_size * history_len);
+  for (int64_t b = 0; b < batch_size; ++b) {
+    for (int64_t i = 0; i < history_len; ++i) {
+      history_slot_mapping_vec.push_back(
+          static_cast<int32_t>(b * max_seq_len + i));
+    }
+  }
+  history_metadata.slot_mapping =
+      torch::tensor(history_slot_mapping_vec, options_int);
+  history_metadata.kv_seq_lens =
+      torch::full({batch_size}, history_len, options_int);
+  history_metadata.block_table =
+      torch::zeros({batch_size, num_blocks_per_req}, options_int);
+  history_metadata.max_query_len = history_len;
+  history_metadata.max_seq_len = max_seq_len;
+  history_metadata.compute_dtype = "half";
+  history_metadata.is_prefill = true;
+  history_metadata.is_chunked_prefill = false;
+  history_metadata.is_dummy = false;
+
+  auto history_output = qwen2_attention(history_positions,
+                                        history_hidden_states,
+                                        history_metadata,
+                                        quant_kv_cache);
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+  ASSERT_EQ(history_output.sizes(),
+            torch::IntArrayRef({batch_size * history_len, hidden_size}));
+
   auto hidden_states = test::seeded_tensor("qwen2_quant_chunked.hidden_states",
                                            {num_tokens, hidden_size},
                                            torch::kBFloat16,
                                            options_.device());
-  auto positions = test::seeded_tensor("qwen2_quant_chunked.positions",
-                                       {num_tokens},
-                                       torch::kInt32,
-                                       options_.device());
+  auto positions = make_positions(/*start=*/history_len, chunk_len);
 
-  // Create metadata with is_chunked_prefill=true
-  auto metadata =
-      CreateAttentionMetadata(batch_size, seq_len, false, max_seq_len, true);
+  // Create metadata for the second chunk: reuse the history written above and
+  // append the new chunk at the tail of each request's max_seq_len slice.
+  AttentionMetadata metadata;
+  metadata.q_cu_seq_lens = make_seq_offsets(chunk_len);
+  metadata.kv_cu_seq_lens = make_seq_offsets(total_seq_len);
+  std::vector<int32_t> chunk_slot_mapping_vec;
+  chunk_slot_mapping_vec.reserve(batch_size * chunk_len);
+  for (int64_t b = 0; b < batch_size; ++b) {
+    for (int64_t i = 0; i < chunk_len; ++i) {
+      chunk_slot_mapping_vec.push_back(
+          static_cast<int32_t>(b * max_seq_len + history_len + i));
+    }
+  }
+  metadata.slot_mapping = torch::tensor(chunk_slot_mapping_vec, options_int);
+  metadata.kv_seq_lens = torch::full({batch_size}, total_seq_len, options_int);
+  metadata.block_table = make_block_table();
+  metadata.max_query_len = chunk_len;
+  metadata.max_seq_len = max_seq_len;
+  metadata.compute_dtype = "half";
+  metadata.is_prefill = false;
+  metadata.is_chunked_prefill = true;
+  metadata.is_dummy = false;
 
   // First forward
   auto output =
       qwen2_attention(positions, hidden_states, metadata, quant_kv_cache);
-  xllm::Device device(options_.device());
   device.synchronize_default_stream();
 
   // Verify output shape
