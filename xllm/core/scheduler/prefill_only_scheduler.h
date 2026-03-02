@@ -27,6 +27,7 @@ class PrefillOnlyScheduler final : public ContinuousScheduler {
  private:
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch() override;
+  virtual void recycle_running_requests() override;
   void handle_prefill_requests(
       double& latency_budget,
       double& estimate_latency,
@@ -35,13 +36,11 @@ class PrefillOnlyScheduler final : public ContinuousScheduler {
       RequestPriorityQueue& waiting_priority_queue,
       size_t& num_online_prefill_preempt_offline_requests,
       std::vector<std::shared_ptr<Request>>& finished_requests);
-  void handle_last_step_prefill_requests(
-      double& latency_budget,
-      double& estimate_latency,
-      size_t& remaining_token_budget,
-      size_t& remaining_seq_budget,
-      std::vector<std::shared_ptr<Request>>& running_requests,
-      size_t& num_online_prefill_preempt_offline_requests,
-      std::vector<std::shared_ptr<Request>>& finished_requests);
+
+  // Normally, only one request is in chunkedprefill stage, so this only
+  // contains one request. use `RequestPriorityQueue` only for unified process
+  // with `handle_prefill_requests`. NOTE: For fcfs, we can directly push this
+  // request to `waiting_priority_queue`.
+  RequestPriorityQueue last_step_prefill_requests_;
 };
 }  // namespace xllm
