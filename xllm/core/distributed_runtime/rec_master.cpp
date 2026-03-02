@@ -21,6 +21,8 @@ limitations under the License.
 #include <pybind11/pybind11.h>
 #include <torch/torch.h>
 
+#include <limits>
+#include <string>
 #include <unordered_set>
 
 #include "common/macros.h"
@@ -41,6 +43,21 @@ namespace xllm {
 namespace {
 
 constexpr int32_t kDefaultPlaceholderToken = 20152019;
+constexpr const char* kOneRecSparseEmbeddingName = "sparse_embedding";
+constexpr const char* kOneRecDecoderContextEmbeddingName =
+    "decoder_context_embedding";
+
+std::string format_tensor_shape(const proto::InferInputTensor& tensor) {
+  std::string shape = "[";
+  for (int i = 0; i < tensor.shape_size(); ++i) {
+    if (i > 0) {
+      shape.append(", ");
+    }
+    shape.append(std::to_string(tensor.shape(i)));
+  }
+  shape.push_back(']');
+  return shape;
+}
 
 RecType get_rec_type(const ModelArgs& model_args) {
   const auto kind = get_rec_model_kind(model_args.model_type());
@@ -73,12 +90,120 @@ bool process_onerec_inputs(
   }
 
   if (input_tensors.has_value()) {
+    if (input_tensors->empty()) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "OneRec input_tensors cannot be empty");
+      return false;
+    }
+
     MMDict mm_dict;
     mm_dict.reserve(input_tensors->size());
+    bool has_sparse_embedding = false;
+    bool has_decoder_context_embedding = false;
+    int64_t sparse_embedding_hidden_size = -1;
+    int64_t decoder_context_hidden_size = -1;
+
     for (const auto& tensor : input_tensors.value()) {
-      mm_dict[tensor.name()] =
-          util::convert_rec_tensor_to_torch(tensor).to(torch::kBFloat16);
+      const auto& tensor_name = tensor.name();
+      if (tensor_name != kOneRecSparseEmbeddingName &&
+          tensor_name != kOneRecDecoderContextEmbeddingName) {
+        CALLBACK_WITH_ERROR(
+            StatusCode::INVALID_ARGUMENT,
+            "OneRec input_tensors only supports 'sparse_embedding' and "
+            "'decoder_context_embedding', got '" +
+                tensor_name + "'");
+        return false;
+      }
+      if (mm_dict.find(tensor_name) != mm_dict.end()) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "Duplicate OneRec input tensor: " + tensor_name);
+        return false;
+      }
+      if (!tensor.has_contents()) {
+        CALLBACK_WITH_ERROR(
+            StatusCode::INVALID_ARGUMENT,
+            "OneRec input tensor '" + tensor_name + "' has no contents");
+        return false;
+      }
+      if (tensor.data_type() != proto::DataType::FLOAT) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "OneRec input tensor '" + tensor_name +
+                                "' must use FLOAT(fp32), got " +
+                                proto::DataType_Name(tensor.data_type()));
+        return false;
+      }
+      if (tensor.shape_size() != 2) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "OneRec input tensor '" + tensor_name +
+                                "' must be 2-D [len, hidden], got " +
+                                format_tensor_shape(tensor));
+        return false;
+      }
+
+      const int64_t len = tensor.shape(0);
+      const int64_t hidden = tensor.shape(1);
+      if (len <= 0 || hidden <= 0) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "OneRec input tensor '" + tensor_name +
+                                "' must have positive shape, got " +
+                                format_tensor_shape(tensor));
+        return false;
+      }
+      if (len > std::numeric_limits<int64_t>::max() / hidden) {
+        CALLBACK_WITH_ERROR(
+            StatusCode::INVALID_ARGUMENT,
+            "OneRec input tensor '" + tensor_name + "' shape is too large");
+        return false;
+      }
+
+      const int64_t expected_numel = len * hidden;
+      const int64_t actual_numel =
+          static_cast<int64_t>(tensor.contents().fp32_contents_size());
+      if (expected_numel != actual_numel) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "OneRec input tensor '" + tensor_name +
+                                "' fp32 contents size mismatch, expected " +
+                                std::to_string(expected_numel) + ", got " +
+                                std::to_string(actual_numel));
+        return false;
+      }
+
+      try {
+        mm_dict[tensor_name] =
+            util::convert_rec_tensor_to_torch(tensor).to(torch::kBFloat16);
+      } catch (const std::exception& e) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "Failed to parse OneRec input tensor '" +
+                                tensor_name + "': " + e.what());
+        return false;
+      }
+
+      if (tensor_name == kOneRecSparseEmbeddingName) {
+        has_sparse_embedding = true;
+        sparse_embedding_hidden_size = hidden;
+      } else {
+        has_decoder_context_embedding = true;
+        decoder_context_hidden_size = hidden;
+      }
     }
+
+    if (!has_sparse_embedding) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "OneRec input_tensors must include 'sparse_embedding'");
+      return false;
+    }
+    if (has_decoder_context_embedding &&
+        sparse_embedding_hidden_size != decoder_context_hidden_size) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "OneRec tensor hidden size mismatch: sparse_embedding=" +
+              std::to_string(sparse_embedding_hidden_size) +
+              ", decoder_context_embedding=" +
+              std::to_string(decoder_context_hidden_size));
+      return false;
+    }
+
     *processed_mm_data = MMData(MMType::EMBEDDING, mm_dict);
   }
 
@@ -626,7 +751,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
   int32_t max_context_len = model_args_.max_position_embeddings();
   if (!options_.enable_chunked_prefill()) {
     int32_t max_tokens_per_req = options_.max_tokens_per_batch();
-    if (is_rec_multi_round_mode()) {
+    if (rec_type_ == RecType::kLlmRec && is_rec_multi_round_mode()) {
       CHECK_GT(options_.max_seqs_per_batch(), 0)
           << "max_seqs_per_batch must be greater than 0 in multi-round mode";
       max_tokens_per_req /= options_.max_seqs_per_batch();
