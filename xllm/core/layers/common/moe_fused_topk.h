@@ -48,5 +48,6 @@ class MoEFusedTopkImpl : public torch::nn::Module {
   DEFINE_WEIGHT(e_score_correction_bias);
 };
 
+TORCH_MODULE(MoEFusedTopk);
 }  // namespace layer
 }  // namespace xllm

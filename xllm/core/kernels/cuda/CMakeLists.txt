@@ -123,6 +123,7 @@ set(CUDA_SOURCE_FILES
   xattention/lse_combine.cu
   xattention/prefill_reshape_and_cache.cu
   moe/moe_fused_topk.cu
+  moe/fused_moe.cpp
 )
 
 cc_library(

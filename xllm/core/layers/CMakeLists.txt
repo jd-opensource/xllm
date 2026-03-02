@@ -54,6 +54,7 @@ cc_library(
   DEPS
     $<$<BOOL:${USE_NPU}>:npu_layers>
     $<$<BOOL:${USE_ILU}>:ilu_layers>
+    $<$<BOOL:${USE_CUDA}>:cuda_layers>
     :common_layers
     :parallel_state
     :state_dict
