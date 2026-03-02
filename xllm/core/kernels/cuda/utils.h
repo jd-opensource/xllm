@@ -57,8 +57,7 @@ std::string path_to_uri_so_lib(const std::string& uri);
 
 std::string determine_attention_backend(int64_t pos_encoding_mode,
                                         bool use_fp16_qk_reduction,
-                                        bool use_custom_mask,
-                                        bool causal);
+                                        bool use_custom_mask);
 
 std::string get_batch_prefill_uri(const std::string& backend,
                                   torch::ScalarType dtype_q,
