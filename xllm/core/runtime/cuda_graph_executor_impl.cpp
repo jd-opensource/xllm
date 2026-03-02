@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/layers/common/attention_metadata.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/cuda/flashinfer_planinfo.h"
+#include "core/layers/cuda/xattention_planinfo.h"
 #include "core/platform/cuda/device_capture_lock.h"
 #include "core/platform/device.h"
 #include "core/platform/shared_vmm_allocator.h"
@@ -252,6 +253,22 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
           layer::AttentionMetadataBuilder::build(params));
   CHECK(attn_metadata) << "attn_metadata should not be null";
   attn_metadata->enable_cuda_graph = true;
+  auto build_capture_params_if_needed =
+      [&]() -> std::optional<ModelInputParams> {
+    if (!return_capture_params) {
+      return std::nullopt;
+    }
+    CHECK(params_for_capture.has_value())
+        << "params_for_capture should be initialized when "
+           "return_capture_params "
+           "is true";
+    if (params.input_embedding.defined()) {
+      params_for_capture->input_embedding =
+          persistent_embedding(padded_num_tokens);
+    }
+    params_for_capture->attn_metadata = attn_metadata;
+    return params_for_capture;
+  };
 
   const uint32_t actual_num_tokens = tokens.size(0);
   const int64_t actual_batch_size = params.num_sequences;
@@ -364,7 +381,168 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         .copy_(embedding, /*non_blocking=*/true);
   }
 
-  // FlashInfer decode parameters update (if present)
+  const bool enable_two_stage_decode =
+      FLAGS_enable_xattention_two_stage_decode &&
+      params.batch_forward_type.is_decode() && params.has_llmrec_params();
+  const int32_t head_dim = args_.head_dim();
+  const int64_t n_heads = args_.n_heads();
+  const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
+  const int64_t block_size = options_.block_size();
+
+  // Get sliding_window from ModelArgs (default to -1 if not available)
+  // Note: sliding_window in ModelArgs is the actual window size, but in
+  // attention it's used as window_size_left which is typically sliding_window
+  // - 1. This matches the behavior in attention.cpp where sliding_window_ is
+  // initialized as sliding_window - 1 regardless of the value.
+  int32_t sliding_window = args_.sliding_window();
+  sliding_window =
+      sliding_window - 1;  // Convert to window_size_left (always subtract 1)
+
+  // Get dtype from k_cache
+  const auto dtype = k_cache.scalar_type();
+  // Determine backend
+  const std::string backend = xllm::kernel::cuda::determine_attention_backend(
+      /*pos_encoding_mode=*/0,
+      /*use_fp16_qk_reduction=*/false,
+      /*use_custom_mask=*/false);
+
+  bool use_tensor_core =
+      xllm::kernel::cuda::should_use_tensor_core(dtype, n_heads, n_kv_heads);
+  if (enable_two_stage_decode) {
+    if (params.q_seq_lens.defined() && params.q_seq_lens.numel() > 0) {
+      const int64_t q_numel = params.q_seq_lens.numel();
+      q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_numel)
+          .copy_(params.q_seq_lens, /*non_blocking=*/true);
+      attn_metadata->q_cu_seq_lens = q_seq_lens(/*actual_batch_size=*/q_numel);
+    }
+
+    if (params.kv_seq_lens.defined() && params.kv_seq_lens.numel() > 0) {
+      const int64_t kv_numel = params.kv_seq_lens.numel();
+      kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/kv_numel)
+          .copy_(params.kv_seq_lens, /*non_blocking=*/true);
+      attn_metadata->kv_cu_seq_lens =
+          kv_seq_lens(/*actual_batch_size=*/kv_numel);
+      if (kv_numel > 1) {
+        attn_metadata->kv_seq_lens = torch::diff(attn_metadata->kv_cu_seq_lens);
+      }
+    }
+
+    attn_metadata->paged_kv_indptr = torch::Tensor();
+    attn_metadata->paged_kv_indices = torch::Tensor();
+    attn_metadata->paged_kv_last_page_len = torch::Tensor();
+    attn_metadata->qo_indptr = torch::Tensor();
+
+    // Update plan_info if attn_metadata exists and enable_cuda_graph is true.
+    const auto& llmrec_params = *params.llmrec_params();
+    CHECK(attn_metadata->xattention_two_stage_decode_cache.has_value())
+        << "two-stage cache must be prepared in rec worker before "
+           "cuda graph update";
+
+    auto cache = attn_metadata->xattention_two_stage_decode_cache.value();
+    CHECK(cache.q_cu_seq_lens_shared.defined())
+        << "q_cu_seq_lens_shared must be initialized in rec worker";
+    CHECK(cache.paged_kv_indptr_expanded.defined() &&
+          cache.paged_kv_indices_expanded.defined() &&
+          cache.paged_kv_last_page_len_expanded.defined())
+        << "paged_kv_* expanded tensors must be initialized in rec worker";
+    CHECK(cache.shared_lse.defined() && cache.shared_o.defined() &&
+          cache.unshared_lse.defined() && cache.unshared_o.defined())
+        << "two-stage shared/unshared output cache tensors must be "
+           "initialized in rec worker";
+
+    const int64_t request_batch_size =
+        cache.q_cu_seq_lens_shared.numel() > 0
+            ? (cache.q_cu_seq_lens_shared.numel() - 1)
+            : 0;
+    CHECK_GT(request_batch_size, 0)
+        << "request_batch_size must be > 0 for two-stage xattention";
+    const int64_t beam_width = std::max<int64_t>(llmrec_params.beam_width, 1);
+    const int64_t total_beam = request_batch_size * beam_width;
+
+    CHECK_EQ(cache.shared_o.size(0), total_beam)
+        << "shared_o first dim mismatch: expected total_beam=" << total_beam
+        << ", got " << cache.shared_o.size(0);
+    CHECK_EQ(cache.unshared_o.size(0), total_beam)
+        << "unshared_o first dim mismatch: expected total_beam=" << total_beam
+        << ", got " << cache.unshared_o.size(0);
+    CHECK_EQ(cache.paged_kv_indptr_expanded.numel(), total_beam + 1)
+        << "paged_kv_indptr_expanded size mismatch";
+    CHECK_EQ(cache.paged_kv_indices_expanded.numel(), total_beam)
+        << "paged_kv_indices_expanded size mismatch";
+    CHECK_EQ(cache.paged_kv_last_page_len_expanded.numel(), total_beam)
+        << "paged_kv_last_page_len_expanded size mismatch";
+
+    const int64_t max_decode_step =
+        !llmrec_params.unshared_k_caches.empty()
+            ? llmrec_params.unshared_k_caches[0].size(2)
+            : std::max<int64_t>(FLAGS_max_decode_rounds - 1, 1);
+    CHECK_GT(max_decode_step, 0)
+        << "max_decode_step must be > 0 for two-stage decode";
+
+    cache.cached_batch_size = static_cast<int32_t>(request_batch_size);
+    cache.cached_beam_size = static_cast<int32_t>(beam_width);
+    cache.cached_num_heads = static_cast<int32_t>(n_heads);
+    cache.cached_head_size = static_cast<int32_t>(head_dim);
+    cache.cached_max_decode_step = static_cast<int32_t>(max_decode_step);
+    cache.cached_step = (llmrec_params.current_round_tensor.defined() &&
+                         llmrec_params.current_round_tensor.numel() > 0)
+                            ? llmrec_params.current_round_tensor.item<int32_t>()
+                            : 0;
+
+    attn_metadata->xattention_two_stage_decode_cache = cache;
+
+    layer::AttentionMetadata shared_attn_meta = *attn_metadata;
+    shared_attn_meta.plan_info = attn_metadata->shared_plan_info;
+    shared_attn_meta.q_cu_seq_lens = cache.q_cu_seq_lens_shared;
+    shared_attn_meta.is_causal = false;
+
+    attn_metadata->shared_plan_info->layer_id = 0;
+    layer::xattention::update_xattention_plan_info(
+        attn_metadata->shared_plan_info,
+        backend,
+        shared_attn_meta,
+        dtype,
+        dtype,
+        dtype,
+        head_dim,
+        head_dim,
+        static_cast<int32_t>(n_heads),
+        static_cast<int32_t>(n_kv_heads),
+        /*block_size=*/1,
+        /*window_size_left=*/-1,
+        /*enable_cuda_graph=*/true,
+        /*causal=*/false,
+        /*use_tensor_core=*/true,
+        /*is_shared_stage_plan*/ true);
+
+    layer::AttentionMetadata unshared_attn_meta = *attn_metadata;
+    unshared_attn_meta.plan_info = attn_metadata->unshared_plan_info;
+    unshared_attn_meta.paged_kv_indptr = cache.paged_kv_indptr_expanded;
+    unshared_attn_meta.paged_kv_indices = cache.paged_kv_indices_expanded;
+    unshared_attn_meta.paged_kv_last_page_len =
+        cache.paged_kv_last_page_len_expanded;
+    unshared_attn_meta.is_causal = false;
+
+    attn_metadata->unshared_plan_info->layer_id = 0;
+    layer::xattention::update_xattention_plan_info(
+        attn_metadata->unshared_plan_info,
+        backend,
+        unshared_attn_meta,
+        dtype,
+        dtype,
+        dtype,
+        head_dim,
+        head_dim,
+        static_cast<int32_t>(n_heads),
+        static_cast<int32_t>(n_kv_heads),
+        static_cast<int32_t>(max_decode_step),
+        sliding_window,
+        /*enable_cuda_graph=*/true,
+        /*causal=*/false,
+        use_tensor_core,
+        /*is_shared_stage_plan*/ false);
+    return build_capture_params_if_needed();
+  }
   CHECK(params.paged_kv_indptr.defined())
       << "paged_kv_indptr should not be null";
   VLOG(kGraphExecutorLogVerboseLevel)
@@ -422,41 +600,15 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   // Update plan_info if attn_metadata exists and enable_cuda_graph is true
   // This ensures plan_info is updated before CUDA graph capture/replay
   {
-    // Get attention parameters from ModelArgs
-    const int32_t head_dim = args_.head_dim();
-    const int64_t n_heads = args_.n_heads();
-    const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
-    const int64_t block_size = options_.block_size();
-
-    // Get sliding_window from ModelArgs (default to -1 if not available)
-    // Note: sliding_window in ModelArgs is the actual window size, but in
-    // attention it's used as window_size_left which is typically sliding_window
-    // - 1. This matches the behavior in attention.cpp where sliding_window_ is
-    // initialized as sliding_window - 1 regardless of the value.
-    int32_t sliding_window = args_.sliding_window();
-    sliding_window =
-        sliding_window - 1;  // Convert to window_size_left (always subtract 1)
-
-    // Get dtype from k_cache
-    const auto dtype = k_cache.scalar_type();
-
     // Determine if causal (prefill mode)
     const bool causal =
         attn_metadata->is_prefill || attn_metadata->is_chunked_prefill;
-
-    // Determine backend
-    const std::string backend = xllm::kernel::cuda::determine_attention_backend(
-        /*pos_encoding_mode=*/0,
-        /*use_fp16_qk_reduction=*/false,
-        /*use_custom_mask=*/false);
 
     // Update plan_info
     // Note: plan_info is only updated at layer 0, so we set layer_id to 0
     attn_metadata->plan_info->layer_id = 0;
     CHECK_EQ(dtype, torch::ScalarType::BFloat16)
         << "only support bf16 kvcache for now";
-    bool use_tensor_core =
-        xllm::kernel::cuda::should_use_tensor_core(dtype, n_heads, n_kv_heads);
 
     VLOG(kGraphExecutorLogVerboseLevel)
         << "CudaGraphPersistentParam::update() calling update_plan_info: "
@@ -521,19 +673,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   }
 
   // Return ModelInputParams with persistent buffer references if requested
-  if (return_capture_params) {
-    CHECK_GT(padded_num_tokens, 0)
-        << "padded_num_tokens must be > 0 when return_capture_params is true";
-    // Set persistent embedding if available
-    if (params.input_embedding.defined()) {
-      params_for_capture->input_embedding =
-          persistent_embedding(padded_num_tokens);
-    }
-    params_for_capture->attn_metadata = attn_metadata;
-    return params_for_capture;
-  }
-
-  return std::nullopt;
+  return build_capture_params_if_needed();
 }
 
 // CudaGraph implementation

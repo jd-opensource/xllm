@@ -156,6 +156,12 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
       }
 #if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.plan_info->layer_id = i;
+      if (attn_metadata.shared_plan_info != nullptr) {
+        attn_metadata.shared_plan_info->layer_id = i;
+      }
+      if (attn_metadata.unshared_plan_info != nullptr) {
+        attn_metadata.unshared_plan_info->layer_id = i;
+      }
 #endif
       auto& layer = layers_[i];
       h = layer(h,

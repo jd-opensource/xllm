@@ -16,22 +16,24 @@ limitations under the License.
 #include "cuda_ops_api.h"
 
 namespace xllm::kernel::cuda {
+namespace {
 
-void batch_prefill(const std::string& uri,
-                   ffi::Array<int64_t> plan_info,
-                   torch::Tensor float_workspace_buffer,
-                   torch::Tensor int_workspace_buffer,
-                   torch::Tensor page_locked_int_workspace_buffer,
-                   torch::Tensor query,
-                   torch::Tensor key,
-                   torch::Tensor value,
-                   torch::Tensor q_cu_seq_lens,
-                   torch::Tensor kv_cu_seq_lens,
-                   int64_t window_left,
-                   double sm_scale,
-                   torch::Tensor output,
-                   std::optional<torch::Tensor>& output_lse,
-                   const std::optional<torch::Tensor>& mask) {
+void batch_prefill_impl(const std::string& uri,
+                        ffi::Array<int64_t> plan_info,
+                        torch::Tensor float_workspace_buffer,
+                        torch::Tensor int_workspace_buffer,
+                        torch::Tensor page_locked_int_workspace_buffer,
+                        torch::Tensor query,
+                        torch::Tensor key,
+                        torch::Tensor value,
+                        torch::Tensor q_cu_seq_lens,
+                        torch::Tensor kv_cu_seq_lens,
+                        int64_t window_left,
+                        double sm_scale,
+                        torch::Tensor output,
+                        std::optional<torch::Tensor>& output_lse,
+                        bool is_causal,
+                        const std::optional<torch::Tensor>& mask) {
   // Optional custom mask (e.g. for Qwen2_5_VL padding) -> FlashInfer packed
   // format.
   std::optional<torch::Tensor> processed_mask;
@@ -107,7 +109,7 @@ void batch_prefill(const std::string& uri,
         to_ffi_tensor(output),
         output_lse.has_value() ? to_ffi_tensor(output_lse.value())
                                : ffi::Optional<ffi::Tensor>(),
-        /*mask_mode_code=*/1,  // CAUSAL
+        /*mask_mode_code=*/is_causal ? 1 : 0,
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),
@@ -142,7 +144,7 @@ void batch_prefill(const std::string& uri,
         to_ffi_tensor(output),
         output_lse.has_value() ? to_ffi_tensor(output_lse.value())
                                : ffi::Optional<ffi::Tensor>(),
-        /*mask_mode_code=*/1,  // CAUSAL
+        /*mask_mode_code=*/is_causal ? 1 : 0,
         /*kv_layout_code=*/0,  // NHD layout
         window_left,
         support_pdl(),
@@ -156,6 +158,74 @@ void batch_prefill(const std::string& uri,
         scale_v_scalar,
         /*token_pos_in_items_len=*/0);
   }
+}
+
+}  // namespace
+
+void batch_prefill(const std::string& uri,
+                   ffi::Array<int64_t> plan_info,
+                   torch::Tensor float_workspace_buffer,
+                   torch::Tensor int_workspace_buffer,
+                   torch::Tensor page_locked_int_workspace_buffer,
+                   torch::Tensor query,
+                   torch::Tensor key,
+                   torch::Tensor value,
+                   torch::Tensor q_cu_seq_lens,
+                   torch::Tensor kv_cu_seq_lens,
+                   int64_t window_left,
+                   double sm_scale,
+                   torch::Tensor output,
+                   std::optional<torch::Tensor>& output_lse,
+                   const std::optional<torch::Tensor>& mask) {
+  batch_prefill_impl(uri,
+                     plan_info,
+                     float_workspace_buffer,
+                     int_workspace_buffer,
+                     page_locked_int_workspace_buffer,
+                     query,
+                     key,
+                     value,
+                     q_cu_seq_lens,
+                     kv_cu_seq_lens,
+                     window_left,
+                     sm_scale,
+                     output,
+                     output_lse,
+                     /*is_causal=*/true,
+                     mask);
+}
+
+void batch_prefill_non_causal(const std::string& uri,
+                              ffi::Array<int64_t> plan_info,
+                              torch::Tensor float_workspace_buffer,
+                              torch::Tensor int_workspace_buffer,
+                              torch::Tensor page_locked_int_workspace_buffer,
+                              torch::Tensor query,
+                              torch::Tensor key,
+                              torch::Tensor value,
+                              torch::Tensor q_cu_seq_lens,
+                              torch::Tensor kv_cu_seq_lens,
+                              int64_t window_left,
+                              double sm_scale,
+                              torch::Tensor output,
+                              std::optional<torch::Tensor>& output_lse,
+                              const std::optional<torch::Tensor>& mask) {
+  batch_prefill_impl(uri,
+                     plan_info,
+                     float_workspace_buffer,
+                     int_workspace_buffer,
+                     page_locked_int_workspace_buffer,
+                     query,
+                     key,
+                     value,
+                     q_cu_seq_lens,
+                     kv_cu_seq_lens,
+                     window_left,
+                     sm_scale,
+                     output,
+                     output_lse,
+                     /*is_causal=*/false,
+                     mask);
 }
 
 }  // namespace xllm::kernel::cuda
