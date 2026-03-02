@@ -41,8 +41,8 @@
 #include <limits>
 #include <type_traits>
 
-#include "cuda_utils.h"
 #include "moe_topk_funcs.cuh"
+#include "platform/device.h"
 // #include "topk_last_dim.h"
 
 using SizeType32 = int32_t;
@@ -1753,7 +1753,7 @@ void standalone_stable_radix_11bits(void* buf,
         stream,
         sorted);
   } else {
-    int sm_cnt = getMultiProcessorCount();
+    int32_t sm_cnt = xllm::Device::sm_count();
     unsigned grid_dim = air_topk_stable::calc_grid_dim<T, IdxT, 11, block_dim>(
         batch_size, len, sm_cnt);
 
@@ -1952,7 +1952,7 @@ size_t invokeComputeTopkLastDimWorkspaceSize(SizeType32 batchSize,
 
   constexpr int block_dim = 512;
   constexpr bool fused_last_filter = false;
-  int sm_cnt = getMultiProcessorCount();
+  int32_t sm_cnt = xllm::Device::sm_count();
   unsigned grid_dim = air_topk_stable::calc_grid_dim<T, IdxT, 11, block_dim>(
       batchSize, inputLength, sm_cnt);
 
