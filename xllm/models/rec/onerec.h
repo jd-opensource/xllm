@@ -26,7 +26,6 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/framework/model_loader.h"
-#include "core/layers/onerec_block_layer.h"
 #include "core/layers/common/word_embedding.h"
 #include "models/model_registry.h"
 #include "models/rec/onerec_args.h"
