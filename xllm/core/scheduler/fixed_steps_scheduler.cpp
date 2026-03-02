@@ -239,7 +239,8 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     const std::shared_ptr<Request>& sample_request =
         waiting_priority_queue_.top();
     auto rec_type = sample_request->state().rec_type;
-    bool is_rec_multi_round = is_rec_multi_round_mode();
+    bool is_rec_multi_round =
+        (rec_type == RecType::kLlmRec) && is_rec_multi_round_mode();
     scheduler_pipeline_ =
         create_scheduler_pipeline(rec_type, is_rec_multi_round);
   }
