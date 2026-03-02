@@ -271,7 +271,7 @@ void DeepseekScalingRotaryEmbeddingImpl::forward(
 }
 
 // Factory function: creates the appropriate RoPE type based on model args
-RotaryEmbeddingVariants create_rotary_embedding(
+std::shared_ptr<MlaRotaryEmbeddingBase> create_mla_rotary_embedding(
     const ModelArgs& args,
     int64_t rotary_dim,
     int64_t max_position_embeddings,
@@ -301,32 +301,6 @@ RotaryEmbeddingVariants create_rotary_embedding(
                                                  interleaved,
                                                  options);
   }
-}
-
-// Unified forward interface for single tensor (used in MLA architecture)
-void apply_rotary_embedding(RotaryEmbeddingVariants& rotary,
-                            torch::Tensor& input,
-                            const torch::Tensor& positions,
-                            const torch::Tensor& cu_query_lens,
-                            int64_t max_query_len,
-                            bool is_prompt) {
-  std::visit(
-      [&](auto& emb) {
-        emb->forward(input, positions, cu_query_lens, max_query_len, is_prompt);
-      },
-      rotary);
-}
-
-// Helper function to get sin cache from variants
-torch::Tensor get_sin_cache(RotaryEmbeddingVariants& rotary) {
-  return std::visit(
-      [](auto& emb) -> torch::Tensor { return emb->get_sin_cache(); }, rotary);
-}
-
-// Helper function to get cos cache from variants
-torch::Tensor get_cos_cache(RotaryEmbeddingVariants& rotary) {
-  return std::visit(
-      [](auto& emb) -> torch::Tensor { return emb->get_cos_cache(); }, rotary);
 }
 
 }  // namespace layer

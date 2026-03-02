@@ -227,14 +227,24 @@ class IndexerTest : public ::testing::Test {
                            int64_t max_query_len,
                            bool is_prefill,
                            bool chunked_prefill = false,
-                           int64_t history_len = 0) {
+                           int64_t history_len = 0,
+                           bool use_default_rope = false) {
     test_config_ = TestConfig();
-    rotary_emb_ = std::make_shared<MockDeepseekScalingRotaryEmbedding>(
-        test_config_.qk_rope_head_dim,
-        test_config_.max_position_embeddings,
-        test_config_.rope_theta,
-        test_config_.rope_interleaved,
-        options_);
+    if (use_default_rope) {
+      rotary_emb_ = std::make_shared<RotaryEmbeddingImpl>(
+          test_config_.qk_rope_head_dim,
+          test_config_.max_position_embeddings,
+          test_config_.rope_theta,
+          test_config_.rope_interleaved,
+          options_);
+    } else {
+      rotary_emb_ = std::make_shared<MockDeepseekScalingRotaryEmbedding>(
+          test_config_.qk_rope_head_dim,
+          test_config_.max_position_embeddings,
+          test_config_.rope_theta,
+          test_config_.rope_interleaved,
+          options_);
+    }
 
     TestInputs inputs;
     int64_t num_tokens = batch_size * max_query_len;
@@ -306,7 +316,7 @@ class IndexerTest : public ::testing::Test {
   torch::TensorOptions options_;
   torch::TensorOptions int_option_;
   std::unique_ptr<xllm::ProcessGroup> mock_process_group_;
-  RotaryEmbeddingVariants rotary_emb_;
+  std::shared_ptr<MlaRotaryEmbeddingBase> rotary_emb_;
 };
 
 TEST_F(IndexerTest, PrefillBatch) {
@@ -427,6 +437,19 @@ TEST_F(IndexerTest, CompareFusedVsNonFusedEdgeCaseSmall) {
                             base_context_lens.to(torch::kFloat32));
   test::verify_tensor_close(fused_block_tables_slice.to(torch::kFloat32),
                             base_block_tables_slice.to(torch::kFloat32));
+}
+
+TEST_F(IndexerTest, DefaultRopeDecodePath) {
+  LOG(INFO) << "Testing default rope decode path";
+  TestInputs inputs = create_inputs(32, 1, false, false, 0, true);
+
+  auto [block_tables, context_lens] = run_indexer(inputs, false, false);
+
+  EXPECT_EQ(block_tables.dim(), 2);
+  EXPECT_EQ(block_tables.size(0), 32);
+  EXPECT_EQ(block_tables.size(1), test_config_.index_topk);
+  EXPECT_EQ(context_lens.dim(), 1);
+  EXPECT_EQ(context_lens.size(0), 32);
 }
 
 }  // namespace layer

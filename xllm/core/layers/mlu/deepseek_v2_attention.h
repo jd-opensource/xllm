@@ -96,8 +96,8 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   RowParallelLinear o_proj_{nullptr};
 
   Attention attn_{nullptr};
-  RotaryEmbeddingVariants rotary_emb_;
-  RotaryEmbeddingVariants indexer_rotary_emb_;
+  std::shared_ptr<MlaRotaryEmbeddingBase> rotary_emb_;
+  std::shared_ptr<MlaRotaryEmbeddingBase> indexer_rotary_emb_;
   Indexer indexer_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Attention);

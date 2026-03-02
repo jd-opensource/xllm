@@ -19,7 +19,6 @@ limitations under the License.
 #include <torch/types.h>
 
 #include <memory>
-#include <variant>
 
 #include "attention_metadata.h"
 #include "core/framework/model_context.h"
@@ -29,7 +28,20 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class RotaryEmbeddingImpl : public torch::nn::Module {
+class MlaRotaryEmbeddingBase : public torch::nn::Module {
+ public:
+  ~MlaRotaryEmbeddingBase() override = default;
+
+  virtual void forward(torch::Tensor& input,
+                       const torch::Tensor& positions,
+                       const torch::Tensor& cu_query_lens,
+                       int64_t max_query_len,
+                       bool is_prompt) = 0;
+  virtual const torch::Tensor& get_sin_cache() const = 0;
+  virtual const torch::Tensor& get_cos_cache() const = 0;
+};
+
+class RotaryEmbeddingImpl : public MlaRotaryEmbeddingBase {
  public:
   RotaryEmbeddingImpl(int64_t rotary_dim,
                       int64_t max_position_embeddings,
@@ -49,15 +61,16 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
                const torch::Tensor& positions,
                const torch::Tensor& cu_query_lens,
                int64_t max_query_len,
-               bool is_prompt);
+               bool is_prompt) override;
 
   const torch::Tensor& precomputed_cos_sin_cache() {
     return precomputed_cos_sin_cache_;
   }
 
   torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
-  torch::Tensor get_sin_cache() { return sin_; }
-  torch::Tensor get_cos_cache() { return cos_; }
+  const torch::Tensor& get_sin_cache() const override { return sin_; }
+  const torch::Tensor& get_cos_cache() const override { return cos_; }
+
  protected:
   bool interleaved_;
   torch::Tensor cos_sin_cache_;
@@ -91,7 +104,7 @@ class MRotaryEmbeddingImpl : public RotaryEmbeddingImpl {
 };
 TORCH_MODULE(MRotaryEmbedding);
 
-class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
+class DeepseekScalingRotaryEmbeddingImpl : public MlaRotaryEmbeddingBase {
  public:
   DeepseekScalingRotaryEmbeddingImpl(
       int64_t head_size,
@@ -113,9 +126,9 @@ class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
                const torch::Tensor& positions,
                const torch::Tensor& cu_query_lens,
                int64_t max_query_len,
-               bool is_prompt);
-  const torch::Tensor& get_sin_cache() const { return sin_; }
-  const torch::Tensor& get_cos_cache() const { return cos_; }
+               bool is_prompt) override;
+  const torch::Tensor& get_sin_cache() const override { return sin_; }
+  const torch::Tensor& get_cos_cache() const override { return cos_; }
 
  private:
   int64_t head_size_;
@@ -130,34 +143,13 @@ class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
 };
 TORCH_MODULE(DeepseekScalingRotaryEmbedding);
 
-// Unified RoPE variant type for MLA architecture
-// Supports both DeepseekScalingRotaryEmbedding (for deepseek_yarn) and
-// RotaryEmbedding (for default rope)
-// Using shared_ptr wrapper because TORCH_MODULE types have no default
-// constructor
-using RotaryEmbeddingVariants =
-    std::variant<std::shared_ptr<RotaryEmbeddingImpl>,
-                 std::shared_ptr<DeepseekScalingRotaryEmbeddingImpl>>;
-
 // Factory function: creates the appropriate RoPE type based on model args
-RotaryEmbeddingVariants create_rotary_embedding(
+std::shared_ptr<MlaRotaryEmbeddingBase> create_mla_rotary_embedding(
     const ModelArgs& args,
     int64_t rotary_dim,
     int64_t max_position_embeddings,
     bool interleaved,
     const torch::TensorOptions& options);
-
-// Unified forward interface for single tensor (used in MLA architecture)
-void apply_rotary_embedding(RotaryEmbeddingVariants& rotary,
-                            torch::Tensor& input,
-                            const torch::Tensor& positions,
-                            const torch::Tensor& cu_query_lens,
-                            int64_t max_query_len,
-                            bool is_prompt);
-
-// Helper functions to access sin/cos cache from variants
-torch::Tensor get_sin_cache(RotaryEmbeddingVariants& rotary);
-torch::Tensor get_cos_cache(RotaryEmbeddingVariants& rotary);
 
 }  // namespace layer
 }  // namespace xllm

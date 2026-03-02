@@ -55,7 +55,8 @@ class DeepseekMLATest : public ::testing::Test {
     init_test_weights();
   }
 
-  ModelArgs create_mla_model_args() {
+  ModelArgs create_mla_model_args(
+      const std::string& rope_type = "deepseek_yarn") {
     ModelArgs model_args;
     model_args.q_lora_rank() = 1536;
     model_args.kv_lora_rank() = 512;
@@ -77,7 +78,7 @@ class DeepseekMLATest : public ::testing::Test {
     model_args.rope_scaling_beta_slow() = 1;
     model_args.rope_scaling_mscale() = 1.;
     model_args.rope_scaling_mscale_all_dim() = 1.;
-    model_args.rope_scaling_rope_type() = "deepseek_yarn";
+    model_args.rope_scaling_rope_type() = rope_type;
 
     // indexer
     model_args.index_head_dim() = 128;
@@ -368,6 +369,45 @@ TEST_F(DeepseekMLATest, VariousBatchSizesTest) {
                                             kv_cache);
     test::verify_tensor_close(output_fused, output_non_fused);
   }
+}
+
+TEST_F(DeepseekMLATest, DefaultRopePrefillTest) {
+  model_args_ = create_mla_model_args("default");
+  init_test_weights();
+
+  int64_t batch_size = 2;
+  int64_t max_query_len = 3;
+  int64_t num_tokens = batch_size * max_query_len;
+  int64_t hidden_size = model_args_.hidden_size();
+
+  auto hidden_states = torch::randn({num_tokens, hidden_size}, options_) * 0.02;
+  auto positions = torch::arange(max_query_len, options_.dtype(torch::kInt32))
+                       .repeat({batch_size});
+
+  int64_t block_num = 32;
+  auto k_cache = torch::randn({block_num,
+                               1,
+                               1,
+                               model_args_.qk_rope_head_dim() +
+                                   model_args_.kv_lora_rank()},
+                              options_) *
+                 0.01;
+  auto index_cache =
+      torch::randn({block_num, 1, 1, model_args_.index_head_dim()}, options_) *
+      0.01;
+  KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
+
+  auto output = run_single_test(false,
+                                batch_size,
+                                max_query_len,
+                                true,
+                                hidden_states,
+                                positions,
+                                kv_cache);
+
+  EXPECT_EQ(output.dim(), 2);
+  EXPECT_EQ(output.size(0), num_tokens);
+  EXPECT_EQ(output.size(1), hidden_size);
 }
 
 }  // namespace layer
