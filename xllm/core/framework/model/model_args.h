@@ -41,17 +41,21 @@ struct ModelArgs {
   PROPERTY(int64_t, intermediate_size) = 0;
 
   PROPERTY(int64_t, n_layers) = 0;
+  PROPERTY(int64_t, n_encoder_layers) = 0;
 
   // attn head dim
   PROPERTY(int64_t, head_dim) = 0;
+  PROPERTY(int64_t, decoder_head_dim) = 0;
 
   // attn head num
   PROPERTY(int64_t, n_heads) = 0;
+  PROPERTY(int64_t, decoder_n_heads) = 0;
 
   PROPERTY(int64_t, actual_n_heads) = 0;
 
   // attn head num for key/value
   PROPERTY(std::optional<int64_t>, n_kv_heads);
+  PROPERTY(std::optional<int64_t>, decoder_n_kv_heads);
 
   PROPERTY(int64_t, vocab_size) = -1;
 
@@ -81,6 +85,7 @@ struct ModelArgs {
 
   // the maximum sequence length to use for rotary position embeddings.
   PROPERTY(int64_t, max_position_embeddings) = 0;
+  PROPERTY(bool, use_absolute_position_embedding) = false;
 
   // token id for beginning of sentence.
   PROPERTY(int32_t, bos_token_id) = 0;
@@ -110,6 +115,10 @@ struct ModelArgs {
   PROPERTY(int32_t, first_k_dense_replace) = 0;
   PROPERTY(int32_t, moe_layer_freq) = 0;
   // deepseek v2/v3 MoE
+  PROPERTY(bool, use_moe) = false;
+  PROPERTY(std::string, moe_score_func);
+  PROPERTY(float, moe_route_scale) = 1.0f;
+  PROPERTY(bool, moe_use_shared_experts) = false;
   PROPERTY(std::string, topk_method);
   PROPERTY(int32_t, n_routed_experts) = 0;
   PROPERTY(int32_t, n_shared_experts) = 0;
@@ -408,9 +417,13 @@ inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
   os << ", hidden_act: " << args.hidden_act();
   os << ", intermediate_size: " << args.intermediate_size();
   os << ", n_layers: " << args.n_layers();
+  os << ", n_encoder_layers: " << args.n_encoder_layers();
   os << ", head_dim: " << args.head_dim();
+  os << ", decoder_head_dim: " << args.decoder_head_dim();
   os << ", n_heads: " << args.n_heads();
+  os << ", decoder_n_heads: " << args.decoder_n_heads();
   os << ", n_kv_heads: " << args.n_kv_heads().value_or(-1);
+  os << ", decoder_n_kv_heads: " << args.decoder_n_kv_heads().value_or(-1);
   os << ", vocab_size: " << args.vocab_size();
   os << ", rms_norm_eps: " << args.rms_norm_eps();
   os << ", layer_norm_eps: " << args.layer_norm_eps();
@@ -430,6 +443,8 @@ inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
   }
   os << "]";
   os << ", max_position_embeddings: " << args.max_position_embeddings();
+  os << ", use_absolute_position_embedding: "
+     << args.use_absolute_position_embedding();
   os << ", bos_token_id: " << args.bos_token_id();
   os << ", eos_token_id: " << args.eos_token_id();
   os << ", pad_token_id: " << args.pad_token_id();
