@@ -103,45 +103,22 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   w_kc_ = weights.slice(1, 0, qk_nope_head_dim_);
   w_vc_ = weights.slice(1, qk_nope_head_dim_, qk_nope_head_dim_ + v_head_dim_);
 
-  auto register_rotary_embedding =
-      [&](const std::string& name,
-          bool interleaved) -> std::shared_ptr<RotaryEmbeddingBase> {
-    if (args.rope_scaling_rope_type() == "deepseek_yarn") {
-      auto rotary_module = register_module(
-          name,
-          DeepseekScalingRotaryEmbedding(
-              qk_rope_head_dim_,
-              qk_rope_head_dim_,
-              max_position_embeddings,
-              args.rope_scaling_original_max_position_embeddings(),
-              args.rope_theta(),
-              interleaved,
-              args.rope_scaling_factor(),
-              args.rope_extrapolation_factor(),
-              args.rope_scaling_attn_factor(),
-              args.rope_scaling_beta_fast(),
-              args.rope_scaling_beta_slow(),
-              args.rope_scaling_mscale(),
-              args.rope_scaling_mscale_all_dim(),
-              options));
-      return std::static_pointer_cast<RotaryEmbeddingBase>(rotary_module);
-    }
-
-    auto rotary_module =
-        register_module(name,
-                        RotaryEmbedding(qk_rope_head_dim_,
-                                        max_position_embeddings,
-                                        args.rope_theta(),
-                                        interleaved,
-                                        options));
-    return std::static_pointer_cast<RotaryEmbeddingBase>(rotary_module);
-  };
-
-  rotary_emb_ = register_rotary_embedding("rotary_emb", interleaved_);
+  rotary_emb_ =
+      register_module("rotary_emb",
+                      create_mla_rotary_embedding(args,
+                                                  qk_rope_head_dim_,
+                                                  max_position_embeddings,
+                                                  interleaved_,
+                                                  options));
 
   // indexer rotary embedding for lighting indexer
-  indexer_rotary_emb_ = register_rotary_embedding(
-      "indexer_rotary_emb", args.indexer_rope_interleave());
+  indexer_rotary_emb_ = register_module(
+      "indexer_rotary_emb",
+      create_mla_rotary_embedding(args,
+                                  qk_rope_head_dim_,
+                                  max_position_embeddings,
+                                  args.indexer_rope_interleave(),
+                                  options));
 
   if (args.rope_scaling_rope_type() == "deepseek_yarn") {
     float mscale = layer::rotary::yarn_get_mscale(
