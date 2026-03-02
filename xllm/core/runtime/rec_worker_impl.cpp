@@ -18,7 +18,6 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
-#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -28,6 +27,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/rec_model_utils.h"
 #include "common/types.h"
+#include "core/common/global_flags.h"
 #include "framework/model/model_input_params.h"
 #if defined(USE_CUDA)
 #include "kernels/cuda/cuda_ops_api.h"
@@ -1150,7 +1150,11 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
                                        context.get_quant_args(),
                                        context.get_tensor_options());
 
-    runtime.model = create_llm_model(*runtime.context.get());
+    if (rec_model_kind_ == RecModelKind::kOneRec) {
+      runtime.model = create_rec_model(*runtime.context.get());
+    } else {
+      runtime.model = create_llm_model(*runtime.context.get());
+    }
     CHECK(runtime.model != nullptr) << "Failed to create model instance " << i;
 
     runtime.executor =
