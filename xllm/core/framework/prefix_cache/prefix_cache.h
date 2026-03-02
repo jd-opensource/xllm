@@ -102,6 +102,11 @@ class PrefixCache {
                                     std::vector<Block>& blocks,
                                     const size_t cached_blocks = 0);
 
+  bool contains_block_id(int32_t block_id) const {
+    auto iter = cached_block_id_refs_.find(block_id);
+    return iter != cached_block_id_refs_.end() && iter->second > 0;
+  }
+
  protected:
   size_t insert(const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,
@@ -207,6 +212,8 @@ class PrefixCache {
 
   std::unordered_map<Murmur3Key, Node*, FixedStringKeyHash, FixedStringKeyEqual>
       cached_blocks_;
+  // Track how many cache nodes currently reference each physical block id.
+  std::unordered_map<int32_t, size_t> cached_block_id_refs_;
 
   std::atomic<uint64_t> total_blocks_{0}, matched_blocks_{0};
 };
