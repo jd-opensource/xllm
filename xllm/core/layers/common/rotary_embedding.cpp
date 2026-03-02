@@ -271,7 +271,7 @@ void DeepseekScalingRotaryEmbeddingImpl::forward(
 }
 
 // Factory function: creates the appropriate RoPE type based on model args
-std::shared_ptr<MlaRotaryEmbeddingBase> create_mla_rotary_embedding(
+std::shared_ptr<RotaryEmbeddingBase> create_mla_rotary_embedding(
     const ModelArgs& args,
     int64_t rotary_dim,
     int64_t max_position_embeddings,

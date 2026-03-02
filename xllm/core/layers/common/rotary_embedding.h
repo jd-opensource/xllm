@@ -28,9 +28,9 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class MlaRotaryEmbeddingBase : public torch::nn::Module {
+class RotaryEmbeddingBase : public torch::nn::Module {
  public:
-  ~MlaRotaryEmbeddingBase() override = default;
+  ~RotaryEmbeddingBase() override = default;
 
   virtual void forward(torch::Tensor& input,
                        const torch::Tensor& positions,
@@ -41,7 +41,7 @@ class MlaRotaryEmbeddingBase : public torch::nn::Module {
   virtual const torch::Tensor& get_cos_cache() const = 0;
 };
 
-class RotaryEmbeddingImpl : public MlaRotaryEmbeddingBase {
+class RotaryEmbeddingImpl : public RotaryEmbeddingBase {
  public:
   RotaryEmbeddingImpl(int64_t rotary_dim,
                       int64_t max_position_embeddings,
@@ -104,7 +104,7 @@ class MRotaryEmbeddingImpl : public RotaryEmbeddingImpl {
 };
 TORCH_MODULE(MRotaryEmbedding);
 
-class DeepseekScalingRotaryEmbeddingImpl : public MlaRotaryEmbeddingBase {
+class DeepseekScalingRotaryEmbeddingImpl : public RotaryEmbeddingBase {
  public:
   DeepseekScalingRotaryEmbeddingImpl(
       int64_t head_size,
@@ -144,7 +144,7 @@ class DeepseekScalingRotaryEmbeddingImpl : public MlaRotaryEmbeddingBase {
 TORCH_MODULE(DeepseekScalingRotaryEmbedding);
 
 // Factory function: creates the appropriate RoPE type based on model args
-std::shared_ptr<MlaRotaryEmbeddingBase> create_mla_rotary_embedding(
+std::shared_ptr<RotaryEmbeddingBase> create_mla_rotary_embedding(
     const ModelArgs& args,
     int64_t rotary_dim,
     int64_t max_position_embeddings,

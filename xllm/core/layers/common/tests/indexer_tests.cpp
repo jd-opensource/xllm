@@ -316,7 +316,7 @@ class IndexerTest : public ::testing::Test {
   torch::TensorOptions options_;
   torch::TensorOptions int_option_;
   std::unique_ptr<xllm::ProcessGroup> mock_process_group_;
-  std::shared_ptr<MlaRotaryEmbeddingBase> rotary_emb_;
+  std::shared_ptr<RotaryEmbeddingBase> rotary_emb_;
 };
 
 TEST_F(IndexerTest, PrefillBatch) {

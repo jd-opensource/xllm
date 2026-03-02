@@ -105,7 +105,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
 
   auto register_rotary_embedding =
       [&](const std::string& name,
-          bool interleaved) -> std::shared_ptr<MlaRotaryEmbeddingBase> {
+          bool interleaved) -> std::shared_ptr<RotaryEmbeddingBase> {
     if (args.rope_scaling_rope_type() == "deepseek_yarn") {
       auto rotary_module = register_module(
           name,
@@ -124,7 +124,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
               args.rope_scaling_mscale(),
               args.rope_scaling_mscale_all_dim(),
               options));
-      return std::static_pointer_cast<MlaRotaryEmbeddingBase>(rotary_module);
+      return std::static_pointer_cast<RotaryEmbeddingBase>(rotary_module);
     }
 
     auto rotary_module =
@@ -134,7 +134,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                         args.rope_theta(),
                                         interleaved,
                                         options));
-    return std::static_pointer_cast<MlaRotaryEmbeddingBase>(rotary_module);
+    return std::static_pointer_cast<RotaryEmbeddingBase>(rotary_module);
   };
 
   rotary_emb_ = register_rotary_embedding("rotary_emb", interleaved_);

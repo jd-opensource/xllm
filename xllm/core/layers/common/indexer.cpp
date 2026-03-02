@@ -104,18 +104,17 @@ torch::Tensor hadamard_transform_ref(const torch::Tensor& x,
 namespace xllm {
 namespace layer {
 
-IndexerImpl::IndexerImpl(
-    int64_t dim,
-    int64_t index_n_heads,
-    int64_t index_head_dim,
-    int64_t qk_rope_head_dim,
-    int64_t index_topk,
-    int64_t q_lora_rank,
-    bool enable_fused_qk,
-    const std::shared_ptr<MlaRotaryEmbeddingBase>& rotary_emb,
-    const QuantArgs& quant_args,
-    const ParallelArgs& parallel_args,
-    const torch::TensorOptions& options)
+IndexerImpl::IndexerImpl(int64_t dim,
+                         int64_t index_n_heads,
+                         int64_t index_head_dim,
+                         int64_t qk_rope_head_dim,
+                         int64_t index_topk,
+                         int64_t q_lora_rank,
+                         bool enable_fused_qk,
+                         const std::shared_ptr<RotaryEmbeddingBase>& rotary_emb,
+                         const QuantArgs& quant_args,
+                         const ParallelArgs& parallel_args,
+                         const torch::TensorOptions& options)
     : dim_(dim),
       n_heads_(index_n_heads),
       head_dim_(index_head_dim),
