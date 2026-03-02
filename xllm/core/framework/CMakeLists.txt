@@ -56,3 +56,13 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )
+
+cc_test(
+  NAME
+    hf_model_loader_test
+  SRCS
+    hf_model_loader_test.cpp
+  DEPS
+    :model_loader
+    GTest::gtest_main
+)

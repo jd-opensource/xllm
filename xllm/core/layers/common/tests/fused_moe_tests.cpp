@@ -211,6 +211,36 @@ class FusedMoETest : public ::testing::Test {
     return weight_dict;
   }
 
+  std::unordered_map<std::string, torch::Tensor>
+  create_w4a8_groupwise_test_weights(int64_t num_experts,
+                                     int64_t hidden_size,
+                                     int64_t intermediate_size,
+                                     int64_t group_size) {
+    std::unordered_map<std::string, torch::Tensor> weight_dict;
+
+    for (size_t expert_id = 0; expert_id < num_experts; ++expert_id) {
+      std::string expert_prefix = "experts." + std::to_string(expert_id) + ".";
+      std::string seed_prefix =
+          "fused_moe_tests.expert_" + std::to_string(expert_id);
+      test::append_w4a8_expert_weights(weight_dict,
+                                       expert_prefix,
+                                       seed_prefix,
+                                       hidden_size,
+                                       intermediate_size,
+                                       intermediate_size,
+                                       intermediate_size,
+                                       group_size,
+                                       options_.device());
+    }
+
+    weight_dict["gate.weight"] =
+        torch::full({num_experts, hidden_size}, 5.0f, options_);
+    weight_dict["gate.e_score_correction_bias"] =
+        torch::full({num_experts}, 0.1f, options_);
+
+    return weight_dict;
+  }
+
   FusedMoE create_fused_moe(int64_t num_experts,
                             int64_t top_k,
                             int64_t num_expert_group,
@@ -425,6 +455,52 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   set_expected_output(expected_values);
 
   verify_precision(output, 1e-3, 1e-4);
+}
+
+TEST_F(FusedMoETest, W4A8GroupwiseSmokeTest) {
+  const int64_t batch_size = 4;
+  const int64_t seq_len = 8;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t group_size = 128;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
+  const double route_scale = 2.5;
+
+  quant_args_.moe_weight_bits() = 4;
+  quant_args_.group_size() = group_size;
+
+  auto fused_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    /*n_shared_experts=*/0);
+
+  auto weight_dict = create_w4a8_groupwise_test_weights(
+      num_experts, hidden_size, intermediate_size, group_size);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
+
+  auto output =
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  EXPECT_EQ(output.dim(), 2);
+  EXPECT_EQ(output.size(0), batch_size * seq_len);
+  EXPECT_EQ(output.size(1), hidden_size);
+  EXPECT_NE(torch::sum(output).item<float>(), 0.0f);
 }
 
 }  // namespace layer

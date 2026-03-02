@@ -180,12 +180,14 @@ torch::Tensor FusedMoEImpl::forward_experts_base(
     group_gemm_params.b = w13_;
     group_gemm_params.token_count = selected_expert_info.token_count_slice;
     if (is_smoothquant_) {
+      auto [b_scale, quant_flag] = prepare_group_gemm_weight_scale(w13_scale_);
       torch::Tensor a_scale =
           selected_expert_info.input_scale.value().flatten();
       selected_expert_info.input_scale =
           view_as_dtype(a_scale, torch::kFloat32);
       group_gemm_params.a_scale = selected_expert_info.input_scale;
-      group_gemm_params.b_scale = w13_scale_;
+      group_gemm_params.b_scale = b_scale;
+      group_gemm_params.quant_flag = quant_flag;
     }
     group_gemm_params.max_dim = group_gemm_max_dim;
     group_gemm_params.trans_a = false;
@@ -247,8 +249,10 @@ torch::Tensor FusedMoEImpl::forward_experts_base(
     group_gemm_params.b = w2_;
     group_gemm_params.token_count = selected_expert_info.token_count_slice;
     if (is_smoothquant_) {
+      auto [b_scale, quant_flag] = prepare_group_gemm_weight_scale(w2_scale_);
       group_gemm_params.a_scale = act_out_scale;
-      group_gemm_params.b_scale = w2_scale_;
+      group_gemm_params.b_scale = b_scale;
+      group_gemm_params.quant_flag = quant_flag;
     }
     group_gemm_params.max_dim = group_gemm_max_dim;
     group_gemm_params.trans_a = false;

@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <utility>
+
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"
@@ -94,6 +96,9 @@ class FusedMoEImpl : public torch::nn::Module {
                              const torch::Tensor& hidden_states,
                              int64_t num_token_expand);
 
+  std::pair<torch::Tensor, std::optional<torch::List<int64_t>>>
+  prepare_group_gemm_weight_scale(const torch::Tensor& b_scale) const;
+
  private:
   int64_t num_total_experts_;
   int64_t topk_;
@@ -102,6 +107,8 @@ class FusedMoEImpl : public torch::nn::Module {
   bool is_gated_;
   std::string hidden_act_;
   bool is_smoothquant_;
+  int64_t moe_weight_bits_ = 8;
+  int64_t weight_pack_factor_ = 1;
 
   int64_t num_experts_per_rank_;
   int64_t start_expert_id_;

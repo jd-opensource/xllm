@@ -203,6 +203,17 @@ torch::Tensor seeded_tensor(const std::string& key,
                             torch::ScalarType dtype = torch::kFloat,
                             torch::Device device = torch::Device(torch::kCPU));
 
+void append_w4a8_expert_weights(
+    std::unordered_map<std::string, torch::Tensor>& weight_dict,
+    const std::string& expert_prefix,
+    const std::string& seed_prefix,
+    int64_t hidden_size,
+    int64_t gate_up_intermediate_size,
+    int64_t down_qweight_intermediate_size,
+    int64_t down_scale_intermediate_size,
+    int64_t group_size,
+    const torch::Device& device);
+
 }  // namespace test
 }  // namespace layer
 }  // namespace xllm
