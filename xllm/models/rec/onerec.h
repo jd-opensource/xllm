@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "core/framework/kv_cache/kv_cache.h"
@@ -52,19 +53,30 @@ class OneRecModelImpl : public torch::nn::Module {
       return ModelOutput();
     }
 
-    if (tokens.numel() == 0) {
-      return ModelOutput(torch::empty({0, hidden_size_}, options_));
+    const auto* onerec_params = input_params.onerec_params();
+    const bool is_encoder_forward =
+        (onerec_params != nullptr) && onerec_params->is_encoder_forward;
+
+    auto hidden_states =
+        build_hidden_states(tokens, onerec_params, is_encoder_forward);
+    if (!hidden_states.defined()) {
+      return ModelOutput();
     }
 
-    if (const auto* onerec_params = input_params.onerec_params()) {
-      if (onerec_params->is_hybrid_mode &&
-          tokens.scalar_type() != torch::kLong &&
-          tokens.scalar_type() != torch::kInt) {
-        return ModelOutput(tokens);
+    if (is_encoder_forward) {
+      return ModelOutput(hidden_states);
+    }
+
+    auto cross_context = resolve_cross_context(onerec_params);
+    if (cross_context.defined()) {
+      auto enriched_hidden_states =
+          add_cross_context_bias(hidden_states, cross_context);
+      if (enriched_hidden_states.defined()) {
+        hidden_states = std::move(enriched_hidden_states);
       }
     }
 
-    return ModelOutput(shared_(tokens));
+    return ModelOutput(hidden_states);
   }
 
   void load_state_dict(const StateDict& state_dict) {
@@ -81,6 +93,88 @@ class OneRecModelImpl : public torch::nn::Module {
   }
 
  private:
+  static bool is_token_id_tensor(const torch::Tensor& tokens) {
+    return tokens.scalar_type() == torch::kLong ||
+           tokens.scalar_type() == torch::kInt;
+  }
+
+  torch::Tensor build_hidden_states(const torch::Tensor& tokens,
+                                    const OneRecModelInputParams* onerec_params,
+                                    bool is_encoder_forward) const {
+    if (tokens.numel() == 0) {
+      return torch::empty({0, hidden_size_}, options_);
+    }
+
+    if (is_token_id_tensor(tokens)) {
+      return shared_(tokens);
+    }
+
+    if (tokens.dim() == 2 && tokens.size(-1) == hidden_size_) {
+      if (onerec_params != nullptr) {
+        if (onerec_params->is_hybrid_mode || is_encoder_forward) {
+          return tokens;
+        }
+        if (onerec_params->decoder_context_embedding.defined()) {
+          return tokens;
+        }
+      }
+      return tokens;
+    }
+
+    LOG(ERROR) << "Invalid OneRec token tensor shape for non-id path: "
+               << tokens.sizes();
+    return torch::Tensor();
+  }
+
+  torch::Tensor resolve_cross_context(
+      const OneRecModelInputParams* onerec_params) const {
+    if (onerec_params == nullptr) {
+      return torch::Tensor();
+    }
+    if (onerec_params->decoder_context_embedding.defined()) {
+      return onerec_params->decoder_context_embedding;
+    }
+    return torch::Tensor();
+  }
+
+  torch::Tensor add_cross_context_bias(
+      const torch::Tensor& hidden_states,
+      const torch::Tensor& cross_context) const {
+    if (!hidden_states.defined() || !cross_context.defined()) {
+      return hidden_states;
+    }
+
+    if (hidden_states.dim() != 2 || hidden_states.size(-1) != hidden_size_) {
+      LOG(ERROR) << "Unexpected hidden_states shape in OneRec decoder: "
+                 << hidden_states.sizes();
+      return hidden_states;
+    }
+
+    auto context = cross_context;
+    if (context.device() != hidden_states.device()) {
+      context = context.to(hidden_states.device());
+    }
+    if (context.dtype() != hidden_states.dtype()) {
+      context = context.to(hidden_states.dtype());
+    }
+
+    if (context.dim() == 1 && context.size(0) == hidden_size_) {
+      context = context.unsqueeze(0);
+    } else if (context.dim() > 2 && context.size(-1) == hidden_size_) {
+      context = context.reshape({-1, hidden_size_});
+    }
+
+    if (context.dim() != 2 || context.size(-1) != hidden_size_) {
+      LOG(ERROR) << "Unexpected OneRec cross context shape: "
+                 << context.sizes();
+      return hidden_states;
+    }
+
+    auto pooled_context = context.mean(/*dim=*/0, /*keepdim=*/true);
+    return hidden_states + pooled_context.expand(
+                               {hidden_states.size(0), pooled_context.size(1)});
+  }
+
   torch::TensorOptions options_;
   int64_t hidden_size_ = 0;
   layer::WordEmbedding shared_{nullptr};
@@ -95,14 +189,29 @@ class OneRecForConditionalGenerationImpl
 
   void load_model(std::unique_ptr<ModelLoader> loader,
                   std::string prefix = "model.") override {
-    (void)prefix;
     for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(*state_dict);
+      StateDict model_state_dict = state_dict->get_dict_with_prefix(prefix);
+      if (model_state_dict.size() == 0) {
+        model_state_dict = *state_dict;
+      }
+      model_->load_state_dict(model_state_dict);
 
       if (tie_word_embeddings_) {
-        lm_head_->load_state_dict(state_dict->get_dict_with_prefix("shared."));
+        auto shared_dict = model_state_dict.get_dict_with_prefix("shared.");
+        if (shared_dict.size() == 0) {
+          shared_dict = state_dict->get_dict_with_prefix("shared.");
+        }
+        if (shared_dict.size() != 0) {
+          lm_head_->load_state_dict(shared_dict);
+        }
       } else {
-        lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
+        auto lm_head_dict = model_state_dict.get_dict_with_prefix("lm_head.");
+        if (lm_head_dict.size() == 0) {
+          lm_head_dict = state_dict->get_dict_with_prefix("lm_head.");
+        }
+        if (lm_head_dict.size() != 0) {
+          lm_head_->load_state_dict(lm_head_dict);
+        }
       }
     }
   }
