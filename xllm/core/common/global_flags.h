@@ -237,6 +237,8 @@ DECLARE_bool(enable_beam_search_kernel);
 
 DECLARE_bool(enable_rec_fast_sampler);
 
+DECLARE_bool(enable_rec_prefill_only);
+
 DECLARE_bool(enable_topk_sorted);
 
 DECLARE_bool(output_rec_logprobs);

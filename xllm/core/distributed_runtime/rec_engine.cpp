@@ -84,6 +84,8 @@ bool RecEngine::init_model() {
   tokenizer_args_ = model_loader->tokenizer_args();
   // Determine rec model kind and create pipeline via factory
   rec_model_kind_ = get_rec_model_kind(args_.model_type());
+  CHECK(rec_model_kind_ != RecModelKind::kNone)
+      << "Unsupported rec model_type: " << args_.model_type();
   auto pipeline_type = get_rec_pipeline_type(rec_model_kind_);
   pipeline_ = create_pipeline(pipeline_type, *this);
   // LlmRec-specific initialization
@@ -523,20 +525,34 @@ void RecEngine::OneRecEnginePipeline::process_group_test() {
 bool RecEngine::OneRecEnginePipeline::init_model_workers(
     const std::string& model_path) {
   const auto& devices = engine_.options_.devices();
-  if (devices.size() > 1) {
+  const int32_t world_size = static_cast<int32_t>(devices.size());
+
+  // OneRec local workers still expect valid TP group metadata even on a
+  // single device. For world_size == 1, only rank/world_size metadata is
+  // needed, so avoid creating a real communication backend or extra streams.
+  // For multi-device NPU keep the HCCL-backed groups; other local backends use
+  // the generic local process group creation path.
+  if (world_size == 1) {
+    engine_.process_groups_.clear();
+    engine_.process_groups_.emplace_back(
+        std::make_unique<ProcessGroup>(/*rank=*/0, world_size, devices[0]));
+  } else if (devices[0].is_privateuseone()) {
     engine_.process_groups_ =
         parallel_state::create_npu_process_groups(devices);
+  } else {
+    engine_.process_groups_ =
+        parallel_state::create_local_process_groups(devices, engine_.options_);
   }
 
   engine_.workers_.clear();
   WorkerType worker_type = WorkerType::REC;
-  const int32_t world_size = static_cast<int32_t>(devices.size());
-  for (int32_t rank = 0; rank < world_size; ++rank) {
-    ProcessGroup* pg =
-        world_size > 1 ? engine_.process_groups_[rank].get() : nullptr;
+  for (size_t i = 0; i < devices.size(); ++i) {
+    const int32_t rank = static_cast<int32_t>(i);
+    ProcessGroup* pg = engine_.process_groups_[i].get();
     ParallelArgs parallel_args(rank, world_size, pg);
+    parallel_args.tp_group_ = pg;
     engine_.workers_.emplace_back(std::make_unique<Worker>(
-        parallel_args, devices[rank], engine_.options_, worker_type));
+        parallel_args, devices[i], engine_.options_, worker_type));
   }
 
   std::vector<folly::SemiFuture<bool>> futures;
@@ -684,7 +700,43 @@ ForwardOutput RecEngine::OneRecEnginePipeline::get_model_output(
 
   auto forward_output = results.front().value();
   CHECK(forward_output.has_value()) << "Failed to execute model";
-  return forward_output.value();
+
+  auto& output = forward_output.value();
+  auto& sample_output = output.sample_output;
+
+  if (sample_output.embeddings.defined()) {
+    sample_output.embeddings = safe_to(sample_output.embeddings,
+                                       torch::kCPU,
+                                       true);
+    sample_output.embeddings = safe_to(sample_output.embeddings,
+                                       torch::kFloat32,
+                                       true);
+  }
+
+  if (sample_output.next_tokens.defined()) {
+    sample_output.next_tokens = safe_to(sample_output.next_tokens,
+                                        torch::kCPU,
+                                        true);
+    if (sample_output.logprobs.defined()) {
+      sample_output.logprobs = safe_to(sample_output.logprobs,
+                                       torch::kCPU,
+                                       true);
+    }
+    if (sample_output.top_tokens.defined()) {
+      sample_output.top_tokens = safe_to(sample_output.top_tokens,
+                                         torch::kCPU,
+                                         true);
+    }
+    if (sample_output.top_logprobs.defined()) {
+      sample_output.top_logprobs = safe_to(sample_output.top_logprobs,
+                                           torch::kCPU,
+                                           true);
+    }
+  }
+  Device(engine_.workers_[0]->device()).synchronize_default_stream();
+
+
+  return output;
 }
 
 std::vector<int64_t>
