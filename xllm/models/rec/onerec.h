@@ -69,7 +69,7 @@ class OneRecModelImpl : public torch::nn::Module {
 
   void load_state_dict(const StateDict& state_dict) {
     auto shared_dict = state_dict.get_dict_with_prefix("shared.");
-    if (!shared_dict.empty()) {
+    if (shared_dict.size() > 0) {
       shared_->load_state_dict(shared_dict);
     }
   }
