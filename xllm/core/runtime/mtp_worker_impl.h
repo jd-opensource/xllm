@@ -91,6 +91,18 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                             const int64_t offset,
                             const torch::Device device);
 
+  // Per-step processing for draft outputs before validation/cache.
+  virtual void process_draft_output(ForwardOutput& draft_output);
+
+  // Build a 2-token-per-seq draft extend input in one batch.
+  void prepare_draft_extend_inputs(const ForwardInput& base_input,
+                                   const SampleOutput& validate_output,
+                                   ForwardInput& extend_input);
+
+  // Run one draft extend forward and write next-step seed into embedding cache.
+  void run_draft_extend(const ForwardInput& input,
+                        const SampleOutput& validate_output);
+
  protected:
   // Draft model worker
   std::unique_ptr<LLMWorkerImpl> draft_impl_;

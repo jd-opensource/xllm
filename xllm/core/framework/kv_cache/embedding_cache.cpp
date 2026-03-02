@@ -24,61 +24,76 @@ namespace xllm {
 
 EmbeddingCache::EmbeddingCache(int32_t total_nums) {
   CHECK_GT(total_nums, 0) << "No embeddings to allocate";
-  cache_.resize(total_nums);
-}
-
-// write embeddings to cache
-void EmbeddingCache::write(int32_t id, const torch::Tensor& embeddings) {
-  cache_[id] = embeddings;
+  decode_tails_.resize(total_nums);
 }
 
 void EmbeddingCache::write(const std::vector<int32_t>& ids,
-                           const torch::Tensor& embeddings) {
-  int32_t total_nums = ids.size();
-  CHECK_EQ(total_nums, embeddings.size(0));
-  for (int32_t i = 0; i < total_nums; ++i) {
-    write(ids[i], embeddings[i]);
+                           const torch::Tensor& next_tokens,
+                           const torch::Tensor& embeddings,
+                           const torch::Tensor& probs) {
+  CHECK_EQ(next_tokens.dim(), 1) << "next_tokens should be [batch]";
+  CHECK_EQ(embeddings.dim(), 2) << "embeddings should be [batch, h]";
+  CHECK_EQ(next_tokens.size(0), static_cast<int64_t>(ids.size()))
+      << "next_tokens batch mismatch";
+  CHECK_EQ(embeddings.size(0), static_cast<int64_t>(ids.size()))
+      << "embeddings batch mismatch";
+  CHECK(probs.defined()) << "probs should be defined";
+  CHECK_GE(probs.dim(), 1) << "probs should have batch dimension";
+  CHECK_EQ(probs.size(0), static_cast<int64_t>(ids.size()))
+      << "probs batch mismatch";
+
+  for (int32_t i = 0; i < static_cast<int32_t>(ids.size()); ++i) {
+    auto& tail = mutable_tail(ids[i]);
+    tail.token_id = static_cast<int32_t>(next_tokens[i].item<int64_t>());
+    tail.embedding = embeddings[i];
+    tail.probs = probs[i];
   }
 }
 
-void EmbeddingCache::write_validate(const std::vector<int32_t>& ids,
-                                    torch::Tensor& next_tokens,
-                                    const torch::Tensor& embeddings) {
-  int32_t total_nums = ids.size();
-  for (int32_t i = 0; i < total_nums; ++i) {
-    torch::Tensor cur_tokens = next_tokens[i];
-    for (int32_t j = 0; j < cur_tokens.size(0); ++j) {
-      if (cur_tokens[j].item<int32_t>() >= 0) {
-        write(ids[i], embeddings[i][j]);
-      }
-    }
+ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
+  CHECK(!ids.empty()) << "decode ids should not be empty";
+  std::vector<int32_t> token_ids;
+  std::vector<torch::Tensor> embeddings;
+  std::vector<torch::Tensor> probs;
+  token_ids.reserve(ids.size());
+  embeddings.reserve(ids.size());
+  probs.reserve(ids.size());
+  for (int32_t id : ids) {
+    const auto& item = get_tail(id);
+    CHECK_GE(item.token_id, 0) << "decode entry missing token id";
+    CHECK(item.embedding.defined()) << "decode entry missing embedding";
+    CHECK(item.probs.defined()) << "decode entry missing probs";
+    token_ids.emplace_back(item.token_id);
+    embeddings.emplace_back(item.embedding);
+    probs.emplace_back(item.probs);
+  }
+  ForwardOutput output;
+  output.sample_output.next_tokens = torch::tensor(token_ids, torch::kInt);
+  output.sample_output.embeddings = torch::stack(embeddings);
+  output.sample_output.probs = torch::stack(probs);
+  return output;
+}
+
+void EmbeddingCache::clear(const std::vector<int32_t>& ids) {
+  for (int32_t id : ids) {
+    auto& tail = mutable_tail(id);
+    tail.embedding = torch::Tensor();
+    tail.token_id = -1;
+    tail.probs = torch::Tensor();
   }
 }
 
-void EmbeddingCache::set_placeholder(const torch::Tensor& placeholder) {
-  placeholder_ = placeholder;
+EmbeddingCache::DecodeState& EmbeddingCache::mutable_tail(
+    int32_t embedding_id) {
+  CHECK_GE(embedding_id, 0);
+  CHECK_LT(static_cast<size_t>(embedding_id), decode_tails_.size());
+  return decode_tails_[embedding_id];
 }
 
-// read embeddings from cache; empty slot returns placeholder if set (PD
-// separation)
-torch::Tensor EmbeddingCache::read(int32_t id) {
-  const torch::Tensor& t = cache_[id];
-  if (t.defined()) {
-    return t;
-  }
-  if (placeholder_.defined()) {
-    return placeholder_.clone();
-  }
-  return t;
-}
-
-torch::Tensor EmbeddingCache::read(const std::vector<int32_t>& ids) {
-  std::vector<torch::Tensor> tensors;
-  int32_t total_nums = ids.size();
-  tensors.reserve(total_nums);
-  for (int32_t i = 0; i < total_nums; ++i) {
-    tensors.emplace_back(read(ids[i]));
-  }
-  return torch::stack(tensors);
+const EmbeddingCache::DecodeState& EmbeddingCache::get_tail(
+    int32_t embedding_id) const {
+  CHECK_GE(embedding_id, 0);
+  CHECK_LT(static_cast<size_t>(embedding_id), decode_tails_.size());
+  return decode_tails_[embedding_id];
 }
 }  // namespace xllm
