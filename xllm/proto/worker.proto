@@ -156,6 +156,10 @@ message BlockPair {
   int32 host_block_id = 2;
 }
 
+message MPositions {
+  repeated int32 positions = 1;
+}
+
 message TensorList {
   repeated Tensor tensors = 1;
 }
@@ -167,9 +171,44 @@ message MMValue {
   }
 }
 
-message MMData {
+message TokenPos {
+  uint32 offset = 1;
+  uint32 length = 2;
+}
+
+message PrefixCache {
+  bytes key = 1;
+  uint32 cached_token_num = 2;
+}
+
+message MMItemState {
+  TokenPos token_pos = 1;
+  PrefixCache prefix_cache = 2;
+}
+
+message MMDataItem {
   uint32 type = 1;
   map<string, MMValue> dict = 2;
+  MMItemState state = 3;
+}
+
+enum MMDataContentType {
+  MM_DATA_CONTENT_TYPE_UNSPECIFIED = 0;
+  MM_DATA_CONTENT_TYPE_DICT = 1;
+  MM_DATA_CONTENT_TYPE_ITEMS = 2;
+}
+
+message MMData {
+  uint32 type = 1;
+  MMDataContentType content_type = 2;
+  map<string, MMValue> dict = 3;
+  repeated MMDataItem items = 4;
+}
+
+message MMBatchData {
+  uint32 type = 1;
+  map<string, MMValue> dict = 2;
+  repeated MMData mm_datas = 3;
 }
 
 message ForwardInput {
@@ -218,10 +257,11 @@ message ForwardInput {
   repeated float acc_logprob_vec = 37;
   uint64 batch_id = 38;
   int32 batch_forward_type = 39;
-  MMData mm_data = 40;
+  MMBatchData mm_data = 40;
   repeated int32 q_cu_seq_lens = 41;
   repeated int32 dp_is_decode = 42;
   repeated int32 kv_cache_tokens_nums = 43;
+  repeated MPositions m_positions_vec = 44;
 }
 
  message BatchedForwardInputs {
