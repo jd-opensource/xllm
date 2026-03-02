@@ -54,12 +54,17 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
 }
 
 bool LLMWorkerImpl::init_model(ModelContext& context) {
+  return init_model_with_creator(context, create_llm_model);
+}
+
+bool LLMWorkerImpl::init_model_with_creator(
+    ModelContext& context,
+    const std::function<std::unique_ptr<CausalLM>(const ModelContext&)>&
+        creator) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
-  // Try to create a causal LM model
-  model_ = create_llm_model(context);
+  model_ = creator(context);
 
-  // Dont find model in causal models
   CHECK(model_ != nullptr) << "Failed to create model.";
   model_executor_ = std::make_unique<Executor>(
       model_.get(), context.get_model_args(), device_, options_);

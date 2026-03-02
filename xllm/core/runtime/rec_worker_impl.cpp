@@ -72,9 +72,7 @@ RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(RecWorkerImpl& worker)
 
 bool RecWorkerImpl::OneRecWorkPipeline::create_model(RecWorkerImpl& worker,
                                                      ModelContext& context) {
-  // OneRec also uses LLM model for now, can be extended to create_rec_model
-  // later
-  return worker.LLMWorkerImpl::init_model(context);
+  return worker.init_onerec_model(context);
 }
 
 ForwardInput RecWorkerImpl::OneRecWorkPipeline::prepare_inputs(Batch& batch) {
@@ -900,6 +898,10 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
   work_pipeline_ = create_pipeline(pipeline_type, *this);
   // Let pipeline create model
   return work_pipeline_->create_model(*this, context);
+}
+
+bool RecWorkerImpl::init_onerec_model(ModelContext& context) {
+  return init_model_with_creator(context, create_rec_model);
 }
 
 ForwardInput RecWorkerImpl::prepare_inputs(Batch& batch) {

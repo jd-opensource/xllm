@@ -18,6 +18,8 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <torch/torch.h>
 
+#include <functional>
+
 #include "executor.h"
 #include "forward_params.h"
 #include "framework/model/causal_lm.h"
@@ -71,6 +73,12 @@ class LLMWorkerImpl : public WorkerImpl {
   void set_word_embedding(layer::WordEmbedding& embedding) {
     model_->set_word_embedding(embedding);
   };
+
+ protected:
+  bool init_model_with_creator(
+      ModelContext& context,
+      const std::function<std::unique_ptr<CausalLM>(const ModelContext&)>&
+          creator);
 
  private:
   std::unique_ptr<BeamSearcher> beam_searcher_;
