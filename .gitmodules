@@ -28,3 +28,7 @@
 [submodule "third_party/torch_npu_ops"]
 	path = third_party/torch_npu_ops
 	url = https://gitcode.com/xLLM-AI/torch_npu_ops.git
+[submodule "third_party/tilelang-ascend"]
+	path = third_party/tilelang-ascend
+	url = https://github.com/tile-ai/tilelang-ascend.git
+	branch = ascendc_pto
