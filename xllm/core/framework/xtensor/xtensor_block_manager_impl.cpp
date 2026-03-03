@@ -48,14 +48,14 @@ XTensorBlockManagerImpl::XTensorBlockManagerImpl(const Options& options,
             << ", num_blocks=" << options.num_blocks();
 }
 
-void XTensorBlockManagerImpl::reserve_xtensor_null_blocks() {
-  // Reserve the first block as null block for padding tokens
-  auto null_blocks = alloc_internal(1);
-  if (null_blocks.empty() || null_blocks[0] != 0) {
-    LOG(FATAL) << "Failed to reserve null block, got "
-               << (null_blocks.empty() ? -1 : null_blocks[0]);
+void XTensorBlockManagerImpl::reserve_xtensor_padding_blocks() {
+  // Reserve the first block as padding block for padding tokens
+  auto padding_blocks = alloc_internal(1);
+  if (padding_blocks.empty() || padding_blocks[0] != 0) {
+    LOG(FATAL) << "Failed to reserve padding block, got "
+               << (padding_blocks.empty() ? -1 : padding_blocks[0]);
   }
-  null_block_ = std::move(null_blocks);
+  padding_block_ = padding_blocks[0];
 }
 
 XTensorBlockManagerImpl::~XTensorBlockManagerImpl() {

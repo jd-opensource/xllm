@@ -565,8 +565,8 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       return false;
     }
   }
-  // XTensor mode: reserve null blocks and start prealloc thread.
-  kv_cache_manager_->reserve_xtensor_null_blocks();
+  // XTensor mode: reserve padding blocks and start prealloc thread.
+  kv_cache_manager_->reserve_xtensor_padding_blocks();
 
   return true;
 }

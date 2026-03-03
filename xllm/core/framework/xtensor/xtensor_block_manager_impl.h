@@ -111,9 +111,9 @@ class XTensorBlockManagerImpl : public BlockManager {
   // Get mapped memory size in bytes
   size_t get_mapped_memory_size() const;
 
-  // Reserve null block for padding tokens.
+  // Reserve padding block for padding tokens.
   // Should be called after KV tensors are created.
-  void reserve_xtensor_null_blocks();
+  void reserve_xtensor_padding_blocks();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(XTensorBlockManagerImpl);
@@ -158,8 +158,8 @@ class XTensorBlockManagerImpl : public BlockManager {
   // Reserved blocks for pre-allocation
   std::vector<int32_t> reserved_blocks_;
 
-  // Null block (block 0, reserved for padding)
-  std::optional<std::vector<int32_t>> null_block_;
+  // Padding block id (block 0, reserved for padding)
+  std::optional<int32_t> padding_block_;
 
   // Mutex for thread safety
   mutable std::mutex mtx_;

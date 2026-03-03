@@ -58,6 +58,8 @@ class Master {
 
   int32_t get_master_status() const { return master_status_; }
 
+  bool is_sleeping() const { return master_status_ != WAKEUP; }
+
   void set_master_status(int32_t master_status) {
     master_status_ = master_status;
   }

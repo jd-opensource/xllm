@@ -344,17 +344,17 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
   sequence->reset();
 }
 
-void BlockManagerPool::reserve_xtensor_null_blocks() {
+void BlockManagerPool::reserve_xtensor_padding_blocks() {
   if (!options_.enable_xtensor()) {
     return;
   }
 
-  // Reserve null block on each XTensorBlockManagerImpl.
+  // Reserve padding block on each XTensorBlockManagerImpl.
   for (auto& manager : block_managers_) {
     auto* xtensor_manager =
         dynamic_cast<XTensorBlockManagerImpl*>(manager.get());
     if (xtensor_manager) {
-      xtensor_manager->reserve_xtensor_null_blocks();
+      xtensor_manager->reserve_xtensor_padding_blocks();
     }
   }
 

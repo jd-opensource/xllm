@@ -483,8 +483,7 @@ ChatServiceImpl::ChatServiceImpl(LLMMaster* master,
       reasoning_parser_format_(
           master_->options().reasoning_parser().value_or("")) {
   CHECK(master_ != nullptr);
-  // Add initial master to the model map
-  llm_model_to_master_[models[0]] = master;
+  add_model_master(models[0], master);
 }
 
 ChatServiceImpl::ChatServiceImpl(RecMaster* master,
@@ -496,6 +495,23 @@ ChatServiceImpl::ChatServiceImpl(RecMaster* master,
       tool_call_parser_format_(""),
       reasoning_parser_format_("") {
   CHECK(rec_master_ != nullptr);
+}
+
+void ChatServiceImpl::add_model_master(const std::string& model,
+                                       LLMMaster* master) {
+  CHECK(master != nullptr);
+  std::unique_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
+  llm_model_to_master_.insert_or_assign(model, master);
+  models_.insert(model);
+}
+
+LLMMaster* ChatServiceImpl::get_model_master(const std::string& model) const {
+  std::shared_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
+  auto it = llm_model_to_master_.find(model);
+  if (it == llm_model_to_master_.end()) {
+    return nullptr;
+  }
+  return it->second;
 }
 
 void ChatServiceImpl::process_rec_chat_request(std::shared_ptr<ChatCall> call) {
@@ -705,20 +721,23 @@ void ChatServiceImpl::process_async_rpc_impl(
 // chat_async for brpc
 void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
   const auto& rpc_request = call->request();
-  // check if model is supported
   const auto& model = rpc_request.model();
-  if (unlikely(!models_.contains(model))) {
-    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
-    return;
-  }
 
   // Route to RecMaster if configured
   if (rec_master_) {
+    if (unlikely(!models_.contains(model))) {
+      call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+      return;
+    }
     process_rec_chat_request(call);
     return;
   }
 
-  auto master = llm_model_to_master_[model];
+  LLMMaster* master = get_model_master(model);
+  if (unlikely(master == nullptr)) {
+    call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
+    return;
+  }
   // LLMMaster path (existing logic)
   // Check if the request is being rate-limited or model is sleeping.
   // is_limited() returns true if sleeping or rate-limited.
@@ -780,7 +799,7 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     request_params.decode_address = rpc_request.routing().decode_name();
   }
 
-  is_force_reasoning_ = get_enable_thinking_from_request(
+  const bool is_force_reasoning = get_enable_thinking_from_request(
       request_params.chat_template_kwargs, reasoning_parser_format_);
 
   std::shared_ptr<StreamOutputParser> stream_parser;
@@ -790,7 +809,7 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
         std::make_shared<StreamOutputParser>(request_params.tools,
                                              tool_call_parser_format_,
                                              reasoning_parser_format_,
-                                             is_force_reasoning_);
+                                             is_force_reasoning);
     CHECK(stream_parser != nullptr) << "create StreamOutputParser failed!";
   }
 
@@ -814,7 +833,7 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
        json_tools = std::move(saved_tools),
        tool_call_parser_format = tool_call_parser_format_,
        reasoning_parser_format = reasoning_parser_format_,
-       is_force_reasoning = is_force_reasoning_,
+       is_force_reasoning = is_force_reasoning,
        stream_parser =
            stream_parser](const RequestOutput& req_output) mutable -> bool {
         req_output.log_request_status();

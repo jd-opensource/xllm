@@ -77,6 +77,18 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
+  if (FLAGS_enable_xtensor) {
+#if defined(USE_NPU)
+    SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
+#endif
+    return step_internal(input);
+  } else {
+    return step_internal(input);
+  }
+}
+
+std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
+    const ForwardInput& input) {
   MULTI_MODEL_STEP_LOCK(FLAGS_enable_xtensor);
 
   Timer timer;
@@ -105,12 +117,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     eplb_executor_->eplb_execute(input.eplb_info);
   }
 
-  // temporarily use [0], will be adapted in next pr
   // call model executor forward to get hidden states
-#if defined(USE_NPU)
-  SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
-#endif
-
   auto model_output = model_executor_->forward(
       input.token_ids, input.positions, kv_caches_, input.input_params);
   if (!model_output.hidden_states.defined()) {

@@ -71,17 +71,12 @@ SpeculativeEngine::SpeculativeEngine(const runtime::Options& options,
   }
 }
 
-<<<<<<< HEAD
 SuffixSpeculativeEngine::SuffixSpeculativeEngine(
     const runtime::Options& options)
     : SpeculativeEngine(options, /*use_draft_engine=*/false) {}
 
-bool SpeculativeEngine::init(int32_t master_status) {
-  if (!init_model(master_status)) {
-=======
 bool SpeculativeEngine::init() {
   if (!init_model()) {
->>>>>>> 0f0fb85 (feat: support PD separation in virtual memory management.)
     return false;
   }
 
@@ -96,17 +91,11 @@ bool SpeculativeEngine::init_model() {
   if (!engine_->init_model()) {
     return false;
   }
-<<<<<<< HEAD
-=======
-  if (!draft_engine_->init_model()) {
-    return false;
-  }
->>>>>>> 0f0fb85 (feat: support PD separation in virtual memory management.)
 
   model_args_ = engine_->model_args();
 
   if (use_draft_engine_) {
-    if (!draft_engine_->init_model(master_status)) {
+    if (!draft_engine_->init_model()) {
       return false;
     }
 

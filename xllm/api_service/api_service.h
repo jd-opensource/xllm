@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <shared_mutex>
+#include <string>
 #include <unordered_map>
 
 #include "anthropic_service_impl.h"
@@ -160,8 +162,13 @@ class APIService : public proto::XllmAPIService {
  private:
   bool ParseForkMasterRequest(const proto::MasterInfos* request,
                               Options& options);
+  void set_model_master(const std::string& model_id, Master* master);
+  bool has_model_master(const std::string& model_id) const;
+  bool add_model_master_if_absent(const std::string& model_id, Master* master);
+  Master* get_model_master(const std::string& model_id) const;
 
   Master* master_;
+  mutable std::shared_mutex masters_mutex_;
   std::unordered_map<std::string, Master*> masters_;
   std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;
   std::unique_ptr<CompletionServiceImpl> completion_service_impl_;

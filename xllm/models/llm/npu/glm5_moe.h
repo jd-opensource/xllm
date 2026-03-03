@@ -151,6 +151,38 @@ class Glm5MoeModelImpl : public torch::nn::Module {
     norm_->merge_loaded_weights();
   }
 
+  void merge_and_move_pinned_host() {
+    npu_embed_tokens_->merge_and_move_pinned_host();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->merge_and_move_pinned_host();
+    }
+    norm_->merge_and_move_pinned_host();
+  }
+
+  void free_weights() {
+    npu_embed_tokens_->free_weights();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->free_weights();
+    }
+    norm_->free_weights();
+  }
+
+  void reload_weights() {
+    npu_embed_tokens_->reload_weights();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights();
+    }
+    norm_->reload_weights();
+  }
+
+  void reload_weights_from_device() {
+    npu_embed_tokens_->reload_weights_from_device();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights_from_device();
+    }
+    norm_->reload_weights_from_device();
+  }
+
   void prepare_expert_weight(int32_t layer_id,
                              const std::vector<int32_t>& expert_ids) {
     layers_[layer_id]->prepare_expert_weight(expert_ids);

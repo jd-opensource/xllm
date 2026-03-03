@@ -83,9 +83,9 @@ class BlockManagerPool : public KVCacheManager {
   // get the options for the block manager
   const Options& options() const { return options_; }
 
-  // Reserve XTensor null blocks for each DP manager.
+  // Reserve XTensor padding blocks for each DP manager.
   // Should be called after KV tensors are created.
-  void reserve_xtensor_null_blocks() override;
+  void reserve_xtensor_padding_blocks() override;
 
  protected:
   int32_t get_manager_with_max_free_blocks() const;

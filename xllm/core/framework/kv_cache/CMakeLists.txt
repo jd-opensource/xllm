@@ -47,7 +47,9 @@ cc_test(
   SRCS
     embedding_cache_test.cpp
   DEPS
+    :xllm_server
     :kv_cache
+    $<$<BOOL:${USE_NPU}>:xllm_server>
     GTest::gtest_main
 )
 target_link_libraries(embedding_cache_test
