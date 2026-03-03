@@ -15,6 +15,8 @@ ARG TORCH_CUDA_ARCH_LIST="8.0 8.9 9.0a 10.0a 12.0a"
 
 ARG FLASHINFER_VERSION=0.6.2
 ARG FLASHINFER_CUDA_ARCH_LIST="8.0 8.9 9.0a 10.0a 12.0a"
+ARG TILELANG_VERSION=v0.1.8
+ARG Z3_VERSION=z3-4.15.3
 
 ARG GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 
@@ -40,6 +42,8 @@ ENV CMAKE_VERSION=${CMAKE_VERSION}
 ENV TORCH_VERSION=${TORCH_VERSION}
 ENV TORCH_INDEX_URL=${TORCH_INDEX_URL}
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+ENV TILELANG_VERSION=${TILELANG_VERSION}
+ENV Z3_VERSION=${Z3_VERSION}
 
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -94,7 +98,8 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 RUN set -eux; \
     pip install "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}"; \
     pip install uv ninja "numpy<2" nvshmem4py-cu12 nvidia-nvshmem-cu12 \
-    aiohttp requests tqdm transformers
+    aiohttp requests tqdm transformers \
+    scikit-build-core pybind11 cython cloudpickle
 
 ENV NVSHMEM_HOME=/usr/local
 
@@ -124,14 +129,79 @@ RUN if [[ -n "${GIT_HTTPS_MIRROR_PREFIX}" ]]; then \
       git config --global url."${GIT_HTTPS_MIRROR_PREFIX}".insteadOf https://; \
     fi
 
-# Install tvm-ffi
+# Build and install Z3 from source into /usr/local
 RUN set -eux; \
-    git clone --depth 1 --recurse-submodules https://github.com/apache/tvm-ffi.git /workspace/tvm-ffi; \
-    git -C /workspace/tvm-ffi submodule update --init --recursive; \
-    cmake -S /workspace/tvm-ffi -B /workspace/tvm-ffi/build_cpp -DCMAKE_BUILD_TYPE=RelWithDebInfo; \
-    cmake --build /workspace/tvm-ffi/build_cpp --parallel --config RelWithDebInfo --target tvm_ffi_shared; \
-    cmake --install /workspace/tvm-ffi/build_cpp --config RelWithDebInfo; \
-    rm -rf /workspace/tvm-ffi
+    git clone --depth 1 --branch "${Z3_VERSION}" https://github.com/Z3Prover/z3.git /workspace/z3; \
+    cmake -S /workspace/z3 -B /workspace/z3/build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=ON \
+      -DCMAKE_INSTALL_PREFIX=/usr/local; \
+    cmake --build /workspace/z3/build --parallel; \
+    cmake --install /workspace/z3/build; \
+    rm -rf /workspace/z3
+
+# Clone TileLang v0.1.8 (with bundled TVM + tvm-ffi)
+RUN set -eux; \
+    git clone --depth 1 --branch "${TILELANG_VERSION}" --recurse-submodules \
+      https://github.com/tile-ai/tilelang.git /workspace/tilelang; \
+    git -C /workspace/tilelang submodule update --init --recursive
+
+# Build and install tvm-ffi from TileLang bundled TVM source
+RUN set -eux; \
+    cmake \
+      -S /workspace/tilelang/3rdparty/tvm/3rdparty/tvm-ffi \
+      -B /workspace/tilelang/3rdparty/tvm/3rdparty/tvm-ffi/build_cpp \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_INSTALL_PREFIX=/usr/local; \
+    cmake --build /workspace/tilelang/3rdparty/tvm/3rdparty/tvm-ffi/build_cpp \
+      --parallel --config RelWithDebInfo --target tvm_ffi_shared; \
+    cmake --install /workspace/tilelang/3rdparty/tvm/3rdparty/tvm-ffi/build_cpp \
+      --config RelWithDebInfo
+
+# Build and install TileLang runtime with source-built Z3
+RUN set -eux; \
+    Z3_CONFIG_FILE="$(find /usr/local -type f \( -name Z3Config.cmake -o -name z3-config.cmake \) -print -quit)"; \
+    test -n "${Z3_CONFIG_FILE}"; \
+    Z3_CMAKE_DIR="$(dirname "${Z3_CONFIG_FILE}")"; \
+    TVM_ROOT=/workspace/tilelang/3rdparty/tvm \
+      cmake -S /workspace/tilelang -B /workspace/tilelang/build_runtime \
+        -DPython3_EXECUTABLE="$(which python)" \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DUSE_CUDA=ON \
+        -DUSE_Z3=ON \
+        -DUSE_PYPI_Z3=OFF \
+        -DZ3_DIR="${Z3_CMAKE_DIR}" \
+        -DCMAKE_PREFIX_PATH=/usr/local \
+        -DCMAKE_INSTALL_PREFIX=/usr/local; \
+    cmake --build /workspace/tilelang/build_runtime --parallel --config RelWithDebInfo; \
+    cmake --install /workspace/tilelang/build_runtime --config RelWithDebInfo
+
+# Install Python packages from source paths (tvm-ffi + tilelang)
+RUN set -eux; \
+    python -m pip install --no-deps /workspace/tilelang/3rdparty/tvm/3rdparty/tvm-ffi; \
+    rm -rf /workspace/tilelang/build /workspace/tilelang/_skbuild; \
+    CMAKE_GENERATOR=Ninja \
+    TVM_ROOT=/workspace/tilelang/3rdparty/tvm \
+    CMAKE_ARGS="-DUSE_CUDA=ON -DUSE_Z3=ON -DUSE_PYPI_Z3=OFF -DCMAKE_PREFIX_PATH=/usr/local -DPython3_EXECUTABLE=$(which python)" \
+      python -m pip install --no-build-isolation --no-deps /workspace/tilelang
+
+# Build-time read-only validation for runtime and Python package sources
+RUN python - <<'PY'
+import importlib.metadata as im
+import tilelang
+import tvm
+import tvm_ffi
+
+print("tilelang:", im.version("tilelang"), tilelang.__file__)
+print("apache-tvm-ffi:", im.version("apache-tvm-ffi"), tvm_ffi.__file__)
+print("tvm:", tvm.__file__)
+PY
+
+RUN set -eux; \
+    ldd /usr/local/tilelang/lib/libtvm.so | grep libz3 | grep /usr/local/lib/libz3.so; \
+    test -f /usr/local/tilelang/lib/libtilelang.so; \
+    test -f /usr/local/tilelang/lib/libtvm.so; \
+    test -f /usr/local/lib/libtvm_ffi.so
 
 # Install flashinfer + AOT compile
 ENV FLASHINFER_VERSION=${FLASHINFER_VERSION}
@@ -149,6 +219,7 @@ RUN set -eux; \
     rm -rf /workspace/flashinfer
 
 ENV FLASHINFER_OPS_PATH=/flashinfer_ops
+ENV LD_LIBRARY_PATH=/usr/local/tilelang/lib:$LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
