@@ -42,7 +42,7 @@
 #include <type_traits>
 
 #include "cuda_utils.h"
-#include "moe_topk_funcs.cuh"
+#include "moe/moe_topk.cuh"
 // #include "topk_last_dim.h"
 
 using SizeType32 = int32_t;

@@ -32,12 +32,15 @@ set(CUDA_HEADER_FILES
   cutlass_w8a8/c3x/scaled_mm_sm90_fp8_dispatch.cuh
   fp8_quant_utils.cuh
   global_capture_instance.h
-  moe_topk_funcs.cuh
   piecewise_graphs.h
   topk_last_dim.cuh
   type_convert.cuh
   utils.h
+  device_utils.cuh
   xattention/xattention_ops_api.h
+  moe/moe_topk.cuh
+  moe/moe_topk_sigmoid_kernels.cuh
+  moe/moe_topk_softmax_kernels.cuh
 )
 
 # Keep source list explicit to avoid accidentally compiling test files into cuda_kernels.
@@ -72,6 +75,7 @@ set(CUDA_SOURCE_FILES
   xattention/decoder_reshape_and_cache.cu
   xattention/lse_combine.cu
   xattention/prefill_reshape_and_cache.cu
+  moe/moe_fused_topk.cu
 )
 
 cc_library(
@@ -129,9 +133,9 @@ target_link_libraries(cache_select_test PRIVATE brpc)
 
 cc_test(
   NAME
-    moe_topk_funcs_test
+    moe_fused_topk_test
   SRCS
-    moe_topk_funcs_test.cu
+    moe/moe_topk_test.cu
   DEPS
     :cuda_kernels
     GTest::gtest_main
