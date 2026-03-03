@@ -18,8 +18,8 @@
 
 #include <torch/all.h>
 
-#include "cuda_utils.h"
 #include "cutlass_extensions/common.hpp"
+#include "kernels/cuda/utils.h"
 
 namespace xllm {
 namespace kernel {

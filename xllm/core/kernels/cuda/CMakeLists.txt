@@ -24,7 +24,6 @@ set(CUDA_HEADER_FILES
   arch_condition.h
   attention_runner.h
   cuda_ops_api.h
-  cuda_utils.h
   cutlass_w8a8/c3x/cutlass_gemm_caller.cuh
   cutlass_w8a8/c3x/scaled_mm.cuh
   cutlass_w8a8/c3x/scaled_mm_sm100_fp8_dispatch.cuh
