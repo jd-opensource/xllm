@@ -143,6 +143,7 @@ xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与
 - [Beihang-HiPO](https://github.com/buaa-hipo)（北京航空航天大学HiPO研究组）
 - PKU-DS-LAB（北京大学数据结构实验室）
 - PKU-NetSys-LAB（北京大学网络系统实验室）
+- [TJU-TANKLab](https://clouduv.cn/) (天津大学TANK实验室)
 
 感谢以下为xLLM作出贡献的[开发者](https://github.com/jd-opensource/xllm/graphs/contributors)
 
