@@ -24,7 +24,7 @@ limitations under the License.
 
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
-#include "xllm_kernels/models/glm4v/glm4v_encoder.h"
+#include "xllm_atb_layers/models/glm4v/glm4v_encoder.h"
 
 namespace xllm {
 namespace layer {

@@ -35,11 +35,11 @@ limitations under the License.
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
-#include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
-#include "xllm_kernels/core/include/atb_speed/base/model.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
-#include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
-#include "xllm_kernels/models/qwen2/layer/decoder_layer.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/hosttensor_binder.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/model.h"
+#include "xllm_atb_layers/core/include/atb_speed/log.h"
+#include "xllm_atb_layers/core/include/atb_speed/utils/model_factory.h"
+#include "xllm_atb_layers/models/qwen2/layer/decoder_layer.h"
 
 namespace xllm {
 namespace layer {

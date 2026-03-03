@@ -31,3 +31,6 @@
 [submodule "third_party/cutlass"]
 	path = third_party/cutlass
 	url = https://gitcode.com/xLLM-AI/cutlass.git
+[submodule "third_party/xllm_atb_layers"]
+	path = third_party/xllm_atb_layers
+	url = https://gitcode.com/xLLM-AI/xllm_atb_layers.git

@@ -29,7 +29,6 @@ class ExtBuild(build_ext):
         ("base-dir=", None, "base directory of xLLM project"),
         ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
-        ("install-xllm-kernels=", None, "install xllm_kernels RPM package (true/false)"),
         ("generate-so=", None, "generate so or binary"),
     ]
 
@@ -38,7 +37,6 @@ class ExtBuild(build_ext):
         self.base_dir = get_base_dir()
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
-        self.install_xllm_kernels: Optional[bool] = None
         self.generate_so: bool = False
 
     def finalize_options(self) -> None:
@@ -109,7 +107,7 @@ class ExtBuild(build_ext):
             f"-DBUILD_SHARED_LIBS=OFF",
             f"-DDEVICE_TYPE=USE_{self.device.upper()}",
             f"-DDEVICE_ARCH={self.arch.upper()}",
-            f"-DINSTALL_XLLM_KERNELS={'ON' if self.install_xllm_kernels else 'OFF'}",
+            f"-DXLLM_ATB_LAYERS_SOURCE_DIR={os.path.join(self.base_dir, 'third_party', 'xllm_atb_layers')}",
             f"-DCMAKE_JOB_POOLS=archive={archive_jobs}",
         ]
 
@@ -463,7 +461,6 @@ class SingleTest(Command):
         ("test-name=", None, "name of the test target to build and run (e.g. platform_vmm_test)"),
         ("device=", None, "target device type (a3 or a2 or mlu or cuda or ilu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
-        ("install-xllm-kernels=", None, "install xllm_kernels RPM package (true/false)"),
         ("generate-so=", None, "generate so or binary"),
     ]
 
@@ -471,7 +468,6 @@ class SingleTest(Command):
         self.test_name: Optional[str] = None
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
-        self.install_xllm_kernels: Optional[bool] = None
         self.generate_so: bool = False
 
     def finalize_options(self) -> None:
@@ -485,7 +481,6 @@ class SingleTest(Command):
         build_ext.test_name = self.test_name
         build_ext.device = self.device
         build_ext.arch = self.arch
-        build_ext.install_xllm_kernels = self.install_xllm_kernels
         build_ext.generate_so = self.generate_so
         build_ext.finalize_options()
         
@@ -525,14 +520,6 @@ def parse_arguments() -> dict[str, Any]:
     )
     
     parser.add_argument(
-        '--install-xllm-kernels',
-        type=str.lower,
-        choices=['true', 'false', '1', '0', 'yes', 'no', 'y', 'n', 'on', 'off'],
-        default='true',
-        help='Whether to install xllm kernels'
-    )
-    
-    parser.add_argument(
         '--generate-so',
         type=str.lower,
         choices=['true', 'false', '1', '0', 'yes', 'no', 'y', 'n', 'on', 'off'],
@@ -551,13 +538,11 @@ def parse_arguments() -> dict[str, Any]:
     
     sys.argv = [sys.argv[0]] + args.setup_args
     
-    install_kernels = args.install_xllm_kernels.lower() in ('true', '1', 'yes', 'y', 'on')
     generate_so = args.generate_so.lower() in ('true', '1', 'yes', 'y', 'on')
 
     return {
         'device': args.device,
         'dry_run': args.dry_run,
-        'install_xllm_kernels': install_kernels,
         'generate_so': generate_so,
         'test_name': args.test_name,
     }
@@ -574,7 +559,6 @@ if __name__ == "__main__":
     if not config['dry_run']:
         pre_build(device)
 
-    install_kernels = config['install_xllm_kernels']
     generate_so = config['generate_so']
     test_name = config.get('test_name')
 
@@ -593,7 +577,6 @@ if __name__ == "__main__":
         'build_ext': {
             'device': device,
             'arch': arch,
-            'install_xllm_kernels': install_kernels,
             'generate_so': generate_so
         },
         'bdist_wheel': {
@@ -605,7 +588,6 @@ if __name__ == "__main__":
         options['test'] = {
             'device': device,
             'arch': arch,
-            'install_xllm_kernels': install_kernels,
             'generate_so': generate_so,
             'test_name': test_name,
         }

@@ -29,7 +29,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "loader/glm4_moe_lite_decoder_loader.h"
 #include "npu_base_layer.h"
-#include "xllm_kernels/models/glm/layer/moe_decoder_layer.h"
+#include "xllm_atb_layers/models/glm/layer/moe_decoder_layer.h"
 
 namespace xllm {
 namespace layer {

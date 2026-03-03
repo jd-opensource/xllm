@@ -39,7 +39,7 @@ limitations under the License.
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
-#include "xllm_kernels/models/qwen3_vl/qwen3_vl_encoder.h"
+#include "xllm_atb_layers/models/qwen3_vl/qwen3_vl_encoder.h"
 
 namespace xllm {
 namespace layer {
