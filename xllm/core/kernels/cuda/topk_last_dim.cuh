@@ -41,7 +41,7 @@
 #include <limits>
 #include <type_traits>
 
-#include "moe_topk_funcs.cuh"
+#include "moe/moe_topk.cuh"
 #include "platform/device.h"
 // #include "topk_last_dim.h"
 

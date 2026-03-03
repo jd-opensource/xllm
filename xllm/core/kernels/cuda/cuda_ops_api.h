@@ -240,4 +240,10 @@ void fused_qk_norm_rope(
     const torch::Tensor& position_ids  // Position IDs for RoPE [num_tokens]
 );
 
+std::tuple<torch::Tensor, torch::Tensor> moe_fused_topk(
+    torch::Tensor& gating_output,
+    int64_t topk,
+    bool renormalize,
+    const std::optional<torch::Tensor>& correction_bias,
+    const std::string& scoring_func);
 }  // namespace xllm::kernel::cuda

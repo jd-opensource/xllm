@@ -381,7 +381,7 @@ torch::Tensor group_gemm(GroupGemmParams& params) {
 }
 
 std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
-    MoeActiveTopkParams& params) {
+    MoeFusedTopkParams& params) {
 #if defined(USE_MLU)
   return mlu::moe_active_topk(params.input,
                               params.topk,
@@ -394,6 +394,8 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.route_scale,
                               params.e_score_correction_bias);
 #elif defined(USE_NPU)
+  CHECK_EQ(params.scoring_func, "softmax")
+      << "Only softmax is supported for NPU";
   auto [topk_weights, topk_ids, row_ids] = npu::apply_moe_gating_topk_softmax(
       params.input, params.finished, params.topk);
   (void)row_ids;
@@ -409,6 +411,12 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.scoring_func,
                               params.route_scale,
                               params.e_score_correction_bias);
+#elif defined(USE_CUDA) || defined(USE_MUSA)
+  return cuda::moe_fused_topk(params.input,
+                              params.topk,
+                              params.normalize,
+                              params.e_score_correction_bias,
+                              params.scoring_func);
 #else
   NOT_IMPLEMENTED();
 #endif
