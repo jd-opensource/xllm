@@ -26,6 +26,7 @@ cc_library(
     dit_request_output.h
     dit_request_params.h
     request_params.h
+    utils.h
     sequence.h
     sequence_logprob_state.h
     sequence_kv_state.h
@@ -53,6 +54,7 @@ cc_library(
     request_output.cpp
     dit_request_output.cpp
     request_params.cpp
+    utils.cpp
     dit_request_params.cpp
     sequence.cpp
     sequence_logprob_state.cpp
@@ -74,4 +76,3 @@ cc_library(
     torch
     ${OpenCV_LIBS}
 )
-

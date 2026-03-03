@@ -15,6 +15,7 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
 #include <cstdint>
 #include <limits>
 #include <nlohmann/json.hpp>

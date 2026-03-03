@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
 #include "framework/request/sequence.h"
+#include "framework/request/utils.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
@@ -394,6 +395,11 @@ void DisaggPDScheduler::dispatch_requests() {
       req->set_is_embeddings(requests[i]->state().sampling_param.is_embeddings);
       req->set_echo(requests[i]->state().echo);
       req->set_skip_special_tokens(requests[i]->state().skip_special_tokens);
+      copy_json_tools_to_proto(requests[i]->state().tools,
+                               req->mutable_tools());
+      if (!requests[i]->state().tool_choice.empty()) {
+        req->set_tool_choice(requests[i]->state().tool_choice);
+      }
       //*reqs.mutable_reqs()->Add() = req;
     }
     std::vector<std::string> device_ips;

@@ -24,6 +24,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "common/types.h"
 #include "core/framework/sampling/sampling_params.h"
 #include "mm_data.h"
 #include "rec_type.h"
@@ -170,6 +171,10 @@ struct RequestState final {
 
   // This will be used in enable_scheduler_overlap
   bool handle_last_token_done = false;
+
+  // Preserve tool-call metadata for disaggregated PD path.
+  std::vector<xllm::JsonTool> tools;
+  std::string tool_choice = "auto";
 
   std::optional<Call*> call_;
 };

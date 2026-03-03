@@ -20,6 +20,7 @@ limitations under the License.
 #include "common/types.h"
 #include "distributed_runtime/llm_engine.h"
 #include "framework/request/request_output.h"
+#include "framework/request/utils.h"
 #include "scheduler/disagg_pd_scheduler.h"
 
 namespace xllm {
@@ -103,6 +104,10 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
                          scheduler_->enable_schedule_overlap(),
                          output_callback,
                          batch_output_callback);
+  req_state.tools = parse_tools_from_proto(req.tools());
+  if (req.has_tool_choice()) {
+    req_state.tool_choice = req.tool_choice();
+  }
 
   auto new_request = std::make_shared<Request>(req.req_id(),
                                                req.x_request_id(),

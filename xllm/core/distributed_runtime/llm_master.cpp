@@ -421,6 +421,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                          nullptr,
                          sp.decode_address,
                          call);
+  req_state.tools = sp.tools;
+  req_state.tool_choice = sp.tool_choice;
 
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,
