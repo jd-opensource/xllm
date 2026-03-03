@@ -120,7 +120,7 @@ xLLM 提供了强大的智能计算能力，通过硬件系统的算力优化与
 如果您有企业内部Slack，请直接联系xLLM Core团队。另外，我们建立了官方微信群，可以访问以下二维码加入。欢迎沟通和联系我们:
 
 <div align="center">
-  <img src="docs/assets/wechat_qrcode.jpg" alt="qrcode3" width="50%" />
+  <img src="docs/assets/wechat_qrcode.png" alt="qrcode3" width="50%" />
 </div>
 
 ---

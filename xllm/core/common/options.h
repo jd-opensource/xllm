@@ -209,6 +209,14 @@ class Options {
 
   // beam width for beam search
   PROPERTY(int32_t, beam_width) = 128;
+
+  // KV cache data type for quantization.
+  // "auto" (default): KV cache dtype aligns with model dtype (no quantization).
+  // "int8": Enables INT8 quantization. Only supported on MLU backend.
+  PROPERTY(std::string, kv_cache_dtype) = "auto";
+
+  // max concurrency for rec worker
+  PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
 };
 
 }  // namespace xllm

@@ -41,11 +41,11 @@ DECLARE_string(devices);
 
 DECLARE_int32(limit_image_per_prompt);
 
+// --- kvcache config ---
 DECLARE_int32(block_size);
-
 DECLARE_int64(max_cache_size);
-
 DECLARE_double(max_memory_utilization);
+DECLARE_string(kv_cache_dtype);
 
 DECLARE_bool(enable_prefix_cache);
 
@@ -64,6 +64,7 @@ DECLARE_string(draft_model);
 DECLARE_string(draft_devices);
 DECLARE_int32(num_speculative_tokens);
 DECLARE_string(speculative_algorithm);
+DECLARE_bool(enable_opt_validate_probs);
 
 DECLARE_int32(num_request_handling_threads);
 
@@ -220,7 +221,7 @@ DECLARE_int64(buffer_size_per_seq);
 // --- beam search config ---
 DECLARE_bool(enable_beam_search_kernel);
 
-DECLARE_bool(enable_fast_sampler);
+DECLARE_bool(enable_rec_fast_sampler);
 
 DECLARE_bool(enable_topk_sorted);
 
@@ -266,6 +267,9 @@ DECLARE_int32(max_decode_rounds);
 DECLARE_int32(beam_width);
 
 DECLARE_bool(use_audio_in_video);
+
+// --- concurrent rec worker config ---
+DECLARE_uint32(rec_worker_max_concurrency);
 
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);

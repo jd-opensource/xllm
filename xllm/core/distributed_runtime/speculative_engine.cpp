@@ -79,6 +79,7 @@ bool SpeculativeEngine::init_model() {
   if (!engine_->init_model()) {
     return false;
   }
+
   if (!draft_engine_->init_model()) {
     return false;
   }

@@ -59,8 +59,25 @@ void batch_prefill(const std::string& uri,
                    double sm_scale,
                    torch::Tensor output,
                    std::optional<torch::Tensor>& output_lse,
-                   bool enable_cuda_graph,
                    const std::optional<torch::Tensor>& mask = std::nullopt);
+
+// Wrapper function for batch_prefill that conditionally uses AttentionRunner
+// for piecewise CUDA Graph capture
+void batch_prefill_with_optional_piecewise_capture(
+    const std::string& uri,
+    ffi::Array<int64_t> plan_info,
+    torch::Tensor float_workspace_buffer,
+    torch::Tensor int_workspace_buffer,
+    torch::Tensor page_locked_int_workspace_buffer,
+    torch::Tensor query,
+    torch::Tensor key,
+    torch::Tensor value,
+    torch::Tensor q_cu_seq_lens,
+    torch::Tensor kv_cu_seq_lens,
+    int64_t window_left,
+    double sm_scale,
+    torch::Tensor output,
+    std::optional<torch::Tensor>& output_lse);
 
 void batch_decode(const std::string& uri,
                   ffi::Array<int64_t> plan_info,
@@ -77,9 +94,7 @@ void batch_decode(const std::string& uri,
                   double sm_scale,
                   torch::Tensor output,
                   std::optional<torch::Tensor>& output_lse,
-                  bool enable_cuda_graph,
                   bool use_tensor_core,
-                  torch::Tensor kv_seq_lens,
                   std::optional<torch::Tensor> qo_indptr = std::nullopt);
 
 void rms_norm(torch::Tensor output,
@@ -109,5 +124,24 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_general(
     uint32_t input_length,
     uint32_t k,
     torch::Device device);
+
+torch::Tensor air_log_softmax_last_dim(const torch::Tensor& input,
+                                       const torch::Tensor& temperatures);
+
+void fused_qk_norm_rope(
+    torch::Tensor& qkv,   // Combined QKV tensor [num_tokens,
+                          // (num_heads_q+num_heads_k+num_heads_v)*head_dim]
+    int64_t num_heads_q,  // Number of query heads
+    int64_t num_heads_k,  // Number of key heads
+    int64_t num_heads_v,  // Number of value heads
+    int64_t head_dim,     // Dimension per head
+    double eps,           // Epsilon for RMS normalization
+    const torch::Tensor& q_weight,  // RMSNorm weights for query [head_dim]
+    const torch::Tensor& k_weight,  // RMSNorm weights for key [head_dim]
+    const torch::Tensor&
+        cos_sin_cache,  // Cos/sin cache [max_position, rotary_dim]
+    bool interleaved,   // Whether RoPE is applied in interleaved style
+    const torch::Tensor& position_ids  // Position IDs for RoPE [num_tokens]
+);
 
 }  // namespace xllm::kernel::cuda

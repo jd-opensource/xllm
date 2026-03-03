@@ -61,6 +61,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                             torch::Tensor& q_input,
                             torch::Tensor& latent_cache,
                             torch::Tensor& kv_cache,
+                            std::optional<torch::Tensor> k_cache_scale,
                             const torch::Tensor& positions,
                             const AttentionMetadata& attn_metadata);
 

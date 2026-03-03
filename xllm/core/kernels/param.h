@@ -51,6 +51,9 @@ struct RotaryParams {
   // Precomputed cos_sin tensor. Not used in current MLU implementation
   // (rope.cpp).
   torch::Tensor cos_sin;
+  // Pre-formatted cos_sin cache for kernels that need [cos_half, sin_half]
+  // layout (CUDA, MUSA, ILU). Avoids chunk/cat operations per layer.
+  torch::Tensor precomputed_cos_sin;
   // Optional position IDs tensor. Type must be int32.
   // Shape: [total_seqlen] if discrete=true, or [batch_size] if discrete=false.
   // If discrete=true, position_ids must be provided.
@@ -143,6 +146,14 @@ struct ReshapePagedCacheParams {
   // Direction flag: false = CONTEXT2CACHE (copy from context to cache),
   // true = CACHE2CONTEXT (copy from cache to context).
   bool direction = false;
+  // Optional scale tensor for quantized key cache. Shape: [num_blocks,
+  // num_heads, block_size]. Dtype: float32. Required when using INT8
+  // quantization.
+  std::optional<torch::Tensor> k_cache_scale;
+  // Optional scale tensor for quantized value cache. Shape: [num_blocks,
+  // num_heads, block_size]. Dtype: float32. Required when using INT8
+  // quantization.
+  std::optional<torch::Tensor> v_cache_scale;
 };
 
 // ReshapeFromCacheParams describes parameters for gathering and flattening
@@ -188,136 +199,20 @@ struct ReshapeFromCacheParams {
   // Used for slicing key and value cache starts in memory.
   // Shape: [batch_size]. Dtype: int32. Default: None.
   std::optional<torch::Tensor> cache_seq_offset;
-};
 
-// Attention parameters
-// Note: This struct is used by both batch_prefill (flash_attention) and
-// batch_decode (single_query_cached_kv_attn). Parameters are grouped by usage.
-struct AttentionParams {
-  // Constructor: requires AttentionMetadata to be provided
-  explicit AttentionParams(const layer::AttentionMetadata& attn_metadata)
-      : attn_metadata(attn_metadata) {}
-
-  // Batch-level attention metadata shared across all layers.
-  // Contains sequence lengths, paged KV cache indices, plan_info, etc.
-  const layer::AttentionMetadata& attn_metadata;
-
-  // ========== Common parameters (used by both prefill and decode) ==========
-  // Query tensor. Shape depends on mode:
-  // - Prefill: 3D [total_tokens, num_heads, head_dim] (packed) or
-  //            4D [batch, seq_len, num_heads, head_dim] (padded)
-  // - Decode: 4D [batch, seq_q, num_heads, head_dim]
-  //   Last two dims must be contiguous: stride(-1)==1, stride(-2)==head_dim
-  torch::Tensor query;
-  // Output tensor. Shape: [batch, seq_q, num_heads, head_dim] (decode) or
-  // [total_tokens, num_heads, head_dim] (prefill packed) or
-  // [batch, seq_len, num_heads, head_dim] (prefill padded).
-  // Last two dims must be contiguous: stride(-1)==1, stride(-2)==head_dim
-  torch::Tensor output;
-  // Optional log-sum-exp output tensor. Shape: [batch, num_heads, seq_q].
-  // Used when return_lse=true. Must be contiguous.
-  std::optional<torch::Tensor> output_lse;
-  // Optional ALiBi (Attention with Linear Biases) slope tensor.
-  // - Prefill: shape [batch, num_heads] or [num_heads]
-  // - Decode: shape [batch, num_heads] or [num_heads]
-  std::optional<torch::Tensor> alibi_slope;
-  // Optional query quantization scale tensor.
-  // - Prefill: 1D (fp8 per-tensor) or 3D (sage per-block)
-  // - Decode: 1D [1] (per-tensor) or 3D [batch, seq_q, num_heads] (per-token)
-  // If provided, k_quant_scale (prefill) or k_cache_quant_scale (decode) must
-  // also be provided.
-  std::optional<torch::Tensor> q_quant_scale;
-  // Optional output quantization scale. Currently not supported (must be None).
-  // Reserved for future use.
-  std::optional<torch::Tensor> out_quant_scale;
-  // Note: block_table, compute_dtype, and max_seq_len are now in attn_metadata
-#if defined(USE_ILU)
-  // Block-aligned maximum sequence length for ILU.
-  // Used to store the block-aligned max sequence length calculated from
-  // block_table and block_size. Value: block_table.size(-1) * block_size.
-  // Default: 0 (not set).
-  int64_t block_aligned_max_seq_len = 0;
-#endif
-  // Left window size for sliding window attention. Must be >= 0.
-  int64_t window_size_left;
-  // Right window size for sliding window attention. Default: -1.
-  // In decode mode, only supports window_size_right < 0 currently.
-  int64_t window_size_right = -1;
-  // Softmax scaling factor. Applied to Q@K^T before softmax.
-  float scale;
-  // Whether to return log-sum-exp values in output_lse.
-  bool return_lse = false;
-  // ========== Torch NPU related parameters ==========
-  torch::Tensor seq_lens;
-  torch::Tensor attn_mask;
-
-  // ========== FlashInfer related parameters ==========
-  // Note: paged_kv_indptr, paged_kv_indices, paged_kv_last_page_len, qo_indptr,
-  // uri, plan_info, enable_cuda_graph, and use_tensor_core are now in
-  // attn_metadata
-  torch::Tensor float_workspace_buffer;
-  torch::Tensor int_workspace_buffer;
-  torch::Tensor page_locked_int_workspace_buffer;
-  bool use_tensor_core;
-
-  // ========== Prefill-specific parameters ==========
-  // Key tensor. Shape: [num_tokens, num_kv_heads, head_dim_qk] (packed) or
-  // [batch, seq_len, num_kv_heads, head_dim_qk] (padded) or
-  // [num_blocks, num_kv_heads, block_size, head_dim_qk] (paged with
-  // block_table). If block_table provided, must be 4D. Must have same dim as
-  // value.
-  torch::Tensor key;
-  // Value tensor. Shape: [num_tokens, num_kv_heads, head_dim_vo] (packed) or
-  // [batch, seq_len, num_kv_heads, head_dim_vo] (padded) or
-  // [num_blocks, num_kv_heads, block_size, head_dim_vo] (paged with
-  // block_table). If block_table provided, must be 4D. Must have same dim as
-  // key.
-  torch::Tensor value;
-  // Note: q_cu_seq_lens, kv_cu_seq_lens, q_seq_lens, and kv_seq_lens are now in
-  // attn_metadata Optional attention bias tensor. Used for custom attention
-  // patterns.
-  std::optional<torch::Tensor> attn_bias;
-  // Optional key quantization scale tensor.
-  // - 1D [1]: fp8 per-tensor quantization (requires q_quant_scale to be 1D)
-  // - 3D: sage per-block quantization (not supported with block_table)
-  // Must have same dim as q_quant_scale.
-  std::optional<torch::Tensor> k_quant_scale;
-  // Optional value quantization scale tensor.
-  // - 1D [1]: fp8 per-tensor quantization (requires q_quant_scale to be 1D)
-  // - 3D [batch, num_kv_heads, head_dim_vo]: sage per-channel quantization
-  std::optional<torch::Tensor> v_quant_scale;
-  // Note: max_query_len and is_causal are now in attn_metadata
-
-  // ========== Decode-specific parameters ==========
-  // Key cache tensor in paged format. Shape: [num_blocks, num_kv_heads,
-  // block_size, head_dim]. Must be contiguous. If kv_cache_quant_bit_size=4,
-  // shape is [num_blocks, num_kv_heads, block_size, head_dim/2].
-  torch::Tensor k_cache;
-  // Value cache tensor in paged format. Shape: [num_blocks, num_kv_heads,
-  // block_size, head_dim]. Must be contiguous. If kv_cache_quant_bit_size=4,
-  // shape is [num_blocks, num_kv_heads, v_cache_len, head_dim] where
-  // v_cache_len = PAD_UP_DIV(block_size, 2).
-  std::optional<torch::Tensor> v_cache;
-  // Optional key cache quantization scale tensor. Must be contiguous.
-  // - 2D [num_kv_heads, head_dim]: per-channel quantization
-  // - 3D [num_blocks, num_kv_heads, block_size]: per-token quantization
-  // - 4D [num_blocks, num_kv_heads, block_size, 1]: per-token quantization
-  // Required when q_quant_scale is provided.
-  std::optional<torch::Tensor> k_cache_quant_scale;
-  // Optional value cache quantization scale tensor. Must be contiguous.
-  // Must have same dim as k_cache_quant_scale if provided.
-  // - 2D [num_kv_heads, head_dim]: per-channel quantization
-  // - 3D [num_blocks, num_kv_heads, block_size]: per-token quantization
-  // - 4D [num_blocks, num_kv_heads, block_size, 1]: per-token quantization
-  std::optional<torch::Tensor> v_cache_quant_scale;
-  // Optional attention mask tensor.
-  // When provided, uses NTT (non-token-to-token) mask mode instead of causal
-  // mask.
-  std::optional<torch::Tensor> mask;
-  // KV cache quantization bit size. Default: -1 (no quantization).
-  // Supported values: -1 (no quant), 4 (int4), 8 (int8).
-  // If 4, k_cache and v_cache shapes are adjusted for int4 packing.
-  int64_t kv_cache_quant_bit_size = -1;
+  // ========== Quantization parameters (for dequant_from_paged_cache)
+  // ========== Optional scale tensor for quantized key cache. Shape:
+  // [num_blocks, num_heads, block_size] or [num_heads, head_dim]. Dtype:
+  // float32. Required when dequantizing INT8 cache.
+  std::optional<torch::Tensor> key_cache_quant_scale;
+  // Optional scale tensor for quantized value cache.
+  // Shape: [num_blocks, num_heads, block_size] or [num_heads, head_dim].
+  // Dtype: float32. Required when dequantizing INT8 cache.
+  std::optional<torch::Tensor> value_cache_quant_scale;
+  // Quantization mode: 0 for per-channel, 1 for per-token. Default: 1.
+  int64_t quant_mode = 1;
+  // Quantization bit size. Default: 8 (INT8).
+  int64_t quant_bit = 8;
 };
 
 // Fused layer norm parameters
@@ -451,6 +346,52 @@ struct GroupGemmParams {
   // Quantization bit-width for input a.
   // Set -1 to disable quantization.
   int64_t a_quant_bit;
+  // ========== Torch NPU related parameters ==========
+  // Optional input tensor list for grouped matmul.
+  // If provided, this overrides `a` for NPU backend.
+  // Each tensor shape: [M, K] (or [K, M] if trans_a is true).
+  std::optional<torch::TensorList> x_list;
+  // Optional weight tensor list for grouped matmul.
+  // If provided, this overrides `b` for NPU backend.
+  // Each tensor shape: [K, N] or [N, K] depending on trans_b.
+  std::optional<torch::TensorList> weight_list;
+  // Optional bias list. Used in quantized or fused-activation paths.
+  std::optional<torch::TensorList> bias_list;
+  // Optional scale list for quantized weights.
+  std::optional<torch::TensorList> scale_list;
+  // Optional offset list for quantized weights.
+  std::optional<torch::TensorList> offset_list;
+  // Optional anti-quantization scale list.
+  std::optional<torch::TensorList> antiquant_scale_list;
+  // Optional anti-quantization offset list.
+  std::optional<torch::TensorList> antiquant_offset_list;
+  // Optional per-token scale list.
+  std::optional<torch::TensorList> per_token_scale_list;
+  // Optional group list for NPU grouped matmul.
+  // If group_list_type == 0: values are cumsum of group sizes.
+  // If group_list_type == 1: values are per-group sizes.
+  std::optional<torch::Tensor> group_list;
+  // Optional activation input list for fused activation.
+  std::optional<torch::TensorList> activation_input_list;
+  // Optional activation quantization scale list.
+  std::optional<torch::TensorList> activation_quant_scale_list;
+  // Optional activation quantization offset list.
+  std::optional<torch::TensorList> activation_quant_offset_list;
+  // Optional split item for grouped matmul.
+  // Common value is 2 for gated MLP (gate + up).
+  std::optional<int64_t> split_item = 2;
+  // Optional group type for grouped matmul.
+  // 0 indicates grouping along the M axis (row-wise).
+  std::optional<int64_t> group_type = 0;
+  // Optional group list type for grouped matmul.
+  // 0: cumsum of group sizes; 1: per-group sizes.
+  std::optional<int64_t> group_list_type = 1;
+  // Optional activation type for fused activation.
+  std::optional<int64_t> act_type;
+  // Optional tuning configuration for NPU kernel.
+  c10::OptionalIntArrayRef tuning_config;
+  // Optional output dtype for NPU kernel.
+  std::optional<torch::ScalarType> output_dtype;
   // ========== Torch ILU related parameters ==========
   // Inverse mapping of gather_idx.
   // Shape: [expand_token_num].
@@ -464,6 +405,10 @@ struct MoeActiveTopkParams {
   // Dtype: float32, float16, bfloat16.
   // Must be contiguous.
   torch::Tensor input;
+  // Optional finished mask for NPU gating topk softmax.
+  // Shape should be broadcastable to input's leading dims.
+  // If not provided, all tokens are considered active.
+  std::optional<torch::Tensor> finished;
   // Number of top-k experts to select per token.
   // Constraint: 0 < topk <= num_expert.
   int64_t topk;
@@ -555,6 +500,14 @@ struct MoeCombineResultParams {
   // - Dtype: int32.
   // - Corresponds to permutation/scatter indices for reordering expert outputs.
   torch::Tensor gather_ids;
+  // Optional probes tensor for NPU token unpermute.
+  // If provided, used as probe weights in unpermute kernel.
+  // Shape: [num_tokens, topk].
+  std::optional<torch::Tensor> probes;
+  // Whether the permuted tokens are padded (NPU token unpermute).
+  bool padded_mode = false;
+  // Optional restore shape for NPU token unpermute.
+  c10::OptionalIntArrayRef restore_shape = c10::nullopt;
   // Optional residual connection input.
   // Shape: [num_tokens, hidden_size].
   // - Must have same shape and dtype as output if provided.
@@ -1235,6 +1188,24 @@ struct FusedIndexerKParams {
   // Shape: (head_size, head_size).
   // Dtype: same as x.
   std::optional<torch::Tensor> hadamard_matrix;
+};
+
+struct MoeInitRoutingV2Params {
+  // TODO: NPU moe_init_routing_v2 is equivalent to moe_gen_idx +
+  // moe_expand_input (and token_count/cusum outputs) on other backends.
+  torch::Tensor x;
+  torch::Tensor expert_idx;
+  std::optional<torch::Tensor> scale;
+  std::optional<torch::Tensor> offset;
+  int active_num;
+  int expert_capacity;
+  int expert_num;
+  int drop_pad_mode;
+  int expert_tokens_num_type;
+  bool expert_tokens_num_flag;
+  int quant_mode;
+  torch::IntArrayRef active_expert_range;
+  int row_idx_type;
 };
 
 }  // namespace xllm::kernel

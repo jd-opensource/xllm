@@ -62,3 +62,24 @@ cc_test(
     torch
     glog::glog
 )
+
+# Add test for FusedMoE All2All path
+# This test must exist individually, because it contains forked processes
+#  which does not allow any device init on main process
+cc_test(
+  NAME
+    fused_moe_all2all_test
+  SRCS
+    fused_moe_all2all_tests.cpp
+    tests_utils.cpp
+  DEPS
+    :common_layers
+    :mlu_layers
+    :parallel_state
+    :model
+    :model_context
+    :state_dict
+    GTest::gtest_main
+    torch
+    glog::glog
+)

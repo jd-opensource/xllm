@@ -107,6 +107,20 @@ std::string get_model_backend(const std::filesystem::path& model_path) {
   return ModelRegistry::get_model_backend(model_type);
 }
 
+void validate_flags(const std::string& model_type) {
+  if (FLAGS_backend.empty()) {
+    LOG(FATAL) << "Model is not supported currently, model type: "
+               << model_type;
+  }
+#if defined(USE_MLU)
+  // TODO: support other block sizes in the future
+  if (FLAGS_block_size != 16 && FLAGS_block_size != 1) {
+    LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "
+                  "support other block sizes in the future.";
+  }
+#endif
+}
+
 int run() {
   // check if model path exists
   if (!std::filesystem::exists(FLAGS_model)) {
@@ -171,6 +185,9 @@ int run() {
       FLAGS_tool_call_parser, model_type);
   FLAGS_reasoning_parser =
       ReasoningParser::get_parser_auto(FLAGS_reasoning_parser, model_type);
+
+  // validate flags before creating master
+  validate_flags(model_type);
 
   // Create Master
   Options options;
@@ -251,6 +268,8 @@ int run() {
       .input_shm_size(FLAGS_input_shm_size)
       .output_shm_size(FLAGS_output_shm_size)
       .beam_width(FLAGS_beam_width)
+      .kv_cache_dtype(FLAGS_kv_cache_dtype)
+      .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency)
       .is_local(is_local);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));

@@ -13,7 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "attention_metadata.h"
+#include <torch_npu/csrc/aten/CustomFunctions.h>
 
-// AttentionMetadata is now a simple struct. Use AttentionMetadataBuilder to
-// build instances.
+#include "npu_ops_api.h"
+#include "ops_npu/npu_ops.h"
+
+namespace xllm::kernel::npu {
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+apply_moe_gating_topk_softmax(const torch::Tensor& x,
+                              const std::optional<torch::Tensor>& finished,
+                              int k) {
+  return at_npu::native::custom_ops::npu_moe_gating_top_k_softmax(
+      x, finished.value(), k);
+}
+
+}  // namespace xllm::kernel::npu

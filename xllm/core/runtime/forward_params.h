@@ -27,6 +27,7 @@ limitations under the License.
 #include "framework/request/mm_data.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
+#include "platform/device.h"
 
 namespace xllm {
 
@@ -117,6 +118,14 @@ struct ForwardInput {
     ForwardInput inputs;
     inputs.token_ids = safe_to(token_ids, device, true);
     inputs.positions = safe_to(positions, device, true);
+    // Convert positions to int64 on CUDA/ILU/MUSA to avoid repeated per-layer
+    // type conversions in rope kernels.
+    const auto dev = Device::type_str();
+    if ((dev == "cuda" || dev == "ilu" || dev == "musa") &&
+        inputs.positions.defined() &&
+        inputs.positions.scalar_type() != torch::kInt64) {
+      inputs.positions = inputs.positions.to(torch::kInt64);
+    }
     inputs.input_params = input_params.to(device);
     inputs.sampling_params = sampling_params.to(device, dtype);
     inputs.decoder_sampling_params = decoder_sampling_params.to(device, dtype);

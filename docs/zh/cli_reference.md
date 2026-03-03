@@ -28,6 +28,7 @@ xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 | `block_size` | `int32` | 128 |  | KV Cache存储的block size大小 |  |
 | `task` | `string` | "generate" | "embed" | 服务类型，生成式或embedding |  |
 | `max_cache_size` | `int64` | 0 |  | 可使用的KV Cache大小，单位byte |  |
+| `kv_cache_dtype` | `string` | "auto" | "int8" | KV Cache数据类型。"auto"表示与模型dtype对齐（不量化），"int8"启用INT8量化以节省约50%显存。仅MLU后端支持 |  |
 
 ## MOE模型相关参数
 | 参数名称 | 类型 | 默认值 | 其他值 | 参数含义 | 其他 |

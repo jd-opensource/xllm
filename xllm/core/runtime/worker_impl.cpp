@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "worker_impl.h"
 
+#include <ATen/Parallel.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 #include <gflags/gflags.h>
@@ -60,6 +61,51 @@ constexpr uint32_t BATCH_COPY_MAX_SIZE = 4096;
 constexpr uint32_t TIMEOUT_S = 60;      // second
 constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
 
+namespace {
+
+// During TP model initialization, each rank loads weights concurrently.
+// MoE weight assembly (especially stack/cat on large expert tensors) runs on
+// CPU and is backed by ATen intra-op thread pools.
+//
+// If every TP rank also uses many intra-op threads, we get severe CPU
+// oversubscription and memory-bandwidth contention:
+//   1) many processes run large stack/cat at the same time
+//   2) each process fans out into multiple CPU workers
+//   3) host-side contention dominates load time even when I/O is fast
+//
+// For the weight-loading window only, forcing ATen to 1 thread reduces this
+// cross-rank contention and usually lowers end-to-end load latency in TP mode.
+// We restore the previous thread count immediately after load_model() returns,
+// so runtime compute behavior remains unchanged.
+class ScopedAtenLoadThreads {
+ public:
+  explicit ScopedAtenLoadThreads(int32_t target_threads)
+      : prev_threads_(static_cast<int32_t>(at::get_num_threads())) {
+    if (target_threads > 0 && prev_threads_ != target_threads) {
+      torch::set_num_threads(target_threads);
+      active_ = true;
+    }
+  }
+
+  ~ScopedAtenLoadThreads() {
+    if (active_) {
+      torch::set_num_threads(prev_threads_);
+    }
+  }
+
+  // Non-copyable and non-movable
+  ScopedAtenLoadThreads(const ScopedAtenLoadThreads&) = delete;
+  ScopedAtenLoadThreads& operator=(const ScopedAtenLoadThreads&) = delete;
+  ScopedAtenLoadThreads(ScopedAtenLoadThreads&&) = delete;
+  ScopedAtenLoadThreads& operator=(ScopedAtenLoadThreads&&) = delete;
+
+ private:
+  int32_t prev_threads_ = 0;
+  bool active_ = false;
+};
+
+}  // namespace
+
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
                        const torch::Device& device,
                        const runtime::Options& options)
@@ -89,13 +135,39 @@ bool WorkerImpl::allocate_kv_cache(
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
+  // Check if KV cache quantization is enabled
+  // "auto" (default): cache dtype aligns with model dtype (no quantization)
+  // "int8": enables INT8 quantization
+  const bool enable_kv_cache_quant = options_.kv_cache_dtype() == "int8";
+
+  if (enable_kv_cache_quant) {
+#if !defined(USE_MLU)
+    LOG(FATAL) << "KV Cache quantization is only supported on MLU backend. "
+               << "Current backend does not support this feature.";
+#endif
+    // Check for unsupported scenarios
+    if (options_.backend() == "vlm") {
+      LOG(FATAL) << "KV Cache quantization is not supported for VLM "
+                    "(Vision-Language Model) backend.";
+    }
+    if (options_.enable_disagg_pd()) {
+      LOG(FATAL) << "KV Cache quantization is not supported in PD "
+                    "disaggregation mode.";
+    }
+  }
+
   // create a KVCache for each layer
   const int64_t num_layers = get_num_layers();
   const bool enable_lighting_indexer =
       context_.get_model_args().index_n_heads() > 0;
   kv_caches_.reserve(num_layers);
+
+  // Determine cache dtype based on quantization setting
+  torch::ScalarType cache_dtype = enable_kv_cache_quant ? torch::kInt8 : dtype_;
+
   for (int64_t i = 0; i < num_layers; ++i) {
     torch::Tensor key_cache, value_cache, index_cache;
+    torch::Tensor key_cache_scale, value_cache_scale;
 #if defined(USE_NPU)
     aclFormat npu_format_type =
         context_.get_model_args().model_type() == "deepseek_v3" &&
@@ -103,10 +175,12 @@ bool WorkerImpl::allocate_kv_cache(
             ? ACL_FORMAT_FRACTAL_NZ
             : ACL_FORMAT_ND;
     key_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_)),
+        torch::empty(kv_cache_shape[0],
+                     torch::dtype(cache_dtype).device(device_)),
         npu_format_type);
     value_cache = at_npu::native::npu_format_cast(
-        torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_)),
+        torch::empty(kv_cache_shape[1],
+                     torch::dtype(cache_dtype).device(device_)),
         npu_format_type);
     if (enable_lighting_indexer) {
       index_cache = at_npu::native::npu_format_cast(
@@ -114,29 +188,52 @@ bool WorkerImpl::allocate_kv_cache(
           npu_format_type);
     }
 #elif defined(USE_ILU) || defined(USE_MLU)
-    key_cache =
-        torch::zeros(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
+    key_cache = torch::zeros(kv_cache_shape[0],
+                             torch::dtype(cache_dtype).device(device_));
     if (!kv_cache_shape[1].empty()) {
-      value_cache =
-          torch::zeros(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+      value_cache = torch::zeros(kv_cache_shape[1],
+                                 torch::dtype(cache_dtype).device(device_));
     }
     if (enable_lighting_indexer) {
       index_cache =
           torch::zeros(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
     }
+    // Allocate scale tensors for quantized KV cache
+    if (enable_kv_cache_quant) {
+      // Scale shape: [block_nums, num_kv_heads, block_size] (remove head_size
+      // dim)
+      std::vector<int64_t> key_scale_shape(kv_cache_shape[0].begin(),
+                                           kv_cache_shape[0].end() - 1);
+      key_cache_scale = torch::zeros(
+          key_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+      if (!kv_cache_shape[1].empty()) {
+        std::vector<int64_t> value_scale_shape(kv_cache_shape[1].begin(),
+                                               kv_cache_shape[1].end() - 1);
+        value_cache_scale = torch::zeros(
+            value_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+      }
+    }
 #else
-    key_cache =
-        torch::empty(kv_cache_shape[0], torch::dtype(dtype_).device(device_));
+    key_cache = torch::empty(kv_cache_shape[0],
+                             torch::dtype(cache_dtype).device(device_));
     if (!kv_cache_shape[1].empty()) {
-      value_cache =
-          torch::empty(kv_cache_shape[1], torch::dtype(dtype_).device(device_));
+      value_cache = torch::empty(kv_cache_shape[1],
+                                 torch::dtype(cache_dtype).device(device_));
     }
     if (enable_lighting_indexer) {
       index_cache =
           torch::empty(kv_cache_shape[2], torch::dtype(dtype_).device(device_));
     }
 #endif
-    kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+    if (enable_kv_cache_quant) {
+      kv_caches_.emplace_back(key_cache,
+                              value_cache,
+                              index_cache,
+                              key_cache_scale,
+                              value_cache_scale);
+    } else {
+      kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+    }
   }
 
   init_hierarchy_kv_cache_transfer();
@@ -185,6 +282,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   int32_t device_id = device_.index();
   // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
+  const bool enable_lighting_indexer =
+      context_.get_model_args().index_n_heads() > 0;
   kv_cache_transfer_ = KVCacheTransferFactory::create(
       FLAGS_kv_cache_transfer_type,
       options_.device_ip().value(),
@@ -198,6 +297,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       [this](const std::vector<std::vector<int64_t>>& shape) {
         this->allocate_kv_cache(shape);
       },
+      enable_lighting_indexer,
       context_.get_model_args().model_type());
 
   init_hierarchy_kv_cache_transfer();
@@ -402,7 +502,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     auto dst_tensor =
         torch::tensor(dst_indices, torch::dtype(torch::kLong).device(device_));
     const int64_t num_layers = context_.get_model_args().n_layers();
-    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
+    for (int32_t layer_id = 0; layer_id < num_layers; layer_id++) {
       kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
     }
   }
@@ -592,7 +692,27 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     return false;
   }
 
+  int32_t tp_world_size = parallel_args_.world_size();
+  if (parallel_args_.tp_group_) {
+    tp_world_size = parallel_args_.tp_group_->world_size();
+  }
+
+  std::unique_ptr<ScopedAtenLoadThreads> scoped_load_threads;
+  if (tp_world_size > 1) {
+    const int32_t prev_threads = static_cast<int32_t>(torch::get_num_threads());
+    LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
+              << ", tp_world_size=" << tp_world_size
+              << ", prev_threads=" << prev_threads;
+    scoped_load_threads =
+        std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
+  }
+
   this->load_model(std::move(model_loader));
+
+  if (scoped_load_threads) {
+    LOG(INFO) << "Weight loading completed, restored ATen threads="
+              << torch::get_num_threads();
+  }
 
   status_ = Status::LOADED;
   if (FLAGS_enable_eplb) {

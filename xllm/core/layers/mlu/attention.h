@@ -50,19 +50,25 @@ class AttentionImpl : public torch::nn::Module {
       torch::Tensor& value,
       KVCache& kv_cache);
 
-  void prefill_forward(torch::Tensor& query,
-                       torch::Tensor& key,
-                       torch::Tensor& value,
-                       torch::Tensor& output,
-                       const torch::Tensor& k_cache,
-                       const std::optional<torch::Tensor>& v_cache,
-                       const AttentionMetadata& attn_metadata);
+  void prefill_forward(
+      torch::Tensor& query,
+      torch::Tensor& key,
+      torch::Tensor& value,
+      torch::Tensor& output,
+      const torch::Tensor& k_cache,
+      const std::optional<torch::Tensor>& v_cache,
+      const AttentionMetadata& attn_metadata,
+      const std::optional<torch::Tensor>& k_cache_scale = std::nullopt,
+      const std::optional<torch::Tensor>& v_cache_scale = std::nullopt);
 
-  void decoder_forward(torch::Tensor& query,
-                       torch::Tensor& output,
-                       const torch::Tensor& k_cache,
-                       const std::optional<torch::Tensor>& v_cache,
-                       const AttentionMetadata& attn_metadata);
+  void decoder_forward(
+      torch::Tensor& query,
+      torch::Tensor& output,
+      const torch::Tensor& k_cache,
+      const std::optional<torch::Tensor>& v_cache,
+      const AttentionMetadata& attn_metadata,
+      const std::optional<torch::Tensor>& k_cache_scale = std::nullopt,
+      const std::optional<torch::Tensor>& v_cache_scale = std::nullopt);
 
  private:
   int64_t num_heads_;

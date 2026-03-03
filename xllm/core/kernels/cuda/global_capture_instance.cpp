@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "attention_runner.h"
+#include "core/common/global_flags.h"
 #include "piecewise_graphs.h"
 
 namespace xllm::runtime::cuda {

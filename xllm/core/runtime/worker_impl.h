@@ -184,7 +184,7 @@ class WorkerImpl {
     return context_.get_optimization_config();
   }
 
- private:
+ protected:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
   // Only used for deepseek chunked prefill ops on npu device
   void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);

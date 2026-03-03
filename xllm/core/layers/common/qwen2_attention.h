@@ -51,6 +51,7 @@ class Qwen2AttentionImpl : public torch::nn::Module {
   int64_t kv_size_;
   float scaling_;
   bool is_qwen3_style_;
+  bool can_use_fused_qk_norm_rope_;
 
   QKVParallelLinear qkv_proj_{nullptr};
   RowParallelLinear o_proj_{nullptr};

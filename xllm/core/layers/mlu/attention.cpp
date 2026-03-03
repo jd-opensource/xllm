@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "attention.h"
 
+#include "kernels/mlu/mlu_ops_api.h"
 #include "kernels/ops_api.h"
 
 DECLARE_bool(enable_chunked_prefill);
@@ -90,6 +91,10 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     v_cache = kv_cache.get_v_cache();
   }
 
+  // Check if KV cache quantization is enabled by checking scale tensors
+  std::optional<torch::Tensor> k_cache_scale = kv_cache.get_k_cache_scale();
+  std::optional<torch::Tensor> v_cache_scale = kv_cache.get_v_cache_scale();
+
   bool skip_process_cache = enable_mla_ && (only_prefill || use_fused_mla_qkv_);
   if (!skip_process_cache) {
     xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
@@ -98,7 +103,16 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     reshape_paged_cache_params.k_cache = k_cache;
     reshape_paged_cache_params.v_cache = v_cache;
     reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
-    xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+
+    if (k_cache_scale.has_value()) {
+      // Use quant_to_paged_cache for INT8 quantization
+      reshape_paged_cache_params.k_cache_scale = k_cache_scale;
+      reshape_paged_cache_params.v_cache_scale = v_cache_scale;
+      xllm::kernel::quant_to_paged_cache(reshape_paged_cache_params);
+    } else {
+      // Use standard reshape_paged_cache
+      xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+    }
   }
 
   if (enable_lighting_indexer_ || !only_prefill) {
@@ -109,10 +123,29 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
       // we must explicitly make sure the k_cache is contiguous after reshaping
       k_cache = k_cache.reshape({-1, k_cache.size(1), 1, k_cache.size(3)})
                     .contiguous();
+      if (k_cache_scale.has_value()) {
+        auto scale = k_cache_scale.value();
+        k_cache_scale = scale.reshape({-1, scale.size(1), 1}).contiguous();
+      }
     }
-    decoder_forward(query, output, k_cache, v_cache, attn_metadata);
+
+    decoder_forward(query,
+                    output,
+                    k_cache,
+                    v_cache,
+                    attn_metadata,
+                    k_cache_scale,
+                    v_cache_scale);
   } else {
-    prefill_forward(query, key, value, output, k_cache, v_cache, attn_metadata);
+    prefill_forward(query,
+                    key,
+                    value,
+                    output,
+                    k_cache,
+                    v_cache,
+                    attn_metadata,
+                    k_cache_scale,
+                    v_cache_scale);
   }
 
   int64_t head_size = enable_mla_ ? v_head_dim_ : head_size_;
@@ -120,46 +153,146 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   return {output, output_lse};
 }
 
-void AttentionImpl::prefill_forward(torch::Tensor& query,
-                                    torch::Tensor& key,
-                                    torch::Tensor& value,
-                                    torch::Tensor& output,
-                                    const torch::Tensor& k_cache,
-                                    const std::optional<torch::Tensor>& v_cache,
-                                    const AttentionMetadata& attn_metadata) {
+void AttentionImpl::prefill_forward(
+    torch::Tensor& query,
+    torch::Tensor& key,
+    torch::Tensor& value,
+    torch::Tensor& output,
+    const torch::Tensor& k_cache,
+    const std::optional<torch::Tensor>& v_cache,
+    const AttentionMetadata& attn_metadata,
+    const std::optional<torch::Tensor>& k_cache_scale,
+    const std::optional<torch::Tensor>& v_cache_scale) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
-  xllm::kernel::AttentionParams attention_params(attn_metadata);
-  attention_params.query = query.view({-1, num_heads_, head_size_});
-  attention_params.output = output.view({-1, num_heads_, head_size_v});
-  attention_params.window_size_left = sliding_window_;
-  attention_params.scale = scale_;
+  query = query.view({-1, num_heads_, head_size_});
+  output = output.view({-1, num_heads_, head_size_v});
+
+  std::optional<torch::Tensor> block_tables = std::nullopt;
+  std::optional<torch::Tensor> output_lse = std::nullopt;
 
   if (attn_metadata.is_prefill) {
-    attention_params.key = key.view({-1, num_kv_heads_, head_size_});
-    attention_params.value = value.view({-1, num_kv_heads_, head_size_v});
+    key = key.view({-1, num_kv_heads_, head_size_});
+    value = value.view({-1, num_kv_heads_, head_size_v});
   } else if (attn_metadata.is_chunked_prefill) {
-    attention_params.key = k_cache;
-    attention_params.value = v_cache.value();
+    // For chunked prefill with quantized KV cache, we need to dequantize first
+    if (k_cache_scale.has_value() && k_cache_scale->defined() &&
+        k_cache_scale->numel() > 0) {
+      // Quantized KV cache path - dequantize before flash attention
+
+      // Calculate total sequence length from cumulative sequence lengths
+      int64_t total_seqlens =
+          attn_metadata.kv_cu_seq_lens[attn_metadata.kv_cu_seq_lens.size(0) - 1]
+              .item<int64_t>();
+
+      // Allocate dequantized output tensors
+      torch::Tensor key_dequant = torch::zeros(
+          {total_seqlens, num_kv_heads_, head_size_}, query.options());
+
+      torch::Tensor value_dequant;
+      if (v_cache_scale.has_value() && v_cache_scale->defined() &&
+          v_cache_scale->numel() > 0) {
+        value_dequant = torch::zeros(
+            {total_seqlens, num_kv_heads_, head_size_v}, query.options());
+      }
+
+      // Call dequant_from_paged_cache
+      xllm::kernel::ReshapeFromCacheParams dequant_params;
+      dequant_params.key = key_dequant;
+      dequant_params.value = value_dequant;
+      dequant_params.key_cache = k_cache;
+      dequant_params.value_cache = v_cache;
+      dequant_params.key_cache_quant_scale = k_cache_scale;
+      dequant_params.value_cache_quant_scale = v_cache_scale;
+      dequant_params.context_lengths = attn_metadata.kv_seq_lens;
+      dequant_params.max_context_len = attn_metadata.max_seq_len;
+      dequant_params.context_seq_offset = std::nullopt;
+      dequant_params.block_tables = attn_metadata.block_table;
+      dequant_params.quant_mode = 1;  // per-token quantization
+      dequant_params.quant_bit = 8;   // only support INT8 for now.
+
+      xllm::kernel::dequant_from_paged_cache(dequant_params);
+
+      // Use dequantized tensors for flash attention
+      key = key_dequant;
+      value = value_dequant;
+    } else {
+      // Non-quantized KV cache path - use directly
+      key = k_cache;
+      value = v_cache.value();
+      block_tables = attn_metadata.block_table;
+    }
   }
-  xllm::kernel::batch_prefill(attention_params);
+
+  xllm::kernel::mlu::batch_prefill(query,
+                                   key,
+                                   value,
+                                   output,
+                                   output_lse,
+                                   attn_metadata.q_cu_seq_lens,
+                                   attn_metadata.kv_cu_seq_lens,
+                                   /*alibi_slope=*/std::nullopt,
+                                   /*alibi_bias=*/std::nullopt,
+                                   /*q_quant_scale=*/std::nullopt,
+                                   /*k_quant_scale=*/std::nullopt,
+                                   /*v_quant_scale=*/std::nullopt,
+                                   /*out_quant_scale=*/std::nullopt,
+                                   block_tables,
+                                   attn_metadata.max_query_len,
+                                   attn_metadata.max_seq_len,
+                                   scale_,
+                                   /*is_causal=*/true,
+                                   sliding_window_,
+                                   /*window_size_right=*/-1,
+                                   /*compute_dtype=*/"float",
+                                   /*return_lse=*/false);
 }
 
-void AttentionImpl::decoder_forward(torch::Tensor& query,
-                                    torch::Tensor& output,
-                                    const torch::Tensor& k_cache,
-                                    const std::optional<torch::Tensor>& v_cache,
-                                    const AttentionMetadata& attn_metadata) {
+void AttentionImpl::decoder_forward(
+    torch::Tensor& query,
+    torch::Tensor& output,
+    const torch::Tensor& k_cache,
+    const std::optional<torch::Tensor>& v_cache,
+    const AttentionMetadata& attn_metadata,
+    const std::optional<torch::Tensor>& k_cache_scale,
+    const std::optional<torch::Tensor>& v_cache_scale) {
   int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
-  xllm::kernel::AttentionParams attention_params(attn_metadata);
-  attention_params.query = query.view({-1, 1, num_heads_, head_size_});
-  attention_params.output = output.view({-1, 1, num_heads_, head_size_v});
-  attention_params.output_lse = std::nullopt;
-  attention_params.window_size_left = sliding_window_;
-  attention_params.scale = scale_;
-  attention_params.k_cache = k_cache;
-  attention_params.v_cache = v_cache;
+  query = query.view({-1, 1, num_heads_, head_size_});
+  output = output.view({-1, 1, num_heads_, head_size_v});
 
-  xllm::kernel::batch_decode(attention_params);
+  std::optional<torch::Tensor> output_lse = std::nullopt;
+
+  // Set quantization parameters if KV cache is quantized
+  std::optional<torch::Tensor> k_cache_quant_scale;
+  std::optional<torch::Tensor> v_cache_quant_scale;
+  int64_t kv_cache_quant_bit_size = -1;
+  if (k_cache_scale.has_value()) {
+    k_cache_quant_scale = k_cache_scale;
+    if (v_cache_scale.has_value()) {
+      v_cache_quant_scale = v_cache_scale;
+    }
+    kv_cache_quant_bit_size = 8;  // INT8 quantization
+  }
+
+  xllm::kernel::mlu::batch_decode(query,
+                                  k_cache,
+                                  output,
+                                  attn_metadata.block_table,
+                                  attn_metadata.kv_seq_lens,
+                                  v_cache,
+                                  output_lse,
+                                  /*q_quant_scale=*/std::nullopt,
+                                  k_cache_quant_scale,
+                                  v_cache_quant_scale,
+                                  /*out_quant_scale=*/std::nullopt,
+                                  /*alibi_slope=*/std::nullopt,
+                                  /*mask=*/std::nullopt,
+                                  /*compute_dtype=*/"float",
+                                  attn_metadata.max_seq_len,
+                                  sliding_window_,
+                                  /*window_size_right=*/-1,
+                                  scale_,
+                                  /*return_lse=*/false,
+                                  kv_cache_quant_bit_size);
 }
 
 }  // namespace layer

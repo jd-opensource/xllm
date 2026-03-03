@@ -93,6 +93,50 @@ TEST(RejectionSamplerTest, Basic) {
   EXPECT_TRUE(torch::allclose(masked_output, desired_masked_output));
 }
 
+TEST(RejectionSamplerTest, BasicSelectedOnlyDraftProbs) {
+  // test with hand-crafted example using selected-only draft probs
+  const auto options = get_test_options(torch::kFloat32);
+
+  // set random seed
+  torch::manual_seed(100);
+
+  const auto draft_token_ids =
+      torch::tensor({{1, 2, 3}}, options.dtype(torch::kInt64));
+
+  // selected-only draft probs shape: [1, 3]
+  auto draft_probs = torch::tensor({{0.2163, 0.2398, 0.2451}}, options);
+
+  // shape: [1, 3, 5]
+  auto target_probs = torch::tensor({{0.1299, 0.2462, 0.1821, 0.1354, 0.3064},
+                                     {0.1159, 0.2839, 0.1603, 0.2451, 0.1949},
+                                     {0.0002, 0.0433, 0.6629, 0.1469, 0.1467}},
+                                    options)
+                          .reshape({1, 3, 5});
+
+  // selected_target_probs:  [0.2462  0.1603  0.1469]
+  // selected_draft_probs:   [0.2163  0.2398  0.2451]
+  // acceptance_probs:       [1.1382  0.6685  0.5993]
+  // uniform_rand:           [0.4785  0.6589  0.9399]
+  // accepted:               [  1        1       0  ]
+  auto uniform_rand = torch::tensor({{0.4785, 0.6589, 0.9399}}, options);
+  auto bonus_token_ids = torch::tensor({{5}}, options.dtype(torch::kInt64));
+
+  auto [output, masked_output] =
+      RejectionSampler::random_sample(draft_token_ids,
+                                      draft_probs,
+                                      target_probs,
+                                      uniform_rand,
+                                      bonus_token_ids,
+                                      true);
+  auto desired_output =
+      torch::tensor({{1, 2, 2, 5}}, options.dtype(torch::kInt64));
+  EXPECT_TRUE(torch::allclose(output, desired_output));
+
+  auto desired_masked_output =
+      torch::tensor({{1, 2, 2, -1}}, options.dtype(torch::kInt64));
+  EXPECT_TRUE(torch::allclose(masked_output, desired_masked_output));
+}
+
 TEST(RejectionSamplerTest, Mask) {
   // test accepted mask
   const auto options = get_test_options(torch::kBool);
@@ -257,6 +301,64 @@ TEST(RejectionSamplerTest, Random) {
                               sample_prob,
                               /*rtol=*/1e-2,
                               /*atol=*/1e-3));
+}
+
+TEST(RejectionSamplerTest, RandomSelectedOnlyMatchesDenseWhenAccepted) {
+  const auto options = get_test_options(torch::kFloat32);
+  const auto device = get_test_device();
+
+  // make all tokens accepted by setting target probs > selected draft probs.
+  torch::manual_seed(123);
+  int64_t batch_size = 64;
+  int64_t n_spec = 4;
+  int64_t vocab_size = 16;
+
+  auto target_probs = torch::randn({batch_size, n_spec, vocab_size}, options)
+                          .softmax(/*dim=*/-1, /*dtype=*/torch::kFloat32);
+
+  auto draft_token_ids =
+      torch::randint(0,
+                     vocab_size,
+                     {batch_size, n_spec},
+                     torch::dtype(torch::kInt64).device(device));
+
+  // Build dense draft probs with 50% of selected target probs at draft tokens.
+  auto draft_probs_dense =
+      torch::zeros({batch_size, n_spec, vocab_size}, target_probs.options());
+  auto selected_target_probs =
+      target_probs.gather(/*dim=*/-1, draft_token_ids.unsqueeze(-1))
+          .squeeze(-1);
+  auto selected_draft_probs = selected_target_probs * 0.5;
+  draft_probs_dense.scatter_(/*dim=*/-1,
+                             draft_token_ids.unsqueeze(-1),
+                             selected_draft_probs.unsqueeze(-1));
+
+  // Ensure acceptance by using uniform_rand == 0.
+  auto uniform_rand = torch::zeros({batch_size, n_spec}, options);
+  auto bonus_token_ids =
+      torch::randint(0,
+                     vocab_size,
+                     {batch_size, 1},
+                     torch::dtype(torch::kInt64).device(device));
+
+  auto [dense_output, dense_masked] =
+      RejectionSampler::random_sample(draft_token_ids,
+                                      draft_probs_dense,
+                                      target_probs,
+                                      uniform_rand,
+                                      bonus_token_ids,
+                                      true);
+
+  auto [selected_output, selected_masked] =
+      RejectionSampler::random_sample(draft_token_ids,
+                                      selected_draft_probs,
+                                      target_probs,
+                                      uniform_rand,
+                                      bonus_token_ids,
+                                      true);
+
+  EXPECT_TRUE(torch::equal(dense_output, selected_output));
+  EXPECT_TRUE(torch::equal(dense_masked, selected_masked));
 }
 
 TEST(RejectionSamplerTest, RandomFused) {

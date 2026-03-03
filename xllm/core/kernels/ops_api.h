@@ -32,9 +32,13 @@ void reshape_paged_cache(ReshapePagedCacheParams& params);
 
 void reshape_from_cache(ReshapeFromCacheParams& params);
 
-void batch_prefill(AttentionParams& params);
+// Quantize and store KV cache to paged cache (INT8 quantization)
+// Only supported on MLU backend
+void quant_to_paged_cache(ReshapePagedCacheParams& params);
 
-void batch_decode(AttentionParams& params);
+// Dequantize KV cache from paged cache (INT8 to FP16/BF16)
+// Only supported on MLU backend
+void dequant_from_paged_cache(ReshapeFromCacheParams& params);
 
 void fused_layernorm(FusedLayerNormParams& params);
 
@@ -90,4 +94,8 @@ void fused_indexer_q(FusedIndexerQParams& params);
 
 void fused_indexer_k(FusedIndexerKParams& params);
 
+// TODO: NPU moe_init_routing_v2 is equivalent to moe_gen_idx + moe_expand_input
+// (and token_count/cusum outputs) on other backends.
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+moe_init_routing_v2(MoeInitRoutingV2Params& params);
 }  // namespace xllm::kernel
