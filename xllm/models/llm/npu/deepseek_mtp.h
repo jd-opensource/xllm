@@ -28,7 +28,7 @@ namespace xllm {
 class DeepseekMtpModelImpl : public MtpModelImplBase<DeepseekV2DecoderLayer> {
  public:
   DeepseekMtpModelImpl(const ModelContext& context)
-      : MtpModelImplBase<DeepseekV2DecoderLayer>("deepseek_v3_mtp", context) {
+      : MtpModelImplBase<DeepseekV2DecoderLayer>(context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -52,6 +52,40 @@ class DeepseekMtpModelImpl : public MtpModelImplBase<DeepseekV2DecoderLayer> {
         model_args.rope_scaling_mscale(),
         model_args.rope_scaling_mscale_all_dim(),
         options);
+  }
+
+ protected:
+  torch::Tensor build_attention_mask(
+      const ModelInputParams& input_params,
+      const torch::Tensor& cos_pos,
+      const torch::Tensor& hidden_states) override {
+    if (FLAGS_enable_chunked_prefill) {
+      int32_t num_sequences = input_params.num_sequences;
+      if (num_sequences > 0) {
+        std::vector<torch::Tensor> req_mask_vec;
+        req_mask_vec.reserve(num_sequences);
+
+        for (int32_t j = 0; j < num_sequences; j++) {
+          auto mask =
+              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
+                                         input_params.kv_seq_lens_vec[j],
+                                         input_params.kv_max_seq_len,
+                                         cos_pos.dtype().toScalarType(),
+                                         cos_pos.device());
+          req_mask_vec.emplace_back(mask);
+        }
+        return torch::cat(req_mask_vec, 0);
+      }
+    }
+
+    if (FLAGS_enable_prefix_cache &&
+        !input_params.batch_forward_type.is_decode()) {
+      return attn_mask_.get_attn_mask(
+          512, hidden_states.dtype().toScalarType(), hidden_states.device());
+    }
+
+    return attn_mask_.get_attn_mask(
+        128, hidden_states.dtype().toScalarType(), hidden_states.device());
   }
 };
 TORCH_MODULE(DeepseekMtpModel);

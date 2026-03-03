@@ -22,6 +22,7 @@ limitations under the License.
 
 #include <string>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 #include "core/common/global_flags.h"
@@ -104,9 +105,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 template <typename DecoderLayerType>
 class LlmModelImplBase : public torch::nn::Module {
  public:
-  // mode type: qwen2, qwen3 .etc
-  LlmModelImplBase(const std::string& model_type, const ModelArgs& args)
-      : model_type_(model_type) {
+  LlmModelImplBase(const ModelArgs& args) {
     InterruptionBus::get_instance().subscribe([this](bool interrupted) {
       this->layer_forward_interrupted_ = interrupted;
     });
@@ -136,63 +135,12 @@ class LlmModelImplBase : public torch::nn::Module {
       h = npu_embed_tokens_(tokens, 0);
     }
 
-    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
-    auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
-    auto cos_pos = target_cos_sin_chunks[0].contiguous();
-    auto sin_pos = target_cos_sin_chunks[1].contiguous();
-
-    if (positions.dim() == 2) {  // mrope
-      auto apply = [this](torch::Tensor x) {
-        auto sections = mrope_section_;
-        sections.insert(sections.end(), sections.begin(), sections.end());
-
-        auto vec = x.split(sections, -1);
-        std::vector<torch::Tensor> selects;
-        selects.reserve(vec.size());
-
-        for (int64_t i = 0; i < vec.size(); ++i) {
-          auto m = vec[i];
-          selects.push_back(m[i % mrope_section_.size()]);
-        }
-        return torch::cat(selects, -1);
-      };
-      cos_pos = apply(cos_pos.reshape(
-          {positions.sizes().front(), -1, cos_pos.sizes().back()}));
-      sin_pos = apply(sin_pos.reshape(
-          {positions.sizes().front(), -1, sin_pos.sizes().back()}));
-    }
+    auto [cos_pos, sin_pos] = build_rotary_pos_embeddings(positions);
 
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
-    torch::Tensor attn_mask;
-    if (model_type_ == "qwen2") {
-      int64_t max_seq_len =
-          FLAGS_enable_chunked_prefill ? input_params.kv_max_seq_len : 128;
-      attn_mask = attn_mask_.get_attn_mask(
-          max_seq_len, cos_pos.dtype().toScalarType(), cos_pos.device());
-    } else {
-      if (FLAGS_enable_chunked_prefill) {
-        int num_sequences = input_params.num_sequences;
-        if (num_sequences > 0) {
-          std::vector<torch::Tensor> req_mask_vec;
-          req_mask_vec.reserve(num_sequences);
-
-          for (int j = 0; j < num_sequences; j++) {
-            auto mask =
-                attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                           input_params.kv_seq_lens_vec[j],
-                                           input_params.kv_max_seq_len,
-                                           cos_pos.dtype().toScalarType(),
-                                           cos_pos.device());
-            req_mask_vec.emplace_back(mask);
-          }
-          attn_mask = torch::cat(req_mask_vec, 0);
-        }
-      } else {
-        attn_mask = attn_mask_.get_attn_mask(
-            128, cos_pos.dtype().toScalarType(), cos_pos.device());
-      }
-    }
+    auto attn_mask = build_attention_mask(input_params, cos_pos, h);
+    mutate_input_params(input_params_new, tokens, h);
 
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
@@ -212,6 +160,8 @@ class LlmModelImplBase : public torch::nn::Module {
         return ModelOutput();
       }
 
+      before_layer_forward(i, h, input_params_new);
+
       layer(h,
             cos_pos,
             sin_pos,
@@ -220,6 +170,8 @@ class LlmModelImplBase : public torch::nn::Module {
             input_params_new,
             event,
             event_flag);
+
+      after_layer_forward(i, h, input_params_new);
     }
 
     auto hidden_states = norm_(h, 0);
@@ -268,6 +220,91 @@ class LlmModelImplBase : public torch::nn::Module {
   }
 
  protected:
+  virtual std::pair<torch::Tensor, torch::Tensor> build_rotary_pos_embeddings(
+      const torch::Tensor& positions) {
+    auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
+    auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
+    auto cos_pos = target_cos_sin_chunks[0].contiguous();
+    auto sin_pos = target_cos_sin_chunks[1].contiguous();
+
+    post_process_rotary_pos_embeddings(cos_pos, sin_pos, positions);
+    return {cos_pos, sin_pos};
+  }
+
+  virtual void post_process_rotary_pos_embeddings(
+      torch::Tensor& cos_pos,
+      torch::Tensor& sin_pos,
+      const torch::Tensor& positions) {
+    if (positions.dim() != 2) {
+      return;
+    }
+
+    auto apply = [this](torch::Tensor x) {
+      auto sections = mrope_section_;
+      sections.insert(sections.end(), sections.begin(), sections.end());
+
+      auto vec = x.split(sections, -1);
+      std::vector<torch::Tensor> selects;
+      selects.reserve(vec.size());
+
+      for (int64_t i = 0; i < vec.size(); ++i) {
+        auto m = vec[i];
+        selects.push_back(m[i % mrope_section_.size()]);
+      }
+      return torch::cat(selects, -1);
+    };
+
+    cos_pos = apply(cos_pos.reshape(
+        {positions.sizes().front(), -1, cos_pos.sizes().back()}));
+    sin_pos = apply(sin_pos.reshape(
+        {positions.sizes().front(), -1, sin_pos.sizes().back()}));
+  }
+
+  virtual torch::Tensor build_attention_mask(
+      const ModelInputParams& input_params,
+      const torch::Tensor& cos_pos,
+      const torch::Tensor& hidden_states) {
+    if (FLAGS_enable_chunked_prefill) {
+      int num_sequences = input_params.num_sequences;
+      if (num_sequences > 0) {
+        std::vector<torch::Tensor> req_mask_vec;
+        req_mask_vec.reserve(num_sequences);
+
+        for (int j = 0; j < num_sequences; j++) {
+          auto mask =
+              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
+                                         input_params.kv_seq_lens_vec[j],
+                                         input_params.kv_max_seq_len,
+                                         cos_pos.dtype().toScalarType(),
+                                         cos_pos.device());
+          req_mask_vec.emplace_back(mask);
+        }
+        return torch::cat(req_mask_vec, 0);
+      }
+    }
+
+    return attn_mask_.get_attn_mask(
+        128, cos_pos.dtype().toScalarType(), cos_pos.device());
+  }
+
+  virtual void mutate_input_params(ModelInputParams& input_params,
+                                   const torch::Tensor& tokens,
+                                   const torch::Tensor& hidden_states) {
+    return;
+  }
+
+  virtual void before_layer_forward(size_t layer_id,
+                                    torch::Tensor& hidden_states,
+                                    ModelInputParams& input_params) {
+    return;
+  }
+
+  virtual void after_layer_forward(size_t layer_id,
+                                   torch::Tensor& hidden_states,
+                                   ModelInputParams& input_params) {
+    return;
+  }
+
   torch::Tensor cos_sin_;
   torch::Tensor cos_pos_;
   torch::Tensor sin_pos_;
@@ -289,7 +326,6 @@ class LlmModelImplBase : public torch::nn::Module {
   bool layer_forward_interrupted_ = false;
 
  private:
-  std::string model_type_;
 };
 
 template <typename LlmModelType>

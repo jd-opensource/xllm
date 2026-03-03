@@ -37,7 +37,7 @@ TORCH_MODULE(QWen2DecoderLayer);
 class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
  public:
   QWen2ModelImpl(const ModelContext& context)
-      : LlmModelImplBase<QWen2DecoderLayer>("qwen2", context.get_model_args()) {
+      : LlmModelImplBase<QWen2DecoderLayer>(context.get_model_args()) {
     // register submodules
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
@@ -67,6 +67,17 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
       layers_.push_back(block);
       blocks_->push_back(block);
     }
+  }
+
+ protected:
+  torch::Tensor build_attention_mask(
+      const ModelInputParams& input_params,
+      const torch::Tensor& cos_pos,
+      const torch::Tensor& hidden_states) override {
+    int64_t max_seq_len =
+        FLAGS_enable_chunked_prefill ? input_params.kv_max_seq_len : 128;
+    return attn_mask_.get_attn_mask(
+        max_seq_len, cos_pos.dtype().toScalarType(), cos_pos.device());
   }
 };
 TORCH_MODULE(QWen2Model);

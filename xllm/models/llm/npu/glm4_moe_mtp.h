@@ -24,7 +24,7 @@ namespace xllm::hf {
 class Glm4MoeMtpModelImpl : public MtpModelImplBase<Glm4MoeDecoderLayer> {
  public:
   Glm4MoeMtpModelImpl(const ModelContext& context)
-      : MtpModelImplBase<Glm4MoeDecoderLayer>("glm4_moe_mtp", context) {
+      : MtpModelImplBase<Glm4MoeDecoderLayer>(context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -38,6 +38,15 @@ class Glm4MoeMtpModelImpl : public MtpModelImplBase<Glm4MoeDecoderLayer> {
         model_args.max_position_embeddings(),
         model_args.rope_theta(),
         options);
+  }
+
+ protected:
+  void post_process_rotary_pos_embeddings(
+      torch::Tensor& cos_pos,
+      torch::Tensor& sin_pos,
+      const torch::Tensor& positions) override {
+    cos_pos = cos_pos.view(at::IntArrayRef{-1, 2, cos_pos.size(-1) / 2});
+    sin_pos = sin_pos.view(at::IntArrayRef{-1, 2, sin_pos.size(-1) / 2});
   }
 };
 TORCH_MODULE(Glm4MoeMtpModel);
