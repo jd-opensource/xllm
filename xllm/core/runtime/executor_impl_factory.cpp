@@ -53,6 +53,13 @@ std::unique_ptr<ExecutorImpl> ExecutorImplFactory::create_executor_impl(
     LOG(INFO) << "Creating Graph Executor for " << backend << " device";
   }
 
+  if (backend == "rec") {
+    if (options.enable_graph()) {
+      backend = "cuda";
+    } else if (!options.enable_graph()) {
+      backend = "llm";
+    }
+  }
   auto it = creators_.find(backend);
   if (it == creators_.end()) {
     throw std::runtime_error("No valid graph backend found: " + backend);

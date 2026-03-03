@@ -63,8 +63,8 @@ void reshape_paged_cache(
     torch::Tensor& slot_mapping);  //(num_tokens)
 
 void batch_prefill(torch::Tensor& query,
-                   torch::Tensor& key,
-                   torch::Tensor& value,
+                   const torch::Tensor& key,
+                   const std::optional<torch::Tensor>& value,
                    torch::Tensor& output,
                    std::optional<torch::Tensor>& output_lse,
                    const std::optional<torch::Tensor>& q_cu_seq_lens,
@@ -85,10 +85,10 @@ void batch_prefill(torch::Tensor& query,
                    bool return_lse);
 
 void batch_decode(torch::Tensor& query,
-                  torch::Tensor& k_cache,
+                  const torch::Tensor& k_cache,
                   torch::Tensor& output,
-                  torch::Tensor& block_table,
-                  torch::Tensor& seq_lens,
+                  const torch::Tensor& block_table,
+                  const torch::Tensor& seq_lens,
                   const std::optional<torch::Tensor>& v_cache,
                   std::optional<torch::Tensor>& output_lse,
                   const std::optional<torch::Tensor>& q_quant_scale,

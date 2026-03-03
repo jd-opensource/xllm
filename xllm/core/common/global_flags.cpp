@@ -550,6 +550,12 @@ DEFINE_bool(
     false,
     "Whether to decode both audio and video when the input is a video.");
 
+// --- concurrent rec worker config ---
+DEFINE_uint32(rec_worker_max_concurrency,
+              1,
+              "Concurrency for rec worker parallel execution. Less than or "
+              "equal to 1 means disable concurrent rec worker.");
+
 #if defined(USE_NPU)
 
 // USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph

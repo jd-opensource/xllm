@@ -19,12 +19,21 @@ limitations under the License.
 
 #include <tuple>
 
+#if defined(USE_CUDA)
+#include "kernels/cuda/cuda_ops_api.h"
+#endif
 namespace {
 inline bool is_qwen3_model(const std::string& model_type) {
   static const std::set<std::string> qwen3_type_set = {
       "qwen3", "qwen3_vl", "qwen3_moe", "qwen3_vl_moe"};
   return qwen3_type_set.contains(model_type);
 }
+
+#if defined(USE_CUDA)
+inline bool supports_fused_qk_norm_rope_head_dim(int64_t head_dim) {
+  return head_dim == 64 || head_dim == 128 || head_dim == 256;
+}
+#endif
 }  // namespace
 
 namespace xllm {
@@ -39,6 +48,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   const int64_t total_num_heads = args.n_heads();
   const int64_t total_num_kv_heads = args.n_kv_heads().value_or(args.n_heads());
   is_qwen3_style_ = is_qwen3_model(args.model_type());
+  can_use_fused_qk_norm_rope_ = false;
   bool qkv_bias = is_qwen3_style_ ? args.attention_bias() : true;
 
   CHECK(total_num_heads % tp_size == 0);
@@ -58,6 +68,14 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   q_size_ = num_heads_ * head_dim_;
   kv_size_ = num_kv_heads_ * head_dim_;
   scaling_ = std::sqrt(1.0f / head_dim_);
+#if defined(USE_CUDA)
+  // Fused QKNorm+RoPE currently only supports:
+  // 1) non-MRoPE models (positions must be 1D),
+  // 2) head_dim in {64, 128, 256}.
+  can_use_fused_qk_norm_rope_ = is_qwen3_style_ &&
+                                args.rope_scaling_mrope_section().empty() &&
+                                supports_fused_qk_norm_rope_head_dim(head_dim_);
+#endif
 
   // 1. QKV parallel linear
   qkv_proj_ = register_module("qkv_proj",
@@ -123,8 +141,35 @@ torch::Tensor Qwen2AttentionImpl::forward(
   auto v = qkv.slice(/*dim=*/-1, q_size_ + kv_size_, q_size_ + 2 * kv_size_);
 
   const int64_t T = q.size(0);
+  bool fused_qk_norm_rope_applied = false;
 
-  if (is_qwen3_style_) {
+#if defined(USE_CUDA)
+  // Runtime guard: fused QKNorm+RoPE only accepts 1D position_ids.
+  // MRoPE provides 2D positions, so it must fall back to the unfused path.
+  if (can_use_fused_qk_norm_rope_ && positions.dim() == 1) {
+    auto q_weight = q_norm_->weight();
+    auto k_weight = k_norm_->weight();
+    auto eps = q_norm_->eps();
+    auto cos_sin_cache = rotary_emb_->precomputed_cos_sin_cache();
+    auto position_ids = positions.to(torch::kInt64).contiguous();
+    xllm::kernel::cuda::fused_qk_norm_rope(qkv,
+                                           num_heads_,
+                                           num_kv_heads_,
+                                           num_kv_heads_,
+                                           head_dim_,
+                                           eps,
+                                           q_weight,
+                                           k_weight,
+                                           cos_sin_cache,
+                                           false,
+                                           position_ids);
+    q = qkv.slice(/*dim=*/-1, 0, q_size_);
+    k = qkv.slice(/*dim=*/-1, q_size_, q_size_ + kv_size_);
+    fused_qk_norm_rope_applied = true;
+  }
+#endif
+
+  if (is_qwen3_style_ && !fused_qk_norm_rope_applied) {
     // 2. q-norm
     q = std::get<0>(q_norm_->forward(q));
 
@@ -133,7 +178,9 @@ torch::Tensor Qwen2AttentionImpl::forward(
   }
 
   // 4. rope
-  rotary_emb_->forward(q, k, positions, attn_metadata);
+  if (!fused_qk_norm_rope_applied) {
+    rotary_emb_->forward(q, k, positions, attn_metadata);
+  }
   q = q.view({T, q_size_});
   k = k.view({T, kv_size_});
 

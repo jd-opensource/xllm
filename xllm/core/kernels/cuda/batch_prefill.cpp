@@ -31,7 +31,6 @@ void batch_prefill(const std::string& uri,
                    double sm_scale,
                    torch::Tensor output,
                    std::optional<torch::Tensor>& output_lse,
-                   bool enable_cuda_graph,
                    const std::optional<torch::Tensor>& mask) {
   // Optional custom mask (e.g. for Qwen2_5_VL padding) -> FlashInfer packed
   // format.
@@ -93,8 +92,7 @@ void batch_prefill(const std::string& uri,
   std::string backend =
       determine_attention_backend(/*pos_encoding_mode=*/0,
                                   /*use_fp16_qk_reduction=*/false,
-                                  use_custom_mask,
-                                  /*causal=*/true);
+                                  use_custom_mask);
 
   if (backend == "fa2") {
     get_function(uri, "ragged_run")(

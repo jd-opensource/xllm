@@ -9,7 +9,6 @@ cc_library(
   NAME
     npu_layers 
   HDRS
-    fused_moe.h
     multi_head_attention.h
     npu_word_embedding_impl.h
     npu_pos_embedding_impl.h
@@ -59,7 +58,6 @@ cc_library(
     loader/qwen3_decoder_manual_loader.h
     loader/eagle3_decoder_manual_loader.h
   SRCS
-    fused_moe.cpp
     multi_head_attention.cpp
     npu_word_embedding_impl.cpp
     npu_pos_embedding_impl.cpp

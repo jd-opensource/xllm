@@ -22,6 +22,9 @@ limitations under the License.
 
 namespace {
 
+// Use read-only cache load for CUDA kernels.
+#define XLLM_LDG(arg) __ldg(arg)
+
 template <typename scalar_t,
           scalar_t (*ACT_FN)(const scalar_t&),
           bool act_first>
@@ -30,6 +33,13 @@ __device__ __forceinline__ scalar_t compute(const scalar_t& x,
   return act_first ? ACT_FN(x) * y : x * ACT_FN(y);
 }
 
+// Check if pointer is 16-byte aligned for int4 vectorized access
+__device__ __forceinline__ bool is_16byte_aligned(const void* ptr) {
+  return (reinterpret_cast<uintptr_t>(ptr) & 15) == 0;
+}
+
+// Activation and gating kernel template with 128-bit vectorized access
+// optimization.
 template <typename scalar_t,
           scalar_t (*ACT_FN)(const scalar_t&),
           bool act_first>
@@ -37,11 +47,48 @@ __global__ void act_and_mul_kernel(
     scalar_t* __restrict__ out,          // [..., d]
     const scalar_t* __restrict__ input,  // [..., 2, d]
     const int d) {
+  constexpr int VEC_SIZE = 16 / sizeof(scalar_t);
   const int64_t token_idx = blockIdx.x;
-  for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
-    const scalar_t x = *(&input[token_idx * 2 * d + idx]);
-    const scalar_t y = *(&input[token_idx * 2 * d + d + idx]);
-    out[token_idx * d + idx] = compute<scalar_t, ACT_FN, act_first>(x, y);
+  const scalar_t* x_ptr = input + token_idx * 2 * d;
+  const scalar_t* y_ptr = x_ptr + d;
+  scalar_t* out_ptr = out + token_idx * d;
+
+  // Check alignment for 128-bit vectorized access.
+  // All three pointers must be 16-byte aligned for safe int4 operations.
+  const bool aligned = is_16byte_aligned(x_ptr) && is_16byte_aligned(y_ptr) &&
+                       is_16byte_aligned(out_ptr);
+
+  if (aligned && d >= VEC_SIZE) {
+    // Fast path: 128-bit vectorized loop
+    const int4* x_vec = reinterpret_cast<const int4*>(x_ptr);
+    const int4* y_vec = reinterpret_cast<const int4*>(y_ptr);
+    int4* out_vec = reinterpret_cast<int4*>(out_ptr);
+    const int num_vecs = d / VEC_SIZE;
+    const int vec_end = num_vecs * VEC_SIZE;
+
+    for (int i = threadIdx.x; i < num_vecs; i += blockDim.x) {
+      int4 x = XLLM_LDG(&x_vec[i]), y = XLLM_LDG(&y_vec[i]), r;
+      auto* xp = reinterpret_cast<scalar_t*>(&x);
+      auto* yp = reinterpret_cast<scalar_t*>(&y);
+      auto* rp = reinterpret_cast<scalar_t*>(&r);
+#pragma unroll
+      for (int j = 0; j < VEC_SIZE; j++) {
+        rp[j] = compute<scalar_t, ACT_FN, act_first>(xp[j], yp[j]);
+      }
+      out_vec[i] = r;
+    }
+    // Scalar cleanup for remaining elements
+    for (int i = vec_end + threadIdx.x; i < d; i += blockDim.x) {
+      out_ptr[i] = compute<scalar_t, ACT_FN, act_first>(XLLM_LDG(&x_ptr[i]),
+                                                        XLLM_LDG(&y_ptr[i]));
+    }
+  } else {
+    // Scalar fallback for unaligned data or small d
+    for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
+      const scalar_t x = XLLM_LDG(&x_ptr[idx]);
+      const scalar_t y = XLLM_LDG(&y_ptr[idx]);
+      out_ptr[idx] = compute<scalar_t, ACT_FN, act_first>(x, y);
+    }
   }
 }
 

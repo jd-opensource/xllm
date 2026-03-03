@@ -43,6 +43,20 @@ class XAttentionImpl : public BaseAttentionImpl {
       torch::Tensor& value,
       torch::Tensor& output,
       KVCache& kv_cache) override;
+
+ private:
+  void prefill_forward(const AttentionMetadata& attn_metadata,
+                       torch::Tensor& query,
+                       torch::Tensor& key,
+                       torch::Tensor& value,
+                       torch::Tensor& output,
+                       std::optional<at::Tensor>& output_lse);
+
+  void decoder_forward(const AttentionMetadata& attn_metadata,
+                       torch::Tensor& query,
+                       torch::Tensor& key,
+                       torch::Tensor& value,
+                       torch::Tensor& output);
 };
 
 }  // namespace layer

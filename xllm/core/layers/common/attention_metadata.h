@@ -23,6 +23,7 @@ namespace ffi = tvm::ffi;
 #endif
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace xllm::layer {
@@ -39,9 +40,7 @@ struct PlanInfo {
 // attention layers. It is built once at the beginning of model forward pass and
 // reused by all layers. This avoids redundant computation and memory allocation
 // for metadata that is identical across layers (e.g., sequence lengths, paged
-// KV cache indices, plan_info). AttentionMetadata is now a member of
-// AttentionParams (used for kernel calls), which also contains layer-specific
-// tensors (query, key, value) that differ per layer. Use
+// KV cache indices, plan_info). Use
 // AttentionMetadataBuilder to build instances from ModelInputParams.
 struct AttentionMetadata {
   torch::Tensor q_cu_seq_lens;
@@ -84,7 +83,7 @@ struct AttentionMetadata {
   // qo_indptr[batch_size] = total_tokens. Shape: [batch_size + 1]. Type: int32.
   // Used when use_tensor_core=true. If not defined (use .defined() to check),
   // will be created internally in batch_decode.
-  torch::Tensor qo_indptr;
+  std::optional<torch::Tensor> qo_indptr;
   // FlashInfer execution plan information for attention computation.
   // Contains kernel URI and plan tensor that specifies how to execute the
   // attention kernel. Only updated at layer 0 (shared across all layers). The
