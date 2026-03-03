@@ -165,11 +165,12 @@ class LlmModelImplBase : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor attn_mask;
+    max_seq_len_ = FLAGS_enable_chunked_prefill
+                       ? std::max(input_params.kv_max_seq_len, max_seq_len_)
+                       : 128;
     if (model_type_ == "qwen2") {
-      int64_t max_seq_len =
-          FLAGS_enable_chunked_prefill ? input_params.kv_max_seq_len : 128;
       attn_mask = attn_mask_.get_attn_mask(
-          max_seq_len, cos_pos.dtype().toScalarType(), cos_pos.device());
+          max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
       if (FLAGS_enable_chunked_prefill) {
         int num_sequences = input_params.num_sequences;
@@ -181,7 +182,7 @@ class LlmModelImplBase : public torch::nn::Module {
             auto mask =
                 attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
                                            input_params.kv_seq_lens_vec[j],
-                                           input_params.kv_max_seq_len,
+                                           max_seq_len_,
                                            cos_pos.dtype().toScalarType(),
                                            cos_pos.device());
             req_mask_vec.emplace_back(mask);
@@ -190,7 +191,7 @@ class LlmModelImplBase : public torch::nn::Module {
         }
       } else {
         attn_mask = attn_mask_.get_attn_mask(
-            128, cos_pos.dtype().toScalarType(), cos_pos.device());
+            max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
       }
     }
 
@@ -287,6 +288,8 @@ class LlmModelImplBase : public torch::nn::Module {
   std::vector<DecoderLayerType> layers_;
 
   bool layer_forward_interrupted_ = false;
+
+  int32_t max_seq_len_ = 0;
 
  private:
   std::string model_type_;
