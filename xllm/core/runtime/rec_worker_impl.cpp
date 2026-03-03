@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -27,7 +28,6 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/rec_model_utils.h"
 #include "common/types.h"
-#include "core/common/global_flags.h"
 #include "framework/model/model_input_params.h"
 #if defined(USE_CUDA)
 #include "kernels/cuda/cuda_ops_api.h"
