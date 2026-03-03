@@ -28,6 +28,9 @@ if(USE_NPU)
       message(STATUS "Building for device: A2 (macro USE_A2 defined)")
   endif()
 
+  # Override Mooncake option for mooncake transfer engine
+  set(USE_ASCEND ON CACHE BOOL "Enable Mooncake Ascend transport" FORCE)
+
   set(XLLM_ATB_LAYERS_SOURCE_DIR
       "${CMAKE_SOURCE_DIR}/third_party/xllm_atb_layers"
       CACHE PATH "Path to xllm_atb_layers source tree")

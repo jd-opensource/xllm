@@ -512,13 +512,7 @@ def parse_arguments() -> dict[str, Any]:
         default='auto',
         help='Device type: a2, a3, mlu, ilu, cuda or musa (case-insensitive)'
     )
-    
-    parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Dry run mode (do not execute pre_build)'
-    )
-    
+
     parser.add_argument(
         '--generate-so',
         type=str.lower,
@@ -542,7 +536,6 @@ def parse_arguments() -> dict[str, Any]:
 
     return {
         'device': args.device,
-        'dry_run': args.dry_run,
         'generate_so': generate_so,
         'test_name': args.test_name,
     }
@@ -555,9 +548,8 @@ if __name__ == "__main__":
     if device == 'auto':
         device = get_device_type()
     print(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
-    
-    if not config['dry_run']:
-        pre_build(device)
+
+    pre_build()
 
     generate_so = config['generate_so']
     test_name = config.get('test_name')
