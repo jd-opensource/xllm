@@ -40,6 +40,9 @@ class JsonReader {
   // parse the json file, return true if success
   bool parse(const std::string& json_file_path);
 
+  // parse json content from a string, return true if success
+  bool parse_text(const std::string& json_text);
+
   // check if the json contains the key, key can be nested with dot notation
   bool contains(const std::string& key) const;
 

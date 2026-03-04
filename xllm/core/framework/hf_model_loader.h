@@ -21,10 +21,13 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/state_dict/state_dict.h"
+#include "core/util/json_reader.h"
 #include "core/util/threadpool.h"
 #include "model_loader.h"
 
 namespace xllm {
+
+bool load_quant_cfg(const JsonReader& reader, QuantArgs& quant_args);
 
 class HFModelLoader : public ModelLoader {
  public:

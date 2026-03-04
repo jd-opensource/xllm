@@ -18,31 +18,52 @@ limitations under the License.
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include <filesystem>
 #include <string>
 
 namespace xllm {
 namespace {
 
-std::filesystem::path get_fixture_dir(const std::string& name) {
-  return std::filesystem::path(__FILE__).parent_path() / "testdata" /
-         "hf_model_loader" / name;
-}
-
 TEST(HFModelLoaderTest, DetectsDeepseekMixedW4A8FromConfig) {
-  HFModelLoader loader(get_fixture_dir("deepseek_w4a8"));
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+{
+  "quantization_config": {
+    "quant_method": "smoothquant",
+    "bits": 8,
+    "group_size": 128,
+    "weight_precision": "int8",
+    "activation_precision": "int8",
+    "only_expert_per_group": true,
+    "expert_weight_precision": "int4",
+    "experts_weight_bits": 4,
+    "expert_activation_precision": "int8"
+  }
+}
+)json"));
+  QuantArgs quant_args;
+  ASSERT_TRUE(load_quant_cfg(reader, quant_args));
 
-  EXPECT_EQ(loader.quant_args().bits(), 8);
-  EXPECT_EQ(loader.quant_args().moe_weight_bits(), 4);
-  EXPECT_EQ(loader.quant_args().group_size(), 128);
+  EXPECT_EQ(quant_args.bits(), 8);
+  EXPECT_EQ(quant_args.moe_weight_bits(), 4);
+  EXPECT_EQ(quant_args.group_size(), 128);
 }
 
 TEST(HFModelLoaderTest, KeepsDefaultMoeWeightBitsWhenBitsMissing) {
-  HFModelLoader loader(get_fixture_dir("deepseek_w4a8_no_bits"));
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+{
+  "quantization_config": {
+    "quant_method": "smoothquant",
+    "group_size": 128
+  }
+}
+)json"));
+  QuantArgs quant_args;
+  ASSERT_TRUE(load_quant_cfg(reader, quant_args));
 
-  EXPECT_EQ(loader.quant_args().bits(), 0);
-  EXPECT_EQ(loader.quant_args().moe_weight_bits(), 8);
-  EXPECT_EQ(loader.quant_args().group_size(), 128);
+  EXPECT_EQ(quant_args.bits(), 0);
+  EXPECT_EQ(quant_args.moe_weight_bits(), 8);
+  EXPECT_EQ(quant_args.group_size(), 128);
 }
 
 }  // namespace
