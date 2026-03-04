@@ -343,14 +343,12 @@ void SequencesGroup::generate_multi_round_output(
                                 sequence_params_.skip_special_tokens);
     out.token_ids = std::move(gen_ids);
     if (FLAGS_output_rec_logprobs && !out.token_ids.empty()) {
-      float beam_logprob = (b < last_lps.size()) ? last_lps[b] : 0.0f;
+      float beam_logprob = (b < last_lps.size()) ? last_lps[b] : -9999.0f;
       out.logprobs.emplace();
       auto append_logprob = [&](int32_t token_id) {
         LogProb token_logprob;
         token_logprob.token_id = token_id;
-        token_logprob.token =
-            tokenizer.decode(std::vector<int32_t>{token_id},
-                             sequence_params_.skip_special_tokens);
+        token_logprob.token = tokenizer.id_to_token(token_id);
         token_logprob.logprob = beam_logprob;
         out.logprobs->emplace_back(std::move(token_logprob));
       };

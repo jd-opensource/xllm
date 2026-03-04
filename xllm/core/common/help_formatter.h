@@ -91,7 +91,8 @@ const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
 const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
                                            {"enable_beam_search_kernel",
                                             "enable_rec_fast_sampler",
-                                            "enable_topk_sorted"}};
+                                            "enable_topk_sorted",
+                                            "output_rec_logprobs"}};
 
 const OptionCategory kOtherOptions = {
     "OTHER OPTIONS",
