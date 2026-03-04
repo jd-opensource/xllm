@@ -32,6 +32,25 @@ namespace xllm {
 
 bool xllm::SpawnWorkerServer::g_running_ = true;
 
+namespace {
+std::string backend_from_worker_type(const std::string& worker_type) {
+  if (worker_type == "LLM" || worker_type == "ELM") {
+    return "llm";
+  }
+  if (worker_type == "VLM" || worker_type == "EVLM" ||
+      worker_type == "MMEVLM") {
+    return "vlm";
+  }
+  if (worker_type == "REC") {
+    return "rec";
+  }
+  if (worker_type == "DIT") {
+    return "dit";
+  }
+  return "";
+}
+}  // namespace
+
 SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      int local_rank,
                                      int global_rank,
@@ -44,10 +63,15 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      uint64_t output_shm_size,
                                      bool is_local,
                                      const std::string& task_type,
-                                     const std::string& worker_type) {
+                                     const std::string& worker_type,
+                                     const std::string& communication_backend) {
   // TODO: pass whole xllm::runtime::Options here from main process.
   xllm::runtime::Options runner_options;
+  const std::string backend = backend_from_worker_type(worker_type);
+  CHECK(!backend.empty()) << "Unsupported worker_type for backend mapping: "
+                          << worker_type;
   runner_options.block_size(block_size)
+      .backend(backend)
       .num_decoding_tokens(num_decoding_tokens)
       .enable_schedule_overlap(false)
       .enable_offline_inference(true)
@@ -60,8 +84,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   FLAGS_enable_schedule_overlap = false;
   FLAGS_master_node_addr = master_node_addr;
   FLAGS_block_size = block_size;
+  FLAGS_communication_backend = communication_backend;
 
-  std::atomic<bool> done(false);
 #if defined(USE_NPU)
   xllm::Device device("npu:" + std::to_string(device_idx));
   device.set_device();
@@ -70,15 +94,17 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
 #endif
 
   ParallelArgs parallel_args(global_rank, world_size, 1, nullptr, 1);
-  WorkerServer worker_server(local_rank,
-                             master_node_addr,
-                             done,
-                             parallel_args,
-                             device,
-                             runner_options,
-                             worker_type,
-                             false);
+  worker_server_ = std::make_unique<WorkerServer>(local_rank,
+                                                  master_node_addr,
+                                                  done_,
+                                                  parallel_args,
+                                                  device,
+                                                  runner_options,
+                                                  worker_type,
+                                                  false);
 }
+
+SpawnWorkerServer::~SpawnWorkerServer() = default;
 
 void SpawnWorkerServer::handle_signal(int signum) { g_running_ = false; }
 
