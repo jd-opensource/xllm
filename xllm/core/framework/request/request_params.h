@@ -137,8 +137,8 @@ struct RequestParams {
 
   // JSON-based tools (replacing proto_tools)
   std::vector<xllm::JsonTool> tools;
+
   std::string tool_choice = "auto";
-  bool has_tools() const { return !tools.empty(); }
 
   bool offline = false;
 

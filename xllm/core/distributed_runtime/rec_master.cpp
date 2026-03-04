@@ -524,12 +524,9 @@ void RecMaster::handle_request(
   }
 
   Timer timer;
+
   std::optional<std::string> prompt;
-  if (sp.has_tools()) {
-    prompt = chat_template_->apply(messages, sp.tools, sp.chat_template_kwargs);
-  } else {
-    prompt = chat_template_->apply(messages, sp.chat_template_kwargs);
-  }
+  prompt = chat_template_->apply(messages, sp.tools, sp.chat_template_kwargs);
 
   if (!prompt.has_value()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
@@ -537,6 +534,7 @@ void RecMaster::handle_request(
     LOG(ERROR) << "Failed to construct prompt from messages";
     return;
   }
+
   COUNTER_ADD(chat_template_latency_seconds, timer.elapsed_seconds());
 
   schedule_request(std::move(sp),
