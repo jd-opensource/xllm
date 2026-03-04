@@ -18,6 +18,7 @@ limitations under the License.
 #include <c10/core/Device.h>
 #include <cuda_runtime.h>
 #include <dlpack/dlpack.h>
+#include <dlfcn.h>
 
 #include <cstdlib>
 #include <mutex>
@@ -40,6 +41,56 @@ const std::unordered_map<torch::ScalarType, std::string_view>
         {torch::kInt64, "i64"},
         {torch::kUInt64, "u64"},
 };
+
+void ensure_tvm_ffi_global_symbols() {
+  // Ensure that TVMFFIEnvGetStream and other TVM FFI symbols are globally visible for offline inference
+  static std::once_flag once;
+  std::call_once(once, []() {
+    auto has_required_symbol = [](void* handle) -> bool {
+      return handle != nullptr &&
+             dlsym(handle, "TVMFFIEnvGetStream") != nullptr;
+    };
+
+    constexpr const char* kLibNames[] = {
+        "libtvm_ffi.so",
+        "libtvm_ffi.so.0",
+    };
+
+    // Prefer promoting an already loaded handle to RTLD_GLOBAL.
+    for (const char* lib : kLibNames) {
+      void* handle = dlopen(lib, RTLD_NOW | RTLD_NOLOAD | RTLD_GLOBAL);
+      if (has_required_symbol(handle)) {
+        VLOG(1) << "[tvmffi] promoted existing handle to RTLD_GLOBAL: " << lib;
+        return;
+      }
+    }
+
+    // Respect explicit path when provided.
+    const char* explicit_lib = std::getenv("TVM_FFI_LIB");
+    if (explicit_lib != nullptr && explicit_lib[0] != '\0') {
+      void* handle = dlopen(explicit_lib, RTLD_NOW | RTLD_GLOBAL);
+      if (has_required_symbol(handle)) {
+        VLOG(1) << "[tvmffi] loaded explicit TVM_FFI_LIB with RTLD_GLOBAL: "
+                << explicit_lib;
+        return;
+      }
+    }
+
+    // Fallback to dynamic linker search paths.
+    for (const char* lib : kLibNames) {
+      void* handle = dlopen(lib, RTLD_NOW | RTLD_GLOBAL);
+      if (has_required_symbol(handle)) {
+        VLOG(1) << "[tvmffi] loaded with RTLD_GLOBAL: " << lib;
+        return;
+      }
+    }
+
+    const char* err = dlerror();
+    LOG(WARNING) << "[tvmffi] failed to make TVMFFI symbols globally visible. "
+                 << "flashinfer op loading may fail. dlerror="
+                 << (err ? err : "unknown");
+  });
+}
 
 DLDataType get_data_type_for_dlpack_v1(const torch::Tensor& t) {
   DLDataType dtype;
@@ -359,6 +410,7 @@ ffi::Module get_module(const std::string& uri) {
     return it->second;
   }
 
+  ensure_tvm_ffi_global_symbols();
   std::string so_file_path = path_to_uri_so_lib(uri);
   auto mod = ffi::Module::LoadFromFile(so_file_path);
   module_cache.emplace(uri, mod);

@@ -89,9 +89,12 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   FLAGS_block_size = block_size;
   FLAGS_communication_backend = communication_backend;
 
-#if defined(USE_NPU)
-  xllm::Device device("npu:" + std::to_string(device_idx));
+  const std::string device_type = xllm::Device::type_str();
+  const std::string device_str = device_type + ":" + std::to_string(device_idx);
+  xllm::Device device{torch::Device(device_str)};
   device.set_device();
+
+#if defined(USE_NPU)
   device.init_device_context();
   FLAGS_enable_atb_comm_multiprocess = true;
 #endif
