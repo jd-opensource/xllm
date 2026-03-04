@@ -68,7 +68,8 @@ inline constexpr bool is_onerec_model_type(std::string_view model_type) {
 }
 
 inline constexpr bool is_llmrec_model_type(std::string_view model_type) {
-  return model_type == "qwen2" || model_type == "qwen3";
+  return model_type == "qwen2" || model_type == "qwen3" ||
+         model_type == "qwen3_moe";
 }
 
 inline constexpr RecModelKind get_rec_model_kind(std::string_view model_type) {
