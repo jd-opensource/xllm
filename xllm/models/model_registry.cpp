@@ -314,8 +314,8 @@ std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context) {
 }
 
 std::unique_ptr<CausalLM> create_rec_model(const ModelContext& context) {
-  auto factory =
-      ModelRegistry::get_rec_model_factory(context.get_model_args().model_type());
+  auto factory = ModelRegistry::get_rec_model_factory(
+      context.get_model_args().model_type());
   if (factory) {
     return factory(context);
   }

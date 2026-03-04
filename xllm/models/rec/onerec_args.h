@@ -58,12 +58,10 @@ REGISTER_MODEL_ARGS(onerec, [&] {
   LOAD_ARG_OR(num_experts_per_tok, "moe_topk", 2);
   LOAD_ARG_OR(moe_intermediate_size, "moe_inter_dim", 1024);
 
-  LOAD_ARG_OR(relative_attention_num_buckets,
-              "relative_attention_num_buckets",
-              32);
-  LOAD_ARG_OR(relative_attention_max_distance,
-              "relative_attention_max_distance",
-              128);
+  LOAD_ARG_OR(
+      relative_attention_num_buckets, "relative_attention_num_buckets", 32);
+  LOAD_ARG_OR(
+      relative_attention_max_distance, "relative_attention_max_distance", 128);
   LOAD_ARG_OR(bos_token_id, "bos_token_id", 0);
   LOAD_ARG_OR(eos_token_id, "eos_token_id", 128001);
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));

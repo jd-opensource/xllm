@@ -85,6 +85,11 @@ namespace xllm {
     LOG(FATAL) << __func__ << " is not implemented"; \
   } while (0)
 
+#define NOT_IMPLEMENTED_WITH_MSG(msg)                         \
+  do {                                                        \
+    LOG(FATAL) << __func__ << " is not implemented: " << msg; \
+  } while (0)
+
 // Multi-model step lock/unlock macros for serializing step execution
 // Only locks when the condition (e.g., FLAGS_enable_xtensor) is true
 #define MULTI_MODEL_STEP_LOCK(condition)                \

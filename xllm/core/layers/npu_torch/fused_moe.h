@@ -26,15 +26,11 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
 #include "layers/common/dense_mlp.h"
+#include "layers/common/fused_moe_base.h"
 #include "layers/common/linear.h"
 
 namespace xllm {
 namespace layer {
-
-// match layers/ilu/fused_moe.h and layers/mlu/fused_moe.h.
-struct FusedMoEArgs {
-  bool is_gated = true;
-};
 
 class FusedMoEImpl : public torch::nn::Module {
  public:
