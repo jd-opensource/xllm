@@ -50,8 +50,8 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
   (void)is_prefill;
 
   if (encoder_output != nullptr && encoder_output->defined() &&
-      encoder_output->device() != hidden_states.device()) {
-    *encoder_output = encoder_output->to(hidden_states.device());
+      encoder_output->device() != device_) {
+    *encoder_output = encoder_output->to(device_);
   }
 
   if (hidden_states.device() != device_) {
