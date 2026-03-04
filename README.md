@@ -144,7 +144,7 @@ Thanks to the following collaborating university laboratories:
 - [Beihang-HiPO](https://github.com/buaa-hipo) (Beihang HiPO research group)
 - PKU-DS-LAB (Data Structure Laboratory, Peking University)
 - PKU-NetSys-LAB (NetSys Lab, Peking University)
-- [TJU-TANKLab](https://clouduv.cn/) (TANK Lab, Tianjin University)
+- [TJU-TANKLab](https://flashserve.org/) (TANK Lab, Tianjin University)
 
 Thanks to all the following [developers](https://github.com/jd-opensource/xllm/graphs/contributors) who have contributed to xLLM.
 
