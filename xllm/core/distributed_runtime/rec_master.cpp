@@ -564,6 +564,8 @@ RecMaster::RecMaster(const Options& options)
 
   // Create pipelines based on rec_type
   auto rec_model_kind = get_rec_model_kind(model_args_.model_type());
+  CHECK(rec_model_kind != RecModelKind::kNone)
+      << "Unsupported rec model_type: " << model_args_.model_type();
   auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
   pipeline_ = create_pipeline(pipeline_type, *this);
 

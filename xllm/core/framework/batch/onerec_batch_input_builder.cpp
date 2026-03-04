@@ -858,6 +858,14 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
   // ========== Common parameter settings ==========
   // Batch set other parameters
   input_params.embedding_ids.assign(num_sequences, 0);
+  input_params.batch_id = batch_id_;
+  input_params.request_ids.clear();
+  input_params.request_ids.reserve(static_cast<size_t>(num_sequences));
+  for (const auto* group : sequence_groups_) {
+    for (const auto& sequence : group->sequences()) {
+      input_params.request_ids.push_back(sequence->request_id());
+    }
+  }
 
   // OneRec model parameters
   onerec_params.rec_stage = OneRecModelInputParams::RecStage::PREFILL;

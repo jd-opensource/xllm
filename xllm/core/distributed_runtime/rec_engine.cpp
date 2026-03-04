@@ -83,6 +83,8 @@ bool RecEngine::init_model() {
   tokenizer_args_ = model_loader->tokenizer_args();
   // Determine rec model kind and create pipeline via factory
   rec_model_kind_ = get_rec_model_kind(args_.model_type());
+  CHECK(rec_model_kind_ != RecModelKind::kNone)
+      << "Unsupported rec model_type: " << args_.model_type();
   auto pipeline_type = get_rec_pipeline_type(rec_model_kind_);
   pipeline_ = create_pipeline(pipeline_type, *this);
   // LlmRec-specific initialization
