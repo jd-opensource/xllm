@@ -323,8 +323,8 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
     }
     if (auto v = reader.value<int64_t>("quantization_config.bits")) {
       quant_args_.bits() = v.value();
+      quant_args_.moe_weight_bits() = v.value();
     }
-    quant_args_.moe_weight_bits() = quant_args_.bits();
     if (auto v = reader.value<int64_t>("quantization_config.group_size")) {
       quant_args_.group_size() = v.value();
     }

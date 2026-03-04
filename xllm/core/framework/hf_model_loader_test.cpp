@@ -18,63 +18,30 @@ limitations under the License.
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <string>
 
 namespace xllm {
 namespace {
 
-class TempModelDir {
- public:
-  TempModelDir() {
-    char dir_template[] = "/tmp/hf_model_loader_test_XXXXXX";
-    char* created_dir = mkdtemp(dir_template);
-    CHECK(created_dir != nullptr);
-    path_ = created_dir;
-  }
-
-  ~TempModelDir() { std::filesystem::remove_all(path_); }
-
-  const std::filesystem::path& path() const { return path_; }
-
- private:
-  std::filesystem::path path_;
-};
-
-void write_file(const std::filesystem::path& path, const std::string& content) {
-  std::ofstream file(path);
-  ASSERT_TRUE(file.is_open()) << "Failed to open " << path;
-  file << content;
-  file.close();
+std::filesystem::path get_fixture_dir(const std::string& name) {
+  return std::filesystem::path(__FILE__).parent_path() / "testdata" /
+         "hf_model_loader" / name;
 }
 
 TEST(HFModelLoaderTest, DetectsDeepseekMixedW4A8FromConfig) {
-  TempModelDir model_dir;
-  write_file(model_dir.path() / "config.json", R"json(
-{
-  "model_type": "deepseek_v32",
-  "torch_dtype": "bfloat16",
-  "quantization_config": {
-    "quant_method": "smoothquant",
-    "bits": 8,
-    "group_size": 128,
-    "weight_precision": "int8",
-    "activation_precision": "int8",
-    "only_expert_per_group": true,
-    "expert_weight_precision": "int4",
-    "experts_weight_bits": 4,
-    "expert_activation_precision": "int8"
-  }
-}
-)json");
-  write_file(model_dir.path() / "dummy.safetensors", "");
-
-  HFModelLoader loader(model_dir.path());
+  HFModelLoader loader(get_fixture_dir("deepseek_w4a8"));
 
   EXPECT_EQ(loader.quant_args().bits(), 8);
   EXPECT_EQ(loader.quant_args().moe_weight_bits(), 4);
+  EXPECT_EQ(loader.quant_args().group_size(), 128);
+}
+
+TEST(HFModelLoaderTest, KeepsDefaultMoeWeightBitsWhenBitsMissing) {
+  HFModelLoader loader(get_fixture_dir("deepseek_w4a8_no_bits"));
+
+  EXPECT_EQ(loader.quant_args().bits(), 0);
+  EXPECT_EQ(loader.quant_args().moe_weight_bits(), 8);
   EXPECT_EQ(loader.quant_args().group_size(), 128);
 }
 
