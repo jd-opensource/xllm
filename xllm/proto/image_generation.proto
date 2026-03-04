@@ -85,6 +85,12 @@ message Parameters {
 
   // Output type, either "base64" or "url"
   // optional string output_type = 12;
+
+  // Scaling factor for prompt embeddings
+  optional float prompt_embeds_scale = 13;
+
+  // Scaling factor for pooled prompt embeddings
+  optional float pooled_prompt_embeds_scale = 14;
 }
 
 // Request structure for image generation tasks using FLUX models

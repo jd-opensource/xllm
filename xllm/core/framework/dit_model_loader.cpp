@@ -81,6 +81,12 @@ bool DiTFolderLoader::load_args(const std::string& model_weights_path) {
     return false;
   }
 
+  if (!load_image_preprocessor_args(model_weights_path)) {
+    LOG(ERROR) << "Failed to load image preprocess args from "
+               << model_weights_path;
+    return false;
+  }
+
   return true;
 }
 
@@ -214,6 +220,96 @@ bool DiTFolderLoader::load_tokenizer_args(
     } else if (auto v = tokenizer_reader.value<std::string>("pad_token")) {
       tokenizer_args_.pad_token() = v.value();
     }
+  }
+
+  return true;
+}
+
+bool DiTFolderLoader::load_image_preprocessor_args(
+    const std::string& model_weights_path) {
+  // image preprocessor args
+  JsonReader image_preprocess_reader;
+  const std::string image_preprocess_file_path =
+      model_weights_path + "/preprocessor_config.json";
+  if (image_preprocess_reader.parse(image_preprocess_file_path)) {
+    LOG(INFO) << "Success to parse image preprocess args file: "
+              << image_preprocess_file_path;
+    args_.mm_image_do_center_crop() =
+        image_preprocess_reader.value_or<bool>("do_center_crop", false);
+    args_.mm_image_crop_height_size() =
+        image_preprocess_reader.value_or<int>("crop_size.height", 335);
+    args_.mm_image_crop_width_size() =
+        image_preprocess_reader.value_or<int>("crop_size.width", 335);
+
+    args_.mm_image_size_height() =
+        image_preprocess_reader.value_or<int>("size.height", 384);
+
+    args_.mm_image_size_width() =
+        image_preprocess_reader.value_or<int>("size.width", 384);
+
+    args_.mm_image_do_resize() =
+        image_preprocess_reader.value_or<bool>("do_resize", false);
+    args_.mm_image_resize_shortest_edge() =
+        image_preprocess_reader.value_or<int>("size.shortest_edge", 335);
+    args_.mm_image_resample() =
+        image_preprocess_reader.value_or<int>("resample", 335);
+
+    args_.mm_image_do_rescale() =
+        image_preprocess_reader.value_or<bool>("do_rescale", false);
+    args_.mm_image_rescale_factor() =
+        image_preprocess_reader.value_or<double>("rescale_factor", 0);
+
+    args_.mm_image_do_normalize() =
+        image_preprocess_reader.value_or<bool>("do_normalize", false);
+
+    const auto& image_prerocess_data = image_preprocess_reader.data();
+    if (image_preprocess_reader.contains("image_mean")) {
+      args_.mm_image_normalize_mean() =
+          image_prerocess_data["image_mean"].get<std::vector<double>>();
+    } else if (image_preprocess_reader.contains("norm_mean")) {
+      args_.mm_image_normalize_mean() =
+          image_prerocess_data["norm_mean"].get<std::vector<double>>();
+    }
+    if (image_preprocess_reader.contains("image_std")) {
+      args_.mm_image_normalize_std() =
+          image_prerocess_data["image_std"].get<std::vector<double>>();
+    } else if (image_preprocess_reader.contains("norm_std")) {
+      args_.mm_image_normalize_std() =
+          image_prerocess_data["norm_std"].get<std::vector<double>>();
+    }
+
+    args_.mm_image_shortest_edge() =
+        image_preprocess_reader.value_or<int>("size.shortest_edge", 0);
+
+    args_.mm_image_longest_edge() =
+        image_preprocess_reader.value_or<int>("size.longest_edge", 0);
+
+    args_.mm_image_min_pixels() =
+        image_preprocess_reader.value_or<int>("min_pixels", 0);
+
+    args_.mm_image_max_pixels() =
+        image_preprocess_reader.value_or<int>("max_pixels", 0);
+
+    args_.mm_image_patch_size() =
+        image_preprocess_reader.value_or<int>("patch_size", 0);
+
+    args_.mm_image_temporal_patch_size() =
+        image_preprocess_reader.value_or<int>("temporal_patch_size", 0);
+
+    args_.mm_image_merge_size() =
+        image_preprocess_reader.value_or<int>("merge_size", 0);
+
+    args_.mm_image_feature_size() =
+        image_preprocess_reader.value_or<int>("image_feature_size", 0);
+
+    args_.mm_scale_resolution() =
+        image_preprocess_reader.value_or<int>("scale_resolution", 0);
+
+    args_.mm_slice_mode() =
+        image_preprocess_reader.value_or<bool>("slice_mode", false);
+
+    args_.mm_use_image_id() =
+        image_preprocess_reader.value_or<bool>("use_image_id", false);
   }
 
   return true;

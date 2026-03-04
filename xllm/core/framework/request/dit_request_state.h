@@ -43,7 +43,9 @@ struct DiTGenerationParams {
            max_sequence_length == other.max_sequence_length &&
            strength == other.strength &&
            enable_cfg_renorm == other.enable_cfg_renorm &&
-           cfg_renorm_min == other.cfg_renorm_min;
+           cfg_renorm_min == other.cfg_renorm_min &&
+           prompt_embeds_scale == other.prompt_embeds_scale &&
+           pooled_prompt_embeds_scale == other.pooled_prompt_embeds_scale;
   }
 
   bool operator!=(const DiTGenerationParams& other) const {
@@ -71,6 +73,10 @@ struct DiTGenerationParams {
   bool enable_cfg_renorm = true;
 
   float cfg_renorm_min = 0.0f;
+
+  float prompt_embeds_scale = 1.0;
+
+  float pooled_prompt_embeds_scale = 1.0;
 };
 
 struct DiTInputParams {
