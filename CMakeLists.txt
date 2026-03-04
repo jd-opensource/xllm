@@ -6,6 +6,7 @@ option(USE_MLU "Enable MLU support" OFF)
 option(USE_ILU "Enable ILU support" OFF)
 option(USE_CUDA "Enable CUDA support" OFF)
 option(USE_MUSA "Enable MUSA support" OFF)
+option(ENABLE_HA "Enable Mooncake etcd-based HA support" OFF)
 add_compile_definitions(YLT_ENABLE_IBV)
 add_definitions(-DYLT_ENABLE_IBV)
 set(YLT_ENABLE_IBV ON)
@@ -13,6 +14,14 @@ set(YLT_ENABLE_IBV ON)
 if(DEVICE_ARCH STREQUAL "ARM")
     set(CMAKE_SYSTEM_PROCESSOR aarch64)
     set(RUST_TARGET aarch64-unknown-linux-gnu)
+endif()
+
+if(ENABLE_HA)
+  set(USE_ETCD ON CACHE BOOL "Enable Mooncake transfer-engine etcd backend" FORCE)
+  set(STORE_USE_ETCD ON CACHE BOOL "Enable Mooncake store etcd backend" FORCE)
+  add_definitions(-DUSE_ETCD)
+  add_definitions(-DSTORE_USE_ETCD)
+  message(STATUS "ENABLE_HA=ON, Mooncake high availability mode enabled")
 endif()
 
 if(USE_NPU)
@@ -30,6 +39,10 @@ if(USE_NPU)
 
   # Override Mooncake option for mooncake transfer engine
   set(USE_ASCEND ON CACHE BOOL "Enable Mooncake Ascend transport" FORCE)
+  add_definitions(-DBUILD_SHARED_LIBS=ON)
+  add_compile_definitions(USE_UB)
+  add_definitions(-DUSE_UB)
+  set(USE_UB ON)
 
   set(XLLM_ATB_LAYERS_SOURCE_DIR
       "${CMAKE_SOURCE_DIR}/third_party/xllm_atb_layers"
@@ -318,6 +331,7 @@ if(USE_NPU)
   add_definitions(-DUSE_NPU)
   add_definitions(-DBUILD_LIBTORCH)
   add_definitions(-DTORCH_SETCUSTOMHANDLER=ON)
+
   # set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
   set(CMAKE_VERBOSE_MAKEFILE ON)
   add_definitions(-DTORCH_HIGHER_THAN_PTA6)

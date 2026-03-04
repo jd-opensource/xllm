@@ -66,7 +66,8 @@ bool check_instance_name(const std::string& name) {
 
 bool XServiceClient::init(const std::string& etcd_addr,
                           const std::string& instance_name,
-                          const BlockManagerPool* block_manager_pool) {
+                          const BlockManagerPool* block_manager_pool,
+                          uint32_t offload_batch) {
   if (initialize_done_) {
     LOG(INFO) << "XServiceClient is already initialized, skipping.";
     return true;
@@ -77,6 +78,7 @@ bool XServiceClient::init(const std::string& etcd_addr,
     return false;
   }
 
+  offload_batch_.store(offload_batch, std::memory_order_relaxed);
   instance_name_ = instance_name;
   chan_options_.max_retry = 3;
   chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
@@ -288,6 +290,9 @@ void XServiceClient::heartbeat() {
       auto max_ttft = std::max_element(ttft.begin(), ttft.end());
       req.mutable_latency_metrics()->set_recent_max_ttft(*max_ttft);
     }
+
+    req.mutable_load_metrics()->set_offload_batch(
+        offload_batch_.load(std::memory_order_relaxed));
 
     if (!tbt.empty()) {
       auto max_tbt = std::max_element(tbt.begin(), tbt.end());
