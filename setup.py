@@ -363,6 +363,7 @@ class TestUT(Command):
     SEQUENTIAL_TESTS = [
         'ReduceScatterMultiDeviceTest',
         'DeepEPMultiDeviceTest',
+        'FusedMoEAll2AllMultiDeviceTest',
     ]
 
     def initialize_options(self) -> None:

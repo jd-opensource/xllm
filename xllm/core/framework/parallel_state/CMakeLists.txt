@@ -18,6 +18,7 @@ cc_library(
   SRCS
     mapping_npu.cpp
     parallel_state.cpp
+    parallel_state_async.cpp
     process_group.cpp
     $<$<BOOL:${USE_NPU}>:npu_process_group.cpp>
     collective_communicator.cpp
