@@ -493,6 +493,13 @@ DEFINE_bool(enable_topk_sorted,
             true,
             "Whether to enable sorted output for topk.");
 
+DEFINE_bool(
+    output_rec_logprobs,
+    false,
+    "Whether to output rec multi-round token-aligned logprobs. "
+    "When enabled, missing per-token logprobs are filled with the final "
+    "beam logprob.");
+
 // --- reasoning parser config ---
 
 DEFINE_string(reasoning_parser,

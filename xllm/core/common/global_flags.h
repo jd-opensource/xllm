@@ -241,6 +241,8 @@ DECLARE_bool(enable_rec_fast_sampler);
 
 DECLARE_bool(enable_topk_sorted);
 
+DECLARE_bool(output_rec_logprobs);
+
 // --- qwen3 reranker config ---
 DECLARE_bool(enable_qwen3_reranker);
 
