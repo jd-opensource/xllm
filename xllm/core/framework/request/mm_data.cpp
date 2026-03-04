@@ -130,6 +130,20 @@ bool MMData::foreach (MMDataItem::IVisitor& v) {
   return true;
 }
 
+bool MMData::foreach (MMDataItem::IVisitor& v, int32_t mm_data_index) {
+  if (!valid()) return false;
+
+  if (!hold<MMItemVec>()) return false;
+
+  auto& vec = items<MMItemVec>();
+  for (auto& item : vec) {
+    if (!v.visit(item, mm_data_index)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool MMData::foreach (MMDictItem::IVisitor& v) {
   if (!valid()) return false;
 

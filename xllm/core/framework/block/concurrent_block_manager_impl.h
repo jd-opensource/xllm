@@ -32,11 +32,13 @@ class ConcurrentBlockManagerImpl : public BlockManagerImpl {
 
   // try to share blocks among sequences with the same prefix
   std::vector<Block> allocate_shared(
+      Sequence* sequence,
       const Slice<int32_t>& tokens_ids,
       const Slice<Block>& existed_shared_blocks = {}) override;
 
   // cache the blocks
-  void cache(const Slice<int32_t>& token_ids,
+  void cache(Sequence* sequence,
+             const Slice<int32_t>& token_ids,
              std::vector<Block>& blocks,
              size_t existed_shared_blocks_num = 0) override;
   void cache(const std::vector<Block>& blocks) override;
