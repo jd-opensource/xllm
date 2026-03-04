@@ -100,7 +100,7 @@ class OneRecModelImpl : public torch::nn::Module {
 
   torch::Tensor build_hidden_states(const torch::Tensor& tokens,
                                     const OneRecModelInputParams* onerec_params,
-                                    bool is_encoder_forward) const {
+                                    bool is_encoder_forward) {
     if (tokens.numel() == 0) {
       return torch::empty({0, hidden_size_}, options_);
     }
