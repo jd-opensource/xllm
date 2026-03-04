@@ -20,7 +20,6 @@ limitations under the License.
 
 #include "forward_params.h"
 #include "framework/model/causal_lm.h"
-#include "framework/model/embedding_lm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/quant_args.h"
