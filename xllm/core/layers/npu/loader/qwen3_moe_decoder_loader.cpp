@@ -294,8 +294,9 @@ void Qwen3MoeDecoderLoader::merge_experts_weights() {
                                 experts_weights_["up_proj.weight"],
                                 /*transpose=*/false);
     }
+    // Moe_grouped_matmul needs a weight of NZ format, default cast for now
     at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_gateup_weight, 2).contiguous();
+        at_npu::native::npu_format_cast(mlp_gateup_weight, 29).contiguous();
   } catch (const std::exception& e) {
     LOG(ERROR) << "[ERROR] Exception in gateup weight processing: " << e.what();
     throw;
@@ -319,6 +320,8 @@ void Qwen3MoeDecoderLoader::merge_experts_weights() {
       at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
           merge_experts_weights(experts_weights_["down_proj.weight_scale"]);
     }
+    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
+        at_npu::native::npu_format_cast(mlp_down_weight, 29).contiguous();
   } catch (const std::exception& e) {
     LOG(ERROR) << "[ERROR] Exception in down weight processing: " << e.what();
     throw;
@@ -571,6 +574,7 @@ torch::Tensor Qwen3MoeDecoderLoader::merge_experts_weights(
 
 void Qwen3MoeDecoderLoader::merge_loaded_weights() {
   merge_experts_weights();
+
   at_weight_tensors_[IN_QKV_WEIGHT_0] =
       torch::cat({at_weight_tensors_[IN_QKV_WEIGHT_0],
                   at_weight_tensors_[IN_QKV_WEIGHT_1],

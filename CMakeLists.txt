@@ -347,6 +347,17 @@ if(USE_NPU)
       $ENV{XLLM_KERNELS_PATH}/lib/
   )
   link_libraries(cust_opapi)
+  # avoid conflicts with xllm libruntime.a
+  find_library(
+    NPU_RUNTIME_SO
+    NAMES libruntime.so
+    PATHS $ENV{ASCEND_TOOLKIT_HOME}/lib64
+    NO_DEFAULT_PATH
+  )
+  if(NOT NPU_RUNTIME_SO)
+      message(FATAL_ERROR "Failed to find npu libruntime.so in ${ASCEND_TOOLKIT_HOME}/lib64")
+  endif()
+  set(NPU_RUNTIME_SO ${NPU_RUNTIME_SO} CACHE INTERNAL "CACHED ASCEND libruntime.so path")
 endif()
 
 if(USE_MLU)

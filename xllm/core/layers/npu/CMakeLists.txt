@@ -121,6 +121,7 @@ cc_library(
     spdlog::spdlog
     torch
     torch_npu
+    ${NPU_RUNTIME_SO}
     xllm_kernels
     nnopbase
 )
