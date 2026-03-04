@@ -234,7 +234,7 @@ class QWen3ForCausalLMImpl : public LlmForCausalLMImplBase<QWen3Model> {
     if (seleted_idxes.defined()) {
       h = h.index_select(/*dim=*/0, seleted_idxes);
     }
-    using torch::nn::functional as F;
+    namespace F = torch::nn::functional;
     return F::normalize(h, F::NormalizeFuncOptions().p(2).dim(1));
   }
 };
