@@ -91,7 +91,6 @@ class LlmModelImplBase : public torch::nn::Module {
     if (is_rec_multi_round_mode() &&
         modified_input_params.has_llmrec_params()) {
       llmrec_params = modified_input_params.llmrec_params();
-      CHECK(llmrec_params != nullptr);
       CHECK_EQ(llmrec_params->full_k_caches.size(), layers_.size())
           << "Rec multi-round mode requires full_k_caches per layer.";
       CHECK_EQ(llmrec_params->full_v_caches.size(), layers_.size())
