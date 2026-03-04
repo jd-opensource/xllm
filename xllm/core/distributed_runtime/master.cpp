@@ -139,7 +139,9 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
   } else if (type == EngineType::SSM) {
     // create a speculative engine if draft model path is provided
     const auto draft_model_path = options_.draft_model_path().value_or("");
-    CHECK(!draft_model_path.empty());
+    const bool use_suffix_spec = options_.speculative_algorithm() == "Suffix";
+    CHECK(use_suffix_spec || !draft_model_path.empty())
+        << "draft model path is required unless --speculative_algorithm=Suffix";
     const auto draft_devices = DeviceNameUtils::parse_devices(
         options_.draft_devices().value_or("auto"));
     LOG(INFO) << "Using draft devices: "
@@ -155,6 +157,19 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .max_memory_utilization(options_.max_memory_utilization())
         .enable_prefix_cache(options_.enable_prefix_cache())
         .num_speculative_tokens(options_.num_speculative_tokens())
+        .speculative_algorithm(options_.speculative_algorithm())
+        .speculative_suffix_cache_max_depth(
+            options_.speculative_suffix_cache_max_depth())
+        .speculative_suffix_max_spec_factor(
+            options_.speculative_suffix_max_spec_factor())
+        .speculative_suffix_max_spec_offset(
+            options_.speculative_suffix_max_spec_offset())
+        .speculative_suffix_min_token_prob(
+            options_.speculative_suffix_min_token_prob())
+        .speculative_suffix_max_cached_requests(
+            options_.speculative_suffix_max_cached_requests())
+        .speculative_suffix_use_tree_spec(
+            options_.speculative_suffix_use_tree_spec())
         .task_type(options.task_type())
         .enable_mla(options.enable_mla())
         .master_node_addr(options.master_node_addr())
@@ -184,8 +199,11 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
       spec_options.device_ip(options_.device_ip().value());
     }
 
-    auto spec_engine = std::make_unique<SpeculativeEngine>(spec_options);
-    engine_ = std::move(spec_engine);
+    if (use_suffix_spec) {
+      engine_ = std::make_unique<SuffixSpeculativeEngine>(spec_options);
+    } else {
+      engine_ = std::make_unique<SpeculativeEngine>(spec_options);
+    }
   } else if (type == EngineType::LLM) {
     if (options_.task_type() == "embed" || options.task_type() == "mm_embed") {
       options_.enable_schedule_overlap(false);

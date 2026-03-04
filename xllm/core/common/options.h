@@ -75,6 +75,20 @@ class Options {
   // sps tokens
   PROPERTY(int32_t, num_speculative_tokens) = 0;
 
+  PROPERTY(std::string, speculative_algorithm) = "MTP";
+
+  PROPERTY(int32_t, speculative_suffix_cache_max_depth) = 64;
+
+  PROPERTY(double, speculative_suffix_max_spec_factor) = 1.0;
+
+  PROPERTY(double, speculative_suffix_max_spec_offset) = 0.0;
+
+  PROPERTY(double, speculative_suffix_min_token_prob) = 0.1;
+
+  PROPERTY(int32_t, speculative_suffix_max_cached_requests) = -1;
+
+  PROPERTY(bool, speculative_suffix_use_tree_spec) = false;
+
   // thread num to handle requests
   PROPERTY(size_t, num_request_handling_threads) = 4;
 

@@ -26,7 +26,13 @@ namespace xllm {
 
 DisaggPDServiceImpl::DisaggPDServiceImpl(DisaggPDScheduler* scheduler,
                                          Engine* engine)
-    : scheduler_(scheduler), engine_(engine) {}
+    : scheduler_(scheduler), engine_(engine) {
+  xservice_client_ = XServiceClient::get_instance();
+  if (!xservice_client_->initialize_done()) {
+    LOG(FATAL) << "XServiceClient not init.";
+    return;
+  }
+}
 
 std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
     const proto::DisaggRequest& req) {
@@ -79,13 +85,22 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
                                    std::move(stop_tokens),
                                    std::move(stop_sequences));
 
-  auto output_callback = [this](const RequestOutput& output) {
-    return scheduler_->decode_send_stream_generation(output);
+  auto output_callback = [this](const RequestOutput& output) -> bool {
+    // response to xllm service to avoid the redirect cost.
+    if (xservice_client_ == nullptr) return false;
+    auto return_status = xservice_client_->generations({output});
+    CHECK_EQ(return_status.size(), 1)
+        << "return size of generations is not equal to 1";
+    return return_status[0];
   };
 
   auto batch_output_callback =
       [this](const std::vector<RequestOutput>& outputs) {
-        return scheduler_->decode_send_stream_generations(outputs);
+        // response to xllm service to avoid the redirect cost.
+        if (xservice_client_ == nullptr) {
+          return std::vector<bool>(outputs.size(), false);
+        }
+        return xservice_client_->generations(outputs);
       };
 
   RequestState req_state(std::move(prompt),

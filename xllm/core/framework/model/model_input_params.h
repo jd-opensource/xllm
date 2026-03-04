@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <memory>
 #include <optional>
+#include <string>
 #include <variant>
 
 #if defined(USE_NPU)
@@ -292,6 +293,7 @@ struct ModelInputParams {
     params.dp_global_token_nums = dp_global_token_nums;
     params.dp_is_decode = dp_is_decode;
     params.embedding_ids = std::move(embedding_ids);
+    params.request_ids = std::move(request_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.kv_cache_tokens_nums_host = std::move(kv_cache_tokens_nums_host);
@@ -451,6 +453,9 @@ struct ModelInputParams {
 
   // embedding ids of each sequence
   std::vector<int32_t> embedding_ids;
+
+  // request ids of each sequence, used by suffix decoding request identity
+  std::vector<std::string> request_ids;
 
   // chunked prefill case of speculative decoding
   // extra token ids for each sequence, and -1 for last chunk

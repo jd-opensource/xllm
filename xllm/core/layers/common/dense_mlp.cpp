@@ -37,7 +37,7 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
       process_group_(process_group),
       hidden_act_(hidden_act) {
   // Check if using w8a8 smoothquant quantization
-  is_smoothquant_ = quant_args.quant_method() == "smoothquant";
+  is_smoothquant_ = quant_args.quant_method() == kQuantMethodSmoothquant;
 
   if (is_smoothquant_) {
     // Safety check: only w8a8 smoothquant is supported

@@ -33,7 +33,7 @@ limitations under the License.
 #include "processors/input_processor.h"
 #include "processors/minicpmv_image_processor.h"
 #include "processors/pywarpper_image_processor.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
+#include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm {
 

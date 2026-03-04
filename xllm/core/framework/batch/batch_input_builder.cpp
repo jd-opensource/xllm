@@ -227,6 +227,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
+    state_.request_ids.insert(state_.request_ids.end(),
+                              state.request_ids.begin(),
+                              state.request_ids.end());
     state_.extra_token_ids.insert(state_.extra_token_ids.end(),
                                   state.extra_token_ids.begin(),
                                   state.extra_token_ids.end());
@@ -361,6 +364,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     // add -1 as extra token id
     state.extra_token_ids.emplace_back(-1);
     state.embedding_ids.emplace_back(sequence->get_embedding_id());
+    state.request_ids.emplace_back(sequence->request_id());
   } else {
     state.extra_token_ids.emplace_back(token_ids[seq_len]);
   }
@@ -578,6 +582,10 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
   }
 
+  input_params.embedding_ids = std::move(state_.embedding_ids);
+  input_params.request_ids = std::move(state_.request_ids);
+  input_params.extra_token_ids = std::move(state_.extra_token_ids);
+
   if (swap_block_transfer_infos_ != nullptr &&
       swap_block_transfer_infos_->size() > 0) {
     input_params.swap_blocks.insert(input_params.swap_blocks.end(),
@@ -662,6 +670,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.paged_kv_last_page_len);
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
+  raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
   // beam search kernel input
   if (state_.acc_logprob_vec.size() > 0) {

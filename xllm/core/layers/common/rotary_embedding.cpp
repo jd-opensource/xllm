@@ -86,6 +86,40 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& q,
   k = rotary_params.k;
 }
 
+// Single tensor forward for MLA architecture
+void RotaryEmbeddingImpl::forward(torch::Tensor& input,
+                                  const torch::Tensor& positions,
+                                  const torch::Tensor& cu_query_lens,
+                                  int64_t max_query_len,
+                                  bool is_prompt) {
+  bool discrete;
+  std::optional<torch::Tensor> position_ids;
+  if (is_prompt) {
+    discrete = false;
+    if (Device::type_str() == "cuda" || Device::type_str() == "npu" ||
+        Device::type_str() == "ilu") {
+      position_ids = positions;
+    }
+  } else {
+    discrete = true;
+    position_ids = positions;
+  }
+
+  xllm::kernel::RotaryParams rotary_params;
+  rotary_params.q = input;
+  rotary_params.sin = sin_;
+  rotary_params.cos = cos_;
+  rotary_params.cos_sin = cos_sin_cache_;
+  rotary_params.position_ids = position_ids;
+  rotary_params.cu_query_lens = cu_query_lens;
+  rotary_params.interleaved = interleaved_;
+  rotary_params.discrete = discrete;
+  rotary_params.max_query_len = max_query_len;
+  xllm::kernel::apply_rotary(rotary_params);
+
+  input = rotary_params.q;
+}
+
 MRotaryEmbeddingImpl::MRotaryEmbeddingImpl(
     int64_t rotary_dim,
     int64_t max_position_embeddings,
@@ -233,6 +267,39 @@ void DeepseekScalingRotaryEmbeddingImpl::forward(
     input = torch::cat({input_rot, input_pass}, dim);
   } else {
     input = input_rot;
+  }
+}
+
+// Factory function: creates the appropriate RoPE type based on model args
+std::shared_ptr<RotaryEmbeddingBase> create_mla_rotary_embedding(
+    const ModelArgs& args,
+    int64_t rotary_dim,
+    int64_t max_position_embeddings,
+    bool interleaved,
+    const torch::TensorOptions& options) {
+  if (args.rope_scaling_rope_type() == "deepseek_yarn") {
+    return std::make_shared<DeepseekScalingRotaryEmbeddingImpl>(
+        rotary_dim,  // head_size (same as rotary_dim for MLA)
+        rotary_dim,
+        max_position_embeddings,
+        args.rope_scaling_original_max_position_embeddings(),
+        args.rope_theta(),
+        interleaved,
+        args.rope_scaling_factor(),
+        args.rope_extrapolation_factor(),
+        args.rope_scaling_attn_factor(),
+        args.rope_scaling_beta_fast(),
+        args.rope_scaling_beta_slow(),
+        args.rope_scaling_mscale(),
+        args.rope_scaling_mscale_all_dim(),
+        options);
+  } else {
+    // default rope type
+    return std::make_shared<RotaryEmbeddingImpl>(rotary_dim,
+                                                 max_position_embeddings,
+                                                 args.rope_theta(),
+                                                 interleaved,
+                                                 options);
   }
 }
 

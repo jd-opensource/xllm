@@ -37,7 +37,7 @@ limitations under the License.
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
-#include "xllm_kernels/models/glm4v/glm4v_encoder.h"
+#include "xllm_atb_layers/models/glm4v/glm4v_encoder.h"
 
 namespace xllm {
 namespace layer {

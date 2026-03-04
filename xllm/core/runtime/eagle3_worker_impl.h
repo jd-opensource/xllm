@@ -18,7 +18,6 @@ limitations under the License.
 #include "common/metrics.h"
 #include "forward_params.h"
 #include "runtime/mtp_worker_impl.h"
-#include "util/timer.h"
 
 namespace xllm {
 
@@ -37,13 +36,12 @@ class Eagle3WorkerImpl : public MTPWorkerImpl {
   // EAGLE-3 draft input_embedding is 3 * target_hidden_size
   int64_t get_embedding_placeholder_size() override;
 
-  // Override step_decode to apply hot_token_id mapping for EAGLE-3
-  std::optional<ForwardOutput> step_decode(const ForwardInput& inputs) override;
-
   // Override validate to handle EAGLE-3 specific token ID mapping
   SampleOutput validate(const SamplingParameters& sampling_params,
                         const std::vector<ForwardOutput>& draft_outputs,
                         const ForwardOutput& target_output) override;
+
+  void process_draft_output(ForwardOutput& draft_output) override;
 
   // Get hot_token_id for draft-to-target token mapping
   torch::Tensor get_hot_token_id() const { return hot_token_id_; }

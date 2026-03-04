@@ -1150,7 +1150,11 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
                                        context.get_quant_args(),
                                        context.get_tensor_options());
 
-    runtime.model = create_llm_model(*runtime.context.get());
+    if (rec_model_kind_ == RecModelKind::kOneRec) {
+      runtime.model = create_rec_model(*runtime.context.get());
+    } else {
+      runtime.model = create_llm_model(*runtime.context.get());
+    }
     CHECK(runtime.model != nullptr) << "Failed to create model instance " << i;
 
     runtime.executor =

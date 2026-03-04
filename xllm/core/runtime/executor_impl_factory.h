@@ -40,7 +40,8 @@ class ExecutorImplFactory {
       CausalLM* model,
       const ModelArgs& args,
       const torch::Device& device,
-      const runtime::Options& options);
+      const runtime::Options& options,
+      const std::string& backend);
 
   DISALLOW_COPY_AND_ASSIGN(ExecutorImplFactory);
 

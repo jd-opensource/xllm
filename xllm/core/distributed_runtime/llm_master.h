@@ -66,6 +66,12 @@ class LLMMaster : public Master {
                             std::vector<RequestParams> sp,
                             BatchOutputCallback callback);
 
+  // handle rpc response, send stream generations to xllm service
+  bool handle_rpc_response(const RequestOutput& output);
+
+  std::vector<bool> handle_rpc_responses(
+      const std::vector<RequestOutput>& outputs);
+
   // start running loop
   void run() override;
 
@@ -89,6 +95,8 @@ class LLMMaster : public Master {
       OutputCallback callback);
 
  private:
+  XServiceClient* xservice_client_ = nullptr;
+
   std::unique_ptr<Scheduler> scheduler_;
 
   // model args

@@ -131,6 +131,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> extra_token_ids =
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
+  std::vector<std::string> request_ids =
+      std::vector<std::string>(pb_forward_input->request_ids().begin(),
+                               pb_forward_input->request_ids().end());
 
   std::vector<BlockTransferInfo> swap_blocks;
   for (size_t i = 0; i < pb_forward_input->swap_blocks().size(); ++i) {
@@ -222,6 +225,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
+  input_params.request_ids = std::move(request_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
 
   input_params.swap_blocks = std::move(swap_blocks);
@@ -471,6 +475,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
 
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_request_ids(),
+                      inputs.request_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),
                       inputs.extra_token_ids);
   pb_forward_input->mutable_swap_blocks()->Reserve(inputs.swap_blocks.size());

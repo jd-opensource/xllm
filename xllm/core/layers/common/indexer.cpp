@@ -111,7 +111,7 @@ IndexerImpl::IndexerImpl(int64_t dim,
                          int64_t index_topk,
                          int64_t q_lora_rank,
                          bool enable_fused_qk,
-                         DeepseekScalingRotaryEmbedding& rotary_emb,
+                         const std::shared_ptr<RotaryEmbeddingBase>& rotary_emb,
                          const QuantArgs& quant_args,
                          const ParallelArgs& parallel_args,
                          const torch::TensorOptions& options)

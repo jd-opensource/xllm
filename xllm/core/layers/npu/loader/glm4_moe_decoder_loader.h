@@ -26,7 +26,7 @@ limitations under the License.
 #include "framework/model/npu_dp_ep_padding.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "xllm_kernels/models/glm/layer/moe_decoder_layer.h"
+#include "xllm_atb_layers/models/glm/layer/moe_decoder_layer.h"
 
 namespace xllm {
 namespace layer {

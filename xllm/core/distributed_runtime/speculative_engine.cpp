@@ -18,6 +18,7 @@ limitations under the License.
 #include <gflags/gflags_declare.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <memory>
 
 #include "common/metrics.h"
@@ -29,7 +30,11 @@ limitations under the License.
 namespace xllm {
 
 SpeculativeEngine::SpeculativeEngine(const runtime::Options& options)
-    : options_(options) {
+    : SpeculativeEngine(options, /*use_draft_engine=*/true) {}
+
+SpeculativeEngine::SpeculativeEngine(const runtime::Options& options,
+                                     bool use_draft_engine)
+    : options_(options), use_draft_engine_(use_draft_engine) {
   CHECK_GT(options.num_speculative_tokens(), 0)
       << "speculative tokens should not be zero";
 
@@ -42,26 +47,33 @@ SpeculativeEngine::SpeculativeEngine(const runtime::Options& options)
   engine_options.num_decoding_tokens(options.num_speculative_tokens() + 1);
   engine_ = std::make_unique<LLMEngine>(engine_options, dist_manager_);
 
-  // draft engine
-  engine_options.model_path(options_.draft_model_path().value_or(""))
-      .devices(options.draft_devices())
-      .num_decoding_tokens(1)
-      .is_draft_engine(true);
-  draft_engine_ = std::make_unique<LLMEngine>(engine_options, dist_manager_);
+  if (use_draft_engine_) {
+    // draft engine
+    engine_options.model_path(options_.draft_model_path().value_or(""))
+        .devices(options.draft_devices())
+        .num_decoding_tokens(1)
+        .is_draft_engine(true);
+    draft_engine_ = std::make_unique<LLMEngine>(engine_options, dist_manager_);
 
-  // check if llm and ssm are using the same device
-  for (const auto& target : options.devices()) {
-    for (const auto& draft : options.draft_devices()) {
-      if (target == draft) {
-        share_device_ = true;
-        break;
-      } else {
-        LOG(FATAL) << "Current only support target and draft engine using the "
-                      "same devices";
+    // check if llm and ssm are using the same device
+    for (const auto& target : options.devices()) {
+      for (const auto& draft : options.draft_devices()) {
+        if (target == draft) {
+          share_device_ = true;
+          break;
+        } else {
+          LOG(FATAL)
+              << "Current only support target and draft engine using the "
+                 "same devices";
+        }
       }
     }
   }
 }
+
+SuffixSpeculativeEngine::SuffixSpeculativeEngine(
+    const runtime::Options& options)
+    : SpeculativeEngine(options, /*use_draft_engine=*/false) {}
 
 bool SpeculativeEngine::init() {
   if (!init_model()) {
@@ -80,47 +92,51 @@ bool SpeculativeEngine::init_model() {
     return false;
   }
 
-  if (!draft_engine_->init_model()) {
-    return false;
-  }
+  model_args_ = engine_->model_args();
 
-  // check if the tokenizers are compatible
-  const auto* draft_tokenizer = draft_engine_->tokenizer();
-  const auto* target_tokenizer = engine_->tokenizer();
-  if (draft_tokenizer->vocab_size() != target_tokenizer->vocab_size()) {
-    LOG(ERROR) << "draft and target tokenizers have different vocab sizes, "
-                  "draft vocab_size: "
-               << draft_tokenizer->vocab_size()
-               << ", target vocab_size: " << target_tokenizer->vocab_size();
-    return false;
-  }
-
-  const std::string test_text = "hello from xllm!";
-  std::vector<int32_t> draft_token_ids;
-  std::vector<int32_t> target_token_ids;
-  if (!draft_tokenizer->encode(test_text, &draft_token_ids) ||
-      !target_tokenizer->encode(test_text, &target_token_ids)) {
-    if (draft_token_ids != target_token_ids) {
-      LOG(ERROR) << "draft and target tokenizers are not compatible";
+  if (use_draft_engine_) {
+    if (!draft_engine_->init_model()) {
       return false;
+    }
+
+    // check if the tokenizers are compatible
+    const auto* draft_tokenizer = draft_engine_->tokenizer();
+    const auto* target_tokenizer = engine_->tokenizer();
+    if (draft_tokenizer->vocab_size() != target_tokenizer->vocab_size()) {
+      LOG(ERROR) << "draft and target tokenizers have different vocab sizes, "
+                    "draft vocab_size: "
+                 << draft_tokenizer->vocab_size()
+                 << ", target vocab_size: " << target_tokenizer->vocab_size();
+      return false;
+    }
+
+    const std::string test_text = "hello from xllm!";
+    std::vector<int32_t> draft_token_ids;
+    std::vector<int32_t> target_token_ids;
+    if (!draft_tokenizer->encode(test_text, &draft_token_ids) ||
+        !target_tokenizer->encode(test_text, &target_token_ids)) {
+      if (draft_token_ids != target_token_ids) {
+        LOG(ERROR) << "draft and target tokenizers are not compatible";
+        return false;
+      }
+    }
+
+    // check if the max context length are the same
+    const auto& draft_model_args = draft_engine_->model_args();
+    if (model_args_.max_position_embeddings() !=
+        draft_model_args.max_position_embeddings()) {
+      LOG(WARNING) << "draft and target models have different max context "
+                      "lengths, draft max_position_embeddings: "
+                   << draft_model_args.max_position_embeddings()
+                   << ", target max_position_embeddings: "
+                   << model_args_.max_position_embeddings()
+                   << ", using the minimum between them";
+      model_args_.max_position_embeddings() =
+          std::min(model_args_.max_position_embeddings(),
+                   draft_model_args.max_position_embeddings());
     }
   }
 
-  // check if the max context length are the same
-  model_args_ = engine_->model_args();
-  const auto& draft_model_args = draft_engine_->model_args();
-  if (model_args_.max_position_embeddings() !=
-      draft_model_args.max_position_embeddings()) {
-    LOG(WARNING) << "draft and target models have different max context "
-                    "lengths, draft max_position_embeddings: "
-                 << draft_model_args.max_position_embeddings()
-                 << ", target max_position_embeddings: "
-                 << model_args_.max_position_embeddings()
-                 << ", using the minimum between them";
-    model_args_.max_position_embeddings() =
-        std::min(model_args_.max_position_embeddings(),
-                 draft_model_args.max_position_embeddings());
-  }
   dtype_ = util::parse_dtype(model_args_.dtype(), options_.devices()[0]);
   return true;
 }
@@ -128,6 +144,11 @@ bool SpeculativeEngine::init_model() {
 bool SpeculativeEngine::allocate_kv_cache() {
   Engine::KVCacheCapacity target_kv_cache_cap =
       engine_->estimate_kv_cache_capacity();
+
+  if (!use_draft_engine_) {
+    return engine_->allocate_kv_cache(target_kv_cache_cap);
+  }
+
   Engine::KVCacheCapacity draft_kv_cache_cap =
       draft_engine_->estimate_kv_cache_capacity();
   const int64_t kv_cache_size =

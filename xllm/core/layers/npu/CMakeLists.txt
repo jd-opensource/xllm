@@ -121,6 +121,6 @@ cc_library(
     spdlog::spdlog
     torch
     torch_npu
-    xllm_kernels
+    xllm_atb_layers
     nnopbase
 )

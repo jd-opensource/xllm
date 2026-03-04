@@ -115,16 +115,17 @@ void APIService::Completions(::google::protobuf::RpcController* controller,
     return;
   }
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  auto arena = GetArenaWithCheck<CompletionCall>(response);
-  std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
-      ctrl,
-      done_guard.release(),
-      const_cast<proto::CompletionRequest*>(request),
-      response,
-      arena != nullptr);
+
   if (FLAGS_backend == "llm") {
-    completion_service_impl_->process_async(call);
+    completion_service_impl_->process_async_rpc_impl(request);
   } else if (FLAGS_backend == "rec") {
+    auto arena = GetArenaWithCheck<CompletionCall>(response);
+    std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
+        ctrl,
+        done_guard.release(),
+        const_cast<proto::CompletionRequest*>(request),
+        response,
+        arena != nullptr);
     rec_completion_service_impl_->process_async(call);
   }
 }
@@ -167,13 +168,6 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
   } else if (FLAGS_backend == "rec") {
     rec_completion_service_impl_->process_async(call);
   }
-}
-
-void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
-                                 const proto::ChatRequest* request,
-                                 proto::ChatResponse* response,
-                                 ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
 }
 
 namespace {
@@ -288,12 +282,12 @@ std::pair<Status, std::string> preprocess_chat_json(std::string json_str,
 namespace {
 
 template <typename ChatCall, typename Service>
-void chat_completions_impl(std::unique_ptr<Service>& service,
-                           xllm::ClosureGuard& guard,
-                           brpc::Controller* ctrl,
-                           const proto::HttpRequest* request,
-                           proto::HttpResponse* response,
-                           bool is_multimodal) {
+void chat_completions_http_impl(std::unique_ptr<Service>& service,
+                                xllm::ClosureGuard& guard,
+                                brpc::Controller* ctrl,
+                                const proto::HttpRequest* request,
+                                proto::HttpResponse* response,
+                                bool is_multimodal) {
   auto arena = GetArenaWithCheck<ChatCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ReqType>(arena);
@@ -332,7 +326,28 @@ void chat_completions_impl(std::unique_ptr<Service>& service,
       ctrl, guard.release(), req_pb, resp_pb, arena != nullptr /*use_arena*/);
   service->process_async(call);
 }
+
 }  // namespace
+
+void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
+                                 const proto::ChatRequest* request,
+                                 proto::ChatResponse* response,
+                                 ::google::protobuf::Closure* done) {
+  // TODO with xllm-service
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  // Maybe need double check later
+
+  chat_service_impl_->process_async_rpc_impl(request);
+}
 
 void APIService::ChatCompletionsHttp(
     ::google::protobuf::RpcController* controller,
@@ -352,15 +367,16 @@ void APIService::ChatCompletionsHttp(
 
   if (FLAGS_backend == "llm") {
     CHECK(chat_service_impl_) << " chat service is invalid.";
-    chat_completions_impl<ChatCall, ChatServiceImpl>(chat_service_impl_,
-                                                     done_guard,
-                                                     ctrl,
-                                                     request,
-                                                     response,
-                                                     /*is_multimodal=*/false);
+    chat_completions_http_impl<ChatCall, ChatServiceImpl>(
+        chat_service_impl_,
+        done_guard,
+        ctrl,
+        request,
+        response,
+        /*is_multimodal=*/false);
   } else if (FLAGS_backend == "vlm") {
     CHECK(mm_chat_service_impl_) << " mm chat service is invalid.";
-    chat_completions_impl<MMChatCall, MMChatServiceImpl>(
+    chat_completions_http_impl<MMChatCall, MMChatServiceImpl>(
         mm_chat_service_impl_,
         done_guard,
         ctrl,
@@ -369,12 +385,13 @@ void APIService::ChatCompletionsHttp(
         /*is_multimodal=*/true);
   } else if (FLAGS_backend == "rec") {
     CHECK(chat_service_impl_) << " chat service is invalid.";
-    chat_completions_impl<ChatCall, ChatServiceImpl>(chat_service_impl_,
-                                                     done_guard,
-                                                     ctrl,
-                                                     request,
-                                                     response,
-                                                     /*is_multimodal=*/false);
+    chat_completions_http_impl<ChatCall, ChatServiceImpl>(
+        chat_service_impl_,
+        done_guard,
+        ctrl,
+        request,
+        response,
+        /*is_multimodal=*/false);
   }
 }
 
@@ -540,6 +557,20 @@ void APIService::Models(::google::protobuf::RpcController* controller,
                         proto::ModelListResponse* response,
                         ::google::protobuf::Closure* done) {
   // TODO with xllm-service
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  bool st_models = models_service_impl_->list_models(nullptr, response);
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  if (!st_models) {
+    ctrl->SetFailed("list models failed.");
+    LOG(ERROR) << "list models failed.";
+    return;
+  }
 }
 
 void APIService::ModelsHttp(::google::protobuf::RpcController* controller,
@@ -554,16 +585,13 @@ void APIService::ModelsHttp(::google::protobuf::RpcController* controller,
 
   auto arena = response->GetArena();
   auto resp_pb =
-      google::protobuf::Arena::CreateMessage<proto::ModelList>(arena);
+      google::protobuf::Arena::CreateMessage<proto::ModelListResponse>(arena);
 
-  proto::ModelListResponse model_list;
-  bool st_models = models_service_impl_->list_models(nullptr, &model_list);
+  bool st_models = models_service_impl_->list_models(nullptr, resp_pb);
   if (!st_models) {
     LOG(ERROR) << "list models failed.";
     return;
   }
-  resp_pb->mutable_data()->CopyFrom(model_list.data());
-  resp_pb->set_object("list");
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
   json2pb::Pb2JsonOptions json_options;
