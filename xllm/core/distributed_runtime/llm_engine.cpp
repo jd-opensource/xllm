@@ -287,8 +287,8 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     index_slot_size = dtype_size * index_n_head * args_.index_head_dim();
   }
   if (args_.linear_num_value_heads() > 0) {
-    int64_t head_k_dim = args_.linear_value_head_dim();
-    int64_t head_v_dim = args_.linear_key_head_dim();
+    int64_t head_k_dim = args_.linear_key_head_dim();
+    int64_t head_v_dim = args_.linear_value_head_dim();
     int64_t linear_ssm_slot_size = dtype_size * n_local_linear_v_heads_ * head_k_dim * head_v_dim;
     int64_t linear_conv_slot_size = dtype_size * (head_k_dim * n_local_linear_k_heads_ * 2 + head_v_dim * n_local_linear_v_heads_) * (args_.linear_conv_kernel_dim() -1 );
     linear_slot_size = linear_ssm_slot_size + linear_conv_slot_size;
