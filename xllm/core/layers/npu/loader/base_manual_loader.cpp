@@ -249,10 +249,7 @@ torch::Tensor BaseManualLoader::convert_to_torch_tensor(
   auto fptr = c10::GetStorageImplCreate(device_type);
   auto allocator = c10::GetAllocator(device_type);
 
-  // PyTorch 2.7+ API Change:
-  // Old: StorageImpl(size, allocator) + storage.set_data_ptr(data)  // two
-  // steps New: StorageImpl(size, data_ptr, allocator)                     //
-  // one step
+  // PyTorch 2.7+: StorageImpl now takes DataPtr instead of raw allocator
   storage = fptr(c10::StorageImpl::use_byte_size_t(),
                  c10::SymInt(tensor_nbytes),
                  std::move(c10_data_ptr),
