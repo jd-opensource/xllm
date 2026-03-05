@@ -17,12 +17,13 @@ limitations under the License.
 
 #include <folly/futures/Future.h>
 
+#include <unordered_map>
+
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/model/model_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
-#include "framework/xtensor/xtensor_manager_pool.h"
 #include "runtime/options.h"
 
 namespace xllm {
@@ -30,7 +31,9 @@ class Engine {
  public:
   virtual ~Engine() = default;
 
-  virtual bool init() = 0;
+  virtual bool init() { return true; };
+
+  virtual bool init(int32_t master_status) { return true; };
 
   // execute model with batch input
   virtual ForwardOutput step(std::vector<Batch>& batch) = 0;
@@ -45,14 +48,6 @@ class Engine {
     auto p = reinterpret_cast<BlockManagerPool*>(kv_cache_manager_.get());
     if (!p) {
       LOG(FATAL) << "kv_cache_manager_ is not BlockManagerPool type!";
-    }
-    return p;
-  }
-
-  virtual XTensorManagerPool* xtensor_manager_pool() const {
-    auto p = reinterpret_cast<XTensorManagerPool*>(kv_cache_manager_.get());
-    if (!p) {
-      LOG(FATAL) << "kv_cache_manager_ is not XTensorManagerPool type!";
     }
     return p;
   }
@@ -116,6 +111,16 @@ class Engine {
     NOT_IMPLEMENTED();
   };
 
+  // Get XTensor info for etcd registration (from dp group 0)
+  // worker_free_phy_pages: free pages per worker
+  // model_weight_segments: weight segments in GlobalXTensor per model
+  virtual void get_xtensor_info(
+      std::vector<size_t>& worker_free_phy_pages,
+      std::unordered_map<std::string, std::vector<WeightSegment>>&
+          model_weight_segments) {
+    NOT_IMPLEMENTED();
+  };
+
   virtual bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                             const std::vector<std::string>& addrs,
                             const std::vector<std::string>& device_ips,
@@ -131,6 +136,41 @@ class Engine {
                               const std::vector<uint16_t>& ports,
                               const int32_t dp_size) {
     NOT_IMPLEMENTED();
+    return false;
+  };
+
+  // D2D link for weight transfer - each worker links to one remote addr
+  // device_ips: one ip per worker, in worker order
+  virtual bool link_d2d(const std::vector<std::string>& device_ips) {
+    NOT_IMPLEMENTED();
+    return false;
+  };
+
+  virtual bool unlink_d2d(const std::vector<std::string>& device_ips) {
+    NOT_IMPLEMENTED();
+    return false;
+  };
+
+  virtual bool sleep(int32_t master_status) {
+    LOG(FATAL) << " sleep is not implemented!";
+    return false;
+  };
+
+  virtual bool wakeup(const WakeupOptions& options) {
+    LOG(FATAL) << " wakeup is not implemented!";
+    return false;
+  };
+
+  // XTensor mode: get GlobalXTensor offsets for allocated blocks
+  // Returns per-layer K/V offsets for each block
+  // Output: offsets[layer_id] = {k_offsets, v_offsets}
+  // dp_rank: Target DP rank to query (offsets come from workers in that DP
+  // group)
+  virtual bool get_xtensor_offsets_for_blocks(
+      int32_t dp_rank,
+      const std::vector<int32_t>& block_ids,
+      std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
+          layer_offsets) {
     return false;
   };
 

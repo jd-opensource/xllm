@@ -1107,8 +1107,9 @@ RecWorkerImpl::~RecWorkerImpl() {
 }
 
 bool RecWorkerImpl::init_model(const std::string& model_weights_path,
-                               int32_t random_seed) {
-  if (!WorkerImpl::init_model(model_weights_path, random_seed)) {
+                               int32_t random_seed,
+                               int32_t master_status) {
+  if (!WorkerImpl::init_model(model_weights_path, random_seed, master_status)) {
     return false;
   }
 

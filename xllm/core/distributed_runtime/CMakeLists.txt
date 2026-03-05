@@ -64,6 +64,7 @@ cc_library(
     :parallel_state
     $<$<BOOL:${USE_NPU}>:xllm_atb_layers>
     :collective_service
+    :xtensor
 )
 
 cc_library(

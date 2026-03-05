@@ -37,11 +37,6 @@ KVCache::KVCache(torch::Tensor key_cache,
       index_cache_(std::move(index_cache)),
       key_cache_scale_(std::move(key_cache_scale)),
       value_cache_scale_(std::move(value_cache_scale)) {}
-
-KVCache::KVCache(std::shared_ptr<XTensor> key_xtensor,
-                 std::shared_ptr<XTensor> value_xtensor)
-    : key_xtensor_(key_xtensor), value_xtensor_(value_xtensor) {}
-
 torch::Tensor KVCache::get_k_cache() const { return key_cache_; }
 torch::Tensor KVCache::get_v_cache() const { return value_cache_; }
 torch::Tensor KVCache::get_index_cache() const { return index_cache_; }
@@ -115,10 +110,5 @@ void KVCache::swap_blocks(torch::Tensor& src_tensor,
         torch::index_select(value_cache_scale_, 0, src_tensor);
     value_cache_scale_.index_copy_(0, dst_tensor, selected_v_scales);
   }
-}
-
-std::shared_ptr<XTensor> KVCache::get_k_xtensor() const { return key_xtensor_; }
-std::shared_ptr<XTensor> KVCache::get_v_xtensor() const {
-  return value_xtensor_;
 }
 }  // namespace xllm

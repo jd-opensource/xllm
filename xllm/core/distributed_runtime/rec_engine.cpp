@@ -30,6 +30,7 @@ limitations under the License.
 #include "framework/model_loader.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/request/rec_type.h"
+#include "master.h"  // For WAKEUP constant
 #include "util/env_var.h"
 #include "util/pretty_print.h"
 #include "util/timer.h"
@@ -243,7 +244,8 @@ bool RecEngine::LlmRecEnginePipeline::init_model_workers(
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.worker_clients_num_);
   for (auto& worker : engine_.worker_clients_) {
-    futures.push_back(worker->init_model_async(model_path, FLAGS_random_seed));
+    futures.push_back(
+        worker->init_model_async(model_path, FLAGS_random_seed, WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
@@ -541,7 +543,8 @@ bool RecEngine::OneRecEnginePipeline::init_model_workers(
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->init_model_async(model_path, FLAGS_random_seed));
+    futures.push_back(
+        worker->init_model_async(model_path, FLAGS_random_seed, WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
@@ -752,7 +755,8 @@ bool RecEngine::RecMultiRoundEnginePipeline::init_model_workers(
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->init_model_async(model_path, FLAGS_random_seed));
+    futures.push_back(
+        worker->init_model_async(model_path, FLAGS_random_seed, WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {

@@ -229,7 +229,7 @@ void NpuGlm4DecoderLayerImpl::merge_loaded_weights() {
     at_weight_tensors_[idx] = at_placeholder_;
   }
 
-  c10_npu::NPUCachingAllocator::emptyCache();
+  Device::empty_cache(device_.index());
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[i]);

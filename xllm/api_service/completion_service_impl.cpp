@@ -164,6 +164,25 @@ CompletionServiceImpl::CompletionServiceImpl(
     const std::vector<std::string>& models)
     : APIServiceImpl(models), master_(master) {
   CHECK(master_ != nullptr);
+  add_model_master(models[0], master);
+}
+
+void CompletionServiceImpl::add_model_master(const std::string& model,
+                                             LLMMaster* master) {
+  CHECK(master != nullptr);
+  std::unique_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
+  llm_model_to_master_.insert_or_assign(model, master);
+  models_.insert(model);
+}
+
+LLMMaster* CompletionServiceImpl::get_model_master(
+    const std::string& model) const {
+  std::shared_lock<std::shared_mutex> lock(llm_model_to_master_mutex_);
+  auto it = llm_model_to_master_.find(model);
+  if (it == llm_model_to_master_.end()) {
+    return nullptr;
+  }
+  return it->second;
 }
 
 // complete_async for brpc from xllm_service
@@ -233,18 +252,24 @@ void CompletionServiceImpl::process_async_rpc_impl(
 void CompletionServiceImpl::process_async_impl(
     std::shared_ptr<CompletionCall> call) {
   const auto& rpc_request = call->request();
-  // check if model is supported
   const auto& model = rpc_request.model();
-  if (unlikely(!models_.contains(model))) {
+  LLMMaster* master = get_model_master(model);
+  if (unlikely(master == nullptr)) {
     call->finish_with_error(StatusCode::UNKNOWN, "Model not supported");
     return;
   }
 
-  // Check if the request is being rate-limited.
-  if (unlikely(master_->get_rate_limiter()->is_limited())) {
-    call->finish_with_error(
-        StatusCode::RESOURCE_EXHAUSTED,
-        "The number of concurrent requests has reached the limit.");
+  // Check if the request is being rate-limited or model is sleeping.
+  // is_limited() returns true if sleeping or rate-limited.
+  if (unlikely(master->get_rate_limiter()->is_limited())) {
+    if (master->get_rate_limiter()->is_sleeping()) {
+      call->finish_with_error(StatusCode::UNAVAILABLE,
+                              "Model is currently in sleep state.");
+    } else {
+      call->finish_with_error(
+          StatusCode::RESOURCE_EXHAUSTED,
+          "The number of concurrent requests has reached the limit.");
+    }
     return;
   }
 
@@ -269,14 +294,14 @@ void CompletionServiceImpl::process_async_impl(
   auto saved_streaming = request_params.streaming;
   auto saved_request_id = request_params.request_id;
   // schedule the request
-  master_->handle_request(
+  master->handle_request(
       std::move(rpc_request.prompt()),
       std::move(prompt_tokens),
       std::move(request_params),
       call.get(),
       [call,
        model,
-       master = master_,
+       master = master,
        stream = std::move(saved_streaming),
        include_usage = include_usage,
        request_id = std::move(saved_request_id),

@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "base_manual_loader.h"
 
+#include "framework/xtensor/xtensor_allocator.h"
+
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
@@ -35,6 +37,29 @@ static inline size_t AlignUp(size_t value, size_t alignment) {
 BaseManualLoader::~BaseManualLoader() {
   release_host_storage();
   release_device_storage();
+}
+
+void BaseManualLoader::free_weights() { release_host_storage(); }
+
+void BaseManualLoader::allocate_device_storage() {
+  auto& allocator = XTensorAllocator::get_instance();
+  bool ok =
+      allocator.allocate_weight(model_id_, device_storage_, storage_size_);
+  CHECK(ok) << "Failed to allocate contiguous device storage size="
+            << storage_size_;
+}
+
+void BaseManualLoader::reload_weights() {
+  allocate_device_storage();
+  copy_weights_to_device_async();
+  init_device_at_weights();
+}
+
+void BaseManualLoader::reload_weights_from_device() {
+  // D2D path: weights already transferred to GlobalXTensor weight region.
+  // Call allocate_weight to get the pointer into the pre-allocated region.
+  allocate_device_storage();
+  init_device_at_weights();
 }
 
 void BaseManualLoader::init_weight_slices() {
@@ -74,17 +99,20 @@ void BaseManualLoader::copy_weights_to_pinned_host() {
     if (!slice.bytes) {
       continue;
     }
-    auto host_tensor = at_host_weight_tensors_[i].to(torch::kCPU).contiguous();
     void* dst = static_cast<char*>(host_pinned_storage_) +
                 static_cast<ptrdiff_t>(slice.offset);
-    std::memcpy(dst, host_tensor.data_ptr(), slice.bytes);
-    at_host_weight_tensors_[i] = at::Tensor();
-  }
+    auto host_tensor = at_host_weight_tensors_[i].to(torch::kCPU).contiguous();
 
-  ret = aclrtMallocAlign32(
-      &device_storage_, storage_size_, ACL_MEM_MALLOC_HUGE_FIRST);
-  CHECK_EQ(ret, ACL_SUCCESS)
-      << "Failed to allocate contiguous device storage size=" << storage_size_;
+    if (is_nz_format_tensor(i)) {
+      int err = copy_host_nd_to_nz(
+          host_tensor, dst, slice.bytes, ACL_MEMCPY_DEVICE_TO_HOST);
+      CHECK_EQ(err, ACL_SUCCESS)
+          << "copy_host_nd_to_nz failed for tensor index " << i;
+    } else {
+      std::memcpy(dst, host_tensor.data_ptr(), slice.bytes);
+    }
+    at_host_weight_tensors_[i] = torch::zeros({1});
+  }
 }
 
 void BaseManualLoader::copy_weights_to_device_async() {
@@ -95,22 +123,20 @@ void BaseManualLoader::copy_weights_to_device_async() {
   void* dst = static_cast<char*>(device_storage_);
   void* src = static_cast<char*>(host_pinned_storage_);
 
-  auto err = aclrtMemcpyAsync(dst,
+  auto ret = aclrtMemcpyAsync(dst,
                               storage_size_,
                               src,
                               storage_size_,
                               ACL_MEMCPY_HOST_TO_DEVICE,
                               stream);
-  CHECK_EQ(err, ACL_SUCCESS) << "aclrtMemcpyAsync failed";
+  CHECK_EQ(ret, ACL_SUCCESS) << "aclrtMemcpyAsync failed";
 }
 
 void BaseManualLoader::copy_weights_to_device() {
   CHECK_EQ(weight_slices_.size(), at_host_weight_tensors_.size())
       << "weight_slices_ size and at_host_weight_tensors_ size mismatch.";
-  auto ret = aclrtMallocAlign32(
-      &device_storage_, storage_size_, ACL_MEM_MALLOC_HUGE_FIRST);
-  CHECK_EQ(ret, ACL_SUCCESS)
-      << "Failed to allocate contiguous device storage size=" << storage_size_;
+
+  allocate_device_storage();
 
   for (size_t i = 0; i < weight_slices_.size(); ++i) {
     const auto& slice = weight_slices_[i];
@@ -131,19 +157,19 @@ void BaseManualLoader::copy_weights_to_device() {
                         ACL_MEMCPY_HOST_TO_DEVICE);
     }
     CHECK_EQ(err, ACL_SUCCESS) << "aclrtMemcpy failed for tensor index " << i;
-    at_host_weight_tensors_[i] = at::Tensor();
+    at_host_weight_tensors_[i] = torch::zeros({1});
   }
 }
 
 int BaseManualLoader::copy_host_nd_to_nz(torch::Tensor host_tensor,
                                          void* dst_ptr,
-                                         uint64_t len) {
+                                         uint64_t len,
+                                         aclrtMemcpyKind kind) {
   auto tmp_tensor = at_npu::native::npu_format_cast(host_tensor.to(device_),
                                                     ACL_FORMAT_FRACTAL_NZ);
   const void* src_ptr = tmp_tensor.data_ptr();
   auto stream = c10_npu::getCurrentNPUStream();
-  auto err = aclrtMemcpyAsync(
-      dst_ptr, len, src_ptr, len, ACL_MEMCPY_DEVICE_TO_DEVICE, stream);
+  auto err = aclrtMemcpyAsync(dst_ptr, len, src_ptr, len, kind, stream);
   stream.synchronize();
   tmp_tensor = torch::Tensor();
 
@@ -171,16 +197,7 @@ void BaseManualLoader::init_device_at_weights() {
   }
 }
 
-void BaseManualLoader::release_device_storage() {
-  if (device_storage_ == nullptr) {
-    return;
-  }
-  auto ret = aclrtFree(device_storage_);
-  if (ret != ACL_SUCCESS) {
-    LOG(ERROR) << "Failed to free contiguous layer storage, ret=" << ret;
-  }
-  device_storage_ = nullptr;
-}
+void BaseManualLoader::release_device_storage() {}
 
 void BaseManualLoader::release_host_storage() {
   if (host_pinned_storage_ == nullptr) {
@@ -195,8 +212,21 @@ void BaseManualLoader::release_host_storage() {
 
 BaseManualLoader::BaseManualLoader(uint64_t weight_count,
                                    const ModelContext& context)
-    : BaseLoader(weight_count, context) {
+    : BaseLoader(weight_count, context), model_id_(context.get_model_id()) {
   at_host_weight_tensors_.resize(weight_count_);
+}
+
+void BaseManualLoader::merge_loaded_weights() {
+  merge_host_at_weights();
+  init_weight_slices();
+  copy_weights_to_device();
+  init_device_at_weights();
+}
+
+void BaseManualLoader::merge_and_move_pinned_host() {
+  merge_host_at_weights();
+  init_weight_slices();
+  copy_weights_to_pinned_host();
 }
 
 torch::Tensor BaseManualLoader::convert_to_torch_tensor(

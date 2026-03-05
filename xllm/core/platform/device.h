@@ -49,6 +49,7 @@ class Device {
 
   int64_t total_memory();
   int64_t free_memory();
+  static void empty_cache(int32_t device_index);
 
   int synchronize_default_stream();
   std::unique_ptr<Stream> get_stream_from_pool(const int32_t timeout = -1);

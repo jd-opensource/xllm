@@ -41,6 +41,9 @@ limitations under the License.
 #include "options.h"
 #include "platform/device.h"
 #include "util/threadpool.h"
+#if defined(USE_NPU)
+#include "framework/kv_cache/mooncake_weight_transfer.h"
+#endif
 
 namespace xllm {
 
@@ -62,9 +65,12 @@ class WorkerImpl {
   virtual bool init_model(ModelContext& context) = 0;
 
   virtual bool init_model(const std::string& model_weights_path,
-                          int32_t random_seed);
+                          int32_t random_seed,
+                          int32_t master_status);
 
   virtual void load_model(std::unique_ptr<ModelLoader> loader);
+
+  virtual void lazy_load_model(std::unique_ptr<ModelLoader> loader);
 
   virtual std::tuple<int64_t, int64_t> estimate_kv_cache_capacity();
 
@@ -73,7 +79,6 @@ class WorkerImpl {
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
   virtual bool allocate_kv_cache_with_transfer(
-      uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
 #if defined(USE_NPU)
@@ -81,9 +86,6 @@ class WorkerImpl {
       std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 #endif
-
-  virtual bool allocate_continuous_kv_cache(
-      const std::vector<XTensor::Options>& options);
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -102,6 +104,10 @@ class WorkerImpl {
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports);
 
+  // D2D link for weight transfer
+  virtual bool link_d2d(const std::string& remote_addr);
+  virtual bool unlink_d2d(const std::string& remote_addr);
+
   // prepare input for execution
   virtual ForwardInput prepare_inputs(Batch& batch);
 
@@ -118,7 +124,8 @@ class WorkerImpl {
   // initialize model, cache manager. async call
   virtual folly::SemiFuture<bool> init_model_async(
       const std::string& model_weights_path,
-      int32_t random_seed);
+      int32_t random_seed,
+      int32_t master_status);
 
   virtual folly::SemiFuture<std::tuple<int64_t, int64_t>>
   estimate_kv_cache_capacity_async();
@@ -128,11 +135,11 @@ class WorkerImpl {
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
   virtual folly::SemiFuture<bool> allocate_kv_cache_with_transfer_async(
-      uint64_t kv_cache_size,
       const std::vector<std::vector<int64_t>>& kv_cache_shape);
 
-  virtual folly::SemiFuture<bool> allocate_continuous_kv_cache_async(
-      const std::vector<XTensor::Options>& options);
+  virtual bool sleep(int32_t master_status);
+
+  virtual bool wakeup(const WakeupOptions& options);
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       uint64_t src_cluster_id,
@@ -216,6 +223,7 @@ class WorkerImpl {
   Device device_;
 
   std::unique_ptr<Stream> prepare_stream_;
+  std::unique_ptr<Stream> compute_stream_;
 
   // parallel args of current instance
   ParallelArgs parallel_args_;
@@ -245,11 +253,17 @@ class WorkerImpl {
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
   std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
 
+#if defined(USE_NPU)
+  std::unique_ptr<MooncakeWeightTransfer> weight_transfer_;
+#endif
+
   bool is_spec_draft_ = false;
 
   Status status_ = Status::UNINITIALIZED;
 
   torch::Tensor expert_load_data_;
+
+  std::string model_weights_path_;
 };
 
 }  // namespace xllm

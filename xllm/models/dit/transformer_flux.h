@@ -458,7 +458,7 @@ class FluxAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
 
     attn_output = attn_output.reshape({batch_size, -1, attn_heads * head_dim});
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MUSA)
     // SDPA expects (B, H, S, D); our query1/key1/value1 are (B, S, H, D).
     // Transpose to match diffusers dispatch_attention_fn (permute 0,2,1,3).
     query1 = query1.transpose(1, 2);

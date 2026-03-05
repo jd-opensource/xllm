@@ -32,7 +32,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
-#if defined(USE_CUDA) || defined(USE_ILU)
+#if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
 #include "layers/cuda/flashinfer_workspace.h"
 #endif
 #include "models/model_registry.h"
@@ -46,7 +46,7 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
                              const runtime::Options& options)
     : WorkerImpl(parallel_args, device, options) {
   device_.set_device();
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_MUSA)
   threadpool_.schedule([this]() mutable {
     // initialize flashinfer workspace
     ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
@@ -77,6 +77,20 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
+  if (FLAGS_enable_xtensor) {
+#if defined(USE_NPU)
+    SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
+#endif
+    return step_internal(input);
+  } else {
+    return step_internal(input);
+  }
+}
+
+std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
+    const ForwardInput& input) {
+  MULTI_MODEL_STEP_LOCK(FLAGS_enable_xtensor);
+
   Timer timer;
   auto& sampling_params = input.sampling_params;
 
@@ -103,7 +117,6 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     eplb_executor_->eplb_execute(input.eplb_info);
   }
 
-  // temporarily use [0], will be adapted in next pr
   // call model executor forward to get hidden states
   auto model_output = model_executor_->forward(
       input.token_ids, input.positions, kv_caches_, input.input_params);
@@ -128,6 +141,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
 
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
       !options_.enable_speculative_decode()) {
+    MULTI_MODEL_STEP_UNLOCK();
     auto ret = device_.synchronize_default_stream();
     // in p-d disaggregation scene, all micro batches should be in same
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
@@ -190,6 +204,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     }
   }
 
+  MULTI_MODEL_STEP_UNLOCK();
   auto ret = device_.synchronize_default_stream();
 
   if (options_.kv_cache_transfer_mode() == "PUSH" &&

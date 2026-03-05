@@ -16,6 +16,9 @@ limitations under the License.
 
 #pragma once
 
+#include <shared_mutex>
+#include <unordered_map>
+
 #include "api_service/api_service_impl.h"
 #include "api_service/stream_call.h"
 #include "chat.pb.h"
@@ -41,16 +44,20 @@ class ChatServiceImpl final : public APIServiceImpl<ChatCall> {
 
   void process_async_rpc_impl(const proto::ChatRequest* request);
 
+  void add_model_master(const std::string& model, LLMMaster* master);
+
  private:
   void process_rec_chat_request(std::shared_ptr<ChatCall> call);
+  LLMMaster* get_model_master(const std::string& model) const;
 
   DISALLOW_COPY_AND_ASSIGN(ChatServiceImpl);
 
   LLMMaster* master_ = nullptr;
   RecMaster* rec_master_ = nullptr;
+  mutable std::shared_mutex llm_model_to_master_mutex_;
+  std::unordered_map<std::string, LLMMaster*> llm_model_to_master_;
   const std::string tool_call_parser_format_;
   const std::string reasoning_parser_format_;
-  bool is_force_reasoning_ = false;
 };
 
 class VLMMaster;
