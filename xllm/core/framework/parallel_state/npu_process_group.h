@@ -50,6 +50,14 @@ class ProcessGroupImpl : public ProcessGroup {
                  std::vector<torch::Tensor>& outputs) override;
 
  private:
+  // group_id is a optional value of c10d_npu::ProcessGroupHCCL::Options,
+  // which is used to construct the key of process_domain, if the value
+  // was not set when initializing more than one HcclProcessGroup, A Hccl ERROR
+  // that inidicates the comm name has already exist would occur,
+  // so for each time when we create a new process group, we should increase
+  // group_id_ and pass it to c10d_npu::ProcessGroupHCCL::Options
+  static int32_t group_id_;
+
   HcclComm comm_ = nullptr;
   c10_npu::NPUStream comm_stream_;
 };
