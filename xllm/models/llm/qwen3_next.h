@@ -86,6 +86,8 @@ class Qwen3NextModelImpl : public torch::nn::Module {
                       torch::Tensor positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
+    // Disable gradient computation to reduce memory usage during inference
+    torch::NoGradGuard no_grad;
     if (dp_size_ > 1) {
       if (tokens.sizes() == 0) {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);

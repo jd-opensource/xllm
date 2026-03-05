@@ -262,10 +262,8 @@ torch::Tensor FusedMoEImpl::forward_expert(
     gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
   }
 
-  // Step 5: activation or scaled quantization(fused with activation)
-  torch::Tensor act_out =
-      is_gated_ ? gemm1_out.slice(1, 0, gemm1_out.size(1) / 2).contiguous()
-                : gemm1_out;
+  // Step 5: activation
+  torch::Tensor act_out;
 
   xllm::kernel::ActivationParams activation_params;
   activation_params.input = gemm1_out;
