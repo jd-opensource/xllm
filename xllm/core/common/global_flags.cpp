@@ -604,3 +604,8 @@ DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 DEFINE_int32(health_check_interval_ms,
              3000,
              "Worker health check interval in milliseconds.");
+
+DEFINE_bool(enable_xattention_one_stage,
+            false,
+            "Whether to force xattention one-stage decode for rec "
+            "multi-round mode.");

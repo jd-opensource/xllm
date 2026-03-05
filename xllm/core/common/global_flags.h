@@ -280,6 +280,8 @@ DECLARE_int32(max_decode_rounds);
 
 DECLARE_int32(beam_width);
 
+DECLARE_bool(enable_xattention_one_stage);
+
 DECLARE_bool(use_audio_in_video);
 
 // --- concurrent rec worker config ---
