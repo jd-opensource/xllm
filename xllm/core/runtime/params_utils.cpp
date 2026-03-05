@@ -131,6 +131,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> extra_token_ids =
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
+  std::vector<std::string> request_ids =
+      std::vector<std::string>(pb_forward_input->request_ids().begin(),
+                               pb_forward_input->request_ids().end());
 
   std::vector<BlockTransferInfo> swap_blocks;
   for (size_t i = 0; i < pb_forward_input->swap_blocks().size(); ++i) {
@@ -222,6 +225,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
+  input_params.request_ids = std::move(request_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
 
   input_params.swap_blocks = std::move(swap_blocks);
@@ -324,6 +328,21 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
                                 .dp_size();
 
     transfer_kv_info.remote_instance_info = std::move(instance_info);
+
+    // XTensor mode: read dst_xtensor_layer_offsets
+    const auto& pb_info = pb_forward_input->transfer_kv_infos()[i];
+    for (const auto& pb_layer_offsets : pb_info.dst_xtensor_layer_offsets()) {
+      XTensorLayerOffsets layer_offsets;
+      layer_offsets.k_offsets =
+          std::vector<uint64_t>(pb_layer_offsets.k_offsets().begin(),
+                                pb_layer_offsets.k_offsets().end());
+      layer_offsets.v_offsets =
+          std::vector<uint64_t>(pb_layer_offsets.v_offsets().begin(),
+                                pb_layer_offsets.v_offsets().end());
+      transfer_kv_info.dst_xtensor_layer_offsets.emplace_back(
+          std::move(layer_offsets));
+    }
+
     forward_inputs.transfer_kv_infos.emplace_back(std::move(transfer_kv_info));
   }
   auto& eplb_info = forward_inputs.eplb_info;
@@ -453,6 +472,17 @@ void forward_input_to_proto(const RawForwardInput& inputs,
                           transfer_kv_info.remote_instance_info.v_cache_ids);
       pb_transfer_kv_info->mutable_remote_instance_info()->set_dp_size(
           transfer_kv_info.remote_instance_info.dp_size);
+
+      // XTensor mode: write dst_xtensor_layer_offsets
+      for (const auto& layer_offsets :
+           transfer_kv_info.dst_xtensor_layer_offsets) {
+        auto* pb_layer_offsets =
+            pb_transfer_kv_info->mutable_dst_xtensor_layer_offsets()->Add();
+        ADD_VECTOR_TO_PROTO(pb_layer_offsets->mutable_k_offsets(),
+                            layer_offsets.k_offsets);
+        ADD_VECTOR_TO_PROTO(pb_layer_offsets->mutable_v_offsets(),
+                            layer_offsets.v_offsets);
+      }
     }
   }
   pb_forward_input->mutable_eplb_info()->set_prepare_layer_id(
@@ -471,6 +501,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
 
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_request_ids(),
+                      inputs.request_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),
                       inputs.extra_token_ids);
   pb_forward_input->mutable_swap_blocks()->Reserve(inputs.swap_blocks.size());

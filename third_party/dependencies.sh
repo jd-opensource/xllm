@@ -7,99 +7,125 @@ YELLOW="\033[0;33m"
 RED="\033[0;31m"
 NC="\033[0m" # No Color
 
-# Configuration
-REPO_ROOT=`pwd`
-INSTALL_PREFIX="${HOME}/.local/yalantinglibs"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+INSTALL_PREFIX="/usr/local/yalantinglibs"
 
-# Function to print section headers
 print_section() {
     echo -e "\n${BLUE}=== $1 ===${NC}"
 }
 
-# Function to print success messages
 print_success() {
     echo -e "${GREEN}✓ $1${NC}"
 }
 
-# Function to print error messages and exit
+print_warning() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
 print_error() {
     echo -e "${RED}✗ ERROR: $1${NC}"
     exit 1
 }
 
-# Function to check command success
-check_success() {
+run_or_die() {
+    local error_message="$1"
+    shift
+    "$@"
     if [ $? -ne 0 ]; then
-        print_error "$1"
+        print_error "$error_message"
     fi
 }
 
-# Create install directory if it doesn't exist
-if [ ! -d "${INSTALL_PREFIX}" ]; then
-    mkdir -p "${INSTALL_PREFIX}"
-    check_success "Failed to create install directory: ${INSTALL_PREFIX}"
-fi
+ensure_dir() {
+    local dir_path="$1"
+    local error_message="$2"
+    if [ ! -d "${dir_path}" ]; then
+        run_or_die "${error_message}" mkdir -p "${dir_path}"
+    fi
+}
 
-echo -e "${YELLOW}Installing to: ${INSTALL_PREFIX}${NC}"
+remove_dir_if_exists() {
+    local dir_path="$1"
+    local dir_name="$2"
+    if [ -d "${dir_path}" ]; then
+        print_warning "${dir_name} directory already exists. Removing for fresh install..."
+        run_or_die "Failed to remove existing ${dir_name} directory" rm -rf "${dir_path}"
+    fi
+}
 
+patch_yalantinglibs_config() {
+    local config_file="$1"
+    if [ -f "${config_file}" ]; then
+        run_or_die \
+            "Failed to patch yalantinglibs config.cmake" \
+            sed -i \
+            '54s/target_link_libraries(${ylt_target_name} -libverbs)/target_link_libraries(${ylt_target_name} INTERFACE -libverbs)/' \
+            "${config_file}"
+    fi
+}
 
-# Install yalantinglibs
-print_section "Installing yalantinglibs"
+patch_yalantinglibs_easylog() {
+    local easylog_header="$1"
+    if [ -f "${easylog_header}" ]; then
+        run_or_die \
+            "Failed to patch yalantinglibs easylog severity default" \
+            sed -i \
+            '/std::atomic<Severity> min_severity_ =/,/#endif/c\  std::atomic<Severity> min_severity_ = Severity::WARN;' \
+            "${easylog_header}"
+    fi
+}
 
-# Check if thirdparties directory exists
-if [ ! -d "${REPO_ROOT}/third_party/Mooncake/thirdparties" ]; then
-    mkdir -p "${REPO_ROOT}/third_party/Mooncake/thirdparties"
-    check_success "Failed to create Mooncake/thirdparties directory"
-fi
+install_yalantinglibs() {
+    print_section "Installing yalantinglibs"
 
-# Change to thirdparties directory
-cd "${REPO_ROOT}/third_party/Mooncake/thirdparties"
-check_success "Failed to change to Mooncake/thirdparties directory"
+    local thirdparties_dir="${REPO_ROOT}/third_party/Mooncake/thirdparties"
+    local yalanting_repo_url="https://gitcode.com/gh_mirrors/ya/yalantinglibs.git"
+    local yalanting_source_dir="${thirdparties_dir}/yalantinglibs"
+    local yalanting_build_dir="${yalanting_source_dir}/build"
+    local yalanting_config_file="${INSTALL_PREFIX}/lib/cmake/yalantinglibs/config.cmake"
+    local yalanting_easylog_header="${yalanting_source_dir}/include/ylt/easylog.hpp"
 
-# Check if yalantinglibs is already installed
-if [ -d "yalantinglibs" ]; then
-    echo -e "${YELLOW}yalantinglibs directory already exists. Removing for fresh install...${NC}"
-    rm -rf yalantinglibs
-    check_success "Failed to remove existing yalantinglibs directory"
-fi
+    ensure_dir "${thirdparties_dir}" "Failed to create Mooncake/thirdparties directory"
+    remove_dir_if_exists "${yalanting_source_dir}" "yalantinglibs"
 
-# Clone yalantinglibs
-echo "Cloning yalantinglibs from https://gitcode.com/gh_mirrors/ya/yalantinglibs.git"
-git clone https://gitcode.com/gh_mirrors/ya/yalantinglibs.git
-check_success "Failed to clone yalantinglibs"
+    echo "Cloning yalantinglibs from ${yalanting_repo_url}"
+    run_or_die "Failed to clone yalantinglibs" git clone "${yalanting_repo_url}" "${yalanting_source_dir}"
 
-# Build and install yalantinglibs
-cd yalantinglibs
-check_success "Failed to change to yalantinglibs directory"
+    echo "Checking out yalantinglibs version 0.5.5..."
+    run_or_die "Failed to checkout yalantinglibs version 0.5.5" git -C "${yalanting_source_dir}" checkout 0.5.5
 
-# Checkout version 0.5.5
-echo "Checking out yalantinglibs version 0.5.5..."
-git checkout 0.5.5
-check_success "Failed to checkout yalantinglibs version 0.5.5"
+    patch_yalantinglibs_easylog "${yalanting_easylog_header}"
 
-mkdir -p build
-check_success "Failed to create build directory"
+    ensure_dir "${yalanting_build_dir}" "Failed to create build directory"
 
-cd build
-check_success "Failed to change to build directory"
+    echo "Configuring yalantinglibs..."
+    run_or_die \
+        "Failed to configure yalantinglibs" \
+        cmake \
+        -S "${yalanting_source_dir}" \
+        -B "${yalanting_build_dir}" \
+        -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_BENCHMARK=OFF \
+        -DBUILD_UNIT_TESTS=OFF \
+        -DYLT_ENABLE_IBV=ON
 
-echo "Configuring yalantinglibs..."
-cmake .. -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARK=OFF -DBUILD_UNIT_TESTS=OFF -DYLT_ENABLE_IBV=ON 
-check_success "Failed to configure yalantinglibs"
+    echo "Building yalantinglibs (using $(nproc) cores)..."
+    run_or_die "Failed to build yalantinglibs" cmake --build "${yalanting_build_dir}" -j"$(nproc)"
 
-echo "Building yalantinglibs (using $(nproc) cores)..."
-cmake --build . -j$(nproc)
-check_success "Failed to build yalantinglibs"
+    echo "Installing yalantinglibs..."
+    run_or_die "Failed to install yalantinglibs" cmake --install "${yalanting_build_dir}"
 
-echo "Installing yalantinglibs..."
-cmake --install .
-check_success "Failed to install yalantinglibs"
+    patch_yalantinglibs_config "${yalanting_config_file}"
+    print_success "yalantinglibs installed successfully to ${INSTALL_PREFIX}"
+}
 
-# Patch the config.cmake file
-CONFIG_FILE="${INSTALL_PREFIX}/lib/cmake/yalantinglibs/config.cmake"
-if [ -f "${CONFIG_FILE}" ]; then
-    sed -i '54s/target_link_libraries(${ylt_target_name} -libverbs)/target_link_libraries(${ylt_target_name} INTERFACE -libverbs)/' "${CONFIG_FILE}"
-    check_success "Failed to patch yalantinglibs config.cmake"
-fi
+main() {
+    ensure_dir "${INSTALL_PREFIX}" "Failed to create install directory: ${INSTALL_PREFIX}"
+    echo -e "${YELLOW}Installing to: ${INSTALL_PREFIX}${NC}"
 
-print_success "yalantinglibs installed successfully to ${INSTALL_PREFIX}"
+    install_yalantinglibs
+}
+
+main "$@"

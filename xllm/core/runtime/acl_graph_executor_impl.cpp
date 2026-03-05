@@ -61,7 +61,9 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
       need_update_attn_mask_(need_update_attn_mask) {
   // Determine whether attention plan needs to be updated based on model type
   // Future logic can be extended here for more complex model-specific behavior
-  need_update_attention_plan_ = (args.model_type() != "deepseek_v32");
+  need_update_attention_plan_ =
+      (args.model_type() != "deepseek_v32" && args.model_type() != "glm5_moe" &&
+       args.model_type() != "glm_moe_dsa");
 
   // Check if mRoPE is used (for VLM models like qwen2-vl)
   use_mrope_ = !args.rope_scaling_mrope_section().empty();

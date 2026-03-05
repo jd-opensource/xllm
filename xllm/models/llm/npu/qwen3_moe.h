@@ -100,6 +100,18 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
 
   void merge_loaded_weights() { decoder_layer_->merge_loaded_weights(); }
 
+  void merge_and_move_pinned_host() {
+    decoder_layer_->merge_and_move_pinned_host();
+  }
+
+  void free_weights() { decoder_layer_->free_weights(); }
+
+  void reload_weights() { decoder_layer_->reload_weights(); }
+
+  void reload_weights_from_device() {
+    decoder_layer_->reload_weights_from_device();
+  }
+
  private:
   layer::NpuQwen3MoeDecoderLayer decoder_layer_{nullptr};
 };
@@ -315,6 +327,38 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
+  }
+
+  void merge_and_move_pinned_host() {
+    npu_embed_tokens_->merge_and_move_pinned_host();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->merge_and_move_pinned_host();
+    }
+    norm_->merge_and_move_pinned_host();
+  }
+
+  void free_weights() {
+    npu_embed_tokens_->free_weights();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->free_weights();
+    }
+    norm_->free_weights();
+  }
+
+  void reload_weights() {
+    npu_embed_tokens_->reload_weights();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights();
+    }
+    norm_->reload_weights();
+  }
+
+  void reload_weights_from_device() {
+    npu_embed_tokens_->reload_weights_from_device();
+    for (size_t i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights_from_device();
+    }
+    norm_->reload_weights_from_device();
   }
 
   layer::NpuWordEmbedding get_npu_word_embedding() { return npu_embed_tokens_; }

@@ -29,7 +29,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "loader/deepseek_v2_decoder_loader.h"
 #include "npu_base_layer.h"
-#include "xllm_kernels/models/deepseekv2/layer/decoder_layer.h"
+#include "xllm_atb_layers/models/deepseekv2/layer/decoder_layer.h"
 
 namespace xllm {
 namespace layer {
@@ -110,8 +110,6 @@ class NpuDeepseekV2DecoderLayerImpl : public BaseLayer {
                                          const int32_t layer_id);
 
   ~NpuDeepseekV2DecoderLayerImpl() override = default;
-
-  virtual void merge_loaded_weights() override;
 
   torch::Tensor build_expert_routing_map(std::vector<int32_t> expert_lists);
 

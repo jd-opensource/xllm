@@ -124,14 +124,17 @@ void XAttentionImpl::decoder_forward(const AttentionMetadata& attn_metadata,
                                      torch::Tensor& key,
                                      torch::Tensor& value,
                                      torch::Tensor& output) {
-  key = key.contiguous();
-  value = value.contiguous();
+  uint32_t batch_size = attn_metadata.kv_cu_seq_lens.size(0) - 1;
+  uint32_t total_beam = query.size(0);
+  uint32_t beam_size = total_beam / batch_size;
+
+  key = key.view({batch_size, beam_size, num_kv_heads_, head_size_});
+  value = value.view({batch_size, beam_size, num_kv_heads_, head_size_});
 
   xllm::kernel::cuda::decoder_reshape_and_cache(key,
                                                 value,
                                                 attn_metadata.unshared_k_cache,
                                                 attn_metadata.unshared_v_cache,
-                                                attn_metadata.block_table,
                                                 attn_metadata.step_tensor);
 
   torch::Tensor full_k_cache = attn_metadata.full_k_cache.unsqueeze(1);

@@ -32,6 +32,8 @@ limitations under the License.
 #include "llm/npu/glm4_moe.h"                 // IWYU pragma: keep
 #include "llm/npu/glm4_moe_lite.h"            // IWYU pragma: keep
 #include "llm/npu/glm4_moe_mtp.h"             // IWYU pragma: keep
+#include "llm/npu/glm5_moe.h"                 // IWYU pragma: keep
+#include "llm/npu/glm5_moe_mtp.h"             // IWYU pragma: keep
 #include "llm/npu/kimi_k2.h"                  // IWYU pragma: keep
 #include "llm/npu/llama.h"                    // IWYU pragma: keep
 #include "llm/npu/llama3.h"                   // IWYU pragma: keep
@@ -41,6 +43,7 @@ limitations under the License.
 #include "llm/npu/qwen3_eagle3.h"             // IWYU pragma: keep
 #include "llm/npu/qwen3_embedding.h"          // IWYU pragma: keep
 #include "llm/npu/qwen3_moe.h"                // IWYU pragma: keep
+#include "rec/onerec.h"                       // IWYU pragma: keep
 #include "vlm/npu/glm4v.h"                    // IWYU pragma: keep
 #include "vlm/npu/glm4v_moe.h"                // IWYU pragma: keep
 #include "vlm/npu/minicpmv.h"                 // IWYU pragma: keep
@@ -81,6 +84,8 @@ limitations under the License.
 #include "vlm/qwen2_vl_embedding.h"           // IWYU pragma: keep
 #include "vlm/qwen3_vl.h"                     // IWYU pragma: keep
 #include "vlm/qwen3_vl_moe.h"                 // IWYU pragma: keep
+#elif defined(USE_MUSA)
+#include "llm/musa/qwen3.h"  // IWYU pragma: keep
 #else
-#error "Unsupported device type, only support NPU, CUDA, MLU and ILU now."
+#error "Unsupported device type, only support NPU, CUDA, MLU, ILU and MUSA now."
 #endif

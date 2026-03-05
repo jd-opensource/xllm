@@ -21,6 +21,8 @@ limitations under the License.
 #include <c10d/TCPStore.hpp>
 #include <torch_npu/csrc/distributed/ProcessGroupHCCL.hpp>
 
+#include "platform/device.h"
+
 namespace {
 inline bool is_npu(const torch::Tensor& tensor) {
   if (!tensor.defined()) {
@@ -111,7 +113,7 @@ ProcessGroupImpl::~ProcessGroupImpl() {
   } else {
     HCCLCHECK(HcclCommDestroy(comm_));
   }
-  c10_npu::NPUCachingAllocator::emptyCache();
+  Device::empty_cache(device().index());
 }
 
 ProcessGroupImpl::ProcessGroupImpl(int rank,

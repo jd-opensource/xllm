@@ -40,8 +40,10 @@ class RecWorkerImpl : public LLMWorkerImpl {
                 const runtime::Options& options);
 
   virtual ~RecWorkerImpl();
+
   bool init_model(const std::string& model_weights_path,
-                  int32_t random_seed) override;
+                  int32_t random_seed,
+                  int32_t master_status) override;
 
   bool init_model(ModelContext& context) override;
 

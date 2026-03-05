@@ -15,6 +15,10 @@ limitations under the License.
 
 #pragma once
 
+#include <shared_mutex>
+#include <string>
+#include <unordered_map>
+
 #include "anthropic_service_impl.h"
 #include "chat_service_impl.h"
 #include "completion_service_impl.h"
@@ -105,9 +109,67 @@ class APIService : public proto::XllmAPIService {
                              proto::HttpResponse* response,
                              ::google::protobuf::Closure* done) override;
 
- private:
-  Master* master_;
+  void ForkMaster(::google::protobuf::RpcController* controller,
+                  const proto::MasterInfos* request,
+                  proto::Status* response,
+                  ::google::protobuf::Closure* done) override;
 
+  void ForkMasterHttp(::google::protobuf::RpcController* controller,
+                      const proto::HttpRequest* request,
+                      proto::HttpResponse* response,
+                      ::google::protobuf::Closure* done) override;
+
+  void Sleep(::google::protobuf::RpcController* controller,
+             const proto::MasterInfos* request,
+             proto::Status* response,
+             ::google::protobuf::Closure* done) override;
+
+  void SleepHttp(::google::protobuf::RpcController* controller,
+                 const proto::HttpRequest* request,
+                 proto::HttpResponse* response,
+                 ::google::protobuf::Closure* done) override;
+
+  void Wakeup(::google::protobuf::RpcController* controller,
+              const proto::MasterInfos* request,
+              proto::Status* response,
+              ::google::protobuf::Closure* done) override;
+
+  void WakeupHttp(::google::protobuf::RpcController* controller,
+                  const proto::HttpRequest* request,
+                  proto::HttpResponse* response,
+                  ::google::protobuf::Closure* done) override;
+
+  void LinkD2D(::google::protobuf::RpcController* controller,
+               const proto::D2DLinkRequest* request,
+               proto::Status* response,
+               ::google::protobuf::Closure* done) override;
+
+  void LinkD2DHttp(::google::protobuf::RpcController* controller,
+                   const proto::HttpRequest* request,
+                   proto::HttpResponse* response,
+                   ::google::protobuf::Closure* done) override;
+
+  void UnlinkD2D(::google::protobuf::RpcController* controller,
+                 const proto::D2DLinkRequest* request,
+                 proto::Status* response,
+                 ::google::protobuf::Closure* done) override;
+
+  void UnlinkD2DHttp(::google::protobuf::RpcController* controller,
+                     const proto::HttpRequest* request,
+                     proto::HttpResponse* response,
+                     ::google::protobuf::Closure* done) override;
+
+ private:
+  bool ParseForkMasterRequest(const proto::MasterInfos* request,
+                              Options& options);
+  void set_model_master(const std::string& model_id, Master* master);
+  bool has_model_master(const std::string& model_id) const;
+  bool add_model_master_if_absent(const std::string& model_id, Master* master);
+  Master* get_model_master(const std::string& model_id) const;
+
+  Master* master_;
+  mutable std::shared_mutex masters_mutex_;
+  std::unordered_map<std::string, Master*> masters_;
   std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;
   std::unique_ptr<CompletionServiceImpl> completion_service_impl_;
   std::unique_ptr<ChatServiceImpl> chat_service_impl_;

@@ -28,7 +28,20 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class RotaryEmbeddingImpl : public torch::nn::Module {
+class RotaryEmbeddingBase : public torch::nn::Module {
+ public:
+  ~RotaryEmbeddingBase() override = default;
+
+  virtual void forward(torch::Tensor& input,
+                       const torch::Tensor& positions,
+                       const torch::Tensor& cu_query_lens,
+                       int64_t max_query_len,
+                       bool is_prompt) = 0;
+  virtual const torch::Tensor& get_sin_cache() const = 0;
+  virtual const torch::Tensor& get_cos_cache() const = 0;
+};
+
+class RotaryEmbeddingImpl : public RotaryEmbeddingBase {
  public:
   RotaryEmbeddingImpl(int64_t rotary_dim,
                       int64_t max_position_embeddings,
@@ -43,10 +56,20 @@ class RotaryEmbeddingImpl : public torch::nn::Module {
                const torch::Tensor& cu_query_lens,
                int64_t max_query_len,
                bool is_prompt);
+  // Single tensor forward for MLA architecture
+  void forward(torch::Tensor& input,
+               const torch::Tensor& positions,
+               const torch::Tensor& cu_query_lens,
+               int64_t max_query_len,
+               bool is_prompt) override;
 
   const torch::Tensor& precomputed_cos_sin_cache() {
     return precomputed_cos_sin_cache_;
   }
+
+  torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
+  const torch::Tensor& get_sin_cache() const override { return sin_; }
+  const torch::Tensor& get_cos_cache() const override { return cos_; }
 
  protected:
   bool interleaved_;
@@ -81,7 +104,7 @@ class MRotaryEmbeddingImpl : public RotaryEmbeddingImpl {
 };
 TORCH_MODULE(MRotaryEmbedding);
 
-class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
+class DeepseekScalingRotaryEmbeddingImpl : public RotaryEmbeddingBase {
  public:
   DeepseekScalingRotaryEmbeddingImpl(
       int64_t head_size,
@@ -103,9 +126,9 @@ class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
                const torch::Tensor& positions,
                const torch::Tensor& cu_query_lens,
                int64_t max_query_len,
-               bool is_prompt);
-  const torch::Tensor& get_sin_cache() const { return sin_; }
-  const torch::Tensor& get_cos_cache() const { return cos_; }
+               bool is_prompt) override;
+  const torch::Tensor& get_sin_cache() const override { return sin_; }
+  const torch::Tensor& get_cos_cache() const override { return cos_; }
 
  private:
   int64_t head_size_;
@@ -119,6 +142,14 @@ class DeepseekScalingRotaryEmbeddingImpl : public torch::nn::Module {
   torch::Tensor precomputed_cos_sin_cache_;
 };
 TORCH_MODULE(DeepseekScalingRotaryEmbedding);
+
+// Factory function: creates the appropriate RoPE type based on model args
+std::shared_ptr<RotaryEmbeddingBase> create_mla_rotary_embedding(
+    const ModelArgs& args,
+    int64_t rotary_dim,
+    int64_t max_position_embeddings,
+    bool interleaved,
+    const torch::TensorOptions& options);
 
 }  // namespace layer
 }  // namespace xllm

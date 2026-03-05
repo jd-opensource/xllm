@@ -707,12 +707,10 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
 
   GAUGE_SET(kv_cache_utilization_perc,
             kv_cache_manager_->kv_cache_utilization());
-  if (!FLAGS_enable_continuous_kvcache) {
-    GAUGE_SET(num_blocks_in_prefix_cache,
-              util::min(kv_cache_manager_->num_blocks_in_prefix_cache()));
-    GAUGE_SET(num_free_blocks, util::max(kv_cache_manager_->num_free_blocks()));
-    GAUGE_SET(num_used_blocks, util::min(kv_cache_manager_->num_used_blocks()));
-  }
+  GAUGE_SET(num_blocks_in_prefix_cache,
+            util::min(kv_cache_manager_->num_blocks_in_prefix_cache()));
+  GAUGE_SET(num_free_blocks, util::max(kv_cache_manager_->num_free_blocks()));
+  GAUGE_SET(num_used_blocks, util::min(kv_cache_manager_->num_used_blocks()));
 
   return batches;
 }

@@ -101,6 +101,7 @@ class BatchInputBuilder {
 
     // Additional data
     std::vector<int32_t> embedding_ids;
+    std::vector<std::string> request_ids;
     std::vector<int32_t> extra_token_ids;
     std::vector<TransferKVInfo> transfer_kv_infos;
 
@@ -134,11 +135,6 @@ class BatchInputBuilder {
       uint32_t q_seq_len,
       BuilderState* state_ptr = nullptr,
       std::unordered_set<int32_t>* write_block_ids_ptr = nullptr);
-  void setup_continuous_kv_cache_info(Sequence* sequence,
-                                      uint32_t n_kv_cache_tokens,
-                                      uint32_t seq_len,
-                                      uint32_t q_seq_len,
-                                      BuilderState* state_ptr = nullptr);
 
   // Input data
   const std::vector<Sequence*>& sequences_;

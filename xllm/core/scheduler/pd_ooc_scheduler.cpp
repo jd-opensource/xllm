@@ -104,7 +104,7 @@ PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
   // PDOOCScheduler::start_rpc_server is called, not the base class version)
   rpc_server_thread_ =
       std::make_unique<std::thread>(&PDOOCScheduler::start_rpc_server, this);
-  initialize_rpc_server_and_client(server_name_);
+  initialize_rpc_server(server_name_);
   register_instance_info(server_name_, engine);
 }
 

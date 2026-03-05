@@ -44,10 +44,6 @@ class SpeculativeEngine : public Engine {
     return engine_->block_manager_pool();
   }
 
-  XTensorManagerPool* xtensor_manager_pool() const override {
-    return engine_->xtensor_manager_pool();
-  }
-
   const ModelArgs& model_args() const override { return model_args_; }
 
   const TokenizerArgs& tokenizer_args() const override {
@@ -90,6 +86,9 @@ class SpeculativeEngine : public Engine {
                       const std::vector<uint16_t>& ports,
                       const int32_t dp_size) override;
 
+ protected:
+  SpeculativeEngine(const runtime::Options& options, bool use_draft_engine);
+
  private:
   bool init_model();
 
@@ -111,12 +110,21 @@ class SpeculativeEngine : public Engine {
   // draft engine
   std::unique_ptr<LLMEngine> draft_engine_;
 
+  // whether this speculative engine uses an external draft engine
+  const bool use_draft_engine_;
+
   // whether target and draft engine are sharing the same device
   bool share_device_ = false;
 
   ModelArgs model_args_;
 
   std::shared_ptr<DistManager> dist_manager_ = nullptr;
+};
+
+class SuffixSpeculativeEngine : public SpeculativeEngine {
+ public:
+  explicit SuffixSpeculativeEngine(const runtime::Options& options);
+  ~SuffixSpeculativeEngine() override = default;
 };
 
 }  // namespace xllm

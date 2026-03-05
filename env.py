@@ -82,10 +82,6 @@ def set_npu_envs() -> None:
     if not PYTORCH_NPU_INSTALL_PATH:
         os.environ["PYTORCH_NPU_INSTALL_PATH"] = "/usr/local/libtorch_npu"
 
-    XLLM_KERNELS_PATH = os.getenv("XLLM_KERNELS_PATH")
-    if not XLLM_KERNELS_PATH:
-        os.environ["XLLM_KERNELS_PATH"] = "/usr/local/xllm_kernels"
-
     set_common_envs()
     NPU_TOOLKIT_HOME = os.getenv("NPU_TOOLKIT_HOME")
     if not NPU_TOOLKIT_HOME:

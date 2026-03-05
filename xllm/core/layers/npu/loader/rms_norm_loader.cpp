@@ -18,21 +18,19 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-RMSNORMLoader::RMSNORMLoader(uint64_t weight_count, const ModelContext& context)
+RMSNormLoader::RMSNormLoader(uint64_t weight_count, const ModelContext& context)
     : BaseLoader(weight_count, context) {
-  at_weight_tensors_.resize(1);
-
   auto options = context.get_tensor_options();
   dtype_ = torch::typeMetaToScalarType(options.dtype());
   at_weight_tensors_[0] = torch::zeros({1}).to(options);
 }
 
-void RMSNORMLoader::load_state_dict(const StateDict& state_dict) {
+void RMSNormLoader::load_state_dict(const StateDict& state_dict) {
   set_weight(state_dict, "weight", 0);
   at_weight_tensors_[0] = at_weight_tensors_[0].to(dtype_);
 }
 
-void RMSNORMLoader::verify_loaded_weights(const std::string& weight_str) const {
+void RMSNormLoader::verify_loaded_weights(const std::string& weight_str) const {
   CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
       << "final norm weight is not loaded for " << weight_str;
 }

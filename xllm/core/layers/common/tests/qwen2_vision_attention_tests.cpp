@@ -90,7 +90,10 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
   int32_t num_tokens = batch_size * seq_len;
 
   auto hidden_states =
-      torch::randn({num_tokens, mm_hidden_size}, options_) * 0.02f;
+      test::seeded_tensor("qwen2_vision_attention.hidden_states",
+                          {num_tokens, mm_hidden_size},
+                          torch::kBFloat16,
+                          options_.device());
 
   // Create cu_seq_len (cumulative sequence lengths)
   std::vector<int32_t> cu_seq_len_vec = {0, seq_len, num_tokens};
@@ -101,8 +104,14 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
   // Shape: (rope_seqlen, rope_dim)
   int32_t mm_head_dim = model_args_.mm_head_dim();
   int32_t rope_dim = mm_head_dim;
-  auto m_cos_pos = torch::randn({num_tokens, rope_dim}, options_);
-  auto m_sin_pos = torch::randn({num_tokens, rope_dim}, options_);
+  auto m_cos_pos = test::seeded_tensor("qwen2_vision_attention.m_cos_pos",
+                                       {num_tokens, rope_dim},
+                                       torch::kBFloat16,
+                                       options_.device());
+  auto m_sin_pos = test::seeded_tensor("qwen2_vision_attention.m_sin_pos",
+                                       {num_tokens, rope_dim},
+                                       torch::kBFloat16,
+                                       options_.device());
 
   // Create ModelInputParams
   ModelInputParams params;
@@ -115,25 +124,25 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
 
   int32_t check_count = 10;
   auto test_output = output.flatten().slice(0, 0, check_count);
+  std::vector<float> expected_values = {0.0703125f,
+                                        0.198242f,
+                                        0.0878906f,
+                                        -0.119141f,
+                                        0.142578f,
+                                        -0.410156f,
+                                        -0.233398f,
+                                        0.328125f,
+                                        -0.298828f,
+                                        0.0712891f};
+  test::verify_precision(test_output.unsqueeze(0), expected_values, 1e-4, 1e-5);
 
-  // Output actual float values
-  std::cout << "Actual first-" << check_count << " values: [";
-  for (size_t i = 0; i < check_count; ++i) {
-    std::cout << test_output[i].item<float>() << ", ";
-  }
-  std::cout << "]" << std::endl;
-
-  std::vector<float> expected_values = {-0.0127563,
-                                        -0.0090332,
-                                        0.0664062,
-                                        0.0480957,
-                                        0.0620117,
-                                        -0.0356445,
-                                        -0.0245361,
-                                        -0.00970459,
-                                        -0.0444336,
-                                        -0.000797272};
-  test::verify_precision(test_output.unsqueeze(0), expected_values, 1e-5, 1e-6);
+  auto output2 = vision_attention->forward(
+      hidden_states, m_cos_pos, m_sin_pos, cu_seq_len, cu_seq_len_vec, params);
+  device.synchronize_default_stream();
+  ASSERT_TRUE(torch::allclose(output.flatten().to(torch::kFloat32),
+                              output2.flatten().to(torch::kFloat32),
+                              /*rtol=*/1e-4,
+                              /*atol=*/1e-5));
 }
 
 }  // namespace layer

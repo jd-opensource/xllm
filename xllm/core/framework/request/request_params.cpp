@@ -528,46 +528,54 @@ RequestParams::RequestParams(const proto::AnthropicMessagesRequest& request,
 bool RequestParams::verify_params(OutputCallback callback) const {
   if (n == 0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "n should be greater than 0");
+                        "n should be greater than 0",
+                        service_request_id);
     return false;
   }
   if (best_of.has_value()) {
     if (n > best_of.value()) {
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                          "n should be less than or equal to best_of");
+                          "n should be less than or equal to best_of",
+                          service_request_id);
       return false;
     }
   }
 
   // up to 4 stop sequences
   if (stop.has_value() && stop.value().size() > 4) {
-    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "stop size is too large");
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "stop size is too large",
+                        service_request_id);
     return false;
   }
 
   // temperature between [0.0, 2.0]
   if (temperature < 0.0 || temperature > 2.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "temperature must be between 0.0 and 2.0");
+                        "temperature must be between 0.0 and 2.0",
+                        service_request_id);
     return false;
   }
 
   // top_p between [0.0, 1.0]
   if (top_p < 0.0 || top_p > 1.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "top_p must be between 0.0 and 1.0");
+                        "top_p must be between 0.0 and 1.0",
+                        service_request_id);
     return false;
   }
 
   if (logprobs) {
     if (echo) {
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                          "logprobs is not supported with echo");
+                          "logprobs is not supported with echo",
+                          service_request_id);
       return false;
     }
     if (top_logprobs < 0 || top_logprobs > 2000) {
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                          "logprobs must be between 0 and 2000");
+                          "logprobs must be between 0 and 2000",
+                          service_request_id);
       return false;
     }
   }
@@ -575,14 +583,16 @@ bool RequestParams::verify_params(OutputCallback callback) const {
   // presence_penalty between [-2.0, 2.0]
   if (presence_penalty < -2.0 || presence_penalty > 2.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "presence_penalty must be between -2.0 and 2.0");
+                        "presence_penalty must be between -2.0 and 2.0",
+                        service_request_id);
     return false;
   }
 
   // frequency_penalty between [0.0, 2.0]
   if (frequency_penalty < 0.0 || frequency_penalty > 2.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                        "frequency_penalty must be between 0.0 and 2.0");
+                        "frequency_penalty must be between 0.0 and 2.0",
+                        service_request_id);
     return false;
   }
   return true;

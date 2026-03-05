@@ -68,6 +68,9 @@ class KVCacheManager {
   virtual std::vector<size_t> num_used_blocks() const = 0;
   virtual double kv_cache_utilization() const = 0;
 
+  // Reserve XTensor padding blocks after KV tensors are created.
+  virtual void reserve_xtensor_padding_blocks() {}
+
  protected:
   KVCacheManager() = default;
 

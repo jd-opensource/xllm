@@ -62,7 +62,9 @@ cc_library(
     proto::xllm_proto
     absl::flat_hash_set
     :parallel_state
+    $<$<BOOL:${USE_NPU}>:xllm_atb_layers>
     :collective_service
+    :xtensor
 )
 
 cc_library(

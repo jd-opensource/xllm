@@ -61,10 +61,26 @@ DECLARE_int32(max_tokens_per_chunk_for_prefill);
 
 // --- speculative inference config ---
 DECLARE_string(draft_model);
+
 DECLARE_string(draft_devices);
+
 DECLARE_int32(num_speculative_tokens);
+
 DECLARE_string(speculative_algorithm);
+
 DECLARE_bool(enable_opt_validate_probs);
+
+DECLARE_int32(speculative_suffix_cache_max_depth);
+
+DECLARE_double(speculative_suffix_max_spec_factor);
+
+DECLARE_double(speculative_suffix_max_spec_offset);
+
+DECLARE_double(speculative_suffix_min_token_prob);
+
+DECLARE_int32(speculative_suffix_max_cached_requests);
+
+DECLARE_bool(speculative_suffix_use_tree_spec);
 
 DECLARE_int32(num_request_handling_threads);
 
@@ -99,6 +115,8 @@ DECLARE_int32(max_tokens_for_graph_mode);
 DECLARE_bool(enable_chunked_prefill);
 
 DECLARE_string(master_node_addr);
+
+DECLARE_string(xtensor_master_node_addr);
 
 DECLARE_bool(enable_disagg_pd);
 
@@ -210,13 +228,9 @@ DECLARE_int32(max_global_tpot_ms);
 
 DECLARE_int32(max_requests_per_batch);
 
-DECLARE_bool(enable_continuous_kvcache);
+DECLARE_bool(enable_xtensor);
 
 DECLARE_int64(phy_page_granularity_size);
-
-DECLARE_int64(cache_size_per_token);
-
-DECLARE_int64(buffer_size_per_seq);
 
 // --- beam search config ---
 DECLARE_bool(enable_beam_search_kernel);
