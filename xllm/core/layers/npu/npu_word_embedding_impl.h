@@ -29,14 +29,15 @@ limitations under the License.
 #include "atb/atb_infer.h"
 #include "framework/model/model_input_params.h"
 #include "loader/word_embedding_loader.h"
+#include "loader/word_embedding_manual_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
-#include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
-#include "xllm_kernels/core/include/atb_speed/base/model.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
-#include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
-#include "xllm_kernels/operations/fusion/embedding/word_embedding.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/hosttensor_binder.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/model.h"
+#include "xllm_atb_layers/core/include/atb_speed/log.h"
+#include "xllm_atb_layers/core/include/atb_speed/utils/model_factory.h"
+#include "xllm_atb_layers/operations/fusion/embedding/word_embedding.h"
 
 namespace xllm {
 namespace layer {
@@ -46,8 +47,6 @@ class NpuWordEmbeddingImpl : public BaseLayer {
   explicit NpuWordEmbeddingImpl(const ModelContext& context);
 
   ~NpuWordEmbeddingImpl() override = default;
-
-  void merge_loaded_weights() override;
 
   void param_from_args(atb_speed::common::WordEmbeddingParam& param,
                        const xllm::ModelArgs& args,

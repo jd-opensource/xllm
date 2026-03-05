@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "common/global_flags.h"
 #include "common/types.h"
 #include "distributed_runtime/llm_engine.h"
 #include "framework/request/request_output.h"
@@ -26,7 +27,13 @@ namespace xllm {
 
 DisaggPDServiceImpl::DisaggPDServiceImpl(DisaggPDScheduler* scheduler,
                                          Engine* engine)
-    : scheduler_(scheduler), engine_(engine) {}
+    : scheduler_(scheduler), engine_(engine) {
+  xservice_client_ = XServiceClient::get_instance();
+  if (!xservice_client_->initialize_done()) {
+    LOG(FATAL) << "XServiceClient not init.";
+    return;
+  }
+}
 
 std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
     const proto::DisaggRequest& req) {
@@ -79,13 +86,22 @@ std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
                                    std::move(stop_tokens),
                                    std::move(stop_sequences));
 
-  auto output_callback = [this](const RequestOutput& output) {
-    return scheduler_->decode_send_stream_generation(output);
+  auto output_callback = [this](const RequestOutput& output) -> bool {
+    // response to xllm service to avoid the redirect cost.
+    if (xservice_client_ == nullptr) return false;
+    auto return_status = xservice_client_->generations({output});
+    CHECK_EQ(return_status.size(), 1)
+        << "return size of generations is not equal to 1";
+    return return_status[0];
   };
 
   auto batch_output_callback =
       [this](const std::vector<RequestOutput>& outputs) {
-        return scheduler_->decode_send_stream_generations(outputs);
+        // response to xllm service to avoid the redirect cost.
+        if (xservice_client_ == nullptr) {
+          return std::vector<bool>(outputs.size(), false);
+        }
+        return xservice_client_->generations(outputs);
       };
 
   RequestState req_state(std::move(prompt),
@@ -143,6 +159,7 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
                    << req.req_id();
         // request and blocks are released in scheduler
         resp->set_status_code(500);
+        continue;
       }
 
       auto dp_rank = sequence->dp_rank();
@@ -150,8 +167,38 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
 
       size_t shared_num = sequence->kv_state().shared_kv_blocks_num();
       auto blocks = sequence->kv_state().kv_blocks();
+
+      // Collect block IDs
+      std::vector<int32_t> block_ids;
+      block_ids.reserve(blocks.size() - shared_num);
       for (size_t i = shared_num; i < blocks.size(); i++) {
-        *(resp->mutable_blocks_ids()->Add()) = blocks[i].id();
+        int32_t block_id = blocks[i].id();
+        *(resp->mutable_blocks_ids()->Add()) = block_id;
+        block_ids.push_back(block_id);
+      }
+      // XTensor mode: calculate and return GlobalXTensor offsets
+      if (FLAGS_enable_xtensor && !block_ids.empty()) {
+        std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>
+            layer_offsets;
+        if (engine_->get_xtensor_offsets_for_blocks(
+                dp_rank, block_ids, layer_offsets)) {
+          // Fill proto with per-layer offsets
+          for (const auto& [k_offsets, v_offsets] : layer_offsets) {
+            auto* layer_proto = resp->add_xtensor_layer_offsets();
+            for (const auto& k_off : k_offsets) {
+              layer_proto->add_k_offsets(k_off);
+            }
+            for (const auto& v_off : v_offsets) {
+              layer_proto->add_v_offsets(v_off);
+            }
+          }
+          VLOG(5) << "XTensor offsets added for request " << req.req_id()
+                  << ", num_blocks=" << block_ids.size()
+                  << ", num_layers=" << layer_offsets.size();
+        } else {
+          LOG(WARNING) << "Failed to get XTensor offsets for request "
+                       << req.req_id();
+        }
       }
 
       resp->set_status_code(200);

@@ -17,11 +17,11 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "common/global_flags.h"
 #include "framework/model/model_input_params.h"
-#include "framework/xtensor/xtensor.h"
 
 namespace xllm {
 class KVCache final {
@@ -31,8 +31,12 @@ class KVCache final {
   KVCache(torch::Tensor key_cache,
           torch::Tensor value_cache,
           torch::Tensor index_cache);
-  KVCache(std::shared_ptr<XTensor> key_xtensor,
-          std::shared_ptr<XTensor> value_xtensor);
+  // Constructor for quantized KV cache with scale tensors
+  KVCache(torch::Tensor key_cache,
+          torch::Tensor value_cache,
+          torch::Tensor index_cache,
+          torch::Tensor key_cache_scale,
+          torch::Tensor value_cache_scale);
   ~KVCache() = default;
 
   // TODO: pass in kv_shape and options instead
@@ -40,15 +44,14 @@ class KVCache final {
   torch::Tensor get_v_cache() const;
   torch::Tensor get_index_cache() const;
 
+  // Get scale tensors for quantized KV cache
+  std::optional<torch::Tensor> get_k_cache_scale() const;
+  std::optional<torch::Tensor> get_v_cache_scale() const;
+
   std::vector<std::vector<int64_t>> get_shapes();
 
-  std::shared_ptr<XTensor> get_k_xtensor() const;
-  std::shared_ptr<XTensor> get_v_xtensor() const;
-
   bool empty() const {
-    return FLAGS_enable_continuous_kvcache
-               ? (key_xtensor_ == nullptr || value_xtensor_ == nullptr)
-               : (!key_cache_.defined() || !value_cache_.defined());
+    return !key_cache_.defined() || !value_cache_.defined();
   }
 
   void swap_blocks(torch::Tensor& src_tensor, torch::Tensor& dst_tensor);
@@ -58,9 +61,9 @@ class KVCache final {
   torch::Tensor value_cache_;
   torch::Tensor index_cache_;
 
-  // for continuous kvcache
-  std::shared_ptr<XTensor> key_xtensor_;
-  std::shared_ptr<XTensor> value_xtensor_;
+  // scale tensors for quantized KV cache (int8)
+  torch::Tensor key_cache_scale_;
+  torch::Tensor value_cache_scale_;
 };
 
 }  // namespace xllm

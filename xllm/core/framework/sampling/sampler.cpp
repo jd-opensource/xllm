@@ -72,7 +72,7 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
     auto greedy = greedy_sample(probs);
     samples = torch::where(params.do_sample, random, greedy);
   }
-  output.probs = probs;
+  output.probs = probs.to(logits.dtype());
   output.next_tokens = samples;
 
   if (params.logprobs) {

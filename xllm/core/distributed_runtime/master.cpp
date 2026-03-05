@@ -50,7 +50,8 @@ DECLARE_bool(graceful_quit_on_sighup);
 
 namespace xllm {
 
-Master::Master(const Options& options, EngineType type) : options_(options) {
+Master::Master(const Options& options, EngineType type)
+    : options_(options), master_status_(options.master_status()) {
   LOG(INFO) << "Master init options: " << options.to_string();
 
   // Allow brpc receive SIGTREM and SIGINT signal.
@@ -139,7 +140,9 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
   } else if (type == EngineType::SSM) {
     // create a speculative engine if draft model path is provided
     const auto draft_model_path = options_.draft_model_path().value_or("");
-    CHECK(!draft_model_path.empty());
+    const bool use_suffix_spec = options_.speculative_algorithm() == "Suffix";
+    CHECK(use_suffix_spec || !draft_model_path.empty())
+        << "draft model path is required unless --speculative_algorithm=Suffix";
     const auto draft_devices = DeviceNameUtils::parse_devices(
         options_.draft_devices().value_or("auto"));
     LOG(INFO) << "Using draft devices: "
@@ -155,6 +158,19 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .max_memory_utilization(options_.max_memory_utilization())
         .enable_prefix_cache(options_.enable_prefix_cache())
         .num_speculative_tokens(options_.num_speculative_tokens())
+        .speculative_algorithm(options_.speculative_algorithm())
+        .speculative_suffix_cache_max_depth(
+            options_.speculative_suffix_cache_max_depth())
+        .speculative_suffix_max_spec_factor(
+            options_.speculative_suffix_max_spec_factor())
+        .speculative_suffix_max_spec_offset(
+            options_.speculative_suffix_max_spec_offset())
+        .speculative_suffix_min_token_prob(
+            options_.speculative_suffix_min_token_prob())
+        .speculative_suffix_max_cached_requests(
+            options_.speculative_suffix_max_cached_requests())
+        .speculative_suffix_use_tree_spec(
+            options_.speculative_suffix_use_tree_spec())
         .task_type(options.task_type())
         .enable_mla(options.enable_mla())
         .master_node_addr(options.master_node_addr())
@@ -184,8 +200,11 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
       spec_options.device_ip(options_.device_ip().value());
     }
 
-    auto spec_engine = std::make_unique<SpeculativeEngine>(spec_options);
-    engine_ = std::move(spec_engine);
+    if (use_suffix_spec) {
+      engine_ = std::make_unique<SuffixSpeculativeEngine>(spec_options);
+    } else {
+      engine_ = std::make_unique<SpeculativeEngine>(spec_options);
+    }
   } else if (type == EngineType::LLM) {
     if (options_.task_type() == "embed" || options.task_type() == "mm_embed") {
       options_.enable_schedule_overlap(false);
@@ -226,14 +245,15 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .store_local_hostname(options_.store_local_hostname())
         .prefetch_bacth_size(options_.prefetch_bacth_size())
         .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
-        .enable_continuous_kvcache(options_.enable_continuous_kvcache())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
         .input_shm_size(options_.input_shm_size() * 1024 * 1024)
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
         .is_local(options_.is_local())
-        .server_idx(options_.server_idx());
+        .server_idx(options_.server_idx())
+        .kv_cache_dtype(options_.kv_cache_dtype())
+        .model_id(options_.model_id());
 
     if (options_.device_ip().has_value()) {
       eng_options.device_ip(options_.device_ip().value());
@@ -268,7 +288,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .max_tokens_per_batch(options_.max_tokens_per_batch())
         .enable_graph(options_.enable_graph())
         .max_tokens_per_chunk_for_prefill(
-            options_.max_tokens_per_chunk_for_prefill());
+            options_.max_tokens_per_chunk_for_prefill())
+        .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
 
     engine_ = std::make_unique<RecEngine>(eng_options);
   } else {
@@ -295,4 +316,42 @@ std::unique_ptr<Master> create_master(const std::string& backend,
   }
 }
 
+std::unique_ptr<Master> fork_master(Master* master, const Options& options) {
+  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
+  if (!FLAGS_enable_xtensor) {
+    LOG(WARNING) << "fork_master requires xtensor to be enabled";
+    return nullptr;
+  }
+
+  static uint64_t server_idx = 1;
+  CHECK(master != nullptr);
+
+  Options new_options = master->options();
+
+  if (!options.model_id().empty()) {
+    new_options.model_id() = options.model_id();
+  }
+  if (!options.model_path().empty()) {
+    new_options.model_path() = options.model_path();
+  }
+  new_options.master_node_addr() = options.master_node_addr();
+  new_options.server_idx() = server_idx++;
+  new_options.master_status() = options.master_status();
+  // Set nnodes and dp_size from fork request (tp_size * dp_size = nnodes)
+  if (options.nnodes() > 0 && new_options.nnodes() >= options.nnodes()) {
+    new_options.nnodes() = options.nnodes();
+  }
+  if (options.dp_size() > 0 && new_options.dp_size() >= options.nnodes()) {
+    new_options.dp_size() = options.dp_size();
+  }
+  std::unique_ptr<Master> new_master;
+  if (new_options.node_rank() != 0) {
+    new_master = std::make_unique<LLMAssistantMaster>(new_options);
+  } else {
+    new_master = create_master(new_options.backend(), new_options);
+  }
+  new_master->run();
+
+  return new_master;
+}
 }  // namespace xllm

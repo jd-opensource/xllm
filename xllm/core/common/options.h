@@ -75,6 +75,20 @@ class Options {
   // sps tokens
   PROPERTY(int32_t, num_speculative_tokens) = 0;
 
+  PROPERTY(std::string, speculative_algorithm) = "MTP";
+
+  PROPERTY(int32_t, speculative_suffix_cache_max_depth) = 64;
+
+  PROPERTY(double, speculative_suffix_max_spec_factor) = 1.0;
+
+  PROPERTY(double, speculative_suffix_max_spec_offset) = 0.0;
+
+  PROPERTY(double, speculative_suffix_min_token_prob) = 0.1;
+
+  PROPERTY(int32_t, speculative_suffix_max_cached_requests) = -1;
+
+  PROPERTY(bool, speculative_suffix_use_tree_spec) = false;
+
   // thread num to handle requests
   PROPERTY(size_t, num_request_handling_threads) = 4;
 
@@ -176,8 +190,6 @@ class Options {
   // max requests per batch
   PROPERTY(int, max_requests_per_batch) = 0;
 
-  PROPERTY(bool, enable_continuous_kvcache) = false;
-
   // for offline inference: start with offline inference, default is false
   PROPERTY(bool, enable_offline_inference) = false;
   // for offline inference: the path to spawn worker binary
@@ -209,6 +221,16 @@ class Options {
 
   // beam width for beam search
   PROPERTY(int32_t, beam_width) = 128;
+
+  // KV cache data type for quantization.
+  // "auto" (default): KV cache dtype aligns with model dtype (no quantization).
+  // "int8": Enables INT8 quantization. Only supported on MLU backend.
+  PROPERTY(std::string, kv_cache_dtype) = "auto";
+
+  // max concurrency for rec worker
+  PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
+
+  PROPERTY(int32_t, master_status) = 0;
 };
 
 }  // namespace xllm

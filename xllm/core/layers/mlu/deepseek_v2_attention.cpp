@@ -103,32 +103,22 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   w_kc_ = weights.slice(1, 0, qk_nope_head_dim_);
   w_vc_ = weights.slice(1, qk_nope_head_dim_, qk_nope_head_dim_ + v_head_dim_);
 
-  // Helper lambda to create DeepseekScalingRotaryEmbedding instances
-  auto create_rotary_emb = [&](const std::string& name, bool interleaved) {
-    return register_module(
-        name,
-        DeepseekScalingRotaryEmbedding(
-            qk_rope_head_dim_,
-            qk_rope_head_dim_,
-            max_position_embeddings,
-            args.rope_scaling_original_max_position_embeddings(),
-            args.rope_theta(),
-            interleaved,
-            args.rope_scaling_factor(),
-            args.rope_extrapolation_factor(),
-            args.rope_scaling_attn_factor(),
-            args.rope_scaling_beta_fast(),
-            args.rope_scaling_beta_slow(),
-            args.rope_scaling_mscale(),
-            args.rope_scaling_mscale_all_dim(),
-            options));
-  };
-
-  rotary_emb_ = create_rotary_emb("rotary_emb", interleaved_);
+  rotary_emb_ =
+      register_module("rotary_emb",
+                      create_mla_rotary_embedding(args,
+                                                  qk_rope_head_dim_,
+                                                  max_position_embeddings,
+                                                  interleaved_,
+                                                  options));
 
   // indexer rotary embedding for lighting indexer
-  //  DeepSeek V3.2 use interleaved=false as default
-  indexer_rotary_emb_ = create_rotary_emb("indexer_rotary_emb", false);
+  indexer_rotary_emb_ = register_module(
+      "indexer_rotary_emb",
+      create_mla_rotary_embedding(args,
+                                  qk_rope_head_dim_,
+                                  max_position_embeddings,
+                                  args.indexer_rope_interleave(),
+                                  options));
 
   if (args.rope_scaling_rope_type() == "deepseek_yarn") {
     float mscale = layer::rotary::yarn_get_mscale(
@@ -195,11 +185,11 @@ void DeepseekV2AttentionImpl::decode_q_pre_base(
   auto q_nope_transposed = q_nope.transpose(0, 1);
   auto q_input_slice = q_input.slice(dim, 0, kv_lora_rank_).transpose(0, 1);
   torch::bmm_out(q_input_slice, q_nope_transposed, w_kc_);
-  rotary_emb_(q_pe,
-              positions,
-              attn_metadata.q_cu_seq_lens,
-              attn_metadata.max_query_len,
-              attn_metadata.is_prefill);
+  rotary_emb_->forward(q_pe,
+                       positions,
+                       attn_metadata.q_cu_seq_lens,
+                       attn_metadata.max_query_len,
+                       attn_metadata.is_prefill);
   q_input.slice(dim, kv_lora_rank_) = q_pe;
 }
 
@@ -214,11 +204,11 @@ void DeepseekV2AttentionImpl::decode_kv_pre_base(
                                         /*residual=*/std::nullopt,
                                         v_input));
   auto k_pe = latent_cache.slice(-1, kv_lora_rank_).unsqueeze(1);
-  rotary_emb_(k_pe,
-              positions,
-              attn_metadata.q_cu_seq_lens,
-              attn_metadata.max_query_len,
-              attn_metadata.is_prefill);
+  rotary_emb_->forward(k_pe,
+                       positions,
+                       attn_metadata.q_cu_seq_lens,
+                       attn_metadata.max_query_len,
+                       attn_metadata.is_prefill);
 }
 
 void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
@@ -227,6 +217,7 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
     torch::Tensor& q_input,
     torch::Tensor& latent_cache,
     torch::Tensor& kv_cache,
+    std::optional<torch::Tensor> k_cache_scale,
     const torch::Tensor& positions,
     const AttentionMetadata& attn_metadata) {
   // forward_decoder_fused_mla_q
@@ -275,12 +266,13 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
   fused_mla_kv_params.position_id = positions;
   fused_mla_kv_params.gamma = kv_a_layernorm_->weight();
   fused_mla_kv_params.kv_cache = kv_cache;
-  fused_mla_kv_params.kv_cache_scale = std::nullopt;
+  fused_mla_kv_params.kv_cache_scale = k_cache_scale;
   fused_mla_kv_params.slot_mapping =
       attn_metadata.slot_mapping.view({batch, seq});
   fused_mla_kv_params.cache_bs_id = std::nullopt;
   fused_mla_kv_params.cache_seq_offset = std::nullopt;
-  fused_mla_kv_params.quant_mode = "none";
+  fused_mla_kv_params.quant_mode =
+      k_cache_scale.has_value() ? "dynamic_per_token" : "none";
   fused_mla_kv_params.eps = eps_;
   fused_mla_kv_params.interleaved = interleaved_;
   kernel::fused_mla_kv(fused_mla_kv_params);
@@ -306,9 +298,16 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   }
   auto latent_cache = kv_a_proj_with_mqa_(hidden_states);
   auto k_cache = kv_cache.get_k_cache();
+  std::optional<torch::Tensor> k_cache_scale = kv_cache.get_k_cache_scale();
   if (enable_fused_qkv) {
-    decode_qkv_pre_fused(
-        q, qr, q_input, latent_cache, k_cache, positions, attn_metadata);
+    decode_qkv_pre_fused(q,
+                         qr,
+                         q_input,
+                         latent_cache,
+                         k_cache,
+                         k_cache_scale,
+                         positions,
+                         attn_metadata);
   } else {
     decode_q_pre_base(q, qr, q_input, positions, attn_metadata);
     decode_kv_pre_base(latent_cache, positions, attn_metadata);
@@ -328,12 +327,20 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
   if (!attn_metadata.is_dummy) {
     // mla prefill save cache before flashattn
     if (only_prefill) {
+      // Check if KV cache quantization is enabled by checking scale tensors
       auto key = k_input.unsqueeze(1);
       xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
       reshape_paged_cache_params.key = key;
       reshape_paged_cache_params.k_cache = k_cache;
       reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
-      xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+      if (k_cache_scale.has_value()) {
+        // Use quant_to_paged_cache for INT8 quantization
+        reshape_paged_cache_params.k_cache_scale = k_cache_scale;
+        xllm::kernel::quant_to_paged_cache(reshape_paged_cache_params);
+      } else {
+        // Use standard reshape_paged_cache
+        xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+      }
     }
     // indexer and update index params for attn
     attn_indexer_metadata = attn_metadata;

@@ -61,6 +61,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                             torch::Tensor& q_input,
                             torch::Tensor& latent_cache,
                             torch::Tensor& kv_cache,
+                            std::optional<torch::Tensor> k_cache_scale,
                             const torch::Tensor& positions,
                             const AttentionMetadata& attn_metadata);
 
@@ -95,8 +96,8 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   RowParallelLinear o_proj_{nullptr};
 
   Attention attn_{nullptr};
-  DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};
-  DeepseekScalingRotaryEmbedding indexer_rotary_emb_{nullptr};
+  std::shared_ptr<RotaryEmbeddingBase> rotary_emb_;
+  std::shared_ptr<RotaryEmbeddingBase> indexer_rotary_emb_;
   Indexer indexer_{nullptr};
 };
 TORCH_MODULE(DeepseekV2Attention);

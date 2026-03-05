@@ -21,6 +21,8 @@ limitations under the License.
 #include <c10d/TCPStore.hpp>
 #include <torch_npu/csrc/distributed/ProcessGroupHCCL.hpp>
 
+#include "platform/device.h"
+
 namespace {
 inline bool is_npu(const torch::Tensor& tensor) {
   if (!tensor.defined()) {
@@ -83,10 +85,8 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
       comm_stream_(c10_npu::getNPUStreamFromPool(device.index())) {
   c10::intrusive_ptr<c10d_npu::ProcessGroupHCCL::Options> hccl_pg_options =
       c10d_npu::ProcessGroupHCCL::Options::create();
-#if TORCH_VERSION_MAJOR > 2 || \
-    (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 7)
-  hccl_pg_options->group_name = group_name;
-#endif
+  hccl_pg_options->group_id = group_name;
+
   int32_t rank = global_rank;
   if (world_size != rank_size) {
     auto [local_rank, group_ranks] =
@@ -111,7 +111,7 @@ ProcessGroupImpl::~ProcessGroupImpl() {
   } else {
     HCCLCHECK(HcclCommDestroy(comm_));
   }
-  c10_npu::NPUCachingAllocator::emptyCache();
+  Device::empty_cache(device().index());
 }
 
 ProcessGroupImpl::ProcessGroupImpl(int rank,

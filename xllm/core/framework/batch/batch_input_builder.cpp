@@ -201,7 +201,7 @@ void BatchInputBuilder::process_sequences_multithreaded() {
                                         state.unique_token_lens_vec.end());
     state_.max_seq_len = std::max(state_.max_seq_len, state.max_seq_len);
     state_.q_max_seq_len = std::max(state_.q_max_seq_len, state.q_max_seq_len);
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MUSA)
     state_.seq_lens.insert(
         state_.seq_lens.end(), state.seq_lens.begin(), state.seq_lens.end());
     state_.q_seq_lens.insert(state_.q_seq_lens.end(),
@@ -227,20 +227,15 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
+    state_.request_ids.insert(state_.request_ids.end(),
+                              state.request_ids.begin(),
+                              state.request_ids.end());
     state_.extra_token_ids.insert(state_.extra_token_ids.end(),
                                   state.extra_token_ids.begin(),
                                   state.extra_token_ids.end());
     state_.transfer_kv_infos.insert(state_.transfer_kv_infos.end(),
                                     state.transfer_kv_infos.begin(),
                                     state.transfer_kv_infos.end());
-    if (FLAGS_enable_continuous_kvcache) {
-      state_.new_cache_slot_offsets.insert(state_.new_cache_slot_offsets.end(),
-                                           state.new_cache_slot_offsets.begin(),
-                                           state.new_cache_slot_offsets.end());
-      state_.kv_cache_start_offsets.insert(state_.kv_cache_start_offsets.end(),
-                                           state.kv_cache_start_offsets.begin(),
-                                           state.kv_cache_start_offsets.end());
-    }
 
     // for flashinfer
     // we skip the first '0' element
@@ -293,7 +288,7 @@ void BatchInputBuilder::process_single_sequence(
   state.max_seq_len = std::max(state.max_seq_len, seq_len + offset);
   state.q_max_seq_len = std::max(state.q_max_seq_len, q_seq_len);
   state.kv_cache_tokens_nums.emplace_back(n_kv_cache_tokens);
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MUSA)
   state.seq_lens.push_back(seq_len + offset);
   state.q_seq_lens.push_back(q_seq_len);
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
@@ -304,17 +299,12 @@ void BatchInputBuilder::process_single_sequence(
   extract_tokens_and_positions(sequence, n_kv_cache_tokens, seq_len, state_ptr);
 
   // Setup KV cache
-  if (!FLAGS_enable_continuous_kvcache) {
-    setup_kv_cache_info(sequence,
-                        n_kv_cache_tokens,
-                        seq_len,
-                        q_seq_len,
-                        state_ptr,
-                        write_block_ids_ptr);
-  } else {
-    setup_continuous_kv_cache_info(
-        sequence, n_kv_cache_tokens, seq_len, q_seq_len, state_ptr);
-  }
+  setup_kv_cache_info(sequence,
+                      n_kv_cache_tokens,
+                      seq_len,
+                      q_seq_len,
+                      state_ptr,
+                      write_block_ids_ptr);
 
   // Input for beam search kernel
   if (FLAGS_enable_beam_search_kernel && sequence->check_beam_search() &&
@@ -361,6 +351,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     // add -1 as extra token id
     state.extra_token_ids.emplace_back(-1);
     state.embedding_ids.emplace_back(sequence->get_embedding_id());
+    state.request_ids.emplace_back(sequence->request_id());
   } else {
     state.extra_token_ids.emplace_back(token_ids[seq_len]);
   }
@@ -461,31 +452,6 @@ void BatchInputBuilder::setup_kv_cache_info(
   state.block_tables_vec.emplace_back(std::move(block_ids));
 }
 
-void BatchInputBuilder::setup_continuous_kv_cache_info(
-    Sequence* sequence,
-    uint32_t n_kv_cache_tokens,
-    uint32_t seq_len,
-    uint32_t q_seq_len,
-    BuilderState* state_ptr) {
-  BuilderState& state = state_ptr ? *state_ptr : state_;
-  // update kv cache tokens num
-  sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
-
-  int32_t seq_id = sequence->seq_id();
-
-  int64_t kv_cache_start_offset = seq_id * FLAGS_buffer_size_per_seq;
-  std::vector<int64_t> cache_slot_offsets;
-  cache_slot_offsets.reserve(seq_len - n_kv_cache_tokens);
-  for (int32_t i = n_kv_cache_tokens; i < seq_len; ++i) {
-    cache_slot_offsets.emplace_back(kv_cache_start_offset +
-                                    i * FLAGS_cache_size_per_token);
-  }
-  state.new_cache_slot_offsets.insert(state.new_cache_slot_offsets.end(),
-                                      cache_slot_offsets.begin(),
-                                      cache_slot_offsets.end());
-  state.kv_cache_start_offsets.emplace_back(kv_cache_start_offset);
-}
-
 void BatchInputBuilder::padding_decode_batch_size(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
@@ -509,7 +475,7 @@ void BatchInputBuilder::padding_decode_batch_size(
           }
           state_.new_token_slot_ids.emplace_back(0);
         }
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MUSA)
         state_.seq_lens.push_back(num_decoding_tokens);
         state_.q_seq_lens.push_back(num_decoding_tokens);
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
@@ -578,18 +544,15 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
   }
 
+  input_params.embedding_ids = std::move(state_.embedding_ids);
+  input_params.request_ids = std::move(state_.request_ids);
+  input_params.extra_token_ids = std::move(state_.extra_token_ids);
+
   if (swap_block_transfer_infos_ != nullptr &&
       swap_block_transfer_infos_->size() > 0) {
     input_params.swap_blocks.insert(input_params.swap_blocks.end(),
                                     swap_block_transfer_infos_->begin(),
                                     swap_block_transfer_infos_->end());
-  }
-
-  if (FLAGS_enable_continuous_kvcache) {
-    input_params.new_cache_slots =
-        torch::tensor(state_.new_cache_slot_offsets, torch::kInt64);
-    input_params.kv_cache_start_offsets =
-        torch::tensor(state_.kv_cache_start_offsets, torch::kInt64);
   }
 
   CHECK_EQ(state_.sampling_params.size(), state_.selected_token_idxes.size());
@@ -662,18 +625,13 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.paged_kv_last_page_len);
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
+  raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
   // beam search kernel input
   if (state_.acc_logprob_vec.size() > 0) {
     raw_forward_input.acc_logprob_vec = std::move(state_.acc_logprob_vec);
   }
 
-  if (FLAGS_enable_continuous_kvcache) {
-    raw_forward_input.new_cache_slot_offsets =
-        std::move(state_.new_cache_slot_offsets);
-    raw_forward_input.kv_cache_start_offsets =
-        std::move(state_.kv_cache_start_offsets);
-  }
   raw_forward_input.mm_data.batch(mm_data_vec_);
 
   process_swap_block_infos(raw_forward_input);

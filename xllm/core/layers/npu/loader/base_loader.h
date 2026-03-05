@@ -23,8 +23,8 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
-#include "xllm_kernels/pytorch/atb_torch/core/include/base_operation.h"
-#include "xllm_kernels/pytorch/atb_torch/core/include/graph_operation.h"
+#include "xllm_atb_layers/pytorch/atb_torch/core/include/base_operation.h"
+#include "xllm_atb_layers/pytorch/atb_torch/core/include/graph_operation.h"
 
 namespace xllm {
 namespace layer {
@@ -38,7 +38,11 @@ class BaseLoader {
   virtual void verify_loaded_weights() const {};
   virtual void verify_loaded_weights(const std::string& prefix) const {};
   virtual void merge_loaded_weights() {};
+  virtual void merge_and_move_pinned_host() {};
   virtual void resize_experts_weights(int num_of_device_experts) {};
+  virtual void free_weights() {};
+  virtual void reload_weights() {};
+  virtual void reload_weights_from_device() {};
 
   torch::Dtype string2dtype(const std::string& dtype_str);
 

@@ -15,21 +15,62 @@ limitations under the License.
 
 #include "attention.h"
 
-#include "kernels/ops_api.h"
+#include <cstdint>
+#include <tuple>
+#include <vector>
 
-DECLARE_bool(enable_chunked_prefill);
+#include "MTTOplib/Attention.h"
+#include "MTTOplib/Ops.h"
+#include "MTTOplib/WeightReorder.h"
+
 namespace xllm {
 namespace layer {
-AttentionImpl::AttentionImpl(int num_heads,
-                             int head_size,
+AttentionImpl::AttentionImpl(ModelArgs const& args,
+                             QuantArgs const& quant_args,
+                             ParallelArgs const& parallel_args,
+                             torch::TensorOptions const& options)
+    : MUSALayerBaseImpl(options),
+      num_heads_(args.n_heads()),
+      num_kv_heads_(args.n_kv_heads().value_or(args.n_heads())),
+      head_dim_(args.head_dim()),
+      q_size_(num_heads_ * head_dim_),
+      kv_size_(num_kv_heads_ * head_dim_),
+      rms_eps(args.rms_norm_eps()),
+      scaling_(std::sqrt(1.0f / head_dim_)),
+      hidden_size_(args.hidden_size()) {
+  weights_.resize(weight_num_);
+}
+
+AttentionImpl::AttentionImpl(int64_t num_heads,
+                             int64_t head_size,
                              float scale,
-                             int num_kv_heads,
-                             int sliding_window)
-    : num_heads_(num_heads),
-      head_size_(head_size),
-      scale_(scale),
-      num_kv_heads_(num_kv_heads),
-      sliding_window_(sliding_window - 1) {}
+                             int64_t num_kv_heads,
+                             int64_t sliding_window) {}
+
+torch::Tensor AttentionImpl::forward(torch::Tensor& input,
+                                     ForwardParams& fwd_params) {
+  auto&& cache = fwd_params.kv_cache;
+  auto& input_params = const_cast<ModelInputParams&>(fwd_params.input_params);
+
+  auto musa_attn_meta =
+      xllm_musa::AttnMetaData::build(input_params.q_seq_lens_vec,
+                                     input_params.kv_seq_lens_vec,
+                                     num_heads_,
+                                     num_kv_heads_,
+                                     head_dim_,
+                                     input_params.new_cache_slots,
+                                     64);
+
+  return xllm_musa::QWen3Attn(input,
+                              cache.get_k_cache(),
+                              cache.get_v_cache(),
+                              input_params.block_tables,
+                              fwd_params.attn_meta.mrope_cos,
+                              fwd_params.positions,
+                              weights_,
+                              rms_eps,
+                              musa_attn_meta);
+}
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     const AttentionMetadata& attn_metadata,
@@ -37,11 +78,33 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     torch::Tensor& key,
     torch::Tensor& value,
     KVCache& kv_cache) {
-  auto output = torch::empty_like(query);
-  auto output_lse = std::nullopt;
-  output = output.view({-1, num_heads_ * head_size_});
-  return {output, output_lse};
+  // This method is not used in the current implementation
+  return std::make_tuple(torch::Tensor(), std::nullopt);
 }
 
+void AttentionImpl::load_state_dict(StateDict const& state_dict) {
+  using WeightMeta = std::pair<std::string, std::vector<int64_t>>;
+  static int32_t all_loaded = 0;
+  std::vector<WeightMeta> meta = {{"q_proj.", {q_size_, hidden_size_}},
+                                  {"k_proj.", {kv_size_, hidden_size_}},
+                                  {"v_proj.", {kv_size_, hidden_size_}},
+                                  {"o_proj.", {hidden_size_, hidden_size_}},
+                                  {"q_norm.", {128}},
+                                  {"k_norm.", {128}}};
+
+  for (int32_t i = 0; i < meta.size(); ++i) {
+    all_loaded += load_weight_common(
+        state_dict.get_dict_with_prefix("self_attn." + meta[i].first),
+        meta[i].second,
+        i);
+  }
+  all_loaded += load_weight_common(
+      state_dict.get_dict_with_prefix("input_layernorm."), {hidden_size_}, 6);
+
+  if (all_loaded == weight_num_) {
+    all_loaded = 0;
+    weights_ = xllm_musa::ReorderAttn(weights_);
+  }
+}
 }  // namespace layer
 }  // namespace xllm

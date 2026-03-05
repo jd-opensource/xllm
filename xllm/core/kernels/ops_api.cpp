@@ -57,11 +57,17 @@ void apply_rotary(RotaryParams& params) {
   torch::Tensor cos_sin;
 
   if (params.position_ids.has_value()) {
+    // positions is already int64 on CUDA/MUSA (pre-converted in
+    // ForwardInput::to).
     pos_ids = params.position_ids.value().to(torch::kInt64);
-    auto cos_sin_vec = params.cos_sin.chunk(4, -1);
-    auto cos = cos_sin_vec[0];
-    auto sin = cos_sin_vec[2];
-    cos_sin = torch::cat({cos, sin}, -1);
+    if (params.precomputed_cos_sin.defined()) {
+      cos_sin = params.precomputed_cos_sin;
+    } else {
+      auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+      auto cos = cos_sin_vec[0];
+      auto sin = cos_sin_vec[2];
+      cos_sin = torch::cat({cos, sin}, -1);
+    }
   } else if (params.cu_query_lens.has_value()) {
     auto cu = params.cu_query_lens.value().to(torch::kInt64);
     CHECK(cu.numel() >= 2) << "apply_rotary (CUDA): cu_query_lens must have at "
@@ -90,6 +96,8 @@ void apply_rotary(RotaryParams& params) {
       auto cos_sliced = params.cos.contiguous().slice(-1, 0, rot_half);
       auto sin_sliced = params.sin.contiguous().slice(-1, 0, rot_half);
       cos_sin = torch::cat({cos_sliced, sin_sliced}, -1);
+    } else if (params.precomputed_cos_sin.defined()) {
+      cos_sin = params.precomputed_cos_sin;
     } else {
       auto cos_sin_vec = params.cos_sin.chunk(4, -1);
       auto cos = cos_sin_vec[0];
@@ -104,13 +112,17 @@ void apply_rotary(RotaryParams& params) {
 
   cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
 #elif defined(USE_ILU)
-  auto cos_sin_vec = params.cos_sin.chunk(4, -1);
-  auto cos = cos_sin_vec[0];
-  auto sin = cos_sin_vec[2];
-  auto cos_sin = torch::cat({cos, sin}, -1);
+  torch::Tensor ilu_cos_sin;
+  if (params.precomputed_cos_sin.defined()) {
+    ilu_cos_sin = params.precomputed_cos_sin;
+  } else {
+    auto cos_sin_vec = params.cos_sin.chunk(4, -1);
+    ilu_cos_sin = torch::cat({cos_sin_vec[0], cos_sin_vec[2]}, -1);
+  }
+  // positions is already int64 on ILU (pre-converted in ForwardInput::to).
   torch::Tensor long_position_ids = params.position_ids.value().to(at::kLong);
   ilu::apply_rope_pos_ids_cos_sin_cache(
-      params.q, params.k, cos_sin, long_position_ids, params.interleaved);
+      params.q, params.k, ilu_cos_sin, long_position_ids, params.interleaved);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -185,195 +197,38 @@ void reshape_from_cache(ReshapeFromCacheParams& params) {
 #endif
 }
 
-void batch_prefill(AttentionParams& params) {
+void quant_to_paged_cache(ReshapePagedCacheParams& params) {
 #if defined(USE_MLU)
-  std::optional<torch::Tensor> block_tables;
-  if (params.attn_metadata.is_chunked_prefill) {
-    block_tables = params.attn_metadata.block_table;
-  }
-  mlu::batch_prefill(params.query,
-                     params.key,
-                     params.value,
-                     params.output,
-                     params.output_lse,
-                     params.attn_metadata.q_cu_seq_lens,
-                     params.attn_metadata.kv_cu_seq_lens,
-                     params.alibi_slope,
-                     params.attn_bias,
-                     params.q_quant_scale,
-                     params.k_quant_scale,
-                     params.v_quant_scale,
-                     params.out_quant_scale,
-                     block_tables,
-                     params.attn_metadata.max_query_len,
-                     params.attn_metadata.max_seq_len,
-                     params.scale,
-                     params.attn_metadata.is_causal,
-                     params.window_size_left,
-                     params.window_size_right,
-                     params.attn_metadata.compute_dtype,
-                     params.return_lse);
-#elif defined(USE_NPU)
-  npu::batch_prefill(params.query,
-                     params.key,
-                     params.value,
-                     params.attn_mask,
-                     params.seq_lens,
-                     params.scale,
-                     params.output);
-#elif defined(USE_CUDA)
-  cuda::batch_prefill_with_optional_piecewise_capture(
-      params.attn_metadata.plan_info->uri,
-      params.attn_metadata.plan_info->plan_info,
-      params.float_workspace_buffer,
-      params.int_workspace_buffer,
-      params.page_locked_int_workspace_buffer,
-      params.query,
-      params.key,
-      params.value,
-      params.attn_metadata.q_cu_seq_lens,
-      params.attn_metadata.kv_cu_seq_lens,
-      params.window_size_left,
-      params.scale,
-      params.output,
-      params.output_lse,
-      params.attn_metadata.enable_cuda_graph);
-#elif defined(USE_MUSA)
-  cuda::batch_prefill(params.attn_metadata.plan_info->uri,
-                      params.attn_metadata.plan_info->plan_info,
-                      params.float_workspace_buffer,
-                      params.int_workspace_buffer,
-                      params.page_locked_int_workspace_buffer,
-                      params.query,
-                      params.key,
-                      params.value,
-                      params.attn_metadata.q_cu_seq_lens,
-                      params.attn_metadata.kv_cu_seq_lens,
-                      params.window_size_left,
-                      params.scale,
-                      params.output,
-                      params.output_lse,
-                      params.attn_metadata.enable_cuda_graph,
-                      params.mask);
-#elif defined(USE_ILU)
-  ilu::batch_prefill(params.query,
-                     params.key,
-                     params.value,
-                     params.output,
-                     params.output_lse,
-                     params.attn_metadata.q_cu_seq_lens,
-                     params.attn_metadata.kv_cu_seq_lens,
-                     params.alibi_slope,
-                     params.attn_bias,
-                     params.q_quant_scale,
-                     params.k_quant_scale,
-                     params.v_quant_scale,
-                     params.attn_metadata.block_table,
-                     params.attn_metadata.max_query_len,
-                     params.attn_metadata.max_seq_len,
-                     params.scale,
-                     params.attn_metadata.is_causal,
-                     params.window_size_left,
-                     params.window_size_right,
-                     params.attn_metadata.compute_dtype,
-                     params.return_lse);
+  CHECK(params.k_cache_scale.has_value())
+      << "k_cache_scale is required for quant_to_paged_cache";
+  mlu::quant_to_paged_cache(params.key,
+                            params.value,
+                            params.k_cache,
+                            params.v_cache,
+                            params.k_cache_scale.value(),
+                            params.v_cache_scale,
+                            params.slot_mapping);
 #else
   NOT_IMPLEMENTED();
 #endif
 }
 
-void batch_decode(AttentionParams& params) {
+void dequant_from_paged_cache(ReshapeFromCacheParams& params) {
 #if defined(USE_MLU)
-  mlu::batch_decode(params.query,
-                    params.k_cache,
-                    params.output,
-                    params.attn_metadata.block_table,
-                    params.attn_metadata.kv_seq_lens,
-                    params.v_cache,
-                    params.output_lse,
-                    params.q_quant_scale,
-                    params.k_cache_quant_scale,
-                    params.v_cache_quant_scale,
-                    params.out_quant_scale,
-                    params.alibi_slope,
-                    params.mask,
-                    params.attn_metadata.compute_dtype,
-                    params.attn_metadata.max_seq_len,
-                    params.window_size_left,
-                    params.window_size_right,
-                    params.scale,
-                    params.return_lse,
-                    params.kv_cache_quant_bit_size);
-#elif defined(USE_NPU)
-  if (params.attn_metadata.paged_attention_tiling_data.defined()) {
-    // Use CustomPagedAttention for ACL graph mode to avoid .to(kCPU) operations
-
-    npu::batch_decode_acl_graph(
-        params.query,
-        params.k_cache,
-        params.v_cache.value_or(torch::Tensor()),
-        params.scale,
-        params.attn_metadata.block_table,
-        params.seq_lens,
-        params.attn_metadata.paged_attention_tiling_data,
-        params.output);
-  } else {
-    // Standard PagedAttention path
-    npu::batch_decode(params.query,
-                      params.k_cache,
-                      params.v_cache.value_or(torch::Tensor()),
-                      params.scale,
-                      params.attn_metadata.block_table,
-                      params.seq_lens,
-                      params.output);
-  }
-#elif defined(USE_CUDA) || defined(USE_MUSA)
-  cuda::batch_decode(params.attn_metadata.plan_info->uri,
-                     params.attn_metadata.plan_info->plan_info,
-                     params.float_workspace_buffer,
-                     params.int_workspace_buffer,
-                     params.page_locked_int_workspace_buffer,
-                     params.query,
-                     params.k_cache,
-                     params.v_cache.value_or(torch::Tensor()),
-                     params.attn_metadata.paged_kv_indptr,
-                     params.attn_metadata.paged_kv_indices,
-                     params.attn_metadata.paged_kv_last_page_len,
-                     params.window_size_left,
-                     params.scale,
-                     params.output,
-                     params.output_lse,
-                     params.attn_metadata.enable_cuda_graph,
-                     params.use_tensor_core,
-                     params.attn_metadata.kv_seq_lens,
-                     params.attn_metadata.qo_indptr.defined()
-                         ? std::make_optional(params.attn_metadata.qo_indptr)
-                         : std::nullopt);
-#elif defined(USE_ILU)
-  torch::Tensor block_tables, kv_seq_lens;
-  block_tables = params.attn_metadata.block_table;
-  kv_seq_lens = params.attn_metadata.kv_seq_lens;
-  ilu::batch_decode(params.query,
-                    params.k_cache,
-                    params.output,
-                    block_tables,
-                    kv_seq_lens,
-                    params.v_cache,
-                    params.output_lse,
-                    params.q_quant_scale,
-                    params.k_cache_quant_scale,
-                    params.v_cache_quant_scale,
-                    params.out_quant_scale,
-                    params.alibi_slope,
-                    params.mask,
-                    params.attn_metadata.compute_dtype,
-                    params.block_aligned_max_seq_len,
-                    params.window_size_left,
-                    params.window_size_right,
-                    params.scale,
-                    params.return_lse,
-                    params.attn_metadata.is_causal,
-                    params.kv_cache_quant_bit_size);
+  CHECK(params.key_cache_quant_scale.has_value())
+      << "key_cache_quant_scale is required for dequant_from_paged_cache";
+  mlu::dequant_from_paged_cache(params.key,
+                                params.value,
+                                params.key_cache,
+                                params.value_cache,
+                                params.key_cache_quant_scale.value(),
+                                params.value_cache_quant_scale,
+                                params.context_lengths,
+                                params.max_context_len,
+                                params.context_seq_offset,
+                                params.block_tables.value(),
+                                params.quant_mode,
+                                params.quant_bit);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -475,6 +330,48 @@ torch::Tensor group_gemm(GroupGemmParams& params) {
                          params.trans_a,
                          params.trans_b,
                          params.a_quant_bit);
+#elif defined(USE_NPU)
+  std::vector<torch::Tensor> x_list;
+  std::vector<torch::Tensor> weight_list;
+  torch::TensorList x_ref;
+  torch::TensorList weight_ref;
+  if (params.x_list.has_value()) {
+    x_ref = params.x_list.value();
+  } else {
+    x_list = {params.a};
+    x_ref = x_list;
+  }
+  if (params.weight_list.has_value()) {
+    weight_ref = params.weight_list.value();
+  } else {
+    weight_list = {params.b};
+    weight_ref = weight_list;
+  }
+  std::optional<torch::Tensor> group_list = params.group_list;
+  if (!group_list.has_value()) {
+    group_list = params.token_count;
+  }
+
+  auto outputs =
+      npu::apply_npu_grouped_matmul(x_ref,
+                                    weight_ref,
+                                    params.bias_list,
+                                    params.scale_list,
+                                    params.offset_list,
+                                    params.antiquant_scale_list,
+                                    params.antiquant_offset_list,
+                                    params.per_token_scale_list,
+                                    group_list,
+                                    params.activation_input_list,
+                                    params.activation_quant_scale_list,
+                                    params.activation_quant_offset_list,
+                                    params.split_item,
+                                    params.group_type,
+                                    params.group_list_type,
+                                    params.act_type,
+                                    params.tuning_config,
+                                    params.output_dtype);
+  return outputs.back();
 #elif defined(USE_ILU)
   return ilu::group_gemm(params.a,
                          params.b,
@@ -499,6 +396,11 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.scoring_func,
                               params.route_scale,
                               params.e_score_correction_bias);
+#elif defined(USE_NPU)
+  auto [topk_weights, topk_ids, row_ids] = npu::apply_moe_gating_topk_softmax(
+      params.input, params.finished, params.topk);
+  (void)row_ids;
+  return std::make_tuple(topk_weights, topk_ids);
 #elif defined(USE_ILU)
   return ilu::moe_active_topk(params.input,
                               params.topk,
@@ -550,6 +452,20 @@ torch::Tensor moe_combine_result(MoeCombineResultParams& params) {
                                  params.start_expert_id,
                                  params.expert_size,
                                  params.bias);
+#elif defined(USE_NPU)
+  std::optional<torch::Tensor> probes =
+      params.probes.has_value()
+          ? params.probes
+          : std::optional<torch::Tensor>(params.reduce_weight);
+  auto output = npu::apply_npu_moe_token_unpermute(params.input,
+                                                   params.gather_ids,
+                                                   probes,
+                                                   params.padded_mode,
+                                                   params.restore_shape);
+  if (params.residual.has_value()) {
+    output = output + params.residual.value();
+  }
+  return output;
 #elif defined(USE_ILU)
   return ilu::moe_combine_result(params.input, params.reduce_weight);
 #else
@@ -822,6 +738,67 @@ void fused_indexer_k(FusedIndexerKParams& params) {
                        params.hadamard_matrix);
 #else
   NOT_IMPLEMENTED();
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+moe_init_routing_v2(MoeInitRoutingV2Params& params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_moe_init_routing_v2(params.x,
+                                            params.expert_idx,
+                                            params.scale,
+                                            params.offset,
+                                            params.active_num,
+                                            params.expert_capacity,
+                                            params.expert_num,
+                                            params.drop_pad_mode,
+                                            params.expert_tokens_num_type,
+                                            params.expert_tokens_num_flag,
+                                            params.quant_mode,
+                                            params.active_expert_range,
+                                            params.row_idx_type);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
+    Fp8ScaledQuantizeParams& params) {
+#if defined(USE_CUDA)
+  return cuda::fp8_scaled_quantize(params.input, params.output, params.scale);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params) {
+#if defined(USE_CUDA)
+  auto out_2d = cuda::fp8_scaled_matmul(params.a,
+                                        params.b,
+                                        params.a_scale,
+                                        params.b_scale,
+                                        params.output_dtype,
+                                        params.bias,
+                                        params.output);
+
+  // Auto reshape output if original input shape is provided
+  if (params.input_shape.has_value()) {
+    auto out_shape = params.input_shape.value();
+    out_shape.back() = params.b.size(0);
+    return out_2d.view(out_shape);
+  }
+  return out_2d;
+#else
+  LOG(FATAL) << "fp8_scaled_matmul is only supported on CUDA";
+  return torch::Tensor();
+#endif
+}
+
+void static_scaled_fp8_quant(StaticScaledFp8QuantParams& params) {
+#if defined(USE_CUDA)
+  cuda::static_scaled_fp8_quant(params.output, params.input, params.scale);
+#else
+  LOG(FATAL) << "static_scaled_fp8_quant is only supported on CUDA";
 #endif
 }
 

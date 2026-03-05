@@ -31,15 +31,16 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/qwen3_decoder_loader.h"
 #include "loader/qwen3_decoder_manual_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
-#include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
-#include "xllm_kernels/core/include/atb_speed/base/model.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
-#include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
-#include "xllm_kernels/models/qwen3/layer/decoder_layer.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/hosttensor_binder.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/model.h"
+#include "xllm_atb_layers/core/include/atb_speed/log.h"
+#include "xllm_atb_layers/core/include/atb_speed/utils/model_factory.h"
+#include "xllm_atb_layers/models/qwen3/layer/decoder_layer.h"
 namespace xllm {
 namespace layer {
 
@@ -48,8 +49,6 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
   explicit NpuQwen3DecoderLayerImpl(const ModelContext& context);
 
   ~NpuQwen3DecoderLayerImpl() override = default;
-
-  virtual void merge_loaded_weights() override;
 
   virtual int64_t init_layer() override;
 

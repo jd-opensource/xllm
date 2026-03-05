@@ -19,8 +19,8 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "npu_process_group.h"
-#include "xllm_kernels/core/include/atb_speed/base/external_comm_manager.h"
-#include "xllm_kernels/core/include/atb_speed/utils/singleton.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/external_comm_manager.h"
+#include "xllm_atb_layers/core/include/atb_speed/utils/singleton.h"
 #elif defined(USE_MLU)
 #include "mlu_process_group.h"
 #elif defined(USE_CUDA)
@@ -68,6 +68,9 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   }
 
   // comunicator will be inited in atb.
+  // HACK: MappingNPU internally uses a static counter to auto-assign
+  // buffer_offset for multi-model scenarios. This is a hack and should be
+  // refactored later.
   MappingNPU::Options mapping_options;
   mapping_options.dp_size(dp_size)
       .tp_size(world_size / dp_size)

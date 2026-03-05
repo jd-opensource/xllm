@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "core/common/global_flags.h"
 #include "cuda_ops_api.h"
 #include "global_capture_instance.h"
 
@@ -95,8 +96,71 @@ void AttentionRunner::run_replay(const AttentionReplayParams& params) {
                 window_size_left_,
                 scale_,
                 output_slice,
-                output_lse,
-                /*enable_cuda_graph=*/false);
+                output_lse);
+}
+
+void batch_prefill_with_optional_piecewise_capture(
+    const std::string& uri,
+    ffi::Array<int64_t> plan_info,
+    torch::Tensor float_workspace_buffer,
+    torch::Tensor int_workspace_buffer,
+    torch::Tensor page_locked_int_workspace_buffer,
+    torch::Tensor query,
+    torch::Tensor key,
+    torch::Tensor value,
+    torch::Tensor q_cu_seq_lens,
+    torch::Tensor kv_cu_seq_lens,
+    int64_t window_left,
+    double sm_scale,
+    torch::Tensor output,
+    std::optional<torch::Tensor>& output_lse) {
+  // This function is only called for prefill, so is_prefill is always true
+  if (FLAGS_enable_graph && FLAGS_enable_prefill_piecewise_graph &&
+      ::xllm::runtime::cuda::GlobalCaptureInstance::get_instance()
+          .is_capturing()) {
+    // Create temporary runner
+    AttentionRunner runner;
+
+    // Get padded_num_tokens from query tensor shape (query is already padded)
+    uint32_t padded_num_tokens = static_cast<uint32_t>(query.size(0));
+
+    // Run capture
+    runner.run_capture(uri,
+                       plan_info,
+                       float_workspace_buffer,
+                       int_workspace_buffer,
+                       page_locked_int_workspace_buffer,
+                       query,
+                       key,
+                       value,
+                       q_cu_seq_lens,
+                       kv_cu_seq_lens,
+                       window_left,
+                       sm_scale,
+                       output,
+                       output_lse,
+                       padded_num_tokens);
+
+    // Register to GlobalCaptureInstance
+    ::xllm::runtime::cuda::GlobalCaptureInstance::get_instance()
+        .register_attention_runner(std::move(runner));
+    return;
+  }
+  // Non-piecewise mode: directly call batch_prefill
+  batch_prefill(uri,
+                plan_info,
+                float_workspace_buffer,
+                int_workspace_buffer,
+                page_locked_int_workspace_buffer,
+                query,
+                key,
+                value,
+                q_cu_seq_lens,
+                kv_cu_seq_lens,
+                window_left,
+                sm_scale,
+                output,
+                output_lse);
 }
 
 }  // namespace cuda

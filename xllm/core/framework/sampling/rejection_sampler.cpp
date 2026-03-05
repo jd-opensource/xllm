@@ -110,7 +110,9 @@ RejectionSampler::RejectionSampler(
 }
 
 // draft_token_ids: [batch_size, n_speculative_tokens]
-// draft_probs: [batch_size, n_speculative_tokens, vocab_size]
+// draft_probs:
+//   1) dense format: [batch_size, n_speculative_tokens, vocab_size]
+//   2) selected-only format: [batch_size, n_speculative_tokens]
 // target_logits: [batch_size, n_speculative_tokens + 1, vocab_size]
 // bonus_token_ids: [batch_size, 1]
 // returns accepted tokens. [batch_size, n_speculative_tokens + 1]
@@ -253,8 +255,21 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample(
     const torch::Tensor& uniform_rand,
     const torch::Tensor& bonus_token_ids,
     bool mask_out_rejected_tokens) {
-  auto selected_draft_probs =
-      index_select_2d(draft_probs, /*dim=*/-1, draft_token_ids);
+  const bool use_selected_only_draft_probs = (draft_probs.dim() == 2);
+
+  torch::Tensor selected_draft_probs;
+  if (use_selected_only_draft_probs) {
+    CHECK_EQ(draft_probs.sizes(), draft_token_ids.sizes())
+        << "selected-only draft_probs must have shape [batch, n_spec]";
+    selected_draft_probs = draft_probs;
+  } else {
+    CHECK_EQ(draft_probs.dim(), 3)
+        << "draft_probs must be either [batch, n_spec] or "
+           "[batch, n_spec, vocab]";
+    selected_draft_probs =
+        index_select_2d(draft_probs, /*dim=*/-1, draft_token_ids);
+  }
+
   auto selected_target_probs =
       index_select_2d(target_probs, /*dim=*/-1, draft_token_ids);
 
@@ -263,7 +278,16 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample(
   auto accepted = (uniform_rand < acceptance_probs);
 
   // construct recovered probs
-  auto recovered_probs = (target_probs - draft_probs).clamp_min_(0);
+  auto recovered_probs = target_probs.clone();
+  if (use_selected_only_draft_probs) {
+    recovered_probs.scatter_(/*dim=*/-1,
+                             draft_token_ids.unsqueeze(-1),
+                             torch::zeros_like(selected_draft_probs)
+                                 .unsqueeze(-1)
+                                 .to(recovered_probs.dtype()));
+  } else {
+    recovered_probs.sub_(draft_probs).clamp_min_(0);
+  }
   // a small value to avoid division by zero
   const auto epsilon = 1e-6f;
   auto sum = recovered_probs.sum(-1, /*keepdim=*/true).clamp_min_(epsilon);
@@ -295,6 +319,10 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample_fused(
     const torch::Tensor& uniform_rand,
     const torch::Tensor& bonus_token_ids,
     bool mask_out_rejected_tokens) {
+  CHECK_EQ(draft_probs.dim(), 3)
+      << "Fused rejection sampler requires dense draft_probs [batch, n_spec, "
+         "vocab], please set enable_optimized_validate_draft_probs_ to false.";
+
   const auto device = draft_token_ids.device();
   const int64_t batch_size = draft_token_ids.size(0);
   const int64_t n_spec = draft_token_ids.size(1);

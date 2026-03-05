@@ -46,17 +46,19 @@ runtime::Options eagle3_draft_options(const runtime::Options& options) {
 Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                                    const torch::Device& device,
                                    const runtime::Options& options)
-    : SpeculativeWorkerImpl(parallel_args,
-                            device,
-                            options,
-                            eagle3_main_options(options),
-                            eagle3_draft_options(options)) {}
+    : MTPWorkerImpl(parallel_args,
+                    device,
+                    options,
+                    eagle3_main_options(options),
+                    eagle3_draft_options(options),
+                    /*enable_opt_validate_probs=*/true) {}
 
 bool Eagle3WorkerImpl::init_model(const std::string& model_weights_path,
-                                  int32_t random_seed) {
+                                  int32_t random_seed,
+                                  int32_t master_status) {
   // Call parent's init_model first
   bool result =
-      SpeculativeWorkerImpl::init_model(model_weights_path, random_seed);
+      MTPWorkerImpl::init_model(model_weights_path, random_seed, master_status);
 
   // Load hot_token_id_ directly from state_dict (EAGLE-3 specific)
   // This should be done after draft model is loaded
@@ -87,93 +89,20 @@ int64_t Eagle3WorkerImpl::get_embedding_placeholder_size() {
   return 3 * target_hidden;
 }
 
-std::optional<ForwardOutput> Eagle3WorkerImpl::step_decode(
-    const ForwardInput& input) {
-  // TODO : now only support Deepseek MTP
-  // More work need to support n-gram and native speculative decoding.
-  ForwardInput draft_input = input;
-  // get embedding cache
-  torch::Tensor embeddings =
-      embedding_cache_->read(draft_input.input_params.embedding_ids);
-  draft_input.input_params.input_embedding = embeddings.to(device_);
-
-  // run the draft model to get proposals
-  std::vector<ForwardOutput> draft_outputs;
-  ForwardInput validate_input, next_step_input;
-  Timer timer;
-  std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
-  for (size_t i = 0; i < options_.num_speculative_tokens(); ++i) {
-    auto future = draft_impl_->step_async(draft_input);
-    if (i == options_.num_speculative_tokens() - 1) {
-      // final step, prepare validate input
-      prepare_validate_inputs(input, validate_input);
-    } else {
-      prepare_draft_inputs(draft_input, next_step_input, 1, device_);
-    }
-    draft_outputs.push_back(std::move(future).get().value());
-    auto& last_output = draft_outputs.back().sample_output;
-
-    // Extract probability for selected draft token
-    if (last_output.probs.defined()) {
-      auto selected_probs =
-          last_output.probs
-              .gather(
-                  /*dim=*/-1, last_output.next_tokens.unsqueeze(-1))
-              .squeeze(-1);
-      last_output.probs = selected_probs;  // [batch_size]
-    }
-
-    // EAGLE-3 specific: map draft token IDs to target token IDs using
-    // hot_token_id_
-    if (hot_token_id_.defined()) {
-      last_output.next_tokens =
-          hot_token_id_.index_select(0, last_output.next_tokens);
-    }
-    if (i < options_.num_speculative_tokens() - 1) {
-      draft_input = next_step_input;
-      draft_input.token_ids = safe_to(last_output.next_tokens, torch::kInt);
-      draft_input.input_params.input_embedding =
-          last_output.embeddings.to(device_);
-    }
-  }
-  COUNTER_ADD(speculative_execution_latency_seconds_draft,
-              timer.elapsed_seconds());
-
-  for (int i = 0; i < options_.num_speculative_tokens(); ++i) {
-    ForwardOutput draft_output = draft_outputs[i];
-    auto next_tokens =
-        safe_to(draft_output.sample_output.next_tokens, torch::kInt);
-    auto& token_ids = validate_input.token_ids;
-    auto mask = (token_ids == -1 * (i + 1));
-    token_ids.masked_scatter_(mask, next_tokens);
+void Eagle3WorkerImpl::process_draft_output(ForwardOutput& draft_output) {
+  auto& output = draft_output.sample_output;
+  if (output.probs.defined()) {
+    auto selected_probs = output.probs
+                              .gather(
+                                  /*dim=*/-1, output.next_tokens.unsqueeze(-1))
+                              .squeeze(-1);
+    output.probs = selected_probs;  // [batch_size]
   }
 
-  // run the target model to get the verification scores
-  timer.reset();
-  auto future = impl_->step_async(validate_input);
-  ForwardOutput target_output = std::move(future).get().value();
-  COUNTER_ADD(speculative_execution_latency_seconds_target,
-              timer.elapsed_seconds());
-
-  // verify the proposals with target and update the batch
-  timer.reset();
-  SampleOutput val_output =
-      validate(input.sampling_params, draft_outputs, target_output);
-  COUNTER_ADD(speculative_execution_latency_seconds_validation,
-              timer.elapsed_seconds());
-
-  // write the right cache and clear embeddings
-  val_output.next_tokens = val_output.next_tokens.to(torch::kCPU);
-  embedding_cache_->write_validate(input.input_params.embedding_ids,
-                                   val_output.next_tokens,
-                                   val_output.embeddings);
-
-  if (!enable_schedule_overlap() && !driver_ && !dp_driver_) {
-    return std::nullopt;
+  // EAGLE-3 specific: map draft token IDs to target token IDs.
+  if (hot_token_id_.defined()) {
+    output.next_tokens = hot_token_id_.index_select(0, output.next_tokens);
   }
-  val_output.embeddings = torch::Tensor();
-  target_output.sample_output = val_output;
-  return target_output;
 }
 
 SampleOutput Eagle3WorkerImpl::validate(
@@ -197,36 +126,26 @@ SampleOutput Eagle3WorkerImpl::validate(
   // [batch_size, n_speculative_tokens, vocab_size]
   auto target_logits =
       target_output.logits.view({batch_size, num_val_tokens, vocab_size});
-  // Initialize draft_probs with zeros (target vocab size)
-  // Note: draft vocab size != target vocab size in EAGLE-3
-  auto draft_probs =
-      torch::zeros({batch_size, options_.num_speculative_tokens(), vocab_size},
-                   target_logits.options());
 
   // prepare input for rejection sampling
   // For EAGLE-3, draft_token_ids are already mapped to target token IDs
   // via hot_token_id_ in step_decode
   // draft_output.sample_output.probs has been extracted to [batch_size] in
   // step_decode
-  auto batch_indices =
-      torch::arange(batch_size, torch::kInt64).to(draft_probs.device());
   std::vector<torch::Tensor> draft_token_ids_vec;
-  for (size_t spec_step = 0; spec_step < draft_outputs.size(); ++spec_step) {
-    const auto& draft_output = draft_outputs[spec_step];
+  std::vector<torch::Tensor> selected_draft_probs_vec;
+  selected_draft_probs_vec.reserve(draft_outputs.size());
+  for (size_t i = 0; i < draft_outputs.size(); ++i) {
+    const auto& draft_output = draft_outputs[i];
     auto draft_token_ids = draft_output.sample_output.next_tokens;
-
-    auto token_indices =
-        torch::full(
-            {batch_size}, static_cast<int64_t>(spec_step), torch::kInt64)
-            .to(draft_token_ids.device());
-
-    // draft_output.probs is already [batch_size] - probability of selected
-    // token
     auto selected_probs = draft_output.sample_output.probs;
-    draft_probs.index_put_({batch_indices, token_indices, draft_token_ids},
-                           selected_probs);
+    selected_draft_probs_vec.push_back(selected_probs.view({batch_size, 1}));
     draft_token_ids_vec.push_back(draft_token_ids.view({batch_size, 1}));
   }
+
+  // Optimized path for Eagle3:
+  // keep only selected draft token probabilities [B, S].
+  auto draft_probs = torch::cat(selected_draft_probs_vec, /*dim=*/1);
 
   // concatenate the draft token ids along the last dimension
   const auto draft_token_ids =

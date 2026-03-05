@@ -39,6 +39,7 @@ limitations under the License.
 #include "core/platform/stream.h"
 #include "core/platform/vmm_torch_allocator.h"
 #include "core/util/utils.h"
+#include "kernels/cuda/global_capture_instance.h"
 #include "kernels/cuda/utils.h"
 
 namespace xllm::runtime::cuda {
@@ -447,8 +448,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     const std::string backend = xllm::kernel::cuda::determine_attention_backend(
         /*pos_encoding_mode=*/0,
         /*use_fp16_qk_reduction=*/false,
-        /*use_custom_mask=*/false,
-        /*causal=*/causal);
+        /*use_custom_mask=*/false);
 
     // Update plan_info
     // Note: plan_info is only updated at layer 0, so we set layer_id to 0
@@ -465,23 +465,51 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         << ", causal=" << causal << ", backend=" << backend
         << ", enable_cuda_graph=" << attn_metadata->enable_cuda_graph;
 
-    layer::flashinfer::update_plan_info(
-        attn_metadata->plan_info,
-        backend,
-        *attn_metadata,
-        dtype,                             // query_dtype
-        dtype,                             // key_dtype
-        dtype,                             // output_dtype
-        head_dim,                          // head_dim_qk
-        head_dim,                          // head_dim_vo
-        static_cast<int32_t>(n_heads),     // num_qo_heads
-        static_cast<int32_t>(n_kv_heads),  // num_kv_heads
-        static_cast<int32_t>(block_size),  // block_size
-        sliding_window,                    // window_size_left
-        /*enable_cuda_graph=*/true,
-        causal,          // causal
-        use_tensor_core  // use_tensor_core for decode planning
-    );
+    if (attn_metadata->is_prefill) {
+      layer::flashinfer::update_prefill_plan_info(
+          attn_metadata->plan_info,
+          backend,
+          *attn_metadata,
+          dtype,                             // query_dtype
+          dtype,                             // key_dtype
+          dtype,                             // output_dtype
+          head_dim,                          // head_dim_qk
+          head_dim,                          // head_dim_vo
+          static_cast<int32_t>(n_heads),     // num_qo_heads
+          static_cast<int32_t>(n_kv_heads),  // num_kv_heads
+          /*enable_cuda_graph=*/true);
+    } else if (attn_metadata->is_chunked_prefill) {
+      layer::flashinfer::update_chunked_prefill_plan_info(
+          attn_metadata->plan_info,
+          /*backend=*/"fa2",  // flashinfer paged fa3 is slow, use fa2 instead
+          *attn_metadata,
+          dtype,                             // query_dtype
+          dtype,                             // key_dtype
+          dtype,                             // output_dtype
+          head_dim,                          // head_dim_qk
+          head_dim,                          // head_dim_vo
+          static_cast<int32_t>(n_heads),     // num_qo_heads
+          static_cast<int32_t>(n_kv_heads),  // num_kv_heads
+          static_cast<int32_t>(block_size),  // block_size
+          sliding_window,                    // window_size_left
+          /*enable_cuda_graph=*/true);
+    } else {
+      layer::flashinfer::update_decode_plan_info(
+          attn_metadata->plan_info,
+          backend,
+          *attn_metadata,
+          dtype,                             // query_dtype
+          dtype,                             // key_dtype
+          dtype,                             // output_dtype
+          head_dim,                          // head_dim_qk
+          head_dim,                          // head_dim_vo
+          static_cast<int32_t>(n_heads),     // num_qo_heads
+          static_cast<int32_t>(n_kv_heads),  // num_kv_heads
+          static_cast<int32_t>(block_size),  // block_size
+          sliding_window,                    // window_size_left
+          /*enable_cuda_graph=*/true,
+          use_tensor_core);
+    }
 
     VLOG(kGraphExecutorLogVerboseLevel)
         << "CudaGraphPersistentParam::update() plan_info updated: uri="

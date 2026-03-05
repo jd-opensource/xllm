@@ -27,6 +27,7 @@ cc_library(
     Boost::serialization
     SMHasherSupport
     torch
+    :xtensor
 )
 target_link_libraries(block PRIVATE Folly::folly)
 
@@ -41,6 +42,7 @@ if(USE_NPU)
     SRCS
       ${TEST_SRCS}
     DEPS
+      :xllm_server
       :block
       :flags
       :kv_cache
@@ -50,6 +52,6 @@ if(USE_NPU)
       GTest::gtest_main
   )
 
-  target_link_libraries(block_test PRIVATE OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf c_sec)
+  target_link_libraries(block_test PRIVATE Folly::folly OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf c_sec)
   add_dependencies(block_test brpc-static)
 endif()

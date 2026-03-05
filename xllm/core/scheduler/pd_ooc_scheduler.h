@@ -77,11 +77,6 @@ class PDOOCScheduler : public DisaggPDScheduler {
       int32_t src_dp_size,
       int32_t src_dp_rank);
 
-  // decode-3: decode send response to prefill
-  // bool decode_send_stream_generation(const RequestOutput& output) override;
-  // std::vector<bool> decode_send_stream_generations(
-  //     const std::vector<RequestOutput>& outputs) override;
-
   void prefill_step(const absl::Duration& timeout);
 
   void decode_step(const absl::Duration& timeout);

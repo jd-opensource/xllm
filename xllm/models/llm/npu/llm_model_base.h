@@ -37,7 +37,7 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
 #include "models/model_registry.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
+#include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm {
 
@@ -93,6 +93,19 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
   virtual void load_state_dict(const StateDict& state_dict) {
     // call each submodule's load_state_dict function
     decoder_layer_->load_state_dict(state_dict);
+  }
+
+  virtual void merge_and_move_pinned_host() {
+    decoder_layer_->merge_and_move_pinned_host();
+    block_copy_->merge_loaded_weights();
+  }
+
+  virtual void free_weights() { decoder_layer_->free_weights(); }
+
+  virtual void reload_weights() { decoder_layer_->reload_weights(); }
+
+  virtual void reload_weights_from_device() {
+    decoder_layer_->reload_weights_from_device();
   }
 
  private:
@@ -165,11 +178,12 @@ class LlmModelImplBase : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor attn_mask;
+    max_seq_len_ = FLAGS_enable_chunked_prefill
+                       ? std::max(input_params.kv_max_seq_len, max_seq_len_)
+                       : 128;
     if (model_type_ == "qwen2") {
-      int64_t max_seq_len =
-          FLAGS_enable_chunked_prefill ? input_params.kv_max_seq_len : 128;
       attn_mask = attn_mask_.get_attn_mask(
-          max_seq_len, cos_pos.dtype().toScalarType(), cos_pos.device());
+          max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
       if (FLAGS_enable_chunked_prefill) {
         int num_sequences = input_params.num_sequences;
@@ -181,7 +195,7 @@ class LlmModelImplBase : public torch::nn::Module {
             auto mask =
                 attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
                                            input_params.kv_seq_lens_vec[j],
-                                           input_params.kv_max_seq_len,
+                                           max_seq_len_,
                                            cos_pos.dtype().toScalarType(),
                                            cos_pos.device());
             req_mask_vec.emplace_back(mask);
@@ -190,7 +204,7 @@ class LlmModelImplBase : public torch::nn::Module {
         }
       } else {
         attn_mask = attn_mask_.get_attn_mask(
-            128, cos_pos.dtype().toScalarType(), cos_pos.device());
+            max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
       }
     }
 
@@ -230,7 +244,6 @@ class LlmModelImplBase : public torch::nn::Module {
   virtual void load_state_dict(const StateDict& state_dict) {
     npu_embed_tokens_->load_state_dict(
         state_dict.get_dict_with_prefix("embed_tokens."));
-
     // call each layer's load_state_dict function
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
@@ -256,6 +269,39 @@ class LlmModelImplBase : public torch::nn::Module {
       layers_[i]->merge_loaded_weights();
     }
     norm_->merge_loaded_weights();
+  }
+
+  virtual void free_weights() {
+    npu_embed_tokens_->free_weights();
+    for (int i = 0; i < layers_.size(); i++) {
+      layers_[i]->free_weights();
+    }
+    norm_->free_weights();
+  }
+
+  virtual void reload_weights() {
+    npu_embed_tokens_->reload_weights();
+    for (int i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights();
+    }
+    norm_->reload_weights();
+  }
+
+  virtual void reload_weights_from_device() {
+    npu_embed_tokens_->reload_weights_from_device();
+    for (int i = 0; i < layers_.size(); i++) {
+      layers_[i]->reload_weights_from_device();
+    }
+    norm_->reload_weights_from_device();
+  }
+
+  virtual void merge_and_move_pinned_host() {
+    // todo: word embed and norm need to be merged and moved to pinned host.
+    npu_embed_tokens_->merge_and_move_pinned_host();
+    for (int i = 0; i < layers_.size(); i++) {
+      layers_[i]->merge_and_move_pinned_host();
+    }
+    norm_->merge_and_move_pinned_host();
   }
 
   virtual layer::NpuWordEmbedding get_npu_word_embedding() {
@@ -287,6 +333,8 @@ class LlmModelImplBase : public torch::nn::Module {
   std::vector<DecoderLayerType> layers_;
 
   bool layer_forward_interrupted_ = false;
+
+  int32_t max_seq_len_ = 0;
 
  private:
   std::string model_type_;
@@ -352,6 +400,55 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     npu_lm_head_->merge_loaded_weights();
   }
 
+  virtual void lazy_load_model(
+      std::unique_ptr<ModelLoader> loader,
+      std::string prefix = "model." /*llm model weight prefix*/) {
+    if (keep_host_weights) {
+      LOG(INFO) << "Model weights are already kept on host.";
+      return;
+    }
+    for (const auto& state_dict : loader->get_state_dicts()) {
+      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
+      if (tie_word_embeddings) {
+        npu_lm_head_->load_state_dict(
+            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
+      } else {
+        npu_lm_head_->load_state_dict(
+            state_dict->get_dict_with_prefix("lm_head."));
+      }
+    }
+    // verify
+    model_->verify_loaded_weights(prefix);
+    npu_lm_head_->verify_loaded_weights("lm_head.");
+
+    model_->merge_and_move_pinned_host();
+    // test
+    npu_lm_head_->merge_and_move_pinned_host();
+
+    keep_host_weights = true;
+  }
+
+  virtual void free_model_weights() {
+    if (!keep_host_weights) {
+      LOG(INFO) << "Model weights are not kept on host.";
+      return;
+    }
+    model_->free_weights();
+    npu_lm_head_->free_weights();
+  }
+
+  virtual void reload_model_weights() {
+    model_->reload_weights();
+    npu_lm_head_->reload_weights();
+    auto stream = c10_npu::getCurrentNPUStream();
+    stream.synchronize();
+  }
+
+  virtual void reload_model_weights_from_device() {
+    model_->reload_weights_from_device();
+    npu_lm_head_->reload_weights_from_device();
+  }
+
   virtual void prepare_expert_weight(int32_t layer_id,
                                      const std::vector<int32_t>& expert_ids) {
     return;
@@ -376,6 +473,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   LlmModelType model_{nullptr};
   int device_id = 0;
   bool tie_word_embeddings{false};
+  bool keep_host_weights{false};
   // test
   layer::NpuLmHead npu_lm_head_{nullptr};
 };

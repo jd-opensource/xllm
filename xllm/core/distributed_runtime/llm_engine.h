@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
+#include "core/distributed_runtime/master.h"
 #include "dist_manager.h"
 #include "engine.h"
 #include "framework/batch/batch.h"
@@ -38,7 +39,6 @@ limitations under the License.
 #include "runtime/worker_client.h"
 #include "runtime/xservice_client.h"
 #include "util/threadpool.h"
-
 namespace xllm {
 
 class LLMEngine : public Engine {
@@ -53,7 +53,7 @@ class LLMEngine : public Engine {
 
   const runtime::Options& options() const { return options_; }
 
-  bool init() override;
+  bool init(int32_t master_status) override;
 
   void update_last_step_result(std::vector<Batch>& batch) override;
 
@@ -95,6 +95,11 @@ class LLMEngine : public Engine {
                       std::vector<int64_t>& k_cache_ids,
                       std::vector<int64_t>& v_cache_ids) override;
 
+  void get_xtensor_info(
+      std::vector<size_t>& worker_free_phy_pages,
+      std::unordered_map<std::string, std::vector<WeightSegment>>&
+          model_weight_segments) override;
+
   bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                     const std::vector<std::string>& addrs,
                     const std::vector<std::string>& device_ips,
@@ -107,17 +112,32 @@ class LLMEngine : public Engine {
                       const std::vector<uint16_t>& ports,
                       const int32_t dp_size) override;
 
+  // D2D link for weight transfer - each worker links to one remote addr
+  bool link_d2d(const std::vector<std::string>& device_ips) override;
+
+  bool unlink_d2d(const std::vector<std::string>& device_ips) override;
+
   std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; };
+
+  bool sleep(int32_t master_status) override;
+
+  bool wakeup(const WakeupOptions& options) override;
+
+  // XTensor mode: get GlobalXTensor offsets for allocated blocks via RPC
+  // Calls worker in the specified DP group to compute offsets
+  bool get_xtensor_offsets_for_blocks(
+      int32_t dp_rank,
+      const std::vector<int32_t>& block_ids,
+      std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
+          layer_offsets) override;
 
  private:
   friend class SpeculativeEngine;
   // setup workers internal
   void setup_workers(const runtime::Options& options);
-  bool init_model();
+  bool init_model(int32_t master_status = WAKEUP);
   Engine::KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
-  bool allocate_continuous_kv_cache(
-      const Engine::KVCacheCapacity& kv_cache_cap);
   std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);
   void process_group_test();
 

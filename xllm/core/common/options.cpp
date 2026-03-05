@@ -34,6 +34,19 @@ std::string Options::to_string() const {
      << ", max_tokens_per_chunk_for_prefill: "
      << max_tokens_per_chunk_for_prefill()
      << ", num_speculative_tokens: " << num_speculative_tokens()
+     << ", speculative_algorithm: " << speculative_algorithm()
+     << ", speculative_suffix_cache_max_depth: "
+     << speculative_suffix_cache_max_depth()
+     << ", speculative_suffix_max_spec_factor: "
+     << speculative_suffix_max_spec_factor()
+     << ", speculative_suffix_max_spec_offset: "
+     << speculative_suffix_max_spec_offset()
+     << ", speculative_suffix_min_token_prob: "
+     << speculative_suffix_min_token_prob()
+     << ", speculative_suffix_max_cached_requests: "
+     << speculative_suffix_max_cached_requests()
+     << ", speculative_suffix_use_tree_spec: "
+     << speculative_suffix_use_tree_spec()
      << ", num_request_handling_threads: " << num_request_handling_threads()
      << ", communication_backend: " << communication_backend().value_or("null")
      << ", rank_tablefile: " << rank_tablefile().value_or("null")
@@ -48,6 +61,7 @@ std::string Options::to_string() const {
      << ", enable_schedule_overlap: " << enable_schedule_overlap()
      << ", enable_disagg_pd: " << enable_disagg_pd()
      << ", enable_pd_ooc: " << enable_pd_ooc()
+     << ", kv_cache_dtype: " << kv_cache_dtype()
      << ", kv_cache_transfer_mode: " << kv_cache_transfer_mode()
      << ", etcd_addr: " << etcd_addr().value_or("null")
      << ", enable_service_routing: " << enable_service_routing()
@@ -61,7 +75,6 @@ std::string Options::to_string() const {
      << ", store_metadata_server: " << store_metadata_server()
      << ", store_local_hostname: " << store_local_hostname()
      << ", enable_multi_stream_parallel: " << enable_multi_stream_parallel()
-     << ", enable_continuous_kvcache: " << enable_continuous_kvcache()
      << ", disable_ttft_profiling: " << disable_ttft_profiling()
      << ", enable_forward_interruption: " << enable_forward_interruption()
      << ", enable_graph: " << enable_graph()

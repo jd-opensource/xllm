@@ -75,6 +75,19 @@ void ModelRegistry::register_causallm_factory(const std::string& name,
   }
 }
 
+void ModelRegistry::register_rec_model_factory(const std::string& name,
+                                               RecModelFactory factory) {
+  ModelRegistry* instance = get_instance();
+
+  if (instance->model_registry_[name].rec_model_factory != nullptr) {
+    SAFE_LOG_WARNING("rec model factory for " << name
+                                              << " already registered.");
+  } else {
+    instance->model_registry_[name].rec_model_factory = factory;
+    instance->model_backend_[name] = "rec";
+  }
+}
+
 void ModelRegistry::register_causalvlm_factory(const std::string& name,
                                                CausalVLMFactory factory) {
   ModelRegistry* instance = get_instance();
@@ -210,6 +223,12 @@ CausalLMFactory ModelRegistry::get_causallm_factory(const std::string& name) {
   return instance->model_registry_[name].causal_lm_factory;
 }
 
+RecModelFactory ModelRegistry::get_rec_model_factory(const std::string& name) {
+  ModelRegistry* instance = get_instance();
+
+  return instance->model_registry_[name].rec_model_factory;
+}
+
 CausalVLMFactory ModelRegistry::get_causalvlm_factory(const std::string& name) {
   ModelRegistry* instance = get_instance();
 
@@ -289,6 +308,19 @@ std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context) {
   }
 
   LOG(ERROR) << "Unsupported model type: "
+             << context.get_model_args().model_type();
+
+  return nullptr;
+}
+
+std::unique_ptr<CausalLM> create_rec_model(const ModelContext& context) {
+  auto factory =
+      ModelRegistry::get_rec_model_factory(context.get_model_args().model_type());
+  if (factory) {
+    return factory(context);
+  }
+
+  LOG(ERROR) << "Unsupported rec model type: "
              << context.get_model_args().model_type();
 
   return nullptr;

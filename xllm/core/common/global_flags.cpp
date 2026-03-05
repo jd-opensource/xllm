@@ -141,6 +141,13 @@ DEFINE_double(max_memory_utilization,
               "The fraction of GPU memory to be used for model inference, "
               "including model weights and kv cache.");
 
+DEFINE_string(
+    kv_cache_dtype,
+    "auto",
+    "KV cache data type for quantization. \"auto\" (default): KV "
+    "cache dtype aligns with model dtype (no quantization). "
+    "\"int8\": Enables INT8 quantization. Only supported on MLU backend.");
+
 // --- scheduler config ---
 
 DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
@@ -276,6 +283,11 @@ DEFINE_string(master_node_addr,
               "The master address for multi-node distributed serving(e.g. "
               "10.18.1.1:9999).");
 
+DEFINE_string(
+    xtensor_master_node_addr,
+    "127.0.0.1:19889",
+    "The master address for XTensor distributed service(e.g. 10.18.1.1:9999).");
+
 DEFINE_int32(nnodes, 1, "The number of multi-nodes.");
 
 DEFINE_int32(node_rank, 0, "The node rank.");
@@ -339,8 +351,39 @@ DEFINE_int32(num_speculative_tokens, 0, "Number of speculative tokens.");
 
 DEFINE_string(speculative_algorithm,
               "MTP",
-              "Speculative decoding algorithm. Supported options: MTP, Eagle3. "
-              "Default is MTP.");
+              "Speculative decoding algorithm. Supported options: MTP, Eagle3, "
+              "Suffix. Default is MTP.");
+
+DEFINE_int32(speculative_suffix_cache_max_depth,
+             64,
+             "Maximum suffix tree depth for suffix speculative decoding.");
+
+DEFINE_double(speculative_suffix_max_spec_factor,
+              1.0,
+              "Suffix speculation max tokens factor relative to match length.");
+
+DEFINE_double(speculative_suffix_max_spec_offset,
+              0.0,
+              "Suffix speculation max tokens additive offset.");
+
+DEFINE_double(speculative_suffix_min_token_prob,
+              0.1,
+              "Minimum token probability used in suffix speculation.");
+
+DEFINE_int32(speculative_suffix_max_cached_requests,
+             -1,
+             "Maximum globally cached requests for suffix speculation (-1 "
+             "unlimited, 0 disabled).");
+
+DEFINE_bool(speculative_suffix_use_tree_spec,
+            false,
+            "Whether to use tree-based suffix speculation instead of path "
+            "speculation.");
+
+DEFINE_bool(enable_opt_validate_probs,
+            false,
+            "Whether to use optimized draft_probs handling in speculative "
+            "validation.");
 
 DEFINE_bool(enable_atb_spec_kernel,
             false,
@@ -419,11 +462,10 @@ DEFINE_int32(micro_batch_num,
 
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
-// --- continuous kv cache config ---
-
-DEFINE_bool(enable_continuous_kvcache,
-            false,
-            "Whether to enable continuous kv cache.");
+DEFINE_bool(
+    enable_xtensor,
+    false,
+    "Whether to enable xtensor for model weights with physical page pool.");
 
 DEFINE_int64(
     phy_page_granularity_size,
@@ -431,22 +473,16 @@ DEFINE_int64(
     "Granularity size for one physical page in bytes, default 2MB, when enable "
     "continuous kv cache.");
 
-DEFINE_int64(cache_size_per_token,
-             0,
-             "Cache size per token in bytes, default 0, which means it is "
-             "calculated by head_dim and n_local_kv_heads.");
-
-DEFINE_int64(buffer_size_per_seq,
-             0,
-             "Buffer size per sequence in bytes, default 0.");
-
 // --- beam search config ---
 
 DEFINE_bool(enable_beam_search_kernel,
             false,
             "Whether to enable beam search kernel.");
 
-DEFINE_bool(enable_fast_sampler, false, "Whether to enable fast sampler path.");
+DEFINE_bool(
+    enable_rec_fast_sampler,
+    true,
+    "Whether to enable RecSampler fast sampling path for Rec pipelines.");
 
 DEFINE_bool(enable_topk_sorted,
             true,
@@ -534,6 +570,12 @@ DEFINE_bool(
     use_audio_in_video,
     false,
     "Whether to decode both audio and video when the input is a video.");
+
+// --- concurrent rec worker config ---
+DEFINE_uint32(rec_worker_max_concurrency,
+              1,
+              "Concurrency for rec worker parallel execution. Less than or "
+              "equal to 1 means disable concurrent rec worker.");
 
 #if defined(USE_NPU)
 

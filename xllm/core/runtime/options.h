@@ -63,6 +63,20 @@ struct Options {
   // the number of speculative tokens per step
   PROPERTY(int32_t, num_speculative_tokens) = 0;
 
+  PROPERTY(std::string, speculative_algorithm) = "mtp";
+
+  PROPERTY(int32_t, speculative_suffix_cache_max_depth) = 64;
+
+  PROPERTY(double, speculative_suffix_max_spec_factor) = 1.0;
+
+  PROPERTY(double, speculative_suffix_max_spec_offset) = 0.0;
+
+  PROPERTY(double, speculative_suffix_min_token_prob) = 0.1;
+
+  PROPERTY(int32_t, speculative_suffix_max_cached_requests) = -1;
+
+  PROPERTY(bool, speculative_suffix_use_tree_spec) = false;
+
   // enable speculative decode
   PROPERTY(bool, enable_speculative_decode) = false;
 
@@ -170,9 +184,6 @@ struct Options {
   // max requests per batch
   PROPERTY(int, max_requests_per_batch) = 0;
 
-  // enable continuous kvcache
-  PROPERTY(bool, enable_continuous_kvcache) = false;
-
   // start with offline inference, default is false
   PROPERTY(bool, enable_offline_inference) = false;
 
@@ -204,6 +215,14 @@ struct Options {
 
   // max tokens per batch
   PROPERTY(int32_t, max_tokens_per_batch) = 4096;
+
+  // KV cache data type for quantization.
+  // "auto" (default): KV cache dtype aligns with model dtype (no quantization).
+  // "int8": Enables INT8 quantization. Only supported on MLU backend.
+  PROPERTY(std::string, kv_cache_dtype) = "auto";
+
+  // max concurrency for rec worker
+  PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
 };
 
 }  // namespace runtime

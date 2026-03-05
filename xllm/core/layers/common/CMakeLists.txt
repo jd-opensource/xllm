@@ -33,7 +33,6 @@ cc_library(
     indexer.cpp
     deep_ep.cpp
     activation.cpp
-    attention_metadata.cpp
     attention_metadata_builder.cpp
     dp_utils.cpp
     add_matmul.cpp

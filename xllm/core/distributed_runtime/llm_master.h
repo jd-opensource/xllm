@@ -66,12 +66,28 @@ class LLMMaster : public Master {
                             std::vector<RequestParams> sp,
                             BatchOutputCallback callback);
 
+  // handle rpc response, send stream generations to xllm service
+  bool handle_rpc_response(const RequestOutput& output);
+
+  std::vector<bool> handle_rpc_responses(
+      const std::vector<RequestOutput>& outputs);
+
   // start running loop
   void run() override;
 
   // generate will run all request done at once,
   // this is a blocking call
   void generate();
+
+  bool sleep() override;
+
+  bool wakeup() override;
+
+  bool wakeup(const WakeupOptions& options) override;
+
+  bool link_d2d(const std::vector<std::string>& device_ips) override;
+
+  bool unlink_d2d(const std::vector<std::string>& device_ips) override;
 
  private:
   std::shared_ptr<Request> generate_request(
@@ -89,6 +105,8 @@ class LLMMaster : public Master {
       OutputCallback callback);
 
  private:
+  XServiceClient* xservice_client_ = nullptr;
+
   std::unique_ptr<Scheduler> scheduler_;
 
   // model args
@@ -119,12 +137,13 @@ class LLMMaster : public Master {
 class LLMAssistantMaster : public Master {
  public:
   LLMAssistantMaster(const Options& options);
-  ~LLMAssistantMaster() = default;
+  ~LLMAssistantMaster();
   void run() override;
 
   static void handle_signal(int signum) { running_ = false; }
 
  private:
+  std::thread loop_thread_;
   static volatile bool running_;
 };
 

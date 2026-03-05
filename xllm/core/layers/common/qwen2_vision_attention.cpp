@@ -16,6 +16,9 @@ limitations under the License.
 #include "qwen2_vision_attention.h"
 
 #include "framework/parallel_state/parallel_state.h"
+#if defined(USE_MLU)
+#include "kernels/mlu/mlu_ops_api.h"
+#endif
 #include "kernels/ops_api.h"
 #include "layers/common/attention_metadata.h"
 namespace xllm {
@@ -139,27 +142,32 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   int32_t max_seqlen =
       *std::max_element(cu_seq_len_vec.begin(), cu_seq_len_vec.end());
 
-  // Create AttentionMetadata for AttentionParams
-  // Note: This is a special case where we manually create AttentionMetadata
-  // with the required fields for this vision attention layer
-  layer::AttentionMetadata attn_metadata;
-  attn_metadata.q_cu_seq_lens = cu_seq_len;
-  attn_metadata.kv_cu_seq_lens = cu_seq_len;
-  attn_metadata.max_query_len = max_seqlen;
-  attn_metadata.max_seq_len = max_seqlen;
-  attn_metadata.compute_dtype = "half";
-  attn_metadata.is_causal = false;
-  attn_metadata.is_chunked_prefill = false;
+#if defined(USE_MLU)
+  std::optional<torch::Tensor> output_lse = std::nullopt;
 
-  xllm::kernel::AttentionParams attention_params(attn_metadata);
-  attention_params.query = q;
-  attention_params.key = k;
-  attention_params.value = v;
-  attention_params.output = output;
-
-  attention_params.window_size_left = -1;
-  attention_params.scale = scale_;
-  xllm::kernel::batch_prefill(attention_params);
+  xllm::kernel::mlu::batch_prefill(q,
+                                   k,
+                                   v,
+                                   output,
+                                   output_lse,
+                                   cu_seq_len,
+                                   cu_seq_len,
+                                   /*alibi_slope=*/std::nullopt,
+                                   /*alibi_bias=*/std::nullopt,
+                                   /*q_quant_scale=*/std::nullopt,
+                                   /*k_quant_scale=*/std::nullopt,
+                                   /*v_quant_scale=*/std::nullopt,
+                                   /*out_quant_scale=*/std::nullopt,
+                                   /*block_table=*/std::nullopt,
+                                   max_seqlen,
+                                   max_seqlen,
+                                   scale_,
+                                   /*is_causal=*/true,
+                                   /*window_size_left=*/-1,
+                                   /*window_size_right=*/-1,
+                                   /*compute_dtype=*/"half",
+                                   /*return_lse=*/false);
+#endif
 
   // context_layer = rearrange(output, "(b s) h d -> s b (h d)", b=batch_size)
   output = output.view({B, S, -1});

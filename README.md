@@ -122,7 +122,7 @@ If you have problems about development, please check our document: **[Document](
 If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the xLLM Core team directly via your internal Slack. In addition, we have established official WeChat groups. You can access the following QR code to join. Welcome to contact us!
 
 <div align="center">
-  <img src="docs/assets/wechat_qrcode.jpg" alt="qrcode3" width="50%" />
+  <img src="docs/assets/wechat_qrcode.png" alt="qrcode3" width="50%" />
 </div>
 
 ## Acknowledgment
@@ -144,6 +144,7 @@ Thanks to the following collaborating university laboratories:
 - [Beihang-HiPO](https://github.com/buaa-hipo) (Beihang HiPO research group)
 - PKU-DS-LAB (Data Structure Laboratory, Peking University)
 - PKU-NetSys-LAB (NetSys Lab, Peking University)
+- [TJU-TANKLab](https://flashserve.org/) (TANK Lab, Tianjin University)
 
 Thanks to all the following [developers](https://github.com/jd-opensource/xllm/graphs/contributors) who have contributed to xLLM.
 

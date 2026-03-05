@@ -47,6 +47,44 @@ void reshape_from_cache(torch::Tensor& key,
                                      cache_seq_offset);
 }
 
+void quant_to_paged_cache(const torch::Tensor& k,
+                          const std::optional<torch::Tensor>& v,
+                          torch::Tensor& k_cache,
+                          const std::optional<torch::Tensor>& v_cache,
+                          torch::Tensor& k_cache_scale,
+                          const std::optional<torch::Tensor>& v_cache_scale,
+                          const torch::Tensor& slot_mapping) {
+  tmo::torch_api::quant_to_paged_cache(
+      k, v, k_cache, v_cache, k_cache_scale, v_cache_scale, slot_mapping);
+}
+
+void dequant_from_paged_cache(
+    torch::Tensor& key,
+    const std::optional<torch::Tensor>& value,
+    const torch::Tensor& key_cache,
+    const std::optional<torch::Tensor>& value_cache,
+    const torch::Tensor& key_cache_quant_scale,
+    const std::optional<torch::Tensor>& value_cache_quant_scale,
+    const torch::Tensor& context_lengths,
+    int64_t max_context_len,
+    const std::optional<torch::Tensor>& context_seq_offset,
+    const torch::Tensor& block_tables,
+    int64_t quant_mode,
+    int64_t quant_bit) {
+  tmo::torch_api::dequant_from_paged_cache(key,
+                                           value,
+                                           key_cache,
+                                           value_cache,
+                                           key_cache_quant_scale,
+                                           value_cache_quant_scale,
+                                           context_lengths,
+                                           max_context_len,
+                                           context_seq_offset,
+                                           block_tables,
+                                           quant_mode,
+                                           quant_bit);
+}
+
 void batch_prefill(const torch::Tensor& query,
                    const torch::Tensor& key,
                    const torch::Tensor& value,

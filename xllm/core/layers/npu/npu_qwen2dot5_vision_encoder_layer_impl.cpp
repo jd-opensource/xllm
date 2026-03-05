@@ -55,7 +55,6 @@ NpuQwen2dot5VisionEncoderLayerImpl::NpuQwen2dot5VisionEncoderLayerImpl(
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
   param_from_args(encode_param_, model_args, parallel_args);
-  at_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   dtype_ = c10::typeMetaToScalarType(options.dtype());
   device_id_ = options.device().index();
@@ -68,7 +67,7 @@ NpuQwen2dot5VisionEncoderLayerImpl::NpuQwen2dot5VisionEncoderLayerImpl(
 void NpuQwen2dot5VisionEncoderLayerImpl::merge_loaded_weights() {
   loader_->merge_loaded_weights();
   auto& at_weight_tensors = loader_->get_at_weight_tensors();
-  c10_npu::NPUCachingAllocator::emptyCache();
+  Device::empty_cache(device_.index());
   for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);

@@ -20,7 +20,7 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include "hccl/hccl.h"
-#include "xllm_kernels/models/base/param/mapping.h"
+#include "xllm_atb_layers/models/base/param/mapping.h"
 #endif
 
 #include <nlohmann/json.hpp>

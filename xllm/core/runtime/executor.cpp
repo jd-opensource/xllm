@@ -23,8 +23,11 @@ Executor::Executor(CausalLM* model,
                    const ModelArgs& args,
                    const torch::Device& device,
                    const runtime::Options& options) {
+  std::string backend = (options.backend() != "vlm" && FLAGS_enable_graph)
+                            ? Device::type_str()
+                            : options.backend();
   impl_ = ExecutorImplFactory::get_instance().create_executor_impl(
-      model, args, device, options);
+      model, args, device, options, backend);
 }
 
 ForwardInput Executor::prepare_inputs(Batch& batch) {

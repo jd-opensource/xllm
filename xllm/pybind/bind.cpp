@@ -87,7 +87,8 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("enable_shm", &Options::enable_shm_)
       .def_readwrite("input_shm_size", &Options::input_shm_size_)
       .def_readwrite("output_shm_size", &Options::output_shm_size_)
-      .def_readwrite("is_local", &Options::is_local_);
+      .def_readwrite("is_local", &Options::is_local_)
+      .def_readwrite("kv_cache_dtype", &Options::kv_cache_dtype_);
 
   // 2. export LLMMaster
   py::class_<LLMMaster>(m, "LLMMaster")

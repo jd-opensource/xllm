@@ -174,7 +174,11 @@ struct XLLM_CAPI_EXPORT XLLM_RequestParams {
   // Number of sequences to generate for each prompt and select n best among.
   std::optional<uint32_t> best_of;
 
-  int32_t slo_ms = 0;
+  int32_t ttlt_slo_ms;
+
+  int32_t ttft_slo_ms;
+
+  int32_t tpot_slo_ms;
 
   int32_t beam_width = 0;
 

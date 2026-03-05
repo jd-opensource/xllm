@@ -29,7 +29,8 @@ class Tokenizer;
 class AsyncResponseProcessor final {
  public:
   AsyncResponseProcessor(const Tokenizer* tokenizer,
-                         const std::optional<InstanceRole>& role);
+                         const std::optional<InstanceRole>& role,
+                         bool enable_service_routing);
   virtual ~AsyncResponseProcessor() = default;
 
   void process_completed_request(std::shared_ptr<Request> request);
@@ -43,8 +44,7 @@ class AsyncResponseProcessor final {
   void process_stream_request(std::shared_ptr<Request> request);
 
   // in disagg pd mode, decode send requests' responses to prefill
-  void process_stream_requests(std::vector<std::shared_ptr<Request>>& requests,
-                               bool is_prefill);
+  void process_stream_requests(std::vector<std::shared_ptr<Request>>& requests);
 
   void batch_process_stream_requests(
       std::vector<std::shared_ptr<Request>>& requests);

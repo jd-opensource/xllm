@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <string>
 
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
@@ -27,6 +28,7 @@ limitations under the License.
 #include "framework/request/mm_data.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
+#include "platform/device.h"
 
 namespace xllm {
 
@@ -117,6 +119,14 @@ struct ForwardInput {
     ForwardInput inputs;
     inputs.token_ids = safe_to(token_ids, device, true);
     inputs.positions = safe_to(positions, device, true);
+    // Convert positions to int64 on CUDA/ILU/MUSA to avoid repeated per-layer
+    // type conversions in rope kernels.
+    const auto dev = Device::type_str();
+    if ((dev == "cuda" || dev == "ilu" || dev == "musa") &&
+        inputs.positions.defined() &&
+        inputs.positions.scalar_type() != torch::kInt64) {
+      inputs.positions = inputs.positions.to(torch::kInt64);
+    }
     inputs.input_params = input_params.to(device);
     inputs.sampling_params = sampling_params.to(device, dtype);
     inputs.decoder_sampling_params = decoder_sampling_params.to(device, dtype);
@@ -124,6 +134,7 @@ struct ForwardInput {
     inputs.eplb_info = eplb_info;
     inputs.acc_logprob = safe_to(acc_logprob, device, true);
     inputs.step_decode = step_decode;
+    inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
     inputs.device_input_buffer = device_input_buffer;
     return inputs;
   }
@@ -156,6 +167,8 @@ struct ForwardInput {
 
   // step-level decode metadata
   std::optional<StepDecodeMeta> step_decode;
+  // If true, skip sampler forward and only keep logits.
+  bool skip_sampling_for_logits_only = false;
 
   // kv info for disaggregated prefill/decode
   std::vector<TransferKVInfo> transfer_kv_infos;
@@ -222,6 +235,8 @@ struct RawForwardInput {
   std::vector<int32_t> extra_token_ids;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
+  // request ids of each sequence
+  std::vector<std::string> request_ids;
   // swap
   std::vector<BlockTransferInfo> swap_blocks;
   uint64_t batch_id;

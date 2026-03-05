@@ -121,6 +121,9 @@ class ContinuousScheduler : public Scheduler {
 
     // Prefetch timeout for prefetch from kv cache store
     PROPERTY(uint32_t, prefetch_timeout) = 0;
+
+    // max concurrency for rec worker
+    PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
   };
 
   ContinuousScheduler(Engine* engine, const Options& options);
@@ -297,6 +300,8 @@ class ContinuousScheduler : public Scheduler {
 
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;
+
+  XServiceClient* xservice_client_ = nullptr;
 
   // params for enable_schedule_overlap case
   std::vector<Batch> last_batch_;

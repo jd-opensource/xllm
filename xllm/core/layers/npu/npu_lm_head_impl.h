@@ -30,14 +30,15 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "loader/lm_head_loader.h"
+#include "loader/lm_head_manual_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
-#include "xllm_kernels/core/include/atb_speed/base/hosttensor_binder.h"
-#include "xllm_kernels/core/include/atb_speed/base/model.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
-#include "xllm_kernels/core/include/atb_speed/utils/model_factory.h"
-#include "xllm_kernels/operations/fusion/lmhead/lmhead.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/hosttensor_binder.h"
+#include "xllm_atb_layers/core/include/atb_speed/base/model.h"
+#include "xllm_atb_layers/core/include/atb_speed/log.h"
+#include "xllm_atb_layers/core/include/atb_speed/utils/model_factory.h"
+#include "xllm_atb_layers/operations/fusion/lmhead/lmhead.h"
 
 namespace xllm {
 namespace layer {
@@ -47,8 +48,6 @@ class NpuLmHeadImpl : public BaseLayer {
   explicit NpuLmHeadImpl(const ModelContext& context);
 
   ~NpuLmHeadImpl() override = default;
-
-  void merge_loaded_weights() override;
 
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const torch::Tensor& seleted_idxes,
