@@ -364,6 +364,11 @@ torch::Tensor ColumnParallelLinearImpl::forward_with_weight_view(
 
   torch::Tensor output;
   if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    CHECK(weight_view.qweight.has_value())
+        << "qweight is required for smoothquant.";
+    CHECK(weight_view.per_channel_scale.has_value())
+        << "per_channel_scale is required for smoothquant.";
+
     torch::Tensor quantized_input;
     torch::Tensor input_scale;
 
@@ -877,6 +882,10 @@ RowParallelLinearImpl::WeightView RowParallelLinearImpl::get_tp_view() const {
 torch::Tensor RowParallelLinearImpl::get_tp_input(
     torch::Tensor input,
     const WeightView& weight_view) const {
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    CHECK(weight_view.qweight.has_value())
+        << "qweight is required for smoothquant.";
+  }
   const int64_t in_features = quant_args_.quant_method() == "smoothquant"
                                   ? qweight_.size(1)
                                   : weight_.size(1);
@@ -911,6 +920,13 @@ torch::Tensor RowParallelLinearImpl::forward_with_weight_view(
   auto bias = weight_view.bias;
   torch::Tensor output;
   if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    CHECK(weight_view.smooth.has_value())
+        << "smooth is required for smoothquant.";
+    CHECK(weight_view.qweight.has_value())
+        << "qweight is required for smoothquant.";
+    CHECK(weight_view.per_channel_scale.has_value())
+        << "per_channel_scale is required for smoothquant.";
+
     torch::Tensor quantized_input;
     torch::Tensor input_scale;
 
