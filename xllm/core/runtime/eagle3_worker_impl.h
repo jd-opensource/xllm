@@ -42,12 +42,14 @@ class Eagle3WorkerImpl : public MTPWorkerImpl {
                         const std::vector<ForwardOutput>& draft_outputs,
                         const ForwardOutput& target_output) override;
 
-  void process_draft_output(ForwardOutput& draft_output) override;
-
   // Get hot_token_id for draft-to-target token mapping
   torch::Tensor get_hot_token_id() const { return hot_token_id_; }
 
  protected:
+  // EAGLE-3 specific draft output post-processing during decode:
+  // selected prob extraction + draft->target token id mapping.
+  void process_draft_sample_output(SampleOutput& sample_output) override;
+
   // EAGLE-3 specific: hot_token_id for draft-to-target token mapping
   // hot_token_id = d2t + arange(d2t.size(0))
   torch::Tensor hot_token_id_;

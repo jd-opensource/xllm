@@ -20,6 +20,8 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
+#include "util/utils.h"
+
 namespace xllm {
 
 EmbeddingCache::EmbeddingCache(int32_t total_nums) {
@@ -30,24 +32,43 @@ EmbeddingCache::EmbeddingCache(int32_t total_nums) {
 void EmbeddingCache::write(const std::vector<int32_t>& ids,
                            const torch::Tensor& next_tokens,
                            const torch::Tensor& embeddings,
-                           const torch::Tensor& probs) {
-  CHECK_EQ(next_tokens.dim(), 1) << "next_tokens should be [batch]";
-  CHECK_EQ(embeddings.dim(), 2) << "embeddings should be [batch, h]";
-  CHECK_EQ(next_tokens.size(0), static_cast<int64_t>(ids.size()))
-      << "next_tokens batch mismatch";
-  CHECK_EQ(embeddings.size(0), static_cast<int64_t>(ids.size()))
-      << "embeddings batch mismatch";
-  CHECK(probs.defined()) << "probs should be defined";
-  CHECK_GE(probs.dim(), 1) << "probs should have batch dimension";
-  CHECK_EQ(probs.size(0), static_cast<int64_t>(ids.size()))
-      << "probs batch mismatch";
+                           const torch::Tensor& probs,
+                           const torch::Tensor& accepted_tokens) {
+  torch::Tensor accepted_tokens_cpu = safe_to(accepted_tokens, torch::kCPU);
+  const bool has_accepted_tokens = accepted_tokens.defined();
 
   for (int32_t i = 0; i < static_cast<int32_t>(ids.size()); ++i) {
     auto& tail = mutable_tail(ids[i]);
     tail.token_id = static_cast<int32_t>(next_tokens[i].item<int64_t>());
+    tail.correction_token_id = tail.token_id;
+    tail.correction_position_offset = 0;
+    if (has_accepted_tokens) {
+      if (accepted_tokens_cpu.dim() == 1) {
+        int64_t token = accepted_tokens_cpu[i].item<int64_t>();
+        tail.correction_token_id = static_cast<int32_t>(token);
+      } else {
+        int32_t last_valid_token = -1;
+        int32_t last_valid_idx = -1;
+        const int32_t token_width = accepted_tokens_cpu.size(1);
+        for (int32_t j = 0; j < token_width; ++j) {
+          int64_t token = accepted_tokens_cpu[i][j].item<int64_t>();
+          if (token >= 0) {
+            last_valid_token = static_cast<int32_t>(token);
+            last_valid_idx = j;
+          }
+        }
+        tail.correction_token_id = last_valid_token;
+        tail.correction_position_offset = last_valid_idx;
+      }
+    }
     tail.embedding = embeddings[i];
     tail.probs = probs[i];
   }
+}
+
+void EmbeddingCache::set_placeholder(
+    const torch::Tensor& embedding_placeholder) {
+  embedding_placeholder_ = embedding_placeholder;
 }
 
 ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
@@ -74,11 +95,41 @@ ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
   return output;
 }
 
+std::vector<int32_t> EmbeddingCache::read_correction_tokens(
+    const std::vector<int32_t>& ids) const {
+  CHECK(!ids.empty()) << "decode ids should not be empty";
+  std::vector<int32_t> tokens;
+  tokens.reserve(ids.size());
+  for (int32_t id : ids) {
+    const auto& item = get_tail(id);
+    CHECK_GE(item.correction_token_id, 0)
+        << "decode entry missing correction token id";
+    tokens.emplace_back(item.correction_token_id);
+  }
+  return tokens;
+}
+
+std::vector<int32_t> EmbeddingCache::read_position_offsets(
+    const std::vector<int32_t>& ids) const {
+  CHECK(!ids.empty()) << "decode ids should not be empty";
+  std::vector<int32_t> offsets;
+  offsets.reserve(ids.size());
+  for (int32_t id : ids) {
+    const auto& item = get_tail(id);
+    CHECK_GE(item.correction_token_id, 0)
+        << "decode entry missing correction token id";
+    offsets.emplace_back(item.correction_position_offset);
+  }
+  return offsets;
+}
+
 void EmbeddingCache::clear(const std::vector<int32_t>& ids) {
   for (int32_t id : ids) {
     auto& tail = mutable_tail(id);
     tail.embedding = torch::Tensor();
     tail.token_id = -1;
+    tail.correction_token_id = -1;
+    tail.correction_position_offset = 0;
     tail.probs = torch::Tensor();
   }
 }
