@@ -153,6 +153,88 @@ void update_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
   plan_info->plan_info = deep_copy_plan_info(plan_result);
 }
 
+void update_chunked_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
+                                      const std::string& backend,
+                                      const AttentionMetadata& attn_meta,
+                                      c10::ScalarType query_dtype,
+                                      c10::ScalarType key_dtype,
+                                      c10::ScalarType output_dtype,
+                                      int32_t head_dim_qk,
+                                      int32_t head_dim_vo,
+                                      int32_t num_qo_heads,
+                                      int32_t num_kv_heads,
+                                      int32_t block_size,
+                                      int32_t window_size_left,
+                                      bool enable_cuda_graph,
+                                      bool causal) {
+  CHECK(plan_info->layer_id != -1) << "Need to set layer_id to PlanInfo.";
+  if (plan_info->layer_id != 0) return;
+
+  const auto device =
+      FlashinferWorkspace::get_instance().get_float_workspace_buffer().device();
+  bind_tvmffi_stream_to_current_torch_stream(device);
+
+  VLOG(kGraphExecutorLogVerboseLevel)
+      << "update_chunked_prefill_plan_info: layer_id=" << plan_info->layer_id
+      << ", enable_cuda_graph=" << enable_cuda_graph;
+
+  auto float_workspace_buffer = to_ffi_tensor(
+      FlashinferWorkspace::get_instance().get_float_workspace_buffer());
+  auto int_workspace_buffer = to_ffi_tensor(
+      FlashinferWorkspace::get_instance().get_int_workspace_buffer());
+  auto page_locked_int_workspace_buffer =
+      to_ffi_tensor(FlashinferWorkspace::get_instance()
+                        .get_page_locked_int_workspace_buffer());
+
+  plan_info->uri =
+      get_batch_prefill_uri(backend,
+                            query_dtype,
+                            key_dtype,
+                            output_dtype,
+                            attn_meta.paged_kv_indptr.scalar_type(),
+                            head_dim_qk,
+                            head_dim_vo,
+                            /*pos_encoding_mode=*/0,
+                            /*use_sliding_window=*/false,
+                            /*use_logits_soft_cap=*/false,
+                            /*use_fp16_qk_reduction=*/false);
+  const int64_t batch_size = attn_meta.paged_kv_last_page_len.size(0);
+  torch::Tensor qo_indptr_host;
+  if (causal) {
+    qo_indptr_host = attn_meta.qo_indptr.value().to(torch::kCPU);
+  } else {
+    qo_indptr_host = get_cache_buffer(batch_size + 1, torch::kCPU);
+  }
+
+  torch::Tensor paged_kv_indptr_host =
+      attn_meta.paged_kv_indptr.to(torch::kCPU);
+  torch::Tensor kv_len_arr_host = attn_meta.kv_seq_lens.to(torch::kCPU);
+
+  const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
+
+  plan_info->plan_info = deep_copy_plan_info(
+      get_function(plan_info->uri, "plan")(float_workspace_buffer,
+                                           int_workspace_buffer,
+                                           page_locked_int_workspace_buffer,
+                                           to_ffi_tensor(qo_indptr_host),
+                                           to_ffi_tensor(paged_kv_indptr_host),
+                                           to_ffi_tensor(kv_len_arr_host),
+                                           causal ? total_num_rows : batch_size,
+                                           batch_size,
+                                           num_qo_heads,  // num_qo_heads
+                                           num_kv_heads,  // num_kv_heads
+                                           block_size,    // block_size
+                                           enable_cuda_graph,
+                                           head_dim_qk,  // head_dim_qk
+                                           head_dim_vo,  // head_dim_vo
+                                           causal,
+                                           window_size_left,
+                                           /*fixed_split_size=*/-1,
+                                           /*disable_split_kv=*/false,
+                                           /*num_colocated_ctas=*/0)
+          .cast<ffi::Array<int64_t>>());
+}
+
 void update_decode_plan_info(std::shared_ptr<PlanInfo> plan_info,
                              const std::string& backend,
                              const AttentionMetadata& attn_meta,
@@ -170,65 +252,39 @@ void update_decode_plan_info(std::shared_ptr<PlanInfo> plan_info,
   CHECK(plan_info->layer_id != -1) << "Need to set layer_id to PlanInfo.";
   if (plan_info->layer_id != 0) return;
 
-  const auto device =
-      FlashinferWorkspace::get_instance().get_float_workspace_buffer().device();
-  bind_tvmffi_stream_to_current_torch_stream(device);
-
-  VLOG(kGraphExecutorLogVerboseLevel)
-      << "update_decode_plan_info: layer_id=" << plan_info->layer_id
-      << ", enable_cuda_graph=" << enable_cuda_graph;
-
-  auto float_workspace_buffer = to_ffi_tensor(
-      FlashinferWorkspace::get_instance().get_float_workspace_buffer());
-  auto int_workspace_buffer = to_ffi_tensor(
-      FlashinferWorkspace::get_instance().get_int_workspace_buffer());
-  auto page_locked_int_workspace_buffer =
-      to_ffi_tensor(FlashinferWorkspace::get_instance()
-                        .get_page_locked_int_workspace_buffer());
-
   if (use_tensor_core) {
-    plan_info->uri =
-        get_batch_prefill_uri(backend,
-                              query_dtype,
-                              key_dtype,
-                              output_dtype,
-                              attn_meta.paged_kv_indptr.scalar_type(),
-                              head_dim_qk,
-                              head_dim_vo,
-                              /*pos_encoding_mode=*/0,
-                              /*use_sliding_window=*/false,
-                              /*use_logits_soft_cap=*/false,
-                              /*use_fp16_qk_reduction=*/false);
-    const int64_t batch_size = attn_meta.paged_kv_last_page_len.size(0);
-    torch::Tensor qo_indptr_host =
-        get_cache_buffer(batch_size + 1, torch::kCPU);
-    torch::Tensor paged_kv_indptr_host =
-        attn_meta.paged_kv_indptr.to(torch::kCPU);
-    torch::Tensor kv_len_arr_host = attn_meta.kv_seq_lens.to(torch::kCPU);
-
-    plan_info->plan_info =
-        deep_copy_plan_info(get_function(plan_info->uri, "plan")(
-                                float_workspace_buffer,
-                                int_workspace_buffer,
-                                page_locked_int_workspace_buffer,
-                                to_ffi_tensor(qo_indptr_host),
-                                to_ffi_tensor(paged_kv_indptr_host),
-                                to_ffi_tensor(kv_len_arr_host),
-                                batch_size,  // total_num_rows
-                                batch_size,
-                                num_qo_heads,  // num_qo_heads
-                                num_kv_heads,  // num_kv_heads
-                                block_size,    // block_size
-                                enable_cuda_graph,
-                                head_dim_qk,  // head_dim_qk
-                                head_dim_vo,  // head_dim_vo
-                                /*causal=*/false,
-                                /*window_size_left=*/-1,
-                                /*fixed_split_size=*/-1,
-                                /*disable_split_kv=*/false,
-                                /*num_colocated_ctas=*/0)
-                                .cast<ffi::Array<int64_t>>());
+    update_chunked_prefill_plan_info(plan_info,
+                                     backend,
+                                     attn_meta,
+                                     query_dtype,
+                                     key_dtype,
+                                     output_dtype,
+                                     head_dim_qk,
+                                     head_dim_vo,
+                                     num_qo_heads,
+                                     num_kv_heads,
+                                     block_size,
+                                     window_size_left,
+                                     enable_cuda_graph,
+                                     /*causal=*/false);
   } else {
+    const auto device = FlashinferWorkspace::get_instance()
+                            .get_float_workspace_buffer()
+                            .device();
+    bind_tvmffi_stream_to_current_torch_stream(device);
+
+    VLOG(kGraphExecutorLogVerboseLevel)
+        << "update_decode_plan_info: layer_id=" << plan_info->layer_id
+        << ", enable_cuda_graph=" << enable_cuda_graph;
+
+    auto float_workspace_buffer = to_ffi_tensor(
+        FlashinferWorkspace::get_instance().get_float_workspace_buffer());
+    auto int_workspace_buffer = to_ffi_tensor(
+        FlashinferWorkspace::get_instance().get_int_workspace_buffer());
+    auto page_locked_int_workspace_buffer =
+        to_ffi_tensor(FlashinferWorkspace::get_instance()
+                          .get_page_locked_int_workspace_buffer());
+
     plan_info->uri =
         get_batch_decode_uri(query_dtype,
                              key_dtype,
@@ -267,35 +323,6 @@ void update_decode_plan_info(std::shared_ptr<PlanInfo> plan_info,
                                 to_ffi_tensor(empty_kv_data))
                                 .cast<ffi::Array<int64_t>>());
   }
-}
-
-void update_chunked_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
-                                      const std::string& backend,
-                                      const AttentionMetadata& attn_meta,
-                                      c10::ScalarType query_dtype,
-                                      c10::ScalarType key_dtype,
-                                      c10::ScalarType output_dtype,
-                                      int32_t head_dim_qk,
-                                      int32_t head_dim_vo,
-                                      int32_t num_qo_heads,
-                                      int32_t num_kv_heads,
-                                      int32_t block_size,
-                                      int32_t window_size_left,
-                                      bool enable_cuda_graph) {
-  update_decode_plan_info(plan_info,
-                          backend,
-                          attn_meta,
-                          query_dtype,
-                          key_dtype,
-                          output_dtype,
-                          head_dim_qk,
-                          head_dim_vo,
-                          num_qo_heads,
-                          num_kv_heads,
-                          block_size,
-                          window_size_left,
-                          enable_cuda_graph,
-                          /*use_tensor_core=*/true);
 }
 
 }  // namespace xllm::layer::flashinfer

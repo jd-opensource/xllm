@@ -264,23 +264,23 @@ void FlashInferAttentionImpl::chunked_prefill_forward(
         attn_metadata.enable_cuda_graph);
   }
 
-  xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
-                                   attn_metadata.plan_info->plan_info,
-                                   float_workspace_buffer_,
-                                   int_workspace_buffer_,
-                                   page_locked_int_workspace_buffer_,
-                                   query,
-                                   k_cache,
-                                   v_cache,
-                                   attn_metadata.paged_kv_indptr,
-                                   attn_metadata.paged_kv_indices,
-                                   attn_metadata.paged_kv_last_page_len,
-                                   sliding_window_,
-                                   scale_,
-                                   output,
-                                   output_lse,
-                                   /*use_tensor_core=*/true,
-                                   attn_metadata.qo_indptr);
+  xllm::kernel::cuda::batch_chunked_prefill(
+      attn_metadata.plan_info->uri,
+      attn_metadata.plan_info->plan_info,
+      float_workspace_buffer_,
+      int_workspace_buffer_,
+      page_locked_int_workspace_buffer_,
+      query,
+      k_cache,
+      v_cache,
+      attn_metadata.paged_kv_indptr,
+      attn_metadata.paged_kv_indices,
+      attn_metadata.paged_kv_last_page_len,
+      sliding_window_,
+      scale_,
+      output,
+      output_lse,
+      attn_metadata.qo_indptr);
 }
 
 void FlashInferAttentionImpl::decoder_forward(
