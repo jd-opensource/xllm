@@ -139,10 +139,18 @@ void DiTWorker::process_group_test() {
   // create random tensors
   const auto options = torch::dtype(torch::kHalf).device(device_);
   torch::Tensor tensor = torch::randn({10, 10}, options);
+  // There would be conflicts when using the DiT process group, as it doesn't
+  // contain a HCCL/NCCL process_group, but uses HCCL communication functions
+  // directly. In the new framework of DiT, this will be solved.
+  // Temporarily, we won't call communication functions.
+  // The following communication functions are temporarily disabled.
+
   // call allreduce
-  parallel_state::reduce(tensor, context_.get_parallel_args().process_group_);
+  // parallel_state::reduce(tensor,
+  // context_.get_parallel_args().process_group_);
   // call allgather
-  parallel_state::gather(tensor, context_.get_parallel_args().process_group_);
+  // parallel_state::gather(tensor,
+  // context_.get_parallel_args().process_group_);
 }
 
 folly::SemiFuture<folly::Unit> DiTWorker::process_group_test_async() {
