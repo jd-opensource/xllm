@@ -381,9 +381,9 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         .copy_(embedding, /*non_blocking=*/true);
   }
 
-  const bool enable_two_stage_decode =
-      FLAGS_enable_xattention_two_stage_decode &&
-      params.batch_forward_type.is_decode() && params.has_llmrec_params();
+  const bool enable_two_stage_decode = !FLAGS_enable_xattention_one_stage &&
+                                       params.batch_forward_type.is_decode() &&
+                                       params.has_llmrec_params();
   const int32_t head_dim = args_.head_dim();
   const int64_t n_heads = args_.n_heads();
   const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
@@ -434,10 +434,6 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
     // Update plan_info if attn_metadata exists and enable_cuda_graph is true.
     const auto& llmrec_params = *params.llmrec_params();
-    CHECK(attn_metadata->xattention_two_stage_decode_cache.has_value())
-        << "two-stage cache must be prepared in rec worker before "
-           "cuda graph update";
-
     auto cache = attn_metadata->xattention_two_stage_decode_cache.value();
     CHECK(cache.q_cu_seq_lens_shared.defined())
         << "q_cu_seq_lens_shared must be initialized in rec worker";

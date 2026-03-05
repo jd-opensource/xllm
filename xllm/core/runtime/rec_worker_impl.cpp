@@ -554,7 +554,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
           .unsqueeze(1);
   cached_current_round_tensor_ = torch::zeros({1}, int_options);
 
-  if (FLAGS_enable_xattention_two_stage_decode) {
+  if (!FLAGS_enable_xattention_one_stage) {
     const int64_t num_heads = runtime_.context->get_model_args().n_heads();
     const int64_t max_total_beam =
         static_cast<int64_t>(max_seqs_per_batch_) * beam_width_;
@@ -865,7 +865,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
 // TODO: implement prepare_two_stage_round_input for NPU
 #elif defined(USE_CUDA)
   auto& llm_rec_params = input.input_params.mutable_llmrec_params();
-  CHECK(FLAGS_enable_xattention_two_stage_decode)
+  CHECK(!FLAGS_enable_xattention_one_stage)
       << "prepare_two_stage_round_input should only be called when "
          "two-stage decode is enabled";
 
@@ -966,7 +966,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_input_for_current_round(
 #if defined(USE_NPU)
 // TODO: implement prepare_input_for_current_round for NPU
 #elif defined(USE_CUDA)
-  if (FLAGS_enable_xattention_two_stage_decode) {
+  if (!FLAGS_enable_xattention_one_stage) {
     prepare_two_stage_round_input(input, round, top_tokens, beam_tensors);
     return;
   }
@@ -1020,7 +1020,7 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::compute_next_round_input_async(
 #if defined(USE_NPU)
 // TODO: implement compute_next_round_input_async for NPU
 #elif defined(USE_CUDA)
-  if (FLAGS_enable_xattention_two_stage_decode) {
+  if (!FLAGS_enable_xattention_one_stage) {
     promise.setValue(NextRoundInputResults{});
     return future;
   }
@@ -1213,7 +1213,7 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
                              const runtime::Options& options)
     : LLMWorkerImpl(parallel_args, device, options) {
 #if defined(USE_CUDA)
-  if (FLAGS_enable_xattention_two_stage_decode) {
+  if (!FLAGS_enable_xattention_one_stage) {
     ::xllm::layer::xattention::XAttentionWorkspace::get_instance().initialize(
         device_);
   }
@@ -1229,7 +1229,7 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
 #if defined(USE_CUDA)
         ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
             .initialize(device_);
-        if (FLAGS_enable_xattention_two_stage_decode) {
+        if (!FLAGS_enable_xattention_one_stage) {
           ::xllm::layer::xattention::XAttentionWorkspace::get_instance()
               .initialize(device_);
         }

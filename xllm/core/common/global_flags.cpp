@@ -610,6 +610,7 @@ DEFINE_int32(health_check_interval_ms,
              3000,
              "Worker health check interval in milliseconds.");
 
-DEFINE_bool(enable_xattention_two_stage_decode,
+DEFINE_bool(enable_xattention_one_stage,
             false,
-            "Whether to enable xattention two stage decode.");
+            "Whether to force xattention one-stage decode for rec "
+            "multi-round mode.");
