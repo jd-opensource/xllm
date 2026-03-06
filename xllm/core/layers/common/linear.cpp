@@ -290,9 +290,9 @@ ColumnParallelLinearImpl::WeightView ColumnParallelLinearImpl::get_tp_view()
     const {
   CHECK(linear_extra_args_.use_full_weight_storage)
       << "get_tp_view requires full-weight storage.";
-  const int64_t out_features = quant_args_.quant_method() == "smoothquant"
-                                   ? qweight_.size(0)
-                                   : weight_.size(0);
+  const int64_t out_features =
+      quant_args_.quant_method() == kQuantMethodSmoothquant ? qweight_.size(0)
+                                                            : weight_.size(0);
   CHECK_EQ(out_features % world_size_, 0)
       << "full output features must be divisible by tp_world_size.";
   const int64_t out_features_per_partition = out_features / world_size_;
@@ -324,7 +324,7 @@ torch::Tensor ColumnParallelLinearImpl::weight_tp() const {
     return weight();
   }
   WeightView weight_view = get_tp_view();
-  if (quant_args_.quant_method() == "smoothquant") {
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
     CHECK(weight_view.qweight.has_value());
     return *weight_view.qweight;
   }
@@ -814,7 +814,7 @@ RowParallelLinearImpl::RowParallelLinearImpl(
 
 RowParallelLinearImpl::WeightView RowParallelLinearImpl::get_w_view() const {
   WeightView weight_view;
-  if (quant_args_.quant_method() == "smoothquant") {
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
     weight_view.qweight = qweight_;
     weight_view.per_channel_scale = per_channel_scale_;
     weight_view.smooth = smooth_;
@@ -832,16 +832,16 @@ void RowParallelLinearImpl::build_tp_cache() {
     tp_cache_.reset();
     return;
   }
-  const int64_t in_features = quant_args_.quant_method() == "smoothquant"
-                                  ? qweight_.size(1)
-                                  : weight_.size(1);
+  const int64_t in_features =
+      quant_args_.quant_method() == kQuantMethodSmoothquant ? qweight_.size(1)
+                                                            : weight_.size(1);
   CHECK_EQ(in_features % world_size_, 0)
       << "full input features must be divisible by current TP world size.";
   const int64_t in_features_per_partition = in_features / world_size_;
   const int64_t input_offset = rank_ * in_features_per_partition;
 
   CachedTPSlices cached_slices;
-  if (quant_args_.quant_method() == "smoothquant") {
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
     cached_slices.qweight =
         qweight_.narrow(1, input_offset, in_features_per_partition)
             .contiguous();
@@ -866,7 +866,7 @@ RowParallelLinearImpl::WeightView RowParallelLinearImpl::get_tp_view() const {
       << "get_tp_view requires full-weight storage.";
   WeightView weight_view;
   const auto& cached_slices = tp_cache();
-  if (quant_args_.quant_method() == "smoothquant") {
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
     weight_view.qweight = cached_slices.qweight;
     weight_view.per_channel_scale = per_channel_scale_;
     weight_view.smooth = cached_slices.smooth;
@@ -886,12 +886,13 @@ torch::Tensor RowParallelLinearImpl::get_tp_input(
     CHECK(weight_view.qweight.has_value())
         << "qweight is required for smoothquant.";
   }
-  const int64_t in_features = quant_args_.quant_method() == "smoothquant"
-                                  ? qweight_.size(1)
-                                  : weight_.size(1);
+  const int64_t in_features =
+      quant_args_.quant_method() == kQuantMethodSmoothquant ? qweight_.size(1)
+                                                            : weight_.size(1);
   const int64_t in_features_per_partition =
-      quant_args_.quant_method() == "smoothquant" ? weight_view.qweight->size(1)
-                                                  : weight_view.weight->size(1);
+      quant_args_.quant_method() == kQuantMethodSmoothquant
+          ? weight_view.qweight->size(1)
+          : weight_view.weight->size(1);
   const int64_t input_offset = rank_ * in_features_per_partition;
 
   torch::Tensor local_input;
