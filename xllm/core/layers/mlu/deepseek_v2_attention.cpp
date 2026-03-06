@@ -50,7 +50,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   num_local_heads_ = num_heads / tp_size;
   float scaling = std::pow(qk_head_dim_, -0.5f);
 
-  is_per_token_smoothquant_ = quant_args.quant_method() == "smoothquant";
+  is_per_token_smoothquant_ =
+      quant_args.quant_method() == kQuantMethodSmoothquant;
 
   if (q_lora_rank_ > 0) {
     q_a_proj_ = register_module(

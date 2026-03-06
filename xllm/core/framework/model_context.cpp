@@ -77,7 +77,7 @@ void ModelContext::derive_optimization_config() {
     optimization_config_.enable_fused_spec_kernel = false;
     // fused mla only support smoothquant mode
     optimization_config_.enable_fused_mla_kernel =
-        quant_args_.quant_method() == "smoothquant";
+        quant_args_.quant_method() == kQuantMethodSmoothquant;
     // TODO: enable fused indexer qk for mlu backend
     // The current implementation of fused indexer qk is missing the
     //  weights and bias loading.
