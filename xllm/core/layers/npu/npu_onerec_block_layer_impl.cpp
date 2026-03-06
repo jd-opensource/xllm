@@ -845,9 +845,6 @@ void NpuOneRecBlockLayerImpl::build_encoder_node_variant_pack(
   (void)is_prefill;
   (void)layer_id;
 
-  if (encoder_output != nullptr && encoder_output->defined() &&
-      encoder_output->device() != device_) {
-    *encoder_output = encoder_output->to(device_);
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
 
   for (size_t i = 0; i < kOneRecWeightCountPerLayer; ++i) {

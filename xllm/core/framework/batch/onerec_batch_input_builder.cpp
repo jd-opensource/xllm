@@ -861,7 +861,7 @@ ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
   input_params.batch_id = batch_id_;
   input_params.request_ids.clear();
   input_params.request_ids.reserve(static_cast<size_t>(num_sequences));
-  for (const auto* group : sequence_groups_) {
+  for (auto* group : sequence_groups_) {
     for (const auto& sequence : group->sequences()) {
       input_params.request_ids.push_back(sequence->request_id());
     }

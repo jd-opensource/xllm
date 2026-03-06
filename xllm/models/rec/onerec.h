@@ -427,7 +427,7 @@ class OneRecStackImpl : public torch::nn::Module {
       const torch::Tensor& h,
       bool is_decode_stage,
       const ModelInputParams& input_params) {
-    CHECK(position_bias_embedding_ != nullptr)
+    CHECK(!position_bias_embedding_.is_empty())
         << "position_bias_embedding is required for relative attention.";
 
     auto layer_position_bias =
