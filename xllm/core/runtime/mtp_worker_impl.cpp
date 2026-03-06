@@ -202,6 +202,12 @@ ForwardInput MTPWorkerImpl::update_input_by_last_step_output(
   const int32_t num_sequences = input_params.num_sequences;
   const int32_t block_size = options_.block_size();
 
+  // DP empty-run may still be marked as decode in global batch type.
+  // Skip correction when no local sequences are present.
+  if (num_sequences == 0 || input_params.embedding_ids.empty()) {
+    return inputs;
+  }
+
   CHECK(embedding_cache_ != nullptr)
       << "embedding_cache_ must be initialized before decode correction";
   std::vector<int32_t> correction_tokens =

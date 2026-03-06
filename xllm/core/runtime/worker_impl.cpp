@@ -594,7 +594,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       const auto output = this->step(input);
       promise.setValue(output);
     } else {
-      if (last_step_output_valid_ &&
+      if (last_step_output_valid_ && input.token_ids.numel() > 0 &&
           input.input_params.batch_forward_type.has_decode()) {
         // replace step i model input with true output of step i-1
         input = update_input_by_last_step_output(input);
