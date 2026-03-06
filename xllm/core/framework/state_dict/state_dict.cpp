@@ -175,6 +175,17 @@ StateDict StateDict::get_dict_with_prefix(const std::string& prefix) const {
 }
 
 StateDict StateDict::get_dict_with_prefix(
+    const std::vector<std::string>& prefixes) const {
+  for (const auto& prefix : prefixes) {
+    auto sd = get_dict_with_prefix(prefix);
+    if (sd.size() > 0) {
+      return sd;
+    }
+  }
+  return StateDict({}, prefix_);
+}
+
+StateDict StateDict::get_dict_with_prefix(
     const std::string& prefix,
     TensorTransform transform_func) const {
   auto tensors = get_dict_with_prefix(prefix);

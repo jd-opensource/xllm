@@ -114,7 +114,6 @@ void load_merged_weight(const StateDict& state_dict,
                         int64_t shard_size,
                         torch::Tensor& weight,
                         bool& weight_is_loaded);
-
 }  // namespace weight
 
 // helper macros for defining and loading weights

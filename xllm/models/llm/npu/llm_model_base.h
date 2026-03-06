@@ -436,15 +436,19 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
       std::unique_ptr<ModelLoader> loader,
       std::string prefix = "model." /*llm model weight prefix*/) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      auto sub_dict = state_dict->get_dict_with_prefix(prefix);
-      if (sub_dict.size() == 0) {
-        sub_dict = state_dict->get_dict_with_prefix("");
-      }
-      model_->load_state_dict(sub_dict);
-
+      // The same model_type may come from checkpoints with different top-level
+      // weight prefixes. Try these candidate prefixes in order to improve
+      // compatibility across such variants.
+      model_->load_state_dict(state_dict->get_dict_with_prefix(
+          std::vector<std::string>{"model.language_model.",
+                                   "language_model.model.",
+                                   prefix,
+                                   "model.",
+                                   ""}));
       if (tie_word_embeddings) {
         npu_lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
+            state_dict->get_dict_with_prefix(std::vector<std::string>{
+                prefix + "embed_tokens.", "embed_tokens."}));
       } else {
         npu_lm_head_->load_state_dict(
             state_dict->get_dict_with_prefix("lm_head."));
@@ -454,7 +458,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     // verify
     model_->verify_loaded_weights(prefix);
     if (tie_word_embeddings) {
-      npu_lm_head_->verify_loaded_weights(prefix + "embed_tokens.");
+      npu_lm_head_->verify_loaded_weights("embed_tokens.");
     } else {
       npu_lm_head_->verify_loaded_weights("lm_head.");
     }

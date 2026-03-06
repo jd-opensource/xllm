@@ -43,6 +43,12 @@ class StateDict {
   // the returned tensor name will be the suffix of the original name.
   virtual StateDict get_dict_with_prefix(const std::string& prefix) const;
 
+  // Try prefixes in order and return the first matched sub-dict.
+  // The returned tensor names are stripped by the matched prefix.
+  // Returns an empty StateDict if none of the prefixes match.
+  virtual StateDict get_dict_with_prefix(
+      const std::vector<std::string>& prefixes) const;
+
   // get all tensors whose name starts with prefix and apply the transform
   // for each tensor.
   using TensorTransform =

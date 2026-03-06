@@ -844,7 +844,8 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      visual_->load_state_dict(state_dict->get_dict_with_prefix("visual."));
+      visual_->load_state_dict(state_dict->get_dict_with_prefix(
+          std::vector<std::string>{"visual.", "model.visual."}));
     }
 
     // verify
