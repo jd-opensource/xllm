@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include <xxhash.h>
+#include <xxHash/xxhash.h>
 
 #include <cstdint>
 #include <cstring>

@@ -18,7 +18,7 @@ limitations under the License.
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
 #include <string.h>
-#include <xxhash.h>
+#include <xxHash/xxhash.h>
 
 #include <iostream>
 #include <thread>

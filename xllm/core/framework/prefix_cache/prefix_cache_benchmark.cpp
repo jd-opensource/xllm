@@ -16,7 +16,7 @@ limitations under the License.
 #include <MurmurHash3.h>
 #include <benchmark/benchmark.h>
 #include <glog/logging.h>
-#include <xxhash.h>
+#include <xxHash/xxhash.h>
 
 #include <algorithm>
 #include <cstdint>
