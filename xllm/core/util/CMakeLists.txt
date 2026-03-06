@@ -83,4 +83,5 @@ cc_test(
     gflags::gflags
 )
 target_link_libraries(util_test PRIVATE brpc leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto)
+add_dependencies(util brpc-static)
 add_dependencies(util_test brpc-static)
