@@ -30,6 +30,10 @@ if(USE_NPU)
 
   # Override Mooncake option for mooncake transfer engine
   set(USE_ASCEND ON CACHE BOOL "Enable Mooncake Ascend transport" FORCE)
+  add_definitions(-DBUILD_SHARED_LIBS=ON)
+  add_compile_definitions(USE_UB)
+  add_definitions(-DUSE_UB)
+  set(USE_UB ON)
 
   set(XLLM_ATB_LAYERS_SOURCE_DIR
       "${CMAKE_SOURCE_DIR}/third_party/xllm_atb_layers"

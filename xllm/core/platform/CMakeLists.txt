@@ -14,11 +14,13 @@ cc_library(
     vmm_api.h
     shared_vmm_allocator.h
     vmm_torch_allocator.h
+    layer_synchronizer.h
   SRCS
     stream.cpp
     device.cpp
     vmm_api.cpp
     shared_vmm_allocator.cpp
+    layer_synchronizer.cpp
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>

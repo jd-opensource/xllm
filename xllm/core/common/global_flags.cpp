@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "global_flags.h"
 
+#include <cstdint>
 #include <limits>
 
 #include "brpc/reloadable_flags.h"
@@ -406,6 +407,12 @@ DEFINE_bool(enable_service_routing,
 DEFINE_double(heart_beat_interval, 0.5, "Heart beat interval.");
 
 DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
+
+// Trigger offload when there are offload_batch blocks not yet offloaded to
+// kvcache store.
+DEFINE_uint32(offload_batch,
+              std::numeric_limits<uint32_t>::max(),
+              "Offload batch for disaggregated prefill-decode.");
 
 // --- kvcache store config ---
 

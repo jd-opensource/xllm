@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -139,6 +140,8 @@ class Options {
   PROPERTY(uint16_t, transfer_listen_port) = 26000;
 
   PROPERTY(std::optional<std::string>, etcd_addr);
+
+  PROPERTY(std::optional<uint32_t>, offload_batch);
 
   PROPERTY(bool, enable_service_routing) = false;
 
