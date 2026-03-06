@@ -1,12 +1,10 @@
 name: xLLM Build x86_64 ILU
 
-on: 
+on:
   workflow_dispatch:
   push:
     branches: [main]
     paths-ignore:
-      - '.github/**'
-      - 'cibuild/**'
       - 'cmake/**'
       - 'docs/**'
       - 'third_party/**'
@@ -27,85 +25,173 @@ on:
       - '*.yml'
   pull_request_review:
     types: [submitted]
-    paths:
-      - '.github/**.yaml'
-      - 'cibuild/**.sh'
-      - 'setup.py'
-      - 'examples/generate.py'
+  issue_comment:
+    types: [created]
 
 env:
   JOBNAME: xllm-x86_64-ilu-cibuild-${{ github.run_id }}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # need to review code first when sensitive files are modified.
-  check-sensitive:
+  check-approval:
     runs-on: [self-hosted]
     outputs:
-      requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
       do_build: ${{ steps.decide.outputs.do_build }}
     steps:
       - name: Checkout Code
+        if: |
+          github.event_name == 'push' ||
+          github.event_name == 'pull_request' ||
+          github.event_name == 'pull_request_review' ||
+          github.event_name == 'issue_comment'
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensure we can compare commits
+          fetch-depth: 0
+          ref: ${{
+            github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) ||
+            github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) ||
+            github.event_name == 'pull_request_review' && format('refs/pull/{0}/head', github.event.pull_request.number) ||
+            github.sha }}
 
-      - name: Install jq
-        run: yum install -y jq
-
-      - name: Check if sensitive files were changed
-        id: check_sensitive
+      - name: Decide whether to build
+        id: decide
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           sensitive_files=(
             ".github/**.yaml"
             "cibuild/**.sh"
             "setup.py"
           )
-          changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
-          requires_approval="false"
-          while IFS= read -r changed_file; do
-            [[ -z "$changed_file" ]] && continue
-            for pattern in "${sensitive_files[@]}"; do
-              if [[ "$changed_file" == $pattern ]]; then
-                requires_approval="true"
-                break 2
-              fi
-          done
-          done < <(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")
-          echo "requires_approval=$requires_approval" >> $GITHUB_OUTPUT
 
-      - name: Decide whether to check build
-        id: decide
-        run: |
+          check_sensitive() {
+            local base_sha=$1
+            local head_sha=$2
+            while IFS= read -r changed_file; do
+              [[ -z "$changed_file" ]] && continue
+              for pattern in "${sensitive_files[@]}"; do
+                if [[ "$changed_file" == $pattern ]]; then
+                  echo "$changed_file"
+                  return
+                fi
+              done
+            done < <(git diff --name-only "$base_sha" "$head_sha")
+          }
+
+          check_mergeable() {
+            local pr_number=$1
+            curl -s \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${pr_number}" | \
+              python3 -c "import sys, json; print(json.load(sys.stdin).get('mergeable'))"
+          }
+
           event="${{ github.event_name }}"
-          if [[ "$event" == "workflow_dispatch" || "$event" == "push" ]]; then
+
+          if [[ "$event" == "workflow_dispatch" ]]; then
             echo "do_build=true" >> $GITHUB_OUTPUT
+
+          elif [[ "$event" == "push" ]]; then
+            hit=$(check_sensitive "${{ github.event.before }}" "${{ github.sha }}")
+            if [[ -n "$hit" ]]; then
+              echo "ERROR: sensitive file '$hit' was merged into main." >&2
+              exit 1
+            fi
+            echo "do_build=false" >> $GITHUB_OUTPUT
+
           elif [[ "$event" == "pull_request" ]]; then
-            if  [ "${{ steps.check_sensitive.outputs.requires_approval }}" == "true" ]; then
+            mergeable=$(check_mergeable "${{ github.event.pull_request.number }}")
+            if [[ "$mergeable" == "False" ]]; then
+              echo "PR has merge conflicts, skipping CI." >&2
               echo "do_build=false" >> $GITHUB_OUTPUT
-            else
-              echo "do_build=true" >> $GITHUB_OUTPUT
+              exit 0
             fi
+            hit=$(check_sensitive "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+            if [[ -n "$hit" ]]; then
+              echo "ERROR: sensitive file '$hit' modified, manual review required before building." >&2
+              exit 1
+            fi
+            echo "do_build=false" >> $GITHUB_OUTPUT
+
           elif [[ "$event" == "pull_request_review" ]]; then
-            # Since pull_request_review now only triggers when sensitive files are modified,
-            # we only need to check if the review is approved
-            if [[ "${{ github.event.review.state }}" == "approved" ]]; then
-              echo "do_build=true" >> $GITHUB_OUTPUT
-            else
+            if [[ "${{ github.event.review.state }}" != "approved" ]]; then
               echo "do_build=false" >> $GITHUB_OUTPUT
+              exit 0
             fi
+            mergeable=$(check_mergeable "${{ github.event.pull_request.number }}")
+            if [[ "$mergeable" == "False" ]]; then
+              echo "do_build=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            hit=$(check_sensitive "${{ github.event.pull_request.base.sha }}" "${{ github.event.review.commit_id }}")
+            if [[ -n "$hit" ]]; then
+              echo "do_build=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            pr_number="${{ github.event.pull_request.number }}"
+            response=$(curl -s \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${pr_number}/reviews")
+            is_first=$(echo "$response" | python3 -c "
+import sys, json
+reviews = json.load(sys.stdin)
+current_id = ${{ github.event.review.id }}
+current_commit = '${{ github.event.review.commit_id }}'
+already = any(r['state'] == 'APPROVED' and r['commit_id'] == current_commit and r['id'] != current_id for r in reviews)
+print('false' if already else 'true')
+")
+            echo "do_build=$is_first" >> $GITHUB_OUTPUT
+
+          elif [[ "$event" == "issue_comment" ]]; then
+            if [[ -z "${{ github.event.issue.pull_request.url }}" ]]; then
+              echo "do_build=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            if [[ "${{ github.event.comment.body }}" != "/build" ]]; then
+              echo "do_build=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            permission=$(curl -s \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/collaborators/${{ github.event.comment.user.login }}/permission" | \
+              python3 -c "import sys, json; print(json.load(sys.stdin).get('permission', 'none'))")
+            if [[ "$permission" != "write" && "$permission" != "maintain" && "$permission" != "admin" ]]; then
+              echo "do_build=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            pr_number="${{ github.event.issue.number }}"
+            pr_info=$(curl -s \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${pr_number}")
+            mergeable=$(echo "$pr_info" | python3 -c "import sys, json; print(json.load(sys.stdin).get('mergeable'))")
+            if [[ "$mergeable" == "False" ]]; then
+              echo "PR has merge conflicts, skipping CI." >&2
+              echo "do_build=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            base_sha=$(echo "$pr_info" | python3 -c "import sys, json; print(json.load(sys.stdin)['base']['sha'])")
+            head_sha=$(echo "$pr_info" | python3 -c "import sys, json; print(json.load(sys.stdin)['head']['sha'])")
+            hit=$(check_sensitive "$base_sha" "$head_sha")
+            if [[ -n "$hit" ]]; then
+              echo "do_build=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "do_build=true" >> $GITHUB_OUTPUT
+
           else
             echo "do_build=false" >> $GITHUB_OUTPUT
           fi
 
   build:
-    needs: check-sensitive
-    if: >
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'push') ||
-      needs.check-sensitive.outputs.do_build == 'true'
+    needs: check-approval
+    if: needs.check-approval.outputs.do_build == 'true'
     runs-on: [self-hosted]
     steps:
     - name: Checkout Code
@@ -113,6 +199,10 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: true
+        ref: ${{
+          github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) ||
+          github.event_name == 'pull_request_review' && format('refs/pull/{0}/head', github.event.pull_request.number) ||
+          github.sha }}
 
     - name: Build
       if: ${{ success() }}
