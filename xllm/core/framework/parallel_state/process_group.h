@@ -64,6 +64,11 @@ class ProcessGroup {
   virtual void allgather(const torch::Tensor& input,
                          std::vector<torch::Tensor>& outputs);
 
+  // allgather_async: enqueue allgather and return an async work handle.
+  virtual c10::intrusive_ptr<c10d::Work> allgather_async(
+      const torch::Tensor& input,
+      std::vector<torch::Tensor>& outputs);
+
   // reduce_scatter: reduce the input tensor across all processes, scatter the
   // reduced chunks to all processes so that each process gets one chunk of the
   // result. we use default dim 0 for reduce_scatter.

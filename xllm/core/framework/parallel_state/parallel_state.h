@@ -27,6 +27,12 @@ struct Options;
 
 namespace parallel_state {
 
+struct GatherAsyncCtx {
+  c10::intrusive_ptr<c10d::Work> work;
+  std::vector<torch::Tensor> shards;
+  std::vector<int32_t> token_num_list;
+};
+
 std::optional<ParallelArgs> get_dp_attn_parallel_args(
     const ParallelArgs& parallel_args);
 
@@ -37,6 +43,12 @@ torch::Tensor gather(const torch::Tensor& input,
 torch::Tensor gather(const torch::Tensor& input,
                      ProcessGroup* process_group,
                      const std::vector<int32_t>& token_num_list);
+
+GatherAsyncCtx launch_gather(const torch::Tensor& input,
+                             ProcessGroup* process_group,
+                             const std::vector<int32_t>& token_num_list);
+
+torch::Tensor finish_gather(GatherAsyncCtx ctx);
 
 torch::Tensor all_gather_interleaved(const torch::Tensor& input,
                                      ProcessGroup* process_group);

@@ -149,6 +149,9 @@ void CollectiveCommunicator::create_process_groups(
                                    "tp_group",
                                    device);
   parallel_args_->tp_group_ = tp_group_.get();
+  // SP and TP share the same rank set during prefill today. Keep a distinct
+  // handle so SP call sites do not depend on TP wiring directly.
+  parallel_args_->sp_group_ = tp_group_.get();
   port += dp_size;
 
   if (dp_size > 1) {

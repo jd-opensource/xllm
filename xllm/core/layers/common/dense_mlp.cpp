@@ -50,11 +50,11 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
   }
 
   // Determine extra args based on quantization mode
-  FusedLinearExtraArgs gate_up_proj_extra_args("none", false);
-  FusedLinearExtraArgs down_proj_extra_args("none", false);
+  LinearExtraArgs gate_up_proj_extra_args("none", false);
+  LinearExtraArgs down_proj_extra_args("none", false);
   if (is_smoothquant_) {
     // For per-token smoothquant, use specific args
-    down_proj_extra_args = FusedLinearExtraArgs(hidden_act_, is_gated_);
+    down_proj_extra_args = LinearExtraArgs(hidden_act_, is_gated_);
   }
 
   // 1. gate + up
