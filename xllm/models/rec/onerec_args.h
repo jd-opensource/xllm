@@ -67,6 +67,9 @@ REGISTER_MODEL_ARGS(onerec, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
-REGISTER_TOKENIZER_ARGS(onerec, [&] { SET_ARG(tokenizer_type, "rec"); });
+REGISTER_TOKENIZER_ARGS(onerec, [&] {
+  SET_ARG(tokenizer_type, "rec");
+  LOAD_ARG_OR(vocab_file, "vocab_file", "");
+});
 
 }  // namespace xllm

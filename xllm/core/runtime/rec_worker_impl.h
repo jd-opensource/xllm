@@ -49,6 +49,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   void load_model(std::unique_ptr<ModelLoader> loader) override;
 
+  bool init_onerec_model(ModelContext& context);
+
   ForwardInput prepare_inputs(Batch& batch) override;
 
   void prepare_work_before_execute(const ForwardInput& inputs,
