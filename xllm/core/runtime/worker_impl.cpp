@@ -785,18 +785,17 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   auto quant_args = model_loader->quant_args();
   torch::ScalarType dtype = util::parse_dtype(args.dtype(), device_);
 
-  if (tokenizer->vocab_size() != args.vocab_size()) {
-    // use tokenizer vocab size if model vocab size is not set
-    if (args.vocab_size() <= 0) {
-      LOG(WARNING)
-          << "Model vocab size is not set, using tokenizer vocab size: "
-          << tokenizer->vocab_size();
-      args.vocab_size(tokenizer->vocab_size());
-    } else {
-      LOG(WARNING) << "Vocab size mismatch: tokenizer: "
-                   << tokenizer->vocab_size()
-                   << ", model: " << args.vocab_size();
-    }
+  const int64_t tokenizer_vocab_size =
+      static_cast<int64_t>(tokenizer->vocab_size());
+  int64_t model_vocab_size = args.vocab_size();
+  // use tokenizer vocab size if model vocab size is not set
+  if (model_vocab_size <= 0) {
+    LOG(WARNING) << "Model vocab size is not set, using tokenizer vocab size: "
+                 << tokenizer_vocab_size;
+    args.vocab_size(tokenizer_vocab_size);
+  } else if (tokenizer_vocab_size > model_vocab_size) {
+    LOG(WARNING) << "Unsafe vocab mismatch: tokenizer: " << tokenizer_vocab_size
+                 << ", model: " << model_vocab_size;
   }
 
 #if defined(USE_NPU)

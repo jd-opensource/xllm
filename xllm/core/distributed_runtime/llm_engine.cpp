@@ -200,17 +200,22 @@ bool LLMEngine::init_model(int32_t master_status) {
             << ", dtype: " << dtype_
             << ", kv_cache_dtype: " << options_.kv_cache_dtype();
 
-  if (tokenizer_->vocab_size() != args_.vocab_size()) {
+  const int64_t tokenizer_vocab_size =
+      static_cast<int64_t>(tokenizer_->vocab_size());
+  int64_t model_vocab_size = args_.vocab_size();
+  if (tokenizer_vocab_size != model_vocab_size) {
     // use tokenizer vocab size if model vocab size is not set
-    if (args_.vocab_size() <= 0) {
+    if (model_vocab_size <= 0) {
       LOG(WARNING) << "Model vocab size is not set, using tokenizer vocab "
                       "size: "
-                   << tokenizer_->vocab_size();
-      args_.vocab_size(tokenizer_->vocab_size());
+                   << tokenizer_vocab_size;
+      args_.vocab_size(tokenizer_vocab_size);
+    } else if (tokenizer_vocab_size > model_vocab_size) {
+      LOG(WARNING) << "Unsafe vocab mismatch: tokenizer: "
+                   << tokenizer_vocab_size << ", model: " << model_vocab_size;
     } else {
-      LOG(WARNING) << "Vocab size mismatch: tokenizer: "
-                   << tokenizer_->vocab_size()
-                   << ", model: " << args_.vocab_size();
+      LOG(INFO) << "Tokenizer/model vocab differ: tokenizer="
+                << tokenizer_vocab_size << ", model=" << model_vocab_size;
     }
   }
 
