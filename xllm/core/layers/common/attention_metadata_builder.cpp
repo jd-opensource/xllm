@@ -110,6 +110,12 @@ AttentionMetadata AttentionMetadataBuilder::build(
   // Copy enable_cuda_graph flag from params
   attn_metadata.enable_cuda_graph = params.enable_cuda_graph;
 
+#if defined(USE_CUDA) || defined(USE_MUSA)
+  if (attn_metadata.is_causal && !attn_metadata.enable_cuda_graph) {
+    attn_metadata.qo_indptr = attn_metadata.q_cu_seq_lens.to(torch::kCUDA);
+  }
+#endif
+
 #if defined(USE_ILU)
   attn_metadata.block_table = params.block_tables;
 #endif

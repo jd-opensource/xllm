@@ -46,6 +46,7 @@ set(CUDA_SOURCE_FILES
   attention_runner.cpp
   batch_decode.cpp
   batch_prefill.cpp
+  batch_chunked_prefill.cpp
   cutlass_extensions/common.cpp
   cutlass_w8a8/c3x/scaled_mm_sm100_fp8.cu
   cutlass_w8a8/c3x/scaled_mm_sm120_fp8.cu
