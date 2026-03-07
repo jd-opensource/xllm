@@ -43,10 +43,10 @@ EmbedWorkerImpl::EmbedWorkerImpl(const ParallelArgs& parallel_args,
 bool EmbedWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
-  // Try to create a embedding LM model
-  model_ = create_lm_embedding_model(context);
+  // Embedding and generate share the same model factory.
+  model_ = create_llm_model(context);
 
-  // Dont find model in embedding models
+  // Dont find model in causal models
   CHECK(model_ != nullptr) << "Failed to create model.";
   model_executor_ = std::make_unique<Executor>(
       model_.get(), context.get_model_args(), device_, options_);
@@ -83,10 +83,8 @@ std::optional<ForwardOutput> EmbedWorkerImpl::step(const ForwardInput& input) {
       input.sampling_params.is_embeddings) {
     // create embeddings
     timer.reset();
-    // cast model_ from Causal model to Embedding model
-    EmbeddingLM* em_model = dynamic_cast<EmbeddingLM*>(model_.get());
     auto embeddings =
-        em_model->pooler(hidden_states, sampling_params.selected_token_idxes);
+        model_->pooler(hidden_states, sampling_params.selected_token_idxes);
     sample_output.embeddings = embeddings;
     COUNTER_ADD(execution_latency_seconds_sampling, timer.elapsed_seconds());
 

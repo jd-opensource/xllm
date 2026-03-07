@@ -65,6 +65,14 @@ class RecForCausalLMImplBase : public torch::nn::Module {
     return lm_head_(h);
   }
 
+  virtual torch::Tensor pooler(const torch::Tensor& hidden_states,
+                               const torch::Tensor& selected_idxes) {
+    if (selected_idxes.defined()) {
+      return hidden_states.index_select(/*dim=*/0, selected_idxes);
+    }
+    return hidden_states;
+  }
+
   virtual void load_model(std::unique_ptr<ModelLoader> loader,
                           std::string prefix = "model.") {
     for (const auto& state_dict : loader->get_state_dicts()) {

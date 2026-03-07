@@ -101,19 +101,6 @@ void ModelRegistry::register_causalvlm_factory(const std::string& name,
   }
 }
 
-void ModelRegistry::register_lm_embedding_factory(const std::string& name,
-                                                  EmbeddingLMFactory factory) {
-  ModelRegistry* instance = get_instance();
-
-  if (instance->model_registry_[name].embedding_lm_factory != nullptr) {
-    SAFE_LOG_WARNING("embedding lm factory for " << name
-                                                 << " already registered.");
-  } else {
-    instance->model_registry_[name].embedding_lm_factory = factory;
-    instance->model_backend_[name] = "llm";
-  }
-}
-
 void ModelRegistry::register_vlm_embedding_factory(
     const std::string& name,
     EmbeddingVLMFactory factory) {
@@ -235,13 +222,6 @@ CausalVLMFactory ModelRegistry::get_causalvlm_factory(const std::string& name) {
   return instance->model_registry_[name].causal_vlm_factory;
 }
 
-EmbeddingLMFactory ModelRegistry::get_embeddinglm_factory(
-    const std::string& name) {
-  ModelRegistry* instance = get_instance();
-
-  return instance->model_registry_[name].embedding_lm_factory;
-}
-
 EmbeddingVLMFactory ModelRegistry::get_embeddingvlm_factory(
     const std::string& name) {
   ModelRegistry* instance = get_instance();
@@ -329,21 +309,6 @@ std::unique_ptr<CausalLM> create_rec_model(const ModelContext& context) {
 std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context) {
   // get the factory function for the model type from model registry
   auto factory = ModelRegistry::get_causalvlm_factory(
-      context.get_model_args().model_type());
-  if (factory) {
-    return factory(context);
-  }
-
-  LOG(ERROR) << "Unsupported model type: "
-             << context.get_model_args().model_type();
-
-  return nullptr;
-}
-
-std::unique_ptr<EmbeddingLM> create_lm_embedding_model(
-    const ModelContext& context) {
-  // get the factory function for the model type from model registry
-  auto factory = ModelRegistry::get_embeddinglm_factory(
       context.get_model_args().model_type());
   if (factory) {
     return factory(context);

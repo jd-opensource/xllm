@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/nn/functional/normalization.h>
+
 #include "core/common/rec_model_utils.h"
 #include "core/framework/model/model_output.h"
 #if defined(USE_NPU_TORCH)
@@ -231,6 +233,16 @@ class QWen3ForCausalLMImpl : public LlmForCausalLMImplBase<QWen3Model> {
  public:
   QWen3ForCausalLMImpl(const ModelContext& context)
       : LlmForCausalLMImplBase<QWen3Model>(context) {}
+
+  torch::Tensor pooler(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) {
+    auto h = hidden_states;
+    if (seleted_idxes.defined()) {
+      h = h.index_select(/*dim=*/0, seleted_idxes);
+    }
+    namespace F = torch::nn::functional;
+    return F::normalize(h, F::NormalizeFuncOptions().p(2).dim(1));
+  }
 };
 TORCH_MODULE(QWen3ForCausalLM);
 

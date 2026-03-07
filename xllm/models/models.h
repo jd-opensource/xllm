@@ -41,7 +41,6 @@ limitations under the License.
 #include "llm/npu/qwen2.h"                    // IWYU pragma: keep
 #include "llm/npu/qwen3.h"                    // IWYU pragma: keep
 #include "llm/npu/qwen3_eagle3.h"             // IWYU pragma: keep
-#include "llm/npu/qwen3_embedding.h"          // IWYU pragma: keep
 #include "llm/npu/qwen3_moe.h"                // IWYU pragma: keep
 #include "rec/onerec.h"                       // IWYU pragma: keep
 #include "vlm/npu/glm4v.h"                    // IWYU pragma: keep
