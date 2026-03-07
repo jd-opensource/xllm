@@ -73,6 +73,8 @@ void check_input(torch::Tensor input) {
 
 namespace xllm {
 
+int32_t ProcessGroupImpl::group_id_ = 0;
+
 ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
                                    int32_t world_size,
                                    int32_t rank_size,
@@ -100,6 +102,7 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
     hccl_pg_options->global_ranks_in_group = uint32_ranks;
     rank = local_rank;
   }
+  hccl_pg_options->group_id = std::to_string(group_id_++);
 
   auto store = create_tcp_store(host, port, rank);
   pg_ = std::make_unique<c10d_npu::ProcessGroupHCCL>(
