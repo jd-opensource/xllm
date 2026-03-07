@@ -311,11 +311,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
       decoder_params.mutable_onerec_params().has_encoder_output =
           rec_params.has_encoder_output;
-      auto model_output = runtime_.executor->forward(
-          input.token_ids,
-          input.positions,
-          runtime_.worker.kv_caches_,
-          decoder_params);
+      auto model_output = runtime_.executor->forward(input.token_ids,
+                                                     input.positions,
+                                                     runtime_.worker.kv_caches_,
+                                                     decoder_params);
       hidden_states = model_output.hidden_states;
     } else {
       const bool has_sparse_embedding =
@@ -357,11 +356,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
         decoder_onerec_params.decoder_context_embedding =
             encoder_output.hidden_states;
       }
-      auto model_output = runtime_.executor->forward(
-          input.token_ids,
-          input.positions,
-          runtime_.worker.kv_caches_,
-          decoder_params);
+      auto model_output = runtime_.executor->forward(input.token_ids,
+                                                     input.positions,
+                                                     runtime_.worker.kv_caches_,
+                                                     decoder_params);
       hidden_states = model_output.hidden_states;
     }
   } else {
@@ -369,8 +367,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     decoder_params.mutable_onerec_params().is_encoder_forward = false;
     decoder_params.mutable_onerec_params().has_encoder_output =
         rec_params.has_encoder_output;
-    auto model_output = runtime_.executor->forward(
-        input.token_ids, input.positions, runtime_.worker.kv_caches_, decoder_params);
+    auto model_output = runtime_.executor->forward(input.token_ids,
+                                                   input.positions,
+                                                   runtime_.worker.kv_caches_,
+                                                   decoder_params);
     hidden_states = model_output.hidden_states;
   }
 
