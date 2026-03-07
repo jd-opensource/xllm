@@ -22,6 +22,7 @@ limitations under the License.
 #include "glm45_detector.h"
 #include "kimik2_detector.h"
 #include "qwen25_detector.h"
+#include "qwen3_coder_detector.h"
 
 namespace xllm {
 namespace function_call {
