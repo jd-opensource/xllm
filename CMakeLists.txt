@@ -29,7 +29,8 @@ if(USE_NPU)
   endif()
 
   # Override Mooncake option for mooncake transfer engine
-  set(USE_ASCEND ON CACHE BOOL "Enable Mooncake Ascend transport" FORCE)
+  # CANN 8.5+ migration: ascend_direct_transport replaces ascend_transport
+  set(USE_ASCEND_DIRECT ON CACHE BOOL "Enable ADXL engine for Ascend NPU" FORCE)
 
   set(XLLM_ATB_LAYERS_SOURCE_DIR
       "${CMAKE_SOURCE_DIR}/third_party/xllm_atb_layers"

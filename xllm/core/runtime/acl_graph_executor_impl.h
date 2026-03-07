@@ -30,7 +30,17 @@ limitations under the License.
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
 #include "options.h"
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+#endif
+
 #include "torch_npu/csrc/core/npu/NPUGraph.h"
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 // Forward declarations for ATB
 namespace atb {

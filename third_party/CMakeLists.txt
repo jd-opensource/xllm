@@ -7,6 +7,16 @@ add_subdirectory(smhasher/src)
 add_subdirectory(cpprestsdk)
 set(CPPREST_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cpprestsdk/Release/include)
 set(CPPREST_LIB ${CMAKE_BINARY_DIR}/third_party/cpprestsdk/Release/Binaries/libcpprest.a)
+
+# GCC 12+ strict check workaround for cpprestsdk
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND 
+   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    if(TARGET cpprest)
+        target_compile_options(cpprest PRIVATE -Wno-restrict -Wno-attributes)
+        message(STATUS "Applied GCC 12+ warning suppressions for cpprestsdk")
+    endif()
+endif()
+
 add_subdirectory(etcd_cpp_apiv3)
 add_subdirectory(xxHash)
 
