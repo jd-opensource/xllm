@@ -95,17 +95,20 @@ bool parse_embedding_output(const xllm::proto::Embedding& in_embedding_output,
 MMEmbeddingHandler::MMEmbeddingHandler(MMType::Value mm_type)
     : mm_type_(mm_type) {};
 
-bool MMEmbeddingHandler::load(const MMContent& content,
-                              MMInputItem& input,
-                              MMPayload& payload) {
+MMErrCode MMEmbeddingHandler::load(const MMContent& content,
+                                   MMInputItem& input,
+                                   MMPayload& payload) {
   input.type = mm_type_;
   if (!parse_embedding_output(content.embedding, payload, input.embedding)) {
-    return false;
+    LOG(ERROR) << "parse embedding failed";
+    return MMErrCode::PARSE_EMB_ERR;
   }
 
-  return true;
+  return MMErrCode::SUCCESS;
 }
 
-bool MMEmbeddingHandler::decode(MMInputItem& input) { return true; }
+MMErrCode MMEmbeddingHandler::decode(MMInputItem& input) {
+  return MMErrCode::SUCCESS;
+}
 
 }  // namespace xllm
