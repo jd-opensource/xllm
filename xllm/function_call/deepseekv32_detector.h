@@ -43,6 +43,9 @@ class DeepSeekV32Detector : public BaseFormatDetector {
  private:
   std::regex function_calls_regex_;
   std::regex invoke_regex_;
+  // For streaming: matches invoke with optional closing tag (group 3 =
+  // "</｜DSML｜invoke>" or "")
+  std::regex streaming_invoke_regex_;
   std::regex parameter_regex_;
   std::regex partial_parameter_regex_;
 
