@@ -22,20 +22,19 @@ namespace layer {
 
 NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
                                                  bool is_decoder,
-                                                 int layer_id)
+                                                 int32_t layer_id)
     : device_(context.get_tensor_options().device()),
       is_decoder_(is_decoder),
       layer_id_(layer_id) {}
 
-torch::Tensor NpuOneRecBlockLayerImpl::forward(
-    torch::Tensor& hidden_states,
-    torch::Tensor& attn_mask,
-    KVCache& kv_cache,
-    ModelInputParams& input_params,
-    torch::Tensor* encoder_output,
-    int node_id,
-    aclrtEvent* event,
-    std::atomic<bool>* event_flag) {
+torch::Tensor NpuOneRecBlockLayerImpl::forward(torch::Tensor& hidden_states,
+                                               torch::Tensor& attn_mask,
+                                               KVCache& kv_cache,
+                                               ModelInputParams& input_params,
+                                               torch::Tensor* encoder_output,
+                                               int32_t node_id,
+                                               aclrtEvent* event,
+                                               std::atomic<bool>* event_flag) {
   (void)attn_mask;
   (void)kv_cache;
   (void)node_id;

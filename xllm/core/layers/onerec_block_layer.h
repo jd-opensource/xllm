@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <atomic>
+#include <cstdint>
 
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
@@ -40,7 +41,7 @@ class OneRecBlockLayer : public torch::nn::Module {
                                 KVCache& kv_cache,
                                 ModelInputParams& input_params,
                                 torch::Tensor* encoder_output = nullptr,
-                                int node_id = 0,
+                                int32_t node_id = 0,
                                 aclrtEvent* event = nullptr,
                                 std::atomic<bool>* event_flag = nullptr) = 0;
 };
