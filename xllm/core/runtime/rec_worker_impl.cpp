@@ -18,7 +18,6 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
-#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -29,6 +28,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/rec_model_utils.h"
 #include "common/types.h"
+#include "core/common/global_flags.h"
 #include "framework/model/model_input_params.h"
 #if defined(USE_CUDA)
 #include "kernels/cuda/cuda_ops_api.h"
@@ -278,10 +278,6 @@ void RecWorkerImpl::LlmRecWorkPipeline::prepare_work_before_execute(
   runtime_.worker.prepare_multi_modal_data(processed_inputs);
 }
 
-// ============================================================
-// OneRecWorkPipeline Implementation
-// ============================================================
-
 ForwardInput RecWorkerImpl::OneRecWorkPipeline::prepare_inputs(Batch& batch) {
   ThreadPool* thread_pool =
       runtime_.worker.input_builder_thread_pool_
@@ -313,6 +309,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     if (!rec_params.is_first_prefill) {
       ModelInputParams decoder_params = input_params;
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
+      decoder_params.mutable_onerec_params().has_encoder_output =
+          rec_params.has_encoder_output;
       auto model_output = runtime_.executor->forward(input.token_ids,
                                                      input.positions,
                                                      runtime_.worker.kv_caches_,
@@ -332,22 +330,32 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       ModelInputParams encoder_params = input_params;
       auto& mutable_onerec_params = encoder_params.mutable_onerec_params();
       mutable_onerec_params.is_encoder_forward = true;
+      mutable_onerec_params.is_hybrid_mode = has_sparse_embedding;
 
       torch::Tensor encoder_tokens;
       if (has_sparse_embedding) {
-        mutable_onerec_params.is_hybrid_mode = true;
         encoder_tokens = rec_params.encoder_sparse_embedding;
       } else {
+        mutable_onerec_params.is_hybrid_mode = false;
         encoder_tokens = rec_params.encoder_token_ids;
       }
 
-      runtime_.executor->forward(encoder_tokens,
-                                 rec_params.encoder_positions,
-                                 runtime_.worker.kv_caches_,
-                                 encoder_params);
+      auto encoder_output =
+          runtime_.executor->forward(encoder_tokens,
+                                     rec_params.encoder_positions,
+                                     runtime_.worker.kv_caches_,
+                                     encoder_params);
 
       ModelInputParams decoder_params = input_params;
-      decoder_params.mutable_onerec_params().is_encoder_forward = false;
+      auto& decoder_onerec_params = decoder_params.mutable_onerec_params();
+      decoder_onerec_params.is_encoder_forward = false;
+      decoder_onerec_params.has_encoder_output =
+          encoder_output.hidden_states.defined();
+      if (encoder_output.hidden_states.defined() &&
+          !decoder_onerec_params.decoder_context_embedding.defined()) {
+        decoder_onerec_params.decoder_context_embedding =
+            encoder_output.hidden_states;
+      }
       auto model_output = runtime_.executor->forward(input.token_ids,
                                                      input.positions,
                                                      runtime_.worker.kv_caches_,
@@ -357,6 +365,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
   } else {
     ModelInputParams decoder_params = input_params;
     decoder_params.mutable_onerec_params().is_encoder_forward = false;
+    decoder_params.mutable_onerec_params().has_encoder_output =
+        rec_params.has_encoder_output;
     auto model_output = runtime_.executor->forward(input.token_ids,
                                                    input.positions,
                                                    runtime_.worker.kv_caches_,
@@ -1360,6 +1370,21 @@ void RecWorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
   }
 
   LOG(INFO) << "Loaded weights for all " << work_pipelines_.size() << " models";
+}
+
+bool RecWorkerImpl::init_onerec_model(ModelContext& context) {
+  CHECK(model_ == nullptr) << "Model is already initialized.";
+  device_.set_device();
+
+  model_ = create_rec_model(context);
+  CHECK(model_ != nullptr) << "Failed to create rec model.";
+  model_executor_ = std::make_unique<Executor>(
+      model_.get(), context.get_model_args(), device_, options_);
+
+  if (FLAGS_enable_eplb) {
+    eplb_executor_ = std::make_unique<EplbExecutor>(model_.get(), device_);
+  }
+  return true;
 }
 
 ForwardInput RecWorkerImpl::prepare_inputs(Batch& batch) {

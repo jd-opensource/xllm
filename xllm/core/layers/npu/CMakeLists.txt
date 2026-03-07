@@ -31,6 +31,7 @@ cc_library(
     npu_llama_decoder_layer_impl.h
     npu_qwen2_decoder_layer_impl.h
     npu_qwen3_decoder_layer_impl.h
+    npu_onerec_block_layer_impl.h
     npu_eagle3_decoder_layer_impl.h
     npu_glm4_decoder_layer_impl.h
     npu_rms_norm_impl.h
@@ -84,6 +85,7 @@ cc_library(
     npu_llama_decoder_layer_impl.cpp
     npu_qwen2_decoder_layer_impl.cpp
     npu_qwen3_decoder_layer_impl.cpp
+    npu_onerec_block_layer_impl.cpp
     npu_eagle3_decoder_layer_impl.cpp
     npu_glm4_decoder_layer_impl.cpp
     npu_rms_norm_impl.cpp
