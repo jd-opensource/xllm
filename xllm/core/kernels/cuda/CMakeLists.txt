@@ -89,6 +89,18 @@ cc_library(
 
 cc_test(
   NAME
+    activation_test
+  SRCS
+    activation_test.cpp
+  DEPS
+    :cuda_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
     decoder_reshape_and_cache_test
   SRCS
     xattention/decoder_reshape_and_cache_test.cpp
