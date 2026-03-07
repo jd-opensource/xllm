@@ -21,7 +21,7 @@ limitations under the License.
 #include <random>
 #include <vector>
 
-#include "core/kernels/cuda/moe_topk_funcs.cuh"
+#include "moe_topk.cuh"
 
 namespace xllm::kernel::cuda {
 namespace test {

@@ -399,7 +399,7 @@ struct GroupGemmParams {
   std::optional<torch::Tensor> combine_idx;
 };
 
-struct MoeActiveTopkParams {
+struct MoeFusedTopkParams {
   // Input tensor.
   // Shape: [*, num_mask, num_expert] (e.g., [batch, num_mask, num_expert]).
   // Dtype: float32, float16, bfloat16.

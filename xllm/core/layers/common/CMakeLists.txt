@@ -20,6 +20,7 @@ cc_library(
     attention_metadata_builder.h
     dp_utils.h
     add_matmul.h
+    moe_fused_topk.h
   SRCS
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
@@ -36,6 +37,7 @@ cc_library(
     attention_metadata_builder.cpp
     dp_utils.cpp
     add_matmul.cpp
+    moe_fused_topk.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"

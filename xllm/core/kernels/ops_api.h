@@ -47,7 +47,7 @@ torch::Tensor matmul(MatmulParams& params);
 torch::Tensor group_gemm(GroupGemmParams& params);
 
 std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
-    MoeActiveTopkParams& params);
+    MoeFusedTopkParams& params);
 
 std::vector<torch::Tensor> moe_gen_idx(MoeGenIdxParams& params);
 
