@@ -64,6 +64,12 @@ class LlamaDecoderLayerImpl : public torch::nn::Module {
     decoder_layer_->reload_weights_from_device();
   }
 
+  layer::BaseManualLoader* get_manual_loader() {
+    return decoder_layer_->get_manual_loader();
+  }
+
+  void refresh_rolling_weights() { decoder_layer_->refresh_rolling_weights(); }
+
  private:
   layer::NpuLlamaDecoderLayer decoder_layer_{nullptr};
 };
@@ -171,10 +177,20 @@ class LlamaModelImpl : public torch::nn::Module {
       }
       attn_mask = torch::cat(req_mask_vec, 0);
     }
+    int32_t last_executed_layer = -1;
+    SCOPE_GUARD([this, &last_executed_layer] {
+      if (rolling_mgr_ != nullptr) {
+        rolling_mgr_->finalize(last_executed_layer);
+      }
+    });
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-
+      if (rolling_mgr_)
+        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
       layer(h, cos_pos, sin_pos, attn_mask, kv_caches[i], input_params_new, i);
+      last_executed_layer = static_cast<int32_t>(i);
+      if (rolling_mgr_)
+        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
     }
     auto hidden_states = norm_(h, 0);
     return ModelOutput(hidden_states);
@@ -234,6 +250,11 @@ class LlamaModelImpl : public torch::nn::Module {
     norm_->reload_weights();
   }
 
+  void reload_non_decoder_weights() {
+    npu_embed_tokens_->reload_weights();
+    norm_->reload_weights();
+  }
+
   void reload_weights_from_device() {
     npu_embed_tokens_->reload_weights_from_device();
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -241,6 +262,23 @@ class LlamaModelImpl : public torch::nn::Module {
     }
     norm_->reload_weights_from_device();
   }
+
+  void refresh_rolling_weights() {
+    for (auto& layer : layers_) {
+      layer->refresh_rolling_weights();
+    }
+  }
+
+  std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseManualLoader*> loaders;
+    loaders.reserve(layers_.size());
+    for (auto& layer : layers_) {
+      loaders.push_back(layer->get_manual_loader());
+    }
+    return loaders;
+  }
+
+  void set_rolling_load_manager(RollingLoadManager* mgr) { rolling_mgr_ = mgr; }
 
   layer::NpuWordEmbedding get_npu_word_embedding() {
     return {npu_embed_tokens_};
@@ -262,6 +300,7 @@ class LlamaModelImpl : public torch::nn::Module {
   torch::nn::ModuleList blocks_{nullptr};
   // hold same data but different type as blocks_ to avoid type cast
   std::vector<LlamaDecoderLayer> layers_;
+  RollingLoadManager* rolling_mgr_ = nullptr;
 };
 TORCH_MODULE(LlamaModel);
 

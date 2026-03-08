@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "base_manual_loader.h"
 
+#include "core/common/global_flags.h"
 #include "framework/xtensor/xtensor_allocator.h"
 
 #ifdef TORCH_HIGHER_THAN_PTA6
@@ -41,12 +42,45 @@ BaseManualLoader::~BaseManualLoader() {
 
 void BaseManualLoader::free_weights() { release_host_storage(); }
 
+void BaseManualLoader::set_rolling_buffer(
+    std::shared_ptr<RollingWeightBuffer> buf,
+    int32_t layer_index) {
+  rolling_buffer_ = std::move(buf);
+  layer_index_ = layer_index;
+}
+
+void BaseManualLoader::refresh_rolling_weights() {
+  if (rolling_buffer_ == nullptr) {
+    return;
+  }
+  allocate_device_storage();
+  init_device_at_weights();
+}
+
 void BaseManualLoader::allocate_device_storage() {
-  auto& allocator = XTensorAllocator::get_instance();
-  bool ok =
-      allocator.allocate_weight(model_id_, device_storage_, storage_size_);
-  CHECK(ok) << "Failed to allocate contiguous device storage size="
-            << storage_size_;
+  if (rolling_buffer_ != nullptr) {
+    // Rolling load path: use the pre-allocated slot instead of
+    // XTensorAllocator. Decoder layer weights bypass XTensor regardless of
+    // enable_xtensor flag.
+    CHECK_GE(layer_index_, 0) << "layer_index_ not set for rolling buffer";
+    device_storage_ = rolling_buffer_->get_slot_ptr(layer_index_);
+    CHECK(device_storage_ != nullptr)
+        << "RollingWeightBuffer slot is null for layer " << layer_index_;
+    return;
+  }
+  if (FLAGS_enable_xtensor) {
+    auto& allocator = XTensorAllocator::get_instance();
+    bool ok =
+        allocator.allocate_weight(model_id_, device_storage_, storage_size_);
+    CHECK(ok) << "Failed to allocate contiguous device storage size="
+              << storage_size_;
+    return;
+  }
+  auto ret = aclrtMallocAlign32(
+      &device_storage_, storage_size_, ACL_MEM_MALLOC_HUGE_FIRST);
+  CHECK_EQ(ret, ACL_SUCCESS)
+      << "aclrtMallocAlign32 failed for BaseManualLoader, size="
+      << storage_size_ << ", ret=" << ret;
 }
 
 void BaseManualLoader::reload_weights() {
@@ -118,8 +152,10 @@ void BaseManualLoader::copy_weights_to_pinned_host() {
 void BaseManualLoader::copy_weights_to_device_async() {
   CHECK_EQ(weight_slices_.size(), at_weight_tensors_.size())
       << "weight_slices_ size and at_weight_tensors_ size mismatch.";
-  aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+  copy_weights_to_device_async(c10_npu::getCurrentNPUStream().stream());
+}
 
+void BaseManualLoader::copy_weights_to_device_async(aclrtStream stream) {
   void* dst = static_cast<char*>(device_storage_);
   void* src = static_cast<char*>(host_pinned_storage_);
 
@@ -129,7 +165,7 @@ void BaseManualLoader::copy_weights_to_device_async() {
                               storage_size_,
                               ACL_MEMCPY_HOST_TO_DEVICE,
                               stream);
-  CHECK_EQ(ret, ACL_SUCCESS) << "aclrtMemcpyAsync failed";
+  CHECK_EQ(ret, ACL_SUCCESS) << "aclrtMemcpyAsync failed (rolling)";
 }
 
 void BaseManualLoader::copy_weights_to_device() {
@@ -197,7 +233,18 @@ void BaseManualLoader::init_device_at_weights() {
   }
 }
 
-void BaseManualLoader::release_device_storage() {}
+void BaseManualLoader::release_device_storage() {
+  if (device_storage_ == nullptr) {
+    return;
+  }
+  if (!FLAGS_enable_xtensor && !rolling_buffer_) {
+    auto ret = aclrtFree(device_storage_);
+    if (ret != ACL_SUCCESS) {
+      LOG(ERROR) << "aclrtFree failed for BaseManualLoader, ret=" << ret;
+    }
+  }
+  device_storage_ = nullptr;
+}
 
 void BaseManualLoader::release_host_storage() {
   if (host_pinned_storage_ == nullptr) {

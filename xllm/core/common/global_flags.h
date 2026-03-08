@@ -228,9 +228,17 @@ DECLARE_int32(max_global_tpot_ms);
 
 DECLARE_int32(max_requests_per_batch);
 
+DECLARE_bool(enable_manual_loader);
+
 DECLARE_bool(enable_xtensor);
 
 DECLARE_int64(phy_page_granularity_size);
+
+// --- rolling load config ---
+DECLARE_bool(enable_rolling_load);
+
+DECLARE_int32(rolling_load_num_cached_layers);
+DECLARE_int32(rolling_load_num_rolling_slots);
 
 // --- beam search config ---
 DECLARE_bool(enable_beam_search_kernel);

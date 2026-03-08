@@ -61,6 +61,8 @@ cc_library(
     loader/rms_norm_manual_loader.h
     loader/word_embedding_manual_loader.h
     loader/lm_head_manual_loader.h
+    loader/rolling_weight_buffer.h
+    loader/rolling_load_manager.h
   SRCS
     multi_head_attention.cpp
     npu_word_embedding_impl.cpp
@@ -114,6 +116,8 @@ cc_library(
     loader/rms_norm_manual_loader.cpp
     loader/word_embedding_manual_loader.cpp
     loader/lm_head_manual_loader.cpp
+    loader/rolling_weight_buffer.cpp
+    loader/rolling_load_manager.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"

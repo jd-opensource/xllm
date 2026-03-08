@@ -43,6 +43,7 @@ class BaseLoader {
   virtual void free_weights() {};
   virtual void reload_weights() {};
   virtual void reload_weights_from_device() {};
+  virtual void refresh_rolling_weights() {};
 
   torch::Dtype string2dtype(const std::string& dtype_str);
 

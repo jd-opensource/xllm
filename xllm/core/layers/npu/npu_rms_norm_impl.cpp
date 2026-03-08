@@ -32,7 +32,7 @@ NpuRMSNormImpl::NpuRMSNormImpl(const ModelContext& context)
 
   atb_weight_tensors_.resize(1);
 
-  if (FLAGS_enable_xtensor) {
+  if (FLAGS_enable_manual_loader) {
     loader_ = std::make_unique<RMSNormManualLoader>(1, context);
   } else {
     loader_ = std::make_unique<RMSNormLoader>(1, context);

@@ -130,9 +130,10 @@ class XTensorAllocator {
   // Increments offset within the pre-allocated region
   bool allocate_weight(const std::string& model_id, void*& ptr, size_t size);
 
-  // Free weight allocation (called by sleep)
-  // Returns the number of pages freed
-  size_t free_weight_from_global_xtensor(const std::string& model_id);
+  // Free weight allocation (called by sleep), including both contiguous
+  // GlobalXTensor and fallback XTensor allocations.
+  // Returns the number of pages freed.
+  size_t free_weight(const std::string& model_id);
 
   // ============== Multi-node Setup ==============
 

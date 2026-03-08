@@ -19,8 +19,12 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <fstream>
+#include <optional>
 #include <source_location>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace xllm {
@@ -297,6 +301,28 @@ constexpr torch::ScalarType get_scalar_type() {
     LOG(FATAL) << "Unsupported type for torch::ScalarType.";
     return torch::kFloat32;
   }
+}
+
+inline std::optional<torch::ScalarType> try_get_scalar_type_from_string(
+    const std::string& dtype_str) {
+  static const std::unordered_map<std::string, torch::ScalarType> kDtypeMap = {
+      {"float16", torch::kFloat16},
+      {"bfloat16", torch::kBFloat16},
+      {"float32", torch::kFloat32},
+      {"float64", torch::kFloat64},
+      {"int8", torch::kInt8},
+      {"int16", torch::kInt16},
+      {"int32", torch::kInt32},
+      {"int64", torch::kInt64},
+      {"uint8", torch::kUInt8},
+      {"bool", torch::kBool},
+  };
+
+  auto it = kDtypeMap.find(dtype_str);
+  if (it == kDtypeMap.end()) {
+    return std::nullopt;
+  }
+  return it->second;
 }
 
 inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,

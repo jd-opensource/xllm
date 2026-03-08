@@ -77,14 +77,13 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
-  if (FLAGS_enable_xtensor) {
+  if (FLAGS_enable_manual_loader) {
 #if defined(USE_NPU)
     SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
 #endif
     return step_internal(input);
-  } else {
-    return step_internal(input);
   }
+  return step_internal(input);
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step_internal(

@@ -462,10 +462,37 @@ DEFINE_int32(micro_batch_num,
 
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
+DEFINE_bool(enable_manual_loader,
+            false,
+            "Pin decoder layer weights to host memory and use async H2D "
+            "transfer. Required by enable_rolling_load; also implied by "
+            "enable_xtensor.");
+
 DEFINE_bool(
     enable_xtensor,
     false,
     "Whether to enable xtensor for model weights with physical page pool.");
+
+// --- rolling load config ---
+
+DEFINE_bool(enable_rolling_load,
+            false,
+            "Enable rolling weight load: keep only N decoder layer weight "
+            "slots in HBM and stream-load each layer just-in-time. "
+            "Requires enable_manual_loader=true. NPU only.");
+
+DEFINE_int32(rolling_load_num_cached_layers,
+             2,
+             "Number of decoder layer weight slots to keep in HBM when "
+             "enable_rolling_load=true.");
+
+DEFINE_int32(rolling_load_num_rolling_slots,
+             -1,
+             "Number of rolling slots used by decoder rolling load. "
+             "Fixed slots are computed as "
+             "rolling_load_num_cached_layers - rolling_load_num_rolling_slots."
+             " -1 means auto (min(2, preload_count)). "
+             "Must be in [-1, rolling_load_num_cached_layers].");
 
 DEFINE_int64(
     phy_page_granularity_size,

@@ -20,6 +20,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <string>
 #include <typeinfo>
 #include <vector>
@@ -29,13 +30,18 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
+#include "core/framework/model/model_traits.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
+#include "core/layers/npu/loader/base_manual_loader.h"
+#include "core/layers/npu/loader/rolling_load_manager.h"
+#include "core/layers/npu/loader/rolling_weight_buffer.h"
 #include "core/layers/npu/npu_block_copy_impl.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "core/layers/npu/npu_pos_embedding_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
+#include "core/util/scope_guard.h"
 #include "models/model_registry.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
@@ -106,6 +112,14 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 
   virtual void reload_weights_from_device() {
     decoder_layer_->reload_weights_from_device();
+  }
+
+  virtual layer::BaseManualLoader* get_manual_loader() {
+    return decoder_layer_->get_manual_loader();
+  }
+
+  virtual void refresh_rolling_weights() {
+    decoder_layer_->refresh_rolling_weights();
   }
 
  private:
@@ -208,6 +222,13 @@ class LlmModelImplBase : public torch::nn::Module {
       }
     }
 
+    int32_t last_executed_layer = -1;
+    SCOPE_GUARD([this, &last_executed_layer] {
+      if (rolling_mgr_ != nullptr) {
+        rolling_mgr_->finalize(last_executed_layer);
+      }
+    });
+
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -225,6 +246,8 @@ class LlmModelImplBase : public torch::nn::Module {
         LOG(INFO) << "Forward interrupted at layer: " << i;
         return ModelOutput();
       }
+      if (rolling_mgr_)
+        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
 
       layer(h,
             cos_pos,
@@ -234,6 +257,10 @@ class LlmModelImplBase : public torch::nn::Module {
             input_params_new,
             event,
             event_flag);
+
+      last_executed_layer = static_cast<int32_t>(i);
+      if (rolling_mgr_)
+        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
     }
 
     auto hidden_states = norm_(h, 0);
@@ -287,6 +314,11 @@ class LlmModelImplBase : public torch::nn::Module {
     norm_->reload_weights();
   }
 
+  virtual void reload_non_decoder_weights() {
+    npu_embed_tokens_->reload_weights();
+    norm_->reload_weights();
+  }
+
   virtual void reload_weights_from_device() {
     npu_embed_tokens_->reload_weights_from_device();
     for (int i = 0; i < layers_.size(); i++) {
@@ -296,12 +328,32 @@ class LlmModelImplBase : public torch::nn::Module {
   }
 
   virtual void merge_and_move_pinned_host() {
-    // todo: word embed and norm need to be merged and moved to pinned host.
     npu_embed_tokens_->merge_and_move_pinned_host();
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_and_move_pinned_host();
     }
     norm_->merge_and_move_pinned_host();
+  }
+
+  // Collect BaseManualLoader* from each decoder layer (in order)
+  virtual std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseManualLoader*> loaders;
+    loaders.reserve(layers_.size());
+    for (auto& l : layers_) {
+      loaders.push_back(l->get_manual_loader());
+    }
+    return loaders;
+  }
+
+  // Inject rolling load manager (not owned, managed by WorkerImpl)
+  void set_rolling_load_manager(RollingLoadManager* mgr) { rolling_mgr_ = mgr; }
+
+  // For rolling load: refresh decoder layers' rolling device pointers and
+  // corresponding AT/ATB tensor bindings.
+  virtual void refresh_rolling_weights() {
+    for (auto& layer : layers_) {
+      layer->refresh_rolling_weights();
+    }
   }
 
   virtual layer::NpuWordEmbedding get_npu_word_embedding() {
@@ -335,6 +387,9 @@ class LlmModelImplBase : public torch::nn::Module {
   bool layer_forward_interrupted_ = false;
 
   int32_t max_seq_len_ = 0;
+
+  RollingLoadManager* rolling_mgr_ =
+      nullptr;  // not owned; managed by LlmForCausalLMImplBase
 
  private:
   std::string model_type_;
@@ -452,10 +507,19 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     }
     model_->free_weights();
     npu_lm_head_->free_weights();
+    keep_host_weights = false;
   }
 
   virtual void reload_model_weights() {
     model_->reload_weights();
+    npu_lm_head_->reload_weights();
+    auto stream = c10_npu::getCurrentNPUStream();
+    stream.synchronize();
+  }
+
+  virtual void init_rolling_model_state() {
+    model_->reload_non_decoder_weights();
+    model_->refresh_rolling_weights();
     npu_lm_head_->reload_weights();
     auto stream = c10_npu::getCurrentNPUStream();
     stream.synchronize();
@@ -485,12 +549,67 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     model_->set_npu_word_embedding(npu_word_embedding);
   }
 
+  virtual std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
+    return model_->get_decoder_loaders();
+  }
+
+  virtual void set_rolling_load_manager(RollingLoadManager* mgr) {
+    model_->set_rolling_load_manager(mgr);
+  }
+
+  virtual bool init_or_refresh_rolling_runtime(Stream* load_stream,
+                                               Stream* compute_stream,
+                                               int32_t num_cached_slots,
+                                               int32_t requested_rolling_slots,
+                                               const std::string& model_id) {
+    CHECK(load_stream != nullptr) << "load_stream is null for rolling load";
+    CHECK(compute_stream != nullptr)
+        << "compute_stream is null for rolling load";
+
+    if (rolling_load_manager_ == nullptr) {
+      auto loaders = model_->get_decoder_loaders();
+      CHECK(!loaders.empty()) << "No decoder loaders found for rolling load";
+      CHECK(loaders[0] != nullptr) << "Decoder loader[0] is null";
+
+      const size_t storage_size = loaders[0]->get_storage_size();
+      for (size_t i = 1; i < loaders.size(); ++i) {
+        CHECK(loaders[i] != nullptr) << "Decoder loader[" << i << "] is null";
+        CHECK_EQ(loaders[i]->get_storage_size(), storage_size)
+            << "Decoder loader[" << i
+            << "] storage_size mismatch with loader[0]";
+      }
+
+      rolling_weight_buffer_ = std::make_shared<layer::RollingWeightBuffer>(
+          num_cached_slots, storage_size, model_id);
+      rolling_load_manager_ =
+          std::make_unique<RollingLoadManager>(loaders,
+                                               rolling_weight_buffer_,
+                                               load_stream,
+                                               compute_stream,
+                                               requested_rolling_slots);
+
+      for (int32_t i = 0; i < static_cast<int32_t>(loaders.size()); ++i) {
+        const int32_t slot = rolling_load_manager_->slot_for_layer(i);
+        loaders[i]->set_rolling_buffer(rolling_weight_buffer_, slot);
+      }
+    } else {
+      rolling_load_manager_->refresh_rolling_buffer_address();
+    }
+
+    model_->set_rolling_load_manager(rolling_load_manager_.get());
+    init_rolling_model_state();
+    rolling_load_manager_->init_rolling_load();
+    return true;
+  }
+
  protected:
   // parameter members, must be registered
   LlmModelType model_{nullptr};
   int device_id = 0;
   bool tie_word_embeddings{false};
   bool keep_host_weights{false};
+  std::shared_ptr<layer::RollingWeightBuffer> rolling_weight_buffer_{nullptr};
+  std::unique_ptr<RollingLoadManager> rolling_load_manager_{nullptr};
   // test
   layer::NpuLmHead npu_lm_head_{nullptr};
 };

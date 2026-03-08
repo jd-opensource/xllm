@@ -76,6 +76,12 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
     decoder_layer_->reload_weights_from_device();
   }
 
+  layer::BaseManualLoader* get_manual_loader() {
+    return decoder_layer_->get_manual_loader();
+  }
+
+  void refresh_rolling_weights() { decoder_layer_->refresh_rolling_weights(); }
+
   void prepare_expert_weight(const std::vector<int32_t>& expert_list) {
     decoder_layer_->prepare_expert_weight(expert_list);
   }
@@ -172,6 +178,12 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
           num_speculative_tokens_ + 1, dtype_, device_);
     }
 
+    int32_t last_executed_layer = -1;
+    SCOPE_GUARD([this, &last_executed_layer] {
+      if (rolling_mgr_ != nullptr) {
+        rolling_mgr_->finalize(last_executed_layer);
+      }
+    });
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -184,6 +196,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
+      if (rolling_mgr_)
+        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
       layer(h,
             cos_pos,
             sin_pos,
@@ -192,6 +206,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
             input_params,
             event,
             event_flag);
+      last_executed_layer = static_cast<int32_t>(i);
+      if (rolling_mgr_)
+        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
     }
     auto hidden_states = norm_(h, 0);
     return ModelOutput(hidden_states);
@@ -250,6 +267,11 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     norm_->reload_weights();
   }
 
+  void reload_non_decoder_weights() {
+    npu_embed_tokens_->reload_weights();
+    norm_->reload_weights();
+  }
+
   void reload_weights_from_device() {
     npu_embed_tokens_->reload_weights_from_device();
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -257,6 +279,23 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     }
     norm_->reload_weights_from_device();
   }
+
+  void refresh_rolling_weights() {
+    for (auto& layer : layers_) {
+      layer->refresh_rolling_weights();
+    }
+  }
+
+  std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseManualLoader*> loaders;
+    loaders.reserve(layers_.size());
+    for (auto& layer : layers_) {
+      loaders.push_back(layer->get_manual_loader());
+    }
+    return loaders;
+  }
+
+  void set_rolling_load_manager(RollingLoadManager* mgr) { rolling_mgr_ = mgr; }
 
   void prepare_expert_weight(int32_t layer_id,
                              const std::vector<int32_t>& expert_ids) {
@@ -290,6 +329,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   layer::NpuPosEmbedding atb_pos_emb_{nullptr};
   layer::AttentionMask attn_mask_;
   layer::NpuRMSNorm norm_{nullptr};
+  RollingLoadManager* rolling_mgr_ = nullptr;
 };
 TORCH_MODULE(DeepseekV2Model);
 

@@ -126,6 +126,38 @@ void validate_flags(const std::string& model_type) {
                   "support other block sizes in the future.";
   }
 #endif
+
+#if defined(USE_NPU)
+  // enable_xtensor / enable_rolling_load imply enable_manual_loader
+  if ((FLAGS_enable_xtensor || FLAGS_enable_rolling_load) &&
+      !FLAGS_enable_manual_loader) {
+    LOG(WARNING) << "enable_xtensor or enable_rolling_load requires "
+                    "enable_manual_loader; forcing enable_manual_loader=true.";
+    FLAGS_enable_manual_loader = true;
+  }
+  if (FLAGS_enable_rolling_load && FLAGS_rolling_load_num_cached_layers < 1) {
+    LOG(FATAL) << "rolling_load_num_cached_layers must be >= 1.";
+  }
+  if (FLAGS_enable_rolling_load && FLAGS_rolling_load_num_rolling_slots < -1) {
+    LOG(FATAL) << "rolling_load_num_rolling_slots must be >= -1.";
+  }
+  if (FLAGS_enable_rolling_load && FLAGS_rolling_load_num_rolling_slots >= 0 &&
+      FLAGS_rolling_load_num_rolling_slots >
+          FLAGS_rolling_load_num_cached_layers) {
+    LOG(FATAL) << "rolling_load_num_rolling_slots must be <= "
+               << "rolling_load_num_cached_layers.";
+  }
+#else
+  if (FLAGS_enable_xtensor) {
+    LOG(FATAL) << "enable_xtensor is only supported on NPU.";
+  }
+  if (FLAGS_enable_manual_loader) {
+    LOG(FATAL) << "enable_manual_loader is only supported on NPU.";
+  }
+  if (FLAGS_enable_rolling_load) {
+    LOG(FATAL) << "enable_rolling_load is only supported on NPU.";
+  }
+#endif
 }
 
 int run() {

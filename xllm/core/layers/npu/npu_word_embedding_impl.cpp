@@ -62,7 +62,7 @@ NpuWordEmbeddingImpl::NpuWordEmbeddingImpl(const ModelContext& context)
   atOutTensors_.resize(1);
   dtype_ = c10::typeMetaToScalarType(options.dtype());
 
-  if (FLAGS_enable_xtensor) {
+  if (FLAGS_enable_manual_loader) {
     loader_ = std::make_unique<WordEmbeddingManualLoader>(1, context);
   } else {
     loader_ = std::make_unique<WordEmbeddingLoader>(1, context);

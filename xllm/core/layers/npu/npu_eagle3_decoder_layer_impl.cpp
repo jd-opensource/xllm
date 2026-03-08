@@ -100,7 +100,7 @@ NpuEagle3DecoderLayerImpl::NpuEagle3DecoderLayerImpl(
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  if (FLAGS_enable_xtensor) {
+  if (FLAGS_enable_manual_loader) {
     loader_ = std::make_unique<Eagle3DecoderManualLoader>(
         WEIGHT_COUNT_PER_LAYER, context);
   } else {
@@ -111,7 +111,7 @@ NpuEagle3DecoderLayerImpl::NpuEagle3DecoderLayerImpl(
 }
 
 void NpuEagle3DecoderLayerImpl::initialize_linear_transpose_type() {
-  auto& at_host_weight_tensors = FLAGS_enable_xtensor
+  auto& at_host_weight_tensors = FLAGS_enable_manual_loader
                                      ? loader_->get_at_host_weight_tensors()
                                      : loader_->get_at_weight_tensors();
   TransposeType transpose_type =

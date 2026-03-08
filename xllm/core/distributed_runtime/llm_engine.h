@@ -41,6 +41,8 @@ limitations under the License.
 #include "util/threadpool.h"
 namespace xllm {
 
+class ModelLoader;
+
 class LLMEngine : public Engine {
  public:
   // create an engine with the given devices
@@ -136,6 +138,8 @@ class LLMEngine : public Engine {
   // setup workers internal
   void setup_workers(const runtime::Options& options);
   bool init_model(MasterStatus master_status = MasterStatus::WAKEUP);
+  int64_t get_effective_xtensor_weight_size(
+      const ModelLoader& model_loader) const;
   Engine::KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
   std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);
