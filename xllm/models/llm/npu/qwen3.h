@@ -215,6 +215,12 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     const int64_t num_tokens = h.size(0);
     const int64_t hidden_size = h.size(-1);
     size_t capture_idx = 0;
+    int32_t last_executed_layer = -1;
+    SCOPE_GUARD([this, &last_executed_layer] {
+      if (rolling_mgr_ != nullptr) {
+        rolling_mgr_->finalize(last_executed_layer);
+      }
+    });
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event{nullptr};
       std::atomic<bool>* event_flag{nullptr};
@@ -238,6 +244,13 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         capture_idx++;
       }
 
+      if (layer_forward_interrupted_) {
+        LOG(INFO) << "Forward interrupted at layer: " << i;
+        return ModelOutput();
+      }
+      if (rolling_mgr_)
+        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
+
       layer(h,
             cos_pos,
             sin_pos,
@@ -246,6 +259,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
             input_params_new,
             event,
             event_flag);
+
+      last_executed_layer = static_cast<int32_t>(i);
+      if (rolling_mgr_)
+        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
           h = deepstack_process(

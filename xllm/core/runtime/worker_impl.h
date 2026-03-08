@@ -42,6 +42,7 @@ limitations under the License.
 #include "util/threadpool.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache/mooncake_weight_transfer.h"
+#include "layers/npu/loader/rolling_load_manager.h"
 #endif
 
 namespace xllm {
@@ -201,6 +202,16 @@ class WorkerImpl {
   // model
   int64_t get_num_layers() const;
 
+  bool wakeup_local(const WakeupOptions& options);
+
+#if defined(USE_NPU)
+  bool wakeup_from_remote_weights(const WakeupOptions& options);
+  // Complete rolling initialization by delegating to model-owned rolling
+  // runtime (manager + buffer): decoder preload, non-decoder reload, and
+  // decoder ATB binding refresh.
+  bool init_rolling_runtime_state();
+#endif
+
  protected:
   // runtime options
   runtime::Options options_;
@@ -254,6 +265,7 @@ class WorkerImpl {
 
 #if defined(USE_NPU)
   std::unique_ptr<MooncakeWeightTransfer> weight_transfer_;
+  std::unique_ptr<Stream> load_stream_;
 #endif
 
   bool is_spec_draft_ = false;

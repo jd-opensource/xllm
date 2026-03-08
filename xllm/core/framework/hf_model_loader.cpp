@@ -36,6 +36,7 @@ limitations under the License.
 #include "core/framework/tokenizer/tokenizer_factory.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
+#include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
 
 namespace xllm {
@@ -225,21 +226,20 @@ int64_t HFModelLoader::get_total_weight_size() const {
   }
 
   if (index_json_path.empty()) {
-    LOG(WARNING) << "Failed to find .index.json file in "
-                 << model_weights_path_;
-    return 0;
+    LOG(ERROR) << "Failed to find .index.json file in " << model_weights_path_;
+    return -1;
   }
 
   JsonReader reader;
   if (!reader.parse(index_json_path)) {
     LOG(ERROR) << "Failed to parse json file " << index_json_path;
-    return 0;
+    return -1;
   }
 
   auto total_size = reader.value<int64_t>("metadata.total_size");
   if (!total_size.has_value()) {
-    LOG(WARNING) << "Failed to find metadata.total_size in " << index_json_path;
-    return 0;
+    LOG(ERROR) << "Failed to find metadata.total_size in " << index_json_path;
+    return -1;
   }
 
   int64_t result = total_size.value();
@@ -249,21 +249,9 @@ int64_t HFModelLoader::get_total_weight_size() const {
   // inference. Add the size of word_embedding weight (vocab_size * hidden_size
   // * bytes_per_elem)
   if (args_.tie_word_embeddings()) {
-    static const std::unordered_map<std::string, torch::Dtype> kDtypeMap = {
-        {"float16", torch::kFloat16},
-        {"bfloat16", torch::kBFloat16},
-        {"float32", torch::kFloat32},
-        {"float64", torch::kFloat64},
-        {"int8", torch::kInt8},
-        {"int16", torch::kInt16},
-        {"int32", torch::kInt32},
-        {"int64", torch::kInt64},
-        {"uint8", torch::kUInt8},
-        {"bool", torch::kBool},
-    };
-    auto it = kDtypeMap.find(args_.dtype());
-    CHECK(it != kDtypeMap.end()) << "Unsupported dtype: " << args_.dtype();
-    int64_t bytes_per_elem = torch::elementSize(it->second);
+    auto scalar_type = try_get_scalar_type_from_string(args_.dtype());
+    CHECK(scalar_type.has_value()) << "Unsupported dtype: " << args_.dtype();
+    int64_t bytes_per_elem = torch::elementSize(*scalar_type);
     int64_t embedding_size =
         args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
     result += embedding_size;
@@ -271,6 +259,38 @@ int64_t HFModelLoader::get_total_weight_size() const {
               << embedding_size << " bytes";
   }
 
+  return result;
+}
+
+int64_t HFModelLoader::get_non_decoder_weight_size() const {
+  auto scalar_type = try_get_scalar_type_from_string(args_.dtype());
+  if (!scalar_type.has_value() ||
+      (*scalar_type != torch::kFloat16 && *scalar_type != torch::kBFloat16 &&
+       *scalar_type != torch::kFloat32 && *scalar_type != torch::kFloat64 &&
+       *scalar_type != torch::kInt8)) {
+    LOG(WARNING) << "get_non_decoder_weight_size: unsupported dtype "
+                 << args_.dtype() << ", falling back to total_weight_size";
+    return get_total_weight_size();
+  }
+  int64_t bytes_per_elem = torch::elementSize(*scalar_type);
+
+  // embed_tokens: vocab_size * hidden_size
+  int64_t embed_size =
+      args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
+
+  // final norm: hidden_size
+  int64_t norm_size = args_.hidden_size() * bytes_per_elem;
+
+  // lm_head: vocab_size * hidden_size
+  // When tie_word_embeddings=true, lm_head shares the checkpoint weight with
+  // embed_tokens, but still gets its own device memory allocation at runtime.
+  int64_t lm_head_size =
+      args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
+
+  int64_t result = embed_size + norm_size + lm_head_size;
+  LOG(INFO) << "get_non_decoder_weight_size: embed=" << embed_size
+            << " norm=" << norm_size << " lm_head=" << lm_head_size
+            << " total=" << result;
   return result;
 }
 

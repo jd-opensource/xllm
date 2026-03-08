@@ -66,6 +66,8 @@ namespace xllm {
 
 // Defines a npu memory alignment constant with 16-byte alignment
 constexpr int32_t NZ_ALIGNMENT = 16;
+// Extra weight pages reserved for mapping/alignment overhead.
+constexpr size_t kXTensorWeightPageSafetyMargin = 10;
 
 LLMEngine::LLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
@@ -255,12 +257,18 @@ bool LLMEngine::init_model(MasterStatus master_status) {
     xtensor_allocator.set_model_parallel_strategy(
         model_id, dp_size_, dp_local_tp_size_);
 
-    // Get total weight size and compute aligned num_pages
-    int64_t total_weight_size = model_loader->get_total_weight_size();
-    int64_t weight_size_per_tp = total_weight_size / dp_local_tp_size_;
+    // Get weight size for XTensor page allocation.
+    const int64_t total_weight_size =
+        get_effective_xtensor_weight_size(*model_loader);
+    if (total_weight_size < 0) {
+      return false;
+    }
+    int64_t weight_size_per_tp =
+        (total_weight_size + dp_local_tp_size_ - 1) / dp_local_tp_size_;
 
     size_t page_size = FLAGS_phy_page_granularity_size;
-    size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size + 10;
+    size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size +
+                       kXTensorWeightPageSafetyMargin;
 
     LOG(INFO) << "XTensor weight allocation: total_weight_size="
               << total_weight_size << ", tp_size=" << dp_local_tp_size_
@@ -303,6 +311,54 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   }
 
   return true;
+}
+
+int64_t LLMEngine::get_effective_xtensor_weight_size(
+    const ModelLoader& model_loader) const {
+  constexpr int64_t kInvalidWeightSize = -1;
+  const int64_t all_size = model_loader.get_total_weight_size();
+  if (all_size <= 0) {
+    LOG(ERROR)
+        << "Invalid total model weight size: " << all_size
+        << ". Ensure model .index.json exists and has metadata.total_size";
+    return kInvalidWeightSize;
+  }
+
+  if (!FLAGS_enable_rolling_load) {
+    return all_size;
+  }
+
+  const int64_t non_decoder_size = model_loader.get_non_decoder_weight_size();
+  if (non_decoder_size <= 0) {
+    LOG(ERROR) << "Invalid non-decoder weight size: " << non_decoder_size;
+    return kInvalidWeightSize;
+  }
+  if (non_decoder_size > all_size) {
+    LOG(ERROR) << "non_decoder_weight_size (" << non_decoder_size
+               << ") exceeds total_weight_size (" << all_size << ")";
+    return kInvalidWeightSize;
+  }
+  if (args_.n_layers() <= 0) {
+    LOG(ERROR) << "Invalid layer count: " << args_.n_layers();
+    return kInvalidWeightSize;
+  }
+
+  const int64_t all_decoder_size = all_size - non_decoder_size;
+  const int64_t single_layer_size =
+      (all_decoder_size + args_.n_layers() - 1) / args_.n_layers();
+  const int64_t rolling_buffer_size =
+      static_cast<int64_t>(FLAGS_rolling_load_num_cached_layers) *
+      single_layer_size;
+  const int64_t total_weight_size =
+      all_size - all_decoder_size + rolling_buffer_size;
+
+  LOG(INFO) << "XTensor rolling_load weight budget: total=" << all_size
+            << ", all_decoder=" << all_decoder_size
+            << ", rolling_buffer=" << rolling_buffer_size << " ("
+            << FLAGS_rolling_load_num_cached_layers << " slots x "
+            << single_layer_size << " bytes/layer)"
+            << ", effective=" << total_weight_size;
+  return total_weight_size;
 }
 
 Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
