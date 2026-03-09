@@ -64,6 +64,8 @@ const std::unordered_map<std::string,
         {"deepseekv3", [] { return std::make_unique<DeepSeekV3Detector>(); }},
         {"glm45", [] { return std::make_unique<Glm45Detector>(); }},
         {"glm47", [] { return std::make_unique<Glm47Detector>(); }},
+        // glm5 use glm47 detector
+        {"glm5", [] { return std::make_unique<Glm47Detector>(); }},
 };
 
 std::string get_supported_detector_factories() {

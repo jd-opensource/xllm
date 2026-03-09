@@ -60,6 +60,7 @@ const std::unordered_map<std::string, DetectorFactory> paser_factories = {
     REGISTER_DETECTOR("deepseek-v3", "<think>", "</think>"),
     REGISTER_DETECTOR("glm45", "<think>", "</think>"),
     REGISTER_DETECTOR("glm47", "<think>", "</think>"),
+    REGISTER_DETECTOR("glm5", "<think>", "</think>"),
     REGISTER_DETECTOR_DEFAULT_FORCE("kimi", "◁think▷", "◁/think▷", false),
     REGISTER_DETECTOR("qwen3", "<think>", "</think>"),
     REGISTER_DETECTOR_DEFAULT_FORCE("qwen3-thinking",
