@@ -114,6 +114,24 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
 
+    // @TODO: Currently, gflags are configured through hard coding, which needs
+    // to be improved in the future. For example, a separate gflags
+    // configuration file can be provided to the so for setting gflags.
+    FLAGS_beam_width = xllm_init_options.beam_width;
+    FLAGS_max_decode_rounds = xllm_init_options.max_decode_rounds;
+    FLAGS_max_seqs_per_batch = xllm_init_options.max_seqs_per_batch;
+    FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
+    FLAGS_block_size = xllm_init_options.block_size;
+
+    FLAGS_enable_graph = true;
+    FLAGS_rec_worker_max_concurrency = 2;
+    FLAGS_enable_prefill_piecewise_graph = true;
+    FLAGS_enable_xattention_two_stage_decode = true;
+    FLAGS_enable_graph_mode_decode_no_padding = true;
+    FLAGS_enable_topk_sorted = false;
+
+    options.enable_graph(FLAGS_enable_graph);
+
     handler->master = std::make_unique<xllm::RecMaster>(options);
     handler->master->run();
 
@@ -175,6 +193,7 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_text_completions(
       xllm::helper::InferenceType::REC_COMPLETIONS,
       model_id,
       prompt,
+      nullptr,
       timeout_ms,
       request_params);
 }
@@ -202,6 +221,56 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_token_completions(
       xllm::helper::InferenceType::REC_COMPLETIONS,
       model_id,
       token_ids_vec,
+      nullptr,
+      timeout_ms,
+      request_params);
+}
+
+XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_multimodal_completions(
+    XLLM_REC_Handler* handler,
+    const char* model_id,
+    const int32_t* token_ids,
+    size_t token_size,
+    const XLLM_MM_Data* mm_data,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams* request_params) {
+  if (!handler || !model_id || *model_id == '\0' || !token_ids ||
+      token_size == 0) {
+    return xllm::helper::build_error_response(
+        "", XLLM_StatusCode::kInvalidRequest, "Invalid input parameters");
+  }
+
+  if (!mm_data) {
+    return xllm_rec_token_completions(
+        handler, model_id, token_ids, token_size, timeout_ms, request_params);
+  }
+
+  xllm::MMData internal_mm_data;
+  try {
+    bool ret = xllm::helper::convert_xllm_mm_data_to_internal(mm_data,
+                                                              internal_mm_data);
+    if (!ret) {
+      return xllm::helper::build_error_response(
+          "", XLLM_StatusCode::kInternalError, "Fail in mm_data conversion");
+    }
+  } catch (const std::exception& e) {
+    return xllm::helper::build_error_response(
+        "",
+        XLLM_StatusCode::kInternalError,
+        "Critical error in mm_data conversion: " + std::string(e.what()));
+  }
+
+  std::vector<int> token_ids_vec;
+  for (int i = 0; i < token_size; i++) {
+    token_ids_vec.push_back(token_ids[i]);
+  }
+
+  return xllm::helper::handle_inference_request(
+      handler,
+      xllm::helper::InferenceType::REC_COMPLETIONS,
+      model_id,
+      token_ids_vec,
+      static_cast<void*>(&internal_mm_data),
       timeout_ms,
       request_params);
 }
@@ -230,6 +299,7 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_chat_completions(
       xllm::helper::InferenceType::REC_CHAT_COMPLETIONS,
       model_id,
       xllm_messages,
+      nullptr,
       timeout_ms,
       request_params);
 }

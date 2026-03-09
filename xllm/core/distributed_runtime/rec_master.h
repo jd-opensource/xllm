@@ -55,12 +55,10 @@ class RecMaster : public Master {
       RequestParams sp,
       OutputCallback callback);
 
-  void handle_request(
-      std::optional<std::vector<int>> input_tokens,
-      std::optional<std::vector<int>> input_indices,
-      std::optional<std::vector<std::vector<float>>> input_embedding,
-      RequestParams sp,
-      OutputCallback callback);
+  void handle_request(const std::vector<int>& prompt_tokens,
+                      std::optional<MMData> mm_data,
+                      RequestParams sp,
+                      OutputCallback callback);
 
   // start the handling loop
   void run() override;
@@ -90,9 +88,8 @@ class RecMaster : public Master {
 
     // For raw input (LlmRec with mm_data)
     virtual std::shared_ptr<Request> generate_request(
-        std::optional<std::vector<int>> input_tokens,
-        std::optional<std::vector<int>> input_indices,
-        std::optional<std::vector<std::vector<float>>> input_embedding,
+        const std::vector<int>& prompt_tokens,
+        std::optional<MMData> mm_data,
         const RequestParams& sp,
         OutputCallback callback);
 
@@ -117,9 +114,8 @@ class RecMaster : public Master {
    public:
     explicit LlmRecWithMmDataMasterPipeline(RecMaster& master);
     std::shared_ptr<Request> generate_request(
-        std::optional<std::vector<int>> input_tokens,
-        std::optional<std::vector<int>> input_indices,
-        std::optional<std::vector<std::vector<float>>> input_embedding,
+        const std::vector<int>& prompt_tokens,
+        std::optional<MMData> mm_data,
         const RequestParams& sp,
         OutputCallback callback) override;
   };

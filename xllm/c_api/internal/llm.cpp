@@ -114,6 +114,8 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
 
+    options.enable_graph(FLAGS_enable_graph);
+
     handler->master = std::make_unique<xllm::LLMMaster>(options);
     handler->master->run();
 
@@ -175,6 +177,7 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_llm_completions(
       xllm::helper::InferenceType::LLM_COMPLETIONS,
       model_id,
       prompt,
+      nullptr,
       timeout_ms,
       request_params);
 }
@@ -203,6 +206,7 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_llm_chat_completions(
       xllm::helper::InferenceType::LLM_CHAT_COMPLETIONS,
       model_id,
       xllm_messages,
+      nullptr,
       timeout_ms,
       request_params);
 }

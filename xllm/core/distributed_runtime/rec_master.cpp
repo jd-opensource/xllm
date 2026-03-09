@@ -92,124 +92,85 @@ bool process_onerec_inputs(
   return true;
 }
 
-bool process_llmrec_raw_inputs(
-    std::optional<std::vector<int>> input_tokens,
-    std::optional<std::vector<int>> input_indices,
-    std::optional<std::vector<std::vector<float>>> input_embedding,
-    const ModelArgs& model_args,
+bool process_llmrec_with_mm_data_inputs(
+    const std::vector<int>& prompt_tokens,
+    std::optional<MMData> mm_data,
     std::vector<int32_t>* local_prompt_tokens,
     MMData* processed_mm_data,
+    int32_t hidden_size,
     OutputCallback callback) {
-  std::vector<int32_t> local_input_tokens;
-  std::vector<int32_t> local_input_indices;
-  torch::Tensor input_tokens_tensor;
-  torch::Tensor input_indices_tensor;
-  torch::Tensor input_embedding_tensor;
-  int64_t embedding_rows = 0;
+  local_prompt_tokens->assign(prompt_tokens.begin(), prompt_tokens.end());
 
-  if (input_tokens.has_value()) {
-    const auto& tokens = input_tokens.value();
-    local_input_tokens.reserve(tokens.size());
-    for (const auto token : tokens) {
-      local_input_tokens.push_back(static_cast<int32_t>(token));
-    }
-    if (!local_input_tokens.empty()) {
-      input_tokens_tensor =
-          torch::from_blob(local_input_tokens.data(),
-                           {static_cast<int64_t>(local_input_tokens.size())},
-                           torch::dtype(torch::kInt32).device(torch::kCPU))
-              .clone();
-      processed_mm_data->add(
-          MMType::EMBEDDING, LLM_REC_INPUT_TOKENS, input_tokens_tensor);
-      local_prompt_tokens->assign(local_input_tokens.begin(),
-                                  local_input_tokens.end());
-    }
+  if (!mm_data.has_value()) {
+    return true;
   }
 
-  if (input_indices.has_value()) {
-    if (!input_tokens.has_value()) {
-      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                          "LLMRec input indices require input tokens");
-      return false;
-    }
-    const auto& indices = input_indices.value();
-    local_input_indices.reserve(indices.size());
-    for (const auto index : indices) {
-      local_input_indices.push_back(static_cast<int32_t>(index));
-    }
-    if (local_input_indices.size() != local_input_tokens.size()) {
-      CALLBACK_WITH_ERROR(
-          StatusCode::INVALID_ARGUMENT,
-          "LLMRec input indices size does not match input tokens");
-      return false;
-    }
-    if (!local_input_indices.empty()) {
-      input_indices_tensor =
-          torch::from_blob(local_input_indices.data(),
-                           {static_cast<int64_t>(local_input_indices.size())},
-                           torch::dtype(torch::kInt32).device(torch::kCPU))
-              .clone();
-      processed_mm_data->add(
-          MMType::EMBEDDING, LLM_REC_INPUT_INDICES, input_indices_tensor);
-    }
-  }
+  std::vector<torch::Tensor> all_indices_list;
+  std::vector<torch::Tensor> all_values_list;
 
-  if (input_embedding.has_value()) {
-    const auto& embedding_vec = input_embedding.value();
-    if (embedding_vec.empty()) {
-      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                          "LLMRec input embedding is empty");
-      return false;
-    }
-    const int64_t rows = static_cast<int64_t>(embedding_vec.size());
-    const int64_t cols = static_cast<int64_t>(embedding_vec[0].size());
-    if (cols != model_args.hidden_size()) {
-      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                          "LLMRec input embedding has invalid hidden size");
-      return false;
-    }
-
-    std::vector<float> flat_data;
-    flat_data.reserve(static_cast<size_t>(rows * cols));
-    for (const auto& row : embedding_vec) {
-      flat_data.insert(flat_data.end(), row.begin(), row.end());
-    }
-    input_embedding_tensor =
-        torch::from_blob(flat_data.data(),
-                         {rows, cols},
-                         torch::dtype(torch::kFloat32).device(torch::kCPU))
-            .clone();
-    processed_mm_data->add(
-        MMType::EMBEDDING, LLM_REC_INPUT_EMBEDDING, input_embedding_tensor);
-    embedding_rows = rows;
-    local_prompt_tokens->insert(local_prompt_tokens->end(),
-                                static_cast<size_t>(embedding_rows),
-                                kDefaultPlaceholderToken);
-  }
-
-  if (!local_input_indices.empty()) {
-    const int64_t total_size =
-        static_cast<int64_t>(local_input_tokens.size()) + embedding_rows;
-    std::unordered_set<int32_t> seen;
-    seen.reserve(local_input_indices.size());
-    for (const auto index : local_input_indices) {
-      if (index < 0 || index >= total_size) {
-        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                            "LLMRec input indices contain invalid values");
-        return false;
-      }
-      if (!seen.insert(index).second) {
-        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
-                            "LLMRec input indices contain duplicate values");
-        return false;
-      }
-    }
-  }
-
-  if (local_prompt_tokens->empty()) {
-    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Prompt is empty");
+  MMData mm_data_s = mm_data.value();
+  if (!mm_data_s.hold<MMItemVec>()) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "MMData need be item vec type");
     return false;
   }
+
+  int64_t last_end = 0;
+  MMItemVec mm_items = mm_data_s.items<MMItemVec>();
+  for (auto& mm_item : mm_items) {
+    const MMItemState::TokenPos token_pos = mm_item.state().token_pos();
+    std::optional<torch::Tensor> mm_value =
+        mm_item.get<torch::Tensor>("tensor");
+
+    if (!mm_value.has_value()) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "Rec model requires embedding in mm data to be provided");
+      return false;
+    }
+
+    int64_t start = static_cast<int64_t>(token_pos.offset);
+    int64_t end = static_cast<int64_t>(token_pos.offset + token_pos.length);
+    torch::Tensor tensor = mm_value.value();
+
+    if (start < last_end || end >= local_prompt_tokens->size()) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "Token pos in mm data is wrong");
+      return false;
+    }
+
+    last_end = end;
+
+    if (tensor.dim() != 2) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "Embedding in mm data is invalid");
+      return false;
+    }
+
+    if (tensor.size(0) != token_pos.length) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "Token length is not match to embedding");
+      return false;
+    }
+
+    if (tensor.size(1) != hidden_size) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "Embedding size is not match to model hidden size");
+      return false;
+    }
+
+    torch::Tensor range_indices = torch::arange(start, end);
+    all_indices_list.push_back(range_indices);
+    all_values_list.push_back(tensor);
+  }
+
+  torch::Tensor total_indices = torch::cat(all_indices_list, 0);
+  torch::Tensor total_values = torch::cat(all_values_list, 0);
+
+  MMDict mm_dict;
+  mm_dict["MULTI_MODAL_INDICES"] = total_indices;
+  mm_dict["MULTI_MODAL_VALUES"] = total_values;
+  *processed_mm_data = MMData(MMType::EMBEDDING, mm_dict);
 
   return true;
 }
@@ -231,10 +192,9 @@ std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
 }
 
 std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
-    std::optional<std::vector<int>> /*input_tokens*/,
-    std::optional<std::vector<int>> /*input_indices*/,
-    std::optional<std::vector<std::vector<float>>> /*input_embedding*/,
-    const RequestParams& /*sp*/,
+    const std::vector<int>& prompt_tokens,
+    std::optional<MMData> mm_data,
+    const RequestParams& sp,
     OutputCallback callback) {
   CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                       "This pipeline does not support raw input");
@@ -304,26 +264,23 @@ RecMaster::LlmRecWithMmDataMasterPipeline::LlmRecWithMmDataMasterPipeline(
 
 std::shared_ptr<Request>
 RecMaster::LlmRecWithMmDataMasterPipeline::generate_request(
-    std::optional<std::vector<int>> input_tokens,
-    std::optional<std::vector<int>> input_indices,
-    std::optional<std::vector<std::vector<float>>> input_embedding,
+    const std::vector<int>& prompt_tokens,
+    std::optional<MMData> mm_data,
     const RequestParams& sp,
     OutputCallback callback) {
-  Timer timer;
   std::vector<int32_t> local_prompt_tokens;
   MMData processed_mm_data;
 
-  if (!process_llmrec_raw_inputs(std::move(input_tokens),
-                                 std::move(input_indices),
-                                 std::move(input_embedding),
-                                 master_.model_args_,
-                                 &local_prompt_tokens,
-                                 &processed_mm_data,
-                                 callback)) {
+  int32_t hidden_size = master_.model_args_.hidden_size();
+  bool ret = process_llmrec_with_mm_data_inputs(prompt_tokens,
+                                                mm_data,
+                                                &local_prompt_tokens,
+                                                &processed_mm_data,
+                                                hidden_size,
+                                                callback);
+  if (!ret) {
     return nullptr;
   }
-
-  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
 
   return master_.build_request_common(std::string(""),
                                       std::move(local_prompt_tokens),
@@ -553,28 +510,25 @@ void RecMaster::handle_request(
                    });
 }
 
-void RecMaster::handle_request(
-    std::optional<std::vector<int>> input_tokens,
-    std::optional<std::vector<int>> input_indices,
-    std::optional<std::vector<std::vector<float>>> input_embedding,
-    RequestParams sp,
-    OutputCallback callback) {
+void RecMaster::handle_request(const std::vector<int>& prompt_tokens,
+                               std::optional<MMData> mm_data,
+                               RequestParams sp,
+                               OutputCallback callback) {
   if (rec_type_ != RecType::kLlmRec) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "LLMRec should use raw input interface");
     return;
   }
+
   schedule_request(std::move(sp),
                    std::move(callback),
                    [this,
-                    input_tokens = std::move(input_tokens),
-                    input_indices = std::move(input_indices),
-                    input_embedding = std::move(input_embedding)](
-                       const RequestParams& params, OutputCallback cb) mutable {
+                    prompt_tokens = std::move(prompt_tokens),
+                    mm_data = std::move(mm_data)](const RequestParams& params,
+                                                  OutputCallback cb) mutable {
                      return mm_data_pipeline_->generate_request(
-                         std::move(input_tokens),
-                         std::move(input_indices),
-                         std::move(input_embedding),
+                         std::move(prompt_tokens),
+                         std::move(mm_data),
                          params,
                          std::move(cb));
                    });

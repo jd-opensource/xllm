@@ -202,6 +202,93 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_token_completions(
     const XLLM_RequestParams* request_params);
 
 /**
+ * @brief Generate generative recommendation completions for multimodal input
+ * (TOKEN ID + MULTIMODAL DATA INPUT)
+ * @details Generates recommendation results from pre-tokenized text input
+ * (MANDATORY) supplemented with multimodal data that replaces/augments
+ * information for specific tokens in the token_ids array. This API extends
+ * xllm_rec_token_completions to support multi-modal recommendation scenarios
+ * where partial text tokens are enriched with image/audio/video/embedding
+ * features (e.g., replacing product text tokens with image embeddings).
+ *
+ * @param handler Valid, initialized REC inference instance handle (must not be
+ * NULL) Created via xllm_rec_create() and initialized via xllm_rec_initialize()
+ * @param model_id Null-terminated string of the loaded REC model ID (must match
+ *                the model_path used in xllm_rec_initialize())
+ *                Must be a multi-modal REC model (text-only models will return
+ * kInvalidRequest)
+ * @param token_ids Pointer to int32_t array of pre-tokenized text input IDs
+ * (MUST NOT be NULL) Token IDs must be compatible with the REC model's
+ * tokenizer vocabulary This is the core input and cannot be empty (token_size >
+ * 0 required)
+ * @param token_size Number of tokens in the token_ids array (MUST be ≥ 1)
+ *                  Valid ranges: 1 ≤ token_size ≤ model-dependent max input
+ * length token_size = 0 will return kInvalidRequest status (core text input
+ * required)
+ * @param mm_data Pointer to multi-modal data container (XLLM_MM_Data) (NULL =
+ * no multimodal augmentation) Used to replace/augment information for specific
+ * tokens in token_ids (via XLLM_MM_TokenPos) Supports
+ * image/audio/video/embedding modalities (see XLLM_MM_Type) Must be valid
+ * (mm_data->type_mask != XLLM_MM_TYPE_NONE) if non-NULL, and token positions in
+ * mm_data must be within [0, token_size-1] (out-of-range positions trigger
+ * kInvalidRequest)
+ * @param timeout_ms Timeout in milliseconds (0 = no timeout, wait indefinitely)
+ * @param request_params Generation parameters (NULL = use REC defaults)
+ *                       See XLLM_RequestParams for configurable options (e.g.,
+ * top_k, top_p)
+ * @return Pointer to XLLM_Response on success; NULL ONLY if memory allocation
+ *         fails (response->status indicates the actual result status, even if
+ * non-NULL)
+ * @par Response Status Codes (XLLM_StatusCode)
+ * - kSuccess: Valid multi-modal recommendation response generated
+ *             Check response->choices for recommended item list and explanation
+ * text Multimodal data has been applied to augment/replace specified tokens
+ * - kNotInitialized: Handler not initialized with xllm_rec_initialize()
+ * - kModelNotFound: model_id does not match any loaded REC model
+ * - kInvalidRequest:
+ *   - token_ids = NULL (core text input is mandatory)
+ *   - token_size = 0 (empty core text input)
+ *   - token_ids contain invalid IDs (out of vocabulary range)
+ *   - model_id is NULL/empty/mismatch or is a text-only model
+ *   - mm_data is non-NULL but invalid:
+ *     - mm_data->type_mask = XLLM_MM_TYPE_NONE (empty multimodal data)
+ *     - token positions in mm_data (XLLM_MM_TokenPos) are out of [0,
+ * token_size-1] range
+ *     - mismatched tensor types/shape in mm_data (e.g., embedding dim mismatch)
+ * - kTimeout: Generation exceeded timeout_ms
+ * - kInternalError: Internal REC runtime error (e.g., multimodal embedding
+ * fusion failure, token augmentation/replacement error, item retrieval error)
+ * @warning Mandatory: Call xllm_rec_free_response() to release response memory
+ *          Failing to free will cause memory leaks
+ * @note 1. Token IDs must be generated using the SAME tokenizer as the REC
+ * model (e.g., same vocab.txt)
+ *       2. Invalid token IDs (e.g., < 0 or > vocab_size) will trigger
+ * kInvalidRequest or kInternalError
+ *       3. For token_size > model's max input length, the input will be
+ * truncated to max length
+ *       4. mm_data is used to replace/augment specific tokens (via
+ * XLLM_MM_TokenPos.offset/length):
+ *          - offset: start index of tokens in token_ids to be
+ * augmented/replaced
+ *          - length: number of consecutive tokens to apply multimodal data to
+ *       5. If mm_data is NULL, this API behaves identically to
+ * xllm_rec_token_completions (text-only inference)
+ *       6. Multimodal data must be aligned with token positions (offset +
+ * length ≤ token_size)
+ * @see xllm_rec_token_completions, xllm_rec_request_params_default,
+ *      XLLM_REC_REQUEST_PARAMS_DEFAULT, xllm_rec_free_response, XLLM_MM_Data,
+ * XLLM_MM_TokenPos
+ */
+XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_multimodal_completions(
+    XLLM_REC_Handler* handler,
+    const char* model_id,
+    const int32_t* token_ids,
+    size_t token_size,
+    const XLLM_MM_Data* mm_data,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams* request_params);
+
+/**
  * @brief Generate generative recommendation chat completions from multi-turn
  * conversation history Generates personalized recommendation responses for a
  * multi-turn user-assistant conversation
