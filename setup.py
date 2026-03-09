@@ -363,6 +363,7 @@ class TestUT(Command):
     SEQUENTIAL_TESTS = [
         'ReduceScatterMultiDeviceTest',
         'DeepEPMultiDeviceTest',
+        'AttentionMultiDeviceTest',
         'FusedMoEAll2AllMultiDeviceTest',
     ]
 

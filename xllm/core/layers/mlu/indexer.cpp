@@ -115,12 +115,10 @@ IndexerImpl::IndexerImpl(int64_t dim,
                          const QuantArgs& quant_args,
                          const ParallelArgs& parallel_args,
                          const torch::TensorOptions& options)
-    : dim_(dim),
-      n_heads_(index_n_heads),
+    : n_heads_(index_n_heads),
       head_dim_(index_head_dim),
       rope_head_dim_(qk_rope_head_dim),
       index_topk_(index_topk),
-      q_lora_rank_(q_lora_rank),
       rotary_emb_(rotary_emb),
       softmax_scale_(std::pow(head_dim_, -0.5) * std::pow(n_heads_, -0.5)),
       enable_fused_qk_(enable_fused_qk) {
@@ -128,6 +126,7 @@ IndexerImpl::IndexerImpl(int64_t dim,
   // or parallelization strategies. These features are planned for future
   // updates. For now, the entire indexer computation runs independently on each
   // MLU on any parallel strategy.
+  (void)parallel_args;
 
   // Register modules
   wq_b_ = register_module("wq_b",
@@ -175,7 +174,6 @@ torch::Tensor IndexerImpl::rotate_activation(
   // Ensure the input is bfloat16 as per interface contract
   CHECK(input.dtype() == torch::kBFloat16)
       << "rotate_activation: input must be bfloat16";
-  int64_t hidden_size = input.size(-1);
   return hadamard_transform_ref(input, hadamard_matrix);
 }
 
@@ -287,7 +285,8 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::preprocess_indexer_k(
     const torch::Tensor& x,
     const torch::Tensor& positions,
     torch::Tensor& k_cache,
-    const AttentionMetadata& attn_metadata) {
+    const AttentionMetadata& attn_metadata,
+    bool write_k_cache) {
   // Forward pass through wk and normalize
   auto k = wk_->forward(x);
   auto k_dtype = k.dtype();
@@ -305,17 +304,9 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::preprocess_indexer_k(
                        attn_metadata.is_prefill);
   k = rotate_activation(k, hadamard_matrix_);
 
-  // Reshape paged cache
-  auto k_unsqueezed = k.unsqueeze(1);
-  xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
-  reshape_paged_cache_params.key = k_unsqueezed;
-  reshape_paged_cache_params.value = std::nullopt;
-  reshape_paged_cache_params.k_cache = k_cache;
-  reshape_paged_cache_params.v_cache = std::nullopt;
-  reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
-  reshape_paged_cache_params.direction = false;
-  xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
-  k = k_unsqueezed.squeeze(1);
+  if (write_k_cache) {
+    write_prefill_k_cache(k, k_cache, attn_metadata.slot_mapping);
+  }
 
   // Forward pass through weights projection
   auto weights = weights_proj_->forward(x);
@@ -371,36 +362,123 @@ torch::Tensor IndexerImpl::preprocess_indexer_k_fused(
   return head_weights;
 }
 
-std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
-    const torch::Tensor& x,
-    const torch::Tensor& qr,
-    const torch::Tensor& positions,
-    torch::Tensor& k_cache,
-    const AttentionMetadata& attn_metadata,
-    bool is_prefill,
-    const std::optional<torch::Tensor>& mask) {
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+IndexerImpl::preprocess_indexer_inputs(const torch::Tensor& x,
+                                       const torch::Tensor& qr,
+                                       const torch::Tensor& positions,
+                                       torch::Tensor& k_cache,
+                                       const AttentionMetadata& attn_metadata,
+                                       bool is_prefill,
+                                       bool write_k_cache) {
   torch::Tensor q, k, weights;
   if (!is_prefill && enable_fused_qk_) {
     q = preprocess_indexer_q_fused(qr, positions);
     weights = preprocess_indexer_k_fused(x, positions, k_cache, attn_metadata);
   } else {
     q = preprocess_indexer_q(qr, positions, attn_metadata);
-    std::tie(k, weights) =
-        preprocess_indexer_k(x, positions, k_cache, attn_metadata);
+    std::tie(k, weights) = preprocess_indexer_k(
+        x, positions, k_cache, attn_metadata, write_k_cache);
   }
-  // Unified parameter setup for both prefill and decode modes
-  IndexerRuntimeContext ctx = prepare_runtime_context(
-      k, k_cache, q, weights, attn_metadata, is_prefill, x.size(0));
+  return {q, k, weights};
+}
 
+IndexerSPPreOut IndexerImpl::sp_pre(
+    const torch::Tensor& x,
+    const torch::Tensor& qr,
+    const torch::Tensor& positions,
+    const AttentionMetadata& attn_metadata,
+    const v32_sp::DeepseekV32SPContext& sp_ctx) {
+  (void)sp_ctx;
+  IndexerSPPreOut out;
+  std::tie(out.q, out.k_local, out.weights) =
+      preprocess_indexer_inputs(x,
+                                qr,
+                                positions,
+                                out.k_local,
+                                attn_metadata,
+                                /*is_prefill=*/true,
+                                /*write_k_cache=*/false);
+  return out;
+}
+
+v32_sp::PaddedGatherHandle IndexerImpl::sp_comm(
+    const torch::Tensor& k_local,
+    const v32_sp::DeepseekV32SPContext& sp_ctx) {
+  if (!k_local.defined()) {
+    return {};
+  }
+  torch::Tensor padded_k = v32_sp::pad_to_sp_rows(k_local, sp_ctx);
+  return v32_sp::launch_gather_padded(padded_k, sp_ctx);
+}
+
+torch::Tensor IndexerImpl::sp_wait_k(
+    const torch::Tensor& k_local,
+    const v32_sp::PaddedGatherHandle& gather_handle,
+    const v32_sp::DeepseekV32SPContext& sp_ctx) {
+  if (!gather_handle.gather_ctx.shards.empty()) {
+    return v32_sp::finish_gather_padded(gather_handle, sp_ctx);
+  }
+  return k_local;
+}
+
+std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::sp_post(
+    const IndexerSPPreOut& pre_out,
+    const torch::Tensor& k_global,
+    torch::Tensor& k_cache,
+    const AttentionMetadata& attn_metadata,
+    const v32_sp::DeepseekV32SPMetadata& sp_meta,
+    const v32_sp::DeepseekV32SPContext& sp_ctx) {
+  (void)sp_ctx;
+  write_prefill_k_cache(k_global, k_cache, attn_metadata.slot_mapping);
+  torch::Tensor k_packed = v32_sp::pack_sp_k_for_indexer(k_global, sp_meta);
+  torch::Tensor q = pre_out.q;
+  torch::Tensor weights = pre_out.weights;
+  IndexerRuntimeContext ctx = prepare_runtime_context(k_packed,
+                                                      k_cache,
+                                                      q,
+                                                      weights,
+                                                      attn_metadata,
+                                                      /*is_prefill=*/true,
+                                                      q.size(0));
+  return run_indexer_select_kernel(
+      attn_metadata, /*is_prefill=*/true, ctx, &sp_meta);
+}
+
+void IndexerImpl::write_prefill_k_cache(const torch::Tensor& k,
+                                        torch::Tensor& k_cache,
+                                        const torch::Tensor& slot_mapping) {
+  auto k_unsqueezed = k.unsqueeze(1);
+  xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
+  reshape_paged_cache_params.key = k_unsqueezed;
+  reshape_paged_cache_params.value = std::nullopt;
+  reshape_paged_cache_params.k_cache = k_cache;
+  reshape_paged_cache_params.v_cache = std::nullopt;
+  reshape_paged_cache_params.slot_mapping = slot_mapping;
+  reshape_paged_cache_params.direction = false;
+  xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::run_indexer_select_kernel(
+    const AttentionMetadata& attn_metadata,
+    bool is_prefill,
+    IndexerRuntimeContext& ctx,
+    const v32_sp::DeepseekV32SPMetadata* sp_meta) {
   // Call masked indexer select paged kv
   kernel::MaskedIndexerSelectPagedKVParams params;
   params.query = ctx.q;
   params.k_cache = ctx.k_cache_tensor;
   params.weights = ctx.weights;
-  params.kv_cache_block_table = attn_metadata.block_table;
-  params.cu_seq_q_lens = ctx.cu_seq_q_lens;
-  params.cu_seq_k_lens = ctx.cu_seq_k_lens;
-  params.k_context_lens = ctx.k_context_lens;
+  if (sp_meta != nullptr) {
+    params.kv_cache_block_table = sp_meta->seg_block_table;
+    params.cu_seq_q_lens = sp_meta->seg_q_cu_lens;
+    params.cu_seq_k_lens = sp_meta->seg_k_cu_lens;
+    params.k_context_lens = sp_meta->seg_k_lens;
+  } else {
+    params.kv_cache_block_table = attn_metadata.block_table;
+    params.cu_seq_q_lens = ctx.cu_seq_q_lens;
+    params.cu_seq_k_lens = ctx.cu_seq_k_lens;
+    params.k_context_lens = ctx.k_context_lens;
+  }
   params.k_cache_block_table = ctx.k_block_table;
   params.is_prefill = is_prefill;
   params.softmax_scale = softmax_scale_;
@@ -419,6 +497,30 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   }
 
   return {ctx.new_block_tables, ctx.new_context_lens};
+}
+
+std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
+    const torch::Tensor& x,
+    const torch::Tensor& qr,
+    const torch::Tensor& positions,
+    torch::Tensor& k_cache,
+    const AttentionMetadata& attn_metadata,
+    bool is_prefill,
+    const std::optional<torch::Tensor>& mask) {
+  (void)mask;
+  torch::Tensor q, k, weights;
+  std::tie(q, k, weights) = preprocess_indexer_inputs(x,
+                                                      qr,
+                                                      positions,
+                                                      k_cache,
+                                                      attn_metadata,
+                                                      is_prefill,
+                                                      /*write_k_cache=*/true);
+  // Unified parameter setup for both prefill and decode modes
+  IndexerRuntimeContext ctx = prepare_runtime_context(
+      k, k_cache, q, weights, attn_metadata, is_prefill, x.size(0));
+
+  return run_indexer_select_kernel(attn_metadata, is_prefill, ctx);
 }
 
 // load the weight from the checkpoint

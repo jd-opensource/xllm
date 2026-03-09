@@ -114,6 +114,8 @@ DECLARE_int32(max_tokens_for_graph_mode);
 
 DECLARE_bool(enable_chunked_prefill);
 
+DECLARE_bool(prefill_use_sequence_parallel);
+
 DECLARE_string(master_node_addr);
 
 DECLARE_string(xtensor_master_node_addr);

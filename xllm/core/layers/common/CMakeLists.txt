@@ -13,7 +13,6 @@ cc_library(
     dense_mlp.h
     linear.h
     word_embedding_impl.h
-    indexer.h
     deep_ep.h
     activation.h
     attention_metadata.h
@@ -31,7 +30,6 @@ cc_library(
     dense_mlp.cpp
     linear.cpp
     word_embedding_impl.cpp
-    indexer.cpp
     deep_ep.cpp
     activation.cpp
     attention_metadata_builder.cpp
