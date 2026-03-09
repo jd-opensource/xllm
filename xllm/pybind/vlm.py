@@ -30,6 +30,7 @@ class VLM:
         expert_parallel_degree: int = 0,
         enable_mla: bool = False,
         disable_chunked_prefill: bool = False,
+        enable_prefill_sp: bool = False,
         instance_role: str = 'DEFAULT',
         device_ip: str = '',
         transfer_listen_port: int = 26000,
@@ -80,6 +81,7 @@ class VLM:
             options.enable_chunked_prefill = False
         else:
             options.enable_chunked_prefill = True
+        options.enable_prefill_sp = enable_prefill_sp
         free_port = util.get_free_port()
         options.master_node_addr = "127.0.0.1:" + str(free_port)
         options.device_ip = device_ip

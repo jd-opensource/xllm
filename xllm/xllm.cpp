@@ -244,6 +244,7 @@ int run() {
       .expert_parallel_degree(FLAGS_expert_parallel_degree)
       .enable_mla(FLAGS_enable_mla)
       .enable_chunked_prefill(FLAGS_enable_chunked_prefill)
+      .enable_prefill_sp(FLAGS_enable_prefill_sp)
       .master_node_addr(FLAGS_master_node_addr)
       .instance_role(InstanceRole(FLAGS_instance_role))
       .device_ip("")

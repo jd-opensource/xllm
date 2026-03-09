@@ -46,6 +46,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Whether to enable chunked prefill for inference */
   bool enable_chunked_prefill;
 
+  /** Whether to enable prefill-only sequence parallel */
+  bool enable_prefill_sp;
+
   /** Whether to enable prefix cache optimization */
   bool enable_prefix_cache;
 

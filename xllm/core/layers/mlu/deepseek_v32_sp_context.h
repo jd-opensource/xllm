@@ -41,20 +41,14 @@ struct PaddedGatherHandle {
 
 struct DeepseekV32SPContext {
   DeepseekV32SPCommPlan comm_plan;
-  std::vector<DeepseekV32SPSegment> segments;
   AttentionMetadata local_attn_metadata;
   DeepseekV32SPMetadata sp_meta;
 
-  torch::Tensor local_reorder_index;
   torch::Tensor gathered_reorder_index;
-  torch::Tensor gathered_padded_reorder_index;
 
   int32_t total_tokens = 0;
   int32_t rank = 0;
-  int32_t world_size = 1;
   ProcessGroup* process_group = nullptr;
-
-  bool is_enabled() const { return process_group != nullptr; }
 };
 
 inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
@@ -93,32 +87,23 @@ inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
 
   DeepseekV32SPContext context;
   const auto all_segments = build_all_sp_segments(world_size, seq_lens);
-  context.comm_plan =
-      build_zigzag_comm_plan(curr_rank, world_size, all_segments, total_tokens);
-  context.segments = build_local_sp_segments(curr_rank, all_segments);
+  const auto local_segments = build_local_sp_segments(curr_rank, all_segments);
+  const auto runtime_artifacts = build_sp_runtime_artifacts(
+      curr_rank, world_size, all_segments, total_tokens);
+  context.comm_plan = runtime_artifacts.comm_plan;
   context.local_attn_metadata = build_local_prefill_attention_metadata(
-      base_attn_metadata, context.segments);
+      base_attn_metadata, local_segments);
   context.sp_meta =
-      build_sp_metadata(base_attn_metadata, context.segments, seq_lens);
+      build_sp_metadata(base_attn_metadata, local_segments, seq_lens);
   context.total_tokens = total_tokens;
   context.rank = curr_rank;
-  context.world_size = world_size;
   context.process_group = sp_group;
 
-  const auto int32_options =
-      torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
   const auto int64_options =
       torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU);
   const torch::Device device = tokens.device();
-  context.local_reorder_index =
-      torch::tensor(context.comm_plan.local_reorder_index_cpu, int32_options)
-          .to(device);
   context.gathered_reorder_index =
-      torch::tensor(context.comm_plan.gathered_reorder_index_cpu, int64_options)
-          .to(device);
-  context.gathered_padded_reorder_index =
-      torch::tensor(context.comm_plan.gathered_padded_reorder_index_cpu,
-                    int64_options)
+      torch::tensor(runtime_artifacts.gathered_reorder_index_cpu, int64_options)
           .to(device);
   return context;
 }
@@ -144,7 +129,11 @@ inline torch::Tensor reorder_by_index(const torch::Tensor& tensor,
 inline torch::Tensor reorder_to_local_shard(
     const torch::Tensor& tensor,
     const DeepseekV32SPContext& context) {
-  return reorder_by_index(tensor, context.local_reorder_index);
+  const int32_t token_num = context.comm_plan.tokens_per_rank.at(context.rank);
+  return reorder_by_index(
+      tensor,
+      context.gathered_reorder_index.narrow(
+          0, context.comm_plan.token_num_offset, token_num));
 }
 
 inline torch::Tensor all_gather_across_ranks(
@@ -183,18 +172,39 @@ inline torch::Tensor restore_gathered_to_global_order(
         << "unexpected packed tensor length for sequence parallel restore.";
     restore_index = context.gathered_reorder_index;
   } else {
-    CHECK_EQ(gathered_tensor.size(0),
-             context.gathered_padded_reorder_index.size(0))
+    const int64_t padded_token_num =
+        std::accumulate(context.comm_plan.padded_tokens_per_rank.begin(),
+                        context.comm_plan.padded_tokens_per_rank.end(),
+                        int64_t{0});
+    CHECK_EQ(gathered_tensor.size(0), padded_token_num)
         << "unexpected padded tensor length for sequence parallel restore.";
-    restore_index = context.gathered_padded_reorder_index;
-    if (restore_index.device() != gathered_tensor.device()) {
-      restore_index = restore_index.to(gathered_tensor.device());
+    restore_index = context.gathered_reorder_index;
+
+    std::vector<torch::Tensor> valid_slices;
+    valid_slices.reserve(context.comm_plan.tokens_per_rank.size());
+    int64_t gathered_offset = 0;
+    for (size_t rank = 0; rank < context.comm_plan.tokens_per_rank.size();
+         ++rank) {
+      const int32_t valid_token_num = context.comm_plan.tokens_per_rank[rank];
+      if (valid_token_num > 0) {
+        valid_slices.push_back(
+            gathered_tensor.narrow(0, gathered_offset, valid_token_num));
+      }
+      gathered_offset += context.comm_plan.padded_tokens_per_rank[rank];
     }
-    torch::Tensor valid_mask = restore_index.ne(context.total_tokens);
-    torch::Tensor valid_positions =
-        torch::nonzero(valid_mask).squeeze(1).to(torch::kLong);
-    restore_index = restore_index.index_select(0, valid_positions);
-    valid_tensor = gathered_tensor.index_select(0, valid_positions);
+
+    if (valid_slices.empty()) {
+      auto empty_shape = gathered_tensor.sizes().vec();
+      empty_shape[0] = 0;
+      valid_tensor = torch::empty(empty_shape, gathered_tensor.options());
+    } else if (valid_slices.size() == 1) {
+      valid_tensor = valid_slices.front().contiguous();
+    } else {
+      valid_tensor = torch::cat(valid_slices, 0).contiguous();
+    }
+    CHECK_EQ(valid_tensor.size(0), restore_index.size(0))
+        << "unexpected valid token length for padded sequence parallel "
+           "restore.";
   }
 
   if (restore_index.device() != gathered_tensor.device()) {

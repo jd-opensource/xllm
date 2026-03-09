@@ -25,6 +25,7 @@ extern "C" {
 const XLLM_InitOptions XLLM_INIT_LLM_OPTIONS_DEFAULT = {
     .enable_mla = false,
     .enable_chunked_prefill = false,
+    .enable_prefill_sp = false,
     .enable_prefix_cache = false,
     .enable_disagg_pd = false,
     .enable_pd_ooc = false,
@@ -84,6 +85,7 @@ const XLLM_RequestParams XLLM_LLM_REQUEST_PARAMS_DEFAULT = {
 const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .enable_mla = false,
     .enable_chunked_prefill = false,
+    .enable_prefill_sp = false,
     .enable_prefix_cache = false,
     .enable_disagg_pd = false,
     .enable_pd_ooc = false,

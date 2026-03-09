@@ -19,7 +19,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstdint>
-#include <numeric>
 #include <vector>
 
 #include "layers/common/attention_metadata.h"
@@ -28,8 +27,8 @@ limitations under the License.
 namespace xllm::layer::v32_sp {
 
 struct DeepseekV32SPMetadata {
-  std::vector<DeepseekV32SPSegment> segments;
-  std::vector<int32_t> req_offsets_cpu;
+  std::vector<int32_t> k_pack_starts_cpu;
+  std::vector<int32_t> k_pack_lens_cpu;
 
   torch::Tensor seg_q_cu_lens;
   torch::Tensor seg_k_cu_lens;
@@ -91,12 +90,11 @@ inline DeepseekV32SPMetadata build_sp_metadata(
       << "deepseek_v32 sequence parallel requires kv_seq_lens.";
 
   DeepseekV32SPMetadata meta;
-  meta.segments = segments;
-
-  meta.req_offsets_cpu.reserve(seq_lens.size());
+  std::vector<int32_t> req_offsets_cpu;
+  req_offsets_cpu.reserve(seq_lens.size());
   int32_t req_offset = 0;
   for (int32_t seq_len : seq_lens) {
-    meta.req_offsets_cpu.push_back(req_offset);
+    req_offsets_cpu.push_back(req_offset);
     req_offset += seq_len;
   }
 
@@ -105,13 +103,19 @@ inline DeepseekV32SPMetadata build_sp_metadata(
   std::vector<int32_t> seg_q_tokens;
   std::vector<int32_t> seg_k_lens_cpu;
   std::vector<int64_t> seg_to_req_cpu;
-  seg_q_tokens.reserve(meta.segments.size());
-  seg_k_lens_cpu.reserve(meta.segments.size());
-  seg_to_req_cpu.reserve(meta.segments.size());
-  for (const auto& segment : meta.segments) {
+  seg_q_tokens.reserve(segments.size());
+  seg_k_lens_cpu.reserve(segments.size());
+  seg_to_req_cpu.reserve(segments.size());
+  meta.k_pack_starts_cpu.reserve(segments.size());
+  meta.k_pack_lens_cpu.reserve(segments.size());
+  for (const auto& segment : segments) {
     seg_q_tokens.push_back(segment.q_tokens);
     seg_k_lens_cpu.push_back(segment.k_len);
     seg_to_req_cpu.push_back(segment.req_idx);
+    if (segment.k_len > 0) {
+      meta.k_pack_starts_cpu.push_back(req_offsets_cpu[segment.req_idx]);
+      meta.k_pack_lens_cpu.push_back(segment.k_len);
+    }
   }
   meta.seg_q_cu_lens = make_sp_prefix(seg_q_tokens, q_cu_options);
   meta.seg_k_cu_lens = make_sp_prefix(seg_k_lens_cpu, q_cu_options);
@@ -139,13 +143,10 @@ inline torch::Tensor pack_sp_k_for_indexer(
       << "deepseek_v32 sequence parallel indexer expects non-scalar k.";
 
   std::vector<torch::Tensor> seg_slices;
-  seg_slices.reserve(sp_meta.segments.size());
-  for (const auto& segment : sp_meta.segments) {
-    if (segment.k_len == 0) {
-      continue;
-    }
-    const int32_t req_offset = sp_meta.req_offsets_cpu[segment.req_idx];
-    seg_slices.push_back(k_global.narrow(0, req_offset, segment.k_len));
+  seg_slices.reserve(sp_meta.k_pack_lens_cpu.size());
+  for (size_t i = 0; i < sp_meta.k_pack_lens_cpu.size(); ++i) {
+    seg_slices.push_back(k_global.narrow(
+        0, sp_meta.k_pack_starts_cpu[i], sp_meta.k_pack_lens_cpu[i]));
   }
 
   if (!seg_slices.empty()) {

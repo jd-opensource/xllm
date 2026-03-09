@@ -40,6 +40,9 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
 
   bool enable_chunked_prefill = false;
 
+  // Whether to enable prefill-only sequence parallel
+  bool enable_prefill_sp = false;
+
   bool enable_prefix_cache = false;
 
   // Whether to enable disaggregated prefill and decode execution

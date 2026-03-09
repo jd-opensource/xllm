@@ -17,6 +17,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <numeric>
 #include <vector>
 
 #include "core/common/global_flags.h"
@@ -126,16 +127,6 @@ std::vector<int32_t> extract_segment_q_tokens(
   return values;
 }
 
-std::vector<int32_t> extract_segment_q_offsets(
-    const std::vector<DeepseekV32SPSegment>& segments) {
-  std::vector<int32_t> values;
-  values.reserve(segments.size());
-  for (const auto& segment : segments) {
-    values.push_back(segment.q_offset);
-  }
-  return values;
-}
-
 std::vector<int32_t> extract_segment_k_lens(
     const std::vector<DeepseekV32SPSegment>& segments) {
   std::vector<int32_t> values;
@@ -149,36 +140,47 @@ std::vector<int32_t> extract_segment_k_lens(
 TEST(DeepseekV32SPUtilsTest,
      BuildZigzagSplitPlanMatchesSingleRequestWithoutPadding) {
   const auto all_segments = build_all_sp_segments(4, {16});
-  const DeepseekV32SPCommPlan rank0 =
-      build_zigzag_comm_plan(0, 4, all_segments, /*total_tokens=*/16);
+  const auto runtime_artifacts =
+      build_sp_runtime_artifacts(0, 4, all_segments, /*total_tokens=*/16);
+  const auto& rank0 = runtime_artifacts.comm_plan;
+  const auto& gathered_reorder_index =
+      runtime_artifacts.gathered_reorder_index_cpu;
+  const std::vector<int32_t> local_reorder_index(
+      gathered_reorder_index.begin() + rank0.token_num_offset,
+      gathered_reorder_index.begin() + rank0.token_num_offset +
+          rank0.tokens_per_rank[0]);
   EXPECT_EQ(rank0.tokens_per_rank, (std::vector<int32_t>{4, 4, 4, 4}));
   EXPECT_EQ(rank0.padded_tokens_per_rank, (std::vector<int32_t>{4, 4, 4, 4}));
-  EXPECT_EQ(rank0.local_reorder_index_cpu,
-            (std::vector<int32_t>{0, 1, 14, 15}));
-  EXPECT_EQ(rank0.gathered_reorder_index_cpu,
+  EXPECT_EQ(local_reorder_index, (std::vector<int32_t>{0, 1, 14, 15}));
+  EXPECT_EQ(gathered_reorder_index,
             (std::vector<int32_t>{
                 0, 1, 14, 15, 2, 3, 12, 13, 4, 5, 10, 11, 6, 7, 8, 9}));
 
   const auto segments = build_local_sp_segments(0, all_segments);
   EXPECT_EQ(extract_segment_req_idx(segments), (std::vector<int32_t>{0, 0}));
   EXPECT_EQ(extract_segment_q_tokens(segments), (std::vector<int32_t>{2, 2}));
-  EXPECT_EQ(extract_segment_q_offsets(segments), (std::vector<int32_t>{0, 14}));
   EXPECT_EQ(extract_segment_k_lens(segments), (std::vector<int32_t>{2, 16}));
 }
 
 TEST(DeepseekV32SPUtilsTest,
      BuildZigzagSplitPlanMatchesSingleRequestWithPadding) {
   const auto all_segments = build_all_sp_segments(4, {10});
-  const DeepseekV32SPCommPlan rank2 =
-      build_zigzag_comm_plan(2, 4, all_segments, /*total_tokens=*/10);
+  const auto runtime_artifacts =
+      build_sp_runtime_artifacts(2, 4, all_segments, /*total_tokens=*/10);
+  const auto& rank2 = runtime_artifacts.comm_plan;
+  const auto& gathered_reorder_index =
+      runtime_artifacts.gathered_reorder_index_cpu;
+  const std::vector<int32_t> local_reorder_index(
+      gathered_reorder_index.begin() + rank2.token_num_offset,
+      gathered_reorder_index.begin() + rank2.token_num_offset +
+          rank2.tokens_per_rank[2]);
   EXPECT_EQ(rank2.tokens_per_rank, (std::vector<int32_t>{3, 3, 2, 2}));
   EXPECT_EQ(rank2.padded_tokens_per_rank, (std::vector<int32_t>{3, 3, 3, 3}));
-  EXPECT_EQ(rank2.local_reorder_index_cpu, (std::vector<int32_t>{4, 7}));
+  EXPECT_EQ(local_reorder_index, (std::vector<int32_t>{4, 7}));
 
   const auto segments = build_local_sp_segments(2, all_segments);
   EXPECT_EQ(extract_segment_req_idx(segments), (std::vector<int32_t>{0, 0}));
   EXPECT_EQ(extract_segment_q_tokens(segments), (std::vector<int32_t>{1, 1}));
-  EXPECT_EQ(extract_segment_q_offsets(segments), (std::vector<int32_t>{4, 7}));
   EXPECT_EQ(extract_segment_k_lens(segments), (std::vector<int32_t>{5, 8}));
 }
 
@@ -198,15 +200,6 @@ TEST(DeepseekV32SPUtilsTest,
   const auto& context = maybe_context.value();
   EXPECT_EQ(context.total_tokens, 21);
   EXPECT_EQ(context.rank, 1);
-  EXPECT_EQ(context.world_size, 4);
-  EXPECT_EQ(extract_segment_req_idx(context.segments),
-            (std::vector<int32_t>{0, 0, 1, 1, 2, 2}));
-  EXPECT_EQ(extract_segment_q_tokens(context.segments),
-            (std::vector<int32_t>{1, 0, 1, 1, 2, 1}));
-  EXPECT_EQ(extract_segment_q_offsets(context.segments),
-            (std::vector<int32_t>{1, 4, 1, 4, 2, 9}));
-  EXPECT_EQ(extract_segment_k_lens(context.segments),
-            (std::vector<int32_t>{2, 0, 2, 5, 4, 10}));
   EXPECT_EQ(context.comm_plan.tokens_per_rank,
             (std::vector<int32_t>{6, 6, 5, 4}));
   EXPECT_EQ(context.comm_plan.padded_tokens_per_rank,
@@ -214,18 +207,13 @@ TEST(DeepseekV32SPUtilsTest,
   EXPECT_EQ(context.comm_plan.token_num_offset, 6);
 
   EXPECT_TRUE(
-      torch::equal(context.local_reorder_index,
+      torch::equal(reorder_to_local_shard(tokens, context),
                    torch::tensor({1, 5, 8, 12, 13, 19},
                                  torch::TensorOptions().dtype(torch::kInt32))));
   EXPECT_TRUE(
       torch::equal(context.gathered_reorder_index,
                    torch::tensor({0,  4, 9, 10, 11, 20, 1, 5, 8,  12, 13,
                                   19, 2, 6, 14, 15, 18, 3, 7, 16, 17},
-                                 torch::TensorOptions().dtype(torch::kInt64))));
-  EXPECT_TRUE(
-      torch::equal(context.gathered_padded_reorder_index,
-                   torch::tensor({0, 4, 9,  10, 11, 20, 1, 5, 8,  12, 13, 19,
-                                  2, 6, 14, 15, 18, 21, 3, 7, 16, 17, 21, 21},
                                  torch::TensorOptions().dtype(torch::kInt64))));
 
   EXPECT_TRUE(
@@ -238,8 +226,10 @@ TEST(DeepseekV32SPUtilsTest,
                                  torch::TensorOptions().dtype(torch::kInt32))));
   EXPECT_EQ(context.local_attn_metadata.max_query_len, 2);
   EXPECT_EQ(context.local_attn_metadata.max_seq_len, 10);
-  EXPECT_EQ(context.sp_meta.req_offsets_cpu, (std::vector<int32_t>{0, 4, 10}));
-  EXPECT_EQ(context.sp_meta.segments.size(), 6);
+  EXPECT_EQ(context.sp_meta.k_pack_starts_cpu,
+            (std::vector<int32_t>{0, 4, 4, 10, 10}));
+  EXPECT_EQ(context.sp_meta.k_pack_lens_cpu,
+            (std::vector<int32_t>{2, 2, 5, 4, 10}));
   EXPECT_TRUE(
       torch::equal(context.sp_meta.seg_q_cu_lens,
                    torch::tensor({0, 1, 1, 2, 3, 5, 6},
@@ -278,13 +268,8 @@ TEST(DeepseekV32SPUtilsTest, BuildSPMetadataTracksSegmentView) {
   ASSERT_TRUE(maybe_context.has_value());
   const auto& sp_meta = maybe_context->sp_meta;
 
-  EXPECT_EQ(sp_meta.req_offsets_cpu, (std::vector<int32_t>{0, 4, 10}));
-  EXPECT_EQ(extract_segment_req_idx(sp_meta.segments),
-            (std::vector<int32_t>{0, 0, 1, 1, 2, 2}));
-  EXPECT_EQ(extract_segment_q_tokens(sp_meta.segments),
-            (std::vector<int32_t>{1, 0, 1, 1, 2, 1}));
-  EXPECT_EQ(extract_segment_k_lens(sp_meta.segments),
-            (std::vector<int32_t>{2, 0, 2, 5, 4, 10}));
+  EXPECT_EQ(sp_meta.k_pack_starts_cpu, (std::vector<int32_t>{0, 4, 4, 10, 10}));
+  EXPECT_EQ(sp_meta.k_pack_lens_cpu, (std::vector<int32_t>{2, 2, 5, 4, 10}));
   EXPECT_TRUE(
       torch::equal(sp_meta.seg_q_cu_lens,
                    torch::tensor({0, 1, 1, 2, 3, 5, 6},
@@ -306,13 +291,8 @@ TEST(DeepseekV32SPUtilsTest, BuildSPMetadataTracksSegmentView) {
 
 TEST(DeepseekV32SPUtilsTest, PackSPKForIndexerExpandsSegmentPrefixes) {
   DeepseekV32SPMetadata sp_meta;
-  sp_meta.req_offsets_cpu = {0, 4};
-  sp_meta.segments = {
-      {.req_idx = 0, .rank = 0, .q_tokens = 0, .q_offset = 0, .k_len = 2},
-      {.req_idx = 0, .rank = 0, .q_tokens = 0, .q_offset = 0, .k_len = 4},
-      {.req_idx = 1, .rank = 0, .q_tokens = 0, .q_offset = 0, .k_len = 1},
-      {.req_idx = 1, .rank = 0, .q_tokens = 0, .q_offset = 0, .k_len = 3},
-  };
+  sp_meta.k_pack_starts_cpu = {0, 0, 4, 4};
+  sp_meta.k_pack_lens_cpu = {2, 4, 1, 3};
 
   torch::Tensor k_global =
       torch::arange(0, 7, torch::TensorOptions().dtype(torch::kFloat32))
@@ -415,18 +395,25 @@ TEST(DeepseekV32SPUtilsTest, RestoreGatheredToGlobalOrderDropsPadding) {
   const auto& context = maybe_context.value();
 
   const int64_t padded_token_num =
-      context.gathered_padded_reorder_index.size(0);
+      std::accumulate(context.comm_plan.padded_tokens_per_rank.begin(),
+                      context.comm_plan.padded_tokens_per_rank.end(),
+                      int64_t{0});
   torch::Tensor gathered = torch::zeros(
       {padded_token_num}, torch::TensorOptions().dtype(torch::kFloat32));
   auto* gathered_ptr = gathered.data_ptr<float>();
-  auto pad_index = context.gathered_padded_reorder_index.to(torch::kCPU);
-  const auto* pad_index_ptr = pad_index.data_ptr<int64_t>();
-  for (int64_t i = 0; i < padded_token_num; ++i) {
-    if (pad_index_ptr[i] == 10) {
-      gathered_ptr[i] = -1.0f;
-    } else {
-      gathered_ptr[i] = static_cast<float>(pad_index_ptr[i]);
+  auto gathered_index = context.gathered_reorder_index.to(torch::kCPU);
+  const auto* gathered_index_ptr = gathered_index.data_ptr<int64_t>();
+  int64_t padded_offset = 0;
+  int64_t packed_offset = 0;
+  for (size_t rank = 0; rank < context.comm_plan.tokens_per_rank.size();
+       ++rank) {
+    const int32_t valid_token_num = context.comm_plan.tokens_per_rank[rank];
+    for (int32_t i = 0; i < valid_token_num; ++i) {
+      gathered_ptr[padded_offset + i] =
+          static_cast<float>(gathered_index_ptr[packed_offset + i]);
     }
+    padded_offset += context.comm_plan.padded_tokens_per_rank[rank];
+    packed_offset += valid_token_num;
   }
 
   torch::Tensor restored = restore_gathered_to_global_order(
