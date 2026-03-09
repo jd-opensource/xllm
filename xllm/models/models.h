@@ -59,6 +59,9 @@ limitations under the License.
 #include "vlm/npu/qwen3_vl_moe.h"             // IWYU pragma: keep
 
 #elif defined(USE_MLU)
+#include "dit/pipeline_flux.h"          // IWYU pragma: keep
+#include "dit/pipeline_flux_control.h"  // IWYU pragma: keep
+#include "dit/pipeline_flux_fill.h"     // IWYU pragma: keep
 #include "llm/deepseek_mtp.h"        // IWYU pragma: keep
 #include "llm/deepseek_v2.h"         // IWYU pragma: keep
 #include "llm/deepseek_v3.h"         // IWYU pragma: keep

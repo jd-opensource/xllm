@@ -14,7 +14,10 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+
+#if defined(USE_NPU)
 #include <acl/acl.h>
+#endif
 #include <torch/torch.h>
 
 #include <algorithm>
