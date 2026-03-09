@@ -165,6 +165,8 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   int64_t S = q.size(1);
   int64_t head_dim = q.size(3);
   CHECK_EQ(head_dim, hidden_size_per_attention_head_) << "head_dim mismatch";
+  int32_t max_seqlen =
+      *std::max_element(cu_seq_len_vec.begin(), cu_seq_len_vec.end());
 
   // 4. rope
   // Reshape q, k from [B, S, H, D] to [B*S, H, D] before applying RoPE so
@@ -183,7 +185,8 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   rotary_params.cos = m_cos_pos;
   rotary_params.interleaved = false;
   rotary_params.discrete = false;
-  rotary_params.max_query_len = S;
+  rotary_params.cu_query_lens = cu_seq_len;
+  rotary_params.max_query_len = max_seqlen;
   xllm::kernel::apply_rotary(rotary_params);
 
   // q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
@@ -193,9 +196,6 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   torch::Tensor output = torch::zeros_like(q);
 
   // 5. store k/v cache and do attention
-  int32_t max_seqlen =
-      *std::max_element(cu_seq_len_vec.begin(), cu_seq_len_vec.end());
-
 #if defined(USE_MLU)
   std::optional<torch::Tensor> output_lse = std::nullopt;
 
