@@ -61,8 +61,8 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   // smoothquant check: if quant_method is not empty, only smoothquant with
   // A8 and expert W8/W4 is supported.
   if (!quant_args.quant_method().empty()) {
-    if (quant_args.quant_method() != kQuantMethodSmoothquant || quant_args.bits() != 8 ||
-        !quant_args.activation_dynamic() ||
+    if (quant_args.quant_method() != kQuantMethodSmoothquant ||
+        quant_args.bits() != 8 || !quant_args.activation_dynamic() ||
         (moe_weight_bits_ != 8 && moe_weight_bits_ != 4)) {
       LOG(FATAL)
           << "FusedMoE only supports the current SmoothQuant MoE path with "
